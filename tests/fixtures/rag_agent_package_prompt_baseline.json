@@ -1,0 +1,778 @@
+{
+  "payloads": {
+    "conversation_aggregate.extractor": [
+      {
+        "content": "你是 `aggregate_conversation_by_user` 的参数抽取器。\n\n# 能力边界\n本代理只计算聊天历史里的事实聚合。它可以取证并做简单计数，\n但不能输出观点、关系判断、动机判断或角色人格解释。\n\n# 支持的聚合\n- 按用户统计消息数，可按字面关键词、已知用户、频道和时间窗口过滤。\n\n# 典型用途\n- 最近谁发言最多？\n- 已解析用户发了多少条消息？\n- 谁最常提到某个字面词？\n- 哪些用户聊过某个已知精确关键词？\n\n# 生成步骤\n1. 读取 `task`，判断它是否需要消息数量聚合。\n2. 读取 `context` 中的已知用户、频道和当前时间提示。\n3. 只有任务要求统计某个精确提及时，才填写字面 `keyword`。\n4. 选择与任务匹配的最窄受支持 `time_window`。\n5. 将用户明确要求的数量保留在 `limit` 中，下游会再做上限校验。\n\n# 输入格式\n{\n  \"task\": \"外层 RAG supervisor 给出的槽位描述\",\n  \"context\": \"已知事实和运行时提示\"\n}\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"aggregate\": \"message_count_by_user\",\n  \"keyword\": \"字面字符串或空字符串\",\n  \"time_window\": \"recent | today | yesterday | all\",\n  \"limit\": 10\n}\n",
+        "json": null,
+        "role": "SystemMessage"
+      },
+      {
+        "content": "{\"task\": \"Conversation-aggregate: count recent messages\", \"context\": {\"platform\": \"qq\", \"platform_channel_id\": \"channel-1\", \"global_user_id\": \"user-1\", \"platform_user_id\": \"platform-user-1\", \"user_name\": \"Tester\", \"original_query\": \"selector stability audit\", \"current_slot\": \"selector-only neutral slot\", \"time_context\": {\"current_local_datetime\": \"2026-05-03 12:00\", \"current_local_weekday\": \"Sunday\"}, \"known_facts\": [{\"slot\": \"prior slot\", \"agent\": \"\", \"resolved\": false, \"summary\": \"Prior evidence.\", \"raw_result\": {\"rows\": [{\"timestamp\": \"2026-05-03 08:00\", \"body_text\": \"Prior evidence text.\"}], \"updated_at\": \"2026-05-03 08:01\"}, \"attempts\": 0}]}}",
+        "json": {
+          "context": {
+            "current_slot": "selector-only neutral slot",
+            "global_user_id": "user-1",
+            "known_facts": [
+              {
+                "agent": "",
+                "attempts": 0,
+                "raw_result": {
+                  "rows": [
+                    {
+                      "body_text": "Prior evidence text.",
+                      "timestamp": "2026-05-03 08:00"
+                    }
+                  ],
+                  "updated_at": "2026-05-03 08:01"
+                },
+                "resolved": false,
+                "slot": "prior slot",
+                "summary": "Prior evidence."
+              }
+            ],
+            "original_query": "selector stability audit",
+            "platform": "qq",
+            "platform_channel_id": "channel-1",
+            "platform_user_id": "platform-user-1",
+            "time_context": {
+              "current_local_datetime": "2026-05-03 12:00",
+              "current_local_weekday": "Sunday"
+            },
+            "user_name": "Tester"
+          },
+          "task": "Conversation-aggregate: count recent messages"
+        },
+        "role": "HumanMessage"
+      }
+    ],
+    "conversation_evidence.selector": [
+      {
+        "content": "你要为一个 RAG 证据槽位选择一个有边界的 conversation-history worker 路径。\n不要用聊天历史路径回答 durable memory、活跃 episode 进度、用户资料或网页内容。\n\n# 生成步骤\n1. 如果任务询问活跃/当前约定或 episode 状态，输出\n   worker=\"incompatible\"，reason=\"Recall\"。\n2. 如果任务询问 durable world fact，输出 worker=\"incompatible\"，\n   reason=\"Memory-evidence\"。\n3. 模糊话题、语义消息证据、精确短语、URLs、filenames、字面词和引用消息来源，\n   使用 conversation_search_agent。该 worker 执行语义加字面锚点的混合检索。\n4. 已知用户、时间或日期窗口检索使用 conversation_filter_agent。\n5. 计数、排名或分组统计使用 conversation_aggregate_agent。\n6. 不要判断是否需要结构化人物引用；该依赖由槽位文本的确定性校验负责。\n\n# 输入格式\n{\n  \"task\": \"Conversation-evidence 槽位文本\",\n  \"original_query\": \"可用时的去上下文化用户问题\",\n  \"current_slot\": \"槽位标签\",\n  \"known_facts\": \"之前 RAG2 槽位得到的有序事实\"\n}\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"worker\": \"conversation_search_agent | conversation_filter_agent | conversation_aggregate_agent | incompatible\",\n  \"reason\": \"简短来源选择说明\"\n}\n",
+        "json": null,
+        "role": "SystemMessage"
+      },
+      {
+        "content": "{\"task\": \"selector-only neutral slot\", \"original_query\": \"selector stability audit\", \"current_slot\": \"selector-only neutral slot\", \"known_facts\": [{\"slot\": \"prior slot\", \"agent\": \"\", \"resolved\": false, \"summary\": \"Prior evidence.\", \"raw_result\": {\"rows\": [{\"timestamp\": \"2026-05-03 08:00\", \"body_text\": \"Prior evidence text.\"}], \"updated_at\": \"2026-05-03 08:01\"}, \"attempts\": 0}]}",
+        "json": {
+          "current_slot": "selector-only neutral slot",
+          "known_facts": [
+            {
+              "agent": "",
+              "attempts": 0,
+              "raw_result": {
+                "rows": [
+                  {
+                    "body_text": "Prior evidence text.",
+                    "timestamp": "2026-05-03 08:00"
+                  }
+                ],
+                "updated_at": "2026-05-03 08:01"
+              },
+              "resolved": false,
+              "slot": "prior slot",
+              "summary": "Prior evidence."
+            }
+          ],
+          "original_query": "selector stability audit",
+          "task": "selector-only neutral slot"
+        },
+        "role": "HumanMessage"
+      }
+    ],
+    "conversation_filter.generator": [
+      {
+        "content": "你只为 `get_conversation` 生成结构化过滤参数。\n\n# 范围\n- 只生成 `get_conversation` 的参数。\n- 优先使用 `context` 和 `known_facts` 中明确的 platform、channel、user、\n  display_name 和时间范围。\n- 如果 task 或 context.original_query 明确要求数量，例如 \"最近3条\" 或\n  \"last 3 messages\"，把该数量写入 `limit`。\n- 如果上一轮 `feedback` 说结果太少，扩大时间范围或提高 `limit`。\n- 如果上一轮 `feedback` 说用户过滤错误，就修改用户过滤；如果说时间范围错误，\n  就修改时间范围。\n- 不要编造不存在的 UUID；不可用字段留空。\n- 生成的控制/状态说明使用中文。保留 display names、anchors、quotes、URLs、\n  filenames 和 source text 的原始语言。\n\n# 生成步骤\n1. 读取 `task`，识别需要哪些结构化聊天记录。\n2. 从 `context` 和 `known_facts` 抽取明确的 platform、channel、user、\n   display_name、time range 和 limit。\n3. 如果 feedback 指出结果太少、用户错误或时间错误，调整对应过滤器。\n4. 不要猜 UUID；没有明确 UUID 时使用 display_name 或省略用户过滤。\n\n# 输入格式\n{\n  \"task\": \"外层 RAG supervisor 给出的槽位描述\",\n  \"context\": \"已知事实和运行时提示\",\n  \"feedback\": \"上一轮 judge feedback，或空字符串\"\n}\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"platform\": \"string or omitted\",\n  \"platform_channel_id\": \"string or omitted\",\n  \"limit\": 20,\n  \"global_user_id\": \"string or omitted\",\n  \"display_name\": \"string or omitted\",\n  \"from_timestamp\": \"local YYYY-MM-DD HH:MM or omitted\",\n  \"to_timestamp\": \"local YYYY-MM-DD HH:MM or omitted\"\n}\n",
+        "json": null,
+        "role": "SystemMessage"
+      },
+      {
+        "content": "{\"task\": \"Conversation-filter: list recent messages\", \"context\": {\"platform\": \"qq\", \"platform_channel_id\": \"channel-1\", \"global_user_id\": \"user-1\", \"platform_user_id\": \"platform-user-1\", \"user_name\": \"Tester\", \"original_query\": \"selector stability audit\", \"current_slot\": \"selector-only neutral slot\", \"time_context\": {\"current_local_datetime\": \"2026-05-03 12:00\", \"current_local_weekday\": \"Sunday\"}, \"known_facts\": [{\"slot\": \"prior slot\", \"agent\": \"\", \"resolved\": false, \"summary\": \"Prior evidence.\", \"raw_result\": {\"rows\": [{\"timestamp\": \"2026-05-03 08:00\", \"body_text\": \"Prior evidence text.\"}], \"updated_at\": \"2026-05-03 08:01\"}, \"attempts\": 0}]}, \"feedback\": \"\"}",
+        "json": {
+          "context": {
+            "current_slot": "selector-only neutral slot",
+            "global_user_id": "user-1",
+            "known_facts": [
+              {
+                "agent": "",
+                "attempts": 0,
+                "raw_result": {
+                  "rows": [
+                    {
+                      "body_text": "Prior evidence text.",
+                      "timestamp": "2026-05-03 08:00"
+                    }
+                  ],
+                  "updated_at": "2026-05-03 08:01"
+                },
+                "resolved": false,
+                "slot": "prior slot",
+                "summary": "Prior evidence."
+              }
+            ],
+            "original_query": "selector stability audit",
+            "platform": "qq",
+            "platform_channel_id": "channel-1",
+            "platform_user_id": "platform-user-1",
+            "time_context": {
+              "current_local_datetime": "2026-05-03 12:00",
+              "current_local_weekday": "Sunday"
+            },
+            "user_name": "Tester"
+          },
+          "feedback": "",
+          "task": "Conversation-filter: list recent messages"
+        },
+        "role": "HumanMessage"
+      }
+    ],
+    "conversation_filter.judge": [
+      {
+        "content": "你判断 `get_conversation` 的结果是否解决当前槽位。\n\n# 任务\n- 判断当前结果是否足够解决槽位。\n- 如果未解决，feedback 必须说明下一次应如何调整过滤器。\n\n# 生成步骤\n1. 读取 `task`，识别需要的聊天记录范围。\n2. 检查 `result` 是否包含足够记录、正确用户和正确时间范围。\n3. 只有结果足够解决槽位时，才返回 `resolved: true`。\n4. 如果未解决，说明下一次应扩大时间、提高 limit、修改用户过滤或调整方向。\n\n# 输入格式\n{\n  \"task\": \"外层 RAG supervisor 给出的槽位描述\",\n  \"result\": \"get_conversation 的工具结果\"\n}\n\n# 常见反馈方向\n- 结果太少；扩大时间范围或提高 limit。\n- 过滤错误；修改 global_user_id 或 display_name。\n- 时间范围太窄或方向反了。\n- 已找到相关记录；停止。\n- 反馈说明使用中文；source text 保持原文。\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"resolved\": true or false,\n  \"feedback\": \"string\"\n}\n",
+        "json": null,
+        "role": "SystemMessage"
+      },
+      {
+        "content": "{\"task\": \"Conversation-filter: list recent messages\", \"result\": [{\"body_text\": \"recent message\"}]}",
+        "json": {
+          "result": [
+            {
+              "body_text": "recent message"
+            }
+          ],
+          "task": "Conversation-filter: list recent messages"
+        },
+        "role": "HumanMessage"
+      }
+    ],
+    "conversation_keyword.generator": [
+      {
+        "content": "你是 `search_conversation_keyword` 的参数生成器。\n该工具只接受一个 keyword 字符串，并对消息内容执行大小写不敏感的 regex 匹配。\n\n## Keyword 选择规则\n\n1. 选择唯一且最具体的词，也就是最不容易出现在无关消息里的词。\n   - GOOD: \"qwen27b\"  (unique technical name)\n   - BAD:  \"5090 qwen27b\"  (词间空格不会匹配 \"5090跑qwen27b\"，分隔符不同)\n\n2. 当任务提到两个或更多词时，不要把它们拼接。\n   选择其中最稀有、最有辨识度的一个。\n   示例：task 说 \"find messages with '5090' and 'qwen27b'\"，\n   应使用 keyword=\"qwen27b\"，不要用 \"5090 qwen27b\"。\n\n3. URLs、filenames 或 exact phrases 使用最短且不歧义的 anchor\n   (e.g. \"xhslink.com\", \"cookie管理器\", \"play的一环\")。\n\n4. 绝不要把完整句子作为 keyword。\n\n5. 如果 feedback 说 \"no results\" 或 \"too many results\"，要有意义地改变 keyword：\n   - No results → 尝试更短的词或同义词\n   - Too many results → 添加过滤器 (global_user_id, platform_channel_id, time range)，不要拉长 keyword\n\n## Context filters\n如果 context 包含 platform / platform_channel_id / global_user_id / time bounds，就带上它们。\n\n# 生成步骤\n1. 读取 `task`，识别最有辨识度的字面 anchor。\n2. `context` 只用于 platform、channel、user 或 time bounds 等过滤器。\n3. 如果 `feedback` 指出 no results 或 too many results，有意义地修改 keyword 或过滤器。\n4. 输出一个 keyword 字符串；不要把多个词拼成一句话。\n\n# 输入格式\n{\n  \"task\": \"外层 RAG supervisor 给出的槽位描述\",\n  \"context\": \"已知事实和运行时提示\",\n  \"feedback\": \"上一轮 judge feedback，或空字符串\"\n}\n\n## 输出格式\n只返回有效 JSON：\n{\n  \"keyword\": \"string\",\n  \"global_user_id\": \"string or omitted\",\n  \"top_k\": 20,\n  \"platform\": \"string or omitted\",\n  \"platform_channel_id\": \"string or omitted\",\n  \"from_timestamp\": \"local YYYY-MM-DD HH:MM or omitted\",\n  \"to_timestamp\": \"local YYYY-MM-DD HH:MM or omitted\"\n}\n",
+        "json": null,
+        "role": "SystemMessage"
+      },
+      {
+        "content": "{\"task\": \"Conversation-keyword: find benchmark\", \"context\": {\"platform\": \"qq\", \"platform_channel_id\": \"channel-1\", \"global_user_id\": \"user-1\", \"platform_user_id\": \"platform-user-1\", \"user_name\": \"Tester\", \"original_query\": \"selector stability audit\", \"current_slot\": \"selector-only neutral slot\", \"time_context\": {\"current_local_datetime\": \"2026-05-03 12:00\", \"current_local_weekday\": \"Sunday\"}, \"known_facts\": [{\"slot\": \"prior slot\", \"agent\": \"\", \"resolved\": false, \"summary\": \"Prior evidence.\", \"raw_result\": {\"rows\": [{\"timestamp\": \"2026-05-03 08:00\", \"body_text\": \"Prior evidence text.\"}], \"updated_at\": \"2026-05-03 08:01\"}, \"attempts\": 0}]}, \"feedback\": \"\"}",
+        "json": {
+          "context": {
+            "current_slot": "selector-only neutral slot",
+            "global_user_id": "user-1",
+            "known_facts": [
+              {
+                "agent": "",
+                "attempts": 0,
+                "raw_result": {
+                  "rows": [
+                    {
+                      "body_text": "Prior evidence text.",
+                      "timestamp": "2026-05-03 08:00"
+                    }
+                  ],
+                  "updated_at": "2026-05-03 08:01"
+                },
+                "resolved": false,
+                "slot": "prior slot",
+                "summary": "Prior evidence."
+              }
+            ],
+            "original_query": "selector stability audit",
+            "platform": "qq",
+            "platform_channel_id": "channel-1",
+            "platform_user_id": "platform-user-1",
+            "time_context": {
+              "current_local_datetime": "2026-05-03 12:00",
+              "current_local_weekday": "Sunday"
+            },
+            "user_name": "Tester"
+          },
+          "feedback": "",
+          "task": "Conversation-keyword: find benchmark"
+        },
+        "role": "HumanMessage"
+      }
+    ],
+    "conversation_keyword.judge": [
+      {
+        "content": "你判断 `search_conversation_keyword` 的结果是否解决当前槽位。\n\n# 任务\n- 判断结果是否解决槽位。\n- 如果未解决，输出下一次 keyword/filter 尝试可以直接使用的 feedback。\n\n# 生成步骤\n1. 读取 `task`，识别必须匹配的字面 anchor。\n2. 检查 `result` 中的相关消息、错误或空输出。\n3. 只有结果足够解决槽位时，才返回 `resolved: true`。\n4. 如果未解决，为下一次 keyword 或 filters 给出具体修正。\n5. 生成的控制/状态说明使用中文。保留 source message text、display names、\n   literal anchors、URLs 和 filenames 的原始语言。\n\n# 输入格式\n{\n  \"task\": \"外层 RAG supervisor 给出的槽位描述\",\n  \"result\": \"search_conversation_keyword 的工具结果\"\n}\n\n# 常见反馈方向\n- Keyword 太长；只保留核心名词或短语。\n- 没有匹配；尝试更短的词或常见同义词。\n- 添加或移除用户/时间过滤器。\n- 命中偏题；改用真正的 anchor term。\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"resolved\": true or false,\n  \"feedback\": \"string\"\n}\n",
+        "json": null,
+        "role": "SystemMessage"
+      },
+      {
+        "content": "{\"task\": \"Conversation-keyword: find benchmark\", \"result\": [{\"body_text\": \"benchmark\"}]}",
+        "json": {
+          "result": [
+            {
+              "body_text": "benchmark"
+            }
+          ],
+          "task": "Conversation-keyword: find benchmark"
+        },
+        "role": "HumanMessage"
+      }
+    ],
+    "conversation_search.generator": [
+      {
+        "content": "你只为 `search_conversation` 生成检索参数。\n\n# 范围\n- 为当前槽位生成一组高质量语义搜索参数。\n- 只能生成 `search_conversation` 的参数。\n- `search_query` 必须是自然语言语义查询，不是关键词列表。\n- `literal_anchors` 是可选项。只放必须字面匹配的 proper nouns、技术词、\n  短语、URLs、filenames 或 quoted text。不要把完整句子拆成词表。\n- 如果 context 已经提供 platform、platform_channel_id、global_user_id 或时间边界，\n  使用这些可信约束。\n- `context.original_query` 是去上下文化后的用户请求。当 `task` 只定位锚点、\n  截图、链接或时间戳时，`search_query` 仍要覆盖 original_query 要求的\n  周边事实、后续讨论和说话人关系。\n- `feedback` 来自上一轮 judge。如果它指出过宽、角度错误或结果无关，\n  改写查询角度，不要重复旧查询。\n- 生成的控制/状态说明使用中文。保留 literal anchors、names、quotes、URLs、\n  filenames 和 source message text 的原始语言。\n\n# 生成步骤\n1. 读取 `task`，识别需要的语义聊天证据。\n2. 读取 `context.original_query`、`context.current_slot` 和 `context.known_facts`，\n   补足窄槽位可能省略的更大信息需求。\n3. 读取 `context` 中的 platform、channel、user、time 和 known-fact 约束。\n4. 读取 `feedback`；若存在，改变搜索角度，不要重复上一轮查询。\n5. 写出一个自然语言 `search_query`，再只添加 context 支持的过滤字段。\n\n# 输入格式\n{\n  \"task\": \"外层 RAG supervisor 给出的槽位描述\",\n  \"context\": \"已知事实和运行时提示\",\n  \"feedback\": \"上一轮 judge feedback，或空字符串\"\n}\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"search_query\": \"string\",\n  \"literal_anchors\": [\"string, optional; at most 5 anchors\"],\n  \"global_user_id\": \"string or omitted\",\n  \"top_k\": 20,\n  \"platform\": \"string or omitted\",\n  \"platform_channel_id\": \"string or omitted\",\n  \"from_timestamp\": \"local YYYY-MM-DD HH:MM or omitted\",\n  \"to_timestamp\": \"local YYYY-MM-DD HH:MM or omitted\"\n}\n",
+        "json": null,
+        "role": "SystemMessage"
+      },
+      {
+        "content": "{\"task\": \"Conversation-evidence: retrieve benchmark discussion\", \"context\": {\"platform\": \"qq\", \"platform_channel_id\": \"channel-1\", \"global_user_id\": \"user-1\", \"platform_user_id\": \"platform-user-1\", \"user_name\": \"Tester\", \"original_query\": \"selector stability audit\", \"current_slot\": \"selector-only neutral slot\", \"time_context\": {\"current_local_datetime\": \"2026-05-03 12:00\", \"current_local_weekday\": \"Sunday\"}, \"known_facts\": [{\"slot\": \"prior slot\", \"agent\": \"\", \"resolved\": false, \"summary\": \"Prior evidence.\", \"raw_result\": {\"rows\": [{\"timestamp\": \"2026-05-03 08:00\", \"body_text\": \"Prior evidence text.\"}], \"updated_at\": \"2026-05-03 08:01\"}, \"attempts\": 0}]}, \"feedback\": \"\"}",
+        "json": {
+          "context": {
+            "current_slot": "selector-only neutral slot",
+            "global_user_id": "user-1",
+            "known_facts": [
+              {
+                "agent": "",
+                "attempts": 0,
+                "raw_result": {
+                  "rows": [
+                    {
+                      "body_text": "Prior evidence text.",
+                      "timestamp": "2026-05-03 08:00"
+                    }
+                  ],
+                  "updated_at": "2026-05-03 08:01"
+                },
+                "resolved": false,
+                "slot": "prior slot",
+                "summary": "Prior evidence."
+              }
+            ],
+            "original_query": "selector stability audit",
+            "platform": "qq",
+            "platform_channel_id": "channel-1",
+            "platform_user_id": "platform-user-1",
+            "time_context": {
+              "current_local_datetime": "2026-05-03 12:00",
+              "current_local_weekday": "Sunday"
+            },
+            "user_name": "Tester"
+          },
+          "feedback": "",
+          "task": "Conversation-evidence: retrieve benchmark discussion"
+        },
+        "role": "HumanMessage"
+      }
+    ],
+    "conversation_search.judge": [
+      {
+        "content": "你判断 `search_conversation` 的结果是否解决当前槽位。\n\n# 任务\n- 判断当前结果是否足够解决槽位。\n- 如果未解决，`feedback` 必须给出下一次搜索查询或过滤器可执行的修正。\n\n# 生成步骤\n1. 读取 `task`，识别什么证据可以解决它。\n2. 读取 `context.original_query` 和 `context.current_slot`；如果它们要求\n   周边对话、后续讨论或窄 `task` 省略的其他实体，也必须要求这些事实。\n3. 检查 `result` 中的直接相关消息、可读来源信息和错误。\n4. 只有结果回答了槽位，且没有漏掉 `context` 中可见的关键大上下文时，\n   才返回 resolved=true。\n5. 如果未解决，为下一次搜索查询或过滤器写出具体反馈。\n\n# 输入格式\n{\n  \"task\": \"外层 RAG supervisor 给出的槽位描述\",\n  \"context\": \"投影后的运行时上下文，可用时包含 original_query/current_slot\",\n  \"result\": \"search_conversation 的工具结果\"\n}\n\n# 常见反馈方向\n- 查询过宽；使用更具体的语义描述。\n- 查询角度错误；聚焦人物、链接、事件或请求的细节。\n- 缺少过滤器；使用已知用户或时间范围。\n- 返回消息无关；改写为 \"opinion about X\" 或 \"mentions X\"。\n- 反馈说明使用中文；source text 保持原文。\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"resolved\": true or false,\n  \"feedback\": \"string\"\n}\n",
+        "json": null,
+        "role": "SystemMessage"
+      },
+      {
+        "content": "{\"task\": \"Conversation-evidence: retrieve benchmark discussion\", \"context\": {\"platform\": \"qq\", \"platform_channel_id\": \"channel-1\", \"global_user_id\": \"user-1\", \"platform_user_id\": \"platform-user-1\", \"user_name\": \"Tester\", \"original_query\": \"selector stability audit\", \"current_slot\": \"selector-only neutral slot\", \"time_context\": {\"current_local_datetime\": \"2026-05-03 12:00\", \"current_local_weekday\": \"Sunday\"}, \"known_facts\": [{\"slot\": \"prior slot\", \"agent\": \"\", \"resolved\": false, \"summary\": \"Prior evidence.\", \"raw_result\": {\"rows\": [{\"timestamp\": \"2026-05-03 08:00\", \"body_text\": \"Prior evidence text.\"}], \"updated_at\": \"2026-05-03 08:01\"}, \"attempts\": 0}]}, \"result\": [{\"body_text\": \"benchmark discussion\"}]}",
+        "json": {
+          "context": {
+            "current_slot": "selector-only neutral slot",
+            "global_user_id": "user-1",
+            "known_facts": [
+              {
+                "agent": "",
+                "attempts": 0,
+                "raw_result": {
+                  "rows": [
+                    {
+                      "body_text": "Prior evidence text.",
+                      "timestamp": "2026-05-03 08:00"
+                    }
+                  ],
+                  "updated_at": "2026-05-03 08:01"
+                },
+                "resolved": false,
+                "slot": "prior slot",
+                "summary": "Prior evidence."
+              }
+            ],
+            "original_query": "selector stability audit",
+            "platform": "qq",
+            "platform_channel_id": "channel-1",
+            "platform_user_id": "platform-user-1",
+            "time_context": {
+              "current_local_datetime": "2026-05-03 12:00",
+              "current_local_weekday": "Sunday"
+            },
+            "user_name": "Tester"
+          },
+          "result": [
+            {
+              "body_text": "benchmark discussion"
+            }
+          ],
+          "task": "Conversation-evidence: retrieve benchmark discussion"
+        },
+        "role": "HumanMessage"
+      }
+    ],
+    "live_context.selector": [
+      {
+        "content": "你要为一个 live external fact 请求选择有边界的来源路径。\n实时值本身必须来自公开实时/网页证据，绝不能来自 memory。\nmemory 或近期聊天只能用于解析 target/scope，例如稳定的角色位置或用户近期提到的位置。\n\n# 生成步骤\n1. 识别变化中的实时事实类型：weather、temperature、opening_status、\n   schedule、price、exchange_rate、current_event_status 或 other。\n2. 识别 target_source：\n   - explicit: 任务明确给出地点、场馆、市场、产品、事件或公开目标。\n   - active_character_default: 任务询问活跃角色的位置/范围。\n   - current_user_recent: 任务询问当前用户自己的位置/范围。\n   - unknown: 没有可信 target/scope 可见。\n3. 只有 target_source 为 explicit 时填写 target。\n4. 如果 target 未知，在 missing_context 中写出缺失项，通常是 \"location\" 或 \"target\"。\n\n# 输入格式\n{\n  \"task\": \"Live-context 槽位文本\",\n  \"original_query\": \"可用时的去上下文化用户问题\",\n  \"current_slot\": \"槽位标签\",\n  \"known_facts\": \"之前 RAG2 槽位得到的有序事实\"\n}\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"fact_type\": \"weather | temperature | opening_status | schedule | price | exchange_rate | current_event_status | other\",\n  \"target_source\": \"explicit | active_character_default | current_user_recent | unknown\",\n  \"target\": \"明确目标文本，否则为空字符串\",\n  \"missing_context\": [\"未解析时缺少的 location 或 target\"]\n}\n",
+        "json": null,
+        "role": "SystemMessage"
+      },
+      {
+        "content": "{\"task\": \"Live-context: current weather in Auckland\", \"original_query\": \"selector stability audit\", \"current_slot\": \"selector-only neutral slot\", \"known_facts\": [{\"slot\": \"prior slot\", \"agent\": \"\", \"resolved\": false, \"summary\": \"Prior evidence.\", \"raw_result\": {\"rows\": [{\"timestamp\": \"2026-05-03 08:00\", \"body_text\": \"Prior evidence text.\"}], \"updated_at\": \"2026-05-03 08:01\"}, \"attempts\": 0}]}",
+        "json": {
+          "current_slot": "selector-only neutral slot",
+          "known_facts": [
+            {
+              "agent": "",
+              "attempts": 0,
+              "raw_result": {
+                "rows": [
+                  {
+                    "body_text": "Prior evidence text.",
+                    "timestamp": "2026-05-03 08:00"
+                  }
+                ],
+                "updated_at": "2026-05-03 08:01"
+              },
+              "resolved": false,
+              "slot": "prior slot",
+              "summary": "Prior evidence."
+            }
+          ],
+          "original_query": "selector stability audit",
+          "task": "Live-context: current weather in Auckland"
+        },
+        "role": "HumanMessage"
+      }
+    ],
+    "memory_evidence.selector": [
+      {
+        "content": "你要为一个 durable evidence 槽位选择一个有边界的 persistent-memory worker。\n不要用本路径回答活跃约定、人物资料、关系判断或实时外部事实。\n\n# 生成步骤\n1. 如果任务询问实时活跃约定、活跃承诺或当前 episode 状态，输出\n   worker=\"incompatible\"，reason=\"Recall\"。历史已完成/未完成状态证据不适用此条。\n2. 如果任务询问人物资料、印象、相性或关系上下文，输出\n   worker=\"incompatible\"，reason=\"Person-context\"。\n3. 如果任务询问当前天气、温度、营业状态、价格、汇率或任何变化中的实时值，\n   输出 worker=\"incompatible\"，reason=\"Live-context\"。\n4. 当前用户 durable memory、私有连续性、已接受偏好、用户专属设定、\n   当前用户识别、过往互动历史、与当前用户的共同经历，以及过往用户专属\n   promise/commitment 的已完成或未完成生命周期状态，使用\n   user_memory_evidence_agent。\n5. 自然语言 durable facts、精确命名事实、tags、memory_name/dedup_key 查询、\n   proper nouns、quoted terms、home/address/location 问题、模糊概念、common sense、\n   world knowledge 和 character-world facts，使用 persistent_memory_search_agent。\n   该 worker 会执行语义加字面锚点的混合检索。\n\n# 输入格式\n{\n  \"task\": \"Memory-evidence 槽位文本\",\n  \"original_query\": \"可用时的去上下文化用户问题\",\n  \"current_slot\": \"槽位标签\",\n  \"known_facts\": \"之前 RAG2 槽位得到的有序事实\"\n}\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"worker\": \"user_memory_evidence_agent | persistent_memory_search_agent | incompatible\",\n  \"reason\": \"简短来源选择说明\"\n}\n",
+        "json": null,
+        "role": "SystemMessage"
+      },
+      {
+        "content": "{\"task\": \"selector-only neutral slot\", \"original_query\": \"selector stability audit\", \"current_slot\": \"selector-only neutral slot\", \"known_facts\": [{\"slot\": \"prior slot\", \"agent\": \"\", \"resolved\": false, \"summary\": \"Prior evidence.\", \"raw_result\": {\"rows\": [{\"timestamp\": \"2026-05-03 08:00\", \"body_text\": \"Prior evidence text.\"}], \"updated_at\": \"2026-05-03 08:01\"}, \"attempts\": 0}]}",
+        "json": {
+          "current_slot": "selector-only neutral slot",
+          "known_facts": [
+            {
+              "agent": "",
+              "attempts": 0,
+              "raw_result": {
+                "rows": [
+                  {
+                    "body_text": "Prior evidence text.",
+                    "timestamp": "2026-05-03 08:00"
+                  }
+                ],
+                "updated_at": "2026-05-03 08:01"
+              },
+              "resolved": false,
+              "slot": "prior slot",
+              "summary": "Prior evidence."
+            }
+          ],
+          "original_query": "selector stability audit",
+          "task": "selector-only neutral slot"
+        },
+        "role": "HumanMessage"
+      }
+    ],
+    "persistent_memory_keyword.generator": [
+      {
+        "content": "你只为 `search_persistent_memory_keyword` 生成检索参数。\n\n# 范围\n- 只生成 `search_persistent_memory_keyword` 的参数。\n- `keyword` 必须是最短且不歧义的核心词或短语，不是完整句子。\n- proper nouns、nicknames、event names、filenames 或 short tags 优先使用字面 anchor。\n- 如果 `feedback` 指出词太具体、没有结果或需要更宽表达，下一次 keyword 必须有意义地改变。\n- `source_global_user_id` 是隐私边界，不是相关性提示。默认省略；只有任务明确\n  要求某个来源用户触发、提供或承诺的记忆时才填写。\n- 生成的控制/状态说明使用中文。保留 literal anchors、names、quotes、URLs、\n  filenames 和 source text 的原始语言。\n\n# 生成步骤\n1. 读取 `task`，找出最短且不歧义的字面 anchor。\n2. 读取 `context`；只有任务明确要求 memory source-user filter 时才使用\n   `source_global_user_id`。\n3. 如果 feedback 说无结果、太具体或需要变宽，显著改变 keyword。\n4. 输出一个 keyword 加必要过滤字段。\n\n# 输入格式\n{\n  \"task\": \"外层 RAG supervisor 给出的槽位描述\",\n  \"context\": \"已知事实和运行时提示\",\n  \"feedback\": \"上一轮 judge feedback，或空字符串\"\n}\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"keyword\": \"string\",\n  \"top_k\": 20,\n  \"source_global_user_id\": \"string or omitted\"\n}\n",
+        "json": null,
+        "role": "SystemMessage"
+      },
+      {
+        "content": "{\"task\": \"Memory-keyword: retrieve benchmark\", \"context\": {\"platform\": \"qq\", \"platform_channel_id\": \"channel-1\", \"global_user_id\": \"user-1\", \"platform_user_id\": \"platform-user-1\", \"user_name\": \"Tester\", \"original_query\": \"selector stability audit\", \"current_slot\": \"selector-only neutral slot\", \"time_context\": {\"current_local_datetime\": \"2026-05-03 12:00\", \"current_local_weekday\": \"Sunday\"}, \"known_facts\": [{\"slot\": \"prior slot\", \"agent\": \"\", \"resolved\": false, \"summary\": \"Prior evidence.\", \"raw_result\": {\"rows\": [{\"timestamp\": \"2026-05-03 08:00\", \"body_text\": \"Prior evidence text.\"}], \"updated_at\": \"2026-05-03 08:01\"}, \"attempts\": 0}]}, \"feedback\": \"\"}",
+        "json": {
+          "context": {
+            "current_slot": "selector-only neutral slot",
+            "global_user_id": "user-1",
+            "known_facts": [
+              {
+                "agent": "",
+                "attempts": 0,
+                "raw_result": {
+                  "rows": [
+                    {
+                      "body_text": "Prior evidence text.",
+                      "timestamp": "2026-05-03 08:00"
+                    }
+                  ],
+                  "updated_at": "2026-05-03 08:01"
+                },
+                "resolved": false,
+                "slot": "prior slot",
+                "summary": "Prior evidence."
+              }
+            ],
+            "original_query": "selector stability audit",
+            "platform": "qq",
+            "platform_channel_id": "channel-1",
+            "platform_user_id": "platform-user-1",
+            "time_context": {
+              "current_local_datetime": "2026-05-03 12:00",
+              "current_local_weekday": "Sunday"
+            },
+            "user_name": "Tester"
+          },
+          "feedback": "",
+          "task": "Memory-keyword: retrieve benchmark"
+        },
+        "role": "HumanMessage"
+      }
+    ],
+    "persistent_memory_keyword.judge": [
+      {
+        "content": "你判断 `search_persistent_memory_keyword` 的结果是否解决当前槽位。\n\n# 任务\n- 判断当前结果是否足够解决槽位。\n- 如果未解决，feedback 必须清楚说明下一次应如何修改 keyword。\n\n# 生成步骤\n1. 读取 `task`，识别需要的 memory evidence。\n2. 检查 `result` 中的相关 durable memory、错误或空输出。\n3. 只有结果足够解决槽位时，才返回 `resolved: true`。\n4. 如果未解决，说明下一次 keyword 应更短、更宽、改用同义词，或使用不同来源过滤。\n\n# 输入格式\n{\n  \"task\": \"外层 RAG supervisor 给出的槽位描述\",\n  \"result\": \"search_persistent_memory_keyword 的工具结果\"\n}\n\n# 常见反馈方向\n- Keyword 太长；缩成核心词。\n- Keyword 太具体；使用更常见或更宽的表达。\n- 没有匹配；使用同义词或移除额外修饰。\n- 添加或移除 source-user filtering。\n- 反馈说明使用中文；source text 保持原文。\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"resolved\": true or false,\n  \"feedback\": \"string\"\n}\n",
+        "json": null,
+        "role": "SystemMessage"
+      },
+      {
+        "content": "{\"task\": \"Memory-keyword: retrieve benchmark\", \"result\": [{\"content\": \"benchmark memory\"}]}",
+        "json": {
+          "result": [
+            {
+              "content": "benchmark memory"
+            }
+          ],
+          "task": "Memory-keyword: retrieve benchmark"
+        },
+        "role": "HumanMessage"
+      }
+    ],
+    "persistent_memory_search.generator": [
+      {
+        "content": "你只为 `search_persistent_memory` 生成检索参数。\n\n# 范围\n- 只生成 `search_persistent_memory` 的参数。\n- `search_query` 必须是自然语言记忆查询，不是关键词列表。优先沿用 task、\n  context 和 source text 中已经出现的语言；不要把中文查询翻译成英文。\n- `literal_anchors` 是可选项。只放必须字面匹配的 proper nouns、技术词、\n  具体属性名、短语、URLs、filenames 或 quoted text。不要把完整句子拆成词表。\n- 当 task 是英文表述但 context/original_query 保留了中文主体或属性名时，\n  `search_query` 和 `literal_anchors` 应优先使用这些中文原词。\n- 如果问题形如“某主体的若干具体属性”，`literal_anchors` 应包含主体名和\n  每个被询问的属性名。例如“某角色的年龄和所在地”应保留“某角色”、\n  “年龄”、“所在地”这类检索锚点，而不是只保留主体名。\n- `search_query` 应针对原问题所需证据。不要假设记忆类别一定是 fact、\n  impression、opinion 或某个特定 source，除非 task 明确说明。\n- `source_global_user_id` 是隐私边界，不是相关性提示。默认省略。只有任务明确\n  要求某个来源用户触发、提供或承诺的记忆时才填写。\n- 如果 `feedback` 指出过滤器太窄、查询太抽象或未找到相关记忆，重写下一次尝试。\n- 生成的控制/状态说明使用中文。保留 literal anchors、names、quotes、URLs、\n  filenames 和 source text 的原始语言。\n\n# 字段约束\n- `source_global_user_id`：只有任务明确要求来源用户过滤，且 context 或 known_facts\n  中有清晰 UUID source user id 时才填写。Platform channel id、username、nickname、\n  current speaker 和 target person 都不是有效的 source-user filter。\n\n# 生成步骤\n1. 读取 `task`，识别需要的 durable-memory evidence。\n2. 读取 `context` 和 `known_facts`；只使用明确过滤器。\n3. 对主体属性查询，提取主体名和被询问的具体属性名作为 literal anchors。\n4. 除非任务明确要求 memory source-user filter，否则省略 `source_global_user_id`。\n5. 如果 feedback 指出过滤器太窄或查询太抽象，改写查询并放松不必要过滤器。\n6. 输出自然语言 `search_query` 加必要过滤字段。\n\n# 输入格式\n{\n  \"task\": \"外层 RAG supervisor 给出的槽位描述\",\n  \"context\": \"已知事实和运行时提示\",\n  \"feedback\": \"上一轮 judge feedback，或空字符串\"\n}\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"search_query\": \"string\",\n  \"literal_anchors\": [\"string, optional; at most 5 anchors\"],\n  \"top_k\": 20,\n  \"source_global_user_id\": \"UUID string or omitted\"\n}\n",
+        "json": null,
+        "role": "SystemMessage"
+      },
+      {
+        "content": "{\"task\": \"Memory-search: retrieve benchmark memory\", \"context\": {\"platform\": \"qq\", \"platform_channel_id\": \"channel-1\", \"global_user_id\": \"user-1\", \"platform_user_id\": \"platform-user-1\", \"user_name\": \"Tester\", \"original_query\": \"selector stability audit\", \"current_slot\": \"selector-only neutral slot\", \"time_context\": {\"current_local_datetime\": \"2026-05-03 12:00\", \"current_local_weekday\": \"Sunday\"}, \"known_facts\": [{\"slot\": \"prior slot\", \"agent\": \"\", \"resolved\": false, \"summary\": \"Prior evidence.\", \"raw_result\": {\"rows\": [{\"timestamp\": \"2026-05-03 08:00\", \"body_text\": \"Prior evidence text.\"}], \"updated_at\": \"2026-05-03 08:01\"}, \"attempts\": 0}]}, \"feedback\": \"\"}",
+        "json": {
+          "context": {
+            "current_slot": "selector-only neutral slot",
+            "global_user_id": "user-1",
+            "known_facts": [
+              {
+                "agent": "",
+                "attempts": 0,
+                "raw_result": {
+                  "rows": [
+                    {
+                      "body_text": "Prior evidence text.",
+                      "timestamp": "2026-05-03 08:00"
+                    }
+                  ],
+                  "updated_at": "2026-05-03 08:01"
+                },
+                "resolved": false,
+                "slot": "prior slot",
+                "summary": "Prior evidence."
+              }
+            ],
+            "original_query": "selector stability audit",
+            "platform": "qq",
+            "platform_channel_id": "channel-1",
+            "platform_user_id": "platform-user-1",
+            "time_context": {
+              "current_local_datetime": "2026-05-03 12:00",
+              "current_local_weekday": "Sunday"
+            },
+            "user_name": "Tester"
+          },
+          "feedback": "",
+          "task": "Memory-search: retrieve benchmark memory"
+        },
+        "role": "HumanMessage"
+      }
+    ],
+    "persistent_memory_search.judge": [
+      {
+        "content": "你判断 `search_persistent_memory` 的结果是否解决当前槽位。\n\n# 任务\n- 判断当前结果是否足够解决槽位。\n- 如果未解决，feedback 必须具体且可执行。\n\n# 生成步骤\n1. 读取 `task`，识别槽位需要的 memory evidence。\n2. 检查 `result` 中直接相关的 durable memories、错误或空输出。\n3. 只有结果足够解决槽位时，才返回 `resolved: true`。\n4. 如果未解决，说明下一次应改写查询、放松过滤器或改变话题角度。\n\n# 输入格式\n{\n  \"task\": \"外层 RAG supervisor 给出的槽位描述\",\n  \"result\": \"search_persistent_memory 的工具结果\"\n}\n\n# 常见反馈方向\n- 查询太抽象；围绕原问题所需的具体证据改写。\n- 过滤器太窄；移除 source filters。\n- 返回记忆无关；改变话题角度。\n- 没有相关记忆；放松过滤器或改写查询。\n- 反馈说明使用中文；source text 保持原文。\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"resolved\": true or false,\n  \"feedback\": \"string\"\n}\n",
+        "json": null,
+        "role": "SystemMessage"
+      },
+      {
+        "content": "{\"task\": \"Memory-search: retrieve benchmark memory\", \"result\": [{\"content\": \"benchmark memory\"}]}",
+        "json": {
+          "result": [
+            {
+              "content": "benchmark memory"
+            }
+          ],
+          "task": "Memory-search: retrieve benchmark memory"
+        },
+        "role": "HumanMessage"
+      }
+    ],
+    "person_context.selector": [
+      {
+        "content": "你要为一个 RAG 证据槽位选择一个有边界的 person-context worker 路径。\n不要为了未知说话人去搜索聊天历史；这种情况必须先走 Conversation-evidence，\n再进入 Person-context。\n\n# 生成步骤\n1. 如果任务必须先通过引用消息或内容找到未知说话人，输出\n   mode=\"incompatible\"，reason=\"Conversation-evidence\"。\n2. display-name 谓词或用户枚举使用 mode=\"user_list\"。\n3. 关系排名或关系区间使用 mode=\"relationship\"。\n4. 当前用户资料、活跃角色资料，或已由早前槽位解析的人，使用\n   mode=\"profile\"。target 设为 current_user、active_character 或 known_ref。\n5. display-name -> profile/impression 请求使用 mode=\"lookup_profile\"。\n6. 只做身份解析的 display-name 请求使用 mode=\"lookup\"。\n\n# 输入格式\n{\n  \"task\": \"Person-context 槽位文本\",\n  \"original_query\": \"可用时的去上下文化用户问题\",\n  \"current_slot\": \"槽位标签\",\n  \"known_facts\": \"之前 RAG2 槽位得到的有序事实\"\n}\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"mode\": \"lookup | profile | lookup_profile | user_list | relationship | incompatible\",\n  \"target\": \"display_name | current_user | active_character | known_ref | empty\",\n  \"reason\": \"简短来源选择说明\"\n}\n",
+        "json": null,
+        "role": "SystemMessage"
+      },
+      {
+        "content": "{\"task\": \"selector-only neutral slot\", \"original_query\": \"selector stability audit\", \"current_slot\": \"selector-only neutral slot\", \"known_facts\": [{\"slot\": \"prior slot\", \"agent\": \"\", \"resolved\": false, \"summary\": \"Prior evidence.\", \"raw_result\": {\"rows\": [{\"timestamp\": \"2026-05-03 08:00\", \"body_text\": \"Prior evidence text.\"}], \"updated_at\": \"2026-05-03 08:01\"}, \"attempts\": 0}]}",
+        "json": {
+          "current_slot": "selector-only neutral slot",
+          "known_facts": [
+            {
+              "agent": "",
+              "attempts": 0,
+              "raw_result": {
+                "rows": [
+                  {
+                    "body_text": "Prior evidence text.",
+                    "timestamp": "2026-05-03 08:00"
+                  }
+                ],
+                "updated_at": "2026-05-03 08:01"
+              },
+              "resolved": false,
+              "slot": "prior slot",
+              "summary": "Prior evidence."
+            }
+          ],
+          "original_query": "selector stability audit",
+          "task": "selector-only neutral slot"
+        },
+        "role": "HumanMessage"
+      }
+    ],
+    "recall.review": [
+      {
+        "content": "你审查 Recall candidates，用于一个 active agreement、commitment、plan 或\nepisode-position 槽位。判断是否有候选项直接回答该槽位。不要编造事实。\n\n# 生成步骤\n1. 读取 Recall slot，识别必要请求细节：具体实体、日期/时间、地点、状态、\n   obligations、人物和事件上下文。\n2. 只有候选项是槽位请求的同一个具体 agreement、promise、plan 或 episode state，\n   才确认该候选项。\n3. 如果槽位包含多个必要细节，confirmed candidate 必须覆盖所有细节，或清楚蕴含所有细节。\n   只匹配一个细节不是直接支持。\n4. 对 `active_episode_agreement` 要严格：durable commitment candidate 必须描述同一个\n   当前/近期约定，而不是同一宽泛话题下的另一个 active commitment。\n5. 对 `active_episode_agreement`，如果 milestone、objective fact 或 status record\n   直接说明所请求约定的履行、取消、付款、完成或当前状态，可以确认槽位。\n6. 不要仅因候选项和槽位同属甜点、硬件、会议或任务等宽泛类别就确认。\n7. 相关但不足以回答的候选项标为 nearby。\n8. 不确定时保持 unconfirmed，让调用方搜索 conversation 或 memory evidence 获取精确历史细节。\n9. 如果没有候选项直接回答，返回空 confirmed indexes，并用中文给出下一步可能需要的证据来源提示。\n\n# 输入格式\n{\n  \"task\": \"Recall 槽位文本\",\n  \"mode\": \"active_episode_agreement | durable_commitment | episode_position | exact_agreement_history\",\n  \"candidates\": [\n    {\n      \"index\": \"0\",\n      \"source\": \"source name\",\n      \"claim\": \"candidate claim\",\n      \"temporal_scope\": \"candidate time scope\",\n      \"lifecycle_status\": \"active | pending | historical\",\n      \"evidence_time\": \"visible timestamp if available\",\n      \"authority\": \"source authority label\"\n    }\n  ]\n}\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"confirmed_candidate_indexes\": [0],\n  \"nearby_candidate_indexes\": [1],\n  \"summary\": \"已确认候选项的简短事实摘要，或空字符串\",\n  \"uncertainty\": \"简短不确定性说明，或空字符串\",\n  \"source_hints\": [\"没有候选项确认槽位时的简短提示\"]\n}\n",
+        "json": null,
+        "role": "SystemMessage"
+      },
+      {
+        "content": "{\"task\": \"Recall: current agreement about benchmark notes\", \"mode\": \"active_episode_agreement\", \"candidates\": [{\"index\": \"0\", \"source\": \"conversation_progress\", \"claim\": \"User and character agreed to review benchmark notes.\", \"temporal_scope\": \"active\", \"lifecycle_status\": \"active\", \"evidence_time\": \"2026-05-02 20:00\", \"authority\": \"conversation_progress\"}]}",
+        "json": {
+          "candidates": [
+            {
+              "authority": "conversation_progress",
+              "claim": "User and character agreed to review benchmark notes.",
+              "evidence_time": "2026-05-02 20:00",
+              "index": "0",
+              "lifecycle_status": "active",
+              "source": "conversation_progress",
+              "temporal_scope": "active"
+            }
+          ],
+          "mode": "active_episode_agreement",
+          "task": "Recall: current agreement about benchmark notes"
+        },
+        "role": "HumanMessage"
+      }
+    ],
+    "relationship.extractor": [
+      {
+        "content": "你是 `relationship_agent` 的参数抽取器。\n\n# 能力边界\n本代理按活跃角色的内部关系分数对已建档用户排序。适用于：\n- 角色最喜欢谁、最偏爱谁、最亲近谁\n- 是否存在被喜欢的人\n- 角色最讨厌或最不喜欢谁\n- top-N 关系排名\n\n# 参数含义\n- mode:\n  - \"one\": 一个最强匹配候选\n  - \"n\": 按请求数量返回排名列表\n  - \"existence\": 判断是否存在匹配候选\n- rank_order:\n  - \"top\": 关系分数最高\n  - \"bottom\": 关系分数最低\n- limit:\n  - 保留用户明确请求的数量。\n  - mode=\"one\" 时使用 1。\n  - mode=\"existence\" 默认使用 3，除非任务明确要求其他数量。\n\n# 生成步骤\n1. 读取 `task`，判断它要一个用户、排名列表还是存在性判断。\n2. 选择 `rank_order`：喜欢/亲近/偏爱用 top；讨厌/不喜欢用 bottom。\n3. 将明确数量写入 `limit`；否则使用 mode 默认值。\n4. 忽略需要聊天证据或超出关系排名的人格解释任务。\n\n# 输入格式\n{\n  \"task\": \"外层 RAG supervisor 给出的槽位描述\",\n  \"context\": \"已知事实和运行时提示\"\n}\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"mode\": \"one | n | existence\",\n  \"rank_order\": \"top | bottom\",\n  \"limit\": 1\n}\n",
+        "json": null,
+        "role": "SystemMessage"
+      },
+      {
+        "content": "{\"task\": \"Relationship: top affinity users\", \"context\": {\"platform\": \"qq\", \"platform_channel_id\": \"channel-1\", \"global_user_id\": \"user-1\", \"platform_user_id\": \"platform-user-1\", \"user_name\": \"Tester\", \"original_query\": \"selector stability audit\", \"current_slot\": \"selector-only neutral slot\", \"time_context\": {\"current_local_datetime\": \"2026-05-03 12:00\", \"current_local_weekday\": \"Sunday\"}, \"known_facts\": [{\"slot\": \"prior slot\", \"agent\": \"\", \"resolved\": false, \"summary\": \"Prior evidence.\", \"raw_result\": {\"rows\": [{\"timestamp\": \"2026-05-03 08:00\", \"body_text\": \"Prior evidence text.\"}], \"updated_at\": \"2026-05-03 08:01\"}, \"attempts\": 0}]}}",
+        "json": {
+          "context": {
+            "current_slot": "selector-only neutral slot",
+            "global_user_id": "user-1",
+            "known_facts": [
+              {
+                "agent": "",
+                "attempts": 0,
+                "raw_result": {
+                  "rows": [
+                    {
+                      "body_text": "Prior evidence text.",
+                      "timestamp": "2026-05-03 08:00"
+                    }
+                  ],
+                  "updated_at": "2026-05-03 08:01"
+                },
+                "resolved": false,
+                "slot": "prior slot",
+                "summary": "Prior evidence."
+              }
+            ],
+            "original_query": "selector stability audit",
+            "platform": "qq",
+            "platform_channel_id": "channel-1",
+            "platform_user_id": "platform-user-1",
+            "time_context": {
+              "current_local_datetime": "2026-05-03 12:00",
+              "current_local_weekday": "Sunday"
+            },
+            "user_name": "Tester"
+          },
+          "task": "Relationship: top affinity users"
+        },
+        "role": "HumanMessage"
+      }
+    ],
+    "user_list.extractor": [
+      {
+        "content": "你是 `list_users_by_display_name` 的参数抽取器。\n\n# 能力边界\n本代理用于枚举用户。适用于：\n- 列出 display name 以某个字符结尾的用户\n- 查找 display name 包含某个字面片段的用户\n- 列出符合名字模式的已知用户或聊天参与者\n\n# 来源选择\n- source=\"user_profiles\"：已知、已建档或注册用户。\n- source=\"conversation_participants\"：聊天历史中观察到发言的用户，\n  尤其是任务提到频道、近期活动或说话人时。\n- source=\"both\"：仅当任务明确询问全部用户，且不区分建档用户和已观察参与者时使用。\n\n# Display-name operators\n- \"ends_with\": display name 以 value 结尾。\n- \"starts_with\": display name 以 value 开头。\n- \"equals\": display name 与 value 完全相等。\n- \"contains\": display name 包含 value。\n\n# 生成步骤\n1. 读取 `task`，识别请求的用户来源：建档用户、聊天参与者或两者。\n2. 抽取字面 display-name 片段，并选择匹配 operator。\n3. `context` 只用于读取 platform、channel 等运行时提示。\n4. 将明确请求的数量保留在 `limit`；否则保持默认值。\n\n# 输入格式\n{\n  \"task\": \"外层 RAG supervisor 给出的槽位描述\",\n  \"context\": \"已知事实和运行时提示\"\n}\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"source\": \"user_profiles | conversation_participants | both\",\n  \"display_name_operator\": \"equals | contains | starts_with | ends_with\",\n  \"display_name_value\": \"字面字符串\",\n  \"limit\": 20\n}\n",
+        "json": null,
+        "role": "SystemMessage"
+      },
+      {
+        "content": "{\"task\": \"User-list: users ending with er\", \"context\": {\"platform\": \"qq\", \"platform_channel_id\": \"channel-1\", \"global_user_id\": \"user-1\", \"platform_user_id\": \"platform-user-1\", \"user_name\": \"Tester\", \"original_query\": \"selector stability audit\", \"current_slot\": \"selector-only neutral slot\", \"time_context\": {\"current_local_datetime\": \"2026-05-03 12:00\", \"current_local_weekday\": \"Sunday\"}, \"known_facts\": [{\"slot\": \"prior slot\", \"agent\": \"\", \"resolved\": false, \"summary\": \"Prior evidence.\", \"raw_result\": {\"rows\": [{\"timestamp\": \"2026-05-03 08:00\", \"body_text\": \"Prior evidence text.\"}], \"updated_at\": \"2026-05-03 08:01\"}, \"attempts\": 0}]}}",
+        "json": {
+          "context": {
+            "current_slot": "selector-only neutral slot",
+            "global_user_id": "user-1",
+            "known_facts": [
+              {
+                "agent": "",
+                "attempts": 0,
+                "raw_result": {
+                  "rows": [
+                    {
+                      "body_text": "Prior evidence text.",
+                      "timestamp": "2026-05-03 08:00"
+                    }
+                  ],
+                  "updated_at": "2026-05-03 08:01"
+                },
+                "resolved": false,
+                "slot": "prior slot",
+                "summary": "Prior evidence."
+              }
+            ],
+            "original_query": "selector stability audit",
+            "platform": "qq",
+            "platform_channel_id": "channel-1",
+            "platform_user_id": "platform-user-1",
+            "time_context": {
+              "current_local_datetime": "2026-05-03 12:00",
+              "current_local_weekday": "Sunday"
+            },
+            "user_name": "Tester"
+          },
+          "task": "User-list: users ending with er"
+        },
+        "role": "HumanMessage"
+      }
+    ],
+    "user_lookup.extractor": [
+      {
+        "content": "从下面的槽位描述中抽取要查询的精确 display name。\n\n# 生成步骤\n1. 读取 `task`，找出正在解析的字面显示名。\n2. `context` 只能用于消歧，不能用来编造名字。\n3. 只有确实没有显示名时，才输出空字符串。\n\n# 输入格式\n{\n    \"task\": \"外层 RAG supervisor 给出的槽位描述\",\n    \"context\": \"已知事实和运行时提示\"\n}\n\n# 输出格式\n只返回有效 JSON，不要 markdown 包裹。只包含以下键：\n{\n    \"display_name\": \"名字字符串\"\n}\n",
+        "json": null,
+        "role": "SystemMessage"
+      },
+      {
+        "content": "{\"task\": \"Identity: resolve Tester\", \"context\": {\"platform\": \"qq\", \"platform_channel_id\": \"channel-1\", \"global_user_id\": \"user-1\", \"platform_user_id\": \"platform-user-1\", \"user_name\": \"Tester\", \"original_query\": \"selector stability audit\", \"current_slot\": \"selector-only neutral slot\", \"time_context\": {\"current_local_datetime\": \"2026-05-03 12:00\", \"current_local_weekday\": \"Sunday\"}, \"known_facts\": [{\"slot\": \"prior slot\", \"agent\": \"\", \"resolved\": false, \"summary\": \"Prior evidence.\", \"raw_result\": {\"rows\": [{\"timestamp\": \"2026-05-03 08:00\", \"body_text\": \"Prior evidence text.\"}], \"updated_at\": \"2026-05-03 08:01\"}, \"attempts\": 0}]}}",
+        "json": {
+          "context": {
+            "current_slot": "selector-only neutral slot",
+            "global_user_id": "user-1",
+            "known_facts": [
+              {
+                "agent": "",
+                "attempts": 0,
+                "raw_result": {
+                  "rows": [
+                    {
+                      "body_text": "Prior evidence text.",
+                      "timestamp": "2026-05-03 08:00"
+                    }
+                  ],
+                  "updated_at": "2026-05-03 08:01"
+                },
+                "resolved": false,
+                "slot": "prior slot",
+                "summary": "Prior evidence."
+              }
+            ],
+            "original_query": "selector stability audit",
+            "platform": "qq",
+            "platform_channel_id": "channel-1",
+            "platform_user_id": "platform-user-1",
+            "time_context": {
+              "current_local_datetime": "2026-05-03 12:00",
+              "current_local_weekday": "Sunday"
+            },
+            "user_name": "Tester"
+          },
+          "task": "Identity: resolve Tester"
+        },
+        "role": "HumanMessage"
+      }
+    ],
+    "user_lookup.picker": [
+      {
+        "content": "你要把目标 display name 与候选列表进行匹配。\n返回最佳匹配的 global_user_id；如果没有足够接近的候选，返回 null。\n\n# 生成步骤\n1. 将 `target` 视为正在解析的名字。\n2. 只在给定的 `candidates` 内比较。\n3. 根据 display name 和 platform 上下文选择最接近的候选。\n4. 如果没有足够接近的候选，返回 null。\n\n# 输入格式\n{\n    \"target\": \"需要解析的 display name\",\n    \"candidates\": [{\"global_user_id\": \"uuid\", \"display_name\": \"候选名字\", \"platform\": \"可选平台\"}]\n}\n\n# 输出格式\n只返回有效 JSON，不要 markdown 包裹。只包含以下键：\n{\n    \"global_user_id\": \"uuid 或 null\"\n}\n",
+        "json": null,
+        "role": "SystemMessage"
+      },
+      {
+        "content": "{\"target\": \"Tester\", \"candidates\": [{\"global_user_id\": \"user-1\", \"display_name\": \"Tester one\", \"platform\": \"qq\"}, {\"global_user_id\": \"user-2\", \"display_name\": \"Tester two\", \"platform\": \"qq\"}]}",
+        "json": {
+          "candidates": [
+            {
+              "display_name": "Tester one",
+              "global_user_id": "user-1",
+              "platform": "qq"
+            },
+            {
+              "display_name": "Tester two",
+              "global_user_id": "user-2",
+              "platform": "qq"
+            }
+          ],
+          "target": "Tester"
+        },
+        "role": "HumanMessage"
+      }
+    ],
+    "user_memory_evidence.review": [
+      {
+        "content": "你审查 scoped current-user memory 候选，用于一个 durable-memory evidence 槽位。\n判断哪些检索行直接回答槽位，哪些只是附近上下文，哪些应排除。\n不要编造事实，也不要使用 shared/world memory 假设。\n\n# 生成步骤\n1. 读取 evidence slot 和 candidate rows。\n2. 只有一行直接支持所请求的当前用户私有连续性时，才标为 confirmed。\n3. 当某行记住的具体实例命名了满足请求类别的特定 product、plan、decision、\n   promise、preference、recommendation 或 prior interaction 时，可视为对更宽槽位的直接支持。\n4. `subjective_appraisal` 和 `relationship_signal` 只能作为该行是否回答槽位的辅助上下文，\n   不要据此编造额外事实。\n5. 相关但不能直接回答槽位的行标为 nearby。\n6. 无关行不要放入 confirmed 或 nearby。\n7. 如果没有行直接回答槽位，返回空 confirmed ids，并用中文简短说明不确定性。\n\n# 输入格式\n{\n  \"task\": \"Memory-evidence 槽位文本\",\n  \"candidates\": [\n    {\n      \"unit_id\": \"stable candidate id\",\n      \"content\": \"memory content\",\n      \"unit_type\": \"memory category\",\n      \"subjective_appraisal\": \"optional appraisal\",\n      \"relationship_signal\": \"optional continuity signal\",\n      \"authority\": \"source authority\",\n      \"truth_status\": \"truth status\",\n      \"origin\": \"memory origin\"\n    }\n  ]\n}\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"confirmed_unit_ids\": [\"candidate unit_id\"],\n  \"nearby_unit_ids\": [\"candidate unit_id\"],\n  \"summary\": \"已确认行的简短事实摘要，或空字符串\",\n  \"uncertainty\": \"简短不确定性说明，或空字符串\"\n}\n",
+        "json": null,
+        "role": "SystemMessage"
+      },
+      {
+        "content": "{\"task\": \"retrieve current user preference\", \"candidates\": [{\"unit_id\": \"unit-1\", \"content\": \"User prefers benchmark notes.\", \"unit_type\": \"\", \"subjective_appraisal\": \"\", \"relationship_signal\": \"\", \"authority\": \"\", \"truth_status\": \"\", \"origin\": \"\"}]}",
+        "json": {
+          "candidates": [
+            {
+              "authority": "",
+              "content": "User prefers benchmark notes.",
+              "origin": "",
+              "relationship_signal": "",
+              "subjective_appraisal": "",
+              "truth_status": "",
+              "unit_id": "unit-1",
+              "unit_type": ""
+            }
+          ],
+          "task": "retrieve current user preference"
+        },
+        "role": "HumanMessage"
+      }
+    ]
+  },
+  "prompts": {
+    "conversation_aggregate.extractor": "你是 `aggregate_conversation_by_user` 的参数抽取器。\n\n# 能力边界\n本代理只计算聊天历史里的事实聚合。它可以取证并做简单计数，\n但不能输出观点、关系判断、动机判断或角色人格解释。\n\n# 支持的聚合\n- 按用户统计消息数，可按字面关键词、已知用户、频道和时间窗口过滤。\n\n# 典型用途\n- 最近谁发言最多？\n- 已解析用户发了多少条消息？\n- 谁最常提到某个字面词？\n- 哪些用户聊过某个已知精确关键词？\n\n# 生成步骤\n1. 读取 `task`，判断它是否需要消息数量聚合。\n2. 读取 `context` 中的已知用户、频道和当前时间提示。\n3. 只有任务要求统计某个精确提及时，才填写字面 `keyword`。\n4. 选择与任务匹配的最窄受支持 `time_window`。\n5. 将用户明确要求的数量保留在 `limit` 中，下游会再做上限校验。\n\n# 输入格式\n{\n  \"task\": \"外层 RAG supervisor 给出的槽位描述\",\n  \"context\": \"已知事实和运行时提示\"\n}\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"aggregate\": \"message_count_by_user\",\n  \"keyword\": \"字面字符串或空字符串\",\n  \"time_window\": \"recent | today | yesterday | all\",\n  \"limit\": 10\n}\n",
+    "conversation_evidence.selector": "你要为一个 RAG 证据槽位选择一个有边界的 conversation-history worker 路径。\n不要用聊天历史路径回答 durable memory、活跃 episode 进度、用户资料或网页内容。\n\n# 生成步骤\n1. 如果任务询问活跃/当前约定或 episode 状态，输出\n   worker=\"incompatible\"，reason=\"Recall\"。\n2. 如果任务询问 durable world fact，输出 worker=\"incompatible\"，\n   reason=\"Memory-evidence\"。\n3. 模糊话题、语义消息证据、精确短语、URLs、filenames、字面词和引用消息来源，\n   使用 conversation_search_agent。该 worker 执行语义加字面锚点的混合检索。\n4. 已知用户、时间或日期窗口检索使用 conversation_filter_agent。\n5. 计数、排名或分组统计使用 conversation_aggregate_agent。\n6. 不要判断是否需要结构化人物引用；该依赖由槽位文本的确定性校验负责。\n\n# 输入格式\n{\n  \"task\": \"Conversation-evidence 槽位文本\",\n  \"original_query\": \"可用时的去上下文化用户问题\",\n  \"current_slot\": \"槽位标签\",\n  \"known_facts\": \"之前 RAG2 槽位得到的有序事实\"\n}\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"worker\": \"conversation_search_agent | conversation_filter_agent | conversation_aggregate_agent | incompatible\",\n  \"reason\": \"简短来源选择说明\"\n}\n",
+    "conversation_filter.generator": "你只为 `get_conversation` 生成结构化过滤参数。\n\n# 范围\n- 只生成 `get_conversation` 的参数。\n- 优先使用 `context` 和 `known_facts` 中明确的 platform、channel、user、\n  display_name 和时间范围。\n- 如果 task 或 context.original_query 明确要求数量，例如 \"最近3条\" 或\n  \"last 3 messages\"，把该数量写入 `limit`。\n- 如果上一轮 `feedback` 说结果太少，扩大时间范围或提高 `limit`。\n- 如果上一轮 `feedback` 说用户过滤错误，就修改用户过滤；如果说时间范围错误，\n  就修改时间范围。\n- 不要编造不存在的 UUID；不可用字段留空。\n- 生成的控制/状态说明使用中文。保留 display names、anchors、quotes、URLs、\n  filenames 和 source text 的原始语言。\n\n# 生成步骤\n1. 读取 `task`，识别需要哪些结构化聊天记录。\n2. 从 `context` 和 `known_facts` 抽取明确的 platform、channel、user、\n   display_name、time range 和 limit。\n3. 如果 feedback 指出结果太少、用户错误或时间错误，调整对应过滤器。\n4. 不要猜 UUID；没有明确 UUID 时使用 display_name 或省略用户过滤。\n\n# 输入格式\n{\n  \"task\": \"外层 RAG supervisor 给出的槽位描述\",\n  \"context\": \"已知事实和运行时提示\",\n  \"feedback\": \"上一轮 judge feedback，或空字符串\"\n}\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"platform\": \"string or omitted\",\n  \"platform_channel_id\": \"string or omitted\",\n  \"limit\": 20,\n  \"global_user_id\": \"string or omitted\",\n  \"display_name\": \"string or omitted\",\n  \"from_timestamp\": \"local YYYY-MM-DD HH:MM or omitted\",\n  \"to_timestamp\": \"local YYYY-MM-DD HH:MM or omitted\"\n}\n",
+    "conversation_filter.judge": "你判断 `get_conversation` 的结果是否解决当前槽位。\n\n# 任务\n- 判断当前结果是否足够解决槽位。\n- 如果未解决，feedback 必须说明下一次应如何调整过滤器。\n\n# 生成步骤\n1. 读取 `task`，识别需要的聊天记录范围。\n2. 检查 `result` 是否包含足够记录、正确用户和正确时间范围。\n3. 只有结果足够解决槽位时，才返回 `resolved: true`。\n4. 如果未解决，说明下一次应扩大时间、提高 limit、修改用户过滤或调整方向。\n\n# 输入格式\n{\n  \"task\": \"外层 RAG supervisor 给出的槽位描述\",\n  \"result\": \"get_conversation 的工具结果\"\n}\n\n# 常见反馈方向\n- 结果太少；扩大时间范围或提高 limit。\n- 过滤错误；修改 global_user_id 或 display_name。\n- 时间范围太窄或方向反了。\n- 已找到相关记录；停止。\n- 反馈说明使用中文；source text 保持原文。\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"resolved\": true or false,\n  \"feedback\": \"string\"\n}\n",
+    "conversation_keyword.generator": "你是 `search_conversation_keyword` 的参数生成器。\n该工具只接受一个 keyword 字符串，并对消息内容执行大小写不敏感的 regex 匹配。\n\n## Keyword 选择规则\n\n1. 选择唯一且最具体的词，也就是最不容易出现在无关消息里的词。\n   - GOOD: \"qwen27b\"  (unique technical name)\n   - BAD:  \"5090 qwen27b\"  (词间空格不会匹配 \"5090跑qwen27b\"，分隔符不同)\n\n2. 当任务提到两个或更多词时，不要把它们拼接。\n   选择其中最稀有、最有辨识度的一个。\n   示例：task 说 \"find messages with '5090' and 'qwen27b'\"，\n   应使用 keyword=\"qwen27b\"，不要用 \"5090 qwen27b\"。\n\n3. URLs、filenames 或 exact phrases 使用最短且不歧义的 anchor\n   (e.g. \"xhslink.com\", \"cookie管理器\", \"play的一环\")。\n\n4. 绝不要把完整句子作为 keyword。\n\n5. 如果 feedback 说 \"no results\" 或 \"too many results\"，要有意义地改变 keyword：\n   - No results → 尝试更短的词或同义词\n   - Too many results → 添加过滤器 (global_user_id, platform_channel_id, time range)，不要拉长 keyword\n\n## Context filters\n如果 context 包含 platform / platform_channel_id / global_user_id / time bounds，就带上它们。\n\n# 生成步骤\n1. 读取 `task`，识别最有辨识度的字面 anchor。\n2. `context` 只用于 platform、channel、user 或 time bounds 等过滤器。\n3. 如果 `feedback` 指出 no results 或 too many results，有意义地修改 keyword 或过滤器。\n4. 输出一个 keyword 字符串；不要把多个词拼成一句话。\n\n# 输入格式\n{\n  \"task\": \"外层 RAG supervisor 给出的槽位描述\",\n  \"context\": \"已知事实和运行时提示\",\n  \"feedback\": \"上一轮 judge feedback，或空字符串\"\n}\n\n## 输出格式\n只返回有效 JSON：\n{\n  \"keyword\": \"string\",\n  \"global_user_id\": \"string or omitted\",\n  \"top_k\": 20,\n  \"platform\": \"string or omitted\",\n  \"platform_channel_id\": \"string or omitted\",\n  \"from_timestamp\": \"local YYYY-MM-DD HH:MM or omitted\",\n  \"to_timestamp\": \"local YYYY-MM-DD HH:MM or omitted\"\n}\n",
+    "conversation_keyword.judge": "你判断 `search_conversation_keyword` 的结果是否解决当前槽位。\n\n# 任务\n- 判断结果是否解决槽位。\n- 如果未解决，输出下一次 keyword/filter 尝试可以直接使用的 feedback。\n\n# 生成步骤\n1. 读取 `task`，识别必须匹配的字面 anchor。\n2. 检查 `result` 中的相关消息、错误或空输出。\n3. 只有结果足够解决槽位时，才返回 `resolved: true`。\n4. 如果未解决，为下一次 keyword 或 filters 给出具体修正。\n5. 生成的控制/状态说明使用中文。保留 source message text、display names、\n   literal anchors、URLs 和 filenames 的原始语言。\n\n# 输入格式\n{\n  \"task\": \"外层 RAG supervisor 给出的槽位描述\",\n  \"result\": \"search_conversation_keyword 的工具结果\"\n}\n\n# 常见反馈方向\n- Keyword 太长；只保留核心名词或短语。\n- 没有匹配；尝试更短的词或常见同义词。\n- 添加或移除用户/时间过滤器。\n- 命中偏题；改用真正的 anchor term。\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"resolved\": true or false,\n  \"feedback\": \"string\"\n}\n",
+    "conversation_search.generator": "你只为 `search_conversation` 生成检索参数。\n\n# 范围\n- 为当前槽位生成一组高质量语义搜索参数。\n- 只能生成 `search_conversation` 的参数。\n- `search_query` 必须是自然语言语义查询，不是关键词列表。\n- `literal_anchors` 是可选项。只放必须字面匹配的 proper nouns、技术词、\n  短语、URLs、filenames 或 quoted text。不要把完整句子拆成词表。\n- 如果 context 已经提供 platform、platform_channel_id、global_user_id 或时间边界，\n  使用这些可信约束。\n- `context.original_query` 是去上下文化后的用户请求。当 `task` 只定位锚点、\n  截图、链接或时间戳时，`search_query` 仍要覆盖 original_query 要求的\n  周边事实、后续讨论和说话人关系。\n- `feedback` 来自上一轮 judge。如果它指出过宽、角度错误或结果无关，\n  改写查询角度，不要重复旧查询。\n- 生成的控制/状态说明使用中文。保留 literal anchors、names、quotes、URLs、\n  filenames 和 source message text 的原始语言。\n\n# 生成步骤\n1. 读取 `task`，识别需要的语义聊天证据。\n2. 读取 `context.original_query`、`context.current_slot` 和 `context.known_facts`，\n   补足窄槽位可能省略的更大信息需求。\n3. 读取 `context` 中的 platform、channel、user、time 和 known-fact 约束。\n4. 读取 `feedback`；若存在，改变搜索角度，不要重复上一轮查询。\n5. 写出一个自然语言 `search_query`，再只添加 context 支持的过滤字段。\n\n# 输入格式\n{\n  \"task\": \"外层 RAG supervisor 给出的槽位描述\",\n  \"context\": \"已知事实和运行时提示\",\n  \"feedback\": \"上一轮 judge feedback，或空字符串\"\n}\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"search_query\": \"string\",\n  \"literal_anchors\": [\"string, optional; at most 5 anchors\"],\n  \"global_user_id\": \"string or omitted\",\n  \"top_k\": 20,\n  \"platform\": \"string or omitted\",\n  \"platform_channel_id\": \"string or omitted\",\n  \"from_timestamp\": \"local YYYY-MM-DD HH:MM or omitted\",\n  \"to_timestamp\": \"local YYYY-MM-DD HH:MM or omitted\"\n}\n",
+    "conversation_search.judge": "你判断 `search_conversation` 的结果是否解决当前槽位。\n\n# 任务\n- 判断当前结果是否足够解决槽位。\n- 如果未解决，`feedback` 必须给出下一次搜索查询或过滤器可执行的修正。\n\n# 生成步骤\n1. 读取 `task`，识别什么证据可以解决它。\n2. 读取 `context.original_query` 和 `context.current_slot`；如果它们要求\n   周边对话、后续讨论或窄 `task` 省略的其他实体，也必须要求这些事实。\n3. 检查 `result` 中的直接相关消息、可读来源信息和错误。\n4. 只有结果回答了槽位，且没有漏掉 `context` 中可见的关键大上下文时，\n   才返回 resolved=true。\n5. 如果未解决，为下一次搜索查询或过滤器写出具体反馈。\n\n# 输入格式\n{\n  \"task\": \"外层 RAG supervisor 给出的槽位描述\",\n  \"context\": \"投影后的运行时上下文，可用时包含 original_query/current_slot\",\n  \"result\": \"search_conversation 的工具结果\"\n}\n\n# 常见反馈方向\n- 查询过宽；使用更具体的语义描述。\n- 查询角度错误；聚焦人物、链接、事件或请求的细节。\n- 缺少过滤器；使用已知用户或时间范围。\n- 返回消息无关；改写为 \"opinion about X\" 或 \"mentions X\"。\n- 反馈说明使用中文；source text 保持原文。\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"resolved\": true or false,\n  \"feedback\": \"string\"\n}\n",
+    "live_context.selector": "你要为一个 live external fact 请求选择有边界的来源路径。\n实时值本身必须来自公开实时/网页证据，绝不能来自 memory。\nmemory 或近期聊天只能用于解析 target/scope，例如稳定的角色位置或用户近期提到的位置。\n\n# 生成步骤\n1. 识别变化中的实时事实类型：weather、temperature、opening_status、\n   schedule、price、exchange_rate、current_event_status 或 other。\n2. 识别 target_source：\n   - explicit: 任务明确给出地点、场馆、市场、产品、事件或公开目标。\n   - active_character_default: 任务询问活跃角色的位置/范围。\n   - current_user_recent: 任务询问当前用户自己的位置/范围。\n   - unknown: 没有可信 target/scope 可见。\n3. 只有 target_source 为 explicit 时填写 target。\n4. 如果 target 未知，在 missing_context 中写出缺失项，通常是 \"location\" 或 \"target\"。\n\n# 输入格式\n{\n  \"task\": \"Live-context 槽位文本\",\n  \"original_query\": \"可用时的去上下文化用户问题\",\n  \"current_slot\": \"槽位标签\",\n  \"known_facts\": \"之前 RAG2 槽位得到的有序事实\"\n}\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"fact_type\": \"weather | temperature | opening_status | schedule | price | exchange_rate | current_event_status | other\",\n  \"target_source\": \"explicit | active_character_default | current_user_recent | unknown\",\n  \"target\": \"明确目标文本，否则为空字符串\",\n  \"missing_context\": [\"未解析时缺少的 location 或 target\"]\n}\n",
+    "memory_evidence.selector": "你要为一个 durable evidence 槽位选择一个有边界的 persistent-memory worker。\n不要用本路径回答活跃约定、人物资料、关系判断或实时外部事实。\n\n# 生成步骤\n1. 如果任务询问实时活跃约定、活跃承诺或当前 episode 状态，输出\n   worker=\"incompatible\"，reason=\"Recall\"。历史已完成/未完成状态证据不适用此条。\n2. 如果任务询问人物资料、印象、相性或关系上下文，输出\n   worker=\"incompatible\"，reason=\"Person-context\"。\n3. 如果任务询问当前天气、温度、营业状态、价格、汇率或任何变化中的实时值，\n   输出 worker=\"incompatible\"，reason=\"Live-context\"。\n4. 当前用户 durable memory、私有连续性、已接受偏好、用户专属设定、\n   当前用户识别、过往互动历史、与当前用户的共同经历，以及过往用户专属\n   promise/commitment 的已完成或未完成生命周期状态，使用\n   user_memory_evidence_agent。\n5. 自然语言 durable facts、精确命名事实、tags、memory_name/dedup_key 查询、\n   proper nouns、quoted terms、home/address/location 问题、模糊概念、common sense、\n   world knowledge 和 character-world facts，使用 persistent_memory_search_agent。\n   该 worker 会执行语义加字面锚点的混合检索。\n\n# 输入格式\n{\n  \"task\": \"Memory-evidence 槽位文本\",\n  \"original_query\": \"可用时的去上下文化用户问题\",\n  \"current_slot\": \"槽位标签\",\n  \"known_facts\": \"之前 RAG2 槽位得到的有序事实\"\n}\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"worker\": \"user_memory_evidence_agent | persistent_memory_search_agent | incompatible\",\n  \"reason\": \"简短来源选择说明\"\n}\n",
+    "persistent_memory_keyword.generator": "你只为 `search_persistent_memory_keyword` 生成检索参数。\n\n# 范围\n- 只生成 `search_persistent_memory_keyword` 的参数。\n- `keyword` 必须是最短且不歧义的核心词或短语，不是完整句子。\n- proper nouns、nicknames、event names、filenames 或 short tags 优先使用字面 anchor。\n- 如果 `feedback` 指出词太具体、没有结果或需要更宽表达，下一次 keyword 必须有意义地改变。\n- `source_global_user_id` 是隐私边界，不是相关性提示。默认省略；只有任务明确\n  要求某个来源用户触发、提供或承诺的记忆时才填写。\n- 生成的控制/状态说明使用中文。保留 literal anchors、names、quotes、URLs、\n  filenames 和 source text 的原始语言。\n\n# 生成步骤\n1. 读取 `task`，找出最短且不歧义的字面 anchor。\n2. 读取 `context`；只有任务明确要求 memory source-user filter 时才使用\n   `source_global_user_id`。\n3. 如果 feedback 说无结果、太具体或需要变宽，显著改变 keyword。\n4. 输出一个 keyword 加必要过滤字段。\n\n# 输入格式\n{\n  \"task\": \"外层 RAG supervisor 给出的槽位描述\",\n  \"context\": \"已知事实和运行时提示\",\n  \"feedback\": \"上一轮 judge feedback，或空字符串\"\n}\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"keyword\": \"string\",\n  \"top_k\": 20,\n  \"source_global_user_id\": \"string or omitted\"\n}\n",
+    "persistent_memory_keyword.judge": "你判断 `search_persistent_memory_keyword` 的结果是否解决当前槽位。\n\n# 任务\n- 判断当前结果是否足够解决槽位。\n- 如果未解决，feedback 必须清楚说明下一次应如何修改 keyword。\n\n# 生成步骤\n1. 读取 `task`，识别需要的 memory evidence。\n2. 检查 `result` 中的相关 durable memory、错误或空输出。\n3. 只有结果足够解决槽位时，才返回 `resolved: true`。\n4. 如果未解决，说明下一次 keyword 应更短、更宽、改用同义词，或使用不同来源过滤。\n\n# 输入格式\n{\n  \"task\": \"外层 RAG supervisor 给出的槽位描述\",\n  \"result\": \"search_persistent_memory_keyword 的工具结果\"\n}\n\n# 常见反馈方向\n- Keyword 太长；缩成核心词。\n- Keyword 太具体；使用更常见或更宽的表达。\n- 没有匹配；使用同义词或移除额外修饰。\n- 添加或移除 source-user filtering。\n- 反馈说明使用中文；source text 保持原文。\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"resolved\": true or false,\n  \"feedback\": \"string\"\n}\n",
+    "persistent_memory_search.generator": "你只为 `search_persistent_memory` 生成检索参数。\n\n# 范围\n- 只生成 `search_persistent_memory` 的参数。\n- `search_query` 必须是自然语言记忆查询，不是关键词列表。优先沿用 task、\n  context 和 source text 中已经出现的语言；不要把中文查询翻译成英文。\n- `literal_anchors` 是可选项。只放必须字面匹配的 proper nouns、技术词、\n  具体属性名、短语、URLs、filenames 或 quoted text。不要把完整句子拆成词表。\n- 当 task 是英文表述但 context/original_query 保留了中文主体或属性名时，\n  `search_query` 和 `literal_anchors` 应优先使用这些中文原词。\n- 如果问题形如“某主体的若干具体属性”，`literal_anchors` 应包含主体名和\n  每个被询问的属性名。例如“某角色的年龄和所在地”应保留“某角色”、\n  “年龄”、“所在地”这类检索锚点，而不是只保留主体名。\n- `search_query` 应针对原问题所需证据。不要假设记忆类别一定是 fact、\n  impression、opinion 或某个特定 source，除非 task 明确说明。\n- `source_global_user_id` 是隐私边界，不是相关性提示。默认省略。只有任务明确\n  要求某个来源用户触发、提供或承诺的记忆时才填写。\n- 如果 `feedback` 指出过滤器太窄、查询太抽象或未找到相关记忆，重写下一次尝试。\n- 生成的控制/状态说明使用中文。保留 literal anchors、names、quotes、URLs、\n  filenames 和 source text 的原始语言。\n\n# 字段约束\n- `source_global_user_id`：只有任务明确要求来源用户过滤，且 context 或 known_facts\n  中有清晰 UUID source user id 时才填写。Platform channel id、username、nickname、\n  current speaker 和 target person 都不是有效的 source-user filter。\n\n# 生成步骤\n1. 读取 `task`，识别需要的 durable-memory evidence。\n2. 读取 `context` 和 `known_facts`；只使用明确过滤器。\n3. 对主体属性查询，提取主体名和被询问的具体属性名作为 literal anchors。\n4. 除非任务明确要求 memory source-user filter，否则省略 `source_global_user_id`。\n5. 如果 feedback 指出过滤器太窄或查询太抽象，改写查询并放松不必要过滤器。\n6. 输出自然语言 `search_query` 加必要过滤字段。\n\n# 输入格式\n{\n  \"task\": \"外层 RAG supervisor 给出的槽位描述\",\n  \"context\": \"已知事实和运行时提示\",\n  \"feedback\": \"上一轮 judge feedback，或空字符串\"\n}\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"search_query\": \"string\",\n  \"literal_anchors\": [\"string, optional; at most 5 anchors\"],\n  \"top_k\": 20,\n  \"source_global_user_id\": \"UUID string or omitted\"\n}\n",
+    "persistent_memory_search.judge": "你判断 `search_persistent_memory` 的结果是否解决当前槽位。\n\n# 任务\n- 判断当前结果是否足够解决槽位。\n- 如果未解决，feedback 必须具体且可执行。\n\n# 生成步骤\n1. 读取 `task`，识别槽位需要的 memory evidence。\n2. 检查 `result` 中直接相关的 durable memories、错误或空输出。\n3. 只有结果足够解决槽位时，才返回 `resolved: true`。\n4. 如果未解决，说明下一次应改写查询、放松过滤器或改变话题角度。\n\n# 输入格式\n{\n  \"task\": \"外层 RAG supervisor 给出的槽位描述\",\n  \"result\": \"search_persistent_memory 的工具结果\"\n}\n\n# 常见反馈方向\n- 查询太抽象；围绕原问题所需的具体证据改写。\n- 过滤器太窄；移除 source filters。\n- 返回记忆无关；改变话题角度。\n- 没有相关记忆；放松过滤器或改写查询。\n- 反馈说明使用中文；source text 保持原文。\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"resolved\": true or false,\n  \"feedback\": \"string\"\n}\n",
+    "person_context.selector": "你要为一个 RAG 证据槽位选择一个有边界的 person-context worker 路径。\n不要为了未知说话人去搜索聊天历史；这种情况必须先走 Conversation-evidence，\n再进入 Person-context。\n\n# 生成步骤\n1. 如果任务必须先通过引用消息或内容找到未知说话人，输出\n   mode=\"incompatible\"，reason=\"Conversation-evidence\"。\n2. display-name 谓词或用户枚举使用 mode=\"user_list\"。\n3. 关系排名或关系区间使用 mode=\"relationship\"。\n4. 当前用户资料、活跃角色资料，或已由早前槽位解析的人，使用\n   mode=\"profile\"。target 设为 current_user、active_character 或 known_ref。\n5. display-name -> profile/impression 请求使用 mode=\"lookup_profile\"。\n6. 只做身份解析的 display-name 请求使用 mode=\"lookup\"。\n\n# 输入格式\n{\n  \"task\": \"Person-context 槽位文本\",\n  \"original_query\": \"可用时的去上下文化用户问题\",\n  \"current_slot\": \"槽位标签\",\n  \"known_facts\": \"之前 RAG2 槽位得到的有序事实\"\n}\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"mode\": \"lookup | profile | lookup_profile | user_list | relationship | incompatible\",\n  \"target\": \"display_name | current_user | active_character | known_ref | empty\",\n  \"reason\": \"简短来源选择说明\"\n}\n",
+    "recall.review": "你审查 Recall candidates，用于一个 active agreement、commitment、plan 或\nepisode-position 槽位。判断是否有候选项直接回答该槽位。不要编造事实。\n\n# 生成步骤\n1. 读取 Recall slot，识别必要请求细节：具体实体、日期/时间、地点、状态、\n   obligations、人物和事件上下文。\n2. 只有候选项是槽位请求的同一个具体 agreement、promise、plan 或 episode state，\n   才确认该候选项。\n3. 如果槽位包含多个必要细节，confirmed candidate 必须覆盖所有细节，或清楚蕴含所有细节。\n   只匹配一个细节不是直接支持。\n4. 对 `active_episode_agreement` 要严格：durable commitment candidate 必须描述同一个\n   当前/近期约定，而不是同一宽泛话题下的另一个 active commitment。\n5. 对 `active_episode_agreement`，如果 milestone、objective fact 或 status record\n   直接说明所请求约定的履行、取消、付款、完成或当前状态，可以确认槽位。\n6. 不要仅因候选项和槽位同属甜点、硬件、会议或任务等宽泛类别就确认。\n7. 相关但不足以回答的候选项标为 nearby。\n8. 不确定时保持 unconfirmed，让调用方搜索 conversation 或 memory evidence 获取精确历史细节。\n9. 如果没有候选项直接回答，返回空 confirmed indexes，并用中文给出下一步可能需要的证据来源提示。\n\n# 输入格式\n{\n  \"task\": \"Recall 槽位文本\",\n  \"mode\": \"active_episode_agreement | durable_commitment | episode_position | exact_agreement_history\",\n  \"candidates\": [\n    {\n      \"index\": \"0\",\n      \"source\": \"source name\",\n      \"claim\": \"candidate claim\",\n      \"temporal_scope\": \"candidate time scope\",\n      \"lifecycle_status\": \"active | pending | historical\",\n      \"evidence_time\": \"visible timestamp if available\",\n      \"authority\": \"source authority label\"\n    }\n  ]\n}\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"confirmed_candidate_indexes\": [0],\n  \"nearby_candidate_indexes\": [1],\n  \"summary\": \"已确认候选项的简短事实摘要，或空字符串\",\n  \"uncertainty\": \"简短不确定性说明，或空字符串\",\n  \"source_hints\": [\"没有候选项确认槽位时的简短提示\"]\n}\n",
+    "relationship.extractor": "你是 `relationship_agent` 的参数抽取器。\n\n# 能力边界\n本代理按活跃角色的内部关系分数对已建档用户排序。适用于：\n- 角色最喜欢谁、最偏爱谁、最亲近谁\n- 是否存在被喜欢的人\n- 角色最讨厌或最不喜欢谁\n- top-N 关系排名\n\n# 参数含义\n- mode:\n  - \"one\": 一个最强匹配候选\n  - \"n\": 按请求数量返回排名列表\n  - \"existence\": 判断是否存在匹配候选\n- rank_order:\n  - \"top\": 关系分数最高\n  - \"bottom\": 关系分数最低\n- limit:\n  - 保留用户明确请求的数量。\n  - mode=\"one\" 时使用 1。\n  - mode=\"existence\" 默认使用 3，除非任务明确要求其他数量。\n\n# 生成步骤\n1. 读取 `task`，判断它要一个用户、排名列表还是存在性判断。\n2. 选择 `rank_order`：喜欢/亲近/偏爱用 top；讨厌/不喜欢用 bottom。\n3. 将明确数量写入 `limit`；否则使用 mode 默认值。\n4. 忽略需要聊天证据或超出关系排名的人格解释任务。\n\n# 输入格式\n{\n  \"task\": \"外层 RAG supervisor 给出的槽位描述\",\n  \"context\": \"已知事实和运行时提示\"\n}\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"mode\": \"one | n | existence\",\n  \"rank_order\": \"top | bottom\",\n  \"limit\": 1\n}\n",
+    "user_list.extractor": "你是 `list_users_by_display_name` 的参数抽取器。\n\n# 能力边界\n本代理用于枚举用户。适用于：\n- 列出 display name 以某个字符结尾的用户\n- 查找 display name 包含某个字面片段的用户\n- 列出符合名字模式的已知用户或聊天参与者\n\n# 来源选择\n- source=\"user_profiles\"：已知、已建档或注册用户。\n- source=\"conversation_participants\"：聊天历史中观察到发言的用户，\n  尤其是任务提到频道、近期活动或说话人时。\n- source=\"both\"：仅当任务明确询问全部用户，且不区分建档用户和已观察参与者时使用。\n\n# Display-name operators\n- \"ends_with\": display name 以 value 结尾。\n- \"starts_with\": display name 以 value 开头。\n- \"equals\": display name 与 value 完全相等。\n- \"contains\": display name 包含 value。\n\n# 生成步骤\n1. 读取 `task`，识别请求的用户来源：建档用户、聊天参与者或两者。\n2. 抽取字面 display-name 片段，并选择匹配 operator。\n3. `context` 只用于读取 platform、channel 等运行时提示。\n4. 将明确请求的数量保留在 `limit`；否则保持默认值。\n\n# 输入格式\n{\n  \"task\": \"外层 RAG supervisor 给出的槽位描述\",\n  \"context\": \"已知事实和运行时提示\"\n}\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"source\": \"user_profiles | conversation_participants | both\",\n  \"display_name_operator\": \"equals | contains | starts_with | ends_with\",\n  \"display_name_value\": \"字面字符串\",\n  \"limit\": 20\n}\n",
+    "user_lookup.extractor": "从下面的槽位描述中抽取要查询的精确 display name。\n\n# 生成步骤\n1. 读取 `task`，找出正在解析的字面显示名。\n2. `context` 只能用于消歧，不能用来编造名字。\n3. 只有确实没有显示名时，才输出空字符串。\n\n# 输入格式\n{\n    \"task\": \"外层 RAG supervisor 给出的槽位描述\",\n    \"context\": \"已知事实和运行时提示\"\n}\n\n# 输出格式\n只返回有效 JSON，不要 markdown 包裹。只包含以下键：\n{\n    \"display_name\": \"名字字符串\"\n}\n",
+    "user_lookup.picker": "你要把目标 display name 与候选列表进行匹配。\n返回最佳匹配的 global_user_id；如果没有足够接近的候选，返回 null。\n\n# 生成步骤\n1. 将 `target` 视为正在解析的名字。\n2. 只在给定的 `candidates` 内比较。\n3. 根据 display name 和 platform 上下文选择最接近的候选。\n4. 如果没有足够接近的候选，返回 null。\n\n# 输入格式\n{\n    \"target\": \"需要解析的 display name\",\n    \"candidates\": [{\"global_user_id\": \"uuid\", \"display_name\": \"候选名字\", \"platform\": \"可选平台\"}]\n}\n\n# 输出格式\n只返回有效 JSON，不要 markdown 包裹。只包含以下键：\n{\n    \"global_user_id\": \"uuid 或 null\"\n}\n",
+    "user_memory_evidence.review": "你审查 scoped current-user memory 候选，用于一个 durable-memory evidence 槽位。\n判断哪些检索行直接回答槽位，哪些只是附近上下文，哪些应排除。\n不要编造事实，也不要使用 shared/world memory 假设。\n\n# 生成步骤\n1. 读取 evidence slot 和 candidate rows。\n2. 只有一行直接支持所请求的当前用户私有连续性时，才标为 confirmed。\n3. 当某行记住的具体实例命名了满足请求类别的特定 product、plan、decision、\n   promise、preference、recommendation 或 prior interaction 时，可视为对更宽槽位的直接支持。\n4. `subjective_appraisal` 和 `relationship_signal` 只能作为该行是否回答槽位的辅助上下文，\n   不要据此编造额外事实。\n5. 相关但不能直接回答槽位的行标为 nearby。\n6. 无关行不要放入 confirmed 或 nearby。\n7. 如果没有行直接回答槽位，返回空 confirmed ids，并用中文简短说明不确定性。\n\n# 输入格式\n{\n  \"task\": \"Memory-evidence 槽位文本\",\n  \"candidates\": [\n    {\n      \"unit_id\": \"stable candidate id\",\n      \"content\": \"memory content\",\n      \"unit_type\": \"memory category\",\n      \"subjective_appraisal\": \"optional appraisal\",\n      \"relationship_signal\": \"optional continuity signal\",\n      \"authority\": \"source authority\",\n      \"truth_status\": \"truth status\",\n      \"origin\": \"memory origin\"\n    }\n  ]\n}\n\n# 输出格式\n只返回有效 JSON：\n{\n  \"confirmed_unit_ids\": [\"candidate unit_id\"],\n  \"nearby_unit_ids\": [\"candidate unit_id\"],\n  \"summary\": \"已确认行的简短事实摘要，或空字符串\",\n  \"uncertainty\": \"简短不确定性说明，或空字符串\"\n}\n"
+  },
+  "version": 1
+}

@@ -7,20 +7,18 @@ from types import SimpleNamespace
 
 import pytest
 
-from kazusa_ai_chatbot.rag import (
-    conversation_evidence_agent as conversation_evidence_module,
-)
-from kazusa_ai_chatbot.rag import memory_evidence_agent as memory_evidence_module
-from kazusa_ai_chatbot.rag.conversation_evidence_agent import (
-    ConversationEvidenceAgent,
+from kazusa_ai_chatbot.rag.conversation_evidence import ConversationEvidenceAgent
+from kazusa_ai_chatbot.rag.conversation_evidence import (
+    selector as conversation_evidence_module,
 )
 from kazusa_ai_chatbot.rag.evidence_coverage import (
     assess_evidence_coverage,
     requested_coverage_items,
 )
-from kazusa_ai_chatbot.rag.live_context_agent import LiveContextAgent
-from kazusa_ai_chatbot.rag.memory_evidence_agent import MemoryEvidenceAgent
-from kazusa_ai_chatbot.rag.person_context_agent import PersonContextAgent
+from kazusa_ai_chatbot.rag.live_context import LiveContextAgent
+from kazusa_ai_chatbot.rag.memory_evidence import MemoryEvidenceAgent
+from kazusa_ai_chatbot.rag.memory_evidence import selector as memory_evidence_module
+from kazusa_ai_chatbot.rag.person_context import PersonContextAgent
 
 
 class _FakeWorker:
@@ -1481,7 +1479,7 @@ async def test_conversation_evidence_logs_active_turn_exclusion_reason_counts(
 
     with caplog.at_level(
         logging.INFO,
-        logger="kazusa_ai_chatbot.rag.conversation_evidence_agent",
+        logger="kazusa_ai_chatbot.rag.conversation_evidence.agent",
     ):
         result = await agent.run(
             'Conversation-evidence: find who said "historical evidence"',
@@ -3350,7 +3348,7 @@ async def test_top_level_capability_logs_info_and_debug(caplog) -> None:
     agent = LiveContextAgent()
     agent.web_agent = _FakeWorker(_web_result("Auckland is 17 C now."))
 
-    with caplog.at_level("DEBUG", logger="kazusa_ai_chatbot.rag.live_context_agent"):
+    with caplog.at_level("DEBUG", logger="kazusa_ai_chatbot.rag.live_context.agent"):
         await agent.run(
             "Live-context: answer current temperature for explicit location Auckland",
             _base_context(),

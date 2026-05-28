@@ -10,7 +10,7 @@ import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.config import RAG_SUBAGENT_LLM_BASE_URL
-from kazusa_ai_chatbot.rag import conversation_evidence_agent as selector_module
+from kazusa_ai_chatbot.rag.conversation_evidence import selector as selector_module
 from kazusa_ai_chatbot.rag.prompt_projection import project_selector_input_for_llm
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 from tests.llm_trace import write_llm_trace

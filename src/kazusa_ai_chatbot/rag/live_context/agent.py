@@ -1,59 +1,39 @@
-"""Top-level RAG capability agent for present-tense live context."""
+"""Top-level RAG capability agent for live context."""
 
 from __future__ import annotations
 
-import json
 import logging
-import re
 from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
-
-from kazusa_ai_chatbot.config import (
-    RAG_SUBAGENT_LLM_API_KEY,
-    RAG_SUBAGENT_LLM_BASE_URL,
-    RAG_SUBAGENT_LLM_MODEL,
-)
-from kazusa_ai_chatbot.rag.conversation_search_agent import ConversationSearchAgent
+from kazusa_ai_chatbot.rag.conversation_evidence.workers.search import ConversationSearchAgent
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
-from kazusa_ai_chatbot.rag.persistent_memory_search_agent import PersistentMemorySearchAgent
-from kazusa_ai_chatbot.rag.prompt_projection import project_selector_input_for_llm
+from kazusa_ai_chatbot.rag.live_context.runtime_facts import (
+    _runtime_selected_summary,
+    _validated_runtime_time_context,
+)
+from kazusa_ai_chatbot.rag.live_context.selector import (
+    _deterministic_plan,
+    _extract_fact_type,
+    _select_external_live_plan,
+    _strip_live_prefix,
+)
+from kazusa_ai_chatbot.rag.live_context.target_resolution import (
+    _extract_worker_text,
+    _location_ref,
+    _url_from_text,
+    _web_task,
+)
+from kazusa_ai_chatbot.rag.memory_evidence.workers.persistent_search import PersistentMemorySearchAgent
 from kazusa_ai_chatbot.rag.web_agent3 import WebAgent3
-from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
+from kazusa_ai_chatbot.utils import text_or_empty
 
 logger = logging.getLogger(__name__)
 
 _CAPABILITY_NAME = "live_context"
-_AGENT_NAME = "live_context_agent"
-_UNCACHED_REASON = "capability_orchestrator_uncached"
-_URL_PATTERN = re.compile(r"https?://[^\s)>\]}\"']+")
-_RUNTIME_DATETIME_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
-_RUNTIME_WEEKDAY_PATTERN = re.compile(r"^[A-Za-z]+$")
-_KNOWN_FACT_TYPES = {
-    "current_time",
-    "current_date",
-    "current_weekday",
-    "weather",
-    "temperature",
-    "opening_status",
-    "schedule",
-    "price",
-    "exchange_rate",
-    "current_event_status",
-    "other",
-}
-_RUNTIME_FACT_TYPES = {
-    "current_time",
-    "current_date",
-    "current_weekday",
-}
-_KNOWN_TARGET_SOURCES = {
-    "explicit",
-    "active_character_default",
-    "current_user_recent",
-    "unknown",
-}
 
+_AGENT_NAME = "live_context_agent"
+
+_UNCACHED_REASON = "capability_orchestrator_uncached"
 
 def _clip_text(value: object, *, limit: int = 1000) -> str:
     """Return compact text for prompt-facing evidence fields.
@@ -73,7 +53,6 @@ def _clip_text(value: object, *, limit: int = 1000) -> str:
     return_value = f"{clipped}…"
     return return_value
 
-
 def _cache_status() -> dict[str, Any]:
     """Build no-cache metadata for top-level capability orchestration."""
     status = {
@@ -83,7 +62,6 @@ def _cache_status() -> dict[str, Any]:
         "reason": _UNCACHED_REASON,
     }
     return status
-
 
 def _result_payload(
     *,
@@ -131,7 +109,6 @@ def _result_payload(
     }
     return payload
 
-
 def _agent_result(*, resolved: bool, payload: dict[str, Any]) -> dict[str, Any]:
     """Build the outer helper result for one capability-agent execution."""
     result = {
@@ -141,437 +118,6 @@ def _agent_result(*, resolved: bool, payload: dict[str, Any]) -> dict[str, Any]:
         "cache": _cache_status(),
     }
     return result
-
-
-def _extract_fact_type(task: str) -> str:
-    """Classify the live fact type from structured slot text.
-
-    Args:
-        task: Initializer slot or dispatcher task text.
-
-    Returns:
-        One approved live fact type label.
-    """
-
-    normalized = task.lower()
-    if "local weekday" in normalized:
-        return "current_weekday"
-    if "local date" in normalized:
-        return "current_date"
-    if "local time" in normalized:
-        return "current_time"
-    if "current local time" in normalized or "current time" in normalized:
-        return "current_time"
-    if "current local date" in normalized or "current date" in normalized:
-        return "current_date"
-    if "current local weekday" in normalized or "current weekday" in normalized:
-        return "current_weekday"
-    if "temperature" in normalized:
-        return "temperature"
-    if "weather" in normalized:
-        return "weather"
-    if "opening status" in normalized or "open status" in normalized:
-        return "opening_status"
-    if "open " in normalized or "is open" in normalized:
-        return "opening_status"
-    if "schedule" in normalized or "timetable" in normalized:
-        return "schedule"
-    if "price" in normalized or "cost" in normalized:
-        return "price"
-    if "exchange rate" in normalized:
-        return "exchange_rate"
-    if "current event" in normalized or "event status" in normalized:
-        return "current_event_status"
-    return "other"
-
-
-def _strip_live_prefix(task: str) -> str:
-    """Remove the semantic capability prefix when present."""
-    if ":" not in task:
-        return task.strip()
-    _, _, remainder = task.partition(":")
-    return_value = remainder.strip()
-    return return_value
-
-
-def _clean_target(target: str) -> str:
-    """Normalize a target phrase extracted from structured slot text."""
-    cleaned = target.strip(" .,:;\"'")
-    return cleaned
-
-
-def _target_after_marker(task_body: str, marker: str) -> str:
-    """Extract text following a structured target marker."""
-    pattern = re.compile(rf"{re.escape(marker)}\s+(.+)$", re.IGNORECASE)
-    match = pattern.search(task_body)
-    if match is None:
-        return_value = ""
-        return return_value
-    return_value = _clean_target(match.group(1))
-    return return_value
-
-
-def _deterministic_plan(task: str) -> dict[str, Any] | None:
-    """Parse structured live-context slots without a selector LLM.
-
-    Args:
-        task: Slot text supplied by the RAG2 dispatcher.
-
-    Returns:
-        A selector plan when the slot contains approved structured markers,
-        otherwise ``None`` so the selector LLM can classify the request.
-    """
-
-    task_body = _strip_live_prefix(task)
-    normalized = task_body.lower()
-    fact_type = _extract_fact_type(task_body)
-
-    if fact_type in _RUNTIME_FACT_TYPES:
-        target = _target_after_marker(task_body, "explicit location")
-        if not target:
-            target = _target_after_marker(task_body, "explicit target")
-        if not target and " for " in normalized:
-            _, _, extracted_target = task_body.rpartition(" for ")
-            extracted_target = _clean_target(extracted_target)
-            extracted_target_lower = extracted_target.lower()
-            if extracted_target and extracted_target_lower not in {
-                "unknown location",
-                "unknown target",
-            }:
-                if "location" not in extracted_target_lower:
-                    target = extracted_target
-
-        if target:
-            plan = {
-                "source_class": "external_live_lookup",
-                "runtime_scope": "",
-                "fact_type": fact_type,
-                "target_source": "explicit",
-                "target": target,
-                "missing_context": [],
-            }
-            return plan
-
-        runtime_scope = "active_character"
-        if "current user" in normalized:
-            runtime_scope = "current_user"
-
-        plan = {
-            "source_class": "runtime_snapshot",
-            "runtime_scope": runtime_scope,
-            "fact_type": fact_type,
-            "target_source": "unknown",
-            "target": "",
-            "missing_context": [],
-        }
-        return plan
-
-    if "current user's location" in normalized:
-        plan = {
-            "source_class": "external_live_lookup",
-            "runtime_scope": "",
-            "fact_type": fact_type,
-            "target_source": "current_user_recent",
-            "target": "",
-            "missing_context": [],
-        }
-        return plan
-
-    if "active character's location" in normalized:
-        plan = {
-            "source_class": "external_live_lookup",
-            "runtime_scope": "",
-            "fact_type": fact_type,
-            "target_source": "active_character_default",
-            "target": "",
-            "missing_context": [],
-        }
-        return plan
-
-    target = _target_after_marker(task_body, "explicit location")
-    if target:
-        plan = {
-            "source_class": "external_live_lookup",
-            "runtime_scope": "",
-            "fact_type": fact_type,
-            "target_source": "explicit",
-            "target": target,
-            "missing_context": [],
-        }
-        return plan
-
-    target = _target_after_marker(task_body, "explicit target")
-    if target:
-        plan = {
-            "source_class": "external_live_lookup",
-            "runtime_scope": "",
-            "fact_type": fact_type,
-            "target_source": "explicit",
-            "target": target,
-            "missing_context": [],
-        }
-        return plan
-
-    if " for " in normalized:
-        _, _, target = task_body.rpartition(" for ")
-        target = _clean_target(target)
-        if target and "location" not in target.lower():
-            plan = {
-                "source_class": "external_live_lookup",
-                "runtime_scope": "",
-                "fact_type": fact_type,
-                "target_source": "explicit",
-                "target": target,
-                "missing_context": [],
-            }
-            return plan
-
-    return None
-
-
-def _normalize_selector_plan(raw_plan: dict[str, Any]) -> dict[str, Any]:
-    """Normalize an LLM selector payload to the approved plan fields."""
-    fact_type = text_or_empty(raw_plan.get("fact_type"))
-    if fact_type not in _KNOWN_FACT_TYPES:
-        fact_type = "other"
-
-    target_source = text_or_empty(raw_plan.get("target_source"))
-    if target_source not in _KNOWN_TARGET_SOURCES:
-        target_source = "unknown"
-
-    missing_context = raw_plan.get("missing_context")
-    if not isinstance(missing_context, list):
-        missing_context = []
-
-    plan = {
-        "source_class": "external_live_lookup",
-        "runtime_scope": "",
-        "fact_type": fact_type,
-        "target_source": target_source,
-        "target": text_or_empty(raw_plan.get("target")),
-        "missing_context": [
-            text
-            for item in missing_context
-            if (text := text_or_empty(item))
-        ],
-    }
-    return plan
-
-
-_EXTERNAL_LIVE_SELECTOR_PROMPT = '''\
-你要为一个 live external fact 请求选择有边界的来源路径。
-实时值本身必须来自公开实时/网页证据，绝不能来自 memory。
-memory 或近期聊天只能用于解析 target/scope，例如稳定的角色位置或用户近期提到的位置。
-
-# 生成步骤
-1. 识别变化中的实时事实类型：weather、temperature、opening_status、
-   schedule、price、exchange_rate、current_event_status 或 other。
-2. 识别 target_source：
-   - explicit: 任务明确给出地点、场馆、市场、产品、事件或公开目标。
-   - active_character_default: 任务询问活跃角色的位置/范围。
-   - current_user_recent: 任务询问当前用户自己的位置/范围。
-   - unknown: 没有可信 target/scope 可见。
-3. 只有 target_source 为 explicit 时填写 target。
-4. 如果 target 未知，在 missing_context 中写出缺失项，通常是 "location" 或 "target"。
-
-# 输入格式
-{
-  "task": "Live-context 槽位文本",
-  "original_query": "可用时的去上下文化用户问题",
-  "current_slot": "槽位标签",
-  "known_facts": "之前 RAG2 槽位得到的有序事实"
-}
-
-# 输出格式
-只返回有效 JSON：
-{
-  "fact_type": "weather | temperature | opening_status | schedule | price | exchange_rate | current_event_status | other",
-  "target_source": "explicit | active_character_default | current_user_recent | unknown",
-  "target": "明确目标文本，否则为空字符串",
-  "missing_context": ["未解析时缺少的 location 或 target"]
-}
-'''
-_external_live_selector_llm = get_llm(
-    temperature=0.0,
-    top_p=1.0,
-    model=RAG_SUBAGENT_LLM_MODEL,
-    base_url=RAG_SUBAGENT_LLM_BASE_URL,
-    api_key=RAG_SUBAGENT_LLM_API_KEY,
-)
-
-
-async def _select_external_live_plan(
-    task: str,
-    context: dict[str, Any],
-) -> dict[str, Any]:
-    """Select a bounded external live target path for the requested slot.
-
-    Args:
-        task: Slot text supplied by the dispatcher.
-        context: RAG2 delegate context.
-
-    Returns:
-        Normalized source-selection plan.
-    """
-
-    llm_input = project_selector_input_for_llm(task, context)
-    system_prompt = SystemMessage(content=_EXTERNAL_LIVE_SELECTOR_PROMPT)
-    human_message = HumanMessage(
-        content=json.dumps(llm_input, ensure_ascii=False, default=str)
-    )
-    response = await _external_live_selector_llm.ainvoke(
-        [system_prompt, human_message]
-    )
-    raw_plan = parse_llm_json_output(response.content)
-    if not isinstance(raw_plan, dict):
-        raw_plan = {}
-    plan = _normalize_selector_plan(raw_plan)
-    return plan
-
-
-def _extract_text_from_rows(rows: object) -> str:
-    """Extract a target/scope phrase from a worker result payload.
-
-    Args:
-        rows: Raw worker ``result`` value.
-
-    Returns:
-        First available human-readable target text.
-    """
-
-    if isinstance(rows, str):
-        return rows.strip()
-
-    if isinstance(rows, dict):
-        for field in (
-            "content",
-            "body_text",
-            "text",
-            "description",
-            "summary",
-            "selected_summary",
-            "fact",
-        ):
-            text = text_or_empty(rows.get(field))
-            if text:
-                return text
-        return_value = ""
-        return return_value
-
-    if isinstance(rows, list):
-        for item in rows:
-            text = _extract_text_from_rows(item)
-            if text:
-                return text
-        return_value = ""
-        return return_value
-
-    return_value = text_or_empty(rows)
-    return return_value
-
-
-def _extract_worker_text(worker_result: dict[str, Any]) -> str:
-    """Extract target/scope text from a helper-agent result."""
-    rows = worker_result.get("result")
-    text = _extract_text_from_rows(rows)
-    return text
-
-
-def _url_from_text(text: str) -> str:
-    """Return the first URL embedded in a web evidence string."""
-    match = _URL_PATTERN.search(text)
-    if match is None:
-        return_value = ""
-        return return_value
-    return_value = match.group(0).rstrip(".,")
-    return return_value
-
-
-def _location_ref(*, role: str, text: str) -> dict[str, str]:
-    """Build a structured location reference for downstream slots."""
-    ref = {
-        "ref_type": "location",
-        "role": role,
-        "text": text,
-    }
-    return ref
-
-
-def _web_task(*, fact_type: str, target: str, original_task: str) -> str:
-    """Build the delegated web worker task for a resolved live target."""
-    task = (
-        "Web-evidence: retrieve current live external evidence "
-        f"for fact_type={fact_type}; target={target}; "
-        f"original_task={original_task}"
-    )
-    return task
-
-
-def _validated_runtime_time_context(
-    raw_time_context: object,
-) -> dict[str, str] | None:
-    """Validate the sanitized runtime time context consumed by live facts.
-
-    Args:
-        raw_time_context: Runtime state payload from the current turn.
-
-    Returns:
-        Sanitized datetime and weekday fields, or ``None`` when malformed.
-    """
-
-    if not isinstance(raw_time_context, dict):
-        return None
-
-    raw_local_datetime = raw_time_context.get("current_local_datetime")
-    raw_local_weekday = raw_time_context.get("current_local_weekday")
-    if not isinstance(raw_local_datetime, str):
-        return None
-    if not isinstance(raw_local_weekday, str):
-        return None
-
-    local_datetime = raw_local_datetime.strip()
-    local_weekday = raw_local_weekday.strip()
-    if not local_datetime or not local_weekday:
-        return None
-    if _RUNTIME_DATETIME_PATTERN.fullmatch(local_datetime) is None:
-        return None
-    if _RUNTIME_WEEKDAY_PATTERN.fullmatch(local_weekday) is None:
-        return None
-
-    time_context = {
-        "current_local_datetime": local_datetime,
-        "current_local_weekday": local_weekday,
-    }
-    return time_context
-
-
-def _runtime_selected_summary(
-    fact_type: str,
-    time_context: dict[str, str],
-) -> str:
-    """Build the direct evidence sentence for a runtime-backed live fact.
-
-    Args:
-        fact_type: Runtime-backed live fact type.
-        time_context: Validated sanitized time context.
-
-    Returns:
-        A compact direct-evidence sentence for the evaluator and projection.
-    """
-
-    local_datetime = time_context["current_local_datetime"]
-    local_weekday = time_context["current_local_weekday"]
-    local_date, _, _ = local_datetime.partition(" ")
-
-    if fact_type == "current_time":
-        return_value = f"当前本地时间是 {local_datetime}，{local_weekday}。"
-        return return_value
-    if fact_type == "current_date":
-        return_value = f"当前本地日期是 {local_date}，{local_weekday}。"
-        return return_value
-    return_value = f"当前本地星期是 {local_weekday}，日期是 {local_date}。"
-    return return_value
-
 
 class LiveContextAgent(BaseRAGHelperAgent):
     """Top-level RAG helper for runtime and external live facts."""

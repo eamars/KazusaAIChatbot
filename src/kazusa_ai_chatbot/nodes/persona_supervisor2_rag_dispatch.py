@@ -15,22 +15,28 @@ from kazusa_ai_chatbot.config import (
     RAG_PLANNER_LLM_BASE_URL,
     RAG_PLANNER_LLM_MODEL,
 )
-from kazusa_ai_chatbot.rag.conversation_aggregate_agent import ConversationAggregateAgent
-from kazusa_ai_chatbot.rag.conversation_evidence_agent import ConversationEvidenceAgent
-from kazusa_ai_chatbot.rag.conversation_filter_agent import ConversationFilterAgent
-from kazusa_ai_chatbot.rag.conversation_keyword_agent import ConversationKeywordAgent
-from kazusa_ai_chatbot.rag.conversation_search_agent import ConversationSearchAgent
-from kazusa_ai_chatbot.rag.live_context_agent import LiveContextAgent
-from kazusa_ai_chatbot.rag.memory_evidence_agent import MemoryEvidenceAgent
-from kazusa_ai_chatbot.rag.person_context_agent import PersonContextAgent
-from kazusa_ai_chatbot.rag.persistent_memory_keyword_agent import PersistentMemoryKeywordAgent
-from kazusa_ai_chatbot.rag.persistent_memory_search_agent import PersistentMemorySearchAgent
+from kazusa_ai_chatbot.rag.conversation_evidence import ConversationEvidenceAgent
+from kazusa_ai_chatbot.rag.conversation_evidence.workers import (
+    ConversationAggregateAgent,
+    ConversationFilterAgent,
+    ConversationKeywordAgent,
+    ConversationSearchAgent,
+)
+from kazusa_ai_chatbot.rag.live_context import LiveContextAgent
+from kazusa_ai_chatbot.rag.memory_evidence import MemoryEvidenceAgent
+from kazusa_ai_chatbot.rag.memory_evidence.workers import (
+    PersistentMemoryKeywordAgent,
+    PersistentMemorySearchAgent,
+)
+from kazusa_ai_chatbot.rag.person_context import PersonContextAgent
+from kazusa_ai_chatbot.rag.person_context.workers import (
+    RelationshipAgent,
+    UserListAgent,
+    UserLookupAgent,
+    UserProfileAgent,
+)
 from kazusa_ai_chatbot.rag.prompt_projection import project_runtime_context_for_llm
-from kazusa_ai_chatbot.rag.recall_agent import RecallAgent
-from kazusa_ai_chatbot.rag.relationship_agent import RelationshipAgent
-from kazusa_ai_chatbot.rag.user_list_agent import UserListAgent
-from kazusa_ai_chatbot.rag.user_lookup_agent import UserLookupAgent
-from kazusa_ai_chatbot.rag.user_profile_agent import UserProfileAgent
+from kazusa_ai_chatbot.rag.recall import RecallAgent
 from kazusa_ai_chatbot.rag.web_agent3 import WebAgent3
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_prompt_views import (
     _known_facts_llm_view,

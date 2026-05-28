@@ -185,6 +185,7 @@ plans.
 | [rag2_cognition_ready_evidence_plan.md](archive/completed/short_term/rag2_cognition_ready_evidence_plan.md) |
 | [rag2_mainline_fusion_recall_quality_plan.md](archive/completed/short_term/rag2_mainline_fusion_recall_quality_plan.md) |
 | [rag2_phase4_continuation_plan.md](archive/completed/short_term/rag2_phase4_continuation_plan.md) |
+| [rag_agent_package_reorganization_plan.md](archive/completed/short_term/rag_agent_package_reorganization_plan.md) |
 | [rag_cache2_persistent_initializer_plan.md](archive/completed/short_term/rag_cache2_persistent_initializer_plan.md) |
 | [rag_current_turn_exclusion_plan.md](archive/completed/short_term/rag_current_turn_exclusion_plan.md) |
 | [rag_phase3_development_plan.md](archive/completed/short_term/rag_phase3_development_plan.md) |

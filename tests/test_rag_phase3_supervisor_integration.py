@@ -8,7 +8,7 @@ import pytest
 
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_supervisor2 as supervisor2_module
 from kazusa_ai_chatbot.rag.cache2_runtime import RAGCache2Runtime
-from kazusa_ai_chatbot.rag.live_context_agent import LiveContextAgent
+from kazusa_ai_chatbot.rag.live_context import LiveContextAgent
 
 pytestmark = pytest.mark.asyncio
 

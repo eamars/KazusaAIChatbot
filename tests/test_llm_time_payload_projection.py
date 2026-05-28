@@ -462,7 +462,7 @@ def test_rag_prompt_projections_are_plain_json_serializable() -> None:
 @pytest.mark.asyncio
 async def test_live_context_runtime_result_has_no_utc_leak() -> None:
     """Runtime-backed live-context output should expose only sanitized local strings."""
-    from kazusa_ai_chatbot.rag.live_context_agent import LiveContextAgent
+    from kazusa_ai_chatbot.rag.live_context import LiveContextAgent
 
     agent = LiveContextAgent()
     result = await agent.run(
@@ -581,7 +581,9 @@ def test_compact_memory_unit_rows_timestamps_are_local() -> None:
 
 def test_message_row_text_uses_local_timestamp() -> None:
     """_message_row_text should render timestamps in local format."""
-    from kazusa_ai_chatbot.rag.conversation_evidence_agent import _message_row_text
+    from kazusa_ai_chatbot.rag.conversation_evidence.projection import (
+        _message_row_text,
+    )
 
     row = {
         "display_name": "Tester",
@@ -660,7 +662,7 @@ def test_cognition_helpers_project_rag_and_history_times() -> None:
     ("module_name", "response_payload"),
     [
         (
-            "kazusa_ai_chatbot.rag.live_context_agent",
+            "kazusa_ai_chatbot.rag.live_context.selector",
             {
                 "fact_type": "other",
                 "target_source": "unknown",
@@ -672,7 +674,7 @@ def test_cognition_helpers_project_rag_and_history_times() -> None:
             },
         ),
         (
-            "kazusa_ai_chatbot.rag.conversation_evidence_agent",
+            "kazusa_ai_chatbot.rag.conversation_evidence.selector",
             {
                 "worker": "incompatible",
                 "reason": "test",
@@ -680,14 +682,14 @@ def test_cognition_helpers_project_rag_and_history_times() -> None:
             },
         ),
         (
-            "kazusa_ai_chatbot.rag.memory_evidence_agent",
+            "kazusa_ai_chatbot.rag.memory_evidence.selector",
             {
                 "worker": "incompatible",
                 "reason": "test",
             },
         ),
         (
-            "kazusa_ai_chatbot.rag.person_context_agent",
+            "kazusa_ai_chatbot.rag.person_context.selector",
             {
                 "mode": "lookup",
                 "target": "display_name",
@@ -708,7 +710,7 @@ async def test_top_level_rag_selector_payload_projects_known_facts(
     llm = _CapturingAsyncLLM(response_payload)
     selector_function_name = "_select_plan"
     payload_path = f"$.{module_name}._select_plan"
-    if module_name == "kazusa_ai_chatbot.rag.live_context_agent":
+    if module_name == "kazusa_ai_chatbot.rag.live_context.selector":
         monkeypatch.setattr(module, "_external_live_selector_llm", llm)
         selector_function_name = "_select_external_live_plan"
         payload_path = f"$.{module_name}._select_external_live_plan"
