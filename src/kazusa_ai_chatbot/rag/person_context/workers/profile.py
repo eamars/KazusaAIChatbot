@@ -15,7 +15,7 @@ from kazusa_ai_chatbot.rag.cache2_policy import (
     build_user_profile_dependencies,
 )
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
-from kazusa_ai_chatbot.rag.user_image_retriever_agent import user_image_retriever_agent
+from kazusa_ai_chatbot.rag.person_context.workers.image import user_image_retriever_agent
 
 
 def _walk_for_global_user_id(value: Any) -> str:

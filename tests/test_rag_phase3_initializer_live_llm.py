@@ -9,9 +9,11 @@ import pytest
 
 from kazusa_ai_chatbot.config import RAG_PLANNER_LLM_BASE_URL
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_supervisor2 as supervisor2_module
-from kazusa_ai_chatbot.rag import user_memory_evidence_agent as user_memory_evidence_module
+from kazusa_ai_chatbot.rag.memory_evidence.workers import (
+    user_memory as user_memory_evidence_module,
+)
 from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
-from kazusa_ai_chatbot.rag.memory_evidence_agent import MemoryEvidenceAgent
+from kazusa_ai_chatbot.rag.memory_evidence import MemoryEvidenceAgent
 from kazusa_ai_chatbot.time_boundary import local_time_context_from_storage_utc
 from tests.llm_trace import write_llm_trace
 

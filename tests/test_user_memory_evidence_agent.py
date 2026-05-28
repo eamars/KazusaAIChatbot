@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from kazusa_ai_chatbot.rag import user_memory_evidence_agent as module
-from kazusa_ai_chatbot.rag.user_memory_evidence_agent import UserMemoryEvidenceAgent
+from kazusa_ai_chatbot.rag.memory_evidence.workers import user_memory as module
+from kazusa_ai_chatbot.rag.memory_evidence.workers.user_memory import (
+    UserMemoryEvidenceAgent,
+)
 
 
 def _context(**overrides: object) -> dict[str, object]:

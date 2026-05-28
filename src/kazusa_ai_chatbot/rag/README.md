@@ -142,6 +142,46 @@ construction is centralized there; the rest of RAG continues to receive
 `original_query`, `character_name`, and `context` rather than raw
 `CognitiveEpisode` payloads.
 
+## Package Boundary
+
+RAG helper agents are organized by dispatcher-visible capability. Public
+callers import the top-level capability class from the package:
+
+```python
+from kazusa_ai_chatbot.rag.conversation_evidence import ConversationEvidenceAgent
+from kazusa_ai_chatbot.rag.memory_evidence import MemoryEvidenceAgent
+from kazusa_ai_chatbot.rag.person_context import PersonContextAgent
+from kazusa_ai_chatbot.rag.live_context import LiveContextAgent
+from kazusa_ai_chatbot.rag.recall import RecallAgent
+```
+
+The global RAG dispatcher remains an explicit registry. It does not discover
+RAG packages dynamically. The only local source discovery in RAG remains inside
+`web_agent3/subagent`, where source modules are part of the web helper's own
+provider router.
+
+Package ownership is:
+
+| Package | Owns |
+|---|---|
+| `conversation_evidence/` | Conversation-history evidence selection, projection, active-turn exclusion, and conversation workers. |
+| `memory_evidence/` | Durable memory evidence selection, projection, shared memory workers, and scoped current-user memory evidence. |
+| `person_context/` | Person/profile selector, projection, identity lookup, user listing, profile, relationship, and image hydration workers. |
+| `live_context/` | Runtime date/time facts, live external target resolution, and web delegation for changing public facts. |
+| `recall/` | Active agreement, commitment, scheduled-event, current-episode, and gated history recall. |
+| `web_agent3/` | Public web search/read routing and source-local web subagents. |
+
+Shared RAG utility modules stay flat unless a capability move directly requires
+a local import update. Shared utilities include Cache 2 policy/runtime,
+cognitive episode projection, evidence formatting, hybrid retrieval, memory
+retrieval tools, prompt projection, quote-aware sequence handling, search
+runtime, and user-memory-unit retrieval.
+
+Split rule: when a helper grows beyond a single inspectable ownership boundary,
+split inside its capability package first. Do not add global auto-discovery,
+compatibility import shims, fallback import paths, new helper modes, or prompt
+behavior changes as part of a structural split.
+
 ## Runtime Lifecycle
 
 ```text

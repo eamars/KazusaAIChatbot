@@ -6,8 +6,11 @@ import pytest
 
 from kazusa_ai_chatbot.db.schemas import UserMemoryUnitStatus, UserMemoryUnitType
 from kazusa_ai_chatbot.db import scheduled_events as scheduled_module
-from kazusa_ai_chatbot.rag import recall_agent as recall_module
-from kazusa_ai_chatbot.rag.recall_agent import RecallAgent
+from kazusa_ai_chatbot.rag.recall import RecallAgent
+from kazusa_ai_chatbot.rag.recall import agent as recall_agent_module
+from kazusa_ai_chatbot.rag.recall.collectors import commitments as commitments_module
+from kazusa_ai_chatbot.rag.recall.collectors import history as history_module
+from kazusa_ai_chatbot.rag.recall.collectors import scheduled_events as scheduled_events_module
 
 
 def _base_context(**overrides: object) -> dict:
@@ -90,9 +93,13 @@ async def _empty_history(
 
 def _patch_empty_sources(monkeypatch) -> None:
     """Patch every external Recall source to an empty deterministic result."""
-    monkeypatch.setattr(recall_module, "query_user_memory_units", _empty_active_commitments)
-    monkeypatch.setattr(recall_module, "query_pending_scheduled_events", _empty_scheduled_events)
-    monkeypatch.setattr(recall_module, "get_conversation_history", _empty_history)
+    monkeypatch.setattr(commitments_module, "query_user_memory_units", _empty_active_commitments)
+    monkeypatch.setattr(
+        scheduled_events_module,
+        "query_pending_scheduled_events",
+        _empty_scheduled_events,
+    )
+    monkeypatch.setattr(history_module, "get_conversation_history", _empty_history)
 
 
 @pytest.mark.asyncio
@@ -105,9 +112,13 @@ async def test_recall_missing_mandatory_scope_does_not_query_db(monkeypatch) -> 
         queried = True
         raise AssertionError("Recall must not query DB without mandatory scope")
 
-    monkeypatch.setattr(recall_module, "query_user_memory_units", _fail_query)
-    monkeypatch.setattr(recall_module, "query_pending_scheduled_events", _fail_query)
-    monkeypatch.setattr(recall_module, "get_conversation_history", _fail_query)
+    monkeypatch.setattr(commitments_module, "query_user_memory_units", _fail_query)
+    monkeypatch.setattr(
+        scheduled_events_module,
+        "query_pending_scheduled_events",
+        _fail_query,
+    )
+    monkeypatch.setattr(history_module, "get_conversation_history", _fail_query)
 
     result = await RecallAgent().run(
         "Recall: retrieve active_episode_agreement relevant to today's appointment",
@@ -143,9 +154,13 @@ async def test_recall_active_progress_answers_current_agreement(monkeypatch) -> 
         return_value: list[dict] = []
         return return_value
 
-    monkeypatch.setattr(recall_module, "query_user_memory_units", _empty_active_commitments)
-    monkeypatch.setattr(recall_module, "query_pending_scheduled_events", _empty_scheduled_events)
-    monkeypatch.setattr(recall_module, "get_conversation_history", _history_probe)
+    monkeypatch.setattr(commitments_module, "query_user_memory_units", _empty_active_commitments)
+    monkeypatch.setattr(
+        scheduled_events_module,
+        "query_pending_scheduled_events",
+        _empty_scheduled_events,
+    )
+    monkeypatch.setattr(history_module, "get_conversation_history", _history_probe)
 
     result = await RecallAgent().run(
         "Recall: retrieve active_episode_agreement relevant to today's appointment",
@@ -186,9 +201,13 @@ async def test_recall_durable_commitment_prefers_active_memory_units(monkeypatch
         ]
         return return_value
 
-    monkeypatch.setattr(recall_module, "query_user_memory_units", _commitments)
-    monkeypatch.setattr(recall_module, "query_pending_scheduled_events", _empty_scheduled_events)
-    monkeypatch.setattr(recall_module, "get_conversation_history", _empty_history)
+    monkeypatch.setattr(commitments_module, "query_user_memory_units", _commitments)
+    monkeypatch.setattr(
+        scheduled_events_module,
+        "query_pending_scheduled_events",
+        _empty_scheduled_events,
+    )
+    monkeypatch.setattr(history_module, "get_conversation_history", _empty_history)
 
     result = await RecallAgent().run(
         "Recall: retrieve durable_commitment relevant to ongoing promises",
@@ -229,9 +248,13 @@ async def test_recall_includes_pending_scheduled_events(monkeypatch) -> None:
         ]
         return return_value
 
-    monkeypatch.setattr(recall_module, "query_user_memory_units", _empty_active_commitments)
-    monkeypatch.setattr(recall_module, "query_pending_scheduled_events", _events)
-    monkeypatch.setattr(recall_module, "get_conversation_history", _empty_history)
+    monkeypatch.setattr(commitments_module, "query_user_memory_units", _empty_active_commitments)
+    monkeypatch.setattr(
+        scheduled_events_module,
+        "query_pending_scheduled_events",
+        _events,
+    )
+    monkeypatch.setattr(history_module, "get_conversation_history", _empty_history)
 
     result = await RecallAgent().run(
         "Recall: retrieve active_episode_agreement relevant to today's appointment",
@@ -296,9 +319,13 @@ async def test_recall_active_mode_uses_commitment_before_scheduled_event(monkeyp
         ]
         return return_value
 
-    monkeypatch.setattr(recall_module, "query_user_memory_units", _commitments)
-    monkeypatch.setattr(recall_module, "query_pending_scheduled_events", _events)
-    monkeypatch.setattr(recall_module, "get_conversation_history", _empty_history)
+    monkeypatch.setattr(commitments_module, "query_user_memory_units", _commitments)
+    monkeypatch.setattr(
+        scheduled_events_module,
+        "query_pending_scheduled_events",
+        _events,
+    )
+    monkeypatch.setattr(history_module, "get_conversation_history", _empty_history)
 
     result = await RecallAgent().run(
         "Recall: retrieve active_episode_agreement relevant to today's appointment",
@@ -361,10 +388,14 @@ async def test_recall_review_rejects_unrelated_fallback_commitments(monkeypatch)
         }
         return return_value
 
-    monkeypatch.setattr(recall_module, "query_user_memory_units", _commitments)
-    monkeypatch.setattr(recall_module, "query_pending_scheduled_events", _empty_scheduled_events)
-    monkeypatch.setattr(recall_module, "get_conversation_history", _empty_history)
-    monkeypatch.setattr(recall_module, "_review_recall_candidates", _review)
+    monkeypatch.setattr(commitments_module, "query_user_memory_units", _commitments)
+    monkeypatch.setattr(
+        scheduled_events_module,
+        "query_pending_scheduled_events",
+        _empty_scheduled_events,
+    )
+    monkeypatch.setattr(history_module, "get_conversation_history", _empty_history)
+    monkeypatch.setattr(recall_agent_module, "_review_recall_candidates", _review)
 
     result = await RecallAgent().run(
         "Recall: retrieve active_episode_agreement relevant to Beers by Bacon Bros and tiramisu promises",
@@ -431,10 +462,14 @@ async def test_recall_review_accepts_matching_fallback_commitment(monkeypatch) -
         }
         return return_value
 
-    monkeypatch.setattr(recall_module, "query_user_memory_units", _commitments)
-    monkeypatch.setattr(recall_module, "query_pending_scheduled_events", _empty_scheduled_events)
-    monkeypatch.setattr(recall_module, "get_conversation_history", _empty_history)
-    monkeypatch.setattr(recall_module, "_review_recall_candidates", _review)
+    monkeypatch.setattr(commitments_module, "query_user_memory_units", _commitments)
+    monkeypatch.setattr(
+        scheduled_events_module,
+        "query_pending_scheduled_events",
+        _empty_scheduled_events,
+    )
+    monkeypatch.setattr(history_module, "get_conversation_history", _empty_history)
+    monkeypatch.setattr(recall_agent_module, "_review_recall_candidates", _review)
 
     result = await RecallAgent().run(
         "Recall: retrieve durable_commitment relevant to noodle compensation",
@@ -496,14 +531,14 @@ async def test_recall_active_review_accepts_exact_durable_memory_fallback(
         }
         return return_value
 
-    monkeypatch.setattr(recall_module, "query_user_memory_units", _commitments)
+    monkeypatch.setattr(commitments_module, "query_user_memory_units", _commitments)
     monkeypatch.setattr(
-        recall_module,
+        scheduled_events_module,
         "query_pending_scheduled_events",
         _empty_scheduled_events,
     )
-    monkeypatch.setattr(recall_module, "get_conversation_history", _empty_history)
-    monkeypatch.setattr(recall_module, "_review_recall_candidates", _review)
+    monkeypatch.setattr(history_module, "get_conversation_history", _empty_history)
+    monkeypatch.setattr(recall_agent_module, "_review_recall_candidates", _review)
 
     result = await RecallAgent().run(
         "Recall: retrieve active_episode_agreement relevant to noodle compensation",
@@ -570,14 +605,14 @@ async def test_recall_active_review_accepts_broad_memory_inventory(
         }
         return return_value
 
-    monkeypatch.setattr(recall_module, "query_user_memory_units", _commitments)
+    monkeypatch.setattr(commitments_module, "query_user_memory_units", _commitments)
     monkeypatch.setattr(
-        recall_module,
+        scheduled_events_module,
         "query_pending_scheduled_events",
         _empty_scheduled_events,
     )
-    monkeypatch.setattr(recall_module, "get_conversation_history", _empty_history)
-    monkeypatch.setattr(recall_module, "_review_recall_candidates", _review)
+    monkeypatch.setattr(history_module, "get_conversation_history", _empty_history)
+    monkeypatch.setattr(recall_agent_module, "_review_recall_candidates", _review)
 
     result = await RecallAgent().run(
         "Recall: retrieve active_episode_agreement relevant to open commitments",
@@ -607,9 +642,13 @@ async def test_recall_exact_history_runs_history_gate(monkeypatch) -> None:
         ]
         return return_value
 
-    monkeypatch.setattr(recall_module, "query_user_memory_units", _empty_active_commitments)
-    monkeypatch.setattr(recall_module, "query_pending_scheduled_events", _empty_scheduled_events)
-    monkeypatch.setattr(recall_module, "get_conversation_history", _history_probe)
+    monkeypatch.setattr(commitments_module, "query_user_memory_units", _empty_active_commitments)
+    monkeypatch.setattr(
+        scheduled_events_module,
+        "query_pending_scheduled_events",
+        _empty_scheduled_events,
+    )
+    monkeypatch.setattr(history_module, "get_conversation_history", _history_probe)
 
     result = await RecallAgent().run(
         "Recall: retrieve exact_agreement_history relevant to when the agreement was made",
@@ -657,9 +696,13 @@ async def test_recall_ignores_stale_progress_and_uses_active_commitment(monkeypa
         "continuity": "sharp_transition",
         "current_thread": "Old plan that should not be active.",
     }
-    monkeypatch.setattr(recall_module, "query_user_memory_units", _commitments)
-    monkeypatch.setattr(recall_module, "query_pending_scheduled_events", _empty_scheduled_events)
-    monkeypatch.setattr(recall_module, "get_conversation_history", _empty_history)
+    monkeypatch.setattr(commitments_module, "query_user_memory_units", _commitments)
+    monkeypatch.setattr(
+        scheduled_events_module,
+        "query_pending_scheduled_events",
+        _empty_scheduled_events,
+    )
+    monkeypatch.setattr(history_module, "get_conversation_history", _empty_history)
 
     result = await RecallAgent().run(
         "Recall: retrieve active_episode_agreement relevant to today's appointment",
@@ -709,9 +752,13 @@ async def test_recall_excludes_inactive_memory_units(monkeypatch) -> None:
         ]
         return return_value
 
-    monkeypatch.setattr(recall_module, "query_user_memory_units", _commitments)
-    monkeypatch.setattr(recall_module, "query_pending_scheduled_events", _empty_scheduled_events)
-    monkeypatch.setattr(recall_module, "get_conversation_history", _empty_history)
+    monkeypatch.setattr(commitments_module, "query_user_memory_units", _commitments)
+    monkeypatch.setattr(
+        scheduled_events_module,
+        "query_pending_scheduled_events",
+        _empty_scheduled_events,
+    )
+    monkeypatch.setattr(history_module, "get_conversation_history", _empty_history)
 
     result = await RecallAgent().run(
         "Recall: retrieve durable_commitment relevant to ongoing promises",

@@ -5,14 +5,28 @@ from kazusa_ai_chatbot.config import (
     CONVERSATION_SEARCH_DEFAULT_TOP_K,
     CONVERSATION_SEARCH_MAX_TOP_K,
 )
-from kazusa_ai_chatbot.rag import conversation_aggregate_agent
-from kazusa_ai_chatbot.rag import conversation_filter_agent
-from kazusa_ai_chatbot.rag import conversation_keyword_agent
-from kazusa_ai_chatbot.rag import conversation_search_agent
-from kazusa_ai_chatbot.rag import persistent_memory_keyword_agent
-from kazusa_ai_chatbot.rag import persistent_memory_search_agent
-from kazusa_ai_chatbot.rag import relationship_agent
-from kazusa_ai_chatbot.rag import user_list_agent
+from kazusa_ai_chatbot.rag.conversation_evidence.workers import (
+    aggregate as conversation_aggregate_agent,
+)
+from kazusa_ai_chatbot.rag.conversation_evidence.workers import (
+    filter as conversation_filter_agent,
+)
+from kazusa_ai_chatbot.rag.conversation_evidence.workers import (
+    keyword as conversation_keyword_agent,
+)
+from kazusa_ai_chatbot.rag.conversation_evidence.workers import (
+    search as conversation_search_agent,
+)
+from kazusa_ai_chatbot.rag.memory_evidence.workers import (
+    persistent_keyword as persistent_memory_keyword_agent,
+)
+from kazusa_ai_chatbot.rag.memory_evidence.workers import (
+    persistent_search as persistent_memory_search_agent,
+)
+from kazusa_ai_chatbot.rag.person_context.workers import list as user_list_agent
+from kazusa_ai_chatbot.rag.person_context.workers import (
+    relationship as relationship_agent,
+)
 
 
 def test_conversation_search_args_do_not_stringify_container_fields() -> None:

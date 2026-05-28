@@ -5,8 +5,12 @@ import json
 import pytest
 
 from kazusa_ai_chatbot.config import RAG_HYBRID_SEMANTIC_ONLY_SCORE_FLOOR
-from kazusa_ai_chatbot.rag import conversation_search_agent
-from kazusa_ai_chatbot.rag import persistent_memory_search_agent
+from kazusa_ai_chatbot.rag.conversation_evidence.workers import (
+    search as conversation_search_agent,
+)
+from kazusa_ai_chatbot.rag.memory_evidence.workers import (
+    persistent_search as persistent_memory_search_agent,
+)
 
 
 class _FakeTool:

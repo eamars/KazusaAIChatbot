@@ -7,7 +7,7 @@ import pytest
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.rag.cache2_policy import build_user_profile_cache_key
 from kazusa_ai_chatbot.rag.cache2_runtime import RAGCache2Runtime
-from kazusa_ai_chatbot.rag.user_profile_agent import (
+from kazusa_ai_chatbot.rag.person_context.workers.profile import (
     UserProfileAgent,
     _extract_global_user_id_from_known_facts,
 )
@@ -83,15 +83,15 @@ async def test_user_profile_agent_reads_character_profile_for_character_gid(monk
         side_effect=AssertionError("user-image retriever should not run")
     )
     monkeypatch.setattr(
-        "kazusa_ai_chatbot.rag.user_profile_agent.get_character_profile",
+        "kazusa_ai_chatbot.rag.person_context.workers.profile.get_character_profile",
         get_character_profile,
     )
     monkeypatch.setattr(
-        "kazusa_ai_chatbot.rag.user_profile_agent.get_query_text_embedding",
+        "kazusa_ai_chatbot.rag.person_context.workers.profile.get_query_text_embedding",
         get_query_text_embedding,
     )
     monkeypatch.setattr(
-        "kazusa_ai_chatbot.rag.user_profile_agent.user_image_retriever_agent",
+        "kazusa_ai_chatbot.rag.person_context.workers.profile.user_image_retriever_agent",
         user_image_retriever_agent,
     )
 
@@ -124,7 +124,7 @@ async def test_user_profile_agent_keeps_character_profile_cacheable(monkeypatch)
     """A second character profile read should come from Cache 2."""
     get_character_profile = AsyncMock(return_value={"name": "Kazusa"})
     monkeypatch.setattr(
-        "kazusa_ai_chatbot.rag.user_profile_agent.get_character_profile",
+        "kazusa_ai_chatbot.rag.person_context.workers.profile.get_character_profile",
         get_character_profile,
     )
 
@@ -173,7 +173,7 @@ async def test_user_profile_agent_ignores_stale_user_profile_cache_for_character
     )
     get_character_profile = AsyncMock(return_value={"name": "Kazusa"})
     monkeypatch.setattr(
-        "kazusa_ai_chatbot.rag.user_profile_agent.get_character_profile",
+        "kazusa_ai_chatbot.rag.person_context.workers.profile.get_character_profile",
         get_character_profile,
     )
 
@@ -206,11 +206,11 @@ async def test_user_profile_agent_uses_query_embedding_for_user_hydration(
     get_query_text_embedding = AsyncMock(return_value=[0.3, 0.4])
     user_image_retriever_agent = AsyncMock(return_value=({"name": "User"}, []))
     monkeypatch.setattr(
-        "kazusa_ai_chatbot.rag.user_profile_agent.get_query_text_embedding",
+        "kazusa_ai_chatbot.rag.person_context.workers.profile.get_query_text_embedding",
         get_query_text_embedding,
     )
     monkeypatch.setattr(
-        "kazusa_ai_chatbot.rag.user_profile_agent.user_image_retriever_agent",
+        "kazusa_ai_chatbot.rag.person_context.workers.profile.user_image_retriever_agent",
         user_image_retriever_agent,
     )
 
