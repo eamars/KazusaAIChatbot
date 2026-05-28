@@ -29,6 +29,15 @@ class ReferentResolution(TypedDict, total=False):
     status: Literal["resolved", "unresolved"]
 
 
+class ScopeUser(TypedDict):
+    """Prompt-facing identity row available in the current turn scope."""
+
+    display_name: str
+    platform_user_id: str
+    global_user_id: str
+    aliases: list[str]
+
+
 class GlobalPersonaState(TypedDict):
     # Character related
     character_profile: CharacterProfileDoc
@@ -56,6 +65,7 @@ class GlobalPersonaState(TypedDict):
     reply_context: ReplyContext
     indirect_speech_context: str
     channel_topic: str
+    scope_users: NotRequired[list[ScopeUser]]
     conversation_episode_state: NotRequired[ConversationEpisodeStateDoc | None]
     conversation_progress: NotRequired[ConversationProgressPromptDoc]
     promoted_reflection_context: NotRequired[dict]

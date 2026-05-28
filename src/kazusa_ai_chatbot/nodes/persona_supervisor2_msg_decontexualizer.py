@@ -323,10 +323,11 @@ _MSG_DECONTEXUALIZER_PROMPT = '''\
    - `prompt_message_context`：提及对象、显式地址对象、附件和回复元数据。
    - `reply_context`：被回复消息的说话人和可见正文。
    - `chat_history`：最近可见频道历史；使用临近、明示、或由提及/回复/显式地址连接起来的消息。
+   - `scope_users`：当前轮已知的中立身份表，只提供 `display_name`、`platform_user_id`、`global_user_id` 和 `aliases`。它不是候选答案列表，不能单独证明某个指代对象。
    - `indirect_speech_context` 和 `channel_topic` 只作为弱提示，不能覆盖明示文字。
 4. 对每个指代文本片段选择动作：
    - 保持：原句已经清楚，或属于直接对话且没有群聊指向对象的一二人称。
-   - 解析：有明确实体，且不改写会让离开上下文后的句子难以理解。
+   - 解析：`user_input`、`prompt_message_context`、`reply_context` 或 `chat_history` 已经提供文本桥接，能确定明确实体；`scope_users` 只能在桥接成立后帮助使用正确身份名。
    - 标为缺失：确实缺少对象，且影响回答。
 5. 组合 `output`。只改写动作是解析的文本片段；其余文本片段保留原文。
 6. 做一致性检查：同一 `user_input` 里指向同一已解析实体的文本片段全部使用同一实体名；
@@ -340,13 +341,13 @@ _MSG_DECONTEXUALIZER_PROMPT = '''\
 - 转述内容里的「我 / 我的」属于被转述说话人。该说话人必须能从转述引导语、引号内容、reply_context 或 chat_history 明确确定；动作是解析。结构为「A 说 X，Y」时，X 是转述内容，Y 回到当前用户的直接表达，除非 Y 明确继续引用 A。当前用户自己的「我 / 我的」仍保持。
 - 转述片段里的「我的 + 名词」按被转述说话人的所有格处理，输出为「A 的 + 名词」；`user_name` 只用于当前用户直接表达片段，不用于转述片段 X。
 - `chat_history` 中每条消息的「我」属于该消息的 `display_name`；这只用于解释转述和第三人称，不把当前用户的直接自称改成名字。
-- 第三人称代词有最近明示先行词时动作是解析；没有足够证据时动作是保持或标为缺失，取决于是否影响回答。
+- 第三人称代词只有在 `user_input`、`prompt_message_context`、`reply_context` 或 `chat_history` 给出最近明示先行词、回复对象、提及对象、被地址对象或可见说话人桥接时才解析；桥接成立后可用 `scope_users` 选择稳定 `display_name`。没有桥接时不要从 `scope_users` 猜人，若缺失对象影响回答则标为缺失。
 - 指示代词「这个 / 这些 / 那个」指向 `reply_context.reply_excerpt`、附件、或最近明示对象时动作是解析；没有对象且问题依赖该对象时动作是标为缺失。
 - 疑问代词「谁 / 什么 / 哪里 / 哪个 / 怎么」是问题内容，动作是保持。
 
 # 指代输出规则
 - 被改写进 `output` 的实体必须有 `status="resolved"` 的指代条目。
-- `status="resolved"` 表示对象能从输入字段确定；它不要求 `output` 一定改写。
+- `status="resolved"` 表示对象能从 `user_input`、`prompt_message_context`、`reply_context` 或 `chat_history` 的桥接证据确定；`scope_users` 只补充身份名，不单独构成确定证据。
 - `status="unresolved"` 只用于所有输入字段都没有可识别对象、且缺失对象影响回答的情况。
 - `referent_role` 只允许 `subject`、`object`、`time`。
 
@@ -363,6 +364,7 @@ _MSG_DECONTEXUALIZER_PROMPT = '''\
 - `prompt_message_context.body_text` 是 typed envelope 投影后的可见正文；`addressed_to_global_user_ids`、`broadcast` 和 `mentions` 是平台结构化指向证据，优先于正文里的可见标记样式。
 - `prompt_message_context.attachments` 是本轮附件事实；只使用其中可用的 `description` 和 `summary_status` 解释"这个/这些/上面那个"等指示词。
 - `chat_history` 是最近可见频道历史；每行的 `display_name` 是该行说话人，`body_text` 是可见正文，只用于解析临近先行词、转述来源和短答对象。
+- `scope_users` 是本轮已知用户身份表，不含正文、时间、角色、证据角色、分数或原因。只有当 `user_input`、`prompt_message_context`、`reply_context` 或 `chat_history` 已经把指代桥接到某个可见身份时，才能读取它来使用稳定显示名；没有桥接时必须保持未解析规则。
 - `reply_context.reply_to_display_name` 与 `reply_context.reply_excerpt` 是当前消息回复的对象和可见摘录，是短答、确认、"这个/这些"解析的强证据。
 - `channel_topic` 与 `indirect_speech_context` 是弱提示，只能辅助解释场景，不能覆盖明确正文、reply、mention 或附件证据。
 
@@ -377,7 +379,7 @@ _MSG_DECONTEXUALIZER_PROMPT = '''\
     ]
 }}
 
-`status="resolved"` 表示对象能从任一输入字段确定，包括 `reply_context.reply_excerpt`；它不要求 `output` 一定改写。`status="unresolved"` 只在所有输入字段都没有可识别对象时使用。
+`status="resolved"` 表示对象能从 `user_input`、`prompt_message_context`、`reply_context` 或 `chat_history` 的桥接证据确定，包括 `reply_context.reply_excerpt`；它不要求 `output` 一定改写。`status="unresolved"` 只在这些桥接字段都没有可识别对象时使用。
 `is_modified` 表示 `output` 是否不同于原句。`referents` 必须每次输出。`referent_role` 只允许 `subject`、`object`、`time`；`status` 只允许 `resolved` 或 `unresolved`。
 '''
 
@@ -419,6 +421,9 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
         "indirect_speech_context": state["indirect_speech_context"],
         "reply_context": state["reply_context"],
     }
+    scope_users = state.get("scope_users")
+    if scope_users:
+        input_msg["scope_users"] = scope_users
     human_message = HumanMessage(content=json.dumps(input_msg, ensure_ascii=False))
 
     # logger.debug(

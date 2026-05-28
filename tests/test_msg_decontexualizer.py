@@ -614,6 +614,54 @@ async def test_decontexualizer_forwards_reply_context_to_llm():
 
 
 @pytest.mark.asyncio
+async def test_decontexualizer_forwards_scope_users_as_neutral_identity_table():
+    """Scoped users should reach the prompt as identity rows, not retry hints."""
+    llm_response = MagicMock()
+    llm_response.content = (
+        '{"output": "@杏山千纱 还不报警抓蚝爹油吗？", '
+        '"reasoning": "used visible mention and identity table", '
+        '"is_modified": true, '
+        '"referents": [{"phrase": "他", "referent_role": "object", "status": "resolved"}]}'
+    )
+    scope_users = [
+        {
+            'display_name': '蚝爹油',
+            'platform_user_id': _TARGET_PLATFORM_USER_ID,
+            'global_user_id': _TARGET_GLOBAL_USER_ID,
+            'aliases': [],
+        },
+        {
+            'display_name': '杏山千纱',
+            'platform_user_id': _BOT_PLATFORM_USER_ID,
+            'global_user_id': _CHARACTER_GLOBAL_USER_ID,
+            'aliases': [],
+        },
+    ]
+    state = _base_state()
+    state['scope_users'] = scope_users
+
+    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._msg_decontexualizer_llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
+
+        result = await call_msg_decontexualizer(state)
+
+    messages = mock_llm.ainvoke.await_args.args[0]
+    system_prompt = messages[0].content
+    payload = json.loads(messages[1].content)
+    assert payload['scope_users'] == scope_users
+    assert all('retry' not in key for key in payload)
+    assert 'scope_users' in system_prompt
+    assert '身份' in system_prompt
+    assert '候选' in system_prompt
+    assert result == {
+        'decontexualized_input': '@杏山千纱 还不报警抓蚝爹油吗？',
+        'referents': [
+            {'phrase': '他', 'referent_role': 'object', 'status': 'resolved'},
+        ],
+    }
+
+
+@pytest.mark.asyncio
 async def test_decontexualizer_parses_unresolved_reference_signal():
     """New ambiguity fields should flow through when the LLM marks unresolved."""
     llm_response = MagicMock()

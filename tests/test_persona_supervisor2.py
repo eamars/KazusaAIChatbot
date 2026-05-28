@@ -485,6 +485,189 @@ async def test_persona_supervisor2_scopes_group_history_before_persona_stages():
 
 
 @pytest.mark.asyncio
+async def test_persona_supervisor2_builds_scope_users_for_first_pass_only():
+    """The decontextualizer should get a neutral roster without retry state."""
+
+    state = _base_discord_state()
+    state["platform"] = "qq"
+    state["user_input"] = "还不报警抓他吗？"
+    state["user_name"] = "Dangal"
+    state["platform_user_id"] = "67889018"
+    state["global_user_id"] = "745d7818-a9d3-4889-b7f3-8555078a2061"
+    state["platform_bot_id"] = "3768713357"
+    state["character_profile"] = {
+        "name": "杏山千纱",
+        "global_user_id": "00000000-0000-4000-8000-000000000001",
+        "mood": "neutral",
+        "global_vibe": "calm",
+        "reflection_summary": "nothing notable",
+    }
+    state["message_envelope"]["body_text"] = state["user_input"]
+    state["message_envelope"]["raw_wire_text"] = state["user_input"]
+    state["message_envelope"]["mentions"] = [
+        {
+            "platform_user_id": "673225019",
+            "global_user_id": "256e8a10-c406-47e9-ac8f-efd270d18160",
+            "display_name": "蚝爹油",
+            "entity_kind": "user",
+        }
+    ]
+    state["message_envelope"]["addressed_to_global_user_ids"] = [
+        "00000000-0000-4000-8000-000000000001",
+        "256e8a10-c406-47e9-ac8f-efd270d18160",
+    ]
+    state["prompt_message_context"] = {
+        "body_text": state["user_input"],
+        "mentions": [
+            {
+                "platform_user_id": "673225019",
+                "global_user_id": "256e8a10-c406-47e9-ac8f-efd270d18160",
+                "display_name": "蚝爹油",
+                "entity_kind": "user",
+            }
+        ],
+        "attachments": [],
+        "addressed_to_global_user_ids": state["message_envelope"][
+            "addressed_to_global_user_ids"
+        ],
+        "broadcast": False,
+    }
+    state["reply_context"] = {
+        "reply_to_platform_user_id": "13579",
+        "reply_to_display_name": "回复对象",
+        "reply_excerpt": "前文摘录",
+    }
+    state["chat_history_wide"] = [
+        {
+            "role": "user",
+            "name": "Dangal-old",
+            "display_name": "Dangal-old",
+            "platform_user_id": "67889018",
+            "global_user_id": "745d7818-a9d3-4889-b7f3-8555078a2061",
+            "body_text": "反正现在有AI",
+            "addressed_to_global_user_ids": [
+                "00000000-0000-4000-8000-000000000001",
+            ],
+            "mentions": [],
+            "broadcast": False,
+            "reply_context": {},
+            "timestamp": "2026-05-08T01:48:45+00:00",
+        },
+        {
+            "role": "user",
+            "name": "蚝爹油",
+            "display_name": "蚝爹油",
+            "platform_user_id": "673225019",
+            "global_user_id": "256e8a10-c406-47e9-ac8f-efd270d18160",
+            "body_text": "把对方解决掉也是解决问题的方式之一哦",
+            "addressed_to_global_user_ids": [
+                "00000000-0000-4000-8000-000000000001",
+            ],
+            "mentions": [],
+            "broadcast": False,
+            "reply_context": {},
+            "timestamp": "2026-05-08T01:48:58+00:00",
+        },
+        {
+            "role": "assistant",
+            "name": "杏山千纱",
+            "display_name": "杏山千纱",
+            "platform_user_id": "3768713357",
+            "global_user_id": "00000000-0000-4000-8000-000000000001",
+            "body_text": "这个一点都不好笑。",
+            "addressed_to_global_user_ids": [
+                "256e8a10-c406-47e9-ac8f-efd270d18160",
+            ],
+            "mentions": [],
+            "broadcast": False,
+            "reply_context": {},
+            "timestamp": "2026-05-08T01:49:02+00:00",
+        },
+    ]
+    state["chat_history_recent"] = list(state["chat_history_wide"])
+
+    with (
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_msg_decontexualizer",
+            new_callable=AsyncMock,
+            return_value={
+                "decontexualized_input": "@杏山千纱 还不报警抓他吗？",
+                "referents": [
+                    {
+                        "phrase": "他",
+                        "referent_role": "object",
+                        "status": "unresolved",
+                    },
+                ],
+            },
+        ) as m_decon,
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.stage_1_research",
+            new_callable=AsyncMock,
+            return_value={"rag_result": {}},
+        ),
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_subgraph",
+            new_callable=AsyncMock,
+            return_value={
+                "internal_monologue": "choosing silence",
+                "interaction_subtext": "",
+                "emotional_appraisal": "",
+                "character_intent": "CLARIFY",
+                "logical_stance": "UNKNOWN_REFERENT",
+                "action_specs": [],
+            },
+        ),
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_memory_lifecycle_update_handler",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
+    ):
+        await persona_supervisor2(state)
+
+    assert m_decon.await_count == 1
+    decon_state = m_decon.await_args.args[0]
+    scope_users = decon_state["scope_users"]
+    by_global = {
+        row["global_user_id"]: row
+        for row in scope_users
+        if row["global_user_id"]
+    }
+    by_platform = {
+        row["platform_user_id"]: row
+        for row in scope_users
+        if row["platform_user_id"]
+    }
+    assert by_global["00000000-0000-4000-8000-000000000001"] == {
+        "display_name": "杏山千纱",
+        "platform_user_id": "3768713357",
+        "global_user_id": "00000000-0000-4000-8000-000000000001",
+        "aliases": [],
+    }
+    assert by_global["745d7818-a9d3-4889-b7f3-8555078a2061"][
+        "display_name"
+    ] == "Dangal"
+    assert by_global["256e8a10-c406-47e9-ac8f-efd270d18160"][
+        "display_name"
+    ] == "蚝爹油"
+    assert by_platform["13579"] == {
+        "display_name": "回复对象",
+        "platform_user_id": "13579",
+        "global_user_id": "",
+        "aliases": [],
+    }
+    for row in scope_users:
+        assert set(row) == {
+            "display_name",
+            "platform_user_id",
+            "global_user_id",
+            "aliases",
+        }
+    assert all("retry" not in key for key in decon_state)
+
+
+@pytest.mark.asyncio
 async def test_persona_supervisor2_no_remember_skips_consolidation():
     """no_remember stays a service concern; supervisor still returns the consolidation snapshot."""
     state = _base_discord_state()

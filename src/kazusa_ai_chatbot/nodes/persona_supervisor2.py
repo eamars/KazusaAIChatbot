@@ -29,7 +29,10 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_memory_lifecycle import (
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import call_msg_decontexualizer
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_projection import project_known_facts
-from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
+from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import (
+    GlobalPersonaState,
+    ScopeUser,
+)
 from kazusa_ai_chatbot.nodes.referent_resolution import (
     should_skip_rag_for_unresolved_referents,
     unresolved_referent_reason,
@@ -42,12 +45,203 @@ from kazusa_ai_chatbot.rag.quote_aware_sequence import (
 )
 from kazusa_ai_chatbot.state import IMProcessState
 from kazusa_ai_chatbot.time_boundary import format_storage_utc_history_for_llm
-from kazusa_ai_chatbot.utils import build_interaction_history_recent, log_preview
+from kazusa_ai_chatbot.utils import (
+    build_interaction_history_recent,
+    log_preview,
+    text_or_empty,
+)
 
 logger = logging.getLogger(__name__)
 
 MILLISECONDS_PER_SECOND = 1000
 PERSONA_RAG_COMPONENT = "nodes.persona_supervisor2"
+
+
+def _find_scope_user_index(
+    scope_users: list[ScopeUser],
+    *,
+    display_name: str,
+    platform_user_id: str,
+    global_user_id: str,
+) -> int | None:
+    """Find a matching roster row by stable identity priority.
+
+    Args:
+        scope_users: Existing roster rows in insertion order.
+        display_name: Clean display name for the incoming identity.
+        platform_user_id: Clean platform user id for the incoming identity.
+        global_user_id: Clean global user id for the incoming identity.
+
+    Returns:
+        Matching row index, or ``None`` when no stable identity matches.
+    """
+
+    if global_user_id:
+        for index, scope_user in enumerate(scope_users):
+            if scope_user["global_user_id"] == global_user_id:
+                return_value = index
+                return return_value
+
+    if platform_user_id:
+        for index, scope_user in enumerate(scope_users):
+            if scope_user["platform_user_id"] == platform_user_id:
+                return_value = index
+                return return_value
+
+    if display_name and not global_user_id and not platform_user_id:
+        for index, scope_user in enumerate(scope_users):
+            if scope_user["display_name"] == display_name:
+                return_value = index
+                return return_value
+
+    return_value = None
+    return return_value
+
+
+def _add_scope_user(
+    scope_users: list[ScopeUser],
+    *,
+    display_name: object,
+    platform_user_id: object,
+    global_user_id: object,
+) -> None:
+    """Add or merge one neutral identity row into the scoped-user roster.
+
+    Args:
+        scope_users: Mutable scoped-user roster.
+        display_name: Raw display name from an already-loaded context source.
+        platform_user_id: Raw platform user id from an already-loaded context.
+        global_user_id: Raw global user id from an already-loaded context.
+    """
+
+    clean_display_name = text_or_empty(display_name)
+    clean_platform_user_id = text_or_empty(platform_user_id)
+    clean_global_user_id = text_or_empty(global_user_id)
+    has_identity = any((
+        clean_display_name,
+        clean_platform_user_id,
+        clean_global_user_id,
+    ))
+    if not has_identity:
+        return
+
+    existing_index = _find_scope_user_index(
+        scope_users,
+        display_name=clean_display_name,
+        platform_user_id=clean_platform_user_id,
+        global_user_id=clean_global_user_id,
+    )
+    if existing_index is None:
+        scope_users.append({
+            "display_name": clean_display_name,
+            "platform_user_id": clean_platform_user_id,
+            "global_user_id": clean_global_user_id,
+            "aliases": [],
+        })
+        return
+
+    scope_user = scope_users[existing_index]
+    if clean_display_name:
+        scope_user["display_name"] = clean_display_name
+    if clean_platform_user_id and not scope_user["platform_user_id"]:
+        scope_user["platform_user_id"] = clean_platform_user_id
+    if clean_global_user_id and not scope_user["global_user_id"]:
+        scope_user["global_user_id"] = clean_global_user_id
+
+
+def _build_scope_users(
+    state: IMProcessState,
+    channel_history: list[dict],
+) -> list[ScopeUser]:
+    """Build the neutral identity roster visible to decontextualization.
+
+    Args:
+        state: Current top-level chat graph state after relevance gating.
+        channel_history: Already-loaded recent channel history prepared for
+            decontextualizer use.
+
+    Returns:
+        Deduplicated neutral identity rows. Rows contain only display name,
+        platform id, global id, and aliases.
+    """
+
+    scope_users: list[ScopeUser] = []
+    for row in channel_history:
+        if not isinstance(row, dict):
+            continue
+        display_name = row.get("display_name")
+        if not display_name:
+            display_name = row.get("name")
+        platform_user_id = row.get("platform_user_id")
+        global_user_id = row.get("global_user_id")
+        _add_scope_user(
+            scope_users,
+            display_name=display_name,
+            platform_user_id=platform_user_id,
+            global_user_id=global_user_id,
+        )
+
+    character_profile = state["character_profile"]
+    _add_scope_user(
+        scope_users,
+        display_name=character_profile["name"],
+        platform_user_id=state["platform_bot_id"],
+        global_user_id=character_profile["global_user_id"],
+    )
+    _add_scope_user(
+        scope_users,
+        display_name=state["user_name"],
+        platform_user_id=state["platform_user_id"],
+        global_user_id=state["global_user_id"],
+    )
+
+    prompt_message_context = state["prompt_message_context"]
+    for mention in prompt_message_context["mentions"]:
+        if not isinstance(mention, dict):
+            continue
+        display_name = mention.get("display_name")
+        platform_user_id = mention.get("platform_user_id")
+        global_user_id = mention.get("global_user_id")
+        _add_scope_user(
+            scope_users,
+            display_name=display_name,
+            platform_user_id=platform_user_id,
+            global_user_id=global_user_id,
+        )
+
+    for addressed_global_user_id in prompt_message_context[
+        "addressed_to_global_user_ids"
+    ]:
+        _add_scope_user(
+            scope_users,
+            display_name="",
+            platform_user_id="",
+            global_user_id=addressed_global_user_id,
+        )
+
+    prompt_reply = prompt_message_context.get("reply")
+    if isinstance(prompt_reply, dict):
+        display_name = prompt_reply.get("display_name")
+        platform_user_id = prompt_reply.get("platform_user_id")
+        global_user_id = prompt_reply.get("global_user_id")
+        _add_scope_user(
+            scope_users,
+            display_name=display_name,
+            platform_user_id=platform_user_id,
+            global_user_id=global_user_id,
+        )
+
+    reply_context = state["reply_context"]
+    reply_display_name = reply_context.get("reply_to_display_name")
+    reply_platform_user_id = reply_context.get("reply_to_platform_user_id")
+    _add_scope_user(
+        scope_users,
+        display_name=reply_display_name,
+        platform_user_id=reply_platform_user_id,
+        global_user_id="",
+    )
+
+    return scope_users
 
 
 def _selected_action_specs(state: GlobalPersonaState) -> list[dict]:
@@ -420,6 +614,10 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
     recent_channel_history_for_decontextualizer = format_storage_utc_history_for_llm(
         state["chat_history_wide"]
     )[-CHAT_HISTORY_RECENT_LIMIT:]
+    scope_users = _build_scope_users(
+        state,
+        recent_channel_history_for_decontextualizer,
+    )
     raw_interaction_wide = build_interaction_history_recent(
         state["chat_history_wide"],
         state["platform_user_id"],
@@ -434,7 +632,7 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
     async def stage_0_msg_decontexualizer(
         persona_state: GlobalPersonaState,
     ) -> dict:
-        """Run decontextualization with recent full channel history only."""
+        """Run decontextualization with recent channel history and identities."""
 
         decontextualizer_state = dict(persona_state)
         decontextualizer_state["chat_history_recent"] = (
@@ -499,6 +697,7 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "reply_context": state["reply_context"],
         "indirect_speech_context": state["indirect_speech_context"],
         "channel_topic": state["channel_topic"],
+        "scope_users": scope_users,
         "conversation_episode_state": state.get("conversation_episode_state"),
         "conversation_progress": state.get("conversation_progress"),
         "promoted_reflection_context": state.get("promoted_reflection_context"),
