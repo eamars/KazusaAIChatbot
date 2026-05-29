@@ -25,6 +25,9 @@ from kazusa_ai_chatbot.reflection_cycle.activity_windows import (
 )
 from kazusa_ai_chatbot.reflection_cycle.selector import collect_reflection_inputs
 from kazusa_ai_chatbot.self_cognition import models
+from kazusa_ai_chatbot.self_cognition.group_review_participant_context import (
+    build_group_review_participant_context,
+)
 from kazusa_ai_chatbot.self_cognition.sleep_period import (
     is_self_cognition_sleep_period,
 )
@@ -155,10 +158,14 @@ async def collect_group_review_cases(
     character_profile: dict[str, Any],
     windows: list[GroupActivityWindow],
     max_cases: int,
+    participant_context_builder: Callable[..., Any] | None = None,
 ) -> list[models.SelfCognitionCase]:
     """Build group-review cases from precomputed activity windows."""
 
     cases: list[models.SelfCognitionCase] = []
+    context_builder = (
+        participant_context_builder or build_group_review_participant_context
+    )
     for window in windows:
         if len(cases) >= max_cases:
             break
@@ -169,6 +176,20 @@ async def collect_group_review_cases(
             character_profile=character_profile,
             now=now,
         )
+        participant_context = await _call_maybe_async(
+            context_builder,
+            participant_rows=[dict(row) for row in window.participant_rows],
+            target_scope=case["target_scope"],
+            character_profile=character_profile,
+            window_start_utc=normalize_storage_utc_iso(
+                window.window_start.isoformat(),
+            ),
+            current_timestamp_utc=normalize_storage_utc_iso(now.isoformat()),
+        )
+        if participant_context is not None:
+            case["conversation_progress"]["participant_context"] = (
+                participant_context
+            )
         binding = await resolve_self_cognition_delivery_target(
             platform=window.platform,
             source_platform_channel_id=window.platform_channel_id,

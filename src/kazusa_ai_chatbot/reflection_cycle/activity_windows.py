@@ -35,6 +35,7 @@ class GroupActivityWindow:
     labels: dict[str, str]
     message_count: int
     visible_context: list[dict[str, str]]
+    participant_rows: list[dict[str, Any]]
     source_refs: list[dict[str, Any]]
 
     @property
@@ -151,6 +152,7 @@ def build_group_activity_windows(
             labels=labels,
             message_count=len(messages),
             visible_context=_visible_context(messages),
+            participant_rows=_participant_rows(messages),
             source_refs=_source_refs(
                 scope_ref=scope.scope_ref,
                 window_start=bucket_start,
@@ -386,6 +388,83 @@ def _visible_context(messages: list[dict[str, Any]]) -> list[dict[str, str]]:
         }
         visible_rows.append(visible_row)
     return visible_rows
+
+
+def _participant_rows(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Build internal participant rows from the activity-window message set."""
+
+    rows: list[dict[str, Any]] = []
+    for message in messages:
+        body_text = _trim_text(text_or_empty(message.get("body_text")))
+        row = {
+            "timestamp": text_or_empty(message.get("timestamp")),
+            "role": text_or_empty(message.get("role")),
+            "display_name": text_or_empty(message.get("display_name")),
+            "body_text": body_text,
+            "platform_message_id": (
+                text_or_empty(message.get("platform_message_id"))
+                or text_or_empty(message.get("message_id"))
+            ).replace("+", ""),
+            "global_user_id": text_or_empty(message.get("global_user_id")),
+            "platform_user_id": text_or_empty(message.get("platform_user_id")),
+            "addressed_to_global_user_ids": _string_list(
+                message.get("addressed_to_global_user_ids"),
+            ),
+            "mentions": _mention_rows(message.get("mentions")),
+            "is_directed_at_character": (
+                message.get("is_directed_at_character") is True
+            ),
+            "reply_context": _reply_context(message.get("reply_context")),
+        }
+        rows.append(row)
+    return rows
+
+
+def _string_list(value: object) -> list[str]:
+    """Return non-empty string values from an optional list-like field."""
+
+    if not isinstance(value, list):
+        return_value: list[str] = []
+        return return_value
+
+    items = [
+        text_value
+        for item in value
+        if (text_value := text_or_empty(item))
+    ]
+    return items
+
+
+def _mention_rows(value: object) -> list[dict[str, str]]:
+    """Project mention metadata into string-only internal rows."""
+
+    if not isinstance(value, list):
+        return_value: list[dict[str, str]] = []
+        return return_value
+
+    rows: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        row = {
+            key: text_value
+            for key, raw_value in item.items()
+            if isinstance(key, str)
+            if (text_value := text_or_empty(raw_value))
+        }
+        if row:
+            rows.append(row)
+    return rows
+
+
+def _reply_context(value: object) -> dict[str, Any]:
+    """Return reply metadata only when the source row carries a mapping."""
+
+    if not isinstance(value, dict):
+        return_value: dict[str, Any] = {}
+        return return_value
+    return_value = dict(value)
+    return return_value
 
 
 def _source_refs(

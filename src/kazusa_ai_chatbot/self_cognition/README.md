@@ -159,6 +159,16 @@ character can judge whether the current scene gives enough reason to speak.
 This guidance is evidence only; it is not a response-ratio control, a command
 to speak, or a deterministic silence rule.
 
+Group review also attaches bounded participant context during source
+collection under `conversation_progress.participant_context`. This context is
+source hydration, not a normal RAG-backed case: it deterministically selects
+one primary social beat from the activity-window participant rows, hydrates
+only that primary participant when a `global_user_id` is already present, and
+caps visible samples plus nearby conversation evidence before the source packet
+is rendered. Missing identity degrades to visible-only context; display-name
+identity lookup, background participant profiles, web lookup, and full RAG
+supervisor planning are not used.
+
 When these cases are consolidated, the deterministic target plan gives the
 group channel its own target eligibility. Group-review participant presence is
 not enough to create a user lane. The source label `self_cognition` is

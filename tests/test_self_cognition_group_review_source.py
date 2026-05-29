@@ -12,15 +12,29 @@ from kazusa_ai_chatbot.reflection_cycle.models import (
     ReflectionInputSet,
     ReflectionScopeInput,
 )
+from kazusa_ai_chatbot.reflection_cycle.activity_windows import (
+    build_group_activity_windows,
+)
 from kazusa_ai_chatbot.self_cognition import models, projection, runner, sources
 
 
 @pytest.mark.asyncio
 async def test_collect_group_chat_review_cases_builds_same_group_cases(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Non-empty group windows should become bounded self-cognition cases."""
 
     now = datetime(2026, 5, 18, 4, 45, tzinfo=timezone.utc)
+
+    async def build_participant_context(**kwargs: Any) -> None:
+        del kwargs
+        return None
+
+    monkeypatch.setattr(
+        sources,
+        "build_group_review_participant_context",
+        build_participant_context,
+    )
 
     async def collect_inputs(**kwargs: Any) -> ReflectionInputSet:
         assert kwargs == {
@@ -198,6 +212,147 @@ async def test_collect_group_chat_review_cases_prefers_newest_windows(
         "2026-05-18T04:30:00+00:00",
         "2026-05-18T04:15:00+00:00",
     ]
+
+
+def test_group_activity_window_projects_internal_participant_rows() -> None:
+    """Participant rows should carry ids without changing visible context."""
+
+    now = datetime(2026, 5, 18, 4, 15, tzinfo=timezone.utc)
+    scope = ReflectionScopeInput(
+        scope_ref="scope_group",
+        platform="qq",
+        platform_channel_id="group-1",
+        channel_type="group",
+        assistant_message_count=0,
+        user_message_count=2,
+        total_message_count=2,
+        first_timestamp="2026-05-18T04:01:00+00:00",
+        last_timestamp="2026-05-18T04:02:00+00:00",
+        messages=[
+            _message(
+                role="user",
+                timestamp="2026-05-18T04:01:00+00:00",
+                body_text="Can you answer this?",
+                global_user_id="user-1",
+                platform_user_id="qq-user-1",
+                addressed=True,
+            ),
+            _message(
+                role="user",
+                timestamp="2026-05-18T04:02:00+00:00",
+                body_text="Replying to the bot.",
+                global_user_id="user-2",
+                platform_user_id="qq-user-2",
+                reply_context={
+                    "reply_to_platform_user_id": "bot-1",
+                    "reply_to_message_id": "assistant-msg-1",
+                },
+            ),
+        ],
+    )
+
+    windows = build_group_activity_windows(
+        scope=scope,
+        window_start=datetime(2026, 5, 18, 4, 0, tzinfo=timezone.utc),
+        window_end=datetime(2026, 5, 18, 4, 15, tzinfo=timezone.utc),
+        now=now,
+        character_global_user_id="character-global",
+        platform_bot_id="bot-1",
+    )
+
+    assert len(windows) == 1
+    window = windows[0]
+    assert [row["global_user_id"] for row in window.participant_rows] == [
+        "user-1",
+        "user-2",
+    ]
+    assert window.participant_rows[0]["is_directed_at_character"] is False
+    assert window.participant_rows[0]["addressed_to_global_user_ids"] == [
+        "character-global",
+    ]
+    assert window.participant_rows[1]["reply_context"] == {
+        "reply_to_platform_user_id": "bot-1",
+        "reply_to_message_id": "assistant-msg-1",
+    }
+    assert "global_user_id" not in window.visible_context[0]
+    assert "platform_user_id" not in window.visible_context[0]
+    assert window.visible_context[0]["body_text"] == "Can you answer this?"
+
+
+@pytest.mark.asyncio
+async def test_collect_group_review_cases_attaches_participant_context(
+) -> None:
+    """Source collection should attach participant context before cognition."""
+
+    now = datetime(2026, 5, 18, 4, 15, tzinfo=timezone.utc)
+    windows = build_group_activity_windows(
+        scope=_group_scope(),
+        window_start=datetime(2026, 5, 18, 4, 0, tzinfo=timezone.utc),
+        window_end=datetime(2026, 5, 18, 4, 30, tzinfo=timezone.utc),
+        now=now,
+        character_global_user_id="character-global",
+        platform_bot_id="bot-1",
+    )
+    captured_builder_payload: dict[str, Any] = {}
+
+    async def participant_context_builder(**kwargs: Any) -> dict[str, Any]:
+        captured_builder_payload.update(kwargs)
+        context = {
+            "source": "group_review_participant_context",
+            "context_shape": "single_flow_focus",
+            "focus_mode": "direct_reply",
+            "guidance": "reply to the primary target only",
+            "primary_reply_target": {
+                "display_name": "user",
+                "reply_target_fit": "high",
+                "role_in_window": ["direct_cue"],
+                "relationship_label": "Neutral",
+                "relationship_band": "neutral",
+                "last_relationship_insight": "",
+                "engagement_guidelines": [],
+                "nearby_conversation_evidence": [],
+                "visible_samples": ["Can you look at this in the group?"],
+            },
+            "background_flow": {
+                "mode": "ambient_group",
+                "summary": "one other row is visible",
+                "participant_count_label": "few",
+            },
+        }
+        return context
+
+    cases = await sources.collect_group_review_cases(
+        now=now,
+        character_profile={
+            "name": "Character",
+            "global_user_id": "character-global",
+            "platform_bot_id": "bot-1",
+        },
+        windows=windows,
+        max_cases=1,
+        participant_context_builder=participant_context_builder,
+    )
+
+    assert len(cases) == 1
+    case = cases[0]
+    assert captured_builder_payload["target_scope"]["user_id"] is None
+    assert captured_builder_payload["window_start_utc"] == (
+        "2026-05-18T04:00:00+00:00"
+    )
+    assert captured_builder_payload["participant_rows"][0][
+        "global_user_id"
+    ] == "user-1"
+    assert case["conversation_progress"]["participant_context"]["source"] == (
+        "group_review_participant_context"
+    )
+    assert case["target_scope"]["user_id"] is None
+    assert case["delivery_target"]["platform_channel_id"] == "group-1"
+
+    source_packet = projection.build_source_packet(case)
+    serialized_packet = json.dumps(source_packet, ensure_ascii=False)
+    assert "participant_context" in serialized_packet
+    assert "delivery_target" not in serialized_packet
+    assert "user-1" not in serialized_packet
 
 
 @pytest.mark.asyncio
@@ -462,6 +617,7 @@ def _message(
     platform_user_id: str = "",
     platform_message_id: str = "",
     addressed: bool = False,
+    reply_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build one conversation message row."""
 
@@ -480,6 +636,8 @@ def _message(
             ["character-global"] if addressed else []
         ),
         "mentions": [],
+        "is_directed_at_character": False,
+        "reply_context": dict(reply_context or {}),
     }
     return message
 

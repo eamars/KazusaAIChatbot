@@ -1728,6 +1728,32 @@ def test_group_noise_rejected_without_rag_or_action(tmp_path) -> None:
     assert models.ARTIFACT_ACTION_CANDIDATE not in paths
 
 
+def test_group_chat_review_does_not_invoke_full_rag_supervisor(
+    tmp_path,
+) -> None:
+    """Group review source hydration must not make the case RAG-backed."""
+
+    case = _group_chat_review_case()
+
+    def reject_rag(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise AssertionError("group review should not call full RAG")
+
+    paths = run_self_cognition_case(
+        case,
+        tmp_path,
+        rag_client=reject_rag,
+        cognition_client=lambda state: _silent_cognition_output(),
+    )
+    trigger_record = _read_json(paths[models.ARTIFACT_TRIGGER_RECORD])
+    run_record = _read_json(paths[models.ARTIFACT_RUN_RECORD])
+
+    assert run_record["budget"]["rag_calls"] == 0
+    assert trigger_record["target_scope"]["channel_type"] == "group"
+    assert trigger_record["target_scope"]["user_id"] is None
+    assert models.ARTIFACT_RAG_REQUEST not in paths
+    assert models.ARTIFACT_RAG_OUTPUT not in paths
+
+
 def test_topic_followup_contact_decision_writes_action_candidate(
     tmp_path,
 ) -> None:
