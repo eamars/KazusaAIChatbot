@@ -152,9 +152,13 @@ reflection context.
 
 ## Prompt Contracts
 
-Stage 1a hourly and daily-channel prompt schemas remain unchanged. They keep
-English JSON keys and enum values, Simplified Chinese generated free text, and
-bounded prompt-safe message projection.
+Stage 1a hourly and daily-channel prompt schemas keep English JSON keys,
+Simplified Chinese generated free text, and bounded prompt-safe message
+projection. Hourly `confidence` and
+`participant_observations[].evidence_strength` are semantic descriptors for
+later reflection context, not deterministic control enums. Daily-channel
+output `confidence` remains the `low|medium|high` control label used by
+style-update eligibility.
 
 Global promotion lives in `promotion.py` as a separate LLM block:
 

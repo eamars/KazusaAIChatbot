@@ -24,6 +24,7 @@ from kazusa_ai_chatbot.time_boundary import (
 
 
 _FORWARD_LOOKING_FIELDS = {"lore_candidates", "progress_projection", "open_loops"}
+_REFLECTION_DESCRIPTOR_MAX_CHARS = 80
 
 
 def build_hourly_reflection_payload(scope: ReflectionScopeInput) -> dict[str, Any]:
@@ -107,7 +108,7 @@ def validate_hourly_reflection_output(parsed_output: dict[str, Any]) -> list[str
     """
 
     warnings = _validate_required_fields(parsed_output, HOURLY_REQUIRED_FIELDS)
-    warnings.extend(_validate_confidence(parsed_output))
+    warnings.extend(_validate_hourly_descriptors(parsed_output))
     for field_name in _FORWARD_LOOKING_FIELDS:
         if field_name in parsed_output:
             warnings.append(f"出现未请求的前瞻字段: {field_name}")
@@ -130,7 +131,7 @@ def validate_daily_synthesis_output(
     """
 
     warnings = _validate_required_fields(parsed_output, DAILY_REQUIRED_FIELDS)
-    warnings.extend(_validate_confidence(parsed_output))
+    warnings.extend(_validate_daily_confidence(parsed_output))
     if allowed_hours is not None:
         warnings.extend(_validate_daily_summary_hours(parsed_output, allowed_hours))
     for field_name in _FORWARD_LOOKING_FIELDS:
@@ -221,7 +222,7 @@ def _daily_slot_from_hourly_result(
         slot["privacy_notes_omitted_count"] = privacy_notes_omitted_count
     confidence = parsed_output.get("confidence")
     if confidence:
-        slot["confidence"] = str(confidence)
+        slot["confidence"] = _descriptor_text(confidence)
     if result.validation_warnings:
         validation_warnings, validation_warnings_omitted_count = _compact_text_list(
             result.validation_warnings,
@@ -547,8 +548,52 @@ def _validate_required_fields(
     return return_value
 
 
-def _validate_confidence(parsed_output: dict[str, Any]) -> list[str]:
-    """Validate the shared confidence field."""
+def _descriptor_text(value: Any) -> str:
+    """Return a compact semantic descriptor string for prompt projection."""
+
+    cleaned = " ".join(str(value).split())
+    if len(cleaned) <= _REFLECTION_DESCRIPTOR_MAX_CHARS:
+        return_value = cleaned
+        return return_value
+    return_value = cleaned[:_REFLECTION_DESCRIPTOR_MAX_CHARS].rstrip()
+    return return_value
+
+
+def _validate_hourly_descriptors(parsed_output: dict[str, Any]) -> list[str]:
+    """Validate hourly-only descriptor shape without enforcing enums."""
+
+    warnings: list[str] = []
+    confidence = parsed_output.get("confidence")
+    if not isinstance(confidence, str) or not confidence.strip():
+        warnings.append("`confidence` 必须是非空字符串描述")
+    elif len(" ".join(confidence.split())) > _REFLECTION_DESCRIPTOR_MAX_CHARS:
+        warnings.append("`confidence` 描述超过长度上限")
+
+    participant_observations = parsed_output.get("participant_observations")
+    if not isinstance(participant_observations, list):
+        return_value = warnings
+        return return_value
+    for index, observation in enumerate(participant_observations):
+        if not isinstance(observation, dict):
+            continue
+        evidence_strength = observation.get("evidence_strength")
+        if not isinstance(evidence_strength, str) or not evidence_strength.strip():
+            warnings.append(
+                f"participant_observations[{index}].evidence_strength 必须是非空字符串描述"
+            )
+        elif (
+            len(" ".join(evidence_strength.split()))
+            > _REFLECTION_DESCRIPTOR_MAX_CHARS
+        ):
+            warnings.append(
+                f"participant_observations[{index}].evidence_strength 描述超过长度上限"
+            )
+    return_value = warnings
+    return return_value
+
+
+def _validate_daily_confidence(parsed_output: dict[str, Any]) -> list[str]:
+    """Validate the daily synthesis confidence control label."""
 
     confidence = str(parsed_output.get("confidence", "") or "").lower()
     if confidence not in {"low", "medium", "high"}:

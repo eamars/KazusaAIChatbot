@@ -16,9 +16,7 @@ from kazusa_ai_chatbot.config import (
 from kazusa_ai_chatbot.conversation_progress.models import ConversationProgressRecordInput
 from kazusa_ai_chatbot.conversation_progress.policy import (
     VALID_CONTINUITY,
-    VALID_EPISODE_PHASE,
     VALID_STATUS,
-    VALID_TOPIC_MOMENTUM,
 )
 from kazusa_ai_chatbot.db.schemas import ConversationEpisodeStateDoc
 from kazusa_ai_chatbot.nodes.boundary_profile import (
@@ -56,8 +54,8 @@ _RECORDER_PROMPT = '''\
 - 不把机器端标签、内部枚举名或字段名当作说话人名字写进自由文本。
 - `continuity` 写 `same_episode`、`related_shift` 或 `sharp_transition`。同一话题附近才用 `same_episode`；明显换题用 `sharp_transition`。
 - `status` 写 `active`、`suspended` 或 `closed`。本轮已经收束的片段用 `closed`，暂时放下但可能回来再谈的片段用 `suspended`。
-- `episode_phase` 写 `opening`、`developing`、`deepening`、`pivoting`、`stuck_loop`、`resolving` 或 `cooling_down`。
-- `topic_momentum` 写 `stable`、`drifting`、`quick_pivot`、`fragmented` 或 `sharp_break`。
+- `episode_phase` 写 80 字以内的简短语义描述，说明本轮在局部片段中的阶段，不要当固定枚举选择。
+- `topic_momentum` 写 80 字以内的简短语义描述，说明话题推进、转向或破裂的状态，不要当固定枚举选择。
 - `episode_label` 写一个短标签。
 - `conversation_mode` 写 80 字以内的简短中文描述；它不是固定枚举，不要照抄旧状态里的 `task_support`、`playful_banter`、`casual_chat` 这类英文标签。
 - `current_thread` 写本轮正在谈什么，不要夹带已经失效的旧承诺。
@@ -90,7 +88,7 @@ _RECORDER_PROMPT = '''\
 
 # 生成步骤
 1. 先判断本轮真正推进、收束、转向或中断了什么。
-2. 选择 `continuity`、`status`、`episode_phase` 和 `topic_momentum`；把 `conversation_mode` 写成 80 字以内的简短中文描述。
+2. 选择 `continuity` 和 `status`；把 `conversation_mode`、`episode_phase` 和 `topic_momentum` 写成 80 字以内的简短中文描述。
 3. 对旧状态逐项检查：无时间依赖且仍有用的可以继承；含相对时间、相对顺序或旧压力的默认删除。
 4. 只保留仍然有用的目标、阻塞点、用户状态、未闭合事项、已处理事项和不要重提提醒。
 5. 检查所有列表字段：只能输出字符串；没有内容就输出 `[]`。
@@ -106,8 +104,8 @@ _RECORDER_PROMPT = '''\
         "episode_label": "上一轮短标签",
         "continuity": "same_episode",
         "conversation_mode": "上一轮简短描述",
-        "episode_phase": "developing",
-        "topic_momentum": "stable",
+        "episode_phase": "上一轮局部阶段描述",
+        "topic_momentum": "上一轮话题推进状态描述",
         "current_thread": "上一轮当前话题",
         "user_goal": "上一轮用户目标，或空字符串",
         "current_blocker": "上一轮阻塞点，或空字符串",
@@ -146,8 +144,8 @@ _RECORDER_PROMPT = '''\
     "status": "active",
     "episode_label": "短语义标签",
     "conversation_mode": "任务协助",
-    "episode_phase": "developing",
-    "topic_momentum": "stable",
+    "episode_phase": "正在展开回答",
+    "topic_momentum": "沿当前问题推进",
     "current_thread": "当前话题",
     "user_goal": "",
     "current_blocker": "",
@@ -392,15 +390,6 @@ def _string_list(value: Any, field_name: str) -> list[str]:
     return result
 
 
-def _validated_label(value: Any, field_name: str, allowed_values: set[str]) -> str:
-    label = _require_string(value, field_name)
-    if not label:
-        return ""
-    if label not in allowed_values:
-        raise ValueError(f"invalid {field_name}: {label}")
-    return label
-
-
 def _prior_entry_texts(prior_episode_state: ConversationEpisodeStateDoc, field_name: str) -> list[str]:
     values = prior_episode_state.get(field_name, [])
     if not isinstance(values, list):
@@ -482,15 +471,13 @@ def validate_recorder_output(payload: dict) -> dict:
             payload.get("conversation_mode", ""),
             "conversation_mode",
         ),
-        "episode_phase": _validated_label(
+        "episode_phase": _require_string(
             payload.get("episode_phase", ""),
             "episode_phase",
-            VALID_EPISODE_PHASE,
         ),
-        "topic_momentum": _validated_label(
+        "topic_momentum": _require_string(
             payload.get("topic_momentum", ""),
             "topic_momentum",
-            VALID_TOPIC_MOMENTUM,
         ),
         "current_thread": _require_string(payload.get("current_thread", ""), "current_thread"),
         "user_goal": _require_string(payload.get("user_goal", ""), "user_goal"),

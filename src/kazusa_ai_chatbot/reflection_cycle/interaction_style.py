@@ -52,9 +52,10 @@ _INTERACTION_STYLE_EXTRACTOR_PROMPT = """\
 You update a fictional chat character's abstract interaction-style overlay.
 
 # Language Policy
-- Output JSON keys and enum values exactly as specified.
+- Output JSON keys and `daily_confidence` enum values exactly as specified.
 - Free-text guideline values should be written in Simplified Chinese unless the
   visible input already uses a specific non-Chinese term that must be preserved.
+- Overlay `confidence` is a short semantic descriptor, not a closed enum.
 
 # Core Task
 Transform daily reflection quality signals into abstract handling guidance for
@@ -86,7 +87,7 @@ active character should interact, not what happened.
     "social_guidelines": ["current handling guidance"],
     "pacing_guidelines": ["current handling guidance"],
     "engagement_guidelines": ["current handling guidance"],
-    "confidence": "low|medium|high|"
+    "confidence": "current confidence descriptor"
   }
 }
 
@@ -98,7 +99,7 @@ Return only a valid JSON object:
     "social_guidelines": ["abstract social handling guidance"],
     "pacing_guidelines": ["abstract pacing guidance"],
     "engagement_guidelines": ["abstract engagement guidance"],
-    "confidence": "medium|high|"
+    "confidence": "confidence descriptor for this overlay"
   }
 }
 """

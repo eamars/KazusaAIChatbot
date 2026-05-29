@@ -30,6 +30,10 @@ Prefer bounded, inspectable architecture:
 - Typed or semi-typed intermediate representations over free-form prose when routing matters.
 - Specialized agents own low-level parameter generation for their domain.
 - Deterministic code owns validation, permissions, limits, schema mapping, and execution.
+- Closed enum output values are for deterministic control only. If a generated
+  value is consumed only as later LLM context, keep the key stable and validate
+  the value as a short bounded semantic descriptor string instead of hard
+  failing on unknown labels.
 - The planner/initializer should decide what information is needed, not how to query every storage backend.
 
 ## LLM Input Shaping

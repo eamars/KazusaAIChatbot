@@ -39,7 +39,7 @@ HOURLY_REFLECTION_SYSTEM_PROMPT = '''\
 - 除结构化枚举值、schema key、participant_ref、scope_ref、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。
 - 用户原文、引用文本、专有名词、标题、别名、外部证据原句在需要精确保留时保持原语言；不要为了统一语言而改写。
 - 不要添加翻译、双语复写或括号内解释，除非源文本本身已经包含。
-- `confidence` 与 `evidence_strength` 必须保持 schema 指定的英文枚举值。
+- `confidence` 与 `evidence_strength` 是短语义描述，用来表达证据可靠性和判断把握，不要当固定枚举选择。
 
 # 核心任务
 - `话题概括`: 只总结该范围实际发生的话题，不预测后续发展。
@@ -90,7 +90,7 @@ HOURLY_REFLECTION_SYSTEM_PROMPT = '''\
     {
       "participant_ref": "participant_1",
       "observation": "基于 transcript 的行为观察",
-      "evidence_strength": "low|medium|high"
+      "evidence_strength": "可见证据较明确"
     }
   ],
   "conversation_quality_feedback": [
@@ -99,7 +99,7 @@ HOURLY_REFLECTION_SYSTEM_PROMPT = '''\
   "privacy_notes": [
     "隐私或泄漏风险；若没有则写无明显风险"
   ],
-  "confidence": "low|medium|high"
+  "confidence": "证据充分但范围有限"
 }
 '''
 _hourly_reflection_llm = get_llm(
@@ -176,7 +176,7 @@ DAILY_SYNTHESIS_SYSTEM_PROMPT = '''\
 - 除结构化枚举值、schema key、participant_ref、scope_ref、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。
 - 用户原文、引用文本、专有名词、标题、别名、外部证据原句在需要精确保留时保持原语言；不要为了统一语言而改写。
 - 不要添加翻译、双语复写或括号内解释，除非源文本本身已经包含。
-- `confidence` 必须保持 schema 指定的英文枚举值。
+- 输出字段 `confidence` 必须保持 schema 指定的英文枚举值。
 
 # 核心任务
 - 合并 `active_hour_slots` 里的重复话题、回应质量模式、隐私风险和局限性。
@@ -217,7 +217,7 @@ DAILY_SYNTHESIS_SYSTEM_PROMPT = '''\
       "privacy_notes_omitted_count": 0,
       "validation_warnings": ["紧凑验证警告"],
       "validation_warnings_omitted_count": 0,
-      "confidence": "low|medium|high"
+      "confidence": "该小时可靠性短描述"
     }
   ],
   "review_questions": ["评估问题"]

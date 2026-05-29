@@ -348,6 +348,11 @@ channel. These documents are compact runtime guidance, not raw reflection
 transcripts. Validation must reject event-like details that should remain in
 reflection evidence or memory systems.
 
+Overlay `confidence` is a bounded semantic descriptor that travels with the
+style guidance for later LLM context. It is normalized and capped, but it is not
+a `low|medium|high` control label. Empty overlays still cannot carry non-empty
+confidence.
+
 The group-channel style image is the current durable group-image lane. It is
 keyed by platform and channel id, not by `global_user_id`, and must stay
 separate from user affinity, relationship insight, and `user_memory_units`.

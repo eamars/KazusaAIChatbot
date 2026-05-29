@@ -310,6 +310,34 @@ def test_recorder_validator_accepts_free_text_conversation_mode() -> None:
     assert payload["conversation_mode"] == "serious_boundary_setting"
 
 
+def test_recorder_validator_accepts_semantic_flow_descriptors() -> None:
+    """Recorder validator keeps LLM-only flow labels as semantic text."""
+
+    payload = recorder.validate_recorder_output({
+        "status": "active",
+        "episode_label": "question answering",
+        "continuity": "same_episode",
+        "conversation_mode": "answering a direct user question",
+        "episode_phase": "answering_first_question",
+        "topic_momentum": "developing",
+        "current_thread": "first answer in a fresh question",
+        "user_goal": "understand the topic",
+        "current_blocker": "",
+        "user_state_updates": [],
+        "assistant_moves": ["direct_answer"],
+        "overused_moves": [],
+        "open_loops": [],
+        "resolved_threads": [],
+        "avoid_reopening": [],
+        "emotional_trajectory": "focused",
+        "next_affordances": ["continue the explanation"],
+        "progression_guidance": "continue from the current answer",
+    })
+
+    assert payload["episode_phase"] == "answering_first_question"
+    assert payload["topic_momentum"] == "developing"
+
+
 def test_recorder_validator_rejects_non_string_conversation_mode() -> None:
     """Recorder validator still rejects malformed conversation_mode shapes."""
 
@@ -322,6 +350,32 @@ def test_recorder_validator_rejects_non_string_conversation_mode() -> None:
             "episode_phase": "developing",
             "topic_momentum": "stable",
             "current_thread": "boundary setting",
+            "user_goal": "",
+            "current_blocker": "",
+            "user_state_updates": [],
+            "assistant_moves": [],
+            "overused_moves": [],
+            "open_loops": [],
+            "resolved_threads": [],
+            "avoid_reopening": [],
+            "emotional_trajectory": "",
+            "next_affordances": [],
+            "progression_guidance": "",
+        })
+
+
+def test_recorder_validator_rejects_non_string_flow_descriptors() -> None:
+    """Recorder semantic descriptors still reject malformed container shapes."""
+
+    with pytest.raises(ValueError, match="topic_momentum"):
+        recorder.validate_recorder_output({
+            "status": "active",
+            "episode_label": "bad output",
+            "continuity": "same_episode",
+            "conversation_mode": "task support",
+            "episode_phase": "developing",
+            "topic_momentum": ["developing"],
+            "current_thread": "bad recorder output",
             "user_goal": "",
             "current_blocker": "",
             "user_state_updates": [],

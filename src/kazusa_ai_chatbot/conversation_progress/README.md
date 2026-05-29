@@ -176,12 +176,13 @@ The important contract is behavioral rather than database-specific:
 - expiry metadata ensures this remains short-term working memory,
 - new optional fields should be tolerated so older state can still project safely.
 
-`conversation_mode` is intentionally a bounded semantic descriptor, not a
-closed enum. The response-path consumers read the prompt-facing progress payload
-as LLM context and do not branch deterministically on mode values. Deterministic
-validation therefore enforces string shape and the existing 80-character stored
-label cap for this field; closed-set validation remains reserved for fields
-that code actually uses as stable state, such as `status` and `continuity`.
+`conversation_mode`, `episode_phase`, and `topic_momentum` are intentionally
+bounded semantic descriptors, not closed enums. The response-path consumers
+read the prompt-facing progress payload as LLM context and do not branch
+deterministically on those descriptor values. Deterministic validation
+therefore enforces string shape and the existing 80-character stored label cap
+for these fields; closed-set validation remains reserved for fields that code
+actually uses as stable state, such as `status` and `continuity`.
 
 The state is expected to expire naturally as short-term working memory.
 

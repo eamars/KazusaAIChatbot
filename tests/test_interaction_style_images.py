@@ -145,6 +145,38 @@ def test_validate_interaction_style_overlay_uses_configured_guideline_limit(
     assert overlay["speech_guidelines"] == ["First.", "Second."]
 
 
+def test_validate_interaction_style_overlay_accepts_semantic_confidence() -> None:
+    """Overlay confidence is a bounded descriptor for later LLM context."""
+
+    raw_overlay = {
+        "speech_guidelines": ["Keep replies brisk and warm."],
+        "social_guidelines": [],
+        "pacing_guidelines": [],
+        "engagement_guidelines": [],
+        "confidence": "  Moderate   But Useful  ",
+    }
+
+    overlay = style_store.validate_interaction_style_overlay(raw_overlay)
+
+    assert overlay["confidence"] == "moderate but useful"
+
+
+def test_validate_interaction_style_overlay_caps_confidence_descriptor() -> None:
+    """Overlay confidence descriptors cannot grow into prompt noise."""
+
+    raw_overlay = {
+        "speech_guidelines": ["Keep replies brisk and warm."],
+        "social_guidelines": [],
+        "pacing_guidelines": [],
+        "engagement_guidelines": [],
+        "confidence": "x" * 120,
+    }
+
+    overlay = style_store.validate_interaction_style_overlay(raw_overlay)
+
+    assert overlay["confidence"] == "x" * 80
+
+
 @pytest.mark.asyncio
 async def test_build_interaction_style_context_uses_configured_l3_limit(
     monkeypatch: pytest.MonkeyPatch,

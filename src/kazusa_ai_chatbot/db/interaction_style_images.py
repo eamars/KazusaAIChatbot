@@ -31,7 +31,7 @@ _GUIDELINE_FIELDS = (
     "pacing_guidelines",
     "engagement_guidelines",
 )
-_CONFIDENCE_VALUES = {"", "low", "medium", "high"}
+_CONFIDENCE_DESCRIPTOR_MAX_CHARS = 80
 _STYLE_LOAD_ERRORS = (PyMongoError, ValueError)
 _STYLE_PROJECTION_ERRORS = (KeyError, TypeError, ValueError)
 _EVENT_MARKER_PATTERNS = (
@@ -150,9 +150,8 @@ def validate_interaction_style_overlay(overlay: dict) -> InteractionStyleOverlay
             field_name=field_name,
         )
 
-    confidence = text_or_empty(overlay.get("confidence")).strip().lower()
-    if confidence not in _CONFIDENCE_VALUES:
-        raise ValueError(f"invalid interaction style confidence: {confidence!r}")
+    confidence = " ".join(text_or_empty(overlay.get("confidence")).split())
+    confidence = confidence.lower()[:_CONFIDENCE_DESCRIPTOR_MAX_CHARS].strip()
     normalized["confidence"] = confidence
 
     has_guidelines = any(normalized[field_name] for field_name in _GUIDELINE_FIELDS)

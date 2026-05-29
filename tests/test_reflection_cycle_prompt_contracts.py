@@ -111,6 +111,25 @@ def test_reflection_prompts_require_chinese_free_text() -> None:
     )
 
 
+def test_reflection_prompts_keep_descriptor_and_control_boundary() -> None:
+    """Hourly LLM-only descriptors stay soft while daily confidence stays strict."""
+
+    input_set = _input_set()
+    hourly_result = _hourly_result(input_set.selected_scopes[0])
+    hourly_prompt = build_hourly_reflection_prompt(input_set.selected_scopes[0])
+    daily_prompt = build_daily_synthesis_prompt(
+        input_set=input_set,
+        channel_scope=input_set.selected_scopes[0],
+        hourly_results=[hourly_result],
+    )
+    retired_confidence_enum = '"confidence": "' + "low|medium|high" + '"'
+    retired_evidence_enum = '"evidence_strength": "' + "low|medium|high" + '"'
+
+    assert retired_evidence_enum not in hourly_prompt.system_prompt
+    assert retired_confidence_enum not in hourly_prompt.system_prompt
+    assert daily_prompt.system_prompt.count(retired_confidence_enum) == 1
+
+
 def test_reflection_prompts_do_not_expose_timezone_concepts() -> None:
     """Prompt text must stay timezone agnostic after local projection."""
 
@@ -219,6 +238,26 @@ def test_hourly_output_validation_warns_on_forward_fields() -> None:
     assert "出现未请求的前瞻字段: lore_candidates" in warnings
 
 
+def test_hourly_output_validation_accepts_semantic_descriptors() -> None:
+    """Hourly reflection descriptors do not warn when used as LLM context."""
+
+    warnings = validate_hourly_reflection_output({
+        "topic_summary": "Project planning.",
+        "participant_observations": [
+            {
+                "participant_ref": "participant_1",
+                "observation": "Asked for structured help.",
+                "evidence_strength": "visible in the transcript",
+            }
+        ],
+        "conversation_quality_feedback": [],
+        "privacy_notes": [],
+        "confidence": "moderate but useful",
+    })
+
+    assert warnings == []
+
+
 def test_daily_output_validation_requires_daily_fields() -> None:
     """Daily schema validation should require daily synthesis fields."""
 
@@ -233,6 +272,22 @@ def test_daily_output_validation_requires_daily_fields() -> None:
     })
 
     assert warnings == []
+
+
+def test_daily_output_validation_warns_on_descriptor_confidence() -> None:
+    """Daily synthesis confidence remains a deterministic control label."""
+
+    warnings = validate_daily_synthesis_output({
+        "day_summary": "Daily summary.",
+        "active_hour_summaries": [],
+        "cross_hour_topics": [],
+        "conversation_quality_patterns": [],
+        "privacy_risks": [],
+        "synthesis_limitations": [],
+        "confidence": "moderate but useful",
+    })
+
+    assert warnings == ["`confidence` 必须是 low、medium 或 high"]
 
 
 def test_daily_output_validation_rejects_rewritten_hours() -> None:

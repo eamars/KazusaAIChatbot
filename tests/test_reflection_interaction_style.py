@@ -114,6 +114,24 @@ def _daily_doc(
     return return_value
 
 
+def test_interaction_style_extractor_prompt_keeps_confidence_boundary() -> None:
+    """Extractor prompt keeps daily confidence strict and overlay confidence soft."""
+
+    prompt = interaction_style._INTERACTION_STYLE_EXTRACTOR_PROMPT
+    retired_current_overlay_confidence = (
+        '"confidence": "' + "low|medium|high|" + '"'
+    )
+    retired_output_overlay_confidence = (
+        '"confidence": "' + "medium|high|" + '"'
+    )
+
+    assert '"daily_confidence": "medium|high"' in prompt
+    assert retired_current_overlay_confidence not in prompt
+    assert retired_output_overlay_confidence not in prompt
+    assert '"confidence": "current confidence descriptor"' in prompt
+    assert '"confidence": "confidence descriptor for this overlay"' in prompt
+
+
 @pytest.mark.asyncio
 async def test_resolve_single_private_scope_user_id_returns_only_unique_user(
     monkeypatch: pytest.MonkeyPatch,
