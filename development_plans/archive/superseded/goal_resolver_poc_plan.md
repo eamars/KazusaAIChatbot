@@ -1,7 +1,8 @@
 # Goal Resolver POC Plan
 
 - Plan class: medium production POC
-- Status: in_progress
+- Status: superseded
+- Superseded by: `development_plans/active/short_term/cognition_preserving_goal_resolver_production_plan.md`
 - Branch: `resolver-goal-poc`
 - Owner: Codex
 - Started: 2026-05-29
@@ -54,6 +55,75 @@ natural user input
   -> continue / ask human / prepare guarded action / final answer
   -> LLM case evaluation
 ```
+
+## Architecture Decision - Cognition-Preserving Resolver
+
+Kazusa is a cognition core system, not an AI assistant shell, coding harness,
+or OpenClaw-style tool runner. The production resolver architecture must
+preserve the existing memory-driven cognition structure. A resolver loop may
+add recurrence around cognition, but it must not replace the three-layer
+thinking process with an external planner/verifier.
+
+The production decision is:
+
+```text
+Every semantic thinking step must pass through the preserved cognition stack.
+The resolver is a recurrence controller around cognition, not a separate brain.
+```
+
+The baseline workflow can be considered a one-cycle resolver path:
+
+```text
+decontextualizer
+  -> L1 subconscious appraisal
+  -> L2 conscious interpretation, boundary, judgment, and social context
+  -> L2d action/capability/surface selection
+  -> L3 dialog only if a visible text surface is selected
+```
+
+Complex goals extend the same structure by repeating cognition after bounded
+capability observations:
+
+```text
+decontextualizer
+  -> cognition cycle 1
+       L1 -> L2 -> L2d
+  -> selected capability observation
+       RAG / web / memory / local artifact / HIL / guarded action candidate
+  -> cognition cycle 2
+       L1 re-appraises the new observation
+       L2 updates stance, requirement state, and personality-grounded judgment
+       L2d selects continue, ask human, prepare approval, speak, private action,
+       future cognition, or stop
+  -> repeat within a hard cap
+  -> L3/dialog only when L2d selects a visible surface
+  -> episode trace, consolidation, scheduler, and reflection
+```
+
+This means RAG becomes demand-driven evidence selected by cognition instead of
+a mandatory stage before cognition. The first cognition cycle still receives
+the always-present personality and continuity substrate:
+
+- character profile and boundary profile;
+- current user profile and relationship summaries;
+- recent interaction context;
+- conversation progress;
+- internal monologue residue;
+- promoted reflection context;
+- local time and scene pressure.
+
+Targeted RAG, conversation search, public web/current facts, local artifact
+inspection, human clarification, and guarded action preparation are
+capabilities that cognition may select when the current substrate is
+insufficient. Tool or retrieval observations must re-enter another full
+L1/L2/L2d cognition cycle before they can affect final stance, visible dialog,
+or private action.
+
+The CLI POC in this plan uses generic planner/verifier/finalizer roles only as
+a traceable evaluation harness. Those roles are not the approved production
+integration shape. A follow-up production integration plan must replace or map
+those roles into cognition-cycle contracts so all semantic decisions remain
+inside the preserved three-layer cognition architecture.
 
 The user explicitly required the case inputs to mimic real Chinese user input.
 Therefore the case inputs below are natural-language paragraphs, not JSON or
@@ -297,7 +367,7 @@ allowed only when all requirements are `satisfied`, `blocked_human`,
 
 ### Generic Planner
 
-The planner is an LLM call with a generic prompt. It must:
+The planner is a CLI POC LLM call with a generic prompt. It must:
 
 - infer the goal and constraints from natural user input;
 - decide the next action from an allowed tool roster;
@@ -342,7 +412,7 @@ Each action maps to a bounded tool adapter:
 
 ### LLM Verifier
 
-After every tool observation, a generic verifier LLM evaluates:
+After every tool observation, a generic CLI POC verifier LLM evaluates:
 
 ```text
 Does the current state satisfy the user's goal?
@@ -355,6 +425,12 @@ Should the resolver continue, ask human, prepare action, or finalize?
 
 The verifier does not know the implementation's desired test answer. It only
 sees the user input, state, tool observations, and tool roster.
+
+Production integration must not keep this verifier as a standalone semantic
+decision-maker outside cognition. Verifier duties become part of the next
+L1/L2/L2d cognition cycle, where the character re-appraises the observation,
+updates stance and requirement state, and selects the next capability or
+terminal surface through L2d.
 
 ### LLM Case Evaluator
 
@@ -445,6 +521,10 @@ after inspecting those raw artifacts.
 ### Keep
 
 - Existing chat/RAG/cognition/dialog/persistence code paths stay unchanged.
+- The production architecture decision that resolver integration must preserve
+  the three-layer cognition process. The CLI POC is evidence for recurrence and
+  tracing only; it is not authorization to replace cognition with a generic
+  planner/verifier loop.
 
 ## Overdesign Guardrail
 
@@ -556,6 +636,7 @@ contracts. Parent fixes in-scope findings and reruns affected verification.
 | Side effects leak into POC | Tool adapters are read-only, sandbox-only, or evaluation-only; production action execution is not exposed. |
 | HIL becomes an excuse for weak resolution | Evaluator receives case contract and can only mark valid HIL when user-owned info or approval is genuinely required. |
 | RAG dominates again | RAG is one tool among several; final evaluation checks goal closure, not RAG loop count. |
+| Resolver bypasses the cognition core | Production integration must treat the baseline turn as a one-cycle resolver and route every semantic decision through L1 -> L2 -> L2d. Planner/verifier roles in this CLI POC are harness roles only. |
 
 ## Progress Log
 

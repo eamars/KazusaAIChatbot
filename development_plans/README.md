@@ -38,7 +38,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [goal_resolver_poc_plan.md](active/short_term/goal_resolver_poc_plan.md) | Medium production POC plan | in_progress |
+| [cognition_preserving_goal_resolver_production_plan.md](active/short_term/cognition_preserving_goal_resolver_production_plan.md) | Large production architecture implementation plan | in_progress |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 
 ## Supporting Experiment Records
@@ -215,5 +215,6 @@ plans.
 | [character_reflection_cycle_stage1_plan.md](archive/superseded/character_reflection_cycle_stage1_plan.md) |
 | [conversation_graph_recent_context_plan.md](archive/superseded/conversation_graph_recent_context_plan.md) |
 | [graph_rag_recall_experiment_plan.md](archive/superseded/graph_rag_recall_experiment_plan.md) |
+| [goal_resolver_poc_plan.md](archive/superseded/goal_resolver_poc_plan.md) |
 | [rag_supervisor2_inner_loop_agents_plan.md](archive/superseded/rag_supervisor2_inner_loop_agents_plan.md) |
 | [short_circuit_early_stop_plan.md](archive/superseded/short_circuit_early_stop_plan.md) |
