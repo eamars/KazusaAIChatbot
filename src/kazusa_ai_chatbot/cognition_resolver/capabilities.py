@@ -35,6 +35,10 @@ from kazusa_ai_chatbot.utils import log_preview
 
 MILLISECONDS_PER_SECOND = 1000
 PERSONA_RAG_COMPONENT = "nodes.persona_supervisor2"
+SELF_GOAL_ALLOWED_TRIGGER_SOURCES = frozenset((
+    "internal_thought",
+    "self_cognition",
+))
 
 logger = logging.getLogger(__name__)
 
@@ -252,13 +256,8 @@ def _self_goal_resolution_observation(
 ) -> ResolverObservationV1:
     """Block user-message self-resolution and allow only internal sources."""
 
-    episode = state.get("cognitive_episode")
-    trigger_source = ""
-    if isinstance(episode, dict):
-        raw_trigger_source = episode.get("trigger_source")
-        if isinstance(raw_trigger_source, str):
-            trigger_source = raw_trigger_source
-    if trigger_source not in {"internal_thought", "self_cognition"}:
+    trigger_source = _cognitive_episode_trigger_source(state)
+    if trigger_source not in SELF_GOAL_ALLOWED_TRIGGER_SOURCES:
         observation = _observation_base(
             request,
             state,
@@ -280,6 +279,21 @@ def _self_goal_resolution_observation(
         ),
     )
     return_value = validate_resolver_observation(observation)
+    return return_value
+
+
+def _cognitive_episode_trigger_source(state: GlobalPersonaState) -> str:
+    """Read the trigger source that owns self-resolution eligibility."""
+
+    episode = state["cognitive_episode"]
+    if not isinstance(episode, dict):
+        raise ResolverValidationError("cognitive_episode: expected mapping")
+    trigger_source = episode["trigger_source"]
+    if not isinstance(trigger_source, str) or not trigger_source.strip():
+        raise ResolverValidationError(
+            "cognitive_episode.trigger_source: expected string"
+        )
+    return_value = trigger_source.strip()
     return return_value
 
 

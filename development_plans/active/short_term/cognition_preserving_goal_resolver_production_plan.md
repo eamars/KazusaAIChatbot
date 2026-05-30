@@ -1344,7 +1344,7 @@ venv\Scripts\python -m pytest tests\test_cognition_resolver_loop.py tests\test_c
 - Modify: `src/kazusa_ai_chatbot/cognition_resolver/loop.py`
 - Test: `tests/test_cognition_resolver_loop.py`
 
-- [ ] **Step 1: Add failing self-resolver tests**
+- [x] **Step 1: Add failing self-resolver tests**
 
 Create two fake episode states:
 
@@ -1354,14 +1354,14 @@ Create two fake episode states:
 Assert user-message source is blocked. Assert internal-thought source returns a
 private observation and never creates a user-visible send by itself.
 
-- [ ] **Step 2: Implement source constraints**
+- [x] **Step 2: Implement source constraints**
 
 Allow `self_goal_resolution` only when the cognitive episode trigger is
 `internal_thought` or a future explicit `self_cognition` trigger. The handler
 may produce prompt-safe private progress text, but execution must be private
 and bounded.
 
-- [ ] **Step 3: Run tests and commit**
+- [x] **Step 3: Run tests and commit**
 
 Run:
 
@@ -1369,6 +1369,27 @@ Run:
 venv\Scripts\python -m pytest tests\test_cognition_resolver_loop.py -q
 git add src\kazusa_ai_chatbot\cognition_resolver tests\test_cognition_resolver_loop.py
 git commit -m "Constrain self resolver capability"
+```
+
+Implementation notes:
+
+- `self_goal_resolution` is accepted only for internal cognition trigger
+  sources: `internal_thought` and the reserved future `self_cognition` source.
+- User-message episodes receive a blocked prompt-safe observation, so a user
+  cannot convert the resolver into a private self-execution path.
+- Internal-thought episodes receive only a private observation. The capability
+  does not create action specs, adapter sends, scheduler events, or visible
+  surfaces by itself.
+- The trigger source is read from required `cognitive_episode` state. Missing
+  or malformed episode state fails structurally instead of silently falling
+  back to a default source.
+
+Verification:
+
+```powershell
+venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\cognition_resolver\capabilities.py tests\test_cognition_resolver_loop.py
+venv\Scripts\python -m pytest tests\test_cognition_resolver_loop.py -q
+# 13 passed
 ```
 
 ### Task 10: Add Sanitized Telemetry And Debug Artifacts

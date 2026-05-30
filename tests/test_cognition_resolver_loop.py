@@ -7,7 +7,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
+from kazusa_ai_chatbot.cognition_episode import (
+    build_text_chat_cognitive_episode,
+    validate_cognitive_episode,
+)
 from kazusa_ai_chatbot.cognition_resolver import capabilities as capabilities_module
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_CAPABILITY_REQUEST_VERSION,
@@ -862,3 +865,36 @@ async def test_self_goal_resolution_blocks_user_message_source() -> None:
 
     assert observation["status"] == "blocked"
     assert observation["capability_kind"] == "self_goal_resolution"
+
+
+@pytest.mark.asyncio
+async def test_self_goal_resolution_allows_internal_thought_source() -> None:
+    """Internal thought may produce a private self-resolution observation."""
+
+    state = _resolver_state()
+    episode = dict(state["cognitive_episode"])
+    episode["trigger_source"] = "internal_thought"
+    episode["input_sources"] = ["internal_monologue"]
+    episode["output_mode"] = "think_only"
+    episode["percepts"] = [{
+        "percept_id": "resolver-internal-thought",
+        "input_source": "internal_monologue",
+        "content": "整理一个内部目标。",
+        "visibility": "internal_only",
+        "metadata": {},
+    }]
+    validate_cognitive_episode(episode)
+    state["cognitive_episode"] = episode
+
+    observation = await capabilities_module.execute_resolver_capability_request(
+        _resolver_request(
+            capability_kind="self_goal_resolution",
+            objective="整理一个内部目标。",
+        ),
+        state,
+    )
+
+    assert observation["status"] == "succeeded"
+    assert observation["capability_kind"] == "self_goal_resolution"
+    assert "internal cognition source" in observation["prompt_safe_summary"]
+    assert "rag_result" not in observation
