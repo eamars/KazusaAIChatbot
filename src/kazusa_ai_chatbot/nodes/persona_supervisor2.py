@@ -1,7 +1,6 @@
 """Persona graph orchestration for decontextualization, RAG, cognition, and dialog."""
 
 import logging
-import time
 
 from langgraph.graph import END, START, StateGraph
 
@@ -18,6 +17,9 @@ from kazusa_ai_chatbot.action_spec.results import (
 )
 from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.config import CHAT_HISTORY_RECENT_LIMIT
+from kazusa_ai_chatbot.cognition_resolver.capabilities import (
+    run_rag_evidence_for_persona_state as _run_rag_evidence_for_persona_state,
+)
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import call_cognition_subgraph
 from kazusa_ai_chatbot.consolidation.core import call_consolidation_subgraph
@@ -28,32 +30,25 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_memory_lifecycle import (
     call_memory_lifecycle_update_handler,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import call_msg_decontexualizer
-from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_projection import project_known_facts
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import (
     GlobalPersonaState,
     ScopeUser,
 )
-from kazusa_ai_chatbot.nodes.referent_resolution import (
-    should_skip_rag_for_unresolved_referents,
-    unresolved_referent_reason,
+from kazusa_ai_chatbot.rag.quote_aware_sequence import (
+    call_quote_aware_rag_supervisor,
 )
 from kazusa_ai_chatbot.rag.cognitive_episode_adapter import (
     build_text_chat_rag_request,
-)
-from kazusa_ai_chatbot.rag.quote_aware_sequence import (
-    call_quote_aware_rag_supervisor,
 )
 from kazusa_ai_chatbot.state import IMProcessState
 from kazusa_ai_chatbot.time_boundary import format_storage_utc_history_for_llm
 from kazusa_ai_chatbot.utils import (
     build_interaction_history_recent,
-    log_preview,
     text_or_empty,
 )
 
 logger = logging.getLogger(__name__)
 
-MILLISECONDS_PER_SECOND = 1000
 PERSONA_RAG_COMPONENT = "nodes.persona_supervisor2"
 
 
@@ -255,42 +250,6 @@ def _selected_action_specs(state: GlobalPersonaState) -> list[dict]:
     return specs
 
 
-def _elapsed_ms(started_at: float) -> int:
-    """Return elapsed monotonic milliseconds since a start marker."""
-
-    elapsed = time.perf_counter() - started_at
-    elapsed_ms = max(0, int(elapsed * MILLISECONDS_PER_SECOND))
-    return elapsed_ms
-
-
-def _rag_correlation_id(state: GlobalPersonaState) -> str:
-    """Build a non-content correlation id for persona RAG work."""
-
-    platform = str(state.get("platform", ""))
-    message_ref = str(state.get("platform_message_id", "") or "no-message-id")
-    correlation_id = f"rag:{platform}:{message_ref}"
-    return correlation_id
-
-
-def _safety_recovery_incidents(rag_result: dict) -> list[str]:
-    """Return compact RAG safety recovery labels from trace metadata."""
-
-    supervisor_trace = rag_result.get("supervisor_trace")
-    if not isinstance(supervisor_trace, dict):
-        incidents: list[str] = []
-        return incidents
-    raw_incidents = supervisor_trace.get("safety_recovery")
-    if not isinstance(raw_incidents, list):
-        incidents = []
-        return incidents
-    incidents = [
-        str(incident)
-        for incident in raw_incidents
-        if incident
-    ]
-    return incidents
-
-
 def _cognition_selects_text_surface(state: GlobalPersonaState) -> bool:
     """Return whether L2d selected the text surface handler."""
 
@@ -442,6 +401,27 @@ async def stage_3_no_response(state: GlobalPersonaState) -> dict:
     return return_value
 
 
+async def run_rag_evidence_for_persona_state(
+    state: GlobalPersonaState,
+    *,
+    agent_name: str,
+    objective: str | None = None,
+) -> dict:
+    """Run reusable persona RAG evidence with this module's patch surface."""
+
+    rag_result = await _run_rag_evidence_for_persona_state(
+        state,
+        agent_name=agent_name,
+        objective=objective,
+        call_rag_supervisor_func=call_quote_aware_rag_supervisor,
+        record_rag_stage_event_func=event_logging.record_rag_stage_event,
+        build_rag_request_func=build_text_chat_rag_request,
+        component=PERSONA_RAG_COMPONENT,
+    )
+    return_value = rag_result
+    return return_value
+
+
 async def stage_1_research(state: GlobalPersonaState) -> dict:
     """Run RAG2 and project its facts into the persona payload.
 
@@ -451,118 +431,9 @@ async def stage_1_research(state: GlobalPersonaState) -> dict:
     Returns:
         A partial state update containing the projected ``rag_result``.
     """
-    started_at = time.perf_counter()
-    correlation_id = _rag_correlation_id(state)
-    referents = state["referents"]
-    if should_skip_rag_for_unresolved_referents(referents):
-        referent_reason = unresolved_referent_reason(referents)
-        rag_result = project_known_facts(
-            [],
-            current_user_id=state["global_user_id"],
-            character_user_id=state["character_profile"]["global_user_id"],
-            answer="",
-            unknown_slots=[],
-            loop_count=0,
-        )
-        logger.info(
-            f"RAG2 skipped output: reason={log_preview(referent_reason)}"
-        )
-        logger.debug(
-            f'RAG2 skipped metadata: platform={state["platform"]} '
-            f'channel={state["platform_channel_id"] or "<dm>"} '
-            f'user={state["global_user_id"]} '
-            f'query={log_preview(state["decontexualized_input"])} '
-            f"rag_result={log_preview(rag_result)}"
-        )
-        await event_logging.record_rag_stage_event(
-            component=PERSONA_RAG_COMPONENT,
-            correlation_id=correlation_id,
-            agent_name="stage_1_research",
-            status="skipped",
-            slot_count=0,
-            retrieval_count=0,
-            cache_hit=False,
-            no_evidence=True,
-            latency_ms=_elapsed_ms(started_at),
-        )
-        return_value = {
-            "rag_result": rag_result,
-        }
-        return return_value
-
-    rag_request = build_text_chat_rag_request(
-        episode=state["cognitive_episode"],
-        decontexualized_input=state["decontexualized_input"],
-        character_profile=state["character_profile"],
-        user_profile=state["user_profile"],
-        prompt_message_context=state["prompt_message_context"],
-        channel_topic=state["channel_topic"],
-        chat_history_recent=state["chat_history_recent"],
-        chat_history_wide=state["chat_history_wide"],
-        reply_context=state["reply_context"],
-        indirect_speech_context=state["indirect_speech_context"],
-        conversation_progress=state.get("conversation_progress"),
-        conversation_episode_state=state.get("conversation_episode_state"),
-        promoted_reflection_context=state.get("promoted_reflection_context"),
-    )
-    rag_supervisor_result = await call_quote_aware_rag_supervisor(
-        fresh_query=rag_request["original_query"],
-        reply_context=state["reply_context"],
-        character_name=rag_request["character_name"],
-        context=rag_request["context"],
-    )
-    rag_result = project_known_facts(
-        rag_supervisor_result["known_facts"],
-        current_user_id=rag_request["current_user_id"],
-        character_user_id=rag_request["character_user_id"],
-        answer=str(rag_supervisor_result["answer"]),
-        unknown_slots=rag_supervisor_result["unknown_slots"],
-        loop_count=int(rag_supervisor_result["loop_count"] or 0),
-    )
-    trace = rag_result["supervisor_trace"]
-    logger.info(
-        f'RAG2 projection output: answer={log_preview(rag_result["answer"])}'
-    )
-    logger.debug(
-        f'RAG2 projection metadata: platform={state["platform"]} '
-        f'channel={state["platform_channel_id"] or "<dm>"} '
-        f'user={state["global_user_id"]} '
-        f'query={log_preview(state["decontexualized_input"])} '
-        f'dispatched={len(trace["dispatched"])} '
-        f'user_image={bool(rag_result["user_image"])} '
-        f'character_image={bool(rag_result["character_image"])} '
-        f'third_party_profiles={len(rag_result["third_party_profiles"])} '
-        f'memory_evidence={len(rag_result["memory_evidence"])} '
-        f'recall_evidence={len(rag_result["recall_evidence"])} '
-        f'conversation_evidence={len(rag_result["conversation_evidence"])} '
-        f'external_evidence={len(rag_result["external_evidence"])} '
-        f"rag_result={log_preview(rag_result)}"
-    )
-    retrieval_count = (
-        len(rag_result["memory_evidence"])
-        + len(rag_result["recall_evidence"])
-        + len(rag_result["conversation_evidence"])
-        + len(rag_result["external_evidence"])
-        + len(rag_result["third_party_profiles"])
-    )
-    safety_recovery_incidents = _safety_recovery_incidents(rag_result)
-    safety_recovery_first = (
-        safety_recovery_incidents[0]
-        if safety_recovery_incidents
-        else ""
-    )
-    await event_logging.record_rag_stage_event(
-        component=PERSONA_RAG_COMPONENT,
-        correlation_id=correlation_id,
+    rag_result = await run_rag_evidence_for_persona_state(
+        state,
         agent_name="stage_1_research",
-        status="succeeded",
-        slot_count=len(rag_supervisor_result["unknown_slots"]),
-        retrieval_count=retrieval_count,
-        cache_hit=False,
-        no_evidence=retrieval_count == 0,
-        latency_ms=_elapsed_ms(started_at),
-        safety_recovery_count=len(safety_recovery_incidents),
-        safety_recovery_first=safety_recovery_first,
     )
     return_value = {
         "rag_result": rag_result,

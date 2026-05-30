@@ -543,7 +543,7 @@ def _normalize_evidence_refs(evidence_refs: list) -> list[EvidenceRefV1]:
 
 
 def _normalize_rag_result(value: object) -> dict:
-    """Keep only prompt-safe RAG summary fields for resolver cognition."""
+    """Keep the prompt-safe projected RAG payload for later cognition."""
 
     if not isinstance(value, dict):
         raise ResolverValidationError("rag_result: expected object")
@@ -551,35 +551,76 @@ def _normalize_rag_result(value: object) -> dict:
     answer = value.get("answer")
     if isinstance(answer, str) and answer.strip():
         normalized["answer"] = _clip_text(answer, MAX_RESOLVER_SUMMARY_CHARS)
+    else:
+        normalized["answer"] = ""
 
-    supervisor_trace = value.get("supervisor_trace")
-    if isinstance(supervisor_trace, dict):
-        known_facts = supervisor_trace.get("known_facts")
-        if isinstance(known_facts, list):
-            summaries = _normalize_known_fact_summaries(known_facts)
-            if summaries:
-                normalized["known_fact_summaries"] = summaries
+    for field_name in (
+        "user_image",
+        "character_image",
+        "supervisor_trace",
+    ):
+        field_value = value.get(field_name)
+        if isinstance(field_value, dict):
+            normalized[field_name] = _normalize_rag_mapping(field_value)
+
+    for field_name in (
+        "user_memory_unit_candidates",
+        "third_party_profiles",
+        "memory_evidence",
+        "recall_evidence",
+        "conversation_evidence",
+        "external_evidence",
+    ):
+        field_value = value.get(field_name)
+        if isinstance(field_value, list):
+            normalized[field_name] = _normalize_rag_list(field_value)
 
     return_value = normalized
     return return_value
 
 
-def _normalize_known_fact_summaries(known_facts: list) -> list[str]:
-    """Extract bounded prompt-safe fact summaries from a RAG result."""
+def _normalize_rag_mapping(value: dict) -> dict:
+    """Recursively copy prompt-safe RAG mapping values."""
 
-    summaries: list[str] = []
-    for known_fact in known_facts:
-        if len(summaries) >= 5:
-            break
-        if isinstance(known_fact, dict):
-            summary = known_fact.get("summary")
-        else:
-            summary = known_fact
-        if not isinstance(summary, str) or not summary.strip():
+    normalized: dict[str, object] = {}
+    for field_name, field_value in value.items():
+        if field_name in {"raw_id", "raw_payload", "raw_result"}:
             continue
-        clipped_summary = _clip_text(summary, MAX_RESOLVER_SUMMARY_CHARS)
-        summaries.append(clipped_summary)
-    return_value = summaries
+        if isinstance(field_value, str):
+            normalized[field_name] = _clip_text(
+                field_value,
+                MAX_RESOLVER_SUMMARY_CHARS,
+            )
+            continue
+        if isinstance(field_value, dict):
+            normalized[field_name] = _normalize_rag_mapping(field_value)
+            continue
+        if isinstance(field_value, list):
+            normalized[field_name] = _normalize_rag_list(field_value)
+            continue
+        if field_value is None or isinstance(field_value, bool | int | float):
+            normalized[field_name] = field_value
+    return_value = normalized
+    return return_value
+
+
+def _normalize_rag_list(value: list) -> list[object]:
+    """Recursively copy prompt-safe RAG list values."""
+
+    normalized: list[object] = []
+    for item in value:
+        if isinstance(item, str):
+            normalized.append(_clip_text(item, MAX_RESOLVER_SUMMARY_CHARS))
+            continue
+        if isinstance(item, dict):
+            normalized.append(_normalize_rag_mapping(item))
+            continue
+        if isinstance(item, list):
+            normalized.append(_normalize_rag_list(item))
+            continue
+        if item is None or isinstance(item, bool | int | float):
+            normalized.append(item)
+    return_value = normalized
     return return_value
 
 
@@ -594,12 +635,16 @@ def _project_rag_result_summary(observation: ResolverObservationV1) -> str:
     if isinstance(answer, str) and answer.strip():
         return_value = _clip_text(answer, MAX_RESOLVER_SUMMARY_CHARS)
         return return_value
-    fact_summaries = rag_result.get("known_fact_summaries")
-    if not isinstance(fact_summaries, list):
+    memory_evidence = rag_result.get("memory_evidence")
+    if not isinstance(memory_evidence, list):
         return_value = ""
         return return_value
     projected_facts = []
-    for fact_summary in fact_summaries:
+    for memory_item in memory_evidence:
+        if isinstance(memory_item, dict):
+            fact_summary = memory_item.get("summary")
+        else:
+            fact_summary = memory_item
         if not isinstance(fact_summary, str) or not fact_summary.strip():
             continue
         clipped_fact = _clip_text(fact_summary, MAX_RESOLVER_SUMMARY_CHARS)

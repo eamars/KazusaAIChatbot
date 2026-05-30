@@ -902,7 +902,7 @@ cognition handoff/output-contract tests.
 - Modify: `src/kazusa_ai_chatbot/nodes/persona_supervisor2.py`
 - Test: `tests/test_cognition_resolver_loop.py`
 
-- [ ] **Step 1: Write failing tests for RAG capability execution**
+- [x] **Step 1: Write failing tests for RAG capability execution**
 
 Build a minimal `GlobalPersonaState` fixture with:
 
@@ -923,7 +923,7 @@ Add assertions that:
 - the observation stores `request_objective` and `request_reason`;
 - malformed or empty objectives fail structural validation before RAG dispatch.
 
-- [ ] **Step 2: Extract a reusable RAG function**
+- [x] **Step 2: Extract a reusable RAG function**
 
 Move the body of `stage_1_research()` that builds the RAG request and projects
 known facts into a helper:
@@ -946,7 +946,7 @@ decontextualized user input in the RAG context under a prompt-safe
 `original_user_request` or equivalent field, so RAG remains grounded in the
 actual turn.
 
-- [ ] **Step 3: Implement capability dispatcher**
+- [x] **Step 3: Implement capability dispatcher**
 
 Expose:
 
@@ -973,7 +973,7 @@ For `self_goal_resolution`, return `status="blocked"` unless the current
 episode is `internal_thought` or `self_cognition`; this prevents user-facing
 turns from spawning private self-goals as an implementation side effect.
 
-- [ ] **Step 4: Run tests and commit**
+- [x] **Step 4: Run tests and commit**
 
 Run:
 
@@ -982,6 +982,17 @@ venv\Scripts\python -m pytest tests\test_cognition_resolver_loop.py -q
 git add src\kazusa_ai_chatbot\cognition_resolver\capabilities.py src\kazusa_ai_chatbot\nodes\persona_supervisor2.py tests\test_cognition_resolver_loop.py
 git commit -m "Add cognition resolver capability execution"
 ```
+
+Completed on 2026-05-30. Verification:
+
+```powershell
+venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\cognition_resolver\contracts.py src\kazusa_ai_chatbot\cognition_resolver\capabilities.py src\kazusa_ai_chatbot\nodes\persona_supervisor2.py tests\test_cognition_resolver_loop.py
+venv\Scripts\python -m pytest tests\test_cognition_resolver_loop.py tests\test_cognition_resolver_contracts.py -q
+venv\Scripts\python -m pytest tests\test_persona_supervisor2_rag2_integration.py tests\test_rag_dialog_event_logging.py tests\test_persona_supervisor2_rag_skip_shape.py -q
+```
+
+Result: 18 passed for resolver capability/contracts and 27 passed for legacy
+RAG integration/event/skip-shape compatibility.
 
 ### Task 6: Implement Cognition Recurrence Loop
 
