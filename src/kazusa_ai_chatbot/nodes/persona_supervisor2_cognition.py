@@ -11,8 +11,16 @@ import logging
 
 from langgraph.graph import StateGraph, START, END
 
+from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    ResolverValidationError,
+    validate_resolver_capability_request,
+    validate_resolver_pending_resolution,
+)
 from kazusa_ai_chatbot.db import build_group_engagement_action_context
-from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState, CognitionState
+from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import (
+    CognitionState,
+    GlobalPersonaState,
+)
 from kazusa_ai_chatbot.utils import build_interaction_history_recent, log_preview
 
 logger = logging.getLogger(__name__)
@@ -187,7 +195,14 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
         "decontexualized_input": decontexualized_input,
         "referents": state["referents"],
         "rag_result": state["rag_result"],
+        "resolver_context": state.get("resolver_context", ""),
     }
+    resolver_state = state.get("resolver_state")
+    if resolver_state is not None:
+        initial_state["resolver_state"] = resolver_state
+    pending_resolver_resume = state.get("pending_resolver_resume")
+    if pending_resolver_resume is not None:
+        initial_state["pending_resolver_resume"] = pending_resolver_resume
     cognitive_episode = state.get("cognitive_episode")
     if cognitive_episode is not None:
         initial_state["cognitive_episode"] = cognitive_episode
@@ -206,6 +221,12 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
     vibe_check = result["vibe_check"]
     relational_dynamic = result["relational_dynamic"]
     action_specs = result.get("action_specs", [])
+    resolver_capability_requests = _validated_resolver_capability_requests(
+        result.get("resolver_capability_requests", []),
+    )
+    resolver_pending_resolution = _validated_resolver_pending_resolution(
+        result.get("resolver_pending_resolution"),
+    )
 
     logger.info(
         f"Cognition output: stance={logical_stance} "
@@ -213,6 +234,10 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
         f"appraisal={log_preview(emotional_appraisal)} "
         f"subtext={log_preview(interaction_subtext)} "
         f"action_specs={log_preview(action_specs)} "
+        f"resolver_capabilities="
+        f"{log_preview(_resolver_request_log_rows(resolver_capability_requests))} "
+        f"resolver_pending_resolution="
+        f"{log_preview(_pending_resolution_log_row(resolver_pending_resolution))} "
         f"monologue={log_preview(internal_monologue)}"
     )
     logger.debug(
@@ -223,6 +248,7 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
     return_value = {
         "internal_monologue": internal_monologue,
         "action_specs": action_specs,
+        "resolver_capability_requests": resolver_capability_requests,
 
         # Other data used by post-dialog consolidation.
         "interaction_subtext": interaction_subtext,
@@ -234,5 +260,76 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
         "emotional_intensity": emotional_intensity,
         "vibe_check": vibe_check,
         "relational_dynamic": relational_dynamic,
+    }
+    if resolver_pending_resolution is not None:
+        return_value["resolver_pending_resolution"] = resolver_pending_resolution
+    return return_value
+
+
+def _validated_resolver_capability_requests(
+    value: object,
+) -> list[dict]:
+    """Validate L2d resolver requests before returning to persona graph."""
+
+    if value is None:
+        return_value: list[dict] = []
+        return return_value
+    if not isinstance(value, list):
+        logger.warning("Cognition dropped non-list resolver capability requests")
+        return_value = []
+        return return_value
+
+    validated_requests: list[dict] = []
+    for raw_request in value:
+        try:
+            validated_request = validate_resolver_capability_request(raw_request)
+        except ResolverValidationError as exc:
+            logger.warning(f"Cognition dropped invalid resolver request: {exc}")
+            continue
+        validated_requests.append(validated_request)
+    return_value = validated_requests
+    return return_value
+
+
+def _validated_resolver_pending_resolution(value: object) -> dict | None:
+    """Validate an optional L2d pending-resolver decision."""
+
+    if value is None:
+        return_value = None
+        return return_value
+    try:
+        validated_resolution = validate_resolver_pending_resolution(value)
+    except ResolverValidationError as exc:
+        logger.warning(f"Cognition dropped invalid pending resolver decision: {exc}")
+        return_value = None
+        return return_value
+    return_value = validated_resolution
+    return return_value
+
+
+def _resolver_request_log_rows(requests: list[dict]) -> list[dict[str, str]]:
+    """Build bounded resolver request log rows without raw prompt text."""
+
+    rows: list[dict[str, str]] = []
+    for request in requests:
+        rows.append({
+            "capability_kind": str(request.get("capability_kind", "")),
+            "priority": str(request.get("priority", "")),
+            "objective": str(request.get("objective", ""))[:120],
+            "reason": str(request.get("reason", ""))[:120],
+        })
+    return_value = rows
+    return return_value
+
+
+def _pending_resolution_log_row(resolution: dict | None) -> dict[str, str]:
+    """Build a small log row for pending resolver closure decisions."""
+
+    if resolution is None:
+        return_value: dict[str, str] = {}
+        return return_value
+    return_value = {
+        "decision": str(resolution.get("decision", "")),
+        "reason": str(resolution.get("reason", ""))[:120],
     }
     return return_value

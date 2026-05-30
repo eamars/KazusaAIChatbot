@@ -259,7 +259,8 @@ def test_action_initializer_prompt_follows_cognition_prompt_structure() -> None:
         assert required_section in prompt
     assert "你是角色的语义行动选择层" in prompt
     assert "用户消息只包含本轮动态行动上下文" in prompt
-    assert "行动请求只描述角色想做什么" in prompt
+    assert "行动请求只描述我想做什么" in prompt
+    assert "解析请求只描述下一步需要什么证据、事实、澄清或审批" in prompt
     assert "`speak` 是可见文字回复" in prompt
     assert "内心独白是证据，不是动作" in prompt
     assert "群聊参与习惯" in prompt
@@ -272,11 +273,12 @@ def test_action_initializer_prompt_follows_cognition_prompt_structure() -> None:
     assert "具体新信息" in prompt
     assert "具体问题、任务或承诺" in prompt
     assert "action_requests" in prompt
+    assert "resolver_capability_requests" in prompt
+    assert "resolver_capability_request.v1" in prompt
     assert "available_capabilities" not in prompt
-    assert "reflection_signal" not in prompt
     assert "scheduled_recall" not in prompt
     assert "system_probe" not in prompt
-    assert "schema_version" not in prompt
+    assert "action_spec.v1" not in prompt
     assert "action_target" not in prompt
     assert "action_spec" not in prompt
     assert "continuation" not in prompt

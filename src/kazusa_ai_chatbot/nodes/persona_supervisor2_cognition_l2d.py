@@ -25,6 +25,14 @@ from kazusa_ai_chatbot.config import (
     COGNITION_LLM_BASE_URL,
     COGNITION_LLM_MODEL,
 )
+from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    ResolverCapabilityRequestV1,
+    ResolverPendingResolutionV1,
+    ResolverValidationError,
+    project_pending_resume_for_cognition,
+    validate_resolver_capability_request,
+    validate_resolver_pending_resolution,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_output_contracts import (
     validate_cognition_output_contract,
 )
@@ -115,6 +123,9 @@ def _build_action_context_text(
         f"相关记忆：{_evidence_list_text(evidence['memory_evidence'])}",
         f"对话进度：{_compact_context_value(evidence['conversation_progress'])}",
     ]
+    resolver_context_text = _resolver_context_text(state)
+    if resolver_context_text:
+        context_lines.append(f"解析器上下文：\n{resolver_context_text}")
     group_engagement_text = _group_engagement_context_text(state)
     if group_engagement_text:
         context_lines.append(group_engagement_text)
@@ -183,6 +194,28 @@ def _is_group_self_cognition_context(state: CognitionState) -> bool:
         and is_internal_monologue
     )
     return is_self_cognition
+
+
+def _resolver_context_text(state: CognitionState) -> str:
+    """Return prompt-safe resolver recurrence context for L2d."""
+
+    context_lines: list[str] = []
+    resolver_context = state.get("resolver_context")
+    if isinstance(resolver_context, str) and resolver_context.strip():
+        context_lines.append(resolver_context.strip())
+
+    pending_resume = state.get("pending_resolver_resume")
+    if isinstance(pending_resume, dict):
+        try:
+            pending_context = project_pending_resume_for_cognition(pending_resume)
+        except ResolverValidationError as exc:
+            logger.warning(f"L2d dropped invalid pending resolver context: {exc}")
+            pending_context = ""
+        if pending_context:
+            context_lines.append(pending_context)
+
+    return_value = "\n".join(context_lines)
+    return return_value
 
 
 def _commitment_context_text(
@@ -400,6 +433,59 @@ def _normalize_action_requests(parsed: object) -> list[ActionRequestV1]:
         if len(normalized_requests) >= ACTION_SPEC_CAP:
             break
     return normalized_requests
+
+
+def _normalize_resolver_capability_requests(
+    parsed: object,
+) -> list[ResolverCapabilityRequestV1]:
+    """Normalize L2d-selected resolver requests before graph merge."""
+
+    normalized_requests: list[ResolverCapabilityRequestV1] = []
+    if not isinstance(parsed, dict):
+        return normalized_requests
+
+    raw_requests = parsed.get("resolver_capability_requests")
+    if not isinstance(raw_requests, list):
+        return normalized_requests
+
+    for raw_request in raw_requests:
+        try:
+            normalized_request = validate_resolver_capability_request(raw_request)
+        except ResolverValidationError as exc:
+            logger.warning(f"L2d dropped invalid resolver request: {exc}")
+            continue
+        normalized_requests.append(normalized_request)
+        if len(normalized_requests) >= ACTION_SPEC_CAP:
+            break
+    return_value = normalized_requests
+    return return_value
+
+
+def _normalize_resolver_pending_resolution(
+    parsed: object,
+) -> ResolverPendingResolutionV1 | None:
+    """Normalize an optional L2d decision for a pending resolver row."""
+
+    if not isinstance(parsed, dict):
+        return_value = None
+        return return_value
+
+    raw_resolution = parsed.get("resolver_pending_resolution")
+    if raw_resolution is None:
+        return_value = None
+        return return_value
+
+    try:
+        normalized_resolution = validate_resolver_pending_resolution(
+            raw_resolution,
+        )
+    except ResolverValidationError as exc:
+        logger.warning(f"L2d dropped invalid pending resolver resolution: {exc}")
+        return_value = None
+        return return_value
+
+    return_value = normalized_resolution
+    return return_value
 
 
 def _materialize_action_specs(
@@ -745,8 +831,11 @@ def _semantic_text(value: Mapping[str, object], field_name: str) -> str:
 _ACTION_INITIALIZER_PROMPT = '''\
 你是角色的语义行动选择层。
 前序理解已经形成当前事件的立场、意图、边界判断和社交语境。
-你的任务是把已经形成的行动意图整理成 0 到 3 个语义动作请求。
+你的任务是把已经形成的行动意图整理成 0 到 3 个语义解析请求或语义动作请求。
+解析请求表示当前证据、当前事实、用户澄清或审批信息还不足，必须先回到认知循环；动作请求表示当前认知循环已经可以外部化为可见表面或私有动作。
+解析请求和动作请求不要混用：需要先解析时，返回 resolver_capability_requests，并让 action_requests 为空。
 行动请求只描述我想做什么；不要生成最终发言文本，不要执行动作。
+解析请求只描述下一步需要什么证据、事实、澄清或审批。
 
 # 语言政策
 - 除结构化枚举值、schema key、capability 名称、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。
@@ -761,6 +850,11 @@ _ACTION_INITIALIZER_PROMPT = '''\
 - 当前输入摘要、资料标题、字段名、JSON、时间戳、semantic_labels、window_summary、transport summary、model-facing metadata 不是可见发言对象；不要围绕这些结构选择 `speak`，也不要复制进 `decision`、`detail`、`reason` 等自由文本字段。
 
 # 可选动作
+- `rag_evidence` 是检索当前对话、记忆、关系或资料证据后再回到认知循环。
+- `web_evidence` 是需要当前公共事实或外部资料证据后再回到认知循环。
+- `human_clarification` 是缺少用户拥有的信息时，准备一个最小澄清问题后再回到认知循环。
+- `approval_preparation` 是准备需要用户确认的副作用说明；它不执行提醒、调度、发送或数据库修改。
+- `self_goal_resolution` 是只允许内部认知来源使用的私有自我解析，不对外发送。
 - `speak` 是可见文字回复。选择它表示我决定把话说到当前外部频道；之后才会交给 L3/dialog 渲染为可见文本。
 - `memory_lifecycle_update` 是私有活动承诺生命周期复核。只选择复核需要，不选择具体承诺、别名、数据库目标或生命周期决定。
 - `trigger_future_cognition` 是私有未来认知。只在我需要等待或消费一个具体新信息后再处理具体问题、任务或承诺时选择。
@@ -769,22 +863,44 @@ _ACTION_INITIALIZER_PROMPT = '''\
 1. 先阅读当前行动上下文，判断我现在是否真的要把某件事外部化为动作。
 2. 内心独白是证据，不是动作。私人好奇、只想观察、保持沉默、维护进度、等待更自然时机，都不是 `speak`。
 3. 反思资料产生的是私有后续判断；只有它明确沉淀出需要私有复核或未来处理的具体对象时，才选择私有动作。不要因为反思资料存在就选择 `speak`。
-4. 只有当前真实场景给了足够清楚的可见发言理由，并且我愿意把该内容发到当前频道，才选择 `speak`。
-5. 群聊参与习惯只是频道互动证据。它可以帮助判断当前现场是否适合开口，但不能替代当前现场，也不能命令我发言。
-6. `speak.detail` 必须写当前可见回复目标、当前可见行动目标，或当前场景中要处理的具体对象、问题、承诺、群聊话题或互动目标。它不是最终台词，不写表情包台词，不复制包标题、时间戳、传输摘要或模型可见元数据，不写“澄清当前输入摘要”。
-7. 玩笑式提到我、嘈杂群聊、轻度调侃，不自动要求边界反击；只有前序裁决已经形成外部化理由，才选择 `speak`。
-8. 当前活动承诺可能被本轮输入或已形成决定影响时，选择 `memory_lifecycle_update`，并在 `detail` 写清需要复核的语义原因。
-9. 当前回合存在具体未完成问题，且继续处理依赖未来新信息时，选择 `trigger_future_cognition`。普通等待、情绪余波、关系观察和更自然的时机不生成未来认知动作。
-10. 没有需要外部化或私有处理的真实动作时，返回空数组。
-11. 同一轮可以选择多个彼此独立的动作，最多 3 个。
+4. 如果当前问题需要记忆、关系、历史对话、当前公共事实或外部资料才能可靠判断，先选择 `rag_evidence` 或 `web_evidence`，不要直接选择 `speak`。
+5. 如果缺少城市、预算、确认、审批、偏好等用户拥有的信息，先选择 `human_clarification` 或 `approval_preparation`，不要编造缺失条件。
+6. 只有当前真实场景给了足够清楚的可见发言理由，并且我愿意把该内容发到当前频道，才选择 `speak`。
+7. 群聊参与习惯只是频道互动证据。它可以帮助判断当前现场是否适合开口，但不能替代当前场景，也不能命令我发言。
+8. `speak.detail` 必须写当前可见回复目标、当前可见行动目标，或当前场景中要处理的具体对象、问题、承诺、群聊话题或互动目标。它不是最终台词，不写表情包台词，不复制包标题、时间戳、传输摘要或模型可见元数据，不写“澄清当前输入摘要”。
+9. 玩笑式提到我、嘈杂群聊、轻度调侃，不自动要求边界反击；只有前序裁决已经形成外部化理由，才选择 `speak`。
+10. 当前活动承诺可能被本轮输入或已形成决定影响时，选择 `memory_lifecycle_update`，并在 `detail` 写清需要复核的语义原因。
+11. 当前回合存在具体未完成问题，且继续处理依赖未来新信息时，选择 `trigger_future_cognition`。普通等待、情绪余波、关系观察和更自然的时机不生成未来认知动作。
+12. 没有需要解析、外部化或私有处理的真实动作时，返回空数组。
+13. 同一轮可以选择多个彼此独立的请求，最多 3 个。
+
+# 未来认知判断
+- 只有等待或消费具体新信息后才能继续处理具体问题、任务或承诺时，才选择 `trigger_future_cognition`。
+- 如果当前缺的是本轮解答前必须取得的证据、当前事实、用户澄清或审批，选择 resolver_capability_requests，而不是未来认知动作。
 
 # 输入格式
 用户消息是一段中文行动上下文字符串，不是 JSON。
-它描述当前回合的动态信息：触发来源、输入来源、输出要求、已形成的决定、即时感受、社交语境、当前输入摘要、检索结论、活动承诺线索、相关记忆、对话进度，以及可能出现的群聊参与习惯或反思资料。
+用户消息只包含本轮动态行动上下文，不包含可执行工具描述或最终动作规格。
+它描述当前回合的动态信息：触发来源、输入来源、输出要求、已形成的决定、即时感受、社交语境、当前输入摘要、检索结论、活动承诺线索、相关记忆、对话进度、解析器上下文，以及可能出现的群聊参与习惯或反思资料。
 
 # 输出格式
 只返回合法 JSON 字符串：
 {
+  "resolver_capability_requests": [
+    {
+      "schema_version": "resolver_capability_request.v1",
+      "capability_kind": "rag_evidence | web_evidence | human_clarification | approval_preparation | self_goal_resolution",
+      "objective": "下一轮解析要完成的具体目标；若是澄清或审批，这里写最小问题或审批说明",
+      "reason": "为什么当前认知循环还不能直接外部化为动作",
+      "priority": "now | background"
+    }
+  ],
+  "resolver_pending_resolution": {
+    "schema_version": "resolver_pending_resolution.v1",
+    "resume_id": "若解析器上下文中存在待处理项且当前用户输入已经被你判断为回答、批准、拒绝或替代，这里填对应 resume_id；否则省略整个字段",
+    "decision": "continue_waiting | answered | approved | rejected | superseded",
+    "reason": "你对待处理项状态的判断理由"
+  },
   "action_requests": [
     {
       "capability": "speak | memory_lifecycle_update | trigger_future_cognition",
@@ -795,7 +911,8 @@ _ACTION_INITIALIZER_PROMPT = '''\
   ]
 }
 
-如果不需要任何动作，返回 {"action_requests": []}。
+如果返回 resolver_capability_requests，action_requests 必须是空数组。
+如果不需要任何解析或动作，返回 {"resolver_capability_requests": [], "action_requests": []}。
 '''
 _action_initializer_llm = get_llm(
     temperature=0.1,
@@ -817,15 +934,28 @@ async def call_action_initializer(state: CognitionState) -> CognitionState:
         human_message,
     ])
     parsed = parse_llm_json_output(response.content)
-    action_requests = _normalize_action_requests(parsed)
+    resolver_capability_requests = _normalize_resolver_capability_requests(parsed)
+    resolver_pending_resolution = _normalize_resolver_pending_resolution(parsed)
+    if resolver_capability_requests:
+        action_requests = []
+        if isinstance(parsed, dict) and parsed.get("action_requests"):
+            logger.warning(
+                "L2d dropped action requests while resolver requests are pending"
+            )
+    else:
+        action_requests = _normalize_action_requests(parsed)
     action_specs = _materialize_action_specs(action_requests, state)
     logger.debug(
         f"L2d action initializer: count={len(action_specs)} "
-        f"kinds={log_preview([spec['kind'] for spec in action_specs])}"
+        f"kinds={log_preview([spec['kind'] for spec in action_specs])} "
+        f"resolver_requests={len(resolver_capability_requests)} "
     )
     return_value = {
         "action_specs": action_specs,
+        "resolver_capability_requests": resolver_capability_requests,
     }
+    if resolver_pending_resolution is not None:
+        return_value["resolver_pending_resolution"] = resolver_pending_resolution
     validate_cognition_output_contract(
         stage="l2d_action_selection",
         payload=return_value,

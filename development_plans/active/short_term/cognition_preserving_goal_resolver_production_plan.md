@@ -794,7 +794,7 @@ environment.
 - Modify: `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l2d.py`
 - Test: `tests/test_cognition_resolver_l2d_contract.py`
 
-- [ ] **Step 1: Write failing L2d parser tests**
+- [x] **Step 1: Write failing L2d parser tests**
 
 Patch the L2d LLM call to return:
 
@@ -820,7 +820,7 @@ Add a second test around `call_cognition_subgraph()` with a patched cognition
 subgraph result that contains `resolver_capability_requests`. Assert the
 returned `GlobalPersonaState` update includes the same normalized requests.
 
-- [ ] **Step 2: Extend schema fields**
+- [x] **Step 2: Extend schema fields**
 
 Add optional fields:
 
@@ -835,7 +835,7 @@ resolver_pending_resolution: NotRequired[ResolverPendingResolutionV1]
 
 Use imports from `kazusa_ai_chatbot.cognition_resolver.contracts`.
 
-- [ ] **Step 3: Extend L2d prompt contract**
+- [x] **Step 3: Extend L2d prompt contract**
 
 Update the L2d prompt so the model can emit either:
 
@@ -852,13 +852,13 @@ Only emit action_requests when the current cognition cycle is ready to
 externalize a visible surface or private action.
 ```
 
-- [ ] **Step 4: Normalize and validate resolver requests**
+- [x] **Step 4: Normalize and validate resolver requests**
 
 Add `_normalize_resolver_capability_requests(parsed)` next to
 `_normalize_action_requests(parsed)`. It must call
 `validate_resolver_capability_request()` and drop malformed rows with a warning.
 
-- [ ] **Step 5: Propagate requests out of cognition**
+- [x] **Step 5: Propagate requests out of cognition**
 
 In `call_cognition_subgraph()`:
 
@@ -873,7 +873,7 @@ In `call_cognition_subgraph()`:
 This is a blocking contract. If this return field is missing, the resolver loop
 will terminate incorrectly.
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 Run:
 
@@ -882,6 +882,17 @@ venv\Scripts\python -m pytest tests\test_cognition_resolver_l2d_contract.py -q
 git add src\kazusa_ai_chatbot\nodes\persona_supervisor2_schema.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_output_contracts.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2d.py tests\test_cognition_resolver_l2d_contract.py
 git commit -m "Let L2d select resolver capabilities"
 ```
+
+Completed on 2026-05-30. Verification:
+
+```powershell
+venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2_schema.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_output_contracts.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2d.py tests\test_cognition_resolver_l2d_contract.py tests\test_persona_supervisor2_action_initializer.py tests\test_cognition_prompt_contract_text.py
+venv\Scripts\python -m pytest tests\test_cognition_prompt_contract_text.py tests\test_cognition_resolver_l2d_contract.py tests\test_persona_supervisor2_action_initializer.py -q
+venv\Scripts\python -m pytest tests\test_l2d_l3_surface_handoff.py tests\test_multi_source_cognition_stage_03_prompt_selection.py -q
+```
+
+Result: 25 passed for prompt/L2d resolver tests and 49 passed for existing
+cognition handoff/output-contract tests.
 
 ### Task 5: Extract Reusable RAG Capability Execution
 

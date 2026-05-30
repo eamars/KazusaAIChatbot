@@ -7,6 +7,13 @@ from kazusa_ai_chatbot.action_spec.results import (
     SurfaceOutputV1,
 )
 from kazusa_ai_chatbot.cognition_episode import CognitiveEpisode
+from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    ResolverCapabilityRequestV1,
+    ResolverCycleStateV1,
+    ResolverCycleTraceV1,
+    ResolverPendingResolutionV1,
+    ResolverPendingResumeV1,
+)
 from kazusa_ai_chatbot.conversation_progress import ConversationProgressPromptDoc
 from kazusa_ai_chatbot.state import (
     DebugModes,
@@ -86,6 +93,14 @@ class GlobalPersonaState(TypedDict):
     # RAG output
     rag_result: dict
 
+    # Cognition resolver output and recurrence context
+    resolver_state: NotRequired[ResolverCycleStateV1]
+    resolver_context: NotRequired[str]
+    resolver_capability_requests: NotRequired[list[ResolverCapabilityRequestV1]]
+    resolver_cycle_trace: NotRequired[ResolverCycleTraceV1]
+    pending_resolver_resume: NotRequired[ResolverPendingResumeV1]
+    resolver_pending_resolution: NotRequired[ResolverPendingResolutionV1]
+
     # Cognition output
     internal_monologue: str
     action_directives: dict
@@ -158,6 +173,13 @@ class CognitionState(TypedDict):
     decontexualized_input: str
     referents: list[ReferentResolution]
     rag_result: dict
+
+    resolver_state: NotRequired[ResolverCycleStateV1]
+    resolver_context: NotRequired[str]
+    resolver_capability_requests: NotRequired[list[ResolverCapabilityRequestV1]]
+    resolver_cycle_trace: NotRequired[ResolverCycleTraceV1]
+    pending_resolver_resume: NotRequired[ResolverPendingResumeV1]
+    resolver_pending_resolution: NotRequired[ResolverPendingResolutionV1]
 
     emotional_appraisal: str
     interaction_subtext: str
