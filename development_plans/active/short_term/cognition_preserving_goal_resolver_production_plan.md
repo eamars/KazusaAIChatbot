@@ -708,7 +708,7 @@ Result: 9 passed.
 - Create: `src/kazusa_ai_chatbot/cognition_resolver/state.py`
 - Test: `tests/test_cognition_resolver_contracts.py`
 
-- [ ] **Step 1: Add failing tests**
+- [x] **Step 1: Add failing tests**
 
 Add tests that verify:
 
@@ -724,7 +724,7 @@ Add tests that verify:
   `resolver_state`, and prompt-safe `resolver_context` before first cognition
   when mandatory RAG is skipped.
 
-- [ ] **Step 2: Implement state helpers**
+- [x] **Step 2: Implement state helpers**
 
 Expose:
 
@@ -764,7 +764,7 @@ helper so downstream cognition receives the current RAG projection shape.
 `call_cognition_resolver_loop`; tests must fail if the first cycle can enter
 `call_cognition_subgraph()` without `rag_result`.
 
-- [ ] **Step 3: Run tests and commit**
+- [x] **Step 3: Run tests and commit**
 
 Run:
 
@@ -773,6 +773,16 @@ venv\Scripts\python -m pytest tests\test_cognition_resolver_contracts.py -q
 git add src\kazusa_ai_chatbot\cognition_resolver\state.py tests\test_cognition_resolver_contracts.py
 git commit -m "Add cognition resolver state helpers"
 ```
+
+Completed on 2026-05-30. Verification:
+
+```powershell
+venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\cognition_resolver\state.py src\kazusa_ai_chatbot\cognition_resolver\contracts.py tests\test_cognition_resolver_contracts.py
+venv\Scripts\python -m pytest tests\test_cognition_resolver_contracts.py -q
+```
+
+Result: 14 passed. `ruff` was not available in the project virtual
+environment.
 
 ### Task 4: Add L2d Resolver Capability Output
 
