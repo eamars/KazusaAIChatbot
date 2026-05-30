@@ -384,7 +384,10 @@ MAX_FACT_HARVESTER_RETRY = int(os.getenv("MAX_FACT_HARVESTER_RETRY", "3"))
 RAG_CACHE2_MAX_ENTRIES = int(os.getenv("RAG_CACHE2_MAX_ENTRIES", "5000"))
 
 # Scheduler (future_promise + followup_message events).
-SCHEDULED_TASKS_ENABLED = os.getenv("SCHEDULED_TASKS_ENABLED", "true").lower() in ("1", "true", "yes")
+SCHEDULED_TASKS_ENABLED = os.getenv(
+    "SCHEDULED_TASKS_ENABLED",
+    "true",
+).lower() in ("1", "true", "yes")
 
 # Visual directives are service-side generation metadata, not an adapter debug
 # mode. Disable this to skip the L3 visual-agent LLM call globally.
@@ -392,6 +395,23 @@ COGNITION_VISUAL_DIRECTIVES_ENABLED = os.getenv(
     "COGNITION_VISUAL_DIRECTIVES_ENABLED",
     "true",
 ).lower() in ("1", "true", "yes")
+
+COGNITION_RESOLVER_ENABLED = _bool_from_env(
+    "COGNITION_RESOLVER_ENABLED",
+    "false",
+)
+COGNITION_RESOLVER_MAX_CYCLES = _bounded_int_from_env(
+    "COGNITION_RESOLVER_MAX_CYCLES",
+    "3",
+    minimum=1,
+    maximum=5,
+)
+COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS = _bounded_float_from_env(
+    "COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS",
+    "45.0",
+    minimum=1.0,
+    maximum=180.0,
+)
 
 # Self-cognition runs by default as a background reasoning loop. Its runtime
 # output and persistence boundaries stay controlled by the self-cognition worker.

@@ -16,10 +16,18 @@ from kazusa_ai_chatbot.action_spec.results import (
     build_text_surface_output,
 )
 from kazusa_ai_chatbot import event_logging
-from kazusa_ai_chatbot.config import CHAT_HISTORY_RECENT_LIMIT
+from kazusa_ai_chatbot.config import (
+    CHAT_HISTORY_RECENT_LIMIT,
+    COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS,
+    COGNITION_RESOLVER_ENABLED,
+    COGNITION_RESOLVER_MAX_CYCLES,
+)
 from kazusa_ai_chatbot.cognition_resolver.capabilities import (
+    execute_resolver_capability_request,
     run_rag_evidence_for_persona_state as _run_rag_evidence_for_persona_state,
 )
+from kazusa_ai_chatbot.cognition_resolver.loop import call_cognition_resolver_loop
+from kazusa_ai_chatbot.cognition_resolver.state import ensure_initial_resolver_inputs
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import call_cognition_subgraph
 from kazusa_ai_chatbot.consolidation.core import call_consolidation_subgraph
@@ -29,7 +37,9 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
 from kazusa_ai_chatbot.nodes.persona_supervisor2_memory_lifecycle import (
     call_memory_lifecycle_update_handler,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import call_msg_decontexualizer
+from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import (
+    call_msg_decontexualizer,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import (
     GlobalPersonaState,
     ScopeUser,
@@ -441,6 +451,26 @@ async def stage_1_research(state: GlobalPersonaState) -> dict:
     return return_value
 
 
+async def stage_1_goal_resolver(state: GlobalPersonaState) -> dict:
+    """Run the cognition-preserving resolver loop after decontextualization."""
+
+    initialized = ensure_initial_resolver_inputs(
+        state,
+        max_cycles=COGNITION_RESOLVER_MAX_CYCLES,
+    )
+    resolved_state = await call_cognition_resolver_loop(
+        initialized,
+        call_cognition_subgraph_func=call_cognition_subgraph,
+        execute_capability_func=execute_resolver_capability_request,
+        max_cycles=COGNITION_RESOLVER_MAX_CYCLES,
+        capability_timeout_seconds=(
+            COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS
+        ),
+    )
+    return_value = resolved_state
+    return return_value
+
+
 def _route_after_cognition(state: GlobalPersonaState) -> str:
     """Route persona flow based on selected L2d text surfaces."""
 
@@ -519,8 +549,11 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "stage_0_msg_decontexualizer",
         stage_0_msg_decontexualizer,
     )
-    persona_builder.add_node("stage_1_research", stage_1_research)
-    persona_builder.add_node("stage_2_cognition", call_cognition_subgraph)
+    if COGNITION_RESOLVER_ENABLED:
+        persona_builder.add_node("stage_1_goal_resolver", stage_1_goal_resolver)
+    else:
+        persona_builder.add_node("stage_1_research", stage_1_research)
+        persona_builder.add_node("stage_2_cognition", call_cognition_subgraph)
     persona_builder.add_node(
         "stage_2_memory_lifecycle",
         call_memory_lifecycle_update_handler,
@@ -528,9 +561,22 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
     persona_builder.add_node("stage_3_action", call_action_subgraph)  # perform action
     persona_builder.add_node("stage_3_no_response", stage_3_no_response)
     persona_builder.add_edge(START, "stage_0_msg_decontexualizer")
-    persona_builder.add_edge("stage_0_msg_decontexualizer", "stage_1_research")
-    persona_builder.add_edge("stage_1_research", "stage_2_cognition")
-    persona_builder.add_edge("stage_2_cognition", "stage_2_memory_lifecycle")
+    if COGNITION_RESOLVER_ENABLED:
+        persona_builder.add_edge(
+            "stage_0_msg_decontexualizer",
+            "stage_1_goal_resolver",
+        )
+        persona_builder.add_edge(
+            "stage_1_goal_resolver",
+            "stage_2_memory_lifecycle",
+        )
+    else:
+        persona_builder.add_edge(
+            "stage_0_msg_decontexualizer",
+            "stage_1_research",
+        )
+        persona_builder.add_edge("stage_1_research", "stage_2_cognition")
+        persona_builder.add_edge("stage_2_cognition", "stage_2_memory_lifecycle")
     persona_builder.add_conditional_edges(
         "stage_2_memory_lifecycle",
         _route_after_cognition,

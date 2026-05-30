@@ -467,6 +467,99 @@ class TestCognitionVisualDirectivesConfig:
         assert result.stdout.strip() == "False"
 
 
+class TestCognitionResolverConfig:
+    def test_cognition_resolver_defaults_are_bounded_and_disabled(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env.pop("COGNITION_RESOLVER_ENABLED", None)
+        env.pop("COGNITION_RESOLVER_MAX_CYCLES", None)
+        env.pop("COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS", None)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(config.COGNITION_RESOLVER_ENABLED); "
+                    "print(config.COGNITION_RESOLVER_MAX_CYCLES); "
+                    "print(config.COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS)"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.splitlines() == ["False", "3", "45.0"]
+
+    def test_cognition_resolver_config_reads_environment(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["COGNITION_RESOLVER_ENABLED"] = "true"
+        env["COGNITION_RESOLVER_MAX_CYCLES"] = "5"
+        env["COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS"] = "180.0"
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(config.COGNITION_RESOLVER_ENABLED); "
+                    "print(config.COGNITION_RESOLVER_MAX_CYCLES); "
+                    "print(config.COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS)"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.splitlines() == ["True", "5", "180.0"]
+
+    def test_cognition_resolver_config_rejects_invalid_bounds(self, tmp_path):
+        max_cycles_env = _configured_subprocess_env_without_dotenv()
+        max_cycles_env["COGNITION_RESOLVER_MAX_CYCLES"] = "6"
+
+        max_cycles_result = subprocess.run(
+            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
+            cwd=tmp_path,
+            env=max_cycles_env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert max_cycles_result.returncode != 0
+        assert (
+            "COGNITION_RESOLVER_MAX_CYCLES must be between 1 and 5"
+            in max_cycles_result.stderr
+        )
+
+        timeout_env = _configured_subprocess_env_without_dotenv()
+        timeout_env["COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS"] = "0.5"
+
+        timeout_result = subprocess.run(
+            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
+            cwd=tmp_path,
+            env=timeout_env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert timeout_result.returncode != 0
+        assert (
+            "COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS "
+            "must be between 1.0 and 180.0"
+        ) in timeout_result.stderr
+
+
 class TestReflectionCycleConfig:
     def test_reflection_cycle_enabled_defaults_to_true(self, tmp_path):
         env = _configured_subprocess_env_without_dotenv()

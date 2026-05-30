@@ -1074,7 +1074,7 @@ The cognition prompt payload builders must receive only prompt-safe
 `resolver_context` and prompt-safe pending-resume projection, not raw
 observation dicts or ledger records.
 
-- [ ] **Step 4: Run tests and commit**
+- [x] **Step 4: Run tests and commit**
 
 Run:
 
@@ -1113,7 +1113,7 @@ venv\Scripts\python -m pytest tests\test_cognition_resolver_loop.py -q
 - Modify: `src/kazusa_ai_chatbot/nodes/persona_supervisor2.py`
 - Test: `tests/test_cognition_resolver_persona_graph.py`
 
-- [ ] **Step 1: Add failing graph tests**
+- [x] **Step 1: Add failing graph tests**
 
 Test two modes:
 
@@ -1121,7 +1121,7 @@ Test two modes:
 - resolver enabled: graph calls resolver loop after decontextualizer and does
   not call mandatory `stage_1_research`.
 
-- [ ] **Step 2: Add config flags**
+- [x] **Step 2: Add config flags**
 
 Add:
 
@@ -1148,7 +1148,7 @@ production slice. It requires a separate contract because shadow mode would run
 two semantic pipelines in one live turn and must prove it cannot duplicate side
 effects, pending approvals, scheduler events, or persistence.
 
-- [ ] **Step 3: Add resolver stage**
+- [x] **Step 3: Add resolver stage**
 
 In `persona_supervisor2.py`, create:
 
@@ -1176,6 +1176,31 @@ Run:
 venv\Scripts\python -m pytest tests\test_cognition_resolver_persona_graph.py -q
 git add src\kazusa_ai_chatbot\config.py src\kazusa_ai_chatbot\nodes\persona_supervisor2.py tests\test_cognition_resolver_persona_graph.py
 git commit -m "Wire cognition resolver behind feature flag"
+```
+
+Implementation notes:
+
+- Resolver-disabled mode preserves the existing graph sequence:
+  `stage_0_msg_decontexualizer -> stage_1_research -> stage_2_cognition`.
+- Resolver-enabled mode routes:
+  `stage_0_msg_decontexualizer -> stage_1_goal_resolver`, then directly to
+  memory lifecycle. Mandatory pre-cognition RAG is skipped and the resolver
+  loop owns any demand-driven RAG request selected by cognition.
+- `stage_1_goal_resolver` initializes resolver inputs before calling the loop,
+  including the empty projected `rag_result`, and passes the existing
+  `call_cognition_subgraph` and resolver capability executor into the loop.
+- Pending HIL/approval resume loading remains in Task 8, where the durable
+  resume ledger contract is implemented. Task 7 only establishes the feature
+  flag and graph integration point.
+- Review follow-up added config default/bound checks and asserts that the graph
+  passes the intended cognition and capability callables into the resolver loop.
+
+Verification:
+
+```powershell
+venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\config.py src\kazusa_ai_chatbot\nodes\persona_supervisor2.py tests\test_cognition_resolver_persona_graph.py
+venv\Scripts\python -m pytest tests\test_config.py tests\test_cognition_resolver_persona_graph.py tests\test_cognition_resolver_loop.py tests\test_persona_supervisor2_rag2_integration.py tests\test_persona_supervisor2_rag_skip_shape.py -q
+# 71 passed
 ```
 
 ### Task 8: Add HIL And Approval Terminal Surfacing
