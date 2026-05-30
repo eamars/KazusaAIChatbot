@@ -233,7 +233,7 @@ def test_pending_resume_validator_and_projection_are_prompt_safe() -> None:
 
     assert pending["status"] == "waiting_for_user"
     assert "Which city are you in?" in projection
-    assert "resolver-pending-001" not in projection
+    assert "resume_id=resolver-pending-001" in projection
     assert "channel-1" not in projection
     assert "user-1" not in projection
 

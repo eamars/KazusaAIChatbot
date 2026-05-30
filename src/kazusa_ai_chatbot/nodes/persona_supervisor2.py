@@ -27,6 +27,11 @@ from kazusa_ai_chatbot.cognition_resolver.capabilities import (
     run_rag_evidence_for_persona_state as _run_rag_evidence_for_persona_state,
 )
 from kazusa_ai_chatbot.cognition_resolver.loop import call_cognition_resolver_loop
+from kazusa_ai_chatbot.cognition_resolver.pending import (
+    apply_pending_resolution,
+    load_matching_pending_resume_into_state,
+    upsert_pending_resume,
+)
 from kazusa_ai_chatbot.cognition_resolver.state import ensure_initial_resolver_inputs
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import call_cognition_subgraph
@@ -458,6 +463,7 @@ async def stage_1_goal_resolver(state: GlobalPersonaState) -> dict:
         state,
         max_cycles=COGNITION_RESOLVER_MAX_CYCLES,
     )
+    initialized = await load_matching_pending_resume_into_state(initialized)
     resolved_state = await call_cognition_resolver_loop(
         initialized,
         call_cognition_subgraph_func=call_cognition_subgraph,
@@ -466,6 +472,8 @@ async def stage_1_goal_resolver(state: GlobalPersonaState) -> dict:
         capability_timeout_seconds=(
             COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS
         ),
+        upsert_pending_resume_func=upsert_pending_resume,
+        apply_pending_resolution_func=apply_pending_resolution,
     )
     return_value = resolved_state
     return return_value

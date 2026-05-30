@@ -436,6 +436,7 @@ def project_pending_resume_for_cognition(
         return return_value
 
     validated = validate_resolver_pending_resume(pending)
+    resume_id = validated["resume_id"]
     capability_kind = validated["capability_kind"]
     status = validated["status"]
     question = validated["prompt_safe_question"]
@@ -443,7 +444,7 @@ def project_pending_resume_for_cognition(
     expires_at = validated["expires_at_utc"]
     projection = (
         "pending_resolver_resume: "
-        f"capability={capability_kind}; status={status}; "
+        f"resume_id={resume_id}; capability={capability_kind}; status={status}; "
         f"question={question}; approval_summary={approval_summary}; "
         f"expires_at_utc={expires_at}"
     )

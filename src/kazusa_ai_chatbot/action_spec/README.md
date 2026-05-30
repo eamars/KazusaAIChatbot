@@ -105,6 +105,19 @@ readable for duplicate suppression and audit compatibility.
 
 Do not add a second action ledger collection without a separate approved plan.
 
+Resolver HIL and approval waits also reuse this ledger. They are deterministic
+pending state, not action specs and not adapter delivery:
+
+- `resolver_pending_hil` stores a prompt-safe clarification question selected
+  by cognition.
+- `resolver_pending_approval` stores a prompt-safe approval summary for a
+  side effect that has not been executed.
+
+Follow-up user turns close, approve, reject, or supersede these rows only when
+L2d emits `resolver_pending_resolution`. Deterministic code must not infer
+approval from keywords or execute the prepared side effect inside the resolver
+stage.
+
 ## Consolidation
 
 The consolidator receives prompt-safe episode-trace projection only. It may

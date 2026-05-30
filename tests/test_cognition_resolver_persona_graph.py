@@ -171,6 +171,8 @@ async def test_persona_graph_enabled_runs_goal_resolver_without_stage_1_rag(
         execute_capability_func: object,
         max_cycles: int,
         capability_timeout_seconds: float,
+        upsert_pending_resume_func: object,
+        apply_pending_resolution_func: object,
     ) -> dict:
         calls.append("resolver")
         captured["state"] = dict(state)
@@ -178,7 +180,20 @@ async def test_persona_graph_enabled_runs_goal_resolver_without_stage_1_rag(
         captured["execute_capability_func"] = execute_capability_func
         captured["max_cycles"] = max_cycles
         captured["capability_timeout_seconds"] = capability_timeout_seconds
+        captured["upsert_pending_resume_func"] = upsert_pending_resume_func
+        captured["apply_pending_resolution_func"] = apply_pending_resolution_func
         return _cognition_output()
+
+    async def load_matching_pending_resume_into_state(state: dict) -> dict:
+        loaded = dict(state)
+        loaded["pending_resolver_resume"] = {
+            "resume_id": "resolver-pending-graph",
+        }
+        loaded["resolver_context"] = (
+            f"{state['resolver_context']}\n"
+            "pending_resolver_resume: resume_id=resolver-pending-graph"
+        )
+        return loaded
 
     monkeypatch.setattr(persona_module, "COGNITION_RESOLVER_ENABLED", True)
     monkeypatch.setattr(persona_module, "COGNITION_RESOLVER_MAX_CYCLES", 3)
@@ -205,6 +220,11 @@ async def test_persona_graph_enabled_runs_goal_resolver_without_stage_1_rag(
     )
     monkeypatch.setattr(
         persona_module,
+        "load_matching_pending_resume_into_state",
+        load_matching_pending_resume_into_state,
+    )
+    monkeypatch.setattr(
+        persona_module,
         "call_memory_lifecycle_update_handler",
         _memory_lifecycle,
     )
@@ -215,9 +235,18 @@ async def test_persona_graph_enabled_runs_goal_resolver_without_stage_1_rag(
     assert captured["state"]["decontexualized_input"] == "今晚想随便聊两句。"
     assert captured["state"]["rag_result"]["answer"] == ""
     assert captured["state"]["resolver_context"].startswith("resolver_state:")
+    assert captured["state"]["pending_resolver_resume"]["resume_id"] == (
+        "resolver-pending-graph"
+    )
     assert captured["call_cognition_subgraph_func"] is call_cognition_subgraph
     assert captured["execute_capability_func"] is (
         persona_module.execute_resolver_capability_request
+    )
+    assert captured["upsert_pending_resume_func"] is (
+        persona_module.upsert_pending_resume
+    )
+    assert captured["apply_pending_resolution_func"] is (
+        persona_module.apply_pending_resolution
     )
     assert captured["max_cycles"] == 3
     assert captured["capability_timeout_seconds"] == 45.0

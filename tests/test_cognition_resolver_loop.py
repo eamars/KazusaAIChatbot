@@ -12,9 +12,22 @@ from kazusa_ai_chatbot.cognition_resolver import capabilities as capabilities_mo
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_CAPABILITY_REQUEST_VERSION,
     RESOLVER_OBSERVATION_VERSION,
+    RESOLVER_PENDING_RESOLUTION_VERSION,
+    RESOLVER_PENDING_RESUME_VERSION,
     ResolverValidationError,
 )
 from kazusa_ai_chatbot.cognition_resolver.loop import call_cognition_resolver_loop
+from kazusa_ai_chatbot.cognition_resolver.pending import (
+    RESOLVER_PENDING_APPROVAL_ACTION_KIND,
+    RESOLVER_PENDING_HIL_ACTION_KIND,
+    apply_pending_resolution,
+    build_pending_resume_record,
+    load_matching_pending_resume,
+)
+from kazusa_ai_chatbot.cognition_resolver.state import (
+    ensure_initial_resolver_inputs,
+    project_resolver_context,
+)
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 
@@ -144,6 +157,43 @@ def _speak_action_spec(reason: str = "已经有足够证据，可以进入可见
             "include_result_as": None,
         },
         "reason": reason,
+    }
+
+
+def _pending_resume(*, capability_kind: str = "human_clarification") -> dict:
+    status = "waiting_for_user"
+    question = "你现在在哪个城市？"
+    approval_summary = ""
+    if capability_kind == "approval_preparation":
+        status = "waiting_for_approval"
+        question = ""
+        approval_summary = "准备创建提醒，但需要用户确认。"
+    return {
+        "schema_version": RESOLVER_PENDING_RESUME_VERSION,
+        "resume_id": f"resolver-pending-{capability_kind}",
+        "capability_kind": capability_kind,
+        "status": status,
+        "platform": "debug",
+        "platform_channel_id": "channel-123",
+        "global_user_id": "global-user-123",
+        "source_message_id": "message-123",
+        "prompt_safe_question": question,
+        "prompt_safe_approval_summary": approval_summary,
+        "created_at_utc": "2026-05-29T21:00:00+00:00",
+        "expires_at_utc": "2026-05-30T21:00:00+00:00",
+    }
+
+
+def _pending_resolution(
+    *,
+    decision: str = "answered",
+    resume_id: str = "resolver-pending-human_clarification",
+) -> dict:
+    return {
+        "schema_version": RESOLVER_PENDING_RESOLUTION_VERSION,
+        "resume_id": resume_id,
+        "decision": decision,
+        "reason": "用户已经回答了澄清问题。",
     }
 
 
@@ -325,6 +375,358 @@ async def test_loop_runs_final_cognition_with_max_cycle_blocker() -> None:
     assert resolver_state["terminal_reason"] == "maximum resolver cycles reached"
     assert len(resolver_state["observations"]) == 2
     assert len(resolver_state["cycle_traces"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_hil_blocked_observation_persists_pending_and_reenters_cognition() -> None:
+    """HIL blockers should create pending state and run one final cognition."""
+
+    request = _resolver_request(
+        capability_kind="human_clarification",
+        objective="请只问用户所在城市。",
+    )
+    pending_rows: list[dict] = []
+    cognition_inputs: list[dict] = []
+
+    async def call_cognition(state: dict) -> dict:
+        cognition_inputs.append(dict(state))
+        if len(cognition_inputs) == 1:
+            return _cognition_result(
+                internal_monologue="第一轮：缺少用户城市",
+                resolver_requests=[request],
+            )
+        assert "pending_resolver_resume" in state["resolver_context"]
+        assert "请只问用户所在城市" in state["resolver_context"]
+        return _cognition_result(
+            internal_monologue="第二轮：提出最小澄清问题",
+            action_specs=[_speak_action_spec("只询问用户所在城市。")],
+        )
+
+    async def execute_capability(
+        capability_request: dict,
+        _state: dict,
+    ) -> dict:
+        return {
+            "schema_version": RESOLVER_OBSERVATION_VERSION,
+            "observation_id": "resolver_obs_hil_city",
+            "capability_kind": capability_request["capability_kind"],
+            "request_objective": capability_request["objective"],
+            "request_reason": capability_request["reason"],
+            "status": "blocked",
+            "prompt_safe_summary": (
+                "Human clarification required: 请只问用户所在城市。"
+            ),
+            "evidence_refs": [],
+            "created_at_utc": "2026-05-29T21:00:00+00:00",
+        }
+
+    async def upsert_pending_resume(state: dict, observation: dict) -> dict:
+        record = build_pending_resume_record(state, observation)
+        pending_rows.append(record)
+        return record["execution_result"]["pending_resume"]
+
+    result = await call_cognition_resolver_loop(
+        _resolver_state(),
+        call_cognition_subgraph_func=call_cognition,
+        execute_capability_func=execute_capability,
+        max_cycles=3,
+        capability_timeout_seconds=1.0,
+        upsert_pending_resume_func=upsert_pending_resume,
+    )
+
+    assert len(cognition_inputs) == 2
+    assert len(pending_rows) == 1
+    assert pending_rows[0]["action_kind"] == RESOLVER_PENDING_HIL_ACTION_KIND
+    assert pending_rows[0]["source_kind"] == "cognitive_episode"
+    assert pending_rows[0]["source_id"] == "resolver-capability-episode"
+    assert pending_rows[0]["action_spec_schema_version"] == (
+        RESOLVER_PENDING_RESUME_VERSION
+    )
+    assert pending_rows[0]["target_scope"] == {
+        "platform": "debug",
+        "platform_channel_id": "channel-123",
+        "global_user_id": "global-user-123",
+        "source_message_id": "message-123",
+    }
+    pending = pending_rows[0]["execution_result"]["pending_resume"]
+    assert pending["status"] == "waiting_for_user"
+    assert pending["prompt_safe_question"] == "请只问用户所在城市。"
+    observation = result["resolver_state"]["observations"][0]
+    assert observation["pending_resume_id"] == pending["resume_id"]
+    assert result["resolver_state"]["status"] == "waiting_for_user"
+    assert result["action_specs"][0]["kind"] == "speak"
+
+
+@pytest.mark.asyncio
+async def test_hil_repeated_after_pending_returns_private_terminal() -> None:
+    """A blocked HIL request must not repeat after pending resume creation."""
+
+    request = _resolver_request(
+        capability_kind="human_clarification",
+        objective="请只问用户所在城市。",
+    )
+    pending_rows: list[dict] = []
+    cognition_inputs: list[dict] = []
+
+    async def call_cognition(state: dict) -> dict:
+        cognition_inputs.append(dict(state))
+        return _cognition_result(
+            internal_monologue="仍然只想请求同一个澄清。",
+            resolver_requests=[request],
+        )
+
+    async def execute_capability(
+        capability_request: dict,
+        _state: dict,
+    ) -> dict:
+        return {
+            "schema_version": RESOLVER_OBSERVATION_VERSION,
+            "observation_id": "resolver_obs_hil_repeat",
+            "capability_kind": capability_request["capability_kind"],
+            "request_objective": capability_request["objective"],
+            "request_reason": capability_request["reason"],
+            "status": "blocked",
+            "prompt_safe_summary": (
+                "Human clarification required: 请只问用户所在城市。"
+            ),
+            "evidence_refs": [],
+            "created_at_utc": "2026-05-29T21:00:00+00:00",
+        }
+
+    async def upsert_pending_resume(state: dict, observation: dict) -> dict:
+        record = build_pending_resume_record(state, observation)
+        pending_rows.append(record)
+        return record["execution_result"]["pending_resume"]
+
+    result = await call_cognition_resolver_loop(
+        _resolver_state(),
+        call_cognition_subgraph_func=call_cognition,
+        execute_capability_func=execute_capability,
+        max_cycles=3,
+        capability_timeout_seconds=1.0,
+        upsert_pending_resume_func=upsert_pending_resume,
+    )
+
+    assert len(cognition_inputs) == 2
+    assert len(pending_rows) == 1
+    assert result["action_specs"] == []
+    assert result["resolver_capability_requests"] == []
+    assert result["resolver_state"]["terminal_reason"] == (
+        "blocked capability repeated after pending resume"
+    )
+
+
+@pytest.mark.asyncio
+async def test_approval_blocked_observation_persists_pending_without_side_effect() -> None:
+    """Approval blockers should persist approval state without executing effects."""
+
+    request = _resolver_request(
+        capability_kind="approval_preparation",
+        objective="说明准备创建提醒，但等待用户确认。",
+    )
+    pending_rows: list[dict] = []
+
+    async def call_cognition(state: dict) -> dict:
+        if "Approval required before side effects" not in state.get(
+            "resolver_context",
+            "",
+        ):
+            return _cognition_result(
+                internal_monologue="第一轮：需要审批",
+                resolver_requests=[request],
+            )
+        assert "pending_resolver_resume" in state["resolver_context"]
+        return _cognition_result(
+            internal_monologue="第二轮：解释审批状态",
+            action_specs=[_speak_action_spec("说明准备做什么并等待确认。")],
+        )
+
+    async def execute_capability(
+        capability_request: dict,
+        _state: dict,
+    ) -> dict:
+        return {
+            "schema_version": RESOLVER_OBSERVATION_VERSION,
+            "observation_id": "resolver_obs_approval",
+            "capability_kind": capability_request["capability_kind"],
+            "request_objective": capability_request["objective"],
+            "request_reason": capability_request["reason"],
+            "status": "blocked",
+            "prompt_safe_summary": (
+                "Approval required before side effects: "
+                "说明准备创建提醒，但等待用户确认。"
+            ),
+            "evidence_refs": [],
+            "created_at_utc": "2026-05-29T21:00:00+00:00",
+        }
+
+    async def upsert_pending_resume(state: dict, observation: dict) -> dict:
+        record = build_pending_resume_record(state, observation)
+        pending_rows.append(record)
+        return record["execution_result"]["pending_resume"]
+
+    result = await call_cognition_resolver_loop(
+        _resolver_state(),
+        call_cognition_subgraph_func=call_cognition,
+        execute_capability_func=execute_capability,
+        max_cycles=3,
+        capability_timeout_seconds=1.0,
+        upsert_pending_resume_func=upsert_pending_resume,
+    )
+
+    assert len(pending_rows) == 1
+    assert pending_rows[0]["action_kind"] == RESOLVER_PENDING_APPROVAL_ACTION_KIND
+    pending = pending_rows[0]["execution_result"]["pending_resume"]
+    assert pending["status"] == "waiting_for_approval"
+    assert pending["prompt_safe_approval_summary"] == (
+        "说明准备创建提醒，但等待用户确认。"
+    )
+    assert result["resolver_state"]["status"] == "waiting_for_approval"
+    assert "action_results" not in result
+
+
+@pytest.mark.asyncio
+async def test_pending_resolution_is_applied_only_after_l2d_decision() -> None:
+    """Follow-up turns should close pending rows only from L2d decisions."""
+
+    applied: list[dict] = []
+    state = ensure_initial_resolver_inputs(_resolver_state(), max_cycles=3)
+    resolver_state = dict(state["resolver_state"])
+    resolver_state["pending_resume"] = _pending_resume()
+    state["resolver_state"] = resolver_state
+    state["pending_resolver_resume"] = _pending_resume()
+    state["resolver_context"] = project_resolver_context(resolver_state)
+    cognition_inputs: list[dict] = []
+
+    async def call_cognition(cognition_state: dict) -> dict:
+        cognition_inputs.append(dict(cognition_state))
+        assert "pending_resolver_resume" in cognition_state["resolver_context"]
+        output = _cognition_result(
+            internal_monologue="用户回答了上一轮澄清。",
+            action_specs=[_speak_action_spec("根据用户回答继续。")],
+        )
+        output["resolver_pending_resolution"] = _pending_resolution()
+        return output
+
+    async def execute_capability(
+        _request: dict,
+        _state: dict,
+    ) -> dict:
+        raise AssertionError("no capability should run on resolved pending state")
+
+    async def apply_resolution(state_with_resolution: dict, resolution: dict) -> None:
+        applied.append({
+            "state": dict(state_with_resolution),
+            "resolution": dict(resolution),
+        })
+
+    result = await call_cognition_resolver_loop(
+        state,
+        call_cognition_subgraph_func=call_cognition,
+        execute_capability_func=execute_capability,
+        max_cycles=3,
+        capability_timeout_seconds=1.0,
+        apply_pending_resolution_func=apply_resolution,
+    )
+
+    assert len(cognition_inputs) == 1
+    assert applied[0]["resolution"]["decision"] == "answered"
+    assert result["resolver_pending_resolution"]["decision"] == "answered"
+    assert result["action_specs"][0]["kind"] == "speak"
+
+
+@pytest.mark.asyncio
+async def test_pending_helpers_load_and_close_matching_pending_rows() -> None:
+    """Pending helper should filter by scope, expiry, and L2d resolution."""
+
+    state = _resolver_state()
+    observation = {
+        "schema_version": RESOLVER_OBSERVATION_VERSION,
+        "observation_id": "resolver_obs_hil_city",
+        "capability_kind": "human_clarification",
+        "request_objective": "你现在在哪个城市？",
+        "request_reason": "缺少用户所在地。",
+        "status": "blocked",
+        "prompt_safe_summary": "Human clarification required: 你现在在哪个城市？",
+        "evidence_refs": [],
+        "created_at_utc": "2026-05-29T21:00:00+00:00",
+    }
+    record = build_pending_resume_record(state, observation)
+    expired_record = build_pending_resume_record(
+        state,
+        observation,
+        expires_at_utc="2026-05-29T20:00:00+00:00",
+    )
+    expired_record["attempt_id"] = "expired"
+    expired_record["execution_result"]["pending_resume"]["resume_id"] = "expired"
+    expired_record["resolver_pending_resume"]["resume_id"] = "expired"
+    rows = [expired_record, record]
+    upserted: list[dict] = []
+
+    async def list_rows(*, limit: int = 1000) -> list[dict]:
+        del limit
+        return list(rows)
+
+    async def upsert_row(row: dict) -> None:
+        upserted.append(row)
+
+    loaded = await load_matching_pending_resume(
+        state,
+        list_action_attempts_func=list_rows,
+        upsert_action_attempt_func=upsert_row,
+    )
+
+    assert loaded["resume_id"] == (
+        record["execution_result"]["pending_resume"]["resume_id"]
+    )
+    assert upserted[0]["status"] == "expired"
+
+    resume_id = record["execution_result"]["pending_resume"]["resume_id"]
+    await apply_pending_resolution(
+        state,
+        _pending_resolution(resume_id=resume_id),
+        list_action_attempts_func=list_rows,
+        upsert_action_attempt_func=upsert_row,
+    )
+
+    assert upserted[-1]["status"] == "closed"
+    assert upserted[-1]["execution_result"]["pending_resolution"]["decision"] == (
+        "answered"
+    )
+    assert upserted[-1]["execution_result"][
+        "resolver_pending_resolution"
+    ]["decision"] == "answered"
+
+    approval_observation = {
+        "schema_version": RESOLVER_OBSERVATION_VERSION,
+        "observation_id": "resolver_obs_approval",
+        "capability_kind": "approval_preparation",
+        "request_objective": "准备创建提醒，但需要用户确认。",
+        "request_reason": "侧效应需要确认。",
+        "status": "blocked",
+        "prompt_safe_summary": "Approval required: 准备创建提醒。",
+        "evidence_refs": [],
+        "created_at_utc": "2026-05-29T21:00:00+00:00",
+    }
+    approval_record = build_pending_resume_record(state, approval_observation)
+    rows = [approval_record]
+    upserted.clear()
+    approval_resume_id = approval_record["resolver_pending_resume"]["resume_id"]
+
+    await apply_pending_resolution(
+        state,
+        _pending_resolution(
+            decision="approved",
+            resume_id=approval_resume_id,
+        ),
+        list_action_attempts_func=list_rows,
+        upsert_action_attempt_func=upsert_row,
+    )
+
+    assert upserted[-1]["status"] == "closed"
+    assert upserted[-1]["execution_result"][
+        "resolver_pending_resolution"
+    ]["decision"] == "approved"
 
 
 @pytest.mark.asyncio

@@ -1168,7 +1168,7 @@ else:
     stage_0_msg_decontexualizer -> stage_1_research -> stage_2_cognition -> stage_2_memory_lifecycle
 ```
 
-- [ ] **Step 4: Run tests and commit**
+- [x] **Step 4: Run tests and commit**
 
 Run:
 
@@ -1214,7 +1214,7 @@ venv\Scripts\python -m pytest tests\test_config.py tests\test_cognition_resolver
 - Modify: `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l2d.py`
 - Test: `tests/test_cognition_resolver_loop.py`
 
-- [ ] **Step 1: Add failing HIL tests**
+- [x] **Step 1: Add failing HIL tests**
 
 Test that a `human_clarification` resolver request:
 
@@ -1236,7 +1236,7 @@ Add a next-turn resume test:
 - assert deterministic code marks the pending row `closed` only because L2d
   emitted that resolution.
 
-- [ ] **Step 2: Add failing approval tests**
+- [x] **Step 2: Add failing approval tests**
 
 Test that an `approval_preparation` resolver request:
 
@@ -1258,7 +1258,7 @@ Add a next-turn approval resume test:
 - assert deterministic code closes the pending row as approved without running
   the side effect in the resolver stage.
 
-- [ ] **Step 3: Implement pending-resume persistence**
+- [x] **Step 3: Implement pending-resume persistence**
 
 In `pending.py`, expose:
 
@@ -1282,14 +1282,14 @@ code may apply `ResolverPendingResolutionV1` only after L2d emits it.
 Expired rows are not projected to cognition; deterministic code may mark them
 `expired` by timestamp validation.
 
-- [ ] **Step 4: Implement blocked-observation cycle behavior**
+- [x] **Step 4: Implement blocked-observation cycle behavior**
 
 For blocked HIL/approval observations, the loop must run one more full
 cognition cycle and then return. If the final cycle again requests the same
 blocked capability, the loop returns a private no-response surface plus event
 log warning rather than repeating forever.
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 Run:
 
@@ -1297,6 +1297,43 @@ Run:
 venv\Scripts\python -m pytest tests\test_cognition_resolver_loop.py -q
 git add src\kazusa_ai_chatbot\cognition_resolver src\kazusa_ai_chatbot\action_spec\README.md src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2d.py tests\test_cognition_resolver_loop.py
 git commit -m "Add HIL and approval resolver terminals"
+```
+
+Implementation notes:
+
+- Pending HIL and approval state reuses the existing
+  `self_cognition_action_attempts` ledger through the `action_spec`
+  attempt-ledger facade. No new collection was introduced.
+- Pending rows carry `action_kind="resolver_pending_hil"` or
+  `action_kind="resolver_pending_approval"`, `schema_version`/schema marker
+  `resolver_pending_resume.v1`, cognitive-episode audit source, scoped
+  platform/channel/user/source-message identity, expiry, and a prompt-safe
+  `resolver_pending_resume` payload.
+- `stage_1_goal_resolver` loads one matching unexpired pending row after
+  resolver initialization and before the first cognition cycle. The row is
+  projected into `resolver_context`; deterministic code does not keyword-match
+  user approval or answers.
+- L2d receives a generic pending-resume instruction and can emit
+  `resolver_pending_resolution`. The loop applies that resolution only after a
+  full L1/L2/L2d cognition pass.
+- Blocked `human_clarification` and `approval_preparation` observations create
+  pending rows, append the observation with `pending_resume_id`, then run one
+  final cognition cycle so L3/dialog can surface the question or approval
+  state. If that final cycle repeats the same blocked capability, the loop
+  clears pending action requests/action specs and returns a terminal
+  no-visible-output state with a warning instead of looping.
+- Independent review found that L2d could not close a pending row unless the
+  prompt-safe projection included `resume_id`; the projection now includes it
+  without exposing platform/channel/user ids.
+
+Verification:
+
+```powershell
+venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\cognition_resolver\pending.py src\kazusa_ai_chatbot\cognition_resolver\loop.py src\kazusa_ai_chatbot\cognition_resolver\contracts.py src\kazusa_ai_chatbot\nodes\persona_supervisor2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2d.py tests\test_cognition_resolver_loop.py tests\test_cognition_resolver_persona_graph.py tests\test_cognition_resolver_contracts.py
+venv\Scripts\python -m pytest tests\test_cognition_resolver_loop.py tests\test_cognition_resolver_contracts.py tests\test_cognition_resolver_persona_graph.py -q
+# 28 passed
+venv\Scripts\python -m pytest tests\test_cognition_resolver_loop.py tests\test_cognition_resolver_contracts.py tests\test_cognition_resolver_persona_graph.py tests\test_cognition_resolver_l2d_contract.py tests\test_persona_supervisor2_rag2_integration.py tests\test_persona_supervisor2_rag_skip_shape.py tests\test_action_spec_attempt_ledger.py -q
+# 52 passed
 ```
 
 ### Task 9: Add Self-Resolver Constraints
