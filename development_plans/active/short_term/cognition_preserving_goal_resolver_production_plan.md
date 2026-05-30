@@ -1400,7 +1400,7 @@ venv\Scripts\python -m pytest tests\test_cognition_resolver_loop.py -q
 - Modify: `src/kazusa_ai_chatbot/event_logging/README.md`
 - Test: `tests/test_cognition_resolver_loop.py`
 
-- [ ] **Step 1: Add failing telemetry tests**
+- [x] **Step 1: Add failing telemetry tests**
 
 Assert telemetry rows include:
 
@@ -1429,7 +1429,7 @@ Add timeout tests in `tests/test_cognition_resolver_loop.py`:
 - timeout observation is present in the next cognition input;
 - terminal trace contains the timeout status without raw prompt text.
 
-- [ ] **Step 2: Implement telemetry helpers**
+- [x] **Step 2: Implement telemetry helpers**
 
 Expose:
 
@@ -1448,7 +1448,7 @@ under `test_artifacts/cognition_resolver/` for validation. It must not be part
 of normal production persistence and must not include raw DB ids, credentials,
 or raw adapter wire text.
 
-- [ ] **Step 3: Run tests and commit**
+- [x] **Step 3: Run tests and commit**
 
 Run:
 
@@ -1456,6 +1456,35 @@ Run:
 venv\Scripts\python -m pytest tests\test_cognition_resolver_loop.py -q
 git add src\kazusa_ai_chatbot\cognition_resolver\telemetry.py src\kazusa_ai_chatbot\event_logging\README.md tests\test_cognition_resolver_loop.py
 git commit -m "Add cognition resolver telemetry"
+```
+
+Implementation notes:
+
+- `cognition_resolver.telemetry` now builds sanitized `resolver_cycle` and
+  `resolver_terminal` event-shaped dictionaries with cycle counts, bounded
+  L1/L2/L2d summaries, capability kinds, observation statuses, prompt-safe
+  observation summaries, terminal reason, pending-resume status, and duration
+  labels.
+- The current event logging public API has no dedicated resolver recorder and
+  intentionally forbids arbitrary payload recorders. This slice therefore does
+  not persist a new event family; it documents the helper boundary in the event
+  logging ICD and keeps production behavior unchanged.
+- `write_human_readable_resolver_trace(...)` writes bounded Markdown artifacts
+  under `test_artifacts/cognition_resolver/` by default, or a caller-supplied
+  output directory for tests.
+- Tests assert telemetry and local trace artifacts exclude raw user message
+  bodies, raw platform ids, raw user ids, raw message ids, and secret-bearing
+  callback text while preserving enough stage output for human review.
+- Timeout coverage now proves the timeout observation reaches the next
+  cognition cycle and terminal telemetry includes the failed observation status
+  and prompt-safe timeout summary without raw message refs.
+
+Verification:
+
+```powershell
+venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\cognition_resolver\telemetry.py tests\test_cognition_resolver_loop.py
+venv\Scripts\python -m pytest tests\test_cognition_resolver_loop.py -q
+# 15 passed
 ```
 
 ### Task 11: Documentation And Operator Guide

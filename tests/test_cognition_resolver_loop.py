@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from unittest.mock import AsyncMock
 
 import pytest
@@ -30,6 +31,11 @@ from kazusa_ai_chatbot.cognition_resolver.pending import (
 from kazusa_ai_chatbot.cognition_resolver.state import (
     ensure_initial_resolver_inputs,
     project_resolver_context,
+)
+from kazusa_ai_chatbot.cognition_resolver.telemetry import (
+    build_resolver_cycle_event,
+    build_resolver_terminal_event,
+    write_human_readable_resolver_trace,
 )
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
@@ -200,6 +206,60 @@ def _pending_resolution(
     }
 
 
+async def _hil_pending_trace_state() -> dict:
+    """Build a resolver result containing one pending HIL terminal trace."""
+
+    request = _resolver_request(
+        capability_kind="human_clarification",
+        objective="请只问用户所在城市。",
+    )
+
+    async def call_cognition(state: dict) -> dict:
+        resolver_context = state["resolver_context"]
+        if "pending_resolver_resume" not in resolver_context:
+            return _cognition_result(
+                internal_monologue="第一轮：缺少用户城市",
+                resolver_requests=[request],
+            )
+        return _cognition_result(
+            internal_monologue="第二轮：提出最小澄清问题",
+            action_specs=[_speak_action_spec("只询问用户所在城市。")],
+        )
+
+    async def execute_capability(
+        capability_request: dict,
+        _state: dict,
+    ) -> dict:
+        return {
+            "schema_version": RESOLVER_OBSERVATION_VERSION,
+            "observation_id": "resolver_obs_hil_city",
+            "capability_kind": capability_request["capability_kind"],
+            "request_objective": capability_request["objective"],
+            "request_reason": capability_request["reason"],
+            "status": "blocked",
+            "prompt_safe_summary": (
+                "Human clarification required: 请只问用户所在城市。"
+            ),
+            "evidence_refs": [],
+            "created_at_utc": "2026-05-29T21:00:00+00:00",
+        }
+
+    async def upsert_pending_resume(state: dict, observation: dict) -> dict:
+        record = build_pending_resume_record(state, observation)
+        return record["execution_result"]["pending_resume"]
+
+    result = await call_cognition_resolver_loop(
+        _resolver_state(),
+        call_cognition_subgraph_func=call_cognition,
+        execute_capability_func=execute_capability,
+        max_cycles=3,
+        capability_timeout_seconds=1.0,
+        upsert_pending_resume_func=upsert_pending_resume,
+    )
+    return_value = result
+    return return_value
+
+
 @pytest.mark.asyncio
 async def test_loop_runs_cognition_capability_then_cognition_again() -> None:
     """The resolver must recur through cognition after a capability observation."""
@@ -325,6 +385,12 @@ async def test_loop_records_timeout_observation_then_returns_to_cognition() -> N
     assert observation["capability_kind"] == "rag_evidence"
     assert observation["request_objective"] == request["objective"]
     assert "timed out" in observation["prompt_safe_summary"]
+    terminal_event = build_resolver_terminal_event(result, duration_ms=1)
+    terminal_json = json.dumps(terminal_event, ensure_ascii=False)
+    assert "failed" in terminal_json
+    assert "timed out" in terminal_json
+    assert "Need an evidence-backed answer" not in terminal_json
+    assert "message-123" not in terminal_json
 
 
 @pytest.mark.asyncio
@@ -517,6 +583,75 @@ async def test_hil_repeated_after_pending_returns_private_terminal() -> None:
     assert result["resolver_state"]["terminal_reason"] == (
         "blocked capability repeated after pending resume"
     )
+
+
+@pytest.mark.asyncio
+async def test_resolver_telemetry_is_sanitized_and_stage_readable() -> None:
+    """Resolver telemetry should expose stage values without raw ids or text."""
+
+    result = await _hil_pending_trace_state()
+    result["debug_secret_url"] = "https://example.invalid/callback?api_key=raw"
+    trace = result["resolver_state"]["cycle_traces"][0]
+
+    cycle_event = build_resolver_cycle_event(
+        result,
+        trace,
+        duration_ms=6000,
+    )
+    terminal_event = build_resolver_terminal_event(result, duration_ms=200)
+    event_json = json.dumps(
+        {
+            "cycle": cycle_event,
+            "terminal": terminal_event,
+        },
+        ensure_ascii=False,
+    )
+
+    assert cycle_event["component"] == "nodes.cognition_resolver"
+    assert cycle_event["event_kind"] == "resolver_cycle"
+    assert cycle_event["labels"]["selected_capability_kind"] == (
+        "human_clarification"
+    )
+    assert cycle_event["labels"]["observation_status"] == "blocked"
+    assert cycle_event["labels"]["duration_label"] == "slow"
+    assert terminal_event["event_kind"] == "resolver_terminal"
+    assert terminal_event["metrics"]["cycle_count"] == 2
+    assert terminal_event["labels"]["pending_resume_status"] == "waiting_for_user"
+    assert terminal_event["labels"]["duration_label"] == "fast"
+    assert "第一轮：缺少用户城市" in event_json
+    assert "human_clarification" in event_json
+    assert "blocked" in event_json
+    assert "Need an evidence-backed answer" not in event_json
+    assert "message-123" not in event_json
+    assert "channel-123" not in event_json
+    assert "global-user-123" not in event_json
+    assert "platform-user-123" not in event_json
+    assert "api_key=raw" not in event_json
+
+
+@pytest.mark.asyncio
+async def test_resolver_human_readable_trace_is_prompt_safe(tmp_path) -> None:
+    """Local resolver traces should be readable without raw platform refs."""
+
+    result = await _hil_pending_trace_state()
+
+    trace_path = write_human_readable_resolver_trace(
+        result,
+        tmp_path,
+        filename_stem="B04 HIL/raw ids",
+    )
+    trace_text = trace_path.read_text(encoding="utf-8")
+
+    assert trace_path.parent == tmp_path
+    assert trace_path.name == "B04_HIL_raw_ids.md"
+    assert "# Cognition Resolver Trace" in trace_text
+    assert "## Cycle 0" in trace_text
+    assert "human_clarification" in trace_text
+    assert "waiting_for_user" in trace_text
+    assert "Need an evidence-backed answer" not in trace_text
+    assert "message-123" not in trace_text
+    assert "channel-123" not in trace_text
+    assert "global-user-123" not in trace_text
 
 
 @pytest.mark.asyncio
