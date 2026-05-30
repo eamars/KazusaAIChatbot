@@ -76,6 +76,26 @@ stage_0_msg_decontexualizer
   -> final_dialog + episode_trace + consolidation_state
 ```
 
+When `COGNITION_RESOLVER_ENABLED=true`, `stage_1_research` and
+`stage_2_cognition` are replaced by a bounded resolver stage:
+
+```text
+stage_0_msg_decontexualizer
+  -> stage_1_goal_resolver
+       repeated call_cognition_subgraph cycles
+       each cycle still runs L1 -> L2 -> L2d
+       demand-driven resolver capabilities
+  -> stage_2_memory_lifecycle
+  -> stage_3_action / stage_3_no_response
+```
+
+The resolver is a recurrence controller, not a separate assistant harness. RAG,
+web/current evidence, HIL blockers, approval blockers, and private
+self-resolution are capability observations that feed another complete
+L1/L2/L2d cognition pass before final L3/dialog rendering. Simple turns can
+still behave like a one-cycle resolver: cognition selects `speak` or silence
+without requesting extra evidence.
+
 The returned `consolidation_state` is the completed persona snapshot. The
 service uses it after visible surface handling to record conversation progress
 and run consolidation. That timing is intentional: the user should not wait for

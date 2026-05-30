@@ -1495,7 +1495,7 @@ venv\Scripts\python -m pytest tests\test_cognition_resolver_loop.py -q
 - Modify: `src/kazusa_ai_chatbot/action_spec/README.md`
 - Modify: `docs/HOWTO.md`
 
-- [ ] **Step 1: Update cognition node docs**
+- [x] **Step 1: Update cognition node docs**
 
 Document the resolver-enabled persona graph:
 
@@ -1510,7 +1510,7 @@ stage_0_msg_decontexualizer
 
 State that every cycle runs L1 -> L2 -> L2d.
 
-- [ ] **Step 2: Update action-spec docs**
+- [x] **Step 2: Update action-spec docs**
 
 Clarify that final actions and evidence capabilities are separate:
 
@@ -1520,7 +1520,7 @@ ResolverCapabilityRequestV1 represents evidence or blocker requests that must
 feed another cognition cycle before final action selection.
 ```
 
-- [ ] **Step 3: Update HOWTO**
+- [x] **Step 3: Update HOWTO**
 
 Document:
 
@@ -1536,13 +1536,34 @@ Add validation commands:
 venv\Scripts\python -m pytest tests\test_cognition_resolver_contracts.py tests\test_cognition_resolver_loop.py tests\test_cognition_resolver_persona_graph.py tests\test_cognition_resolver_l2d_contract.py -q
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Run:
 
 ```powershell
 git add src\kazusa_ai_chatbot\nodes\README.md src\kazusa_ai_chatbot\action_spec\README.md docs\HOWTO.md
 git commit -m "Document cognition resolver architecture"
+```
+
+Implementation notes:
+
+- `nodes/README.md` now documents the resolver-enabled persona graph as a
+  feature-flagged variant after decontextualization, and states that every
+  resolver cycle still runs the shared L1 -> L2 -> L2d cognition stack.
+- `action_spec/README.md` now separates `ResolverCapabilityRequestV1` from
+  `ActionSpecV1`: resolver capabilities produce evidence/blocker observations
+  for another cognition cycle, while final action specs represent selected
+  surfaces or private actions.
+- `docs/HOWTO.md` now lists `COGNITION_RESOLVER_ENABLED`,
+  `COGNITION_RESOLVER_MAX_CYCLES`, and
+  `COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS`, with the documented
+  deterministic validation command.
+
+Verification:
+
+```powershell
+venv\Scripts\python -m pytest tests\test_cognition_resolver_contracts.py tests\test_cognition_resolver_loop.py tests\test_cognition_resolver_persona_graph.py tests\test_cognition_resolver_l2d_contract.py -q
+# 33 passed
 ```
 
 ### Task 12: Real LLM Validation

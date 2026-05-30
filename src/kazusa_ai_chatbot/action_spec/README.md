@@ -56,6 +56,21 @@ Trace contracts live in `results.py`:
 Current runtime accepts only `cognition_mode="deliberative"`. `reflex` is a
 reserved schema slot and fails validation in this implementation slice.
 
+## Resolver Capability Requests
+
+`ActionSpecV1` represents selected surfaces and private actions that have
+survived cognition. `ResolverCapabilityRequestV1` is earlier: it represents a
+bounded evidence, HIL, approval, or private self-resolution request that must
+return a prompt-safe observation into another full cognition cycle before final
+action selection.
+
+This keeps the ownership line clear:
+
+- resolver capabilities retrieve evidence or create blocked observations;
+- L1 -> L2 -> L2d re-judges the turn after each observation;
+- only final L2d action requests become `ActionSpecV1` rows for L3, private
+  handlers, scheduler handoff, or consolidation traces.
+
 ## Capabilities
 
 `build_initial_action_capabilities()` registers the available runtime
