@@ -38,6 +38,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [goal_resolver_poc_plan.md](active/short_term/goal_resolver_poc_plan.md) | Medium production POC plan | in_progress |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 
 ## Supporting Experiment Records

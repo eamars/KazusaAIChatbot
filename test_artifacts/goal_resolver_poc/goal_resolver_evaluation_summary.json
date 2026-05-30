@@ -1,0 +1,108 @@
+{
+  "accepted_count": 10,
+  "all_accepted": true,
+  "mcp_status": "started",
+  "runs": [
+    {
+      "accepted": true,
+      "case_id": "R01_nz_qwen_hardware",
+      "evaluation_status": "pass",
+      "iterations": 3,
+      "run_artifact": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\goal_resolver_poc\\goal_resolver_run_R01_nz_qwen_hardware.json",
+      "score": 100,
+      "terminal_contract_valid": true,
+      "terminal_mode": "final"
+    },
+    {
+      "accepted": true,
+      "case_id": "R02_favorite_person_reason",
+      "evaluation_status": "pass",
+      "iterations": 4,
+      "run_artifact": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\goal_resolver_poc\\goal_resolver_run_R02_favorite_person_reason.json",
+      "score": 100,
+      "terminal_contract_valid": true,
+      "terminal_mode": "final"
+    },
+    {
+      "accepted": true,
+      "case_id": "R03_self_generated_goal",
+      "evaluation_status": "pass",
+      "iterations": 2,
+      "run_artifact": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\goal_resolver_poc\\goal_resolver_run_R03_self_generated_goal.json",
+      "score": 100,
+      "terminal_contract_valid": true,
+      "terminal_mode": "final"
+    },
+    {
+      "accepted": true,
+      "case_id": "R04_hil_missing_constraints",
+      "evaluation_status": "pass",
+      "iterations": 1,
+      "run_artifact": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\goal_resolver_poc\\goal_resolver_run_R04_hil_missing_constraints.json",
+      "score": 100,
+      "terminal_contract_valid": true,
+      "terminal_mode": "needs_human"
+    },
+    {
+      "accepted": true,
+      "case_id": "R05_live_fact_freshness",
+      "evaluation_status": "pass",
+      "iterations": 12,
+      "run_artifact": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\goal_resolver_poc\\goal_resolver_run_R05_live_fact_freshness.json",
+      "score": 95,
+      "terminal_contract_valid": true,
+      "terminal_mode": "final"
+    },
+    {
+      "accepted": true,
+      "case_id": "R06_hard_public_fact_lookup",
+      "evaluation_status": "pass",
+      "iterations": 1,
+      "run_artifact": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\goal_resolver_poc\\goal_resolver_run_R06_hard_public_fact_lookup.json",
+      "score": 100,
+      "terminal_contract_valid": true,
+      "terminal_mode": "final"
+    },
+    {
+      "accepted": true,
+      "case_id": "R07_workspace_code_repair",
+      "evaluation_status": "pass",
+      "iterations": 4,
+      "run_artifact": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\goal_resolver_poc\\goal_resolver_run_R07_workspace_code_repair.json",
+      "score": 100,
+      "terminal_contract_valid": true,
+      "terminal_mode": "final"
+    },
+    {
+      "accepted": true,
+      "case_id": "R08_local_artifact_rca",
+      "evaluation_status": "pass",
+      "iterations": 1,
+      "run_artifact": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\goal_resolver_poc\\goal_resolver_run_R08_local_artifact_rca.json",
+      "score": 100,
+      "terminal_contract_valid": true,
+      "terminal_mode": "final"
+    },
+    {
+      "accepted": true,
+      "case_id": "R09_internal_conflict_resolution",
+      "evaluation_status": "pass",
+      "iterations": 2,
+      "run_artifact": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\goal_resolver_poc\\goal_resolver_run_R09_internal_conflict_resolution.json",
+      "score": 100,
+      "terminal_contract_valid": true,
+      "terminal_mode": "final"
+    },
+    {
+      "accepted": true,
+      "case_id": "R10_permissioned_side_effect",
+      "evaluation_status": "pass",
+      "iterations": 1,
+      "run_artifact": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\goal_resolver_poc\\goal_resolver_run_R10_permissioned_side_effect.json",
+      "score": 100,
+      "terminal_contract_valid": true,
+      "terminal_mode": "pending_approval"
+    }
+  ],
+  "total_count": 10
+}
