@@ -27,6 +27,21 @@ def _commitment(index: int) -> dict[str, object]:
     }
 
 
+def _no_due_commitment(unit_id: str, fact: str) -> dict[str, object]:
+    """Build one no-due active commitment supplied by the direct reader."""
+
+    return {
+        "unit_id": unit_id,
+        "unit_type": "active_commitment",
+        "fact": fact,
+        "summary": fact,
+        "status": "active",
+        "due_at": None,
+        "due_state": "no_due_date",
+        "updated_at": "2026-05-29T03:14:23+00:00",
+    }
+
+
 def _state_with_commitments(commitments: list[dict[str, object]]) -> dict[str, Any]:
     return {
         "storage_timestamp_utc": "2026-05-17T06:00:49+00:00",
@@ -53,6 +68,9 @@ def _state_with_commitments(commitments: list[dict[str, object]]) -> dict[str, A
         "conversation_progress": {
             "current_thread": "Promise fulfillment check.",
         },
+        "final_dialog": [],
+        "surface_outputs": [],
+        "action_results": [],
         "cognitive_episode": {
             "episode_id": "episode-001",
         },
@@ -285,6 +303,111 @@ def test_materialization_caps_valid_lifecycle_updates_to_three() -> None:
         for action_spec in materialized["action_specs"]
     ] == ["unit-001", "unit-002", "unit-003"]
     assert materialized["memory_lifecycle_context"]["warnings"]
+
+
+@pytest.mark.asyncio
+async def test_post_surface_review_uses_final_dialog_and_direct_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Final visible dialog should close alias-backed no-due commitments."""
+
+    state = _state_with_commitments([_commitment(1)])
+    state["final_dialog"] = [
+        '哇提拉米苏到啦！债都清了哦！那我就不客气收下啦～'
+    ]
+    state["surface_outputs"] = [
+        {
+            "schema_version": "surface_output.v1",
+            "surface_kind": "text",
+            "visibility": "user_visible",
+            "action_attempt_id": None,
+            "fragments": state["final_dialog"],
+            "artifact_refs": [],
+            "delivery_intent": "deliver_now",
+            "created_at": "2026-05-29T03:14:23+00:00",
+        }
+    ]
+    direct_units = [
+        _no_due_commitment(
+            "unit-tiramisu",
+            '用户答应给角色提拉米苏。',
+        )
+    ]
+    fake_llm = _FakeAsyncLLM({
+        "decision": "lifecycle_change",
+        "lifecycle_decisions": [
+            {
+                "target_alias": "commitment_1",
+                "decision": "fulfilled",
+                "role": "承认提拉米苏债已清",
+                "evidence_anchor": "final_dialog 明确说提拉米苏债都清了",
+            }
+        ],
+        "content_anchor_roles": [
+            {
+                "role": "acknowledge_fulfillment",
+                "anchor": "提拉米苏债已清，不要再当作欠账重开",
+            }
+        ],
+    })
+    monkeypatch.setattr(module, "_memory_lifecycle_specialist_llm", fake_llm)
+
+    result = await module.call_post_surface_memory_lifecycle_review(
+        state,
+        direct_units,
+    )
+    action_specs = result["action_specs"]
+    prompt_payload = json.loads(fake_llm.messages[1].content)
+    serialized_prompt = json.dumps(prompt_payload, ensure_ascii=False)
+
+    assert len(action_specs) == 1
+    assert action_specs[0]["kind"] == APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY
+    assert action_specs[0]["target"]["target_id"] == "unit-tiramisu"
+    assert action_specs[0]["params"]["lifecycle_decision"] == "fulfilled"
+    assert prompt_payload["active_commitments"][0]["due_state"] == "no_due_date"
+    assert prompt_payload["final_dialog"] == state["final_dialog"]
+    assert "unit-tiramisu" not in serialized_prompt
+    assert "unit-001" not in serialized_prompt
+
+
+@pytest.mark.asyncio
+async def test_post_surface_review_leaves_ambiguous_dessert_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ambiguous future dessert language should not close a commitment."""
+
+    state = _state_with_commitments([])
+    state["final_dialog"] = [
+        '下次你再拿甜点来，我再考虑要不要收账。'
+    ]
+    state["surface_outputs"] = [
+        {
+            "schema_version": "surface_output.v1",
+            "surface_kind": "text",
+            "visibility": "user_visible",
+            "action_attempt_id": None,
+            "fragments": state["final_dialog"],
+            "artifact_refs": [],
+            "delivery_intent": "deliver_now",
+            "created_at": "2026-05-29T03:14:23+00:00",
+        }
+    ]
+    fake_llm = _FakeAsyncLLM({
+        "decision": "no_lifecycle_change",
+        "lifecycle_decisions": [],
+        "content_anchor_roles": [],
+    })
+    monkeypatch.setattr(module, "_memory_lifecycle_specialist_llm", fake_llm)
+
+    result = await module.call_post_surface_memory_lifecycle_review(
+        state,
+        [_no_due_commitment("unit-tiramisu", '用户答应给角色提拉米苏。')],
+    )
+
+    assert result["action_specs"] == []
+    assert result["memory_lifecycle_context"]["decision"] == (
+        "no_lifecycle_change"
+    )
 
 
 @pytest.mark.asyncio

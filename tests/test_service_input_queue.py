@@ -270,6 +270,11 @@ def _patch_common_dependencies(monkeypatch, graph) -> None:
         "build_promoted_reflection_context",
         AsyncMock(return_value={}),
     )
+    monkeypatch.setattr(
+        service_module,
+        "_run_post_turn_memory_lifecycle_background",
+        AsyncMock(side_effect=lambda state: state),
+    )
     monkeypatch.setattr(service_module, "_graph", graph)
 
 

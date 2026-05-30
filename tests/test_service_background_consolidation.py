@@ -11,6 +11,10 @@ import pytest
 from fastapi import BackgroundTasks
 
 from kazusa_ai_chatbot import service as service_module
+from kazusa_ai_chatbot.action_spec.registry import (
+    APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+)
+from kazusa_ai_chatbot.brain_service import post_turn as post_turn_module
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 
@@ -171,12 +175,114 @@ def _graph_result(consolidation_state: Mapping | dict | None = None) -> dict:
     return return_value
 
 
-def _patch_chat_dependencies(monkeypatch, graph) -> None:
+def _memory_lifecycle_action_spec(unit_id: str) -> dict[str, object]:
+    """Build one executable memory-lifecycle action fixture."""
+
+    return_value = {
+        "schema_version": "action_spec.v1",
+        "kind": APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+        "cognition_mode": "deliberative",
+        "source_refs": [],
+        "target": {
+            "schema_version": "action_target.v1",
+            "target_kind": "memory_unit",
+            "target_id": unit_id,
+            "owner": "user_memory_units",
+            "scope": {"unit_type": "active_commitment"},
+        },
+        "params": {
+            "memory_kind": "user_memory_unit",
+            "unit_type": "active_commitment",
+            "unit_id": unit_id,
+            "lifecycle_decision": "fulfilled",
+            "due_at": None,
+        },
+        "urgency": "background",
+        "visibility": "private",
+        "deadline": None,
+        "continuation": {
+            "schema_version": "action_continuation.v1",
+            "mode": "none",
+            "episode_type": None,
+            "max_depth": 0,
+            "include_result_as": None,
+        },
+        "reason": "The final visible dialog says the commitment is complete.",
+    }
+    return return_value
+
+
+def _memory_lifecycle_action_result(unit_id: str) -> dict[str, object]:
+    """Build one executed memory-lifecycle action-result fixture."""
+
+    return_value = {
+        "schema_version": "action_result.v1",
+        "action_attempt_id": f"action_attempt:{unit_id}",
+        "action_kind": APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+        "handler_owner": "memory_lifecycle",
+        "status": "executed",
+        "visibility": "private",
+        "result_summary": f"memory lifecycle updated: {unit_id}",
+        "result_refs": [],
+        "continuation": {
+            "schema_version": "action_continuation.v1",
+            "mode": "none",
+            "episode_type": None,
+            "max_depth": 0,
+            "include_result_as": None,
+        },
+        "completed_at": "2026-04-25T18:00:58+12:00",
+    }
+    return return_value
+
+
+def _post_turn_lifecycle_state() -> dict:
+    """Build a completed visible-turn state for lifecycle background tests."""
+
+    state = _consolidation_state()
+    state["cognitive_episode"] = {
+        "episode_id": "episode-001",
+        "trigger_source": "user_message",
+    }
+    state["action_specs"] = []
+    state["action_results"] = []
+    state["surface_outputs"] = [
+        {
+            "schema_version": "surface_output.v1",
+            "surface_kind": "text",
+            "visibility": "user_visible",
+            "action_attempt_id": None,
+            "fragments": state["final_dialog"],
+            "artifact_refs": [],
+            "delivery_intent": "deliver_now",
+            "created_at": state["storage_timestamp_utc"],
+        }
+    ]
+    state["episode_trace"] = {
+        "schema_version": "episode_trace.v1",
+        "episode_id": "episode-001",
+        "trigger_source": "user_message",
+        "cognition_refs": [],
+        "action_specs": [],
+        "action_results": [],
+        "surface_outputs": state["surface_outputs"],
+        "created_at": state["storage_timestamp_utc"],
+    }
+    return state
+
+
+def _patch_chat_dependencies(
+    monkeypatch,
+    graph,
+    *,
+    patch_post_turn_lifecycle: bool = True,
+) -> None:
     """Patch service dependencies that are outside queue-worker behavior.
 
     Args:
         monkeypatch: Pytest monkeypatch fixture.
         graph: Fake graph object installed as the service graph.
+        patch_post_turn_lifecycle: Whether to stub the real post-turn DB path.
 
     Returns:
         None.
@@ -248,6 +354,12 @@ def _patch_chat_dependencies(monkeypatch, graph) -> None:
         AsyncMock(),
     )
     monkeypatch.setattr(service_module, "save_conversation", AsyncMock())
+    if patch_post_turn_lifecycle:
+        monkeypatch.setattr(
+            service_module,
+            "_run_post_turn_memory_lifecycle_background",
+            AsyncMock(side_effect=lambda state: state),
+        )
     monkeypatch.setattr(service_module, "_graph", graph)
 
 
@@ -662,6 +774,225 @@ async def test_chat_consolidates_private_action_result_without_dialog(monkeypatc
     )
     save_assistant_message.assert_not_awaited()
     progress_recorder.assert_not_awaited()
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_post_turn_lifecycle_iterates_after_productive_passes() -> None:
+    """Post-turn lifecycle review should re-query after executed updates."""
+
+    state = _post_turn_lifecycle_state()
+    read_batches = [
+        [{"unit_id": "unit-001", "fact": "User promised dessert."}],
+        [{"unit_id": "unit-002", "fact": "User promised tea."}],
+        [],
+    ]
+    review_unit_ids: list[str] = []
+
+    async def _reader(*, global_user_id: str, limit: int) -> dict[str, object]:
+        assert global_user_id == "global-user-1"
+        assert limit == post_turn_module.POST_SURFACE_ACTIVE_COMMITMENT_REVIEW_LIMIT
+        documents = read_batches.pop(0)
+        return {
+            "documents": documents,
+            "limit": limit,
+            "limit_exceeded": False,
+        }
+
+    async def _review(
+        _state: dict,
+        active_commitment_units: list[dict[str, object]],
+    ) -> dict[str, object]:
+        unit_id = str(active_commitment_units[0]["unit_id"])
+        review_unit_ids.append(unit_id)
+        return {
+            "action_specs": [_memory_lifecycle_action_spec(unit_id)],
+            "memory_lifecycle_context": {
+                "schema_version": "memory_lifecycle_context.v1",
+                "source": "memory_lifecycle_specialist",
+                "decision": "lifecycle_change",
+                "lifecycle_decisions": [
+                    {"target_alias": "commitment_1", "decision": "fulfilled"}
+                ],
+                "content_anchor_roles": [],
+                "visible_alias_count": 1,
+                "omitted_alias_count": 0,
+                "warnings": [],
+            },
+        }
+
+    async def _execute(
+        action_specs: list[dict],
+        *,
+        storage_timestamp_utc: str,
+        executed_action_attempt_ids: set[str] | None = None,
+        record_attempt_func=None,
+    ) -> list[dict]:
+        del storage_timestamp_utc, executed_action_attempt_ids, record_attempt_func
+        return [
+            _memory_lifecycle_action_result(
+                str(action_spec["params"]["unit_id"]),
+            )
+            for action_spec in action_specs
+        ]
+
+    updated = await post_turn_module.run_post_turn_memory_lifecycle_background(
+        state,
+        active_commitment_reader=_reader,
+        review_func=_review,
+        execute_action_specs_func=_execute,
+        logger=service_module.logger,
+        no_remember=False,
+        visible_response_sent=True,
+        think_only_suppressed=False,
+    )
+
+    assert updated is not state
+    assert review_unit_ids == ["unit-001", "unit-002"]
+    assert [
+        action_result["action_kind"]
+        for action_result in updated["action_results"]
+    ] == [
+        APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+        APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+    ]
+    assert updated["episode_trace"]["action_results"] == updated["action_results"]
+    assert [
+        action_spec["params"]["unit_id"]
+        for action_spec in updated["action_specs"]
+    ] == ["unit-001", "unit-002"]
+
+
+@pytest.mark.asyncio
+async def test_post_turn_lifecycle_skips_structural_blockers() -> None:
+    """Post-turn lifecycle review should leave blocked states unchanged."""
+
+    state = _post_turn_lifecycle_state()
+    state_with_existing_result = dict(state)
+    state_with_existing_result["action_results"] = [
+        _memory_lifecycle_action_result("unit-existing")
+    ]
+
+    async def _reader(*, global_user_id: str, limit: int) -> dict[str, object]:
+        raise AssertionError(
+            f"reader should not run: user={global_user_id} limit={limit}"
+        )
+
+    async def _review(
+        _state: dict,
+        active_commitment_units: list[dict[str, object]],
+    ) -> dict[str, object]:
+        raise AssertionError(f"review should not run: {active_commitment_units}")
+
+    async def _execute(
+        action_specs: list[dict],
+        *,
+        storage_timestamp_utc: str,
+        executed_action_attempt_ids: set[str] | None = None,
+        record_attempt_func=None,
+    ) -> list[dict]:
+        raise AssertionError(f"execute should not run: {action_specs}")
+
+    cases = [
+        {
+            "state": state,
+            "no_remember": True,
+            "visible_response_sent": True,
+            "think_only_suppressed": False,
+        },
+        {
+            "state": state,
+            "no_remember": False,
+            "visible_response_sent": False,
+            "think_only_suppressed": False,
+        },
+        {
+            "state": state,
+            "no_remember": False,
+            "visible_response_sent": True,
+            "think_only_suppressed": True,
+        },
+        {
+            "state": state_with_existing_result,
+            "no_remember": False,
+            "visible_response_sent": True,
+            "think_only_suppressed": False,
+        },
+    ]
+
+    for case in cases:
+        result = await post_turn_module.run_post_turn_memory_lifecycle_background(
+            case["state"],
+            active_commitment_reader=_reader,
+            review_func=_review,
+            execute_action_specs_func=_execute,
+            logger=service_module.logger,
+            no_remember=case["no_remember"],
+            visible_response_sent=case["visible_response_sent"],
+            think_only_suppressed=case["think_only_suppressed"],
+        )
+
+        assert result is case["state"]
+
+
+@pytest.mark.asyncio
+async def test_chat_runs_post_turn_lifecycle_before_progress_and_consolidation(
+    monkeypatch,
+) -> None:
+    """Progress and consolidation should consume lifecycle-updated state."""
+
+    await _reset_queue_state()
+    captured_states: dict[str, dict] = {}
+    consolidation_done = asyncio.Event()
+
+    async def _post_turn_lifecycle(state: dict) -> dict:
+        updated = dict(state)
+        updated["post_lifecycle_marker"] = "updated"
+        return updated
+
+    async def _progress_recorder(state: dict) -> None:
+        captured_states["progress"] = dict(state)
+
+    async def _consolidation_runner(state: dict) -> None:
+        captured_states["consolidation"] = dict(state)
+        consolidation_done.set()
+
+    monkeypatch.setattr(service_module, "_save_assistant_message", AsyncMock())
+    monkeypatch.setattr(
+        service_module,
+        "_run_post_turn_memory_lifecycle_background",
+        _post_turn_lifecycle,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_run_conversation_progress_record_background",
+        _progress_recorder,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_run_consolidation_background",
+        _consolidation_runner,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_run_internal_monologue_residue_record_background",
+        AsyncMock(),
+    )
+    _patch_chat_dependencies(
+        monkeypatch,
+        _FakeGraph(_graph_result()),
+        patch_post_turn_lifecycle=False,
+    )
+
+    response = await service_module.chat(
+        _chat_request(),
+        BackgroundTasks(),
+    )
+
+    assert response.messages == ["ok"]
+    await asyncio.wait_for(consolidation_done.wait(), timeout=1.0)
+    assert captured_states["progress"]["post_lifecycle_marker"] == "updated"
+    assert captured_states["consolidation"]["post_lifecycle_marker"] == "updated"
     await _reset_queue_state()
 
 
