@@ -1573,7 +1573,7 @@ venv\Scripts\python -m pytest tests\test_cognition_resolver_contracts.py tests\t
 - Create: `test_artifacts/cognition_resolver/`
 - Modify: this plan file with execution evidence after validation
 
-- [ ] **Step 1: Run deterministic tests**
+- [x] **Step 1: Run deterministic tests**
 
 Run:
 
@@ -1583,7 +1583,7 @@ venv\Scripts\python -m pytest tests\test_cognition_resolver_contracts.py tests\t
 
 Expected: all pass.
 
-- [ ] **Step 2: Rerun exact B01 direct-response live case**
+- [x] **Step 2: Rerun exact B01 direct-response live case**
 
 Use the debug adapter or existing character-test workflow with resolver enabled
 and max cycles 3. Input must exactly match the baseline case:
@@ -1599,7 +1599,7 @@ Expected:
 - L2d selects `speak` or silence based on character judgment;
 - visible output, if any, is rendered by L3.
 
-- [ ] **Step 3: Rerun exact B02 memory/RAG-demand live case**
+- [x] **Step 3: Rerun exact B02 memory/RAG-demand live case**
 
 Input:
 
@@ -1613,7 +1613,7 @@ Expected:
 - RAG observation re-enters cognition;
 - later cognition cycle selects final surface or evidence-backed insufficiency.
 
-- [ ] **Step 4: Rerun exact B03 current-fact live case**
+- [x] **Step 4: Rerun exact B03 current-fact live case**
 
 Input:
 
@@ -1627,7 +1627,7 @@ Expected:
 - observation contains freshness caveat or current evidence;
 - final stance distinguishes current from stale information.
 
-- [ ] **Step 5: Rerun exact B04 HIL live case**
+- [x] **Step 5: Rerun exact B04 HIL live case**
 
 Input:
 
@@ -1642,7 +1642,7 @@ Expected:
 - L3 asks one minimal question;
 - no fabricated location, budget, transport, or preference.
 
-- [ ] **Step 6: Rerun exact B05 approval live case**
+- [x] **Step 6: Rerun exact B05 approval live case**
 
 Input:
 
@@ -1658,7 +1658,7 @@ Expected:
 - a pending approval resume record is written with scope and expiry;
 - L3 explains the pending action and waits for confirmation.
 
-- [ ] **Step 7: Run one self-resolver dry run**
+- [x] **Step 7: Run one self-resolver dry run**
 
 Use an internal-thought/self-cognition trigger packet with a private bounded
 goal. Expected:
@@ -1668,7 +1668,7 @@ goal. Expected:
   delivery permission flow;
 - trace shows private observation and final private action/no-response.
 
-- [ ] **Step 8: Write validation report**
+- [x] **Step 8: Write validation report**
 
 Create:
 
@@ -1687,11 +1687,87 @@ The report must include for each case:
 - final action/surface;
 - pass/fail assessment and residual risk.
 
-- [ ] **Step 9: Commit validation artifacts only if explicitly requested**
+- [x] **Step 9: Commit validation artifacts only if explicitly requested**
 
 By default, do not force-add ignored `test_artifacts`. If the user asks to
 commit reports, force-add only the final human-readable report and bounded raw
 trace summaries, not cache directories or large sandbox outputs.
+
+Execution evidence, 2026-05-30:
+
+- Deterministic command:
+
+  ```powershell
+  venv\Scripts\python -m pytest tests\test_cognition_resolver_contracts.py tests\test_cognition_resolver_loop.py tests\test_cognition_resolver_persona_graph.py tests\test_cognition_resolver_l2d_contract.py tests\test_cognition_prompt_contract_text.py::test_l2d_prompt_preserves_resolver_terminal_boundaries tests\test_dialog_agent.py::test_dialog_prompts_use_content_anchors_as_semantic_authority -q
+  # 35 passed
+  ```
+
+- Final after-run artifacts:
+
+  ```text
+  test_artifacts/cognition_resolver/after_20260530/B01_direct_after_result.json
+  test_artifacts/cognition_resolver/after_20260530/B01_direct_resolver_trace.md
+  test_artifacts/cognition_resolver/after_20260530/B02_memory_after_result.json
+  test_artifacts/cognition_resolver/after_20260530/B02_memory_resolver_trace.md
+  test_artifacts/cognition_resolver/after_20260530/B03_current_facts_after_result.json
+  test_artifacts/cognition_resolver/after_20260530/B03_current_facts_resolver_trace.md
+  test_artifacts/cognition_resolver/after_20260530/B04_hil_after_result.json
+  test_artifacts/cognition_resolver/after_20260530/B04_hil_resolver_trace.md
+  test_artifacts/cognition_resolver/after_20260530/B05_approval_after_result.json
+  test_artifacts/cognition_resolver/after_20260530/B05_approval_resolver_trace.md
+  test_artifacts/cognition_resolver/after_20260530/S01_self_goal_after_result.json
+  test_artifacts/cognition_resolver/after_20260530/S01_self_goal_resolver_trace.md
+  ```
+
+- Human-readable validation report:
+
+  ```text
+  test_artifacts/cognition_resolver/cognition_resolver_validation_report.md
+  ```
+
+Validation harness note:
+
+- The artifacts use real `started_at_utc` / `ended_at_utc` write times, and a
+  fixed scenario clock of `2026-05-30 20:30:00` local time for cognitive
+  episode time, observation `created_at_utc`, and cycle traces.
+- B03's saved bounded trace proves that no current facts were confirmed.
+  Terminal output during the run showed an `unknown tool` failure from the
+  local web-search backend, but that low-level error is not preserved in the
+  saved result/trace artifact.
+
+Final live validation summary:
+
+- B01 direct: 1 cycle, no observation, final visible `speak`.
+- B02 memory: 2 cycles, `rag_evidence` observation, final
+  evidence-insufficient answer.
+- B03 current facts: 2 cycles, `web_evidence` observation, final caveated
+  answer after no confirmed current facts were available in the saved trace;
+  dialog no longer exposes internal RAG/tool labels.
+- B04 HIL: 2 cycles, blocked `human_clarification` observation, pending resume,
+  final one-question location clarification.
+- B05 approval: 2 cycles, blocked `approval_preparation` observation, pending
+  approval resume, final plan/impact/confirmation wording; no reminder
+  scheduler side effect executed.
+- S01 self: 2 cycles, private `self_goal_resolution` observation, terminal
+  no-action/no-visible-output state.
+
+Validation lessons applied to code:
+
+- L2d needed hard prompt boundaries for resolver recurrence. Without them, the
+  local model repeated failed evidence requests, repeated blocked HIL/approval
+  requests, or misused `self_goal_resolution`.
+- Memory/relationship judgment must explicitly request `rag_evidence` before
+  speaking when the user asks for judgment from existing memory and allows an
+  evidence-insufficient answer.
+- `self_goal_resolution` must be a resolver capability request, not an action
+  capability; a succeeded self-goal observation must not be repeated without a
+  new private target.
+- Dialog must paraphrase internal pipeline labels instead of exposing RAG,
+  resolver, L1/L2/L3, tool, or agent names in visible speech.
+- Dialog must also preserve the social meaning of physical-emotion anchors
+  without emitting body or physical-sensation words in visible chat text.
+- The direct harness is required for per-cycle resolver evidence because the
+  `/chat` service response does not expose `resolver_state`.
 
 ## Acceptance Criteria
 

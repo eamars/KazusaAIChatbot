@@ -433,6 +433,43 @@ def test_l2d_prompt_defines_speak_and_scene_grounded_detail() -> None:
     )
 
 
+def test_l2d_prompt_preserves_resolver_terminal_boundaries() -> None:
+    """L2d should keep resolver selection inside source and terminal limits."""
+    prompt_text = l2d_module._ACTION_INITIALIZER_PROMPT
+
+    for required_text in (
+        '`approval_preparation`',
+        '`human_clarification`',
+        '`self_goal_resolution`',
+        '触发来源是 `user_message`',
+        '不是 resolver capability',
+        'blocked observation',
+        'pending resume',
+        '不要再次请求同一个 blocked capability',
+        '不要重复请求同类检索',
+        '解析器续轮硬规则',
+        '返回一个 `speak` action_request',
+        '不要增加新的澄清项',
+        'approval summary',
+        '不得留空',
+        '触发来源：user_message',
+        '禁止返回 `self_goal_resolution`',
+        '必须写入 `resolver_capability_requests`',
+        '绝不能写入 `action_requests.capability`',
+        '证据不够就说明证据不够',
+        '不要为了缩小范围或标准而选择 `human_clarification`',
+        '先选择 `rag_evidence`',
+        '缺少可选范围、标准或排序口径不等于缺少必须由用户提供的信息',
+        '第一轮必须选择 `rag_evidence`',
+        '没有本轮 `rag_evidence` observation 前不得直接 `speak`',
+        '需要先收束目标、整理优先级、拆解私有后续判断或形成下一步内部目标',
+        'resolver_capability_requests[].capability_kind',
+        '私有目标收束已经完成',
+        '没有新的具体私有动作就返回空数组',
+    ):
+        assert required_text in prompt_text
+
+
 def test_prompts_preserve_structured_output_enums() -> None:
     """Prompt rewrites must keep downstream enum vocabularies visible."""
     for enum_value in ('CONFIRM', 'REFUSE', 'TENTATIVE', 'DIVERGE', 'CHALLENGE'):

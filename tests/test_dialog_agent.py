@@ -252,11 +252,23 @@ def test_dialog_prompts_use_content_anchors_as_semantic_authority() -> None:
     """Generator and evaluator prompts should not expose stale history fields."""
 
     assert 'content_anchors` 是本轮可见回复的唯一语义内容来源' in _DIALOG_GENERATOR_PROMPT
+    assert '目标时间改成当前时间' in _DIALOG_GENERATOR_PROMPT
+    assert '等待确认条件必须精确保留' in _DIALOG_GENERATOR_PROMPT
+    assert '不要原样说出这些内部标签' in _DIALOG_GENERATOR_PROMPT
+    assert '刚才没有查到可靠结果' in _DIALOG_GENERATOR_PROMPT
+    assert '只能保留社交含义' in _DIALOG_GENERATOR_PROMPT
+    assert '不得原样输出这些身体词' in _DIALOG_GENERATOR_PROMPT
     assert 'internal_monologue' not in _DIALOG_GENERATOR_PROMPT
     assert 'tone' '_history' not in _DIALOG_GENERATOR_PROMPT
     assert 'last_user' '_message' not in _DIALOG_EVALUATOR_PROMPT
     assert 'internal_monologue' not in _DIALOG_EVALUATOR_PROMPT
     assert '`content_anchors` 是唯一语义权威' in _DIALOG_EVALUATOR_PROMPT
+    assert '精确值边界' in _DIALOG_EVALUATOR_PROMPT
+    assert '当前值或另一个锚点里的值' in _DIALOG_EVALUATOR_PROMPT
+    assert '内部标签边界' in _DIALOG_EVALUATOR_PROMPT
+    assert '不得原样暴露这些内部标签' in _DIALOG_EVALUATOR_PROMPT
+    assert '身体词边界' in _DIALOG_EVALUATOR_PROMPT
+    assert '不得包含心跳、心脏、脸红' in _DIALOG_EVALUATOR_PROMPT
     assert '只有同时满足以下条件才返回 `should_stop=true`' in _DIALOG_EVALUATOR_PROMPT
     assert '没有把另一个对象、提议、请求、问题或偏好所有者当作核心话题' in (
         _DIALOG_EVALUATOR_PROMPT
