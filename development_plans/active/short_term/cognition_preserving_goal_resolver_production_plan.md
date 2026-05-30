@@ -618,7 +618,7 @@ this commit.
 - Create: `src/kazusa_ai_chatbot/cognition_resolver/contracts.py`
 - Test: `tests/test_cognition_resolver_contracts.py`
 
-- [ ] **Step 1: Write failing contract tests**
+- [x] **Step 1: Write failing contract tests**
 
 Add tests for:
 
@@ -637,7 +637,7 @@ venv\Scripts\python -m pytest tests\test_cognition_resolver_contracts.py -q
 
 Expected: fail because the package does not exist.
 
-- [ ] **Step 2: Implement contract module**
+- [x] **Step 2: Implement contract module**
 
 Define constants:
 
@@ -673,7 +673,7 @@ Validation may check structure, enum membership, required string fields,
 bounded length, and list shape. It must not judge whether a user goal is
 semantically satisfied.
 
-- [ ] **Step 3: Run tests**
+- [x] **Step 3: Run tests**
 
 Run:
 
@@ -683,7 +683,7 @@ venv\Scripts\python -m pytest tests\test_cognition_resolver_contracts.py -q
 
 Expected: pass.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Run:
 
@@ -691,6 +691,15 @@ Run:
 git add src\kazusa_ai_chatbot\cognition_resolver tests\test_cognition_resolver_contracts.py
 git commit -m "Add cognition resolver contracts"
 ```
+
+Completed on 2026-05-30. Verification:
+
+```powershell
+venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\cognition_resolver\contracts.py tests\test_cognition_resolver_contracts.py
+venv\Scripts\python -m pytest tests\test_cognition_resolver_contracts.py -q
+```
+
+Result: 9 passed.
 
 ### Task 3: Add Resolver State Helpers
 
