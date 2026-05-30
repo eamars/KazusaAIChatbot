@@ -1002,7 +1002,7 @@ RAG integration/event/skip-shape compatibility.
 - Modify: `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition.py`
 - Test: `tests/test_cognition_resolver_loop.py`
 
-- [ ] **Step 1: Write failing loop tests**
+- [x] **Step 1: Write failing loop tests**
 
 Patch `call_cognition_subgraph` behavior through a fake function sequence:
 
@@ -1021,7 +1021,7 @@ Assert:
 - two `ResolverCycleTraceV1` rows are present, each with L1/L2/L2d summaries
   and terminal/final-surface fields.
 
-- [ ] **Step 2: Implement loop function**
+- [x] **Step 2: Implement loop function**
 
 Expose:
 
@@ -1060,7 +1060,7 @@ Loop rules:
 - when cap is reached, set `resolver_state.status="max_cycles"` and run one
   final cognition cycle with the cap blocker as an observation.
 
-- [ ] **Step 3: Pass resolver context into cognition**
+- [x] **Step 3: Pass resolver context into cognition**
 
 In `call_cognition_subgraph`, include:
 
@@ -1082,6 +1082,27 @@ Run:
 venv\Scripts\python -m pytest tests\test_cognition_resolver_loop.py -q
 git add src\kazusa_ai_chatbot\cognition_resolver\loop.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition.py tests\test_cognition_resolver_loop.py
 git commit -m "Add cognition resolver recurrence loop"
+```
+
+Implementation notes:
+
+- `call_cognition_resolver_loop()` merges cognition updates into the prior
+  `GlobalPersonaState` each cycle so required persona inputs are preserved.
+- First-cycle input setup is mandatory through
+  `ensure_initial_resolver_inputs()`, including an empty projected
+  `rag_result` when legacy `stage_1_research` is skipped.
+- Max-cycle blocker observations reuse the last real capability request kind,
+  objective, and reason. This keeps `ResolverObservationV1` inside the approved
+  capability taxonomy instead of inventing a fake system capability.
+- Review coverage includes two-cycle RAG recurrence, timeout observation,
+  max-cycle final cognition, prompt-safe observation projection, and trace
+  shape validation.
+
+Verification:
+
+```powershell
+venv\Scripts\python -m pytest tests\test_cognition_resolver_loop.py -q
+# 7 passed
 ```
 
 ### Task 7: Integrate Resolver Into Persona Graph Behind Feature Flags

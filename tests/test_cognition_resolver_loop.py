@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
@@ -10,8 +11,10 @@ from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episod
 from kazusa_ai_chatbot.cognition_resolver import capabilities as capabilities_module
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_CAPABILITY_REQUEST_VERSION,
+    RESOLVER_OBSERVATION_VERSION,
     ResolverValidationError,
 )
+from kazusa_ai_chatbot.cognition_resolver.loop import call_cognition_resolver_loop
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 
@@ -88,6 +91,240 @@ def _resolver_state() -> dict:
         "active_turn_conversation_row_ids": ["row-123"],
         "cognitive_episode": episode,
     }
+
+
+def _cognition_result(
+    *,
+    internal_monologue: str,
+    action_specs: list[dict] | None = None,
+    resolver_requests: list[dict] | None = None,
+) -> dict:
+    return {
+        "internal_monologue": internal_monologue,
+        "interaction_subtext": f"{internal_monologue} 的互动潜台词",
+        "emotional_appraisal": f"{internal_monologue} 的情绪判断",
+        "character_intent": f"{internal_monologue} 的角色意图",
+        "logical_stance": f"{internal_monologue} 的逻辑立场",
+        "judgment_note": f"{internal_monologue} 的判断备注",
+        "social_distance": "close",
+        "emotional_intensity": "low",
+        "vibe_check": "steady",
+        "relational_dynamic": "trusted",
+        "action_specs": action_specs or [],
+        "resolver_capability_requests": resolver_requests or [],
+    }
+
+
+def _speak_action_spec(reason: str = "已经有足够证据，可以进入可见回复。") -> dict:
+    return {
+        "schema_version": "action_spec.v1",
+        "kind": "speak",
+        "cognition_mode": "deliberative",
+        "source_refs": [],
+        "target": {
+            "schema_version": "action_target.v1",
+            "target_kind": "current_user",
+            "target_id": None,
+            "owner": "l2d",
+            "scope": {},
+        },
+        "params": {
+            "delivery_mode": "visible_reply",
+            "execute_at": None,
+            "surface_requirements": {},
+        },
+        "urgency": "now",
+        "visibility": "user_visible",
+        "deadline": None,
+        "continuation": {
+            "schema_version": "action_continuation.v1",
+            "mode": "none",
+            "episode_type": None,
+            "max_depth": 0,
+            "include_result_as": None,
+        },
+        "reason": reason,
+    }
+
+
+@pytest.mark.asyncio
+async def test_loop_runs_cognition_capability_then_cognition_again() -> None:
+    """The resolver must recur through cognition after a capability observation."""
+
+    request = _resolver_request(
+        objective="检索信任判断需要的关系证据。",
+    )
+    final_action = _speak_action_spec()
+    cognition_inputs: list[dict] = []
+    capability_inputs: list[tuple[dict, dict]] = []
+
+    async def call_cognition(state: dict) -> dict:
+        cognition_inputs.append(dict(state))
+        if len(cognition_inputs) == 1:
+            return _cognition_result(
+                internal_monologue="第一轮：证据不足",
+                resolver_requests=[request],
+            )
+        return _cognition_result(
+            internal_monologue="第二轮：证据足够",
+            action_specs=[final_action],
+        )
+
+    async def execute_capability(
+        capability_request: dict,
+        state: dict,
+    ) -> dict:
+        capability_inputs.append((capability_request, dict(state)))
+        return {
+            "schema_version": RESOLVER_OBSERVATION_VERSION,
+            "observation_id": "resolver_obs_trust_memory",
+            "capability_kind": capability_request["capability_kind"],
+            "request_objective": capability_request["objective"],
+            "request_reason": capability_request["reason"],
+            "status": "succeeded",
+            "prompt_safe_summary": "找到一条信任相关记忆。",
+            "rag_result": {
+                "answer": "用户曾经稳定支持过她的判断。",
+                "memory_evidence": [
+                    {
+                        "summary": "用户在一次困难讨论里支持过她。",
+                    },
+                ],
+            },
+            "evidence_refs": [],
+            "created_at_utc": "2026-05-29T21:00:00+00:00",
+        }
+
+    result = await call_cognition_resolver_loop(
+        _resolver_state(),
+        call_cognition_subgraph_func=call_cognition,
+        execute_capability_func=execute_capability,
+        max_cycles=3,
+        capability_timeout_seconds=1.0,
+    )
+
+    assert len(cognition_inputs) == 2
+    assert len(capability_inputs) == 1
+    assert capability_inputs[0][0] == request
+    assert cognition_inputs[0]["rag_result"]["answer"] == ""
+    assert cognition_inputs[0]["resolver_context"].startswith("resolver_state:")
+    assert "找到一条信任相关记忆" in cognition_inputs[1]["resolver_context"]
+    assert "用户曾经稳定支持过她的判断" in cognition_inputs[1]["resolver_context"]
+    assert result["action_specs"] == [final_action]
+    assert result["rag_result"]["answer"] == "用户曾经稳定支持过她的判断。"
+
+    resolver_state = result["resolver_state"]
+    assert resolver_state["status"] == "terminal"
+    assert resolver_state["held_action_specs"] == [final_action]
+    assert len(resolver_state["observations"]) == 1
+    assert len(resolver_state["cycle_traces"]) == 2
+    assert resolver_state["cycle_traces"][0]["selected_capability_kind"] == (
+        "rag_evidence"
+    )
+    assert resolver_state["cycle_traces"][0]["observation_ids"] == [
+        "resolver_obs_trust_memory"
+    ]
+    assert resolver_state["cycle_traces"][1]["selected_capability_kind"] == ""
+    assert resolver_state["cycle_traces"][1]["final_surface_decision"].startswith(
+        "action_specs="
+    )
+    assert resolver_state["cycle_traces"][1]["terminal_reason"] == (
+        "no resolver capability request"
+    )
+
+
+@pytest.mark.asyncio
+async def test_loop_records_timeout_observation_then_returns_to_cognition() -> None:
+    """Capability timeouts should become observations, not Python decisions."""
+
+    request = _resolver_request(objective="检索一个会超时的证据目标。")
+    cognition_inputs: list[dict] = []
+
+    async def call_cognition(state: dict) -> dict:
+        cognition_inputs.append(dict(state))
+        if len(cognition_inputs) == 1:
+            return _cognition_result(
+                internal_monologue="第一轮：需要证据",
+                resolver_requests=[request],
+            )
+        return _cognition_result(
+            internal_monologue="第二轮：看到超时阻塞",
+            action_specs=[_speak_action_spec("证据工具超时，所以说明限制。")],
+        )
+
+    async def execute_capability(_request: dict, _state: dict) -> dict:
+        await AsyncMock()()
+        await asyncio.sleep(1.0)
+        raise AssertionError("wait_for should timeout before this returns")
+
+    result = await call_cognition_resolver_loop(
+        _resolver_state(),
+        call_cognition_subgraph_func=call_cognition,
+        execute_capability_func=execute_capability,
+        max_cycles=3,
+        capability_timeout_seconds=0.01,
+    )
+
+    assert len(cognition_inputs) == 2
+    assert "timed out" in cognition_inputs[1]["resolver_context"]
+    observation = result["resolver_state"]["observations"][0]
+    assert observation["status"] == "failed"
+    assert observation["capability_kind"] == "rag_evidence"
+    assert observation["request_objective"] == request["objective"]
+    assert "timed out" in observation["prompt_safe_summary"]
+
+
+@pytest.mark.asyncio
+async def test_loop_runs_final_cognition_with_max_cycle_blocker() -> None:
+    """When capped, the blocker still returns through cognition."""
+
+    request = _resolver_request(objective="持续检索仍然不足的证据。")
+    cognition_inputs: list[dict] = []
+
+    async def call_cognition(state: dict) -> dict:
+        cognition_inputs.append(dict(state))
+        if len(cognition_inputs) == 1:
+            return _cognition_result(
+                internal_monologue="第一轮：还想继续查",
+                resolver_requests=[request],
+            )
+        return _cognition_result(
+            internal_monologue="封顶轮：必须收束",
+            action_specs=[_speak_action_spec("循环封顶后收束。")],
+        )
+
+    async def execute_capability(
+        capability_request: dict,
+        _state: dict,
+    ) -> dict:
+        return {
+            "schema_version": RESOLVER_OBSERVATION_VERSION,
+            "observation_id": "resolver_obs_partial",
+            "capability_kind": capability_request["capability_kind"],
+            "request_objective": capability_request["objective"],
+            "request_reason": capability_request["reason"],
+            "status": "failed",
+            "prompt_safe_summary": "证据仍不足。",
+            "evidence_refs": [],
+            "created_at_utc": "2026-05-29T21:00:00+00:00",
+        }
+
+    result = await call_cognition_resolver_loop(
+        _resolver_state(),
+        call_cognition_subgraph_func=call_cognition,
+        execute_capability_func=execute_capability,
+        max_cycles=1,
+        capability_timeout_seconds=1.0,
+    )
+
+    assert len(cognition_inputs) == 2
+    assert "max_cycles" in cognition_inputs[1]["resolver_context"]
+    assert "maximum resolver cycles" in cognition_inputs[1]["resolver_context"]
+    resolver_state = result["resolver_state"]
+    assert resolver_state["status"] == "max_cycles"
+    assert resolver_state["terminal_reason"] == "maximum resolver cycles reached"
+    assert len(resolver_state["observations"]) == 2
+    assert len(resolver_state["cycle_traces"]) == 2
 
 
 @pytest.mark.asyncio
