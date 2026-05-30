@@ -37,13 +37,13 @@ _ALLOWED_CONTENT_ANCHOR_ROLES = frozenset(
 )
 
 
-_MEMORY_LIFECYCLE_SPECIALIST_PROMPT = """\
+_MEMORY_LIFECYCLE_SPECIALIST_PROMPT = '''\
 你是活动承诺生命周期复核专员。
 你只判断本轮输入是否已经改变某个活动承诺的生命周期状态。
 你不会看到数据库 ID；只能通过 `target_alias` 选择输入里给出的 `commitment_1`、`commitment_2` 等别名。
 
 # 生成步骤
-1. 先读取 `current_input`、`formed_decision` 和活动承诺列表，确认当前回合是否直接兑现、取消、改写、推迟或使某个承诺过时。
+1. 先读取 `current_input`、`formed_decision`、`final_dialog`、`user_visible_surface_text` 和活动承诺列表，确认当前回合是否直接兑现、取消、改写、推迟或使某个承诺过时。
 2. 只在证据清楚时输出生命周期变化。含糊玩笑、普通寒暄、新计划、还没兑现、只是在继续等待，都不要关闭承诺。
 3. 如果需要改变多个承诺，按证据从最清楚到最弱排序。
 4. 只使用输入中存在的 `target_alias`。不要发明别名，不要输出数据库字段。
@@ -53,6 +53,8 @@ _MEMORY_LIFECYCLE_SPECIALIST_PROMPT = """\
 用户消息是 JSON，包含：
 - `current_input`: 当前输入语义摘要。
 - `formed_decision`: 已形成的立场、意图、裁决和内心判断。
+- `final_dialog`: 已经生成并可见给用户的最终台词；如果为空，不要据此关闭承诺。
+- `user_visible_surface_text`: 用户可见文本表面的片段，作为 `final_dialog` 的可见性佐证。
 - `active_commitments`: 最多 12 个活动承诺，每项只有 `target_alias`、`fact`、`status`、`due_at`、`due_state`、`evidence_summary`。
 - `memory_evidence`: 当前检索到的提示性记忆证据。
 - `conversation_progress`: 当前短期对话进度。
@@ -79,7 +81,7 @@ _MEMORY_LIFECYCLE_SPECIALIST_PROMPT = """\
 
 如果没有生命周期变化，返回：
 {"decision": "no_lifecycle_change", "lifecycle_decisions": [], "content_anchor_roles": []}
-"""
+'''
 _memory_lifecycle_specialist_llm = get_llm(
     temperature=0.1,
     top_p=0.7,
@@ -125,23 +127,14 @@ async def call_memory_lifecycle_update_handler(
         }
         return return_value
 
-    prompt_payload = prepared["prompt_payload"]
-    system_prompt = SystemMessage(content=_MEMORY_LIFECYCLE_SPECIALIST_PROMPT)
-    human_message = HumanMessage(
-        content=json.dumps(prompt_payload, ensure_ascii=False)
-    )
-    response = await _memory_lifecycle_specialist_llm.ainvoke([
-        system_prompt,
-        human_message,
-    ])
-    parsed = parse_llm_json_output(response.content)
-    normalized = normalize_memory_lifecycle_output(parsed, alias_bindings)
-    materialized = materialize_memory_lifecycle_actions(
-        normalized,
-        alias_bindings,
+    review = await _invoke_memory_lifecycle_specialist(
+        prompt_payload=prepared["prompt_payload"],
+        alias_bindings=alias_bindings,
         visible_alias_count=int(prepared["visible_alias_count"]),
         omitted_alias_count=int(prepared["omitted_alias_count"]),
     )
+    normalized = review["normalized"]
+    materialized = review["materialized"]
     executable_specs = materialized["action_specs"]
     combined_specs = (
         _selected_non_lifecycle_action_specs(state)
@@ -181,6 +174,102 @@ def prepare_memory_lifecycle_review(
         "omitted_alias_count": _omitted_alias_count(state, visible_alias_count),
     }
     return prepared
+
+
+def prepare_post_surface_memory_lifecycle_review(
+    state: dict,
+    active_commitment_units: list[dict[str, object]],
+) -> dict[str, object]:
+    """Prepare direct-row lifecycle review after visible dialog exists.
+
+    Args:
+        state: Completed persona state after selected surfaces are known.
+        active_commitment_units: Direct DB rows for the current user's active
+            commitments.
+
+    Returns:
+        A prompt-safe review packet whose alias bindings are backed only by
+        the supplied direct rows.
+    """
+
+    filtered_units = _filter_active_commitment_units(active_commitment_units)
+    alias_bindings = _direct_active_commitment_alias_rows(filtered_units)
+    visible_alias_count = len(alias_bindings)
+    prompt_payload = _post_surface_specialist_prompt_payload(
+        state,
+        alias_bindings,
+    )
+    prepared = {
+        "prompt_payload": prompt_payload,
+        "alias_bindings": alias_bindings,
+        "visible_alias_count": visible_alias_count,
+        "omitted_alias_count": max(0, len(filtered_units) - visible_alias_count),
+    }
+    return prepared
+
+
+async def call_post_surface_memory_lifecycle_review(
+    state: dict,
+    active_commitment_units: list[dict[str, object]],
+) -> dict[str, object]:
+    """Review direct active commitments against visible final dialog.
+
+    Args:
+        state: Completed persona state after response delivery has been
+            released to the caller.
+        active_commitment_units: Direct DB rows for one user's active
+            commitments.
+
+    Returns:
+        Partial state update containing executable lifecycle action specs and
+        prompt-safe lifecycle context, or an empty dict when review is not
+        structurally applicable.
+    """
+
+    if not _visible_final_dialog(state):
+        return_value: dict[str, object] = {}
+        return return_value
+
+    filtered_units = _filter_active_commitment_units(active_commitment_units)
+    if not filtered_units:
+        return_value = {}
+        return return_value
+
+    action_specs: list[ActionSpecV1] = []
+    lifecycle_contexts: list[dict[str, object]] = []
+    for offset in range(0, len(filtered_units), ACTIVE_COMMITMENT_ALIAS_LIMIT):
+        prepared = prepare_post_surface_memory_lifecycle_review(
+            state,
+            filtered_units[offset: offset + ACTIVE_COMMITMENT_ALIAS_LIMIT],
+        )
+        alias_bindings = prepared["alias_bindings"]
+        if not alias_bindings:
+            continue
+        review = await _invoke_memory_lifecycle_specialist(
+            prompt_payload=prepared["prompt_payload"],
+            alias_bindings=alias_bindings,
+            visible_alias_count=int(prepared["visible_alias_count"]),
+            omitted_alias_count=int(prepared["omitted_alias_count"]),
+        )
+        materialized = review["materialized"]
+        lifecycle_contexts.append(materialized["memory_lifecycle_context"])
+        action_specs.extend(
+            action_spec
+            for action_spec in materialized["action_specs"]
+            if action_spec.get("kind") == APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY
+        )
+
+    if not lifecycle_contexts:
+        return_value = {}
+        return return_value
+
+    return_value = {
+        "action_specs": action_specs,
+        "memory_lifecycle_context": _combine_memory_lifecycle_contexts(
+            lifecycle_contexts,
+        ),
+    }
+    return return_value
 
 
 def normalize_memory_lifecycle_output(
@@ -255,6 +344,91 @@ def materialize_memory_lifecycle_actions(
         else [],
     }
     return materialized
+
+
+async def _invoke_memory_lifecycle_specialist(
+    *,
+    prompt_payload: dict[str, object],
+    alias_bindings: list[dict[str, Any]],
+    visible_alias_count: int,
+    omitted_alias_count: int,
+) -> dict[str, object]:
+    """Call the lifecycle specialist and materialize trusted alias decisions."""
+
+    system_prompt = SystemMessage(content=_MEMORY_LIFECYCLE_SPECIALIST_PROMPT)
+    human_message = HumanMessage(
+        content=json.dumps(prompt_payload, ensure_ascii=False)
+    )
+    response = await _memory_lifecycle_specialist_llm.ainvoke([
+        system_prompt,
+        human_message,
+    ])
+    parsed = parse_llm_json_output(response.content)
+    normalized = normalize_memory_lifecycle_output(parsed, alias_bindings)
+    materialized = materialize_memory_lifecycle_actions(
+        normalized,
+        alias_bindings,
+        visible_alias_count=visible_alias_count,
+        omitted_alias_count=omitted_alias_count,
+    )
+    review = {
+        "normalized": normalized,
+        "materialized": materialized,
+    }
+    return review
+
+
+def _combine_memory_lifecycle_contexts(
+    lifecycle_contexts: list[dict[str, object]],
+) -> dict[str, object]:
+    """Combine prompt-safe lifecycle contexts from alias chunks."""
+
+    lifecycle_decisions: list[dict[str, str]] = []
+    content_anchor_roles: list[dict[str, str]] = []
+    warnings: list[str] = []
+    visible_alias_count = 0
+    omitted_alias_count = 0
+    decision = "no_lifecycle_change"
+    for context in lifecycle_contexts:
+        if context.get("decision") == "lifecycle_change":
+            decision = "lifecycle_change"
+        raw_visible_count = context.get("visible_alias_count")
+        if isinstance(raw_visible_count, int):
+            visible_alias_count += raw_visible_count
+        raw_omitted_count = context.get("omitted_alias_count")
+        if isinstance(raw_omitted_count, int):
+            omitted_alias_count += raw_omitted_count
+        raw_decisions = context.get("lifecycle_decisions")
+        if isinstance(raw_decisions, list):
+            lifecycle_decisions.extend(
+                raw_decision
+                for raw_decision in raw_decisions
+                if isinstance(raw_decision, dict)
+            )
+        raw_roles = context.get("content_anchor_roles")
+        if isinstance(raw_roles, list):
+            content_anchor_roles.extend(
+                raw_role
+                for raw_role in raw_roles
+                if isinstance(raw_role, dict)
+            )
+        raw_warnings = context.get("warnings")
+        if isinstance(raw_warnings, list):
+            warnings.extend(
+                raw_warning
+                for raw_warning in raw_warnings
+                if isinstance(raw_warning, str)
+            )
+
+    context = _memory_lifecycle_context(
+        decision=decision,
+        visible_alias_count=visible_alias_count,
+        omitted_alias_count=omitted_alias_count,
+        lifecycle_decisions=lifecycle_decisions,
+        content_anchor_roles=content_anchor_roles,
+        warnings=warnings,
+    )
+    return context
 
 
 def _memory_lifecycle_route_specs(
@@ -368,6 +542,37 @@ def _trusted_active_commitment_units(
     return _filter_active_commitment_units(prompt_context_units)
 
 
+def _direct_active_commitment_alias_rows(
+    active_commitment_units: list[dict[str, object]],
+) -> list[dict[str, Any]]:
+    """Build prompt-safe aliases from direct active-commitment DB rows."""
+
+    visible_units = active_commitment_units[:ACTIVE_COMMITMENT_ALIAS_LIMIT]
+    alias_rows: list[dict[str, Any]] = []
+    for index, unit in enumerate(visible_units, start=1):
+        alias = f"commitment_{index}"
+        evidence_summary = _commitment_evidence_summary(unit)
+        due_at = _nullable_text(unit, "due_at")
+        due_state = _optional_text(unit, "due_state")
+        if due_at is None:
+            due_state = "no_due_date"
+        prompt_row = {
+            "target_alias": alias,
+            "fact": _optional_text(unit, "fact"),
+            "status": _optional_text(unit, "status") or "active",
+            "due_at": due_at,
+            "due_state": due_state,
+            "evidence_summary": evidence_summary,
+        }
+        alias_rows.append({
+            "target_alias": alias,
+            "unit_id": _optional_text(unit, "unit_id"),
+            "due_at": due_at,
+            "prompt_row": prompt_row,
+        })
+    return alias_rows
+
+
 def _filter_active_commitment_units(
     raw_units: list[object],
 ) -> list[dict[str, Any]]:
@@ -425,11 +630,81 @@ def _specialist_prompt_payload(
     prompt_payload = {
         "current_input": state["decontexualized_input"],
         "formed_decision": formed_decision,
+        "final_dialog": [],
+        "user_visible_surface_text": [],
         "active_commitments": active_commitments,
         "memory_evidence": _project_memory_evidence(state),
         "conversation_progress": state.get("conversation_progress"),
     }
     return prompt_payload
+
+
+def _post_surface_specialist_prompt_payload(
+    state: dict,
+    alias_rows: list[dict[str, Any]],
+) -> dict[str, object]:
+    """Build a post-surface prompt payload without RAG reachability data."""
+
+    formed_decision = {
+        "logical_stance": state["logical_stance"],
+        "character_intent": state["character_intent"],
+        "judgment_note": state["judgment_note"],
+        "internal_monologue": state["internal_monologue"],
+    }
+    active_commitments = [
+        alias_row["prompt_row"]
+        for alias_row in alias_rows
+    ]
+    prompt_payload = {
+        "current_input": state["decontexualized_input"],
+        "formed_decision": formed_decision,
+        "final_dialog": _visible_final_dialog(state),
+        "user_visible_surface_text": _user_visible_surface_text(state),
+        "active_commitments": active_commitments,
+        "memory_evidence": [],
+        "conversation_progress": state.get("conversation_progress"),
+    }
+    return prompt_payload
+
+
+def _visible_final_dialog(state: Mapping[str, object]) -> list[str]:
+    """Return non-empty final dialog fragments for visible post-surface review."""
+
+    raw_final_dialog = state.get("final_dialog")
+    if not isinstance(raw_final_dialog, list):
+        return_value: list[str] = []
+        return return_value
+    final_dialog = [
+        fragment
+        for fragment in raw_final_dialog
+        if isinstance(fragment, str) and fragment.strip()
+    ]
+    return final_dialog
+
+
+def _user_visible_surface_text(state: Mapping[str, object]) -> list[str]:
+    """Project user-visible text fragments without surface internals."""
+
+    raw_surface_outputs = state.get("surface_outputs")
+    if not isinstance(raw_surface_outputs, list):
+        return_value: list[str] = []
+        return return_value
+
+    visible_fragments: list[str] = []
+    for raw_output in raw_surface_outputs:
+        if not isinstance(raw_output, dict):
+            continue
+        if raw_output.get("visibility") != "user_visible":
+            continue
+        raw_fragments = raw_output.get("fragments")
+        if not isinstance(raw_fragments, list):
+            continue
+        visible_fragments.extend(
+            fragment
+            for fragment in raw_fragments
+            if isinstance(fragment, str) and fragment.strip()
+        )
+    return visible_fragments
 
 
 def _project_memory_evidence(state: GlobalPersonaState) -> list[dict[str, object]]:

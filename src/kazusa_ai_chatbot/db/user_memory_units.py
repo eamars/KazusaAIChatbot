@@ -300,6 +300,46 @@ async def query_active_commitment_memory_units(
     return return_value
 
 
+async def query_active_commitment_memory_units_for_user(
+    *,
+    global_user_id: str,
+    limit: int,
+) -> dict[str, object]:
+    """Read active commitment units for one user without due-date filtering.
+
+    Args:
+        global_user_id: Internal UUID for the memory owner.
+        limit: Maximum active commitment rows to return.
+
+    Returns:
+        A bounded result containing active commitment documents, the requested
+        limit, and whether more rows exist than the requested limit.
+    """
+
+    db = await get_db()
+    cursor = (
+        db.user_memory_units
+        .find(
+            {
+                "global_user_id": global_user_id,
+                "unit_type": UserMemoryUnitType.ACTIVE_COMMITMENT,
+                "status": UserMemoryUnitStatus.ACTIVE,
+            },
+            {"_id": 0, "embedding": 0},
+        )
+        .sort([("due_at", 1), ("updated_at", -1), ("unit_id", 1)])
+        .limit(limit + 1)
+    )
+    documents = [doc async for doc in cursor]
+    trimmed_documents = documents[:limit]
+    result = {
+        "documents": trimmed_documents,
+        "limit": limit,
+        "limit_exceeded": len(documents) > limit,
+    }
+    return result
+
+
 async def search_user_memory_units_by_keyword(
     global_user_id: str,
     keyword: str,

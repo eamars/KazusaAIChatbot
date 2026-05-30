@@ -17,6 +17,7 @@ from kazusa_ai_chatbot.action_spec.registry import (
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
 from kazusa_ai_chatbot.nodes.persona_supervisor2_memory_lifecycle import (
     call_memory_lifecycle_update_handler,
+    call_post_surface_memory_lifecycle_review,
 )
 from tests.llm_trace import write_llm_trace
 
@@ -155,6 +156,48 @@ async def test_live_capacity_12_commitments_last_alias_fulfilled() -> None:
     assert result["memory_lifecycle_context"]["visible_alias_count"] == 12
 
 
+async def test_live_tiramisu_no_due_final_dialog_fulfilled() -> None:
+    """Post-surface specialist should close no-due tiramisu from final dialog."""
+
+    await _skip_if_llm_unavailable()
+    commitment = _commitment(
+        "unit-tiramisu",
+        '用户答应给角色提拉米苏。',
+        due_at=None,
+        due_state="no_due_date",
+    )
+    state = _state(
+        current_input='用户把提拉米苏交给角色，角色准备收下。',
+        commitments=[commitment],
+    )
+    state["final_dialog"] = ['提拉米苏债都清了哦，我就收下啦。']
+    state["surface_outputs"] = [
+        {
+            "schema_version": "surface_output.v1",
+            "surface_kind": "text",
+            "visibility": "user_visible",
+            "action_attempt_id": None,
+            "fragments": state["final_dialog"],
+            "artifact_refs": [],
+            "delivery_intent": "deliver_now",
+            "created_at": "2026-05-29T03:14:23+00:00",
+        }
+    ]
+
+    result = await call_post_surface_memory_lifecycle_review(
+        state,
+        [commitment],
+    )
+    trace_path = _write_trace(
+        "tiramisu_no_due_final_dialog_fulfilled",
+        state,
+        result,
+    )
+
+    assert _apply_unit_ids(result) == ["unit-tiramisu"], f"trace={trace_path}"
+    assert _context_decisions(result)[0]["decision"] == "fulfilled"
+
+
 async def _skip_if_llm_unavailable() -> None:
     """Skip when the configured cognition endpoint is unavailable."""
 
@@ -216,7 +259,7 @@ def _commitment(
     unit_id: str,
     fact: str,
     *,
-    due_at: str = "2026-05-07T18:00:00+12:00",
+    due_at: str | None = "2026-05-07T18:00:00+12:00",
     due_state: str,
 ) -> dict[str, object]:
     """Build one trusted active-commitment row."""

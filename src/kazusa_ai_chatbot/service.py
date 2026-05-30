@@ -20,6 +20,7 @@ from typing import Literal
 
 from fastapi import FastAPI, BackgroundTasks
 
+from kazusa_ai_chatbot.action_spec.execution import execute_action_specs_for_trace
 from kazusa_ai_chatbot.action_spec.results import has_consolidatable_output
 from kazusa_ai_chatbot.config import (
     CHARACTER_GLOBAL_USER_ID,
@@ -65,6 +66,7 @@ from kazusa_ai_chatbot.db import (
     get_conversation_history,
     get_user_profile,
     load_initializer_entries,
+    query_active_commitment_memory_units_for_user,
     resolve_global_user_id,
     save_conversation,
     split_character_profile_runtime_state,
@@ -127,6 +129,9 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import (
     multimedia_descriptor_agent,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2
+from kazusa_ai_chatbot.nodes.persona_supervisor2_memory_lifecycle import (
+    call_post_surface_memory_lifecycle_review,
+)
 from kazusa_ai_chatbot.consolidation.core import call_consolidation_subgraph
 from kazusa_ai_chatbot.rag.cache2_policy import INITIALIZER_CACHE_NAME
 from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
@@ -1448,6 +1453,23 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             stages_reached.append("assistant_persisted")
         _chat_input_queue.complete(item, response)
         stages_reached.append("response_completed")
+        visible_response_sent = bool(response_dialog)
+        think_only_suppressed = (
+            bool(final_dialog)
+            and debug_modes.get("think_only")
+            and not visible_response_sent
+        )
+        if (
+            not debug_modes.get("no_remember")
+            and visible_response_sent
+            and not think_only_suppressed
+            and consolidation_state_dict is not None
+        ):
+            consolidation_state_dict = (
+                await _run_post_turn_memory_lifecycle_background(
+                    consolidation_state_dict,
+                )
+            )
         if should_record_progress and consolidation_state_dict is not None:
             await _run_conversation_progress_record_background(
                 consolidation_state_dict,
@@ -1611,6 +1633,22 @@ async def _run_consolidation_background(state: dict) -> None:
         ),
         logger=logger,
     )
+
+
+async def _run_post_turn_memory_lifecycle_background(state: dict) -> dict:
+    """Run post-surface active-commitment lifecycle review."""
+
+    updated_state = await brain_post_turn.run_post_turn_memory_lifecycle_background(
+        state,
+        active_commitment_reader=query_active_commitment_memory_units_for_user,
+        review_func=call_post_surface_memory_lifecycle_review,
+        execute_action_specs_func=execute_action_specs_for_trace,
+        logger=logger,
+        no_remember=False,
+        visible_response_sent=True,
+        think_only_suppressed=False,
+    )
+    return updated_state
 
 
 async def _run_conversation_progress_record_background(state: dict) -> None:

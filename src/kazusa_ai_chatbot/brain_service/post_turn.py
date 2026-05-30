@@ -5,7 +5,12 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime
+from typing import Any, TypeAlias
 
+from kazusa_ai_chatbot.action_spec.registry import (
+    APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+)
+from kazusa_ai_chatbot.action_spec.results import build_episode_trace
 from kazusa_ai_chatbot.conversation_progress import (
     ConversationProgressRecordInput,
     ConversationProgressScope,
@@ -23,6 +28,18 @@ CallConsolidation = Callable[[dict], Awaitable[dict]]
 UpdateCharacterRuntimeState = Callable[[dict], Awaitable[None]]
 RecordTurnProgress = Callable[..., Awaitable[dict]]
 RecordResidue = Callable[..., Awaitable[dict]]
+ActiveCommitmentReader: TypeAlias = Callable[..., Awaitable[dict[str, object]]]
+PostSurfaceMemoryLifecycleReview: TypeAlias = Callable[
+    ...,
+    Awaitable[dict[str, object]],
+]
+ExecuteActionSpecsForTrace: TypeAlias = Callable[
+    ...,
+    Awaitable[list[dict[str, Any]]],
+]
+
+POST_SURFACE_ACTIVE_COMMITMENT_REVIEW_LIMIT = 500
+POST_SURFACE_LIFECYCLE_MAX_PASSES = 5
 
 
 async def save_assistant_message(
@@ -74,6 +91,238 @@ async def save_assistant_message(
         ),
         save_conversation_func=save_conversation_func,
     )
+
+
+async def run_post_turn_memory_lifecycle_background(
+    state: dict,
+    *,
+    active_commitment_reader: ActiveCommitmentReader,
+    review_func: PostSurfaceMemoryLifecycleReview,
+    execute_action_specs_func: ExecuteActionSpecsForTrace,
+    logger: logging.Logger,
+    no_remember: bool,
+    visible_response_sent: bool,
+    think_only_suppressed: bool,
+) -> dict:
+    """Close fulfilled active commitments after visible response delivery.
+
+    Args:
+        state: Completed persona state passed to post-turn memory consumers.
+        active_commitment_reader: Direct DB reader for active commitments.
+        review_func: LLM-owned post-surface lifecycle review function.
+        execute_action_specs_func: Existing action-spec executor.
+        logger: Service logger for skip and saturation diagnostics.
+        no_remember: Whether this turn forbids memory side effects.
+        visible_response_sent: Whether the user received a visible response.
+        think_only_suppressed: Whether visible text was hidden by think-only.
+
+    Returns:
+        The original state object when review is structurally skipped, or a
+        shallow copied state with lifecycle specs/results and rebuilt trace.
+    """
+
+    if no_remember:
+        return state
+    if not visible_response_sent:
+        return state
+    if think_only_suppressed:
+        return state
+
+    global_user_id = _state_text(state, "global_user_id")
+    if not global_user_id:
+        return state
+    if not _visible_final_dialog(state):
+        return state
+    if _has_executed_lifecycle_result(state):
+        return state
+
+    current_state = state
+    for _ in range(POST_SURFACE_LIFECYCLE_MAX_PASSES):
+        read_result = await active_commitment_reader(
+            global_user_id=global_user_id,
+            limit=POST_SURFACE_ACTIVE_COMMITMENT_REVIEW_LIMIT,
+        )
+        if read_result.get("limit_exceeded") is True:
+            logger.warning(
+                f"Post-turn lifecycle review skipped: active commitments "
+                f"exceed limit={POST_SURFACE_ACTIVE_COMMITMENT_REVIEW_LIMIT} "
+                f"user={global_user_id}"
+            )
+            return current_state
+
+        documents = _document_rows(read_result.get("documents"))
+        if not documents:
+            return current_state
+
+        review_result = await review_func(current_state, documents)
+        lifecycle_specs = _apply_lifecycle_action_specs(review_result)
+        if not lifecycle_specs:
+            return current_state
+
+        action_results = await execute_action_specs_func(
+            lifecycle_specs,
+            storage_timestamp_utc=current_state["storage_timestamp_utc"],
+        )
+        executed_results = _executed_lifecycle_results(action_results)
+        if not executed_results:
+            return current_state
+
+        current_state = _append_lifecycle_trace(
+            current_state,
+            lifecycle_specs=lifecycle_specs,
+            action_results=action_results,
+        )
+
+    return current_state
+
+
+def _state_text(state: dict, field_name: str) -> str:
+    """Read one optional string field from post-turn state."""
+
+    value = state.get(field_name)
+    if not isinstance(value, str):
+        return_value = ""
+        return return_value
+    return_value = value.strip()
+    return return_value
+
+
+def _visible_final_dialog(state: dict) -> list[str]:
+    """Return non-empty visible final dialog fragments."""
+
+    raw_final_dialog = state.get("final_dialog")
+    if not isinstance(raw_final_dialog, list):
+        return_value: list[str] = []
+        return return_value
+    final_dialog = [
+        fragment
+        for fragment in raw_final_dialog
+        if isinstance(fragment, str) and fragment.strip()
+    ]
+    return final_dialog
+
+
+def _has_executed_lifecycle_result(state: dict) -> bool:
+    """Return whether this turn already executed lifecycle updates."""
+
+    raw_results = state.get("action_results")
+    if not isinstance(raw_results, list):
+        return_value = False
+        return return_value
+    for raw_result in raw_results:
+        if not isinstance(raw_result, dict):
+            continue
+        if raw_result.get("action_kind") != APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY:
+            continue
+        if raw_result.get("status") == "executed":
+            return_value = True
+            return return_value
+    return_value = False
+    return return_value
+
+
+def _document_rows(raw_documents: object) -> list[dict[str, object]]:
+    """Return direct DB documents that have dictionary shape."""
+
+    if not isinstance(raw_documents, list):
+        return_value: list[dict[str, object]] = []
+        return return_value
+    documents = [
+        document
+        for document in raw_documents
+        if isinstance(document, dict)
+    ]
+    return documents
+
+
+def _apply_lifecycle_action_specs(
+    review_result: dict[str, object],
+) -> list[dict[str, Any]]:
+    """Keep only executable memory-lifecycle action specs."""
+
+    raw_specs = review_result.get("action_specs")
+    if not isinstance(raw_specs, list):
+        return_value: list[dict[str, Any]] = []
+        return return_value
+    lifecycle_specs = [
+        action_spec
+        for action_spec in raw_specs
+        if (
+            isinstance(action_spec, dict)
+            and action_spec.get("kind") == APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY
+        )
+    ]
+    return lifecycle_specs
+
+
+def _executed_lifecycle_results(
+    action_results: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return executed memory-lifecycle action results."""
+
+    executed_results = [
+        action_result
+        for action_result in action_results
+        if (
+            isinstance(action_result, dict)
+            and action_result.get("action_kind")
+            == APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY
+            and action_result.get("status") == "executed"
+        )
+    ]
+    return executed_results
+
+
+def _append_lifecycle_trace(
+    state: dict,
+    *,
+    lifecycle_specs: list[dict[str, Any]],
+    action_results: list[dict[str, Any]],
+) -> dict:
+    """Append lifecycle evidence and rebuild the episode trace."""
+
+    updated_state = dict(state)
+    prior_specs = _dict_list(updated_state.get("action_specs"))
+    prior_results = _dict_list(updated_state.get("action_results"))
+    surface_outputs = _dict_list(updated_state.get("surface_outputs"))
+    updated_specs = prior_specs + lifecycle_specs
+    updated_results = prior_results + action_results
+    episode = updated_state["cognitive_episode"]
+    existing_trace = updated_state.get("episode_trace")
+    cognition_refs: list[dict[str, object]] | None = None
+    if isinstance(existing_trace, dict):
+        raw_cognition_refs = existing_trace.get("cognition_refs")
+        if isinstance(raw_cognition_refs, list):
+            cognition_refs = [
+                ref for ref in raw_cognition_refs if isinstance(ref, dict)
+            ]
+    trace = build_episode_trace(
+        episode_id=episode["episode_id"],
+        trigger_source=episode["trigger_source"],
+        created_at=updated_state["storage_timestamp_utc"],
+        action_specs=updated_specs,
+        action_results=updated_results,
+        surface_outputs=surface_outputs,
+        cognition_refs=cognition_refs,
+    )
+    updated_state["action_specs"] = updated_specs
+    updated_state["action_results"] = updated_results
+    updated_state["episode_trace"] = trace
+    return updated_state
+
+
+def _dict_list(raw_value: object) -> list[dict[str, Any]]:
+    """Return dictionary rows from an optional list field."""
+
+    if not isinstance(raw_value, list):
+        return_value: list[dict[str, Any]] = []
+        return return_value
+    rows = [
+        row
+        for row in raw_value
+        if isinstance(row, dict)
+    ]
+    return rows
 
 
 async def run_consolidation_background(

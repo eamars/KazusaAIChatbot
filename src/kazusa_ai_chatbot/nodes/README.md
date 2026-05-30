@@ -112,6 +112,15 @@ prompt-safe aliases, and deterministic code resolves those aliases into
 `memory_lifecycle_context` role anchors, so content can avoid reopening a
 fulfilled promise without seeing persistence ids.
 
+After a visible text response is sent, the service may run a post-surface
+lifecycle review for active commitments. That review is fed only by direct
+current-user active-commitment rows plus the completed `final_dialog` and
+user-visible text-surface fragments. It does not use RAG reachability or
+state-projected active commitments as its row source. The prompt receives only
+prompt-safe aliases, and deterministic code materializes only
+`apply_memory_lifecycle_update` action specs through the existing lifecycle
+action path.
+
 L3 text and L3 image are treated as registered surface handlers. The current
 runtime implements text-surface routing and keeps visual directives/promptable
 image guidance available for future image surfaces; it does not call an
