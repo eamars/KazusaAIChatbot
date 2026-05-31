@@ -224,21 +224,31 @@ async def _run_max_cycle_final_cognition(
     final_terminal_reason = "maximum resolver cycles reached"
     final_selected_request = _select_immediate_request(cognition_state)
     if final_selected_request is not None:
-        logger.warning(
-            "Resolver converted max-cycle terminal capability request to "
-            "visible blocker surface"
-        )
-        if not cognition_state.get("action_specs"):
+        cognition_state["resolver_capability_requests"] = []
+        if cognition_state.get("action_specs"):
+            final_terminal_reason = "maximum resolver cycles reached"
+        elif _should_surface_terminal_blocker(cognition_state):
+            logger.warning(
+                "Resolver converted max-cycle terminal capability request to "
+                "visible blocker surface"
+            )
             cognition_state["action_specs"] = [
                 _terminal_blocker_speak_action_spec(
                     final_selected_request,
                     blocker,
                 ),
             ]
-        cognition_state["resolver_capability_requests"] = []
-        final_terminal_reason = (
-            "maximum resolver cycles converted to terminal surface"
-        )
+            final_terminal_reason = (
+                "maximum resolver cycles converted to terminal surface"
+            )
+        else:
+            logger.warning(
+                "Resolver kept max-cycle terminal capability request private "
+                "for non-user source"
+            )
+            final_terminal_reason = (
+                "maximum resolver cycles kept private for non-user source"
+            )
     final_resolver_state["held_action_specs"] = list(
         cognition_state.get("action_specs", []),
     )
@@ -301,22 +311,36 @@ async def _run_duplicate_request_final_cognition(
     )
     final_repeated_request = _select_immediate_request(cognition_state)
     if final_repeated_request is not None:
-        logger.warning(
-            "Resolver converted terminal capability request after duplicate "
-            "blocking to "
-            "visible blocker surface"
-        )
-        if not cognition_state.get("action_specs"):
+        cognition_state["resolver_capability_requests"] = []
+        if cognition_state.get("action_specs"):
+            final_terminal_reason = (
+                "duplicate resolver capability request final cognition "
+                "completed"
+            )
+        elif _should_surface_terminal_blocker(cognition_state):
+            logger.warning(
+                "Resolver converted terminal capability request after "
+                "duplicate blocking to visible blocker surface"
+            )
             cognition_state["action_specs"] = [
                 _terminal_blocker_speak_action_spec(
                     final_repeated_request,
                     blocker,
                 ),
             ]
-        cognition_state["resolver_capability_requests"] = []
-        final_terminal_reason = (
-            "duplicate resolver capability request converted to terminal surface"
-        )
+            final_terminal_reason = (
+                "duplicate resolver capability request converted to "
+                "terminal surface"
+            )
+        else:
+            logger.warning(
+                "Resolver kept terminal capability request private after "
+                "duplicate blocking for non-user source"
+            )
+            final_terminal_reason = (
+                "duplicate resolver capability request kept private for "
+                "non-user source"
+            )
     final_resolver_state["held_action_specs"] = list(
         cognition_state.get("action_specs", []),
     )
@@ -751,6 +775,23 @@ def _duplicate_request_observation(
         "created_at_utc": _created_at_utc(state),
     }
     return_value = validate_resolver_observation(observation)
+    return return_value
+
+
+def _should_surface_terminal_blocker(state: GlobalPersonaState) -> bool:
+    """Return whether resolver-owned terminal blockers should be visible."""
+
+    episode = state["cognitive_episode"]
+    if not isinstance(episode, dict):
+        raise ResolverValidationError("cognitive_episode: expected mapping")
+
+    trigger_source = episode["trigger_source"]
+    if not isinstance(trigger_source, str):
+        raise ResolverValidationError(
+            "cognitive_episode.trigger_source: expected string",
+        )
+
+    return_value = trigger_source == "user_message"
     return return_value
 
 

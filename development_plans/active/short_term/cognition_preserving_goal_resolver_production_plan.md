@@ -65,6 +65,15 @@ explains a valid character/system blocker with enough evidence that a human can
 see why the goal could not be completed. "Asked one question", "called RAG", or
 "hit a terminal state" is insufficient by itself.
 
+Visible speech is not mandatory when cognition produces a coherent no-speak
+decision. Kazusa is a cognition core, so the plan must not force dialog output
+just because an earlier pass leaned toward speaking or because the baseline
+spoke. A no-speak result is acceptable when the LLM trace gives a believable
+character, boundary, scene-pressure, timing, or evidence reason. If no-speak is
+caused by a misleading prompt/contract, missing model-facing context, or an
+unexplained route/action mismatch, fix that contract or observability gap
+instead of adding deterministic semantic overrides that force `speak`.
+
 Human-in-the-loop resolution is an open continuation until the issue is
 resolved or validly blocked. It is not a fixed two-turn demo. The test harness
 must keep feeding realistic user follow-up messages through the same resolver
@@ -2219,6 +2228,35 @@ Current G03 verdict: partial with meaningful improvement. It satisfies the
 relaxed local-model goal for HIL continuation and bounded best-effort
 resolution, but it is not a clean production pass and is not yet evidence of
 high-quality current-world recommendation research.
+
+#### Self-Cognition No-Speak Follow-Up, 2026-06-01
+
+Latest inspected files:
+
+```text
+test_artifacts/cognition_resolver/real_db_comparison_20260601/self_cognition_l2d_bugfix_review.md
+test_artifacts/cognition_resolver/real_db_comparison_20260601/self_cognition_l2d_diagnostics_before_loop_fix.json
+test_artifacts/cognition_resolver/real_db_comparison_20260601/self_cognition_l2d_diagnostics.json
+```
+
+Observed behavior:
+
+- R04 now runs `self_goal_resolution` and then L2d selects `speak`; this is a
+  valid visible output because speech is selected by cognition, not forced by
+  the resolver.
+- R05 now runs `self_goal_resolution` and then L2d selects private
+  `trigger_future_cognition`; this is a valid no-speak output because the trace
+  says the character is waiting for photos or a clearer intervention signal.
+- Before the loop fix, R05 repeated `self_goal_resolution` until duplicate
+  blocking and then the resolver converted the private terminal blocker into a
+  visible `speak` candidate. That violated the self-cognition boundary.
+
+Implementation lesson applied:
+
+- Terminal duplicate and max-cycle blocker speech is only appropriate for
+  `user_message` goals. For `internal_thought` and other non-user sources,
+  deterministic resolver code must clear the terminal capability request and
+  keep the result private unless L2d itself selected an action.
 
 ## Acceptance Criteria
 

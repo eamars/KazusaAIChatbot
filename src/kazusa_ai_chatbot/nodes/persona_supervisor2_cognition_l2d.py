@@ -1202,7 +1202,9 @@ _ACTION_INITIALIZER_PROMPT = '''\
 - 如果用户明确要求根据已有记忆、历史对话、关系证据或过去经验来判断、排序、推荐、回忆或证明，且解析器上下文里还没有本轮 `rag_evidence` observation，第一轮必须选择 `rag_evidence`，不要直接选择 `speak`。
 - 如果用户允许证据不足就如实说明，缺少可选范围、标准或排序口径不等于缺少必须由用户提供的信息；先取得必要证据，或在证据不足后直接说明不足。
 - 如果行动上下文写着 `触发来源：internal_thought` 且 `输入来源：internal_monologue`，并且当前内部资料需要先收束目标、整理优先级、拆解私有后续判断或形成下一步内部目标，选择 `resolver_capability_requests` 里的 `self_goal_resolution`；不要把 `self_goal_resolution` 当成 `action_requests` 的 capability。
-- 如果解析器上下文已有 `self_goal_resolution` observation 且 status 是 `succeeded`，不要重复请求 `self_goal_resolution`。把该 observation 当作私有目标收束已经完成；除非出现新的具体私有动作目标，否则返回空数组结束。
+- 如果解析器上下文已有 `self_goal_resolution` observation 且 status 是 `succeeded`，不要重复请求 `self_goal_resolution`。把该 observation 当作私有目标收束已经完成，然后重新按当前 L2 决定、场景压力和社交理由选择普通动作：有足够可见发言理由时选择 `speak`；需要等待具体新信息时选择 `trigger_future_cognition`；没有真实动作理由时才返回空数组。
+- 如果最终返回空的 `action_requests`，而本轮或上一轮曾经考虑过可见发言、未来认知或其他外部化动作，`resolver_goal_progress` 必须在 deliverable note、assumptions_or_inferences 或 blockers 中写清现在不外部化的具体理由。不要只因为 self-goal 已完成就无解释地沉默。
+- 没有 `pending_resolver_resume` 时，`resolver_pending_resolution` 不要输出判断；不要把普通内部思考状态写成 `continue_waiting`。
 
 # 选择流程
 1. 先阅读当前行动上下文，判断我现在是否真的要把某件事外部化为动作。
@@ -1224,7 +1226,7 @@ _ACTION_INITIALIZER_PROMPT = '''\
 5f. 如果用户已经给出“证据不足就直说”的退路，缺少可选范围、标准或排序口径不等于缺少必须由用户提供的信息；需要先取证据，或在证据不足后直接说明不足。
 5g. 记忆驱动判断要先取证据：已有记忆、历史对话、认识的人、关系证据、过去经验这类请求，在没有本轮 `rag_evidence` observation 前不得直接 `speak`。
 5h. `self_goal_resolution` 不是 action capability；只要要使用它，必须放在 `resolver_capability_requests[].capability_kind`。
-5i. 如果已有 succeeded 的 `self_goal_resolution` observation，不要再次请求同一个 self resolver；没有新的具体私有动作就返回空数组。
+5i. 如果已有 succeeded 的 `self_goal_resolution` observation，不要再次请求同一个 self resolver；继续按当前 L2 决定选择 `speak`、`trigger_future_cognition` 或空动作。空动作必须能从当前场景和 `resolver_goal_progress` 中看出具体理由。
 6. 只有当前真实场景给了足够清楚的可见发言理由，并且我愿意把该内容发到当前频道，才选择 `speak`。
 7. 群聊参与习惯只是频道互动证据。它可以帮助判断当前现场是否适合开口，但不能替代当前场景，也不能命令我发言。
 8. `speak.detail` 必须写当前可见回复目标、当前可见行动目标，或当前场景中要处理的具体对象、问题、承诺、群聊话题或互动目标。它不是最终台词，不写表情包台词，不复制包标题、时间戳、传输摘要或模型可见元数据，不写“澄清当前输入摘要”。
@@ -1289,6 +1291,7 @@ _ACTION_INITIALIZER_PROMPT = '''\
 }
 
 如果返回 resolver_capability_requests，action_requests 必须是空数组。
+没有 `pending_resolver_resume` 时，resolver_pending_resolution 必须省略或返回空对象。
 如果不需要任何解析或动作，返回 {"resolver_capability_requests": [], "action_requests": []}。
 '''
 _action_initializer_llm = get_llm(

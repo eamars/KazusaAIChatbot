@@ -117,6 +117,28 @@ def _resolver_state() -> dict:
     }
 
 
+def _internal_thought_resolver_state() -> dict:
+    """Return resolver state for a private internal-thought cognition source."""
+
+    state = _resolver_state()
+    episode = dict(state["cognitive_episode"])
+    episode["trigger_source"] = "internal_thought"
+    episode["input_sources"] = ["internal_monologue"]
+    episode["output_mode"] = "think_only"
+    episode["percepts"] = [{
+        "percept_id": "resolver-internal-thought",
+        "input_source": "internal_monologue",
+        "content": "整理一个内部目标。",
+        "visibility": "internal_only",
+        "metadata": {},
+    }]
+    validate_cognitive_episode(episode)
+    state["cognitive_episode"] = episode
+    state["channel_type"] = "group"
+    return_value = state
+    return return_value
+
+
 def _cognition_result(
     *,
     internal_monologue: str,
@@ -706,6 +728,58 @@ async def test_duplicate_final_cognition_changed_request_gets_terminal_speak() -
 
 
 @pytest.mark.asyncio
+async def test_duplicate_final_cognition_internal_thought_stays_private() -> None:
+    """Internal self-cognition must not get a fabricated visible blocker."""
+
+    request = _resolver_request(
+        capability_kind="self_goal_resolution",
+        objective="整理一个内部观察目标。",
+    )
+    execute_count = 0
+
+    async def call_cognition(_state: dict) -> dict:
+        return _cognition_result(
+            internal_monologue="仍然重复请求私有自我整理。",
+            resolver_requests=[request],
+        )
+
+    async def execute_capability(
+        capability_request: dict,
+        _state: dict,
+    ) -> dict:
+        nonlocal execute_count
+        execute_count += 1
+        return {
+            "schema_version": RESOLVER_OBSERVATION_VERSION,
+            "observation_id": f"resolver_obs_self_{execute_count}",
+            "capability_kind": capability_request["capability_kind"],
+            "request_objective": capability_request["objective"],
+            "request_reason": capability_request["reason"],
+            "status": "succeeded",
+            "prompt_safe_summary": "内部自我整理已经完成。",
+            "evidence_refs": [],
+            "created_at_utc": "2026-05-29T21:00:00+00:00",
+        }
+
+    result = await call_cognition_resolver_loop(
+        _internal_thought_resolver_state(),
+        call_cognition_subgraph_func=call_cognition,
+        execute_capability_func=execute_capability,
+        max_cycles=3,
+        capability_timeout_seconds=1.0,
+    )
+
+    assert execute_count == 1
+    assert result["resolver_capability_requests"] == []
+    assert result["action_specs"] == []
+    assert result["resolver_state"]["status"] == "blocked"
+    assert result["resolver_state"]["terminal_reason"] == (
+        "duplicate resolver capability request kept private for non-user source"
+    )
+    assert result["resolver_state"]["held_action_specs"] == []
+
+
+@pytest.mark.asyncio
 async def test_loop_runs_final_cognition_with_max_cycle_blocker() -> None:
     """When capped, the blocker still returns through cognition."""
 
@@ -822,6 +896,54 @@ async def test_loop_converts_max_cycle_request_to_visible_blocker() -> None:
     assert resolver_state["cycle_traces"][-1]["terminal_reason"] == (
         "maximum resolver cycles converted to terminal surface"
     )
+
+
+@pytest.mark.asyncio
+async def test_max_cycle_internal_thought_request_stays_private() -> None:
+    """Internal max-cycle terminal requests must stay private without speech."""
+
+    request = _resolver_request(
+        capability_kind="self_goal_resolution",
+        objective="继续整理内部观察目标。",
+    )
+
+    async def call_cognition(_state: dict) -> dict:
+        return _cognition_result(
+            internal_monologue="仍然想继续内部自我整理。",
+            resolver_requests=[request],
+        )
+
+    async def execute_capability(
+        capability_request: dict,
+        _state: dict,
+    ) -> dict:
+        return {
+            "schema_version": RESOLVER_OBSERVATION_VERSION,
+            "observation_id": "resolver_obs_self_partial",
+            "capability_kind": capability_request["capability_kind"],
+            "request_objective": capability_request["objective"],
+            "request_reason": capability_request["reason"],
+            "status": "succeeded",
+            "prompt_safe_summary": "内部自我整理已经完成。",
+            "evidence_refs": [],
+            "created_at_utc": "2026-05-29T21:00:00+00:00",
+        }
+
+    result = await call_cognition_resolver_loop(
+        _internal_thought_resolver_state(),
+        call_cognition_subgraph_func=call_cognition,
+        execute_capability_func=execute_capability,
+        max_cycles=1,
+        capability_timeout_seconds=1.0,
+    )
+
+    assert result["resolver_capability_requests"] == []
+    assert result["action_specs"] == []
+    assert result["resolver_state"]["status"] == "max_cycles"
+    assert result["resolver_state"]["terminal_reason"] == (
+        "maximum resolver cycles kept private for non-user source"
+    )
+    assert result["resolver_state"]["held_action_specs"] == []
 
 
 @pytest.mark.asyncio
