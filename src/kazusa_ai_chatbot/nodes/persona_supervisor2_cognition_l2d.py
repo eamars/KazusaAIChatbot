@@ -1167,11 +1167,11 @@ _ACTION_INITIALIZER_PROMPT = '''\
 - 当前输入摘要、资料标题、字段名、JSON、时间戳、semantic_labels、window_summary、transport summary、model-facing metadata 不是可见发言对象；不要围绕这些结构选择 `speak`，也不要复制进 `decision`、`detail`、`reason` 等自由文本字段。
 
 # 可选动作
-- `rag_evidence` 是检索当前对话、记忆、关系或资料证据后再回到认知循环。
+- `rag_evidence` 是检索当前对话、记忆、关系或资料证据后再回到认知循环。内部思考需要回看前文、关系或记忆证据时，也使用同一个证据通道。
 - `web_evidence` 是需要当前公共事实或外部资料证据后再回到认知循环。
 - `human_clarification` 是缺少用户拥有的信息时，准备一个最小澄清问题后再回到认知循环。
 - `approval_preparation` 是准备需要用户确认的副作用说明；它不执行提醒、调度、发送或数据库修改。
-- `self_goal_resolution` 只在触发来源是 `internal_thought` 且输入来源包含 `internal_monologue` 时使用；它必须写入 `resolver_capability_requests`，绝不能写入 `action_requests.capability`。它不是用户消息里的“先想一想”或“整理回复方案”。
+- `self_goal_resolution` 只在触发来源是 `internal_thought` 且输入来源包含 `internal_monologue` 时使用；它必须写入 `resolver_capability_requests`，绝不能写入 `action_requests.capability`。它用于收束已有内部目标，不是证据检索，也不是用户消息里的“先想一想”或“整理回复方案”。
 - `speak` 是可见文字回复。选择它表示我决定把话说到当前外部频道；之后才会交给 L3/dialog 渲染为可见文本。
 - `memory_lifecycle_update` 是私有活动承诺生命周期复核。只选择复核需要，不选择具体承诺、别名、数据库目标或生命周期决定。
 - `trigger_future_cognition` 是私有未来认知。只在我需要等待或消费一个具体新信息后再处理具体问题、任务或承诺时选择。
@@ -1201,8 +1201,8 @@ _ACTION_INITIALIZER_PROMPT = '''\
 - 如果行动上下文写着 `触发来源：user_message`，禁止返回 `self_goal_resolution`。用户消息里的“整理方案”“形成回复策略”“内部想一想”都应由本层直接选择 `speak`、`approval_preparation`、`human_clarification`、`rag_evidence` 或 `web_evidence`。
 - 如果用户明确要求根据已有记忆、历史对话、关系证据或过去经验来判断、排序、推荐、回忆或证明，且解析器上下文里还没有本轮 `rag_evidence` observation，第一轮必须选择 `rag_evidence`，不要直接选择 `speak`。
 - 如果用户允许证据不足就如实说明，缺少可选范围、标准或排序口径不等于缺少必须由用户提供的信息；先取得必要证据，或在证据不足后直接说明不足。
-- 如果行动上下文写着 `触发来源：internal_thought` 且 `输入来源：internal_monologue`，并且当前内部资料需要先收束目标、整理优先级、拆解私有后续判断或形成下一步内部目标，选择 `resolver_capability_requests` 里的 `self_goal_resolution`；不要把 `self_goal_resolution` 当成 `action_requests` 的 capability。
-- 如果解析器上下文已有 `self_goal_resolution` observation 且 status 是 `succeeded`，不要重复请求 `self_goal_resolution`。把该 observation 当作私有目标收束已经完成，然后重新按当前 L2 决定、场景压力和社交理由选择普通动作：有足够可见发言理由时选择 `speak`；需要等待具体新信息时选择 `trigger_future_cognition`；没有真实动作理由时才返回空数组。
+- 如果行动上下文写着 `触发来源：internal_thought` 且 `输入来源：internal_monologue`，先判断真实缺口：缺少前文、记忆、关系或资料证据时可选择 `rag_evidence`；需要先收束目标、整理优先级、拆解私有后续判断或形成下一步内部目标时可选择 `self_goal_resolution`；已有足够理由时选择普通动作；没有真实动作理由时返回空数组。不要因为来源是 `internal_thought` 就自动选择 `self_goal_resolution`，也不要把 `self_goal_resolution` 当成 `action_requests` 的 capability。
+- 如果解析器上下文已有 `self_goal_resolution` observation 且 status 是 `succeeded`，不要重复请求 `self_goal_resolution`。把该 observation 当作私有目标收束已经完成，然后重新按当前 L2 决定、场景压力和社交理由选择普通动作：有足够可见发言理由时选择 `speak`；需要等待具体新信息时选择 `trigger_future_cognition`；没有新的具体私有动作就返回空数组。
 - 如果最终返回空的 `action_requests`，而本轮或上一轮曾经考虑过可见发言、未来认知或其他外部化动作，`resolver_goal_progress` 必须在 deliverable note、assumptions_or_inferences 或 blockers 中写清现在不外部化的具体理由。不要只因为 self-goal 已完成就无解释地沉默。
 - 没有 `pending_resolver_resume` 时，`resolver_pending_resolution` 不要输出判断；不要把普通内部思考状态写成 `continue_waiting`。
 
@@ -1222,7 +1222,7 @@ _ACTION_INITIALIZER_PROMPT = '''\
 5b3. 如果原始问题依赖具体当前外部事实，用户补足约束后必须先选择 `web_evidence`。只有已有 `web_evidence` observation 后，才能 `speak`；若证据失败，`speak.detail` 必须说明不能确认具体当前断言，并给可行动标准与最后核实步骤。
 5c. 如果解析器上下文里已经有 `human_clarification` 或 `approval_preparation` 的 blocked observation 或 pending resume，本轮最终应该选择 `speak`，让 L3 去问那一个澄清问题或说明待确认动作；不要再次请求同一个 blocked capability。
 5d. 如果解析器上下文里已有失败或证据不足的 `rag_evidence` / `web_evidence` observation，不要重复请求同类检索的同一目标。只有当原始用户目标仍未解决、且存在更窄或不同的未尝试目标时，才继续请求解析能力；否则选择 `speak`，如实说明证据不足、当前限制或需要用户换方向。
-5e. 只有触发来源是 `internal_thought` 且输入来源包含 `internal_monologue` 时，才可以选择 `self_goal_resolution`。触发来源是 `user_message` 时，内部整理回复策略是本层当前职责，不是 resolver capability。
+5e. 只有触发来源是 `internal_thought` 且输入来源包含 `internal_monologue` 时，才可以选择 `self_goal_resolution`；这只是允许条件，不是默认动作。内部思考缺少证据时按证据缺口选择 `rag_evidence` 或 `web_evidence`，已有足够理由时选择普通动作，没有真实动作理由时返回空数组。触发来源是 `user_message` 时，内部整理回复策略是本层当前职责，不是 resolver capability。
 5f. 如果用户已经给出“证据不足就直说”的退路，缺少可选范围、标准或排序口径不等于缺少必须由用户提供的信息；需要先取证据，或在证据不足后直接说明不足。
 5g. 记忆驱动判断要先取证据：已有记忆、历史对话、认识的人、关系证据、过去经验这类请求，在没有本轮 `rag_evidence` observation 前不得直接 `speak`。
 5h. `self_goal_resolution` 不是 action capability；只要要使用它，必须放在 `resolver_capability_requests[].capability_kind`。
