@@ -41,6 +41,19 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+_SUPERVISOR_TRACE_PRIVATE_KEYS = frozenset((
+    "_id",
+    "conversation_row_id",
+    "platform_message_id",
+    "safety_recovery",
+    "seed_conversation_row_id",
+    "seed_platform_message_id",
+    "unit_id",
+    "source_refs",
+    "raw_refs",
+))
+
+
 def _clamp_unit(value: float) -> float:
     """Clamp a float into the inclusive ``0.0``–``1.0`` range.
 
@@ -111,13 +124,34 @@ def _cognition_rag_result(rag_result: object) -> dict[str, Any]:
     public_result.pop("user_memory_unit_candidates", None)
     supervisor_trace = public_result.get("supervisor_trace")
     if isinstance(supervisor_trace, dict):
-        prompt_trace = dict(supervisor_trace)
-        prompt_trace.pop("safety_recovery", None)
+        prompt_trace = _prompt_safe_supervisor_trace(supervisor_trace)
         public_result["supervisor_trace"] = prompt_trace
     projected_result = project_tool_result_for_llm(public_result)
     if not isinstance(projected_result, dict):
         return {}
     return projected_result
+
+
+def _prompt_safe_supervisor_trace(value: object) -> object:
+    """Remove trace-only private fields before L2 sees RAG internals."""
+
+    if isinstance(value, dict):
+        projected: dict[str, Any] = {}
+        for key, item in value.items():
+            if key in _SUPERVISOR_TRACE_PRIVATE_KEYS:
+                continue
+            projected[key] = _prompt_safe_supervisor_trace(item)
+        return_value: object = projected
+        return return_value
+    if isinstance(value, list):
+        projected_items = [
+            _prompt_safe_supervisor_trace(item)
+            for item in value
+        ]
+        return_value = projected_items
+        return return_value
+    return_value = value
+    return return_value
 
 
 def _build_boundary_affinity_override(boundary_profile: dict, affinity: int, affinity_level: str) -> dict[str, str]:

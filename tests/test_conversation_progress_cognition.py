@@ -313,6 +313,101 @@ async def test_visual_agent_receives_boundary_profile_contract(monkeypatch) -> N
     assert result["visual_vibe"] == ["轻松的日常氛围"]
 
 
+@pytest.mark.asyncio
+async def test_visual_agent_prompt_omits_raw_runtime_ids(monkeypatch) -> None:
+    """Visual prompt should receive semantic scene context, not raw ids."""
+
+    fake_llm = _CapturingLLM({
+        "facial_expression": ["自然"],
+        "body_language": [],
+        "gaze_direction": [],
+        "visual_vibe": [],
+    })
+    monkeypatch.setattr(l3_module, "_visual_agent_llm", fake_llm)
+    state = _profile_conformance_state()
+    state["prompt_message_context"] = {
+        "body_text": "看这张图。",
+        "addressed_to_global_user_ids": ["raw-character-global-id"],
+        "broadcast": False,
+        "mentions": [
+            {
+                "display_name": "测试用户",
+                "entity_kind": "user",
+                "platform_user_id": "raw-mentioned-platform-id",
+                "global_user_id": "raw-mentioned-global-id",
+            },
+        ],
+        "attachments": [
+            {
+                "media_kind": "image",
+                "description": "桌上的甜点照片。",
+                "summary_status": "available",
+                "raw_attachment_id": "raw-attachment-id",
+            },
+        ],
+        "reply": {
+            "platform_message_id": "raw-reply-message-id",
+            "platform_user_id": "raw-reply-platform-id",
+            "global_user_id": "raw-reply-global-id",
+            "display_name": "上条消息作者",
+            "excerpt": "上一条可见文本。",
+        },
+    }
+    state["reply_context"] = {
+        "reply_to_message_id": "raw-service-reply-message-id",
+        "reply_to_platform_user_id": "raw-service-reply-platform-id",
+        "reply_to_display_name": "上条消息作者",
+        "reply_excerpt": "上一条可见文本。",
+    }
+    state["rag_result"]["supervisor_trace"] = {
+        "loop_count": 1,
+        "unknown_slots": [],
+        "dispatched": [
+            {
+                "slot": "conversation evidence",
+                "agent": "conversation_search",
+                "resolved": True,
+                "source_refs": [
+                    {
+                        "conversation_row_id": "raw-row-id",
+                        "platform_message_id": "raw-message-id",
+                    },
+                ],
+            },
+        ],
+    }
+
+    await l3_module.call_visual_agent(state)
+
+    human_payload = json.loads(fake_llm.messages[1].content)
+    rendered_payload = fake_llm.messages[1].content
+    prompt_context = human_payload["prompt_message_context"]
+    reply_context = human_payload["reply_context"]
+    supervisor_trace = human_payload["rag_result"]["supervisor_trace"]
+    assert prompt_context["mentions"] == [
+        {"display_name": "测试用户", "entity_kind": "user"},
+    ]
+    assert prompt_context["reply"] == {
+        "display_name": "上条消息作者",
+        "excerpt": "上一条可见文本。",
+    }
+    assert reply_context == {
+        "reply_to_display_name": "上条消息作者",
+        "reply_excerpt": "上一条可见文本。",
+    }
+    assert "source_refs" not in supervisor_trace["dispatched"][0]
+    for raw_id in (
+        "raw-character-global-id",
+        "raw-mentioned-platform-id",
+        "raw-mentioned-global-id",
+        "raw-reply-message-id",
+        "raw-service-reply-message-id",
+        "raw-row-id",
+        "raw-message-id",
+    ):
+        assert raw_id not in rendered_payload
+
+
 def test_projection_preserves_relative_age_for_prior_disclosure() -> None:
     """Stored first_seen_at becomes an LLM-facing age_hint."""
 

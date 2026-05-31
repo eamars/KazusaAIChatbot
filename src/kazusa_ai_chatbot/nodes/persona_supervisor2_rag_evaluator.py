@@ -93,6 +93,12 @@ _EVALUATOR_SUMMARIZER_PROMPT = '''\
 - 对 profile 或 durable memory payloads，抽取关键事实。
 - 对 unresolved slots，简短说明该检索来源未确认槽位。
 - 如果 raw_result 为空，不要推断之前槽位失败，除非 known_facts 明确显示。
+- 如果 slot 要求比较多个来源类别、证据轨道或目标对象，摘要必须区分
+  “已由当前 raw_result 支撑的事实”和“当前 raw_result 没有确认的类别”。
+  raw_result 里只有链接、相邻对象、派生轨道或说明性资料时，
+  只能写成邻近线索，不能写成该类别已确认目标事实。
+- 不得把“未发现冲突”或“信息一致”写进摘要，除非 raw_result 明确列出每个被比较
+  来源类别都包含同一目标事实。
 
 # 输入格式
 human payload 是 JSON：
@@ -1066,6 +1072,12 @@ _FINALIZER_PROMPT = '''\
 - 如果某个槽位 unresolved，如实说明缺失部分。
 - 不要把一个来源未命中扩大成 "no record exists" 或 "no interaction exists"；
   只能说明被搜索来源返回了什么。
+- 跨来源一致性必须保守：只有每个被比较的来源类别都有 resolved 事实，且 summary
+  或 raw_result 明确包含同一目标事实时，才可以写“信息一致”或“无冲突”。
+  如果某类来源只有链接、读取失败、邻近对象、派生轨道或说明性资料，
+  必须写成“该来源类别未确认目标事实”或“仅为邻近线索”。
+- 不要把相邻对象、派生轨道、集成说明、镜像、扩展或非目标对象当成目标对象的直接证据；
+  除非 original_query 明确询问这些轨道，否则只能列为邻近线索或排除项。
 - 仅当有助于理解事实时保留可读 URL、说话人、时间或来源线索。
 - 不要复述 global_user_id、UUID、platform_message_id、conversation_row_id、
   message ID 或类似来源标识；需要指代来源时只写 "消息记录" 或直接省略。

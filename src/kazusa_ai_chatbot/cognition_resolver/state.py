@@ -9,11 +9,15 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_CYCLE_STATE_VERSION,
     ResolverCycleStateV1,
     ResolverCycleTraceV1,
+    ResolverGoalProgressV1,
     ResolverObservationV1,
     ResolverValidationError,
+    new_empty_goal_progress,
+    project_goal_progress_for_cognition,
     project_observations_for_cognition,
     project_pending_resume_for_cognition,
     validate_resolver_cycle_trace,
+    validate_resolver_goal_progress,
     validate_resolver_observation,
     validate_resolver_pending_resume,
 )
@@ -43,6 +47,9 @@ def new_resolver_state(
         "observations": [],
         "cycle_traces": [],
         "held_action_specs": [],
+        "goal_progress": new_empty_goal_progress(
+            original_goal=decontexualized_input,
+        ),
         "terminal_reason": "",
     }
     return return_value
@@ -81,6 +88,20 @@ def append_cycle_trace(
     updated = dict(normalized_state)
     updated["cycle_traces"] = cycle_traces
     updated["cycle_index"] = next_cycle_index
+    return_value = updated
+    return return_value
+
+
+def update_goal_progress(
+    state: ResolverCycleStateV1,
+    goal_progress: ResolverGoalProgressV1,
+) -> ResolverCycleStateV1:
+    """Store the latest cognition-maintained goal progress without mutation."""
+
+    normalized_state = validate_resolver_state(state)
+    normalized_goal_progress = validate_resolver_goal_progress(goal_progress)
+    updated = dict(normalized_state)
+    updated["goal_progress"] = normalized_goal_progress
     return_value = updated
     return return_value
 
@@ -163,13 +184,20 @@ def project_resolver_context(
             f"resolver_state: status={normalized_state['status']}; "
             f"cycle_index={normalized_state['cycle_index']}; "
             f"max_cycles={normalized_state['max_cycles']}; "
-            f"terminal_reason={normalized_state['terminal_reason']}"
+            f"terminal_reason={normalized_state['terminal_reason']}; "
+            "original_goal="
+            f"{normalized_state['original_decontexualized_input']}"
         ),
     ]
     observations = normalized_state["observations"][-validated_limit:]
     observation_context = project_observations_for_cognition(observations)
     if observation_context:
         lines.append(f"resolver_observations:\n{observation_context}")
+    goal_progress_context = project_goal_progress_for_cognition(
+        normalized_state.get("goal_progress"),
+    )
+    if goal_progress_context:
+        lines.append(goal_progress_context)
     pending_resume = normalized_state.get("pending_resume")
     pending_context = project_pending_resume_for_cognition(pending_resume)
     if pending_context:
@@ -199,6 +227,11 @@ def validate_resolver_state(value: object) -> ResolverCycleStateV1:
     ]
     held_action_specs = list(_require_list(data, "held_action_specs"))
     terminal_reason = _require_string(data, "terminal_reason")
+    raw_goal_progress = data.get("goal_progress")
+    if raw_goal_progress is None:
+        goal_progress = new_empty_goal_progress(original_goal=original_input)
+    else:
+        goal_progress = validate_resolver_goal_progress(raw_goal_progress)
     normalized: ResolverCycleStateV1 = {
         "schema_version": RESOLVER_CYCLE_STATE_VERSION,
         "cycle_index": cycle_index,
@@ -208,6 +241,7 @@ def validate_resolver_state(value: object) -> ResolverCycleStateV1:
         "observations": observations,
         "cycle_traces": cycle_traces,
         "held_action_specs": held_action_specs,
+        "goal_progress": goal_progress,
         "terminal_reason": terminal_reason,
     }
     pending_resume = data.get("pending_resume")

@@ -32,9 +32,14 @@ from kazusa_ai_chatbot.rag.quote_aware_sequence import (
     call_quote_aware_rag_supervisor,
 )
 from kazusa_ai_chatbot.utils import log_preview
+from kazusa_ai_chatbot.mcp_client import mcp_manager
 
 MILLISECONDS_PER_SECOND = 1000
 PERSONA_RAG_COMPONENT = "nodes.persona_supervisor2"
+WEB_EVIDENCE_REQUIRED_TOOLS = (
+    "mcp-searxng__searxng_web_search",
+    "mcp-searxng__web_url_read",
+)
 SELF_GOAL_ALLOWED_TRIGGER_SOURCES = frozenset((
     "internal_thought",
     "self_cognition",
@@ -215,6 +220,21 @@ async def _execute_rag_like_capability(
 ) -> ResolverObservationV1:
     """Execute RAG or web evidence through the existing RAG supervisor path."""
 
+    if request["capability_kind"] == "web_evidence":
+        missing_tools = _missing_mcp_tools(WEB_EVIDENCE_REQUIRED_TOOLS)
+        if missing_tools:
+            observation = _observation_base(
+                request,
+                state,
+                status="failed",
+                prompt_safe_summary=(
+                    "Web evidence tools unavailable: missing "
+                    f"{', '.join(missing_tools)}."
+                ),
+            )
+            return_value = validate_resolver_observation(observation)
+            return return_value
+
     rag_result = await run_rag_evidence_for_persona_state(
         state,
         agent_name=f"resolver_{request['capability_kind']}",
@@ -240,6 +260,14 @@ def _blocked_observation(
     """Build a blocked observation for user-owned input or approval."""
 
     summary = f"{summary_prefix}: {request['objective']}"
+    if request["capability_kind"] == "approval_preparation":
+        summary = (
+            f"{summary} Capability boundary: approval preparation only; "
+            "no reminder, scheduling, sending, file inspection, status check, "
+            "checksum validation, download monitoring, or other side effect "
+            "has executed. Do not claim unavailable inspection tools unless "
+            "the user or runtime explicitly provided them."
+        )
     observation = _observation_base(
         request,
         state,
@@ -294,6 +322,18 @@ def _cognitive_episode_trigger_source(state: GlobalPersonaState) -> str:
             "cognitive_episode.trigger_source: expected string"
         )
     return_value = trigger_source.strip()
+    return return_value
+
+
+def _missing_mcp_tools(required_tool_names: tuple[str, ...]) -> list[str]:
+    """Return required MCP tool names that are not currently discovered."""
+
+    missing_tools = [
+        tool_name
+        for tool_name in required_tool_names
+        if mcp_manager.get_tool(tool_name) is None
+    ]
+    return_value = missing_tools
     return return_value
 
 
@@ -355,6 +395,24 @@ def _rag_observation_summary(rag_result: dict[str, Any]) -> str:
 
     answer = str(rag_result.get("answer", "")).strip()
     retrieval_count = _retrieval_count(rag_result)
+    no_confirmed_fact_markers = (
+        "没有找到已确认事实",
+        "没有找到相关证据",
+        "没有返回已确认结果",
+        "缺少 evidence",
+        "缺少 live_evidence",
+        "缺少 记忆证据",
+    )
+    has_no_confirmed_facts = any(
+        marker in answer for marker in no_confirmed_fact_markers
+    )
+    if retrieval_count == 0 and has_no_confirmed_facts:
+        summary = (
+            "RAG evidence returned no projected rows and no confirmed facts; "
+            f"treat as evidence_missing, not source-backed truth; "
+            f"answer={log_preview(answer)}"
+        )
+        return summary
     if answer:
         summary = (
             f"RAG evidence succeeded with {retrieval_count} projected rows; "

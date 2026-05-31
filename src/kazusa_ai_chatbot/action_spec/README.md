@@ -129,9 +129,11 @@ pending state, not action specs and not adapter delivery:
   side effect that has not been executed.
 
 Follow-up user turns close, approve, reject, or supersede these rows only when
-L2d emits `resolver_pending_resolution`. Deterministic code must not infer
-approval from keywords or execute the prepared side effect inside the resolver
-stage.
+L2d emits a semantic pending-resolution decision. The LLM-facing prompt does
+not expose pending row ids; deterministic code binds the single active pending
+row into `resolver_pending_resolution` after L2d chooses `decision` and
+`reason`. Deterministic code must not infer approval from keywords or execute
+the prepared side effect inside the resolver stage.
 
 ## Consolidation
 

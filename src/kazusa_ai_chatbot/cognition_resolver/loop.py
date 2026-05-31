@@ -7,6 +7,14 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from kazusa_ai_chatbot.action_spec.models import (
+    ACTION_CONTINUATION_VERSION,
+    ACTION_SOURCE_REF_VERSION,
+    ACTION_SPEC_VERSION,
+    ACTION_TARGET_VERSION,
+    validate_action_spec,
+)
+from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_CYCLE_TRACE_VERSION,
     RESOLVER_OBSERVATION_VERSION,
@@ -15,7 +23,9 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ResolverObservationV1,
     ResolverPendingResolutionV1,
     ResolverPendingResumeV1,
+    ResolverValidationError,
     validate_resolver_capability_request,
+    validate_resolver_goal_progress,
     validate_resolver_observation,
     validate_resolver_pending_resolution,
 )
@@ -28,6 +38,7 @@ from kazusa_ai_chatbot.cognition_resolver.state import (
     append_observation,
     ensure_initial_resolver_inputs,
     project_resolver_context,
+    update_goal_progress,
     validate_resolver_state,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
@@ -50,6 +61,7 @@ PendingResolutionApplyFunc = Callable[
 ]
 
 MAX_CYCLE_OBSERVATION_ID = "resolver_obs_max_cycles"
+DUPLICATE_REQUEST_OBSERVATION_ID = "resolver_obs_duplicate_request"
 BLOCKED_PENDING_CAPABILITIES = frozenset((
     "human_clarification",
     "approval_preparation",
@@ -82,6 +94,7 @@ async def call_cognition_resolver_loop(
         status_before = _resolver_state(current_state)["status"]
         cognition_output = await call_cognition_subgraph_func(current_state)
         cognition_state = _merge_state(current_state, cognition_output)
+        cognition_state = _sync_goal_progress_from_cognition(cognition_state)
         resolver_state = _resolver_state(cognition_state)
         selected_request = _select_immediate_request(cognition_state)
 
@@ -90,6 +103,18 @@ async def call_cognition_resolver_loop(
                 cognition_state,
                 resolver_state=resolver_state,
                 status_before=status_before,
+                apply_pending_resolution_func=apply_pending_resolution_func,
+            )
+            return_value = final_state
+            return return_value
+
+        if _is_repeated_capability_request(selected_request, resolver_state):
+            final_state = await _run_duplicate_request_final_cognition(
+                cognition_state,
+                selected_request=selected_request,
+                resolver_state=resolver_state,
+                status_before=status_before,
+                call_cognition_subgraph_func=call_cognition_subgraph_func,
                 apply_pending_resolution_func=apply_pending_resolution_func,
             )
             return_value = final_state
@@ -152,6 +177,7 @@ async def _finalize_without_capability(
         cognition_state,
         apply_pending_resolution_func=apply_pending_resolution_func,
     )
+    resolver_state = _resolver_state(cognition_state)
     action_specs = list(cognition_state.get("action_specs", []))
     updated_resolver_state = dict(resolver_state)
     updated_resolver_state["status"] = "terminal"
@@ -188,15 +214,36 @@ async def _run_max_cycle_final_cognition(
     cognition_input = _with_resolver_state(state, updated_resolver_state)
     cognition_output = await call_cognition_subgraph_func(cognition_input)
     cognition_state = _merge_state(cognition_input, cognition_output)
+    cognition_state = _sync_goal_progress_from_cognition(cognition_state)
     await _apply_pending_resolution_if_present(
         cognition_state,
         apply_pending_resolution_func=apply_pending_resolution_func,
     )
     final_resolver_state = _resolver_state(cognition_state)
     final_resolver_state = dict(final_resolver_state)
+    final_terminal_reason = "maximum resolver cycles reached"
+    final_selected_request = _select_immediate_request(cognition_state)
+    if final_selected_request is not None:
+        logger.warning(
+            "Resolver converted max-cycle terminal capability request to "
+            "visible blocker surface"
+        )
+        if not cognition_state.get("action_specs"):
+            cognition_state["action_specs"] = [
+                _terminal_blocker_speak_action_spec(
+                    final_selected_request,
+                    blocker,
+                ),
+            ]
+        cognition_state["resolver_capability_requests"] = []
+        final_terminal_reason = (
+            "maximum resolver cycles converted to terminal surface"
+        )
     final_resolver_state["held_action_specs"] = list(
         cognition_state.get("action_specs", []),
     )
+    final_resolver_state["status"] = "max_cycles"
+    final_resolver_state["terminal_reason"] = final_terminal_reason
     trace = _build_cycle_trace(
         cognition_state,
         resolver_state=final_resolver_state,
@@ -204,9 +251,87 @@ async def _run_max_cycle_final_cognition(
         status_before="max_cycles",
         selected_capability_kind="",
         observation_ids=[],
-        terminal_reason="maximum resolver cycles reached",
+        terminal_reason=final_terminal_reason,
     )
     final_resolver_state = append_cycle_trace(final_resolver_state, trace)
+    return_value = _with_resolver_state(cognition_state, final_resolver_state)
+    return return_value
+
+
+async def _run_duplicate_request_final_cognition(
+    state: GlobalPersonaState,
+    *,
+    selected_request: ResolverCapabilityRequestV1,
+    resolver_state: ResolverCycleStateV1,
+    status_before: str,
+    call_cognition_subgraph_func: CognitionSubgraphFunc,
+    apply_pending_resolution_func: PendingResolutionApplyFunc,
+) -> GlobalPersonaState:
+    """Return one final cognition cycle after blocking repeated capability work."""
+
+    blocker = _duplicate_request_observation(selected_request, state)
+    resolver_state = append_observation(resolver_state, blocker)
+    updated_resolver_state = dict(resolver_state)
+    updated_resolver_state["status"] = "blocked"
+    updated_resolver_state["terminal_reason"] = (
+        "duplicate resolver capability request blocked"
+    )
+    trace = _build_cycle_trace(
+        state,
+        resolver_state=updated_resolver_state,
+        cycle_index=updated_resolver_state["cycle_index"],
+        status_before=status_before,
+        selected_capability_kind=selected_request["capability_kind"],
+        observation_ids=[blocker["observation_id"]],
+        terminal_reason="duplicate resolver capability request blocked",
+    )
+    updated_resolver_state = append_cycle_trace(updated_resolver_state, trace)
+    cognition_input = _with_resolver_state(state, updated_resolver_state)
+    cognition_output = await call_cognition_subgraph_func(cognition_input)
+    cognition_state = _merge_state(cognition_input, cognition_output)
+    cognition_state = _sync_goal_progress_from_cognition(cognition_state)
+    await _apply_pending_resolution_if_present(
+        cognition_state,
+        apply_pending_resolution_func=apply_pending_resolution_func,
+    )
+    final_resolver_state = _resolver_state(cognition_state)
+    final_resolver_state = dict(final_resolver_state)
+    final_terminal_reason = (
+        "duplicate resolver capability request final cognition completed"
+    )
+    final_repeated_request = _select_immediate_request(cognition_state)
+    if final_repeated_request is not None:
+        logger.warning(
+            "Resolver converted terminal capability request after duplicate "
+            "blocking to "
+            "visible blocker surface"
+        )
+        if not cognition_state.get("action_specs"):
+            cognition_state["action_specs"] = [
+                _terminal_blocker_speak_action_spec(
+                    final_repeated_request,
+                    blocker,
+                ),
+            ]
+        cognition_state["resolver_capability_requests"] = []
+        final_terminal_reason = (
+            "duplicate resolver capability request converted to terminal surface"
+        )
+    final_resolver_state["held_action_specs"] = list(
+        cognition_state.get("action_specs", []),
+    )
+    final_resolver_state["status"] = "blocked"
+    final_resolver_state["terminal_reason"] = final_terminal_reason
+    final_trace = _build_cycle_trace(
+        cognition_state,
+        resolver_state=final_resolver_state,
+        cycle_index=final_resolver_state["cycle_index"],
+        status_before="blocked",
+        selected_capability_kind="",
+        observation_ids=[],
+        terminal_reason=final_terminal_reason,
+    )
+    final_resolver_state = append_cycle_trace(final_resolver_state, final_trace)
     return_value = _with_resolver_state(cognition_state, final_resolver_state)
     return return_value
 
@@ -252,6 +377,7 @@ async def _run_blocked_pending_final_cognition(
 
     cognition_output = await call_cognition_subgraph_func(cognition_input)
     cognition_state = _merge_state(cognition_input, cognition_output)
+    cognition_state = _sync_goal_progress_from_cognition(cognition_state)
     await _apply_pending_resolution_if_present(
         cognition_state,
         apply_pending_resolution_func=apply_pending_resolution_func,
@@ -266,6 +392,20 @@ async def _run_blocked_pending_final_cognition(
         cognition_state["resolver_capability_requests"] = []
         cognition_state["action_specs"] = []
         final_terminal_reason = "blocked capability repeated after pending resume"
+    if not cognition_state.get("action_specs"):
+        cognition_state["resolver_capability_requests"] = []
+        cognition_state["action_specs"] = [
+            _pending_resume_speak_action_spec(
+                pending_resume,
+                normalized_observation,
+            ),
+        ]
+        if final_terminal_reason == "blocked capability repeated after pending resume":
+            final_terminal_reason = (
+                "pending resume fallback surface after repeated capability"
+            )
+        else:
+            final_terminal_reason = "pending resume fallback surface completed"
     final_resolver_state = dict(final_resolver_state)
     final_resolver_state["held_action_specs"] = list(
         cognition_state.get("action_specs", []),
@@ -286,6 +426,70 @@ async def _run_blocked_pending_final_cognition(
     return return_value
 
 
+def _pending_resume_speak_action_spec(
+    pending_resume: ResolverPendingResumeV1,
+    observation: ResolverObservationV1,
+) -> dict[str, Any]:
+    """Build the visible text action for a persisted pending row."""
+
+    capability_kind = pending_resume["capability_kind"]
+    decision = "ask_clarification"
+    detail = pending_resume["prompt_safe_question"]
+    if capability_kind == "approval_preparation":
+        decision = "request_approval"
+        detail = pending_resume["prompt_safe_approval_summary"]
+    if not detail:
+        detail = observation["prompt_safe_summary"]
+
+    action_spec = {
+        "schema_version": ACTION_SPEC_VERSION,
+        "kind": SPEAK_CAPABILITY,
+        "cognition_mode": "deliberative",
+        "source_refs": [
+            {
+                "schema_version": ACTION_SOURCE_REF_VERSION,
+                "ref_kind": "system_event",
+                "ref_id": observation["observation_id"],
+                "owner": "cognition_resolver",
+                "relationship": "basis",
+                "evidence_refs": [],
+            },
+        ],
+        "target": {
+            "schema_version": ACTION_TARGET_VERSION,
+            "target_kind": "current_channel",
+            "target_id": None,
+            "owner": "l3_text",
+            "scope": {"surface": "text"},
+        },
+        "params": {
+            "delivery_mode": "visible_reply",
+            "execute_at": None,
+            "surface_requirements": {
+                "decision": decision,
+                "detail": detail,
+            },
+        },
+        "urgency": "now",
+        "visibility": "user_visible",
+        "deadline": None,
+        "continuation": {
+            "schema_version": ACTION_CONTINUATION_VERSION,
+            "mode": "none",
+            "episode_type": None,
+            "max_depth": 0,
+            "include_result_as": None,
+        },
+        "reason": (
+            "Resolver created a pending row and must surface its prompt-safe "
+            "question or approval summary."
+        ),
+    }
+    validated_spec = validate_action_spec(action_spec)
+    return_value = dict(validated_spec)
+    return return_value
+
+
 async def _apply_pending_resolution_if_present(
     state: GlobalPersonaState,
     *,
@@ -297,7 +501,133 @@ async def _apply_pending_resolution_if_present(
     if resolution is None:
         return
     validated_resolution = validate_resolver_pending_resolution(resolution)
-    await apply_pending_resolution_func(state, validated_resolution)
+    if _resolution_targets_current_message_pending(state, validated_resolution):
+        state.pop("resolver_pending_resolution", None)
+        return
+    updated_row = await apply_pending_resolution_func(state, validated_resolution)
+    _reflect_pending_resolution_in_state(
+        state,
+        validated_resolution,
+        updated_row,
+    )
+
+
+def _reflect_pending_resolution_in_state(
+    state: GlobalPersonaState,
+    resolution: ResolverPendingResolutionV1,
+    updated_row: object,
+) -> None:
+    """Reflect applied pending status in the current prompt-safe state."""
+
+    pending_resume = _pending_resume_from_updated_row(updated_row)
+    if pending_resume is None:
+        pending_resume = _pending_resume_from_state(state)
+    if pending_resume is None:
+        return
+
+    updated_pending = dict(pending_resume)
+    if resolution["decision"] == "continue_waiting":
+        updated_status = pending_resume["status"]
+    elif resolution["decision"] == "superseded":
+        updated_status = "superseded"
+    else:
+        updated_status = "closed"
+    updated_pending["status"] = updated_status
+    resolver_state = _resolver_state(state)
+    updated_resolver_state = dict(resolver_state)
+    updated_resolver_state["pending_resume"] = updated_pending
+    state["pending_resolver_resume"] = updated_pending
+    state["resolver_state"] = validate_resolver_state(updated_resolver_state)
+    state["resolver_context"] = project_resolver_context(state["resolver_state"])
+
+
+def _resolution_targets_current_message_pending(
+    state: GlobalPersonaState,
+    resolution: ResolverPendingResolutionV1,
+) -> bool:
+    """Return whether a resolution tries to answer a same-message pending row."""
+
+    pending_resume = _pending_resume_from_state(state)
+    if pending_resume is None:
+        return_value = False
+        return return_value
+    same_resume = pending_resume.get("resume_id") == resolution["resume_id"]
+    same_message = (
+        pending_resume.get("source_message_id")
+        == state.get("platform_message_id")
+    )
+    return_value = bool(same_resume and same_message)
+    return return_value
+
+
+def _pending_resume_from_updated_row(updated_row: object) -> dict | None:
+    """Return pending resume payload from a just-updated ledger row."""
+
+    if not isinstance(updated_row, dict):
+        return_value = None
+        return return_value
+    pending_resume = updated_row.get("resolver_pending_resume")
+    if isinstance(pending_resume, dict):
+        return_value = pending_resume
+        return return_value
+    execution_result = updated_row.get("execution_result")
+    if not isinstance(execution_result, dict):
+        return_value = None
+        return return_value
+    pending_resume = execution_result.get("resolver_pending_resume")
+    if isinstance(pending_resume, dict):
+        return_value = pending_resume
+        return return_value
+    pending_resume = execution_result.get("pending_resume")
+    if isinstance(pending_resume, dict):
+        return_value = pending_resume
+        return return_value
+    return_value = None
+    return return_value
+
+
+def _pending_resume_from_state(state: GlobalPersonaState) -> dict | None:
+    """Return pending resume payload already attached to the resolver state."""
+
+    pending_resume = state.get("pending_resolver_resume")
+    if isinstance(pending_resume, dict):
+        return_value = pending_resume
+        return return_value
+    resolver_state = state.get("resolver_state")
+    if not isinstance(resolver_state, dict):
+        return_value = None
+        return return_value
+    pending_resume = resolver_state.get("pending_resume")
+    if isinstance(pending_resume, dict):
+        return_value = pending_resume
+        return return_value
+    return_value = None
+    return return_value
+
+
+def _sync_goal_progress_from_cognition(
+    state: GlobalPersonaState,
+) -> GlobalPersonaState:
+    """Persist L2d's validated goal checklist into resolver state."""
+
+    raw_goal_progress = state.get("resolver_goal_progress")
+    if raw_goal_progress is None:
+        return_value = state
+        return return_value
+    try:
+        goal_progress = validate_resolver_goal_progress(raw_goal_progress)
+    except ResolverValidationError as exc:
+        logger.warning(f"Resolver dropped invalid goal progress: {exc}")
+        updated = dict(state)
+        updated.pop("resolver_goal_progress", None)
+        return_value = updated
+        return return_value
+
+    resolver_state = update_goal_progress(_resolver_state(state), goal_progress)
+    updated = _with_resolver_state(state, resolver_state)
+    updated["resolver_goal_progress"] = goal_progress
+    return_value = updated
+    return return_value
 
 
 async def _execute_with_timeout(
@@ -361,6 +691,22 @@ def _is_repeated_blocked_request(
     return return_value
 
 
+def _is_repeated_capability_request(
+    request: ResolverCapabilityRequestV1,
+    resolver_state: ResolverCycleStateV1,
+) -> bool:
+    """Return whether the exact capability objective was already observed."""
+
+    for observation in resolver_state["observations"]:
+        same_capability = observation["capability_kind"] == request["capability_kind"]
+        same_objective = observation["request_objective"] == request["objective"]
+        if same_capability and same_objective:
+            return_value = True
+            return return_value
+    return_value = False
+    return return_value
+
+
 def _timeout_observation(
     request: ResolverCapabilityRequestV1,
     state: GlobalPersonaState,
@@ -381,6 +727,103 @@ def _timeout_observation(
         "created_at_utc": _created_at_utc(state),
     }
     return_value = validate_resolver_observation(observation)
+    return return_value
+
+
+def _duplicate_request_observation(
+    request: ResolverCapabilityRequestV1,
+    state: GlobalPersonaState,
+) -> ResolverObservationV1:
+    """Build a failed observation for an exact repeated capability request."""
+
+    observation = {
+        "schema_version": RESOLVER_OBSERVATION_VERSION,
+        "observation_id": DUPLICATE_REQUEST_OBSERVATION_ID,
+        "capability_kind": request["capability_kind"],
+        "request_objective": request["objective"],
+        "request_reason": request["reason"],
+        "status": "failed",
+        "prompt_safe_summary": (
+            "Resolver blocked a duplicate capability request because the same "
+            "objective was already attempted in this resolver run."
+        ),
+        "evidence_refs": [],
+        "created_at_utc": _created_at_utc(state),
+    }
+    return_value = validate_resolver_observation(observation)
+    return return_value
+
+
+def _terminal_blocker_speak_action_spec(
+    request: ResolverCapabilityRequestV1,
+    blocker: ResolverObservationV1,
+) -> dict[str, Any]:
+    """Build a visible text-surface action for terminal resolver blockers."""
+
+    detail = (
+        f'围绕 objective={request["objective"]} 说明当前证据获取已经阻塞，'
+        '不能给出来源确认的具体当前对象或状态；不要重复请求同一解析能力。'
+        '可见回复应区分：已知约束、已由来源支持的事实、'
+        '推断或常识层面的建议、当前无法确认的部分、'
+        '以及用户或后续流程需要核实的最小项目。'
+        '这是本轮终止收束，不得写成临时处理状态或延后承诺；'
+        '必须在当前回复内给出可执行的最佳努力答案。'
+        '如果原始目标或目标进度包含多部分交付、计划、路线、'
+        '时间安排、风险、对比或执行步骤，必须按目标进度中的'
+        'deliverables 和 final_response_requirements 收束；'
+        '不要只回答最新证据或最容易回答的一个子问题。'
+        '没有来源时不要补造具体当前实体、属性、实时状态、'
+        '可用性或来源绑定结论。泛化说明也不能偷换成未授权的'
+        '具体对象示例。'
+        '不要把收束改成新的主澄清、放宽条件请求或开放式追问；'
+        '如果提到可调整条件，只能作为可选退路，不能以追问结尾。'
+    )
+    action_spec = {
+        "schema_version": ACTION_SPEC_VERSION,
+        "kind": SPEAK_CAPABILITY,
+        "cognition_mode": "deliberative",
+        "source_refs": [
+            {
+                "schema_version": ACTION_SOURCE_REF_VERSION,
+                "ref_kind": "system_event",
+                "ref_id": blocker["observation_id"],
+                "owner": "cognition_resolver",
+                "relationship": "basis",
+                "evidence_refs": [],
+            },
+        ],
+        "target": {
+            "schema_version": ACTION_TARGET_VERSION,
+            "target_kind": "current_channel",
+            "target_id": None,
+            "owner": "l3_text",
+            "scope": {"surface": "text"},
+        },
+        "params": {
+            "delivery_mode": "visible_reply",
+            "execute_at": None,
+            "surface_requirements": {
+                "decision": "explain terminal evidence blocker",
+                "detail": detail,
+            },
+        },
+        "urgency": "now",
+        "visibility": "user_visible",
+        "deadline": None,
+        "continuation": {
+            "schema_version": ACTION_CONTINUATION_VERSION,
+            "mode": "none",
+            "episode_type": None,
+            "max_depth": 0,
+            "include_result_as": None,
+        },
+        "reason": (
+            "Resolver reached a terminal capability blocker and must surface "
+            "the evidence boundary instead of looping silently."
+        ),
+    }
+    validated_spec = validate_action_spec(action_spec)
+    return_value = dict(validated_spec)
     return return_value
 
 

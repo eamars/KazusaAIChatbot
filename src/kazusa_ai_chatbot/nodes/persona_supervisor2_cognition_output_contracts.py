@@ -61,6 +61,7 @@ _OPTIONAL_OUTPUT_FIELDS: dict[CognitionPromptStage, dict[str, type[object]]] = {
     "l2d_action_selection": {
         "resolver_capability_requests": list,
         "resolver_pending_resolution": dict,
+        "resolver_goal_progress": dict,
     },
 }
 

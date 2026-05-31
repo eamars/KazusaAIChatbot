@@ -493,7 +493,7 @@ class TestCognitionResolverConfig:
         )
 
         assert result.returncode == 0
-        assert result.stdout.splitlines() == ["False", "3", "45.0"]
+        assert result.stdout.splitlines() == ["False", "3", "120.0"]
 
     def test_cognition_resolver_config_reads_environment(self, tmp_path):
         env = _configured_subprocess_env_without_dotenv()

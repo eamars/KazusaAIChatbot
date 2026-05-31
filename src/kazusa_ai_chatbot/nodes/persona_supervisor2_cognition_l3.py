@@ -1,8 +1,18 @@
 """Selected L3 surface and collector calls."""
+from collections.abc import Mapping
+
 from kazusa_ai_chatbot.config import (
     COGNITION_LLM_API_KEY,
     COGNITION_LLM_BASE_URL,
     COGNITION_LLM_MODEL,
+)
+from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    ResolverValidationError,
+    project_observations_for_cognition,
+    validate_resolver_goal_progress,
+)
+from kazusa_ai_chatbot.cognition_resolver.state import (
+    MAX_PROJECTED_RESOLVER_OBSERVATIONS,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_output_contracts import (
     validate_cognition_output_contract,
@@ -93,13 +103,46 @@ def _cognition_rag_result(rag_result: object) -> dict[str, Any]:
     public_result.pop("user_memory_unit_candidates", None)
     supervisor_trace = public_result.get("supervisor_trace")
     if isinstance(supervisor_trace, dict):
-        prompt_trace = dict(supervisor_trace)
-        prompt_trace.pop("safety_recovery", None)
+        prompt_trace = _prompt_safe_supervisor_trace(supervisor_trace)
         public_result["supervisor_trace"] = prompt_trace
     projected_result = project_tool_result_for_llm(public_result)
     if not isinstance(projected_result, dict):
         return {}
     return projected_result
+
+
+def _prompt_safe_supervisor_trace(supervisor_trace: dict[str, Any]) -> dict[str, Any]:
+    """Return RAG routing trace without raw source or storage identifiers."""
+
+    prompt_trace: dict[str, Any] = {}
+    loop_count = supervisor_trace.get("loop_count")
+    if isinstance(loop_count, int):
+        prompt_trace["loop_count"] = loop_count
+    unknown_slots = supervisor_trace.get("unknown_slots")
+    if isinstance(unknown_slots, list):
+        prompt_trace["unknown_slots"] = [
+            slot for slot in unknown_slots
+            if isinstance(slot, str)
+        ]
+    dispatched = supervisor_trace.get("dispatched")
+    if isinstance(dispatched, list):
+        prompt_dispatched: list[dict[str, Any]] = []
+        for entry in dispatched:
+            if not isinstance(entry, dict):
+                continue
+            prompt_entry: dict[str, Any] = {}
+            for field_name in ("slot", "agent"):
+                value = entry.get(field_name)
+                if isinstance(value, str):
+                    prompt_entry[field_name] = value
+            resolved = entry.get("resolved")
+            if isinstance(resolved, bool):
+                prompt_entry["resolved"] = resolved
+            if prompt_entry:
+                prompt_dispatched.append(prompt_entry)
+        prompt_trace["dispatched"] = prompt_dispatched
+    return_value = prompt_trace
+    return return_value
 
 
 def _surface_history_for_visual(chat_history: list[dict]) -> list[dict]:
@@ -130,6 +173,116 @@ def _surface_history_for_style(chat_history: list[dict]) -> list[dict]:
 
     history = format_storage_utc_history_for_llm(chat_history[-2:])
     return history
+
+
+def _visual_prompt_message_context(
+    value: object,
+    *,
+    fallback_body_text: str,
+) -> dict[str, Any]:
+    """Return current-message context needed by visual generation only."""
+
+    if isinstance(value, Mapping):
+        raw_context = value
+    else:
+        raw_context = {}
+    body_text = raw_context.get("body_text")
+    if not isinstance(body_text, str):
+        body_text = fallback_body_text
+    projected: dict[str, Any] = {
+        "body_text": body_text,
+        "broadcast": bool(raw_context.get("broadcast", False)),
+        "mentions": _visual_mentions(raw_context.get("mentions", [])),
+        "attachments": _visual_attachments(raw_context.get("attachments", [])),
+    }
+    reply = _visual_reply(raw_context.get("reply"))
+    if reply:
+        projected["reply"] = reply
+    return_value = projected
+    return return_value
+
+
+def _visual_mentions(value: object) -> list[dict[str, str]]:
+    """Project mention labels without raw platform or durable user ids."""
+
+    if not isinstance(value, list):
+        return_value: list[dict[str, str]] = []
+        return return_value
+    mentions: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        mention: dict[str, str] = {}
+        for field_name in ("display_name", "entity_kind"):
+            field_value = item.get(field_name)
+            if isinstance(field_value, str) and field_value.strip():
+                mention[field_name] = field_value.strip()
+        if mention:
+            mentions.append(mention)
+    return_value = mentions
+    return return_value
+
+
+def _visual_attachments(value: object) -> list[dict[str, str]]:
+    """Project attachment summaries without raw media or storage fields."""
+
+    if not isinstance(value, list):
+        return_value: list[dict[str, str]] = []
+        return return_value
+    attachments: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        attachment: dict[str, str] = {}
+        for field_name in ("media_kind", "description", "summary_status"):
+            field_value = item.get(field_name)
+            if isinstance(field_value, str):
+                attachment[field_name] = field_value
+        if attachment:
+            attachments.append(attachment)
+    return_value = attachments
+    return return_value
+
+
+def _visual_reply(value: object) -> dict[str, Any]:
+    """Project reply context without raw message or user identifiers."""
+
+    if not isinstance(value, Mapping):
+        return_value: dict[str, Any] = {}
+        return return_value
+    reply: dict[str, Any] = {}
+    for field_name in ("display_name", "excerpt", "derivation"):
+        field_value = value.get(field_name)
+        if isinstance(field_value, str) and field_value.strip():
+            reply[field_name] = field_value.strip()
+    attachments = _visual_attachments(value.get("attachments", []))
+    if attachments:
+        reply["attachments"] = attachments
+    return_value = reply
+    return return_value
+
+
+def _visual_reply_context(value: object) -> dict[str, Any]:
+    """Project service reply context for visual generation without raw ids."""
+
+    if not isinstance(value, Mapping):
+        return_value: dict[str, Any] = {}
+        return return_value
+    reply_context: dict[str, Any] = {}
+    display_name = value.get("reply_to_display_name")
+    if isinstance(display_name, str) and display_name.strip():
+        reply_context["reply_to_display_name"] = display_name.strip()
+    excerpt = value.get("reply_excerpt")
+    if isinstance(excerpt, str) and excerpt.strip():
+        reply_context["reply_excerpt"] = excerpt.strip()
+    reply_to_current_bot = value.get("reply_to_current_bot")
+    if isinstance(reply_to_current_bot, bool):
+        reply_context["reply_to_current_bot"] = reply_to_current_bot
+    attachments = _visual_attachments(value.get("reply_attachments", []))
+    if attachments:
+        reply_context["reply_attachments"] = attachments
+    return_value = reply_context
+    return return_value
 
 
 def _empty_interaction_style_context(channel_type: str) -> dict:
@@ -183,7 +336,7 @@ _STYLE_AGENT_PROMPT = """\
 你现在是角色 {character_name} 的语言风格策略制定者。你负责决定“话该怎么说”——修辞策略、语言风格、禁用词汇。你**不**负责决定“说什么”（内容锚点由独立的 Content Anchor Agent 生成）。严禁涉及任何物理动作。
 
 # 语言政策
-- 除结构化枚举值、schema key、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。
+- 除结构化枚举值、schema key、用户原文中的公开标识、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。不要把内部 UUID、message id、platform id、channel id、pending/resume id 复制到自由文本字段。
 - 用户原文、引用文本、专有名词、标题、别名、外部证据原句在需要精确保留时保持原语言；不要为了统一语言而改写。
 - 不要添加翻译、双语复写或括号内解释，除非源文本本身已经包含。
 
@@ -368,7 +521,7 @@ _CONTENT_ANCHOR_AGENT_PROMPT = """\
 你现在是角色 {character_name} 的内容锚点生成器。你只决定下游台词要覆盖的内容骨架：立场、事实、回答、社交姿态、推进和篇幅。你不决定修辞风格，不写完整台词，不写物理动作。
 
 # 语言政策
-- 除结构化枚举值、schema key、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。
+- 除结构化枚举值、schema key、用户原文中的公开标识、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。不要把内部 UUID、message id、platform id、channel id、pending/resume id 复制到自由文本字段。
 - 用户原文、引用文本、专有名词、标题、别名、外部证据原句在需要精确保留时保持原语言；不要为了统一语言而改写。
 - 不要添加翻译、双语复写或括号内解释，除非源文本本身已经包含。
 
@@ -378,7 +531,10 @@ _CONTENT_ANCHOR_AGENT_PROMPT = """\
 - 不要在这里改写 `logical_stance`、`character_intent`、检索事实或上游意识判断；只能把它们组织成锚点。
 - 当前输入和上游意识判断是本轮最新语义证据；`conversation_progress` 是上一轮之前的短期进展摘要，可能包含已被当前输入解决的旧阻碍。
 - `interaction_style_context` 是已清洗的互动处理建议，只能作为 `[SOCIAL]`、`[PROGRESSION]` 和追问形状的软参考；不能改变立场、事实或答案。
-- `selected_text_surface_intent` 若非空，表示本轮已选择文本输出时传下来的语义目标；它帮助你覆盖该目标，但不是事实来源，也不能改变上游立场。
+- `selected_text_surface_intent` 若非空，表示本轮已选择文本输出时传下来的语义目标；它帮助你覆盖该目标，但不是事实来源，也不能改变上游立场；其中可能包含已清洗的 resolver observation 摘要，可用于恢复上一轮已查到的事实与失败边界。
+- 如果 `selected_text_surface_intent` 含 `原始目标`，说明本轮是 HIL/审批续轮后的最终交付；当前输入可能只是补充约束，不能取代原始目标。必须保留原始目标中的主要交付部分。
+- 如果 `selected_text_surface_intent` 含 `目标进度` 或 `resolver_goal_progress`，它是 L2d 维护的交付清单。必须按其中 deliverables、blockers 和 final_response_requirements 组织 `[ANSWER]` 和 `[SCOPE]`；不得只回答最新 evidence 或最显眼的一个子问题。
+- 如果 `selected_text_surface_intent` 表明本轮应在证据不足后收束，该收束目标优先于 `character_intent = CLARIFY`；不得把本轮主回答改成新的澄清或认可请求。
 - `memory_lifecycle_context` 若存在，只包含活动承诺复核后的提示安全角色锚点；它可以帮助你避免重开已兑现承诺或承认承诺变化，但不能授权新的事实、数据库操作或用户可见技术细节。
 
 # 依赖树（先解析上游，再生成下游）
@@ -416,6 +572,12 @@ logical_stance + character_intent
 8. **解析 `[SOCIAL]`**：只放社交姿态、局促、防备、委婉、得意、挑衅等表达分寸；不得改变 `[DECISION]`、`[FACT]` 或 `[ANSWER]`。
 9. **解析 `[PROGRESSION]` / `[AVOID_REPEAT]`**：根据当前输入对 open loop 的关系、`conversation_progress` 和合格的互动风格建议处理推进、重复和旧线程。
 10. **解析 `[SCOPE]`**：只描述篇幅和需要覆盖的锚点。
+11. **保留交付清单**：如果 `selected_text_surface_intent` 要求推荐、计划、路线、时间安排、风险清单、对比、来源可信度或最小下一步，必须把这些交付部分逐项压进 `[ANSWER]` 或 `[SCOPE]`；不要只保留社交姿态或一个泛泛方向。
+11b. **执行目标进度**：如果 `selected_text_surface_intent` 提供了目标进度，先读取 deliverables 的 status。`pending`、`partial` 和 `blocked` 的交付项必须在 `[ANSWER]` 中被完成、被 caveat 化，或被明确阻塞；`final_response_requirements` 必须成为最终可见回答的覆盖范围。
+11a. **保留原始目标**：如果 `selected_text_surface_intent` 含 `原始目标`，必须把原始目标和当前补充约束合并处理；不得只回答当前补充约束或检索结果里最显眼的一部分。
+12. **证据边界**：如果 `rag_result.answer` 表示没有找到已确认事实、缺少 evidence、工具失败或当前无法核实，`[ANSWER]` 必须把来源未确认或当前无法验证写成用户可见限制；不得把缺失证据改写成已确认事实。
+13. **来源类别边界**：如果 `rag_result.answer` 区分了多个来源类别、证据轨道或比较对象，`[FACT]` 和 `[ANSWER]` 必须保留这个边界。只有明确包含目标事实的来源类别才可称为已确认；未命中、只返回邻近线索或没有覆盖目标事实的路径不得被改写成一致、无冲突或已确认。
+14. **当前事实防编造**：如果用户目标依赖实时、易变或来源绑定的外部事实，而 `rag_result.answer` 没有提供已确认具体对象或属性，不要在 `[ANSWER]` 要求下游给出具体当前断言。具体对象、属性、状态、时间和可用性必须来自 `[FACT]` 或 `rag_result.external_evidence` 中的已确认外部证据；若没有，应要求下游给出证据阻塞、可执行筛选办法、允许的泛化范围和用户最后需要自行核实的项目。
 
 # 每个锚点的最小规则
 ## Clarification override
@@ -452,8 +614,18 @@ logical_stance + character_intent
 - `character_intent = CLARIFY` 时，`[ANSWER]` 必须是缩小歧义范围的追问；不能猜测补全后的答案。
 - 当前输入回答了活跃 open loop 时，`[ANSWER]` 要判定或使用该答案，而不是把它改写成普通知识展示。
 - 当前输入没有回答活跃 open loop 时，`[ANSWER]` 可以接住社交内容，但不能宣告答对、完成或进入下一步。
-- 用户请求包含群/频道/房间 ID、消息正文、引用内容、提醒对象等执行参数时，必须保留具体细节。
+- 用户原文明确给出群/频道/房间的公开标识、消息正文、引用内容、提醒对象等执行参数时，必须保留具体细节；不要从运行时元数据补写内部频道 ID、消息 ID、用户 ID 或 pending/resume ID。
 - 不得使用 `interaction_style_context` 补足缺失事实、替代检索答案或回答未被当前输入/RAG/媒体证据支持的问题。
+- 如果需要在证据不足后给最佳努力答案，`[ANSWER]` 要同时包含：可说的常识/推断、未被来源确认的部分、用户下一步如何核实或继续。不要把最佳努力答案写成已验证结论。
+- 如果 `selected_text_surface_intent` 已列出多部分交付，`[ANSWER]` 不得压缩成一个泛称或松散方向；必须保留主要交付名目，例如候选、计划、风险、来源判断或最小下一步。
+- 如果原始目标或 `selected_text_surface_intent` 要求计划、路线、时间安排或执行步骤，`[ANSWER]` 必须给出可执行的时间切分和行动顺序；不得只列候选或把计划收束成新的口味、预算、时间偏好追问。
+- 如果已知开始时间和总时长，`[ANSWER]` 必须尽量写成具体时段；不要只给模糊时长或省略结束点。
+- 如果目标要求行动路径而具体落点缺少来源确认，仍要给可执行骨架：起点或待确认对象 -> 可公开核实的中间锚点 -> 结束点或回退点。不得只写模糊方向。
+- 如果证据不足发生在实时外部事实任务上，`[ANSWER]` 不得用常识补造具体当前对象或属性。可以给出框架、筛选标准、泛化类别或核实步骤，但不能发明当前事实。
+- 具体对象、属性、状态、时间和可用性只能来自 `[FACT]` 或 `rag_result.external_evidence` 中已确认的外部证据。缺少这类证据时，`[ANSWER]` 必须禁止下游给出具体断言，只能给泛化类别、筛选标准、行动骨架和最终核实清单。
+- 泛化说明不得偷换成具体对象示例；如果没有已确认外部证据，不得在 `[ANSWER]` 中放入未被来源确认的具体名称。
+- 证据阻塞不是新的 HIL 澄清。如果 `selected_text_surface_intent` 表明本轮应在证据不足后收束，即使 `character_intent = CLARIFY`，`[ANSWER]` 也必须完成最佳努力阻塞答复：已知约束、不能确认的事实、可用泛化范围、行动骨架和最终核实步骤。可调整条件只能作为可选退路，不能把主回应改成新的追问或认可请求。
+- 终止型证据阻塞必须在当前可见回答内收束。`[ANSWER]` 不得要求下游用临时处理状态或延后承诺替代当前交付，也不得把已要求的主要交付推迟到下一轮。
 
 ## `[SOCIAL]`
 - 只描述关系姿态或表达分寸。
@@ -472,6 +644,9 @@ logical_stance + character_intent
 
 ## `[SCOPE]`
 - 只根据已生成锚点控制篇幅：仅 `[DECISION]` 约 15 字；含 `[FACT]` 或 `[ANSWER]` 约 20-40 字；多个实质锚点约 50 字以上。
+- 如果 `[ANSWER]` 要求完整方案、计划、路线、步骤、多候选推荐或风险说明，`[SCOPE]` 必须给足覆盖空间；不要用过短篇幅迫使下游只回答一个子问题或把其余部分推到之后。
+- 如果用户原始目标要求具体可执行结果，`[SCOPE]` 必须允许下游多发几段短句完成交付；角色口吻可以碎片化，但交付不能碎片化到不可用。
+- 如果 `[ANSWER]` 包含三项以上候选、风险、步骤、权衡或核实项，`[SCOPE]` 应允许 250-500 字或多段短句；不要把多部分交付压成 80-120 字。
  
 # 本轮输入字段说明
 - `decontexualized_input` 是当前输入或触发材料的语义摘要，是判断问题、请求、回答、玩笑、补充或澄清需求的第一入口。
@@ -481,6 +656,9 @@ logical_stance + character_intent
 - `internal_monologue` 是上游意识层的解释依据，只用于理解决定，不要原文暴露。
 - `logical_stance` 与 `character_intent` 是已定的 L2 立场和意图；内容锚点只能执行它们，不能改判。
 - `selected_text_surface_intent` 是已选择文本输出时传下来的语义目标；覆盖它，但不要把它当成事实来源。
+- `selected_text_surface_intent` 中的 observation 摘要是已清洗的 resolver observation；可以用来保留已经查到的事实、风险和失败边界，但不得输出其中的内部观察别名或能力名。
+- 若 `selected_text_surface_intent` 包含 `原始目标`，该原始目标是本轮应交付的问题范围；当前输入和 RAG 结果只是补充约束与证据，不得把它们缩小成新目标。
+- 若 `selected_text_surface_intent` 包含 `目标进度`、`deliverables`、`final_response_requirements`、`blockers`，这些是本轮的交付范围和阻塞记录；必须把它们转成用户可见答案骨架。
 - `memory_lifecycle_context` 是活动承诺复核后的提示安全锚点；重点读取 `content_anchor_roles` 的 `avoid_reopening`、`acknowledge_fulfillment` 和 `keep_waiting`。
 - `interaction_style_context` 是已清洗的用户/群频道互动风格，按 `application_order` 使用；其中 `engagement_guidelines` 只调节承接、追问或收束方式。
 - `conversation_progress` 是短期进展摘要；重点读取 `continuity`、`current_thread`、`current_blocker`、`open_loops`、`resolved_threads`、`avoid_reopening`、`overused_moves`、`next_affordances` 和 `progression_guidance`，并以当前输入覆盖旧阻碍。
@@ -587,7 +765,7 @@ _PREFERENCE_ADAPTER_PROMPT = """\
 你现在是角色 {character_name} 的“表达偏好适配器”。你的任务不是决定台词内容，而是从用户当前要求与持久用户画像中，提取那些**已经被角色接受、可以自然落地**的表达偏好，并把它们改写成下游台词生成器容易执行的软约束。
 
 # 语言政策
-- 除结构化枚举值、schema key、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。
+- 除结构化枚举值、schema key、用户原文中的公开标识、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。不要把内部 UUID、message id、platform id、channel id、pending/resume id 复制到自由文本字段。
 - 用户原文、引用文本、专有名词、标题、别名、外部证据原句在需要精确保留时保持原语言；不要为了统一语言而改写。
 - 不要添加翻译、双语复写或括号内解释，除非源文本本身已经包含。
 
@@ -772,7 +950,7 @@ _VISUAL_AGENT_PROMPT = """\
 你现在是角色 {character_name} 的静态画面导演。你负责把本轮对话压缩成一个可被图像生成模型绘制的单帧瞬间。你的产出将作为视觉生成系统的主要依据。
 
 # 语言政策
-- 除结构化枚举值、schema key、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。
+- 除结构化枚举值、schema key、用户原文中的公开标识、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。不要把内部 UUID、message id、platform id、channel id、pending/resume id 复制到自由文本字段。
 - 用户原文、引用文本、专有名词、标题、别名、外部证据原句在需要精确保留时保持原语言；不要为了统一语言而改写。
 - 不要添加翻译、双语复写或括号内解释，除非源文本本身已经包含。
 
@@ -926,15 +1104,11 @@ async def call_visual_agent(state: CognitionState) -> CognitionState:
         boundary_relational_override=get_relationship_priority_description(relational_override),
     ))
 
-    prompt_message_context = state.get("prompt_message_context")
-    if not isinstance(prompt_message_context, dict):
-        prompt_message_context = {
-            "body_text": state["decontexualized_input"],
-            "addressed_to_global_user_ids": [],
-            "broadcast": False,
-            "mentions": [],
-            "attachments": [],
-        }
+    prompt_message_context = _visual_prompt_message_context(
+        state.get("prompt_message_context"),
+        fallback_body_text=state["decontexualized_input"],
+    )
+    reply_context = _visual_reply_context(state.get("reply_context", {}))
     contextual_directives = {
         "social_distance": state.get("social_distance", ""),
         "emotional_intensity": state.get("emotional_intensity", ""),
@@ -958,7 +1132,7 @@ async def call_visual_agent(state: CognitionState) -> CognitionState:
         "emotional_appraisal": state["emotional_appraisal"],
         "boundary_core_assessment": state["boundary_core_assessment"],
         "chat_history": _surface_history_for_visual(state.get("chat_history_recent", [])),
-        "reply_context": state.get("reply_context", {}),
+        "reply_context": reply_context,
         "channel_topic": state.get("channel_topic", ""),
         "conversation_progress": state.get("conversation_progress"),
     }
@@ -1005,6 +1179,170 @@ async def call_visual_agent(state: CognitionState) -> CognitionState:
 # L4 — Surface directive collector
 # ---------------------------------------------------------------------------
 
+def _goal_progress_content_anchors(state: CognitionState) -> list[str]:
+    """Build content anchors from L2d-owned resolver goal progress.
+
+    Args:
+        state: L3 surface state after content-anchor generation.
+
+    Returns:
+        Extra anchors preserving the resolver deliverable checklist, or an
+        empty list when no valid progress exists.
+    """
+
+    raw_goal_progress = state.get("resolver_goal_progress")
+    if not isinstance(raw_goal_progress, dict):
+        return_value: list[str] = []
+        return return_value
+
+    try:
+        goal_progress = validate_resolver_goal_progress(raw_goal_progress)
+    except ResolverValidationError:
+        return_value = []
+        return return_value
+
+    deliverables = goal_progress["deliverables"]
+    requirements = goal_progress["final_response_requirements"]
+    blockers = goal_progress["blockers"]
+    if not deliverables and not requirements and not blockers:
+        return_value = []
+        return return_value
+
+    anchors: list[str] = []
+    headline_segments: list[str] = []
+    original_goal = goal_progress["original_goal"]
+    if original_goal:
+        headline_segments.append('原始目标：' + original_goal)
+    current_focus = goal_progress["current_focus"]
+    if current_focus:
+        headline_segments.append('当前焦点：' + current_focus)
+    if headline_segments:
+        anchors.append(
+            '[ANSWER] 目标进度交付清单：'
+            + '；'.join(headline_segments)
+            + '。不要只回答最新补充信息或其中一个子问题。'
+        )
+
+    if deliverables:
+        for index, deliverable in enumerate(deliverables, start=1):
+            anchors.append(
+                f"[ANSWER] 目标进度交付项 {index}："
+                f"status={deliverable['status']}；"
+                f"description={deliverable['description']}；"
+                f"note={deliverable['note']}。"
+                "必须在可见回答中完成、caveat 化或明确阻塞。"
+            )
+
+    source_backed_facts = goal_progress["source_backed_facts"]
+    if source_backed_facts:
+        anchors.append(
+            '[FACT] 来源已确认：'
+            + '；'.join(source_backed_facts)
+            + '。不得把推断或未确认内容写成已确认。'
+        )
+    assumptions_or_inferences = goal_progress["assumptions_or_inferences"]
+    if assumptions_or_inferences:
+        anchors.append(
+            '[ANSWER] 推断或未确认：'
+            + '；'.join(assumptions_or_inferences)
+            + '。必须用未确认、推断、建议核实或最佳努力来表达。'
+        )
+    if blockers:
+        anchors.append(
+            '[ANSWER] 阻塞：'
+            + '；'.join(blockers)
+            + '。必须说明限制，不得改写成已确认事实。'
+        )
+    if requirements:
+        anchors.append(
+            '[ANSWER] 最终可见回答必须覆盖：'
+            + '；'.join(requirements)
+            + '。这些是语义交付，不只是篇幅建议。'
+        )
+        for requirement in requirements:
+            anchors.append('[SCOPE] 交付覆盖要求：' + requirement)
+        anchors.append(
+            '[SCOPE] 完整方案、路线、时间切分、风险、候选对比或核实清单'
+            '需要更多台词片段时，覆盖优先于简短。'
+        )
+
+    return_value = anchors
+    return return_value
+
+
+def _resolver_observation_content_anchors(state: CognitionState) -> list[str]:
+    """Build content anchors from prompt-safe resolver observations."""
+
+    resolver_state = state.get("resolver_state")
+    if not isinstance(resolver_state, dict):
+        return_value: list[str] = []
+        return return_value
+    raw_observations = resolver_state.get("observations")
+    if not isinstance(raw_observations, list) or not raw_observations:
+        return_value = []
+        return return_value
+
+    try:
+        observation_context = project_observations_for_cognition(
+            raw_observations[-MAX_PROJECTED_RESOLVER_OBSERVATIONS:],
+        )
+    except ResolverValidationError:
+        return_value = []
+        return return_value
+    if not observation_context:
+        return_value = []
+        return return_value
+
+    compact_context = observation_context.replace("\n", " / ")
+    anchors = [
+        '[ANSWER] 已完成证据观察摘要：'
+        + compact_context
+        + '。succeeded 可作为来源支持事实；failed 或 blocked 只能作为证据边界；不得输出内部观察别名或能力名。'
+    ]
+    return_value = anchors
+    return return_value
+
+
+def _content_anchors_with_goal_progress(state: CognitionState) -> list[str]:
+    """Return content anchors augmented with resolver progress and evidence."""
+
+    content_anchors = list(state["content_anchors"])
+    goal_anchors = _goal_progress_content_anchors(state)
+    observation_anchors = _resolver_observation_content_anchors(state)
+    if not goal_anchors and not observation_anchors:
+        return_value = content_anchors
+        return return_value
+
+    string_anchors = [
+        anchor for anchor in content_anchors
+        if isinstance(anchor, str)
+    ]
+    joined_anchors = "\n".join(string_anchors)
+    extra_anchors: list[str] = []
+    if '目标进度交付清单' not in joined_anchors:
+        extra_anchors.extend(goal_anchors)
+    if '已完成证据观察摘要' not in joined_anchors:
+        extra_anchors.extend(observation_anchors)
+    if not extra_anchors:
+        return_value = content_anchors
+        return return_value
+
+    if (
+        content_anchors
+        and isinstance(content_anchors[-1], str)
+        and content_anchors[-1].startswith("[SCOPE]")
+    ):
+        return_value = [
+            *content_anchors[:-1],
+            content_anchors[-1],
+            *extra_anchors,
+        ]
+        return return_value
+
+    return_value = [*content_anchors, *extra_anchors]
+    return return_value
+
+
 async def call_surface_directive_collector(
     state: CognitionState,
 ) -> CognitionState:
@@ -1023,7 +1361,7 @@ async def call_surface_directive_collector(
                 "rhetorical_strategy": state["rhetorical_strategy"],
                 "linguistic_style": state["linguistic_style"],
                 "accepted_user_preferences": state.get("accepted_user_preferences", []),
-                "content_anchors": state["content_anchors"],
+                "content_anchors": _content_anchors_with_goal_progress(state),
                 "forbidden_phrases": state["forbidden_phrases"],
             },
             "visual_directives": {

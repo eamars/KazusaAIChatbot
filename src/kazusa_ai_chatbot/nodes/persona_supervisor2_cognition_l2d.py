@@ -26,10 +26,16 @@ from kazusa_ai_chatbot.config import (
     COGNITION_LLM_MODEL,
 )
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    ALLOWED_RESOLVER_CAPABILITIES,
+    RESOLVER_CAPABILITY_REQUEST_VERSION,
+    RESOLVER_GOAL_PROGRESS_VERSION,
+    RESOLVER_PENDING_RESOLUTION_VERSION,
+    ResolverGoalProgressV1,
     ResolverCapabilityRequestV1,
     ResolverPendingResolutionV1,
     ResolverValidationError,
     project_pending_resume_for_cognition,
+    validate_resolver_goal_progress,
     validate_resolver_capability_request,
     validate_resolver_pending_resolution,
 )
@@ -42,6 +48,7 @@ from kazusa_ai_chatbot.utils import get_llm, log_preview, parse_llm_json_output
 logger = logging.getLogger(__name__)
 
 ACTION_SPEC_CAP = 3
+OPEN_GOAL_DELIVERABLE_STATUSES = ("pending", "partial", "blocked")
 
 
 class ActionRequestV1(TypedDict, total=False):
@@ -435,6 +442,107 @@ def _normalize_action_requests(parsed: object) -> list[ActionRequestV1]:
     return normalized_requests
 
 
+def _normalize_pending_resume_action_requests(
+    parsed: object,
+    state: CognitionState,
+) -> list[ActionRequestV1]:
+    """Recover pending HIL/approval answers emitted with resolver capability."""
+
+    pending_resume = state.get("pending_resolver_resume")
+    if not isinstance(pending_resume, dict):
+        action_requests = _normalize_action_requests(parsed)
+        return action_requests
+
+    pending_capability = pending_resume.get("capability_kind")
+    if pending_capability not in ("human_clarification", "approval_preparation"):
+        action_requests = _normalize_action_requests(parsed)
+        return action_requests
+
+    if not isinstance(parsed, dict):
+        return []
+
+    raw_requests = parsed.get("action_requests")
+    if not isinstance(raw_requests, list):
+        return []
+
+    rewritten_requests: list[object] = []
+    for raw_request in raw_requests:
+        if not isinstance(raw_request, dict):
+            rewritten_requests.append(raw_request)
+            continue
+
+        capability = _semantic_text(raw_request, "capability")
+        if capability != pending_capability:
+            rewritten_requests.append(raw_request)
+            continue
+
+        rewritten_request = dict(raw_request)
+        rewritten_request["capability"] = SPEAK_CAPABILITY
+        if not _semantic_text(rewritten_request, "decision"):
+            rewritten_request["decision"] = "visible_reply"
+        pending_detail = _pending_resume_surface_detail(
+            pending_resume,
+            pending_capability,
+        )
+        if pending_detail:
+            rewritten_request["detail"] = pending_detail
+        rewritten_requests.append(rewritten_request)
+
+    rewritten_parsed = {"action_requests": rewritten_requests}
+    action_requests = _normalize_action_requests(rewritten_parsed)
+    return action_requests
+
+
+def _pending_resume_speak_request(
+    state: CognitionState,
+) -> list[ActionRequestV1]:
+    """Build a text action for an active pending HIL or approval row."""
+
+    pending_resume = state.get("pending_resolver_resume")
+    if not isinstance(pending_resume, dict):
+        return []
+
+    pending_capability = pending_resume.get("capability_kind")
+    if pending_capability not in ("human_clarification", "approval_preparation"):
+        return []
+
+    pending_detail = _pending_resume_surface_detail(
+        pending_resume,
+        pending_capability,
+    )
+    if not pending_detail:
+        return []
+
+    action_request: ActionRequestV1 = {
+        "capability": SPEAK_CAPABILITY,
+        "decision": "visible_reply",
+        "detail": pending_detail,
+        "reason": "处理当前等待中的澄清或审批状态。",
+    }
+    action_requests = [action_request]
+    return action_requests
+
+
+def _pending_resume_surface_detail(
+    pending_resume: Mapping[str, object],
+    pending_capability: object,
+) -> str:
+    """Return the prompt-safe pending detail that L3 should surface."""
+
+    pending_detail = ""
+    if pending_capability == "human_clarification":
+        pending_detail = _semantic_text(
+            pending_resume,
+            "prompt_safe_question",
+        )
+    elif pending_capability == "approval_preparation":
+        pending_detail = _semantic_text(
+            pending_resume,
+            "prompt_safe_approval_summary",
+        )
+    return pending_detail
+
+
 def _normalize_resolver_capability_requests(
     parsed: object,
 ) -> list[ResolverCapabilityRequestV1]:
@@ -463,8 +571,9 @@ def _normalize_resolver_capability_requests(
 
 def _normalize_resolver_pending_resolution(
     parsed: object,
+    state: CognitionState,
 ) -> ResolverPendingResolutionV1 | None:
-    """Normalize an optional L2d decision for a pending resolver row."""
+    """Bind L2d's pending decision to the active deterministic pending row."""
 
     if not isinstance(parsed, dict):
         return_value = None
@@ -475,9 +584,53 @@ def _normalize_resolver_pending_resolution(
         return_value = None
         return return_value
 
+    if not isinstance(raw_resolution, dict):
+        logger.warning(
+            "L2d dropped invalid pending resolver resolution: expected object"
+        )
+        return_value = None
+        return return_value
+
+    pending_resume = state.get("pending_resolver_resume")
+    if not isinstance(pending_resume, dict):
+        logger.warning(
+            "L2d dropped pending resolver resolution without active pending row"
+        )
+        return_value = None
+        return return_value
+
+    raw_active_resume_id = pending_resume.get("resume_id")
+    if (
+        not isinstance(raw_active_resume_id, str)
+        or not raw_active_resume_id.strip()
+    ):
+        logger.warning(
+            "L2d dropped pending resolver resolution with invalid active pending id"
+        )
+        return_value = None
+        return return_value
+
+    active_resume_id = raw_active_resume_id.strip()
+    raw_model_resume_id = raw_resolution.get("resume_id")
+    if (
+        isinstance(raw_model_resume_id, str)
+        and raw_model_resume_id.strip()
+        and raw_model_resume_id.strip() != active_resume_id
+    ):
+        logger.warning(
+            "L2d ignored model-supplied pending resolver id that did not "
+            "match the active pending row"
+        )
+
+    canonical_resolution = {
+        "schema_version": RESOLVER_PENDING_RESOLUTION_VERSION,
+        "resume_id": active_resume_id,
+        "decision": raw_resolution.get("decision", ""),
+        "reason": raw_resolution.get("reason", ""),
+    }
     try:
         normalized_resolution = validate_resolver_pending_resolution(
-            raw_resolution,
+            canonical_resolution,
         )
     except ResolverValidationError as exc:
         logger.warning(f"L2d dropped invalid pending resolver resolution: {exc}")
@@ -485,6 +638,167 @@ def _normalize_resolver_pending_resolution(
         return return_value
 
     return_value = normalized_resolution
+    return return_value
+
+
+def _normalize_resolver_goal_progress(
+    parsed: object,
+) -> ResolverGoalProgressV1 | None:
+    """Normalize L2d's optional goal-progress checklist."""
+
+    if not isinstance(parsed, dict):
+        return_value = None
+        return return_value
+
+    raw_progress = parsed.get("resolver_goal_progress")
+    if raw_progress is None:
+        return_value = None
+        return return_value
+    if not isinstance(raw_progress, dict):
+        return_value = None
+        return return_value
+
+    canonical_progress = dict(raw_progress)
+    canonical_progress["schema_version"] = RESOLVER_GOAL_PROGRESS_VERSION
+    try:
+        normalized_progress = validate_resolver_goal_progress(
+            canonical_progress,
+        )
+    except ResolverValidationError as exc:
+        logger.warning(f"L2d dropped invalid goal progress: {exc}")
+        return_value = None
+        return return_value
+
+    return_value = normalized_progress
+    return return_value
+
+
+def _goal_progress_with_surface_requirements(
+    goal_progress: ResolverGoalProgressV1 | None,
+    action_specs: list[ActionSpecV1],
+) -> ResolverGoalProgressV1 | None:
+    """Mirror L2d's open deliverables into the visible-response checklist."""
+
+    if goal_progress is None:
+        return_value = None
+        return return_value
+
+    has_visible_speak = any(
+        action_spec["kind"] == SPEAK_CAPABILITY
+        and action_spec["visibility"] == "user_visible"
+        for action_spec in action_specs
+    )
+    if not has_visible_speak:
+        return_value = goal_progress
+        return return_value
+
+    requirements = list(goal_progress["final_response_requirements"])
+    for deliverable in goal_progress["deliverables"]:
+        if deliverable["status"] not in OPEN_GOAL_DELIVERABLE_STATUSES:
+            continue
+        description = deliverable["description"]
+        if any(description in requirement for requirement in requirements):
+            continue
+        requirement = (
+            f"{description}："
+            f"{deliverable['note']}"
+        )
+        requirements.append(requirement)
+
+    if requirements == goal_progress["final_response_requirements"]:
+        return_value = goal_progress
+        return return_value
+
+    updated_progress = dict(goal_progress)
+    updated_progress["final_response_requirements"] = requirements
+    normalized_progress = validate_resolver_goal_progress(updated_progress)
+    return_value = normalized_progress
+    return return_value
+
+
+def _resolver_requests_repeat_pending_capability(
+    requests: list[ResolverCapabilityRequestV1],
+    state: CognitionState,
+) -> bool:
+    """Return whether resolver requests only repeat the active pending row.
+
+    Args:
+        requests: Normalized resolver requests emitted by L2d.
+        state: Cognition state that may contain a pending resolver resume.
+
+    Returns:
+        True when every request repeats the pending HIL/approval capability.
+    """
+
+    if not requests:
+        return_value = False
+        return return_value
+
+    pending_resume = state.get("pending_resolver_resume")
+    if not isinstance(pending_resume, dict):
+        return_value = False
+        return return_value
+
+    pending_capability = pending_resume.get("capability_kind")
+    if pending_capability not in ("human_clarification", "approval_preparation"):
+        return_value = False
+        return return_value
+
+    repeats_pending = all(
+        request["capability_kind"] == pending_capability
+        for request in requests
+    )
+    return_value = repeats_pending
+    return return_value
+
+
+def _normalize_misplaced_resolver_requests(
+    parsed: object,
+) -> list[ResolverCapabilityRequestV1]:
+    """Recover resolver capability requests emitted in the action field."""
+
+    normalized_requests: list[ResolverCapabilityRequestV1] = []
+    if not isinstance(parsed, dict):
+        return normalized_requests
+
+    raw_requests = parsed.get("action_requests")
+    if not isinstance(raw_requests, list):
+        return normalized_requests
+
+    for raw_request in raw_requests:
+        if not isinstance(raw_request, dict):
+            continue
+        capability = _semantic_text(raw_request, "capability")
+        if capability not in ALLOWED_RESOLVER_CAPABILITIES:
+            continue
+        objective = _semantic_text(raw_request, "detail")
+        if not objective:
+            objective = _semantic_text(raw_request, "decision")
+        reason = _semantic_text(raw_request, "reason")
+        if not objective or not reason:
+            logger.warning(
+                "L2d dropped misplaced resolver request without objective "
+                "or reason"
+            )
+            continue
+        request = {
+            "schema_version": RESOLVER_CAPABILITY_REQUEST_VERSION,
+            "capability_kind": capability,
+            "objective": objective,
+            "reason": reason,
+            "priority": "now",
+        }
+        try:
+            normalized_request = validate_resolver_capability_request(request)
+        except ResolverValidationError as exc:
+            logger.warning(
+                f"L2d dropped invalid misplaced resolver request: {exc}"
+            )
+            continue
+        normalized_requests.append(normalized_request)
+        if len(normalized_requests) >= ACTION_SPEC_CAP:
+            break
+    return_value = normalized_requests
     return return_value
 
 
@@ -836,9 +1150,12 @@ _ACTION_INITIALIZER_PROMPT = '''\
 解析请求和动作请求不要混用：需要先解析时，返回 resolver_capability_requests，并让 action_requests 为空。
 行动请求只描述我想做什么；不要生成最终发言文本，不要执行动作。
 解析请求只描述下一步需要什么证据、事实、澄清或审批。
+你还要维护 `resolver_goal_progress`：这是当前用户目标的语义进度表，不是动作请求，也不是工具参数。
+它必须由本层根据当前输入、上游认知、解析器上下文和 observation 更新，供下一轮认知和 L3 保留原始目标、交付清单、依赖、已确认事实、推断和阻塞。
+不要让 Python 或工具结果替你判断目标是否完成；你只输出结构化语义进度，确定性代码只负责校验和保存。
 
 # 语言政策
-- 除结构化枚举值、schema key、capability 名称、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。
+- 除结构化枚举值、schema key、capability 名称、用户原文中的公开标识、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。不要把内部 UUID、message id、platform id、channel id、pending/resume id 复制到自由文本字段。
 - 用户原文、引用文本、专有名词、标题、别名、外部证据原句在需要精确保留时保持原语言；不要为了统一语言而改写。
 - 不要添加翻译、双语复写或括号内解释，除非源文本本身已经包含。
 
@@ -859,14 +1176,31 @@ _ACTION_INITIALIZER_PROMPT = '''\
 - `memory_lifecycle_update` 是私有活动承诺生命周期复核。只选择复核需要，不选择具体承诺、别名、数据库目标或生命周期决定。
 - `trigger_future_cognition` 是私有未来认知。只在我需要等待或消费一个具体新信息后再处理具体问题、任务或承诺时选择。
 
-# 解析器续轮硬规则
+# 解析器续轮原则
 这些规则优先于普通选择流程：
-- 如果解析器上下文已有 `capability=human_clarification; status=blocked` 或 `pending_resolver_resume` 的 capability 是 `human_clarification`，本轮不要再返回 `resolver_capability_requests`。返回一个 `speak` action_request，让 L3 只问 observation summary 或 pending question 里的那一个缺失问题，不要增加新的澄清项。
-- 如果解析器上下文已有 `capability=approval_preparation; status=blocked` 或 `pending_resolver_resume` 的 capability 是 `approval_preparation`，本轮不要再返回 `resolver_capability_requests`。返回一个 `speak` action_request，让 L3 说明准备做什么、影响是什么，并等待确认。`speak.detail` 必须概括 approval summary 里的具体动作、目标时间、影响和等待确认条件，不得留空，也不要只说“稍后列出方案”。
-- 如果解析器上下文已有 `rag_evidence` 或 `web_evidence` observation，且 `rag_answer` 表示没有找到已确认事实、缺少 evidence、工具失败、unknown tool 或 timed out，本轮不要重复请求同类证据。返回 `speak`，如实说明证据不足或工具限制。
+- 如果本轮有清楚的用户目标，或解析器上下文已有 `resolver_goal_progress`、`original_goal`、`pending_resolver_resume`、`resolver_observations`，输出必须包含 `resolver_goal_progress`。
+- `resolver_goal_progress.original_goal` 必须保持用户原始目标或 pending 中的 original_goal；当前补充信息只能更新约束、依赖和交付状态，不得替换原始目标。
+- `resolver_goal_progress.deliverables` 必须拆出原始目标里用户实际期待看到的主要交付部分。不要只写“回答用户问题”，也不要因为当前只处理一个子目标就删除其他交付部分。
+- 每个 deliverable 的 status 只能是 `pending`、`partial`、`satisfied`、`blocked`。证据不足但可以给框架时用 `partial`；必要证据、权限或用户信息无法取得时用 `blocked`；已由本轮 action detail 要求 L3 覆盖时才用 `satisfied`。
+- `resolver_goal_progress.final_response_requirements` 是 L3/dialog 的交付清单。如果本轮选择 `speak`，它必须写清最终可见回答必须覆盖什么，不得少于未满足或部分满足的主要 deliverable。
+- `source_backed_facts` 只能写当前 RAG、web、媒体或 resolver observation 直接支持的事实；失败、超时、空结果、只有线索或只有未确认候选时，不得把目标属性升格为已确认事实。
+- 对时效性、公开来源绑定或用户明确要求核实来源的事实，必须先取得相应证据才能给具体当前断言。若 bounded 尝试后仍无足够证据，选择 `speak` 收束，并要求最终回答区分来源确认、角色推断和当前无法验证的部分。
+- 如果检索答案按来源类别、证据轨道或比较对象区分结论，必须保留这些边界。某一路径未命中、只返回邻近线索或没有覆盖目标事实时，不得改写成跨来源一致、无冲突或已确认。
+- 续轮能力目标要窄到一个能力调用可以完成。不要把多个对象、多个属性和多个证据路径塞进一次检索目标。
+- 如果解析器上下文已有 `capability=human_clarification; status=blocked` 或 `pending_resolver_resume` 的 capability 是 `human_clarification`，本轮不要再次请求同一 blocked capability。返回一个 `speak` action_request，让 L3 只问 observation summary 或 pending question 里的那个最小缺口。
+- 如果解析器上下文已有 `capability=approval_preparation; status=blocked` 或 `pending_resolver_resume` 的 capability 是 `approval_preparation`，本轮不要再次请求同一 blocked capability。返回一个 `speak` action_request，让 L3 说明待确认的副作用、影响和确认条件。
+- approval preview 必须能力扎根：只说明当前系统确实能准备或执行的副作用。不得编造上下文没有提供的工具、权限、外部执行机制或验证机制。
+- 如果 `pending_resolver_resume` 已由当前输入回答、批准、拒绝或替代，必须输出 `resolver_pending_resolution` 的 decision 和 reason；不要输出、复制或发明 resolver pending id、UUID、message id 或 platform id，系统会绑定当前 active pending row。
+- 当 pending 已被回答或批准，并且 pending 中有 `original_goal`，本轮必须继续推进 `original_goal`。不要只确认收到、不要询问是否开始继续；证据不足就继续请求合适解析能力，证据足够就选择 `speak` 完成原始目标。
+- 如果已有围绕原始目标取得的 resolver observation，本轮的 `speak.detail` 必须写成回答原始目标的可见回复目标，而不是把用户补充信息当作新的独立闲聊。
+- 如果原始目标要求多个交付部分，`speak.detail` 必须覆盖这些主要部分；不要只回答其中一个子问题后把必要交付推迟到下一轮。
+- 如果已经问过一轮澄清，且用户补充足以形成可执行的最佳努力答案，缺少非必需偏好或排序口径时不要再次选择 `human_clarification`。把未确认信息写成不确定性或备选条件，继续完成原始目标。
+- 如果解析器上下文已有 `rag_evidence` 或 `web_evidence` observation，且 observation status 是 `failed`、工具缺失、unknown tool 或 timed out，不要把它当成“事实不存在”。如果没有尚未尝试的替代证据路径，返回 `speak`，明确说明当前证据或工具阻塞；如果仍有更窄、不同、未尝试的证据目标，才可以请求一次新的能力。
+- 如果解析器上下文已有 `rag_evidence` 或 `web_evidence` observation，且检索成功但没有确认目标事实，本轮不要重复请求同类检索的同一目标。若原始用户目标仍未解决，只能选择一个不同且更具体的未尝试目标继续；否则返回 `speak`，如实说明证据不足或工具限制。
+- 如果同类证据目标已多次失败或没有确认事实，不要继续换同义词重复搜索。对可以基于用户给定约束、已有证据和一般判断完成的分析、决策、方案或排查任务，选择 `speak`，用清晰边界完成回答。
 - 如果行动上下文写着 `触发来源：user_message`，禁止返回 `self_goal_resolution`。用户消息里的“整理方案”“形成回复策略”“内部想一想”都应由本层直接选择 `speak`、`approval_preparation`、`human_clarification`、`rag_evidence` 或 `web_evidence`。
-- 如果用户明确要求“根据已有记忆/已有证据判断”，并允许“证据不够就说明证据不够”，不要为了缩小范围或标准而选择 `human_clarification`。先选择 `rag_evidence`；如果检索后仍没有足够证据，再选择 `speak` 如实说明不足。
-- 如果用户要求根据已有记忆、历史对话、认识的人、关系证据或过去经验来判断、排序、推荐、回忆或证明，且解析器上下文里还没有本轮 `rag_evidence` observation，第一轮必须选择 `rag_evidence`，不要直接选择 `speak`。
+- 如果用户明确要求根据已有记忆、历史对话、关系证据或过去经验来判断、排序、推荐、回忆或证明，且解析器上下文里还没有本轮 `rag_evidence` observation，第一轮必须选择 `rag_evidence`，不要直接选择 `speak`。
+- 如果用户允许证据不足就如实说明，缺少可选范围、标准或排序口径不等于缺少必须由用户提供的信息；先取得必要证据，或在证据不足后直接说明不足。
 - 如果行动上下文写着 `触发来源：internal_thought` 且 `输入来源：internal_monologue`，并且当前内部资料需要先收束目标、整理优先级、拆解私有后续判断或形成下一步内部目标，选择 `resolver_capability_requests` 里的 `self_goal_resolution`；不要把 `self_goal_resolution` 当成 `action_requests` 的 capability。
 - 如果解析器上下文已有 `self_goal_resolution` observation 且 status 是 `succeeded`，不要重复请求 `self_goal_resolution`。把该 observation 当作私有目标收束已经完成；除非出现新的具体私有动作目标，否则返回空数组结束。
 
@@ -875,12 +1209,17 @@ _ACTION_INITIALIZER_PROMPT = '''\
 2. 内心独白是证据，不是动作。私人好奇、只想观察、保持沉默、维护进度、等待更自然时机，都不是 `speak`。
 3. 反思资料产生的是私有后续判断；只有它明确沉淀出需要私有复核或未来处理的具体对象时，才选择私有动作。不要因为反思资料存在就选择 `speak`。
 4. 如果当前问题需要记忆、关系、历史对话、当前公共事实或外部资料才能可靠判断，先选择 `rag_evidence` 或 `web_evidence`，不要直接选择 `speak`。
-5. 如果缺少城市、预算、确认、审批、偏好等用户拥有的信息，先选择 `human_clarification` 或 `approval_preparation`，不要编造缺失条件。
-5a. 如果用户要求在执行提醒、调度、发送、数据库修改或其他副作用之前先说明方案、影响并等待确认，选择 `approval_preparation`，不要选择 `self_goal_resolution`。
+4a. 如果用户已经给出足够的选项、约束、日志、指标或权衡目标，且问题主要是分析、决策、方案设计、风险清单或下一步行动，而不是询问变化中的外部事实，优先直接选择 `speak`。不要为了给一般判断背书而启动 `web_evidence`。
+4b. 具体当前外部断言必须有本轮 `web_evidence` observation 支撑后才能 `speak` 给出；否则先请求 `web_evidence`，或在已失败后只给阻塞说明、可行动标准和最后核实步骤。
+5. 如果缺少必须由用户拥有的信息，先选择 `human_clarification`；如果缺少副作用授权，先选择 `approval_preparation`。不要编造缺失条件。
+5a. 如果用户要求在执行提醒、调度、发送、数据库修改或其他副作用之前先说明方案、影响并等待确认，选择 `approval_preparation`，不要选择 `self_goal_resolution`，也不要直接选择 `speak` 跳过审批准备。审批说明只能描述当前系统可准备的真实副作用和等待确认条件；没有工具或路径证据时，不得编造监控、校验、自动检查或外部执行能力。
 5b. 如果解析器上下文里有 `pending_resolver_resume`，先判断当前用户输入是否回答、批准、拒绝或替代了它。
-只有形成判断时才返回 `resolver_pending_resolution`，不要用关键词硬判。
+只有形成判断时才返回 `resolver_pending_resolution`，不要用关键词硬判。不要输出、复制或发明 resolver pending id、UUID、message id 或 platform id；只判断 decision 和 reason，系统会绑定当前 active pending row。若当前输入已经回答了澄清项或批准了审批项，必须继续处理原始用户目标：证据仍不足就继续请求合适解析能力，证据足够就选择 `speak` 完成原始问题，不要只确认“收到”就结束，也不要询问是否开始下一步。
+5b1. 如果围绕原始目标的证据已经返回，`speak.detail` 必须明确交给 L3 去回答原始问题；不要把动作目标写成流程性过渡。
+5b2. 如果原始问题是计划、排查、推荐、对比或执行建议，且用户已经补足关键约束，`speak.detail` 必须要求 L3 给出完整的最佳努力结果、证据限制和必要步骤；不要把可选偏好缺失当成继续追问的理由。
+5b3. 如果原始问题依赖具体当前外部事实，用户补足约束后必须先选择 `web_evidence`。只有已有 `web_evidence` observation 后，才能 `speak`；若证据失败，`speak.detail` 必须说明不能确认具体当前断言，并给可行动标准与最后核实步骤。
 5c. 如果解析器上下文里已经有 `human_clarification` 或 `approval_preparation` 的 blocked observation 或 pending resume，本轮最终应该选择 `speak`，让 L3 去问那一个澄清问题或说明待确认动作；不要再次请求同一个 blocked capability。
-5d. 如果解析器上下文里已有失败或证据不足的 `rag_evidence` / `web_evidence` observation，且没有新的明确证据目标，不要重复请求同类检索；选择 `speak`，如实说明证据不足、当前限制或需要用户换方向。
+5d. 如果解析器上下文里已有失败或证据不足的 `rag_evidence` / `web_evidence` observation，不要重复请求同类检索的同一目标。只有当原始用户目标仍未解决、且存在更窄或不同的未尝试目标时，才继续请求解析能力；否则选择 `speak`，如实说明证据不足、当前限制或需要用户换方向。
 5e. 只有触发来源是 `internal_thought` 且输入来源包含 `internal_monologue` 时，才可以选择 `self_goal_resolution`。触发来源是 `user_message` 时，内部整理回复策略是本层当前职责，不是 resolver capability。
 5f. 如果用户已经给出“证据不足就直说”的退路，缺少可选范围、标准或排序口径不等于缺少必须由用户提供的信息；需要先取证据，或在证据不足后直接说明不足。
 5g. 记忆驱动判断要先取证据：已有记忆、历史对话、认识的人、关系证据、过去经验这类请求，在没有本轮 `rag_evidence` observation 前不得直接 `speak`。
@@ -917,10 +1256,27 @@ _ACTION_INITIALIZER_PROMPT = '''\
     }
   ],
   "resolver_pending_resolution": {
-    "schema_version": "resolver_pending_resolution.v1",
-    "resume_id": "若解析器上下文中存在待处理项且当前用户输入已经被你判断为回答、批准、拒绝或替代，这里填对应 resume_id；否则省略整个字段",
     "decision": "continue_waiting | answered | approved | rejected | superseded",
     "reason": "你对待处理项状态的判断理由"
+  },
+  "resolver_goal_progress": {
+    "schema_version": "resolver_goal_progress.v1",
+    "original_goal": "用户原始目标；若有 pending original_goal，必须沿用它",
+    "current_focus": "本轮正在推进的子目标或最终回答焦点",
+    "deliverables": [
+      {
+        "description": "原始目标中的一个具体交付部分",
+        "status": "pending | partial | satisfied | blocked",
+        "note": "状态依据、证据限制或交给 L3 的覆盖要求"
+      }
+    ],
+    "missing_user_inputs": ["仍然必须由用户提供的信息；没有则空数组"],
+    "evidence_dependencies": ["还需要或刚需要过的证据依赖；没有则空数组"],
+    "attempted_paths": ["已经尝试的解析/检索/澄清路径摘要；没有则空数组"],
+    "source_backed_facts": ["来源已确认的事实；没有则空数组"],
+    "assumptions_or_inferences": ["基于常识或角色判断但未被来源确认的推断；没有则空数组"],
+    "blockers": ["阻止完整解决的证据、工具、权限或用户信息缺口；没有则空数组"],
+    "final_response_requirements": ["若本轮选择 speak，最终回答必须覆盖的项目；没有则空数组"]
   },
   "action_requests": [
     {
@@ -956,7 +1312,34 @@ async def call_action_initializer(state: CognitionState) -> CognitionState:
     ])
     parsed = parse_llm_json_output(response.content)
     resolver_capability_requests = _normalize_resolver_capability_requests(parsed)
-    resolver_pending_resolution = _normalize_resolver_pending_resolution(parsed)
+    if not resolver_capability_requests:
+        resolver_capability_requests = _normalize_misplaced_resolver_requests(
+            parsed,
+        )
+    resolver_pending_resolution = _normalize_resolver_pending_resolution(
+        parsed,
+        state,
+    )
+    resolver_goal_progress = _normalize_resolver_goal_progress(parsed)
+    has_raw_action_requests = (
+        isinstance(parsed, dict)
+        and isinstance(parsed.get("action_requests"), list)
+        and bool(parsed["action_requests"])
+    )
+    repeated_pending_request = False
+    if (
+        resolver_capability_requests
+        and _resolver_requests_repeat_pending_capability(
+            resolver_capability_requests,
+            state,
+        )
+    ):
+        logger.warning(
+            "L2d converted repeated pending resolver request to pending "
+            "surface handling"
+        )
+        resolver_capability_requests = []
+        repeated_pending_request = True
     if resolver_capability_requests:
         action_requests = []
         if isinstance(parsed, dict) and parsed.get("action_requests"):
@@ -964,8 +1347,20 @@ async def call_action_initializer(state: CognitionState) -> CognitionState:
                 "L2d dropped action requests while resolver requests are pending"
             )
     else:
-        action_requests = _normalize_action_requests(parsed)
+        if repeated_pending_request and has_raw_action_requests:
+            action_requests = _normalize_pending_resume_action_requests(
+                parsed,
+                state,
+            )
+        elif repeated_pending_request:
+            action_requests = _pending_resume_speak_request(state)
+        else:
+            action_requests = _normalize_action_requests(parsed)
     action_specs = _materialize_action_specs(action_requests, state)
+    resolver_goal_progress = _goal_progress_with_surface_requirements(
+        resolver_goal_progress,
+        action_specs,
+    )
     logger.debug(
         f"L2d action initializer: count={len(action_specs)} "
         f"kinds={log_preview([spec['kind'] for spec in action_specs])} "
@@ -977,6 +1372,8 @@ async def call_action_initializer(state: CognitionState) -> CognitionState:
     }
     if resolver_pending_resolution is not None:
         return_value["resolver_pending_resolution"] = resolver_pending_resolution
+    if resolver_goal_progress is not None:
+        return_value["resolver_goal_progress"] = resolver_goal_progress
     validate_cognition_output_contract(
         stage="l2d_action_selection",
         payload=return_value,

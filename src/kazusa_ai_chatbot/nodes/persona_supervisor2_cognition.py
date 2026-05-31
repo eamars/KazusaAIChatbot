@@ -14,6 +14,7 @@ from langgraph.graph import StateGraph, START, END
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ResolverValidationError,
     validate_resolver_capability_request,
+    validate_resolver_goal_progress,
     validate_resolver_pending_resolution,
 )
 from kazusa_ai_chatbot.db import build_group_engagement_action_context
@@ -203,6 +204,9 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
     pending_resolver_resume = state.get("pending_resolver_resume")
     if pending_resolver_resume is not None:
         initial_state["pending_resolver_resume"] = pending_resolver_resume
+    resolver_goal_progress = state.get("resolver_goal_progress")
+    if resolver_goal_progress is not None:
+        initial_state["resolver_goal_progress"] = resolver_goal_progress
     cognitive_episode = state.get("cognitive_episode")
     if cognitive_episode is not None:
         initial_state["cognitive_episode"] = cognitive_episode
@@ -226,6 +230,9 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
     )
     resolver_pending_resolution = _validated_resolver_pending_resolution(
         result.get("resolver_pending_resolution"),
+    )
+    resolver_goal_progress = _validated_resolver_goal_progress(
+        result.get("resolver_goal_progress"),
     )
 
     logger.info(
@@ -263,6 +270,8 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
     }
     if resolver_pending_resolution is not None:
         return_value["resolver_pending_resolution"] = resolver_pending_resolution
+    if resolver_goal_progress is not None:
+        return_value["resolver_goal_progress"] = resolver_goal_progress
     return return_value
 
 
@@ -304,6 +313,22 @@ def _validated_resolver_pending_resolution(value: object) -> dict | None:
         return_value = None
         return return_value
     return_value = validated_resolution
+    return return_value
+
+
+def _validated_resolver_goal_progress(value: object) -> dict | None:
+    """Validate L2d's optional goal-progress checklist."""
+
+    if value is None:
+        return_value = None
+        return return_value
+    try:
+        validated_progress = validate_resolver_goal_progress(value)
+    except ResolverValidationError as exc:
+        logger.warning(f"Cognition dropped invalid goal progress: {exc}")
+        return_value = None
+        return return_value
+    return_value = validated_progress
     return return_value
 
 

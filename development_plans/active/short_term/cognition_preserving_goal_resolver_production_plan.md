@@ -2,7 +2,15 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Implement a production goal resolver as bounded recurrence around Kazusa's existing L1 -> L2 -> L2d cognition core, with demand-driven evidence/tool observations and no bypass around memory-driven personality cognition.
+**Goal:** Implement a production goal resolver that lets Kazusa pursue and
+resolve a user's actual goal through bounded recurrence around the existing
+L1 -> L2 -> L2d cognition core. The resolver should behave closer to a
+pragmatic coding agent resolving a request: keep track of the goal, collect
+missing evidence, ask the human when needed, continue after the answer, recover
+or clearly block when tools fail, and finish with a useful answer when the
+character's personality and system boundaries permit it. Demand-driven
+evidence/tool observations are means to that outcome, not the success
+criterion, and they must not bypass memory-driven personality cognition.
 
 **Architecture:** The baseline persona turn becomes a one-cycle resolver. Complex turns repeat the preserved cognition subgraph after bounded capability observations. RAG, web/current facts, human clarification, approval preparation, and self-resolution are selected by L2d as cognition-owned capabilities; deterministic code only validates, executes, limits, records, and routes observations back into the next cognition cycle.
 
@@ -50,6 +58,20 @@ decontextualizer
   -> selected L3 surface or private/no-response finalization
 ```
 
+The product goal is goal completion, not loop completion. A resolver trace is
+only evidence for review. A validation case is successful only when the final
+state answers the user's original question, completes the requested workflow, or
+explains a valid character/system blocker with enough evidence that a human can
+see why the goal could not be completed. "Asked one question", "called RAG", or
+"hit a terminal state" is insufficient by itself.
+
+Human-in-the-loop resolution is an open continuation until the issue is
+resolved or validly blocked. It is not a fixed two-turn demo. The test harness
+must keep feeding realistic user follow-up messages through the same resolver
+scope until cognition either closes the pending row and answers the original
+goal, continues waiting for specific missing information, rejects/supersedes
+the task for a valid reason, or reaches a bounded failure state with evidence.
+
 RAG becomes demand-driven evidence selected by cognition. The first cognition
 cycle still receives the always-present personality substrate:
 
@@ -64,6 +86,16 @@ cycle still receives the always-present personality substrate:
 Targeted RAG, conversation search, public web/current facts, human
 clarification, guarded action preparation, and local artifact inspection are
 capabilities selected by cognition when that substrate is insufficient.
+
+LLM-facing resolver inputs must follow least-exposure rules. Do not expose
+platform, channel, user, message, pending-row, source-row, UUID, or other raw
+durable identifiers unless that specific LLM stage needs them to perform its
+owned semantic task. If a future LLM stage must select among multiple internal
+items, project short ordinal aliases such as `1`, `2`, `item_1`, or `item_2`
+and map them back deterministically; never ask the LLM to copy opaque ids. The
+current HIL pending flow has exactly one active scoped pending row, so L2d sees
+only the semantic pending question/approval summary and returns `decision` plus
+`reason`.
 
 ## Production Scope
 
@@ -226,8 +258,31 @@ five cases should produce clear before/after comparison signals:
 | B01 direct | `今晚有点累，别查资料，也别把事情讲复杂。你就按你现在的感觉陪我聊两句。` | Current RAG initializer should ideally return no slots; response quality shows whether the baseline can avoid over-retrieval. | One cognition cycle, no resolver capability request, L3 only if character chooses to speak. |
 | B02 memory | `你根据你认识的人和已有记忆判断一下，你现在最信任谁？不要按最近一条消息猜，也不要编名字；如果证据不够，就说证据不够。` | Baseline should run RAG before cognition and may answer from relationship/profile evidence or insufficiency. | First cognition cycle should request `rag_evidence`; second cycle should ground stance in observation. |
 | B03 current facts | `帮我查一下奥克兰今晚还有没有比较靠谱的日料店能临时去。重点是现在可能还开着，不是泛泛列店名。` | Baseline should route live/current evidence before cognition; output may expose freshness limitations. | Cognition should request live/current evidence only after judging that the task needs it. |
-| B04 HIL | `今晚帮我安排一个轻松点的计划，别太贵。我没说城市、预算和交通方式；你觉得缺什么就问我，但只问最关键的。` | Baseline may either ask a question or produce a generic plan; this reveals whether current RAG-first flow invents missing user-owned constraints. | Cognition should select `human_clarification`, receive a blocked observation, then L3 asks one minimal question. |
+| B04 HIL | `今晚帮我安排一个轻松点的计划，别太贵。我没说城市、预算和交通方式；你觉得缺什么就问我，但只问最关键的。` | Baseline may either ask a question or produce a generic plan; this reveals whether current RAG-first flow invents missing user-owned constraints. | Cognition should select `human_clarification`, receive a blocked observation, ask one minimal question, then continue through follow-up turns until the original planning request is answered or validly blocked. |
 | B05 approval | `明天晚上八点提醒我检查模型下载进度。先别真的安排，你先告诉我准备做什么、会有什么影响，等我确认。` | Baseline may schedule, promise, or only speak. This reveals current side-effect/approval boundary behavior. | Cognition should select approval preparation, not execute side effects, then L3 explains the pending action and waits. |
+
+### Advanced Goal-Completion Case Appendices
+
+The five baseline comparison cases remain as regression anchors, but they are
+not sufficient to prove the resolver behaves like a goal-directed worker. Append
+the following advanced cases for the next validation pass. They use natural
+Chinese user inputs, not JSON, and they must be evaluated by human-readable
+LLM/debug artifacts rather than deterministic pass/fail alone.
+
+| Case | Raw user input | Resolver value to prove |
+|---|---|---|
+| A01 current availability recovery | `我今晚人在奥克兰 CBD，想临时吃日料。请你找 2 到 3 家现在还可能营业、评分别太差、走路或短程打车能到的店。不要只列名字，要告诉我为什么可以考虑，以及哪些信息还需要我自己最后确认。` | Current public evidence should produce useful recommendations when web/RAG works; if it fails, trace must prove the infrastructure blocker and attempt an allowed recovery path before final caveat. |
+| A02 hardware purchase research | `我想在新西兰买一套能比较舒服跑 Qwen 27B 本地推理的硬件。显卡必须是在新西兰能买到的。你先查可买性和价格区间，再给我一个保守方案和一个更激进方案。` | Multi-step public research with current availability, tradeoffs, and grounded recommendations. |
+| A03 open-source release verification | `帮我确认 OpenHands 最近一次正式发布是哪一天。不要把预告、nightly、测试版当正式发布；如果来源之间冲突，要告诉我你信哪个以及为什么。` | Evidence comparison and source-quality judgment, not just one search result. |
+| A04 follow-up HIL completion | `今晚帮我安排一个轻松点的计划，别太贵。我还没说城市、预算和交通方式；你觉得缺什么就问我，但只问最关键的。` | Open-ended HIL continuation until the plan is actually produced after the user supplies enough missing information. |
+| A05 partial HIL answer | `我想让你帮我规划一个明天下午的半天安排，最好别太累。你缺什么就问。` | Resolver should handle partial answers across multiple user turns and ask only the next necessary question instead of restarting. |
+| A06 approval then execution handoff | `明天晚上八点提醒我检查模型下载进度。先别真的安排，你先告诉我准备做什么、会有什么影响，等我确认。` | Approval preparation must wait; after user confirms in a later turn, cognition closes approval and only then may normal scheduling/action path proceed if supported. |
+| A07 ambiguous reference recovery | `他刚才说的那个方案靠谱吗？如果你不知道“他”和“那个方案”指什么，就先问我，不要硬猜。` | Decontextualizer/cognition/HIL must resolve references through follow-up before evaluating. |
+| A08 dependent memory retrieval | `谁之前说过 5090 能跑 Qwen 27B？如果找得到，说出是谁、当时大概在讨论什么，再判断这个说法靠不靠谱。` | Conversation evidence followed by person/context and factual judgment. |
+| A09 incident triage from artifacts | `我给你一组服务日志和指标，你要找出最可能的根因、说明证据链，然后给一个最小恢复步骤。不要看到第一个 timeout 就下结论。` | Multi-source evidence synthesis and root-cause reasoning, with explicit uncertainty. |
+| A10 code repair workflow | `这个检查脚本失败了。你要先看失败信息和相关代码，定位根因，再给出最小修复。不要只改到测试变绿，要说明为什么这个修复是对的。` | Coding-agent-like investigation loop: reproduce, inspect, patch proposal or bounded code edit, verify. |
+| A11 user preference plus hard constraint | `帮我挑一款新西兰可以买到的迷你主机做本地推理实验，预算尽量低，但不要推荐明显跑不动 27B 的东西。你可以劝我降低目标，但要给依据。` | Tradeoff handling with refusal/redirect when constraints conflict. |
+| A12 self-resolution without user send | `这段内部残留里有几个互相冲突的后续目标：继续等用户补充、整理证据缺口、不要主动打扰。不要对外发消息，先把私下目标收束清楚。` | Private self-resolver should consolidate internal goals without visible output or side effects. |
 
 Baseline artifacts are stored under:
 
@@ -300,6 +355,69 @@ Important baseline observations:
 - HIL, approval, unsupported capability, timeout, and max-cycle stops must be
   explicit resolver statuses. Python may stop the loop structurally, but L2d
   decides what that stop means for the character and final surface.
+
+Additional goal-matrix lesson from G03 pass7-pass13:
+
+- HIL resume state alone is not enough. A pending row can carry the original
+  text, but the model still collapses a multi-part goal into the most recent or
+  most salient evidence subgoal. Production needs a compact, cognition-owned
+  goal-progress contract that names deliverables and their status. For example:
+  `food_candidates`, `walking_route`, `time_split`, `source_limits`, and
+  `final_verification_checklist` for an evening-plan case. This must be generic
+  enough for deployment plans, RCA, hardware recommendations, release
+  verification, and memory/person judgment; it must not be a case-specific
+  keyword classifier.
+- Prompt-only deliverable reminders are not reliable enough with the local
+  model. L2d and L3 need a stable checklist-like projection before they decide
+  whether to request another capability or render the final answer.
+- Prompt contracts must stay generic. Validation failures may justify clearer
+  semantic principles, but they must not be copied into runtime prompts as
+  case lists, source-specific answer keys, exact forbidden endings, or lookup
+  tables. Deterministic tests should protect ownership boundaries and evidence
+  contracts, not freeze the validation examples into prompt text.
+- The convergence policy must distinguish "partial evidence is enough to
+  answer with caveats" from "decision-critical dependency is still missing".
+  Otherwise the resolver over-pursues web evidence and still fails to complete
+  the original user-visible deliverable.
+
+### Parked Design Note: Optional Resolver-Time Visible Surface
+
+This is a deferred design idea, not part of the current production execution
+scope.
+
+Long-running resolver work can make Kazusa appear silent for too long, but the
+solution must not become a generic chatbot acknowledgement protocol. Do not add
+hardcoded "please wait" text, mandatory progress messages, or a prompt rule that
+forces Kazusa to speak whenever a tool call starts.
+
+The preferred future direction is an optional combo output from cognition:
+
+```text
+L1 -> L2 -> L2d
+  -> resolver capability request, such as web_evidence
+  -> optional non-terminal visible surface intent
+```
+
+The visible surface, when present, should run through the normal L3/dialog
+surface path and be delivered in parallel with the resolver capability
+execution. It must not terminate the resolver loop, must not replace the final
+answer, and must not trigger an independent continuation path. If cognition
+does not naturally produce such a surface, there is no mandatory output.
+
+The semantic ownership stays with the cognition stack:
+
+- L1/L2/L2d decide whether the current scene, relationship, wait pressure, and
+  character state justify saying anything while work continues.
+- Deterministic resolver code only validates, throttles, audits, and delivers
+  the optional non-terminal surface when adapter capabilities permit it.
+- The surface must avoid unsupported conclusions such as "I almost found it"
+  unless existing observations justify that stance.
+
+This parked idea should be revisited only after the core resolver can reliably
+preserve the original goal, complete multi-cycle deliverables, and produce
+human-readable per-cycle state/value traces. If implemented later, model-facing
+language should avoid "acknowledgement" or "progress message" labels that bias
+the system toward assistant-style status logging.
 
 ### Independent Review Remediation Contract
 
@@ -392,8 +510,13 @@ Rules:
 
 ### ResolverPendingResolutionV1
 
-Emitted by L2d when the current cognition cycle is interpreting a pending HIL
-or approval row that was projected into `resolver_context`.
+The model-facing L2d output is only the semantic pending decision:
+`decision` plus `reason`. L2d must not output, copy, or select a durable
+pending row id, UUID, message id, platform id, channel id, or user id.
+Deterministic code binds the current active pending row and schema version
+after L2d has made the semantic judgment.
+
+The normalized internal payload used by resolver code remains:
 
 ```python
 class ResolverPendingResolutionV1(TypedDict):
@@ -403,9 +526,10 @@ class ResolverPendingResolutionV1(TypedDict):
     reason: str
 ```
 
-This is structural state chosen by cognition. Deterministic code may use it to
-close, keep, or supersede the ledger row. Deterministic code must not infer
-approval from keywords such as "yes" or "ok".
+This is structural state chosen by cognition and completed by deterministic
+binding. Deterministic code may use it to close, keep, or supersede the ledger
+row. Deterministic code must not infer approval from keywords such as "yes" or
+"ok".
 
 ### ResolverObservationV1
 
@@ -551,7 +675,7 @@ Modify:
 - Modify: `development_plans/README.md`
 - Modify: this plan file
 
-- [ ] **Step 1: Verify branch and workspace**
+- [x] **Step 1: Verify branch and workspace**
 
 Run:
 
@@ -568,7 +692,7 @@ Expected:
 If the workspace has unrelated user changes, do not reset them. Record them in
 the task notes and avoid staging them.
 
-- [ ] **Step 2: Register this plan**
+- [x] **Step 2: Register this plan**
 
 Add this row under `Active Short-Term Plans`:
 
@@ -596,7 +720,7 @@ git diff --name-status main -- src resources test_artifacts\goal_resolver_poc
 Expected: no diff for those production/resource artifact paths after the
 removal is staged.
 
-- [ ] **Step 3: Commit the plan-only baseline and old POC removal**
+- [x] **Step 3: Commit the plan-only baseline and old POC removal**
 
 Run:
 
@@ -1313,7 +1437,10 @@ Implementation notes:
   resolver initialization and before the first cognition cycle. The row is
   projected into `resolver_context`; deterministic code does not keyword-match
   user approval or answers.
-- L2d receives a generic pending-resume instruction and can emit
+- L2d receives a generic pending-resume instruction and can emit only a
+  semantic pending decision (`decision` and `reason`). The LLM-facing pending
+  projection omits `resume_id`, expiry, platform, channel, user, and message
+  ids. Deterministic code binds the active pending row into the internal
   `resolver_pending_resolution`. The loop applies that resolution only after a
   full L1/L2/L2d cognition pass.
 - Blocked `human_clarification` and `approval_preparation` observations create
@@ -1322,9 +1449,11 @@ Implementation notes:
   state. If that final cycle repeats the same blocked capability, the loop
   clears pending action requests/action specs and returns a terminal
   no-visible-output state with a warning instead of looping.
-- Independent review found that L2d could not close a pending row unless the
-  prompt-safe projection included `resume_id`; the projection now includes it
-  without exposing platform/channel/user ids.
+- Independent review first found that L2d could not close a pending row without
+  `resume_id`, but the production contract was tightened after LLM I/O audit:
+  L2d no longer sees or copies the id. The active pending row is selected by
+  deterministic scope loading, while L2d only decides whether the user answered,
+  approved, rejected, superseded, or should continue waiting.
 
 Verification:
 
@@ -1753,9 +1882,11 @@ Final live validation summary:
 
 Validation lessons applied to code:
 
-- L2d needed hard prompt boundaries for resolver recurrence. Without them, the
-  local model repeated failed evidence requests, repeated blocked HIL/approval
-  requests, or misused `self_goal_resolution`.
+- L2d needed clear semantic boundaries for resolver recurrence. Without them,
+  the local model repeated failed evidence requests, repeated blocked
+  HIL/approval requests, or misused `self_goal_resolution`; the boundary must
+  be expressed as general capability-selection principles, not as examples
+  copied from validation failures.
 - Memory/relationship judgment must explicitly request `rag_evidence` before
   speaking when the user asks for judgment from existing memory and allows an
   evidence-insufficient answer.
@@ -1769,10 +1900,336 @@ Validation lessons applied to code:
 - The direct harness is required for per-cycle resolver evidence because the
   `/chat` service response does not expose `resolver_state`.
 
+Follow-up RCA and acceptance validation, 2026-05-30:
+
+- B03 first after-run was a harness/tooling regression, not proof that the
+  resolver could not handle current facts. The direct harness had not started
+  the MCP manager and the resolver did not surface missing web tools explicitly.
+  The harness now starts/stops `mcp_manager`, `web_evidence` fails early when
+  required MCP tools are absent, and the resolver capability timeout default is
+  now `120.0` seconds.
+- Rerun B03 evidence:
+
+  ```text
+  test_artifacts/cognition_resolver/after_20260530/B03_current_facts_after_result.json
+  test_artifacts/cognition_resolver/after_20260530/B03_current_facts_resolver_trace.md
+  ```
+
+  The rerun completed 2 resolver cycles with one `web_evidence` observation
+  and produced concrete currently plausible Japanese restaurant options with
+  caveats.
+- B04 single-turn HIL was insufficient. A real HIL validation must maintain
+  stable scope across turns and continue until the original goal is answered or
+  validly blocked. The conversation harness now supports `CASE_LOCAL_START` so
+  synthetic time does not contradict user input.
+- Rerun B04 acceptance evidence:
+
+  ```text
+  test_artifacts/cognition_resolver/after_20260530/B04_hil_multiturn_acceptance_conversation_result.json
+  test_artifacts/cognition_resolver/after_20260530/B04_hil_multiturn_acceptance_turn_1_resolver_trace.md
+  test_artifacts/cognition_resolver/after_20260530/B04_hil_multiturn_acceptance_turn_2_resolver_trace.md
+  ```
+
+  Turn 1 created a blocked `human_clarification` observation and asked for
+  budget, dietary constraints, time, and area. Turn 2 closed the pending HIL
+  path, requested `web_evidence`, and answered the original two-hour food plus
+  walking plan with concrete options.
+- Code/design lessons from the follow-up pass:
+  - Same-message pending resolutions must be ignored because the current user
+    text cannot answer a future question created from that same message.
+  - Valid resolver capabilities misplaced inside `action_requests` should be
+    recovered because the local model sometimes uses the wrong output slot.
+  - Pending HIL resume must carry the original goal into cognition; otherwise
+    follow-up answers can be treated as standalone chat.
+  - L2d must not replace complete plans with procedural acknowledgement after
+    evidence returns.
+  - L3/content anchors and dialog/evaluator must preserve multi-part
+    deliverables; visible output is the final user-goal success surface.
+
+### Production Evidence Gap And Goal-Matrix Plan
+
+The current evidence is not sufficient to merge the resolver as a production
+system. B03 and B04 prove that the loop can recover from two important
+failures, but they do not yet prove general goal-resolution behavior. The
+remaining evidence gap is:
+
+- **Goal translation:** whether cognition reliably turns natural Chinese user
+  requests into an original goal, deliverables, dependencies, and blockers
+  without deterministic keyword routing.
+- **Dependency pursuit:** whether the resolver can sequence evidence,
+  clarification, approval, and final answer across different domains.
+- **Continuation quality:** whether HIL answers are folded back into the
+  original goal instead of becoming standalone chat.
+- **Final-answer adequacy:** whether the visible output is close to what a
+  pragmatic coding agent would deliver: concrete, grounded, caveated, and
+  finished enough for the user to act on.
+- **Character-core preservation:** whether all semantic decisions still pass
+  through L1 -> L2 -> L2d and keep Kazusa's memory/personality stance, rather
+  than turning into a generic assistant harness.
+
+The next validation pass must use a goal matrix, not more isolated demos. Each
+case must be evaluated by human-readable inspection against this rubric:
+
+| Criterion | Pass signal |
+| --- | --- |
+| Goal read | The final trace shows the original user goal is preserved through loops. |
+| Dependency handling | The resolver asks for missing user-owned information, requests evidence, or blocks with a reason rather than guessing. |
+| Completion | The final visible answer completes the user goal or gives a defensible blocker. |
+| Codex-likeness | The answer is as useful as a pragmatic coding agent response would be for the same prompt, within Kazusa's personality and capability boundaries. |
+| No shallow pass | Calling RAG, asking one question, or reaching terminal state is not enough without visible user value. |
+
+#### Ten Goal-Matrix Cases
+
+These cases are natural Chinese user inputs, not JSON prompts. The harness file
+is:
+
+```text
+test_artifacts/cognition_resolver/goal_matrix_20260530/goal_matrix_cases.json
+```
+
+| ID | Goal path | User-facing workload |
+| --- | --- | --- |
+| G01 | Current recommendation + availability + comparison | Recommend a New Zealand-available hardware setup for running Qwen 27B locally, including GPU availability, VRAM reasoning, and practical tradeoffs. |
+| G02 | Source freshness + release classification | Verify the latest official OpenHands release, distinguishing stable release from prerelease/nightly/news. |
+| G03 | HIL planning continuation | Build a two-stage city evening plan where turn 1 lacks location/budget/time and turn 2 supplies constraints; final answer must complete the original plan. |
+| G04 | Incident RCA from user-provided artifacts | Analyze logs and metrics, avoid first-timeout bias, identify likely root cause, evidence chain, and minimal recovery steps. |
+| G05 | Memory/person judgment | Use existing memory/history only to identify a liked/trusted person; if evidence is insufficient, say so without inventing names. |
+| G06 | Approval-gated side effect | Prepare a reminder/scheduled follow-up plan but do not execute until user approval; final answer must explain action and impact. |
+| G07 | Ambiguous referent HIL | User asks about "he/that thing" with insufficient referent; resolver must ask the minimal clarification rather than guessing. |
+| G08 | Conflict-aware current research | Compare conflicting public-source claims about a current project/model/tool and explain which source is trusted and why. |
+| G09 | Constraint-satisfying recommendation | Recommend an offline-first note/search stack under explicit privacy, cost, local-model, and maintenance constraints. |
+| G10 | Multi-step decision with fallback | Help choose between two deployment paths from provided constraints, produce recommendation, risk list, and next actions; ask HIL only if a decision-critical constraint is missing. |
+
+#### Goal-Matrix Execution Plan
+
+- Add a matrix runner that reads `goal_matrix_cases.json` and executes the
+  current resolver-enabled persona path with stable per-case scope.
+- The runner must emit raw JSON only: case inputs, turn outputs, resolver
+  state, trace paths, and basic counts. Human-readable quality judgment remains
+  agent-authored after inspecting the raw output.
+- Run one case at a time when doing live LLM inspection; do not reduce the
+  result to a green/red command summary.
+- Write the agent-authored report to:
+
+  ```text
+  test_artifacts/cognition_resolver/goal_matrix_20260530/goal_matrix_review.md
+  ```
+
+- If failures expose a specific implementation gap, fix the smallest approved
+  change surface and rerun the failed case before broadening.
+
+#### Goal-Matrix Pass 1 Findings
+
+Pass 1 was executed with:
+
+```text
+GOAL_MATRIX_RUN_ID=goal_matrix_20260530_pass1
+venv\Scripts\python test_artifacts\cognition_resolver\goal_matrix_20260530\run_goal_matrix_cases.py
+```
+
+Live cases were run one at a time and inspected from raw JSON plus resolver
+trace files under:
+
+```text
+test_artifacts/cognition_resolver/goal_matrix_20260530/runs/
+```
+
+The agent-authored review is:
+
+```text
+test_artifacts/cognition_resolver/goal_matrix_20260530/goal_matrix_review.md
+```
+
+Outcome:
+
+| Result | Cases | Meaning |
+| --- | --- | --- |
+| Production pass | G04, G05, G07 | The current architecture handles these without extra resolver work. |
+| Partial | G10 | The answer is directionally useful but loses required structure and leaks markup. |
+| Fail | G01, G02, G03, G06, G08, G09 | The resolver loop runs but does not complete the user goal at Codex-like quality. |
+
+Key findings from pass 1:
+
+- Web evidence retrieval is brittle for normal current-source tasks. Queries are
+  often too constrained and sometimes include artificial date/year filters,
+  producing "No results found" where a human resolver would try official URLs,
+  release pages, docs, changelogs, and source-specific fallback searches.
+- The resolver lacks a strong convergence policy. It can repeat similar
+  evidence requests until `max_cycles`, then either stop or answer from weak
+  assumptions.
+- Final-answer adequacy is not preserved through L3/dialog. Required
+  deliverables such as named options, route, risk list, recommendation, and next
+  step are often compressed away.
+- Evidence-backed facts and assumptions are not separated clearly enough. G01
+  made an availability-style claim after inventory evidence failed.
+- Approval previews are not capability-grounded. G06 described file-size and
+  checksum monitoring without evidence that the current system can execute
+  those checks.
+- Positive durable-memory retrieval remains unproven; G05 only proves the
+  no-evidence branch.
+
+The next implementation pass must address the above gaps before another merge
+readiness claim:
+
+1. Add a cognition-owned goal-progress contract: original goal, requested
+   deliverables, missing user-owned inputs, evidence dependencies, attempted
+   paths, source-backed facts, assumptions, and blocker reason.
+2. Classify evidence failures as source absence, query/search failure, access
+   timeout/failure, or partial evidence.
+3. Add adaptive dependency strategy so current-source tasks try different paths
+   after failed searches instead of repeating broad queries.
+4. Carry a generic deliverable checklist from L2d through L3/dialog so the final
+   surface completes the user's requested output shape.
+5. Ground approval-gated side-effect previews in actual available
+   capabilities.
+6. Add a seeded positive memory case while retaining G05 as the no-evidence
+   control.
+
+#### Goal-Matrix Follow-Up Findings
+
+Follow-up validation was executed after targeted fixes for approval HIL,
+official-source web discovery, source-category evidence boundaries, and dialog
+markup cleanup. Updated raw evidence remains under:
+
+```text
+test_artifacts/cognition_resolver/goal_matrix_20260530/runs/
+```
+
+The agent-authored review was updated at:
+
+```text
+test_artifacts/cognition_resolver/goal_matrix_20260530/goal_matrix_review.md
+```
+
+Updated outcome:
+
+| Result | Cases | Meaning |
+| --- | --- | --- |
+| Production pass | G02, G04, G05, G06, G07, G08 | These now demonstrate useful goal completion or valid blockers under the current POC. |
+| Partial | G03, G10 | G03 now proves HIL continuation and a bounded plan, but current-state evidence and final wording remain caveated; G10 still compresses requested risk/checklist structure too much. |
+| Still fail or unproven | G01, G09 | Current inventory and decision-matrix depth remain below merge bar. |
+
+What improved:
+
+- `approval_preparation` now creates a scoped pending approval row and returns
+  to L3/dialog with a preview that says only what Kazusa can actually do. G06
+  no longer invents file-size, checksum, download-monitoring, or scheduling
+  execution capabilities.
+- Repeated pending HIL/approval requests from L2d no longer disappear into a
+  private terminal. If the model repeats the active pending capability, L2d
+  converts it into a visible `speak` surface using the stored pending question
+  or approval summary.
+- Web evidence can now perform a bounded canonical-source seed-read fallback
+  after the normal search graph reports an empty result. The fallback must stay
+  generic: infer source URLs from the task and context, not from hard-coded
+  validation-case product paths.
+- RAG, L2d, and L3 prompts now preserve source-category boundaries. Missing or
+  adjacent evidence must remain missing or adjacent; it cannot be upgraded to
+  "consistent", "no conflict", or confirmed target evidence.
+- Dialog output strips HTML line-break tags, removing the visible `</br>` leak
+  observed in G10 pass 1.
+
+What remains:
+
+- The resolver still lacks a first-class goal-progress object. The trace shows
+  observations and cycle state, but not a stable goal/dependency/deliverable
+  record that cognition updates each cycle.
+- Web research can still run too many expensive slots before converging. G02
+  and G08 reached useful answers, but at high latency and repeated web reads.
+- L3/dialog still compresses multi-part deliverables. G10 is directionally
+  right but lacks a full risk checklist, rollback/fallback path, and minimum
+  two-week migration sequence.
+- G01 remains the hardest production blocker: current inventory/availability
+  recommendations need source-backed store availability or an honest blocker,
+  not generic hardware advice.
+- G03 and G09 still need reruns after a stronger deliverable contract; current
+  evidence does not prove HIL plan completion or high-quality recommendation
+  synthesis.
+
+Additional G03-focused follow-up through `goal_matrix_20260530_pass13_G03`
+confirmed the main production blocker:
+
+- HIL mechanics now work: turn 1 asks for a missing location, turn 2 resumes the
+  pending row, and cognition requests current web evidence instead of
+  inventing venue names.
+- Evidence handling improved: repeated identical requests can be blocked, and
+  terminal blockers can surface visible answers instead of silence.
+- The answer still fails the Codex-like criterion. The final visible response
+  repeatedly narrows the original multi-part goal into restaurant-only
+  selection, asks the user to verify hours, and omits the two-hour schedule plus
+  walking route. Moving the original pending goal into the L3 surface intent is
+  not enough; the local model needs a structured goal-progress checklist with
+  deliverable statuses.
+- Production work must add a generic `GoalProgressV1` or equivalent contract
+  before merge readiness can be claimed. This should be a cognition-owned
+  semantic object, not a deterministic keyword classifier over user input.
+
+The current implementation is a stronger POC, not merge-ready production. The
+next production step should prioritize a cognition-owned goal-progress contract
+and deliverable-preservation path before widening live rollout.
+
+#### G03 Focused Follow-Up Findings, Pass15-Pass27
+
+Focused G03 reruns after the goal-progress, HIL pending-resume,
+terminal-blocker, and dialog-boundary fixes are recorded under:
+
+```text
+test_artifacts/cognition_resolver/goal_matrix_20260530/runs/goal_matrix_20260531_pass27_G03/
+```
+
+Latest inspected files:
+
+```text
+test_artifacts/cognition_resolver/goal_matrix_20260530/runs/goal_matrix_20260531_pass27_G03/G03_hil_evening_plan_result.json
+test_artifacts/cognition_resolver/goal_matrix_20260530/runs/goal_matrix_20260531_pass27_G03/G03_hil_evening_plan_turn_1_resolver_trace.md
+test_artifacts/cognition_resolver/goal_matrix_20260530/runs/goal_matrix_20260531_pass27_G03/G03_hil_evening_plan_turn_2_resolver_trace.md
+```
+
+Observed behavior:
+
+- Turn 1 surfaces a minimal HIL question through L3/dialog.
+- Turn 2 resumes the original goal after the user supplies CBD, budget,
+  19:30 start time, no-alcohol, and low-queue constraints.
+- The first web evidence pass finds budget-fit candidate leads and excludes at
+  least one poor queue-fit option.
+- Secondary validation for 19:30 opening, non-alcoholic fit, queue status, and
+  walking-route evidence remains partial or times out.
+- Rephrased repeated `web_evidence` requests after a duplicate blocker are now
+  terminalized into a visible blocker answer instead of causing silence.
+- The final visible answer preserves source boundaries and gives a usable
+  fallback: caveated candidate leads, a 19:30-21:30 schedule, a CBD walking
+  skeleton, and final user-side checks.
+
+Implementation lessons applied:
+
+- Goal-progress has to be prompt-safe and carried through pending HIL resume;
+  otherwise the second turn can answer the follow-up but drop the original
+  plan.
+- L2d, L3, and dialog all need the same deliverable boundary. Fixing only L2d
+  left L3/dialog free to collapse the answer or invent example names.
+- Terminal evidence blockers must be current-turn answers, not promises to
+  keep searching.
+- Exact duplicate evidence objectives should be structurally blocked. Broader
+  "different but not useful" evidence strategy remains an L2d/LLM contract,
+  not Python keyword matching over evidence prose.
+- "Example" entity names are still unsupported concrete claims when current
+  external evidence is missing.
+
+Current G03 verdict: partial with meaningful improvement. It satisfies the
+relaxed local-model goal for HIL continuation and bounded best-effort
+resolution, but it is not a clean production pass and is not yet evidence of
+high-quality current-world recommendation research.
+
 ## Acceptance Criteria
 
 - Resolver disabled path preserves existing production graph behavior.
 - Resolver enabled path runs after decontextualizer and before mandatory RAG.
+- Resolver-enabled validation judges user goal completion first. A case passes
+  only if Kazusa answers the user's original request, completes the requested
+  workflow, or gives a valid character/system blocker with traceable evidence.
+- A resolver loop trace is supporting evidence, not a passing result by itself.
+  The report must state the user-visible value improvement or regression
+  against baseline for every comparison case.
 - Every semantic decision runs through `call_cognition_subgraph`.
 - Every resolver cycle includes full L1 -> L2 -> L2d output.
 - `call_cognition_subgraph` propagates `resolver_capability_requests` from L2d.
@@ -1785,6 +2242,9 @@ Validation lessons applied to code:
   through direct resolver text.
 - HIL and approval blockers create durable pending-resume rows scoped to
   platform/channel/user/source message with expiry.
+- HIL validation continues across realistic follow-up turns until the original
+  user issue is answered or validly blocked. A single-turn clarification is not
+  sufficient evidence.
 - Next-turn HIL and approval resumes load unexpired pending rows into
   cognition and close/approve/reject/supersede them only from an L2d
   `ResolverPendingResolutionV1`.
@@ -1798,6 +2258,9 @@ Validation lessons applied to code:
   execution, telemetry, and state persistence.
 - Real LLM validation report reruns exact B01-B05 baseline inputs and includes
   at least three multi-cycle cases plus one internal self-resolver dry run.
+- Advanced validation appends the A01-A12 cases and includes enough raw and
+  summarized evidence for a human to judge whether Kazusa resolved the user
+  problem in a Codex-like way while preserving character cognition.
 
 ## Rollout Plan
 

@@ -268,6 +268,9 @@ def test_action_initializer_prompt_follows_cognition_prompt_structure() -> None:
     assert "只返回合法 JSON 字符串" in prompt
     assert "`speak`" in prompt
     assert "`trigger_future_cognition`" in prompt
+    assert "只有线索或只有未确认候选时" in prompt
+    assert "不得把目标属性升格为已确认事实" in prompt
+    assert "具体当前外部断言" in prompt
     assert "`send_message`" not in prompt
     assert "用户消息是一段中文行动上下文字符串，不是 JSON" in prompt
     assert "具体新信息" in prompt
@@ -291,6 +294,8 @@ def test_action_initializer_prompt_follows_cognition_prompt_structure() -> None:
     assert "L2c2" not in prompt
     assert "小判断例" not in prompt
     assert "5090 能跑什么人工智能模型" not in prompt
+    assert "resume_id" not in prompt
+    assert "系统会绑定当前 active pending row" in prompt
 
 
 def test_action_initializer_payload_includes_group_engagement_context() -> None:
@@ -576,6 +581,443 @@ async def test_action_initializer_accepts_multiple_valid_action_specs(
     assert human_context.startswith("当前行动上下文：")
     assert "trigger_context" not in human_context
     assert "available_capabilities" not in human_context
+
+
+@pytest.mark.asyncio
+async def test_action_initializer_recovers_misplaced_resolver_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Resolver capability names in action rows should stay resolver work."""
+
+    fake_llm = _FakeLLM(json.dumps({
+        "action_requests": [
+            {
+                "capability": "web_evidence",
+                "decision": "retrieve current facts",
+                "detail": "检索奥克兰 CBD 预算内晚间计划需要的当前事实。",
+                "reason": "当前回答还缺少外部证据。",
+            },
+        ],
+    }, ensure_ascii=False))
+    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+
+    result = await l2d_module.call_action_initializer(_state())
+
+    assert result["action_specs"] == []
+    assert result["resolver_capability_requests"] == [
+        {
+            "schema_version": "resolver_capability_request.v1",
+            "capability_kind": "web_evidence",
+            "objective": "检索奥克兰 CBD 预算内晚间计划需要的当前事实。",
+            "reason": "当前回答还缺少外部证据。",
+            "priority": "now",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_action_initializer_returns_valid_goal_progress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """L2d should be able to emit the goal checklist beside resolver work."""
+
+    fake_llm = _FakeLLM(json.dumps({
+        "resolver_capability_requests": [
+            {
+                "schema_version": "resolver_capability_request.v1",
+                "capability_kind": "web_evidence",
+                "objective": "检索当前营业证据。",
+                "reason": "需要当前事实才能推荐。",
+                "priority": "now",
+            },
+        ],
+        "resolver_goal_progress": {
+            "schema_version": "resolver_goal_progress.v1",
+            "original_goal": "安排两小时低预算计划。",
+            "current_focus": "先确认当前营业事实。",
+            "deliverables": [
+                {
+                    "description": "晚餐候选和证据边界",
+                    "status": "partial",
+                    "note": "需要当前事实。",
+                },
+                {
+                    "description": "散步路线和时间切分",
+                    "status": "pending",
+                    "note": "最终回答必须覆盖。",
+                },
+            ],
+            "missing_user_inputs": [],
+            "evidence_dependencies": ["当前营业证据"],
+            "attempted_paths": [],
+            "source_backed_facts": ["用户给出地点和预算"],
+            "assumptions_or_inferences": [],
+            "blockers": [],
+            "final_response_requirements": [
+                "覆盖晚餐、路线、时间切分和核实清单",
+            ],
+        },
+        "action_requests": [],
+    }, ensure_ascii=False))
+    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+
+    result = await l2d_module.call_action_initializer(_state())
+
+    assert result["resolver_goal_progress"]["original_goal"] == (
+        "安排两小时低预算计划。"
+    )
+    assert result["resolver_goal_progress"]["deliverables"][1]["status"] == (
+        "pending"
+    )
+    assert result["action_specs"] == []
+
+
+@pytest.mark.asyncio
+async def test_action_initializer_derives_visible_requirements_from_open_goal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Open L2d deliverables should reach L3 even when requirements are empty."""
+
+    fake_llm = _FakeLLM(json.dumps({
+        "resolver_capability_requests": [],
+        "resolver_goal_progress": {
+            "schema_version": "resolver_goal_progress.v1",
+            "original_goal": "安排两小时低预算计划。",
+            "current_focus": "基于现有证据给最佳努力计划。",
+            "deliverables": [
+                {
+                    "description": "散步路线和时间切分",
+                    "status": "pending",
+                    "note": "最终回答必须覆盖。",
+                },
+                {
+                    "description": "已确认约束复述",
+                    "status": "satisfied",
+                    "note": "地点和预算已确认。",
+                },
+            ],
+            "missing_user_inputs": [],
+            "evidence_dependencies": [],
+            "attempted_paths": [],
+            "source_backed_facts": ["用户给出地点和预算"],
+            "assumptions_or_inferences": [],
+            "blockers": [],
+            "final_response_requirements": [],
+        },
+        "action_requests": [
+            _speak_request("基于现有证据给用户可见计划。"),
+        ],
+    }, ensure_ascii=False))
+    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+
+    result = await l2d_module.call_action_initializer(_state())
+
+    requirements = result["resolver_goal_progress"][
+        "final_response_requirements"
+    ]
+    assert requirements == [
+        "散步路线和时间切分：最终回答必须覆盖。",
+    ]
+    assert result["action_specs"][0]["kind"] == "speak"
+
+
+@pytest.mark.asyncio
+async def test_action_initializer_completes_partial_visible_requirements(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Existing requirements should be extended for uncovered open deliverables."""
+
+    fake_llm = _FakeLLM(json.dumps({
+        "resolver_capability_requests": [],
+        "resolver_goal_progress": {
+            "schema_version": "wrong-version-from-model",
+            "original_goal": "安排两小时低预算计划。",
+            "current_focus": "给最终计划。",
+            "deliverables": [
+                {
+                    "description": "晚餐候选和证据边界",
+                    "status": "partial",
+                    "note": "已有候选但营业状态要 caveat。",
+                },
+                {
+                    "description": "散步路线和时间切分",
+                    "status": "pending",
+                    "note": "最终回答必须覆盖。",
+                },
+            ],
+            "missing_user_inputs": [],
+            "evidence_dependencies": [],
+            "attempted_paths": [],
+            "source_backed_facts": [],
+            "assumptions_or_inferences": [],
+            "blockers": [],
+            "final_response_requirements": [
+                "晚餐候选和证据边界：已有候选但营业状态要 caveat。",
+            ],
+        },
+        "action_requests": [
+            _speak_request("基于现有证据给用户可见计划。"),
+        ],
+    }, ensure_ascii=False))
+    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+
+    result = await l2d_module.call_action_initializer(_state())
+
+    goal_progress = result["resolver_goal_progress"]
+    assert goal_progress["schema_version"] == "resolver_goal_progress.v1"
+    assert goal_progress["final_response_requirements"] == [
+        "晚餐候选和证据边界：已有候选但营业状态要 caveat。",
+        "散步路线和时间切分：最终回答必须覆盖。",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_action_initializer_binds_pending_resolution_to_active_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """L2d should judge pending semantics while Python binds the row id."""
+
+    fake_llm = _FakeLLM(json.dumps({
+        "resolver_pending_resolution": {
+            "decision": "answered",
+            "reason": "用户补充了缺失地点。",
+        },
+        "action_requests": [
+            _speak_request("继续完成原始目标。"),
+        ],
+    }, ensure_ascii=False))
+    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+    state = _state()
+    state["pending_resolver_resume"] = {
+        "schema_version": "resolver_pending_resume.v1",
+        "resume_id": "resolver-pending-city-1",
+        "capability_kind": "human_clarification",
+        "status": "waiting_for_user",
+        "platform": "debug",
+        "platform_channel_id": "channel-123",
+        "global_user_id": "global-user-123",
+        "source_message_id": "message-123",
+        "prompt_safe_original_goal": "安排两小时低预算计划。",
+        "prompt_safe_question": "奥克兰哪个区域？",
+        "prompt_safe_approval_summary": "",
+        "created_at_utc": "2026-05-15T21:00:00+00:00",
+        "expires_at_utc": "2026-05-16T21:00:00+00:00",
+    }
+
+    result = await l2d_module.call_action_initializer(state)
+
+    assert result["resolver_pending_resolution"] == {
+        "schema_version": "resolver_pending_resolution.v1",
+        "resume_id": "resolver-pending-city-1",
+        "decision": "answered",
+        "reason": "用户补充了缺失地点。",
+    }
+    human_context = fake_llm.messages[1].content
+    assert "pending_resolver_resume:" in human_context
+    assert "安排两小时低预算计划。" in human_context
+    assert "奥克兰哪个区域？" in human_context
+    assert "resume_id" not in human_context
+    assert "resolver-pending-city-1" not in human_context
+    assert "expires_at_utc" not in human_context
+    assert "channel-123" not in human_context
+    assert "global-user-123" not in human_context
+
+
+@pytest.mark.asyncio
+async def test_action_initializer_ignores_model_supplied_pending_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Opaque pending ids from L2d should never choose the row to update."""
+
+    fake_llm = _FakeLLM(json.dumps({
+        "resolver_pending_resolution": {
+            "schema_version": "resolver_pending_resolution.v1",
+            "resume_id": "wrong-model-id",
+            "decision": "approved",
+            "reason": "用户同意了待审批动作。",
+        },
+        "action_requests": [
+            _speak_request("说明审批后的结果。"),
+        ],
+    }, ensure_ascii=False))
+    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+    state = _state()
+    state["pending_resolver_resume"] = {
+        "schema_version": "resolver_pending_resume.v1",
+        "resume_id": "resolver-pending-approval-1",
+        "capability_kind": "approval_preparation",
+        "status": "waiting_for_approval",
+        "platform": "debug",
+        "platform_channel_id": "channel-123",
+        "global_user_id": "global-user-123",
+        "source_message_id": "message-123",
+        "prompt_safe_original_goal": "准备提醒但先等待确认。",
+        "prompt_safe_question": "",
+        "prompt_safe_approval_summary": "提醒用户晚上复查。",
+        "created_at_utc": "2026-05-15T21:00:00+00:00",
+        "expires_at_utc": "2026-05-16T21:00:00+00:00",
+    }
+
+    result = await l2d_module.call_action_initializer(state)
+
+    assert result["resolver_pending_resolution"] == {
+        "schema_version": "resolver_pending_resolution.v1",
+        "resume_id": "resolver-pending-approval-1",
+        "decision": "approved",
+        "reason": "用户同意了待审批动作。",
+    }
+    serialized = json.dumps(result, ensure_ascii=False)
+    assert "wrong-model-id" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_action_initializer_keeps_action_when_pending_request_repeats(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A repeated pending resolver request should not hide a valid answer."""
+
+    fake_llm = _FakeLLM(json.dumps({
+        "resolver_capability_requests": [
+            {
+                "schema_version": "resolver_capability_request.v1",
+                "capability_kind": "approval_preparation",
+                "objective": "再次准备同一个提醒审批。",
+                "reason": "模型重复了同一个待审批能力。",
+                "priority": "now",
+            },
+        ],
+        "action_requests": [
+            _speak_request("explain the approval preview"),
+        ],
+    }, ensure_ascii=False))
+    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+    state = _state()
+    state["pending_resolver_resume"] = {
+        "schema_version": "resolver_pending_resume.v1",
+        "resume_id": "resolver-pending-approval-1",
+        "capability_kind": "approval_preparation",
+        "status": "waiting_for_approval",
+        "platform": "debug",
+        "platform_channel_id": "channel-123",
+        "global_user_id": "global-user-123",
+        "source_message_id": "message-123",
+        "prompt_safe_original_goal": "Explain then wait for approval.",
+        "prompt_safe_question": "",
+        "prompt_safe_approval_summary": "Explain reminder plan first.",
+        "created_at_utc": "2026-05-15T21:00:00+00:00",
+        "expires_at_utc": "2026-05-16T21:00:00+00:00",
+    }
+
+    result = await l2d_module.call_action_initializer(state)
+
+    assert result["resolver_capability_requests"] == []
+    assert [spec["kind"] for spec in result["action_specs"]] == ["speak"]
+    assert result["action_specs"][0]["reason"] == "explain the approval preview"
+
+
+@pytest.mark.asyncio
+async def test_action_initializer_recovers_pending_capability_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pending resolver answer should become text even with the wrong name."""
+
+    fake_llm = _FakeLLM(json.dumps({
+        "resolver_capability_requests": [
+            {
+                "schema_version": "resolver_capability_request.v1",
+                "capability_kind": "approval_preparation",
+                "objective": "Repeat the same approval preparation.",
+                "reason": "The model repeated the active pending capability.",
+                "priority": "now",
+            },
+        ],
+        "action_requests": [
+            {
+                "capability": "approval_preparation",
+                "decision": "",
+                "detail": "",
+                "reason": "explain the pending approval preview",
+            },
+        ],
+    }))
+    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+    state = _state()
+    state["pending_resolver_resume"] = {
+        "schema_version": "resolver_pending_resume.v1",
+        "resume_id": "resolver-pending-approval-1",
+        "capability_kind": "approval_preparation",
+        "status": "waiting_for_approval",
+        "platform": "debug",
+        "platform_channel_id": "channel-123",
+        "global_user_id": "global-user-123",
+        "source_message_id": "message-123",
+        "prompt_safe_original_goal": "Explain then wait for approval.",
+        "prompt_safe_question": "",
+        "prompt_safe_approval_summary": "Explain reminder plan first.",
+        "created_at_utc": "2026-05-15T21:00:00+00:00",
+        "expires_at_utc": "2026-05-16T21:00:00+00:00",
+    }
+
+    result = await l2d_module.call_action_initializer(state)
+
+    assert result["resolver_capability_requests"] == []
+    assert [spec["kind"] for spec in result["action_specs"]] == ["speak"]
+    surface_requirements = result["action_specs"][0]["params"][
+        "surface_requirements"
+    ]
+    assert surface_requirements == {
+        "decision": "visible_reply",
+        "detail": "Explain reminder plan first.",
+    }
+
+
+@pytest.mark.asyncio
+async def test_action_initializer_surfaces_repeated_pending_without_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A repeated pending resolver request should still reach L3 text."""
+
+    fake_llm = _FakeLLM(json.dumps({
+        "resolver_capability_requests": [
+            {
+                "schema_version": "resolver_capability_request.v1",
+                "capability_kind": "approval_preparation",
+                "objective": "Repeat the same approval preparation.",
+                "reason": "The model repeated the active pending capability.",
+                "priority": "now",
+            },
+        ],
+        "action_requests": [],
+    }))
+    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+    state = _state()
+    state["pending_resolver_resume"] = {
+        "schema_version": "resolver_pending_resume.v1",
+        "resume_id": "resolver-pending-approval-1",
+        "capability_kind": "approval_preparation",
+        "status": "waiting_for_approval",
+        "platform": "debug",
+        "platform_channel_id": "channel-123",
+        "global_user_id": "global-user-123",
+        "source_message_id": "message-123",
+        "prompt_safe_original_goal": "Explain then wait for approval.",
+        "prompt_safe_question": "",
+        "prompt_safe_approval_summary": "Explain reminder plan first.",
+        "created_at_utc": "2026-05-15T21:00:00+00:00",
+        "expires_at_utc": "2026-05-16T21:00:00+00:00",
+    }
+
+    result = await l2d_module.call_action_initializer(state)
+
+    assert result["resolver_capability_requests"] == []
+    assert [spec["kind"] for spec in result["action_specs"]] == ["speak"]
+    surface_requirements = result["action_specs"][0]["params"][
+        "surface_requirements"
+    ]
+    assert surface_requirements == {
+        "decision": "visible_reply",
+        "detail": "Explain reminder plan first.",
+    }
 
 
 @pytest.mark.asyncio

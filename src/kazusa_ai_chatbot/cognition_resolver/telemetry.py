@@ -10,6 +10,7 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     MAX_RESOLVER_TRACE_CHARS,
     ResolverCycleStateV1,
     ResolverCycleTraceV1,
+    project_goal_progress_for_cognition,
     validate_resolver_cycle_trace,
 )
 from kazusa_ai_chatbot.cognition_resolver.state import validate_resolver_state
@@ -430,6 +431,14 @@ def _trace_markdown_lines(
                 f"status={_safe_text(observation['status'])}; "
                 f"summary={_safe_text(observation['prompt_safe_summary'])}"
             )
+        lines.append("")
+    goal_progress = project_goal_progress_for_cognition(
+        resolver_state.get("goal_progress"),
+    )
+    if goal_progress:
+        lines.extend(["## Goal Progress", ""])
+        for line in goal_progress.splitlines():
+            lines.append(_safe_text(line))
         lines.append("")
     return_value = lines
     return return_value

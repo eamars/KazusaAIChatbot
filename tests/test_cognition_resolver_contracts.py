@@ -9,14 +9,18 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     MAX_RESOLVER_TRACE_CHARS,
     RESOLVER_CAPABILITY_REQUEST_VERSION,
     RESOLVER_CYCLE_STATE_VERSION,
+    RESOLVER_GOAL_PROGRESS_VERSION,
     RESOLVER_OBSERVATION_VERSION,
     RESOLVER_PENDING_RESOLUTION_VERSION,
     RESOLVER_PENDING_RESUME_VERSION,
     ResolverValidationError,
+    new_empty_goal_progress,
+    project_goal_progress_for_cognition,
     project_observations_for_cognition,
     project_pending_resume_for_cognition,
     validate_resolver_capability_request,
     validate_resolver_cycle_trace,
+    validate_resolver_goal_progress,
     validate_resolver_observation,
     validate_resolver_pending_resolution,
     validate_resolver_pending_resume,
@@ -70,6 +74,15 @@ def _rag_observation() -> dict:
     observation["request_objective"] = "raw-user-id-should-stay-out"
     observation["rag_result"] = {
         "answer": "RAG prompt-safe answer with evidence.",
+        "external_evidence": [
+            {
+                "summary": (
+                    "CBD walking route evidence includes Wynyard Quarter "
+                    "and Britomart."
+                ),
+                "raw_id": "raw-external-id-321",
+            },
+        ],
         "supervisor_trace": {
             "known_facts": [
                 {"summary": "prompt-safe fact summary"},
@@ -111,6 +124,7 @@ def _pending_resume() -> dict:
         "platform_channel_id": "channel-1",
         "global_user_id": "user-1",
         "source_message_id": "message-1",
+        "prompt_safe_original_goal": "Plan a low-cost evening after location.",
         "prompt_safe_question": "Which city are you in?",
         "prompt_safe_approval_summary": "",
         "created_at_utc": "2026-05-30T00:00:00+00:00",
@@ -124,6 +138,36 @@ def _pending_resolution() -> dict:
         "resume_id": "resolver-pending-001",
         "decision": "answered",
         "reason": "The user supplied the missing city.",
+    }
+
+
+def _goal_progress() -> dict:
+    return {
+        "schema_version": RESOLVER_GOAL_PROGRESS_VERSION,
+        "original_goal": "帮我安排一个两小时的低预算晚间计划。",
+        "current_focus": "用户已补充城市和预算，需要完成最终计划。",
+        "deliverables": [
+            {
+                "description": "晚餐候选和证据边界",
+                "status": "partial",
+                "note": "已有候选类别，但营业状态未确认。",
+            },
+            {
+                "description": "两小时步行路线和时间切分",
+                "status": "pending",
+                "note": "最终回答仍必须覆盖。",
+            },
+        ],
+        "missing_user_inputs": [],
+        "evidence_dependencies": ["当前营业状态和路线锚点"],
+        "attempted_paths": ["web_evidence: CBD 平价晚餐"],
+        "source_backed_facts": ["用户预算 20 NZD；地点奥克兰 CBD"],
+        "assumptions_or_inferences": ["散步路线可以用公开海滨路线骨架给出"],
+        "blockers": ["无法确认每家店 19:30 仍营业"],
+        "final_response_requirements": [
+            "区分已确认约束、未确认营业事实和最佳努力路线",
+            "给出晚餐加散步的两小时安排",
+        ],
     }
 
 
@@ -186,10 +230,12 @@ def test_observation_projection_hides_raw_ids() -> None:
     assert "resolver_obs_1" in projection
     assert "Found two relevant relationship evidence rows." in projection
     assert "RAG prompt-safe answer with evidence." in projection
+    assert "CBD walking route evidence includes Wynyard Quarter" in projection
     assert "raw-tool-run-123" not in projection
     assert "raw-evidence-row-456" not in projection
     assert "raw-user-id-should-stay-out" not in projection
     assert "raw-rag-id-789" not in projection
+    assert "raw-external-id-321" not in projection
 
 
 def test_validators_strip_unknown_fields() -> None:
@@ -228,12 +274,20 @@ def test_cycle_trace_clips_nested_requests_and_action_summaries() -> None:
 def test_pending_resume_validator_and_projection_are_prompt_safe() -> None:
     """Pending user-owned blockers should project scope-free prompt text."""
 
-    pending = validate_resolver_pending_resume(_pending_resume())
+    raw_pending = _pending_resume()
+    raw_pending["prompt_safe_goal_progress"] = _goal_progress()
+    pending = validate_resolver_pending_resume(raw_pending)
     projection = project_pending_resume_for_cognition(pending)
 
     assert pending["status"] == "waiting_for_user"
+    assert pending["prompt_safe_goal_progress"]["deliverables"][1][
+        "description"
+    ] == "两小时步行路线和时间切分"
+    assert "Plan a low-cost evening after location." in projection
     assert "Which city are you in?" in projection
-    assert "resume_id=resolver-pending-001" in projection
+    assert "两小时步行路线和时间切分" not in projection
+    assert "resume_id" not in projection
+    assert "expires_at_utc" not in projection
     assert "channel-1" not in projection
     assert "user-1" not in projection
 
@@ -245,6 +299,29 @@ def test_pending_resolution_validator_accepts_cognition_decision() -> None:
 
     assert validated["decision"] == "answered"
     assert validated["resume_id"] == "resolver-pending-001"
+
+
+def test_goal_progress_validator_and_projection_preserve_deliverables() -> None:
+    """Goal progress should carry the user-goal checklist into cognition."""
+
+    validated = validate_resolver_goal_progress(_goal_progress())
+    projection = project_goal_progress_for_cognition(validated)
+
+    assert validated["schema_version"] == RESOLVER_GOAL_PROGRESS_VERSION
+    assert validated["deliverables"][0]["status"] == "partial"
+    assert "晚餐候选和证据边界" in projection
+    assert "两小时步行路线和时间切分" in projection
+    assert "final_response_requirements" in projection
+
+
+def test_empty_goal_progress_shell_has_no_python_deliverable_guess() -> None:
+    """Deterministic initialization may store the goal, not infer deliverables."""
+
+    progress = new_empty_goal_progress(original_goal="帮我做一个复杂计划。")
+
+    assert progress["original_goal"] == "帮我做一个复杂计划。"
+    assert progress["deliverables"] == []
+    assert progress["final_response_requirements"] == []
 
 
 def test_new_resolver_state_initializes_cycle_zero() -> None:
@@ -262,6 +339,8 @@ def test_new_resolver_state_initializes_cycle_zero() -> None:
     assert state["observations"] == []
     assert state["cycle_traces"] == []
     assert state["held_action_specs"] == []
+    assert state["goal_progress"]["original_goal"] == "Need a deliberate answer."
+    assert state["goal_progress"]["deliverables"] == []
     assert "pending_resume" not in state
 
 
@@ -334,4 +413,5 @@ def test_ensure_initial_resolver_inputs_adds_first_cycle_context() -> None:
     assert initialized["resolver_state"]["max_cycles"] == 3
     assert initialized["resolver_state"]["cycle_index"] == 0
     assert "resolver_state: status=running" in initialized["resolver_context"]
+    assert "resolver_goal_progress:" in initialized["resolver_context"]
     assert "resolver_observations:" not in initialized["resolver_context"]

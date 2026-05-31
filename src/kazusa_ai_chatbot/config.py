@@ -408,7 +408,7 @@ COGNITION_RESOLVER_MAX_CYCLES = _bounded_int_from_env(
 )
 COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS = _bounded_float_from_env(
     "COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS",
-    "45.0",
+    "120.0",
     minimum=1.0,
     maximum=180.0,
 )

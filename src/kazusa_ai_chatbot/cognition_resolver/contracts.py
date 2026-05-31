@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from typing import Literal, NotRequired, TypedDict
 
 from kazusa_ai_chatbot.action_spec.models import (
@@ -17,11 +19,19 @@ RESOLVER_OBSERVATION_VERSION = "resolver_observation.v1"
 RESOLVER_CYCLE_TRACE_VERSION = "resolver_cycle_trace.v1"
 RESOLVER_PENDING_RESUME_VERSION = "resolver_pending_resume.v1"
 RESOLVER_PENDING_RESOLUTION_VERSION = "resolver_pending_resolution.v1"
+RESOLVER_GOAL_PROGRESS_VERSION = "resolver_goal_progress.v1"
 
 MAX_RESOLVER_SUMMARY_CHARS = 600
 MAX_RESOLVER_OBJECTIVE_CHARS = 400
 MAX_RESOLVER_REASON_CHARS = 400
 MAX_RESOLVER_TRACE_CHARS = 600
+MAX_RESOLVER_GOAL_FIELD_CHARS = 500
+MAX_RESOLVER_GOAL_ITEM_CHARS = 240
+MAX_RESOLVER_GOAL_ITEMS = 8
+MAX_RESOLVER_RAG_EVIDENCE_SUMMARY_CHARS = 320
+MAX_RESOLVER_RAG_EVIDENCE_ITEMS = 4
+
+_RAW_MARKER_RE = re.compile(r"\braw-[A-Za-z0-9_-]+")
 
 ALLOWED_RESOLVER_CAPABILITIES = frozenset((
     "rag_evidence",
@@ -57,6 +67,12 @@ ALLOWED_PENDING_DECISIONS = frozenset((
     "approved",
     "rejected",
     "superseded",
+))
+ALLOWED_GOAL_DELIVERABLE_STATUSES = frozenset((
+    "pending",
+    "partial",
+    "satisfied",
+    "blocked",
 ))
 
 
@@ -134,8 +150,10 @@ class ResolverPendingResumeV1(TypedDict):
     platform_channel_id: str
     global_user_id: str
     source_message_id: str
+    prompt_safe_original_goal: str
     prompt_safe_question: str
     prompt_safe_approval_summary: str
+    prompt_safe_goal_progress: NotRequired[ResolverGoalProgressV1]
     created_at_utc: str
     expires_at_utc: str
 
@@ -155,6 +173,30 @@ class ResolverPendingResolutionV1(TypedDict):
     reason: str
 
 
+class ResolverGoalDeliverableV1(TypedDict):
+    """One cognition-maintained deliverable inside a resolver goal."""
+
+    description: str
+    status: Literal["pending", "partial", "satisfied", "blocked"]
+    note: str
+
+
+class ResolverGoalProgressV1(TypedDict):
+    """Cognition-maintained goal checklist carried across resolver cycles."""
+
+    schema_version: Literal["resolver_goal_progress.v1"]
+    original_goal: str
+    current_focus: str
+    deliverables: list[ResolverGoalDeliverableV1]
+    missing_user_inputs: list[str]
+    evidence_dependencies: list[str]
+    attempted_paths: list[str]
+    source_backed_facts: list[str]
+    assumptions_or_inferences: list[str]
+    blockers: list[str]
+    final_response_requirements: list[str]
+
+
 class ResolverCycleStateV1(TypedDict):
     """State accumulated by the deterministic resolver recurrence controller."""
 
@@ -167,6 +209,7 @@ class ResolverCycleStateV1(TypedDict):
     cycle_traces: list[ResolverCycleTraceV1]
     held_action_specs: list[ActionSpecV1]
     pending_resume: NotRequired[ResolverPendingResumeV1]
+    goal_progress: NotRequired[ResolverGoalProgressV1]
     terminal_reason: str
 
 
@@ -351,6 +394,11 @@ def validate_resolver_pending_resume(value: object) -> ResolverPendingResumeV1:
     platform_channel_id = _require_string(data, "platform_channel_id")
     global_user_id = _require_non_empty_string(data, "global_user_id")
     source_message_id = _require_non_empty_string(data, "source_message_id")
+    raw_original_goal = data.get("prompt_safe_original_goal")
+    if isinstance(raw_original_goal, str):
+        original_goal = raw_original_goal
+    else:
+        original_goal = ""
     question = _require_string(data, "prompt_safe_question")
     approval_summary = _require_string(data, "prompt_safe_approval_summary")
     created_at_utc = _require_non_empty_string(data, "created_at_utc")
@@ -364,6 +412,10 @@ def validate_resolver_pending_resume(value: object) -> ResolverPendingResumeV1:
         "platform_channel_id": platform_channel_id,
         "global_user_id": global_user_id,
         "source_message_id": source_message_id,
+        "prompt_safe_original_goal": _clip_text(
+            original_goal,
+            MAX_RESOLVER_SUMMARY_CHARS,
+        ),
         "prompt_safe_question": _clip_text(
             question,
             MAX_RESOLVER_SUMMARY_CHARS,
@@ -375,6 +427,11 @@ def validate_resolver_pending_resume(value: object) -> ResolverPendingResumeV1:
         "created_at_utc": created_at_utc,
         "expires_at_utc": expires_at_utc,
     }
+    raw_goal_progress = data.get("prompt_safe_goal_progress")
+    if raw_goal_progress is not None:
+        normalized["prompt_safe_goal_progress"] = validate_resolver_goal_progress(
+            raw_goal_progress,
+        )
     return_value = normalized
     return return_value
 
@@ -399,6 +456,79 @@ def validate_resolver_pending_resolution(
     return return_value
 
 
+def new_empty_goal_progress(*, original_goal: str) -> ResolverGoalProgressV1:
+    """Build the empty goal-progress shell before L2d adds semantics."""
+
+    if not isinstance(original_goal, str) or not original_goal.strip():
+        raise ResolverValidationError("original_goal: expected non-empty string")
+    progress = {
+        "schema_version": RESOLVER_GOAL_PROGRESS_VERSION,
+        "original_goal": _clip_text(
+            original_goal.strip(),
+            MAX_RESOLVER_GOAL_FIELD_CHARS,
+        ),
+        "current_focus": "",
+        "deliverables": [],
+        "missing_user_inputs": [],
+        "evidence_dependencies": [],
+        "attempted_paths": [],
+        "source_backed_facts": [],
+        "assumptions_or_inferences": [],
+        "blockers": [],
+        "final_response_requirements": [],
+    }
+    return_value = validate_resolver_goal_progress(progress)
+    return return_value
+
+
+def validate_resolver_goal_progress(value: object) -> ResolverGoalProgressV1:
+    """Validate L2d's goal-progress checklist before storing or projecting it."""
+
+    data = _require_mapping(value, "resolver_goal_progress")
+    _require_version(data, RESOLVER_GOAL_PROGRESS_VERSION)
+    original_goal = _require_non_empty_string(data, "original_goal")
+    current_focus = _require_string(data, "current_focus")
+    deliverables = _normalize_goal_deliverables(
+        _require_list(data, "deliverables"),
+    )
+    normalized: ResolverGoalProgressV1 = {
+        "schema_version": RESOLVER_GOAL_PROGRESS_VERSION,
+        "original_goal": _clip_text(
+            original_goal,
+            MAX_RESOLVER_GOAL_FIELD_CHARS,
+        ),
+        "current_focus": _clip_text(
+            current_focus,
+            MAX_RESOLVER_GOAL_FIELD_CHARS,
+        ),
+        "deliverables": deliverables,
+        "missing_user_inputs": _normalize_goal_text_list(
+            data,
+            "missing_user_inputs",
+        ),
+        "evidence_dependencies": _normalize_goal_text_list(
+            data,
+            "evidence_dependencies",
+        ),
+        "attempted_paths": _normalize_goal_text_list(data, "attempted_paths"),
+        "source_backed_facts": _normalize_goal_text_list(
+            data,
+            "source_backed_facts",
+        ),
+        "assumptions_or_inferences": _normalize_goal_text_list(
+            data,
+            "assumptions_or_inferences",
+        ),
+        "blockers": _normalize_goal_text_list(data, "blockers"),
+        "final_response_requirements": _normalize_goal_text_list(
+            data,
+            "final_response_requirements",
+        ),
+    }
+    return_value = normalized
+    return return_value
+
+
 def project_observations_for_cognition(
     observations: list[ResolverObservationV1],
 ) -> str:
@@ -414,13 +544,60 @@ def project_observations_for_cognition(
         line_parts = [
             f"{alias}: capability={capability_kind}",
             f"status={status}",
-            f"summary={summary}",
+            (
+                "objective="
+                f"{_prompt_safe_projection_text(validated['request_objective'])}"
+            ),
+            f"summary={_prompt_safe_projection_text(summary)}",
         ]
         rag_summary = _project_rag_result_summary(validated)
         if rag_summary:
-            line_parts.append(f"rag_answer={rag_summary}")
+            line_parts.append(
+                f"rag_answer={_prompt_safe_projection_text(rag_summary)}"
+            )
         line = "; ".join(line_parts)
         lines.append(line)
+    projection = "\n".join(lines)
+    return_value = projection
+    return return_value
+
+
+def project_goal_progress_for_cognition(
+    goal_progress: ResolverGoalProgressV1 | None,
+) -> str:
+    """Project the cognition-maintained goal checklist into compact text."""
+
+    if goal_progress is None:
+        return_value = ""
+        return return_value
+    validated = validate_resolver_goal_progress(goal_progress)
+    lines = [
+        (
+            "resolver_goal_progress: "
+            f"original_goal={validated['original_goal']}; "
+            f"current_focus={validated['current_focus']}"
+        ),
+    ]
+    if validated["deliverables"]:
+        lines.append("deliverables:")
+        for index, deliverable in enumerate(validated["deliverables"], start=1):
+            lines.append(
+                f"{index}. status={deliverable['status']}; "
+                f"description={deliverable['description']}; "
+                f"note={deliverable['note']}"
+            )
+    for field_name, label in (
+        ("missing_user_inputs", "missing_user_inputs"),
+        ("evidence_dependencies", "evidence_dependencies"),
+        ("attempted_paths", "attempted_paths"),
+        ("source_backed_facts", "source_backed_facts"),
+        ("assumptions_or_inferences", "assumptions_or_inferences"),
+        ("blockers", "blockers"),
+        ("final_response_requirements", "final_response_requirements"),
+    ):
+        items = validated[field_name]
+        if items:
+            lines.append(f"{label}: " + "；".join(items))
     projection = "\n".join(lines)
     return_value = projection
     return return_value
@@ -429,24 +606,23 @@ def project_observations_for_cognition(
 def project_pending_resume_for_cognition(
     pending: ResolverPendingResumeV1 | None,
 ) -> str:
-    """Project pending HIL or approval state without scope identifiers."""
+    """Project pending HIL or approval state without durable identifiers."""
 
     if pending is None:
         return_value = ""
         return return_value
 
     validated = validate_resolver_pending_resume(pending)
-    resume_id = validated["resume_id"]
     capability_kind = validated["capability_kind"]
     status = validated["status"]
+    original_goal = validated["prompt_safe_original_goal"]
     question = validated["prompt_safe_question"]
     approval_summary = validated["prompt_safe_approval_summary"]
-    expires_at = validated["expires_at_utc"]
     projection = (
         "pending_resolver_resume: "
-        f"resume_id={resume_id}; capability={capability_kind}; status={status}; "
-        f"question={question}; approval_summary={approval_summary}; "
-        f"expires_at_utc={expires_at}"
+        f"capability={capability_kind}; status={status}; "
+        f"original_goal={original_goal}; question={question}; "
+        f"approval_summary={approval_summary}"
     )
     return_value = projection
     return return_value
@@ -507,6 +683,65 @@ def _require_list(data: dict, field_name: str) -> list:
     if not isinstance(value, list):
         raise ResolverValidationError(f"{field_name}: expected list")
     return_value = value
+    return return_value
+
+
+def _normalize_goal_deliverables(
+    deliverables: list,
+) -> list[ResolverGoalDeliverableV1]:
+    """Normalize nested deliverable rows from L2d's semantic checklist."""
+
+    normalized: list[ResolverGoalDeliverableV1] = []
+    for raw_deliverable in deliverables:
+        if not isinstance(raw_deliverable, dict):
+            raise ResolverValidationError("deliverables: expected objects")
+        description = _require_non_empty_string(
+            raw_deliverable,
+            "description",
+        )
+        status = _require_enum(
+            raw_deliverable,
+            "status",
+            ALLOWED_GOAL_DELIVERABLE_STATUSES,
+        )
+        note = _require_string(raw_deliverable, "note")
+        normalized.append({
+            "description": _clip_text(
+                description,
+                MAX_RESOLVER_GOAL_ITEM_CHARS,
+            ),
+            "status": status,
+            "note": _clip_text(note, MAX_RESOLVER_GOAL_ITEM_CHARS),
+        })
+        if len(normalized) >= MAX_RESOLVER_GOAL_ITEMS:
+            break
+    return_value = normalized
+    return return_value
+
+
+def _normalize_goal_text_list(data: dict, field_name: str) -> list[str]:
+    """Normalize a bounded list of prompt-safe goal-progress strings."""
+
+    raw_items = _require_list(data, field_name)
+    normalized: list[str] = []
+    for raw_item in raw_items:
+        if not isinstance(raw_item, str):
+            raise ResolverValidationError(f"{field_name}: expected strings")
+        item = raw_item.strip()
+        if not item:
+            continue
+        normalized.append(_clip_text(item, MAX_RESOLVER_GOAL_ITEM_CHARS))
+        if len(normalized) >= MAX_RESOLVER_GOAL_ITEMS:
+            break
+    return_value = normalized
+    return return_value
+
+
+def _prompt_safe_projection_text(value: str) -> str:
+    """Redact raw-looking local identifiers before prompt projection."""
+
+    redacted = _RAW_MARKER_RE.sub("<redacted>", value)
+    return_value = redacted
     return return_value
 
 
@@ -626,15 +861,29 @@ def _normalize_rag_list(value: list) -> list[object]:
 
 
 def _project_rag_result_summary(observation: ResolverObservationV1) -> str:
-    """Project only bounded RAG answer text into the next cognition cycle."""
+    """Project bounded RAG answer and evidence summaries for cognition."""
 
     rag_result = observation.get("rag_result")
     if not isinstance(rag_result, dict):
         return_value = ""
         return return_value
+    summary_segments: list[str] = []
     answer = rag_result.get("answer")
     if isinstance(answer, str) and answer.strip():
-        return_value = _clip_text(answer, MAX_RESOLVER_SUMMARY_CHARS)
+        summary_segments.append(
+            "answer="
+            + _clip_text(answer, MAX_RESOLVER_SUMMARY_CHARS)
+        )
+    external_summaries = _project_rag_evidence_summaries(
+        rag_result.get("external_evidence"),
+    )
+    if external_summaries:
+        summary_segments.append(
+            "external_evidence="
+            + " | ".join(external_summaries)
+        )
+    if summary_segments:
+        return_value = "; ".join(summary_segments)
         return return_value
     memory_evidence = rag_result.get("memory_evidence")
     if not isinstance(memory_evidence, list):
@@ -651,4 +900,28 @@ def _project_rag_result_summary(observation: ResolverObservationV1) -> str:
         clipped_fact = _clip_text(fact_summary, MAX_RESOLVER_SUMMARY_CHARS)
         projected_facts.append(clipped_fact)
     return_value = "; ".join(projected_facts)
+    return return_value
+
+
+def _project_rag_evidence_summaries(value: object) -> list[str]:
+    """Return bounded prompt-safe summaries from RAG evidence rows."""
+
+    if not isinstance(value, list):
+        return_value: list[str] = []
+        return return_value
+
+    projected_summaries: list[str] = []
+    for evidence in value[:MAX_RESOLVER_RAG_EVIDENCE_ITEMS]:
+        if not isinstance(evidence, dict):
+            continue
+        summary = evidence.get("summary")
+        if not isinstance(summary, str) or not summary.strip():
+            continue
+        clipped_summary = _clip_text(
+            summary,
+            MAX_RESOLVER_RAG_EVIDENCE_SUMMARY_CHARS,
+        )
+        projected_summaries.append(clipped_summary)
+
+    return_value = projected_summaries
     return return_value

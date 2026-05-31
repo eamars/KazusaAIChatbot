@@ -14,12 +14,14 @@ from kazusa_ai_chatbot.action_spec.attempt_ledger import (
 )
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_PENDING_RESUME_VERSION,
+    ResolverGoalProgressV1,
     ResolverObservationV1,
     ResolverPendingResolutionV1,
     ResolverPendingResumeV1,
     ResolverValidationError,
     project_pending_resume_for_cognition,
     validate_resolver_observation,
+    validate_resolver_goal_progress,
     validate_resolver_pending_resolution,
     validate_resolver_pending_resume,
 )
@@ -166,6 +168,12 @@ async def load_matching_pending_resume_into_state(
     resolver_state = validate_resolver_state(state["resolver_state"])
     updated_resolver_state = dict(resolver_state)
     updated_resolver_state["pending_resume"] = pending_resume
+    goal_progress = pending_resume.get("prompt_safe_goal_progress")
+    if isinstance(goal_progress, dict):
+        updated_resolver_state["goal_progress"] = goal_progress
+    original_goal = pending_resume["prompt_safe_original_goal"]
+    if original_goal:
+        updated_resolver_state["original_decontexualized_input"] = original_goal
     updated_state = dict(state)
     updated_state["resolver_state"] = updated_resolver_state
     updated_state["pending_resolver_resume"] = pending_resume
@@ -228,7 +236,15 @@ def _pending_resume(
     if capability_kind == "human_clarification":
         question = observation["request_objective"]
     elif capability_kind == "approval_preparation":
-        approval_summary = observation["request_objective"]
+        approval_summary = _approval_summary_for_pending_resume(
+            state,
+            observation,
+        )
+    goal_progress = _pending_goal_progress(state)
+    if goal_progress is not None:
+        original_goal = goal_progress["original_goal"]
+    else:
+        original_goal = _state_text(state, "decontexualized_input")
     pending_resume = {
         "schema_version": RESOLVER_PENDING_RESUME_VERSION,
         "resume_id": resume_id,
@@ -238,13 +254,54 @@ def _pending_resume(
         "platform_channel_id": _state_text(state, "platform_channel_id"),
         "global_user_id": _state_text(state, "global_user_id"),
         "source_message_id": _state_text(state, "platform_message_id"),
+        "prompt_safe_original_goal": original_goal,
         "prompt_safe_question": question,
         "prompt_safe_approval_summary": approval_summary,
         "created_at_utc": _storage_timestamp(state),
         "expires_at_utc": expires_at_utc,
     }
+    if goal_progress is not None:
+        pending_resume["prompt_safe_goal_progress"] = goal_progress
     return_value = validate_resolver_pending_resume(pending_resume)
     return return_value
+
+
+def _pending_goal_progress(
+    state: GlobalPersonaState,
+) -> ResolverGoalProgressV1 | None:
+    """Return the semantic goal checklist to carry through HIL or approval."""
+
+    raw_goal_progress = state.get("resolver_goal_progress")
+    resolver_state = state.get("resolver_state")
+    if isinstance(resolver_state, dict):
+        nested_goal_progress = resolver_state.get("goal_progress")
+        if isinstance(nested_goal_progress, dict):
+            raw_goal_progress = nested_goal_progress
+    if not isinstance(raw_goal_progress, dict):
+        return_value = None
+        return return_value
+
+    goal_progress = validate_resolver_goal_progress(raw_goal_progress)
+    return_value = goal_progress
+    return return_value
+
+
+def _approval_summary_for_pending_resume(
+    state: GlobalPersonaState,
+    observation: ResolverObservationV1,
+) -> str:
+    """Build an approval summary scoped to the original user request."""
+
+    approval_target = _state_text(state, "decontexualized_input")
+    if not approval_target:
+        approval_target = observation["request_objective"]
+    approval_summary = (
+        f'准备审批说明，范围只限原始目标：{approval_target}。'
+        '当前尚未执行提醒、调度、发送、文件检查、状态检查、下载监控、'
+        '恢复操作或其他副作用；继续前必须等待用户明确确认；'
+        '不得把审批说明扩展成原始目标以外的外部执行能力。'
+    )
+    return approval_summary
 
 
 def _pending_resume_from_row(row: dict[str, Any]) -> ResolverPendingResumeV1 | None:

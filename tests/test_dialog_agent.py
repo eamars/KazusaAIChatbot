@@ -192,6 +192,77 @@ def test_dialog_evaluator_prompt_checks_anchor_fidelity() -> None:
     assert '[SCOPE]' in prompt
 
 
+def test_dialog_prompts_preserve_multi_part_deliverables() -> None:
+    """Dialog prompts should not collapse complete plans into later follow-up."""
+
+    generator_prompt = _DIALOG_GENERATOR_PROMPT
+    evaluator_prompt = _DIALOG_EVALUATOR_PROMPT
+
+    for required_text in (
+        '完整方案',
+        '多候选推荐',
+        '主要组成部分',
+        '不得只说先做其中一部分',
+        '[SCOPE]` 是表达量参考，不是删减语义的许可',
+        '覆盖优先于简短',
+        '多候选、多风险、多步骤或对比类回复必须把每一项写成普通字符串片段',
+        '不要用对象、字典、嵌套数组、编号字段或 Markdown 表格表达选项',
+        '技术选型、风险清单、RCA、部署计划、工具组合建议',
+        '信息密度优先',
+        '比喻或感官化修辞最多一次',
+        '给出时间切分或时间范围',
+        '不得压缩成模糊方向',
+        '不得省略结束时间、误算时长',
+        '不一致近似值',
+        '无法给出具体对象',
+        '不得新增锚点没有出现过的具体实体',
+        '泛化说明不得偷换成具体对象示例',
+        '不要用具体名称举例',
+        '临时处理状态或延后承诺',
+        '不得以新的认可请求替代收束',
+        '最小核实清单',
+        '完整建议不要以新的问题结尾',
+        '使用 6-12 个短字符串片段是允许的',
+        '不要为了显得自然而只输出第一项候选或第一条风险',
+        '每个元素必须是字符串',
+        '严禁包含 HTML 或 Markdown 渲染标签',
+    ):
+        assert required_text in generator_prompt
+
+    for required_text in (
+        '完整方案',
+        '多部分交付',
+        '风险说明',
+        '先定一家试试',
+        '结构化任务密度',
+        '时间切分忠实',
+        '行动骨架忠实',
+        '改写成不一致近似值',
+        '把完整安排压缩成更短安排',
+        '不得用连续比喻替代结论、风险、步骤或依据',
+        '不得以无必要的新问题结尾',
+        '具体对象禁令',
+        '不得新增锚点未出现过的具体实体',
+        '举例禁令',
+        '没有锚点确认的具体名称时',
+        '终止收束禁令',
+        '临时处理状态或延后承诺',
+        '新的认可请求结尾',
+        '必须驳回',
+    ):
+        assert required_text in evaluator_prompt
+
+
+def test_dialog_fragment_cleanup_removes_html_line_break_tags() -> None:
+    """Generated dialog fragments should not leak transport break tags."""
+
+    cleaned = dialog_module._clean_dialog_fragment(
+        "先验证 MongoDB 恢复</br>"
+    )
+
+    assert cleaned == "先验证 MongoDB 恢复"
+
+
 def test_dialog_evaluator_prompt_orders_hard_gates_before_style() -> None:
     """Evaluator prompt should read as an ordered weak-model audit."""
 
@@ -218,6 +289,8 @@ def test_dialog_evaluator_prompt_rejects_unsupported_concrete_content() -> None:
     assert '时间' in unsupported_rule
     assert '地点' in unsupported_rule
     assert '承诺' in unsupported_rule
+    assert '具体对象禁令' in prompt
+    assert '只能保留锚点允许的泛化类别、行动骨架、筛选标准和核实清单' in prompt
 
 
 def test_dialog_evaluator_prompt_rejects_guess_owner_flip() -> None:

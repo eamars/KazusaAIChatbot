@@ -136,6 +136,11 @@ def test_web_agent3_router_prompt_uses_project_prompt_style() -> None:
     assert "source adapter roster" not in prompt
     assert agent_module._WEB_AGENT3_SOURCE_TOOLS_TEXT in prompt
     assert '"source": "string"' in prompt
+    assert "不要因为 `reference_time` 自动把当前日期" in prompt
+    assert "移除日期/年份和堆叠约束" in prompt
+    assert "多个来源类别、发布轨道、证据立场或资料类型" in prompt
+    assert "从任务和上下文合理推断的 URL" in prompt
+    assert "没有任何 `read` 尝试" in agent_module._WEB_AGENT3_EVALUATOR_PROMPT
     hardcoded_source_schema = '"source": "{}"'.format(
         "|".join(["generic", "bilibili", "youtube", "nhentai"])
     )
@@ -152,8 +157,25 @@ def test_web_agent3_router_uses_subagent_generation_rules() -> None:
     assert "read:" in generic_subagent.DESCRIPTION
     assert "site:" in generic_subagent.DESCRIPTION
     assert "snippet" in generic_subagent.DESCRIPTION.lower()
+    assert "不要因为 reference_time 自动" in generic_subagent.DESCRIPTION
+    assert "先使用过窄的时间过滤" in generic_subagent.DESCRIPTION
     assert generic_subagent.DESCRIPTION in agent_module._WEB_AGENT3_SOURCE_TOOLS_TEXT
     assert "遵循所选来源描述" in agent_module._WEB_AGENT3_GENERATOR_PROMPT
+
+
+def test_web_agent3_official_url_candidates_cover_source_discovery_tasks() -> None:
+    """Source fallback should infer generic canonical URLs from task names."""
+
+    release_urls = agent_module._official_url_candidates(
+        "Confirm the latest SampleTool GitHub release date."
+    )
+    docs_urls = agent_module._official_url_candidates(
+        "Check Sample Product official docs."
+    )
+
+    assert "https://github.com/SampleTool/SampleTool/releases" in release_urls
+    assert "https://sampleproduct.ai/docs" in docs_urls
+    assert "https://sampleproduct.com/docs" in docs_urls
 
 
 def test_web_agent3_router_source_text_omits_execution_details() -> None:
@@ -419,7 +441,16 @@ async def test_web_agent3_run_subgraph_returns_expected_keys() -> None:
 
         result = await agent_module._run_subgraph(
             task="search something",
-            context={},
+            context={
+                "original_query": "用户想确认当前官方文档。",
+                "current_slot": "official current docs",
+                "channel_topic": "debug planning",
+                "platform": "debug",
+                "platform_channel_id": "raw-channel-123",
+                "global_user_id": "raw-user-123",
+                "platform_user_id": "raw-platform-user-123",
+                "platform_bot_id": "raw-bot-123",
+            },
             expected_response="relevant results",
             local_prompt_timestamp="2026-04-27 12:00",
         )
@@ -431,6 +462,16 @@ async def test_web_agent3_run_subgraph_returns_expected_keys() -> None:
         "source": "generic",
         "query": "",
     }
+    assert sub_state["context"] == {
+        "original_query": "用户想确认当前官方文档。",
+        "current_slot": "official current docs",
+        "channel_topic": "debug planning",
+    }
+    serialized_context = json.dumps(sub_state["context"], ensure_ascii=False)
+    assert "raw-channel-123" not in serialized_context
+    assert "raw-user-123" not in serialized_context
+    assert "raw-platform-user-123" not in serialized_context
+    assert "raw-bot-123" not in serialized_context
     assert result == {
         "status": "success",
         "reason": "found info",
@@ -474,6 +515,48 @@ async def test_web_agent3_run_preserves_base_helper_contract() -> None:
             "reason": "agent_not_cacheable",
         },
     }
+
+
+@pytest.mark.asyncio
+async def test_web_agent3_run_uses_official_url_fallback_after_empty_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty search graph should get one bounded official URL read pass."""
+
+    run_subgraph = AsyncMock(return_value={
+        "status": "not_found",
+        "reason": "search found no source",
+        "response": "No information retrieved.",
+        "is_empty_result": True,
+        "knowledge_metadata": {},
+    })
+    execute_source = AsyncMock(return_value=(
+        "GitHub releases page: Latest release v1.0 published yesterday."
+    ))
+    finalizer = AsyncMock(return_value={
+        "final_status": "success",
+        "final_reason": "official release page read",
+        "final_response": "release evidence package",
+        "final_is_empty_result": False,
+    })
+    monkeypatch.setattr(agent_module, "_run_subgraph", run_subgraph)
+    monkeypatch.setattr(agent_module, "_execute_source_decision", execute_source)
+    monkeypatch.setattr(agent_module, "_tool_call_finalizer", finalizer)
+
+    result = await WebAgent3().run(
+        task="Confirm the latest SampleTool GitHub release date.",
+        context={},
+    )
+
+    execute_source.assert_awaited()
+    first_decision = execute_source.await_args_list[0].args[0]
+    assert first_decision == web_module._RouterDecision(
+        action="read",
+        source="generic",
+        query="https://github.com/SampleTool/SampleTool/releases",
+    )
+    assert result["resolved"] is True
+    assert result["result"] == "release evidence package"
 
 
 @pytest.mark.asyncio
@@ -544,6 +627,9 @@ def test_web_agent3_finalizer_prompt_covers_known_regression_rules() -> None:
     assert "读取失败" in prompt
     assert "搜索摘要" in prompt
     assert "模型知识" in prompt
+    assert "某个来源类别读取失败" in prompt
+    assert "不得说没有冲突或信息一致" in prompt
+    assert "不要把相邻产品、派生轨道、集成说明" in prompt
 
 
 def test_web_agent3_evaluator_prompt_avoids_duplicate_empty_reads() -> None:
@@ -580,6 +666,40 @@ async def test_web_agent3_finalizer_empty_result_forces_not_found_status(
             ),
         ],
         "evaluator_feedback": "requested fact is absent",
+        "prompt_timestamp": "2026-05-27 12:00 (Wednesday)",
+    }
+
+    update = await agent_module._tool_call_finalizer(state)
+
+    assert update["final_status"] == "not_found"
+    assert update["final_is_empty_result"] is True
+
+
+@pytest.mark.asyncio
+async def test_web_agent3_finalizer_missing_empty_flag_uses_score_repair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing empty-result flag with score 0 should not become resolved."""
+
+    fake_llm = SimpleNamespace(
+        ainvoke=AsyncMock(return_value=AIMessage(
+            content=(
+                '{"response": "未找到任何有效证据", "score": 0, '
+                '"reason": "all searches returned no results"}'
+            ),
+        )),
+    )
+    monkeypatch.setattr(agent_module, "_finalizer_llm", fake_llm)
+    state = {
+        "task": "Web-evidence: compare local-first note stacks",
+        "expected_response": "source-backed comparison",
+        "messages": [
+            ToolMessage(
+                content='{"result": "No results found"}',
+                tool_call_id="tool-1",
+            ),
+        ],
+        "evaluator_feedback": "no source evidence",
         "prompt_timestamp": "2026-05-27 12:00 (Wednesday)",
     }
 

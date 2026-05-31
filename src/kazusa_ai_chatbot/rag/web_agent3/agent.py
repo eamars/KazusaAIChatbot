@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Annotated, Any, Literal, TypedDict
 
 from langchain_core.messages import (
@@ -22,7 +23,6 @@ from kazusa_ai_chatbot.config import (
     WEB_SEARCH_LLM_MODEL,
 )
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
-from kazusa_ai_chatbot.rag.prompt_projection import project_runtime_context_for_llm
 from kazusa_ai_chatbot.rag.web_agent3.contracts import (
     _DEFAULT_EXPECTED_RESPONSE,
     _RouterDecision,
@@ -42,6 +42,29 @@ from kazusa_ai_chatbot.rag.web_agent3.subagent import (
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output
 
 logger = logging.getLogger(__name__)
+
+MAX_OFFICIAL_URL_FALLBACK_READS = 5
+_PRODUCT_PHRASE_LEADING_WORDS = frozenset((
+    "check",
+    "confirm",
+    "find",
+    "get",
+    "look",
+    "search",
+    "verify",
+))
+_HTTP_URL_PATTERN = re.compile(r"https?://[^\s，。；,;]+")
+_GITHUB_REPO_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_.-])([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)"
+    r"(?![A-Za-z0-9_.-])"
+)
+_CAMEL_PRODUCT_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9])([A-Z][A-Za-z0-9]*[A-Z][A-Za-z0-9]*)(?![A-Za-z0-9])"
+)
+_TITLE_PRODUCT_PHRASE_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9])([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){1,3})"
+    r"(?![A-Za-z0-9])"
+)
 
 
 def _prompt_timestamp_for_llm(
@@ -85,6 +108,171 @@ def _prompt_timestamp_for_llm(
         return return_value
     return_value = raw_local_prompt_timestamp
     return return_value
+
+
+def _web_runtime_context_for_llm(context: dict[str, Any]) -> dict[str, Any]:
+    """Project only public-web-relevant runtime context into web prompts.
+
+    Args:
+        context: Internal RAG context, which may include platform, channel, and
+            user identifiers that public web search does not need.
+
+    Returns:
+        A small semantic context for web routing/finalization prompts.
+    """
+
+    projected: dict[str, Any] = {}
+    for key in ("original_query", "current_slot", "channel_topic"):
+        value = context.get(key)
+        if isinstance(value, str) and value.strip():
+            projected[key] = value.strip()
+
+    local_time_context = context.get("local_time_context")
+    if isinstance(local_time_context, dict):
+        time_context: dict[str, str] = {}
+        for key in ("current_local_datetime", "current_local_weekday"):
+            value = local_time_context.get(key)
+            if isinstance(value, str) and value.strip():
+                time_context[key] = value.strip()
+        if time_context:
+            projected["time_context"] = time_context
+
+    return_value = projected
+    return return_value
+
+
+def _official_url_candidates(task: str) -> list[str]:
+    """Infer stable official URL reads for current-fact source discovery."""
+
+    candidates: list[str] = []
+    task_text = task.strip()
+    task_lower = task_text.lower()
+    for match in _HTTP_URL_PATTERN.finditer(task_text):
+        candidates.append(match.group(0).rstrip(").]"))
+
+    release_related = any(
+        term in task_lower
+        for term in ("release", "releases", "tag", "tags", "changelog")
+    )
+    github_related = "github" in task_lower or release_related
+    if github_related:
+        candidates.extend(_github_url_candidates(task_text, release_related))
+
+    docs_related = any(
+        term in task_lower
+        for term in ("docs", "documentation", "official", "reference", "guide")
+    )
+    if docs_related:
+        candidates.extend(_docs_url_candidates(task_text, task_lower))
+
+    deduped_candidates = _dedupe_preserving_order(candidates)
+    return deduped_candidates[:MAX_OFFICIAL_URL_FALLBACK_READS]
+
+
+def _github_url_candidates(task: str, release_related: bool) -> list[str]:
+    """Build GitHub source URLs from repo-like or product-like task names."""
+
+    candidates: list[str] = []
+    for match in _GITHUB_REPO_PATTERN.finditer(task):
+        owner = match.group(1).strip(".")
+        repo = match.group(2).strip(".")
+        if not owner or not repo:
+            continue
+        if release_related:
+            candidates.append(f"https://github.com/{owner}/{repo}/releases")
+            candidates.append(f"https://github.com/{owner}/{repo}/tags")
+        candidates.append(f"https://github.com/{owner}/{repo}")
+
+    for product_name in _code_project_names(task):
+        if release_related:
+            candidates.append(
+                f"https://github.com/{product_name}/{product_name}/releases"
+            )
+            candidates.append(
+                f"https://github.com/{product_name}/{product_name}/tags"
+            )
+        candidates.append(f"https://github.com/{product_name}/{product_name}")
+    return candidates
+
+
+def _docs_url_candidates(task: str, task_lower: str) -> list[str]:
+    """Build likely official documentation URLs from product phrases."""
+
+    candidates: list[str] = []
+    for phrase in _product_phrases(task):
+        compact_name = _compact_product_name(phrase)
+        if not compact_name:
+            continue
+        candidates.append(f"https://{compact_name}.ai/docs")
+        candidates.append(f"https://{compact_name}.com/docs")
+    return candidates
+
+
+def _code_project_names(task: str) -> list[str]:
+    """Return CamelCase project names that can form repo URL candidates."""
+
+    project_names: list[str] = []
+    for match in _CAMEL_PRODUCT_PATTERN.finditer(task):
+        project_name = match.group(1)
+        if len(project_name) <= 2:
+            continue
+        if project_name.lower() in {"github", "openai"}:
+            continue
+        project_names.append(project_name)
+    deduped_names = _dedupe_preserving_order(project_names)
+    return deduped_names
+
+
+def _product_phrases(task: str) -> list[str]:
+    """Return title-case product phrases useful for docs URL candidates."""
+
+    phrases: list[str] = []
+    for match in _TITLE_PRODUCT_PHRASE_PATTERN.finditer(task):
+        phrase = match.group(1).strip()
+        phrase = _strip_product_phrase_leading_words(phrase)
+        phrase_lower = phrase.lower()
+        if phrase_lower in {"github releases", "official docs"}:
+            continue
+        phrases.append(phrase)
+    phrases.extend(_code_project_names(task))
+    deduped_phrases = _dedupe_preserving_order(phrases)
+    return deduped_phrases
+
+
+def _strip_product_phrase_leading_words(phrase: str) -> str:
+    """Remove command verbs accidentally captured with title-case products."""
+
+    words = phrase.split()
+    while len(words) > 1 and words[0].lower() in _PRODUCT_PHRASE_LEADING_WORDS:
+        words = words[1:]
+    normalized_phrase = " ".join(words)
+    return normalized_phrase
+
+
+def _compact_product_name(phrase: str) -> str:
+    """Normalize a product phrase into a conservative docs-domain stem."""
+
+    compact_name = "".join(
+        character.lower()
+        for character in phrase
+        if character.isalnum()
+    )
+    return compact_name
+
+
+def _dedupe_preserving_order(values: list[str]) -> list[str]:
+    """Return unique non-empty strings without changing first-seen order."""
+
+    seen_values: set[str] = set()
+    deduped_values: list[str] = []
+    for value in values:
+        if not value:
+            continue
+        if value in seen_values:
+            continue
+        seen_values.add(value)
+        deduped_values.append(value)
+    return deduped_values
 
 
 class WebAgent3State(TypedDict):
@@ -150,6 +338,16 @@ _WEB_AGENT3_GENERATOR_PROMPT = '''\
 4. 对 `read`，`query` 应保留原始目标字符串，例如 URL、编号、标题或用户给出的目标。
 5. 对 `stop`，`query` 必须是空字符串。
 6. `query` 必须遵循所选来源描述中的生成规则。
+
+# Query 生成硬规则
+1. 不要因为 `reference_time` 自动把当前日期、年份、月份或未来日期加入 search query。
+2. 只有当用户任务明确要求某一天、某月、某年或日期范围时，才把日期写入 query。
+3. 用户说“当前、最新、最近、现在”时，优先搜索与任务领域相匹配的权威、稳定、可复核来源路径。
+4. 如果 `call_history` 显示 No results、查询过窄、包含过多限制词或日期导致失败，下一步 search 必须先移除日期/年份和堆叠约束，再换成更短、更来源导向的 query；不要直接停止。
+5. 如果任务要求区分多个来源类别、发布轨道、证据立场或资料类型，应按用户任务中的类别分别尝试；不要把未覆盖的类别写成已确认。
+6. 对现实世界当前事实任务，query 应先找到权威来源、候选来源或索引页，再读取具体页面；不要把所有约束一次性塞进一个搜索词。
+7. 如果任务点名某个来源表面、官方站点或可推断的规范 URL，而搜索没有结果，可以用 `read` 尝试一个从任务和上下文合理推断的 URL；读取失败才算该 URL 路径失败。
+8. 直接 URL 读取只用于发现来源，不等于事实确认；如果读取为空、不可用、跳转无关或内容不含目标事实，最终证据包必须说明该路径未确认。
 
 # 审计步骤
 1. 读取 `task`，确认外部证据需求。
@@ -258,12 +456,16 @@ _WEB_AGENT3_EVALUATOR_PROMPT = '''\
 2. 多轮尝试没有新增有用信息。
 3. 任务相关信息确认缺失，继续检索收益很低。
 4. 如果同一 URL 已经 read 过且正文为空或没有新增信息，不要重复读取同一 URL；应停止并说明只有搜索摘要线索，或建议不同 search query。
+5. 只有过窄 query 返回 No results 时，不算“事实缺失”。如果还没有尝试过更短 query、官方来源 query 或 source-specific query，应设置 `should_stop: false` 并在 `feedback` 要求改写 query。
+6. 如果任务要求区分多个来源类别、发布轨道、证据立场或资料类型，必须确认这些类别已经分别尝试过或已有明确来源；否则不要停止。
+7. 如果任务明确要求某个来源表面、官方站点或可推断的规范 URL，而当前历史只有搜索失败、没有任何 `read` 尝试，通常应设置 `should_stop: false`，反馈要求尝试可合理推断的 URL 或更短的来源导向 query。
 
 # 审计步骤
 1. 读取 `task` 和 `expected_response`，确认要满足的事实范围。
 2. 检查 `call_history`，区分 search 摘要和 read 正文。
 3. 涉及时效判断时，用 `reference_time` 核对结果日期。
-4. 输出 `should_stop` 和给路由器的简短 `feedback`。
+4. 如果失败原因是 query 过窄、包含自动日期/年份或堆叠约束，反馈里明确要求删除这些限制并改走官方/来源导向 query。
+5. 输出 `should_stop` 和给路由器的简短 `feedback`。
 
 # 输出格式
 请务必返回合法的 JSON 字符串，仅包含以下字段：
@@ -338,6 +540,8 @@ _WEB_AGENT3_FINALIZER_PROMPT = '''\
 - 时间边界：不要提及模型知识、训练数据、知识截止或真实世界当前时间；时效判断只能使用 `reference_time`、来源时间和检索内容。
 - 失败诚实：只有观察内容明确包含错误、空内容、工具失败或无数据时，才可以声称读取失败或没有检索数据。
 - 摘要诚实：如果只有搜索摘要、snippet 或搜索结果线索，或者后续正文读取为空，必须标注为搜索摘要级证据，不要写成已读取正文确认。
+- 跨来源一致性：只有每个被比较的来源类别都有正文或摘要明确包含同一目标事实时，才可以说信息一致；如果某个来源类别读取失败、只有链接、只有邻近页面、或正文没有目标事实，必须写成该来源未确认，不得说没有冲突或信息一致。
+- 对象边界：不要把相邻产品、派生轨道、集成说明、镜像、扩展或非目标对象当成目标对象的直接证据；除非任务明确询问这些轨道，否则只能列为邻近线索或排除项。
 - 语言策略：提示面向下游认知，优先使用中文整理证据；URL、标题、来源文本、代码名和专有名词保持原文。
 
 # 生成步骤
@@ -415,7 +619,7 @@ async def _tool_call_finalizer(state: WebAgent3State) -> dict[str, Any]:
     is_empty_result = result.get("is_empty_result")
     if not isinstance(is_empty_result, bool):
         logger.error(f"web_agent3 finalizer omitted is_empty_result; raw result={result}")
-        is_empty_result = False
+        is_empty_result = score <= 0
 
     if missing_response:
         status = "error"
@@ -463,7 +667,7 @@ async def _finalize_web_agent3_result(
 
     state: WebAgent3State = {
         "task": task,
-        "context": project_runtime_context_for_llm(context),
+        "context": _web_runtime_context_for_llm(context),
         "expected_response": _DEFAULT_EXPECTED_RESPONSE,
         "messages": [ToolMessage(content=tool_content, tool_call_id="fixture-1")],
         "router_decision": {"action": "stop", "source": "generic", "query": ""},
@@ -491,6 +695,81 @@ async def _finalize_web_agent3_result(
         "knowledge_metadata": {
             "evidence_limitations": evidence_limitations or [],
             "max_status": max_status,
+        },
+    }
+    return result
+
+
+async def _run_official_url_fallback(
+    *,
+    task: str,
+    context: dict[str, Any],
+    expected_response: str,
+    local_prompt_timestamp: str,
+) -> dict[str, Any] | None:
+    """Read inferred official URLs when text search failed to find sources."""
+
+    candidate_urls = _official_url_candidates(task)
+    if not candidate_urls:
+        return_value = None
+        return return_value
+
+    messages: list[ToolMessage] = []
+    observations: list[dict[str, Any]] = []
+    for candidate_url in candidate_urls:
+        decision = _RouterDecision(
+            action="read",
+            source="generic",
+            query=candidate_url,
+        )
+        try:
+            observation = await _execute_source_decision(decision)
+        except Exception as exc:
+            logger.exception(
+                f"web_agent3 official URL fallback failed for "
+                f"{candidate_url}: {exc}"
+            )
+            observation = {"error": f"official URL fallback failed: {exc}"}
+        record = _observation_record(decision=decision, result=observation)
+        observations.append(record)
+        messages.append(ToolMessage(
+            content=json.dumps(record, ensure_ascii=False, default=str),
+            tool_call_id=f"web-agent3-official-url-{len(messages) + 1}",
+        ))
+
+    prompt_timestamp = _prompt_timestamp_for_llm(local_prompt_timestamp, context)
+    state: WebAgent3State = {
+        "task": task,
+        "context": _web_runtime_context_for_llm(context),
+        "expected_response": expected_response,
+        "messages": messages,
+        "router_decision": {"action": "stop", "source": "generic", "query": ""},
+        "observations": observations,
+        "evaluator_feedback": (
+            "Official URL seed fallback after search failed; summarize only "
+            "facts present in read content."
+        ),
+        "should_stop": True,
+        "retry": 0,
+        "prompt_timestamp": prompt_timestamp,
+        "knowledge_metadata": {},
+        "final_response": "",
+        "final_status": "error",
+        "final_reason": "",
+        "final_is_empty_result": False,
+    }
+    final_state = await _tool_call_finalizer(state)
+    status = final_state["final_status"]
+    if status not in ("success", "partial", "not_found"):
+        status = "not_found"
+    result = {
+        "status": status,
+        "reason": final_state["final_reason"],
+        "response": final_state["final_response"],
+        "is_empty_result": final_state["final_is_empty_result"],
+        "knowledge_metadata": {
+            "fallback": "official_url_seed_read",
+            "candidate_urls": candidate_urls,
         },
     }
     return result
@@ -573,7 +852,7 @@ async def _run_subgraph(
     builder.add_edge("finalizer", END)
 
     sub_graph = builder.compile()
-    llm_context = project_runtime_context_for_llm(context)
+    llm_context = _web_runtime_context_for_llm(context)
     prompt_timestamp = _prompt_timestamp_for_llm(local_prompt_timestamp, context)
     sub_state: WebAgent3State = {
         "task": task,
@@ -653,6 +932,18 @@ class WebAgent3(BaseRAGHelperAgent):
             expected_response=_DEFAULT_EXPECTED_RESPONSE,
             local_prompt_timestamp=local_prompt_timestamp,
         )
+        if bool(raw.get("is_empty_result", False)):
+            fallback_raw = await _run_official_url_fallback(
+                task=task,
+                context=context,
+                expected_response=_DEFAULT_EXPECTED_RESPONSE,
+                local_prompt_timestamp=local_prompt_timestamp,
+            )
+            if (
+                fallback_raw is not None
+                and not bool(fallback_raw.get("is_empty_result", False))
+            ):
+                raw = fallback_raw
         result = self.with_cache_status(
             {
                 "resolved": not bool(raw.get("is_empty_result", False)),

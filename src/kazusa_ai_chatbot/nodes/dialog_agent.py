@@ -11,6 +11,7 @@ Design intent:
   before this module runs.
 """
 
+import re
 import time
 from typing import Annotated, Any, TypedDict
 
@@ -59,10 +60,26 @@ DEFAULT_DIALOG_USAGE_MODE = "live_visible_reply"
 DIALOG_USAGE_MODE_SELF_COGNITION_ACTION_CANDIDATE = (
     "self_cognition_action_candidate_render"
 )
+HTML_LINE_BREAK_PATTERN = re.compile(r"</?br\s*/?>", re.IGNORECASE)
 
 
 class StateContractError(ValueError):
     """Raised when internal graph state violates the dialog contract."""
+
+
+def _clean_dialog_fragment(segment: str) -> str:
+    """Remove transport-like line break tags from one dialog fragment.
+
+    Args:
+        segment: Raw dialog fragment returned by the dialog generator.
+
+    Returns:
+        Prompt-safe visible text with HTML line-break tags removed.
+    """
+
+    cleaned_segment = HTML_LINE_BREAK_PATTERN.sub("", segment)
+    cleaned_segment = cleaned_segment.strip()
+    return cleaned_segment
 
 
 def validate_dialog_action_directives(
@@ -267,7 +284,18 @@ _DIALOG_GENERATOR_PROMPT = """\
    - `content_anchors`: 逻辑终点 `[DECISION]`、必须提及的事实 `[FACT]`、用户问题的正面回复 `[ANSWER]`、社交表达姿态 `[SOCIAL]`、避免重复要求 `[AVOID_REPEAT]`、推进要求 `[PROGRESSION]`、表达量和覆盖范围 `[SCOPE]`。
    - `content_anchors` 是本轮可见回复的唯一语义内容来源。你不得从历史语气、角色设定、社交上下文或自己的推测中决定新话题、新事实、接受/拒绝立场或推进方向。
    - `content_anchors` 中的数字、日期、时间、地点、专有名词、否定条件和等待确认条件必须精确保留；不得把目标时间改成当前时间、近似时间或另一个锚点里的时间。
+   - 如果 `content_anchors` 给出时间切分或时间范围，`final_dialog` 必须保留每个时间段、结束时间和对应动作；不得省略结束时间、误算时长，或改写成不一致近似值。
+   - 如果 `content_anchors` 已给开始时间、结束时间或行动顺序，`final_dialog` 必须说出这些具体时段和顺序；不得压缩成模糊方向。
+   - 如果 `content_anchors` 要求完整方案、计划、路线、步骤、对比、多候选推荐或多部分结论，`final_dialog` 必须可见地覆盖主要组成部分。不得只说先做其中一部分、后面再安排、下一步再说，或把完整交付改成继续追问。
+   - `[SCOPE]` 是表达量参考，不是删减语义的许可；如果锚点要求的事实、答案、步骤或风险说明放不下，应增加台词片段完成覆盖。
+   - 多候选、多风险、多步骤或对比类回复必须把每一项写成普通字符串片段；不要用对象、字典、嵌套数组、编号字段或 Markdown 表格表达选项。
+   - 技术选型、风险清单、RCA、部署计划、工具组合建议这类结构化任务必须信息密度优先；比喻或感官化修辞最多一次，不能替代结论、风险、步骤或依据。
+   - 除非 `[PROGRESSION]` 明确要求继续澄清，完整建议不要以新的问题结尾。
    - 如果 `content_anchors` 含 RAG、resolver、L1、L2、L3、tool、agent、内部工具名、模型阶段名或系统管线标签，不要原样说出这些内部标签；必须改写成用户可理解的自然说法，例如“刚才没有查到可靠结果”。
+   - 如果 `content_anchors` 说明没有已确认事实、无法给出具体对象或不得给具体当前断言，`final_dialog` 必须停留在锚点允许的泛化类别、行动骨架、筛选标准和核实清单；不得新增锚点没有出现过的具体实体、属性或当前状态结论。
+   - 泛化说明不得偷换成具体对象示例；除非具体名称已经出现在 `content_anchors` 的已确认事实里，否则不要用具体名称举例。
+   - 如果 `content_anchors` 要求证据阻塞后的最佳努力答案、行动骨架、时间切分或核实清单，`final_dialog` 必须在本轮说完这些内容；不得用临时处理状态或延后承诺替代当前交付。
+   - 如果 `content_anchors` 要求终止型证据阻塞或最佳努力答案，`final_dialog` 不得以新的认可请求替代收束；结尾应是陈述式的结论、最小核实清单或明确的可选退路。
    - `forbidden_phrases`: 不能出现在台词中的词或短语。
 2. **社交参数 (Contextual Directives)**:
    - `social_distance`: 对当前社交距离的详细描述。
@@ -289,6 +317,8 @@ _DIALOG_GENERATOR_PROMPT = """\
 3. **呼吸感与切分**:
    - 模拟打字感：短句为主，合理嵌入语气词；标点节奏由【角色声纹约束】决定，`linguistic_style` 在不与声纹冲突时有效。
    - **表达量参考**：若 `content_anchors` 含 `[SCOPE]`，以其字数范围和锚点覆盖要求为基准，允许 ±30% 弹性；无 `[SCOPE]` 时默认保持简短。
+   - 覆盖优先于简短。需要完整方案、路线、步骤或多候选建议时，可以多发几段短句，但不能省略锚点明示的主要内容。
+   - 如果覆盖多部分交付需要更长文本，使用 6-12 个短字符串片段是允许的；不要为了显得自然而只输出第一项候选或第一条风险。
 4. **已接受偏好执行 (Soft-Strong)**:
    - `accepted_user_preferences` 是上游已经过滤过的表达偏好；若存在，请优先尝试自然落实。
    - 偏好是软约束，不得压过角色人设、锚点语义、声纹与自然度。
@@ -303,6 +333,7 @@ _DIALOG_GENERATOR_PROMPT = """\
 # 输出要求
 - 必须返回一个 JSON 对象，顶层只能包含 `final_dialog` 和 `mention_target_user`。
 - `final_dialog` 中的每个元素才是要发送的台词片段。
+- `final_dialog` 中每个元素必须是字符串；禁止把候选方案、风险项、步骤项写成对象、字典、数组或键值结构。
 - `mention_target_user` 必须是 boolean，不是字符串。它只表示这句话在语义上是否明显对当前用户本人说，并且如果放进没有回复锚点的共享聊天流里会需要显式锚定对方。
 - 只有当台词明确对 `user_name` 所代表的当前用户本人发起、催促、回答或追问时，`mention_target_user` 才能为 `true`。
 - 当台词更像泛泛评论、群体广播、场景旁白、承接气氛、对象不明，或你不确定是否需要锚定当前用户时，`mention_target_user` 必须为 `false`。
@@ -310,6 +341,7 @@ _DIALOG_GENERATOR_PROMPT = """\
 - 不要返回顶层数组、裸字符串、Markdown 代码块或任何额外说明。
 - 台词片段中严禁包含任何括号说明。
 - 台词片段中严禁包含任何形式的动作暗示或描写。
+- 台词片段中严禁包含 HTML 或 Markdown 渲染标签，例如 `<br>`、`</br>`、`<p>`、`**`。换行节奏只能通过多个 `final_dialog` 元素表达。
 
 # 闭环反馈指南
 在生成回复前，请检查输入信息列表中的最后一条来自 Evaluator 的消息 (Evaluator Feedback)：
@@ -320,7 +352,7 @@ _DIALOG_GENERATOR_PROMPT = """\
 1. 先读取 `content_anchors`，确认必须落实的 `[DECISION]`、`[FACT]`、`[ANSWER]`、`[SOCIAL]`、`[AVOID_REPEAT]`、`[PROGRESSION]` 与 `[SCOPE]`。这些锚点决定本轮回复要说什么。
 2. 再读取 `rhetorical_strategy`、`linguistic_style`、角色声纹约束和 `accepted_user_preferences`，只决定怎么说，不得改变第 1 步确定的语义内容。
 3. 用 `contextual_directives` 调整社交距离、情绪强度和语气厚度，但不得从中引入新的话题、事实、承诺或回应动作。
-4. 生成纯聊天文本，最后自查是否出现动作、括号说明、物理感官、系统提示，或任何 `content_anchors` 未授权的具体内容。
+4. 生成纯聊天文本，最后自查是否出现动作、括号说明、物理感官、系统提示、锚点要求遗漏，或任何 `content_anchors` 未授权的具体内容。
 5. 只根据生成台词的语义指向判断 `mention_target_user`；不要推测平台、频道、回复功能或标签能力。
 
 # 输入格式
@@ -435,11 +467,13 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
         )
         generated_dialog = []
         invalid_fields.append("final_dialog")
-    valid_dialog = [
-        segment
-        for segment in generated_dialog
-        if isinstance(segment, str) and segment.strip()
-    ]
+    valid_dialog: list[str] = []
+    for segment in generated_dialog:
+        if not isinstance(segment, str):
+            continue
+        clean_segment = _clean_dialog_fragment(segment)
+        if clean_segment:
+            valid_dialog.append(clean_segment)
     if len(valid_dialog) != len(generated_dialog):
         logger.warning(
             f"Dialog generator dropped invalid fragments: "
@@ -550,16 +584,27 @@ _DIALOG_EVALUATOR_PROMPT = '''\
 3. 如果存在 `[SOCIAL]`、`[AVOID_REPEAT]`、`[PROGRESSION]` 或 `[SCOPE]`，`final_dialog` 服从其表达姿态、连续性、推进方向和范围约束。
 4. `final_dialog` 没有把另一个对象、提议、请求、问题或偏好所有者当作核心话题。
 5. `final_dialog` 没有把 `content_anchors` 授权给对方的猜测动作改写成猜当前角色自己的偏好、口味、喜欢内容或想看内容。
-6. 没有触发表达安全红线。
+6. 如果 `content_anchors` 要求完整方案、计划、路线、步骤、多候选推荐或多部分结论，`final_dialog` 可见地覆盖主要组成部分，没有把未覆盖部分改写成稍后再安排、下一步再说、先定一个再说或继续追问。
+7. 如果 `content_anchors` 给出具体时间切分，`final_dialog` 保留每个时间段、结束时间和对应动作，没有省略或误算时长。
+8. 如果 `content_anchors` 明示无法给出具体对象、没有已确认事实或不得给出具体当前断言，`final_dialog` 没有新增锚点未出现的具体实体、属性或当前状态结论。
+9. 如果 `content_anchors` 要求证据阻塞后的最佳努力答案或终止收束，`final_dialog` 没有用临时处理状态、延后承诺或新的认可请求来替代当前回答。
+10. 没有触发表达安全红线。
 
 任一条件不满足，返回 `should_stop=false`，`feedback` 点名缺失或被替换的锚点。
 
 # 硬门槛
 先执行硬门槛；硬门槛失败时不要评估软风格。
 - 锚点忠实：不得缺失、替换、反转或绕开 `[DECISION]`、`[FACT]`、`[ANSWER]`、`[SOCIAL]`、`[AVOID_REPEAT]`、`[PROGRESSION]`、`[SCOPE]` 中明示的约束。
+- 多部分交付：如果锚点明示完整方案、计划、路线、步骤、多候选推荐、风险说明或多个主要组成部分，台词必须覆盖这些主要组成部分；只给一个片段并说后面再安排、下一步再说、先定一家试试，属于缺失锚点，必须驳回。
+- 时间切分忠实：如果锚点明示计划时间段、开始/结束时间或总时长，台词必须逐项保留这些时间和对应动作；缺少结束时间、改写成不一致近似值、或把完整安排压缩成更短安排，必须驳回。
+- 行动骨架忠实：如果锚点要求行动顺序，台词必须保留起点、中间锚点和结束点；只说模糊方向而没有行动顺序，必须驳回。
+- 结构化任务密度：如果锚点要求技术选型、风险清单、RCA、部署计划或工具组合建议，台词不得用连续比喻替代结论、风险、步骤或依据；除非 `[PROGRESSION]` 明确要求继续澄清，不得以无必要的新问题结尾。
 - 话题一致：核心对象、提议、请求、问题必须来自 `content_anchors`；不得转成另一个核心话题。
 - 指代与动作所有权：如果 `content_anchors` 只要求对方猜类型、标签、条件、门槛、解锁步骤或对方要看的类别，`final_dialog` 不得改成猜当前角色想看、喜欢、偏好或口味。合格猜测目标应是对方要猜的类型、标签或类别；除非 `content_anchors` 明确说明猜测对象是当前角色的偏好，否则含有等价于“猜我”“我会想看”“我想看”“我喜欢”“我的口味”“我的偏好”的猜测句必须驳回，并在 `feedback` 中说明猜测对象或偏好所有者被改写。
 - 事实边界：不得添加 `content_anchors` 未授权的具体实体、属性、数量、时间、地点、承诺、日程或技术细节。
+- 具体对象禁令：如果锚点说明没有已确认事实、无法给出具体对象或不得给出具体当前断言，台词不得新增锚点未出现过的具体实体、属性、数量、时间、地点或当前状态结论；只能保留锚点允许的泛化类别、行动骨架、筛选标准和核实清单。
+- 举例禁令：泛化说明不得偷换成具体对象输出；没有锚点确认的具体名称时，台词不得用具体名称做例子。
+- 终止收束禁令：如果锚点要求证据阻塞后的最佳努力答案、行动骨架、时间切分、核实清单或终止收束，台词不得用临时处理状态或延后承诺替代当前交付，也不得以新的认可请求结尾；必须驳回。
 - 精确值边界：不得把锚点中的数字、日期、时间、地点、专有名词、否定条件或等待确认条件改成近似值、当前值或另一个锚点里的值。
 - 内部标签边界：如果 `content_anchors` 含 RAG、resolver、L1、L2、L3、tool、agent、内部工具名、模型阶段名或系统管线标签，`final_dialog` 不得原样暴露这些内部标签；必须改写成用户可理解的自然说法。
 - 身体词边界：`final_dialog` 不得包含心跳、心脏、脸红、视线躲闪、身体发热等身体感官词；即使锚点里出现，也要改写为文字聊天中的迟疑、局促或不确定。

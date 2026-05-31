@@ -11,6 +11,7 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ResolverCapabilityRequestV1,
     ResolverCycleStateV1,
     ResolverCycleTraceV1,
+    ResolverGoalProgressV1,
     ResolverPendingResolutionV1,
     ResolverPendingResumeV1,
 )
@@ -98,6 +99,7 @@ class GlobalPersonaState(TypedDict):
     resolver_context: NotRequired[str]
     resolver_capability_requests: NotRequired[list[ResolverCapabilityRequestV1]]
     resolver_cycle_trace: NotRequired[ResolverCycleTraceV1]
+    resolver_goal_progress: NotRequired[ResolverGoalProgressV1]
     pending_resolver_resume: NotRequired[ResolverPendingResumeV1]
     resolver_pending_resolution: NotRequired[ResolverPendingResolutionV1]
 
@@ -178,6 +180,7 @@ class CognitionState(TypedDict):
     resolver_context: NotRequired[str]
     resolver_capability_requests: NotRequired[list[ResolverCapabilityRequestV1]]
     resolver_cycle_trace: NotRequired[ResolverCycleTraceV1]
+    resolver_goal_progress: NotRequired[ResolverGoalProgressV1]
     pending_resolver_resume: NotRequired[ResolverPendingResumeV1]
     resolver_pending_resolution: NotRequired[ResolverPendingResolutionV1]
 
