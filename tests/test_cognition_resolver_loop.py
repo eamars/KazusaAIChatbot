@@ -1800,6 +1800,83 @@ async def test_rag_capability_uses_objective_and_preserves_original_request(
 
 
 @pytest.mark.asyncio
+async def test_internal_thought_rag_capability_uses_existing_rag_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Selected internal-thought RAG should execute through existing RAG."""
+
+    captured: dict = {}
+
+    async def call_rag_supervisor(
+        *,
+        fresh_query: str,
+        reply_context: dict,
+        character_name: str,
+        context: dict,
+    ) -> dict[str, object]:
+        captured["fresh_query"] = fresh_query
+        captured["reply_context"] = reply_context
+        captured["character_name"] = character_name
+        captured["context"] = context
+        result = {
+            "answer": "找到一条群聊前文证据。",
+            "known_facts": [
+                {
+                    "slot": "Conversation-evidence: prior group context",
+                    "agent": "conversation_evidence_agent",
+                    "resolved": True,
+                    "summary": "前文显示这是一段延续中的群聊话题。",
+                    "raw_result": {
+                        "projection_payload": {
+                            "conversation_rows": [{
+                                "content": "前文提到同一个话题。",
+                            }],
+                        },
+                    },
+                }
+            ],
+            "unknown_slots": [],
+            "loop_count": 1,
+        }
+        return result
+
+    monkeypatch.setattr(
+        capabilities_module,
+        "call_quote_aware_rag_supervisor",
+        call_rag_supervisor,
+    )
+    monkeypatch.setattr(
+        capabilities_module.event_logging,
+        "record_rag_stage_event",
+        AsyncMock(),
+    )
+    request = _resolver_request(
+        objective="回看群聊前文，判断这个内部想法是否有足够证据。",
+    )
+
+    observation = await capabilities_module.execute_resolver_capability_request(
+        request,
+        _internal_thought_resolver_state(),
+    )
+
+    assert captured["fresh_query"] == request["objective"]
+    assert captured["context"]["original_user_request"] == (
+        "Original user request about trust."
+    )
+    assert captured["context"]["platform"] == "debug"
+    assert captured["context"]["channel_type"] == "private"
+    assert captured["context"]["global_user_id"] == "global-user-123"
+    assert captured["context"]["active_turn_conversation_row_ids"] == [
+        "row-123",
+    ]
+    assert captured["character_name"] == "Kazusa"
+    assert observation["status"] == "succeeded"
+    assert observation["capability_kind"] == "rag_evidence"
+    assert observation["rag_result"]["answer"] == "找到一条群聊前文证据。"
+    assert "conversation_evidence" in observation["rag_result"]
+
+
+@pytest.mark.asyncio
 async def test_web_evidence_requires_discovered_mcp_tools(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

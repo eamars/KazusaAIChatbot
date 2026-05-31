@@ -40,6 +40,7 @@ long_term/todo.md
 |---|---|---|
 | [cognition_preserving_goal_resolver_production_plan.md](active/short_term/cognition_preserving_goal_resolver_production_plan.md) | Large production architecture implementation plan | in_progress |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
+| [self_cognition_rag_resolver_evidence_plan.md](active/short_term/self_cognition_rag_resolver_evidence_plan.md) | Medium production integration plan | in_progress |
 
 ## Supporting Experiment Records
 
@@ -69,6 +70,7 @@ long_term/todo.md
 | [cognition_prompt_chain_previous20_equivalence_check_20260519.md](reference/evidence/cognition_prompt_chain_previous20_equivalence_check_20260519.md) | Supporting evidence |
 | [cognition_prompt_chain_previous20_input_output_20260519.md](reference/evidence/cognition_prompt_chain_previous20_input_output_20260519.md) | Supporting evidence |
 | [rag2_recall_quality_experiment_plan.md](reference/evidence/rag2_recall_quality_experiment_plan.md) | Supporting experiment evidence |
+| [self_cognition_rag_resolver_evidence_review_20260601.md](reference/evidence/self_cognition_rag_resolver_evidence_review_20260601.md) | Supporting real LLM evidence |
 | [multi_source_cognition_stage_03_inactive_prompt_variant_notes.md](reference/multi_source_cognition_stage_03_inactive_prompt_variant_notes.md) | Reference notes |
 
 ## Triage

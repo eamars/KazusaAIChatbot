@@ -44,6 +44,26 @@ def _valid_episode() -> dict:
     return episode
 
 
+def _internal_thought_episode() -> dict:
+    """Build a valid internal-thought cognitive episode for adapter tests.
+
+    Returns:
+        Valid internal-thought cognitive episode.
+    """
+    episode = deepcopy(_valid_episode())
+    episode["trigger_source"] = "internal_thought"
+    episode["input_sources"] = ["internal_monologue"]
+    episode["output_mode"] = "think_only"
+    episode["percepts"] = [{
+        "percept_id": "percept-internal-thought",
+        "input_source": "internal_monologue",
+        "content": "需要回看群聊前文再判断这个内部想法。",
+        "visibility": "internal_only",
+        "metadata": {"source": "runtime_internal_thought"},
+    }]
+    return episode
+
+
 def _request_kwargs() -> dict:
     """Build common adapter inputs around one valid episode.
 
@@ -166,10 +186,61 @@ def test_forbidden_context_keys_are_not_exposed() -> None:
     assert forbidden_keys.isdisjoint(set(request["context"]))
 
 
+def test_internal_thought_episode_builds_rag_request_shape() -> None:
+    kwargs = _request_kwargs()
+    kwargs["episode"] = _internal_thought_episode()
+    kwargs["decontexualized_input"] = "回看群聊前文，判断这个内部想法是否有足够证据。"
+
+    request = build_text_chat_rag_request(**kwargs)
+
+    assert request["original_query"] == (
+        "回看群聊前文，判断这个内部想法是否有足够证据。"
+    )
+    assert request["character_name"] == "Kazusa"
+    assert request["current_user_id"] == "user-1"
+    assert request["character_user_id"] == "character-1"
+    assert request["context"]["platform"] == "qq"
+    assert request["context"]["platform_channel_id"] == "chan-1"
+    assert request["context"]["channel_type"] == "group"
+    assert request["context"]["global_user_id"] == "user-1"
+    assert request["context"]["user_name"] == "User"
+    assert request["context"]["active_turn_platform_message_ids"] == [
+        "msg-1",
+        "msg-2",
+    ]
+    assert request["context"]["active_turn_conversation_row_ids"] == [
+        "row-1",
+        "row-2",
+    ]
+    assert request["context"]["prompt_message_context"] == (
+        kwargs["prompt_message_context"]
+    )
+    assert "cognitive_episode" not in request["context"]
+    assert "trigger_source" not in request["context"]
+    assert "input_sources" not in request["context"]
+
+
 def test_non_user_message_trigger_is_rejected() -> None:
     kwargs = _request_kwargs()
     episode = deepcopy(kwargs["episode"])
     episode["trigger_source"] = "reflection_signal"
+    kwargs["episode"] = episode
+
+    with pytest.raises(RAGEpisodeAdapterError):
+        build_text_chat_rag_request(**kwargs)
+
+
+def test_internal_thought_without_internal_monologue_source_is_rejected() -> None:
+    kwargs = _request_kwargs()
+    episode = _internal_thought_episode()
+    episode["input_sources"] = ["retrieved_memory"]
+    episode["percepts"] = [{
+        "percept_id": "percept-memory",
+        "input_source": "retrieved_memory",
+        "content": "memory observed",
+        "visibility": "model_visible",
+        "metadata": {},
+    }]
     kwargs["episode"] = episode
 
     with pytest.raises(RAGEpisodeAdapterError):
