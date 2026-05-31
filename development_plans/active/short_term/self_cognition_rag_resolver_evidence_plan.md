@@ -188,7 +188,7 @@ Positive real LLM validation means either:
 - [x] Run real LLM diagnostic cases and inspect every LLM-relevant output for
       whether RAG was selected or reasonably not selected.
 - [x] Write human-readable real LLM review artifact.
-- [ ] If the real LLM result is positive, commit this branch and merge it into
+- [x] If the real LLM result is positive, commit this branch and merge it into
       `resolver-goal-poc`.
 
 ## Verification Commands
@@ -261,3 +261,9 @@ Results:
 The real LLM result is positive under the agreed criterion: at least one
 self-cognition case called RAG for evidence, and the no-RAG case opted out with
 a reasonable cognition-owned explanation.
+
+Merge evidence:
+
+- Feature branch commit: `ee9da4f Wire self cognition resolver RAG evidence`
+- Merge commit on `resolver-goal-poc`:
+  `43c97c1 Merge self cognition resolver RAG evidence`
