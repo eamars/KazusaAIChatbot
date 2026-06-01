@@ -42,31 +42,31 @@ class FakeSession:
 async def test_call_tool_sends_original_name_not_namespaced():
     """Regression: MCP server receives original tool name, not the namespaced one.
 
-    Previously call_tool sent 'mcp-searxng__searxng_web_search' to the
-    server, which rejected it as unknown.  The server only knows the
-    original name 'searxng_web_search'.
+    Previously call_tool sent 'search-server__web_search' to the server, which
+    rejected it as unknown. The server only knows the original name
+    'web_search'.
     """
     session = FakeSession(response_text="search results here")
 
     manager = McpManager()
-    manager._sessions["mcp-searxng"] = session
-    manager._tools["mcp-searxng__searxng_web_search"] = ToolInfo(
-        name="mcp-searxng__searxng_web_search",
-        original_name="searxng_web_search",
-        server="mcp-searxng",
+    manager._sessions["search-server"] = session
+    manager._tools["search-server__web_search"] = ToolInfo(
+        name="search-server__web_search",
+        original_name="web_search",
+        server="search-server",
         description="Search the web",
         parameters={"properties": {"query": {"type": "string"}}},
     )
 
     result = await manager.call_tool(
-        "mcp-searxng__searxng_web_search",
+        "search-server__web_search",
         {"query": "一之濑明日奈 萌娘百科"},
     )
 
     assert result == "search results here"
     assert len(session.calls) == 1
     # The critical assertion: server receives the ORIGINAL name
-    assert session.calls[0][0] == "searxng_web_search"
+    assert session.calls[0][0] == "web_search"
     assert session.calls[0][1] == {"query": "一之濑明日奈 萌娘百科"}
 
 

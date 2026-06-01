@@ -146,7 +146,7 @@ Post-turn work
   - run reflection and growth workers outside live chat
         |
         v
-MongoDB + model routes + optional MCP web tools + platform callbacks
+MongoDB + model routes + direct web access + optional generic MCP tools + platform callbacks
 ```
 
 Visible adapter delivery follows selected text surface outputs. Private action

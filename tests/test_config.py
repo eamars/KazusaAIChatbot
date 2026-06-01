@@ -135,6 +135,99 @@ class TestMcpServersDefault:
         assert isinstance(MCP_SERVERS, dict)
 
 
+class TestDirectWebConfig:
+    def test_config_allows_empty_searxng_url(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env.pop("SEARXNG_URL", None)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(repr(config.SEARXNG_URL)); "
+                    "print(config.SEARXNG_SEARCH_TIMEOUT_SECONDS); "
+                    "print(config.SEARXNG_SEARCH_RESULT_LIMIT); "
+                    "print(config.WEB_URL_READ_MAX_CHARS)"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.splitlines() == ["''", "30.0", "10", "10000"]
+
+    def test_config_reads_direct_web_settings_from_environment(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["SEARXNG_URL"] = " http://search.test:8080/// "
+        env["SEARXNG_SEARCH_TIMEOUT_SECONDS"] = "12.5"
+        env["SEARXNG_SEARCH_RESULT_LIMIT"] = "7"
+        env["WEB_URL_READ_TIMEOUT_SECONDS"] = "9.5"
+        env["WEB_URL_READ_MAX_BYTES"] = "2048"
+        env["WEB_URL_READ_MAX_CHARS"] = "1500"
+        env["WEB_URL_READ_REDIRECT_LIMIT"] = "3"
+        env["WEB_URL_READER_USER_AGENT"] = "TestBrowser/1.0"
+        env["WEB_URL_READER_ACCEPT_LANGUAGE"] = "ja,en;q=0.8"
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(config.SEARXNG_URL); "
+                    "print(config.SEARXNG_SEARCH_TIMEOUT_SECONDS); "
+                    "print(config.SEARXNG_SEARCH_RESULT_LIMIT); "
+                    "print(config.WEB_URL_READ_TIMEOUT_SECONDS); "
+                    "print(config.WEB_URL_READ_MAX_BYTES); "
+                    "print(config.WEB_URL_READ_MAX_CHARS); "
+                    "print(config.WEB_URL_READ_REDIRECT_LIMIT); "
+                    "print(config.WEB_URL_READER_USER_AGENT); "
+                    "print(config.WEB_URL_READER_ACCEPT_LANGUAGE)"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.splitlines() == [
+            "http://search.test:8080",
+            "12.5",
+            "7",
+            "9.5",
+            "2048",
+            "1500",
+            "3",
+            "TestBrowser/1.0",
+            "ja,en;q=0.8",
+        ]
+
+    def test_config_rejects_invalid_searxng_url(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["SEARXNG_URL"] = "ftp://search.test"
+
+        result = subprocess.run(
+            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode != 0
+        assert "SEARXNG_URL must be empty or an HTTP(S) URL" in result.stderr
+
+
 class TestCache2Config:
     def test_cache2_max_entries_is_positive(self):
         from kazusa_ai_chatbot.config import RAG_CACHE2_MAX_ENTRIES

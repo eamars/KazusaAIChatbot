@@ -39,6 +39,7 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
+| [searxng_mcp_phaseout_plan.md](active/short_term/searxng_mcp_phaseout_plan.md) | Large web-agent transport cutover plan | completed on branch |
 
 ## Supporting Experiment Records
 

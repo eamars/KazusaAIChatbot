@@ -76,8 +76,19 @@ COGNITION_VISUAL_DIRECTIVES_ENABLED=true
 SELF_COGNITION_ENABLED=true
 CHARACTER_SLEEP_LOCAL_PERIOD=02:00-12:00
 
-# MCP servers and timeouts
-MCP_SERVERS={"mcp-searxng":{"url":"http://localhost:4001/mcp"}}
+# Direct web search and URL-reader behavior
+SEARXNG_URL=http://your-searxng-host:8080
+SEARXNG_SEARCH_TIMEOUT_SECONDS=30
+SEARXNG_SEARCH_RESULT_LIMIT=10
+WEB_URL_READ_TIMEOUT_SECONDS=30
+WEB_URL_READ_MAX_BYTES=1048576
+WEB_URL_READ_MAX_CHARS=10000
+WEB_URL_READ_REDIRECT_LIMIT=5
+WEB_URL_READER_USER_AGENT=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36
+WEB_URL_READER_ACCEPT_LANGUAGE=en-US,en;q=0.9
+
+# Optional generic MCP servers and timeouts
+MCP_SERVERS={}
 MCP_CALL_TIMEOUT=30
 MCP_CONNECT_TIMEOUT=10
 
@@ -131,9 +142,18 @@ NAPCAT_RUNTIME_PORT=8011
 
 All route-specific chat model variables are required. Route-specific variables
 replace the retired generic `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL`
-settings. Missing route variables stop config loading. The web-search helper
-expects an MCP server named `mcp-searxng` exposing `searxng_web_search` and
-`web_url_read`.
+settings. Missing route variables stop config loading.
+
+`SEARXNG_URL` is optional. When it is empty, the web agent can still read
+HTTP(S) URLs directly from the Kazusa process, but web search returns a bounded
+unavailable observation. When it is set, search uses the configured SearXNG
+`/search?format=json` endpoint directly. URL reads do not require SearXNG or
+MCP, and local/private HTTP(S) resources reachable from the Kazusa process are
+allowed by default. URL reads always use browser-navigation headers,
+process-memory cookies, locally supported compression encodings, and common
+HTTP anti-bot challenge detection. They do not execute JavaScript, solve
+CAPTCHA, or impersonate browser TLS fingerprints. `MCP_SERVERS` remains
+available for unrelated generic MCP tools.
 
 When LM Studio reports
 `The model has crashed without additional information.`, chat model calls made
@@ -165,7 +185,11 @@ You need:
 - MongoDB
 - an OpenAI-compatible chat completion endpoint
 - an OpenAI-compatible embeddings endpoint
-- optional MCP servers for web search
+- optional SearXNG service for web search
+- optional generic MCP servers for unrelated tools
+
+Direct URL reads use the existing HTTP client dependency and do not require an
+additional browser transport or automation dependency.
 
 LM Studio works for local model hosting, but any OpenAI-compatible endpoint can
 be used.
