@@ -1,5 +1,11 @@
 # Cognition-Preserving Goal Resolver Production Implementation Plan
 
+> Superseded on 2026-06-01 by
+> `development_plans/active/short_term/resolver_default_mainline_cutover_plan.md`.
+> The new plan makes the resolver the default and only live persona workflow,
+> removes the old mandatory RAG-first compatibility path, and focuses on
+> merge-to-main cutover.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Implement a production goal resolver that lets Kazusa pursue and
@@ -21,7 +27,7 @@ criterion, and they must not bypass memory-driven personality cognition.
 ## Plan Metadata
 
 - Plan class: large production architecture implementation
-- Status: in_progress
+- Status: superseded
 - Branch: `resolver-goal-poc`
 - Owner: Codex
 - Created: 2026-05-30
