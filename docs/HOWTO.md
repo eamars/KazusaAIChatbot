@@ -149,8 +149,11 @@ HTTP(S) URLs directly from the Kazusa process, but web search returns a bounded
 unavailable observation. When it is set, search uses the configured SearXNG
 `/search?format=json` endpoint directly. URL reads do not require SearXNG or
 MCP, and local/private HTTP(S) resources reachable from the Kazusa process are
-allowed by default. `MCP_SERVERS` remains available for unrelated generic MCP
-tools.
+allowed by default. URL reads always use browser-navigation headers,
+process-memory cookies, locally supported compression encodings, and common
+HTTP anti-bot challenge detection. They do not execute JavaScript, solve
+CAPTCHA, or impersonate browser TLS fingerprints. `MCP_SERVERS` remains
+available for unrelated generic MCP tools.
 
 When LM Studio reports
 `The model has crashed without additional information.`, chat model calls made
@@ -184,6 +187,9 @@ You need:
 - an OpenAI-compatible embeddings endpoint
 - optional SearXNG service for web search
 - optional generic MCP servers for unrelated tools
+
+Direct URL reads use the existing HTTP client dependency and do not require an
+additional browser transport or automation dependency.
 
 LM Studio works for local model hosting, but any OpenAI-compatible endpoint can
 be used.

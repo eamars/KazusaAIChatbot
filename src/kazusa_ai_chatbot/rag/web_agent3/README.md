@@ -60,6 +60,15 @@ the Kazusa process perspective. The reader owns browser-like request headers,
 timeouts, response-size caps, deterministic text extraction, and bounded error
 strings.
 
+The URL reader always sends browser-navigation headers, advertises only
+compression encodings the local HTTP stack can decode, and keeps response
+cookies in process memory for later reads. It also detects common HTTP
+anti-bot challenge surfaces such as Cloudflare, DataDome, Akamai, PerimeterX,
+and generic CAPTCHA pages before returning a generic HTTP-status error. It
+does not execute JavaScript, solve CAPTCHA, or impersonate browser TLS
+fingerprints; pages that require those mechanisms return a bounded blocked
+observation for the graph.
+
 Source-specific metadata/search is owned by the selected source subagent.
 Currently, only `nhentai` has an approved direct provider API path, limited to
 gallery metadata reads and gallery search through its own subagent.

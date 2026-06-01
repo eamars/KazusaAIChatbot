@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 from pathlib import Path
@@ -30,15 +31,30 @@ class _FakeHTTPResponse:
         headers: dict[str, str] | None = None,
         json_payload: dict | None = None,
         chunks: list[bytes] | None = None,
+        status_code: int = 200,
+        url: str = "https://example.test/page",
+        cookies: httpx.Cookies | None = None,
     ) -> None:
         self.text = text
         self.content = text.encode("utf-8")
         self.headers = headers or {"content-type": "text/html; charset=utf-8"}
         self._json_payload = json_payload
         self._chunks = chunks
+        self.status_code = status_code
+        self.url = url
+        self.cookies = cookies or httpx.Cookies()
 
     def raise_for_status(self) -> None:
-        return None
+        if self.status_code < 400:
+            return None
+
+        request = httpx.Request("GET", self.url)
+        response = httpx.Response(
+            self.status_code,
+            headers=self.headers,
+            request=request,
+        )
+        response.raise_for_status()
 
     def json(self) -> dict:
         if self._json_payload is None:
@@ -309,8 +325,381 @@ async def test_web_agent3_url_read_sends_configured_browser_headers(
     headers = calls[0]["headers"]
     assert headers["User-Agent"] == "TestBrowser/1.0"
     assert headers["Accept-Language"] == "ja,en;q=0.8"
+    assert "text/html" in headers["Accept"]
+    assert "image/webp" in headers["Accept"]
+    assert headers["Accept-Encoding"].startswith("gzip, deflate")
+    assert headers["DNT"] == "1"
+    assert headers["Upgrade-Insecure-Requests"] == "1"
+    assert headers["Sec-Fetch-Dest"] == "document"
+    assert headers["Sec-Fetch-Mode"] == "navigate"
+    assert headers["Sec-Fetch-Site"] == "none"
+    assert headers["Sec-Fetch-User"] == "?1"
+    assert headers["Referer"] == "https://example.test/"
     assert calls[0]["kwargs"]["timeout"] == 9.0
     assert "Page body" in result
+
+
+@pytest.mark.asyncio
+async def test_web_agent3_url_read_accept_encoding_uses_available_decoders(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """web_url_read should only advertise locally supported compression."""
+    url_reader = importlib.import_module(
+        "kazusa_ai_chatbot.rag.web_agent3.url_reader"
+    )
+    calls: list[dict[str, str]] = []
+
+    class FakeURLClient:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        def stream(self, method: str, url: str, *, headers: dict):
+            assert method == "GET"
+            calls.append(headers)
+            response = _FakeHTTPResponse(
+                text="<html><body><p>Compressed page</p></body></html>",
+            )
+            stream = _FakeHTTPStream(response)
+            return stream
+
+    monkeypatch.setattr(url_reader, "_BROTLI_AVAILABLE", True)
+    monkeypatch.setattr(url_reader, "_ZSTD_AVAILABLE", True)
+    monkeypatch.setattr(url_reader.httpx, "AsyncClient", FakeURLClient)
+
+    result = await searxng_module.web_url_read.ainvoke({
+        "url": "https://example.test/compressed",
+    })
+
+    assert calls[0]["Accept-Encoding"] == "gzip, deflate, br, zstd"
+    assert "Compressed page" in result
+
+
+@pytest.mark.asyncio
+async def test_web_agent3_url_read_accept_encoding_omits_missing_decoders(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """web_url_read should not advertise optional missing decoders."""
+    url_reader = importlib.import_module(
+        "kazusa_ai_chatbot.rag.web_agent3.url_reader"
+    )
+    calls: list[dict[str, str]] = []
+
+    class FakeURLClient:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        def stream(self, method: str, url: str, *, headers: dict):
+            assert method == "GET"
+            calls.append(headers)
+            response = _FakeHTTPResponse(
+                text="<html><body><p>Plain compressed page</p></body></html>",
+            )
+            stream = _FakeHTTPStream(response)
+            return stream
+
+    monkeypatch.setattr(url_reader, "_BROTLI_AVAILABLE", False)
+    monkeypatch.setattr(url_reader, "_ZSTD_AVAILABLE", False)
+    monkeypatch.setattr(url_reader.httpx, "AsyncClient", FakeURLClient)
+
+    result = await searxng_module.web_url_read.ainvoke({
+        "url": "https://example.test/compressed",
+    })
+
+    assert calls[0]["Accept-Encoding"] == "gzip, deflate"
+    assert "Plain compressed page" in result
+
+
+@pytest.mark.asyncio
+async def test_web_agent3_url_read_reuses_process_memory_cookies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """web_url_read should keep HTTP cookies in process memory."""
+    url_reader = importlib.import_module(
+        "kazusa_ai_chatbot.rag.web_agent3.url_reader"
+    )
+    calls: list[dict[str, object]] = []
+    response_cookies = httpx.Cookies()
+    response_cookies.set("sessionid", "abc", domain="example.test")
+    responses = [
+        _FakeHTTPResponse(
+            text="<html><body><p>First page</p></body></html>",
+            cookies=response_cookies,
+        ),
+        _FakeHTTPResponse(text="<html><body><p>Second page</p></body></html>"),
+    ]
+
+    class FakeURLClient:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        def stream(self, method: str, url: str, *, headers: dict):
+            assert method == "GET"
+            calls.append({"url": url, "headers": headers, "kwargs": self.kwargs})
+            response = responses.pop(0)
+            stream = _FakeHTTPStream(response)
+            return stream
+
+    monkeypatch.setattr(url_reader, "_COOKIE_JAR", httpx.Cookies())
+    monkeypatch.setattr(url_reader, "_COOKIE_LOCK", asyncio.Lock())
+    monkeypatch.setattr(url_reader.httpx, "AsyncClient", FakeURLClient)
+
+    first_result = await searxng_module.web_url_read.ainvoke({
+        "url": "https://example.test/first",
+    })
+    second_result = await searxng_module.web_url_read.ainvoke({
+        "url": "https://example.test/second",
+    })
+
+    first_kwargs = calls[0]["kwargs"]
+    second_kwargs = calls[1]["kwargs"]
+    first_cookies = first_kwargs["cookies"]
+    second_cookies = second_kwargs["cookies"]
+    assert first_cookies.get("sessionid") is None
+    assert second_cookies.get("sessionid") == "abc"
+    assert "First page" in first_result
+    assert "Second page" in second_result
+
+
+@pytest.mark.asyncio
+async def test_web_agent3_url_read_reuses_redirect_cookies_from_client_jar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """web_url_read should keep cookies collected during redirects."""
+    url_reader = importlib.import_module(
+        "kazusa_ai_chatbot.rag.web_agent3.url_reader"
+    )
+    calls: list[dict[str, object]] = []
+    client_count = 0
+
+    class FakeURLClient:
+        def __init__(self, **kwargs):
+            nonlocal client_count
+
+            client_count += 1
+            self.kwargs = kwargs
+            self.cookies = httpx.Cookies()
+            if client_count == 1:
+                self.cookies.set(
+                    "redirectid",
+                    "xyz",
+                    domain="example.test",
+                )
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        def stream(self, method: str, url: str, *, headers: dict):
+            assert method == "GET"
+            calls.append({"url": url, "headers": headers, "kwargs": self.kwargs})
+            response = _FakeHTTPResponse(
+                text="<html><body><p>Redirect page</p></body></html>",
+            )
+            stream = _FakeHTTPStream(response)
+            return stream
+
+    monkeypatch.setattr(url_reader, "_COOKIE_JAR", httpx.Cookies())
+    monkeypatch.setattr(url_reader, "_COOKIE_LOCK", asyncio.Lock())
+    monkeypatch.setattr(url_reader.httpx, "AsyncClient", FakeURLClient)
+
+    await searxng_module.web_url_read.ainvoke({
+        "url": "https://example.test/redirect",
+    })
+    await searxng_module.web_url_read.ainvoke({
+        "url": "https://example.test/next",
+    })
+
+    second_kwargs = calls[1]["kwargs"]
+    second_cookies = second_kwargs["cookies"]
+    assert second_cookies.get("redirectid") == "xyz"
+
+
+@pytest.mark.asyncio
+async def test_web_agent3_url_read_referer_omits_url_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """web_url_read should not put URL userinfo into synthetic Referer."""
+    url_reader = importlib.import_module(
+        "kazusa_ai_chatbot.rag.web_agent3.url_reader"
+    )
+    calls: list[dict[str, str]] = []
+
+    class FakeURLClient:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        def stream(self, method: str, url: str, *, headers: dict):
+            assert method == "GET"
+            calls.append(headers)
+            response = _FakeHTTPResponse(
+                text="<html><body><p>Credential URL page</p></body></html>",
+            )
+            stream = _FakeHTTPStream(response)
+            return stream
+
+    monkeypatch.setattr(url_reader.httpx, "AsyncClient", FakeURLClient)
+
+    result = await searxng_module.web_url_read.ainvoke({
+        "url": "https://user:pass@example.test/path",
+    })
+
+    assert calls[0]["Referer"] == "https://example.test/"
+    assert "Credential URL page" in result
+
+
+@pytest.mark.asyncio
+async def test_web_agent3_url_read_reports_anti_bot_challenge_before_http_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """web_url_read should identify common HTTP anti-bot challenge pages."""
+    url_reader = importlib.import_module(
+        "kazusa_ai_chatbot.rag.web_agent3.url_reader"
+    )
+
+    class FakeURLClient:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        def stream(self, method: str, url: str, *, headers: dict):
+            assert method == "GET"
+            response = _FakeHTTPResponse(
+                text=(
+                    "<html><title>Just a moment...</title>"
+                    "<body>Checking your browser before accessing.</body></html>"
+                ),
+                headers={
+                    "content-type": "text/html; charset=utf-8",
+                    "server": "cloudflare",
+                    "cf-ray": "fixture",
+                },
+                status_code=403,
+                url=url,
+            )
+            stream = _FakeHTTPStream(response)
+            return stream
+
+    monkeypatch.setattr(url_reader.httpx, "AsyncClient", FakeURLClient)
+
+    result = await searxng_module.web_url_read.ainvoke({
+        "url": "https://example.test/protected",
+    })
+
+    assert result == (
+        "Error: URL read blocked by anti-bot challenge: cloudflare (HTTP 403)"
+    )
+
+
+@pytest.mark.asyncio
+async def test_web_agent3_url_read_does_not_mask_ok_pages_with_marker_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """web_url_read should not treat ordinary HTTP 200 text as a challenge."""
+    url_reader = importlib.import_module(
+        "kazusa_ai_chatbot.rag.web_agent3.url_reader"
+    )
+
+    class FakeURLClient:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        def stream(self, method: str, url: str, *, headers: dict):
+            assert method == "GET"
+            response = _FakeHTTPResponse(
+                text=(
+                    "<html><body><p>This documentation says Just a moment... "
+                    "and describes checking your browser text.</p></body></html>"
+                ),
+                status_code=200,
+                url=url,
+            )
+            stream = _FakeHTTPStream(response)
+            return stream
+
+    monkeypatch.setattr(url_reader.httpx, "AsyncClient", FakeURLClient)
+
+    result = await searxng_module.web_url_read.ainvoke({
+        "url": "https://example.test/docs",
+    })
+
+    assert "This documentation says Just a moment..." in result
+    assert not result.startswith("Error: URL read blocked by anti-bot challenge")
+
+
+@pytest.mark.asyncio
+async def test_web_agent3_url_read_preserves_non_challenge_http_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """web_url_read should keep ordinary HTTP errors separate from bot checks."""
+    url_reader = importlib.import_module(
+        "kazusa_ai_chatbot.rag.web_agent3.url_reader"
+    )
+
+    class FakeURLClient:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        def stream(self, method: str, url: str, *, headers: dict):
+            assert method == "GET"
+            response = _FakeHTTPResponse(
+                text="<html><body><p>Forbidden.</p></body></html>",
+                status_code=403,
+                url=url,
+            )
+            stream = _FakeHTTPStream(response)
+            return stream
+
+    monkeypatch.setattr(url_reader.httpx, "AsyncClient", FakeURLClient)
+
+    result = await searxng_module.web_url_read.ainvoke({
+        "url": "https://example.test/forbidden",
+    })
+
+    assert result.startswith("Error: URL read HTTP error:")
+    assert "403 Forbidden" in result
 
 
 @pytest.mark.asyncio

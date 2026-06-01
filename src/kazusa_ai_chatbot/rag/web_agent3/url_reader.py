@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Mapping
 from dataclasses import dataclass
+from importlib.util import find_spec
 from html.parser import HTMLParser
-from urllib.parse import urlparse
+from urllib.parse import ParseResult, urlparse
 
 import httpx
 
@@ -19,11 +22,21 @@ from kazusa_ai_chatbot.config import (
 
 _ACCEPT_HEADER = (
     "text/html,application/xhtml+xml,application/xml;q=0.9,"
-    "application/json;q=0.8,text/plain;q=0.8,*/*;q=0.5"
+    "image/avif,image/webp,image/apng,*/*;q=0.8,"
+    "application/signed-exchange;v=b3;q=0.7"
 )
 _READ_ERROR_CHAR_LIMIT = 800
 _BINARY_SAMPLE_SIZE = 1024
 _BINARY_CONTROL_RATIO = 0.30
+_CHALLENGE_BODY_SAMPLE_SIZE = 65536
+_CHALLENGE_STATUS_CODES = {403, 429, 503}
+_BROTLI_AVAILABLE = (
+    find_spec("brotli") is not None
+    or find_spec("brotlicffi") is not None
+)
+_ZSTD_AVAILABLE = find_spec("zstandard") is not None
+_COOKIE_JAR = httpx.Cookies()
+_COOKIE_LOCK = asyncio.Lock()
 _IGNORED_HTML_TAGS = {
     "script",
     "style",
@@ -36,6 +49,56 @@ _IGNORED_VOID_HTML_TAGS = {
     "link",
 }
 _PARAGRAPH_HTML_TAGS = {"p", "li", "td", "th", "a", "button"}
+_PROVIDER_HEADER_MARKERS = {
+    "cloudflare": (
+        "__cf_bm",
+        "cf-chl",
+        "cf-ray",
+        "cloudflare",
+    ),
+    "datadome": (
+        "datadome",
+        "x-datadome",
+    ),
+    "akamai": (
+        "ak_bmsc",
+        "akamai",
+        "bm_sz",
+    ),
+    "perimeterx": (
+        "_px",
+        "perimeterx",
+        "px-captcha",
+    ),
+}
+_PROVIDER_BODY_MARKERS = {
+    "cloudflare": (
+        "cf-browser-verification",
+        "cf-chl",
+        "challenge-platform",
+        "checking your browser",
+        "just a moment...",
+    ),
+    "datadome": (
+        "datadome",
+        "dd_captcha",
+    ),
+    "akamai": (
+        "akamai bot manager",
+        "akamai ghost",
+    ),
+    "perimeterx": (
+        "perimeterx",
+        "px-captcha",
+    ),
+}
+_GENERIC_CHALLENGE_BODY_MARKERS = (
+    "are you a human",
+    "bot detection",
+    "captcha",
+    "complete the security check",
+    "verify you are human",
+)
 
 
 @dataclass
@@ -187,15 +250,122 @@ def _error_message(prefix: str, exc: BaseException) -> str:
     return bounded_message
 
 
-def _reader_headers() -> dict[str, str]:
+def _accept_encoding_header() -> str:
+    """Advertise only encodings the local HTTP stack can decode."""
+
+    encodings = ["gzip", "deflate"]
+    if _BROTLI_AVAILABLE:
+        encodings.append("br")
+
+    if _ZSTD_AVAILABLE:
+        encodings.append("zstd")
+
+    header = ", ".join(encodings)
+    return header
+
+
+def _reader_headers(parsed_url: ParseResult) -> dict[str, str]:
     """Build browser-compatible request headers for URL reads."""
 
+    referer_netloc = parsed_url.netloc.rsplit("@", maxsplit=1)[-1]
+    referer = f"{parsed_url.scheme}://{referer_netloc}/"
     headers = {
         "User-Agent": WEB_URL_READER_USER_AGENT,
-        "Accept-Language": WEB_URL_READER_ACCEPT_LANGUAGE,
         "Accept": _ACCEPT_HEADER,
+        "Accept-Language": WEB_URL_READER_ACCEPT_LANGUAGE,
+        "Accept-Encoding": _accept_encoding_header(),
+        "DNT": "1",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Referer": referer,
     }
     return headers
+
+
+async def _cookie_snapshot() -> httpx.Cookies:
+    """Copy the process-memory cookie jar for a single URL read."""
+
+    cookies = httpx.Cookies()
+    async with _COOKIE_LOCK:
+        cookies.update(_COOKIE_JAR)
+    return cookies
+
+
+async def _store_response_cookies(cookies: httpx.Cookies) -> None:
+    """Store response cookies for later URL reads in this process."""
+
+    async with _COOKIE_LOCK:
+        _COOKIE_JAR.update(cookies)
+
+
+def _contains_marker(text: str, markers: tuple[str, ...]) -> bool:
+    """Return whether text contains any known anti-bot marker."""
+
+    for marker in markers:
+        if marker in text:
+            return_value = True
+            return return_value
+
+    return_value = False
+    return return_value
+
+
+def _headers_to_text(headers: Mapping[str, str]) -> str:
+    """Flatten response headers for anti-bot marker inspection."""
+
+    header_parts = []
+    for name, value in headers.items():
+        header_parts.append(f"{name}: {value}")
+
+    header_text = "\n".join(header_parts).lower()
+    return header_text
+
+
+def _detect_anti_bot_challenge(
+    response: httpx.Response,
+    content: bytes,
+) -> str:
+    """Identify common HTTP challenge pages before returning a generic error."""
+
+    status_code = response.status_code
+    header_text = _headers_to_text(response.headers)
+    sample = content[:_CHALLENGE_BODY_SAMPLE_SIZE]
+    body_text = _decode_utf8(sample).lower()
+
+    if status_code not in _CHALLENGE_STATUS_CODES:
+        return_value = ""
+        return return_value
+
+    for provider, markers in _PROVIDER_BODY_MARKERS.items():
+        if _contains_marker(body_text, markers):
+            return_value = provider
+            return return_value
+
+    for provider, markers in _PROVIDER_HEADER_MARKERS.items():
+        if _contains_marker(header_text, markers):
+            return_value = provider
+            return return_value
+
+    if _contains_marker(body_text, _GENERIC_CHALLENGE_BODY_MARKERS):
+        return_value = "unknown"
+        return return_value
+
+    return_value = ""
+    return return_value
+
+
+def _anti_bot_challenge_error(provider: str, status_code: int) -> str:
+    """Build a bounded prompt-facing anti-bot challenge error."""
+
+    message = (
+        "Error: URL read blocked by anti-bot challenge: "
+        f"{provider} (HTTP {status_code})"
+    )
+    bounded_message = _bounded_error(message)
+    return bounded_message
 
 
 def _content_type_from_response(response: httpx.Response) -> str:
@@ -541,14 +711,15 @@ async def _fetch_url_content(
     content_parts: list[bytes] = []
     content_type = ""
     total_bytes = 0
+    cookies = await _cookie_snapshot()
     try:
         async with httpx.AsyncClient(
             timeout=WEB_URL_READ_TIMEOUT_SECONDS,
             follow_redirects=True,
             max_redirects=WEB_URL_READ_REDIRECT_LIMIT,
+            cookies=cookies,
         ) as client:
             async with client.stream("GET", url, headers=headers) as response:
-                response.raise_for_status()
                 content_type = _content_type_from_response(response)
                 async for chunk in response.aiter_bytes():
                     if not chunk:
@@ -563,6 +734,19 @@ async def _fetch_url_content(
                         return return_value
                     content_parts.append(chunk)
                     total_bytes += chunk_size
+                await _store_response_cookies(response.cookies)
+                client_cookies = getattr(client, "cookies", None)
+                if client_cookies is not None:
+                    await _store_response_cookies(client_cookies)
+                content = b"".join(content_parts)
+                provider = _detect_anti_bot_challenge(response, content)
+                if provider:
+                    return_value = _anti_bot_challenge_error(
+                        provider,
+                        response.status_code,
+                    )
+                    return return_value
+                response.raise_for_status()
     except httpx.InvalidURL as exc:
         return_value = _error_message("invalid URL", exc)
         return return_value
@@ -617,7 +801,7 @@ async def web_url_read(
         return_value = "Error: invalid URL: missing network location"
         return return_value
 
-    headers = _reader_headers()
+    headers = _reader_headers(parsed_url)
     fetched_content = await _fetch_url_content(url, headers)
     if isinstance(fetched_content, str):
         return_value = fetched_content
