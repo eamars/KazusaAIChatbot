@@ -9,11 +9,11 @@ dry-run artifact contracts for the idle self-cognition agency loop.
 
 The module supports two entry points:
 
-- The dry-run command reads caller-supplied case files, optionally invokes the
-  existing RAG2 supervisor once, invokes the existing shared L1/L2/L2d
-  cognition graph, runs selected L3 text/dialog only when L2d selects a
-  visible `speak` surface, and writes local artifacts under the requested
-  output directory.
+- The dry-run command reads caller-supplied case files, runs the same
+  resolver-backed persona cognition path, lets L2d decide whether any resolver
+  capability such as RAG2 evidence is needed, runs selected L3 text/dialog only
+  when L2d selects a visible `speak` surface, and writes local artifacts under
+  the requested output directory.
 - The service worker collects bounded visible/actionable source cases,
   binds `SelfCognitionDeliveryTarget` before cognition, builds the same route
   records in memory, invokes the existing dialog graph only for selected
@@ -101,9 +101,13 @@ validation, and adapter delivery are not paused by this predicate.
 
 ## Runtime Engine Budget
 
-- Non-RAG cases may invoke the shared cognition graph once.
-- RAG follow-up cases may invoke the RAG2 supervisor once before the shared
-  cognition graph. Internal RAG2 helper calls remain governed by RAG2.
+- Every case enters the bounded cognition resolver and each resolver cycle
+  invokes the shared L1/L2/L2d cognition graph.
+- If L2d selects `rag_evidence`, the resolver invokes the existing RAG2
+  supervisor as a capability observation and feeds the projected result into
+  the next cognition cycle. Internal RAG2 helper calls remain governed by RAG2.
+- If L2d does not select RAG, no deterministic self-cognition rule calls RAG on
+  its behalf.
 - If L2d selects visible `speak`, the selected L3 text handler may invoke the
   existing dialog graph once to render text.
 - When consolidation is applied without a selected visible `speak`, the runner

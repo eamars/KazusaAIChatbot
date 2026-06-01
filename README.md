@@ -41,10 +41,11 @@ At a high level, Kazusa provides:
 | Bounded live response path       | Queueing, relevance, the cognition resolver, selected evidence capabilities, action routing, and L3 surfaces are explicit stages with caps and inspectable payloads. |
 | Multi-horizon memory             | Recent chat, short-term conversation flow, retrieved evidence, durable memory, and scheduled commitments remain separate.          |
 | Internal monologue residue       | A short private residue lane carries bounded first-person reasons from completed episodes into the next L2a cognition pass.       |
-| RAG 2 evidence retrieval         | Helper agents retrieve user profiles, memories, conversation history, live facts, web evidence, and recall state.                  |
+| RAG 2 evidence retrieval         | Demand-driven helper agents retrieve user profiles, memories, conversation history, live facts, web evidence, and recall state.   |
 | Layered cognition                | Cognition decides stance, boundaries, judgment, style, action needs, and response goals before selected L3 surfaces render output. |
 | Background consolidation         | Completed episodes update durable memory, relationship state, Cache2 invalidation, images, and progress from text plus action/surface traces. |
 | Reflection outside chat          | Hourly, daily, and promoted reflection runs are stored as audit records and only promoted context can enter normal cognition.      |
+| Idle self-cognition              | Background source cases can enter the same resolver-backed persona path, with source-bound delivery and normal consolidation rules. |
 | Scheduled follow-through         | Accepted future promises can become validated scheduled tasks delivered later through registered adapters.                         |
 | Event logging observability      | Runtime, LLM, RAG, action routing, surfaces, reflection, self-cognition, dispatcher, consolidation, and DB operations emit sanitized operational events. |
 
@@ -57,6 +58,7 @@ At a high level, Kazusa provides:
 | Local model character lab            | Route-specific OpenAI-compatible model settings let weaker local models handle narrower, staged prompts.                         |
 | Memory and RAG experiments           | RAG 2, Cache2, scoped user memory, shared memory evolution, and conversation search are modular enough to inspect independently. |
 | Cross-platform adapter experiments   | New adapters only need to normalize platform events into the service contract and render returned messages.                      |
+| Idle cognition and reflection labs   | Self-cognition and reflection use bounded source packets and shared cognition boundaries without turning adapters into agents.   |
 | Promise and follow-through workflows | Accepted future commitments can be validated, persisted, deduplicated, and delivered later through registered adapters.          |
 
 ## Supported LLMs
@@ -103,66 +105,97 @@ commonly use LM Studio or another OpenAI-compatible end points.
 
 ## Architecture At A Glance
 
-```text
-Discord / NapCat QQ / Debug UI / future adapters
-        |
-        | typed ChatRequest + MessageEnvelope
-        v
-FastAPI brain service
-        |
-        v
-Process-local input queue
-  - collapse nearby follow-ups
-  - drop burst noise before RAG
-  - persist dropped user rows without replying
-        |
-        v
-Listen gate and perception
-  - hydrate reply context
-  - describe image inputs when needed
-  - decide whether Kazusa should answer
-        |
-        v
-Persona turn
-  - decontextualize the current message
-  - load short-term conversation progress
-  - load projected private residue for L2a only
-  - run the bounded cognition resolver
-  - reason through L1 -> L2 -> L2d every resolver cycle
-  - request RAG 2, web/current evidence, HIL, approval, or private
-    self-resolution only when cognition selects that capability
-  - run selected L3 text/action handlers
-  - emit surface outputs and action results
-        |
-        +-----------------------------> adapter bridge delivers visible surfaces
-        |
-        v
-Post-turn work
-  - persist assistant surface rows and delivery tracking
-  - record conversation progress
-  - record compact internal monologue residue outside visible response work
-  - consolidate durable memory and state from the episode trace
-  - invalidate stale Cache2 entries
-  - schedule accepted future promises
-  - run reflection and growth workers outside live chat
-        |
-        v
-MongoDB + model routes + direct web access + optional generic MCP tools + platform callbacks
+```mermaid
+flowchart TD
+    A[Discord, NapCat QQ, debug UI, future adapters]
+    B[FastAPI brain service]
+    C[Process-local chat queue]
+    D[Intake and typed episode assembly]
+    E{Service graph}
+    F[Media descriptor]
+    G[Relevance gate]
+    H[Conversation progress, promoted reflection context, L2a residue]
+    J[Adapter delivery and delivery receipts]
+    K[Post-turn memory, progress, residue, consolidation]
+    L[(MongoDB, model routes, Cache2, web/MCP runtimes)]
+    M[Scheduler, dispatcher, reflection, self-cognition workers]
+    N[No persona turn / empty ChatResponse]
+
+    A -->|ChatRequest + MessageEnvelope| B
+    B --> C
+    C -->|drop/collapse policy, persist inbound rows| D
+    D --> E
+    E -->|attachments| F
+    F --> G
+    E -->|text only| G
+    G -->|should respond| H
+    G -->|should not respond| N
+    H --> P0
+    P3 -->|visible text surfaces| J
+    P4 -->|private actions or no visible surface| K
+    J --> K
+    K --> L
+    M -->|self-cognition source cases| P1
+    M -->|scheduled delivery callbacks| J
+    M --> L
+
+    subgraph Persona["Persona turn"]
+        P0[Message decontextualizer]
+        P1[Bounded cognition resolver]
+        P2[Memory lifecycle specialist]
+        P3[L3 text surface and dialog]
+        P4[Private no-response/action trace]
+        P0 --> P1
+        P1 --> P2
+        P2 -->|speak action selected| P3
+        P2 -->|no visible surface| P4
+    end
+
+    subgraph Resolver["Resolver recurrence"]
+        R1[L1 affect and subtext]
+        R2[L2a consciousness + L2b boundary]
+        R3[L2c1 judgment + L2c2 social context]
+        R4[L2d action and capability selection]
+        R1 --> R2
+        R2 --> R3
+        R3 --> R4
+    end
+
+    subgraph Capabilities["Cognition-selected capabilities"]
+        C0[Deterministic capability executor]
+        C1[RAG 2 or web/current evidence]
+        C2[Human clarification or approval blocker]
+        C3[Private self-goal resolution]
+        C0 --> C1
+        C0 --> C2
+        C0 --> C3
+    end
+
+    P1 --> R1
+    R4 -->|capability requested| C0
+    C1 -->|observation| R1
+    C2 -->|observation or pending resume| R1
+    C3 -->|observation| R1
+    R4 -->|terminal action specs| P2
 ```
 
-Visible adapter delivery follows selected text surface outputs. Private action
-results, scheduled-action results, no-visible-output decisions, and private
-finalization still feed episode-trace consolidation without creating adapter
-sends.
+Kazusa's live response path is a cognition core, not a chatbot shell or a
+generic tool harness. Adapters normalize platform events into the typed service
+contract; the brain service owns queueing, identity, reply hydration, history,
+episode construction, and graph execution.
 
-The core boundary is deliberately narrow:
+The resolver preserves the same L1 -> L2 -> L2d cognition stack on every
+cycle. L2d may finish with selected action specs, or it may request one bounded
+capability observation such as RAG 2 evidence, web/current evidence, human
+clarification, approval preparation, or private self-goal resolution. The
+observation is projected into the next cognition cycle; evidence never speaks
+as persona by itself.
 
-```text
-adapter/debug client -> brain service -> queue/intake -> typed episode
--> cognition resolver/L2d -> optional RAG capability
--> selected L3 surfaces/action handlers
--> episode-trace consolidation -> scheduler/reflection
-```
+Selected visible text surfaces go back to adapters through `ChatResponse` and
+delivery receipts. Private action results, no-visible-output decisions, and
+surface traces can still feed post-turn progress, consolidation, Cache2
+invalidation, residue recording, scheduler state, reflection, and
+self-cognition without creating a platform send.
 
 ## Design Principles
 
@@ -210,6 +243,7 @@ cognition, and scheduling remain in the platform-neutral core.
 | Message envelope         | Typed inbound content, mentions, replies, attachments, addressees, broadcast state      | [Message Envelope ICD](src/kazusa_ai_chatbot/message_envelope/README.md)               |
 | Conversation progress    | Short-term episode state used by cognition to avoid loops and stale reopenings          | [Conversation Progress](src/kazusa_ai_chatbot/conversation_progress/README.md)         |
 | Internal monologue residue | Short-lived private first-person residue loaded only into L2a cognition               | [Internal Monologue Residue ICD](src/kazusa_ai_chatbot/internal_monologue_residue/README.md) |
+| Cognition resolver       | Bounded recurrence state, capability observations, HIL/pending resume, and cycle traces | [Cognition Resolver](src/kazusa_ai_chatbot/cognition_resolver/)                        |
 | RAG 2                    | Slot-driven helper-agent retrieval and Cache2 evidence projection                       | [RAG 2](src/kazusa_ai_chatbot/rag/README.md)                                           |
 | Cognition and dialog     | Character stance, boundaries, judgment, style, visual directives, and final wording     | [Cognition Nodes](src/kazusa_ai_chatbot/nodes/README.md)                              |
 | Action spec              | L2d action residues, capability registry, evaluator, results, surfaces, and traces      | [Action Spec](src/kazusa_ai_chatbot/action_spec/README.md)                            |
@@ -217,6 +251,7 @@ cognition, and scheduling remain in the platform-neutral core.
 | Database                 | MongoDB collection ownership, embeddings, indexes, public persistence helpers           | [Database ICD](src/kazusa_ai_chatbot/db/README.md)                                     |
 | Event logging            | Sanitized operational telemetry, status snapshots, statistics, and export contracts     | [Event Logging ICD](src/kazusa_ai_chatbot/event_logging/README.md)                     |
 | Dispatcher and scheduler | Validated delayed tool execution for accepted future promises                           | [Dispatcher](src/kazusa_ai_chatbot/dispatcher/README.md)                               |
+| Self-cognition           | Idle source collection, self-cognition episodes, route tracking, and source-bound delivery | [Self-Cognition](src/kazusa_ai_chatbot/self_cognition/README.md)                    |
 | Reflection cycle         | Background reflection runs, promotion gates, prompt-safe reflection context             | [Reflection Cycle ICD](src/kazusa_ai_chatbot/reflection_cycle/README.md)               |
 | Memory evolution         | Curated shared memory lifecycle, lineage, seed reset, promoted memory writes            | [Memory Evolution ICD](src/kazusa_ai_chatbot/memory_evolution/README.md)               |
 | Global character growth  | Slow promoted-trait drift from approved reflection memory                               | [Global Character Growth ICD](src/kazusa_ai_chatbot/global_character_growth/README.md) |
@@ -270,6 +305,7 @@ src/
   kazusa_ai_chatbot/
     brain_service/             Service API, graph, intake, health, post-turn glue
     message_envelope/          Typed adapter-to-brain message contract
+    cognition_resolver/        Bounded resolver loop, capability observations, HIL state
     nodes/                     Persona, cognition, and dialog stages
     action_spec/               Modality-neutral action contracts, registry, results
     consolidation/             Durable consolidation helpers, target routing, and ICD
@@ -279,6 +315,7 @@ src/
     db/                        MongoDB facade, schemas, collection owners
     event_logging/             Sanitized operational telemetry interface and ICD
     dispatcher/                Delayed task validation and adapter handoff
+    self_cognition/            Idle self-cognition triggers, tracking, and delivery
     reflection_cycle/          Background reflection and promotion
     memory_evolution/          Shared memory lifecycle and seed reset
     global_character_growth/   Slow promoted character-growth traits
@@ -309,9 +346,9 @@ project testing contract.
 
 Kazusa Cognitive Core is alpha-stage experimental infrastructure for a
 persistent digital character. The main runtime is usable as a local brain
-service with adapters, memory, retrieval, reflection, and scheduling, but some
-autonomous-contact surfaces intentionally remain permissioned preview contracts
-rather than production sends.
+service with adapters, memory, retrieval, self-cognition, reflection, and
+scheduling, but some autonomous-contact surfaces intentionally remain
+permissioned preview contracts rather than production sends.
 
 ## Documentation Index
 
@@ -327,8 +364,10 @@ rather than production sends.
 | [Action Spec](src/kazusa_ai_chatbot/action_spec/README.md)               | Modality-neutral action contracts and trace handoff               |
 | [Consolidation ICD](src/kazusa_ai_chatbot/consolidation/README.md)       | Durable target routing and write-intent validation                |
 | [Event Logging ICD](src/kazusa_ai_chatbot/event_logging/README.md)        | Sanitized telemetry interface, event taxonomy, and ops statistics |
+| [Cognition Resolver](src/kazusa_ai_chatbot/cognition_resolver/)           | Bounded resolver loop, capability observations, HIL, and traces   |
 | [RAG 2](src/kazusa_ai_chatbot/rag/README.md)                             | Retrieval architecture and evidence projection                    |
 | [Cognition Nodes](src/kazusa_ai_chatbot/nodes/README.md)                 | Layered cognition, dialog, and node-package design contracts      |
+| [Self-Cognition](src/kazusa_ai_chatbot/self_cognition/README.md)          | Idle cognition source collection, tracking, and delivery          |
 | [Development Plans Registry](development_plans/README.md)                | Active, archived, reference, and roadmap documents                |
 
 ## License

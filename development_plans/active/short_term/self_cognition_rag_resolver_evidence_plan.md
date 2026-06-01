@@ -6,11 +6,11 @@
 > user explicitly requested immediate execution and the current tool contract
 > does not expose sub-agent delegation as a safe default.
 
-**Goal:** Let resolver-enabled self-cognition/internal-thought turns use the
+**Goal:** Let resolver-backed self-cognition/internal-thought turns use the
 existing RAG2 evidence path when, and only when, the cognition core asks for
-`rag_evidence`. This closes the current integration gap where L2d can select
-evidence lookup but the RAG cognitive episode adapter rejects non-user-message
-episodes.
+`rag_evidence`. This completed the integration gap where L2d could select
+evidence lookup but the RAG cognitive episode adapter rejected
+non-user-message episodes.
 
 **Architecture:** Preserve the three-layer cognition core. L1, L2, and L2d own
 semantic judgment and action direction. Deterministic Python only validates a
@@ -27,13 +27,14 @@ prompt, pytest, real LLM diagnostic artifacts.
 ## Plan Metadata
 
 - Plan class: medium production integration
-- Status: in_progress
+- Status: completed
 - Source branch: `resolver-goal-poc`
 - Working branch: `resolver-self-cognition-rag`
+- Merged into: `resolver-goal-poc`
 - Owner: Codex
 - Created: 2026-06-01
 - Related plan:
-  - `development_plans/active/short_term/cognition_preserving_goal_resolver_production_plan.md`
+  - `development_plans/active/short_term/resolver_default_mainline_cutover_plan.md`
 - Related source:
   - `src/kazusa_ai_chatbot/rag/cognitive_episode_adapter.py`
   - `src/kazusa_ai_chatbot/cognition_resolver/capabilities.py`
@@ -62,7 +63,7 @@ prompt, pytest, real LLM diagnostic artifacts.
 - Do not force visible speech after self-cognition. If L2d produces a coherent
   no-speak decision, preserve it.
 
-## Current Gap
+## Original Gap
 
 The resolver can already execute `rag_evidence` and feed `rag_result` into the
 next cognition cycle:
@@ -77,16 +78,24 @@ L2d resolver_capability_requests
   -> next cognition cycle
 ```
 
-However, `build_text_chat_rag_request(...)` currently rejects every
+At plan start, `build_text_chat_rag_request(...)` rejected every
 `trigger_source` except `user_message`. A self-cognition/internal-thought turn
-can therefore select `rag_evidence` in principle, but the capability will fail
-before RAG2 sees the request.
+could therefore select `rag_evidence` in principle, but the capability failed
+before RAG2 saw the request.
 
-The L2d prompt also carries a softer risk: its current internal-thought
-guidance makes `self_goal_resolution` visually prominent. It does not form a
-hard lookup table, but it should be reorganized so `rag_evidence`,
+The L2d prompt also carried a softer risk: its internal-thought guidance made
+`self_goal_resolution` visually prominent. It did not form a hard lookup table,
+but it needed to be reorganized so `rag_evidence`,
 `self_goal_resolution`, ordinary action selection, future cognition, and empty
 action are peer choices based on the actual cognitive gap.
+
+## Completed Outcome
+
+The branch implementation extended the existing RAG cognitive episode adapter
+for internal-thought/self-cognition episodes, preserved user-message RAG
+projection, and kept RAG selection cognition-owned. Real LLM evidence showed
+one self-cognition case selecting `rag_evidence` and one no-RAG case opting out
+with a coherent cognition-owned explanation.
 
 ## Target Behavior
 
@@ -212,13 +221,13 @@ inspected before claiming pass.
 
 ## Independent Review Checklist
 
-- [ ] No deterministic semantic lookup rule was introduced.
-- [ ] No new RAG or DB search path was introduced.
-- [ ] Prompt changes remain generic and do not mention validation cases.
-- [ ] User-message RAG request shape is unchanged.
-- [ ] Internal-thought RAG request exposes only fields RAG2 needs.
-- [ ] No LLM stage is asked to copy UUIDs or durable raw ids.
-- [ ] Real LLM evidence is human-readable and includes the selected resolver
+- [x] No deterministic semantic lookup rule was introduced.
+- [x] No new RAG or DB search path was introduced.
+- [x] Prompt changes remain generic and do not mention validation cases.
+- [x] User-message RAG request shape is unchanged.
+- [x] Internal-thought RAG request exposes only fields RAG2 needs.
+- [x] No LLM stage is asked to copy UUIDs or durable raw ids.
+- [x] Real LLM evidence is human-readable and includes the selected resolver
       path, key L2d output, and final judgment.
 
 ## Execution Evidence

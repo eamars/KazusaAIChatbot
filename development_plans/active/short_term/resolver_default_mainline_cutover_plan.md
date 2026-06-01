@@ -27,8 +27,8 @@ This plan supersedes
 `development_plans/archive/superseded/cognition_preserving_goal_resolver_production_plan.md`.
 
 The superseded plan implemented the resolver behind
-`COGNITION_RESOLVER_ENABLED=false` by default. That is no longer the target.
-The confirmed product decision is:
+`COGNITION_RESOLVER_ENABLED=false` by default. That target was replaced by the
+confirmed product decision:
 
 - the resolver is now the baseline architecture on this branch;
 - the old mandatory RAG-first live persona path is not preserved;
@@ -36,16 +36,17 @@ The confirmed product decision is:
 - RAG remains available only as a cognition-selected resolver capability;
 - all semantic action and evidence decisions remain inside L1 -> L2 -> L2d.
 
-Current code still has the old compatibility split:
+Current branch state on `resolver-goal-poc`:
 
-```text
-if COGNITION_RESOLVER_ENABLED:
-  stage_0_msg_decontexualizer -> stage_1_goal_resolver
-else:
-  stage_0_msg_decontexualizer -> stage_1_research -> stage_2_cognition
-```
+- the resolver-only live persona graph is implemented;
+- `COGNITION_RESOLVER_ENABLED` and the legacy live `stage_1_research` graph
+  node are removed from production code and live docs;
+- RAG remains available through the resolver-selected
+  `run_rag_evidence_for_persona_state(...)` helper;
+- full deterministic regression passed;
+- main merge remains blocked by Stage 8 until explicit user instruction.
 
-This plan removes that split and makes the live graph:
+The live graph is:
 
 ```text
 stage_0_msg_decontexualizer
@@ -831,6 +832,40 @@ the residual risk.
 - Merge-readiness judgment: Stage 7.5 is complete for the branch. The branch is
   not merged to `main`; Stage 8 remains blocked until explicit user
   instruction.
+
+### Main Baseline Comparison And Documentation Cleanup
+
+- After Stage 7.5, the branch was compared against `main` using 20 recent
+  conversation-derived cases: 15 group-chat cases and 5 private-chat cases.
+- Human-readable comparison artifact:
+  `test_artifacts/resolver_merge_eval_20260601/main_vs_resolver_comparison_20260601.md`
+- Raw artifacts:
+  - `test_artifacts/resolver_merge_eval_20260601/main_comparison_raw_results.json`
+  - `test_artifacts/resolver_merge_eval_20260601/current_post_cleanup_full_raw_results.json`
+- Observed result:
+  - `main`: visible output 18/20, average duration 86.98 seconds, average
+    visible output 63.1 characters.
+  - `resolver-goal-poc`: visible output 16/20, average duration 68.03 seconds,
+    average visible output 124.9 characters.
+  - The resolver branch did not speak more often overall; when it spoke, output
+    tended to be more complete because `resolver_goal_progress`, resolver
+    observations, and final response requirements gave L3/dialog a clearer
+    delivery contract.
+- Quality criterion agreed during review: output passes when it makes sense as
+  believable character behavior. It is a bug if an internal selected `speak`
+  action produces no visible dialog.
+- Documentation cleanup after this comparison:
+  - `README.md` and `README_CN.md` now present only the current resolver-first
+    architecture, with no optional-resolver or transition framing.
+  - The `Architecture At A Glance` / `高层架构` sections were rewritten by an
+    isolated subagent from source-code inspection and now use
+    GitHub-renderable Mermaid diagrams.
+  - A second isolated subagent reviewed the surrounding README sections for
+    project-level consistency in both English and native Chinese.
+  - `src/kazusa_ai_chatbot/self_cognition/README.md` now describes
+    self-cognition as entering the bounded resolver, with RAG2 invoked only
+    when L2d selects `rag_evidence`.
+  - No production code changed during this documentation cleanup.
 
 ## Risks
 
