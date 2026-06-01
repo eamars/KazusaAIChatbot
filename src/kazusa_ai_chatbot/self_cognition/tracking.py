@@ -1,4 +1,4 @@
-"""Tracking artifacts and route ownership for self-cognition dry runs."""
+"""Tracking records and route ownership for self-cognition runs."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Any
 from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
 from kazusa_ai_chatbot.self_cognition import models
 
-DRY_RUN_HANDOFF_ENABLED = False
+PRODUCTION_HANDOFF_ENABLED = False
 
 
 def build_idempotency_key(
@@ -47,13 +47,13 @@ def build_idempotency_key(
 
 
 def build_trigger_record(case: models.SelfCognitionCase) -> dict[str, Any]:
-    """Build the local trigger artifact explaining why the run exists.
+    """Build the local trigger record explaining why the run exists.
 
     Args:
-        case: External dry-run case.
+        case: Self-cognition source case.
 
     Returns:
-        Trigger record for local artifact storage.
+        Trigger record for local tracking.
     """
 
     target_scope = _case_target_scope(case)
@@ -92,16 +92,16 @@ def build_run_record(
     selected_route: str,
     budget: dict[str, int],
 ) -> dict[str, Any]:
-    """Build the run artifact recording the selected route.
+    """Build the run record for the selected route.
 
     Args:
-        case: External dry-run case.
-        trigger_record: Trigger artifact returned by `build_trigger_record`.
+        case: Self-cognition source case.
+        trigger_record: Trigger record returned by `build_trigger_record`.
         selected_route: Route selected by cognition and deterministic tracking.
-        budget: Local dry-run budget counters.
+        budget: Local budget counters.
 
     Returns:
-        Run record for local artifact storage.
+        Run record for local tracking.
     """
 
     output_mode = "scheduled_action_request"
@@ -133,13 +133,13 @@ def build_route_effect(
     effect_summary: str,
     next_topic: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build the route-effect artifact for the selected consumer.
+    """Build the route-effect record for the selected consumer.
 
     Args:
-        run_record: Run artifact returned by `build_run_record`.
+        run_record: Run record returned by `build_run_record`.
         route: Selected route name.
-        consumer: Dry-run consumer that would receive the effect.
-        effect_summary: Human-readable dry-run effect summary.
+        consumer: Component that receives the tracking effect.
+        effect_summary: Human-readable effect summary.
         next_topic: Optional bounded follow-up topic descriptor.
 
     Returns:
@@ -213,7 +213,7 @@ def classify_route(
     """Derive the self-cognition route without forcing social contact.
 
     Args:
-        case: External dry-run case.
+        case: Self-cognition source case.
         cognition_output: Output returned by the shared cognition graph.
         action_attempt: Optional local action attempt used for duplicate state.
 
@@ -255,12 +255,12 @@ def build_action_attempt(
     """Build or suppress a local action attempt for an outward route.
 
     Args:
-        case: External dry-run case.
-        trigger_record: Trigger artifact returned by `build_trigger_record`.
+        case: Self-cognition source case.
+        trigger_record: Trigger record returned by `build_trigger_record`.
         existing_attempts: Local prior attempts supplied by the case fixture.
 
     Returns:
-        Action-attempt artifact with candidate, held, duplicate, or closed
+        Action-attempt record with candidate, held, duplicate, or closed
         status.
     """
 
@@ -309,7 +309,7 @@ def build_action_candidate(
     """Build a send-message candidate for a non-duplicate action attempt.
 
     Args:
-        case: External dry-run case.
+        case: Self-cognition source case.
         action_attempt: Action attempt returned by `build_action_attempt`.
         text: Candidate message text emitted by the cognition output.
         mention_target_user: Dialog-owned semantic request to address the
@@ -337,7 +337,7 @@ def build_action_candidate(
         "text": clean_text,
         "execute_at": None,
         "dispatch_shape": models.ACTION_KIND_SEND_MESSAGE,
-        "production_handoff": DRY_RUN_HANDOFF_ENABLED,
+        "production_handoff": PRODUCTION_HANDOFF_ENABLED,
     }
     delivery_mentions = _delivery_mentions_for_action(
         case,

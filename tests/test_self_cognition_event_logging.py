@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -13,7 +12,7 @@ import pytest
 from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
 import kazusa_ai_chatbot.event_logging.recording as recording_module
-from kazusa_ai_chatbot.self_cognition import models, runner, worker
+from kazusa_ai_chatbot.self_cognition import models, worker
 
 
 def _target_scope() -> dict[str, str | None]:
@@ -92,11 +91,9 @@ def _action_cognition_output() -> dict[str, Any]:
 
 def _case_runner_with_tracking(
     case: dict[str, Any],
-    output_dir: Path,
 ) -> dict[str, Any]:
     """Build records that resemble a completed runner case."""
 
-    del output_dir
     trigger_record = {
         "trigger_id": "self_cognition_trigger:promise-001",
         "trigger_kind": case["trigger_kind"],
@@ -154,41 +151,10 @@ def _case_runner_with_tracking(
             "scheduled_event_count": 0,
             "cache_evicted_count": 1,
             "origin_trigger_source": "internal_thought",
-            "origin_episode_id": "self_cognition:dry_run:promise-001",
+            "origin_episode_id": "self_cognition:tracking:promise-001",
         },
     }
     return payloads
-
-
-@pytest.mark.asyncio
-async def test_runner_event_log_mirror_omits_candidate_text(
-    monkeypatch,
-    tmp_path,
-) -> None:
-    """Opt-in runner mirroring should store metadata but not candidate text."""
-
-    record_self_cognition_event = AsyncMock()
-    monkeypatch.setattr(
-        runner.event_logging,
-        "record_self_cognition_event",
-        record_self_cognition_event,
-    )
-
-    await runner.run_self_cognition_case_async(
-        _commitment_case(),
-        tmp_path,
-        cognition_client=lambda state: _action_cognition_output(),
-        dialog_client=lambda state: {"final_dialog": ["Checking in now."]},
-        event_log_mirror=True,
-    )
-
-    record_self_cognition_event.assert_awaited_once()
-    kwargs = record_self_cognition_event.await_args.kwargs
-    assert kwargs["component"] == "self_cognition.runner"
-    assert kwargs["case_id"] == "commitment:promise-001"
-    assert kwargs["selected_route"] == models.ROUTE_ACTION_CANDIDATE
-    assert kwargs["dispatch_status"] == "not_requested"
-    assert "Checking in now." not in json.dumps(kwargs, ensure_ascii=False)
 
 
 @pytest.mark.asyncio
@@ -236,7 +202,6 @@ async def test_worker_records_target_binding_failure_without_dispatch_text(
     run_case = AsyncMock()
 
     result = await worker.run_self_cognition_worker_tick(
-        output_root=tmp_path,
         now=datetime(2026, 5, 13, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -286,7 +251,6 @@ async def test_worker_records_empty_source_collection_reason(
         return []
 
     result = await worker.run_self_cognition_worker_tick(
-        output_root=tmp_path,
         now=datetime(2026, 5, 13, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -329,7 +293,6 @@ async def test_worker_synthesizes_missing_target_binding_failure_metadata(
         return [failed_case]
 
     await worker.run_self_cognition_worker_tick(
-        output_root=tmp_path,
         now=datetime(2026, 5, 13, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -445,7 +408,7 @@ async def test_self_cognition_event_logger_sanitizes_consolidation_outcome(
             "scheduled_event_count": 0,
             "cache_evicted_count": 1,
             "origin_trigger_source": "internal_thought",
-            "origin_episode_id": "self_cognition:dry_run:promise-001",
+            "origin_episode_id": "self_cognition:tracking:promise-001",
             "source_packet_text": "Please check back after the appointment.",
         },
     )
@@ -459,7 +422,7 @@ async def test_self_cognition_event_logger_sanitizes_consolidation_outcome(
         "scheduled_event_count": 0,
         "cache_evicted_count": 1,
         "origin_trigger_source": "internal_thought",
-        "origin_episode_id": "self_cognition:dry_run:promise-001",
+        "origin_episode_id": "self_cognition:tracking:promise-001",
     }
     serialized = json.dumps(captured, ensure_ascii=False, sort_keys=True)
     assert "Internal consolidation note" not in serialized

@@ -584,10 +584,10 @@ async def test_action_initializer_accepts_multiple_valid_action_specs(
 
 
 @pytest.mark.asyncio
-async def test_action_initializer_recovers_misplaced_resolver_request(
+async def test_action_initializer_drops_misplaced_resolver_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Resolver capability names in action rows should stay resolver work."""
+    """Resolver capability names in action rows are contract drift."""
 
     fake_llm = _FakeLLM(json.dumps({
         "action_requests": [
@@ -604,22 +604,14 @@ async def test_action_initializer_recovers_misplaced_resolver_request(
     result = await l2d_module.call_action_initializer(_state())
 
     assert result["action_specs"] == []
-    assert result["resolver_capability_requests"] == [
-        {
-            "schema_version": "resolver_capability_request.v1",
-            "capability_kind": "web_evidence",
-            "objective": "检索奥克兰 CBD 预算内晚间计划需要的当前事实。",
-            "reason": "当前回答还缺少外部证据。",
-            "priority": "now",
-        }
-    ]
+    assert result["resolver_capability_requests"] == []
 
 
 @pytest.mark.asyncio
-async def test_action_initializer_recovers_misplaced_terminal_action(
+async def test_action_initializer_drops_misplaced_terminal_action(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Terminal action names in resolver rows should still reach L3."""
+    """Terminal action names in resolver rows are contract drift."""
 
     fake_llm = _FakeLLM(json.dumps({
         "resolver_capability_requests": [
@@ -638,14 +630,7 @@ async def test_action_initializer_recovers_misplaced_terminal_action(
     result = await l2d_module.call_action_initializer(_state())
 
     assert result["resolver_capability_requests"] == []
-    assert [spec["kind"] for spec in result["action_specs"]] == ["speak"]
-    surface_requirements = result["action_specs"][0]["params"][
-        "surface_requirements"
-    ]
-    assert surface_requirements == {
-        "decision": "visible_reply",
-        "detail": "回应当前直接提问。",
-    }
+    assert result["action_specs"] == []
 
 
 @pytest.mark.asyncio

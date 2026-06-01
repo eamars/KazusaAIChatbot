@@ -297,15 +297,10 @@ def test_delivery_target_never_enters_llm_facing_payloads() -> None:
             }
         ],
         "visible_context": [],
-        "rag_query": "Find the open follow-up.",
     }
 
     source_packet = projection.build_source_packet(case)
-    rag_request = projection.build_rag_request(case)
-    serialized = json.dumps(
-        {"source_packet": source_packet, "rag_request": rag_request},
-        ensure_ascii=False,
-    )
+    serialized = json.dumps({"source_packet": source_packet}, ensure_ascii=False)
 
     assert "delivery_target" not in serialized
     assert "self_cognition_delivery_target.v1" not in serialized

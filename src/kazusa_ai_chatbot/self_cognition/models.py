@@ -1,4 +1,4 @@
-"""Typed constants for self-cognition dry-run artifacts."""
+"""Typed constants for self-cognition tracking records."""
 
 from __future__ import annotations
 
@@ -77,9 +77,7 @@ ACTION_ATTEMPT_SUPPRESSING_STATUSES = frozenset(
 
 ARTIFACT_TRIGGER_RECORD = "self_cognition_trigger_record.json"
 ARTIFACT_RUN_RECORD = "self_cognition_run_record.json"
-ARTIFACT_RAG_REQUEST = "self_cognition_rag_request.json"
-ARTIFACT_RAG_OUTPUT = "self_cognition_rag_output.json"
-ARTIFACT_COGNITION_INPUT = "self_cognition_cognition_input_after_rag.json"
+ARTIFACT_COGNITION_INPUT = "self_cognition_cognition_input.json"
 ARTIFACT_COGNITION_OUTPUT = "self_cognition_cognition_output.json"
 ARTIFACT_ROUTE_EFFECT = "self_cognition_route_effect.json"
 ARTIFACT_ACTION_ATTEMPT = "self_cognition_action_attempt.json"
@@ -91,8 +89,6 @@ TRACKING_ARTIFACT_NAMES = frozenset(
     (
         ARTIFACT_TRIGGER_RECORD,
         ARTIFACT_RUN_RECORD,
-        ARTIFACT_RAG_REQUEST,
-        ARTIFACT_RAG_OUTPUT,
         ARTIFACT_COGNITION_INPUT,
         ARTIFACT_COGNITION_OUTPUT,
         ARTIFACT_ROUTE_EFFECT,
@@ -112,10 +108,12 @@ RAG_SUPERVISOR_INVOCATION_LIMIT = 1
 COGNITION_CALL_LIMIT = 1
 DIALOG_RENDER_CALL_LIMIT = 1
 TOPIC_LIMIT = 1
-DEFAULT_DRY_RUN_AFFINITY = 500
+DEFAULT_SELF_COGNITION_AFFINITY = 500
 STABLE_ID_DIGEST_PREFIX_LENGTH = 24
 SOURCE_VISIBLE_CONTEXT_LIMIT = 6
-DRY_RUN_ASSISTANT_GLOBAL_USER_ID = "00000000-0000-4000-8000-000000000001"
+DEFAULT_SELF_COGNITION_ASSISTANT_GLOBAL_USER_ID = (
+    "00000000-0000-4000-8000-000000000001"
+)
 EMPTY_ROUTE_EFFECT_NEXT_TOPIC = None
 
 SELF_COGNITION_INPUT_TEXT = (
@@ -190,7 +188,7 @@ class SelfCognitionTargetBindingFailure(TypedDict):
 
 
 class SelfCognitionSourceRef(TypedDict, total=False):
-    """Reference to visible or actionable evidence for one dry-run case."""
+    """Reference to visible or actionable evidence for one source case."""
 
     source_kind: str
     source_id: str
@@ -199,7 +197,7 @@ class SelfCognitionSourceRef(TypedDict, total=False):
 
 
 class SelfCognitionBudget(TypedDict):
-    """Local dry-run budget counters recorded in run artifacts."""
+    """Local budget counters recorded in self-cognition run records."""
 
     rag_calls: int
     cognition_calls: int
@@ -208,7 +206,7 @@ class SelfCognitionBudget(TypedDict):
 
 
 class SelfCognitionCase(TypedDict, total=False):
-    """External case-file shape accepted by the self-cognition runner."""
+    """Source-case shape accepted by the self-cognition runner."""
 
     case_name: str
     case_id: str
@@ -225,7 +223,6 @@ class SelfCognitionCase(TypedDict, total=False):
     current_mood: str
     global_vibe: str
     reflection_modifier: dict[str, Any]
-    rag_query: str
     existing_attempts: list[dict[str, Any]]
     character_profile: dict[str, Any]
     user_profile: dict[str, Any]
@@ -259,4 +256,3 @@ class SourcePacket(TypedDict):
     current_mood: NotRequired[str]
     global_vibe: NotRequired[str]
     reflection_modifier: NotRequired[dict[str, Any]]
-    rag_evidence: NotRequired[dict[str, Any]]

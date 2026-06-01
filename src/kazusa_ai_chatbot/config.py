@@ -485,18 +485,10 @@ SELF_COGNITION_MAX_CASES_PER_TICK = _positive_int_from_env(
     "SELF_COGNITION_MAX_CASES_PER_TICK",
     "3",
 )
-SELF_COGNITION_TRACKING_DIR = _non_empty_string_from_env(
-    "SELF_COGNITION_TRACKING_DIR",
-    "self_cognition_runs",
-)
 # Source packets enter cognition as internal-monologue percepts, so the default
 # budget stays aligned with the existing internal-thought cognition boundary.
 SELF_COGNITION_SOURCE_PACKET_CHAR_LIMIT = _positive_int_from_env(
     "SELF_COGNITION_SOURCE_PACKET_CHAR_LIMIT",
-    "4000",
-)
-SELF_COGNITION_RAG_EVIDENCE_CHAR_LIMIT = _positive_int_from_env(
-    "SELF_COGNITION_RAG_EVIDENCE_CHAR_LIMIT",
     "4000",
 )
 SELF_COGNITION_TRIGGER_ACTIVE_COMMITMENT_ENABLED = _bool_from_env(

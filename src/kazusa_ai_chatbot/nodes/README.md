@@ -163,7 +163,7 @@ Current supported cognition prompt variants are selected by
 | --- | --- | --- | --- |
 | `user_message` | `dialog_text` plus optional `image_observation` and `audio_observation` | `visible_reply`, `think_only`, `silent` | Normal live chat. |
 | `reflection_signal` | `reflection_artifact` | `think_only`, `preview`, `silent` | Reflection dry-run cognition. |
-| `internal_thought` | `internal_monologue` | `think_only`, `preview`, `silent` | Legacy prompt-variant label used by current self-cognition dry-run/worker paths. Architecturally this is a self-cognition trigger, not a downstream action consumer. |
+| `internal_thought` | `internal_monologue` | `think_only`, `preview`, `silent` | Legacy prompt-variant label used by current self-cognition worker paths. Architecturally this is a self-cognition trigger, not a downstream action consumer. |
 
 The selector validates the episode and exposes only prompt-safe fields:
 
@@ -939,7 +939,7 @@ Keep these invariants when changing the node package:
   results, or private finalization make the episode consolidatable.
 - Consolidation consumes prompt-safe episode-trace evidence; it must not
   execute actions, dispatch, schedule, or trigger cognition.
-- Reflection and self-cognition dry runs reuse the shared cognition graph, but
+- Reflection and self-cognition worker runs reuse the shared cognition graph, but
   raw reflection output and private thought residue do not automatically enter
   normal chat.
 

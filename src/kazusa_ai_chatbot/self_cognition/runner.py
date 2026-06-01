@@ -1,4 +1,4 @@
-"""Orchestrate one self-cognition dry-run case."""
+"""Orchestrate one self-cognition tracking case."""
 
 from __future__ import annotations
 
@@ -6,10 +6,8 @@ import asyncio
 import inspect
 import json
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
-from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.action_spec.attempt_ledger import upsert_action_attempt
 from kazusa_ai_chatbot.action_spec.execution import execute_action_specs_for_trace
 from kazusa_ai_chatbot.action_spec.registry import (
@@ -32,6 +30,10 @@ from kazusa_ai_chatbot.cognition_resolver.capabilities import (
     execute_resolver_capability_request,
 )
 from kazusa_ai_chatbot.cognition_resolver.loop import call_cognition_resolver_loop
+from kazusa_ai_chatbot.cognition_resolver.pending import (
+    apply_pending_resolution,
+    upsert_pending_resume,
+)
 from kazusa_ai_chatbot.nodes.dialog_agent import (
     DIALOG_USAGE_MODE_SELF_COGNITION_ACTION_CANDIDATE,
     StateContractError,
@@ -54,16 +56,10 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
 from kazusa_ai_chatbot.nodes.persona_supervisor2_memory_lifecycle import (
     call_memory_lifecycle_update_handler,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_projection import (
-    project_known_facts,
-)
-from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_supervisor2 import (
-    call_rag_supervisor,
-)
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
     empty_user_memory_context,
 )
-from kazusa_ai_chatbot.self_cognition import artifacts, models, projection, tracking
+from kazusa_ai_chatbot.self_cognition import models, projection, tracking
 from kazusa_ai_chatbot.time_boundary import (
     build_turn_clock_from_storage_utc,
     format_storage_utc_for_llm,
@@ -71,74 +67,17 @@ from kazusa_ai_chatbot.time_boundary import (
 
 
 SelfCognitionClient = Callable[[dict[str, Any]], Any]
-RagClient = Callable[..., Any]
 ConsolidationBuildResult = tuple[dict[str, Any], dict[str, Any], bool]
-RAG_BACKED_CASE_NAMES = frozenset(
-    (
-        models.CASE_TOPIC_RAG_FOLLOWUP,
-        models.CASE_SCHEDULED_FUTURE_COGNITION,
-    )
-)
 SELF_COGNITION_PRIVATE_ACTION_KINDS = frozenset(
     (
         APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
         TRIGGER_FUTURE_COGNITION_CAPABILITY,
     )
 )
-DRY_RUN_EVENT_DISPATCH_STATUS = "not_requested"
-
-
-def run_self_cognition_case(
-    case: models.SelfCognitionCase,
-    output_dir: str | Path,
-    rag_client: RagClient | None = None,
-    cognition_client: SelfCognitionClient | None = None,
-    dialog_client: SelfCognitionClient | None = None,
-    consolidation_client: SelfCognitionClient | None = None,
-    *,
-    apply_consolidation: bool = False,
-    event_log_mirror: bool = False,
-    execute_private_actions: bool = False,
-) -> dict[str, str]:
-    """Run one dry-run case and write local tracking artifacts.
-
-    Args:
-        case: External self-cognition case file data.
-        output_dir: Local output directory for artifacts.
-        rag_client: Optional test seam for the RAG2 supervisor.
-        cognition_client: Optional test seam for the shared cognition graph.
-        dialog_client: Optional test seam for selected visible `speak` render.
-        consolidation_client: Optional test seam for the shared consolidator.
-        apply_consolidation: When true, call the shared consolidation seam
-            with already-rendered dialog output when present.
-        event_log_mirror: When true, mirror sanitized artifact metadata through
-            the public event-logging interface.
-        execute_private_actions: When true, execute selected private action
-            specs through their deterministic owners.
-
-    Returns:
-        Artifact names mapped to written paths.
-    """
-
-    written_paths = asyncio.run(
-        run_self_cognition_case_async(
-            case,
-            output_dir,
-            rag_client=rag_client,
-            cognition_client=cognition_client,
-            dialog_client=dialog_client,
-            consolidation_client=consolidation_client,
-            apply_consolidation=apply_consolidation,
-            event_log_mirror=event_log_mirror,
-            execute_private_actions=execute_private_actions,
-        )
-    )
-    return written_paths
 
 
 def build_self_cognition_case_artifacts(
     case: models.SelfCognitionCase,
-    rag_client: RagClient | None = None,
     cognition_client: SelfCognitionClient | None = None,
     dialog_client: SelfCognitionClient | None = None,
     consolidation_client: SelfCognitionClient | None = None,
@@ -149,8 +88,7 @@ def build_self_cognition_case_artifacts(
     """Build one self-cognition case's tracking records in memory.
 
     Args:
-        case: External self-cognition case data.
-        rag_client: Optional test seam for the RAG2 supervisor.
+        case: Self-cognition source data.
         cognition_client: Optional test seam for the shared cognition graph.
         dialog_client: Optional test seam for selected visible `speak` render.
         consolidation_client: Optional test seam for the shared consolidator.
@@ -166,7 +104,6 @@ def build_self_cognition_case_artifacts(
     artifact_payloads = asyncio.run(
         build_self_cognition_case_artifacts_async(
             case,
-            rag_client=rag_client,
             cognition_client=cognition_client,
             dialog_client=dialog_client,
             consolidation_client=consolidation_client,
@@ -177,64 +114,8 @@ def build_self_cognition_case_artifacts(
     return artifact_payloads
 
 
-async def run_self_cognition_case_async(
-    case: models.SelfCognitionCase,
-    output_dir: str | Path,
-    rag_client: RagClient | None = None,
-    cognition_client: SelfCognitionClient | None = None,
-    dialog_client: SelfCognitionClient | None = None,
-    consolidation_client: SelfCognitionClient | None = None,
-    *,
-    apply_consolidation: bool = False,
-    event_log_mirror: bool = False,
-    execute_private_actions: bool = False,
-) -> dict[str, str]:
-    """Async implementation for one self-cognition dry-run case.
-
-    Args:
-        case: External self-cognition case file data.
-        output_dir: Local output directory for artifacts.
-        rag_client: Optional test seam for the RAG2 supervisor.
-        cognition_client: Optional test seam for the shared cognition graph.
-        dialog_client: Optional test seam for selected visible `speak` render.
-        consolidation_client: Optional test seam for the shared consolidator.
-        apply_consolidation: When true, call the shared consolidation seam
-            with already-rendered dialog output when present.
-        event_log_mirror: When true, mirror sanitized artifact metadata through
-            the public event-logging interface.
-        execute_private_actions: When true, execute selected private action
-            specs through their deterministic owners.
-
-    Returns:
-        Artifact names mapped to written paths.
-    """
-
-    artifact_payloads = await build_self_cognition_case_artifacts_async(
-        case,
-        rag_client=rag_client,
-        cognition_client=cognition_client,
-        dialog_client=dialog_client,
-        consolidation_client=consolidation_client,
-        apply_consolidation=apply_consolidation,
-        execute_private_actions=execute_private_actions,
-    )
-    written_paths = artifacts.write_tracking_artifacts(
-        output_dir,
-        artifact_payloads,
-    )
-    if event_log_mirror:
-        await _record_self_cognition_event_from_artifacts(
-            case=case,
-            artifact_payloads=artifact_payloads,
-            dispatch_status=DRY_RUN_EVENT_DISPATCH_STATUS,
-            component="self_cognition.runner",
-        )
-    return written_paths
-
-
 async def build_self_cognition_case_artifacts_async(
     case: models.SelfCognitionCase,
-    rag_client: RagClient | None = None,
     cognition_client: SelfCognitionClient | None = None,
     dialog_client: SelfCognitionClient | None = None,
     consolidation_client: SelfCognitionClient | None = None,
@@ -245,8 +126,7 @@ async def build_self_cognition_case_artifacts_async(
     """Async implementation for building self-cognition records in memory.
 
     Args:
-        case: External self-cognition case data.
-        rag_client: Optional test seam for the RAG2 supervisor.
+        case: Self-cognition source data.
         cognition_client: Optional test seam for the shared cognition graph.
         dialog_client: Optional test seam for selected visible `speak` render.
         consolidation_client: Optional test seam for the shared consolidator.
@@ -284,22 +164,7 @@ async def build_self_cognition_case_artifacts_async(
         )
         return artifact_payloads
 
-    rag_output: dict[str, Any] | None = None
-    rag_calls = 0
-    if case_name in RAG_BACKED_CASE_NAMES:
-        rag_request = projection.build_rag_request(case)
-        active_rag_client = rag_client or _default_rag_client
-        rag_output = await _call_maybe_async(
-            active_rag_client,
-            rag_request["query"],
-            character_name=_character_name(case),
-            context=rag_request["context"],
-        )
-        rag_calls = models.RAG_SUPERVISOR_INVOCATION_LIMIT
-        artifact_payloads[models.ARTIFACT_RAG_REQUEST] = rag_request
-        artifact_payloads[models.ARTIFACT_RAG_OUTPUT] = rag_output
-
-    source_packet = projection.build_source_packet(case, rag_output=rag_output)
+    source_packet = projection.build_source_packet(case)
     rendered_packet = projection.render_source_packet_text(source_packet)
     cognition_input = {
         "source_packet": source_packet,
@@ -312,7 +177,6 @@ async def build_self_cognition_case_artifacts_async(
     cognition_state = _build_cognition_state(
         case,
         rendered_packet,
-        rag_output=rag_output,
         residue_context=residue_context,
     )
     cognition_output = await _call_maybe_async(
@@ -402,7 +266,7 @@ async def build_self_cognition_case_artifacts_async(
         )
 
     budget = _budget(
-        rag_calls=rag_calls,
+        rag_calls=_resolver_evidence_call_count(cognition_output),
         cognition_calls=1,
         dialog_calls=dialog_calls,
     )
@@ -423,49 +287,6 @@ async def build_self_cognition_case_artifacts_async(
         action_candidate=action_candidate,
     )
     return artifact_payloads
-
-
-async def _record_self_cognition_event_from_artifacts(
-    *,
-    case: models.SelfCognitionCase,
-    artifact_payloads: dict[str, Any],
-    dispatch_status: str,
-    component: str,
-) -> None:
-    """Mirror built tracking artifacts into the event log without raw text."""
-
-    trigger_record = artifact_payloads.get(models.ARTIFACT_TRIGGER_RECORD)
-    run_record = artifact_payloads.get(models.ARTIFACT_RUN_RECORD)
-    action_attempt = artifact_payloads.get(models.ARTIFACT_ACTION_ATTEMPT)
-    if not isinstance(trigger_record, dict) or not isinstance(run_record, dict):
-        return
-    if not isinstance(action_attempt, dict):
-        action_attempt = {}
-    consolidation_outcome = artifact_payloads.get(
-        models.ARTIFACT_CONSOLIDATION_OUTCOME
-    )
-    if not isinstance(consolidation_outcome, dict):
-        consolidation_outcome = None
-    budget = run_record["budget"]
-    await event_logging.record_self_cognition_event(
-        component=component,
-        case_id=_string_field(case, "case_id"),
-        trigger_kind=str(trigger_record["trigger_kind"]),
-        selected_route=str(run_record["selected_route"]),
-        output_mode=str(run_record["output_mode"]),
-        budget={
-            "rag_calls": int(budget["rag_calls"]),
-            "cognition_calls": int(budget["cognition_calls"]),
-            "dialog_calls": int(budget["dialog_calls"]),
-            "topic_limit": int(budget["topic_limit"]),
-        },
-        dispatch_status=dispatch_status,
-        status=str(run_record["status"]),
-        trigger_id=str(trigger_record["trigger_id"]),
-        run_id=str(run_record["run_id"]),
-        attempt_id=str(action_attempt.get("attempt_id") or ""),
-        consolidation_outcome=consolidation_outcome,
-    )
 
 
 async def _load_residue_context_for_case(
@@ -496,33 +317,8 @@ async def _load_residue_context_for_case(
     return residue_context
 
 
-async def _default_rag_client(
-    query: str,
-    *,
-    character_name: str,
-    context: dict[str, Any],
-) -> dict[str, Any]:
-    """Call the existing RAG2 supervisor for one bounded query.
-
-    Args:
-        query: Natural-language retrieval question.
-        character_name: Runtime character name.
-        context: Platform and channel context for RAG.
-
-    Returns:
-        RAG2 supervisor result.
-    """
-
-    rag_result = await call_rag_supervisor(
-        query,
-        character_name=character_name,
-        context=context,
-    )
-    return rag_result
-
-
 async def _default_cognition_client(state: dict[str, Any]) -> dict[str, Any]:
-    """Call the L1/L2/L3 cognition graph through the resolver loop.
+    """Call the shared cognition graph through the resolver loop.
 
     Args:
         state: Global persona state subset required by the cognition graph.
@@ -539,8 +335,53 @@ async def _default_cognition_client(state: dict[str, Any]) -> dict[str, Any]:
         capability_timeout_seconds=(
             COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS
         ),
+        upsert_pending_resume_func=_non_persistent_pending_resume,
+        apply_pending_resolution_func=_non_persistent_pending_resolution,
     )
     return cognition_result
+
+
+async def _non_persistent_pending_resume(
+    state: dict[str, Any],
+    observation: dict[str, Any],
+) -> dict[str, Any]:
+    """Build a pending-resume payload without writing a ledger row."""
+
+    pending_resume = await upsert_pending_resume(
+        state,
+        observation,
+        upsert_action_attempt_func=_discard_action_attempt_record,
+    )
+    return pending_resume
+
+
+async def _non_persistent_pending_resolution(
+    state: dict[str, Any],
+    resolution: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Apply pending resolution against self-cognition's in-memory state only."""
+
+    updated_row = await apply_pending_resolution(
+        state,
+        resolution,
+        list_action_attempts_func=_empty_action_attempt_rows,
+        upsert_action_attempt_func=_discard_action_attempt_record,
+    )
+    return updated_row
+
+
+async def _discard_action_attempt_record(record: dict[str, Any]) -> None:
+    """Accept a pending row callback without durable persistence."""
+
+    del record
+
+
+async def _empty_action_attempt_rows(*, limit: int) -> list[dict[str, Any]]:
+    """Return no durable pending rows for internal self-cognition execution."""
+
+    del limit
+    rows: list[dict[str, Any]] = []
+    return rows
 
 
 async def _default_dialog_client(state: dict[str, Any]) -> dict[str, Any]:
@@ -758,10 +599,10 @@ def _episode_trace_for_private_actions(
 def _build_cognition_state(
     case: models.SelfCognitionCase,
     rendered_packet: str,
-    rag_output: dict[str, Any] | None = None,
+    *,
     residue_context: str = "",
 ) -> dict[str, Any]:
-    """Build the shared cognition graph state for an idle dry run."""
+    """Build the shared cognition graph state for an idle source packet."""
 
     source_timestamp_utc = _string_field(case, "idle_timestamp_utc")
     turn_clock = build_turn_clock_from_storage_utc(source_timestamp_utc)
@@ -811,7 +652,7 @@ def _build_cognition_state(
         "should_respond": False,
         "decontexualized_input": models.SELF_COGNITION_INPUT_TEXT,
         "referents": [],
-        "rag_result": _rag_result(case, rag_output=rag_output),
+        "rag_result": _rag_result(case),
         "internal_monologue": "",
         "action_directives": {},
         "interaction_subtext": "",
@@ -945,7 +786,7 @@ def _has_collected_text_directives(state: dict[str, Any]) -> bool:
 
 
 def _dialog_text(dialog_output: dict[str, Any]) -> str:
-    """Extract dry-run candidate text from dialog graph output."""
+    """Extract candidate text from dialog graph output."""
 
     fragments = _dialog_fragments(dialog_output)
     text = "\n".join(fragments)
@@ -994,7 +835,7 @@ def _build_cognitive_episode(
         sort_keys=True,
     )
     episode: CognitiveEpisode = {
-        "episode_id": f"self_cognition:dry_run:{_string_field(case, 'case_id')}",
+        "episode_id": f"self_cognition:tracking:{_string_field(case, 'case_id')}",
         "trigger_source": "internal_thought",
         "input_sources": ["internal_monologue"],
         "output_mode": "preview",
@@ -1035,25 +876,25 @@ def _route_effect_for_route(
     run_record: dict[str, Any],
     route: str,
 ) -> dict[str, Any]:
-    """Build the dry-run consumer effect for one selected route."""
+    """Build the consumer effect for one selected route."""
 
     if route == models.ROUTE_ACTION_CANDIDATE:
         consumer = "local_action_candidate"
         effect_summary = (
-            "Dry-run action candidate artifacts are inspection-only; "
-            "production selected speak uses the dispatcher/runtime adapter "
-            "bridge after dialog rendering."
+            "Self-cognition action candidates are inspected and delivered "
+            "through the dispatcher/runtime adapter bridge after dialog "
+            "rendering."
         )
     elif route == models.ROUTE_PROGRESS_MAINTENANCE:
         consumer = "conversation_progress_candidate"
         effect_summary = (
-            "Dry-run would keep conversation progress visible; no production "
-            "write was performed."
+            "Self-cognition keeps conversation progress visible; no write "
+            "was performed."
         )
     else:
         consumer = "audit_log"
         effect_summary = (
-            "Dry-run recorded the observation only; no production write was "
+            "Self-cognition recorded the observation only; no write was "
             "performed."
         )
     route_effect = tracking.build_route_effect(
@@ -1074,10 +915,10 @@ def _loop_trace(
     action_attempt: dict[str, Any] | None = None,
     action_candidate: dict[str, Any] | None = None,
 ) -> str:
-    """Render a human-readable trace of the dry-run routing decision."""
+    """Render a human-readable trace of the routing decision."""
 
     lines = [
-        "# Self-Cognition Dry-Run Trace",
+        "# Self-Cognition Trace",
         "",
         f"- case_name: {_string_field(case, 'case_name')}",
         f"- trigger_id: {run_record['trigger_id']}",
@@ -1112,31 +953,33 @@ def _budget(
     return budget
 
 
-def _rag_result(
-    case: models.SelfCognitionCase,
-    rag_output: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Return supplied RAG context or the existing empty RAG projection."""
+def _resolver_evidence_call_count(cognition_output: dict[str, Any]) -> int:
+    """Count resolver-selected retrieval observations recorded by cognition."""
+
+    resolver_state = cognition_output.get("resolver_state")
+    if not isinstance(resolver_state, dict):
+        return_value = 0
+        return return_value
+    observations = resolver_state.get("observations")
+    if not isinstance(observations, list):
+        return_value = 0
+        return return_value
+
+    retrieval_count = 0
+    for observation in observations:
+        if not isinstance(observation, dict):
+            continue
+        capability_kind = observation.get("capability_kind")
+        if capability_kind in {"rag_evidence", "web_evidence"}:
+            retrieval_count += 1
+    return_value = retrieval_count
+    return return_value
+
+
+def _rag_result(case: models.SelfCognitionCase) -> dict[str, Any]:
+    """Return the baseline RAG projection before resolver-selected retrieval."""
 
     source_ref_commitments = _active_commitments_from_source_refs(case)
-    if isinstance(rag_output, dict):
-        projected_output = _project_rag_output_for_cognition(case, rag_output)
-        return_value = _merge_source_ref_commitments(
-            projected_output,
-            source_ref_commitments,
-        )
-        return return_value
-    case_rag_output = case.get("rag_output")
-    if isinstance(case_rag_output, dict):
-        projected_output = _project_rag_output_for_cognition(
-            case,
-            case_rag_output,
-        )
-        return_value = _merge_source_ref_commitments(
-            projected_output,
-            source_ref_commitments,
-        )
-        return return_value
     memory_context = empty_user_memory_context()
     memory_context["active_commitments"] = source_ref_commitments
     return_value = {
@@ -1205,92 +1048,8 @@ def _active_commitments_from_source_refs(
     return return_value
 
 
-def _merge_source_ref_commitments(
-    rag_output: dict[str, Any],
-    source_ref_commitments: list[dict[str, Any]],
-) -> dict[str, Any]:
-    """Attach source-ref commitments when supplied RAG lacks active targets."""
-
-    if not source_ref_commitments:
-        return_value = rag_output
-        return return_value
-
-    merged_result = dict(rag_output)
-    raw_user_image = merged_result.get("user_image")
-    if isinstance(raw_user_image, dict):
-        user_image = dict(raw_user_image)
-    else:
-        user_image = {}
-
-    raw_memory_context = user_image.get("user_memory_context")
-    if isinstance(raw_memory_context, dict):
-        memory_context = dict(raw_memory_context)
-    else:
-        memory_context = empty_user_memory_context()
-
-    raw_active_commitments = memory_context.get("active_commitments")
-    has_active_commitments = (
-        isinstance(raw_active_commitments, list)
-        and bool(raw_active_commitments)
-    )
-    if not has_active_commitments:
-        memory_context["active_commitments"] = source_ref_commitments
-        user_image["user_memory_context"] = memory_context
-        merged_result["user_image"] = user_image
-
-    return_value = merged_result
-    return return_value
-
-
-def _project_rag_output_for_cognition(
-    case: models.SelfCognitionCase,
-    rag_output: dict[str, Any],
-) -> dict[str, Any]:
-    """Project raw RAG supervisor output into the shared cognition shape."""
-
-    if "user_image" in rag_output:
-        return_value = rag_output
-        return return_value
-
-    raw_known_facts = rag_output.get("known_facts")
-    if isinstance(raw_known_facts, list):
-        known_facts = raw_known_facts
-    else:
-        known_facts = []
-
-    raw_answer = rag_output.get("answer")
-    answer = raw_answer if isinstance(raw_answer, str) else ""
-
-    raw_unknown_slots = rag_output.get("unknown_slots")
-    if isinstance(raw_unknown_slots, list):
-        unknown_slots = raw_unknown_slots
-    else:
-        unknown_slots = []
-
-    raw_loop_count = rag_output.get("loop_count")
-    loop_count = raw_loop_count if isinstance(raw_loop_count, int) else 0
-
-    target_scope = _target_scope(case)
-    character_profile = _character_profile(case)
-    raw_character_user_id = character_profile.get("global_user_id")
-    character_user_id = (
-        raw_character_user_id
-        if isinstance(raw_character_user_id, str)
-        else ""
-    )
-    projected_output = project_known_facts(
-        known_facts,
-        current_user_id=target_scope["user_id"] or "",
-        character_user_id=character_user_id,
-        answer=answer,
-        unknown_slots=unknown_slots,
-        loop_count=loop_count,
-    )
-    return projected_output
-
-
 def _character_profile(case: models.SelfCognitionCase) -> dict[str, Any]:
-    """Return the supplied character profile or a dry-run default profile."""
+    """Return the supplied character profile or a self-cognition default."""
 
     value = case.get("character_profile")
     if isinstance(value, dict) and value:
@@ -1336,7 +1095,7 @@ def _character_profile(case: models.SelfCognitionCase) -> dict[str, Any]:
 
 
 def _user_profile(case: models.SelfCognitionCase) -> dict[str, Any]:
-    """Return the supplied user profile or a dry-run default profile."""
+    """Return the supplied user profile or a self-cognition default."""
 
     value = case.get("user_profile")
     if isinstance(value, dict) and value:
@@ -1353,7 +1112,7 @@ def _user_profile(case: models.SelfCognitionCase) -> dict[str, Any]:
     else:
         display_name = target_scope["user_id"] or "self cognition target"
     profile = {
-        "affinity": models.DEFAULT_DRY_RUN_AFFINITY,
+        "affinity": models.DEFAULT_SELF_COGNITION_AFFINITY,
         "display_name": display_name,
         "last_relationship_insight": "",
     }
@@ -1419,7 +1178,9 @@ def _chat_history(
             continue
         global_user_id = target_scope["user_id"] or ""
         if role == "assistant":
-            global_user_id = models.DRY_RUN_ASSISTANT_GLOBAL_USER_ID
+            global_user_id = (
+                models.DEFAULT_SELF_COGNITION_ASSISTANT_GLOBAL_USER_ID
+            )
         row = {
             "timestamp": format_storage_utc_for_llm(
                 _string_field(item, "timestamp"),
@@ -1439,7 +1200,7 @@ def _chat_history(
 
 
 def _character_name(case: models.SelfCognitionCase) -> str:
-    """Read the active character name from the dry-run profile."""
+    """Read the active character name from the source profile."""
 
     profile = _character_profile(case)
     name = profile.get("name")

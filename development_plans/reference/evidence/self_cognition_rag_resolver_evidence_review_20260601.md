@@ -165,4 +165,3 @@ The implementation satisfies the requested production gap:
 - real LLM evidence is positive under the agreed relaxed criterion.
 
 Merge into `resolver-goal-poc` is justified.
-

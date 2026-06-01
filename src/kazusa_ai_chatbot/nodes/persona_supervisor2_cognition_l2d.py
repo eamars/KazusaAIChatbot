@@ -763,98 +763,6 @@ def _resolver_requests_repeat_pending_capability(
     return return_value
 
 
-def _normalize_misplaced_resolver_requests(
-    parsed: object,
-) -> list[ResolverCapabilityRequestV1]:
-    """Recover resolver capability requests emitted in the action field."""
-
-    normalized_requests: list[ResolverCapabilityRequestV1] = []
-    if not isinstance(parsed, dict):
-        return normalized_requests
-
-    raw_requests = parsed.get("action_requests")
-    if not isinstance(raw_requests, list):
-        return normalized_requests
-
-    for raw_request in raw_requests:
-        if not isinstance(raw_request, dict):
-            continue
-        capability = _semantic_text(raw_request, "capability")
-        if capability not in ALLOWED_RESOLVER_CAPABILITIES:
-            continue
-        objective = _semantic_text(raw_request, "detail")
-        if not objective:
-            objective = _semantic_text(raw_request, "decision")
-        reason = _semantic_text(raw_request, "reason")
-        if not objective or not reason:
-            logger.warning(
-                "L2d dropped misplaced resolver request without objective "
-                "or reason"
-            )
-            continue
-        request = {
-            "schema_version": RESOLVER_CAPABILITY_REQUEST_VERSION,
-            "capability_kind": capability,
-            "objective": objective,
-            "reason": reason,
-            "priority": "now",
-        }
-        try:
-            normalized_request = validate_resolver_capability_request(request)
-        except ResolverValidationError as exc:
-            logger.warning(
-                f"L2d dropped invalid misplaced resolver request: {exc}"
-            )
-            continue
-        normalized_requests.append(normalized_request)
-        if len(normalized_requests) >= ACTION_SPEC_CAP:
-            break
-    return_value = normalized_requests
-    return return_value
-
-
-def _normalize_misplaced_action_requests(parsed: object) -> list[ActionRequestV1]:
-    """Recover action capability requests emitted in the resolver field."""
-
-    normalized_requests: list[ActionRequestV1] = []
-    if not isinstance(parsed, dict):
-        return normalized_requests
-
-    raw_requests = parsed.get("resolver_capability_requests")
-    if not isinstance(raw_requests, list):
-        return normalized_requests
-
-    for raw_request in raw_requests:
-        if not isinstance(raw_request, dict):
-            continue
-        capability = _semantic_text(raw_request, "capability_kind")
-        if capability not in ALLOWED_ACTION_CAPABILITIES:
-            continue
-        reason = _semantic_text(raw_request, "reason")
-        if not reason:
-            logger.warning(
-                "L2d dropped misplaced action request without reason"
-            )
-            continue
-        action_request: ActionRequestV1 = {
-            "capability": capability,
-            "reason": reason,
-        }
-        detail = _semantic_text(raw_request, "objective")
-        if detail:
-            action_request["detail"] = detail
-        decision = _semantic_text(raw_request, "decision")
-        if decision:
-            action_request["decision"] = decision
-        elif capability == SPEAK_CAPABILITY:
-            action_request["decision"] = "visible_reply"
-        normalized_requests.append(action_request)
-        if len(normalized_requests) >= ACTION_SPEC_CAP:
-            break
-    return_value = normalized_requests
-    return return_value
-
-
 def _materialize_action_specs(
     requests: list[ActionRequestV1],
     state: CognitionState,
@@ -1368,10 +1276,6 @@ async def call_action_initializer(state: CognitionState) -> CognitionState:
     ])
     parsed = parse_llm_json_output(response.content)
     resolver_capability_requests = _normalize_resolver_capability_requests(parsed)
-    if not resolver_capability_requests:
-        resolver_capability_requests = _normalize_misplaced_resolver_requests(
-            parsed,
-        )
     resolver_pending_resolution = _normalize_resolver_pending_resolution(
         parsed,
         state,
@@ -1412,8 +1316,6 @@ async def call_action_initializer(state: CognitionState) -> CognitionState:
             action_requests = _pending_resume_speak_request(state)
         else:
             action_requests = _normalize_action_requests(parsed)
-            if not action_requests:
-                action_requests = _normalize_misplaced_action_requests(parsed)
     action_specs = _materialize_action_specs(action_requests, state)
     resolver_goal_progress = _goal_progress_with_surface_requirements(
         resolver_goal_progress,

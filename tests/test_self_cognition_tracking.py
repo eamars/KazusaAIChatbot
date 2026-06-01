@@ -1,11 +1,8 @@
-"""Deterministic self-cognition tracking and artifact contract tests."""
+"""Deterministic self-cognition tracking and record contract tests."""
 
 from __future__ import annotations
 
 import json
-import os
-import subprocess
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -18,12 +15,9 @@ from kazusa_ai_chatbot.action_spec.registry import (
     SPEAK_CAPABILITY,
 )
 from kazusa_ai_chatbot.nodes.dialog_agent import StateContractError
-from kazusa_ai_chatbot.self_cognition import artifacts, models, projection
+from kazusa_ai_chatbot.self_cognition import models, projection
 from kazusa_ai_chatbot.self_cognition import sources, tracking
 from kazusa_ai_chatbot.self_cognition import runner
-from kazusa_ai_chatbot.self_cognition.runner import run_self_cognition_case
-
-from tests.test_config import _configured_subprocess_env_without_dotenv
 
 
 def _target_scope(channel_type: str = "private") -> dict[str, str | None]:
@@ -135,6 +129,12 @@ async def test_default_self_cognition_client_uses_resolver_loop(
         direct_cognition
     )
     assert callable(captured["kwargs"]["execute_capability_func"])
+    assert captured["kwargs"]["upsert_pending_resume_func"] is (
+        runner._non_persistent_pending_resume
+    )
+    assert captured["kwargs"]["apply_pending_resolution_func"] is (
+        runner._non_persistent_pending_resolution
+    )
 
 
 def _group_noise_case() -> dict[str, Any]:
@@ -220,7 +220,6 @@ def _topic_followup_case() -> dict[str, Any]:
                 "timestamp": "2026-05-10T00:00:00+00:00",
             }
         ],
-        "rag_query": "Find evidence for the open technical follow-up topic.",
     }
     return case
 
@@ -250,7 +249,6 @@ def _scheduled_future_cognition_case() -> dict[str, Any]:
                 "timestamp": "2026-05-10T00:00:00+00:00",
             }
         ],
-        "rag_query": "Find evidence for the open hardware follow-up topic.",
         "source_scheduled_event_id": "future-cognition-001",
     }
     return case
@@ -448,7 +446,7 @@ def _memory_lifecycle_route_action_spec() -> dict[str, Any]:
             "max_depth": 0,
             "include_result_as": None,
         },
-        "reason": "The dry run selected lifecycle review.",
+        "reason": "The self-cognition run selected lifecycle review.",
     }
     return spec
 
@@ -498,8 +496,26 @@ def _speak_cognition_output_with_partial_directives() -> dict[str, Any]:
     return output
 
 
-def _read_json(path: str | Path) -> dict[str, Any]:
-    content = Path(path).read_text(encoding="utf-8")
+def _build_tracking_records(
+    case: dict[str, Any],
+    unused_fixture_path: object | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Build self-cognition records for deterministic test cases."""
+
+    del unused_fixture_path
+    artifact_payloads = runner.build_self_cognition_case_artifacts(
+        case,
+        **kwargs,
+    )
+    return artifact_payloads
+
+
+def _read_json(payload: Any) -> dict[str, Any]:
+    if isinstance(payload, dict):
+        return_value = payload
+        return return_value
+    content = Path(payload).read_text(encoding="utf-8")
     data = json.loads(content)
     return data
 
@@ -752,13 +768,9 @@ def test_delivery_target_metadata_is_not_model_visible() -> None:
 
     source_packet = projection.build_source_packet(case)
     rendered_packet = projection.render_source_packet_text(source_packet)
-    rag_request = projection.build_rag_request(case)
-    rendered_rag_request = json.dumps(rag_request, ensure_ascii=False)
 
     assert "qq-target" not in rendered_packet
     assert "Target User" not in rendered_packet
-    assert "qq-target" not in rendered_rag_request
-    assert "Target User" not in rendered_rag_request
 
 
 def test_classify_route_returns_action_candidate_when_cognition_selects_contact() -> None:
@@ -876,7 +888,7 @@ def test_before_due_commitment_writes_progress_route_without_action_candidate(
         case_name=models.CASE_COMMITMENT_BEFORE_DUE,
         due_state=models.DUE_STATE_FUTURE_DUE,
     )
-    paths = run_self_cognition_case(
+    paths = _build_tracking_records(
         case,
         tmp_path,
         cognition_client=lambda state: _progress_cognition_output(),
@@ -892,7 +904,7 @@ def test_past_due_contact_decision_writes_action_attempt_and_candidate_without_h
     tmp_path,
 ) -> None:
     case = _commitment_case()
-    paths = run_self_cognition_case(
+    paths = _build_tracking_records(
         case,
         tmp_path,
         cognition_client=lambda state: _action_cognition_output(
@@ -918,7 +930,7 @@ def test_build_self_cognition_case_artifacts_does_not_write_files(tmp_path) -> N
     """Production artifact construction should stay in memory."""
 
     case = _commitment_case()
-    output_dir = tmp_path / "should_not_exist"
+    expected_missing_dir = tmp_path / "should_not_exist"
 
     artifact_payloads = runner.build_self_cognition_case_artifacts(
         case,
@@ -930,7 +942,7 @@ def test_build_self_cognition_case_artifacts_does_not_write_files(tmp_path) -> N
         ),
     )
 
-    assert not output_dir.exists()
+    assert not expected_missing_dir.exists()
     assert artifact_payloads[models.ARTIFACT_ACTION_ATTEMPT]["status"] == (
         models.ACTION_ATTEMPT_STATUS_CANDIDATE
     )
@@ -998,7 +1010,7 @@ def test_runner_apply_consolidation_uses_empty_dialog_without_render() -> None:
         "scheduled_event_count": 0,
         "cache_evicted_count": 2,
         "origin_trigger_source": "internal_thought",
-        "origin_episode_id": "self_cognition:dry_run:commitment_past_due:promise-001",
+        "origin_episode_id": "self_cognition:tracking:commitment_past_due:promise-001",
     }
     serialized = json.dumps(outcome, ensure_ascii=False)
     assert "Reminder was expected" not in serialized
@@ -1025,14 +1037,8 @@ def test_runner_consolidates_no_action_cognition_without_dialog() -> None:
         }
         return return_value
 
-    def rag_client(query: str, **kwargs: Any) -> dict[str, Any]:
-        del query, kwargs
-        return_value = {"answer": ""}
-        return return_value
-
     artifact_payloads = runner.build_self_cognition_case_artifacts(
         case,
-        rag_client=rag_client,
         cognition_client=lambda state: (
             _audit_only_cognition_output_without_directives()
         ),
@@ -1345,7 +1351,7 @@ def test_runner_routes_lifecycle_intent_through_specialist_before_execution(
 def test_runner_does_not_execute_private_actions_by_default(
     monkeypatch,
 ) -> None:
-    """Artifact builds should stay dry-run unless execution is requested."""
+    """Record builds should not execute private actions unless requested."""
 
     case = _commitment_case()
 
@@ -1356,7 +1362,7 @@ def test_runner_does_not_execute_private_actions_by_default(
         executed_action_attempt_ids: set[str] | None = None,
     ) -> list[dict[str, Any]]:
         del action_specs, storage_timestamp_utc, executed_action_attempt_ids
-        raise AssertionError("default dry-run must not execute private actions")
+        raise AssertionError("default builder must not execute private actions")
 
     async def consolidation_client(state: dict[str, Any]) -> dict[str, Any]:
         assert "action_results" not in state
@@ -1473,7 +1479,7 @@ def test_contact_decision_without_candidate_marker_uses_dialog_candidate(
         "_default_dialog_client",
         fake_dialog_client,
     )
-    paths = run_self_cognition_case(
+    paths = _build_tracking_records(
         case,
         tmp_path,
         cognition_client=lambda state: (
@@ -1498,16 +1504,6 @@ def test_selected_speak_self_cognition_runs_l3_before_dialog(
     dialog_states: list[dict[str, Any]] = []
     action_directives = _surface_action_directives()
 
-    def rag_client(query: str, **kwargs: Any) -> dict[str, Any]:
-        del query, kwargs
-        result = {
-            "answer": "Retrieved evidence for the scheduled GPU follow-up.",
-            "known_facts": [],
-            "unknown_slots": [],
-            "loop_count": 0,
-        }
-        return result
-
     async def l3_text_surface_handler(state: dict[str, Any]) -> dict[str, Any]:
         l3_states.append(state)
         result = {"action_directives": action_directives}
@@ -1528,10 +1524,9 @@ def test_selected_speak_self_cognition_runs_l3_before_dialog(
         l3_text_surface_handler,
         raising=False,
     )
-    paths = run_self_cognition_case(
+    paths = _build_tracking_records(
         case,
         tmp_path,
-        rag_client=rag_client,
         cognition_client=lambda state: (
             _speak_cognition_output_with_partial_directives()
         ),
@@ -1573,7 +1568,7 @@ def test_dialog_false_mention_flag_suppresses_group_action_delivery_mention(
         "_default_dialog_client",
         fake_dialog_client,
     )
-    paths = run_self_cognition_case(
+    paths = _build_tracking_records(
         case,
         tmp_path,
         cognition_client=lambda state: _action_cognition_output(
@@ -1612,7 +1607,7 @@ def test_dialog_true_mention_flag_builds_group_action_delivery_mention(
         "_default_dialog_client",
         fake_dialog_client,
     )
-    paths = run_self_cognition_case(
+    paths = _build_tracking_records(
         case,
         tmp_path,
         cognition_client=lambda state: _action_cognition_output(
@@ -1637,7 +1632,7 @@ def test_duplicate_contact_decision_suppresses_same_due_occurrence(
     tmp_path,
 ) -> None:
     case = _duplicate_tick_case()
-    paths = run_self_cognition_case(
+    paths = _build_tracking_records(
         case,
         tmp_path,
         cognition_client=lambda state: _action_cognition_output(
@@ -1684,10 +1679,10 @@ def test_duplicate_contact_decision_suppresses_active_prior_attempt_statuses(
             }
         ]
 
-        output_dir = tmp_path / prior_status
-        paths = run_self_cognition_case(
+        unused_fixture_path = tmp_path / prior_status
+        paths = _build_tracking_records(
             case,
-            output_dir,
+            unused_fixture_path,
             cognition_client=lambda state: _action_cognition_output(
                 "I should check again.",
             ),
@@ -1720,7 +1715,7 @@ def test_group_review_suppresses_prior_delivery_failed_attempt(
         }
     ]
 
-    paths = run_self_cognition_case(
+    paths = _build_tracking_records(
         case,
         tmp_path,
         cognition_client=lambda state: _action_cognition_output(
@@ -1750,41 +1745,31 @@ def test_duplicate_tick_fixture_supplies_prior_attempt_state() -> None:
 def test_group_noise_rejected_without_rag_or_action(tmp_path) -> None:
     case = _group_noise_case()
 
-    def reject_rag(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        raise AssertionError("group noise should not call RAG")
-
     def reject_cognition(state: dict[str, Any]) -> dict[str, Any]:
         raise AssertionError("group noise should not call cognition")
 
-    paths = run_self_cognition_case(
+    paths = _build_tracking_records(
         case,
         tmp_path,
-        rag_client=reject_rag,
         cognition_client=reject_cognition,
     )
     route_effect = _read_json(paths[models.ARTIFACT_ROUTE_EFFECT])
 
     assert route_effect["route"] == models.ROUTE_AUDIT_ONLY
-    assert models.ARTIFACT_RAG_REQUEST not in paths
-    assert models.ARTIFACT_RAG_OUTPUT not in paths
     assert models.ARTIFACT_ACTION_ATTEMPT not in paths
     assert models.ARTIFACT_ACTION_CANDIDATE not in paths
 
 
-def test_group_chat_review_does_not_invoke_full_rag_supervisor(
+def test_group_chat_review_starts_without_preloaded_rag(
     tmp_path,
 ) -> None:
-    """Group review source hydration must not make the case RAG-backed."""
+    """Group review source hydration must not preload retrieval evidence."""
 
     case = _group_chat_review_case()
 
-    def reject_rag(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        raise AssertionError("group review should not call full RAG")
-
-    paths = run_self_cognition_case(
+    paths = _build_tracking_records(
         case,
         tmp_path,
-        rag_client=reject_rag,
         cognition_client=lambda state: _silent_cognition_output(),
     )
     trigger_record = _read_json(paths[models.ARTIFACT_TRIGGER_RECORD])
@@ -1793,8 +1778,6 @@ def test_group_chat_review_does_not_invoke_full_rag_supervisor(
     assert run_record["budget"]["rag_calls"] == 0
     assert trigger_record["target_scope"]["channel_type"] == "group"
     assert trigger_record["target_scope"]["user_id"] is None
-    assert models.ARTIFACT_RAG_REQUEST not in paths
-    assert models.ARTIFACT_RAG_OUTPUT not in paths
 
 
 def test_topic_followup_contact_decision_writes_action_candidate(
@@ -1802,26 +1785,9 @@ def test_topic_followup_contact_decision_writes_action_candidate(
 ) -> None:
     case = _topic_followup_case()
 
-    def rag_client(
-        _query: str,
-        *,
-        character_name: str,
-        context: dict[str, Any],
-    ) -> dict[str, Any]:
-        assert isinstance(character_name, str)
-        assert "prompt_message_context" in context
-        result = {
-            "answer": "Relevant evidence supports a concise follow-up.",
-            "known_facts": [],
-            "unknown_slots": [],
-            "loop_count": 0,
-        }
-        return result
-
-    paths = run_self_cognition_case(
+    paths = _build_tracking_records(
         case,
         tmp_path,
-        rag_client=rag_client,
         cognition_client=lambda state: _action_cognition_output(
             "Want to continue the GraphRAG thread?",
         ),
@@ -1836,60 +1802,38 @@ def test_topic_followup_contact_decision_writes_action_candidate(
     assert action_candidate["text"] == "Want to continue the GraphRAG thread?"
 
 
-def test_scheduled_future_cognition_uses_rag_query_for_next_cycle(
+def test_scheduled_future_cognition_starts_without_preloaded_rag(
     tmp_path,
 ) -> None:
-    """Scheduled follow-up cognition should not run with empty evidence."""
+    """Scheduled follow-up cognition lets resolver decide retrieval needs."""
 
     case = _scheduled_future_cognition_case()
-    rag_calls: list[dict[str, Any]] = []
-
-    def rag_client(
-        query: str,
-        *,
-        character_name: str,
-        context: dict[str, Any],
-    ) -> dict[str, Any]:
-        rag_calls.append(
-            {
-                "query": query,
-                "character_name": character_name,
-                "context": context,
-            }
-        )
-        result = {
-            "answer": "Retrieved follow-up evidence for the GPU model topic.",
-            "known_facts": [],
-            "unknown_slots": [],
-            "loop_count": 0,
-        }
-        return result
 
     def cognition_client(state: dict[str, Any]) -> dict[str, Any]:
-        assert state["rag_result"]["answer"] == (
-            "Retrieved follow-up evidence for the GPU model topic."
-        )
+        assert state["rag_result"]["answer"] == ""
         assert "user_image" in state["rag_result"]
         assert "character_image" in state["rag_result"]
         assert state["rag_result"]["user_image"]["user_memory_context"][
             "active_commitments"
         ] == []
-        return _silent_cognition_output()
+        output = _silent_cognition_output()
+        output["resolver_state"] = {
+            "observations": [
+                {
+                    "capability_kind": "rag_evidence",
+                }
+            ]
+        }
+        return output
 
-    paths = run_self_cognition_case(
+    paths = _build_tracking_records(
         case,
         tmp_path,
-        rag_client=rag_client,
         cognition_client=cognition_client,
     )
+    run_record = _read_json(paths[models.ARTIFACT_RUN_RECORD])
 
-    assert len(rag_calls) == 1
-    assert rag_calls[0]["query"] == (
-        "Find evidence for the open hardware follow-up topic."
-    )
-    assert rag_calls[0]["context"]["platform_channel_id"] == "54369546"
-    assert models.ARTIFACT_RAG_REQUEST in paths
-    assert models.ARTIFACT_RAG_OUTPUT in paths
+    assert run_record["budget"]["rag_calls"] == 1
 
 
 def test_cognition_state_keeps_source_packet_inside_internal_percept(
@@ -1902,7 +1846,7 @@ def test_cognition_state_keeps_source_packet_inside_internal_percept(
         captured.update(state)
         return _silent_cognition_output()
 
-    paths = run_self_cognition_case(
+    paths = _build_tracking_records(
         case,
         tmp_path,
         cognition_client=capture_state,
@@ -1931,7 +1875,7 @@ def test_cognition_state_disables_visual_and_does_not_suppress_memory(
         captured.update(state)
         return _silent_cognition_output()
 
-    run_self_cognition_case(
+    _build_tracking_records(
         case,
         tmp_path,
         cognition_client=capture_state,
@@ -1946,53 +1890,3 @@ def test_cognition_state_disables_visual_and_does_not_suppress_memory(
     assert episode_debug_modes == {"no_visual_directives": True}
     assert "no_remember" not in state_debug_modes
     assert "no_remember" not in episode_debug_modes
-
-
-def test_artifact_writer_uses_expected_file_names(tmp_path) -> None:
-    payloads = {
-        models.ARTIFACT_TRIGGER_RECORD: {"trigger_id": "trigger-001"},
-        models.ARTIFACT_LOOP_TRACE: "trace body",
-    }
-
-    paths = artifacts.write_tracking_artifacts(tmp_path, payloads)
-
-    assert set(paths) == set(payloads)
-    assert Path(paths[models.ARTIFACT_TRIGGER_RECORD]).name == (
-        models.ARTIFACT_TRIGGER_RECORD
-    )
-    assert Path(paths[models.ARTIFACT_LOOP_TRACE]).read_text(
-        encoding="utf-8",
-    ) == "trace body"
-
-
-def test_dry_run_command_rejects_unknown_case_name(tmp_path) -> None:
-    case_file = tmp_path / "unknown_case.json"
-    output_dir = tmp_path / "dry_run"
-    case_file.write_text(
-        json.dumps({"case_name": "unsupported_case"}),
-        encoding="utf-8",
-    )
-    env = _configured_subprocess_env_without_dotenv()
-    src_path = os.path.abspath("src")
-    env["PYTHONPATH"] = src_path
-
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "scripts.run_self_cognition_dry_run",
-            "--case-file",
-            str(case_file),
-            "--output-dir",
-            str(output_dir),
-        ],
-        cwd=tmp_path,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert result.returncode != 0
-    assert "unsupported self-cognition case" in result.stderr
-    assert not output_dir.exists()

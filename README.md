@@ -218,10 +218,11 @@ Kazusa does not flatten all context into one prompt. Immediate surface text,
 conversation progress, retrieved evidence, durable memory, promoted reflection,
 and scheduled commitments each have a separate lifecycle.
 
-Internal monologue residue is a separate short-lived lane. It stores one compact
-first-person reason from a completed episode and projects it only into L2a as
-`internal_monologue_residue_context`. It is not `reflection_summary`, durable
-memory, visible dialog planning, or scheduler input.
+The internal monologue residue lane is a separate short-lived lane. It stores
+one compact first-person reason from a completed episode and projects it only
+into L2a as `internal_monologue_residue_context`. It is not
+`reflection_summary`, durable memory, visible dialog planning, or scheduler
+input.
 
 **Reflection does not shortcut into live chat**
 

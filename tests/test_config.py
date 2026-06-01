@@ -786,9 +786,7 @@ class TestSelfCognitionConfig:
         env.pop("SELF_COGNITION_ENABLED", None)
         env.pop("SELF_COGNITION_WORKER_INTERVAL_SECONDS", None)
         env.pop("SELF_COGNITION_MAX_CASES_PER_TICK", None)
-        env.pop("SELF_COGNITION_TRACKING_DIR", None)
         env.pop("SELF_COGNITION_SOURCE_PACKET_CHAR_LIMIT", None)
-        env.pop("SELF_COGNITION_RAG_EVIDENCE_CHAR_LIMIT", None)
         env.pop("SELF_COGNITION_TRIGGER_ACTIVE_COMMITMENT_ENABLED", None)
         env.pop("SELF_COGNITION_TRIGGER_CONVERSATION_PROGRESS_ENABLED", None)
         env.pop("SELF_COGNITION_TRIGGER_RECENT_DIRECT_DIALOG_ENABLED", None)
@@ -806,9 +804,7 @@ class TestSelfCognitionConfig:
                     "print(config.SELF_COGNITION_ENABLED); "
                     "print(config.SELF_COGNITION_WORKER_INTERVAL_SECONDS); "
                     "print(config.SELF_COGNITION_MAX_CASES_PER_TICK); "
-                    "print(config.SELF_COGNITION_TRACKING_DIR); "
                     "print(config.SELF_COGNITION_SOURCE_PACKET_CHAR_LIMIT); "
-                    "print(config.SELF_COGNITION_RAG_EVIDENCE_CHAR_LIMIT); "
                     "print(config.SELF_COGNITION_TRIGGER_ACTIVE_COMMITMENT_ENABLED); "
                     "print(config.SELF_COGNITION_TRIGGER_CONVERSATION_PROGRESS_ENABLED); "
                     "print(config.SELF_COGNITION_TRIGGER_RECENT_DIRECT_DIALOG_ENABLED); "
@@ -830,8 +826,6 @@ class TestSelfCognitionConfig:
             "True",
             "3600",
             "3",
-            "self_cognition_runs",
-            "4000",
             "4000",
             "True",
             "True",
@@ -925,24 +919,6 @@ class TestSelfCognitionConfig:
             in source_packet_result.stderr
         )
 
-        rag_evidence_env = _configured_subprocess_env_without_dotenv()
-        rag_evidence_env["SELF_COGNITION_RAG_EVIDENCE_CHAR_LIMIT"] = "0"
-
-        rag_evidence_result = subprocess.run(
-            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
-            cwd=tmp_path,
-            env=rag_evidence_env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        assert rag_evidence_result.returncode != 0
-        assert (
-            "SELF_COGNITION_RAG_EVIDENCE_CHAR_LIMIT must be >= 1"
-            in rag_evidence_result.stderr
-        )
-
         max_cases_env = _configured_subprocess_env_without_dotenv()
         max_cases_env["SELF_COGNITION_MAX_CASES_PER_TICK"] = "0"
 
@@ -977,24 +953,6 @@ class TestSelfCognitionConfig:
         assert (
             "SELF_COGNITION_WORKER_INTERVAL_SECONDS must be >= 1"
             in interval_result.stderr
-        )
-
-        tracking_dir_env = _configured_subprocess_env_without_dotenv()
-        tracking_dir_env["SELF_COGNITION_TRACKING_DIR"] = "   "
-
-        tracking_dir_result = subprocess.run(
-            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
-            cwd=tmp_path,
-            env=tracking_dir_env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        assert tracking_dir_result.returncode != 0
-        assert (
-            "SELF_COGNITION_TRACKING_DIR must be non-empty"
-            in tracking_dir_result.stderr
         )
 
     def test_self_cognition_trigger_flags_default_true_and_parse_false(

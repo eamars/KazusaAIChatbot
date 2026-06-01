@@ -1013,21 +1013,6 @@ def test_web_agent3_router_uses_subagent_generation_rules() -> None:
     assert "遵循所选来源描述" in agent_module._WEB_AGENT3_GENERATOR_PROMPT
 
 
-def test_web_agent3_official_url_candidates_cover_source_discovery_tasks() -> None:
-    """Source fallback should infer generic canonical URLs from task names."""
-
-    release_urls = agent_module._official_url_candidates(
-        "Confirm the latest SampleTool GitHub release date."
-    )
-    docs_urls = agent_module._official_url_candidates(
-        "Check Sample Product official docs."
-    )
-
-    assert "https://github.com/SampleTool/SampleTool/releases" in release_urls
-    assert "https://sampleproduct.ai/docs" in docs_urls
-    assert "https://sampleproduct.com/docs" in docs_urls
-
-
 def test_web_agent3_router_source_text_omits_execution_details() -> None:
     """Router source descriptions should expose capability, not implementation."""
     source_text = agent_module._WEB_AGENT3_SOURCE_TOOLS_TEXT
@@ -1368,10 +1353,10 @@ async def test_web_agent3_run_preserves_base_helper_contract() -> None:
 
 
 @pytest.mark.asyncio
-async def test_web_agent3_run_uses_official_url_fallback_after_empty_search(
+async def test_web_agent3_run_returns_empty_search_without_deterministic_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An empty search graph should get one bounded official URL read pass."""
+    """An empty search graph should not invent a deterministic read target."""
 
     run_subgraph = AsyncMock(return_value={
         "status": "not_found",
@@ -1380,33 +1365,18 @@ async def test_web_agent3_run_uses_official_url_fallback_after_empty_search(
         "is_empty_result": True,
         "knowledge_metadata": {},
     })
-    execute_source = AsyncMock(return_value=(
-        "GitHub releases page: Latest release v1.0 published yesterday."
-    ))
-    finalizer = AsyncMock(return_value={
-        "final_status": "success",
-        "final_reason": "official release page read",
-        "final_response": "release evidence package",
-        "final_is_empty_result": False,
-    })
+    execute_source = AsyncMock()
     monkeypatch.setattr(agent_module, "_run_subgraph", run_subgraph)
     monkeypatch.setattr(agent_module, "_execute_source_decision", execute_source)
-    monkeypatch.setattr(agent_module, "_tool_call_finalizer", finalizer)
 
     result = await WebAgent3().run(
         task="Confirm the latest SampleTool GitHub release date.",
         context={},
     )
 
-    execute_source.assert_awaited()
-    first_decision = execute_source.await_args_list[0].args[0]
-    assert first_decision == web_module._RouterDecision(
-        action="read",
-        source="generic",
-        query="https://github.com/SampleTool/SampleTool/releases",
-    )
-    assert result["resolved"] is True
-    assert result["result"] == "release evidence package"
+    execute_source.assert_not_awaited()
+    assert result["resolved"] is False
+    assert result["result"] == "No information retrieved."
 
 
 @pytest.mark.asyncio

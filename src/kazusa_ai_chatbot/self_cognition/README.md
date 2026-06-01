@@ -2,25 +2,19 @@
 
 This module is the canonical ICD for `kazusa_ai_chatbot.self_cognition`.
 It owns source collection, trigger packet construction, route tracking,
-action-attempt compatibility, worker, production attempt persistence, and
-dry-run artifact contracts for the idle self-cognition agency loop.
+action-attempt compatibility, worker execution, production attempt
+persistence, and in-memory tracking records for the idle self-cognition agency
+loop.
 
 ## Boundary
 
-The module supports two entry points:
-
-- The dry-run command reads caller-supplied case files, runs the same
-  resolver-backed persona cognition path, lets L2d decide whether any resolver
-  capability such as RAG2 evidence is needed, runs selected L3 text/dialog only
-  when L2d selects a visible `speak` surface, and writes local artifacts under
-  the requested output directory.
-- The service worker collects bounded visible/actionable source cases,
-  binds `SelfCognitionDeliveryTarget` before cognition, builds the same route
-  records in memory, invokes the existing dialog graph only for selected
-  visible `speak` rendering, calls the existing consolidator through the shared
-  same-path entry, records sanitized event-log telemetry, persists
-  action-attempt state through the DB facade, and dispatches selected `speak`
-  through the runtime adapter bridge.
+The module supports one production entry point: the service worker collects
+bounded visible/actionable source cases, binds `SelfCognitionDeliveryTarget`
+before cognition, builds route records in memory, invokes the existing dialog
+graph only for selected visible `speak` rendering, calls the existing
+consolidator through the shared same-path entry, records sanitized event-log
+telemetry, persists action-attempt state through the DB facade, and dispatches
+selected `speak` through the runtime adapter bridge.
 
 Self-cognition is an upstream trigger source for the shared persona path. It is
 not a downstream action consumer, private cleanup channel, adapter sender, or
@@ -74,10 +68,7 @@ Central settings live in `kazusa_ai_chatbot.config`:
 - `SELF_COGNITION_ENABLED`, default `true`.
 - `SELF_COGNITION_WORKER_INTERVAL_SECONDS`, default `3600`.
 - `SELF_COGNITION_MAX_CASES_PER_TICK`, default `3`.
-- `SELF_COGNITION_TRACKING_DIR`, default `self_cognition_runs`; used only by
-  explicit dry-run/debug artifact writers, not by the production worker.
 - `SELF_COGNITION_SOURCE_PACKET_CHAR_LIMIT`, default `4000`.
-- `SELF_COGNITION_RAG_EVIDENCE_CHAR_LIMIT`, default `4000`.
 - `CHARACTER_SLEEP_LOCAL_PERIOD`, default `02:00-12:00` in
   `CHARACTER_TIME_ZONE`; empty disables sleep-period suppression.
 - Trigger-source enablement flags, all default `true`:
@@ -128,10 +119,8 @@ validation, and adapter delivery are not paused by this predicate.
 - `tracking.build_action_attempt(case, trigger_record, existing_attempts)`
 - `tracking.build_action_candidate(case, action_attempt, text, mention_target_user=False)`
 - `sleep_period.is_self_cognition_sleep_period(...)`
-- `runner.build_self_cognition_case_artifacts(case, rag_client=None, cognition_client=None, dialog_client=None, consolidation_client=None, apply_consolidation=False)`
-- `runner.build_self_cognition_case_artifacts_async(case, rag_client=None, cognition_client=None, dialog_client=None, consolidation_client=None, apply_consolidation=False)`
-- `runner.run_self_cognition_case(case, output_dir, rag_client=None, cognition_client=None, dialog_client=None, consolidation_client=None, apply_consolidation=False)`
-- `artifacts.write_tracking_artifacts(output_dir, artifacts)`
+- `runner.build_self_cognition_case_artifacts(case, cognition_client=None, dialog_client=None, consolidation_client=None, apply_consolidation=False)`
+- `runner.build_self_cognition_case_artifacts_async(case, cognition_client=None, dialog_client=None, consolidation_client=None, apply_consolidation=False)`
 - `worker.run_self_cognition_worker_tick(...)`
 - `worker.start_self_cognition_worker(...)`
 - `worker.stop_self_cognition_worker(...)`
@@ -223,17 +212,17 @@ The resolver does not perform private-channel lookup, private fallback, or
 delivery retry. Adapter channel capability is checked immediately before
 dispatcher write-ahead persistence.
 Cases without a valid concrete source target are recorded as
-`target_binding_failed` and stop before RAG, cognition, dialog, consolidation,
-and delivery.
+`target_binding_failed` and stop before cognition, dialog, consolidation, and
+delivery.
 
 `SelfCognitionDeliveryTarget` is deterministic runtime metadata. It must stay
-out of source packets, RAG requests, cognition state, dialog state, prompts,
-prompt anchors, prompt schemas, and model-facing artifacts.
+out of source packets, cognition state, dialog state, prompts, prompt anchors,
+prompt schemas, and model-facing records.
 
 ## Delivery Mentions
 
 Self-cognition may attach one platform-neutral `delivery_mentions` request to
-a local action candidate artifact when the shared dialog graph
+a local action candidate record when the shared dialog graph
 returns `mention_target_user=true` and the case has a semantic target user in
 `target_scope.user_id`.
 
@@ -251,8 +240,8 @@ The target scope may carry delivery-only platform identity:
 ```
 
 `platform_user_id` and `display_name` are not model context. They must not be
-rendered into source packets, RAG requests, cognition state, dialog state, or
-prompt text. They also do not participate in action-attempt idempotency.
+rendered into source packets, cognition state, dialog state, or prompt text.
+They also do not participate in action-attempt idempotency.
 
 Action candidates may carry:
 
@@ -276,12 +265,11 @@ metadata.
 
 ## Future Cognition Handoff
 
-Self-cognition may produce local delivery-candidate artifacts for dry-run
-inspection and duplicate suppression. In production worker ticks, selected
+Self-cognition may produce local delivery-candidate records for duplicate
+suppression and dispatcher handoff. In production worker ticks, selected
 `speak` requires a bound delivery target, L3 text directives, and dialog in the
 shared cognition path, then the worker hands the final text to dispatcher
-delivery in the same tick. Dry-run candidate rendering remains inspection-only
-and does not deliver.
+delivery in the same tick.
 
 `trigger_future_cognition` uses `scheduled_events` as an internal delayed
 trigger source. The action handler records a private non-dispatcher slot; a
@@ -302,22 +290,19 @@ and consolidation-outcome metadata through
 `kazusa_ai_chatbot.event_logging`. This event-log mirror is the durable
 operator view for long-term production counts and `/ops/self-cognition/stats`.
 
-Dry-run artifacts remain the canonical debug output. The production worker
-does not write artifact files. Event-log rows store ids, route names, output
-modes, budget counters, consolidation write-success booleans,
-scheduled-event counts, cache-eviction counts, origin labels, and status
-labels; they must not include source packet text, action candidate text, raw
-target channels, or conversation bodies.
+Event-log rows store ids, route names, output modes, budget counters,
+consolidation write-success booleans, scheduled-event counts,
+cache-eviction counts, origin labels, and status labels; they must not include
+source packet text, action candidate text, raw target channels, or
+conversation bodies.
 
-## Artifacts
+## Tracking Records
 
-The dry-run writer may produce:
+The in-memory runner may produce:
 
 - `self_cognition_trigger_record.json`
 - `self_cognition_run_record.json`
-- `self_cognition_rag_request.json`
-- `self_cognition_rag_output.json`
-- `self_cognition_cognition_input_after_rag.json`
+- `self_cognition_cognition_input.json`
 - `self_cognition_cognition_output.json`
 - `self_cognition_route_effect.json`
 - `self_cognition_action_attempt.json`
@@ -325,23 +310,13 @@ The dry-run writer may produce:
 - `self_cognition_consolidation_outcome.json`
 - `self_cognition_loop_trace.md`
 
-Legacy dry-run delivery candidates use `dispatch_shape: "send_message"` and
-an inspection-only handoff marker in dry-run artifacts. In live mode,
-production selected speech records a terminal action-attempt status such as
-`sent`, `delivery_failed`, `held`, or `duplicate_suppressed`.
-
-## Command
-
-```powershell
-venv\Scripts\python -m scripts.run_self_cognition_dry_run --case-file <path> --output-dir <path>
-```
-
-The command rejects missing files, malformed JSON, and unsupported case names
-before creating the output directory.
+Delivery candidates use `dispatch_shape: "send_message"`. Production selected
+speech records a terminal action-attempt status such as `sent`,
+`delivery_failed`, `held`, or `duplicate_suppressed`.
 
 ## SC-TRACKING-ICD-001
 
-The required local artifact shapes are:
+The required local tracking-record shapes are:
 
 ```python
 self_cognition_trigger_record = {

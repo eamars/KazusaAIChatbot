@@ -33,7 +33,6 @@ from kazusa_ai_chatbot.config import (
     SCHEDULED_TASKS_ENABLED,
     SELF_COGNITION_ENABLED,
     SELF_COGNITION_MAX_CASES_PER_TICK,
-    SELF_COGNITION_TRACKING_DIR,
     SELF_COGNITION_WORKER_INTERVAL_SECONDS,
 )
 from kazusa_ai_chatbot.cognition_episode import (
@@ -1862,7 +1861,6 @@ async def lifespan(app: FastAPI):
                 is_primary_interaction_busy=_primary_interaction_busy,
                 character_profile_provider=_current_character_profile_snapshot,
                 adapter_registry_provider=lambda: _adapter_registry,
-                output_root=SELF_COGNITION_TRACKING_DIR,
             )
         else:
             logger.info(

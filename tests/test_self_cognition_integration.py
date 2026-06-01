@@ -493,9 +493,7 @@ def _consolidation_result() -> dict[str, Any]:
 
 def _case_runner_with_candidate(
     case: dict[str, Any],
-    output_dir: Path,
 ) -> dict[str, Any]:
-    del output_dir
     attempt = _action_attempt(
         case,
         status=models.ACTION_ATTEMPT_STATUS_CANDIDATE,
@@ -510,11 +508,9 @@ def _case_runner_with_candidate(
 
 def _case_runner_with_tracking(
     case: dict[str, Any],
-    output_dir: Path,
 ) -> dict[str, Any]:
     """Build action artifacts using real tracking duplicate logic."""
 
-    del output_dir
     trigger_record = tracking.build_trigger_record(case)
     existing_attempts = case.get("existing_attempts")
     if not isinstance(existing_attempts, list):
@@ -579,7 +575,6 @@ async def test_collect_scheduled_future_cognition_cases_projects_due_slots() -> 
     assert case["source_refs"][0]["summary"] == (
         "Re-check whether a natural pause appeared."
     )
-    assert case["rag_query"] == "Re-check whether a natural pause appeared."
     assert case["conversation_progress"]["continuation_objective"] == (
         "Re-check whether a natural pause appeared."
     )
@@ -655,7 +650,7 @@ async def test_collect_scheduled_future_cognition_cases_preserves_source_scope()
 
 @pytest.mark.asyncio
 async def test_scheduled_future_cognition_real_user_missing_profile_is_not_defaulted() -> None:
-    """A real scheduled source user must not receive a dry-run profile default."""
+    """A real scheduled source user must not receive a placeholder profile."""
 
     now = datetime(2026, 5, 16, 10, 0, tzinfo=timezone.utc)
     event = _future_cognition_event()
@@ -911,9 +906,8 @@ async def test_worker_tick_marks_future_cognition_slot_completed(
         del kwargs
         return [_future_cognition_case()]
 
-    async def run_case(case: dict[str, Any], output_dir: Path) -> dict[str, Any]:
+    async def run_case(case: dict[str, Any]) -> dict[str, Any]:
         assert case["trigger_kind"] == models.TRIGGER_SCHEDULED_FUTURE_COGNITION
-        assert output_dir.name
         return {}
 
     async def mark_completed(event_id: str) -> bool:
@@ -923,7 +917,6 @@ async def test_worker_tick_marks_future_cognition_slot_completed(
     monkeypatch.setattr(worker.db, "mark_scheduled_event_completed", mark_completed)
 
     result = await worker.run_self_cognition_worker_tick(
-        output_root=tmp_path,
         now=datetime(2026, 5, 16, 10, 0, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -951,8 +944,7 @@ async def test_worker_tick_skips_future_cognition_slot_when_claim_fails(
         del kwargs
         return [_future_cognition_case()]
 
-    async def run_case(case: dict[str, Any], output_dir: Path) -> dict[str, Any]:
-        del output_dir
+    async def run_case(case: dict[str, Any]) -> dict[str, Any]:
         processed_cases.append(case)
         return {}
 
@@ -961,7 +953,6 @@ async def test_worker_tick_skips_future_cognition_slot_when_claim_fails(
         return True
 
     result = await worker.run_self_cognition_worker_tick(
-        output_root=tmp_path,
         now=datetime(2026, 5, 16, 10, 0, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -994,15 +985,13 @@ async def test_worker_selected_speak_dispatches_to_private_channel(
         del kwargs
         return [_commitment_case_with_delivery_target()]
 
-    async def run_case(case: dict[str, Any], output_dir: Path) -> dict[str, Any]:
-        del output_dir
+    async def run_case(case: dict[str, Any]) -> dict[str, Any]:
         return _selected_speak_artifacts(case)
 
     async def record_attempt(attempt: dict[str, Any]) -> None:
         recorded_attempts.append(dict(attempt))
 
     result = await worker.run_self_cognition_worker_tick(
-        output_root=tmp_path,
         now=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -1045,12 +1034,10 @@ async def test_worker_selected_speak_dispatches_to_bound_group_source_channel(
             )
         ]
 
-    async def run_case(case: dict[str, Any], output_dir: Path) -> dict[str, Any]:
-        del output_dir
+    async def run_case(case: dict[str, Any]) -> dict[str, Any]:
         return _selected_speak_artifacts(case)
 
     result = await worker.run_self_cognition_worker_tick(
-        output_root=tmp_path,
         now=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -1100,15 +1087,13 @@ async def test_worker_channel_capability_failure_blocks_before_history_write(
         del kwargs
         return [_commitment_case_with_delivery_target()]
 
-    async def run_case(case: dict[str, Any], output_dir: Path) -> dict[str, Any]:
-        del output_dir
+    async def run_case(case: dict[str, Any]) -> dict[str, Any]:
         return _selected_speak_artifacts(case)
 
     async def record_attempt(attempt: dict[str, Any]) -> None:
         recorded_attempts.append(dict(attempt))
 
     result = await worker.run_self_cognition_worker_tick(
-        output_root=tmp_path,
         now=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -1143,7 +1128,6 @@ async def test_worker_missing_delivery_target_blocks_before_dialog(
         return [_commitment_case()]
 
     result = await worker.run_self_cognition_worker_tick(
-        output_root=tmp_path,
         now=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -1177,7 +1161,6 @@ async def test_worker_missing_delivery_target_blocks_without_adapter_provider(
         return [_commitment_case()]
 
     result = await worker.run_self_cognition_worker_tick(
-        output_root=tmp_path,
         now=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -1215,7 +1198,6 @@ async def test_worker_records_target_binding_failed_and_completes_scheduled_even
         return True
 
     result = await worker.run_self_cognition_worker_tick(
-        output_root=tmp_path,
         now=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -1252,12 +1234,10 @@ async def test_worker_selected_speak_never_records_not_requested(
         del kwargs
         return [_commitment_case_with_delivery_target()]
 
-    async def run_case(case: dict[str, Any], output_dir: Path) -> dict[str, Any]:
-        del output_dir
+    async def run_case(case: dict[str, Any]) -> dict[str, Any]:
         return _selected_speak_artifacts(case)
 
     await worker.run_self_cognition_worker_tick(
-        output_root=tmp_path,
         now=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -1284,12 +1264,11 @@ async def test_worker_no_speak_does_not_dispatch(
         del kwargs
         return [_commitment_case_with_delivery_target()]
 
-    async def run_case(case: dict[str, Any], output_dir: Path) -> dict[str, Any]:
-        del case, output_dir
+    async def run_case(case: dict[str, Any]) -> dict[str, Any]:
+        del case
         return {}
 
     result = await worker.run_self_cognition_worker_tick(
-        output_root=tmp_path,
         now=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -1319,15 +1298,13 @@ async def test_worker_adapter_failure_marks_delivery_failed(
         del kwargs
         return [_commitment_case_with_delivery_target()]
 
-    async def run_case(case: dict[str, Any], output_dir: Path) -> dict[str, Any]:
-        del output_dir
+    async def run_case(case: dict[str, Any]) -> dict[str, Any]:
         return _selected_speak_artifacts(case)
 
     async def record_attempt(attempt: dict[str, Any]) -> None:
         recorded_attempts.append(dict(attempt))
 
     await worker.run_self_cognition_worker_tick(
-        output_root=tmp_path,
         now=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -1358,15 +1335,13 @@ async def test_worker_empty_dialog_text_marks_delivery_failed(
         del kwargs
         return [_commitment_case_with_delivery_target()]
 
-    async def run_case(case: dict[str, Any], output_dir: Path) -> dict[str, Any]:
-        del output_dir
+    async def run_case(case: dict[str, Any]) -> dict[str, Any]:
         return _selected_speak_artifacts(case, text="")
 
     async def record_attempt(attempt: dict[str, Any]) -> None:
         recorded_attempts.append(dict(attempt))
 
     await worker.run_self_cognition_worker_tick(
-        output_root=tmp_path,
         now=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -1399,8 +1374,7 @@ async def test_worker_duplicate_suppression_marks_duplicate_suppressed(
         del kwargs
         return [_commitment_case_with_delivery_target()]
 
-    async def run_case(case: dict[str, Any], output_dir: Path) -> dict[str, Any]:
-        del output_dir
+    async def run_case(case: dict[str, Any]) -> dict[str, Any]:
         return _selected_speak_artifacts(
             case,
             attempt_status=models.ACTION_ATTEMPT_STATUS_DUPLICATE,
@@ -1410,7 +1384,6 @@ async def test_worker_duplicate_suppression_marks_duplicate_suppressed(
         recorded_attempts.append(dict(attempt))
 
     await worker.run_self_cognition_worker_tick(
-        output_root=tmp_path,
         now=datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -1459,16 +1432,14 @@ async def test_worker_tick_records_state_contract_error_without_tick_failure(
 
     async def build_artifacts(
         next_case: dict[str, Any],
-        output_dir: Path,
     ) -> dict[str, Any]:
-        del next_case, output_dir
+        del next_case
         raise StateContractError(
             "usage_mode=self_cognition_action_candidate_render "
             "missing action_specs.speak"
         )
 
     result = await worker.run_self_cognition_worker_tick(
-        output_root=tmp_path,
         now=datetime(2026, 5, 13, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -1565,7 +1536,7 @@ async def test_worker_default_path_requests_production_consolidation_without_fil
                 "scheduled_event_count": 0,
                 "cache_evicted_count": 0,
                 "origin_trigger_source": "internal_thought",
-                "origin_episode_id": "self_cognition:dry_run:test",
+                "origin_episode_id": "self_cognition:tracking:test",
             },
         }
         return payloads
@@ -1577,7 +1548,6 @@ async def test_worker_default_path_requests_production_consolidation_without_fil
     )
 
     result = await worker.run_self_cognition_worker_tick(
-        output_root=tmp_path,
         now=datetime(2026, 5, 13, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -1629,7 +1599,6 @@ async def test_worker_default_path_applies_consolidation_without_dispatch_or_fil
     )
 
     result = await worker.run_self_cognition_worker_tick(
-        output_root=tmp_path,
         now=datetime(2026, 5, 13, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -1689,7 +1658,6 @@ async def test_worker_default_path_records_action_without_dispatch(
     )
 
     result = await worker.run_self_cognition_worker_tick(
-        output_root=tmp_path,
         now=datetime(2026, 5, 13, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -1731,13 +1699,11 @@ async def test_worker_tick_loads_prior_attempts_before_running_case(
         assert limit > 0
         return [prior_attempt]
 
-    async def run_case(next_case: dict[str, Any], output_dir: Path) -> dict[str, Any]:
-        del output_dir
+    async def run_case(next_case: dict[str, Any]) -> dict[str, Any]:
         captured_case.update(next_case)
         return {}
 
     result = await worker.run_self_cognition_worker_tick(
-        output_root=tmp_path,
         now=datetime(2026, 5, 13, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -1767,7 +1733,6 @@ async def test_worker_tick_blocks_unbound_case_before_candidate_render(
         return [case]
 
     result = await worker.run_self_cognition_worker_tick(
-        output_root=tmp_path,
         now=datetime(2026, 5, 13, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -1779,7 +1744,6 @@ async def test_worker_tick_blocks_unbound_case_before_candidate_render(
 
     assert result.processed_count == 0
     assert result.skipped_count == 1
-    assert result.artifact_paths == []
     run_case.assert_not_called()
     record_attempt.assert_not_awaited()
     self_kwargs = worker.event_logging.record_self_cognition_event.await_args.kwargs
@@ -1813,9 +1777,7 @@ async def test_worker_tick_suppresses_duplicate_due_occurrence_from_prior_attemp
 
     def run_duplicate_case(
         next_case: dict[str, Any],
-        output_dir: Path,
     ) -> dict[str, Any]:
-        del output_dir
         assert next_case["existing_attempts"][0]["idempotency_key"] == (
             prior_attempt["idempotency_key"]
         )
@@ -1827,7 +1789,6 @@ async def test_worker_tick_suppresses_duplicate_due_occurrence_from_prior_attemp
         return payloads
 
     result = await worker.run_self_cognition_worker_tick(
-        output_root=tmp_path,
         now=datetime(2026, 5, 13, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -1871,7 +1832,6 @@ async def test_worker_tick_uses_attempt_updates_between_cases(
         recorded_attempts.append(dict(attempt))
 
     result = await worker.run_self_cognition_worker_tick(
-        output_root=tmp_path,
         now=datetime(2026, 5, 13, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,
@@ -1907,7 +1867,6 @@ async def test_worker_tick_defers_when_primary_interaction_is_busy(tmp_path) -> 
         raise AssertionError("busy tick should not collect cases")
 
     result = await worker.run_self_cognition_worker_tick(
-        output_root=tmp_path,
         now=datetime(2026, 5, 13, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: True,
         collect_cases_func=collect_cases,

@@ -19,7 +19,6 @@ from kazusa_ai_chatbot.config import (
     REFLECTION_SELF_GUIDANCE_PROMOTION_ENABLED,
     REFLECTION_WORKER_INTERVAL_SECONDS,
     SELF_COGNITION_MAX_CASES_PER_TICK,
-    SELF_COGNITION_TRACKING_DIR,
 )
 from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.global_character_growth import (
@@ -443,7 +442,6 @@ async def _run_group_self_cognition_review(
         return selected_cases
 
     self_result = await self_cognition_worker.run_self_cognition_worker_tick(
-        output_root=SELF_COGNITION_TRACKING_DIR,
         now=now,
         is_primary_interaction_busy=is_primary_interaction_busy,
         character_profile=character_profile,

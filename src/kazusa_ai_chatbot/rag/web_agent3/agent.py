@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from typing import Annotated, Any, Literal, TypedDict
 
 from langchain_core.messages import (
@@ -42,30 +41,6 @@ from kazusa_ai_chatbot.rag.web_agent3.subagent import (
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output
 
 logger = logging.getLogger(__name__)
-
-MAX_OFFICIAL_URL_FALLBACK_READS = 5
-_PRODUCT_PHRASE_LEADING_WORDS = frozenset((
-    "check",
-    "confirm",
-    "find",
-    "get",
-    "look",
-    "search",
-    "verify",
-))
-_HTTP_URL_PATTERN = re.compile(r"https?://[^\s，。；,;]+")
-_GITHUB_REPO_PATTERN = re.compile(
-    r"(?<![A-Za-z0-9_.-])([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)"
-    r"(?![A-Za-z0-9_.-])"
-)
-_CAMEL_PRODUCT_PATTERN = re.compile(
-    r"(?<![A-Za-z0-9])([A-Z][A-Za-z0-9]*[A-Z][A-Za-z0-9]*)(?![A-Za-z0-9])"
-)
-_TITLE_PRODUCT_PHRASE_PATTERN = re.compile(
-    r"(?<![A-Za-z0-9])([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){1,3})"
-    r"(?![A-Za-z0-9])"
-)
-
 
 def _prompt_timestamp_for_llm(
     local_prompt_timestamp: str,
@@ -139,140 +114,6 @@ def _web_runtime_context_for_llm(context: dict[str, Any]) -> dict[str, Any]:
 
     return_value = projected
     return return_value
-
-
-def _official_url_candidates(task: str) -> list[str]:
-    """Infer stable official URL reads for current-fact source discovery."""
-
-    candidates: list[str] = []
-    task_text = task.strip()
-    task_lower = task_text.lower()
-    for match in _HTTP_URL_PATTERN.finditer(task_text):
-        candidates.append(match.group(0).rstrip(").]"))
-
-    release_related = any(
-        term in task_lower
-        for term in ("release", "releases", "tag", "tags", "changelog")
-    )
-    github_related = "github" in task_lower or release_related
-    if github_related:
-        candidates.extend(_github_url_candidates(task_text, release_related))
-
-    docs_related = any(
-        term in task_lower
-        for term in ("docs", "documentation", "official", "reference", "guide")
-    )
-    if docs_related:
-        candidates.extend(_docs_url_candidates(task_text, task_lower))
-
-    deduped_candidates = _dedupe_preserving_order(candidates)
-    return deduped_candidates[:MAX_OFFICIAL_URL_FALLBACK_READS]
-
-
-def _github_url_candidates(task: str, release_related: bool) -> list[str]:
-    """Build GitHub source URLs from repo-like or product-like task names."""
-
-    candidates: list[str] = []
-    for match in _GITHUB_REPO_PATTERN.finditer(task):
-        owner = match.group(1).strip(".")
-        repo = match.group(2).strip(".")
-        if not owner or not repo:
-            continue
-        if release_related:
-            candidates.append(f"https://github.com/{owner}/{repo}/releases")
-            candidates.append(f"https://github.com/{owner}/{repo}/tags")
-        candidates.append(f"https://github.com/{owner}/{repo}")
-
-    for product_name in _code_project_names(task):
-        if release_related:
-            candidates.append(
-                f"https://github.com/{product_name}/{product_name}/releases"
-            )
-            candidates.append(
-                f"https://github.com/{product_name}/{product_name}/tags"
-            )
-        candidates.append(f"https://github.com/{product_name}/{product_name}")
-    return candidates
-
-
-def _docs_url_candidates(task: str, task_lower: str) -> list[str]:
-    """Build likely official documentation URLs from product phrases."""
-
-    candidates: list[str] = []
-    for phrase in _product_phrases(task):
-        compact_name = _compact_product_name(phrase)
-        if not compact_name:
-            continue
-        candidates.append(f"https://{compact_name}.ai/docs")
-        candidates.append(f"https://{compact_name}.com/docs")
-    return candidates
-
-
-def _code_project_names(task: str) -> list[str]:
-    """Return CamelCase project names that can form repo URL candidates."""
-
-    project_names: list[str] = []
-    for match in _CAMEL_PRODUCT_PATTERN.finditer(task):
-        project_name = match.group(1)
-        if len(project_name) <= 2:
-            continue
-        if project_name.lower() in {"github", "openai"}:
-            continue
-        project_names.append(project_name)
-    deduped_names = _dedupe_preserving_order(project_names)
-    return deduped_names
-
-
-def _product_phrases(task: str) -> list[str]:
-    """Return title-case product phrases useful for docs URL candidates."""
-
-    phrases: list[str] = []
-    for match in _TITLE_PRODUCT_PHRASE_PATTERN.finditer(task):
-        phrase = match.group(1).strip()
-        phrase = _strip_product_phrase_leading_words(phrase)
-        phrase_lower = phrase.lower()
-        if phrase_lower in {"github releases", "official docs"}:
-            continue
-        phrases.append(phrase)
-    phrases.extend(_code_project_names(task))
-    deduped_phrases = _dedupe_preserving_order(phrases)
-    return deduped_phrases
-
-
-def _strip_product_phrase_leading_words(phrase: str) -> str:
-    """Remove command verbs accidentally captured with title-case products."""
-
-    words = phrase.split()
-    while len(words) > 1 and words[0].lower() in _PRODUCT_PHRASE_LEADING_WORDS:
-        words = words[1:]
-    normalized_phrase = " ".join(words)
-    return normalized_phrase
-
-
-def _compact_product_name(phrase: str) -> str:
-    """Normalize a product phrase into a conservative docs-domain stem."""
-
-    compact_name = "".join(
-        character.lower()
-        for character in phrase
-        if character.isalnum()
-    )
-    return compact_name
-
-
-def _dedupe_preserving_order(values: list[str]) -> list[str]:
-    """Return unique non-empty strings without changing first-seen order."""
-
-    seen_values: set[str] = set()
-    deduped_values: list[str] = []
-    for value in values:
-        if not value:
-            continue
-        if value in seen_values:
-            continue
-        seen_values.add(value)
-        deduped_values.append(value)
-    return deduped_values
 
 
 class WebAgent3State(TypedDict):
@@ -700,81 +541,6 @@ async def _finalize_web_agent3_result(
     return result
 
 
-async def _run_official_url_fallback(
-    *,
-    task: str,
-    context: dict[str, Any],
-    expected_response: str,
-    local_prompt_timestamp: str,
-) -> dict[str, Any] | None:
-    """Read inferred official URLs when text search failed to find sources."""
-
-    candidate_urls = _official_url_candidates(task)
-    if not candidate_urls:
-        return_value = None
-        return return_value
-
-    messages: list[ToolMessage] = []
-    observations: list[dict[str, Any]] = []
-    for candidate_url in candidate_urls:
-        decision = _RouterDecision(
-            action="read",
-            source="generic",
-            query=candidate_url,
-        )
-        try:
-            observation = await _execute_source_decision(decision)
-        except Exception as exc:
-            logger.exception(
-                f"web_agent3 official URL fallback failed for "
-                f"{candidate_url}: {exc}"
-            )
-            observation = {"error": f"official URL fallback failed: {exc}"}
-        record = _observation_record(decision=decision, result=observation)
-        observations.append(record)
-        messages.append(ToolMessage(
-            content=json.dumps(record, ensure_ascii=False, default=str),
-            tool_call_id=f"web-agent3-official-url-{len(messages) + 1}",
-        ))
-
-    prompt_timestamp = _prompt_timestamp_for_llm(local_prompt_timestamp, context)
-    state: WebAgent3State = {
-        "task": task,
-        "context": _web_runtime_context_for_llm(context),
-        "expected_response": expected_response,
-        "messages": messages,
-        "router_decision": {"action": "stop", "source": "generic", "query": ""},
-        "observations": observations,
-        "evaluator_feedback": (
-            "Official URL seed fallback after search failed; summarize only "
-            "facts present in read content."
-        ),
-        "should_stop": True,
-        "retry": 0,
-        "prompt_timestamp": prompt_timestamp,
-        "knowledge_metadata": {},
-        "final_response": "",
-        "final_status": "error",
-        "final_reason": "",
-        "final_is_empty_result": False,
-    }
-    final_state = await _tool_call_finalizer(state)
-    status = final_state["final_status"]
-    if status not in ("success", "partial", "not_found"):
-        status = "not_found"
-    result = {
-        "status": status,
-        "reason": final_state["final_reason"],
-        "response": final_state["final_response"],
-        "is_empty_result": final_state["final_is_empty_result"],
-        "knowledge_metadata": {
-            "fallback": "official_url_seed_read",
-            "candidate_urls": candidate_urls,
-        },
-    }
-    return result
-
-
 def _tool_result_to_message_content(tool_result: _WebToolResult) -> str:
     """Render a normalized fixture result as finalizer-visible tool content."""
     if tool_result.operation == "search":
@@ -932,18 +698,6 @@ class WebAgent3(BaseRAGHelperAgent):
             expected_response=_DEFAULT_EXPECTED_RESPONSE,
             local_prompt_timestamp=local_prompt_timestamp,
         )
-        if bool(raw.get("is_empty_result", False)):
-            fallback_raw = await _run_official_url_fallback(
-                task=task,
-                context=context,
-                expected_response=_DEFAULT_EXPECTED_RESPONSE,
-                local_prompt_timestamp=local_prompt_timestamp,
-            )
-            if (
-                fallback_raw is not None
-                and not bool(fallback_raw.get("is_empty_result", False))
-            ):
-                raw = fallback_raw
         result = self.with_cache_status(
             {
                 "resolved": not bool(raw.get("is_empty_result", False)),

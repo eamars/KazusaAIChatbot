@@ -6,7 +6,8 @@
   on `resolver-goal-poc`, remove the legacy mandatory RAG-first path, and
   prepare a clean merge from this branch into `main`.
 - Plan class: high_risk_migration
-- Status: in_progress
+- Status: in_progress; branch-side closure complete, Stage 8 remains gated by
+  explicit user instruction.
 - Mandatory skills: `local-llm-architecture`, `py-style`,
   `test-style-and-execution`, `debug-llm`, `development-plan`,
   `cjk-safety` for Python prompt edits.
@@ -416,10 +417,19 @@ unless the user explicitly approves fallback execution for this plan.
     skipped tests, and residual risks.
   - Sign-off: parent/2026-06-01 after regression evidence is recorded.
 
+- [x] Stage 7.6 - final baseline-review blocker remediation complete.
+  - Covers post-review blocker cleanup requested before plan closure.
+  - Verify dry-run path removal, self-cognition resolver-only retrieval,
+    no-op self-cognition pending hooks, WebAgent3 deterministic URL fallback
+    removal, removal of deterministic L2d misplaced-field semantic repair,
+    stale-reference scan, and full deterministic regression.
+  - Evidence: remediation section in `Execution Evidence`.
+  - Sign-off: parent/2026-06-01 after focused and full verification passed.
+
 - [ ] Stage 8 - branch merged to main after explicit user instruction.
   - Covers implementation order step 8.
   - Gate: do not execute until the user explicitly instructs merge to `main`
-    after Stage 7.5 evidence is available.
+    after Stage 7.6 evidence is available.
   - Verify clean worktree and final post-merge focused verification.
   - Evidence: merge commit, final commands, branch status.
   - Sign-off: parent/date after merge evidence is recorded.
@@ -866,6 +876,118 @@ the residual risk.
     self-cognition as entering the bounded resolver, with RAG2 invoked only
     when L2d selects `rag_evidence`.
   - No production code changed during this documentation cleanup.
+
+### Final Independent Baseline Review
+
+- Review request:
+  compare `resolver-goal-poc` at
+  `103d7a0f1d0a41e086d42afd20d4a3ae4655690c` against `main` at
+  `a311ae1f94a898d9fd62a53545310db75f9eed9a`.
+- Reviewer: independent subagent `019e82c4-565b-7eb1-b3d9-0e993f1e680d`.
+- Result: not closed; review found merge/closure blockers.
+- Blocking findings:
+  - `src/kazusa_ai_chatbot/self_cognition/runner.py` still has a
+    deterministic pre-resolver RAG path for `RAG_BACKED_CASE_NAMES`; this
+    conflicts with the requirement that self-cognition evidence lookup happen
+    only when L2d selects `rag_evidence`.
+  - Self-cognition dry-run/default resolver execution calls
+    `call_cognition_resolver_loop(...)` without no-op pending hooks, so HIL or
+    approval blocker selection can write durable pending rows during dry-run
+    artifact generation.
+- High/medium findings:
+  - `src/kazusa_ai_chatbot/rag/web_agent3/agent.py` contains deterministic
+    official-URL guessing and fallback reads in normal WebAgent3 execution.
+    This pushes semantic source selection into deterministic code instead of a
+    specialist agent/router contract.
+  - The WebAgent3 official-URL fallback catches broad `Exception` inside
+    non-boundary helper code, which can hide internal contract bugs as normal
+    web-read failures.
+- Review recommendation: do not merge or close this plan until the blockers
+  are fixed or explicitly accepted as residual risk by the user.
+
+### Final Review Remediation And Branch-Side Closure
+
+- Remediation scope:
+  - Removed the self-cognition file-output dry-run path completely:
+    `src/scripts/run_self_cognition_dry_run.py`,
+    `src/kazusa_ai_chatbot/self_cognition/artifacts.py`, and
+    `tests/test_self_cognition_dry_run_cli.py`.
+  - Removed `runner.run_self_cognition_case`,
+    `runner.run_self_cognition_case_async`, dry-run artifact writing,
+    dry-run event mirroring, worker output-root compatibility, and
+    artifact-path worker result plumbing.
+  - Removed deterministic pre-resolver self-cognition RAG. Source packets now
+    enter cognition without preloaded RAG evidence; retrieval is counted only
+    when the resolver records `rag_evidence` or `web_evidence` observations.
+  - Added non-persistent self-cognition pending hooks so HIL/approval blocker
+    selection can shape the in-memory resolver pass without writing durable
+    pending ledger rows.
+  - Removed WebAgent3 deterministic official-URL guessing and fallback reads.
+    WebAgent3 still reads URLs selected by its router/subagents, but an empty
+    search result is no longer converted by Python into guessed official URL
+    reads.
+  - Updated self-cognition, script, node, and root README wording so the
+    current architecture is documented without the removed self-cognition
+    dry-run artifact path.
+- Independent review status after remediation:
+  - The blocker on `RAG_BACKED_CASE_NAMES` is fixed; the symbol and
+    deterministic self-cognition pre-RAG path are removed.
+  - The blocker on self-cognition durable pending writes is fixed through
+    non-persistent resolver pending hooks.
+  - The WebAgent3 official-URL fallback and its broad exception path are
+    removed.
+  - Remaining `dry_run` references are unrelated maintenance/reflection
+    paths, historical plan/test filenames, or the existing event-log schema
+    field `dry_run=False` on production self-cognition worker telemetry.
+- Supplemental final review:
+  - Reviewer: independent subagent
+    `019e82f0-a79b-72a3-a04e-307e12afc829` (`Linnaeus`).
+  - Result: the dry-run/RAG/pending/WebAgent3 remediation checked out, but
+    the review found one high-severity guardrail violation and one low-severity
+    whitespace issue.
+  - High finding: `persona_supervisor2_cognition_l2d.py` still performed
+    deterministic semantic repair by moving misplaced resolver requests out of
+    `action_requests` and misplaced terminal actions out of
+    `resolver_capability_requests`. This violated the boundary that LLM stages
+    own semantic action decisions while deterministic code validates contracts.
+  - Low finding: the reference evidence report had a trailing blank line that
+    failed `git diff --check main`.
+  - Remediation: removed the L2d misplaced-field repair helpers and changed
+    the corresponding tests to assert that contract-drift rows are dropped, not
+    semantically reinterpreted by Python. Removed the trailing blank line from
+    the evidence report.
+- Verification commands:
+  - `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\self_cognition\runner.py src\kazusa_ai_chatbot\self_cognition\projection.py src\kazusa_ai_chatbot\self_cognition\models.py src\kazusa_ai_chatbot\self_cognition\sources.py src\kazusa_ai_chatbot\self_cognition\worker.py src\kazusa_ai_chatbot\rag\web_agent3\agent.py src\kazusa_ai_chatbot\config.py src\kazusa_ai_chatbot\service.py src\kazusa_ai_chatbot\reflection_cycle\worker.py`
+    passed.
+  - `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2d.py`
+    passed after removing deterministic misplaced-field repair.
+  - `venv\Scripts\python -m pytest tests\test_persona_supervisor2_action_initializer.py::test_action_initializer_drops_misplaced_resolver_request tests\test_persona_supervisor2_action_initializer.py::test_action_initializer_drops_misplaced_terminal_action -q`
+    passed: 2 passed in 1.83s.
+  - `venv\Scripts\python -m pytest tests\test_persona_supervisor2_action_initializer.py tests\test_cognition_resolver_l2d_contract.py tests\test_l2d_l3_surface_handoff.py tests\test_cognition_resolver_loop.py tests\test_persona_supervisor2.py -q`
+    passed: 81 passed in 2.52s.
+  - `venv\Scripts\python -m pytest tests/test_self_cognition_tracking.py tests/test_self_cognition_framing.py tests/test_self_cognition_delivery_target.py tests/test_self_cognition_event_logging.py tests/test_self_cognition_integration.py -q`
+    passed: 89 passed in 8.43s.
+  - `venv\Scripts\python -m pytest tests/test_cognition_resolver_loop.py tests/test_rag_cognitive_episode_adapter.py tests/test_web_agent3.py tests/test_config.py tests/test_reflection_cycle_stage1c_service.py tests/test_reflection_cycle_stage1c_worker.py tests/test_runtime_adapter_registration.py tests/test_service_background_consolidation.py -q`
+    passed: 227 passed in 12.20s.
+  - `venv\Scripts\python -m pytest tests\test_internal_monologue_residue_prompt_boundaries.py::test_root_readmes_document_residue_architecture -q`
+    passed after restoring the root README residue lane wording.
+  - `venv\Scripts\python -m pytest -q` initially found one root README
+    documentation-boundary failure; after the README fix the full deterministic
+    suite passed: 1855 passed, 269 deselected in 30.49s.
+  - Final full deterministic suite after supplemental review remediation:
+    `venv\Scripts\python -m pytest -q` passed: 1855 passed, 269 deselected in
+    31.34s.
+  - `git diff --check main` and `git diff --check` passed; both emitted only
+    LF/CRLF working-copy warnings.
+  - Stale-reference scan for removed self-cognition dry-run symbols,
+    deterministic self-cognition pre-RAG symbols, and WebAgent3 official-URL
+    fallback symbols returned no matches in `src`, `tests`, root READMEs, or
+    `docs`.
+- Branch-side closure judgment:
+  - The final independent-review blockers are remediated.
+  - The plan is closed for branch-side implementation and verification.
+  - Stage 8 is still intentionally unchecked and must wait for explicit user
+    instruction to merge into `main`.
 
 ## Risks
 
