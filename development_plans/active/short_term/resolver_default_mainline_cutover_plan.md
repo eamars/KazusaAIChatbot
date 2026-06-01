@@ -426,13 +426,13 @@ unless the user explicitly approves fallback execution for this plan.
   - Evidence: remediation section in `Execution Evidence`.
   - Sign-off: parent/2026-06-01 after focused and full verification passed.
 
-- [ ] Stage 8 - branch merged to main after explicit user instruction.
+- [x] Stage 8 - branch merged to main after explicit user instruction.
   - Covers implementation order step 8.
   - Gate: do not execute until the user explicitly instructs merge to `main`
     after Stage 7.6 evidence is available.
   - Verify clean worktree and final post-merge focused verification.
   - Evidence: merge commit, final commands, branch status.
-  - Sign-off: parent/date after merge evidence is recorded.
+  - Sign-off: parent/2026-06-01 after merge evidence is recorded.
 
 ## Verification
 
@@ -986,8 +986,19 @@ the residual risk.
 - Branch-side closure judgment:
   - The final independent-review blockers are remediated.
   - The plan is closed for branch-side implementation and verification.
-  - Stage 8 is still intentionally unchecked and must wait for explicit user
-    instruction to merge into `main`.
+- Stage 8 merge closure:
+  - User explicitly instructed Stage 8 execution on 2026-06-01.
+  - Committed final branch cleanup on `resolver-goal-poc`:
+    `9e1767d Remove legacy self-cognition dry-run path`.
+  - Fetched `origin`, switched to `main`, confirmed `main` was up to date
+    with `origin/main`, then merged `resolver-goal-poc` with explicit merge
+    commit `af2c3b3 Merge resolver-goal-poc`.
+  - Post-merge compile command passed:
+    `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\cognition_resolver\loop.py src\kazusa_ai_chatbot\cognition_resolver\capabilities.py src\kazusa_ai_chatbot\cognition_resolver\contracts.py src\kazusa_ai_chatbot\nodes\persona_supervisor2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2d.py src\kazusa_ai_chatbot\self_cognition\runner.py src\kazusa_ai_chatbot\self_cognition\projection.py src\kazusa_ai_chatbot\self_cognition\worker.py src\kazusa_ai_chatbot\rag\web_agent3\agent.py`.
+  - Post-merge focused pytest command passed:
+    `venv\Scripts\python -m pytest tests\test_cognition_resolver_loop.py tests\test_cognition_resolver_l2d_contract.py tests\test_l2d_l3_surface_handoff.py tests\test_persona_supervisor2_action_initializer.py tests\test_persona_supervisor2.py tests\test_self_cognition_tracking.py tests\test_self_cognition_integration.py tests\test_web_agent3.py -q`;
+    result: 197 passed in 9.60s.
+  - Stage 8 is complete locally on `main`.
 
 ## Risks
 
