@@ -41,6 +41,19 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+_SUPERVISOR_TRACE_PRIVATE_KEYS = frozenset((
+    "_id",
+    "conversation_row_id",
+    "platform_message_id",
+    "safety_recovery",
+    "seed_conversation_row_id",
+    "seed_platform_message_id",
+    "unit_id",
+    "source_refs",
+    "raw_refs",
+))
+
+
 def _clamp_unit(value: float) -> float:
     """Clamp a float into the inclusive ``0.0``–``1.0`` range.
 
@@ -111,13 +124,34 @@ def _cognition_rag_result(rag_result: object) -> dict[str, Any]:
     public_result.pop("user_memory_unit_candidates", None)
     supervisor_trace = public_result.get("supervisor_trace")
     if isinstance(supervisor_trace, dict):
-        prompt_trace = dict(supervisor_trace)
-        prompt_trace.pop("safety_recovery", None)
+        prompt_trace = _prompt_safe_supervisor_trace(supervisor_trace)
         public_result["supervisor_trace"] = prompt_trace
     projected_result = project_tool_result_for_llm(public_result)
     if not isinstance(projected_result, dict):
         return {}
     return projected_result
+
+
+def _prompt_safe_supervisor_trace(value: object) -> object:
+    """Remove trace-only private fields before L2 sees RAG internals."""
+
+    if isinstance(value, dict):
+        projected: dict[str, Any] = {}
+        for key, item in value.items():
+            if key in _SUPERVISOR_TRACE_PRIVATE_KEYS:
+                continue
+            projected[key] = _prompt_safe_supervisor_trace(item)
+        return_value: object = projected
+        return return_value
+    if isinstance(value, list):
+        projected_items = [
+            _prompt_safe_supervisor_trace(item)
+            for item in value
+        ]
+        return_value = projected_items
+        return return_value
+    return_value = value
+    return return_value
 
 
 def _build_boundary_affinity_override(boundary_profile: dict, affinity: int, affinity_level: str) -> dict[str, str]:
@@ -217,6 +251,7 @@ _COGNITION_CONSCIOUSNESS_PROMPT = '''\
 - 存在 `internal_thought_residue` 时，当前材料是我自己的内部观察资料。重点读取 `internal_thought_residue.internal_monologue` 中的真实可见现场；`decontextualized_input` 和 `user_input` 只是运输摘要，不是用户输入、用户发言，也不是任何人正在对我说话。
 - 没有 `reflection_artifact` 且没有 `internal_thought_residue` 时，当前材料是外部说话内容。`decontextualized_input` 是当前外部说话内容的语义摘要。
 - 内部观察资料和反思资料中的标题、字段名、JSON、时间戳、semantic_labels、window_summary、transport summary、model-facing metadata 只帮助定位资料结构；不要把它们当成聊天内容，也不要复制进 `internal_monologue`。
+- `promoted_reflection_context.promoted_global_growth` 是全局人格成长背景，不是当前用户事实、当前承诺或当前聊天证据；可以校准我的表达倾向，但不得把它当成当前用户事实，也不得覆盖当前输入、当前证据或本轮媒体观察。
 
 # 核心任务
 1. 先确定来源类型，再解释当前事实。

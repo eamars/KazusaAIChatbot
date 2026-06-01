@@ -221,7 +221,7 @@ def _dialog_node_state() -> dict[str, object]:
 
 
 @pytest.mark.asyncio
-async def test_stage_1_skip_records_rag_event_without_query_text(monkeypatch) -> None:
+async def test_rag_evidence_skip_records_event_without_query_text(monkeypatch) -> None:
     """Unresolved referent skips should record only sanitized RAG metadata."""
 
     record_rag_stage_event = AsyncMock()
@@ -247,20 +247,23 @@ async def test_stage_1_skip_records_rag_event_without_query_text(monkeypatch) ->
         ],
     )
 
-    result = await supervisor_module.stage_1_research(state)
+    rag_result = await supervisor_module.run_rag_evidence_for_persona_state(
+        state,
+        agent_name="resolver_rag_evidence",
+    )
 
-    assert result["rag_result"]["answer"] == ""
+    assert rag_result["answer"] == ""
     call_rag_supervisor.assert_not_awaited()
     record_rag_stage_event.assert_awaited_once()
     kwargs = record_rag_stage_event.await_args.kwargs
     assert kwargs["status"] == "skipped"
-    assert kwargs["agent_name"] == "stage_1_research"
+    assert kwargs["agent_name"] == "resolver_rag_evidence"
     assert kwargs["correlation_id"] == "rag:qq:msg-event-1"
     assert "private query text" not in _serialized(kwargs)
 
 
 @pytest.mark.asyncio
-async def test_stage_1_success_records_counts_without_evidence(monkeypatch) -> None:
+async def test_rag_evidence_success_records_counts_without_evidence(monkeypatch) -> None:
     """Successful RAG projection should count evidence without logging it."""
 
     record_rag_stage_event = AsyncMock()
@@ -314,9 +317,12 @@ async def test_stage_1_success_records_counts_without_evidence(monkeypatch) -> N
 
     state = _stage_1_state(referents=[])
 
-    result = await supervisor_module.stage_1_research(state)
+    rag_result = await supervisor_module.run_rag_evidence_for_persona_state(
+        state,
+        agent_name="resolver_rag_evidence",
+    )
 
-    assert result["rag_result"]["memory_evidence"]
+    assert rag_result["memory_evidence"]
     record_rag_stage_event.assert_awaited_once()
     kwargs = record_rag_stage_event.await_args.kwargs
     assert kwargs["status"] == "succeeded"
@@ -327,7 +333,7 @@ async def test_stage_1_success_records_counts_without_evidence(monkeypatch) -> N
 
 
 @pytest.mark.asyncio
-async def test_stage_1_success_records_safety_recovery_count(monkeypatch) -> None:
+async def test_rag_evidence_success_records_safety_recovery_count(monkeypatch) -> None:
     """RAG telemetry should expose recovery counts without unsafe content."""
 
     record_rag_stage_event = AsyncMock()
@@ -363,9 +369,12 @@ async def test_stage_1_success_records_safety_recovery_count(monkeypatch) -> Non
 
     state = _stage_1_state(referents=[])
 
-    result = await supervisor_module.stage_1_research(state)
+    rag_result = await supervisor_module.run_rag_evidence_for_persona_state(
+        state,
+        agent_name="resolver_rag_evidence",
+    )
 
-    assert result["rag_result"]["answer"] == ""
+    assert rag_result["answer"] == ""
     record_rag_stage_event.assert_awaited_once()
     kwargs = record_rag_stage_event.await_args.kwargs
     assert kwargs["safety_recovery_count"] > 0

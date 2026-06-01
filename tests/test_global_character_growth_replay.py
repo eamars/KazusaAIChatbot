@@ -133,6 +133,7 @@ def _state(*, promoted_reflection_context: dict) -> dict:
             },
         },
         "cognitive_episode": episode,
+        "local_time_context": turn_clock["local_time_context"],
         "character_profile": {
             "name": "Character",
             "personality_brief": {"mbti": "INTJ"},

@@ -34,7 +34,6 @@ Generated from active entry points, runtime docs, and tests on `2026-05-17`.
 | `run_global_character_growth.py` | `python -m scripts.run_global_character_growth --dry-run` | Manual global growth pass from reflection-promoted memory. |
 | `run_reflection_cycle.py` | `python -m scripts.run_reflection_cycle hourly|daily|promote` | Run production reflection worker modes (dry-run supported). |
 | `run_reflection_cycle_readonly.py` | `python -m scripts.run_reflection_cycle_readonly --lookback-hours 24` | Read-only reflection-cycle evaluator for diagnostics. |
-| `run_self_cognition_dry_run.py` | `python -m scripts.run_self_cognition_dry_run --case-file <path> --output-dir <path>` | Execute one self-cognition case file locally, emit artifacts only. |
 | `sanitize_memory_writer_perspective.py` | `python -m scripts.sanitize_memory_writer_perspective` | Offline migration/sanitization of durable memory perspective wording. |
 | `search_conversation.py` | `search-conversations` | Search conversation history with keyword or vector search. |
 | `search_memory.py` | `python -m scripts.search_memory` | Search memory entries with keyword or vector modes. |

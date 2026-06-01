@@ -209,11 +209,11 @@ def test_initializer_prompt_documents_profile_evidence_dependency() -> None:
         character_name="<active character>",
     )
 
-    assert "Evidence-dependency gate" in rendered_prompt
+    assert "规则 0b：证据依赖门" in rendered_prompt
     assert "<character mention>能做一个自我介绍么" in rendered_prompt
     assert "Person-context: retrieve active character profile" in rendered_prompt
     assert "<character mention><character mention>欢迎回来" in rendered_prompt
-    assert "No person, memory, conversation, recall, live, or web evidence is needed" in rendered_prompt
+    assert "常规欢迎互动，不需要 RAG evidence" in rendered_prompt
 
 
 def test_memory_evidence_prompt_uses_capability_contract() -> None:
@@ -227,8 +227,8 @@ def test_memory_evidence_prompt_uses_capability_contract() -> None:
 
     assert "Memory-evidence: retrieve durable evidence about" in rendered_initializer
     assert "Memory-search:" not in rendered_initializer
-    assert "Do not use memory evidence for live external values" in rendered_initializer
-    assert "Handles durable memory evidence relevant to answering the slot" in rendered_dispatcher
+    assert "不要用 memory evidence 回答实时外部值" in rendered_initializer
+    assert "顶层 durable memory evidence 能力" in rendered_dispatcher
 
 
 def test_initializer_prompt_declares_recall_route() -> None:
@@ -238,7 +238,7 @@ def test_initializer_prompt_declares_recall_route() -> None:
     )
 
     assert "Recall:" in rendered_prompt
-    assert "what was agreed" in rendered_prompt
+    assert "约定了什么" in rendered_prompt
     assert "Conversation-evidence:" in rendered_prompt
 
 
@@ -279,8 +279,8 @@ def test_initializer_prompt_uses_conversation_speaker_scope_contract() -> None:
         "speaker=active_character",
         "speaker=any_speaker",
         "speaker=person resolved in slot N",
-        "Do not create Person-context merely to bind current_user",
-        "Use the slot-N form only for a person",
+        "不要只为了绑定 current_user 而创建 Person-context",
+        "slot-N 形式只能引用早前槽位产生的人",
     ]
     missing_fragments = [
         fragment
@@ -298,11 +298,10 @@ def test_initializer_prompt_documents_self_word_active_character_route() -> None
         character_name="<active character>",
     )
     required_fragments = [
-        "active character's own prior wording",
+        "活跃角色自己的过往措辞",
         "speaker=active_character",
         "我刚才说什么了？",
-        "Conversation-evidence: retrieve prior active-character claim "
-        "about the project being delayed speaker=active_character",
+        '此时 "you" 或 "你" 指活跃角色',
     ]
     missing_fragments = [
         fragment
@@ -409,17 +408,17 @@ def test_initializer_prompt_documents_live_external_fact_contract() -> None:
         character_name="<active character>",
     )
     required_fragments = [
-        "## Rule 2 — Live context present-tense facts",
-        "Live-context owns present-tense facts needed for the current turn.",
-        "Use one `Live-context:` slot for every present-tense fact",
-        "Each live slot must correspond to one live fact type directly requested",
-        "do not split character-location or user-location",
-        "Bare current-time questions are active-character runtime",
+        "## 规则 2：Live context 当前时态事实",
+        "`Live-context:` 负责本轮需要的当前时态事实",
+        "每个当前时态事实创建一个 `Live-context:` 槽位",
+        "每个 live 槽位必须对应用户直接要求的一个 live fact type",
+        "live-context capability 自己负责 target/scope resolution",
+        "裸当前时间问题是 active-character runtime fact",
         "Live-context: answer active character current local <time / date / weekday>",
         "Live-context: answer current user local time if configured",
-        "Examples below are boundary anchors, not an exhaustive routing table.",
+        "以下例子是边界锚点，不是完整路由表",
         "Query: \"现在几点？\"",
-        "This rule overrides memory defaults and backend wording",
+        "仍使用 `Live-context:`",
         "answer current <weather / temperature / opening status",
         "unknown location/target",
     ]

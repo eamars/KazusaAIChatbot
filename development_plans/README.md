@@ -39,6 +39,8 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
+| [resolver_default_mainline_cutover_plan.md](active/short_term/resolver_default_mainline_cutover_plan.md) | High-risk migration and mainline cutover plan | in_progress |
+| [self_cognition_rag_resolver_evidence_plan.md](active/short_term/self_cognition_rag_resolver_evidence_plan.md) | Medium production integration plan | completed on branch |
 | [searxng_mcp_phaseout_plan.md](active/short_term/searxng_mcp_phaseout_plan.md) | Large web-agent transport cutover plan | completed on branch |
 
 ## Supporting Experiment Records
@@ -69,6 +71,7 @@ long_term/todo.md
 | [cognition_prompt_chain_previous20_equivalence_check_20260519.md](reference/evidence/cognition_prompt_chain_previous20_equivalence_check_20260519.md) | Supporting evidence |
 | [cognition_prompt_chain_previous20_input_output_20260519.md](reference/evidence/cognition_prompt_chain_previous20_input_output_20260519.md) | Supporting evidence |
 | [rag2_recall_quality_experiment_plan.md](reference/evidence/rag2_recall_quality_experiment_plan.md) | Supporting experiment evidence |
+| [self_cognition_rag_resolver_evidence_review_20260601.md](reference/evidence/self_cognition_rag_resolver_evidence_review_20260601.md) | Supporting real LLM evidence |
 | [multi_source_cognition_stage_03_inactive_prompt_variant_notes.md](reference/multi_source_cognition_stage_03_inactive_prompt_variant_notes.md) | Reference notes |
 
 ## Triage
@@ -214,6 +217,8 @@ plans.
 |---|
 | [character_reflection_cycle_stage1_plan.md](archive/superseded/character_reflection_cycle_stage1_plan.md) |
 | [conversation_graph_recent_context_plan.md](archive/superseded/conversation_graph_recent_context_plan.md) |
+| [cognition_preserving_goal_resolver_production_plan.md](archive/superseded/cognition_preserving_goal_resolver_production_plan.md) |
 | [graph_rag_recall_experiment_plan.md](archive/superseded/graph_rag_recall_experiment_plan.md) |
+| [goal_resolver_poc_plan.md](archive/superseded/goal_resolver_poc_plan.md) |
 | [rag_supervisor2_inner_loop_agents_plan.md](archive/superseded/rag_supervisor2_inner_loop_agents_plan.md) |
 | [short_circuit_early_stop_plan.md](archive/superseded/short_circuit_early_stop_plan.md) |

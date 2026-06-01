@@ -12,7 +12,7 @@ adapter/debug client
   -> brain service queue/intake
   -> relevance and perception
   -> persona nodes
-       decontextualization -> RAG evidence -> cognition -> dialog
+       decontextualization -> cognition resolver -> selected surfaces
   -> persistence/consolidation
   -> scheduler/reflection outside live chat
 ```
@@ -31,7 +31,7 @@ The package currently contains five major node groups:
 | Area | Main files | Owns |
 | --- | --- | --- |
 | Relevance and perception | `persona_relevance_agent.py`, `persona_supervisor2_msg_decontexualizer.py` | Whether to answer, current media observation, current-message rewrite, referent status. |
-| Persona orchestration | `persona_supervisor2.py` | Live turn graph: decontextualization, RAG, cognition, dialog/no-response routing. |
+| Persona orchestration | `persona_supervisor2.py` | Live turn graph: decontextualization, cognition resolver, memory lifecycle, selected action/surface or no-response routing. |
 | Cognition and action initialization | `persona_supervisor2_cognition*.py`, `boundary_profile.py`, `linguistic_texture.py` | Layered internal appraisal, stance, boundary judgment, L2d action initialization, and selected L3 surface directives. |
 | Dialog | `dialog_agent.py` | Final text generation and evaluator retry loop. |
 | Consolidation handoff | `persona_supervisor2.py` | Completed persona state is handed to `kazusa_ai_chatbot.consolidation`, which owns extraction helpers, origin projection, target validation, and durable write routing. |
@@ -51,14 +51,14 @@ Inside `persona_supervisor2`, the live persona graph is:
 
 ```text
 stage_0_msg_decontexualizer
-  -> stage_1_research
-       RAG 2 supervisor
-       project_known_facts(...)
-       state["rag_result"]
-  -> stage_2_cognition
-       L1 subconscious
-       L2 consciousness + boundary + judgment + social context
-       L2d action initializer
+  -> stage_1_goal_resolver
+       bounded resolver loop
+       each cycle runs L1 subconscious
+       each cycle runs L2 consciousness + boundary + judgment + social context
+       each cycle runs L2d action initializer
+       optional cognition-selected capabilities:
+         RAG 2 evidence, web/current evidence, HIL blockers,
+         approval blockers, private self-resolution
        state["internal_monologue"]
        state["action_specs"]
   -> stage_2_memory_lifecycle
@@ -75,6 +75,13 @@ stage_0_msg_decontexualizer
            private surface output + private action results
   -> final_dialog + episode_trace + consolidation_state
 ```
+
+The resolver is a recurrence controller, not a separate assistant harness. RAG,
+web/current evidence, HIL blockers, approval blockers, and private
+self-resolution are capability observations that feed another complete
+L1/L2/L2d cognition pass before final L3/dialog rendering. Simple turns can
+still behave like a one-cycle resolver: cognition selects `speak` or silence
+without requesting extra evidence.
 
 The returned `consolidation_state` is the completed persona snapshot. The
 service uses it after visible surface handling to record conversation progress
@@ -156,7 +163,7 @@ Current supported cognition prompt variants are selected by
 | --- | --- | --- | --- |
 | `user_message` | `dialog_text` plus optional `image_observation` and `audio_observation` | `visible_reply`, `think_only`, `silent` | Normal live chat. |
 | `reflection_signal` | `reflection_artifact` | `think_only`, `preview`, `silent` | Reflection dry-run cognition. |
-| `internal_thought` | `internal_monologue` | `think_only`, `preview`, `silent` | Legacy prompt-variant label used by current self-cognition dry-run/worker paths. Architecturally this is a self-cognition trigger, not a downstream action consumer. |
+| `internal_thought` | `internal_monologue` | `think_only`, `preview`, `silent` | Legacy prompt-variant label used by current self-cognition worker paths. Architecturally this is a self-cognition trigger, not a downstream action consumer. |
 
 The selector validates the episode and exposes only prompt-safe fields:
 
@@ -755,9 +762,11 @@ The implemented flow is:
    Relevance decides whether a reply should happen.
    Decontextualizer rewrites only context-dependent references.
 
-3. Evidence retrieval
-   RAG 2 retrieves known facts and projects them into `rag_result`.
-   Evidence stays evidence; it does not speak as the character.
+3. Cognition resolver
+   Each cycle runs L1 -> L2 -> L2d. When L2d selects evidence, the resolver
+   calls RAG 2 or a web/current evidence capability and projects the
+   observation into the next cognition cycle. Evidence stays evidence; it does
+   not speak as the character.
 
 4. L1 affect
    `emotional_appraisal` and `interaction_subtext` capture immediate
@@ -930,7 +939,7 @@ Keep these invariants when changing the node package:
   results, or private finalization make the episode consolidatable.
 - Consolidation consumes prompt-safe episode-trace evidence; it must not
   execute actions, dispatch, schedule, or trigger cognition.
-- Reflection and self-cognition dry runs reuse the shared cognition graph, but
+- Reflection and self-cognition worker runs reuse the shared cognition graph, but
   raw reflection output and private thought residue do not automatically enter
   normal chat.
 

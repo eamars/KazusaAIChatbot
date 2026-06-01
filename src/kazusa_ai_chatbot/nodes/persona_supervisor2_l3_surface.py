@@ -3,6 +3,14 @@
 from langgraph.graph import END, START, StateGraph
 
 from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
+from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    ResolverValidationError,
+    project_goal_progress_for_cognition,
+    project_observations_for_cognition,
+)
+from kazusa_ai_chatbot.cognition_resolver.state import (
+    MAX_PROJECTED_RESOLVER_OBSERVATIONS,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (
     call_content_anchor_agent,
     call_interaction_style_context_loader,
@@ -32,7 +40,7 @@ def _selected_text_surface_intent(state: GlobalPersonaState) -> str:
         kind = action_spec.get("kind")
         if kind != SPEAK_CAPABILITY:
             continue
-        intent_parts = _text_surface_intent_parts(action_spec)
+        intent_parts = _text_surface_intent_parts(action_spec, state)
         return_value = "；".join(intent_parts)
         return return_value
 
@@ -40,7 +48,10 @@ def _selected_text_surface_intent(state: GlobalPersonaState) -> str:
     return return_value
 
 
-def _text_surface_intent_parts(action_spec: dict) -> list[str]:
+def _text_surface_intent_parts(
+    action_spec: dict,
+    state: GlobalPersonaState,
+) -> list[str]:
     """Extract prompt-safe text-surface requirements from one action spec."""
 
     params = action_spec.get("params")
@@ -51,6 +62,16 @@ def _text_surface_intent_parts(action_spec: dict) -> list[str]:
         raw_requirements = {}
 
     intent_parts: list[str] = []
+    original_goal = _resolved_pending_original_goal(state)
+    if original_goal:
+        intent_parts.append(f"原始目标：{original_goal}")
+    goal_progress = _resolver_goal_progress_text(state)
+    if goal_progress:
+        intent_parts.append(f"目标进度：{goal_progress}")
+    observation_context = _resolver_observations_text(state)
+    if observation_context:
+        intent_parts.append(f"证据观察：{observation_context}")
+
     for field_name, label in (
         ("decision", "决策"),
         ("intent", "目标"),
@@ -66,6 +87,85 @@ def _text_surface_intent_parts(action_spec: dict) -> list[str]:
         intent_parts.append(f"理由：{reason.strip()}")
 
     return intent_parts
+
+
+def _resolver_goal_progress_text(state: GlobalPersonaState) -> str:
+    """Return compact goal progress text for L3 surface selection."""
+
+    raw_goal_progress = state.get("resolver_goal_progress")
+    if not isinstance(raw_goal_progress, dict):
+        resolver_state = state.get("resolver_state")
+        if isinstance(resolver_state, dict):
+            nested_goal_progress = resolver_state.get("goal_progress")
+            if isinstance(nested_goal_progress, dict):
+                raw_goal_progress = nested_goal_progress
+    if not isinstance(raw_goal_progress, dict):
+        return_value = ""
+        return return_value
+    try:
+        goal_progress = project_goal_progress_for_cognition(raw_goal_progress)
+    except ResolverValidationError:
+        return_value = ""
+        return return_value
+    return_value = goal_progress.replace("\n", " / ")
+    return return_value
+
+
+def _resolver_observations_text(state: GlobalPersonaState) -> str:
+    """Return bounded prompt-safe resolver observations for text surfacing."""
+
+    resolver_state = state.get("resolver_state")
+    if not isinstance(resolver_state, dict):
+        return_value = ""
+        return return_value
+    raw_observations = resolver_state.get("observations")
+    if not isinstance(raw_observations, list):
+        return_value = ""
+        return return_value
+    try:
+        observation_context = project_observations_for_cognition(
+            raw_observations[-MAX_PROJECTED_RESOLVER_OBSERVATIONS:],
+        )
+    except ResolverValidationError:
+        return_value = ""
+        return return_value
+    return_value = observation_context.replace("\n", " / ")
+    return return_value
+
+
+def _resolved_pending_original_goal(state: GlobalPersonaState) -> str:
+    """Return the original HIL goal after a pending row has been resolved."""
+
+    pending_resume = state.get("pending_resolver_resume")
+    if not isinstance(pending_resume, dict):
+        resolver_state = state.get("resolver_state")
+        if isinstance(resolver_state, dict):
+            nested_pending_resume = resolver_state.get("pending_resume")
+            if isinstance(nested_pending_resume, dict):
+                pending_resume = nested_pending_resume
+    if not isinstance(pending_resume, dict):
+        return_value = ""
+        return return_value
+
+    resolution = state.get("resolver_pending_resolution")
+    include_goal = pending_resume.get("status") == "superseded"
+    if isinstance(resolution, dict):
+        include_goal = resolution.get("decision") in (
+            "answered",
+            "approved",
+            "superseded",
+        )
+    if not include_goal:
+        return_value = ""
+        return return_value
+
+    original_goal = pending_resume.get("prompt_safe_original_goal")
+    if isinstance(original_goal, str) and original_goal.strip():
+        return_value = original_goal.strip()
+        return return_value
+
+    return_value = ""
+    return return_value
 
 
 async def call_l3_text_surface_handler(state: GlobalPersonaState) -> dict:
@@ -154,6 +254,12 @@ async def call_l3_text_surface_handler(state: GlobalPersonaState) -> dict:
         initial_state["selected_text_surface_intent"] = (
             selected_text_surface_intent
         )
+    resolver_state = state.get("resolver_state")
+    if resolver_state is not None:
+        initial_state["resolver_state"] = resolver_state
+    resolver_goal_progress = state.get("resolver_goal_progress")
+    if resolver_goal_progress is not None:
+        initial_state["resolver_goal_progress"] = resolver_goal_progress
     memory_lifecycle_context = state.get("memory_lifecycle_context")
     if isinstance(memory_lifecycle_context, dict):
         initial_state["memory_lifecycle_context"] = memory_lifecycle_context

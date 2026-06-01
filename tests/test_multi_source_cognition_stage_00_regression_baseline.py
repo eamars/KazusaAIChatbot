@@ -476,6 +476,33 @@ def _text_surface_update() -> dict[str, Any]:
     return update
 
 
+def _resolver_update(
+    *,
+    rag_result: dict[str, Any] | None = None,
+    action_specs: list[dict[str, Any]] | None = None,
+    internal_monologue: str = "answer normally",
+    character_intent: str = "PROVIDE",
+    logical_stance: str = "CONFIRM",
+) -> dict[str, Any]:
+    """Build a patched resolver result for persona graph tests."""
+
+    update = {
+        "rag_result": rag_result or _rag_result(),
+        "internal_monologue": internal_monologue,
+        "interaction_subtext": "",
+        "emotional_appraisal": "",
+        "character_intent": character_intent,
+        "logical_stance": logical_stance,
+        "judgment_note": "ok",
+        "social_distance": "",
+        "emotional_intensity": "",
+        "vibe_check": "",
+        "relational_dynamic": "",
+        "action_specs": action_specs or [],
+    }
+    return update
+
+
 def _dialog_state() -> dict[str, Any]:
     """Build a dialog-agent state for generator and evaluator render checks."""
     cognition_state = _cognition_state()
@@ -841,23 +868,13 @@ async def test_persona_graph_response_route_preserves_consolidation_snapshot() -
             },
         ) as decontextualizer,
         patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.stage_1_research",
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_resolver_loop",
             new_callable=AsyncMock,
-            return_value={"rag_result": rag_result},
-        ) as research,
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_subgraph",
-            new_callable=AsyncMock,
-            return_value={
-                "internal_monologue": "answer normally",
-                "interaction_subtext": "",
-                "emotional_appraisal": "",
-                "character_intent": "PROVIDE",
-                "logical_stance": "CONFIRM",
-                "judgment_note": "ok",
-                "action_specs": [_speak_action_spec()],
-            },
-        ) as cognition,
+            return_value=_resolver_update(
+                rag_result=rag_result,
+                action_specs=[_speak_action_spec()],
+            ),
+        ) as resolver,
         patch(
             "kazusa_ai_chatbot.nodes.persona_supervisor2.call_l3_text_surface_handler",
             new_callable=AsyncMock,
@@ -876,8 +893,7 @@ async def test_persona_graph_response_route_preserves_consolidation_snapshot() -
         result = await supervisor_module.persona_supervisor2(state)
 
     decontextualizer.assert_awaited_once()
-    research.assert_awaited_once()
-    cognition.assert_awaited_once()
+    resolver.assert_awaited_once()
     dialog.assert_awaited_once()
     assert result["should_respond"] is True
     assert result["final_dialog"] == ["ok"]
@@ -905,21 +921,13 @@ async def test_persona_graph_silence_route_skips_dialog() -> None:
             },
         ),
         patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.stage_1_research",
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_resolver_loop",
             new_callable=AsyncMock,
-            return_value={"rag_result": _rag_result()},
-        ),
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_subgraph",
-            new_callable=AsyncMock,
-            return_value={
-                "internal_monologue": "stay quiet",
-                "interaction_subtext": "",
-                "emotional_appraisal": "",
-                "character_intent": "DISMISS",
-                "logical_stance": "REFUSE",
-                "action_specs": [],
-            },
+            return_value=_resolver_update(
+                internal_monologue="stay quiet",
+                character_intent="DISMISS",
+                logical_stance="REFUSE",
+            ),
         ),
         patch(
             "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",
@@ -943,7 +951,7 @@ async def test_persona_graph_silence_route_skips_dialog() -> None:
 
 @pytest.mark.asyncio
 async def test_persona_graph_scopes_group_history_after_decontextualizer() -> None:
-    """Full channel history should stop before RAG and cognition stages."""
+    """Full channel history should stop before the resolver stage."""
     state = _base_state("group_text")
     state["chat_history_wide"] = [
         {
@@ -1003,23 +1011,10 @@ async def test_persona_graph_scopes_group_history_after_decontextualizer() -> No
             },
         ) as decontextualizer,
         patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.stage_1_research",
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_resolver_loop",
             new_callable=AsyncMock,
-            return_value={"rag_result": _rag_result()},
-        ) as research,
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_subgraph",
-            new_callable=AsyncMock,
-            return_value={
-                "internal_monologue": "answer normally",
-                "interaction_subtext": "",
-                "emotional_appraisal": "",
-                "character_intent": "PROVIDE",
-                "logical_stance": "CONFIRM",
-                "judgment_note": "ok",
-                "action_specs": [_speak_action_spec()],
-            },
-        ),
+            return_value=_resolver_update(action_specs=[_speak_action_spec()]),
+        ) as resolver,
         patch(
             "kazusa_ai_chatbot.nodes.persona_supervisor2.call_l3_text_surface_handler",
             new_callable=AsyncMock,
@@ -1038,7 +1033,7 @@ async def test_persona_graph_scopes_group_history_after_decontextualizer() -> No
         await supervisor_module.persona_supervisor2(state)
 
     decontextualizer_state = decontextualizer.await_args.args[0]
-    research_state = research.await_args.args[0]
+    resolver_state = resolver.await_args.args[0]
     assert [
         row["body_text"]
         for row in decontextualizer_state["chat_history_recent"]
@@ -1050,7 +1045,7 @@ async def test_persona_graph_scopes_group_history_after_decontextualizer() -> No
     ]
     assert [
         row["body_text"]
-        for row in research_state["chat_history_recent"]
+        for row in resolver_state["chat_history_recent"]
     ] == [
         "current user secret",
         "current user reply",
@@ -1230,8 +1225,10 @@ async def test_rag_skip_preserves_full_projected_shape(
         _fail_rag_supervisor,
     )
 
-    result = await supervisor_module.stage_1_research(state)
-    rag_result = result["rag_result"]
+    rag_result = await supervisor_module.run_rag_evidence_for_persona_state(
+        state,
+        agent_name="resolver_rag_evidence",
+    )
 
     assert rag_result["answer"] == ""
     assert rag_result["user_image"]["user_memory_context"] == (

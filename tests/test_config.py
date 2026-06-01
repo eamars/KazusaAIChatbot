@@ -42,6 +42,7 @@ REQUIRED_ROUTE_ENV_VARS = (
     "JSON_REPAIR_LLM_API_KEY",
     "JSON_REPAIR_LLM_MODEL",
 )
+REMOVED_RESOLVER_ENABLE_FLAG = "COGNITION_" + "RESOLVER_ENABLED"
 
 
 def _subprocess_env_without_dotenv() -> dict[str, str]:
@@ -560,6 +561,101 @@ class TestCognitionVisualDirectivesConfig:
         assert result.stdout.strip() == "False"
 
 
+class TestCognitionResolverConfig:
+    def test_cognition_resolver_defaults_are_bounded(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env.pop(REMOVED_RESOLVER_ENABLE_FLAG, None)
+        env.pop("COGNITION_RESOLVER_MAX_CYCLES", None)
+        env.pop("COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS", None)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(hasattr(config, "
+                    f"{REMOVED_RESOLVER_ENABLE_FLAG!r})); "
+                    "print(config.COGNITION_RESOLVER_MAX_CYCLES); "
+                    "print(config.COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS)"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.splitlines() == ["False", "3", "120.0"]
+
+    def test_cognition_resolver_config_reads_remaining_environment(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env[REMOVED_RESOLVER_ENABLE_FLAG] = "true"
+        env["COGNITION_RESOLVER_MAX_CYCLES"] = "5"
+        env["COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS"] = "180.0"
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(hasattr(config, "
+                    f"{REMOVED_RESOLVER_ENABLE_FLAG!r})); "
+                    "print(config.COGNITION_RESOLVER_MAX_CYCLES); "
+                    "print(config.COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS)"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.splitlines() == ["False", "5", "180.0"]
+
+    def test_cognition_resolver_config_rejects_invalid_bounds(self, tmp_path):
+        max_cycles_env = _configured_subprocess_env_without_dotenv()
+        max_cycles_env["COGNITION_RESOLVER_MAX_CYCLES"] = "6"
+
+        max_cycles_result = subprocess.run(
+            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
+            cwd=tmp_path,
+            env=max_cycles_env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert max_cycles_result.returncode != 0
+        assert (
+            "COGNITION_RESOLVER_MAX_CYCLES must be between 1 and 5"
+            in max_cycles_result.stderr
+        )
+
+        timeout_env = _configured_subprocess_env_without_dotenv()
+        timeout_env["COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS"] = "0.5"
+
+        timeout_result = subprocess.run(
+            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
+            cwd=tmp_path,
+            env=timeout_env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert timeout_result.returncode != 0
+        assert (
+            "COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS "
+            "must be between 1.0 and 180.0"
+        ) in timeout_result.stderr
+
+
 class TestReflectionCycleConfig:
     def test_reflection_cycle_enabled_defaults_to_true(self, tmp_path):
         env = _configured_subprocess_env_without_dotenv()
@@ -690,9 +786,7 @@ class TestSelfCognitionConfig:
         env.pop("SELF_COGNITION_ENABLED", None)
         env.pop("SELF_COGNITION_WORKER_INTERVAL_SECONDS", None)
         env.pop("SELF_COGNITION_MAX_CASES_PER_TICK", None)
-        env.pop("SELF_COGNITION_TRACKING_DIR", None)
         env.pop("SELF_COGNITION_SOURCE_PACKET_CHAR_LIMIT", None)
-        env.pop("SELF_COGNITION_RAG_EVIDENCE_CHAR_LIMIT", None)
         env.pop("SELF_COGNITION_TRIGGER_ACTIVE_COMMITMENT_ENABLED", None)
         env.pop("SELF_COGNITION_TRIGGER_CONVERSATION_PROGRESS_ENABLED", None)
         env.pop("SELF_COGNITION_TRIGGER_RECENT_DIRECT_DIALOG_ENABLED", None)
@@ -710,9 +804,7 @@ class TestSelfCognitionConfig:
                     "print(config.SELF_COGNITION_ENABLED); "
                     "print(config.SELF_COGNITION_WORKER_INTERVAL_SECONDS); "
                     "print(config.SELF_COGNITION_MAX_CASES_PER_TICK); "
-                    "print(config.SELF_COGNITION_TRACKING_DIR); "
                     "print(config.SELF_COGNITION_SOURCE_PACKET_CHAR_LIMIT); "
-                    "print(config.SELF_COGNITION_RAG_EVIDENCE_CHAR_LIMIT); "
                     "print(config.SELF_COGNITION_TRIGGER_ACTIVE_COMMITMENT_ENABLED); "
                     "print(config.SELF_COGNITION_TRIGGER_CONVERSATION_PROGRESS_ENABLED); "
                     "print(config.SELF_COGNITION_TRIGGER_RECENT_DIRECT_DIALOG_ENABLED); "
@@ -734,8 +826,6 @@ class TestSelfCognitionConfig:
             "True",
             "3600",
             "3",
-            "self_cognition_runs",
-            "4000",
             "4000",
             "True",
             "True",
@@ -829,24 +919,6 @@ class TestSelfCognitionConfig:
             in source_packet_result.stderr
         )
 
-        rag_evidence_env = _configured_subprocess_env_without_dotenv()
-        rag_evidence_env["SELF_COGNITION_RAG_EVIDENCE_CHAR_LIMIT"] = "0"
-
-        rag_evidence_result = subprocess.run(
-            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
-            cwd=tmp_path,
-            env=rag_evidence_env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        assert rag_evidence_result.returncode != 0
-        assert (
-            "SELF_COGNITION_RAG_EVIDENCE_CHAR_LIMIT must be >= 1"
-            in rag_evidence_result.stderr
-        )
-
         max_cases_env = _configured_subprocess_env_without_dotenv()
         max_cases_env["SELF_COGNITION_MAX_CASES_PER_TICK"] = "0"
 
@@ -881,24 +953,6 @@ class TestSelfCognitionConfig:
         assert (
             "SELF_COGNITION_WORKER_INTERVAL_SECONDS must be >= 1"
             in interval_result.stderr
-        )
-
-        tracking_dir_env = _configured_subprocess_env_without_dotenv()
-        tracking_dir_env["SELF_COGNITION_TRACKING_DIR"] = "   "
-
-        tracking_dir_result = subprocess.run(
-            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
-            cwd=tmp_path,
-            env=tracking_dir_env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        assert tracking_dir_result.returncode != 0
-        assert (
-            "SELF_COGNITION_TRACKING_DIR must be non-empty"
-            in tracking_dir_result.stderr
         )
 
     def test_self_cognition_trigger_flags_default_true_and_parse_false(

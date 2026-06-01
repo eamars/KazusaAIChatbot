@@ -76,6 +76,9 @@ _NESTED_OBJECT_FIELDS = (
 
 _STRIPPED_RAW_KEYS = (
     "conversation_row_id",
+    "platform_message_id",
+    "seed_conversation_row_id",
+    "seed_platform_message_id",
     "_id",
     "embedding",
     "raw_wire_text",

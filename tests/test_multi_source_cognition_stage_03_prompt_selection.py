@@ -326,3 +326,22 @@ def test_output_contract_rejects_action_specs_outside_l2d(
 
     with pytest.raises(CognitionOutputContractError, match="action_specs"):
         validate_cognition_output_contract(stage=stage, payload=payload)
+
+
+@pytest.mark.parametrize(
+    "stage",
+    ("l2a_conscious_framing", "l2c1_judgment_synthesis"),
+)
+def test_output_contract_rejects_resolver_fields_outside_l2d(
+    stage: CognitionPromptStage,
+) -> None:
+    """Only L2d may emit resolver capability decisions."""
+
+    payload = dict(_VALID_OUTPUT_PAYLOADS[stage])
+    payload["resolver_capability_requests"] = []
+
+    with pytest.raises(
+        CognitionOutputContractError,
+        match="resolver_capability_requests",
+    ):
+        validate_cognition_output_contract(stage=stage, payload=payload)

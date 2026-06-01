@@ -29,6 +29,9 @@ _SUPPORTED_USER_MESSAGE_INPUT_SOURCE_PROFILES = {
     ("dialog_text", "audio_observation"),
     ("dialog_text", "image_observation", "audio_observation"),
 }
+_SUPPORTED_INTERNAL_THOUGHT_INPUT_SOURCE_PROFILES = {
+    ("internal_monologue",),
+}
 
 
 def build_text_chat_rag_request(
@@ -73,17 +76,87 @@ def build_text_chat_rag_request(
     """
     validate_cognitive_episode(episode)
 
-    if episode["trigger_source"] != "user_message":
-        raise RAGEpisodeAdapterError("episode trigger_source is not supported")
+    character_user_id, character_name = _character_identity(character_profile)
 
-    if (
-        tuple(episode["input_sources"])
-        not in _SUPPORTED_USER_MESSAGE_INPUT_SOURCE_PROFILES
-    ):
-        raise RAGEpisodeAdapterError("episode input_sources are not supported")
+    if episode["trigger_source"] == "user_message":
+        if (
+            tuple(episode["input_sources"])
+            not in _SUPPORTED_USER_MESSAGE_INPUT_SOURCE_PROFILES
+        ):
+            raise RAGEpisodeAdapterError("episode input_sources are not supported")
 
-    projection = project_text_chat_compatibility_fields(episode)
+        projection = project_text_chat_compatibility_fields(episode)
+        return _build_rag_request_from_fields(
+            decontexualized_input=decontexualized_input,
+            character_user_id=character_user_id,
+            character_name=character_name,
+            user_profile=user_profile,
+            prompt_message_context=prompt_message_context,
+            channel_topic=channel_topic,
+            chat_history_recent=chat_history_recent,
+            chat_history_wide=chat_history_wide,
+            reply_context=reply_context,
+            indirect_speech_context=indirect_speech_context,
+            conversation_progress=conversation_progress,
+            conversation_episode_state=conversation_episode_state,
+            promoted_reflection_context=promoted_reflection_context,
+            platform=projection["platform"],
+            platform_channel_id=projection["platform_channel_id"],
+            channel_type=projection["channel_type"],
+            active_turn_platform_message_ids=projection[
+                "active_turn_platform_message_ids"
+            ],
+            active_turn_conversation_row_ids=projection[
+                "active_turn_conversation_row_ids"
+            ],
+            global_user_id=projection["global_user_id"],
+            user_name=projection["user_name"],
+            storage_timestamp_utc=projection["storage_timestamp_utc"],
+            local_time_context=projection["local_time_context"],
+        )
 
+    if episode["trigger_source"] == "internal_thought":
+        if (
+            tuple(episode["input_sources"])
+            not in _SUPPORTED_INTERNAL_THOUGHT_INPUT_SOURCE_PROFILES
+        ):
+            raise RAGEpisodeAdapterError("episode input_sources are not supported")
+
+        target_scope = episode["target_scope"]
+        origin_metadata = episode["origin_metadata"]
+        return _build_rag_request_from_fields(
+            decontexualized_input=decontexualized_input,
+            character_user_id=character_user_id,
+            character_name=character_name,
+            user_profile=user_profile,
+            prompt_message_context=prompt_message_context,
+            channel_topic=channel_topic,
+            chat_history_recent=chat_history_recent,
+            chat_history_wide=chat_history_wide,
+            reply_context=reply_context,
+            indirect_speech_context=indirect_speech_context,
+            conversation_progress=conversation_progress,
+            conversation_episode_state=conversation_episode_state,
+            promoted_reflection_context=promoted_reflection_context,
+            platform=target_scope["platform"],
+            platform_channel_id=target_scope["platform_channel_id"],
+            channel_type=target_scope["channel_type"],
+            active_turn_platform_message_ids=list(
+                origin_metadata["active_turn_platform_message_ids"]
+            ),
+            active_turn_conversation_row_ids=list(
+                origin_metadata["active_turn_conversation_row_ids"]
+            ),
+            global_user_id=target_scope["current_global_user_id"],
+            user_name=target_scope["current_display_name"],
+            storage_timestamp_utc=episode["storage_timestamp_utc"],
+            local_time_context=episode["local_time_context"],
+        )
+
+    raise RAGEpisodeAdapterError("episode trigger_source is not supported")
+
+
+def _character_identity(character_profile: dict[str, Any]) -> tuple[str, str]:
     if "global_user_id" not in character_profile:
         raise RAGEpisodeAdapterError("character_profile.global_user_id is required")
     character_user_id = character_profile["global_user_id"]
@@ -99,26 +172,49 @@ def build_text_chat_rag_request(
         raise RAGEpisodeAdapterError(
             "character_profile.name must be a non-empty string"
         )
+    return character_user_id, character_name
 
+
+def _build_rag_request_from_fields(
+    *,
+    decontexualized_input: str,
+    character_user_id: str,
+    character_name: str,
+    user_profile: dict[str, Any],
+    prompt_message_context: dict[str, Any],
+    channel_topic: str,
+    chat_history_recent: list[dict[str, Any]],
+    chat_history_wide: list[dict[str, Any]],
+    reply_context: dict[str, Any],
+    indirect_speech_context: str,
+    conversation_progress: dict[str, Any] | None,
+    conversation_episode_state: dict[str, Any] | None,
+    promoted_reflection_context: dict[str, Any] | None,
+    platform: str,
+    platform_channel_id: str,
+    channel_type: str,
+    active_turn_platform_message_ids: list[str],
+    active_turn_conversation_row_ids: list[str],
+    global_user_id: str,
+    user_name: str,
+    storage_timestamp_utc: str,
+    local_time_context: dict[str, Any],
+) -> RAGEpisodeRequest:
     context: dict[str, Any] = {
-        "platform": projection["platform"],
-        "platform_channel_id": projection["platform_channel_id"],
-        "channel_type": projection["channel_type"],
+        "platform": platform,
+        "platform_channel_id": platform_channel_id,
+        "channel_type": channel_type,
         "character_profile": {
             "global_user_id": character_user_id,
             "name": character_name,
         },
-        "active_turn_platform_message_ids": projection[
-            "active_turn_platform_message_ids"
-        ],
-        "active_turn_conversation_row_ids": projection[
-            "active_turn_conversation_row_ids"
-        ],
-        "global_user_id": projection["global_user_id"],
-        "user_name": projection["user_name"],
+        "active_turn_platform_message_ids": active_turn_platform_message_ids,
+        "active_turn_conversation_row_ids": active_turn_conversation_row_ids,
+        "global_user_id": global_user_id,
+        "user_name": user_name,
         "user_profile": user_profile,
-        "current_timestamp_utc": projection["storage_timestamp_utc"],
-        "local_time_context": projection["local_time_context"],
+        "current_timestamp_utc": storage_timestamp_utc,
+        "local_time_context": local_time_context,
         "prompt_message_context": prompt_message_context,
         "channel_topic": channel_topic,
         "chat_history_recent": chat_history_recent,
@@ -133,7 +229,7 @@ def build_text_chat_rag_request(
         "original_query": decontexualized_input,
         "character_name": character_name,
         "context": context,
-        "current_user_id": projection["global_user_id"],
+        "current_user_id": global_user_id,
         "character_user_id": character_user_id,
     }
     return request

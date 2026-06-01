@@ -455,22 +455,9 @@ async def test_selected_speak_runs_l3_surface_and_dialog_once() -> None:
         ),
         patch.object(
             persona_module,
-            "stage_1_research",
+            "call_cognition_resolver_loop",
             new_callable=AsyncMock,
-            return_value={"rag_result": {"answer": "Known fact."}},
-        ),
-        patch.object(
-            persona_module,
-            "call_cognition_subgraph",
-            new_callable=AsyncMock,
-            return_value={
-                "internal_monologue": "I should answer.",
-                "interaction_subtext": "direct",
-                "emotional_appraisal": "calm",
-                "character_intent": "PROVIDE",
-                "logical_stance": "CONFIRM",
-                "action_specs": [_speak_action_spec()],
-            },
+            return_value=_cognition_state(),
         ),
         patch.object(
             persona_module,
@@ -517,15 +504,10 @@ async def test_parent_graph_preserves_social_context_for_selected_l3() -> None:
         ),
         patch.object(
             persona_module,
-            "stage_1_research",
-            new_callable=AsyncMock,
-            return_value={"rag_result": {"answer": "Known fact."}},
-        ),
-        patch.object(
-            persona_module,
-            "call_cognition_subgraph",
+            "call_cognition_resolver_loop",
             new_callable=AsyncMock,
             return_value={
+                **_cognition_state(),
                 "internal_monologue": "I should answer.",
                 "interaction_subtext": "direct request",
                 "emotional_appraisal": "calm",
@@ -615,15 +597,10 @@ async def test_no_speak_skips_l3_surface_and_dialog_but_consolidates() -> None:
         ),
         patch.object(
             persona_module,
-            "stage_1_research",
-            new_callable=AsyncMock,
-            return_value={"rag_result": {"answer": "Known fact."}},
-        ),
-        patch.object(
-            persona_module,
-            "call_cognition_subgraph",
+            "call_cognition_resolver_loop",
             new_callable=AsyncMock,
             return_value={
+                **_cognition_state(),
                 "internal_monologue": "I will not speak now.",
                 "interaction_subtext": "private",
                 "emotional_appraisal": "calm",
@@ -799,6 +776,321 @@ async def test_l3_content_anchor_receives_selected_speak_intent_only() -> None:
     assert "answer with the retrieved fact" in selected_intent
     assert "The visible answer should use the retrieved fact." in selected_intent
     assert "action_specs" not in captured_content_state
+
+
+def test_selected_text_surface_intent_keeps_resolved_hil_original_goal() -> None:
+    """Resolved HIL continuations should keep the original user deliverable."""
+
+    state = _cognition_state()
+    state["resolver_state"] = {
+        "pending_resume": {
+            "schema_version": "resolver_pending_resume.v1",
+            "resume_id": "resolver_pending:v1:goal",
+            "capability_kind": "human_clarification",
+            "status": "closed",
+            "platform": "debug",
+            "platform_channel_id": "channel-123",
+            "global_user_id": "global-user-123",
+            "source_message_id": "message-123",
+            "prompt_safe_original_goal": (
+                "安排两小时计划：吃饭，加一段可以走走看的路线。"
+            ),
+            "prompt_safe_question": "问位置。",
+            "prompt_safe_approval_summary": "",
+            "created_at_utc": "2026-05-30T00:00:00+00:00",
+            "expires_at_utc": "2026-05-31T00:00:00+00:00",
+        },
+    }
+    state["pending_resolver_resume"] = {
+        "schema_version": "resolver_pending_resume.v1",
+        "resume_id": "resolver_pending:v1:goal",
+        "capability_kind": "human_clarification",
+        "status": "closed",
+        "platform": "debug",
+        "platform_channel_id": "channel-123",
+        "global_user_id": "global-user-123",
+        "source_message_id": "message-123",
+        "prompt_safe_original_goal": (
+            "安排两小时计划：吃饭，加一段可以走走看的路线。"
+        ),
+        "prompt_safe_question": "问位置。",
+        "prompt_safe_approval_summary": "",
+        "created_at_utc": "2026-05-30T00:00:00+00:00",
+        "expires_at_utc": "2026-05-31T00:00:00+00:00",
+    }
+    state["resolver_pending_resolution"] = {
+        "schema_version": "resolver_pending_resolution.v1",
+        "resume_id": "resolver_pending:v1:goal",
+        "decision": "answered",
+        "reason": "用户补足了位置。",
+    }
+
+    selected_intent = l3_surface_module._selected_text_surface_intent(state)
+
+    assert selected_intent.startswith(
+        "原始目标：安排两小时计划：吃饭，加一段可以走走看的路线。"
+    )
+    assert "原始目标：安排两小时计划：吃饭，加一段可以走走看的路线。" in (
+        selected_intent
+    )
+
+    state.pop("pending_resolver_resume")
+    selected_intent = l3_surface_module._selected_text_surface_intent(state)
+
+    assert "原始目标：安排两小时计划：吃饭，加一段可以走走看的路线。" in (
+        selected_intent
+    )
+
+
+def test_selected_text_surface_intent_includes_goal_progress_checklist() -> None:
+    """L3 text intent should receive resolver deliverables, not only evidence."""
+
+    state = _cognition_state()
+    state["resolver_state"] = {
+        "goal_progress": {
+            "schema_version": "resolver_goal_progress.v1",
+            "original_goal": "安排两小时计划：吃饭，加一段路线。",
+            "current_focus": "最终回答需要完整计划。",
+            "deliverables": [
+                {
+                    "description": "晚餐候选和证据边界",
+                    "status": "partial",
+                    "note": "不能确认实时营业。",
+                },
+                {
+                    "description": "两小时路线和时间切分",
+                    "status": "pending",
+                    "note": "最终回答必须覆盖。",
+                },
+            ],
+            "missing_user_inputs": [],
+            "evidence_dependencies": ["实时营业证据"],
+            "attempted_paths": ["web_evidence: 奥克兰 CBD 晚餐"],
+            "source_backed_facts": ["用户在奥克兰 CBD"],
+            "assumptions_or_inferences": ["可以给出路线骨架"],
+            "blockers": ["无法确认 19:30 营业状态"],
+            "final_response_requirements": [
+                "覆盖晚餐、散步、时间切分和最终核实清单",
+            ],
+        },
+    }
+
+    selected_intent = l3_surface_module._selected_text_surface_intent(state)
+
+    assert "目标进度：" in selected_intent
+    assert "晚餐候选和证据边界" in selected_intent
+    assert "两小时路线和时间切分" in selected_intent
+    assert "覆盖晚餐、散步、时间切分和最终核实清单" in selected_intent
+
+
+def test_selected_text_surface_intent_includes_resolver_observation_summaries() -> None:
+    """L3 text intent should receive prior prompt-safe evidence observations."""
+
+    state = _cognition_state()
+    state["resolver_state"] = {
+        "observations": [
+            {
+                "schema_version": "resolver_observation.v1",
+                "observation_id": "raw-observation-id",
+                "capability_kind": "web_evidence",
+                "request_objective": "Find CBD walking routes.",
+                "request_reason": "The final answer needs route evidence.",
+                "status": "succeeded",
+                "prompt_safe_summary": "Found Wynyard Quarter and Britomart.",
+                "rag_result": {
+                    "answer": "Walking route answer.",
+                    "external_evidence": [
+                        {
+                            "summary": (
+                                "Wynyard Quarter and Britomart are CBD "
+                                "evening walking options."
+                            ),
+                        },
+                    ],
+                },
+                "evidence_refs": [],
+                "created_at_utc": "2026-05-30T00:00:00+00:00",
+            },
+        ],
+    }
+
+    selected_intent = l3_surface_module._selected_text_surface_intent(state)
+
+    assert "证据观察：" in selected_intent
+    assert "Found Wynyard Quarter and Britomart." in selected_intent
+    assert "Wynyard Quarter and Britomart are CBD evening walking options" in (
+        selected_intent
+    )
+    assert "raw-observation-id" not in selected_intent
+
+
+def test_l3_content_anchors_include_resolver_observation_summaries() -> None:
+    """Dialog directives should keep prior evidence even if L3 compresses it."""
+
+    state = _cognition_state()
+    state["content_anchors"] = [
+        "[DECISION] Answer directly.",
+        "[SCOPE] short.",
+    ]
+    state["resolver_state"] = {
+        "observations": [
+            {
+                "schema_version": "resolver_observation.v1",
+                "observation_id": "raw-observation-id",
+                "capability_kind": "web_evidence",
+                "request_objective": "Find CBD walking routes.",
+                "request_reason": "The final answer needs route evidence.",
+                "status": "succeeded",
+                "prompt_safe_summary": "Found Wynyard Quarter and Britomart.",
+                "rag_result": {
+                    "answer": "Walking route answer.",
+                    "external_evidence": [
+                        {
+                            "summary": (
+                                "Wynyard Quarter and Britomart are CBD "
+                                "evening walking options."
+                            ),
+                        },
+                    ],
+                },
+                "evidence_refs": [],
+                "created_at_utc": "2026-05-30T00:00:00+00:00",
+            },
+        ],
+    }
+
+    content_anchors = l3_module._content_anchors_with_goal_progress(state)
+    joined_anchors = "\n".join(content_anchors)
+
+    assert content_anchors.index("[SCOPE] short.") > 0
+    assert "已完成证据观察摘要" in joined_anchors
+    assert "Wynyard Quarter and Britomart are CBD evening walking options" in (
+        joined_anchors
+    )
+    assert "succeeded 可作为来源支持事实" in joined_anchors
+    assert "不得输出内部观察别名或能力名" in joined_anchors
+    assert "raw-observation-id" not in joined_anchors
+
+
+@pytest.mark.asyncio
+async def test_l3_directives_preserve_goal_progress_when_anchor_omits_it() -> None:
+    """Dialog directives should keep L2d goal progress even if L3 compresses it."""
+
+    from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface
+
+    state = _cognition_state()
+    state["resolver_goal_progress"] = {
+        "schema_version": "resolver_goal_progress.v1",
+        "original_goal": "安排两小时计划：吃饭，加一段路线。",
+        "current_focus": "最终回答需要完整计划。",
+        "deliverables": [
+            {
+                "description": "晚餐候选和证据边界",
+                "status": "partial",
+                "note": "不能确认实时营业。",
+            },
+            {
+                "description": "两小时路线和时间切分",
+                "status": "pending",
+                "note": "最终回答必须覆盖。",
+            },
+        ],
+        "missing_user_inputs": [],
+        "evidence_dependencies": ["实时营业证据"],
+        "attempted_paths": ["web_evidence: 奥克兰 CBD 晚餐"],
+        "source_backed_facts": ["用户在奥克兰 CBD"],
+        "assumptions_or_inferences": ["可以给出路线骨架"],
+        "blockers": ["无法确认 19:30 营业状态"],
+        "final_response_requirements": [
+            "覆盖晚餐、散步、时间切分和最终核实清单",
+        ],
+    }
+
+    with (
+        patch.object(
+            l3_surface,
+            "call_interaction_style_context_loader",
+            new_callable=AsyncMock,
+            return_value={"interaction_style_context": {}},
+        ),
+        patch.object(
+            l3_surface,
+            "call_style_agent",
+            new_callable=AsyncMock,
+            return_value={
+                "rhetorical_strategy": "answer directly",
+                "linguistic_style": "brief",
+                "forbidden_phrases": [],
+            },
+        ),
+        patch.object(
+            l3_surface,
+            "call_content_anchor_agent",
+            new_callable=AsyncMock,
+            return_value={
+                "content_anchors": [
+                    "[DECISION] Answer directly.",
+                    "[ANSWER] Give a compact plan.",
+                    "[SCOPE] short.",
+                ],
+            },
+        ),
+        patch.object(
+            l3_surface,
+            "call_preference_adapter",
+            new_callable=AsyncMock,
+            return_value={"accepted_user_preferences": []},
+        ),
+        patch.object(
+            l3_surface,
+            "call_visual_agent",
+            new_callable=AsyncMock,
+            return_value={
+                "facial_expression": [],
+                "body_language": [],
+                "gaze_direction": [],
+                "visual_vibe": [],
+            },
+        ),
+    ):
+        result = await l3_surface.call_l3_text_surface_handler(state)
+
+    content_anchors = result["action_directives"]["linguistic_directives"][
+        "content_anchors"
+    ]
+
+    assert content_anchors[-1].startswith("[SCOPE]")
+    goal_anchor = "\n".join(content_anchors)
+    assert "目标进度交付清单" in goal_anchor
+    assert "原始目标：安排两小时计划：吃饭，加一段路线。" in goal_anchor
+    assert any(
+        "目标进度交付项 1" in anchor
+        for anchor in content_anchors
+    )
+    assert any(
+        "目标进度交付项 2" in anchor
+        for anchor in content_anchors
+    )
+    assert "晚餐候选和证据边界" in goal_anchor
+    assert "两小时路线和时间切分" in goal_anchor
+    assert "来源已确认：用户在奥克兰 CBD" in goal_anchor
+    assert "推断或未确认：可以给出路线骨架" in goal_anchor
+    assert "不得把推断或未确认内容写成已确认" in goal_anchor
+    assert "覆盖晚餐、散步、时间切分和最终核实清单" in goal_anchor
+    assert any(
+        anchor.startswith("[ANSWER] 最终可见回答必须覆盖")
+        and "覆盖晚餐、散步、时间切分和最终核实清单" in anchor
+        for anchor in content_anchors
+    )
+    assert any(
+        anchor.startswith("[SCOPE] 交付覆盖要求")
+        for anchor in content_anchors
+    )
+    assert content_anchors.index("[SCOPE] short.") > 0
+    assert content_anchors[-1] == (
+        "[SCOPE] 完整方案、路线、时间切分、风险、候选对比或核实清单"
+        "需要更多台词片段时，覆盖优先于简短。"
+    )
 
 
 @pytest.mark.asyncio

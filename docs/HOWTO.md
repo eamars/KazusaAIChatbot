@@ -73,6 +73,8 @@ CHARACTER_GLOBAL_USER_ID=00000000-0000-4000-8000-000000000001
 CONVERSATION_HISTORY_LIMIT=10
 SCHEDULED_TASKS_ENABLED=true
 COGNITION_VISUAL_DIRECTIVES_ENABLED=true
+COGNITION_RESOLVER_MAX_CYCLES=3
+COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS=120.0
 SELF_COGNITION_ENABLED=true
 CHARACTER_SLEEP_LOCAL_PERIOD=02:00-12:00
 
@@ -165,6 +167,14 @@ retried by this recovery path.
 `COGNITION_VISUAL_DIRECTIVES_ENABLED` is a brain-service level switch. Set it
 to `false` to skip L3 visual-directive generation globally; adapters and
 debug-client request payloads do not control this behavior.
+
+The live persona turn always runs the cognition-preserving resolver after
+decontextualization. Each resolver cycle still runs the shared L1 -> L2 -> L2d
+cognition stack. L2d may request bounded evidence, HIL, approval, or private
+self-resolution capabilities before final surface selection.
+`COGNITION_RESOLVER_MAX_CYCLES` caps recurrence, and
+`COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS` bounds one capability
+observation.
 
 `SELF_COGNITION_ENABLED` defaults to `true`. Self-cognition-created episodes
 disable visual directives by default with
@@ -503,6 +513,7 @@ Default test runs exclude live DB and live LLM tests through `pytest.ini`.
 ```bash
 pytest -q
 pytest -m "not live_db and not live_llm" -q
+venv\Scripts\python -m pytest tests\test_cognition_resolver_contracts.py tests\test_cognition_resolver_loop.py tests\test_cognition_resolver_persona_graph.py tests\test_cognition_resolver_l2d_contract.py -q
 ```
 
 Live LLM tests must be run and inspected one at a time:

@@ -5,27 +5,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from kazusa_ai_chatbot.config import (
-    SELF_COGNITION_RAG_EVIDENCE_CHAR_LIMIT,
-    SELF_COGNITION_SOURCE_PACKET_CHAR_LIMIT,
-)
+from kazusa_ai_chatbot.config import SELF_COGNITION_SOURCE_PACKET_CHAR_LIMIT
 from kazusa_ai_chatbot.self_cognition import models
 from kazusa_ai_chatbot.time_boundary import (
     format_storage_utc_for_llm,
     local_time_context_from_storage_utc,
 )
 
-_RAG_OUTPUT_TIME_FIELDS = frozenset(
-    (
-        "timestamp",
-        "created_at",
-        "updated_at",
-        "due_at",
-        "execute_at",
-        "completed_at",
-        "recorded_at",
-    )
-)
 _DUE_STATE_LABELS = {
     models.DUE_STATE_FUTURE_DUE: '未到期',
     models.DUE_STATE_DUE_NOW: '当前到期',
@@ -35,13 +21,11 @@ _DUE_STATE_LABELS = {
 
 def build_source_packet(
     case: models.SelfCognitionCase,
-    rag_output: dict[str, Any] | None = None,
 ) -> models.SourcePacket:
-    """Project one dry-run case into a bounded model-facing packet.
+    """Project one self-cognition source case into a bounded model packet.
 
     Args:
-        case: External case-file data supplied by the dry-run caller.
-        rag_output: Optional RAG2 result from one supervisor invocation.
+        case: Source data collected by the self-cognition worker.
 
     Returns:
         Source packet containing semantic labels and bounded visible evidence.
@@ -98,9 +82,6 @@ def build_source_packet(
     reflection_modifier = case.get("reflection_modifier")
     if isinstance(reflection_modifier, dict):
         packet["reflection_modifier"] = reflection_modifier
-
-    if rag_output is not None:
-        packet["rag_evidence"] = project_rag_output(rag_output)
 
     return packet
 
@@ -173,9 +154,6 @@ def render_source_packet_text(packet: models.SourcePacket) -> str:
             '',
             '# 对话进度',
             _compact_value(packet.get('conversation_progress', {})),
-            '',
-            '# 检索补充',
-            _compact_value(packet.get('rag_evidence', {})),
         ]
     )
     rendered_text = "\n".join(lines)
@@ -339,109 +317,11 @@ def _render_source_state(packet: models.SourcePacket) -> str:
     return rendered
 
 
-def build_rag_request(case: models.SelfCognitionCase) -> dict[str, Any]:
-    """Build one bounded RAG2 supervisor request for a follow-up topic.
-
-    Args:
-        case: External case-file data supplied by the dry-run caller.
-
-    Returns:
-        Request artifact for one RAG supervisor invocation.
-    """
-
-    query = case.get("rag_query")
-    if not isinstance(query, str) or not query.strip():
-        query = _fallback_rag_query(case)
-    target_scope = _target_scope(case)
-    user_id = target_scope["user_id"] or ""
-    idle_timestamp_utc = _string_field(case, "idle_timestamp_utc")
-    visible_context = _rag_visible_context(case)
-    user_profile = case.get("user_profile")
-    if not isinstance(user_profile, dict):
-        user_profile = {}
-    display_name = user_profile.get("display_name")
-    if not isinstance(display_name, str):
-        display_name = ""
-    character_profile = case.get("character_profile")
-    if not isinstance(character_profile, dict):
-        character_profile = {}
-    prompt_message_context = {
-        "body_text": query.strip(),
-        "addressed_to_global_user_ids": [user_id] if user_id else [],
-        "broadcast": target_scope["channel_type"] == "group",
-        "mentions": [],
-        "attachments": [],
-    }
-    request = {
-        "query": query.strip(),
-        "context": {
-            "platform": target_scope["platform"],
-            "platform_channel_id": target_scope["platform_channel_id"],
-            "channel_type": target_scope["channel_type"],
-            "global_user_id": user_id,
-            "platform_user_id": user_id,
-            "display_name": display_name,
-            "user_name": display_name,
-            "user_profile": user_profile,
-            "character_profile": character_profile,
-            "current_timestamp_utc": idle_timestamp_utc,
-            "local_time_context": local_time_context_from_storage_utc(
-                idle_timestamp_utc,
-            ),
-            "prompt_message_context": prompt_message_context,
-            "channel_topic": _string_field(case, "channel_topic"),
-            "chat_history_recent": visible_context,
-            "chat_history_wide": visible_context,
-            "reply_context": {},
-            "indirect_speech_context": "",
-            "conversation_progress": case.get("conversation_progress"),
-            "conversation_episode_state": case.get(
-                "conversation_episode_state",
-            ),
-            "promoted_reflection_context": case.get(
-                "promoted_reflection_context",
-            ),
-            "active_turn_platform_message_ids": [],
-            "active_turn_conversation_row_ids": [],
-        },
-        "budget": {
-            "rag_supervisor_invocations": (
-                models.RAG_SUPERVISOR_INVOCATION_LIMIT
-            ),
-        },
-    }
-    return request
-
-
-def project_rag_output(rag_output: dict[str, Any]) -> dict[str, Any]:
-    """Project RAG2 output into the self-cognition evidence budget.
-
-    Args:
-        rag_output: Raw result returned by the RAG2 supervisor.
-
-    Returns:
-        Bounded dict retaining the factual answer and compact fact list.
-    """
-
-    projected_rag_output = _project_rag_time_fields(rag_output)
-    rendered = json.dumps(
-        projected_rag_output,
-        ensure_ascii=False,
-        sort_keys=True,
-    )
-    clipped = _clip_text(rendered, SELF_COGNITION_RAG_EVIDENCE_CHAR_LIMIT)
-    projected_output = {
-        "bounded_json": clipped,
-        "char_limit": SELF_COGNITION_RAG_EVIDENCE_CHAR_LIMIT,
-    }
-    return projected_output
-
-
 def validate_case_name(case: models.SelfCognitionCase) -> str:
     """Return a supported case name or raise for an unsupported case.
 
     Args:
-        case: External case-file data supplied by the dry-run caller.
+        case: Self-cognition source case.
 
     Returns:
         The validated case name.
@@ -528,39 +408,6 @@ def _visible_context(case: models.SelfCognitionCase) -> list[dict[str, Any]]:
     return rows
 
 
-def _rag_visible_context(
-    case: models.SelfCognitionCase,
-) -> list[dict[str, Any]]:
-    """Copy visible dialog rows for internal RAG runtime context."""
-
-    value = case.get("visible_context")
-    if not isinstance(value, list):
-        return_value: list[dict[str, Any]] = []
-        return return_value
-
-    rows: list[dict[str, Any]] = []
-    for item in value:
-        if isinstance(item, dict):
-            rows.append(dict(item))
-    return rows
-
-
-def _fallback_rag_query(case: models.SelfCognitionCase) -> str:
-    """Build a compact retrieval query when the case omits one."""
-
-    source_refs = _source_refs(case)
-    summaries = [
-        item["summary"]
-        for item in source_refs
-        if item.get("summary")
-    ]
-    if summaries:
-        query = " ".join(summaries)
-    else:
-        query = "self-cognition bounded follow-up topic"
-    return query
-
-
 def _render_target_scope(
     target_scope: models.SelfCognitionTargetScope,
 ) -> str:
@@ -617,28 +464,6 @@ def _render_visible_context(rows: list[dict[str, Any]]) -> str:
         lines.append(f'- {timestamp} {speaker}: {body_text}')
     rendered = '\n'.join(lines)
     return rendered
-
-
-def _project_rag_time_fields(value: object) -> object:
-    """Project storage UTC time fields in RAG evidence to local text."""
-
-    if isinstance(value, dict):
-        projected: dict[str, object] = {}
-        for key, item in value.items():
-            if key in _RAG_OUTPUT_TIME_FIELDS and isinstance(item, str):
-                projected[key] = format_storage_utc_for_llm(item)
-            else:
-                projected[key] = _project_rag_time_fields(item)
-        return projected
-
-    if isinstance(value, list):
-        projected_list = [
-            _project_rag_time_fields(item)
-            for item in value
-        ]
-        return projected_list
-
-    return value
 
 
 def _compact_value(value: object) -> str:

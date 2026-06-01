@@ -685,6 +685,54 @@ def test_cognition_rag_result_omits_safety_recovery_trace() -> None:
     }
 
 
+def test_l2_cognition_rag_result_omits_raw_supervisor_source_refs() -> None:
+    """L2 should receive evidence trace shape without raw durable ids."""
+
+    rag_result = {
+        "answer": "safe answer",
+        "memory_evidence": [],
+        "recall_evidence": [],
+        "conversation_evidence": [],
+        "external_evidence": [],
+        "supervisor_trace": {
+            "loop_count": 1,
+            "dispatched": [
+                {
+                    "slot": "conversation evidence",
+                    "agent": "conversation_search",
+                    "resolved": True,
+                    "source_refs": [
+                        {
+                            "conversation_row_id": "raw-row-id",
+                            "platform_message_id": "raw-message-id",
+                            "unit_id": "raw-unit-id",
+                        },
+                    ],
+                    "nested": {
+                        "raw_refs": [{"_id": "raw-object-id"}],
+                        "summary": "kept",
+                    },
+                },
+            ],
+        },
+    }
+
+    l2_payload = _l2_cognition_rag_result(rag_result)
+    rendered_payload = json.dumps(l2_payload, ensure_ascii=False)
+    dispatched = l2_payload["supervisor_trace"]["dispatched"][0]
+
+    assert "source_refs" not in dispatched
+    assert "raw_refs" not in dispatched["nested"]
+    assert dispatched["nested"]["summary"] == "kept"
+    for raw_id in (
+        "raw-row-id",
+        "raw-message-id",
+        "raw-unit-id",
+        "raw-object-id",
+    ):
+        assert raw_id not in rendered_payload
+
+
 def test_project_known_facts_sanitizes_third_party_profile_source_ids() -> None:
     """Third-party profile summaries should not expose source ids to cognition."""
 

@@ -71,14 +71,14 @@ _PROMPT_FINGERPRINTS = (
     (
         "_COGNITION_SUBCONSCIOUS_PROMPT",
         l1_module._COGNITION_SUBCONSCIOUS_PROMPT,
-        3152,
-        "190718fe10a358f27a060e8fe786bb54ba07f606e7bb8e39c862e2e7d7c006af",
+        3069,
+        "ded0a7507ac36786961beeaf5e6771e960c4c42816288911182ea09529965c81",
     ),
     (
         "_COGNITION_CONSCIOUSNESS_PROMPT",
         l2_module._COGNITION_CONSCIOUSNESS_PROMPT,
-        4577,
-        "998e5b6c30e31995a0a06d9f497cffa481367a4a494add46a29f17b91b1af975",
+        5701,
+        "911012f371c386fd89c1e09fd170938235be89de9ef0a36d1510ef3d64b236e4",
     ),
     (
         "_BOUNDARY_CORE_PROMPT",
@@ -95,38 +95,38 @@ _PROMPT_FINGERPRINTS = (
     (
         "_CONTEXTUAL_AGENT_PROMPT",
         l2c2_module._CONTEXTUAL_AGENT_PROMPT,
-        3626,
-        "394d931fc948b29111b7f1cdb802bed109690f57c42c80d5b3fb68957bf2dc4a",
+        4202,
+        "03609614a7996464bcf77fc775d423d8e62e2cfe6d7e08bf89dc471eb79ceff6",
     ),
     (
         "_ACTION_INITIALIZER_PROMPT",
         l2d_module._ACTION_INITIALIZER_PROMPT,
-        4702,
-        "3a776f85a01e489d76329f7cff0c593ce5ee74525cd212967869d3272b534c83",
+        21373,
+        "8520dc18981472421634551ad835ccfdc6a8668bab580fe2a169b25348d45131",
     ),
     (
         "_STYLE_AGENT_PROMPT",
         l3_module._STYLE_AGENT_PROMPT,
-        6894,
-        "664f0c8fe115dc0a0683595c815c072c7423dc2c6f047b9561938c7831238c0a",
+        7033,
+        "2b06474ba46bca3a348fd8d926fdd93e7aa49225030f1d4f58d7737174bf8c71",
     ),
     (
         "_CONTENT_ANCHOR_AGENT_PROMPT",
         l3_module._CONTENT_ANCHOR_AGENT_PROMPT,
-        18202,
-        "91fcd9bb2e0f0ba88cfce926842371f2d3a48bee0975c93b095c3fd564f4bfbc",
+        21115,
+        "9162c058e5fa9295a17c079afade56ead3e6a2edcc307174f2e20da004442447",
     ),
     (
         "_PREFERENCE_ADAPTER_PROMPT",
         l3_module._PREFERENCE_ADAPTER_PROMPT,
-        7521,
-        "2f09e1ee799141a78cd24b783b6f9a493663d3aa677d7ed449a719d8ae392def",
+        7660,
+        "75ac96a8aeec479cb963662ffa7f86346a15a0c8816e248eb415d0b4195d07c6",
     ),
     (
         "_VISUAL_AGENT_PROMPT",
         l3_module._VISUAL_AGENT_PROMPT,
-        7826,
-        "552498b619657ce9aa11099aa7a4abec3236956691b0908994158798af75743a",
+        7965,
+        "371a2ae8b10a28460b677fed37552c6a9e8358274712e03ef07351a77c289b53",
     ),
 )
 
@@ -1435,9 +1435,11 @@ async def test_internal_thought_prompt_rendering_uses_only_residue_payload(
         "judgment_note",
         "logical_stance",
         "relational_dynamic",
+        "resolver_capability_requests",
         "social_distance",
         "vibe_check",
     ]
+    assert result["resolver_capability_requests"] == []
     l1_l2_llm_names = (
         "_subconscious_llm",
         "_conscious_llm",

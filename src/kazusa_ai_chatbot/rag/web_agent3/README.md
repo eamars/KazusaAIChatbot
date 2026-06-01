@@ -81,6 +81,12 @@ such as `task`, projected `context`, `reference_time`, tool history, and
 evaluator feedback stay in `HumanMessage` JSON so early prompt prefixes remain
 stable for local LLM prefix caching.
 
+The web helper uses its own narrow context projection. Public web routing does
+not need platform, channel, user, bot, message, or pending resolver ids, so
+those identifiers stay out of router, evaluator, and finalizer prompts. The
+model receives only semantic query hints such as `original_query`,
+`current_slot`, `channel_topic`, and prompt-safe local time context.
+
 ## Internal Flow
 
 ```text

@@ -19,6 +19,7 @@ from kazusa_ai_chatbot.rag.memory_retrieval_tools import (
     search_persistent_memory,
     search_persistent_memory_keyword,
 )
+from kazusa_ai_chatbot.rag.prompt_projection import project_tool_result_for_llm
 
 
 class _FakeObjectId:
@@ -110,9 +111,13 @@ async def test_search_conversation_delegates_to_vector_history_search() -> None:
     assert payload["reply_context"] == {
         "reply_excerpt": "previous\n<image>reply image</image>",
     }
+    assert payload["conversation_row_id"] == "row-object-id"
+    assert payload["platform_message_id"] == "message-1"
+    projected_payload = project_tool_result_for_llm(payload)
     rendered = repr(payload)
-    assert "conversation_row_id" not in payload
-    assert "platform_message_id" not in payload
+    assert isinstance(projected_payload, dict)
+    assert "conversation_row_id" not in projected_payload
+    assert "platform_message_id" not in projected_payload
     assert "https://example.test/chart.png" not in rendered
     assert "base64_data" not in rendered
 
@@ -209,7 +214,10 @@ async def test_search_conversation_keyword_delegates_to_keyword_history_search()
         to_timestamp=None,
     )
     assert result[0]["body_text"] == "DDR5 came up"
-    assert "conversation_row_id" not in result[0]
+    assert result[0]["conversation_row_id"] == "row-object-id"
+    projected_result = project_tool_result_for_llm(result[0])
+    assert isinstance(projected_result, dict)
+    assert "conversation_row_id" not in projected_result
     assert "content" not in result[0]
     assert result[0]["display_name"] == "User"
 
@@ -272,7 +280,12 @@ async def test_get_conversation_filters_and_strips_internal_fields() -> None:
         to_timestamp=None,
     )
     assert result[0]["body_text"] == "hi"
-    assert "conversation_row_id" not in result[0]
+    assert result[0]["conversation_row_id"] == "row-object-id"
+    assert result[0]["platform_message_id"] == "message-1"
+    projected_result = project_tool_result_for_llm(result[0])
+    assert isinstance(projected_result, dict)
+    assert "conversation_row_id" not in projected_result
+    assert "platform_message_id" not in projected_result
     assert "content" not in result[0]
     assert "embedding" not in result[0]
 
@@ -295,9 +308,12 @@ def test_conversation_message_payload_projects_image_blocks_from_attachments() -
     )
 
     assert payload["body_text"] == "<image>chart &lt;with&gt; boundary</image>"
+    assert payload["conversation_row_id"] == "row-object-id"
+    projected_payload = project_tool_result_for_llm(payload)
     rendered = repr(payload)
+    assert isinstance(projected_payload, dict)
+    assert "conversation_row_id" not in projected_payload
     assert "https://cdn.example/chart.png" not in rendered
-    assert "conversation_row_id" not in payload
 
 
 def test_conversation_message_payload_projects_reply_image_blocks() -> None:
@@ -355,8 +371,12 @@ def test_conversation_message_payload_drops_raw_attachment_url_and_storage_ids()
     )
 
     rendered = repr(payload)
-    assert "conversation_row_id" not in payload
-    assert "platform_message_id" not in payload
+    assert payload["conversation_row_id"] == "row-object-id"
+    assert payload["platform_message_id"] == "message-1"
+    projected_payload = project_tool_result_for_llm(payload)
+    assert isinstance(projected_payload, dict)
+    assert "conversation_row_id" not in projected_payload
+    assert "platform_message_id" not in projected_payload
     assert "https://cdn.example/chart.png" not in rendered
     assert "stored-object-1" not in rendered
     assert "raw_wire_text" not in rendered

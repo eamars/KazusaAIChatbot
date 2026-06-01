@@ -9,13 +9,15 @@ evidence means for Kazusa's stance, tone, and final response.
 
 ## System Boundary
 
-The runtime entry point is the progressive supervisor:
+The live persona graph reaches RAG through the cognition resolver's evidence
+capability. The retained helper boundary is:
 
 ```python
-from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_supervisor2 import call_rag_supervisor
+from kazusa_ai_chatbot.nodes.persona_supervisor2 import run_rag_evidence_for_persona_state
 ```
 
-`call_rag_supervisor(...)` returns:
+That helper wraps the quote-aware RAG supervisor and projects the result into
+the compact persona payload. The lower-level supervisor returns:
 
 ```python
 {
@@ -26,7 +28,9 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_supervisor2 import call_rag
 }
 ```
 
-The persona graph does not pass this raw shape directly to cognition. `stage_1_research` projects `known_facts` into `rag_result`, the compact cognition/consolidation payload:
+The persona graph does not pass this raw shape directly to cognition.
+`run_rag_evidence_for_persona_state(...)` projects `known_facts` into
+`rag_result`, the compact cognition/consolidation payload:
 
 ```python
 {
@@ -187,7 +191,9 @@ behavior changes as part of a structural split.
 ```text
 persona_supervisor2
   -> stage_0_msg_decontexualizer
-  -> stage_1_research
+  -> stage_1_goal_resolver
+       L1 -> L2 -> L2d cognition cycle
+       L2d selects `rag_evidence` or `web_evidence` only when evidence is needed
        call_rag_supervisor(original_query, character_name, context)
        -> rag_initializer
             decomposes the query into ordered unknown_slots
@@ -204,12 +210,15 @@ persona_supervisor2
        -> rag_finalizer
             produces a compact factual synthesis
        project_known_facts(...)
-       -> state["rag_result"]
-  -> stage_2_cognition
+       -> resolver observation with state["rag_result"]
+       next resolver cycle consumes the projected evidence
   -> stage_3_action
 ```
 
-The loop is slot-driven. `unknown_slots` is the work queue and the stop condition: slots are drained one at a time, and each completed attempt appends a fact row to `known_facts`.
+The RAG loop is slot-driven. `unknown_slots` is the work queue and the stop
+condition: slots are drained one at a time, and each completed attempt appends
+a fact row to `known_facts`. The persona graph decides whether to enter this
+loop through L2d action selection, not through a mandatory pre-cognition step.
 
 The default loop cap is four dispatch iterations. This prevents open-ended
 agentic search and keeps normal chatbot latency bounded. Future RAG
@@ -567,7 +576,8 @@ Conversation retrieval is cached only for closed historical windows with both `f
 
 ## Integration With Cognition
 
-RAG 2 runs before cognition in `persona_supervisor2`.
+RAG 2 is called from the cognition resolver only when L2d selects an evidence
+capability.
 
 Cognition reads `rag_result`, not raw RAG supervisor state. The intended division is:
 

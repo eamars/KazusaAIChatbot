@@ -518,7 +518,7 @@ def _build_group_review_case(
         },
         "character_profile": _project_character_profile(character_profile),
         "user_profile": {
-            "affinity": models.DEFAULT_DRY_RUN_AFFINITY,
+            "affinity": models.DEFAULT_SELF_COGNITION_AFFINITY,
             "display_name": "group audience",
             "last_relationship_insight": "",
         },
@@ -827,7 +827,6 @@ def _build_scheduled_future_cognition_case(
         "user_profile": case_user_profile,
         "current_mood": text_or_empty(character_profile.get("mood")),
         "global_vibe": text_or_empty(character_profile.get("global_vibe")),
-        "rag_query": continuation_objective,
         "platform_bot_id": source_platform_bot_id,
         "source_scheduled_event_id": event_id,
         "source_action_attempt_id": source_action_attempt_id,

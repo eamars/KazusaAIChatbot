@@ -57,6 +57,14 @@ _REQUIRED_OUTPUT_FIELDS: dict[CognitionPromptStage, dict[str, type[object]]] = {
     },
 }
 
+_OPTIONAL_OUTPUT_FIELDS: dict[CognitionPromptStage, dict[str, type[object]]] = {
+    "l2d_action_selection": {
+        "resolver_capability_requests": list,
+        "resolver_pending_resolution": dict,
+        "resolver_goal_progress": dict,
+    },
+}
+
 
 def validate_cognition_output_contract(
     *,
@@ -80,6 +88,13 @@ def validate_cognition_output_contract(
         raise CognitionOutputContractError(
             f"{stage}.action_specs is only supported for l2d_action_selection"
         )
+    if stage != "l2d_action_selection":
+        for field_name in _OPTIONAL_OUTPUT_FIELDS["l2d_action_selection"]:
+            if field_name in payload:
+                raise CognitionOutputContractError(
+                    f"{stage}.{field_name} is only supported for "
+                    "l2d_action_selection"
+                )
 
     required_fields = _REQUIRED_OUTPUT_FIELDS[stage]
     for field_name, expected_type in required_fields.items():
@@ -87,6 +102,16 @@ def validate_cognition_output_contract(
             raise CognitionOutputContractError(
                 f"{stage}.{field_name} is required"
             )
+        field_value = payload[field_name]
+        if not isinstance(field_value, expected_type):
+            raise CognitionOutputContractError(
+                f"{stage}.{field_name} must be a {expected_type.__name__}"
+            )
+
+    optional_fields = _OPTIONAL_OUTPUT_FIELDS.get(stage, {})
+    for field_name, expected_type in optional_fields.items():
+        if field_name not in payload:
+            continue
         field_value = payload[field_name]
         if not isinstance(field_value, expected_type):
             raise CognitionOutputContractError(

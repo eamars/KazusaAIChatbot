@@ -219,7 +219,7 @@ async def _noop_async(*args, **kwargs) -> None:
     del args, kwargs
 
 
-def _stage_1_research_snapshot_state() -> dict:
+def _rag_evidence_snapshot_state() -> dict:
     """Build a full text-chat state for RAG request-shape snapshots.
 
     Returns:
@@ -861,7 +861,7 @@ async def test_call_rag_supervisor_continues_remaining_slots_after_unresolved_st
 
 
 @pytest.mark.asyncio
-async def test_stage_1_research_calls_rag2_and_projects_payload(monkeypatch) -> None:
+async def test_rag_evidence_helper_calls_rag2_and_projects_payload(monkeypatch) -> None:
     captured: dict = {}
 
     async def _call_quote_aware_rag_supervisor(
@@ -908,7 +908,7 @@ async def test_stage_1_research_calls_rag2_and_projects_payload(monkeypatch) -> 
     )
 
     turn_clock = build_turn_clock("2026-04-27 00:00:00")
-    result = await supervisor_module.stage_1_research({
+    rag_result = await supervisor_module.run_rag_evidence_for_persona_state({
         "decontexualized_input": "你记得我喜欢什么吗？",
         "referents": [],
         "character_profile": {"name": "Kazusa", "global_user_id": "character-1"},
@@ -954,7 +954,7 @@ async def test_stage_1_research_calls_rag2_and_projects_payload(monkeypatch) -> 
             "updated_at": "2026-04-26T23:00:00+00:00",
             "turn_count": 7,
         },
-    })
+    }, agent_name="resolver_rag_evidence")
 
     assert captured["fresh_query"] == "你记得我喜欢什么吗？"
     assert captured["reply_context"] == {
@@ -972,12 +972,15 @@ async def test_stage_1_research_calls_rag2_and_projects_payload(monkeypatch) -> 
     assert captured["context"]["chat_history_recent"] == []
     assert captured["context"]["conversation_progress"]["current_thread"] == "Pickup plan is active."
     assert captured["context"]["conversation_episode_state"]["turn_count"] == 7
-    assert result["rag_result"]["answer"] == "resolved"
-    assert result["rag_result"]["user_image"]["user_memory_context"]["objective_facts"][0]["fact"] == "User likes tea"
+    assert rag_result["answer"] == "resolved"
+    objective_facts = rag_result["user_image"]["user_memory_context"][
+        "objective_facts"
+    ]
+    assert objective_facts[0]["fact"] == "User likes tea"
 
 
 @pytest.mark.asyncio
-async def test_stage_1_research_pre_stage_04_request_shape_snapshot(monkeypatch) -> None:
+async def test_rag_evidence_request_shape_snapshot(monkeypatch) -> None:
     """Current RAG request shape should stay stable across adapter extraction."""
     captured: dict = {}
 
@@ -1008,8 +1011,11 @@ async def test_stage_1_research_pre_stage_04_request_shape_snapshot(monkeypatch)
         _call_quote_aware_rag_supervisor,
     )
 
-    state = _stage_1_research_snapshot_state()
-    result = await supervisor_module.stage_1_research(state)
+    state = _rag_evidence_snapshot_state()
+    rag_result = await supervisor_module.run_rag_evidence_for_persona_state(
+        state,
+        agent_name="resolver_rag_evidence",
+    )
 
     expected_request = {
         "fresh_query": "Need current evidence.",
@@ -1055,11 +1061,11 @@ async def test_stage_1_research_pre_stage_04_request_shape_snapshot(monkeypatch)
         },
     }
     assert captured["request"] == expected_request
-    assert result["rag_result"]["answer"] == "snapshot answer"
+    assert rag_result["answer"] == "snapshot answer"
 
 
 @pytest.mark.asyncio
-async def test_stage_1_research_passes_empty_reply_context_to_wrapper(
+async def test_rag_evidence_passes_empty_reply_context_to_wrapper(
     monkeypatch,
 ) -> None:
     """Empty reply metadata should reach the quote-aware wrapper unchanged."""
@@ -1087,17 +1093,20 @@ async def test_stage_1_research_passes_empty_reply_context_to_wrapper(
         "call_quote_aware_rag_supervisor",
         _call_quote_aware_rag_supervisor,
     )
-    state = _stage_1_research_snapshot_state()
+    state = _rag_evidence_snapshot_state()
     state["reply_context"] = {}
 
-    result = await supervisor_module.stage_1_research(state)
+    rag_result = await supervisor_module.run_rag_evidence_for_persona_state(
+        state,
+        agent_name="resolver_rag_evidence",
+    )
 
     assert captured["reply_context"] == {}
-    assert result["rag_result"]["answer"] == "empty reply answer"
+    assert rag_result["answer"] == "empty reply answer"
 
 
 @pytest.mark.asyncio
-async def test_stage_1_research_skips_rag_for_unresolved_referents(monkeypatch) -> None:
+async def test_rag_evidence_skips_for_unresolved_referents(monkeypatch) -> None:
     """Unresolved required references should skip RAG and preserve payload shape."""
     called = False
 
@@ -1120,7 +1129,7 @@ async def test_stage_1_research_skips_rag_for_unresolved_referents(monkeypatch) 
     )
 
     turn_clock = build_turn_clock("2026-04-27 00:00:00")
-    result = await supervisor_module.stage_1_research({
+    rag_result = await supervisor_module.run_rag_evidence_for_persona_state({
         "decontexualized_input": "这些是什么意思？",
         "referents": [
             {"phrase": "这些", "referent_role": "object", "status": "unresolved"},
@@ -1156,9 +1165,8 @@ async def test_stage_1_research_skips_rag_for_unresolved_referents(monkeypatch) 
         "reply_context": {},
         "indirect_speech_context": "",
         "cognitive_episode": _minimal_text_chat_episode(),
-    })
+    }, agent_name="resolver_rag_evidence")
 
-    rag_result = result["rag_result"]
     assert called is False
     assert rag_result["answer"] == ""
     assert rag_result["user_image"]["user_memory_context"]["stable_patterns"] == []
@@ -1171,7 +1179,7 @@ async def test_stage_1_research_skips_rag_for_unresolved_referents(monkeypatch) 
 
 
 @pytest.mark.asyncio
-async def test_stage_1_research_runs_rag_for_mixed_referents(monkeypatch) -> None:
+async def test_rag_evidence_runs_for_mixed_referents(monkeypatch) -> None:
     """Mixed referents should not trigger the old binary RAG skip cliff."""
     called = False
 
@@ -1199,7 +1207,7 @@ async def test_stage_1_research_runs_rag_for_mixed_referents(monkeypatch) -> Non
     )
 
     turn_clock = build_turn_clock("2026-04-27 00:00:00")
-    result = await supervisor_module.stage_1_research({
+    rag_result = await supervisor_module.run_rag_evidence_for_persona_state({
         "decontexualized_input": "他上次说的那些关于X的话是什么意思？",
         "referents": [
             {"phrase": "他", "referent_role": "subject", "status": "resolved"},
@@ -1236,14 +1244,14 @@ async def test_stage_1_research_runs_rag_for_mixed_referents(monkeypatch) -> Non
         "reply_context": {},
         "indirect_speech_context": "",
         "cognitive_episode": _minimal_text_chat_episode(),
-    })
+    }, agent_name="resolver_rag_evidence")
 
     assert called is True
-    assert result["rag_result"]["answer"] == "partial evidence"
+    assert rag_result["answer"] == "partial evidence"
 
 
 @pytest.mark.asyncio
-async def test_stage_1_research_skips_when_referents_are_all_unresolved(monkeypatch) -> None:
+async def test_rag_evidence_skips_when_referents_are_all_unresolved(monkeypatch) -> None:
     """Structured unresolved referents should be authoritative."""
     called = False
 
@@ -1266,7 +1274,7 @@ async def test_stage_1_research_skips_when_referents_are_all_unresolved(monkeypa
     )
 
     turn_clock = build_turn_clock("2026-04-27 00:00:00")
-    result = await supervisor_module.stage_1_research({
+    rag_result = await supervisor_module.run_rag_evidence_for_persona_state({
         "decontexualized_input": "这些是什么意思？",
         "referents": [
             {"phrase": "这些", "referent_role": "object", "status": "unresolved"},
@@ -1301,7 +1309,7 @@ async def test_stage_1_research_skips_when_referents_are_all_unresolved(monkeypa
         "chat_history_wide": [],
         "reply_context": {},
         "indirect_speech_context": "",
-    })
+    }, agent_name="resolver_rag_evidence")
 
     assert called is False
-    assert result["rag_result"]["answer"] == ""
+    assert rag_result["answer"] == ""

@@ -142,7 +142,14 @@ async def test_user_memory_evidence_exact_cjk_term_uses_scoped_keyword(monkeypat
     assert payload["source_system"] == "user_memory_units"
     assert payload["scope_type"] == "user_continuity"
     assert payload["missing_context"] == []
-    assert payload["selected_summary"] == "冰淇淋摊老板是千纱的初中学姐，千纱每次去都能蹭到双倍抹茶酱。"
+    expected_content = (
+        "冰淇淋摊老板是千纱的初中学姐，千纱每次去都能蹭到双倍抹茶酱。\n"
+        "Subjective appraisal: Kazusa appraisal for "
+        "冰淇淋摊老板是千纱的初中学姐，千纱每次去都能蹭到双倍抹茶酱。\n"
+        "Continuity signal: Kazusa signal for "
+        "冰淇淋摊老板是千纱的初中学姐，千纱每次去都能蹭到双倍抹茶酱。"
+    )
+    assert payload["selected_summary"] == expected_content
     assert payload["memory_rows"] == [
         {
             "unit_id": "unit-x",
@@ -150,7 +157,7 @@ async def test_user_memory_evidence_exact_cjk_term_uses_scoped_keyword(monkeypat
             "fact": "冰淇淋摊老板是千纱的初中学姐，千纱每次去都能蹭到双倍抹茶酱。",
             "subjective_appraisal": "Kazusa appraisal for 冰淇淋摊老板是千纱的初中学姐，千纱每次去都能蹭到双倍抹茶酱。",
             "relationship_signal": "Kazusa signal for 冰淇淋摊老板是千纱的初中学姐，千纱每次去都能蹭到双倍抹茶酱。",
-            "content": "冰淇淋摊老板是千纱的初中学姐，千纱每次去都能蹭到双倍抹茶酱。",
+            "content": expected_content,
             "updated_at": "2026-05-03T00:00:00+00:00",
             "source_system": "user_memory_units",
             "scope_type": "user_continuity",
@@ -205,6 +212,14 @@ async def test_user_memory_evidence_agent_collects_multiple_literal_anchor_hits(
     ] == ["unit-arcade", "unit-tea"]
     assert result["result"]["selected_summary"] == (
         "User remembers the arcade promise.\n"
+        "Subjective appraisal: Kazusa appraisal for "
+        "User remembers the arcade promise.\n"
+        "Continuity signal: Kazusa signal for "
+        "User remembers the arcade promise.\n"
+        "User prefers tea during late sessions."
+        "\nSubjective appraisal: Kazusa appraisal for "
+        "User prefers tea during late sessions.\n"
+        "Continuity signal: Kazusa signal for "
         "User prefers tea during late sessions."
     )
 

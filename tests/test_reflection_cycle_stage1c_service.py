@@ -205,12 +205,6 @@ async def _run_lifespan(
         "SELF_COGNITION_ENABLED",
         self_cognition_enabled,
     )
-    monkeypatch.setattr(
-        service_module,
-        "SELF_COGNITION_TRACKING_DIR",
-        "test-self-cognition-runs",
-        raising=False,
-    )
     monkeypatch.setattr(service_module, "db_bootstrap", AsyncMock())
     monkeypatch.setattr(
         service_module,

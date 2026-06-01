@@ -611,6 +611,24 @@ must not expose raw prompt, message, output, evidence, or per-user detail.
 Deployment must restrict `/ops/*` exposure to trusted operators until a future
 auth plan exists.
 
+## Resolver Telemetry Helper Boundary
+
+`kazusa_ai_chatbot.cognition_resolver.telemetry` builds sanitized
+resolver-cycle and resolver-terminal dictionaries for local inspection and
+future event-log integration. These helpers are not a new public event-log
+family and do not persist by themselves.
+
+The helper payloads may contain cycle counts, capability kinds, observation
+statuses, duration labels, pending-resume status, and bounded L1/L2/L2d
+summaries. They must not contain raw user message bodies, raw prompts, raw
+model output, raw platform ids, raw database ids, adapter wire payloads,
+credentials, or callback URLs.
+
+Persisting resolver telemetry to `event_log_events` requires a later dedicated
+public recorder and the extension review below. Until then, local human-readable
+resolver artifacts belong under `test_artifacts/cognition_resolver/` and remain
+debug artifacts rather than production control state.
+
 ## Approved Instrumentation Boundaries
 
 Caller modules may emit only through the public API. The approved production

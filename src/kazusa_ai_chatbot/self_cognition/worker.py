@@ -5,17 +5,14 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-import re
 from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from kazusa_ai_chatbot.config import (
     SELF_COGNITION_MAX_CASES_PER_TICK,
-    SELF_COGNITION_TRACKING_DIR,
     SELF_COGNITION_WORKER_INTERVAL_SECONDS,
 )
 from kazusa_ai_chatbot import db, event_logging
@@ -33,7 +30,6 @@ logger = logging.getLogger(__name__)
 
 _WORKER_STOP_TIMEOUT_SECONDS = 5.0
 _ATTEMPT_HISTORY_LIMIT = 1000
-_SAFE_PATH_COMPONENT_PATTERN = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
 @dataclass
@@ -45,7 +41,6 @@ class SelfCognitionWorkerResult:
     skipped_count: int = 0
     deferred: bool = False
     defer_reason: str = ""
-    artifact_paths: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -61,7 +56,6 @@ def start_self_cognition_worker(
     is_primary_interaction_busy: Callable[[], bool],
     character_profile_provider: Callable[[], dict[str, Any]],
     adapter_registry_provider: Callable[[], AdapterRegistry | None] | None = None,
-    output_root: str | Path = SELF_COGNITION_TRACKING_DIR,
 ) -> SelfCognitionWorkerHandle:
     """Start the process-local self-cognition worker loop.
 
@@ -69,7 +63,6 @@ def start_self_cognition_worker(
         is_primary_interaction_busy: Service load probe.
         character_profile_provider: Callable returning current character state.
         adapter_registry_provider: Callable returning the live adapter registry.
-        output_root: Compatibility path passed only to injected test seams.
 
     Returns:
         Worker handle used for shutdown.
@@ -82,7 +75,6 @@ def start_self_cognition_worker(
             is_primary_interaction_busy=is_primary_interaction_busy,
             character_profile_provider=character_profile_provider,
             adapter_registry_provider=adapter_registry_provider,
-            output_root=output_root,
         )
     )
     handle = SelfCognitionWorkerHandle(task=task, stop_event=stop_event)
@@ -108,7 +100,6 @@ async def stop_self_cognition_worker(
 
 async def run_self_cognition_worker_tick(
     *,
-    output_root: str | Path,
     now: datetime,
     is_primary_interaction_busy: Callable[[], bool],
     character_profile: dict[str, Any] | None = None,
@@ -124,7 +115,6 @@ async def run_self_cognition_worker_tick(
     """Run one bounded self-cognition worker tick.
 
     Args:
-        output_root: Compatibility path passed only to injected test seams.
         now: Current worker tick time.
         is_primary_interaction_busy: Service load probe.
         character_profile: Current character state snapshot.
@@ -166,7 +156,6 @@ async def run_self_cognition_worker_tick(
         await _record_worker_tick_event(result)
         return result
 
-    root = Path(output_root)
     result = SelfCognitionWorkerResult()
     active_read_attempts = read_attempts_func or (
         db.list_self_cognition_action_attempts
@@ -207,7 +196,6 @@ async def run_self_cognition_worker_tick(
             limit=_ATTEMPT_HISTORY_LIMIT,
         )
         case_for_run = _case_with_prior_attempts(case, prior_attempts)
-        output_dir = _case_output_dir(root, now=now, case=case_for_run)
         try:
             if run_case_func is None:
                 artifact_payloads = (
@@ -221,7 +209,6 @@ async def run_self_cognition_worker_tick(
                 artifact_payloads = await _call_maybe_async(
                     run_case_func,
                     case_for_run,
-                    output_dir,
                 )
         except StateContractError as exc:
             result.failed_count += 1
@@ -262,7 +249,6 @@ async def _self_cognition_worker_loop(
     is_primary_interaction_busy: Callable[[], bool],
     character_profile_provider: Callable[[], dict[str, Any]],
     adapter_registry_provider: Callable[[], AdapterRegistry | None] | None,
-    output_root: str | Path,
 ) -> None:
     """Run self-cognition scheduling ticks until stopped."""
 
@@ -270,7 +256,6 @@ async def _self_cognition_worker_loop(
         try:
             character_profile = character_profile_provider()
             await run_self_cognition_worker_tick(
-                output_root=output_root,
                 now=storage_utc_now(),
                 is_primary_interaction_busy=is_primary_interaction_busy,
                 character_profile=character_profile,
@@ -706,23 +691,6 @@ def _attempt_state(
     attempt_state = dict(action_attempt)
     attempt_state["recorded_at"] = now.isoformat()
     return attempt_state
-
-
-def _case_output_dir(
-    root: Path,
-    *,
-    now: datetime,
-    case: models.SelfCognitionCase,
-) -> Path:
-    """Build a stable local artifact directory for one worker case."""
-
-    timestamp_slug = now.strftime("%Y%m%dT%H%M%SZ")
-    case_id = str(case.get("case_id") or case.get("case_name") or "case")
-    safe_case_id = _SAFE_PATH_COMPONENT_PATTERN.sub("_", case_id).strip("_")
-    if not safe_case_id:
-        safe_case_id = "case"
-    output_dir = root / timestamp_slug / safe_case_id
-    return output_dir
 
 
 async def _call_maybe_async(
