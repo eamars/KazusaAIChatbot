@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -122,6 +123,20 @@ def _non_empty_string_from_env(name: str, default: str) -> str:
     value = raw_value.strip()
     if not value:
         raise ValueError(f"{name} must be non-empty")
+    return value
+
+
+def _optional_http_url_from_env(name: str, default: str) -> str:
+    """Read an optional HTTP(S) URL, stripping whitespace and trailing slashes."""
+
+    raw_value = os.getenv(name, default)
+    value = raw_value.strip().rstrip("/")
+    if not value:
+        return ""
+
+    parsed_url = urlparse(value)
+    if parsed_url.scheme not in ("http", "https") or not parsed_url.netloc:
+        raise ValueError(f"{name} must be empty or an HTTP(S) URL")
     return value
 
 
@@ -299,6 +314,56 @@ SAVE_ATTACHMENT_BASE64_TO_DB = os.getenv(
 ).lower() in ("1", "true", "yes")
 # Recent history window for downstream stages.
 CHAT_HISTORY_RECENT_LIMIT = 5
+
+# Direct web search and URL reader settings.
+SEARXNG_URL = _optional_http_url_from_env("SEARXNG_URL", "")
+SEARXNG_SEARCH_TIMEOUT_SECONDS = _bounded_float_from_env(
+    "SEARXNG_SEARCH_TIMEOUT_SECONDS",
+    "30",
+    minimum=1.0,
+    maximum=120.0,
+)
+SEARXNG_SEARCH_RESULT_LIMIT = _bounded_int_from_env(
+    "SEARXNG_SEARCH_RESULT_LIMIT",
+    "10",
+    minimum=1,
+    maximum=20,
+)
+WEB_URL_READ_TIMEOUT_SECONDS = _bounded_float_from_env(
+    "WEB_URL_READ_TIMEOUT_SECONDS",
+    "30",
+    minimum=1.0,
+    maximum=120.0,
+)
+WEB_URL_READ_MAX_BYTES = _bounded_int_from_env(
+    "WEB_URL_READ_MAX_BYTES",
+    "1048576",
+    minimum=1024,
+    maximum=5242880,
+)
+WEB_URL_READ_MAX_CHARS = _bounded_int_from_env(
+    "WEB_URL_READ_MAX_CHARS",
+    "10000",
+    minimum=1000,
+    maximum=50000,
+)
+WEB_URL_READ_REDIRECT_LIMIT = _bounded_int_from_env(
+    "WEB_URL_READ_REDIRECT_LIMIT",
+    "5",
+    minimum=0,
+    maximum=10,
+)
+WEB_URL_READER_USER_AGENT = _non_empty_string_from_env(
+    "WEB_URL_READER_USER_AGENT",
+    (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+    ),
+)
+WEB_URL_READER_ACCEPT_LANGUAGE = _non_empty_string_from_env(
+    "WEB_URL_READER_ACCEPT_LANGUAGE",
+    "en-US,en;q=0.9",
+)
 
 # Maximum guideline strings retained for each interaction-style category in
 # persisted user or group-channel style images.

@@ -1,4 +1,4 @@
-"""Generic web source subagent backed by the existing SearXNG facility."""
+"""Generic web source subagent for ordinary search and URL reads."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ async def execute(decision: _RouterDecision) -> Any:
         decision: Router decision with the query passed through unchanged.
 
     Returns:
-        Raw SearXNG tool output or a stop observation.
+        Raw web tool output or a stop observation.
     """
     if decision.action == "search":
         result = await searxng_tools.web_search.ainvoke({"query": decision.query})

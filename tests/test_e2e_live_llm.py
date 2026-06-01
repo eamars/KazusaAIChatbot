@@ -15,7 +15,11 @@ from fastapi import BackgroundTasks
 
 from kazusa_ai_chatbot import scheduler
 from kazusa_ai_chatbot import service as brain_service
-from kazusa_ai_chatbot.config import DIALOG_GENERATOR_LLM_BASE_URL, SCHEDULED_TASKS_ENABLED
+from kazusa_ai_chatbot.config import (
+    DIALOG_GENERATOR_LLM_BASE_URL,
+    SCHEDULED_TASKS_ENABLED,
+    SEARXNG_URL,
+)
 from kazusa_ai_chatbot.db import (
     build_memory_doc,
     close_db,
@@ -1177,14 +1181,11 @@ async def test_live_real_case_third_party_impression_uses_resolved_profile_evide
     assert final_dialog
     assert "小钳子" in final_dialog
 
-async def test_live_web_agent3_returns_live_result(live_env) -> None:
-    required_tools = {
-        "mcp-searxng__searxng_web_search",
-        "mcp-searxng__web_url_read",
-    }
-    if not required_tools.issubset(live_env["mcp_tools"]):
-        pytest.skip("SearXNG MCP tools are not configured in this environment.")
+async def test_live_web_agent3_returns_live_result() -> None:
+    if not SEARXNG_URL:
+        pytest.skip("SEARXNG_URL is not configured in this environment.")
 
+    await _skip_if_llm_unavailable()
     result = await WebAgent3().run(
         task="查找今天奥克兰的天气，并用中文简短说明当前情况，附一个来源链接。",
         context={},

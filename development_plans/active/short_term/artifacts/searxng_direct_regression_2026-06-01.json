@@ -1,0 +1,243 @@
+{
+  "summary": {
+    "started_at": "2026-06-01T03:15:57.282169+00:00",
+    "branch": "searxng-mcp-phaseout",
+    "baseline": "searxng_direct_workflow",
+    "mcp_url": "",
+    "searxng_url_observed": "http://192.168.2.10:8080",
+    "connect_ms": 0.0,
+    "tools": [
+      "web_search",
+      "web_url_read"
+    ],
+    "example_count": 10,
+    "success_count": 10,
+    "failure_count": 0,
+    "latency_ms_min": 147.07,
+    "latency_ms_median": 607.205,
+    "latency_ms_max": 1252.97,
+    "successful_latency_ms_median": 607.205,
+    "baseline_successful_latency_ms_median": 616.93,
+    "median_latency_limit_ms": 771.16,
+    "median_latency_pass": true,
+    "median_latency_error": "",
+    "criteria_error_count": 0
+  },
+  "examples": [
+    {
+      "id": "search_01",
+      "kind": "search",
+      "tool": "web_search",
+      "arguments": {
+        "query": "SearXNG search API format json",
+        "pageno": 1,
+        "time_range": "",
+        "language": "en",
+        "safesearch": 0
+      },
+      "success": true,
+      "latency_ms": 1252.97,
+      "baseline_latency_ms": 1118.15,
+      "latency_limit_ms": 2618.15,
+      "criteria_errors": [],
+      "output": {
+        "chars": 3251,
+        "sha256": "2f4a79cdceef20c6c950968e1997bd9d8ea8b5a173cdd43f65cd617de9128c3e",
+        "first_line": "Title: Search API - SearXNG Documentation (2026.5.31+300695de5)",
+        "excerpt": "Title: Search API - SearXNG Documentation (2026.5.31+300695de5)\nURL: https://docs.searxng.org/dev/search_api.html\nSnippet: If you want to consume the results as JSON, CSV, or RSS, you need to set the format parameter accordingly. Supported formats are defined in settings.yml , under ...\nEngine: startpage\nScore: 1.0\n\nTitle: JSON Engine - SearXNG Documentation (2026.5.26+0037d43d8)\nURL: https://docs.searxng.org/dev/engines/json_engine.html\nSnippet: Search API · Plugins · Plugin Development · Built-in Plugins · Calculator · Hash ... https://example.org/?search={query}&page={pageno}{time_range}{safe_search ...\nEngine: startpage\nScore: 0.5\n\nTitle: Something brokes SearXNG search api when i choose json format ...\nURL: https://github.com/searxng/searxng/issues/2505\nSnippet: Now if you try to query the search api with curl \"http://localhost:8080/search?q=test&categories=videos&format=csv\" should be fine.\nEngine: startpage\nScore: 0.3333333333333333\n\nTitle: Deploy SearXNG | Open Source Search API for AI Agents - Railway\nURL: https://railway.com/deploy/searxng-search-api\nSnippet: ... format=json appended to the search endpoint. About Hosting SearXNG. SearXNG is a privacy-first federated metasearch engine forked from Searx ...\nEngine: startpage\nScore: 0.25\n\nTitle: Public Searxng instance that supports json? : r/Searx - Reddit\nURL: https://www.reddit.com/r/Searx/comments/1g3egc4/public_searxng_instance_that_supports_json/\nSnippet: I would like to use Searxng in Open WebUI but need an inst"
+      }
+    },
+    {
+      "id": "search_02",
+      "kind": "search",
+      "tool": "web_search",
+      "arguments": {
+        "query": "Python httpx AsyncClient timeout documentation",
+        "pageno": 1,
+        "time_range": "",
+        "language": "en",
+        "safesearch": 0
+      },
+      "success": true,
+      "latency_ms": 752.83,
+      "baseline_latency_ms": 1257.01,
+      "latency_limit_ms": 2757.01,
+      "criteria_errors": [],
+      "output": {
+        "chars": 3157,
+        "sha256": "513bce7a5160f2adc49900d1b32a13c2dc03c5b843b9e029f804259c408a1a89",
+        "first_line": "Title: Timeouts - HTTPX",
+        "excerpt": "Title: Timeouts - HTTPX\nURL: https://www.python-httpx.org/advanced/timeouts/\nSnippet: The write timeout specifies the maximum duration to wait for a chunk of data to be sent (for example, a chunk of the request body). If HTTPX is unable to send ...\nEngine: startpage\nScore: 1.0\n\nTitle: Does timeout=None work on httpx.AsyncClient.stream? #2055\nURL: https://github.com/encode/httpx/discussions/2055\nSnippet: I am trying to follow the documentation on timeout configuration https://www.python-httpx.org/advanced/#timeout-configuration\nEngine: startpage\nScore: 0.5\n\nTitle: Async Support - HTTPX\nURL: https://www.python-httpx.org/async/\nSnippet: HTTPX offers a standard synchronous API by default, but also gives you the option of an async client if you need it.\nEngine: startpage\nScore: 0.3333333333333333\n\nTitle: Httpx vs Aiohttp: Handling High-Concurrency Requests in Async ...\nURL: https://miguel-mendez-ai.com/2024/10/20/aiohttp-vs-httpx\nSnippet: ... asynchronous Python applications. This post explores how httpx struggles with concurrency and how aiohttp outperforms it in such scenarios.\nEngine: startpage\nScore: 0.25\n\nTitle: Strange errors with asynchronous requests - Stack Overflow\nURL: https://stackoverflow.com/questions/59362346/strange-errors-with-asynchronous-requests\nSnippet: The httpx documentation covers the ReadTimeout you are experiencing: HTTPX is careful to enforce timeouts everywhere by default.\nEngine: startpage\nScore: 0.2\n\nTitle: Mastering HTTPX Client for Python: A Compreh"
+      }
+    },
+    {
+      "id": "search_03",
+      "kind": "search",
+      "tool": "web_search",
+      "arguments": {
+        "query": "OpenAI API responses documentation",
+        "pageno": 1,
+        "time_range": "",
+        "language": "en",
+        "safesearch": 0
+      },
+      "success": true,
+      "latency_ms": 615.86,
+      "baseline_latency_ms": 509.17,
+      "latency_limit_ms": 2009.17,
+      "criteria_errors": [],
+      "output": {
+        "chars": 3210,
+        "sha256": "cba37a49d15d14555865b0e449e7eedbc353111a98cc8957420974d7cf26ac19",
+        "first_line": "Title: Responses Overview | OpenAI API Reference",
+        "excerpt": "Title: Responses Overview | OpenAI API Reference\nURL: https://developers.openai.com/api/reference/responses/overview/\nSnippet: OpenAI's most advanced interface for generating model responses. Supports text and image inputs, and text outputs. Create stateful interactions with the model, ...\nEngine: startpage\nScore: 1.0\n\nTitle: Responses | OpenAI API Reference\nURL: https://developers.openai.com/api/reference/python/resources/responses/\nSnippet: Labels an assistant message as intermediate commentary ( commentary ) or the final answer ( final_answer ). For models like gpt-5.3-codex and beyond, ...\nEngine: startpage\nScore: 0.5\n\nTitle: API Overview | OpenAI API Reference\nURL: https://developers.openai.com/api/reference/overview/\nSnippet: This API reference describes the RESTful, streaming, and realtime APIs you can use to interact with the OpenAI platform. REST APIs are usable via HTTP in ...\nEngine: startpage\nScore: 0.3333333333333333\n\nTitle: Migrate to the Responses API - OpenAI Developers\nURL: https://developers.openai.com/api/docs/guides/migrate-to-responses\nSnippet: Better performance: Using reasoning models, like GPT-5, with Responses will result in better model intelligence when compared to Chat Completions. · Agentic by ...\nEngine: startpage\nScore: 0.25\n\nTitle: OpenAI API Platform Documentation\nURL: https://developers.openai.com/api/docs\nSnippet: Responses API. Make direct model requests for text, structured output, tools, and multimodal workflows. Start with Responses · Ag"
+      }
+    },
+    {
+      "id": "search_04",
+      "kind": "search",
+      "tool": "web_search",
+      "arguments": {
+        "query": "Kazusa AI chatbot github",
+        "pageno": 1,
+        "time_range": "",
+        "language": "en",
+        "safesearch": 0
+      },
+      "success": true,
+      "latency_ms": 598.55,
+      "baseline_latency_ms": 532.93,
+      "latency_limit_ms": 2032.93,
+      "criteria_errors": [],
+      "output": {
+        "chars": 3237,
+        "sha256": "66a4335f23f1625c4c2665db35c12437540e20777a64a32b5f16a021eaa4a7f8",
+        "first_line": "Title: MRGRD56/textractor-translator - GitHub",
+        "excerpt": "Title: MRGRD56/textractor-translator - GitHub\nURL: https://github.com/MRGRD56/textractor-translator\nSnippet: AI CODE CREATION. GitHub CopilotWrite better code with AI · GitHub SparkBuild ... Kazusa Touma (Кадзуса Тома) - female - the second main heroine; Takeya ...\nEngine: startpage\nScore: 1.0\n\nTitle: I made a webpage that spawns more koyukis every time you click.\nURL: https://www.reddit.com/r/BlueArchive/comments/1e15oc5/i_made_a_webpage_that_spawns_more_koyukis_every/\nSnippet: ... AI know about the 5 principles of OOP?!) ... anyway here's the ... github.com/ZeroFPS-hk/koyuki-clicker. Update: randomized the size of ...\nEngine: startpage\nScore: 0.5\n\nTitle: In-Depth Nontargeted Proteome Analysis of Dried Blood Spots with ...\nURL: https://pubs.acs.org/doi/full/10.1021/acs.analchem.5c01720\nSnippet: ... Kazusa Kamatari, Kisarazu, Chiba 292-0818, Japan; Orcid https ... A. I. Untargeted, spectral library-free analysis of data-independent ...\nEngine: startpage\nScore: 0.3333333333333333\n\nTitle: The is exactly what computer vision was made for #naruto ...\nURL: https://www.instagram.com/reel/DVpyee3DgCl/\nSnippet: ... KAZUSA NO JUTSU! RASENGAN! KATON: GOUKAKYUU ... Everyone's asking how to hide AI usage so it passes Turnitin or other major AI detectors.\nEngine: startpage\nScore: 0.25\n\nTitle: Mapping Dialectal Landscape: A Sequence-to-Sequence Approach ...\nURL: https://www.mdpi.com/2504-4990/8/5/115\nSnippet: The normalization method proposed in this study functions as a critical module wi"
+      }
+    },
+    {
+      "id": "search_05",
+      "kind": "search",
+      "tool": "web_search",
+      "arguments": {
+        "query": "Wikipedia Kyoto population",
+        "pageno": 1,
+        "time_range": "",
+        "language": "en",
+        "safesearch": 0
+      },
+      "success": true,
+      "latency_ms": 581.34,
+      "baseline_latency_ms": 1054.77,
+      "latency_limit_ms": 2554.77,
+      "criteria_errors": [],
+      "output": {
+        "chars": 2881,
+        "sha256": "9e65a11fa3555b9e5ddb3ff6da3616424d7dbbd47a64835e1c07f1b1b45c1312",
+        "first_line": "Title: Kyoto - Wikipedia",
+        "excerpt": "Title: Kyoto - Wikipedia\nURL: https://en.wikipedia.org/wiki/Kyoto\nSnippet: As of 2020 , the city had a population of 1.46 million, making it the ninth-most populous city in Japan. More than half (56.8%) of Kyoto Prefecture's population ...\nEngine: startpage\nScore: 1.0\n\nTitle: Kyoto - Wikipedia\nURL: https://gpe.wikipedia.org/wiki/Kyoto\nSnippet: De city be de cultural anchor of de substantially larger Greater Kyoto, metropolitan statistical area (MSA) home to a census-estimated 3.8 million people. E ...\nEngine: startpage\nScore: 0.5\n\nTitle: Greater Kyoto - Wikipedia\nURL: https://en.wikipedia.org/wiki/Greater_Kyoto\nSnippet: Greater Kyoto is a metropolitan area in Japan encompassing Kyoto City, the capital of Kyoto Prefecture, as well as its surrounding areas including Ōtsu, ...\nEngine: startpage\nScore: 0.3333333333333333\n\nTitle: Kyoto - Simple English Wikipedia, the free encyclopedia\nURL: https://simple.wikipedia.org/wiki/Kyoto\nSnippet: Kyoto is a major city in the Kansai region of Japan. Its population is 1.5 million people. The city of Kyoto is the capital city of the prefecture of Kyoto.\nEngine: startpage\nScore: 0.25\n\nTitle: Kyoto Prefecture - Wikipedia\nURL: https://en.wikipedia.org/wiki/Kyoto_Prefecture\nSnippet: ɸɯ]) is a prefecture of Japan located in the Kansai region of Honshu. ... It has a population of 2.58 million and has a geographic area of 4,612 square kilometres ...\nEngine: startpage\nScore: 0.2\n\nTitle: Largest cities in Japan by population by decade - Wikipedia\nURL:"
+      }
+    },
+    {
+      "id": "read_01",
+      "kind": "read",
+      "tool": "web_url_read",
+      "arguments": {
+        "url": "https://example.com/",
+        "maxLength": 6000
+      },
+      "success": true,
+      "latency_ms": 202.3,
+      "baseline_latency_ms": 92.44,
+      "latency_limit_ms": 1592.44,
+      "criteria_errors": [],
+      "output": {
+        "chars": 142,
+        "sha256": "e639c656ee40993c86c194936ccd14fb20b5c9d483d5b49d90e3246a8a2b87d3",
+        "first_line": "Example Domain",
+        "excerpt": "Example Domain\nExample Domain\nThis domain is for use in documentation examples without needing permission. Avoid use in operations.\nLearn more"
+      }
+    },
+    {
+      "id": "read_02",
+      "kind": "read",
+      "tool": "web_url_read",
+      "arguments": {
+        "url": "https://docs.searxng.org/dev/search_api.html",
+        "maxLength": 6000
+      },
+      "success": true,
+      "latency_ms": 772.85,
+      "baseline_latency_ms": 700.93,
+      "latency_limit_ms": 2200.93,
+      "criteria_errors": [],
+      "output": {
+        "chars": 5327,
+        "sha256": "1a70a018d3abea6864abf7a7251c69fe0936e8b52c9c82fce4db35599b6bf380",
+        "first_line": "Search API - SearXNG Documentation (2026.5.31+7159b8aed)",
+        "excerpt": "Search API - SearXNG Documentation (2026.5.31+7159b8aed)\nSkip to content\nSearXNG Documentation (2026.5.31+7159b8aed)\nSearXNG Documentation (2026.5.31+7159b8aed)\nUser information\nSearch syntax\nConfigured Engines\nAbout SearXNG\nWhy use a private instance?\nAdministrator documentation\nSettings\nsettings.yml\nengines:\nbrand:\ngeneral:\nsearch:\nserver:\nui:\npreferences:\nredis:\nvalkey:\noutgoing:\ncategories_as_tabs:\nplugins:\nInstallation\nInstallation container\nInstallation Script\nStep by step installation\nGranian\nuWSGI\nNGINX\nApache\nSearXNG maintenance\nAnswer CAPTCHA from server’s IP\nFavicons\nLimiter\nAdministration API\nArchitecture\nList of plugins\nBuildhosts\nDeveloper documentation\nDevelopment Quickstart\nGit Commits & Change Management\nHow to contribute\nExtended Types\nEngine Implementations\nEngine Library\nSearXNG’s engines loader\nEngine Overview\nDemo Online Engine\nXPath Engine\nMediaWiki Engine\nJSON Engine\n500px\nAdobe Stock\nAlpine Linux Packages\nAnna’s Archive\nAOL\nArch Linux\narXiv\nAstrophysics Data System (ADS)\nAzure Resources\nBing Engines\nBpb\nBrave Engines\nBT4G\nCara Images\nChinaSo\nCORE\nCrossref\nDailymotion\nDiscourse Forums\nDuckDuckGo Engines\nGeizhals\nGitea\nGithub Code\nGitLab\nGoogle Engines\nHugging Face\nKarmasearch\nLemmy\nLibrary of Congress\nMarginalia Search\nMastodon\nMoviepilot\nMatrix Rooms Search (MRS)\nMwmbl Engine\nOdysee\nOpenAlex\nOpen Library\nPeertube Engines\nPiped\nPresearch Engine\nPubMed\nQwant\nRadioBrowser\nRecoll Engine\nRepology\nReuters\nSemantic Scholar\nSoundcloud\nSourcehut\nSpringer Natur"
+      }
+    },
+    {
+      "id": "read_03",
+      "kind": "read",
+      "tool": "web_url_read",
+      "arguments": {
+        "url": "https://httpbin.org/html",
+        "maxLength": 6000
+      },
+      "success": true,
+      "latency_ms": 1024.38,
+      "baseline_latency_ms": 1413.68,
+      "latency_limit_ms": 2913.68,
+      "criteria_errors": [],
+      "output": {
+        "chars": 3594,
+        "sha256": "b4e46e4c2f91a8b6bdbf68aa71ff22f18003e20a83b61fc92cde61224bd9ec0b",
+        "first_line": "Herman Melville - Moby-Dick",
+        "excerpt": "Herman Melville - Moby-Dick\nAvailing himself of the mild, summer-cool weather that now reigned in these latitudes, and in preparation for the peculiarly active pursuits shortly to be anticipated, Perth, the begrimed, blistered old blacksmith, had not removed his portable forge to the hold again, after concluding his contributory work for Ahab's leg, but still retained it on deck, fast lashed to ringbolts by the foremast; being now almost incessantly invoked by the headsmen, and harpooneers, and bowsmen to do some little job for them; altering, or repairing, or new shaping their various weapons and boat furniture. Often he would be surrounded by an eager circle, all waiting to be served; holding boat-spades, pike-heads, harpoons, and lances, and jealously watching his every sooty movement, as he toiled. Nevertheless, this old man's was a patient hammer wielded by a patient arm. No murmur, no impatience, no petulance did come from him. Silent, slow, and solemn; bowing over still further his chronically broken back, he toiled away, as if toil were life itself, and the heavy beating of his hammer the heavy beating of his heart. And so it was.—Most miserable! A peculiar walk in this old man, a certain slight but painful appearing yawing in his gait, had at an early period of the voyage excited the curiosity of the mariners. And to the importunity of their persisted questionings he had finally given in; and so it came to pass that every one now knew the shameful story of his wretch"
+      }
+    },
+    {
+      "id": "read_04",
+      "kind": "read",
+      "tool": "web_url_read",
+      "arguments": {
+        "url": "http://192.168.2.10:8080/",
+        "maxLength": 6000
+      },
+      "success": true,
+      "latency_ms": 147.07,
+      "baseline_latency_ms": 19.25,
+      "latency_limit_ms": 1519.25,
+      "criteria_errors": [],
+      "output": {
+        "chars": 121,
+        "sha256": "a5d1874c8180ad58dee81a8031daa5b7a7565060a517eaedf6254eddb3eba924",
+        "first_line": "SearXNG",
+        "excerpt": "SearXNG\nAbout\nPreferences\nSearXNG\nclear\nsearch\nPowered by\nSearXNG\nSource code\nIssue tracker\nEngine stats\nPublic instances"
+      }
+    },
+    {
+      "id": "read_05",
+      "kind": "read",
+      "tool": "web_url_read",
+      "arguments": {
+        "url": "http://192.168.2.10:8080/search?q=kazusa%20test&format=json",
+        "maxLength": 6000
+      },
+      "success": true,
+      "latency_ms": 597.13,
+      "baseline_latency_ms": 497.1,
+      "latency_limit_ms": 1997.1,
+      "criteria_errors": [],
+      "output": {
+        "chars": 6000,
+        "sha256": "d4ac88207b6e817a5d1dcff2f291e937b94275f7ec287d388a6772b32fe7b97b",
+        "first_line": "{\"query\": \"kazusa test\", \"number_of_results\": 0, \"results\": [{\"url\": \"https://www.kazusa.or.jp/en-laboratories/en-genome-dept/en-clinical-group/\", \"title\": \"Laboratory of Genetic Diagnosis | Kazusa DNA Research Institute\", \"content\": \"Genetic testing, Clinical chemistry. Member List. Sakae Itoga sitoga [at] kazusa.or.jp; Yoshiki Naito naito [at] kazusa.or.jp; Takayuki Ishige tishige [at]\\u00a0...\", \"publishedDate\": null, \"engine\": \"startpage\", \"template\": \"default.html\", \"parsed_url\": [\"https\", \"www.kazusa.or.jp\", \"/en-laboratories/en-genome-dept/en-clinical-group/\", \"\", \"\", \"\"], \"img_src\": \"\", \"thumbnail\": \"\", \"priority\": \"\", \"engines\": [\"startpage\"], \"positions\": [1], \"score\": 1.0, \"category\": \"general\"}, {\"url\": \"https://www.samuraisword.com/gallery/cutting-tests/kazusa-kaneshige-with-2-body-cutting-test-by-nagahisa/\", \"title\": \"\\\"Kazusa Kaneshige\\\" With 2 Body Cutting Test by Nagahisa\", \"content\": \"This is an \\u201cUltra rare Kaneshige\\u201d. It is signed with a style of signature that is the most extraordinary mei that anyone has ever seen.\", \"publishedDate\": null, \"engine\": \"startpage\", \"template\": \"default.html\", \"parsed_url\": [\"https\", \"www.samuraisword.com\", \"/gallery/cutting-tests/kazusa-kaneshige-with-2-body-cutting-test-by-nagahisa/\", \"\", \"\", \"\"], \"img_src\": \"\", \"thumbnail\": \"\", \"priority\": \"\", \"engines\": [\"startpage\"], \"positions\": [2], \"score\": 0.5, \"category\": \"general\"}, {\"url\": \"https://www.reddit.com/r/BlueArchive/comments/1i41yk8/apparently_kazusas_vr_experience_is_so_peak_that/\", \"title\": \"Apparently, Kazusa's VR experience is so peak that people coming ...\", \"content\": \"I believe nexon is working with the government to test their new phycological weapon. ... There are 2 kinds of people in this world, before Kazusa\\u00a0...\", \"publishedDate\": \"2025-01-18T00:00:00\", \"engine\": \"startpage\", \"template\": \"default.html\", \"parsed_url\": [\"https\", \"www.reddit.com\", \"/r/BlueArchive/comments/1i41yk8/apparently_kazusas_vr_experience_is_so_peak_that/\", \"\", \"\", \"\"], \"img_src\": \"\", \"thumbnail\": \"\", \"priority\": \"\", \"engines\": [\"startpage\"], \"positions\": [3], \"score\": 0.3333333333333333, \"category\": \"general\", \"pubdate\": \"2025-01-18 00:00:00\"}, {\"url\": \"https://pmc.ncbi.nlm.nih.gov/articles/PMC5614572/\", \"title\": \"Accurate clinical genetic testing for autoinflammatory diseases using ...\", \"content\": \"This study was approved by both the Human Research Ethics Committee of the University of Kyoto and the Kazusa DNA Research Institute. 2.3. DNA samples. DNA\\u00a0...\", \"publishedDate\": null, \"engine\": \"startpage\", \"template\": \"default.html\", \"parsed_url\": [\"https\", \"pmc.ncbi.nlm.nih.gov\", \"/articles/PMC5614572/\", \"\", \"\", \"\"], \"img_src\": \"\", \"thumbnail\": \"\", \"priority\": \"\", \"engines\": [\"startpage\"], \"positions\": [4], \"score\": 0.25, \"category\": \"general\"}, {\"url\": \"https://www.nature.com/articles/s43247-021-00154-2\", \"title\": \"Biomarkers in the rock outcrop of the Kazusa Group reveal ... - Nature\", \"content\": \"The palaeo-maximum temperature and maximum burial depth deduced from vitrinite reflectance and consolidation tests in the Otadai Formation were\\u00a0...\", \"publishedDate\": \"2021-05-10T00:00:00\", \"engine\": \"startpage\", \"template\": \"default.html\", \"parsed_url\": [\"https\", \"www.nature.com\", \"/articles/s43247-021-00154-2\", \"\", \"\", \"\"], \"img_src\": \"\", \"thumbnail\": \"\", \"priority\": \"\", \"engines\": [\"startpage\"], \"positions\": [5], \"score\": 0.2, \"category\": \"general\", \"pubdate\": \"2021-05-10 00:00:00\"}, {\"url\": \"https://www.kazusa.or.jp/en-laboratories/en-genome-dept/en-proteomics-group/\", \"title\": \"Laboratory of Applied Proteomics Research | Kazusa DNA ...\", \"content\": \"... test system for hundreds of genetic diseases. In the future, the screening test system will be promoted for social implementation in industry-academia\\u00a0...\", \"publishedDate\": null, \"engine\": \"startpage\", \"template\": \"default.html\", \"parsed_url\": [\"https\", \"www.kazusa.or.jp\", \"/en-laboratories/en-genome-dept/en-proteomics-group/\", \"\", \"\", \"\"], \"img_src\": \"\", \"thumbnail\": \"\", \"priority\": \"\", \"engines\": [\"startpage\"], \"positions\": [6], \"score\": 0.16666666666666666, \"category\": \"general\"}, {\"url\": \"https://samuraisword.mystagingwebsite.com/gallery/cutting-tests/kazusa-kaneshige-cutting-test-w-gold-inlay/\", \"title\": \"Kazusa Kaneshige Cutting test w/ Gold inlay - SamuraiSword.com\", \"content\": \"One was called \\u201cHige Kiri\\u201d since it cut through beard and the other was called \\u201cHiza Maru\\u201d since it cut through knee joint of the bodies of executed criminals\\u00a0...\", \"publishedDate\": null, \"engine\": \"startpage\", \"template\": \"default.html\", \"parsed_url\": [\"https\", \"samuraisword.mystagingwebsite.com\", \"/gallery/cutting-tests/kazusa-kaneshige-cutting-test-w-gold-inlay/\", \"\", \"\", \"\"], \"img_src\": \"\", \"thumbnail\": \"\", \"priority\": \"\", \"engines\": [\"startpage\"], \"positions\": [7], \"score\": 0.14285714285714285, \"category\": \"general\"}, {\"url\": \"https://www.youtube.com/watch?v=PMSEn3FXpL8\", \"title\": \"SHOULD YOU GET BAND KAZUSA & BAND YOSHIMI? BEST TIME ...\", \"content\": \"Go to channel Sambucha \\u00b7 I Tested Every Zack D. Films Video. Sambucha\\u20224.5M views \\u00b7 15:54. Go to channel GuitarRock First \\u00b7 WHY ARE BLUE ARCHIVE\\u00a0...\", \"publishedDate\": \"2024-10-18T00:00:00\", \"engine\": \"startpage\", \"template\": \"default.html\", \"parsed_url\": [\"https\", \"www.youtube.com\", \"/watch\", \"\", \"v=PMSEn3FXpL8\", \"\"], \"img_src\": \"\", \"thumbnail\": \"\", \"priority\": \"\", \"engines\": [\"startpage\"], \"positions\": [8], \"score\": 0.125, \"category\": \"general\", \"pubdate\": \"2024-10-18 00:00:00\"}, {\"url\": \"https://global.toyota/en/detail/19434425\", \"title\": \"Toyota Signs Licensing Agreement with Kazusa DNA Research ...\", \"content\": \"Eurofins Genomics is a multinational bioanalysis company with 375 analysis and testing laboratories and over 30,000 employees in 41 countries.\", \"publishedDate\": \"2017-10-30T00:00:00\", \"engine\": \"startpage\", \"template\": \"default.html\", \"parsed_url\": [\"https\", \"global.toyota\", \"/en/detail/19434425\", \"\", \"\", \"\"], \"img_src\": \"\", ",
+        "excerpt": "{\"query\": \"kazusa test\", \"number_of_results\": 0, \"results\": [{\"url\": \"https://www.kazusa.or.jp/en-laboratories/en-genome-dept/en-clinical-group/\", \"title\": \"Laboratory of Genetic Diagnosis | Kazusa DNA Research Institute\", \"content\": \"Genetic testing, Clinical chemistry. Member List. Sakae Itoga sitoga [at] kazusa.or.jp; Yoshiki Naito naito [at] kazusa.or.jp; Takayuki Ishige tishige [at]\\u00a0...\", \"publishedDate\": null, \"engine\": \"startpage\", \"template\": \"default.html\", \"parsed_url\": [\"https\", \"www.kazusa.or.jp\", \"/en-laboratories/en-genome-dept/en-clinical-group/\", \"\", \"\", \"\"], \"img_src\": \"\", \"thumbnail\": \"\", \"priority\": \"\", \"engines\": [\"startpage\"], \"positions\": [1], \"score\": 1.0, \"category\": \"general\"}, {\"url\": \"https://www.samuraisword.com/gallery/cutting-tests/kazusa-kaneshige-with-2-body-cutting-test-by-nagahisa/\", \"title\": \"\\\"Kazusa Kaneshige\\\" With 2 Body Cutting Test by Nagahisa\", \"content\": \"This is an \\u201cUltra rare Kaneshige\\u201d. It is signed with a style of signature that is the most extraordinary mei that anyone has ever seen.\", \"publishedDate\": null, \"engine\": \"startpage\", \"template\": \"default.html\", \"parsed_url\": [\"https\", \"www.samuraisword.com\", \"/gallery/cutting-tests/kazusa-kaneshige-with-2-body-cutting-test-by-nagahisa/\", \"\", \"\", \"\"], \"img_src\": \"\", \"thumbnail\": \"\", \"priority\": \"\", \"engines\": [\"startpage\"], \"positions\": [2], \"score\": 0.5, \"category\": \"general\"}, {\"url\": \"https://www.reddit.com/r/BlueArchive/comments/1i41yk8/apparently_kazusas_vr_exper"
+      }
+    }
+  ]
+}
