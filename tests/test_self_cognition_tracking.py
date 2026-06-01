@@ -94,6 +94,49 @@ def _duplicate_tick_case() -> dict[str, Any]:
     return case
 
 
+@pytest.mark.asyncio
+async def test_default_self_cognition_client_uses_resolver_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Self-cognition should enter the same cognition resolver loop."""
+
+    captured: dict[str, Any] = {}
+    expected_result = {
+        "internal_monologue": "resolver completed",
+        "action_specs": [],
+        "resolver_capability_requests": [],
+    }
+
+    async def direct_cognition(_state: dict[str, Any]) -> dict[str, Any]:
+        raise AssertionError("self-cognition bypassed the resolver loop")
+
+    async def resolver_loop(
+        state: dict[str, Any],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        captured["state"] = state
+        captured["kwargs"] = kwargs
+        return expected_result
+
+    monkeypatch.setattr(runner, "call_cognition_subgraph", direct_cognition)
+    monkeypatch.setattr(
+        runner,
+        "call_cognition_resolver_loop",
+        resolver_loop,
+        raising=False,
+    )
+    state = {"cognitive_episode": {"trigger_source": "internal_thought"}}
+
+    result = await runner._default_cognition_client(state)
+
+    assert result == expected_result
+    assert captured["state"] is state
+    assert captured["kwargs"]["call_cognition_subgraph_func"] is (
+        direct_cognition
+    )
+    assert callable(captured["kwargs"]["execute_capability_func"])
+
+
 def _group_noise_case() -> dict[str, Any]:
     case = {
         "case_name": models.CASE_GROUP_NOISE_REJECTED,

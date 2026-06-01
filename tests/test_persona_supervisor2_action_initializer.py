@@ -616,6 +616,39 @@ async def test_action_initializer_recovers_misplaced_resolver_request(
 
 
 @pytest.mark.asyncio
+async def test_action_initializer_recovers_misplaced_terminal_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Terminal action names in resolver rows should still reach L3."""
+
+    fake_llm = _FakeLLM(json.dumps({
+        "resolver_capability_requests": [
+            {
+                "schema_version": "resolver_capability_request.v1",
+                "capability_kind": "speak",
+                "objective": "回应当前直接提问。",
+                "reason": "前序认知已经决定可以可见回应。",
+                "priority": "now",
+            },
+        ],
+        "action_requests": [],
+    }, ensure_ascii=False))
+    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+
+    result = await l2d_module.call_action_initializer(_state())
+
+    assert result["resolver_capability_requests"] == []
+    assert [spec["kind"] for spec in result["action_specs"]] == ["speak"]
+    surface_requirements = result["action_specs"][0]["params"][
+        "surface_requirements"
+    ]
+    assert surface_requirements == {
+        "decision": "visible_reply",
+        "detail": "回应当前直接提问。",
+    }
+
+
+@pytest.mark.asyncio
 async def test_action_initializer_returns_valid_goal_progress(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

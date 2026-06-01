@@ -132,6 +132,10 @@ async def load_matching_pending_resume(
             continue
         if not _is_open_pending_status(pending_resume):
             continue
+        if _is_source_message_for_current_turn(pending_resume, state):
+            continue
+        if _is_created_after_current_turn(pending_resume, current_timestamp_utc):
+            continue
         if _is_expired(pending_resume, current_timestamp_utc):
             expired_row = _updated_pending_row(
                 row,
@@ -431,6 +435,19 @@ def _is_open_pending_status(pending_resume: ResolverPendingResumeV1) -> bool:
     return return_value
 
 
+def _is_source_message_for_current_turn(
+    pending_resume: ResolverPendingResumeV1,
+    state: GlobalPersonaState,
+) -> bool:
+    """Return whether the current turn created the pending row."""
+
+    return_value = (
+        pending_resume["source_message_id"]
+        == _state_text(state, "platform_message_id")
+    )
+    return return_value
+
+
 def _scope_matches_current_turn(
     row: dict[str, Any],
     state: GlobalPersonaState,
@@ -518,6 +535,18 @@ def _is_expired(
     current = parse_storage_utc_datetime(current_timestamp_utc)
     expires_at = parse_storage_utc_datetime(pending_resume["expires_at_utc"])
     return_value = expires_at <= current
+    return return_value
+
+
+def _is_created_after_current_turn(
+    pending_resume: ResolverPendingResumeV1,
+    current_timestamp_utc: str,
+) -> bool:
+    """Return whether a pending row belongs to a future event."""
+
+    current = parse_storage_utc_datetime(current_timestamp_utc)
+    created_at = parse_storage_utc_datetime(pending_resume["created_at_utc"])
+    return_value = created_at > current
     return return_value
 
 

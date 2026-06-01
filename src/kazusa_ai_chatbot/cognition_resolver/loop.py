@@ -434,7 +434,14 @@ async def _run_blocked_pending_final_cognition(
     final_resolver_state["held_action_specs"] = list(
         cognition_state.get("action_specs", []),
     )
-    final_resolver_state["status"] = pending_resume["status"]
+    final_pending_resume = _pending_resume_from_state(cognition_state)
+    if final_pending_resume is None:
+        final_pending_resume = pending_resume
+    final_resolver_state["pending_resume"] = final_pending_resume
+    if _is_open_pending_resume(final_pending_resume):
+        final_resolver_state["status"] = final_pending_resume["status"]
+    else:
+        final_resolver_state["status"] = "terminal"
     final_resolver_state["terminal_reason"] = final_terminal_reason
     final_trace = _build_cycle_trace(
         cognition_state,
@@ -525,7 +532,10 @@ async def _apply_pending_resolution_if_present(
     if resolution is None:
         return
     validated_resolution = validate_resolver_pending_resolution(resolution)
-    if _resolution_targets_current_message_pending(state, validated_resolution):
+    if (
+        _resolution_targets_current_message_pending(state, validated_resolution)
+        and not _same_message_resolution_has_terminal_action(state)
+    ):
         state.pop("resolver_pending_resolution", None)
         return
     updated_row = await apply_pending_resolution_func(state, validated_resolution)
@@ -581,6 +591,24 @@ def _resolution_targets_current_message_pending(
         == state.get("platform_message_id")
     )
     return_value = bool(same_resume and same_message)
+    return return_value
+
+
+def _same_message_resolution_has_terminal_action(state: GlobalPersonaState) -> bool:
+    """Return whether final cognition already selected a terminal action."""
+
+    action_specs = state.get("action_specs")
+    return_value = isinstance(action_specs, list) and bool(action_specs)
+    return return_value
+
+
+def _is_open_pending_resume(pending_resume: dict[str, Any]) -> bool:
+    """Return whether a pending resume should keep resolver waiting."""
+
+    return_value = pending_resume.get("status") in {
+        "waiting_for_user",
+        "waiting_for_approval",
+    }
     return return_value
 
 
@@ -719,12 +747,16 @@ def _is_repeated_capability_request(
     request: ResolverCapabilityRequestV1,
     resolver_state: ResolverCycleStateV1,
 ) -> bool:
-    """Return whether the exact capability objective was already observed."""
+    """Return whether a capability request repeats already attempted work."""
 
     for observation in resolver_state["observations"]:
         same_capability = observation["capability_kind"] == request["capability_kind"]
         same_objective = observation["request_objective"] == request["objective"]
-        if same_capability and same_objective:
+        same_timed_out_capability = (
+            same_capability
+            and observation["observation_id"].startswith("resolver_obs_timeout_")
+        )
+        if same_capability and (same_objective or same_timed_out_capability):
             return_value = True
             return return_value
     return_value = False
@@ -769,7 +801,8 @@ def _duplicate_request_observation(
         "status": "failed",
         "prompt_safe_summary": (
             "Resolver blocked a duplicate capability request because the same "
-            "objective was already attempted in this resolver run."
+            "objective, or a timed-out capability of the same kind, was already "
+            "attempted in this resolver run."
         ),
         "evidence_refs": [],
         "created_at_utc": _created_at_utc(state),

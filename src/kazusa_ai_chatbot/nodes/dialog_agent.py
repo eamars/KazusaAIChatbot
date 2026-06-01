@@ -11,7 +11,6 @@ Design intent:
   before this module runs.
 """
 
-import re
 import time
 from typing import Annotated, Any, TypedDict
 
@@ -60,26 +59,10 @@ DEFAULT_DIALOG_USAGE_MODE = "live_visible_reply"
 DIALOG_USAGE_MODE_SELF_COGNITION_ACTION_CANDIDATE = (
     "self_cognition_action_candidate_render"
 )
-HTML_LINE_BREAK_PATTERN = re.compile(r"</?br\s*/?>", re.IGNORECASE)
 
 
 class StateContractError(ValueError):
     """Raised when internal graph state violates the dialog contract."""
-
-
-def _clean_dialog_fragment(segment: str) -> str:
-    """Remove transport-like line break tags from one dialog fragment.
-
-    Args:
-        segment: Raw dialog fragment returned by the dialog generator.
-
-    Returns:
-        Prompt-safe visible text with HTML line-break tags removed.
-    """
-
-    cleaned_segment = HTML_LINE_BREAK_PATTERN.sub("", segment)
-    cleaned_segment = cleaned_segment.strip()
-    return cleaned_segment
 
 
 def validate_dialog_action_directives(
@@ -471,9 +454,8 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
     for segment in generated_dialog:
         if not isinstance(segment, str):
             continue
-        clean_segment = _clean_dialog_fragment(segment)
-        if clean_segment:
-            valid_dialog.append(clean_segment)
+        if segment:
+            valid_dialog.append(segment)
     if len(valid_dialog) != len(generated_dialog):
         logger.warning(
             f"Dialog generator dropped invalid fragments: "

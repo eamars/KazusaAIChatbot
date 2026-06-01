@@ -23,7 +23,15 @@ from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisode,
     validate_cognitive_episode,
 )
-from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
+from kazusa_ai_chatbot.config import (
+    CHARACTER_GLOBAL_USER_ID,
+    COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS,
+    COGNITION_RESOLVER_MAX_CYCLES,
+)
+from kazusa_ai_chatbot.cognition_resolver.capabilities import (
+    execute_resolver_capability_request,
+)
+from kazusa_ai_chatbot.cognition_resolver.loop import call_cognition_resolver_loop
 from kazusa_ai_chatbot.nodes.dialog_agent import (
     DIALOG_USAGE_MODE_SELF_COGNITION_ACTION_CANDIDATE,
     StateContractError,
@@ -514,7 +522,7 @@ async def _default_rag_client(
 
 
 async def _default_cognition_client(state: dict[str, Any]) -> dict[str, Any]:
-    """Call the existing L1/L2/L3 cognition graph.
+    """Call the L1/L2/L3 cognition graph through the resolver loop.
 
     Args:
         state: Global persona state subset required by the cognition graph.
@@ -523,7 +531,15 @@ async def _default_cognition_client(state: dict[str, Any]) -> dict[str, Any]:
         Shared cognition output.
     """
 
-    cognition_result = await call_cognition_subgraph(state)
+    cognition_result = await call_cognition_resolver_loop(
+        state,
+        call_cognition_subgraph_func=call_cognition_subgraph,
+        execute_capability_func=execute_resolver_capability_request,
+        max_cycles=COGNITION_RESOLVER_MAX_CYCLES,
+        capability_timeout_seconds=(
+            COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS
+        ),
+    )
     return cognition_result
 
 

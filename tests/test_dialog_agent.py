@@ -253,14 +253,30 @@ def test_dialog_prompts_preserve_multi_part_deliverables() -> None:
         assert required_text in evaluator_prompt
 
 
-def test_dialog_fragment_cleanup_removes_html_line_break_tags() -> None:
-    """Generated dialog fragments should not leak transport break tags."""
+@pytest.mark.asyncio
+async def test_dialog_agent_preserves_evaluator_accepted_fragment_text(
+    monkeypatch,
+) -> None:
+    """Dialog should not rewrite string fragments after evaluator acceptance."""
 
-    cleaned = dialog_module._clean_dialog_fragment(
-        "先验证 MongoDB 恢复</br>"
-    )
+    state = _base_global_state()
+    generator_llm = MagicMock()
+    generator_llm.ainvoke = AsyncMock(return_value=AIMessage(
+        content=(
+            '{"final_dialog": ["raw<br>fragment"], '
+            '"mention_target_user": false}'
+        )
+    ))
+    evaluator_llm = MagicMock()
+    evaluator_llm.ainvoke = AsyncMock(return_value=AIMessage(
+        content='{"feedback": "Passed", "should_stop": true}'
+    ))
+    monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
+    monkeypatch.setattr(dialog_module, "_dialog_evaluator_llm", evaluator_llm)
 
-    assert cleaned == "先验证 MongoDB 恢复"
+    result = await dialog_agent(state)
+
+    assert result["final_dialog"] == ["raw<br>fragment"]
 
 
 def test_dialog_evaluator_prompt_orders_hard_gates_before_style() -> None:

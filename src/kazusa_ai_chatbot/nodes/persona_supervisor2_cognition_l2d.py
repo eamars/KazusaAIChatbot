@@ -49,6 +49,11 @@ logger = logging.getLogger(__name__)
 
 ACTION_SPEC_CAP = 3
 OPEN_GOAL_DELIVERABLE_STATUSES = ("pending", "partial", "blocked")
+ALLOWED_ACTION_CAPABILITIES = frozenset((
+    MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+    SPEAK_CAPABILITY,
+    TRIGGER_FUTURE_COGNITION_CAPABILITY,
+))
 
 
 class ActionRequestV1(TypedDict, total=False):
@@ -557,6 +562,12 @@ def _normalize_resolver_capability_requests(
         return normalized_requests
 
     for raw_request in raw_requests:
+        if (
+            isinstance(raw_request, dict)
+            and _semantic_text(raw_request, "capability_kind")
+            in ALLOWED_ACTION_CAPABILITIES
+        ):
+            continue
         try:
             normalized_request = validate_resolver_capability_request(raw_request)
         except ResolverValidationError as exc:
@@ -796,6 +807,48 @@ def _normalize_misplaced_resolver_requests(
             )
             continue
         normalized_requests.append(normalized_request)
+        if len(normalized_requests) >= ACTION_SPEC_CAP:
+            break
+    return_value = normalized_requests
+    return return_value
+
+
+def _normalize_misplaced_action_requests(parsed: object) -> list[ActionRequestV1]:
+    """Recover action capability requests emitted in the resolver field."""
+
+    normalized_requests: list[ActionRequestV1] = []
+    if not isinstance(parsed, dict):
+        return normalized_requests
+
+    raw_requests = parsed.get("resolver_capability_requests")
+    if not isinstance(raw_requests, list):
+        return normalized_requests
+
+    for raw_request in raw_requests:
+        if not isinstance(raw_request, dict):
+            continue
+        capability = _semantic_text(raw_request, "capability_kind")
+        if capability not in ALLOWED_ACTION_CAPABILITIES:
+            continue
+        reason = _semantic_text(raw_request, "reason")
+        if not reason:
+            logger.warning(
+                "L2d dropped misplaced action request without reason"
+            )
+            continue
+        action_request: ActionRequestV1 = {
+            "capability": capability,
+            "reason": reason,
+        }
+        detail = _semantic_text(raw_request, "objective")
+        if detail:
+            action_request["detail"] = detail
+        decision = _semantic_text(raw_request, "decision")
+        if decision:
+            action_request["decision"] = decision
+        elif capability == SPEAK_CAPABILITY:
+            action_request["decision"] = "visible_reply"
+        normalized_requests.append(action_request)
         if len(normalized_requests) >= ACTION_SPEC_CAP:
             break
     return_value = normalized_requests
@@ -1359,6 +1412,8 @@ async def call_action_initializer(state: CognitionState) -> CognitionState:
             action_requests = _pending_resume_speak_request(state)
         else:
             action_requests = _normalize_action_requests(parsed)
+            if not action_requests:
+                action_requests = _normalize_misplaced_action_requests(parsed)
     action_specs = _materialize_action_specs(action_requests, state)
     resolver_goal_progress = _goal_progress_with_surface_requirements(
         resolver_goal_progress,

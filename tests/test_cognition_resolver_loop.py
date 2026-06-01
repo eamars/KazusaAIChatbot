@@ -598,6 +598,59 @@ async def test_loop_blocks_duplicate_capability_objective_before_execution() -> 
 
 
 @pytest.mark.asyncio
+async def test_loop_blocks_same_capability_retry_after_timeout() -> None:
+    """Timed-out capability work should not be retried with renamed objective."""
+
+    first_request = _resolver_request(
+        capability_kind="web_evidence",
+        objective="检索当前外部事实。",
+    )
+    renamed_request = _resolver_request(
+        capability_kind="web_evidence",
+        objective="换一种说法再次检索当前外部事实。",
+    )
+    execute_count = 0
+
+    async def call_cognition(state: dict) -> dict:
+        resolver_context = state["resolver_context"]
+        if "duplicate capability request" in resolver_context:
+            return _cognition_result(
+                internal_monologue="第三轮：重复超时检索已被阻止。",
+                action_specs=[_speak_action_spec("说明外部检索超时。")],
+            )
+        if "timed out" in resolver_context:
+            return _cognition_result(
+                internal_monologue="第二轮：想换个目标继续查。",
+                resolver_requests=[renamed_request],
+            )
+        return _cognition_result(
+            internal_monologue="第一轮：需要外部证据。",
+            resolver_requests=[first_request],
+        )
+
+    async def execute_capability(_request: dict, _state: dict) -> dict:
+        nonlocal execute_count
+        execute_count += 1
+        await asyncio.sleep(1.0)
+        raise AssertionError("wait_for should timeout before this returns")
+
+    result = await call_cognition_resolver_loop(
+        _resolver_state(),
+        call_cognition_subgraph_func=call_cognition,
+        execute_capability_func=execute_capability,
+        max_cycles=3,
+        capability_timeout_seconds=0.01,
+    )
+
+    observations = result["resolver_state"]["observations"]
+    assert execute_count == 1
+    assert result["resolver_state"]["status"] == "blocked"
+    assert observations[-1]["observation_id"] == "resolver_obs_duplicate_request"
+    assert observations[-1]["request_objective"] == renamed_request["objective"]
+    assert result["action_specs"][0]["kind"] == "speak"
+
+
+@pytest.mark.asyncio
 async def test_duplicate_final_cognition_repeated_request_gets_terminal_speak() -> None:
     """Terminal duplicate handling should not leave the user with silence."""
 
@@ -1183,7 +1236,6 @@ async def test_same_message_pending_resolution_is_ignored() -> None:
             )
         output = _cognition_result(
             internal_monologue="第二轮：应该只提出问题。",
-            action_specs=[_speak_action_spec("只询问用户所在城市。")],
         )
         output["resolver_pending_resolution"] = _pending_resolution(
             resume_id=state["pending_resolver_resume"]["resume_id"],
@@ -1230,6 +1282,85 @@ async def test_same_message_pending_resolution_is_ignored() -> None:
     assert result["resolver_state"]["pending_resume"]["status"] == (
         "waiting_for_user"
     )
+
+
+@pytest.mark.asyncio
+async def test_same_message_terminal_action_closes_pending_resolution() -> None:
+    """A self-corrected final answer should not leave stale pending rows."""
+
+    request = _resolver_request(
+        capability_kind="human_clarification",
+        objective="确认“这是”具体指代的对象。",
+    )
+    pending_rows: list[dict] = []
+    applied_rows: list[dict] = []
+
+    async def call_cognition(state: dict) -> dict:
+        if "pending_resolver_resume" not in state:
+            return _cognition_result(
+                internal_monologue="第一轮：误以为需要澄清指代。",
+                resolver_requests=[request],
+            )
+        output = _cognition_result(
+            internal_monologue="第二轮：发现同一句里已经给出对象。",
+            action_specs=[_speak_action_spec("指代已明确，直接回应。")],
+        )
+        output["resolver_pending_resolution"] = _pending_resolution(
+            resume_id=state["pending_resolver_resume"]["resume_id"],
+        )
+        return output
+
+    async def execute_capability(
+        capability_request: dict,
+        _state: dict,
+    ) -> dict:
+        return {
+            "schema_version": RESOLVER_OBSERVATION_VERSION,
+            "observation_id": "resolver_obs_hil_referent",
+            "capability_kind": capability_request["capability_kind"],
+            "request_objective": capability_request["objective"],
+            "request_reason": capability_request["reason"],
+            "status": "blocked",
+            "prompt_safe_summary": (
+                "Human clarification required: 确认“这是”具体指代的对象。"
+            ),
+            "evidence_refs": [],
+            "created_at_utc": "2026-05-29T21:00:00+00:00",
+        }
+
+    async def upsert_pending(state: dict, observation: dict) -> dict:
+        record = build_pending_resume_record(state, observation)
+        pending_rows.append(record)
+        return record["execution_result"]["pending_resume"]
+
+    async def list_pending_rows(*, limit: int = 1000) -> list[dict]:
+        del limit
+        return list(pending_rows)
+
+    async def persist_pending_row(row: dict) -> None:
+        applied_rows.append(row)
+
+    result = await call_cognition_resolver_loop(
+        _resolver_state(),
+        call_cognition_subgraph_func=call_cognition,
+        execute_capability_func=execute_capability,
+        max_cycles=3,
+        capability_timeout_seconds=1.0,
+        upsert_pending_resume_func=upsert_pending,
+        apply_pending_resolution_func=(
+            lambda state, resolution: apply_pending_resolution(
+                state,
+                resolution,
+                list_action_attempts_func=list_pending_rows,
+                upsert_action_attempt_func=persist_pending_row,
+            )
+        ),
+    )
+
+    assert result["resolver_state"]["status"] == "terminal"
+    assert result["resolver_state"]["pending_resume"]["status"] == "closed"
+    assert result["action_specs"][0]["kind"] == "speak"
+    assert applied_rows[-1]["status"] == "closed"
 
 
 @pytest.mark.asyncio
@@ -1619,8 +1750,12 @@ async def test_pending_helpers_load_and_close_matching_pending_rows() -> None:
     async def upsert_row(row: dict) -> None:
         upserted.append(row)
 
+    follow_up_state = dict(state)
+    follow_up_state["platform_message_id"] = "follow-up-message-id"
+    follow_up_state["storage_timestamp_utc"] = "2026-05-29T21:05:00+00:00"
+
     loaded = await load_matching_pending_resume(
-        state,
+        follow_up_state,
         list_action_attempts_func=list_rows,
         upsert_action_attempt_func=upsert_row,
     )
@@ -1632,7 +1767,7 @@ async def test_pending_helpers_load_and_close_matching_pending_rows() -> None:
 
     resume_id = record["execution_result"]["pending_resume"]["resume_id"]
     await apply_pending_resolution(
-        state,
+        follow_up_state,
         _pending_resolution(resume_id=resume_id),
         list_action_attempts_func=list_rows,
         upsert_action_attempt_func=upsert_row,
@@ -1663,7 +1798,7 @@ async def test_pending_helpers_load_and_close_matching_pending_rows() -> None:
     approval_resume_id = approval_record["resolver_pending_resume"]["resume_id"]
 
     await apply_pending_resolution(
-        state,
+        follow_up_state,
         _pending_resolution(
             decision="approved",
             resume_id=approval_resume_id,
@@ -1676,6 +1811,69 @@ async def test_pending_helpers_load_and_close_matching_pending_rows() -> None:
     assert upserted[-1]["execution_result"][
         "resolver_pending_resolution"
     ]["decision"] == "approved"
+
+
+@pytest.mark.asyncio
+async def test_pending_loader_ignores_future_pending_rows() -> None:
+    """Replay or delayed turns must not load pending rows from the future."""
+
+    current_state = _resolver_state()
+    current_state["storage_timestamp_utc"] = "2026-05-29T21:00:00+00:00"
+    future_state = dict(current_state)
+    future_state["storage_timestamp_utc"] = "2026-05-30T21:00:00+00:00"
+    observation = {
+        "schema_version": RESOLVER_OBSERVATION_VERSION,
+        "observation_id": "resolver_obs_future_hil",
+        "capability_kind": "human_clarification",
+        "request_objective": "确认未来消息里的对象。",
+        "request_reason": "缺少未来消息中的指代对象。",
+        "status": "blocked",
+        "prompt_safe_summary": "Human clarification required: 确认未来消息里的对象。",
+        "evidence_refs": [],
+        "created_at_utc": "2026-05-30T21:00:00+00:00",
+    }
+    future_record = build_pending_resume_record(future_state, observation)
+
+    async def list_rows(*, limit: int = 1000) -> list[dict]:
+        del limit
+        return [future_record]
+
+    loaded = await load_matching_pending_resume(
+        current_state,
+        list_action_attempts_func=list_rows,
+    )
+
+    assert loaded is None
+
+
+@pytest.mark.asyncio
+async def test_pending_loader_ignores_same_source_message_rows() -> None:
+    """A source message should not resume the pending row it created."""
+
+    state = _resolver_state()
+    observation = {
+        "schema_version": RESOLVER_OBSERVATION_VERSION,
+        "observation_id": "resolver_obs_same_message_hil",
+        "capability_kind": "human_clarification",
+        "request_objective": "确认当前消息里的对象。",
+        "request_reason": "缺少当前消息中的指代对象。",
+        "status": "blocked",
+        "prompt_safe_summary": "Human clarification required: 确认当前消息里的对象。",
+        "evidence_refs": [],
+        "created_at_utc": "2026-05-29T21:00:00+00:00",
+    }
+    same_message_record = build_pending_resume_record(state, observation)
+
+    async def list_rows(*, limit: int = 1000) -> list[dict]:
+        del limit
+        return [same_message_record]
+
+    loaded = await load_matching_pending_resume(
+        state,
+        list_action_attempts_func=list_rows,
+    )
+
+    assert loaded is None
 
 
 @pytest.mark.asyncio
@@ -1877,21 +2075,51 @@ async def test_internal_thought_rag_capability_uses_existing_rag_path(
 
 
 @pytest.mark.asyncio
-async def test_web_evidence_requires_discovered_mcp_tools(
+async def test_web_evidence_uses_existing_rag_path_without_mcp_preflight(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Web evidence should fail explicitly when web MCP tools are unavailable."""
+    """Web evidence should rely on the existing RAG supervisor boundary."""
 
-    class MissingMcpManager:
-        def get_tool(self, _tool_name: str) -> None:
-            return None
+    captured: dict = {}
 
-    call_rag_supervisor = AsyncMock()
-    monkeypatch.setattr(capabilities_module, "mcp_manager", MissingMcpManager())
+    async def call_rag_supervisor(
+        *,
+        fresh_query: str,
+        reply_context: dict,
+        character_name: str,
+        context: dict,
+    ) -> dict[str, object]:
+        captured["fresh_query"] = fresh_query
+        captured["reply_context"] = reply_context
+        captured["character_name"] = character_name
+        captured["context"] = context
+        result = {
+            "answer": "找到一条网页证据。",
+            "known_facts": [
+                {
+                    "slot": "Web-evidence: current public fact",
+                    "agent": "web_agent3",
+                    "resolved": True,
+                    "summary": "网页证据显示当前事实可用。",
+                    "raw_result": {
+                        "projection_payload": {"web_rows": []},
+                    },
+                }
+            ],
+            "unknown_slots": [],
+            "loop_count": 1,
+        }
+        return result
+
     monkeypatch.setattr(
         capabilities_module,
         "call_quote_aware_rag_supervisor",
         call_rag_supervisor,
+    )
+    monkeypatch.setattr(
+        capabilities_module.event_logging,
+        "record_rag_stage_event",
+        AsyncMock(),
     )
     request = _resolver_request(
         capability_kind="web_evidence",
@@ -1903,13 +2131,15 @@ async def test_web_evidence_requires_discovered_mcp_tools(
         _resolver_state(),
     )
 
-    assert observation["status"] == "failed"
-    assert observation["capability_kind"] == "web_evidence"
-    assert "Web evidence tools unavailable" in observation["prompt_safe_summary"]
-    assert "mcp-searxng__searxng_web_search" in (
-        observation["prompt_safe_summary"]
+    assert captured["fresh_query"] == request["objective"]
+    assert captured["reply_context"] == _resolver_state()["reply_context"]
+    assert captured["character_name"] == "Kazusa"
+    assert captured["context"]["original_user_request"] == (
+        "Original user request about trust."
     )
-    call_rag_supervisor.assert_not_awaited()
+    assert observation["status"] == "succeeded"
+    assert observation["capability_kind"] == "web_evidence"
+    assert observation["rag_result"]["answer"] == "找到一条网页证据。"
 
 
 @pytest.mark.asyncio
