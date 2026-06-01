@@ -38,7 +38,7 @@ At a high level, Kazusa provides:
 | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | Platform-neutral character brain | Discord, QQ, debug UI, and future adapters feed the same FastAPI brain service.                                                    |
 | Typed message boundary           | Platform syntax is normalized into `MessageEnvelope` fields before cognition or RAG sees it.                                       |
-| Bounded live response path       | Queueing, relevance, RAG, cognition, action routing, and L3 surfaces are explicit stages with caps and inspectable payloads.       |
+| Bounded live response path       | Queueing, relevance, the cognition resolver, selected evidence capabilities, action routing, and L3 surfaces are explicit stages with caps and inspectable payloads. |
 | Multi-horizon memory             | Recent chat, short-term conversation flow, retrieved evidence, durable memory, and scheduled commitments remain separate.          |
 | Internal monologue residue       | A short private residue lane carries bounded first-person reasons from completed episodes into the next L2a cognition pass.       |
 | RAG 2 evidence retrieval         | Helper agents retrieve user profiles, memories, conversation history, live facts, web evidence, and recall state.                  |
@@ -125,11 +125,12 @@ Listen gate and perception
         v
 Persona turn
   - decontextualize the current message
-  - retrieve evidence through RAG 2
   - load short-term conversation progress
   - load projected private residue for L2a only
-  - reason through stance, boundary, style, and intent
-  - initialize zero-or-more semantic actions through L2d
+  - run the bounded cognition resolver
+  - reason through L1 -> L2 -> L2d every resolver cycle
+  - request RAG 2, web/current evidence, HIL, approval, or private
+    self-resolution only when cognition selects that capability
   - run selected L3 text/action handlers
   - emit surface outputs and action results
         |
@@ -157,8 +158,9 @@ sends.
 The core boundary is deliberately narrow:
 
 ```text
-adapter/debug client -> brain service -> queue/intake -> typed episode/RAG
--> cognition/L2d -> selected L3 surfaces/action handlers
+adapter/debug client -> brain service -> queue/intake -> typed episode
+-> cognition resolver/L2d -> optional RAG capability
+-> selected L3 surfaces/action handlers
 -> episode-trace consolidation -> scheduler/reflection
 ```
 

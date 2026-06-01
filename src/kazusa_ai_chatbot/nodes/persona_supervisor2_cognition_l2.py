@@ -251,6 +251,7 @@ _COGNITION_CONSCIOUSNESS_PROMPT = '''\
 - 存在 `internal_thought_residue` 时，当前材料是我自己的内部观察资料。重点读取 `internal_thought_residue.internal_monologue` 中的真实可见现场；`decontextualized_input` 和 `user_input` 只是运输摘要，不是用户输入、用户发言，也不是任何人正在对我说话。
 - 没有 `reflection_artifact` 且没有 `internal_thought_residue` 时，当前材料是外部说话内容。`decontextualized_input` 是当前外部说话内容的语义摘要。
 - 内部观察资料和反思资料中的标题、字段名、JSON、时间戳、semantic_labels、window_summary、transport summary、model-facing metadata 只帮助定位资料结构；不要把它们当成聊天内容，也不要复制进 `internal_monologue`。
+- `promoted_reflection_context.promoted_global_growth` 是全局人格成长背景，不是当前用户事实、当前承诺或当前聊天证据；可以校准我的表达倾向，但不得把它当成当前用户事实，也不得覆盖当前输入、当前证据或本轮媒体观察。
 
 # 核心任务
 1. 先确定来源类型，再解释当前事实。

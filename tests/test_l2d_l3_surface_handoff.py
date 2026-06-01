@@ -455,22 +455,9 @@ async def test_selected_speak_runs_l3_surface_and_dialog_once() -> None:
         ),
         patch.object(
             persona_module,
-            "stage_1_research",
+            "call_cognition_resolver_loop",
             new_callable=AsyncMock,
-            return_value={"rag_result": {"answer": "Known fact."}},
-        ),
-        patch.object(
-            persona_module,
-            "call_cognition_subgraph",
-            new_callable=AsyncMock,
-            return_value={
-                "internal_monologue": "I should answer.",
-                "interaction_subtext": "direct",
-                "emotional_appraisal": "calm",
-                "character_intent": "PROVIDE",
-                "logical_stance": "CONFIRM",
-                "action_specs": [_speak_action_spec()],
-            },
+            return_value=_cognition_state(),
         ),
         patch.object(
             persona_module,
@@ -517,15 +504,10 @@ async def test_parent_graph_preserves_social_context_for_selected_l3() -> None:
         ),
         patch.object(
             persona_module,
-            "stage_1_research",
-            new_callable=AsyncMock,
-            return_value={"rag_result": {"answer": "Known fact."}},
-        ),
-        patch.object(
-            persona_module,
-            "call_cognition_subgraph",
+            "call_cognition_resolver_loop",
             new_callable=AsyncMock,
             return_value={
+                **_cognition_state(),
                 "internal_monologue": "I should answer.",
                 "interaction_subtext": "direct request",
                 "emotional_appraisal": "calm",
@@ -615,15 +597,10 @@ async def test_no_speak_skips_l3_surface_and_dialog_but_consolidates() -> None:
         ),
         patch.object(
             persona_module,
-            "stage_1_research",
-            new_callable=AsyncMock,
-            return_value={"rag_result": {"answer": "Known fact."}},
-        ),
-        patch.object(
-            persona_module,
-            "call_cognition_subgraph",
+            "call_cognition_resolver_loop",
             new_callable=AsyncMock,
             return_value={
+                **_cognition_state(),
                 "internal_monologue": "I will not speak now.",
                 "interaction_subtext": "private",
                 "emotional_appraisal": "calm",

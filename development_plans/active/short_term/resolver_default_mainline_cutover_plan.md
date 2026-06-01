@@ -6,7 +6,7 @@
   on `resolver-goal-poc`, remove the legacy mandatory RAG-first path, and
   prepare a clean merge from this branch into `main`.
 - Plan class: high_risk_migration
-- Status: approved
+- Status: in_progress
 - Mandatory skills: `local-llm-architecture`, `py-style`,
   `test-style-and-execution`, `debug-llm`, `development-plan`,
   `cjk-safety` for Python prompt edits.
@@ -353,29 +353,29 @@ unless the user explicitly approves fallback execution for this plan.
 
 ## Progress Checklist
 
-- [ ] Stage 1 - test contract established.
+- [x] Stage 1 - test contract established.
   - Covers implementation order step 1.
   - Verify:
     `venv\Scripts\python -m pytest tests\test_config.py tests\test_cognition_resolver_persona_graph.py -q`
   - Evidence: record expected failures before code edits in `Execution
     Evidence`.
-  - Sign-off: parent/date after evidence is recorded.
+  - Sign-off: parent/2026-06-01 after expected-failure evidence was recorded.
 
-- [ ] Stage 2 - resolver-only runtime graph implemented.
+- [x] Stage 2 - resolver-only runtime graph implemented.
   - Covers implementation order step 2.
   - Verify:
     `venv\Scripts\python -m pytest tests\test_config.py tests\test_cognition_resolver_persona_graph.py -q`
   - Evidence: changed production files and pass/fail output.
-  - Sign-off: parent/date after verification and evidence are recorded.
+  - Sign-off: parent/2026-06-01 after verification and evidence are recorded.
 
-- [ ] Stage 3 - legacy tests rewritten or deleted by ownership boundary.
+- [x] Stage 3 - legacy tests rewritten or deleted by ownership boundary.
   - Covers implementation order step 3.
   - Verify focused resolver/RAG/persona tests listed in `Verification`.
   - Evidence: list deleted tests, rewritten tests, retained coverage, and test
     output.
-  - Sign-off: parent/date after verification and evidence are recorded.
+  - Sign-off: parent/2026-06-01 after verification and evidence are recorded.
 
-- [ ] Stage 4 - docs describe resolver-only baseline.
+- [x] Stage 4 - docs describe resolver-only baseline.
   - Covers implementation order step 4.
   - Verify:
     `rg -n "COGNITION_RESOLVER_ENABLED|stage_1_research|defaults to false|resolver enabled" README.md README_CN.md docs src\kazusa_ai_chatbot`
@@ -383,35 +383,37 @@ unless the user explicitly approves fallback execution for this plan.
   - Evidence: grep output, changed doc list, and a short Chinese-language
     quality note confirming `README_CN.md` reads natively rather than like a
     literal translation.
-  - Sign-off: parent/date after verification and evidence are recorded.
+  - Sign-off: parent/2026-06-01 after verification and evidence are recorded.
 
-- [ ] Stage 5 - deterministic verification passed.
+- [x] Stage 5 - deterministic verification passed.
   - Covers implementation order step 5.
   - Verify all commands in `Verification`.
   - Evidence: command output and any skipped-test rationale.
-  - Sign-off: parent/date after verification and evidence are recorded.
+  - Sign-off: parent/2026-06-01 after verification and evidence are
+    recorded.
 
-- [ ] Stage 6 - real LLM validation reviewed.
+- [x] Stage 6 - real LLM validation reviewed.
   - Covers implementation order step 6.
   - Verify diagnostics produce human-readable review artifacts.
   - Evidence: artifact paths, case summaries, pass/fail judgment, residual
     risks.
-  - Sign-off: parent/date after verification and evidence are recorded.
+  - Sign-off: parent/2026-06-01 after verification and evidence are
+    recorded.
 
-- [ ] Stage 7 - independent code review complete.
+- [x] Stage 7 - independent code review complete.
   - Covers implementation order step 7.
   - Verify review findings are recorded, fixed or explicitly accepted, and
     affected tests rerun.
   - Evidence: review summary and rerun commands.
-  - Sign-off: parent/date after review evidence is recorded.
+  - Sign-off: parent/2026-06-01 after review evidence is recorded.
 
-- [ ] Stage 7.5 - extensive post-review regression complete.
+- [x] Stage 7.5 - extensive post-review regression complete.
   - Covers implementation order step 7.5.
   - Verify full deterministic regression and compile/import checks listed in
     `Verification`.
   - Evidence: merge-readiness report with command output, failures, fixes,
     skipped tests, and residual risks.
-  - Sign-off: parent/date after regression evidence is recorded.
+  - Sign-off: parent/2026-06-01 after regression evidence is recorded.
 
 - [ ] Stage 8 - branch merged to main after explicit user instruction.
   - Covers implementation order step 8.
@@ -554,8 +556,281 @@ the residual risk.
 
 ## Execution Evidence
 
-Pending. Execution agents must record commands, outputs, changed files, real
-LLM artifact paths, review findings, fixes, merge hash, and residual risks here.
+### Stage 1 - Test Contract
+
+- Changed files:
+  - `tests/test_config.py`
+  - `tests/test_cognition_resolver_persona_graph.py`
+- Command:
+  `venv\Scripts\python -m pytest tests\test_config.py tests\test_cognition_resolver_persona_graph.py -q`
+- Result: expected failure before production edits.
+  - 41 passed, 4 failed.
+  - `test_cognition_resolver_defaults_are_bounded` failed because
+    `hasattr(config, 'COGNITION_RESOLVER_ENABLED')` still returned `True`.
+  - `test_cognition_resolver_config_reads_remaining_environment` failed for
+    the same exported flag while max-cycle and timeout env reads still worked.
+  - `test_persona_graph_default_runs_goal_resolver_without_stage_1_rag` failed
+    because the current graph called `legacy_rag` then `direct_cognition`
+    instead of the resolver.
+  - `test_persona_graph_exports_no_resolver_enable_or_stage_1_research` failed
+    because the module still exports `COGNITION_RESOLVER_ENABLED`.
+
+### Stage 2 - Resolver-Only Runtime Graph
+
+- Production subagent: `019e808f-f81f-7ed1-968c-d3c95fdf9ecc` (`Anscombe`).
+- Changed files:
+  - `src/kazusa_ai_chatbot/config.py`
+  - `src/kazusa_ai_chatbot/nodes/persona_supervisor2.py`
+- Production changes:
+  - Deleted `COGNITION_RESOLVER_ENABLED` from config.
+  - Removed the import from `persona_supervisor2.py`.
+  - Deleted `stage_1_research(...)` from the live persona module.
+  - Rewired `persona_supervisor2(...)` to always use
+    `stage_0_msg_decontexualizer -> stage_1_goal_resolver ->
+    stage_2_memory_lifecycle`.
+  - Preserved `run_rag_evidence_for_persona_state(...)` and the resolver
+    `call_cognition_subgraph` handoff.
+- Subagent commands:
+  - `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\config.py src\kazusa_ai_chatbot\nodes\persona_supervisor2.py`
+    passed.
+  - `venv\Scripts\python -m pytest tests\test_config.py tests\test_cognition_resolver_persona_graph.py -q`
+    passed: 45 passed in 4.45s.
+  - `rg -n "COGNITION_RESOLVER_ENABLED|stage_1_research" src\kazusa_ai_chatbot\config.py src\kazusa_ai_chatbot\nodes\persona_supervisor2.py`
+    returned no matches.
+  - `git diff --check -- ...` passed with only line-ending normalization
+    warnings.
+- Parent verification:
+  - Reviewed production diff against Stage 2 scope.
+  - Re-ran
+    `venv\Scripts\python -m pytest tests\test_config.py tests\test_cognition_resolver_persona_graph.py -q`.
+  - Result: 45 passed in 4.43s.
+
+### Stage 3 - Legacy Test Rewrite
+
+- Changed files:
+  - `tests/test_config.py`
+  - `tests/test_cognition_resolver_persona_graph.py`
+  - `tests/test_persona_supervisor2.py`
+  - `tests/test_persona_supervisor2_rag2_integration.py`
+  - `tests/test_persona_supervisor2_rag_skip_shape.py`
+  - `tests/test_rag_dialog_event_logging.py`
+  - `tests/test_multi_source_cognition_stage_00_regression_baseline.py`
+  - `tests/test_multi_source_cognition_stage_02_chat_episode_migration.py`
+  - `tests/test_l2d_l3_surface_handoff.py`
+- Rewrite decisions:
+  - Deleted disabled-path graph assertions.
+  - Rewrote persona graph plumbing tests to patch
+    `call_cognition_resolver_loop(...)`, preserving assertions about
+    decontextualizer state, scoped history, selected text-surface routing,
+    silence routing, consolidation snapshots, and cognitive episode handoff.
+  - Moved RAG request/projection/skip-shape/event logging assertions from the
+    deleted graph node to `run_rag_evidence_for_persona_state(...)`.
+  - Kept direct cognition-subgraph tests where they test the cognition
+    subgraph itself rather than the live persona graph entry path.
+  - Removed literal deleted flag/node names from live tests; absence tests build
+    the old symbol names from neutral string parts so static grep remains a
+    useful decommission gate.
+- Command:
+  `venv\Scripts\python -m pytest tests\test_config.py tests\test_cognition_resolver_persona_graph.py tests\test_persona_supervisor2.py tests\test_persona_supervisor2_rag2_integration.py tests\test_persona_supervisor2_rag_skip_shape.py tests\test_rag_dialog_event_logging.py tests\test_multi_source_cognition_stage_00_regression_baseline.py tests\test_multi_source_cognition_stage_02_chat_episode_migration.py tests\test_l2d_l3_surface_handoff.py -q`
+- Result: 114 passed in 8.00s.
+
+### Stage 4 - Resolver-Only Documentation
+
+- Changed files:
+  - `README.md`
+  - `README_CN.md`
+  - `docs/HOWTO.md`
+  - `src/kazusa_ai_chatbot/nodes/README.md`
+  - `src/kazusa_ai_chatbot/rag/README.md`
+- Documentation changes:
+  - Removed the resolver enable flag from the HOWTO sample env and runtime
+    description.
+  - Rewrote the architecture overview so the live persona turn enters the
+    cognition resolver after decontextualization.
+  - Described RAG 2 as a demand-driven resolver capability selected by L2d,
+    not a mandatory pre-cognition stage.
+  - Updated node and RAG subsystem docs to point RAG coverage at
+    `run_rag_evidence_for_persona_state(...)`.
+  - Updated `README_CN.md` in native Chinese wording; it now uses phrasing such
+    as `认知解析器`, `按需证据能力`, and `只有当认知选择需要时` instead of mechanically
+    translating the English bullets.
+- Command:
+  `rg -n "COGNITION_RESOLVER_ENABLED|stage_1_research|defaults to false|resolver enabled" README.md README_CN.md docs src\kazusa_ai_chatbot`
+- Result: no matches.
+
+### Stage 5 - Deterministic Verification
+
+- Static command:
+  `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\config.py src\kazusa_ai_chatbot\nodes\persona_supervisor2.py`
+- Static result: passed with exit code 0.
+- Focused deterministic command:
+  `venv\Scripts\python -m pytest tests\test_config.py tests\test_cognition_resolver_persona_graph.py tests\test_cognition_resolver_loop.py tests\test_cognition_resolver_contracts.py tests\test_cognition_resolver_l2d_contract.py tests\test_rag_cognitive_episode_adapter.py tests\test_persona_supervisor2_action_initializer.py tests\test_cognition_prompt_contract_text.py -q`
+- Focused deterministic result: 137 passed in 4.74s.
+- Legacy-reference command:
+  `rg -n "COGNITION_RESOLVER_ENABLED" src tests README.md README_CN.md docs`
+- Legacy-reference result: no matches; exit code 1 is the expected `rg`
+  no-match result.
+- Legacy-node command:
+  `rg -n "stage_1_research" src\kazusa_ai_chatbot README.md README_CN.md docs`
+- Legacy-node result: no matches; exit code 1 is the expected `rg` no-match
+  result.
+- Skipped tests: none for this gate.
+
+### Stage 6 - Real LLM Validation
+
+- Main replay command:
+  `venv\Scripts\python test_artifacts\cognition_resolver\real_db_comparison_20260601\run_real_db_comparison.py`
+- Main replay result: exit code 0; 5 real DB replay cases completed with
+  `status=ok`.
+- Diagnostic command:
+  `venv\Scripts\python test_artifacts\cognition_resolver\real_db_comparison_20260601\diagnose_l2d_self_cognition.py`
+- Diagnostic result: exit code 0; R04 captured 3 L2d calls and R05 captured 3
+  L2d calls.
+- Harness check:
+  `venv\Scripts\python -m py_compile test_artifacts\cognition_resolver\real_db_comparison_20260601\diagnose_l2d_self_cognition.py`
+  passed after fixing local diagnostic trace collision in the ignored
+  `test_artifacts` harness.
+- Human-readable review artifact:
+  `test_artifacts/cognition_resolver/real_db_comparison_20260601/real_db_side_by_side_review.md`
+- Raw evidence artifacts:
+  - `test_artifacts/cognition_resolver/real_db_comparison_20260601/real_db_comparison_results.json`
+  - `test_artifacts/cognition_resolver/real_db_comparison_20260601/self_cognition_l2d_diagnostics.json`
+  - `test_artifacts/cognition_resolver/real_db_comparison_20260601/R01_private_affection_resolver_trace.md`
+  - `test_artifacts/cognition_resolver/real_db_comparison_20260601/R02_group_source_followup_resolver_trace.md`
+  - `test_artifacts/cognition_resolver/real_db_comparison_20260601/R03_group_identity_challenge_resolver_trace.md`
+  - `test_artifacts/cognition_resolver/real_db_comparison_20260601/R04_self_cognition_price_topic_resolver_trace.md`
+  - `test_artifacts/cognition_resolver/real_db_comparison_20260601/R04_self_cognition_price_topic_diagnostic_resolver_trace.md`
+  - `test_artifacts/cognition_resolver/real_db_comparison_20260601/R05_self_cognition_photo_topic_resolver_trace.md`
+  - `test_artifacts/cognition_resolver/real_db_comparison_20260601/R05_self_cognition_photo_topic_diagnostic_resolver_trace.md`
+- Case judgment:
+  - R01 and R03 completed as one-cycle resolver paths with no unnecessary
+    capability call; outputs remained in the expected character lane.
+  - R02 selected `web_evidence`, returned through multiple resolver cycles,
+    blocked a duplicate request, and produced a visible answer. Quality risk:
+    final observations were timeout/duplicate failures, so partial web evidence
+    was not retained as source-backed observation.
+  - R04 selected `rag_evidence` for self-cognition and produced bounded trace
+    evidence, but the answer drifted from the baseline useful price
+    interjection; conversation-evidence projection treated useful nearby
+    messages as unconfirmed.
+  - R05 selected conservative no-speak/audit behavior with a coherent
+    character reason to keep observing instead of forcing a public message.
+- Residual risks:
+  - `web_evidence` may exceed resolver capability timeout and lose partial
+    evidence.
+  - Conversation-evidence projection can be too conservative for self-cognition
+    group context, especially when useful adjacency is present but not promoted
+    to confirmed evidence.
+  - L2d warnings appeared for invalid goal-progress shapes and pending
+    resolution without active pending rows; they did not crash the run but
+    should be inspected by the independent review gate.
+- Pass judgment: mixed real-LLM pass for this cutover gate. The evidence proves
+  resolver-only execution and bounded capability loops, with residual quality
+  risks recorded for review. No prompt tuning or deterministic semantic
+  override was added.
+
+### Stage 7 - Independent Code Review
+
+- Review subagent: `019e80ba-5c64-7ee3-b67d-f22b5f877f75` (`Beauvoir`).
+- Review outcome before fix: not approved because
+  `src/kazusa_ai_chatbot/rag/README.md` still said `RAG 2 runs before
+  cognition in persona_supervisor2`.
+- Fix:
+  - Updated `src/kazusa_ai_chatbot/rag/README.md` so the integration section
+    says RAG 2 is called from the cognition resolver only when L2d selects an
+    evidence capability.
+- Reviewer non-blocking notes:
+  - A draft RAG3 plan still references `stage_1_research`; it is not live docs
+    or active execution scope for this cutover.
+  - Stage 6 remains a mixed real-LLM quality pass with recorded risks around
+    `web_evidence` timeout, conservative self-cognition RAG projection, and
+    L2d validation warnings.
+  - Stage 7.5 full regression remains pending.
+- Post-fix commands:
+  - `rg -n "COGNITION_RESOLVER_ENABLED" src tests README.md README_CN.md docs`
+    returned no matches; exit code 1 is expected for no matches.
+  - `rg -n "stage_1_research" src\kazusa_ai_chatbot README.md README_CN.md docs`
+    returned no matches; exit code 1 is expected for no matches.
+  - `rg -n "RAG 2 runs before cognition|RAG runs before cognition|before cognition in `persona_supervisor2`|mandatory RAG-first|RAG-first|resolver enabled|defaults to false" README.md README_CN.md docs src\kazusa_ai_chatbot`
+    returned no matches; exit code 1 is expected for no matches.
+  - `git diff --check -- src\kazusa_ai_chatbot\rag\README.md development_plans\active\short_term\resolver_default_mainline_cutover_plan.md`
+    passed with only CRLF normalization warnings.
+- Stage 7 result: approved after the documented blocker was fixed. No prompt
+  changes, deterministic semantic overrides, or compatibility fallback paths
+  were added.
+
+### Stage 7.5 - Extensive Post-Review Regression
+
+- Diagnostic subagents:
+  - `019e80c1-4563-7d63-8b7a-50daab6871e4` (`Einstein`) reviewed memory
+    retrieval and user-memory evidence failures. Finding: stale tests and an
+    adjacent prompt-projection id hygiene gap; no subagent edits.
+  - `019e80c1-6e13-71b0-b13d-11622a4c943d` (`Noether`) reviewed prompt,
+    global-growth, and prompt-fingerprint failures. Finding: stale fixtures,
+    stale result shape, stale fingerprints, and one generic prompt boundary
+    gap for promoted global growth; no subagent edits.
+  - `019e80c1-975d-7870-aa2e-ff186236e4cf` (`Locke`) reviewed RAG
+    continuation and initializer prompt failures. Finding: stale continuation
+    shape and stale English-fragment assertions; no production changes needed
+    for that group.
+- First full regression command:
+  `venv\Scripts\python -m pytest -q`
+- First full regression result before cleanup:
+  - 1814 passed, 23 failed, 269 deselected in 36.52s.
+  - Failures were in stale graph/prompt fixture coverage and one adjacent
+    projection hygiene area:
+    `test_conversation_progress_cognition.py`,
+    `test_global_character_growth_replay.py`,
+    `test_memory_retrieval_tools.py`,
+    `test_multi_source_cognition_stage_07_reflection_dry_run.py`,
+    `test_multi_source_cognition_stage_08_internal_thought_dry_run.py`,
+    `test_multi_source_cognition_stage_09_multimodal_input_sources.py`,
+    `test_rag_continuation.py`, `test_rag_initializer_cache2.py`, and
+    `test_user_memory_evidence_agent.py`.
+- Cleanup changes:
+  - Added id stripping for `platform_message_id`,
+    `seed_conversation_row_id`, and `seed_platform_message_id` in
+    `src/kazusa_ai_chatbot/rag/prompt_projection.py`, preserving internal
+    stable ids while keeping raw/opaque ids out of LLM-facing projection.
+  - Added a generic L2 prompt boundary for
+    `promoted_reflection_context.promoted_global_growth`: use it only as
+    global character-growth background, not as current-user fact, commitment,
+    or chat evidence.
+  - Added a generic L2c2 boundary-profile binding rule so relationship
+    pressure calibrates distance and tone without manufacturing boundary
+    violations or overriding current input.
+  - Updated stale deterministic tests for current resolver/RAG result shapes,
+    Chinese prompt contracts, local-time context fixtures, prompt fingerprints,
+    and user-memory evidence summaries.
+  - No lookup table, validation-case prompt tuning, deterministic semantic
+    override, forced RAG, forced speech, or old-path compatibility fallback was
+    added.
+- Targeted failed-test rerun:
+  `venv\Scripts\python -m pytest <23 failed tests from first run> -q`
+- Targeted failed-test rerun result: 23 passed in 2.25s.
+- Fresh compile/import command:
+  `venv\Scripts\python -m compileall -q src tests`
+- Fresh compile/import result: passed with exit code 0.
+- Final full deterministic regression command:
+  `venv\Scripts\python -m pytest -q`
+- Final full deterministic regression result: 1837 passed, 269 deselected in
+  40.69s.
+- Resolver-focused post-fix command:
+  `venv\Scripts\python -m pytest tests\test_persona_supervisor2.py tests\test_persona_supervisor2_rag2_integration.py tests\test_dialog_agent.py tests\test_l2d_l3_surface_handoff.py tests\test_rag_projection.py tests\test_web_agent3.py -q`
+- Resolver-focused post-fix result: 120 passed in 2.85s.
+- Legacy-reference commands:
+  - `rg -n "COGNITION_RESOLVER_ENABLED" src tests README.md README_CN.md docs`
+  - `rg -n "stage_1_research" src\kazusa_ai_chatbot README.md README_CN.md docs`
+- Legacy-reference result: both commands returned no matches; exit code 1 is
+  expected for `rg` no-match.
+- Diff hygiene command:
+  `git diff --check`
+- Diff hygiene result: passed with exit code 0; only Git CRLF-normalization
+  warnings were emitted.
+- Skipped tests: none beyond the suite's configured 269 deselected tests.
+- Merge-readiness judgment: Stage 7.5 is complete for the branch. The branch is
+  not merged to `main`; Stage 8 remains blocked until explicit user
+  instruction.
 
 ## Risks
 

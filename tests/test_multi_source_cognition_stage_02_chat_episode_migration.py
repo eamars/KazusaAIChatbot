@@ -602,22 +602,24 @@ async def test_persona_graph_passes_cognitive_episode_through() -> None:
             },
         ) as decontextualizer,
         patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.stage_1_research",
-            new_callable=AsyncMock,
-            return_value={"rag_result": {}},
-        ) as research,
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_subgraph",
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_resolver_loop",
             new_callable=AsyncMock,
             return_value={
                 "internal_monologue": "thinking",
+                "rag_result": {},
                 "action_directives": {},
                 "interaction_subtext": "",
                 "emotional_appraisal": "",
                 "character_intent": "",
                 "logical_stance": "",
+                "judgment_note": "",
+                "social_distance": "",
+                "emotional_intensity": "",
+                "vibe_check": "",
+                "relational_dynamic": "",
+                "action_specs": [],
             },
-        ) as cognition,
+        ) as resolver,
         patch(
             "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",
             new_callable=AsyncMock,
@@ -631,8 +633,7 @@ async def test_persona_graph_passes_cognitive_episode_through() -> None:
         result = await supervisor_module.persona_supervisor2(state)
 
     assert decontextualizer.await_args.args[0]["cognitive_episode"] == episode
-    assert research.await_args.args[0]["cognitive_episode"] == episode
-    assert cognition.await_args.args[0]["cognitive_episode"] == episode
+    assert resolver.await_args.args[0]["cognitive_episode"] == episode
     assert result["consolidation_state"]["cognitive_episode"] == episode
 
 

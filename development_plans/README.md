@@ -39,7 +39,7 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
-| [resolver_default_mainline_cutover_plan.md](active/short_term/resolver_default_mainline_cutover_plan.md) | High-risk migration and mainline cutover plan | approved |
+| [resolver_default_mainline_cutover_plan.md](active/short_term/resolver_default_mainline_cutover_plan.md) | High-risk migration and mainline cutover plan | in_progress |
 | [self_cognition_rag_resolver_evidence_plan.md](active/short_term/self_cognition_rag_resolver_evidence_plan.md) | Medium production integration plan | in_progress |
 
 ## Supporting Experiment Records

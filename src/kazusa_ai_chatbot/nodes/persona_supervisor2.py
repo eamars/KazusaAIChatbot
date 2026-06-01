@@ -19,7 +19,6 @@ from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.config import (
     CHAT_HISTORY_RECENT_LIMIT,
     COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS,
-    COGNITION_RESOLVER_ENABLED,
     COGNITION_RESOLVER_MAX_CYCLES,
 )
 from kazusa_ai_chatbot.cognition_resolver.capabilities import (
@@ -437,25 +436,6 @@ async def run_rag_evidence_for_persona_state(
     return return_value
 
 
-async def stage_1_research(state: GlobalPersonaState) -> dict:
-    """Run RAG2 and project its facts into the persona payload.
-
-    Args:
-        state: Current top-level persona graph state.
-
-    Returns:
-        A partial state update containing the projected ``rag_result``.
-    """
-    rag_result = await run_rag_evidence_for_persona_state(
-        state,
-        agent_name="stage_1_research",
-    )
-    return_value = {
-        "rag_result": rag_result,
-    }
-    return return_value
-
-
 async def stage_1_goal_resolver(state: GlobalPersonaState) -> dict:
     """Run the cognition-preserving resolver loop after decontextualization."""
 
@@ -557,11 +537,7 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "stage_0_msg_decontexualizer",
         stage_0_msg_decontexualizer,
     )
-    if COGNITION_RESOLVER_ENABLED:
-        persona_builder.add_node("stage_1_goal_resolver", stage_1_goal_resolver)
-    else:
-        persona_builder.add_node("stage_1_research", stage_1_research)
-        persona_builder.add_node("stage_2_cognition", call_cognition_subgraph)
+    persona_builder.add_node("stage_1_goal_resolver", stage_1_goal_resolver)
     persona_builder.add_node(
         "stage_2_memory_lifecycle",
         call_memory_lifecycle_update_handler,
@@ -569,22 +545,14 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
     persona_builder.add_node("stage_3_action", call_action_subgraph)  # perform action
     persona_builder.add_node("stage_3_no_response", stage_3_no_response)
     persona_builder.add_edge(START, "stage_0_msg_decontexualizer")
-    if COGNITION_RESOLVER_ENABLED:
-        persona_builder.add_edge(
-            "stage_0_msg_decontexualizer",
-            "stage_1_goal_resolver",
-        )
-        persona_builder.add_edge(
-            "stage_1_goal_resolver",
-            "stage_2_memory_lifecycle",
-        )
-    else:
-        persona_builder.add_edge(
-            "stage_0_msg_decontexualizer",
-            "stage_1_research",
-        )
-        persona_builder.add_edge("stage_1_research", "stage_2_cognition")
-        persona_builder.add_edge("stage_2_cognition", "stage_2_memory_lifecycle")
+    persona_builder.add_edge(
+        "stage_0_msg_decontexualizer",
+        "stage_1_goal_resolver",
+    )
+    persona_builder.add_edge(
+        "stage_1_goal_resolver",
+        "stage_2_memory_lifecycle",
+    )
     persona_builder.add_conditional_edges(
         "stage_2_memory_lifecycle",
         _route_after_cognition,

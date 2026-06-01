@@ -42,6 +42,7 @@ REQUIRED_ROUTE_ENV_VARS = (
     "JSON_REPAIR_LLM_API_KEY",
     "JSON_REPAIR_LLM_MODEL",
 )
+REMOVED_RESOLVER_ENABLE_FLAG = "COGNITION_" + "RESOLVER_ENABLED"
 
 
 def _subprocess_env_without_dotenv() -> dict[str, str]:
@@ -468,9 +469,9 @@ class TestCognitionVisualDirectivesConfig:
 
 
 class TestCognitionResolverConfig:
-    def test_cognition_resolver_defaults_are_bounded_and_disabled(self, tmp_path):
+    def test_cognition_resolver_defaults_are_bounded(self, tmp_path):
         env = _configured_subprocess_env_without_dotenv()
-        env.pop("COGNITION_RESOLVER_ENABLED", None)
+        env.pop(REMOVED_RESOLVER_ENABLE_FLAG, None)
         env.pop("COGNITION_RESOLVER_MAX_CYCLES", None)
         env.pop("COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS", None)
 
@@ -480,7 +481,8 @@ class TestCognitionResolverConfig:
                 "-c",
                 (
                     "import kazusa_ai_chatbot.config as config; "
-                    "print(config.COGNITION_RESOLVER_ENABLED); "
+                    "print(hasattr(config, "
+                    f"{REMOVED_RESOLVER_ENABLE_FLAG!r})); "
                     "print(config.COGNITION_RESOLVER_MAX_CYCLES); "
                     "print(config.COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS)"
                 ),
@@ -495,9 +497,9 @@ class TestCognitionResolverConfig:
         assert result.returncode == 0
         assert result.stdout.splitlines() == ["False", "3", "120.0"]
 
-    def test_cognition_resolver_config_reads_environment(self, tmp_path):
+    def test_cognition_resolver_config_reads_remaining_environment(self, tmp_path):
         env = _configured_subprocess_env_without_dotenv()
-        env["COGNITION_RESOLVER_ENABLED"] = "true"
+        env[REMOVED_RESOLVER_ENABLE_FLAG] = "true"
         env["COGNITION_RESOLVER_MAX_CYCLES"] = "5"
         env["COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS"] = "180.0"
 
@@ -507,7 +509,8 @@ class TestCognitionResolverConfig:
                 "-c",
                 (
                     "import kazusa_ai_chatbot.config as config; "
-                    "print(config.COGNITION_RESOLVER_ENABLED); "
+                    "print(hasattr(config, "
+                    f"{REMOVED_RESOLVER_ENABLE_FLAG!r})); "
                     "print(config.COGNITION_RESOLVER_MAX_CYCLES); "
                     "print(config.COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS)"
                 ),
@@ -520,7 +523,7 @@ class TestCognitionResolverConfig:
         )
 
         assert result.returncode == 0
-        assert result.stdout.splitlines() == ["True", "5", "180.0"]
+        assert result.stdout.splitlines() == ["False", "5", "180.0"]
 
     def test_cognition_resolver_config_rejects_invalid_bounds(self, tmp_path):
         max_cycles_env = _configured_subprocess_env_without_dotenv()

@@ -73,6 +73,11 @@ _CONTEXTUAL_AGENT_PROMPT = '''\
 - boundary_recovery: {boundary_recovery}
 - relational_override: {boundary_relational_override}
 
+# 边界画像绑定规则（Boundary Profile）
+- 边界画像只校准关系距离和压迫感，不决定话题合法性，也不替代当前输入、边界核心判断或已提供的检索记忆/事实上下文。
+- 场景时间压力、已知关系、频道氛围和 `boundary_core_assessment` 要合并判断；没有明确越界证据时，不要把普通任务、事实澄清或轻松闲聊放大成被审查或被控制。
+- 当 `boundary_core_assessment.acceptance = allow` 时，边界画像只能调整语气温度和距离感；不得反向制造越界结论。
+
 # 判断流程
 1. 先确定来源类型。
 2. 外部说话内容：结合 `decontexualized_input`、`boundary_core_assessment`、`affinity_context`、`chat_history` 判断当前互动距离。

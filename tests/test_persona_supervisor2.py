@@ -152,6 +152,25 @@ def _action_directives() -> dict:
     }
 
 
+def _resolver_update(action_specs: list[dict]) -> dict:
+    """Build a patched resolver result for persona graph plumbing tests."""
+
+    return {
+        "rag_result": {},
+        "internal_monologue": "thinking...",
+        "interaction_subtext": "",
+        "emotional_appraisal": "",
+        "character_intent": "",
+        "logical_stance": "",
+        "judgment_note": "",
+        "social_distance": "",
+        "emotional_intensity": "",
+        "vibe_check": "",
+        "relational_dynamic": "",
+        "action_specs": action_specs,
+    }
+
+
 @pytest.mark.asyncio
 async def test_call_action_subgraph_returns_final_dialog():
     """call_action_subgraph wraps dialog_agent output correctly."""
@@ -268,22 +287,10 @@ async def test_persona_supervisor2_returns_final_dialog_and_consolidation_state(
             return_value={"decontexualized_input": "Hello"},
         ) as m_decon,
         patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.stage_1_research",
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_resolver_loop",
             new_callable=AsyncMock,
-            return_value={"rag_result": {}},
-        ) as m_research,
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_subgraph",
-            new_callable=AsyncMock,
-            return_value={
-                "internal_monologue": "thinking...",
-                "interaction_subtext": "",
-                "emotional_appraisal": "",
-                "character_intent": "",
-                "logical_stance": "",
-                "action_specs": [_speak_action_spec()],
-            },
-        ) as m_cognition,
+            return_value=_resolver_update([_speak_action_spec()]),
+        ) as m_resolver,
         patch(
             "kazusa_ai_chatbot.nodes.persona_supervisor2.call_l3_text_surface_handler",
             new_callable=AsyncMock,
@@ -313,6 +320,7 @@ async def test_persona_supervisor2_returns_final_dialog_and_consolidation_state(
     assert result["consolidation_state"]["final_dialog"] == ["Hi there!"]
     assert result["consolidation_state"]["mention_target_user"] is True
     assert result["consolidation_state"]["reply_context"] == {}
+    m_resolver.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -328,20 +336,13 @@ async def test_persona_supervisor2_no_speak_action_skips_dialog():
             return_value={"decontexualized_input": "Hello"},
         ),
         patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.stage_1_research",
-            new_callable=AsyncMock,
-            return_value={"rag_result": {}},
-        ),
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_subgraph",
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_resolver_loop",
             new_callable=AsyncMock,
             return_value={
+                **_resolver_update([]),
                 "internal_monologue": "choosing silence",
-                "interaction_subtext": "",
-                "emotional_appraisal": "",
                 "character_intent": "DISMISS",
                 "logical_stance": "REFUSE",
-                "action_specs": [],
             },
         ),
         patch(
@@ -428,22 +429,10 @@ async def test_persona_supervisor2_scopes_group_history_before_persona_stages():
             return_value={"decontexualized_input": "Hello"},
         ) as m_decon,
         patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.stage_1_research",
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_resolver_loop",
             new_callable=AsyncMock,
-            return_value={"rag_result": {}},
-        ) as m_research,
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_subgraph",
-            new_callable=AsyncMock,
-            return_value={
-                "internal_monologue": "thinking...",
-                "action_directives": {},
-                "interaction_subtext": "",
-                "emotional_appraisal": "",
-                "character_intent": "",
-                "logical_stance": "",
-            },
-        ),
+            return_value=_resolver_update([]),
+        ) as m_resolver,
         patch(
             "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",
             new_callable=AsyncMock,
@@ -457,7 +446,7 @@ async def test_persona_supervisor2_scopes_group_history_before_persona_stages():
         result = await persona_supervisor2(state)
 
     decon_state = m_decon.await_args.args[0]
-    research_state = m_research.await_args.args[0]
+    resolver_state = m_resolver.await_args.args[0]
     assert [
         row["body_text"] for row in decon_state["chat_history_recent"]
     ] == [
@@ -468,19 +457,19 @@ async def test_persona_supervisor2_scopes_group_history_before_persona_stages():
     ]
     assert [
         row["body_text"]
-        for row in research_state["chat_history_recent"]
+        for row in resolver_state["chat_history_recent"]
     ] == [
         "current user secret",
         "current user reply",
     ]
     assert [
-        row["body_text"] for row in research_state["chat_history_wide"]
+        row["body_text"] for row in resolver_state["chat_history_wide"]
     ] == [
         "current user secret",
         "current user reply",
     ]
     assert result["consolidation_state"]["chat_history_recent"] == (
-        research_state["chat_history_recent"]
+        resolver_state["chat_history_recent"]
     )
 
 
@@ -602,20 +591,13 @@ async def test_persona_supervisor2_builds_scope_users_for_first_pass_only():
             },
         ) as m_decon,
         patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.stage_1_research",
-            new_callable=AsyncMock,
-            return_value={"rag_result": {}},
-        ),
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_subgraph",
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_resolver_loop",
             new_callable=AsyncMock,
             return_value={
+                **_resolver_update([]),
                 "internal_monologue": "choosing silence",
-                "interaction_subtext": "",
-                "emotional_appraisal": "",
                 "character_intent": "CLARIFY",
                 "logical_stance": "UNKNOWN_REFERENT",
-                "action_specs": [],
             },
         ),
         patch(
@@ -680,22 +662,10 @@ async def test_persona_supervisor2_no_remember_skips_consolidation():
             return_value={"decontexualized_input": "Hello"},
         ) as m_decon,
         patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.stage_1_research",
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_resolver_loop",
             new_callable=AsyncMock,
-            return_value={"rag_result": {}},
-        ) as m_research,
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_subgraph",
-            new_callable=AsyncMock,
-            return_value={
-                "internal_monologue": "thinking...",
-                "interaction_subtext": "",
-                "emotional_appraisal": "",
-                "character_intent": "",
-                "logical_stance": "",
-                "action_specs": [_speak_action_spec()],
-            },
-        ) as m_cognition,
+            return_value=_resolver_update([_speak_action_spec()]),
+        ) as m_resolver,
         patch(
             "kazusa_ai_chatbot.nodes.persona_supervisor2.call_l3_text_surface_handler",
             new_callable=AsyncMock,

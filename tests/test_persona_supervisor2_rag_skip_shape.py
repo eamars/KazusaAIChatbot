@@ -97,7 +97,7 @@ def _minimal_text_chat_episode() -> dict:
 
 
 @pytest.mark.asyncio
-async def test_stage_1_research_skip_rag_preserves_projected_shape(monkeypatch) -> None:
+async def test_rag_evidence_skip_preserves_projected_shape(monkeypatch) -> None:
     """Skipped RAG should still return the full cognition-consumed payload."""
 
     async def _call_rag_supervisor(
@@ -114,8 +114,10 @@ async def test_stage_1_research_skip_rag_preserves_projected_shape(monkeypatch) 
         _call_rag_supervisor,
     )
 
-    result = await supervisor_module.stage_1_research(_clarification_state())
-    rag_result = result["rag_result"]
+    rag_result = await supervisor_module.run_rag_evidence_for_persona_state(
+        _clarification_state(),
+        agent_name="resolver_rag_evidence",
+    )
 
     assert rag_result["user_image"]["user_memory_context"]["stable_patterns"] == []
     assert rag_result["character_image"] == {}
@@ -140,17 +142,23 @@ async def test_skip_branch_does_not_call_adapter(monkeypatch) -> None:
         _build_text_chat_rag_request,
     )
 
-    result = await supervisor_module.stage_1_research(_clarification_state())
+    rag_result = await supervisor_module.run_rag_evidence_for_persona_state(
+        _clarification_state(),
+        agent_name="resolver_rag_evidence",
+    )
 
-    assert result["rag_result"]["answer"] == ""
-    assert result["rag_result"]["supervisor_trace"]["loop_count"] == 0
+    assert rag_result["answer"] == ""
+    assert rag_result["supervisor_trace"]["loop_count"] == 0
 
 
 @pytest.mark.asyncio
 async def test_content_anchor_accepts_skipped_rag_result_shape(monkeypatch) -> None:
     """Content Anchor should not raise on the skipped-RAG projection shape."""
     monkeypatch.setattr(l3_module, "_content_anchor_agent_llm", _StaticAsyncLLM())
-    research_result = await supervisor_module.stage_1_research(_clarification_state())
+    rag_result = await supervisor_module.run_rag_evidence_for_persona_state(
+        _clarification_state(),
+        agent_name="resolver_rag_evidence",
+    )
 
     result = await l3_module.call_content_anchor_agent({
         "character_profile": {"name": "Kazusa"},
@@ -158,7 +166,7 @@ async def test_content_anchor_accepts_skipped_rag_result_shape(monkeypatch) -> N
         "referents": [
             {"phrase": "这些", "referent_role": "object", "status": "unresolved"},
         ],
-        "rag_result": research_result["rag_result"],
+        "rag_result": rag_result,
         "internal_monologue": "I need to ask what these refers to.",
         "logical_stance": "TENTATIVE",
         "character_intent": "CLARIFY",

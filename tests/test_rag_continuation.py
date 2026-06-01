@@ -10,10 +10,16 @@ def test_empty_continuation_decision_shape() -> None:
     decision = empty_continuation_decision()
 
     assert set(decision.keys()) == {
+        "promote_candidate",
+        "promoted_candidate_indexes",
+        "promotion_summary",
         "should_continue",
         "refined_query",
         "reason",
     }
+    assert decision["promote_candidate"] is False
+    assert decision["promoted_candidate_indexes"] == []
+    assert decision["promotion_summary"] == ""
     assert decision["should_continue"] is False
     assert decision["refined_query"] == ""
     assert decision["reason"] == ""

@@ -13,6 +13,8 @@ from kazusa_ai_chatbot.time_boundary import build_turn_clock
 persona_module = importlib.import_module(
     "kazusa_ai_chatbot.nodes.persona_supervisor2",
 )
+REMOVED_RESOLVER_ENABLE_FLAG = "COGNITION_" + "RESOLVER_ENABLED"
+REMOVED_RAG_FIRST_NODE = "stage_" + "1_research"
 
 
 def _im_state() -> dict:
@@ -103,15 +105,16 @@ async def _memory_lifecycle(_state: dict) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_persona_graph_disabled_keeps_rag_before_cognition(
+async def test_persona_graph_default_runs_goal_resolver_without_legacy_rag(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Compatibility mode should preserve the RAG-first cognition path."""
+    """The default graph should enter the resolver and skip legacy RAG-first."""
 
     calls: list[str] = []
+    captured: dict = {}
 
-    async def stage_1_research(state: dict) -> dict:
-        calls.append("rag")
+    async def legacy_rag_node(state: dict) -> dict:
+        calls.append("legacy_rag")
         assert state["decontexualized_input"] == "今晚想随便聊两句。"
         return {
             "rag_result": {
@@ -120,49 +123,9 @@ async def test_persona_graph_disabled_keeps_rag_before_cognition(
         }
 
     async def call_cognition_subgraph(state: dict) -> dict:
-        calls.append("cognition")
-        assert calls == ["rag", "cognition"]
+        calls.append("direct_cognition")
         assert state["rag_result"]["answer"] == "legacy evidence"
         return _cognition_output()
-
-    monkeypatch.setattr(persona_module, "COGNITION_RESOLVER_ENABLED", False)
-    monkeypatch.setattr(
-        persona_module,
-        "call_msg_decontexualizer",
-        _decontextualizer,
-    )
-    monkeypatch.setattr(persona_module, "stage_1_research", stage_1_research)
-    monkeypatch.setattr(
-        persona_module,
-        "call_cognition_subgraph",
-        call_cognition_subgraph,
-    )
-    monkeypatch.setattr(
-        persona_module,
-        "call_memory_lifecycle_update_handler",
-        _memory_lifecycle,
-    )
-
-    result = await persona_module.persona_supervisor2(_im_state())
-
-    assert calls == ["rag", "cognition"]
-    assert result["should_respond"] is False
-
-
-@pytest.mark.asyncio
-async def test_persona_graph_enabled_runs_goal_resolver_without_stage_1_rag(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Resolver mode should replace mandatory RAG with the goal resolver stage."""
-
-    calls: list[str] = []
-    captured: dict = {}
-
-    async def stage_1_research(_state: dict) -> dict:
-        raise AssertionError("resolver-enabled graph must not call stage_1_research")
-
-    async def call_cognition_subgraph(_state: dict) -> dict:
-        raise AssertionError("resolver-enabled graph should call cognition via loop")
 
     async def call_cognition_resolver_loop(
         state: dict,
@@ -195,7 +158,6 @@ async def test_persona_graph_enabled_runs_goal_resolver_without_stage_1_rag(
         )
         return loaded
 
-    monkeypatch.setattr(persona_module, "COGNITION_RESOLVER_ENABLED", True)
     monkeypatch.setattr(persona_module, "COGNITION_RESOLVER_MAX_CYCLES", 3)
     monkeypatch.setattr(
         persona_module,
@@ -207,7 +169,12 @@ async def test_persona_graph_enabled_runs_goal_resolver_without_stage_1_rag(
         "call_msg_decontexualizer",
         _decontextualizer,
     )
-    monkeypatch.setattr(persona_module, "stage_1_research", stage_1_research)
+    monkeypatch.setattr(
+        persona_module,
+        REMOVED_RAG_FIRST_NODE,
+        legacy_rag_node,
+        raising=False,
+    )
     monkeypatch.setattr(
         persona_module,
         "call_cognition_subgraph",
@@ -251,3 +218,10 @@ async def test_persona_graph_enabled_runs_goal_resolver_without_stage_1_rag(
     assert captured["max_cycles"] == 3
     assert captured["capability_timeout_seconds"] == 45.0
     assert result["should_respond"] is False
+
+
+def test_persona_graph_exports_no_resolver_enable_or_legacy_rag_node() -> None:
+    """Resolver-only graph should not export the old compatibility switch."""
+
+    assert not hasattr(persona_module, REMOVED_RESOLVER_ENABLE_FLAG)
+    assert not hasattr(persona_module, REMOVED_RAG_FIRST_NODE)

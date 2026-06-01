@@ -267,7 +267,7 @@ async def test_contextual_agent_receives_boundary_profile_contract(monkeypatch) 
     human_payload = json.loads(fake_llm.messages[1].content)
     assert "边界画像绑定规则" in system_prompt
     assert "Boundary Profile" in system_prompt
-    assert "comply" in system_prompt
+    assert "顺从" in system_prompt
     assert "话题合法性" in system_prompt
     assert "场景时间压力" in system_prompt
     assert "已提供的检索记忆/事实上下文" in system_prompt

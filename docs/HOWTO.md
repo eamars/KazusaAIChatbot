@@ -73,7 +73,6 @@ CHARACTER_GLOBAL_USER_ID=00000000-0000-4000-8000-000000000001
 CONVERSATION_HISTORY_LIMIT=10
 SCHEDULED_TASKS_ENABLED=true
 COGNITION_VISUAL_DIRECTIVES_ENABLED=true
-COGNITION_RESOLVER_ENABLED=false
 COGNITION_RESOLVER_MAX_CYCLES=3
 COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS=120.0
 SELF_COGNITION_ENABLED=true
@@ -149,13 +148,13 @@ retried by this recovery path.
 to `false` to skip L3 visual-directive generation globally; adapters and
 debug-client request payloads do not control this behavior.
 
-`COGNITION_RESOLVER_ENABLED` defaults to `false`. When enabled, the live persona
-turn runs the cognition-preserving resolver after decontextualization: each
-resolver cycle still runs the shared L1 -> L2 -> L2d cognition stack, and L2d
-may request bounded evidence, HIL, approval, or private self-resolution
-capabilities before final surface selection. `COGNITION_RESOLVER_MAX_CYCLES`
-caps recurrence, and `COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS` bounds one
-capability observation.
+The live persona turn always runs the cognition-preserving resolver after
+decontextualization. Each resolver cycle still runs the shared L1 -> L2 -> L2d
+cognition stack. L2d may request bounded evidence, HIL, approval, or private
+self-resolution capabilities before final surface selection.
+`COGNITION_RESOLVER_MAX_CYCLES` caps recurrence, and
+`COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS` bounds one capability
+observation.
 
 `SELF_COGNITION_ENABLED` defaults to `true`. Self-cognition-created episodes
 disable visual directives by default with
