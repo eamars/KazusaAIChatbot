@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     MAX_RESOLVER_SUMMARY_CHARS,
     MAX_RESOLVER_TRACE_CHARS,
@@ -34,6 +35,7 @@ from kazusa_ai_chatbot.cognition_resolver.state import (
     new_resolver_state,
     project_resolver_context,
 )
+from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 
 def _capability_request() -> dict:
@@ -177,6 +179,46 @@ def _minimal_global_state() -> dict:
         "global_user_id": "user-1",
         "character_profile": {"global_user_id": "character-1"},
     }
+
+
+def _minimal_global_state_with_media(
+    media_description_rows: list[dict],
+) -> dict:
+    """Build an empty-text resolver state with current-turn media percepts."""
+
+    turn_clock = build_turn_clock("2026-06-02 16:04:32")
+    episode = build_text_chat_cognitive_episode(
+        episode_id="resolver-image-only-episode",
+        percept_id="resolver-image-only-percept",
+        storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
+        local_time_context=turn_clock["local_time_context"],
+        user_input="",
+        platform="debug",
+        platform_channel_id="channel-image-only",
+        channel_type="private",
+        platform_message_id="message-image-only",
+        platform_user_id="platform-user-image-only",
+        global_user_id="user-1",
+        user_name="Image User",
+        active_turn_platform_message_ids=["message-image-only"],
+        active_turn_conversation_row_ids=["row-image-only"],
+        debug_modes={},
+        target_addressed_user_ids=["character-1"],
+        target_broadcast=False,
+        media_description_rows=media_description_rows,
+    )
+    state = _minimal_global_state()
+    state["decontexualized_input"] = ""
+    state["cognitive_episode"] = episode
+    return state
+
+
+def _first_image_observation_percept(state: dict) -> dict:
+    episode = state["cognitive_episode"]
+    for percept in episode["percepts"]:
+        if percept["input_source"] == "image_observation":
+            return percept
+    raise AssertionError("expected image observation percept")
 
 
 def test_capability_request_validator_accepts_known_contract() -> None:
@@ -415,3 +457,81 @@ def test_ensure_initial_resolver_inputs_adds_first_cycle_context() -> None:
     assert "resolver_state: status=running" in initialized["resolver_context"]
     assert "resolver_goal_progress:" in initialized["resolver_context"]
     assert "resolver_observations:" not in initialized["resolver_context"]
+
+
+def test_initial_resolver_inputs_uses_image_observation_when_text_empty() -> None:
+    """Image-only turns should bootstrap resolver goal from image observation."""
+
+    image_summary = '一张浅绿色头发角色头像。'
+    state = _minimal_global_state_with_media([
+        {
+            "content_type": "image/png",
+            "description": image_summary,
+        },
+    ])
+
+    initialized = ensure_initial_resolver_inputs(state, max_cycles=3)
+
+    expected_goal = f'当前输入包含图片观察：{image_summary}'
+    resolver_state = initialized["resolver_state"]
+    assert initialized["decontexualized_input"] == ""
+    assert resolver_state["original_decontexualized_input"] == expected_goal
+    assert resolver_state["goal_progress"]["original_goal"] == expected_goal
+    assert expected_goal in initialized["resolver_context"]
+    assert _first_image_observation_percept(state)["content"] == image_summary
+
+
+def test_initial_resolver_inputs_rejects_empty_text_without_image_goal() -> None:
+    """Empty text without image evidence remains invalid for the resolver."""
+
+    state = _minimal_global_state()
+    state["decontexualized_input"] = ""
+
+    with pytest.raises(ResolverValidationError, match="decontexualized_input"):
+        ensure_initial_resolver_inputs(state, max_cycles=3)
+
+
+def test_initial_resolver_inputs_rejects_audio_only_empty_text() -> None:
+    """Audio observations must not become an image-only resolver fallback."""
+
+    state = _minimal_global_state_with_media([
+        {
+            "content_type": "audio/ogg",
+            "description": "user says the deadline is today",
+        },
+    ])
+
+    with pytest.raises(ResolverValidationError, match="decontexualized_input"):
+        ensure_initial_resolver_inputs(state, max_cycles=3)
+
+
+def test_initial_resolver_inputs_rejects_audit_only_image_empty_text() -> None:
+    """Non-model-visible image observations must not bootstrap resolver goals."""
+
+    state = _minimal_global_state_with_media([
+        {
+            "content_type": "image/png",
+            "description": "一张浅绿色头发角色头像。",
+        },
+    ])
+    image_percept = _first_image_observation_percept(state)
+    image_percept["visibility"] = "audit_only"
+
+    with pytest.raises(ResolverValidationError, match="decontexualized_input"):
+        ensure_initial_resolver_inputs(state, max_cycles=3)
+
+
+def test_initial_resolver_inputs_rejects_empty_image_content_empty_text() -> None:
+    """Image observations with empty visible content remain invalid."""
+
+    state = _minimal_global_state_with_media([
+        {
+            "content_type": "image/png",
+            "description": "一张浅绿色头发角色头像。",
+        },
+    ])
+    image_percept = _first_image_observation_percept(state)
+    image_percept["content"] = " "
+
+    with pytest.raises(ResolverValidationError, match="decontexualized_input"):
+        ensure_initial_resolver_inputs(state, max_cycles=3)

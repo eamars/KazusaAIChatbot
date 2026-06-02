@@ -100,8 +100,61 @@ async def _decontextualizer(_state: dict) -> dict:
     }
 
 
+async def _empty_decontextualizer(_state: dict) -> dict:
+    return {
+        "decontexualized_input": "",
+        "referents": [],
+    }
+
+
 async def _memory_lifecycle(_state: dict) -> dict:
     return {}
+
+
+def _image_only_state() -> dict:
+    """Build an image-only persona state with empty current text."""
+
+    image_summary = '一张浅绿色头发角色头像。'
+    turn_clock = build_turn_clock("2026-05-30 09:00:00")
+    episode = build_text_chat_cognitive_episode(
+        episode_id="resolver-graph-image-episode",
+        percept_id="resolver-graph-image-percept",
+        storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
+        local_time_context=turn_clock["local_time_context"],
+        user_input="",
+        platform="debug",
+        platform_channel_id="channel-graph",
+        channel_type="private",
+        platform_message_id="message-graph-image",
+        platform_user_id="platform-user-graph",
+        global_user_id="global-user-graph",
+        user_name="Graph User",
+        active_turn_platform_message_ids=["message-graph-image"],
+        active_turn_conversation_row_ids=["row-graph-image"],
+        debug_modes={},
+        target_addressed_user_ids=["character-graph"],
+        target_broadcast=False,
+        media_description_rows=[
+            {
+                "content_type": "image/png",
+                "description": image_summary,
+            },
+        ],
+    )
+    state = _im_state()
+    state["user_input"] = ""
+    state["prompt_message_context"] = {
+        "body_text": "",
+        "mentions": [],
+        "attachments": [{
+            "media_type": "image/png",
+            "description": image_summary,
+        }],
+        "addressed_to_global_user_ids": ["character-graph"],
+        "broadcast": False,
+    }
+    state["cognitive_episode"] = episode
+    return state
 
 
 @pytest.mark.asyncio
@@ -225,3 +278,67 @@ def test_persona_graph_exports_no_resolver_enable_or_legacy_rag_node() -> None:
 
     assert not hasattr(persona_module, REMOVED_RESOLVER_ENABLE_FLAG)
     assert not hasattr(persona_module, REMOVED_RAG_FIRST_NODE)
+
+
+@pytest.mark.asyncio
+async def test_persona_graph_image_only_empty_text_enters_goal_resolver(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Image-only input should reach the resolver loop after decontextualizer."""
+
+    calls: list[str] = []
+    captured: dict = {}
+
+    async def call_cognition_resolver_loop(
+        state: dict,
+        *,
+        call_cognition_subgraph_func: object,
+        execute_capability_func: object,
+        max_cycles: int,
+        capability_timeout_seconds: float,
+        upsert_pending_resume_func: object,
+        apply_pending_resolution_func: object,
+    ) -> dict:
+        calls.append("resolver")
+        captured["state"] = dict(state)
+        cognition_output = _cognition_output()
+        return cognition_output
+
+    async def load_matching_pending_resume_into_state(state: dict) -> dict:
+        loaded = dict(state)
+        return loaded
+
+    monkeypatch.setattr(
+        persona_module,
+        "call_msg_decontexualizer",
+        _empty_decontextualizer,
+    )
+    monkeypatch.setattr(
+        persona_module,
+        "call_cognition_resolver_loop",
+        call_cognition_resolver_loop,
+    )
+    monkeypatch.setattr(
+        persona_module,
+        "load_matching_pending_resume_into_state",
+        load_matching_pending_resume_into_state,
+    )
+    monkeypatch.setattr(
+        persona_module,
+        "call_memory_lifecycle_update_handler",
+        _memory_lifecycle,
+    )
+
+    result = await persona_module.persona_supervisor2(_image_only_state())
+
+    expected_goal = '当前输入包含图片观察：一张浅绿色头发角色头像。'
+    assert calls == ["resolver"]
+    assert captured["state"]["decontexualized_input"] == ""
+    assert captured["state"]["resolver_state"][
+        "original_decontexualized_input"
+    ] == expected_goal
+    assert captured["state"]["resolver_state"]["goal_progress"][
+        "original_goal"
+    ] == expected_goal
+    assert expected_goal in captured["state"]["resolver_context"]
+    assert result["should_respond"] is False

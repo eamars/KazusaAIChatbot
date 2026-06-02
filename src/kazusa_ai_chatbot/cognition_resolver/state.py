@@ -150,10 +150,38 @@ def ensure_initial_resolver_inputs(
 
     resolver_state = initialized.get("resolver_state")
     if resolver_state is None:
-        decontexualized_input = _require_state_text(
-            initialized,
-            "decontexualized_input",
-        )
+        raw_input = initialized.get("decontexualized_input")
+        if not isinstance(raw_input, str):
+            raise ResolverValidationError(
+                "decontexualized_input: expected non-empty string",
+            )
+        if raw_input.strip():
+            decontexualized_input = raw_input
+        else:
+            decontexualized_input = ""
+            cognitive_episode = initialized.get("cognitive_episode")
+            if isinstance(cognitive_episode, dict):
+                percepts = cognitive_episode.get("percepts")
+                if isinstance(percepts, list):
+                    for percept in percepts:
+                        if not isinstance(percept, dict):
+                            continue
+                        input_source = percept.get("input_source")
+                        visibility = percept.get("visibility")
+                        content = percept.get("content")
+                        if input_source != "image_observation":
+                            continue
+                        if visibility != "model_visible":
+                            continue
+                        if not isinstance(content, str) or not content.strip():
+                            continue
+                        image_summary = content.strip()
+                        decontexualized_input = (
+                            f'当前输入包含图片观察：{image_summary}'
+                        )
+                        break
+            if not decontexualized_input:
+                _require_non_empty_text(raw_input, "decontexualized_input")
         resolver_state = new_resolver_state(
             decontexualized_input=decontexualized_input,
             max_cycles=max_cycles,

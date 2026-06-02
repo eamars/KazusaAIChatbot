@@ -125,6 +125,7 @@ plans.
 | [rag_conversation_evidence_current_episode_boundary_bugfix_plan.md](archive/completed/bugfix/rag_conversation_evidence_current_episode_boundary_bugfix_plan.md) |
 | [rag_retrieval_top_k_embedding_tuning_plan.md](archive/completed/bugfix/rag_retrieval_top_k_embedding_tuning_plan.md) |
 | [reflection_global_promotion_replay_bugfix_plan.md](archive/completed/bugfix/reflection_global_promotion_replay_bugfix_plan.md) |
+| [resolver_image_only_empty_input_bugfix_plan.md](archive/completed/bugfix/resolver_image_only_empty_input_bugfix_plan.md) |
 | [self_cognition_background_context_budget_bugfix_plan.md](archive/completed/bugfix/self_cognition_background_context_budget_bugfix_plan.md) |
 | [self_cognition_dialog_state_contract_bugfix_plan.md](archive/completed/bugfix/self_cognition_dialog_state_contract_bugfix_plan.md) |
 | [self_cognition_group_speak_selection_bugfix_plan.md](archive/completed/bugfix/self_cognition_group_speak_selection_bugfix_plan.md) |
