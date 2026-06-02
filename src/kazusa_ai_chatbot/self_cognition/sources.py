@@ -1066,4 +1066,8 @@ def _project_character_profile(
     }
     if "name" not in projected:
         projected["name"] = "active character"
+    projected["global_user_id"] = (
+        text_or_empty(character_profile.get("global_user_id"))
+        or CHARACTER_GLOBAL_USER_ID
+    )
     return projected

@@ -146,6 +146,10 @@ All route-specific chat model variables are required. Route-specific variables
 replace the retired generic `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL`
 settings. Missing route variables stop config loading.
 
+`CHARACTER_GLOBAL_USER_ID` is required and has no built-in default. The service
+loads `.env` before reading config, then fails fast if the value is missing or
+empty.
+
 `SEARXNG_URL` is optional. When it is empty, the web agent can still read
 HTTP(S) URLs directly from the Kazusa process, but web search returns a bounded
 unavailable observation. When it is set, search uses the configured SearXNG

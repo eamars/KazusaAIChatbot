@@ -73,6 +73,7 @@ def _configured_subprocess_env_without_dotenv() -> dict[str, str]:
     env["EMBEDDING_BASE_URL"] = "configured"
     env["EMBEDDING_API_KEY"] = "configured"
     env["EMBEDDING_MODEL"] = "configured"
+    env["CHARACTER_GLOBAL_USER_ID"] = "character-global"
     return env
 
 
@@ -498,6 +499,7 @@ class TestRouteLlmConfig:
         env["EMBEDDING_BASE_URL"] = "configured"
         env["EMBEDDING_API_KEY"] = "configured"
         env["EMBEDDING_MODEL"] = "configured"
+        env["CHARACTER_GLOBAL_USER_ID"] = "character-global"
         del env["COGNITION_LLM_MODEL"]
 
         result = subprocess.run(
@@ -511,6 +513,38 @@ class TestRouteLlmConfig:
 
         assert result.returncode != 0
         assert "COGNITION_LLM_MODEL" in result.stderr
+
+    def test_missing_character_global_user_id_crashes_import(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env.pop("CHARACTER_GLOBAL_USER_ID", None)
+
+        result = subprocess.run(
+            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode != 0
+        assert "CHARACTER_GLOBAL_USER_ID must be non-empty" in result.stderr
+
+    def test_empty_character_global_user_id_crashes_import(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["CHARACTER_GLOBAL_USER_ID"] = ""
+
+        result = subprocess.run(
+            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode != 0
+        assert "CHARACTER_GLOBAL_USER_ID must be non-empty" in result.stderr
 
 
 class TestCognitionVisualDirectivesConfig:

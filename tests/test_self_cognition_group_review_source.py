@@ -115,6 +115,107 @@ async def test_collect_group_chat_review_cases_builds_same_group_cases(
 
 
 @pytest.mark.asyncio
+async def test_group_review_case_profile_uses_configured_character_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Projected group-review cases should carry configured character identity."""
+
+    now = datetime(2026, 5, 18, 4, 45, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        sources,
+        "CHARACTER_GLOBAL_USER_ID",
+        "configured-character",
+    )
+
+    async def build_participant_context(**kwargs: Any) -> None:
+        del kwargs
+        return None
+
+    monkeypatch.setattr(
+        sources,
+        "build_group_review_participant_context",
+        build_participant_context,
+    )
+
+    async def collect_inputs(**kwargs: Any) -> ReflectionInputSet:
+        assert kwargs == {
+            "lookback_hours": 3,
+            "now": now,
+            "allow_fallback": False,
+        }
+        return _input_set([_group_scope()])
+
+    cases = await sources.collect_group_chat_review_cases(
+        now=now,
+        character_profile={
+            "name": "Character",
+            "mood": "focused",
+            "platform_bot_id": "bot-1",
+        },
+        max_cases=1,
+        collect_reflection_inputs_func=collect_inputs,
+    )
+
+    assert cases
+    for case in cases:
+        assert case["character_profile"]["global_user_id"] == (
+            "configured-character"
+        )
+    assert cases[0]["character_profile"]["global_user_id"] == (
+        "configured-character"
+    )
+
+
+@pytest.mark.asyncio
+async def test_group_review_case_profile_preserves_profile_character_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Projected group-review cases should preserve explicit profile identity."""
+
+    now = datetime(2026, 5, 18, 4, 45, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        sources,
+        "CHARACTER_GLOBAL_USER_ID",
+        "configured-character",
+    )
+
+    async def build_participant_context(**kwargs: Any) -> None:
+        del kwargs
+        return None
+
+    monkeypatch.setattr(
+        sources,
+        "build_group_review_participant_context",
+        build_participant_context,
+    )
+
+    async def collect_inputs(**kwargs: Any) -> ReflectionInputSet:
+        assert kwargs == {
+            "lookback_hours": 3,
+            "now": now,
+            "allow_fallback": False,
+        }
+        return _input_set([_group_scope()])
+
+    cases = await sources.collect_group_chat_review_cases(
+        now=now,
+        character_profile={
+            "name": "Character",
+            "global_user_id": "profile-character",
+            "mood": "focused",
+            "platform_bot_id": "bot-1",
+        },
+        max_cases=1,
+        collect_reflection_inputs_func=collect_inputs,
+    )
+
+    assert cases
+    assert cases[0]["character_profile"]["global_user_id"] == (
+        "profile-character"
+    )
+
+
+@pytest.mark.asyncio
 async def test_collect_group_chat_review_cases_skips_empty_windows() -> None:
     """Empty 15-minute periods should not call self-cognition."""
 

@@ -6,6 +6,9 @@ import os
 import pytest
 
 
+os.environ.setdefault("CHARACTER_GLOBAL_USER_ID", "character-global")
+
+
 # Disable langsmith in unit tests
 @pytest.fixture(scope="session", autouse=True)
 def disable_langsmith():
