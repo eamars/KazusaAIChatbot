@@ -238,7 +238,7 @@ EMBEDDING_MODEL = os.environ["EMBEDDING_MODEL"]
 # Bot settings
 CHARACTER_GLOBAL_USER_ID = _non_empty_string_from_env(
     "CHARACTER_GLOBAL_USER_ID",
-    "",
+    "00000000-0000-4000-8000-000000000001",
 )
 CONVERSATION_HISTORY_LIMIT = int(os.getenv("CONVERSATION_HISTORY_LIMIT", "10"))
 RAG_SEARCH_DEFAULT_TOP_K = _positive_int_from_env_alias(

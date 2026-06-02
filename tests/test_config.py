@@ -514,12 +514,19 @@ class TestRouteLlmConfig:
         assert result.returncode != 0
         assert "COGNITION_LLM_MODEL" in result.stderr
 
-    def test_missing_character_global_user_id_crashes_import(self, tmp_path):
+    def test_missing_character_global_user_id_uses_default(self, tmp_path):
         env = _configured_subprocess_env_without_dotenv()
         env.pop("CHARACTER_GLOBAL_USER_ID", None)
 
         result = subprocess.run(
-            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(config.CHARACTER_GLOBAL_USER_ID)"
+                ),
+            ],
             cwd=tmp_path,
             env=env,
             capture_output=True,
@@ -527,8 +534,8 @@ class TestRouteLlmConfig:
             check=False,
         )
 
-        assert result.returncode != 0
-        assert "CHARACTER_GLOBAL_USER_ID must be non-empty" in result.stderr
+        assert result.returncode == 0
+        assert result.stdout.strip() == "00000000-0000-4000-8000-000000000001"
 
     def test_empty_character_global_user_id_crashes_import(self, tmp_path):
         env = _configured_subprocess_env_without_dotenv()
