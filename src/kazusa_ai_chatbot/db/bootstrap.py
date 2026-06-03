@@ -48,6 +48,9 @@ from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
 
 logger = logging.getLogger(__name__)
 
+CALENDAR_SCHEDULES_COLLECTION = "calendar_schedules"
+CALENDAR_RUNS_COLLECTION = "calendar_runs"
+
 
 def _now_iso() -> str:
     return_value = storage_utc_now_iso()
@@ -75,6 +78,8 @@ async def db_bootstrap() -> None:
         "memory",
         "user_memory_units",
         "scheduled_events",
+        CALENDAR_SCHEDULES_COLLECTION,
+        CALENDAR_RUNS_COLLECTION,
         "conversation_episode_state",
         "character_reflection_runs",
         "interaction_style_images",
@@ -152,6 +157,33 @@ async def db_bootstrap() -> None:
     )
     await db.scheduled_events.create_index(
         "source_user_id", name="event_source_user",
+    )
+    await db[CALENDAR_SCHEDULES_COLLECTION].create_index(
+        "idempotency_key",
+        unique=True,
+        name="calendar_schedule_idempotency_unique",
+    )
+    await db[CALENDAR_SCHEDULES_COLLECTION].create_index(
+        [("status", 1), ("next_run_at", 1), ("trigger_kind", 1)],
+        name="calendar_schedule_status_next_trigger",
+    )
+    await db[CALENDAR_RUNS_COLLECTION].create_index(
+        "idempotency_key",
+        unique=True,
+        name="calendar_run_idempotency_unique",
+    )
+    await db[CALENDAR_RUNS_COLLECTION].create_index(
+        "run_id",
+        unique=True,
+        name="calendar_run_id_unique",
+    )
+    await db[CALENDAR_RUNS_COLLECTION].create_index(
+        [("status", 1), ("due_at", 1), ("trigger_kind", 1)],
+        name="calendar_run_status_due_trigger",
+    )
+    await db[CALENDAR_RUNS_COLLECTION].create_index(
+        [("lease_expires_at", 1), ("status", 1)],
+        name="calendar_run_lease_expiry_status",
     )
     await db[SELF_COGNITION_ACTION_ATTEMPTS_COLLECTION].create_index(
         "idempotency_key",

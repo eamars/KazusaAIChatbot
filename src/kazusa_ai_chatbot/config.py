@@ -454,6 +454,32 @@ SCHEDULED_TASKS_ENABLED = os.getenv(
     "true",
 ).lower() in ("1", "true", "yes")
 
+# Calendar scheduler durable worker settings.
+CALENDAR_SCHEDULER_ENABLED = _bool_from_env(
+    "CALENDAR_SCHEDULER_ENABLED",
+    "true",
+)
+CALENDAR_SCHEDULER_POLL_INTERVAL_SECONDS = _positive_int_from_env(
+    "CALENDAR_SCHEDULER_POLL_INTERVAL_SECONDS",
+    "30",
+)
+CALENDAR_SCHEDULER_CLAIM_LIMIT = _positive_int_from_env(
+    "CALENDAR_SCHEDULER_CLAIM_LIMIT",
+    "10",
+)
+CALENDAR_SCHEDULER_LEASE_SECONDS = _positive_int_from_env(
+    "CALENDAR_SCHEDULER_LEASE_SECONDS",
+    "300",
+)
+CALENDAR_SCHEDULER_MAX_ATTEMPTS = _positive_int_from_env(
+    "CALENDAR_SCHEDULER_MAX_ATTEMPTS",
+    "3",
+)
+CALENDAR_SCHEDULER_PER_TRIGGER_CAPACITY = _positive_int_from_env(
+    "CALENDAR_SCHEDULER_PER_TRIGGER_CAPACITY",
+    "5",
+)
+
 # Visual directives are service-side generation metadata, not an adapter debug
 # mode. Disable this to skip the L3 visual-agent LLM call globally.
 COGNITION_VISUAL_DIRECTIVES_ENABLED = os.getenv(

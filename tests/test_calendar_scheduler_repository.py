@@ -18,7 +18,11 @@ def _db() -> MagicMock:
         return_value={"run_id": "run-1", "trigger_kind": "future_cognition"}
     )
     calendar_runs.update_one = AsyncMock(
-        return_value=MagicMock(matched_count=1, modified_count=1)
+        return_value=MagicMock(
+            matched_count=1,
+            modified_count=1,
+            upserted_id="x",
+        )
     )
     calendar_schedules = MagicMock()
     calendar_schedules.update_one = AsyncMock(
@@ -99,6 +103,7 @@ async def test_claim_due_calendar_runs_are_atomic_and_lease_bound() -> None:
     assert update == {
         "$set": {
             "status": models.RUN_STATUS_RUNNING,
+            "claimed_at": NOW_UTC,
             "lease_owner": "worker-a",
             "lease_expires_at": LEASE_EXPIRES_AT,
             "updated_at": NOW_UTC,
@@ -168,8 +173,87 @@ async def test_mark_run_terminal_clears_lease_fields() -> None:
             "status": models.RUN_STATUS_COMPLETED,
             "completed_at": NOW_UTC,
             "updated_at": NOW_UTC,
-            "result": {"case_id": "case-1"},
-            "lease_owner": "",
-            "lease_expires_at": "",
+            "result_summary": {"case_id": "case-1"},
+            "lease_owner": None,
+            "lease_expires_at": None,
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_mark_run_failed_writes_failure_summary_only() -> None:
+    """Failure transitions should not store raw top-level error fields."""
+
+    from kazusa_ai_chatbot.calendar_scheduler import models, repository
+
+    db = _db()
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(repository, "get_db", AsyncMock(return_value=db))
+        ok = await repository.mark_calendar_run_failed(
+            "run-1",
+            lease_owner="worker-a",
+            storage_timestamp_utc=NOW_UTC,
+            error="unsupported calendar trigger kind: send_message",
+            retryable=False,
+        )
+
+    assert ok is True
+    update_call = db.calendar_runs.update_one.await_args
+    assert update_call.args[0] == {
+        "run_id": "run-1",
+        "status": models.RUN_STATUS_RUNNING,
+        "lease_owner": "worker-a",
+    }
+    assert update_call.args[1] == {
+        "$set": {
+            "status": models.RUN_STATUS_FAILED,
+            "failed_at": NOW_UTC,
+            "updated_at": NOW_UTC,
+            "failure_summary": {
+                "error": "unsupported calendar trigger kind: send_message",
+                "retryable": False,
+            },
+            "lease_owner": None,
+            "lease_expires_at": None,
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_mark_run_skipped_is_lease_bound() -> None:
+    """Skipped transitions should use the same lease gate as terminal writes."""
+
+    from kazusa_ai_chatbot.calendar_scheduler import models, repository
+
+    db = _db()
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(repository, "get_db", AsyncMock(return_value=db))
+        ok = await repository.mark_calendar_run_skipped(
+            "run-1",
+            lease_owner="worker-a",
+            storage_timestamp_utc=NOW_UTC,
+            reason="stale_active_commitment_due_at",
+        )
+
+    assert ok is True
+    update_call = db.calendar_runs.update_one.await_args
+    assert update_call.args[0] == {
+        "run_id": "run-1",
+        "status": models.RUN_STATUS_RUNNING,
+        "lease_owner": "worker-a",
+    }
+    assert update_call.args[1] == {
+        "$set": {
+            "status": models.RUN_STATUS_SKIPPED,
+            "skipped_at": NOW_UTC,
+            "updated_at": NOW_UTC,
+            "skip_reason": "stale_active_commitment_due_at",
+            "failure_summary": {
+                "reason": "stale_active_commitment_due_at",
+            },
+            "lease_owner": None,
+            "lease_expires_at": None,
         }
     }

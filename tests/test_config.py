@@ -1155,3 +1155,69 @@ class TestSelfCognitionConfig:
             "False",
             "False",
         ]
+
+
+class TestCalendarSchedulerConfig:
+    def test_calendar_scheduler_config_defaults_are_positive(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env.pop("CALENDAR_SCHEDULER_ENABLED", None)
+        env.pop("CALENDAR_SCHEDULER_POLL_INTERVAL_SECONDS", None)
+        env.pop("CALENDAR_SCHEDULER_CLAIM_LIMIT", None)
+        env.pop("CALENDAR_SCHEDULER_LEASE_SECONDS", None)
+        env.pop("CALENDAR_SCHEDULER_MAX_ATTEMPTS", None)
+        env.pop("CALENDAR_SCHEDULER_PER_TRIGGER_CAPACITY", None)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(config.CALENDAR_SCHEDULER_ENABLED); "
+                    "print(config.CALENDAR_SCHEDULER_POLL_INTERVAL_SECONDS); "
+                    "print(config.CALENDAR_SCHEDULER_CLAIM_LIMIT); "
+                    "print(config.CALENDAR_SCHEDULER_LEASE_SECONDS); "
+                    "print(config.CALENDAR_SCHEDULER_MAX_ATTEMPTS); "
+                    "print(config.CALENDAR_SCHEDULER_PER_TRIGGER_CAPACITY)"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.splitlines() == [
+            "True",
+            "30",
+            "10",
+            "300",
+            "3",
+            "5",
+        ]
+
+    def test_calendar_scheduler_positive_ints_fail_fast(self, tmp_path):
+        names = [
+            "CALENDAR_SCHEDULER_POLL_INTERVAL_SECONDS",
+            "CALENDAR_SCHEDULER_CLAIM_LIMIT",
+            "CALENDAR_SCHEDULER_LEASE_SECONDS",
+            "CALENDAR_SCHEDULER_MAX_ATTEMPTS",
+            "CALENDAR_SCHEDULER_PER_TRIGGER_CAPACITY",
+        ]
+        for name in names:
+            env = _configured_subprocess_env_without_dotenv()
+            env[name] = "0"
+
+            result = subprocess.run(
+                [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
+                cwd=tmp_path,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            assert result.returncode != 0
+            assert f"{name} must be >= 1" in result.stderr

@@ -71,6 +71,8 @@ def test_one_time_schedule_builder_uses_closed_trigger_contract() -> None:
     assert schedule["recurrence"] == {"kind": "once"}
     assert schedule["status"] == models.SCHEDULE_STATUS_ACTIVE
     assert schedule["next_run_at"] == DUE_AT
+    assert schedule["timezone"] == "UTC"
+    assert schedule["legacy_source"] is None
     assert schedule["created_at"] == CREATED_AT
     assert schedule["updated_at"] == CREATED_AT
     assert schedule["payload"] == _future_payload()
@@ -124,8 +126,14 @@ def test_calendar_run_builder_is_due_run_not_visible_message() -> None:
     assert run["payload"] == schedule["payload"]
     assert run["source_scope"] == schedule["source_scope"]
     assert run["attempt_count"] == 0
-    assert run["lease_owner"] == ""
-    assert run["lease_expires_at"] == ""
+    assert run["max_attempts"] == models.DEFAULT_RUN_MAX_ATTEMPTS
+    assert run["claimed_at"] is None
+    assert run["completed_at"] is None
+    assert run["lease_owner"] is None
+    assert run["lease_expires_at"] is None
+    assert run["result_summary"] is None
+    assert run["failure_summary"] is None
+    assert run["legacy_source"] is None
     assert run["period_start_utc"] is None
     assert run["slot_index"] is None
     assert run["offset_seconds"] is None
@@ -146,3 +154,43 @@ def test_trigger_kind_roster_is_explicit_and_closed() -> None:
     assert "send_message" not in models.CALENDAR_TRIGGER_KINDS
     assert "reflection_hourly_slot" not in models.CALENDAR_TRIGGER_KINDS
     assert "group_self_cognition_review" not in models.CALENDAR_TRIGGER_KINDS
+
+
+def test_schedule_status_roster_matches_plan_lifecycle() -> None:
+    """Schedules should expose the lifecycle statuses owned by the calendar."""
+
+    from kazusa_ai_chatbot.calendar_scheduler import models
+
+    assert {
+        models.SCHEDULE_STATUS_ACTIVE,
+        models.SCHEDULE_STATUS_PAUSED,
+        models.SCHEDULE_STATUS_COMPLETED,
+        models.SCHEDULE_STATUS_CANCELLED,
+    } == {
+        "active",
+        "paused",
+        "completed",
+        "cancelled",
+    }
+
+
+def test_run_status_roster_matches_plan_lifecycle() -> None:
+    """Runs should expose every durable execution lifecycle status."""
+
+    from kazusa_ai_chatbot.calendar_scheduler import models
+
+    assert {
+        models.RUN_STATUS_PENDING,
+        models.RUN_STATUS_RUNNING,
+        models.RUN_STATUS_COMPLETED,
+        models.RUN_STATUS_FAILED,
+        models.RUN_STATUS_CANCELLED,
+        models.RUN_STATUS_SKIPPED,
+    } == {
+        "pending",
+        "running",
+        "completed",
+        "failed",
+        "cancelled",
+        "skipped",
+    }

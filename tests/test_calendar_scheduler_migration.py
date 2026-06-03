@@ -93,8 +93,14 @@ def test_migration_plan_converts_future_cognition_only() -> None:
         "future_cognition:action_attempt:future-123"
     ]
     assert plan["cancelled_scheduled_event_ids"] == ["legacy-send-1"]
+    assert plan["migrated_scheduled_event_ids"] == [
+        "future_cognition:action_attempt:future-123"
+    ]
     assert len(plan["calendar_schedules"]) == 1
     assert len(plan["calendar_runs"]) == 1
+    assert plan["calendar_schedules"][0]["schedule_id"] == (
+        repeated_plan["calendar_schedules"][0]["schedule_id"]
+    )
     assert plan["calendar_runs"][0]["run_id"] == (
         repeated_plan["calendar_runs"][0]["run_id"]
     )
@@ -152,6 +158,13 @@ async def test_migration_dry_run_does_not_write_repository() -> None:
             self.cancellations.append(event_id)
             return True
 
+        async def mark_pending_future_cognition_migrated(
+            self,
+            event_id: str,
+        ) -> bool:
+            self.cancellations.append(event_id)
+            return True
+
     repository = RepositoryDouble()
     summary = await (
         migrate_scheduled_events_to_calendar_scheduler.apply_migration_plan(
@@ -168,3 +181,285 @@ async def test_migration_dry_run_does_not_write_repository() -> None:
     assert summary["applied"] is False
     assert repository.writes == []
     assert repository.cancellations == []
+
+
+@pytest.mark.asyncio
+async def test_migration_apply_writes_calendar_then_marks_legacy_rows() -> None:
+    """Apply mode writes calendar rows before mutating legacy rows."""
+
+    from scripts import migrate_scheduled_events_to_calendar_scheduler
+
+    class RepositoryDouble:
+        def __init__(self) -> None:
+            self.operations: list[tuple[str, str]] = []
+
+        async def upsert_calendar_schedule(self, schedule: dict) -> object:
+            self.operations.append(("schedule", schedule["schedule_id"]))
+            return object()
+
+        async def upsert_calendar_run(self, run: dict) -> object:
+            self.operations.append(("run", run["run_id"]))
+            return object()
+
+        async def cancel_pending_scheduled_event(self, event_id: str) -> bool:
+            self.operations.append(("cancel", event_id))
+            return True
+
+        async def mark_pending_future_cognition_migrated(
+            self,
+            event_id: str,
+        ) -> bool:
+            self.operations.append(("migrated", event_id))
+            return True
+
+    repository = RepositoryDouble()
+    plan = migrate_scheduled_events_to_calendar_scheduler.build_migration_plan(
+        [_future_cognition_event(), _send_message_event()],
+        storage_timestamp_utc=NOW_UTC,
+    )
+
+    summary = await (
+        migrate_scheduled_events_to_calendar_scheduler.apply_migration_plan(
+            plan,
+            repository=repository,
+            dry_run=False,
+        )
+    )
+
+    assert summary["dry_run"] is False
+    assert summary["applied"] is True
+    assert summary["legacy_mutation_failure_count"] == 0
+    assert summary["legacy_mutation_failures"] == {
+        "cancelled_scheduled_event_ids": [],
+        "migrated_scheduled_event_ids": [],
+    }
+    assert [operation[0] for operation in repository.operations] == [
+        "schedule",
+        "run",
+        "cancel",
+        "migrated",
+    ]
+    assert repository.operations[-1] == (
+        "migrated",
+        "future_cognition:action_attempt:future-123",
+    )
+
+
+@pytest.mark.asyncio
+async def test_migration_apply_blocks_unknown_tools_without_writes() -> None:
+    """Blocked plans must not partially write calendar or legacy rows."""
+
+    from scripts import migrate_scheduled_events_to_calendar_scheduler
+
+    class RepositoryDouble:
+        def __init__(self) -> None:
+            self.operations: list[str] = []
+
+        async def upsert_calendar_schedule(self, schedule: dict) -> object:
+            self.operations.append("schedule")
+            return object()
+
+        async def upsert_calendar_run(self, run: dict) -> object:
+            self.operations.append("run")
+            return object()
+
+        async def cancel_pending_scheduled_event(self, event_id: str) -> bool:
+            self.operations.append("cancel")
+            return True
+
+        async def mark_pending_future_cognition_migrated(
+            self,
+            event_id: str,
+        ) -> bool:
+            self.operations.append("migrated")
+            return True
+
+    unknown = {
+        "event_id": "legacy-unknown-1",
+        "tool": "unreviewed_tool",
+        "execute_at": "2026-06-04T00:15:00+00:00",
+        "status": "pending",
+        "args": {},
+    }
+    repository = RepositoryDouble()
+    plan = migrate_scheduled_events_to_calendar_scheduler.build_migration_plan(
+        [_future_cognition_event(), unknown],
+        storage_timestamp_utc=NOW_UTC,
+    )
+
+    summary = await (
+        migrate_scheduled_events_to_calendar_scheduler.apply_migration_plan(
+            plan,
+            repository=repository,
+            dry_run=False,
+        )
+    )
+
+    assert summary["blocked"] is True
+    assert summary["applied"] is False
+    assert repository.operations == []
+
+
+@pytest.mark.asyncio
+async def test_migration_apply_reports_failed_legacy_cancel() -> None:
+    """Failed legacy cancellations should make apply status partial."""
+
+    from scripts import migrate_scheduled_events_to_calendar_scheduler
+
+    class RepositoryDouble:
+        def __init__(self) -> None:
+            self.operations: list[tuple[str, str]] = []
+
+        async def upsert_calendar_schedule(self, schedule: dict) -> object:
+            self.operations.append(("schedule", schedule["schedule_id"]))
+            return object()
+
+        async def upsert_calendar_run(self, run: dict) -> object:
+            self.operations.append(("run", run["run_id"]))
+            return object()
+
+        async def cancel_pending_scheduled_event(self, event_id: str) -> bool:
+            self.operations.append(("cancel", event_id))
+            return False
+
+        async def mark_pending_future_cognition_migrated(
+            self,
+            event_id: str,
+        ) -> bool:
+            self.operations.append(("migrated", event_id))
+            return True
+
+    repository = RepositoryDouble()
+    plan = migrate_scheduled_events_to_calendar_scheduler.build_migration_plan(
+        [_future_cognition_event(), _send_message_event()],
+        storage_timestamp_utc=NOW_UTC,
+    )
+
+    summary = await (
+        migrate_scheduled_events_to_calendar_scheduler.apply_migration_plan(
+            plan,
+            repository=repository,
+            dry_run=False,
+        )
+    )
+
+    assert summary["applied"] is False
+    assert summary["legacy_mutation_failure_count"] == 1
+    assert summary["legacy_mutation_failures"] == {
+        "cancelled_scheduled_event_ids": ["legacy-send-1"],
+        "migrated_scheduled_event_ids": [],
+    }
+    assert [operation[0] for operation in repository.operations] == [
+        "schedule",
+        "run",
+        "cancel",
+        "migrated",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_migration_apply_reports_failed_legacy_migrate() -> None:
+    """Failed migrated marks should make apply status partial."""
+
+    from scripts import migrate_scheduled_events_to_calendar_scheduler
+
+    class RepositoryDouble:
+        def __init__(self) -> None:
+            self.operations: list[tuple[str, str]] = []
+
+        async def upsert_calendar_schedule(self, schedule: dict) -> object:
+            self.operations.append(("schedule", schedule["schedule_id"]))
+            return object()
+
+        async def upsert_calendar_run(self, run: dict) -> object:
+            self.operations.append(("run", run["run_id"]))
+            return object()
+
+        async def cancel_pending_scheduled_event(self, event_id: str) -> bool:
+            self.operations.append(("cancel", event_id))
+            return True
+
+        async def mark_pending_future_cognition_migrated(
+            self,
+            event_id: str,
+        ) -> bool:
+            self.operations.append(("migrated", event_id))
+            return False
+
+    repository = RepositoryDouble()
+    plan = migrate_scheduled_events_to_calendar_scheduler.build_migration_plan(
+        [_future_cognition_event(), _send_message_event()],
+        storage_timestamp_utc=NOW_UTC,
+    )
+
+    summary = await (
+        migrate_scheduled_events_to_calendar_scheduler.apply_migration_plan(
+            plan,
+            repository=repository,
+            dry_run=False,
+        )
+    )
+
+    assert summary["applied"] is False
+    assert summary["legacy_mutation_failure_count"] == 1
+    assert summary["legacy_mutation_failures"] == {
+        "cancelled_scheduled_event_ids": [],
+        "migrated_scheduled_event_ids": [
+            "future_cognition:action_attempt:future-123",
+        ],
+    }
+    assert [operation[0] for operation in repository.operations] == [
+        "schedule",
+        "run",
+        "cancel",
+        "migrated",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_migration_repository_uses_script_operations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The script adapter should use maintenance DB helpers for legacy rows."""
+
+    from scripts import migrate_scheduled_events_to_calendar_scheduler
+
+    operations: list[tuple[str, str]] = []
+
+    async def cancel_pending_send(event_id: str) -> bool:
+        operations.append(("cancel", event_id))
+        return True
+
+    async def mark_pending_migrated(event_id: str) -> bool:
+        operations.append(("migrated", event_id))
+        return True
+
+    monkeypatch.setattr(
+        migrate_scheduled_events_to_calendar_scheduler,
+        "cancel_pending_send_message_for_calendar_migration",
+        cancel_pending_send,
+    )
+    monkeypatch.setattr(
+        migrate_scheduled_events_to_calendar_scheduler,
+        "mark_pending_future_cognition_migrated_for_calendar_migration",
+        mark_pending_migrated,
+    )
+    migration_repository = (
+        migrate_scheduled_events_to_calendar_scheduler._MigrationRepository()
+    )
+
+    cancelled = await migration_repository.cancel_pending_scheduled_event(
+        "legacy-send-1",
+    )
+    migrated = (
+        await migration_repository.mark_pending_future_cognition_migrated(
+            "future_cognition:action_attempt:future-123",
+        )
+    )
+
+    assert cancelled is True
+    assert migrated is True
+    assert operations == [
+        ("cancel", "legacy-send-1"),
+        ("migrated", "future_cognition:action_attempt:future-123"),
+    ]

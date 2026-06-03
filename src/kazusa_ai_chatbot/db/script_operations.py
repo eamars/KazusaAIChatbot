@@ -56,6 +56,9 @@ SYNTHETIC_CONSOLIDATION_USER_COUNT_KEYS = (
     "synthetic_scheduled_events",
     "synthetic_user_memory_units",
 )
+CALENDAR_MIGRATION_PENDING_STATUS = "pending"
+CALENDAR_MIGRATION_FUTURE_COGNITION_TOOL = "trigger_future_cognition"
+CALENDAR_MIGRATION_SEND_MESSAGE_TOOL = "send_message"
 
 
 def _consolidation_target_lifecycle_filters(
@@ -329,6 +332,51 @@ async def export_collection_rows(
     cursor = cursor.limit(limit)
     records = [dict(doc) for doc in await cursor.to_list(length=limit)]
     return records
+
+
+async def list_scheduled_events_for_calendar_migration() -> list[dict[str, Any]]:
+    """Load legacy scheduled-event rows for the calendar migration script."""
+
+    db = await get_db()
+    cursor = db.scheduled_events.find({})
+    rows = [dict(row) for row in await cursor.to_list(length=None)]
+    return rows
+
+
+async def cancel_pending_send_message_for_calendar_migration(
+    event_id: str,
+) -> bool:
+    """Cancel one pending legacy delayed-send row during calendar migration."""
+
+    db = await get_db()
+    update_result = await db.scheduled_events.update_one(
+        {
+            "event_id": event_id,
+            "status": CALENDAR_MIGRATION_PENDING_STATUS,
+            "tool": CALENDAR_MIGRATION_SEND_MESSAGE_TOOL,
+        },
+        {"$set": {"status": "cancelled"}},
+    )
+    matched = update_result.matched_count == 1
+    return matched
+
+
+async def mark_pending_future_cognition_migrated_for_calendar_migration(
+    event_id: str,
+) -> bool:
+    """Mark one pending legacy future-cognition row migrated."""
+
+    db = await get_db()
+    update_result = await db.scheduled_events.update_one(
+        {
+            "event_id": event_id,
+            "status": CALENDAR_MIGRATION_PENDING_STATUS,
+            "tool": CALENDAR_MIGRATION_FUTURE_COGNITION_TOOL,
+        },
+        {"$set": {"status": "migrated"}},
+    )
+    matched = update_result.matched_count == 1
+    return matched
 
 
 async def inspect_consolidation_target_lifecycle() -> dict[str, Any]:

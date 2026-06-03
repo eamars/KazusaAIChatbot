@@ -38,6 +38,8 @@ from kazusa_ai_chatbot.db.health import check_database_connection
 # ── Schemas ────────────────────────────────────────────────────────
 from kazusa_ai_chatbot.db.schemas import (
     AttachmentDoc,
+    CalendarRunDoc,
+    CalendarScheduleDoc,
     CharacterProfileDoc,
     CharacterReflectionRunDoc,
     ConversationEpisodeEntryDoc,
@@ -229,7 +231,8 @@ __all__ = [
     "get_query_text_embedding", "get_query_text_embeddings_batch",
     "get_text_embedding", "get_text_embeddings_batch",
     # Schemas
-    "AttachmentDoc", "CharacterProfileDoc", "CharacterReflectionRunDoc",
+    "AttachmentDoc", "CalendarRunDoc", "CalendarScheduleDoc",
+    "CharacterProfileDoc", "CharacterReflectionRunDoc",
     "ConversationEpisodeEntryDoc", "ConversationEpisodeStateDoc",
     "ConversationMessageDoc", "GlobalCharacterGrowthRunDoc",
     "GlobalCharacterGrowthTraitDoc", "InteractionStyleImageDoc",

@@ -555,6 +555,60 @@ class ScheduledEventDoc(TypedDict, total=False):
     bot_role: str
 
 
+class CalendarScheduleDoc(TypedDict, total=False):
+    """Durable schedule definition in ``calendar_schedules``."""
+
+    schema_version: str
+    owner: str
+    schedule_id: str
+    trigger_kind: str
+    status: str
+    start_at: str
+    next_run_at: str
+    recurrence: dict
+    payload: dict
+    source_scope: dict
+    idempotency_key: str
+    timezone: str
+    legacy_source: dict | None
+    created_at: str
+    updated_at: str
+    cancelled_at: str
+    cancel_reason: str
+
+
+class CalendarRunDoc(TypedDict, total=False):
+    """Durable due-run document in ``calendar_runs``."""
+
+    schema_version: str
+    owner: str
+    run_id: str
+    schedule_id: str
+    trigger_kind: str
+    status: str
+    due_at: str
+    payload: dict
+    source_scope: dict
+    idempotency_key: str
+    attempt_count: int
+    max_attempts: int
+    claimed_at: str | None
+    completed_at: str | None
+    failed_at: str | None
+    skipped_at: str | None
+    lease_owner: str | None
+    lease_expires_at: str | None
+    period_start_utc: str | None
+    slot_index: int | None
+    offset_seconds: int | None
+    result_summary: dict | None
+    failure_summary: dict | None
+    legacy_source: dict | None
+    created_at: str
+    updated_at: str
+    skip_reason: str
+
+
 class SelfCognitionActionAttemptDoc(TypedDict, total=False):
     """Durable action-attempt state for idle self-cognition deduplication."""
 

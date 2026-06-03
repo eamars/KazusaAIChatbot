@@ -858,13 +858,13 @@ requests fallback execution.
     files in `Execution Evidence`.
   - Sign-off: `Codex/2026-06-04` after verification and evidence are recorded.
 
-- [ ] Stage 2 - calendar package, ICD README, DB schema, config, and indexes implemented
+- [x] Stage 2 - calendar package, ICD README, DB schema, config, and indexes implemented
 
   - Covers: `calendar_scheduler` package, package ICD README, `config.py`, DB
     schemas, DB exports, and bootstrap indexes.
   - Verify: focused calendar tests pass.
   - Evidence: record changed files and focused test output.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+  - Sign-off: `Codex/2026-06-04` after verification and evidence are recorded.
 
 - [ ] Stage 3 - future-cognition calendar integration complete
 
@@ -1181,3 +1181,36 @@ begins.
   `Must Do`, `Contracts And Data Shapes`, `Change Surface`,
   `Implementation Order`, `Progress Checklist`, `Verification`,
   `Independent Code Review`, and `Acceptance Criteria`.
+- 2026-06-04 Stage 2 calendar foundation implemented:
+  - Added `src/kazusa_ai_chatbot/calendar_scheduler/` with typed models,
+    recurrence helpers, durable repository operations, worker orchestration,
+    handler contracts, reflection phase mapping, and an ICD-style `README.md`.
+  - Added calendar config values, DB schema docs, DB facade exports, bootstrap
+    collections and indexes for `calendar_schedules` and `calendar_runs`, and
+    maintenance helpers in `db.script_operations` for the one-time legacy
+    scheduled-event migration boundary.
+  - Added
+    `src/scripts/migrate_scheduled_events_to_calendar_scheduler.py` with
+    dry-run default behavior, explicit apply mode, unknown-tool blocking,
+    future-cognition conversion, legacy send cancellation, and failed legacy
+    mutation reporting.
+  - Updated focused tests plus `tests/test_config.py`, `tests/test_db.py`,
+    and `tests/test_script_db_boundary.py` coverage for config, DB bootstrap,
+    schema exports, migration helper boundaries, lease-bound skipped runs, and
+    failed legacy mutation reporting.
+  - Verification command:
+    `venv\Scripts\python -m pytest tests/test_calendar_scheduler_models.py tests/test_calendar_scheduler_recurrence.py tests/test_calendar_scheduler_repository.py tests/test_calendar_scheduler_worker.py tests/test_calendar_scheduler_migration.py tests/test_calendar_scheduler_active_commitments.py tests/test_calendar_scheduler_reflection_phase.py -q`.
+    Result: 42 passed in 2.02s.
+  - Verification command:
+    `venv\Scripts\python -m pytest tests/test_config.py tests/test_db.py tests/test_script_db_boundary.py -q`.
+    Result: 124 passed, 13 deselected in 5.00s.
+  - README ICD grep matched document control, ownership, interface boundary,
+    public interfaces, collection contracts, trigger contracts, and forbidden
+    paths.
+  - `git diff --check` reported no whitespace errors; only LF/CRLF working
+    copy normalization warnings.
+  - Stage 2 spec review approved after README and trigger/status contract
+    fixes.
+  - Stage 2 code-quality review approved after fixes for lease-bound skipped
+    transitions, failed legacy mutation reporting, and keeping migration
+    script legacy DB access behind `db.script_operations`.
