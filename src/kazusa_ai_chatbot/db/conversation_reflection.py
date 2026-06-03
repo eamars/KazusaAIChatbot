@@ -20,6 +20,10 @@ _REFLECTION_MESSAGE_PROJECTION = {
     "global_user_id": 1,
     "display_name": 1,
     "body_text": 1,
+    "addressed_to_global_user_ids": 1,
+    "broadcast": 1,
+    "reply_context.reply_to_current_bot": 1,
+    "reply_context.reply_to_platform_user_id": 1,
     "timestamp": 1,
     "attachments.description": 1,
 }

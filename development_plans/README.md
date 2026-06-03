@@ -38,7 +38,6 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [group_chat_user_style_image_plan.md](active/short_term/group_chat_user_style_image_plan.md) | Large interaction-style source expansion plan | draft |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 | [universal_calendar_scheduler_plan.md](active/short_term/universal_calendar_scheduler_plan.md) | High-risk migration and scheduler architecture plan | draft |
 
@@ -159,6 +158,7 @@ plans.
 | [get_db_private_boundary_plan.md](archive/completed/short_term/get_db_private_boundary_plan.md) |
 | [global_character_growth_from_reflection_plan.md](archive/completed/short_term/global_character_growth_from_reflection_plan.md) |
 | [global_input_queue_plan.md](archive/completed/short_term/global_input_queue_plan.md) |
+| [group_chat_user_style_image_plan.md](archive/completed/short_term/group_chat_user_style_image_plan.md) |
 | [group_chat_noise_relevance_plan.md](archive/completed/short_term/group_chat_noise_relevance_plan.md) |
 | [identity_free_memory_output_contract_plan.md](archive/completed/short_term/identity_free_memory_output_contract_plan.md) |
 | [internal_monologue_residue_lifecycle_plan.md](archive/completed/short_term/internal_monologue_residue_lifecycle_plan.md) |

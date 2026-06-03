@@ -114,6 +114,123 @@ def _daily_doc(
     return return_value
 
 
+def _interaction_style_sources_module():
+    """Import the source-builder module under test."""
+
+    from kazusa_ai_chatbot.reflection_cycle import interaction_style_sources
+
+    return_value = interaction_style_sources
+    return return_value
+
+
+def _group_message(
+    *,
+    role: str,
+    global_user_id: str,
+    platform_user_id: str,
+    body_text: str,
+    addressed_to_global_user_ids: list[str] | None = None,
+    broadcast: bool = False,
+    reply_to_platform_user_id: str = "",
+    reply_to_current_bot: bool | None = None,
+    display_name: str = "Display Name",
+) -> dict:
+    """Build one group conversation row for source attribution tests."""
+
+    reply_context: dict[str, object] = {}
+    if reply_to_platform_user_id:
+        reply_context["reply_to_platform_user_id"] = reply_to_platform_user_id
+    if reply_to_current_bot is not None:
+        reply_context["reply_to_current_bot"] = reply_to_current_bot
+
+    message = {
+        "platform": "qq",
+        "platform_channel_id": "group-channel",
+        "channel_type": "group",
+        "role": role,
+        "platform_user_id": platform_user_id,
+        "global_user_id": global_user_id,
+        "display_name": display_name,
+        "body_text": body_text,
+        "addressed_to_global_user_ids": addressed_to_global_user_ids or [],
+        "broadcast": broadcast,
+        "reply_context": reply_context,
+        "timestamp": "2026-05-05T12:00:00+00:00",
+    }
+    return message
+
+
+def _eligible_group_messages(
+    *,
+    target_global_user_id: str = "target-global",
+    target_platform_user_id: str = "target-platform",
+    character_global_user_id: str = "character-global",
+    character_platform_user_id: str = "bot-platform",
+    target_rows: int = 4,
+    character_rows: int = 4,
+    text_prefix: str = "target",
+) -> list[dict]:
+    """Build structurally attributed group rows above the source threshold."""
+
+    messages: list[dict] = []
+    for index in range(target_rows):
+        messages.append(
+            _group_message(
+                role="user",
+                global_user_id=target_global_user_id,
+                platform_user_id=target_platform_user_id,
+                body_text=f"{text_prefix} user text {index}",
+                addressed_to_global_user_ids=[character_global_user_id],
+                display_name=f"{text_prefix} user",
+            )
+        )
+    for index in range(character_rows):
+        messages.append(
+            _group_message(
+                role="assistant",
+                global_user_id=character_global_user_id,
+                platform_user_id=character_platform_user_id,
+                body_text=f"{text_prefix} character text {index}",
+                addressed_to_global_user_ids=[target_global_user_id],
+                display_name="Character",
+            )
+        )
+    return messages
+
+
+def _hidden_reply_group_messages(
+    *,
+    target_global_user_id: str = "target-global",
+    target_platform_user_id: str = "target-platform",
+    character_global_user_id: str = "character-global",
+    character_platform_user_id: str = "bot-platform",
+) -> list[dict]:
+    """Build group rows attributed only through reply-to platform ids."""
+
+    messages: list[dict] = []
+    for index in range(4):
+        messages.append(
+            _group_message(
+                role="user",
+                global_user_id=target_global_user_id,
+                platform_user_id=target_platform_user_id,
+                body_text=f"hidden user text {index}",
+                reply_to_platform_user_id=character_platform_user_id,
+            )
+        )
+    for index in range(4):
+        messages.append(
+            _group_message(
+                role="assistant",
+                global_user_id=character_global_user_id,
+                platform_user_id=character_platform_user_id,
+                body_text=f"hidden character text {index}",
+                reply_to_platform_user_id=target_platform_user_id,
+            )
+        )
+    return messages
+
+
 def test_interaction_style_extractor_prompt_keeps_confidence_boundary() -> None:
     """Extractor prompt keeps daily confidence strict and overlay confidence soft."""
 
@@ -220,8 +337,199 @@ async def test_extract_user_style_overlay_uses_only_safe_daily_signal_payload(
         "daily_confidence": "medium",
         "conversation_quality_patterns": ["先承接情绪，再使用轻微调侃。"],
         "synthesis_limitations": ["小时槽有限。"],
+        "evidence_rows": [],
         "current_overlay": interaction_style.empty_interaction_style_overlay(),
     }
+
+
+def test_group_user_style_sources_use_structural_targets_only() -> None:
+    """Group sources use structural addressees and produce one target packet."""
+
+    style_sources = _interaction_style_sources_module()
+    group_doc = _daily_doc(run_id="group-daily", channel_type="group")
+    messages = _eligible_group_messages()
+
+    sources = style_sources.build_group_participant_user_style_sources(
+        daily_doc=group_doc,
+        messages=messages,
+        character_global_user_id="character-global",
+    )
+
+    assert len(sources) == 1
+    source = sources[0]
+    assert source["source_kind"] == "group_participant_daily"
+    assert source["global_user_id"] == "target-global"
+    assert source["channel_type"] == "group"
+    assert source["daily_confidence"] == "medium"
+    assert source["source_reflection_run_ids"] == ["group-daily", "hourly-run-1"]
+    roles = {row["role"] for row in source["evidence_rows"]}
+    assert roles == {"target_user", "character"}
+
+
+def test_group_user_style_sources_exclude_adjacent_user_and_broadcast_noise() -> None:
+    """Adjacent users and unaddressed broadcasts stay out of target evidence."""
+
+    style_sources = _interaction_style_sources_module()
+    group_doc = _daily_doc(run_id="group-daily", channel_type="group")
+    messages = _eligible_group_messages()
+    messages.extend([
+        _group_message(
+            role="user",
+            global_user_id="adjacent-global",
+            platform_user_id="adjacent-platform",
+            body_text="adjacent secret text",
+            addressed_to_global_user_ids=[],
+            display_name="Adjacent Display",
+        ),
+        _group_message(
+            role="assistant",
+            global_user_id="character-global",
+            platform_user_id="bot-platform",
+            body_text="broadcast noise text",
+            addressed_to_global_user_ids=[],
+            broadcast=True,
+            display_name="Character",
+        ),
+    ])
+
+    sources = style_sources.build_group_participant_user_style_sources(
+        daily_doc=group_doc,
+        messages=messages,
+        character_global_user_id="character-global",
+    )
+    payload = style_sources.user_style_source_to_extractor_payload(
+        source=sources[0],
+        current_overlay=interaction_style.empty_interaction_style_overlay(),
+    )
+    payload_text = json.dumps(payload, ensure_ascii=False)
+
+    assert len(sources) == 1
+    assert "adjacent secret text" not in payload_text
+    assert "broadcast noise text" not in payload_text
+    assert "Adjacent Display" not in payload_text
+
+
+def test_group_user_style_sources_exclude_other_assistant_rows() -> None:
+    """Assistant evidence must belong to the active character identity."""
+
+    style_sources = _interaction_style_sources_module()
+    group_doc = _daily_doc(run_id="group-daily", channel_type="group")
+    messages = _eligible_group_messages(character_rows=0)
+    for index in range(4):
+        messages.append(
+            _group_message(
+                role="assistant",
+                global_user_id="other-assistant-global",
+                platform_user_id="other-assistant-platform",
+                body_text=f"other assistant text {index}",
+                addressed_to_global_user_ids=["target-global"],
+                display_name="Other Assistant",
+            )
+        )
+
+    sources = style_sources.build_group_participant_user_style_sources(
+        daily_doc=group_doc,
+        messages=messages,
+        character_global_user_id="character-global",
+    )
+
+    assert sources == []
+
+
+def test_group_user_style_sources_accept_hidden_reply_target() -> None:
+    """Hidden reply-to platform ids can provide the structural target proof."""
+
+    style_sources = _interaction_style_sources_module()
+    group_doc = _daily_doc(run_id="group-daily", channel_type="group")
+    messages = _hidden_reply_group_messages()
+
+    sources = style_sources.build_group_participant_user_style_sources(
+        daily_doc=group_doc,
+        messages=messages,
+        character_global_user_id="character-global",
+    )
+
+    assert len(sources) == 1
+    assert sources[0]["global_user_id"] == "target-global"
+    evidence_text = json.dumps(sources[0]["evidence_rows"], ensure_ascii=False)
+    assert "hidden user text" in evidence_text
+    assert "hidden character text" in evidence_text
+
+
+def test_group_user_style_source_thresholds_and_top_five_cap() -> None:
+    """Group sources require strong evidence and cap to the top five users."""
+
+    style_sources = _interaction_style_sources_module()
+    group_doc = _daily_doc(run_id="group-daily", channel_type="group")
+    source_specs = [
+        ("user-1", "platform-1", 6, 6),
+        ("user-2", "platform-2", 5, 5),
+        ("user-3", "platform-3", 4, 5),
+        ("user-4", "platform-4", 5, 3),
+        ("user-5", "platform-5", 4, 4),
+        ("user-6", "platform-6", 3, 5),
+        ("under-threshold", "platform-7", 3, 2),
+    ]
+    messages: list[dict] = []
+    for global_user_id, platform_user_id, target_rows, character_rows in source_specs:
+        messages.extend(
+            _eligible_group_messages(
+                target_global_user_id=global_user_id,
+                target_platform_user_id=platform_user_id,
+                target_rows=target_rows,
+                character_rows=character_rows,
+                text_prefix=global_user_id,
+            )
+        )
+
+    sources = style_sources.build_group_participant_user_style_sources(
+        daily_doc=group_doc,
+        messages=messages,
+        character_global_user_id="character-global",
+    )
+    source_user_ids = [
+        source["global_user_id"]
+        for source in sources
+    ]
+
+    assert source_user_ids == ["user-1", "user-2", "user-3", "user-6", "user-5"]
+    assert "user-4" not in source_user_ids
+    assert "under-threshold" not in source_user_ids
+
+
+def test_group_user_style_source_payload_hides_operational_metadata() -> None:
+    """Extractor payload keeps only semantic fields and role/text evidence."""
+
+    style_sources = _interaction_style_sources_module()
+    group_doc = _daily_doc(run_id="group-daily", channel_type="group")
+    messages = _eligible_group_messages()
+    sources = style_sources.build_group_participant_user_style_sources(
+        daily_doc=group_doc,
+        messages=messages,
+        character_global_user_id="character-global",
+    )
+
+    payload = style_sources.user_style_source_to_extractor_payload(
+        source=sources[0],
+        current_overlay=interaction_style.empty_interaction_style_overlay(),
+    )
+    payload_text = json.dumps(payload, ensure_ascii=False)
+
+    assert set(payload) == {
+        "channel_type",
+        "daily_confidence",
+        "conversation_quality_patterns",
+        "synthesis_limitations",
+        "evidence_rows",
+        "current_overlay",
+    }
+    assert all(set(row) == {"role", "text"} for row in payload["evidence_rows"])
+    assert "target-global" not in payload_text
+    assert "target-platform" not in payload_text
+    assert "source_reflection_run_ids" not in payload_text
+    assert "addressed_to_global_user_ids" not in payload_text
+    assert "reply_context" not in payload_text
+    assert "Display Name" not in payload_text
 
 
 @pytest.mark.asyncio
@@ -269,6 +577,12 @@ async def test_run_daily_interaction_style_update_writes_private_and_group(
         "extract_group_channel_style_overlay_from_daily_reflection",
         AsyncMock(return_value=overlay),
     )
+    monkeypatch.setattr(
+        interaction_style,
+        "list_reflection_scope_messages",
+        AsyncMock(return_value=[]),
+        raising=False,
+    )
     upsert_user = AsyncMock()
     upsert_group = AsyncMock()
     monkeypatch.setattr(interaction_style, "upsert_user_style_image", upsert_user)
@@ -293,6 +607,355 @@ async def test_run_daily_interaction_style_update_writes_private_and_group(
         "private-daily",
         "hourly-run-1",
     ]
+
+
+@pytest.mark.asyncio
+async def test_run_daily_interaction_style_update_writes_group_participant_user_style(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Daily style update writes group participant user-style overlays."""
+
+    group_doc = _daily_doc(run_id="group-daily", channel_type="group")
+    overlay = {
+        "speech_guidelines": ["Use compact warmth."],
+        "social_guidelines": [],
+        "pacing_guidelines": [],
+        "engagement_guidelines": [],
+        "confidence": "medium",
+    }
+    list_messages = AsyncMock(return_value=_eligible_group_messages())
+    monkeypatch.setattr(
+        interaction_style.repository,
+        "daily_channel_runs",
+        AsyncMock(return_value=[group_doc]),
+    )
+    monkeypatch.setattr(
+        interaction_style,
+        "list_reflection_scope_messages",
+        list_messages,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        interaction_style,
+        "get_group_channel_style_image",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        interaction_style,
+        "get_user_style_image",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        interaction_style,
+        "_run_interaction_style_extractor",
+        AsyncMock(return_value=overlay),
+    )
+    upsert_user = AsyncMock()
+    upsert_group = AsyncMock()
+    monkeypatch.setattr(interaction_style, "upsert_user_style_image", upsert_user)
+    monkeypatch.setattr(
+        interaction_style,
+        "upsert_group_channel_style_image",
+        upsert_group,
+    )
+
+    result = await interaction_style.run_daily_interaction_style_update(
+        character_local_date="2026-05-05",
+        dry_run=False,
+        is_primary_interaction_busy=lambda: False,
+    )
+
+    assert result.processed_count == 1
+    assert result.succeeded_count == 1
+    assert result.skipped_count == 0
+    upsert_group.assert_awaited_once()
+    upsert_user.assert_awaited_once()
+    assert upsert_user.await_args.kwargs["global_user_id"] == "target-global"
+    assert upsert_user.await_args.kwargs["source_reflection_run_ids"] == [
+        "group-daily",
+        "hourly-run-1",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_group_participant_style_skips_already_applied_daily_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Group participant style skips users already updated from the daily run."""
+
+    group_doc = _daily_doc(run_id="group-daily", channel_type="group")
+    existing_user_style = {
+        "overlay": {
+            "speech_guidelines": ["Use compact warmth."],
+            "social_guidelines": [],
+            "pacing_guidelines": [],
+            "engagement_guidelines": [],
+            "confidence": "medium",
+        },
+        "source_reflection_run_ids": ["group-daily", "hourly-run-1"],
+    }
+    overlay = {
+        "speech_guidelines": ["Use compact warmth."],
+        "social_guidelines": [],
+        "pacing_guidelines": [],
+        "engagement_guidelines": [],
+        "confidence": "medium",
+    }
+    list_messages = AsyncMock(return_value=_eligible_group_messages())
+    get_user_style = AsyncMock(return_value=existing_user_style)
+    monkeypatch.setattr(
+        interaction_style.repository,
+        "daily_channel_runs",
+        AsyncMock(return_value=[group_doc]),
+    )
+    monkeypatch.setattr(
+        interaction_style,
+        "list_reflection_scope_messages",
+        list_messages,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        interaction_style,
+        "get_group_channel_style_image",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        interaction_style,
+        "get_user_style_image",
+        get_user_style,
+    )
+    monkeypatch.setattr(
+        interaction_style,
+        "_run_interaction_style_extractor",
+        AsyncMock(return_value=overlay),
+    )
+    upsert_user = AsyncMock()
+    upsert_group = AsyncMock()
+    monkeypatch.setattr(interaction_style, "upsert_user_style_image", upsert_user)
+    monkeypatch.setattr(
+        interaction_style,
+        "upsert_group_channel_style_image",
+        upsert_group,
+    )
+
+    result = await interaction_style.run_daily_interaction_style_update(
+        character_local_date="2026-05-05",
+        dry_run=False,
+        is_primary_interaction_busy=lambda: False,
+    )
+
+    assert result.processed_count == 1
+    assert result.succeeded_count == 1
+    assert result.skipped_count == 0
+    upsert_group.assert_awaited_once()
+    list_messages.assert_awaited_once()
+    get_user_style.assert_awaited_once()
+    upsert_user.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_group_channel_failure_does_not_suppress_participant_style(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unexpected group-channel failure must not suppress participant style."""
+
+    group_doc = _daily_doc(run_id="group-daily", channel_type="group")
+    overlay = {
+        "speech_guidelines": ["Use compact warmth."],
+        "social_guidelines": [],
+        "pacing_guidelines": [],
+        "engagement_guidelines": [],
+        "confidence": "medium",
+    }
+    monkeypatch.setattr(
+        interaction_style.repository,
+        "daily_channel_runs",
+        AsyncMock(return_value=[group_doc]),
+    )
+    monkeypatch.setattr(
+        interaction_style,
+        "get_group_channel_style_image",
+        AsyncMock(side_effect=RuntimeError("group branch unavailable")),
+    )
+    monkeypatch.setattr(
+        interaction_style,
+        "list_reflection_scope_messages",
+        AsyncMock(return_value=_eligible_group_messages()),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        interaction_style,
+        "get_user_style_image",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        interaction_style,
+        "_run_interaction_style_extractor",
+        AsyncMock(return_value=overlay),
+    )
+    upsert_user = AsyncMock()
+    upsert_group = AsyncMock()
+    monkeypatch.setattr(interaction_style, "upsert_user_style_image", upsert_user)
+    monkeypatch.setattr(
+        interaction_style,
+        "upsert_group_channel_style_image",
+        upsert_group,
+    )
+
+    result = await interaction_style.run_daily_interaction_style_update(
+        character_local_date="2026-05-05",
+        dry_run=False,
+        is_primary_interaction_busy=lambda: False,
+    )
+
+    assert result.processed_count == 1
+    assert result.succeeded_count == 1
+    assert result.failed_count == 0
+    assert result.skipped_count == 0
+    upsert_user.assert_awaited_once()
+    upsert_group.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_group_participant_failure_preserves_group_channel_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unexpected participant failure must not erase group-channel success."""
+
+    group_doc = _daily_doc(run_id="group-daily", channel_type="group")
+    overlay = {
+        "speech_guidelines": ["Use compact warmth."],
+        "social_guidelines": [],
+        "pacing_guidelines": [],
+        "engagement_guidelines": [],
+        "confidence": "medium",
+    }
+    monkeypatch.setattr(
+        interaction_style.repository,
+        "daily_channel_runs",
+        AsyncMock(return_value=[group_doc]),
+    )
+    monkeypatch.setattr(
+        interaction_style,
+        "get_group_channel_style_image",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        interaction_style,
+        "list_reflection_scope_messages",
+        AsyncMock(side_effect=RuntimeError("participant branch unavailable")),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        interaction_style,
+        "_run_interaction_style_extractor",
+        AsyncMock(return_value=overlay),
+    )
+    upsert_group = AsyncMock()
+    monkeypatch.setattr(
+        interaction_style,
+        "upsert_group_channel_style_image",
+        upsert_group,
+    )
+
+    result = await interaction_style.run_daily_interaction_style_update(
+        character_local_date="2026-05-05",
+        dry_run=False,
+        is_primary_interaction_busy=lambda: False,
+    )
+
+    assert result.processed_count == 1
+    assert result.succeeded_count == 1
+    assert result.failed_count == 0
+    assert result.skipped_count == 0
+    upsert_group.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_later_group_participant_failure_preserves_prior_user_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A later participant failure must not erase an earlier user write."""
+
+    group_doc = _daily_doc(run_id="group-daily", channel_type="group")
+    overlay = {
+        "speech_guidelines": ["Use compact warmth."],
+        "social_guidelines": [],
+        "pacing_guidelines": [],
+        "engagement_guidelines": [],
+        "confidence": "medium",
+    }
+    messages = _eligible_group_messages(
+        target_global_user_id="first-user",
+        target_platform_user_id="first-platform",
+        target_rows=5,
+        character_rows=5,
+        text_prefix="first",
+    )
+    messages.extend(
+        _eligible_group_messages(
+            target_global_user_id="second-user",
+            target_platform_user_id="second-platform",
+            target_rows=4,
+            character_rows=4,
+            text_prefix="second",
+        )
+    )
+    existing_group_style = {
+        "overlay": overlay,
+        "source_reflection_run_ids": ["group-daily", "hourly-run-1"],
+    }
+    get_user_style = AsyncMock(
+        side_effect=[None, RuntimeError("second user branch unavailable")]
+    )
+    monkeypatch.setattr(
+        interaction_style.repository,
+        "daily_channel_runs",
+        AsyncMock(return_value=[group_doc]),
+    )
+    monkeypatch.setattr(
+        interaction_style,
+        "get_group_channel_style_image",
+        AsyncMock(return_value=existing_group_style),
+    )
+    monkeypatch.setattr(
+        interaction_style,
+        "list_reflection_scope_messages",
+        AsyncMock(return_value=messages),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        interaction_style,
+        "get_user_style_image",
+        get_user_style,
+    )
+    monkeypatch.setattr(
+        interaction_style,
+        "_run_interaction_style_extractor",
+        AsyncMock(return_value=overlay),
+    )
+    upsert_user = AsyncMock()
+    upsert_group = AsyncMock()
+    monkeypatch.setattr(interaction_style, "upsert_user_style_image", upsert_user)
+    monkeypatch.setattr(
+        interaction_style,
+        "upsert_group_channel_style_image",
+        upsert_group,
+    )
+
+    result = await interaction_style.run_daily_interaction_style_update(
+        character_local_date="2026-05-05",
+        dry_run=False,
+        is_primary_interaction_busy=lambda: False,
+    )
+
+    assert result.processed_count == 1
+    assert result.succeeded_count == 1
+    assert result.failed_count == 0
+    assert result.skipped_count == 0
+    assert upsert_user.await_count == 1
+    assert upsert_user.await_args.kwargs["global_user_id"] == "first-user"
+    upsert_group.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -440,6 +1103,12 @@ async def test_run_daily_interaction_style_update_skips_rejected_group_overlay(
                 "social_guidelines contains source detail markers"
             )
         ),
+    )
+    monkeypatch.setattr(
+        interaction_style,
+        "list_reflection_scope_messages",
+        AsyncMock(return_value=[]),
+        raising=False,
     )
     upsert_group = AsyncMock()
     monkeypatch.setattr(

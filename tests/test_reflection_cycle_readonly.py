@@ -289,10 +289,18 @@ async def test_db_interface_uses_message_field_allowlist(monkeypatch) -> None:
         "global_user_id": 1,
         "display_name": 1,
         "body_text": 1,
+        "addressed_to_global_user_ids": 1,
+        "broadcast": 1,
+        "reply_context.reply_to_current_bot": 1,
+        "reply_context.reply_to_platform_user_id": 1,
         "timestamp": 1,
         "attachments.description": 1,
     }
     assert "attachments.base64_data" not in projection
+    assert "raw_wire_text" not in projection
+    assert "reply_context.reply_excerpt" not in projection
+    assert "reply_context.reply_to_display_name" not in projection
+    assert "reply_context.reply_to_message_id" not in projection
     cursor.sort.assert_called_once_with("timestamp", -1)
     cursor.limit.assert_called_once_with(120)
 

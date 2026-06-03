@@ -20,13 +20,21 @@ from kazusa_ai_chatbot.db import (
     empty_interaction_style_overlay,
     get_group_channel_style_image,
     get_user_style_image,
+    list_reflection_scope_messages,
     resolve_single_private_scope_user_id,
     upsert_group_channel_style_image,
     upsert_user_style_image,
     validate_interaction_style_overlay,
 )
 from kazusa_ai_chatbot.reflection_cycle import repository
+from kazusa_ai_chatbot.reflection_cycle.interaction_style_sources import (
+    UserStyleSourcePacket,
+    build_group_participant_user_style_sources,
+    build_private_daily_user_style_source,
+    user_style_source_to_extractor_payload,
+)
 from kazusa_ai_chatbot.reflection_cycle.models import (
+    READONLY_REFLECTION_MAX_MESSAGES_PER_SCOPE,
     REFLECTION_RUN_KIND_DAILY_CHANNEL,
     REFLECTION_STATUS_SUCCEEDED,
     ReflectionWorkerResult,
@@ -48,7 +56,7 @@ _STYLE_SIGNAL_ITEM_LIMIT = 5
 _STYLE_SIGNAL_ITEM_CHARS = 180
 
 
-_INTERACTION_STYLE_EXTRACTOR_PROMPT = """\
+_INTERACTION_STYLE_EXTRACTOR_PROMPT = '''\
 You update a fictional chat character's abstract interaction-style overlay.
 
 # Language Policy
@@ -58,22 +66,30 @@ You update a fictional chat character's abstract interaction-style overlay.
 - Overlay `confidence` is a short semantic descriptor, not a closed enum.
 
 # Core Task
-Transform daily reflection quality signals into abstract handling guidance for
-future wording and social pacing.
+Transform daily reflection quality signals and any approved evidence rows into
+abstract handling guidance for future wording and social pacing.
 
 This stage is the sanitization boundary. The output must describe how the
 active character should interact, not what happened.
+
+Evidence rows are style signals only. They are not event memory, attribution
+material, source lineage, or persistence instructions.
 
 # Generation Procedure
 1. Read `channel_type` and `daily_confidence`.
 2. Read `current_overlay` as the currently active handling policy.
 3. Read `conversation_quality_patterns` and `synthesis_limitations` only as
    abstract learning signals.
-4. Preserve useful existing guidance when the new signal still supports it.
-5. Add, refine, or remove guidance only when the daily signal justifies it.
-6. Write positive action-oriented guidance. Do not write event summaries,
+4. Read `evidence_rows` only as compact examples of interaction style:
+   `target_user` rows show the user's style, and `character` rows show the
+   active character's replies to that user.
+5. Attribution, thresholds, source lineage, and persistence eligibility are
+   outside this task; the payload already contains only approved rows.
+6. Preserve useful existing guidance when the new signal still supports it.
+7. Add, refine, or remove guidance only when the daily signal justifies it.
+8. Write positive action-oriented guidance. Do not write event summaries,
    identities, dates, message ids, topic recaps, quotes, or source references.
-7. Return an empty overlay only when the daily signal is not useful enough to
+9. Return an empty overlay only when the daily signal is not useful enough to
    maintain or update the current handling policy.
 
 # Input Format
@@ -82,6 +98,9 @@ active character should interact, not what happened.
   "daily_confidence": "medium|high",
   "conversation_quality_patterns": ["abstract quality signal"],
   "synthesis_limitations": ["abstract limitation signal"],
+  "evidence_rows": [
+    {"role": "target_user|character", "text": "compact style-signal row"}
+  ],
   "current_overlay": {
     "speech_guidelines": ["current handling guidance"],
     "social_guidelines": ["current handling guidance"],
@@ -102,7 +121,7 @@ Return only a valid JSON object:
     "confidence": "confidence descriptor for this overlay"
   }
 }
-"""
+'''
 _interaction_style_extractor_llm = get_llm(
     temperature=0.15,
     top_p=0.8,
@@ -116,22 +135,32 @@ async def extract_user_style_overlay_from_daily_reflection(
     *,
     daily_doc: CharacterReflectionRunDoc,
     current_overlay: dict,
+    source: UserStyleSourcePacket | None = None,
 ) -> dict:
     """Extract a user-scoped style overlay from one private daily reflection.
 
     Args:
         daily_doc: Succeeded private daily reflection document.
         current_overlay: Current sanitized user style overlay.
+        source: Optional already-resolved private source packet.
 
     Returns:
         Sanitized overlay candidate for persistence.
     """
 
-    payload = _daily_style_signal_payload(
-        daily_doc=daily_doc,
+    if source is None:
+        source = build_private_daily_user_style_source(
+            daily_doc=daily_doc,
+            global_user_id="private_daily_extractor_source",
+        )
+    if source is None:
+        overlay = empty_interaction_style_overlay()
+        return overlay
+
+    overlay = await _extract_user_style_overlay_from_source(
+        source=source,
         current_overlay=current_overlay,
     )
-    overlay = await _run_interaction_style_extractor(payload)
     return overlay
 
 
@@ -153,6 +182,30 @@ async def extract_group_channel_style_overlay_from_daily_reflection(
     payload = _daily_style_signal_payload(
         daily_doc=daily_doc,
         current_overlay=current_overlay,
+    )
+    overlay = await _run_interaction_style_extractor(payload)
+    return overlay
+
+
+async def _extract_user_style_overlay_from_source(
+    *,
+    source: UserStyleSourcePacket,
+    current_overlay: dict,
+) -> dict:
+    """Extract a user style overlay from one canonical source packet.
+
+    Args:
+        source: Deterministic single-user style source.
+        current_overlay: Current sanitized user style overlay.
+
+    Returns:
+        Sanitized overlay candidate for persistence.
+    """
+
+    clean_current_overlay = validate_interaction_style_overlay(current_overlay)
+    payload = user_style_source_to_extractor_payload(
+        source=source,
+        current_overlay=clean_current_overlay,
     )
     overlay = await _run_interaction_style_extractor(payload)
     return overlay
@@ -315,11 +368,23 @@ async def _process_private_daily_doc(
         )
         return False
 
+    source = build_private_daily_user_style_source(
+        daily_doc=daily_doc,
+        global_user_id=global_user_id,
+    )
+    if source is None:
+        logger.info(
+            "Reflection style update skipped: "
+            f"run_id={daily_doc['run_id']} reason=ineligible_private_source"
+        )
+        return False
+
     current_overlay = _current_overlay_from_doc(current_doc)
     try:
         overlay = await extract_user_style_overlay_from_daily_reflection(
             daily_doc=daily_doc,
             current_overlay=current_overlay,
+            source=source,
         )
     except ValueError as exc:
         logger.warning(
@@ -339,12 +404,54 @@ async def _process_private_daily_doc(
         await upsert_user_style_image(
             global_user_id=global_user_id,
             overlay=overlay,
-            source_reflection_run_ids=_source_run_ids(daily_doc),
+            source_reflection_run_ids=source["source_reflection_run_ids"],
         )
     return True
 
 
 async def _process_group_daily_doc(
+    *,
+    daily_doc: CharacterReflectionRunDoc,
+    dry_run: bool,
+) -> bool:
+    """Update group-channel and participant style images from one daily doc."""
+
+    branch_errors: list[Exception] = []
+    try:
+        group_channel_updated = await _process_group_channel_style(
+            daily_doc=daily_doc,
+            dry_run=dry_run,
+        )
+    except Exception as exc:
+        branch_errors.append(exc)
+        group_channel_updated = False
+        logger.exception(
+            "Reflection group-channel style branch failed: "
+            f"run_id={daily_doc['run_id']} "
+            f"error={type(exc).__name__}: {exc}"
+        )
+
+    try:
+        participant_updated = await _process_group_participant_user_styles(
+            daily_doc=daily_doc,
+            dry_run=dry_run,
+        )
+    except Exception as exc:
+        branch_errors.append(exc)
+        participant_updated = False
+        logger.exception(
+            "Reflection group-participant style branch failed: "
+            f"run_id={daily_doc['run_id']} "
+            f"error={type(exc).__name__}: {exc}"
+        )
+
+    updated = group_channel_updated or participant_updated
+    if not updated and branch_errors:
+        raise branch_errors[0]
+    return updated
+
+
+async def _process_group_channel_style(
     *,
     daily_doc: CharacterReflectionRunDoc,
     dry_run: bool,
@@ -393,6 +500,101 @@ async def _process_group_daily_doc(
     return True
 
 
+async def _process_group_participant_user_styles(
+    *,
+    daily_doc: CharacterReflectionRunDoc,
+    dry_run: bool,
+) -> bool:
+    """Update user style images from structurally attributed group rows."""
+
+    scope = daily_doc["scope"]
+    messages = await list_reflection_scope_messages(
+        platform=scope["platform"],
+        platform_channel_id=scope["platform_channel_id"],
+        start_timestamp=daily_doc["window_start"],
+        end_timestamp=daily_doc["window_end"],
+        limit=READONLY_REFLECTION_MAX_MESSAGES_PER_SCOPE,
+    )
+    sources = build_group_participant_user_style_sources(
+        daily_doc=daily_doc,
+        messages=messages,
+        character_global_user_id=CHARACTER_GLOBAL_USER_ID,
+    )
+    updated_count = 0
+    source_errors: list[Exception] = []
+    for source in sources:
+        try:
+            source_updated = await _process_user_style_source(
+                source=source,
+                dry_run=dry_run,
+            )
+        except Exception as exc:
+            source_errors.append(exc)
+            logger.exception(
+                "Reflection group participant style source failed: "
+                f"run_id={daily_doc['run_id']} "
+                f"error={type(exc).__name__}: {exc}"
+            )
+            continue
+        if source_updated:
+            updated_count += 1
+
+    logger.info(
+        "Reflection group participant style sources processed: "
+        f"run_id={daily_doc['run_id']} source_count={len(sources)} "
+        f"updated_count={updated_count}"
+    )
+    updated = updated_count > 0
+    if not updated and source_errors:
+        raise source_errors[0]
+    return updated
+
+
+async def _process_user_style_source(
+    *,
+    source: UserStyleSourcePacket,
+    dry_run: bool,
+) -> bool:
+    """Extract and persist one user style source through the shared path."""
+
+    current_doc = await get_user_style_image(source["global_user_id"])
+    daily_run_id = source["source_reflection_run_ids"][0]
+    if _style_doc_contains_source_run(current_doc, daily_run_id):
+        logger.info(
+            "Reflection style update skipped: "
+            f"run_id={daily_run_id} reason=already_applied"
+        )
+        return False
+
+    current_overlay = _current_overlay_from_doc(current_doc)
+    try:
+        overlay = await _extract_user_style_overlay_from_source(
+            source=source,
+            current_overlay=current_overlay,
+        )
+    except ValueError as exc:
+        logger.warning(
+            "Reflection style update skipped: "
+            f"run_id={daily_run_id} reason=style_extraction_rejected "
+            f"error={type(exc).__name__}: {exc}"
+        )
+        return False
+
+    if _overlay_is_empty(overlay):
+        logger.info(
+            "Reflection style update skipped: "
+            f"run_id={daily_run_id} reason=style_extraction_empty_output"
+        )
+        return False
+    if not dry_run:
+        await upsert_user_style_image(
+            global_user_id=source["global_user_id"],
+            overlay=overlay,
+            source_reflection_run_ids=source["source_reflection_run_ids"],
+        )
+    return True
+
+
 def _daily_doc_is_candidate(daily_doc: CharacterReflectionRunDoc) -> bool:
     """Return whether a reflection run can feed style extraction."""
 
@@ -432,6 +634,7 @@ def _daily_style_signal_payload(
         "synthesis_limitations": _compact_text_items(
             output.get("synthesis_limitations")
         ),
+        "evidence_rows": [],
         "current_overlay": clean_current_overlay,
     }
     return payload

@@ -173,6 +173,27 @@ The promotion prompt consumes compact `daily_channel` cards and bounded
 evidence cards. It outputs `promotion_decisions` only. Deterministic validators
 and similarity resolution decide whether memory APIs are called.
 
+## Interaction Style Images
+
+The daily interaction-style update is background maintenance outside the live
+response path. Private daily reflections can update `user_style_image` after
+the private scope resolves to exactly one non-character user.
+
+Group daily reflections continue to update `group_channel_style` separately.
+They may also produce user-scoped `user_style_image` sources only when
+deterministic structural metadata maps both target-user rows and active
+character reply rows to exactly one `global_user_id`. The source builder may
+use platform ids, global ids, addressee lists, and reply-target fields for
+attribution, but the LLM payload is limited to channel type, daily confidence,
+abstract quality signals, synthesis limitations, current overlay, and
+prompt-safe role/text evidence rows.
+
+The user-style extractor must not receive source ids, user ids, display names,
+reply metadata, row counts, thresholds, raw wire text, or adjacent-user rows.
+Group-derived user style reuses `interaction_style_images` and
+`upsert_user_style_image`; it does not write `user_memory_units`, RAG evidence,
+promoted reflection context, dialog state, or self-cognition state.
+
 ## Memory Boundary
 
 Reflection promotion may call only these public memory APIs:
