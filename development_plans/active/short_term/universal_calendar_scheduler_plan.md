@@ -22,14 +22,17 @@
 - Acceptance criteria: implementation is complete only when calendar schedules
   and runs are durable, due runs are atomically claimed with leases,
   `trigger_future_cognition` and precise active-commitment due checks use the
-  new calendar path, pending legacy `scheduled_events` rows are migrated or
-  cancelled by the approved script, production no longer reads
+  new calendar path, active-commitment schedule reconciliation covers create,
+  merge/evolve due changes, and lifecycle closure, pending legacy
+  `scheduled_events` rows are migrated or cancelled by the approved script,
+  production no longer reads
   `scheduled_events`, recurring schedules have deterministic next-run
   materialization, reflection integration provides durable
   `reflection_phase_slot` run intents through a provider-compatible handler
-  seam while preserving hourly/daily idempotency, docs and ops status describe
-  the new stack, deterministic tests pass, migration dry-run/apply evidence is
-  recorded, and independent code review approves the result.
+  seam while preserving hourly/daily idempotency, the `calendar_scheduler`
+  package has an ICD-style README, docs and ops status describe the new stack,
+  deterministic tests pass, migration dry-run/apply evidence is recorded, and
+  independent code review approves the result.
 
 ## Context
 
@@ -48,6 +51,30 @@ Kazusa currently has several unrelated timing mechanisms:
   reflection cadence.
 - RAG recall has a scheduled-event collector that reads pending
   `scheduled_events` as future-action evidence.
+
+Codebase refresh as of 2026-06-04:
+
+- `reflection_cycle.phase_scheduler` now exists as a pure materializer for
+  `ReflectionPhaseRunIntent` rows. It defines
+  `REFLECTION_PHASE_TRIGGER_KIND="reflection_phase_slot"`,
+  `REFLECTION_PHASE_GROUPS_PER_SLOT=1`, and allowed payload actions
+  `reflection_hourly_slot` and `group_self_cognition_review`.
+- `reflection_cycle.worker.LocalReflectionPhaseRunProvider` is the current
+  process-local control plane. It snapshots monitor-eligible scopes at
+  `period_start_utc`, executes due phase intents through
+  `_run_reflection_phase_intent`, coalesces older group review windows, and
+  asks the provider for expected hourly runs before daily synthesis.
+- `action_spec.handlers.future_cognition` still builds a
+  `scheduled_events` document and persists it through `scheduler.schedule_event`.
+- `self_cognition.sources.collect_scheduled_future_cognition_cases` still
+  polls due `trigger_future_cognition` rows from `scheduled_events`, and
+  `collect_active_commitment_cases` still scans active commitments by due
+  ordering during the standalone worker tick.
+- `rag.recall.collectors.scheduled_events.ScheduledEventCollector` is still
+  imported by the recall agent and uses `query_pending_scheduled_events`.
+- Service startup still configures `PendingTaskIndex`, registers the
+  dispatcher `send_message` tool, calls `scheduler.configure_runtime`, and
+  loads process-local scheduler tasks when `SCHEDULED_TASKS_ENABLED=true`.
 
 The short-term reflection phase plan establishes the reflection-side contract
 that this universal scheduler must consume. Reflection phase work is a single
@@ -99,6 +126,11 @@ reading and writing the old `scheduled_events` control plane after cutover.
 - The calendar scheduler must schedule typed Kazusa triggers, not arbitrary
   Python callbacks, raw adapter operations, MongoDB commands, or delayed
   visible text.
+- The new `calendar_scheduler` package must include an ICD-style
+  `README.md`, matching the existing module documentation pattern. It must
+  document document control, ownership boundary, public interfaces, collection
+  contracts, worker lifecycle, trigger kinds, migration/cutover behavior,
+  event logging, verification, and forbidden paths.
 - Reflection phase work uses the single composite trigger kind
   `reflection_phase_slot`. Do not split it into separate hourly-reflection and
   group-review calendar triggers.
@@ -110,6 +142,9 @@ reading and writing the old `scheduled_events` control plane after cutover.
   durable claim, lease, completion, and failure transitions.
 - Reflection phase materialization must use the monitor-eligible snapshot as
   of `period_start_utc`, not each slot's wall-clock execution time.
+- Reflection phase materialization must happen at the phase-period boundary or
+  the first calendar materializer pass after that boundary. Do not precompute
+  future reflection phase runs before the eligible-scope snapshot can be taken.
 - The pure reflection phase materializer remains in `reflection_cycle`; the
   calendar owns durable run storage, claims, leases, status transitions, and
   retry policy.
@@ -140,6 +175,11 @@ reading and writing the old `scheduled_events` control plane after cutover.
   magic numbers inside worker logic.
 - Calendar lease recovery must be deterministic and auditable. Stuck `running`
   rows are recovered only through named lease-expiry rules.
+- Active-commitment calendar reconciliation must run after every active
+  commitment create, merge/evolve semantic update that can write `due_at`, and
+  lifecycle closure. The handler must re-read the memory unit at execution
+  time and skip stale, missing, non-active, or due-mismatched rows rather than
+  trusting old calendar payload.
 - Event logs are observability only. They must not be used as the source of
   truth for schedule state, run state, idempotency, or migration completion.
 - Migration scripts must default to dry-run. Apply mode must require an
@@ -168,6 +208,10 @@ reading and writing the old `scheduled_events` control plane after cutover.
 - Add a new `calendar_scheduler` package with focused modules for models,
   repository operations, recurrence calculation, run materialization, worker
   orchestration, and typed handlers.
+- Add `src/kazusa_ai_chatbot/calendar_scheduler/README.md` as the package ICD.
+  It must follow the style of other subsystem READMEs and describe the
+  calendar scheduler as a closed typed trigger scheduler, not a generic job
+  runner.
 - Add MongoDB collections and bootstrap indexes for `calendar_schedules` and
   `calendar_runs`.
 - Add config values for calendar worker enablement, poll interval, claim limit,
@@ -189,10 +233,22 @@ reading and writing the old `scheduled_events` control plane after cutover.
   `commitment_due_cognition` runs.
 - Upsert commitment due schedules when active-commitment memory units are
   created, merged, rescheduled, completed, or cancelled.
+- Add active-commitment calendar reconciliation at the current write sites:
+  `consolidation.memory_units.process_memory_unit_candidate` after
+  `insert_user_memory_units(...)`, after
+  `update_user_memory_unit_semantics(...)` when lifecycle fields can change
+  `due_at`, and
+  `action_spec.handlers.memory_lifecycle.execute_user_memory_lifecycle_action`
+  after a successful lifecycle close.
+- Add a targeted active-commitment due handler that re-reads the memory unit by
+  `unit_id`, validates `unit_type="active_commitment"`, `status="active"`,
+  and matching `due_at`, then builds exactly one normal active-commitment
+  self-cognition case through the existing source-builder contract.
 - Keep post-turn active-commitment lifecycle review intact. That path reviews
   current user commitments after a turn and is not the due-time scheduler.
 - Replace the RAG recall scheduled-event collector with a calendar pending-run
-  collector.
+  collector and update the recall agent import/contract names so production no
+  longer imports `ScheduledEventCollector`.
 - Add a durable reflection phase materialization path that upserts bounded
   `reflection_phase_slot` `calendar_runs` from the reflection
   `ReflectionPhaseRunIntent` materializer.
@@ -200,6 +256,10 @@ reading and writing the old `scheduled_events` control plane after cutover.
   `reflection_phase_slot` calendar runs into `ReflectionPhaseRunIntent`
   records and invokes the same reflection phase execution handler used by the
   short-term provider seam.
+- Promote or wrap the current reflection phase execution seam without changing
+  reflection prompt contracts: calendar code may call a public
+  reflection-cycle facade or a narrow package-private adapter, but it must not
+  duplicate `_run_reflection_phase_intent` logic.
 - Replace production use of the local reflection phase run provider as a
   control plane after cutover. Keep the pure reflection phase materializer as
   the typed source of run-intent construction if the calendar materializer
@@ -252,22 +312,23 @@ reading and writing the old `scheduled_events` control plane after cutover.
 
 Overall strategy: bigbang with one-time migration
 
-| Area | Policy | Instruction |
-|---|---|---|
-| Calendar collections | migration | Create `calendar_schedules` and `calendar_runs` through DB bootstrap before service wiring uses them. |
-| `trigger_future_cognition` creation | bigbang | Replace `scheduler.schedule_event(...)` with calendar schedule/run creation. Do not dual-write to `scheduled_events`. |
-| Due future-cognition processing | bigbang | Self-cognition must collect due `future_cognition` calendar runs. Do not query `scheduled_events`. |
-| Active commitment due checks | bigbang | Replace periodic due polling in production with `commitment_due_cognition` calendar runs. Keep user-specific active-commitment readers only for live/post-turn lifecycle review and RAG evidence. |
-| RAG recall future-action evidence | bigbang | Replace the scheduled-event collector with a calendar collector. Do not query `scheduled_events`. |
-| Reflection phase local provider | bigbang | Replace production `LocalReflectionPhaseRunProvider` control-plane use with the calendar worker's `reflection_phase_slot` claim and handler adapter. Do not retain local provider fallback after cutover. |
-| Reflection phase materializer | compatible as internal helper only | Keep the pure reflection materializer as an internal run-intent builder for calendar materialization if needed. It must not remain a separate production control plane. |
-| Reflection phase trigger shape | bigbang | Use one composite `reflection_phase_slot` calendar trigger. Do not create separate `reflection_hourly_slot` or `group_self_cognition_review` trigger kinds. |
-| Legacy pending `trigger_future_cognition` rows | migration | Convert pending rows to calendar schedules and runs through the approved script. Mark legacy rows migrated for audit. |
-| Legacy pending `send_message` rows | migration | Cancel pending rows through the approved script. Do not migrate delayed visible sends. |
-| Unknown pending `scheduled_events` tools | migration | Block apply migration and report the unknown rows. Do not partially migrate. |
-| Old scheduler runtime | bigbang | Remove service startup/shutdown use of `configure_runtime`, `load_pending_events`, and process-local sleep tasks. |
-| `scheduled_events` collection | compatible as historical data only | The collection may remain in MongoDB for audit and migration evidence. Production must not read or write it after cutover. |
-| Tests | bigbang | Rewrite scheduler, future-cognition, self-cognition, recall, service startup, and DB tests around calendar behavior. Remove old production scheduler expectations. |
+| Area                                           | Policy                             | Instruction                                                                                                                                                                                               |
+| ---------------------------------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Calendar collections                           | migration                          | Create `calendar_schedules` and `calendar_runs` through DB bootstrap before service wiring uses them.                                                                                                     |
+| `trigger_future_cognition` creation            | bigbang                            | Replace `scheduler.schedule_event(...)` with calendar schedule/run creation. Do not dual-write to `scheduled_events`.                                                                                     |
+| Due future-cognition processing                | bigbang                            | Self-cognition must collect due `future_cognition` calendar runs. Do not query `scheduled_events`.                                                                                                        |
+| Active commitment due checks                   | bigbang                            | Replace periodic due polling in production with `commitment_due_cognition` calendar runs. Keep user-specific active-commitment readers only for live/post-turn lifecycle review and RAG evidence.         |
+| Active commitment write hooks                  | bigbang                            | Create, merge/evolve due changes, and lifecycle closure must reconcile calendar schedules/runs. Do not rely on a periodic full scan after cutover.                                                        |
+| RAG recall future-action evidence              | bigbang                            | Replace the scheduled-event collector with a calendar collector. Do not query `scheduled_events`.                                                                                                         |
+| Reflection phase local provider                | bigbang                            | Replace production `LocalReflectionPhaseRunProvider` control-plane use with the calendar worker's `reflection_phase_slot` claim and handler adapter. Do not retain local provider fallback after cutover. |
+| Reflection phase materializer                  | compatible as internal helper only | Keep the pure reflection materializer as an internal run-intent builder for calendar materialization if needed. It must not remain a separate production control plane.                                   |
+| Reflection phase trigger shape                 | bigbang                            | Use one composite `reflection_phase_slot` calendar trigger. Do not create separate `reflection_hourly_slot` or `group_self_cognition_review` trigger kinds.                                               |
+| Legacy pending `trigger_future_cognition` rows | migration                          | Convert pending rows to calendar schedules and runs through the approved script. Mark legacy rows migrated for audit.                                                                                     |
+| Legacy pending `send_message` rows             | migration                          | Cancel pending rows through the approved script. Do not migrate delayed visible sends.                                                                                                                    |
+| Unknown pending `scheduled_events` tools       | migration                          | Block apply migration and report the unknown rows. Do not partially migrate.                                                                                                                              |
+| Old scheduler runtime                          | bigbang                            | Remove service startup/shutdown use of `configure_runtime`, `load_pending_events`, and process-local sleep tasks.                                                                                         |
+| `scheduled_events` collection                  | compatible as historical data only | The collection may remain in MongoDB for audit and migration evidence. Production must not read or write it after cutover.                                                                                |
+| Tests                                          | bigbang                            | Rewrite scheduler, future-cognition, self-cognition, recall, service startup, and DB tests around calendar behavior. Remove old production scheduler expectations.                                        |
 
 ## Cutover Policy Enforcement
 
@@ -316,11 +377,13 @@ The migration must not:
 - create calendar runs for direct delayed visible sends;
 - silently skip unknown pending tools.
 
-Reflection phase schedule creation is not part of the
-`scheduled_events` migration. The calendar implementation must create or
-reconcile its built-in `reflection_phase_slot` schedule through the approved
-calendar bootstrap/service-start path, then materialize future
-`calendar_runs` from that schedule.
+Reflection phase schedule creation is not part of the `scheduled_events`
+migration. The calendar implementation must create or reconcile its built-in
+`reflection_phase_slot` schedule through the approved calendar
+bootstrap/service-start path. The calendar materializer must create
+`calendar_runs` for a phase period only when the `period_start_utc` snapshot is
+available, using the same monitor-eligible scope selection semantics as the
+current `LocalReflectionPhaseRunProvider`.
 
 ## Target State
 
@@ -338,6 +401,11 @@ contracts. Reflection phase triggers are converted into
 reflection phase handler path stays the same even though durable claim,
 lease, completion, and failure transitions belong to the calendar worker. For
 recurring self checks it creates bounded internal source cases.
+
+Daily-channel reflection readiness reads expected hourly work from the
+calendar-backed reflection phase runs for the previous character-local day.
+It must not fall back to a fresh monitored-channel snapshot after calendar
+cutover, because that can silently summarize partial hourly input.
 
 The old `scheduled_events` collection is no longer a production control
 plane. Historical rows remain only for audit and migration evidence.
@@ -374,6 +442,13 @@ plane. Historical rows remain only for audit and migration evidence.
 - Allow `phase_period` recurrence materialization to create multiple child
   runs for one period only through a closed typed materializer. This is for
   reflection phase slots, not a generic arbitrary fan-out job system.
+- Re-read active-commitment memory units at calendar execution time. Calendar
+  payloads identify the intended unit and due timestamp; they are not the
+  source of truth for commitment status, due date, semantic content, or
+  delivery binding.
+- Replace the recall scheduled-event collector with a new calendar collector
+  rather than keeping a production collector whose class or file name implies
+  `scheduled_events` ownership.
 
 ## Contracts And Data Shapes
 
@@ -470,7 +545,12 @@ For non-phase triggers, those fields must be `None`.
 - Owner: `self_cognition`.
 - Input payload: `unit_id`, `global_user_id`, `due_at`, source scope, and
   prompt-safe commitment summary fields.
-- Output: one normal active-commitment self-cognition case.
+- Execution: re-read the memory unit by `unit_id`, verify it is still an
+  active `active_commitment` for the expected `global_user_id`, and verify the
+  stored `due_at` still equals the run payload `due_at`.
+- Output: one normal active-commitment self-cognition case. Missing, closed,
+  type-mismatched, user-mismatched, or due-mismatched units mark the calendar
+  run `skipped` with a sanitized reason.
 
 `reflection_phase_slot`
 
@@ -520,6 +600,45 @@ The calendar-backed adapter must pass these intents to reflection phase
 handler code. Reflection handlers must not depend on calendar lease fields,
 attempt-count fields, database collection names, or migration metadata.
 
+Calendar-backed daily readiness must expose an equivalent of
+`expected_hourly_runs_for_character_local_date(...)` by reading terminal and
+pending `reflection_phase_slot` calendar runs for the target
+character-local day and deriving expected hourly reflection run ids with the
+same reflection helper logic used by the current local provider.
+
+### Calendar Scheduler ICD README Contract
+
+`src/kazusa_ai_chatbot/calendar_scheduler/README.md` must be written as a
+module ICD, consistent with the existing subsystem READMEs. It must include:
+
+- Document control: ICD id, owning package, interface boundary, runtime
+  consumers, upstream owners, and downstream owners.
+- Purpose and boundary: the calendar scheduler owns durable typed trigger
+  timing, not arbitrary jobs, direct adapter sends, or delayed visible text.
+- Public interfaces: package facade imports, worker start/stop functions,
+  repository functions, materializer functions, and handler registration.
+- Collection contracts: `calendar_schedules` and `calendar_runs` fields,
+  statuses, idempotency keys, indexes, lease semantics, and allowed historical
+  legacy linkage.
+- Trigger contracts: `future_cognition`, `commitment_due_cognition`,
+  `reflection_phase_slot`, and `recurring_self_check`, including ownership and
+  model-facing context safety.
+- Reflection integration: single composite `reflection_phase_slot`,
+  `ReflectionPhaseRunIntent` mapping, no `reflection_phase_runs` collection,
+  no split reflection trigger kinds, and daily readiness from durable calendar
+  phase runs.
+- Migration and cutover: one-time `scheduled_events` migration, pending
+  `send_message` cancellation, no compatibility layer, and
+  `scheduled_events` as historical data only.
+- Runtime lifecycle and ops: service startup/shutdown, worker polling, claim
+  limits, leases, retries, event logging, `/ops/runtime-status` fields, and
+  health semantics.
+- Forbidden paths: no arbitrary Python callbacks, external scheduler stack,
+  plugin trigger kinds, natural-language recurrence parsing, direct adapter
+  calls, prompt-visible calendar internals, or fallback to `scheduled_events`.
+- Testing and verification: focused deterministic tests, migration dry-run,
+  old-path greps, and live DB migration apply approval rule.
+
 ## LLM Call And Context Budget
 
 - The calendar scheduler itself must make zero LLM calls.
@@ -533,12 +652,18 @@ attempt-count fields, database collection names, or migration metadata.
 - No prompt change is authorized by this plan unless an existing source packet
   must rename `scheduled_event` evidence to calendar evidence. Such a change
   must be minimal and covered by prompt-contract tests.
+- If source packets rename `source_kind="scheduled_event"` to a calendar
+  source kind, the visible summary must remain semantic, for example
+  "scheduled future cognition slot". Raw `calendar_run`, `run_id`,
+  `schedule_id`, lease, attempt, collection, and migration terms must stay out
+  of model-facing text.
 
 ## Change Surface
 
 Expected new files:
 
 - `src/kazusa_ai_chatbot/calendar_scheduler/__init__.py`
+- `src/kazusa_ai_chatbot/calendar_scheduler/README.md`
 - `src/kazusa_ai_chatbot/calendar_scheduler/models.py`
 - `src/kazusa_ai_chatbot/calendar_scheduler/repository.py`
 - `src/kazusa_ai_chatbot/calendar_scheduler/recurrence.py`
@@ -546,7 +671,9 @@ Expected new files:
 - `src/kazusa_ai_chatbot/calendar_scheduler/reflection_phase.py`
 - `src/kazusa_ai_chatbot/calendar_scheduler/handlers.py`
 - `src/kazusa_ai_chatbot/calendar_scheduler/worker.py`
+- `src/kazusa_ai_chatbot/rag/recall/collectors/calendar_runs.py`
 - `src/scripts/migrate_scheduled_events_to_calendar_scheduler.py`
+- `tests/test_calendar_scheduler_active_commitments.py`
 - `tests/test_calendar_scheduler_models.py`
 - `tests/test_calendar_scheduler_repository.py`
 - `tests/test_calendar_scheduler_recurrence.py`
@@ -561,22 +688,33 @@ Expected modified files:
 - `src/kazusa_ai_chatbot/db/bootstrap.py`
 - `src/kazusa_ai_chatbot/db/schemas.py`
 - `src/kazusa_ai_chatbot/db/__init__.py`
+- `src/kazusa_ai_chatbot/db/scheduled_events.py`
+- `src/kazusa_ai_chatbot/db/script_operations.py`
+- `src/kazusa_ai_chatbot/db/user_memory_units.py`
 - `src/kazusa_ai_chatbot/action_spec/handlers/future_cognition.py`
 - `src/kazusa_ai_chatbot/self_cognition/sources.py`
 - `src/kazusa_ai_chatbot/self_cognition/worker.py`
-- `src/kazusa_ai_chatbot/rag/recall/collectors/scheduled_events.py`
+- `src/kazusa_ai_chatbot/rag/recall/agent.py`
+- `src/kazusa_ai_chatbot/rag/recall/contracts.py`
+- `src/kazusa_ai_chatbot/rag/recall/README.md`
 - `src/kazusa_ai_chatbot/consolidation/memory_units.py`
 - `src/kazusa_ai_chatbot/action_spec/handlers/memory_lifecycle.py`
+- `src/kazusa_ai_chatbot/reflection_cycle/__init__.py`
 - `src/kazusa_ai_chatbot/reflection_cycle/phase_scheduler.py`
 - `src/kazusa_ai_chatbot/reflection_cycle/worker.py`
 - `src/kazusa_ai_chatbot/dispatcher/README.md`
 - `src/kazusa_ai_chatbot/action_spec/README.md`
 - `src/kazusa_ai_chatbot/self_cognition/README.md`
+- `src/kazusa_ai_chatbot/reflection_cycle/README.md`
 - `src/kazusa_ai_chatbot/db/README.md`
+- `src/kazusa_ai_chatbot/brain_service/README.md`
+- `src/kazusa_ai_chatbot/event_logging/README.md`
 - `docs/HOWTO.md`
 - `README.md`
+- `README_CN.md`
 - `tests/test_action_spec_future_cognition.py`
 - `tests/test_self_cognition_integration.py`
+- `tests/test_service_event_logging.py`
 - `tests/test_scheduler_future_promise.py`
 - `tests/test_rag_recall_agent.py`
 - `tests/test_reflection_phase_scheduler.py`
@@ -584,6 +722,12 @@ Expected modified files:
 - `tests/test_reflection_cycle_stage1c_worker.py`
 - `tests/test_config.py`
 - `tests/test_db.py`
+
+Expected deleted files:
+
+- `src/kazusa_ai_chatbot/scheduler.py`
+- `src/kazusa_ai_chatbot/dispatcher/pending_index.py`
+- `src/kazusa_ai_chatbot/rag/recall/collectors/scheduled_events.py`
 
 Expected deleted or production-decommissioned behavior:
 
@@ -593,28 +737,39 @@ Expected deleted or production-decommissioned behavior:
 - Production self-cognition due-slot reads from `scheduled_events`.
 - Production active-commitment due polling inside the default self-cognition
   source collector.
-- Production RAG recall reads from `scheduled_events`.
+- Production RAG recall reads from `scheduled_events`, including the
+  `ScheduledEventCollector` production import path.
+- Runtime facade access to scheduled-event helpers. Legacy scheduled-event
+  operations may remain only inside the migration script or maintenance-only
+  DB helpers used by that script.
 - Production reflection worker use of the local phase provider as the durable
   control plane. The pure materializer may remain as an internal calendar
   materialization helper.
 
 ## Overdesign Guardrail
 
-- Keep the scheduler package small and typed.
-- Do not build an arbitrary workflow engine.
-- Do not expose a public API for unreviewed trigger kinds.
-- Do not model every possible calendar rule. Implement only `once`,
-  `fixed_interval_seconds`, `daily_local_time`, and `phase_period`.
-- Do not add distributed locking beyond MongoDB atomic claims and lease
-  expiry.
-- Do not add a UI or user-facing calendar surface in this plan.
-- Do not add natural-language schedule parsing.
-- Do not add catch-up storms. Catch-up policies must be bounded and
-  trigger-specific.
-- Do not turn `phase_period` materialization into a generic fan-out framework.
-  It is a closed typed materializer for approved trigger kinds only.
-- Do not persist reflection phase control state in any collection except
-  `calendar_runs`.
+- Actual problem: Kazusa has multiple process-local or polling-based delayed
+  work paths, so future cognition, active-commitment due checks, RAG future
+  evidence, and reflection phase work cannot share durable claim, retry,
+  audit, and migration semantics.
+- Minimal change: add one MongoDB-backed calendar scheduler for the closed
+  trigger kinds in this plan, migrate only pending legacy scheduler rows that
+  are in scope, and wire existing subsystem handlers through narrow adapters.
+- Ownership boundaries: deterministic calendar code owns schedule/run storage,
+  recurrence materialization, idempotency, claim/lease/status transitions,
+  migration, and capacity limits; reflection owns reflection run ids and
+  prompt contracts; self-cognition owns source-case construction, route
+  tracking, dialog rendering, delivery handoff, and consolidation; action-spec
+  owns semantic action residues and handler validation; adapters own delivery.
+- Rejected complexity: arbitrary job execution, external scheduler services,
+  plugin-defined trigger kinds, generic fan-out, natural-language recurrence
+  parsing, delayed visible text, compatibility layers, dual reads/writes,
+  fallback to `scheduled_events`, calendar-owned reflection budget config, a
+  `reflection_phase_runs` collection, and prompt-visible calendar internals.
+- Evidence threshold: add any rejected complexity only after a separate
+  approved plan identifies a concrete production failure or near-term
+  integration that cannot be handled by the closed trigger-kind model, MongoDB
+  atomic claims, and existing subsystem handlers.
 
 ## Agent Autonomy Boundaries
 
@@ -641,6 +796,9 @@ Expected deleted or production-decommissioned behavior:
 1. Parent establishes focused calendar module tests.
    - Add model, recurrence, repository, worker-claim, and migration dry-run
      tests before production code.
+   - Add active-commitment schedule reconciliation tests for create,
+     merge/evolve due changes, lifecycle closure, execution-time re-read, and
+     stale-run skip behavior.
    - Add reflection-phase calendar tests that prove
      `reflection_phase_slot` run rows map to `ReflectionPhaseRunIntent`,
      phase run materialization respects `period_start_utc`, and no
@@ -649,8 +807,8 @@ Expected deleted or production-decommissioned behavior:
      missing functions.
 2. Parent starts the production-code subagent with this approved plan,
    mandatory skills, focused tests, and production-code boundary.
-3. Production-code subagent implements the calendar package, DB schema, config,
-   and bootstrap indexes.
+3. Production-code subagent implements the calendar package, package ICD
+   README, DB schema, config, and bootstrap indexes.
 4. Parent runs focused calendar module tests.
 5. Parent adds integration tests for future cognition, self-cognition,
    commitment due scheduling, recall evidence, reflection phase provider
@@ -691,21 +849,25 @@ requests fallback execution.
 ## Progress Checklist
 
 - [ ] Stage 1 - focused calendar module contract established
+
   - Covers: model, recurrence, repository, worker claim, and migration dry-run
-    tests, including reflection-phase run-intent mapping.
-  - Verify: `venv\Scripts\python -m pytest tests/test_calendar_scheduler_models.py tests/test_calendar_scheduler_recurrence.py tests/test_calendar_scheduler_repository.py tests/test_calendar_scheduler_worker.py tests/test_calendar_scheduler_migration.py tests/test_calendar_scheduler_reflection_phase.py -q`.
+    tests, including active-commitment reconciliation and reflection-phase
+    run-intent mapping.
+  - Verify: `venv\Scripts\python -m pytest tests/test_calendar_scheduler_models.py tests/test_calendar_scheduler_recurrence.py tests/test_calendar_scheduler_repository.py tests/test_calendar_scheduler_worker.py tests/test_calendar_scheduler_migration.py tests/test_calendar_scheduler_active_commitments.py tests/test_calendar_scheduler_reflection_phase.py -q`.
   - Evidence: record expected pre-implementation failures and changed test
     files in `Execution Evidence`.
   - Sign-off: `<agent/date>` after verification and evidence are recorded.
 
-- [ ] Stage 2 - calendar package, DB schema, config, and indexes implemented
-  - Covers: `calendar_scheduler` package, `config.py`, DB schemas, DB exports,
-    and bootstrap indexes.
+- [ ] Stage 2 - calendar package, ICD README, DB schema, config, and indexes implemented
+
+  - Covers: `calendar_scheduler` package, package ICD README, `config.py`, DB
+    schemas, DB exports, and bootstrap indexes.
   - Verify: focused calendar tests pass.
   - Evidence: record changed files and focused test output.
   - Sign-off: `<agent/date>` after verification and evidence are recorded.
 
 - [ ] Stage 3 - future-cognition calendar integration complete
+
   - Covers: action-spec future-cognition handler, self-cognition due-run
     collection, worker claim/completion, and source-packet contract updates.
   - Verify: `venv\Scripts\python -m pytest tests/test_action_spec_future_cognition.py tests/test_self_cognition_integration.py -q`.
@@ -713,14 +875,15 @@ requests fallback execution.
   - Sign-off: `<agent/date>` after verification and evidence are recorded.
 
 - [ ] Stage 4 - active-commitment due scheduling complete
+
   - Covers: active commitment create/update/reschedule/cancel hooks and
     `commitment_due_cognition` run handling.
-  - Verify: focused commitment scheduler tests and existing memory lifecycle
-    tests pass.
+  - Verify: `venv\Scripts\python -m pytest tests/test_calendar_scheduler_active_commitments.py tests/test_action_spec_memory_lifecycle.py tests/test_self_cognition_integration.py -q`.
   - Evidence: record test output and changed files.
   - Sign-off: `<agent/date>` after verification and evidence are recorded.
 
 - [ ] Stage 5 - recall and reflection integrations complete
+
   - Covers: RAG recall calendar evidence collector and reflection slot
     provider cutover, materialization, and trigger handlers.
   - Verify: `venv\Scripts\python -m pytest tests/test_rag_recall_agent.py tests/test_calendar_scheduler_reflection_phase.py tests/test_reflection_phase_scheduler.py tests/test_reflection_cycle_stage1c_worker.py -q`.
@@ -728,6 +891,7 @@ requests fallback execution.
   - Sign-off: `<agent/date>` after verification and evidence are recorded.
 
 - [ ] Stage 6 - legacy scheduler decommission and migration script complete
+
   - Covers: service startup/shutdown removal of old scheduler runtime,
     migration script, scheduler tests rewritten or removed, and old-path grep
     checks.
@@ -738,12 +902,15 @@ requests fallback execution.
   - Sign-off: `<agent/date>` after verification and evidence are recorded.
 
 - [ ] Stage 7 - docs, ops status, and config tests complete
-  - Covers: README, HOWTO, subsystem READMEs, ops status, and config tests.
+
+  - Covers: top-level README, HOWTO, the `calendar_scheduler` ICD README,
+    adjacent subsystem READMEs, ops status, and config tests.
   - Verify: `venv\Scripts\python -m pytest tests/test_config.py tests/test_service_ops_status.py -q`.
   - Evidence: record test output and doc files changed.
   - Sign-off: `<agent/date>` after verification and evidence are recorded.
 
 - [ ] Stage 8 - full deterministic verification complete
+
   - Covers: focused and integration tests listed in `Verification`.
   - Verify: all required commands pass or blocked commands are recorded with
     exact reason.
@@ -751,6 +918,7 @@ requests fallback execution.
   - Sign-off: `<agent/date>` after verification and evidence are recorded.
 
 - [ ] Stage 9 - independent code review complete
+
   - Covers: full diff, migration behavior, old-path decommission, tests, docs,
     and plan alignment.
   - Verify: review findings are recorded, required fixes are complete, and
@@ -768,6 +936,7 @@ venv\Scripts\python -m pytest tests/test_calendar_scheduler_recurrence.py -q
 venv\Scripts\python -m pytest tests/test_calendar_scheduler_repository.py -q
 venv\Scripts\python -m pytest tests/test_calendar_scheduler_worker.py -q
 venv\Scripts\python -m pytest tests/test_calendar_scheduler_migration.py -q
+venv\Scripts\python -m pytest tests/test_calendar_scheduler_active_commitments.py -q
 venv\Scripts\python -m pytest tests/test_calendar_scheduler_reflection_phase.py -q
 venv\Scripts\python -m pytest tests/test_action_spec_future_cognition.py -q
 venv\Scripts\python -m pytest tests/test_self_cognition_integration.py -q
@@ -784,7 +953,10 @@ Required grep checks:
 ```powershell
 rg -n "scheduled_events|schedule_event|load_pending_events|PendingTaskIndex|SCHEDULED_TASKS_ENABLED" src/kazusa_ai_chatbot tests
 rg -n "query_pending_scheduled_events|list_due_future_cognition_events|trigger_future_cognition" src/kazusa_ai_chatbot tests
+rg -n "ScheduledEventCollector|collectors.scheduled_events" src/kazusa_ai_chatbot tests
 rg -n "reflection_phase_runs|reflection_hourly_slot|group_self_cognition_review" src/kazusa_ai_chatbot/calendar_scheduler tests/test_calendar_scheduler_reflection_phase.py
+Test-Path -LiteralPath src/kazusa_ai_chatbot/calendar_scheduler/README.md
+rg -n "Document Control|Owning package|Interface boundary|Public Interfaces|Collection Contracts|Trigger Contracts|Forbidden Paths" src/kazusa_ai_chatbot/calendar_scheduler/README.md
 ```
 
 The grep checks must show only accepted historical references, migration
@@ -796,6 +968,10 @@ The reflection grep must show no `reflection_phase_runs` references. The
 strings `reflection_hourly_slot` and `group_self_cognition_review` may appear
 only as allowed actions inside the `reflection_phase_slot` payload contract,
 not as calendar trigger-kind registrations.
+
+The README path check must print `True`. The README grep must match each ICD
+section heading or equivalent heading text in
+`src/kazusa_ai_chatbot/calendar_scheduler/README.md`.
 
 Migration verification:
 
@@ -823,7 +999,11 @@ that checks:
 - trigger-kind contracts are narrow and typed;
 - recurrence support is sufficient for approved use cases and not broader;
 - active-commitment due scheduling has a write-time materialization path;
+- active-commitment due scheduling reconciles create, merge/evolve due change,
+  lifecycle closure, and stale-run skip behavior;
 - reflection integration preserves hourly/daily idempotency;
+- reflection phase materialization happens only when the `period_start_utc`
+  monitor snapshot is available;
 - reflection integration uses one composite `reflection_phase_slot` trigger
   and does not create split reflection calendar trigger kinds;
 - reflection calendar runs map mechanically to `ReflectionPhaseRunIntent`
@@ -847,6 +1027,8 @@ Review scope:
 - migration script dry-run/apply safety;
 - removal of production `scheduled_events` reads and writes;
 - future-cognition and commitment due-case source-packet safety;
+- active-commitment calendar reconciliation across create, merge/evolve due
+  changes, lifecycle closure, and stale-run skips;
 - reflection run id preservation;
 - reflection phase run-intent compatibility, provider cutover, and absence of
   a `reflection_phase_runs` control plane;
@@ -854,6 +1036,8 @@ Review scope:
   `reflection_hourly_slot` and `group_self_cognition_review`;
 - config defaults and no magic numbers;
 - test coverage and verification accuracy;
+- `calendar_scheduler/README.md` exists, follows the module ICD style, and
+  accurately documents the implemented package boundary and forbidden paths;
 - docs and ops status consistency.
 
 The review subagent must not implement fixes. The parent agent records all
@@ -863,6 +1047,11 @@ records final approval status in `Execution Evidence`.
 ## Acceptance Criteria
 
 - `calendar_schedules` and `calendar_runs` schemas and indexes exist.
+- `src/kazusa_ai_chatbot/calendar_scheduler/README.md` exists and follows the
+  subsystem ICD style, including document control, ownership boundary, public
+  interfaces, collection contracts, trigger contracts, worker lifecycle,
+  migration/cutover behavior, ops/event logging, verification, and forbidden
+  paths.
 - Calendar worker startup and shutdown are wired into service lifecycle.
 - Due runs are claimed atomically and use lease expiry for recovery.
 - Calendar handlers are typed and closed by trigger kind.
@@ -873,6 +1062,9 @@ records final approval status in `Execution Evidence`.
   calendar runs.
 - Active-commitment create/update/reschedule/cancel flows maintain calendar
   schedule state.
+- Calendar execution skips stale active-commitment runs when the underlying
+  memory unit is missing, no longer active, not an active commitment, owned by
+  a different user, or has a different `due_at`.
 - RAG recall future-action evidence reads calendar state, not
   `scheduled_events`.
 - Reflection slot integration uses one composite `reflection_phase_slot`
@@ -903,7 +1095,10 @@ records final approval status in `Execution Evidence`.
 - Cancelling legacy pending `send_message` rows can drop old direct delayed
   sends. This is intentional because delayed visible sends are not preserved.
 - Commitment schedules can become stale if active-commitment write hooks miss
-  a create, merge, reschedule, completion, or cancellation path.
+  a create, merge/evolve due change, lifecycle closure, or invalid due-date
+  removal path.
+- Stale commitment calendar runs can reopen closed or rescheduled commitments
+  unless handlers re-read the memory unit and skip mismatches.
 - Calendar recurrence can drift around character-local timezone and daylight
   saving transitions if UTC/local conversion is not centralized.
 - Reflection daily synthesis can become partial if calendar slot execution and
@@ -919,5 +1114,47 @@ records final approval status in `Execution Evidence`.
 
 ## Execution Evidence
 
-Record execution evidence here after this plan is approved and implementation
-starts. Do not pre-fill evidence during drafting.
+Plan-review evidence may be recorded here before approval. Implementation
+execution evidence starts only after this plan is approved and implementation
+begins.
+
+- 2026-06-04 plan refresh: reread plan registry, top-level README, HOWTO,
+  development-plan references, dispatcher/self-cognition/reflection/db/action
+  READMEs, current `scheduler.py`, reflection phase materializer/worker,
+  future-cognition handler, self-cognition sources, RAG recall scheduled-event
+  collector, DB scheduled-event helpers, active-commitment memory-unit helpers,
+  service startup, config docs, and reflection phase tests.
+- 2026-06-04 independent plan review findings fixed:
+  - Blocker: active-commitment schedule reconciliation covered creation only
+    implicitly and did not name merge/evolve due changes, lifecycle closure,
+    or execution-time stale-run validation. Fixed in `Mandatory Rules`,
+    `Must Do`, trigger contracts, implementation order, checklist, and
+    verification.
+  - Blocker: reflection phase materialization allowed ambiguous future
+    precomputation even though eligibility depends on the `period_start_utc`
+    monitor snapshot. Fixed by requiring boundary-time materialization and
+    calendar-backed daily readiness.
+  - Important: recall change surface kept the old scheduled-event collector
+    path ambiguous. Fixed by adding a `calendar_runs` collector, recall agent
+    and contract updates, and `ScheduledEventCollector` grep verification.
+  - Blocker: old process-local scheduler decommission did not name
+    `scheduler.py`, `dispatcher.pending_index`, runtime facade scheduled-event
+    helper access, or the old recall collector file in the change surface.
+    Fixed by adding explicit deleted/decommissioned module entries and
+    maintenance-only legacy scheduled-event access.
+  - Important: change surface named a nonexistent dispatcher test file.
+    Fixed by replacing it with the existing scheduler/service event logging
+    tests that currently cover the affected startup and pending-index seams.
+  - Important: the `Overdesign Guardrail` did not use the project-required
+    actual-problem/minimal-change/ownership/rejected-complexity/evidence
+    shape. Rewritten to match the plan contract.
+  - Important: `Execution Evidence` said not to pre-fill drafting evidence
+    while `Independent Plan Review` required plan-review findings to be
+    recorded before approval. Fixed by separating plan-review evidence from
+    implementation execution evidence.
+- 2026-06-04 user-directed plan update: added
+  `src/kazusa_ai_chatbot/calendar_scheduler/README.md` as a required
+  ICD-style module README. The requirement is now present in `Mandatory Rules`,
+  `Must Do`, `Contracts And Data Shapes`, `Change Surface`,
+  `Implementation Order`, `Progress Checklist`, `Verification`,
+  `Independent Code Review`, and `Acceptance Criteria`.
