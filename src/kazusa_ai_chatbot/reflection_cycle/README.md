@@ -71,9 +71,9 @@ the package facade above.
 The worker-owned promotion path passes its busy probe into the internal
 promotion runner so a chat turn that appears after the LLM call can defer
 memory writes. The worker also accepts the live adapter-registry provider so
-the reflection-attached group self-cognition sidecar can dispatch selected
-speech through the same source-bound delivery path. CLI and manual promotion
-calls use the package facade above.
+reflection-attached group self-cognition can dispatch selected speech through
+the same source-bound delivery path. CLI and manual promotion calls use the
+package facade above.
 
 ## DB Boundaries
 
@@ -207,33 +207,59 @@ never imports service state.
 Default schedule:
 
 - `REFLECTION_WORKER_INTERVAL_SECONDS=900`
-- `REFLECTION_HOURLY_SLOTS_PER_TICK=3`
+- `REFLECTION_HOURLY_SLOTS_PER_TICK=3`, retained as the default old slot
+  budget for `REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD`
+- `REFLECTION_PHASE_MIN_SLOT_SPACING_SECONDS=60`
+- `REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD=3`
+- `REFLECTION_PHASE_GROUPS_PER_SLOT=1`
 - `REFLECTION_DAILY_RUN_AFTER_LOCAL_TIME=04:30`
 - `REFLECTION_PROMOTION_RUN_AFTER_LOCAL_TIME=05:00`
 
 Gates use `CHARACTER_TIME_ZONE`. Stage 1a hourly slots remain UTC, while daily
 grouping uses the character-local date of each hourly slot.
 
-Tick priority:
+The worker uses a local phase run provider as a lightweight, calendar-shaped
+scheduler consumer. At each phase-period boundary, the provider snapshots the
+current monitor-eligible channels as of `period_start_utc`, materializes
+deterministic `reflection_phase_slot` run intents, and rotates overflow
+channels across later periods. The worker executes due run intents through
+handler entrypoints and waits on its stop event until the next intra-period
+offset. With defaults, three selected channels run at `t+0`, `t+5`, and
+`t+10` inside the 15-minute period.
 
-1. Run due hourly slots.
-2. Run group self-cognition review as a sidecar on the same 15-minute
-   reflection cadence.
-3. Run due daily-channel syntheses after terminal hourly documents exist.
-4. Run daily global promotion after daily-channel documents are terminal.
+Per phase intent:
 
-Group self-cognition review is not a second scheduler. It derives non-empty
-15-minute group activity windows from the same monitored-channel selection:
-group scopes are eligible when the character has an assistant message in the
-24-hour monitor window, and the source packet receives bounded visible context
-plus deterministic semantic labels. Selected visible speech targets the same
-group channel as the source. There is no private fallback, retry loop, adapter
-capability probe, or reflection-specific group-review interval.
+1. Fetch fresh bounded messages for the selected source scope.
+2. Run at most one due closed-hour reflection slot for that selected scope.
+3. If the selected scope is a group and self-cognition is not sleeping, build
+   group activity windows only for that selected group.
+4. Suppress windows with terminal reviewed-window ledger rows.
+5. Review the newest remaining window only.
+6. Record older remaining windows for that selected group as
+   `coalesced_skipped`.
+7. Pass one selected group-review case to the normal self-cognition runner.
+8. Record the selected window as `reviewed`, `target_binding_failed`,
+   `review_failed`, or `stale_skipped`.
+
+Group self-cognition review is not a second scheduler and no longer runs as a
+global newest-first batch. It derives non-empty 15-minute group activity
+windows from the selected phase scope only. Group scopes are eligible when the
+character has an assistant message in the 24-hour monitor window, and the
+source packet receives bounded visible context plus deterministic semantic
+labels. Selected visible speech targets the same group channel as the source.
+There is no private fallback, retry loop, adapter capability probe, or
+reflection-specific group-review interval.
+
+Daily-channel synthesis is period-level maintenance, not per-slot catch-up.
+For scheduled worker runs it first asks the phase provider for the previous
+character-local day's expected hourly run ids and defers if any expected
+terminal hourly documents are missing. This avoids silently partial daily
+reflection when a phased hourly slot has not completed.
 
 Raw hourly or daily reflection output is not fed into self-cognition. The
-group-review sidecar shares the monitored activity projection only; hourly and
-daily reflection records continue to contribute to normal cognition only
-through the existing promoted, gated reflection context.
+group-review phase handler shares the monitored activity projection only;
+hourly and daily reflection records continue to contribute to normal cognition
+only through the existing promoted, gated reflection context.
 
 The service does not serialize reflection behind `/chat`. Both paths may run at
 the same time and may contend for shared LLM or database resources.
@@ -241,7 +267,7 @@ the same time and may contend for shared LLM or database resources.
 `CHARACTER_SLEEP_LOCAL_PERIOD` is owned by self-cognition trigger policy. When
 the current character-local time is inside that period, hourly, daily, style,
 promotion, and global reflection still run; only the group self-cognition
-review sidecar is skipped before profile fetch, case collection, or
+review phase handler is skipped before profile fetch, case collection, or
 self-cognition worker tick.
 
 Terminal hourly statuses are `succeeded`, `failed`, `skipped`, and `dry_run`;

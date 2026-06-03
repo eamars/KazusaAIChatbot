@@ -82,6 +82,7 @@ class _BootstrapDb:
             "user_memory_units",
             "scheduled_events",
             "self_cognition_action_attempts",
+            "self_cognition_group_review_windows",
             "conversation_episode_state",
             "character_reflection_runs",
             "interaction_style_images",
@@ -152,6 +153,33 @@ def _patched_query_embedding(return_value=None, mock=None):
          patch.object(db_conversation_module, "get_query_text_embedding", mock_embed), \
          patch.object(db_memory_module, "get_query_text_embedding", mock_embed):
         yield mock_embed
+
+
+def _group_review_window_doc(
+    *,
+    source_id: str,
+    status: str,
+    case_id: str | None = None,
+    skip_reason: str | None = None,
+) -> dict:
+    """Build a minimal group-review window ledger document for DB tests."""
+
+    doc = {
+        "source_id": source_id,
+        "case_id": case_id,
+        "scope_ref": "scope_group",
+        "platform": "qq",
+        "platform_channel_id": "group-1",
+        "channel_type": "group",
+        "window_start": "2026-05-18T04:00:00+00:00",
+        "window_end": "2026-05-18T04:15:00+00:00",
+        "status": status,
+        "reviewed_at": "2026-05-18T04:20:00+00:00",
+        "selected_route": None,
+        "dispatch_status": None,
+        "skip_reason": skip_reason,
+    }
+    return doc
 
 
 @pytest.mark.asyncio
@@ -746,6 +774,193 @@ async def test_list_self_cognition_action_attempts_returns_recent_rows() -> None
 
 
 @pytest.mark.asyncio
+async def test_upsert_group_review_window_inserts_by_source_id() -> None:
+    """Group review window terminal rows should be keyed by source identity."""
+
+    window_doc = _group_review_window_doc(
+        source_id="scope_group:window-1",
+        status="reviewed",
+        case_id="case-1",
+    )
+    db = _mock_db()
+    db.self_cognition_group_review_windows.find_one = AsyncMock(return_value=None)
+    db.self_cognition_group_review_windows.insert_one = AsyncMock()
+
+    with _patched_get_db(db):
+        result = await (
+            db_self_cognition_module.upsert_self_cognition_group_review_window(
+                window_doc,
+            )
+        )
+
+    assert result == window_doc
+    db.self_cognition_group_review_windows.find_one.assert_awaited_once_with(
+        {"source_id": "scope_group:window-1"},
+        {"_id": 0},
+    )
+    db.self_cognition_group_review_windows.insert_one.assert_awaited_once_with(
+        window_doc,
+    )
+
+
+@pytest.mark.asyncio
+async def test_upsert_group_review_window_returns_existing_terminal_row() -> None:
+    """Existing terminal ledger rows must not be overwritten."""
+
+    existing_doc = _group_review_window_doc(
+        source_id="scope_group:window-1",
+        status="coalesced_skipped",
+        skip_reason="older unreviewed window coalesced",
+    )
+    later_doc = _group_review_window_doc(
+        source_id="scope_group:window-1",
+        status="reviewed",
+        case_id="case-later",
+    )
+    db = _mock_db()
+    db.self_cognition_group_review_windows.find_one = AsyncMock(
+        return_value=existing_doc,
+    )
+    db.self_cognition_group_review_windows.insert_one = AsyncMock()
+    db.self_cognition_group_review_windows.replace_one = AsyncMock()
+
+    with _patched_get_db(db):
+        result = await (
+            db_self_cognition_module.upsert_self_cognition_group_review_window(
+                later_doc,
+            )
+        )
+
+    assert result == existing_doc
+    db.self_cognition_group_review_windows.insert_one.assert_not_awaited()
+    db.self_cognition_group_review_windows.replace_one.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_find_group_review_window_reads_by_source_id() -> None:
+    """Reviewed-window lookups should use the durable source identity."""
+
+    expected_doc = _group_review_window_doc(
+        source_id="scope_group:window-1",
+        status="reviewed",
+        case_id="case-1",
+    )
+    db = _mock_db()
+    db.self_cognition_group_review_windows.find_one = AsyncMock(
+        return_value=expected_doc,
+    )
+
+    with _patched_get_db(db):
+        result = await (
+            db_self_cognition_module.find_self_cognition_group_review_window(
+                source_id="scope_group:window-1",
+            )
+        )
+
+    assert result == expected_doc
+    db.self_cognition_group_review_windows.find_one.assert_awaited_once_with(
+        {"source_id": "scope_group:window-1"},
+        {"_id": 0},
+    )
+
+
+@pytest.mark.asyncio
+async def test_group_review_skipped_rows_require_skip_reason() -> None:
+    """Skipped terminal statuses should carry no case or dispatch metadata."""
+
+    db = _mock_db()
+    db.self_cognition_group_review_windows.find_one = AsyncMock(return_value=None)
+    db.self_cognition_group_review_windows.insert_one = AsyncMock()
+    valid_doc = _group_review_window_doc(
+        source_id="scope_group:coalesced",
+        status="coalesced_skipped",
+        skip_reason="older unreviewed window coalesced",
+    )
+
+    with _patched_get_db(db):
+        await db_self_cognition_module.upsert_self_cognition_group_review_window(
+            valid_doc,
+        )
+
+    invalid_doc = _group_review_window_doc(
+        source_id="scope_group:invalid",
+        status="stale_skipped",
+    )
+    with pytest.raises(ValueError, match="skip_reason"):
+        await db_self_cognition_module.upsert_self_cognition_group_review_window(
+            invalid_doc,
+        )
+
+    invalid_case_doc = _group_review_window_doc(
+        source_id="scope_group:invalid-case",
+        status="coalesced_skipped",
+        case_id="case-should-not-exist",
+        skip_reason="older unreviewed window coalesced",
+    )
+    with pytest.raises(ValueError, match="case_id"):
+        await db_self_cognition_module.upsert_self_cognition_group_review_window(
+            invalid_case_doc,
+        )
+
+
+@pytest.mark.asyncio
+async def test_group_review_reviewed_and_failed_rows_validate_fields() -> None:
+    """Reviewed and failed terminal rows should enforce status-specific fields."""
+
+    reviewed_doc = _group_review_window_doc(
+        source_id="scope_group:reviewed",
+        status="reviewed",
+        case_id="case-1",
+    )
+    target_failed_doc = _group_review_window_doc(
+        source_id="scope_group:target-failed",
+        status="target_binding_failed",
+        case_id="case-2",
+        skip_reason="delivery target missing",
+    )
+    review_failed_doc = _group_review_window_doc(
+        source_id="scope_group:review-failed",
+        status="review_failed",
+        case_id="case-3",
+        skip_reason="self-cognition worker failed",
+    )
+    db = _mock_db()
+    db.self_cognition_group_review_windows.find_one = AsyncMock(return_value=None)
+    db.self_cognition_group_review_windows.insert_one = AsyncMock()
+
+    with _patched_get_db(db):
+        await db_self_cognition_module.upsert_self_cognition_group_review_window(
+            reviewed_doc,
+        )
+        await db_self_cognition_module.upsert_self_cognition_group_review_window(
+            target_failed_doc,
+        )
+        await db_self_cognition_module.upsert_self_cognition_group_review_window(
+            review_failed_doc,
+        )
+
+    missing_case_doc = _group_review_window_doc(
+        source_id="scope_group:missing-case",
+        status="reviewed",
+    )
+    with pytest.raises(ValueError, match="case_id"):
+        await db_self_cognition_module.upsert_self_cognition_group_review_window(
+            missing_case_doc,
+        )
+
+    reviewed_with_skip_reason = _group_review_window_doc(
+        source_id="scope_group:reviewed-with-reason",
+        status="reviewed",
+        case_id="case-4",
+        skip_reason="not allowed for reviewed rows",
+    )
+    with pytest.raises(ValueError, match="skip_reason"):
+        await db_self_cognition_module.upsert_self_cognition_group_review_window(
+            reviewed_with_skip_reason,
+        )
+
+
+@pytest.mark.asyncio
 async def test_db_bootstrap_creates_platform_message_lookup_index(monkeypatch) -> None:
     """Bootstrap should index exact reply-target platform message lookups."""
     db = _BootstrapDb()
@@ -826,6 +1041,11 @@ async def test_db_bootstrap_creates_self_cognition_attempt_indexes(
     )
     monkeypatch.setattr(
         db_bootstrap_module,
+        "ensure_internal_monologue_residue_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
         "purge_stale_initializer_entries",
         AsyncMock(),
     )
@@ -848,6 +1068,71 @@ async def test_db_bootstrap_creates_self_cognition_attempt_indexes(
     assert {
         "keys": [("status", 1), ("recorded_at", -1)],
         "kwargs": {"name": "self_cognition_attempt_status_recorded"},
+    } in index_specs
+
+
+@pytest.mark.asyncio
+async def test_db_bootstrap_creates_group_review_window_indexes(
+    monkeypatch,
+) -> None:
+    """Bootstrap should index reviewed group-window ledger state."""
+
+    db = _BootstrapDb()
+    monkeypatch.setattr(db_bootstrap_module, "get_db", AsyncMock(return_value=db))
+    monkeypatch.setattr(db_bootstrap_module, "enable_vector_index", AsyncMock())
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_reflection_run_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_interaction_style_image_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_global_character_growth_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_event_log_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_internal_monologue_residue_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "purge_stale_initializer_entries",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "prune_persistent_entries",
+        AsyncMock(),
+    )
+
+    await db_bootstrap_module.db_bootstrap()
+
+    index_specs = db.self_cognition_group_review_windows.indexes
+    assert {
+        "keys": "source_id",
+        "kwargs": {
+            "unique": True,
+            "name": "self_cognition_group_review_window_source_unique",
+        },
+    } in index_specs
+    assert {
+        "keys": [("scope_ref", 1), ("status", 1), ("window_start", 1)],
+        "kwargs": {"name": "self_cognition_group_review_window_scope_status"},
+    } in index_specs
+    assert {
+        "keys": "reviewed_at",
+        "kwargs": {"name": "self_cognition_group_review_window_reviewed_at"},
     } in index_specs
 
 

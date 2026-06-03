@@ -42,6 +42,7 @@ from kazusa_ai_chatbot.db.rag_cache2_persistent import (
 )
 from kazusa_ai_chatbot.db.self_cognition import (
     SELF_COGNITION_ACTION_ATTEMPTS_COLLECTION,
+    SELF_COGNITION_GROUP_REVIEW_WINDOWS_COLLECTION,
 )
 from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
 
@@ -83,6 +84,7 @@ async def db_bootstrap() -> None:
         EVENT_LOG_EVENTS_COLLECTION,
         EVENT_LOG_SNAPSHOTS_COLLECTION,
         SELF_COGNITION_ACTION_ATTEMPTS_COLLECTION,
+        SELF_COGNITION_GROUP_REVIEW_WINDOWS_COLLECTION,
         INTERNAL_MONOLOGUE_RESIDUE_COLLECTION,
     ]
     for name in required_collections:
@@ -159,6 +161,19 @@ async def db_bootstrap() -> None:
     await db[SELF_COGNITION_ACTION_ATTEMPTS_COLLECTION].create_index(
         [("status", 1), ("recorded_at", -1)],
         name="self_cognition_attempt_status_recorded",
+    )
+    await db[SELF_COGNITION_GROUP_REVIEW_WINDOWS_COLLECTION].create_index(
+        "source_id",
+        unique=True,
+        name="self_cognition_group_review_window_source_unique",
+    )
+    await db[SELF_COGNITION_GROUP_REVIEW_WINDOWS_COLLECTION].create_index(
+        [("scope_ref", 1), ("status", 1), ("window_start", 1)],
+        name="self_cognition_group_review_window_scope_status",
+    )
+    await db[SELF_COGNITION_GROUP_REVIEW_WINDOWS_COLLECTION].create_index(
+        "reviewed_at",
+        name="self_cognition_group_review_window_reviewed_at",
     )
     await db.conversation_episode_state.create_index(
         [("platform", 1), ("platform_channel_id", 1), ("global_user_id", 1)],
