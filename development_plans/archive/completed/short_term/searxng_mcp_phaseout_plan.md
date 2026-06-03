@@ -382,9 +382,9 @@ Baseline and regression artifact contract:
 ```
 
 The baseline artifact is
-`development_plans/active/short_term/artifacts/searxng_mcp_baseline_2026-06-01.json`.
+`development_plans/archive/completed/short_term/artifacts/searxng_mcp_baseline_2026-06-01.json`.
 The direct-workflow comparison artifact must be
-`development_plans/active/short_term/artifacts/searxng_direct_regression_2026-06-01.json`.
+`development_plans/archive/completed/short_term/artifacts/searxng_direct_regression_2026-06-01.json`.
 For the direct artifact, keep the same summary schema and set `mcp_url` to
 `""` because MCP is not used by the direct workflow.
 
@@ -542,7 +542,7 @@ After this plan:
 
 1. Parent records current SearXNG MCP baseline before production-code edits.
    - Artifact:
-     `development_plans/active/short_term/artifacts/searxng_mcp_baseline_2026-06-01.json`.
+     `development_plans/archive/completed/short_term/artifacts/searxng_mcp_baseline_2026-06-01.json`.
    - Baseline must contain the 10 cases named in `Contracts And Data Shapes`.
    - Record success count, latency summary, first non-empty line, output
      length, output SHA-256, and bounded excerpt for each case.
@@ -677,9 +677,9 @@ After this plan:
   `SEARXNG_URL=http://192.168.2.10:8080` in the command environment only.
   Runtime code and tests must still read the value from `config.py`.
 - Write
-  `development_plans/active/short_term/artifacts/searxng_direct_regression_2026-06-01.json`.
+  `development_plans/archive/completed/short_term/artifacts/searxng_direct_regression_2026-06-01.json`.
 - Compare the direct artifact against
-  `development_plans/active/short_term/artifacts/searxng_mcp_baseline_2026-06-01.json`.
+  `development_plans/archive/completed/short_term/artifacts/searxng_mcp_baseline_2026-06-01.json`.
 - Expected: all direct cases pass the direct workflow regression criteria in
   `Contracts And Data Shapes`.
 - If any comparison fails, fix the regression and rerun this gate before
@@ -773,12 +773,12 @@ This plan is complete when:
   400 to plain GET, which confirms endpoint reachability but not a valid MCP
   session by itself.
 - SearXNG MCP baseline artifact:
-  `development_plans/active/short_term/artifacts/searxng_mcp_baseline_2026-06-01.json`.
+  `development_plans/archive/completed/short_term/artifacts/searxng_mcp_baseline_2026-06-01.json`.
   Summary: 10 examples, 10 successes, 0 failures, MCP connect `193.64ms`,
   latency min `19.25ms`, median `616.93ms`, max `1413.68ms`, discovered tools
   `mcp-searxng__searxng_web_search` and `mcp-searxng__web_url_read`.
 - Human-readable baseline summary:
-  `development_plans/active/short_term/artifacts/searxng_mcp_baseline_2026-06-01.md`.
+  `development_plans/archive/completed/short_term/artifacts/searxng_mcp_baseline_2026-06-01.md`.
 - Independent plan re-review completed by subagent `019e8101-97f4-7ed0-a8d8-4d704aef35e9`.
   Result: approved for execution; no blockers or important findings. Minor
   finding about direct artifact `mcp_url` ambiguity addressed by specifying
@@ -862,7 +862,7 @@ This plan is complete when:
   matches; `rg "localhost:8080" src tests` returned only
   `src/adapters/debug_adapter.py`.
 - Final Stage 4 direct regression artifact:
-  `development_plans/active/short_term/artifacts/searxng_direct_regression_2026-06-01.json`.
+  `development_plans/archive/completed/short_term/artifacts/searxng_direct_regression_2026-06-01.json`.
   Summary after review fixes: 10 examples, 10 successes, 0 failures, latency
   min `147.07ms`, median `607.205ms`, max `1252.97ms`, baseline median
   `616.93ms`, median

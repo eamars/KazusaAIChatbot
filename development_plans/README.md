@@ -39,9 +39,7 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
-| [resolver_default_mainline_cutover_plan.md](active/short_term/resolver_default_mainline_cutover_plan.md) | High-risk migration and mainline cutover plan | in_progress |
-| [self_cognition_rag_resolver_evidence_plan.md](active/short_term/self_cognition_rag_resolver_evidence_plan.md) | Medium production integration plan | completed on branch |
-| [searxng_mcp_phaseout_plan.md](active/short_term/searxng_mcp_phaseout_plan.md) | Large web-agent transport cutover plan | completed on branch |
+| [reflection_phase_scheduled_group_review_plan.md](active/short_term/reflection_phase_scheduled_group_review_plan.md) | Large scheduler and group self-cognition behavior plan | draft |
 
 ## Supporting Experiment Records
 
@@ -202,11 +200,14 @@ plans.
 | [reflection_attached_group_self_cognition_plan.md](archive/completed/short_term/reflection_attached_group_self_cognition_plan.md) |
 | [reflection_flag_simplification_plan.md](archive/completed/short_term/reflection_flag_simplification_plan.md) |
 | [reflection_memory_integration_stage1c_plan.md](archive/completed/short_term/reflection_memory_integration_stage1c_plan.md) |
+| [resolver_default_mainline_cutover_plan.md](archive/completed/short_term/resolver_default_mainline_cutover_plan.md) |
 | [role_vocabulary_contract_cleanup_plan.md](archive/completed/short_term/role_vocabulary_contract_cleanup_plan.md) |
 | [self_cognition_agency_loop_plan.md](archive/completed/short_term/self_cognition_agency_loop_plan.md) |
 | [self_cognition_group_mention_delivery_plan.md](archive/completed/short_term/self_cognition_group_mention_delivery_plan.md) |
 | [self_cognition_group_review_participant_context_plan.md](archive/completed/short_term/self_cognition_group_review_participant_context_plan.md) |
 | [self_cognition_memory_semantics_plan.md](archive/completed/short_term/self_cognition_memory_semantics_plan.md) |
+| [self_cognition_rag_resolver_evidence_plan.md](archive/completed/short_term/self_cognition_rag_resolver_evidence_plan.md) |
+| [searxng_mcp_phaseout_plan.md](archive/completed/short_term/searxng_mcp_phaseout_plan.md) |
 | [service_module_separation_stage1_plan.md](archive/completed/short_term/service_module_separation_stage1_plan.md) |
 | [typed_message_envelope_stage2_plan.md](archive/completed/short_term/typed_message_envelope_stage2_plan.md) |
 | [user_style_engagement_consumer_plan.md](archive/completed/short_term/user_style_engagement_consumer_plan.md) |

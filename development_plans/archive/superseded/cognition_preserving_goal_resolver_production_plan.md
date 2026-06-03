@@ -1,7 +1,7 @@
 # Cognition-Preserving Goal Resolver Production Implementation Plan
 
 > Superseded on 2026-06-01 by
-> `development_plans/active/short_term/resolver_default_mainline_cutover_plan.md`.
+> `development_plans/archive/completed/short_term/resolver_default_mainline_cutover_plan.md`.
 > The new plan makes the resolver the default and only live persona workflow,
 > removes the old mandatory RAG-first compatibility path, and focuses on
 > merge-to-main cutover.

@@ -4,10 +4,9 @@
 
 - Goal: Make the cognition resolver the default and only live persona workflow
   on `resolver-goal-poc`, remove the legacy mandatory RAG-first path, and
-  prepare a clean merge from this branch into `main`.
+  merge the completed resolver-only workflow into `main`.
 - Plan class: high_risk_migration
-- Status: in_progress; branch-side closure complete, Stage 8 remains gated by
-  explicit user instruction.
+- Status: completed and archived after merge to `main`.
 - Mandatory skills: `local-llm-architecture`, `py-style`,
   `test-style-and-execution`, `debug-llm`, `development-plan`,
   `cjk-safety` for Python prompt edits.
@@ -20,7 +19,7 @@
   runtime path; `COGNITION_RESOLVER_ENABLED` and legacy `stage_1_research`
   compatibility are removed; English and Chinese docs describe resolver as the
   baseline; deterministic and real LLM validation pass; extensive post-review
-  regression passes; `main` merge waits for explicit user instruction.
+  regression passes; `main` merge completed after explicit user instruction.
 
 ## Context
 
@@ -37,7 +36,7 @@ confirmed product decision:
 - RAG remains available only as a cognition-selected resolver capability;
 - all semantic action and evidence decisions remain inside L1 -> L2 -> L2d.
 
-Current branch state on `resolver-goal-poc`:
+Final merged state:
 
 - the resolver-only live persona graph is implemented;
 - `COGNITION_RESOLVER_ENABLED` and the legacy live `stage_1_research` graph
@@ -45,7 +44,8 @@ Current branch state on `resolver-goal-poc`:
 - RAG remains available through the resolver-selected
   `run_rag_evidence_for_persona_state(...)` helper;
 - full deterministic regression passed;
-- main merge remains blocked by Stage 8 until explicit user instruction.
+- Stage 8 merged `resolver-goal-poc` into `main` after explicit user
+  instruction.
 
 The live graph is:
 
@@ -488,8 +488,8 @@ venv\Scripts\python -m pytest `
 
 If full regression is blocked by an external dependency, database availability,
 or a pre-existing flaky live test, record the exact failing test, error, and
-reason. Stage 8 still requires explicit user instruction and must not proceed
-unless the user accepts any residual regression risk.
+reason. During execution, Stage 8 required explicit user instruction and could
+not proceed unless the user accepted any residual regression risk.
 
 Real LLM validation:
 

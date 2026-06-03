@@ -34,7 +34,7 @@ prompt, pytest, real LLM diagnostic artifacts.
 - Owner: Codex
 - Created: 2026-06-01
 - Related plan:
-  - `development_plans/active/short_term/resolver_default_mainline_cutover_plan.md`
+  - `development_plans/archive/completed/short_term/resolver_default_mainline_cutover_plan.md`
 - Related source:
   - `src/kazusa_ai_chatbot/rag/cognitive_episode_adapter.py`
   - `src/kazusa_ai_chatbot/cognition_resolver/capabilities.py`
