@@ -33,10 +33,11 @@ path, where the later cognition cycle decides again whether any visible output
 should exist.
 
 Group chat review is hosted by the reflection-cycle worker, not by the
-standalone self-cognition worker interval. Reflection passes bounded
-`group_chat_review` cases into the normal self-cognition runner on the
-reflection cadence, then self-cognition owns routing, dialog rendering,
-attempt persistence, consolidation, and source-bound delivery.
+standalone self-cognition worker interval. Reflection phase slots select at
+most one monitor-eligible group, build windows only for that selected group,
+and pass at most one `group_chat_review` case into the normal self-cognition
+runner. Self-cognition then owns routing, dialog rendering, attempt
+persistence, consolidation, and source-bound delivery.
 
 Self-cognition-created episodes set
 `origin_metadata.debug_modes.no_visual_directives=true` by default, so the
@@ -85,7 +86,7 @@ cognition's route or contact decision.
 The self-cognition module owns sleep-period trigger suppression through
 `sleep_period.is_self_cognition_sleep_period(...)`. During the configured
 local sleep period, production source selection skips active-commitment due
-checks, and the reflection-cycle group review sidecar skips group
+checks, and the reflection-cycle group review phase handler skips group
 self-cognition before case collection. Due scheduled future-cognition slots
 remain eligible. Reflection, consolidation, scheduler execution, dispatcher
 validation, and adapter delivery are not paused by this predicate.
@@ -104,7 +105,9 @@ validation, and adapter delivery are not paused by this predicate.
 - When consolidation is applied without a selected visible `speak`, the runner
   reuses an empty `final_dialog` and does not invoke dialog.
 - The production worker applies consolidation by default and keeps the existing
-  `SELF_COGNITION_MAX_CASES_PER_TICK` case cap.
+  `SELF_COGNITION_MAX_CASES_PER_TICK` case cap. Reflection-attached group
+  review uses the reflection phase invariant
+  `REFLECTION_PHASE_GROUPS_PER_SLOT=1` instead of the standalone worker cap.
 
 ## Public Interface
 
@@ -190,6 +193,10 @@ same idempotency key: `candidate`, `held`, `pending_handoff`,
 For `group_chat_review`, a prior `delivery_failed` attempt for the same
 activity-window identity also suppresses another visible-speech attempt; this
 prevents one group window from repeatedly trying the same selected speech.
+Reflection also records every terminal group activity-window review in the
+`self_cognition_group_review_windows` ledger by `source_id`. That ledger
+suppresses repeated silent/audit-only review, records coalesced backlog
+windows, and is separate from visible action-attempt idempotency.
 
 The live worker stores suppression and audit history in the
 `self_cognition_action_attempts` MongoDB collection through

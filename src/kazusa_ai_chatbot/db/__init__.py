@@ -59,6 +59,7 @@ from kazusa_ai_chatbot.db.schemas import (
     ReflectionScopeDoc,
     ScheduledEventDoc,
     SelfCognitionActionAttemptDoc,
+    SelfCognitionGroupReviewWindowDoc,
     UserMemoryContextDoc,
     UserMemoryContextEntry,
     UserMemoryUnitDoc,
@@ -180,7 +181,9 @@ from kazusa_ai_chatbot.db.scheduled_events import (
     query_pending_scheduled_events,
 )
 from kazusa_ai_chatbot.db.self_cognition import (
+    find_self_cognition_group_review_window,
     list_self_cognition_action_attempts,
+    upsert_self_cognition_group_review_window,
     upsert_self_cognition_action_attempt,
 )
 
@@ -236,6 +239,7 @@ __all__ = [
     "PlatformAccountDoc", "RAGCache2PersistentEntryDoc",
     "ReflectionMessageRefDoc", "ReflectionScopeDoc",
     "ScheduledEventDoc", "SelfCognitionActionAttemptDoc",
+    "SelfCognitionGroupReviewWindowDoc",
     "UserMemoryContextDoc", "UserMemoryContextEntry",
     "UserMemoryUnitDoc", "UserMemoryUnitMergeHistoryEntry", "UserMemoryUnitSourceRef",
     "UserMemoryUnitStatus", "UserMemoryUnitType",
@@ -301,7 +305,9 @@ __all__ = [
     "mark_scheduled_event_failed", "mark_scheduled_event_running",
     "query_pending_scheduled_events",
     # Self-cognition action attempts
+    "find_self_cognition_group_review_window",
     "list_self_cognition_action_attempts",
+    "upsert_self_cognition_group_review_window",
     "upsert_self_cognition_action_attempt",
     # Persistent Cache2
     "build_initializer_version_key", "load_initializer_entries",
