@@ -38,6 +38,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [group_chat_user_style_image_plan.md](active/short_term/group_chat_user_style_image_plan.md) | Large interaction-style source expansion plan | draft |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 | [reflection_phase_scheduled_group_review_plan.md](active/short_term/reflection_phase_scheduled_group_review_plan.md) | High-risk migration scheduler and group self-cognition behavior plan | draft |
 | [universal_calendar_scheduler_plan.md](active/short_term/universal_calendar_scheduler_plan.md) | High-risk migration and scheduler architecture plan | draft |
