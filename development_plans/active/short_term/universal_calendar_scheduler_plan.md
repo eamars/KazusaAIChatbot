@@ -848,7 +848,7 @@ requests fallback execution.
 
 ## Progress Checklist
 
-- [ ] Stage 1 - focused calendar module contract established
+- [x] Stage 1 - focused calendar module contract established
 
   - Covers: model, recurrence, repository, worker claim, and migration dry-run
     tests, including active-commitment reconciliation and reflection-phase
@@ -856,7 +856,7 @@ requests fallback execution.
   - Verify: `venv\Scripts\python -m pytest tests/test_calendar_scheduler_models.py tests/test_calendar_scheduler_recurrence.py tests/test_calendar_scheduler_repository.py tests/test_calendar_scheduler_worker.py tests/test_calendar_scheduler_migration.py tests/test_calendar_scheduler_active_commitments.py tests/test_calendar_scheduler_reflection_phase.py -q`.
   - Evidence: record expected pre-implementation failures and changed test
     files in `Execution Evidence`.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+  - Sign-off: `Codex/2026-06-04` after verification and evidence are recorded.
 
 - [ ] Stage 2 - calendar package, ICD README, DB schema, config, and indexes implemented
 
@@ -1122,6 +1122,24 @@ begins.
   execution with subagents. Branch:
   `feature/universal-calendar-scheduler`. Plan status moved from `draft` to
   `in_progress` before implementation.
+- 2026-06-04 Stage 1 focused test contract established:
+  - Added `tests/test_calendar_scheduler_models.py`,
+    `tests/test_calendar_scheduler_recurrence.py`,
+    `tests/test_calendar_scheduler_repository.py`,
+    `tests/test_calendar_scheduler_worker.py`,
+    `tests/test_calendar_scheduler_migration.py`,
+    `tests/test_calendar_scheduler_active_commitments.py`, and
+    `tests/test_calendar_scheduler_reflection_phase.py`.
+  - Read-only subagent review flagged additional Stage 1 coverage gaps for
+    lease recovery, terminal legacy migration handling, active-commitment
+    unschedulable states, stale commitment due-run skips, DST recurrence, and
+    reflection phase metadata boundaries. Those gaps were added before
+    production implementation.
+  - Verification command:
+    `venv\Scripts\python -m pytest tests/test_calendar_scheduler_models.py tests/test_calendar_scheduler_recurrence.py tests/test_calendar_scheduler_repository.py tests/test_calendar_scheduler_worker.py tests/test_calendar_scheduler_migration.py tests/test_calendar_scheduler_active_commitments.py tests/test_calendar_scheduler_reflection_phase.py -q`.
+  - Expected pre-implementation result: 32 failures in 2.55s. Failures are
+    limited to missing `kazusa_ai_chatbot.calendar_scheduler` imports and
+    missing `scripts.migrate_scheduled_events_to_calendar_scheduler` import.
 
 - 2026-06-04 plan refresh: reread plan registry, top-level README, HOWTO,
   development-plan references, dispatcher/self-cognition/reflection/db/action
