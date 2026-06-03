@@ -39,7 +39,7 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
-| [universal_calendar_scheduler_plan.md](active/short_term/universal_calendar_scheduler_plan.md) | High-risk migration and scheduler architecture plan | draft |
+| [universal_calendar_scheduler_plan.md](active/short_term/universal_calendar_scheduler_plan.md) | High-risk migration and scheduler architecture plan | in_progress |
 
 ## Supporting Experiment Records
 

@@ -6,7 +6,7 @@
   calendar scheduler that can run typed cognition, reflection, and recurring
   internal triggers without scheduling delayed user-visible text directly.
 - Plan class: high_risk_migration
-- Status: draft
+- Status: in_progress
 - Mandatory skills: `development-plan`, `local-llm-architecture`,
   `py-style`, `test-style-and-execution`, `database-data-pull` for optional
   live diagnostics, and `cjk-safety` if Python prompt or source-packet text
@@ -1117,6 +1117,11 @@ records final approval status in `Execution Evidence`.
 Plan-review evidence may be recorded here before approval. Implementation
 execution evidence starts only after this plan is approved and implementation
 begins.
+
+- 2026-06-04 execution start: user explicitly requested branching and
+  execution with subagents. Branch:
+  `feature/universal-calendar-scheduler`. Plan status moved from `draft` to
+  `in_progress` before implementation.
 
 - 2026-06-04 plan refresh: reread plan registry, top-level README, HOWTO,
   development-plan references, dispatcher/self-cognition/reflection/db/action
