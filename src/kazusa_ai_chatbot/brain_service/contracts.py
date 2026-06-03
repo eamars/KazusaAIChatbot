@@ -133,6 +133,9 @@ class OpsRuntimeConfigResponse(BaseModel):
     reflection_cycle_enabled: bool
     self_cognition_enabled: bool
     reflection_worker_interval_seconds: int
+    reflection_phase_min_slot_spacing_seconds: int
+    reflection_phase_max_slots_per_period: int
+    reflection_phase_groups_per_slot: int
     self_cognition_worker_interval_seconds: int
     self_cognition_max_cases_per_tick: int
 

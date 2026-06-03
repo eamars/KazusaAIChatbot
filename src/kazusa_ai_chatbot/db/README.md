@@ -377,6 +377,28 @@ metadata such as action kind, validation status, continuation status, and
 action-spec attempt refs. Callers must read the collection tolerantly and must
 not require a separate ledger collection for each capability.
 
+### `self_cognition_group_review_windows`
+
+Stores terminal consumption state for reflection-derived group activity
+windows. The collection is keyed by `source_id`, the stable activity-window
+identity built from scope ref and window bounds.
+
+This ledger supplements `self_cognition_action_attempts`. Action attempts
+suppress repeated visible sends; reviewed-window rows suppress repeated source
+review even when cognition chooses silence, audit-only progress maintenance,
+target-binding failure, or a failed review. Reflection writes only terminal
+rows:
+
+- `reviewed`
+- `target_binding_failed`
+- `review_failed`
+- `coalesced_skipped`
+- `stale_skipped`
+
+Skipped and failed rows carry `skip_reason`. Coalesced rows record older
+windows skipped by a newer selected phase window so backlog cannot produce a
+later visible burst. Historical action-attempt rows are not migrated.
+
 ### `conversation_episode_state`
 
 Stores short-lived conversation-progress state keyed by platform, channel, and
@@ -428,8 +450,9 @@ dropped only through maintenance helpers and explicit operator scripts.
 `db_bootstrap()` owns startup collection/index preparation and required seed
 documents. It creates current collections and indexes, including
 `user_memory_units`, reflection-run indexes, interaction-style indexes,
-scheduled-event indexes, self-cognition action-attempt indexes, and other
-runtime indexes required by the facade.
+scheduled-event indexes, self-cognition action-attempt indexes,
+self-cognition group-review reviewed-window indexes, and other runtime indexes
+required by the facade.
 
 Bootstrap is idempotent. It creates or updates indexes and seed singleton
 documents. Destructive data repair belongs in explicit migration plans.

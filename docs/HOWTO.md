@@ -107,6 +107,8 @@ RAG_CACHE2_MAX_ENTRIES=5000
 REFLECTION_CYCLE_ENABLED=true
 REFLECTION_WORKER_INTERVAL_SECONDS=900
 REFLECTION_HOURLY_SLOTS_PER_TICK=3
+REFLECTION_PHASE_MIN_SLOT_SPACING_SECONDS=60
+REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD=3
 REFLECTION_DAILY_RUN_AFTER_LOCAL_TIME=04:30
 REFLECTION_PROMOTION_RUN_AFTER_LOCAL_TIME=05:00
 GLOBAL_CHARACTER_GROWTH_PASS_ENABLED=true
@@ -191,6 +193,15 @@ Scheduled future cognition, reflection, consolidation, scheduler execution,
 dispatcher validation, and adapter delivery continue. Set
 `CHARACTER_SLEEP_LOCAL_PERIOD` to an empty value to disable this sleep-period
 suppression.
+
+Reflection phase scheduling spreads monitor-eligible channels across the
+`REFLECTION_WORKER_INTERVAL_SECONDS` period instead of running all group
+review work in one burst. `REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD` defaults to
+the old `REFLECTION_HOURLY_SLOTS_PER_TICK` budget, and
+`REFLECTION_PHASE_MIN_SLOT_SPACING_SECONDS` rejects configurations that cannot
+fit the requested slots inside the period. Each phase slot reviews at most one
+group activity window, and old windows for that group are coalesced into the
+reviewed-window ledger instead of being caught up visibly.
 
 ## Dependencies
 
@@ -350,6 +361,8 @@ The response contains only aggregate service state:
 
 - process last event status and timestamp,
 - effective reflection/self-cognition worker config,
+- effective reflection phase period, minimum slot spacing, maximum slots, and
+  one-group-per-slot invariant,
 - process-local worker liveness flags,
 - latest worker event status and timestamp,
 - semantic health labels such as `worker_error_level`.

@@ -128,6 +128,21 @@ async def test_ops_runtime_status_merges_config_and_worker_liveness(
     )
     monkeypatch.setattr(
         service_module,
+        "REFLECTION_PHASE_MIN_SLOT_SPACING_SECONDS",
+        60,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD",
+        3,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "REFLECTION_PHASE_GROUPS_PER_SLOT",
+        1,
+    )
+    monkeypatch.setattr(
+        service_module,
         "SELF_COGNITION_WORKER_INTERVAL_SECONDS",
         3600,
     )
@@ -156,6 +171,9 @@ async def test_ops_runtime_status_merges_config_and_worker_liveness(
         "reflection_cycle_enabled": True,
         "self_cognition_enabled": False,
         "reflection_worker_interval_seconds": 900,
+        "reflection_phase_min_slot_spacing_seconds": 60,
+        "reflection_phase_max_slots_per_period": 3,
+        "reflection_phase_groups_per_slot": 1,
         "self_cognition_worker_interval_seconds": 3600,
         "self_cognition_max_cases_per_tick": 3,
     }

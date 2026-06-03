@@ -159,6 +159,50 @@ async def collect_reflection_inputs(
     return input_set
 
 
+async def collect_reflection_scope_input(
+    *,
+    platform: str,
+    platform_channel_id: str,
+    channel_type: str,
+    scope_ref: str,
+    lookback_hours: int,
+    now: datetime,
+) -> ReflectionScopeInput:
+    """Fetch a bounded transcript slice for one selected channel scope.
+
+    Args:
+        platform: Platform key for the selected source channel.
+        platform_channel_id: Platform-native channel id.
+        channel_type: Normalized channel type from the phase intent.
+        scope_ref: Stable scope id carried by the phase intent.
+        lookback_hours: Requested message lookback window.
+        now: Deterministic UTC upper bound for the fetch.
+
+    Returns:
+        A fresh scope input for the selected channel only.
+    """
+
+    effective_now = normalize_utc_datetime(now)
+    requested_start_dt = effective_now - timedelta(hours=lookback_hours)
+    requested_start = isoformat_utc(requested_start_dt)
+    requested_end = isoformat_utc(effective_now)
+    messages = await list_reflection_scope_messages(
+        platform=platform,
+        platform_channel_id=platform_channel_id,
+        start_timestamp=requested_start,
+        end_timestamp=requested_end,
+        limit=READONLY_REFLECTION_MAX_MESSAGES_PER_SCOPE,
+    )
+    scope = _scope_input_from_messages(
+        platform=platform,
+        platform_channel_id=platform_channel_id,
+        channel_type=channel_type,
+        scope_ref=scope_ref,
+        messages=messages,
+    )
+    return scope
+
+
 async def _fetch_scope_messages(
     *,
     channel_rows: list[dict[str, Any]],
@@ -180,34 +224,54 @@ async def _fetch_scope_messages(
             end_timestamp=end_timestamp,
             limit=READONLY_REFLECTION_MAX_MESSAGES_PER_SCOPE,
         )
-        assistant_count = sum(
-            1
-            for message in messages
-            if message.get("role") == "assistant"
-        )
-        user_count = sum(
-            1
-            for message in messages
-            if message.get("role") == "user"
-        )
-        first_timestamp = ""
-        last_timestamp = ""
-        if messages:
-            first_timestamp = str(messages[0]["timestamp"])
-            last_timestamp = str(messages[-1]["timestamp"])
-        selected_scope = ReflectionScopeInput(
-            scope_ref=build_scope_ref(platform, platform_channel_id, channel_type),
+        selected_scope = _scope_input_from_messages(
             platform=platform,
             platform_channel_id=platform_channel_id,
             channel_type=channel_type,
-            assistant_message_count=assistant_count,
-            user_message_count=user_count,
-            total_message_count=len(messages),
-            first_timestamp=first_timestamp,
-            last_timestamp=last_timestamp,
+            scope_ref=build_scope_ref(platform, platform_channel_id, channel_type),
             messages=messages,
         )
         selected_scopes.append(selected_scope)
 
     return_value = selected_scopes
     return return_value
+
+
+def _scope_input_from_messages(
+    *,
+    platform: str,
+    platform_channel_id: str,
+    channel_type: str,
+    scope_ref: str,
+    messages: list[dict[str, Any]],
+) -> ReflectionScopeInput:
+    """Build scope counters and timestamp bounds from fetched messages."""
+
+    assistant_count = sum(
+        1
+        for message in messages
+        if message.get("role") == "assistant"
+    )
+    user_count = sum(
+        1
+        for message in messages
+        if message.get("role") == "user"
+    )
+    first_timestamp = ""
+    last_timestamp = ""
+    if messages:
+        first_timestamp = str(messages[0]["timestamp"])
+        last_timestamp = str(messages[-1]["timestamp"])
+    scope = ReflectionScopeInput(
+        scope_ref=scope_ref,
+        platform=platform,
+        platform_channel_id=platform_channel_id,
+        channel_type=channel_type,
+        assistant_message_count=assistant_count,
+        user_message_count=user_count,
+        total_message_count=len(messages),
+        first_timestamp=first_timestamp,
+        last_timestamp=last_timestamp,
+        messages=messages,
+    )
+    return scope

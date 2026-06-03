@@ -29,6 +29,8 @@ from kazusa_ai_chatbot.config import (
     COGNITION_VISUAL_DIRECTIVES_ENABLED,
     RAG_CACHE2_MAX_ENTRIES,
     REFLECTION_CYCLE_ENABLED,
+    REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD,
+    REFLECTION_PHASE_MIN_SLOT_SPACING_SECONDS,
     REFLECTION_WORKER_INTERVAL_SECONDS,
     SCHEDULED_TASKS_ENABLED,
     SELF_COGNITION_ENABLED,
@@ -51,6 +53,9 @@ from kazusa_ai_chatbot.internal_monologue_residue import (
     record_completed_episode_residue,
 )
 from kazusa_ai_chatbot.llm_route_report import render_llm_route_table
+from kazusa_ai_chatbot.reflection_cycle.phase_scheduler import (
+    REFLECTION_PHASE_GROUPS_PER_SLOT,
+)
 from kazusa_ai_chatbot.db import (
     backfill_character_conversation_identity,
     check_database_connection,
@@ -556,6 +561,13 @@ def _ops_runtime_status_payload(
             "reflection_worker_interval_seconds": (
                 REFLECTION_WORKER_INTERVAL_SECONDS
             ),
+            "reflection_phase_min_slot_spacing_seconds": (
+                REFLECTION_PHASE_MIN_SLOT_SPACING_SECONDS
+            ),
+            "reflection_phase_max_slots_per_period": (
+                REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD
+            ),
+            "reflection_phase_groups_per_slot": REFLECTION_PHASE_GROUPS_PER_SLOT,
             "self_cognition_worker_interval_seconds": (
                 SELF_COGNITION_WORKER_INTERVAL_SECONDS
             ),

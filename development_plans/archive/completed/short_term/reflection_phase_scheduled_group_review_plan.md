@@ -6,7 +6,7 @@
   with a deterministic phase scheduler over current monitor-eligible channels,
   while enforcing one group per phase slot and once-only group-window review.
 - Plan class: high_risk_migration
-- Status: draft
+- Status: completed
 - Mandatory skills: `development-plan`, `local-llm-architecture`, `py-style`,
   `test-style-and-execution`, `database-data-pull` for optional live
   diagnostics, and `cjk-safety` if Python prompt/source-packet text with CJK is
@@ -787,7 +787,7 @@ execution.
 
 ## Progress Checklist
 
-- [ ] Stage 1 - phase scheduler and config contract established
+- [x] Stage 1 - phase scheduler and config contract established
   - Covers: implementation steps 1-5.
   - Files: `tests/test_reflection_phase_scheduler.py`,
     `tests/test_config.py`, `src/kazusa_ai_chatbot/config.py`,
@@ -798,9 +798,9 @@ execution.
   - Evidence: record failing-test baseline, changed files, and passing output
     in `Execution Evidence`.
   - Handoff: next agent starts at Stage 2.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+  - Sign-off: `Codex/2026-06-03` after verification and evidence are recorded.
 
-- [ ] Stage 2 - reviewed-window ledger contract complete
+- [x] Stage 2 - reviewed-window ledger contract complete
   - Covers: implementation steps 6-8.
   - Files: `tests/test_db.py`, `src/kazusa_ai_chatbot/db/self_cognition.py`,
     `src/kazusa_ai_chatbot/db/bootstrap.py`,
@@ -810,9 +810,9 @@ execution.
   - Evidence: record failing-test baseline, changed files, and passing output
     in `Execution Evidence`.
   - Handoff: next agent starts at Stage 3.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+  - Sign-off: `Codex/2026-06-03` after verification and evidence are recorded.
 
-- [ ] Stage 3 - reflection worker phase integration complete
+- [x] Stage 3 - reflection worker phase integration complete
   - Covers: implementation steps 9-11.
   - Files: `tests/test_reflection_cycle_stage1c_worker.py`,
     `src/kazusa_ai_chatbot/reflection_cycle/selector.py`,
@@ -824,9 +824,9 @@ execution.
   - Evidence: record old-behavior baseline, changed files, and passing output
     in `Execution Evidence`.
   - Handoff: next agent starts at Stage 4.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+  - Sign-off: `Codex/2026-06-03` after verification and evidence are recorded.
 
-- [ ] Stage 4 - docs and ops surfaces updated
+- [x] Stage 4 - docs and ops surfaces updated
   - Covers: implementation steps 12-13.
   - Files: `tests/test_service_ops_status.py`, docs architecture tests if
     affected, `src/kazusa_ai_chatbot/service.py`,
@@ -836,24 +836,24 @@ execution.
   - Verify: ops/docs focused tests pass.
   - Evidence: record changed files and passing output in `Execution Evidence`.
   - Handoff: next agent starts at Stage 5.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+  - Sign-off: `Codex/2026-06-03` after verification and evidence are recorded.
 
-- [ ] Stage 5 - full focused verification complete
+- [x] Stage 5 - full focused verification complete
   - Covers: implementation step 14.
   - Verify: all commands in `Verification` pass or have recorded blocker
     evidence.
   - Evidence: record command output and residual risk.
   - Handoff: next agent starts independent code review.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+  - Sign-off: `Codex/2026-06-03` after verification and evidence are recorded.
 
-- [ ] Stage 6 - independent code review complete
+- [x] Stage 6 - independent code review complete
   - Covers: implementation steps 15-16.
   - Verify: review findings are addressed or explicitly accepted as residual
     risk, and affected verification commands are rerun.
   - Evidence: record reviewer findings, fixes, rerun commands, and approval
     status.
   - Handoff: plan can move toward completion only after user acceptance.
-  - Sign-off: `<agent/date>` after review approval and evidence are recorded.
+  - Sign-off: `Codex/2026-06-03` after review approval and evidence are recorded.
 
 ## Verification
 
@@ -1027,5 +1027,216 @@ must rerun affected verification before sign-off.
 
 ## Execution Evidence
 
-No execution evidence yet. This plan is a draft and does not authorize
-production-code changes.
+- 2026-06-03: User explicitly requested implementation of this plan after
+  committing local plan changes.
+- 2026-06-03: Plan-review evidence from the draft review pass found no
+  remaining blocking issues after fixes to `max_slots_per_period` and
+  `skip_reason` optionality.
+- 2026-06-03: Planning changes committed on `main` as `c95be0b`
+  (`docs: update scheduler development plans`).
+- 2026-06-03: Implementation branch created:
+  `feature/reflection-phase-scheduled-group-review`.
+- 2026-06-03: Stage 1 failing baseline recorded before production code:
+  `venv\Scripts\python -m pytest tests\test_reflection_phase_scheduler.py -q`
+  failed during collection because `reflection_cycle.phase_scheduler` did not
+  exist.
+- 2026-06-03: Stage 1 config failing baseline recorded before production
+  code: `venv\Scripts\python -m pytest
+  tests\test_config.py::TestReflectionCycleConfig -q` had 4 existing passes
+  and 5 expected failures for missing phase config values and validation.
+- 2026-06-03: Stage 1 production-code subagent `019e8cf4-7eae-7cf1-bb69-aa329b5802ca`
+  implemented `src/kazusa_ai_chatbot/config.py` and
+  `src/kazusa_ai_chatbot/reflection_cycle/phase_scheduler.py`.
+- 2026-06-03: Stage 1 verification passed locally:
+  `venv\Scripts\python -m pytest tests\test_reflection_phase_scheduler.py
+  tests\test_config.py::TestReflectionCycleConfig -q` reported 14 passed.
+- 2026-06-03: Stage 1 syntax verification passed locally:
+  `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\config.py
+  src\kazusa_ai_chatbot\reflection_cycle\phase_scheduler.py
+  tests\test_reflection_phase_scheduler.py tests\test_config.py`.
+- 2026-06-03: Stage 1 purity grep passed locally:
+  `rg -n "event_logging|get_db|asyncio|sleep|lease|retry|AdapterRegistry"
+  src\kazusa_ai_chatbot\reflection_cycle\phase_scheduler.py` returned no
+  matches.
+- 2026-06-03: Stage 2 failing baseline recorded before DB production code:
+  `venv\Scripts\python -m pytest
+  tests\test_db.py::test_upsert_group_review_window_inserts_by_source_id
+  tests\test_db.py::test_upsert_group_review_window_returns_existing_terminal_row
+  tests\test_db.py::test_find_group_review_window_reads_by_source_id
+  tests\test_db.py::test_group_review_skipped_rows_require_skip_reason
+  tests\test_db.py::test_group_review_reviewed_and_failed_rows_validate_fields
+  tests\test_db.py::test_db_bootstrap_creates_group_review_window_indexes -q`
+  failed deterministically for missing reviewed-window helpers and missing
+  bootstrap indexes.
+- 2026-06-03: Stage 2 production-code subagent `019e8cff-4174-7023-a737-52a04ffe5b56`
+  implemented reviewed-window DB helpers, schema, facade exports, and
+  bootstrap indexes in `src/kazusa_ai_chatbot/db/self_cognition.py`,
+  `src/kazusa_ai_chatbot/db/schemas.py`,
+  `src/kazusa_ai_chatbot/db/__init__.py`, and
+  `src/kazusa_ai_chatbot/db/bootstrap.py`.
+- 2026-06-03: Stage 2 verification passed locally:
+  `venv\Scripts\python -m pytest
+  tests\test_db.py::test_upsert_group_review_window_inserts_by_source_id
+  tests\test_db.py::test_upsert_group_review_window_returns_existing_terminal_row
+  tests\test_db.py::test_find_group_review_window_reads_by_source_id
+  tests\test_db.py::test_group_review_skipped_rows_require_skip_reason
+  tests\test_db.py::test_group_review_reviewed_and_failed_rows_validate_fields
+  tests\test_db.py::test_db_bootstrap_creates_group_review_window_indexes -q`
+  reported 6 passed.
+- 2026-06-03: Stage 2 syntax verification passed locally:
+  `venv\Scripts\python -m py_compile
+  src\kazusa_ai_chatbot\db\self_cognition.py
+  src\kazusa_ai_chatbot\db\bootstrap.py
+  src\kazusa_ai_chatbot\db\schemas.py
+  src\kazusa_ai_chatbot\db\__init__.py tests\test_db.py`.
+- 2026-06-03: Stage 3 worker failing baseline recorded before worker
+  production code: `venv\Scripts\python -m pytest
+  tests\test_reflection_cycle_stage1c_worker.py -q` reported 7 existing
+  passes and 12 expected failures for missing phase-provider injection,
+  phase-intent handlers, scoped group-review reviewed-window suppression,
+  daily phase-readiness, and intra-period wait behavior.
+- 2026-06-03: Stage 3 production-code subagent
+  `019e8d0f-1df6-7a60-8a5f-b552a9826949` implemented phase-provider worker
+  integration and scoped source fetching in
+  `src\kazusa_ai_chatbot\reflection_cycle\worker.py` and
+  `src\kazusa_ai_chatbot\reflection_cycle\selector.py`.
+- 2026-06-03: Stage 3 parent review removed the old global group-review
+  sidecar path from `_run_worker_tick`, added target-binding-failed ledger
+  coverage, and hardened provider wait-planning failures.
+- 2026-06-03: Stage 3 verification passed locally:
+  `venv\Scripts\python -m pytest
+  tests\test_reflection_cycle_stage1c_worker.py
+  tests\test_global_character_growth_worker.py
+  tests\test_reflection_cycle_stage1c_service.py::test_reflection_worker_defers_while_primary_interaction_is_busy
+  tests\test_reflection_event_logging.py::test_worker_tick_records_deferred_event
+  -q` reported 27 passed.
+- 2026-06-03: Stage 1/2 regression verification passed after Stage 3:
+  `venv\Scripts\python -m pytest tests\test_reflection_phase_scheduler.py
+  tests\test_config.py::TestReflectionCycleConfig
+  tests\test_db.py::test_upsert_group_review_window_inserts_by_source_id
+  tests\test_db.py::test_upsert_group_review_window_returns_existing_terminal_row
+  tests\test_db.py::test_find_group_review_window_reads_by_source_id
+  tests\test_db.py::test_group_review_skipped_rows_require_skip_reason
+  tests\test_db.py::test_group_review_reviewed_and_failed_rows_validate_fields
+  tests\test_db.py::test_db_bootstrap_creates_group_review_window_indexes -q`
+  reported 20 passed.
+- 2026-06-03: Stage 3 syntax verification passed locally:
+  `venv\Scripts\python -m py_compile
+  src\kazusa_ai_chatbot\reflection_cycle\worker.py
+  src\kazusa_ai_chatbot\reflection_cycle\selector.py
+  src\kazusa_ai_chatbot\reflection_cycle\repository.py
+  src\kazusa_ai_chatbot\reflection_cycle\phase_scheduler.py
+  src\kazusa_ai_chatbot\config.py
+  src\kazusa_ai_chatbot\db\self_cognition.py
+  src\kazusa_ai_chatbot\db\bootstrap.py
+  src\kazusa_ai_chatbot\db\schemas.py
+  tests\test_reflection_cycle_stage1c_worker.py
+  tests\test_reflection_phase_scheduler.py tests\test_config.py
+  tests\test_db.py`.
+- 2026-06-03: Stage 4 updated operator-visible phase config in
+  `/ops/runtime-status` through `src\kazusa_ai_chatbot\service.py`,
+  `src\kazusa_ai_chatbot\brain_service\contracts.py`, and
+  `tests\test_service_ops_status.py`.
+- 2026-06-03: Stage 4 updated docs in `docs\HOWTO.md`,
+  `src\kazusa_ai_chatbot\reflection_cycle\README.md`,
+  `src\kazusa_ai_chatbot\self_cognition\README.md`, and
+  `src\kazusa_ai_chatbot\db\README.md` for phase defaults, one group per
+  slot, once-only reviewed-window review, coalescing, and daily readiness.
+- 2026-06-03: Stage 4 verification passed locally:
+  `venv\Scripts\python -m pytest tests\test_service_ops_status.py -q`
+  reported 4 passed.
+- 2026-06-03: Stage 4 syntax verification passed locally:
+  `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\service.py
+  src\kazusa_ai_chatbot\brain_service\contracts.py`.
+- 2026-06-03: Stage 5 syntax verification passed locally:
+  `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\config.py
+  src\kazusa_ai_chatbot\reflection_cycle\phase_scheduler.py
+  src\kazusa_ai_chatbot\reflection_cycle\selector.py
+  src\kazusa_ai_chatbot\reflection_cycle\worker.py
+  src\kazusa_ai_chatbot\reflection_cycle\repository.py
+  src\kazusa_ai_chatbot\db\self_cognition.py
+  src\kazusa_ai_chatbot\db\bootstrap.py
+  src\kazusa_ai_chatbot\db\schemas.py src\kazusa_ai_chatbot\service.py
+  src\kazusa_ai_chatbot\brain_service\contracts.py`.
+- 2026-06-03: Stage 5 whitespace verification passed locally:
+  `git diff --check` exited successfully, with only Git line-ending warnings.
+- 2026-06-03: Stage 5 focused deterministic verification passed locally:
+  `venv\Scripts\python -m pytest tests\test_reflection_phase_scheduler.py
+  tests\test_reflection_cycle_stage1c_worker.py
+  tests\test_self_cognition_group_review_source.py
+  tests\test_reflection_cycle_activity_windows.py tests\test_db.py
+  tests\test_config.py tests\test_service_ops_status.py -q` reported
+  162 passed and 13 deselected.
+- 2026-06-03: Stage 5 broader regression verification passed locally:
+  `venv\Scripts\python -m pytest
+  tests\test_reflection_cycle_stage1c_repository.py
+  tests\test_reflection_cycle_stage1c_service.py
+  tests\test_reflection_event_logging.py tests\test_self_cognition_tracking.py
+  tests\test_self_cognition_event_logging.py
+  tests\test_self_cognition_delivery_target.py -q` reported 69 passed.
+- 2026-06-03: Stage 5 residual risk: existing DB/bootstrap and service tests
+  connected to the configured MongoDB host during normal test setup. No `.env`
+  inspection, live DB export, or live LLM diagnostic was performed.
+- 2026-06-03: Stage 6 independent code-review subagent
+  `019e8d23-d335-7b00-b0c8-361cdb7dd168` reviewed the full implementation
+  diff, including untracked `reflection_cycle/phase_scheduler.py` and
+  `tests/test_reflection_phase_scheduler.py`, and reported three blocking
+  worker findings: wait planning used pre-tick time, daily/style/promotion
+  maintenance could rerun across intra-period wakes, and daily-readiness
+  expected IDs included open hourly buckets.
+- 2026-06-03: Stage 6 remediation added failing tests for the three review
+  findings in `tests\test_reflection_cycle_stage1c_worker.py`; the targeted
+  baseline command failed as expected before production fixes:
+  `venv\Scripts\python -m pytest
+  tests\test_reflection_cycle_stage1c_worker.py::test_daily_readiness_uses_only_closed_hours_for_phase_due_at
+  tests\test_reflection_cycle_stage1c_worker.py::test_worker_loop_uses_post_tick_time_for_next_phase_wait
+  tests\test_reflection_cycle_stage1c_worker.py::test_worker_loop_runs_period_maintenance_once_across_phase_wakes
+  -q`.
+- 2026-06-03: Stage 6 remediation in
+  `src\kazusa_ai_chatbot\reflection_cycle\worker.py` refreshed loop time before
+  wait planning, returned zero wait for already-due unexecuted intents, gated
+  daily/style and promotion/growth maintenance once per phase period, and
+  derived daily expected hourly IDs from closed scopes at intent `due_at`.
+- 2026-06-03: Stage 6 targeted verification passed locally:
+  `venv\Scripts\python -m pytest
+  tests\test_reflection_cycle_stage1c_worker.py::test_daily_readiness_uses_only_closed_hours_for_phase_due_at
+  tests\test_reflection_cycle_stage1c_worker.py::test_worker_loop_uses_post_tick_time_for_next_phase_wait
+  tests\test_reflection_cycle_stage1c_worker.py::test_worker_loop_runs_period_maintenance_once_across_phase_wakes
+  -q` reported 3 passed.
+- 2026-06-03: Stage 6 worker regression verification passed locally:
+  `venv\Scripts\python -m pytest
+  tests\test_reflection_cycle_stage1c_worker.py -q` reported 24 passed.
+- 2026-06-03: Stage 6 syntax verification passed locally:
+  `venv\Scripts\python -m py_compile
+  src\kazusa_ai_chatbot\reflection_cycle\worker.py
+  tests\test_reflection_cycle_stage1c_worker.py`.
+- 2026-06-03: Stage 6 post-remediation full syntax verification passed
+  locally with the Stage 5 py-compile command plus
+  `tests\test_reflection_cycle_stage1c_worker.py`.
+- 2026-06-03: Stage 6 post-remediation whitespace verification passed
+  locally: `git diff --check` exited successfully, with only Git line-ending
+  warnings.
+- 2026-06-03: Stage 6 post-remediation focused deterministic verification
+  passed locally: `venv\Scripts\python -m pytest
+  tests\test_reflection_phase_scheduler.py
+  tests\test_reflection_cycle_stage1c_worker.py
+  tests\test_self_cognition_group_review_source.py
+  tests\test_reflection_cycle_activity_windows.py tests\test_db.py
+  tests\test_config.py tests\test_service_ops_status.py -q` reported
+  165 passed and 13 deselected.
+- 2026-06-03: Stage 6 post-remediation broader regression verification passed
+  locally: `venv\Scripts\python -m pytest
+  tests\test_reflection_cycle_stage1c_repository.py
+  tests\test_reflection_cycle_stage1c_service.py
+  tests\test_reflection_event_logging.py tests\test_self_cognition_tracking.py
+  tests\test_self_cognition_event_logging.py
+  tests\test_self_cognition_delivery_target.py -q` reported 69 passed.
+- 2026-06-03: Stage 6 remediation re-review by subagent
+  `019e8d23-d335-7b00-b0c8-361cdb7dd168` found no remaining blocking issues
+  and approved the implementation for plan sign-off. Residual risk recorded by
+  reviewer: maintenance keys are marked before maintenance calls complete, so
+  an exception suppresses same-period retry; this matches the at-most-once
+  period behavior.
+- 2026-06-03: User accepted closure. Plan status changed to `completed` and
+  record moved from `development_plans/active/short_term/` to
+  `development_plans/archive/completed/short_term/`.

@@ -776,6 +776,123 @@ class TestReflectionCycleConfig:
         assert not hasattr(config, "REFLECTION_" + "CYCLE_DISABLED")
         assert not hasattr(config, "REFLECTION_" + "CONTEXT_ENABLED")
 
+    def test_reflection_phase_config_defaults_share_old_slot_budget(
+        self,
+        tmp_path,
+    ):
+        env = _configured_subprocess_env_without_dotenv()
+        env.pop("REFLECTION_WORKER_INTERVAL_SECONDS", None)
+        env.pop("REFLECTION_HOURLY_SLOTS_PER_TICK", None)
+        env.pop("REFLECTION_PHASE_MIN_SLOT_SPACING_SECONDS", None)
+        env.pop("REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD", None)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(config.REFLECTION_WORKER_INTERVAL_SECONDS); "
+                    "print(config.REFLECTION_HOURLY_SLOTS_PER_TICK); "
+                    "print(config.REFLECTION_PHASE_MIN_SLOT_SPACING_SECONDS); "
+                    "print(config.REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD)"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.splitlines() == ["900", "3", "60", "3"]
+
+    def test_reflection_phase_max_slots_default_tracks_hourly_slot_budget(
+        self,
+        tmp_path,
+    ):
+        env = _configured_subprocess_env_without_dotenv()
+        env["REFLECTION_HOURLY_SLOTS_PER_TICK"] = "5"
+        env.pop("REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD", None)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(config.REFLECTION_HOURLY_SLOTS_PER_TICK); "
+                    "print(config.REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD)"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.splitlines() == ["5", "5"]
+
+    def test_reflection_phase_spacing_must_be_positive(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["REFLECTION_PHASE_MIN_SLOT_SPACING_SECONDS"] = "0"
+
+        result = subprocess.run(
+            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode != 0
+        assert (
+            "REFLECTION_PHASE_MIN_SLOT_SPACING_SECONDS must be >= 1"
+            in result.stderr
+        )
+
+    def test_reflection_phase_max_slots_must_be_positive(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD"] = "0"
+
+        result = subprocess.run(
+            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode != 0
+        assert "REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD must be >= 1" in result.stderr
+
+    def test_reflection_phase_max_slots_must_fit_spacing(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["REFLECTION_WORKER_INTERVAL_SECONDS"] = "900"
+        env["REFLECTION_PHASE_MIN_SLOT_SPACING_SECONDS"] = "300"
+        env["REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD"] = "4"
+
+        result = subprocess.run(
+            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode != 0
+        assert (
+            "REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD cannot fit inside "
+            "REFLECTION_WORKER_INTERVAL_SECONDS with "
+            "REFLECTION_PHASE_MIN_SLOT_SPACING_SECONDS"
+        ) in result.stderr
+
 
 class TestGlobalCharacterGrowthConfig:
     def test_prompt_char_budget_defaults_to_32000(self, tmp_path):

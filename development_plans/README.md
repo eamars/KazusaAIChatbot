@@ -39,7 +39,6 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
-| [reflection_phase_scheduled_group_review_plan.md](active/short_term/reflection_phase_scheduled_group_review_plan.md) | High-risk migration scheduler and group self-cognition behavior plan | draft |
 | [universal_calendar_scheduler_plan.md](active/short_term/universal_calendar_scheduler_plan.md) | High-risk migration and scheduler architecture plan | draft |
 
 ## Supporting Experiment Records
@@ -201,6 +200,7 @@ plans.
 | [reflection_attached_group_self_cognition_plan.md](archive/completed/short_term/reflection_attached_group_self_cognition_plan.md) |
 | [reflection_flag_simplification_plan.md](archive/completed/short_term/reflection_flag_simplification_plan.md) |
 | [reflection_memory_integration_stage1c_plan.md](archive/completed/short_term/reflection_memory_integration_stage1c_plan.md) |
+| [reflection_phase_scheduled_group_review_plan.md](archive/completed/short_term/reflection_phase_scheduled_group_review_plan.md) |
 | [resolver_default_mainline_cutover_plan.md](archive/completed/short_term/resolver_default_mainline_cutover_plan.md) |
 | [role_vocabulary_contract_cleanup_plan.md](archive/completed/short_term/role_vocabulary_contract_cleanup_plan.md) |
 | [self_cognition_agency_loop_plan.md](archive/completed/short_term/self_cognition_agency_loop_plan.md) |

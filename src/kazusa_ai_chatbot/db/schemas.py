@@ -578,3 +578,27 @@ class SelfCognitionActionAttemptDoc(TypedDict, total=False):
     continuation_status: str
     execution_result: dict | None
     errors: list[str]
+
+
+class SelfCognitionGroupReviewWindowDoc(TypedDict, total=False):
+    """Terminal reviewed-window ledger row for group self-cognition review."""
+
+    source_id: str
+    case_id: str | None
+    scope_ref: str
+    platform: str
+    platform_channel_id: str
+    channel_type: Literal["group"]
+    window_start: str
+    window_end: str
+    status: Literal[
+        "reviewed",
+        "target_binding_failed",
+        "review_failed",
+        "coalesced_skipped",
+        "stale_skipped",
+    ]
+    reviewed_at: str
+    selected_route: str | None
+    dispatch_status: str | None
+    skip_reason: str | None
