@@ -909,13 +909,13 @@ requests fallback execution.
   - Evidence: record test output and doc files changed.
   - Sign-off: `Codex/2026-06-04` after verification and evidence are recorded.
 
-- [ ] Stage 8 - full deterministic verification complete
+- [x] Stage 8 - full deterministic verification complete
 
   - Covers: focused and integration tests listed in `Verification`.
   - Verify: all required commands pass or blocked commands are recorded with
     exact reason.
   - Evidence: record command outputs and residual risks.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+  - Sign-off: `Codex/2026-06-04` after verification and evidence are recorded.
 
 - [ ] Stage 9 - independent code review complete
 
@@ -1520,3 +1520,73 @@ begins.
     contracts, trigger contracts, and forbidden paths.
   - `git diff --check` reported no whitespace errors; only LF/CRLF working
     copy normalization warnings.
+- 2026-06-04 Stage 8 full deterministic verification completed:
+  - Parent reread the full active plan after context compaction before
+    continuing Stage 8.
+  - Required deterministic pytest commands:
+    - `venv\Scripts\python -m pytest tests/test_calendar_scheduler_models.py -q`
+      reported 5 passed in 0.05s.
+    - `venv\Scripts\python -m pytest tests/test_calendar_scheduler_recurrence.py -q`
+      reported 5 passed in 0.05s.
+    - `venv\Scripts\python -m pytest tests/test_calendar_scheduler_repository.py -q`
+      reported 10 passed in 1.44s.
+    - `venv\Scripts\python -m pytest tests/test_calendar_scheduler_worker.py -q`
+      reported 4 passed in 1.82s.
+    - `venv\Scripts\python -m pytest tests/test_calendar_scheduler_migration.py -q`
+      reported 8 passed in 1.48s.
+    - `venv\Scripts\python -m pytest tests/test_calendar_scheduler_active_commitments.py -q`
+      reported 14 passed in 1.52s.
+    - `venv\Scripts\python -m pytest tests/test_calendar_scheduler_reflection_phase.py -q`
+      reported 7 passed in 1.95s.
+    - `venv\Scripts\python -m pytest tests/test_action_spec_future_cognition.py -q`
+      reported 9 passed in 1.48s.
+    - `venv\Scripts\python -m pytest tests/test_self_cognition_integration.py -q`
+      reported 40 passed in 2.13s.
+    - `venv\Scripts\python -m pytest tests/test_action_spec_memory_lifecycle.py -q`
+      reported 10 passed in 1.43s.
+    - `venv\Scripts\python -m pytest tests/test_rag_recall_agent.py -q`
+      reported 14 passed in 1.52s.
+    - `venv\Scripts\python -m pytest tests/test_reflection_phase_scheduler.py -q`
+      reported 5 passed in 1.96s.
+    - `venv\Scripts\python -m pytest tests/test_reflection_cycle_stage1c_worker.py -q`
+      reported 24 passed in 1.95s.
+    - `venv\Scripts\python -m pytest tests/test_config.py tests/test_service_ops_status.py -q`
+      reported 59 passed in 5.06s.
+    - `venv\Scripts\python -m pytest tests/test_db.py -q`
+      reported 66 passed, 13 deselected in 1.68s.
+  - Stage 8 static grep found no production runtime scheduler module,
+    service startup hook, runtime facade, old enable flag, stale
+    scheduled-event query helper, stale recall collector import, or old DB
+    helper facade. Remaining matches are accepted historical collection/index
+    references, maintenance-only migration helpers, migration and
+    decommission tests, historical cleanup diagnostics, the valid
+    `trigger_future_cognition` action capability, prompt-contract tests, and
+    docs that explicitly describe historical migration or forbidden paths.
+  - Stage 8 static grep found one stale documentation command in
+    `src/kazusa_ai_chatbot/proactive_output/README.md` that named the removed
+    `scheduler.schedule_event` and deleted `scheduler.py` path. Parent fixed
+    that documentation-only drift by pointing the ICD verification command at
+    the current calendar scheduler boundary and reran the old-path grep.
+  - Reflection grep:
+    `rg -n "reflection_phase_runs|reflection_hourly_slot|group_self_cognition_review" src/kazusa_ai_chatbot/calendar_scheduler tests/test_calendar_scheduler_reflection_phase.py`.
+    Result: no production Python split reflection trigger kinds and no side
+    control collection. Matches are only allowed action assertions in
+    `tests/test_calendar_scheduler_reflection_phase.py` and forbidden-path or
+    allowed-action wording in `calendar_scheduler/README.md`.
+  - README ICD check:
+    `Test-Path -LiteralPath src/kazusa_ai_chatbot/calendar_scheduler/README.md`
+    returned `True`; the README section grep matched document control,
+    owning package, interface boundary, public interfaces, collection
+    contracts, trigger contracts, and forbidden paths.
+  - Migration dry-run command:
+    `venv\Scripts\python -m scripts.migrate_scheduled_events_to_calendar_scheduler --dry-run --output test_artifacts/calendar_migration_dry_run.json`.
+    Result: command exited 0; artifact summary reported `blocked=false`,
+    `dry_run=true`, `total_legacy_rows=106`, `total_pending=0`,
+    `unknown_tool=0`, `future_cognition_to_migrate=0`,
+    `legacy_send_message_to_cancel=0`, and `terminal_ignored=106`.
+  - `git diff --check` reported no whitespace errors; only LF/CRLF working
+    copy normalization warnings.
+  - Residual risks: live DB apply migration was not run because the plan
+    requires explicit user approval for apply mode; deterministic DB tests
+    included patched/mock DB surfaces and bootstrap/index checks, not a live
+    destructive migration apply.

@@ -212,8 +212,8 @@ Any change to this module must run:
 ```powershell
 venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\proactive_output\__init__.py src\kazusa_ai_chatbot\proactive_output\contracts.py src\kazusa_ai_chatbot\proactive_output\policy.py src\kazusa_ai_chatbot\proactive_output\outbox.py tests\test_multi_source_cognition_stage_10_proactive_policy.py tests\test_multi_source_cognition_stage_10_proactive_outbox.py
 venv\Scripts\python.exe -m pytest tests\test_multi_source_cognition_stage_10_proactive_policy.py tests\test_multi_source_cognition_stage_10_proactive_outbox.py
-rg -n "scheduler\.schedule_event|dispatcher\.dispatch|save_conversation|apply_assistant_delivery_receipt|insert_scheduled_event|register_runtime_adapter|register_remote_runtime_adapter" src\kazusa_ai_chatbot\proactive_output tests\test_multi_source_cognition_stage_10_proactive_policy.py tests\test_multi_source_cognition_stage_10_proactive_outbox.py
-rg -n "proactive_output|proactive_preview|proactive_sent|Proactive" src\kazusa_ai_chatbot\service.py src\kazusa_ai_chatbot\scheduler.py src\kazusa_ai_chatbot\db src\kazusa_ai_chatbot\dispatcher
+rg -n "dispatcher\.dispatch|save_conversation|apply_assistant_delivery_receipt|register_runtime_adapter|register_remote_runtime_adapter" src\kazusa_ai_chatbot\proactive_output tests\test_multi_source_cognition_stage_10_proactive_policy.py tests\test_multi_source_cognition_stage_10_proactive_outbox.py
+rg -n "proactive_output|proactive_preview|proactive_sent|Proactive" src\kazusa_ai_chatbot\service.py src\kazusa_ai_chatbot\calendar_scheduler src\kazusa_ai_chatbot\db src\kazusa_ai_chatbot\dispatcher
 rg -n "send_message" src\kazusa_ai_chatbot\proactive_output tests\test_multi_source_cognition_stage_10_proactive_policy.py tests\test_multi_source_cognition_stage_10_proactive_outbox.py
 git diff --check
 ```
@@ -221,7 +221,7 @@ git diff --check
 Expected grep results:
 
 - forbidden-call grep: zero matches;
-- service/scheduler/db/dispatcher integration grep: zero matches;
+- service/calendar/db/dispatcher integration grep: zero matches;
 - `send_message` grep: matches only this module's fake transport boundary and
   its tests.
 
