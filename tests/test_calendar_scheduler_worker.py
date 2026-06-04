@@ -243,6 +243,61 @@ async def test_worker_tick_marks_skipped_handler_result_skipped() -> None:
 
 
 @pytest.mark.asyncio
+async def test_worker_tick_marks_handler_exception_failed() -> None:
+    """Handler crashes should leave terminal, non-retryable failed runs."""
+
+    from kazusa_ai_chatbot.calendar_scheduler import models, worker
+
+    repository = _RepositoryDouble(
+        [
+            {
+                "run_id": "run-crashed",
+                "trigger_kind": models.TRIGGER_REFLECTION_PHASE_SLOT,
+                "attempt_count": 1,
+                "max_attempts": 3,
+                "payload": {"reflection_phase_intent": {}},
+            }
+        ]
+    )
+
+    async def handle_reflection_phase(run: dict[str, Any]) -> dict[str, Any]:
+        assert run["run_id"] == "run-crashed"
+        raise RuntimeError("phase handler crashed")
+
+    registry = worker.CalendarRunHandlerRegistry()
+    registry.register(
+        models.TRIGGER_REFLECTION_PHASE_SLOT,
+        handle_reflection_phase,
+    )
+
+    result = await worker.run_calendar_worker_tick(
+        current_timestamp_utc=NOW_UTC,
+        repository=repository,
+        handler_registry=registry,
+        lease_owner="worker-a",
+        lease_duration_seconds=300,
+        claim_limit=2,
+        max_attempts=3,
+    )
+
+    assert result == {
+        "claimed_count": 1,
+        "completed_count": 0,
+        "failed_count": 1,
+        "skipped_count": 0,
+    }
+    assert repository.succeeded == []
+    assert repository.skipped == []
+    assert len(repository.failed) == 1
+    failure = repository.failed[0]
+    assert failure["run_id"] == "run-crashed"
+    assert failure["lease_owner"] == "worker-a"
+    assert failure["storage_timestamp_utc"] == NOW_UTC
+    assert failure["retryable"] is False
+    assert "phase handler crashed" in failure["error"]
+
+
+@pytest.mark.asyncio
 async def test_calendar_worker_loop_materializes_reflection_period_before_claims() -> None:
     """The service-owned worker loop should materialize phase runs before claims."""
 

@@ -156,6 +156,8 @@ Bootstrap creates `calendar_runs` and indexes:
 - unique `idempotency_key` as `calendar_run_idempotency_unique`;
 - unique `run_id` as `calendar_run_id_unique`;
 - `(status, due_at, trigger_kind)` as `calendar_run_status_due_trigger`;
+- `(trigger_kind, period_start_utc, run_id)` as
+  `calendar_run_reflection_phase_period`;
 - `(lease_expires_at, status)` as `calendar_run_lease_expiry_status`.
 
 Lease semantics:

@@ -131,7 +131,7 @@ async def list_reflection_phase_slot_calendar_runs_for_character_local_date(
     *,
     character_local_date: str,
 ) -> list[dict[str, Any]]:
-    """Return durable phase slot runs whose due time falls on a local date."""
+    """Return durable phase slot runs for one local date's readiness window."""
 
     start_utc_iso, end_utc_iso = local_date_bounds_to_storage_utc_iso(
         character_local_date,
@@ -141,13 +141,13 @@ async def list_reflection_phase_slot_calendar_runs_for_character_local_date(
         db.calendar_runs.find(
             {
                 "trigger_kind": models.TRIGGER_REFLECTION_PHASE_SLOT,
-                "due_at": {
+                "period_start_utc": {
                     "$gte": start_utc_iso,
-                    "$lt": end_utc_iso,
+                    "$lte": end_utc_iso,
                 },
             }
         )
-        .sort([("due_at", 1), ("run_id", 1)])
+        .sort([("period_start_utc", 1), ("run_id", 1)])
     )
     runs: list[dict[str, Any]] = []
     async for run in cursor:

@@ -210,6 +210,50 @@ async def test_list_pending_calendar_runs_for_source_scopes_future_evidence() ->
 
 
 @pytest.mark.asyncio
+async def test_list_reflection_phase_runs_includes_boundary_period_start() -> None:
+    """Daily readiness must include phase slots due at the next local boundary."""
+
+    from kazusa_ai_chatbot.calendar_scheduler import models, repository
+
+    db = _db()
+    cursor = _AsyncCursor([{
+        "run_id": "phase-run-boundary",
+        "trigger_kind": models.TRIGGER_REFLECTION_PHASE_SLOT,
+    }])
+    db.calendar_runs.find = MagicMock(return_value=cursor)
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(repository, "get_db", AsyncMock(return_value=db))
+        monkeypatch.setattr(
+            repository,
+            "local_date_bounds_to_storage_utc_iso",
+            lambda character_local_date: (
+                "2026-05-04T00:00:00+00:00",
+                "2026-05-05T00:00:00+00:00",
+            ),
+        )
+        runs = await (
+            repository
+            .list_reflection_phase_slot_calendar_runs_for_character_local_date(
+                character_local_date="2026-05-04",
+            )
+        )
+
+    assert runs == [{
+        "run_id": "phase-run-boundary",
+        "trigger_kind": models.TRIGGER_REFLECTION_PHASE_SLOT,
+    }]
+    query = db.calendar_runs.find.call_args.args[0]
+    assert query["trigger_kind"] == models.TRIGGER_REFLECTION_PHASE_SLOT
+    assert query["period_start_utc"] == {
+        "$gte": "2026-05-04T00:00:00+00:00",
+        "$lte": "2026-05-05T00:00:00+00:00",
+    }
+    assert "due_at" not in query
+    assert cursor.sort_args == [("period_start_utc", 1), ("run_id", 1)]
+
+
+@pytest.mark.asyncio
 async def test_claim_calendar_run_claims_one_named_due_run() -> None:
     """Self-cognition should claim the same run projected into its case."""
 

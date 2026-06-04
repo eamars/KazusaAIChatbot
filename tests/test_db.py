@@ -1081,6 +1081,10 @@ async def test_db_bootstrap_creates_calendar_collections_and_indexes(
         "keys": [("status", 1), ("due_at", 1), ("trigger_kind", 1)],
         "kwargs": {"name": "calendar_run_status_due_trigger"},
     } in run_indexes
+    assert {
+        "keys": [("trigger_kind", 1), ("period_start_utc", 1), ("run_id", 1)],
+        "kwargs": {"name": "calendar_run_reflection_phase_period"},
+    } in run_indexes
 
 
 def test_db_facade_exports_calendar_schema_docs() -> None:

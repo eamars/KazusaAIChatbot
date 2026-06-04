@@ -173,7 +173,21 @@ async def run_calendar_worker_tick(
             failed_count += 1
             continue
 
-        result = await handler(run)
+        try:
+            result = await handler(run)
+        except Exception as exc:
+            logger.exception(
+                f"Calendar run handler failed for {run['run_id']}: {exc}"
+            )
+            await repository.mark_calendar_run_failed(
+                run["run_id"],
+                lease_owner=lease_owner,
+                storage_timestamp_utc=current_timestamp_utc,
+                error=str(exc),
+                retryable=False,
+            )
+            failed_count += 1
+            continue
         if result.get("status") == "skipped":
             await repository.mark_calendar_run_skipped(
                 run["run_id"],

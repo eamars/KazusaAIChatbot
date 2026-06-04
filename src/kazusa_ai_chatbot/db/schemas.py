@@ -533,10 +533,8 @@ def build_memory_doc(
 
 
 class ScheduledEventDoc(TypedDict, total=False):
-    """A scheduled future event in the ``scheduled_events`` collection.
+    """Historical ``scheduled_events`` document retained for migration audit."""
 
-    Used by the scheduler to persist pending tool calls across restarts.
-    """
     event_id: str
     tool: str
     args: dict

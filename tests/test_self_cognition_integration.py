@@ -1465,6 +1465,131 @@ async def test_worker_tick_skips_future_cognition_slot_when_claim_fails(
 
 
 @pytest.mark.asyncio
+async def test_worker_tick_marks_state_contract_error_calendar_run_failed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Claimed source runs should be terminal when case contracts fail."""
+
+    del tmp_path
+    record_runtime_error_event = AsyncMock()
+    monkeypatch.setattr(
+        worker.event_logging,
+        "record_runtime_error_event",
+        record_runtime_error_event,
+    )
+    case = _future_cognition_case()
+    failed_runs: list[dict[str, Any]] = []
+
+    async def collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return [case]
+
+    async def build_artifacts(next_case: dict[str, Any]) -> dict[str, Any]:
+        assert next_case["source_calendar_run_id"] == "calendar_run_future_123"
+        raise StateContractError(
+            "usage_mode=self_cognition_action_candidate_render "
+            "missing action_specs.speak"
+        )
+
+    async def claim_run(run_id: str, **kwargs: Any) -> dict[str, Any]:
+        assert run_id == "calendar_run_future_123"
+        assert kwargs["lease_owner"] == "self_cognition_worker"
+        return {
+            "run_id": run_id,
+            "attempt_count": 3,
+            "max_attempts": 3,
+        }
+
+    async def fail_run(run_id: str, **kwargs: Any) -> bool:
+        failed_runs.append({
+            "run_id": run_id,
+            **kwargs,
+        })
+        return True
+
+    result = await worker.run_self_cognition_worker_tick(
+        now=datetime(2026, 5, 16, 10, 0, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        run_case_func=build_artifacts,
+        read_attempts_func=lambda **kwargs: [],
+        record_attempt_func=lambda attempt: None,
+        claim_calendar_run_func=claim_run,
+        fail_calendar_run_func=fail_run,
+        max_cases=3,
+    )
+
+    assert result.processed_count == 0
+    assert result.failed_count == 1
+    assert len(failed_runs) == 1
+    failure = failed_runs[0]
+    assert failure["run_id"] == "calendar_run_future_123"
+    assert failure["lease_owner"] == "self_cognition_worker"
+    assert failure["storage_timestamp_utc"] == (
+        "2026-05-16T10:00:00+00:00"
+    )
+    assert failure["retryable"] is False
+    assert "action_specs.speak" in failure["error"]
+    record_runtime_error_event.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_worker_tick_marks_unexpected_calendar_case_error_failed(
+    tmp_path: Path,
+) -> None:
+    """Unexpected case crashes should release the source calendar lease."""
+
+    del tmp_path
+    case = _future_cognition_case()
+    failed_runs: list[dict[str, Any]] = []
+
+    async def collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return [case]
+
+    async def build_artifacts(next_case: dict[str, Any]) -> dict[str, Any]:
+        assert next_case["source_calendar_run_id"] == "calendar_run_future_123"
+        raise RuntimeError("case runner crashed")
+
+    async def claim_run(run_id: str, **kwargs: Any) -> dict[str, Any]:
+        assert kwargs["lease_owner"] == "self_cognition_worker"
+        return {
+            "run_id": run_id,
+            "attempt_count": 3,
+            "max_attempts": 3,
+        }
+
+    async def fail_run(run_id: str, **kwargs: Any) -> bool:
+        failed_runs.append({
+            "run_id": run_id,
+            **kwargs,
+        })
+        return True
+
+    result = await worker.run_self_cognition_worker_tick(
+        now=datetime(2026, 5, 16, 10, 0, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        run_case_func=build_artifacts,
+        read_attempts_func=lambda **kwargs: [],
+        record_attempt_func=lambda attempt: None,
+        claim_calendar_run_func=claim_run,
+        fail_calendar_run_func=fail_run,
+        max_cases=3,
+    )
+
+    assert result.processed_count == 0
+    assert result.failed_count == 1
+    assert len(failed_runs) == 1
+    failure = failed_runs[0]
+    assert failure["run_id"] == "calendar_run_future_123"
+    assert failure["lease_owner"] == "self_cognition_worker"
+    assert failure["retryable"] is False
+    assert "case runner crashed" in failure["error"]
+
+
+@pytest.mark.asyncio
 async def test_worker_selected_speak_dispatches_to_private_channel(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

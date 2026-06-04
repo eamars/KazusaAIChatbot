@@ -122,6 +122,7 @@ async def run_self_cognition_worker_tick(
     record_attempt_func: Callable[..., Any] | None = None,
     complete_calendar_run_func: Callable[..., Any] | None = None,
     claim_calendar_run_func: Callable[..., Any] | None = None,
+    fail_calendar_run_func: Callable[..., Any] | None = None,
     skip_calendar_run_func: Callable[..., Any] | None = None,
     adapter_registry_provider: Callable[[], AdapterRegistry | None] | None = None,
     max_cases: int = SELF_COGNITION_MAX_CASES_PER_TICK,
@@ -140,6 +141,8 @@ async def run_self_cognition_worker_tick(
             completion.
         claim_calendar_run_func: Optional test seam for atomically claiming
             source calendar runs before processing.
+        fail_calendar_run_func: Optional test seam for terminal source run
+            failures.
         skip_calendar_run_func: Optional test seam for terminal source run
             skips.
         adapter_registry_provider: Optional live adapter registry provider.
@@ -186,6 +189,9 @@ async def run_self_cognition_worker_tick(
     active_claim_calendar_run = (
         claim_calendar_run_func or calendar_repository.claim_calendar_run
     )
+    active_fail_calendar_run = (
+        fail_calendar_run_func or calendar_repository.mark_calendar_run_failed
+    )
     active_skip_calendar_run = (
         skip_calendar_run_func or calendar_repository.mark_calendar_run_skipped
     )
@@ -227,12 +233,13 @@ async def run_self_cognition_worker_tick(
                 reason="target_binding_failed",
             )
             continue
-        prior_attempts = await _call_maybe_async(
-            active_read_attempts,
-            limit=_ATTEMPT_HISTORY_LIMIT,
-        )
-        case_for_run = _case_with_prior_attempts(case, prior_attempts)
+        case_for_run = case
         try:
+            prior_attempts = await _call_maybe_async(
+                active_read_attempts,
+                limit=_ATTEMPT_HISTORY_LIMIT,
+            )
+            case_for_run = _case_with_prior_attempts(case, prior_attempts)
             if run_case_func is None:
                 artifact_payloads = (
                     await runner.build_self_cognition_case_artifacts_async(
@@ -246,8 +253,34 @@ async def run_self_cognition_worker_tick(
                     run_case_func,
                     case_for_run,
                 )
+            dispatch_status = await _handle_case_action_outputs(
+                case=case_for_run,
+                artifact_payloads=artifact_payloads,
+                now=now,
+                record_attempt_func=active_record_attempt,
+                adapter_registry=adapter_registry,
+            )
+            await _record_self_cognition_event_from_artifacts(
+                case=case_for_run,
+                artifact_payloads=artifact_payloads,
+                dispatch_status=dispatch_status,
+            )
+            await _complete_source_calendar_run(
+                case_for_run,
+                now=now,
+                complete_calendar_run_func=active_complete_calendar_run,
+            )
         except StateContractError as exc:
+            logger.exception(
+                f"Self-cognition case state contract failed: {exc}"
+            )
             result.failed_count += 1
+            await _fail_source_calendar_run(
+                case_for_run,
+                now=now,
+                fail_calendar_run_func=active_fail_calendar_run,
+                error=str(exc),
+            )
             await event_logging.record_runtime_error_event(
                 component="self_cognition.worker",
                 error_class="StateContractError",
@@ -257,24 +290,27 @@ async def run_self_cognition_worker_tick(
                 recovered=True,
             )
             continue
+        except Exception as exc:
+            logger.exception(
+                f"Self-cognition case processing failed: {exc}"
+            )
+            result.failed_count += 1
+            await _fail_source_calendar_run(
+                case_for_run,
+                now=now,
+                fail_calendar_run_func=active_fail_calendar_run,
+                error=str(exc),
+            )
+            await event_logging.record_runtime_error_event(
+                component="self_cognition.worker",
+                error_class=type(exc).__name__,
+                error_preview=str(exc),
+                stack_fingerprint="self_cognition_case_processing",
+                top_frame_module=__name__,
+                recovered=True,
+            )
+            continue
         result.processed_count += 1
-        dispatch_status = await _handle_case_action_outputs(
-            case=case_for_run,
-            artifact_payloads=artifact_payloads,
-            now=now,
-            record_attempt_func=active_record_attempt,
-            adapter_registry=adapter_registry,
-        )
-        await _record_self_cognition_event_from_artifacts(
-            case=case_for_run,
-            artifact_payloads=artifact_payloads,
-            dispatch_status=dispatch_status,
-        )
-        await _complete_source_calendar_run(
-            case_for_run,
-            now=now,
-            complete_calendar_run_func=active_complete_calendar_run,
-        )
 
     await _record_worker_tick_event(result)
     return result
@@ -715,6 +751,37 @@ async def _skip_source_calendar_run(
         lease_owner=_CALENDAR_LEASE_OWNER,
         storage_timestamp_utc=now.isoformat(),
         reason=reason,
+    )
+
+
+async def _fail_source_calendar_run(
+    case: models.SelfCognitionCase,
+    *,
+    now: datetime,
+    fail_calendar_run_func: Callable[..., Any],
+    error: str,
+) -> None:
+    """Mark a claimed source calendar run failed after case processing fails."""
+
+    calendar_trigger_kind = (
+        _CALENDAR_TRIGGER_KIND_BY_SELF_COGNITION_TRIGGER.get(
+            case.get("trigger_kind"),
+        )
+    )
+    if calendar_trigger_kind is None:
+        return
+
+    run_id = case.get("source_calendar_run_id")
+    if not isinstance(run_id, str) or not run_id:
+        return
+
+    await _call_maybe_async(
+        fail_calendar_run_func,
+        run_id,
+        lease_owner=_CALENDAR_LEASE_OWNER,
+        storage_timestamp_utc=now.isoformat(),
+        error=error,
+        retryable=False,
     )
 
 

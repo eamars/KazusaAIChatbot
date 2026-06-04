@@ -200,10 +200,15 @@ def _future_cognition_schedule(
     """Convert one pending future-cognition event to a calendar schedule."""
 
     source_scope = {
-        "platform": event.get("source_platform", ""),
-        "platform_channel_id": event.get("source_channel_id", ""),
-        "channel_type": event.get("source_channel_type", ""),
-        "global_user_id": event.get("source_user_id", ""),
+        "source_platform": event.get("source_platform"),
+        "source_channel_id": event.get("source_channel_id"),
+        "source_channel_type": event.get("source_channel_type"),
+        "source_user_id": event.get("source_user_id"),
+        "source_message_id": event.get("source_message_id"),
+        "source_platform_bot_id": event.get("source_platform_bot_id"),
+        "source_character_name": event.get("source_character_name"),
+        "guild_id": event.get("guild_id"),
+        "bot_role": event.get("bot_role"),
     }
     schedule = models.build_one_time_calendar_schedule(
         trigger_kind=models.TRIGGER_FUTURE_COGNITION,

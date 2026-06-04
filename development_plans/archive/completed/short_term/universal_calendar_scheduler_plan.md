@@ -6,7 +6,7 @@
   calendar scheduler that can run typed cognition, reflection, and recurring
   internal triggers without scheduling delayed user-visible text directly.
 - Plan class: high_risk_migration
-- Status: in_progress
+- Status: completed
 - Mandatory skills: `development-plan`, `local-llm-architecture`,
   `py-style`, `test-style-and-execution`, `database-data-pull` for optional
   live diagnostics, and `cjk-safety` if Python prompt or source-packet text
@@ -917,14 +917,14 @@ requests fallback execution.
   - Evidence: record command outputs and residual risks.
   - Sign-off: `Codex/2026-06-04` after verification and evidence are recorded.
 
-- [ ] Stage 9 - independent code review complete
+- [x] Stage 9 - independent code review complete
 
   - Covers: full diff, migration behavior, old-path decommission, tests, docs,
     and plan alignment.
   - Verify: review findings are recorded, required fixes are complete, and
     affected verification is rerun.
   - Evidence: record review result, fixes, rerun commands, and approval status.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+  - Sign-off: `Codex/2026-06-04` after verification and evidence are recorded.
 
 ## Verification
 
@@ -1590,3 +1590,78 @@ begins.
     requires explicit user approval for apply mode; deterministic DB tests
     included patched/mock DB surfaces and bootstrap/index checks, not a live
     destructive migration apply.
+- 2026-06-04 Stage 9 independent code review and remediation completed:
+  - Final independent reviewer subagent `Maxwell`
+    (`019e909c-218d-7591-96ad-9b7ea87d4041`) ran as `gpt-5.5` with
+    `xhigh` reasoning and reviewed only; it did not edit files.
+  - Initial review was not approved. Blocking findings were:
+    calendar worker handler exceptions could strand claimed
+    `calendar_runs` in `running`; self-cognition source calendar runs could
+    be stranded after successful claim on `StateContractError` or unexpected
+    per-case exceptions; migration wrote legacy future-cognition
+    `source_scope` keys that current collectors do not consume; reflection
+    daily readiness queried phase slots by `due_at` and could miss the
+    next-local-boundary hourly input; and `ScheduledEventDoc` docstring still
+    described active scheduler persistence.
+  - Parent added focused regression tests in
+    `tests/test_calendar_scheduler_worker.py`,
+    `tests/test_calendar_scheduler_migration.py`,
+    `tests/test_calendar_scheduler_repository.py`,
+    `tests/test_self_cognition_integration.py`, and `tests/test_db.py`.
+    Pre-fix targeted runs reproduced the review blockers.
+  - Production-code subagent `Hegel`
+    (`019e8fd4-9872-7243-87df-275d667975cd`) owned all production-code
+    remediation. Fixes included terminal failure handling for calendar worker
+    handler exceptions with `retryable=false`; self-cognition source
+    calendar-run failure handling for claimed runs; current `source_*`
+    migration source-scope keys; reflection readiness by
+    `period_start_utc`; the `calendar_run_reflection_phase_period` bootstrap
+    index; updated calendar ICD index docs; and historical-only
+    `ScheduledEventDoc` wording.
+  - Parent tightened the worker regression after remediation so explicit
+    handler exceptions remain terminal and non-retryable even when attempts
+    remain. Hegel made the narrow production fix and reran the targeted
+    worker test.
+  - Fresh deterministic verification after remediation:
+    `tests/test_calendar_scheduler_worker.py` reported 5 passed;
+    `tests/test_calendar_scheduler_migration.py` reported 8 passed;
+    `tests/test_calendar_scheduler_repository.py` reported 11 passed;
+    `tests/test_self_cognition_integration.py` reported 42 passed;
+    `tests/test_db.py` reported 66 passed, 13 deselected;
+    `tests/test_reflection_cycle_stage1c_worker.py`
+    `tests/test_calendar_scheduler_reflection_phase.py` reported 31 passed;
+    `tests/test_calendar_scheduler_models.py`
+    `tests/test_calendar_scheduler_recurrence.py` reported 10 passed;
+    `tests/test_calendar_scheduler_active_commitments.py` reported 14 passed;
+    `tests/test_action_spec_future_cognition.py` reported 9 passed;
+    `tests/test_action_spec_memory_lifecycle.py` reported 10 passed;
+    `tests/test_rag_recall_agent.py`
+    `tests/test_reflection_phase_scheduler.py` reported 19 passed; and
+    `tests/test_config.py` `tests/test_service_ops_status.py` reported
+    59 passed.
+  - Syntax verification command:
+    `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\calendar_scheduler\worker.py src\kazusa_ai_chatbot\calendar_scheduler\repository.py src\kazusa_ai_chatbot\self_cognition\worker.py src\scripts\migrate_scheduled_events_to_calendar_scheduler.py src\kazusa_ai_chatbot\db\schemas.py src\kazusa_ai_chatbot\db\bootstrap.py tests\test_calendar_scheduler_worker.py tests\test_calendar_scheduler_migration.py tests\test_calendar_scheduler_repository.py tests\test_self_cognition_integration.py tests\test_db.py`.
+    Result: passed.
+  - Static old-path greps showed no production old scheduler runtime,
+    service startup hook, stale due-future-cognition query helper, stale
+    recall collector import, or split reflection trigger-kind registration.
+    Remaining matches are accepted historical migration/audit docs,
+    maintenance helpers, migration/decommission tests, valid
+    `trigger_future_cognition` action capability, prompt-contract tests, and
+    allowed reflection action strings or forbidden-path wording inside the
+    `reflection_phase_slot` contract.
+  - Migration dry-run command:
+    `venv\Scripts\python -m scripts.migrate_scheduled_events_to_calendar_scheduler --dry-run --output test_artifacts/calendar_migration_dry_run.json`.
+    Result: command exited 0; artifact summary reported `dry_run=true`,
+    `blocked=false`, `total_legacy_rows=106`, `total_pending=0`,
+    `unknown_tool=0`, `future_cognition_to_migrate=0`,
+    `legacy_send_message_to_cancel=0`, and `terminal_ignored=106`.
+  - README ICD checks reported `True` for the README path and matched
+    document control, owning package, interface boundary, public interfaces,
+    collection contracts, trigger contracts, and forbidden paths.
+  - `git diff --check` reported no whitespace errors; only LF/CRLF working
+    copy normalization warnings.
+  - Final reviewer rerun approved Stage 9 completion. Residual risk is limited
+    to live apply migration and live runtime behavior not exercised by this
+    deterministic review pass; live apply migration still requires explicit
+    user approval.

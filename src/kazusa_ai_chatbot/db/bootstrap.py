@@ -185,6 +185,10 @@ async def db_bootstrap() -> None:
         [("lease_expires_at", 1), ("status", 1)],
         name="calendar_run_lease_expiry_status",
     )
+    await db[CALENDAR_RUNS_COLLECTION].create_index(
+        [("trigger_kind", 1), ("period_start_utc", 1), ("run_id", 1)],
+        name="calendar_run_reflection_phase_period",
+    )
     await db[SELF_COGNITION_ACTION_ATTEMPTS_COLLECTION].create_index(
         "idempotency_key",
         unique=True,

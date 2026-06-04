@@ -98,6 +98,20 @@ def test_migration_plan_converts_future_cognition_only() -> None:
     ]
     assert len(plan["calendar_schedules"]) == 1
     assert len(plan["calendar_runs"]) == 1
+    assert plan["calendar_schedules"][0]["source_scope"] == {
+        "source_platform": "qq",
+        "source_channel_id": "group-1",
+        "source_channel_type": "group",
+        "source_user_id": "user-1",
+        "source_message_id": "action_attempt:future-123",
+        "source_platform_bot_id": "bot-1",
+        "source_character_name": "Character",
+        "guild_id": None,
+        "bot_role": "system",
+    }
+    assert plan["calendar_runs"][0]["source_scope"] == (
+        plan["calendar_schedules"][0]["source_scope"]
+    )
     assert plan["calendar_schedules"][0]["schedule_id"] == (
         repeated_plan["calendar_schedules"][0]["schedule_id"]
     )
