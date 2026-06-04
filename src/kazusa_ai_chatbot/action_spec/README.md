@@ -2,7 +2,7 @@
 
 `kazusa_ai_chatbot.action_spec` owns the modality-neutral action contract used
 between cognition, selected surface handlers, private action handlers,
-consolidation, and scheduler-owned continuation handlers.
+consolidation, and calendar-owned continuation handlers.
 
 It is not the dispatcher, not a scheduler, and not an LLM prompt package. Its
 job is to define typed action residues, validate them deterministically, project
@@ -69,7 +69,7 @@ This keeps the ownership line clear:
 - resolver capabilities retrieve evidence or create blocked observations;
 - L1 -> L2 -> L2d re-judges the turn after each observation;
 - only final L2d action requests become `ActionSpecV1` rows for L3, private
-  handlers, scheduler handoff, or consolidation traces.
+  handlers, calendar handoff, or consolidation traces.
 
 ## Capabilities
 
@@ -138,9 +138,9 @@ the prepared side effect inside the resolver stage.
 ## Consolidation
 
 The consolidator receives prompt-safe episode-trace projection only. It may
-learn from visible text, private action outcomes, scheduled-action outcomes,
-and private finalization, but it must not select actions, execute actions, call
-the dispatcher, call the scheduler, or trigger cognition.
+learn from visible text, private action outcomes, calendar-triggered action
+outcomes, and private finalization, but it must not select actions, execute
+actions, call the dispatcher, create calendar runs, or trigger cognition.
 
 `final_dialog` is represented as one text `SurfaceOutputV1`; it is no longer
 the only possible evidence that a turn has consolidatable output.
@@ -154,7 +154,7 @@ latency budget.
 Reserved next-stage candidates:
 
 - `schedule_self_check`: orchestrator-owned request to create a future
-  self-cognition episode through scheduler/orchestrator mechanics.
+  self-cognition episode through calendar/orchestrator mechanics.
 - `web_research`: retrieval-owned research action that must return evidence,
   not final dialog.
 - notes/open-loop tools: memory or open-loop owner actions for durable internal

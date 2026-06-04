@@ -40,6 +40,10 @@ def _runtime_status_payload() -> dict[str, object]:
             "last_status": "ready",
         },
         "workers": {
+            "calendar_scheduler": {
+                "last_event_at": "2026-05-14T00:01:30+00:00",
+                "last_status": "succeeded",
+            },
             "reflection_cycle": {
                 "last_event_at": "2026-05-14T00:02:00+00:00",
                 "last_status": "succeeded",
@@ -121,6 +125,27 @@ async def test_ops_runtime_status_merges_config_and_worker_liveness(
     )
     monkeypatch.setattr(service_module, "REFLECTION_CYCLE_ENABLED", True)
     monkeypatch.setattr(service_module, "SELF_COGNITION_ENABLED", False)
+    monkeypatch.setattr(service_module, "CALENDAR_SCHEDULER_ENABLED", True)
+    monkeypatch.setattr(
+        service_module,
+        "CALENDAR_SCHEDULER_POLL_INTERVAL_SECONDS",
+        30,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "CALENDAR_SCHEDULER_CLAIM_LIMIT",
+        4,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "CALENDAR_SCHEDULER_LEASE_SECONDS",
+        120,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "CALENDAR_SCHEDULER_MAX_ATTEMPTS",
+        5,
+    )
     monkeypatch.setattr(
         service_module,
         "REFLECTION_WORKER_INTERVAL_SECONDS",
@@ -158,6 +183,11 @@ async def test_ops_runtime_status_merges_config_and_worker_liveness(
     )
     monkeypatch.setattr(
         service_module,
+        "_calendar_worker_handle",
+        SimpleNamespace(task=_FakeTask(done=False)),
+    )
+    monkeypatch.setattr(
+        service_module,
         "_self_cognition_worker_handle",
         None,
     )
@@ -168,6 +198,11 @@ async def test_ops_runtime_status_merges_config_and_worker_liveness(
     assert payload["status"] == "ok"
     assert payload["window_hours"] == 6
     assert payload["config"] == {
+        "calendar_scheduler_enabled": True,
+        "calendar_scheduler_poll_interval_seconds": 30,
+        "calendar_scheduler_claim_limit": 4,
+        "calendar_scheduler_lease_seconds": 120,
+        "calendar_scheduler_max_attempts": 5,
         "reflection_cycle_enabled": True,
         "self_cognition_enabled": False,
         "reflection_worker_interval_seconds": 900,
@@ -177,6 +212,8 @@ async def test_ops_runtime_status_merges_config_and_worker_liveness(
         "self_cognition_worker_interval_seconds": 3600,
         "self_cognition_max_cases_per_tick": 3,
     }
+    assert payload["workers"]["calendar_scheduler"]["task_alive"] is True
+    assert payload["workers"]["calendar_scheduler"]["enabled"] is True
     assert payload["workers"]["reflection_cycle"]["task_alive"] is True
     assert payload["workers"]["reflection_cycle"]["enabled"] is True
     assert payload["workers"]["self_cognition"]["task_alive"] is False

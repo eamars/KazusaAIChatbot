@@ -901,13 +901,13 @@ requests fallback execution.
   - Evidence: record test output, grep output, and migration dry-run summary.
   - Sign-off: `Codex/2026-06-04` after verification and evidence are recorded.
 
-- [ ] Stage 7 - docs, ops status, and config tests complete
+- [x] Stage 7 - docs, ops status, and config tests complete
 
   - Covers: top-level README, HOWTO, the `calendar_scheduler` ICD README,
     adjacent subsystem READMEs, ops status, and config tests.
   - Verify: `venv\Scripts\python -m pytest tests/test_config.py tests/test_service_ops_status.py -q`.
   - Evidence: record test output and doc files changed.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+  - Sign-off: `Codex/2026-06-04` after verification and evidence are recorded.
 
 - [ ] Stage 8 - full deterministic verification complete
 
@@ -1449,6 +1449,70 @@ begins.
     side collection. Matches are allowed action strings in
     `tests/test_calendar_scheduler_reflection_phase.py` and documentation
     wording in the calendar scheduler README.
+  - README ICD check:
+    `Test-Path -LiteralPath src/kazusa_ai_chatbot/calendar_scheduler/README.md`
+    returned `True`; the README section grep matched document control,
+    owning package, interface boundary, public interfaces, collection
+    contracts, trigger contracts, and forbidden paths.
+  - `git diff --check` reported no whitespace errors; only LF/CRLF working
+    copy normalization warnings.
+- 2026-06-04 Stage 7 docs, ops status, and config tests completed:
+  - Production-code subagent `Hegel`
+    (`019e8fd4-9872-7243-87df-275d667975cd`) owned the production source
+    changes. Parent owned tests, documentation, verification, and plan
+    evidence.
+  - Added `/ops/runtime-status` calendar scheduler visibility: config now
+    reports `calendar_scheduler_enabled`,
+    `calendar_scheduler_poll_interval_seconds`,
+    `calendar_scheduler_claim_limit`, `calendar_scheduler_lease_seconds`, and
+    `calendar_scheduler_max_attempts`; worker status now includes
+    `calendar_scheduler.enabled` and `calendar_scheduler.task_alive`.
+  - Updated the Pydantic ops response contract so calendar scheduler config
+    survives response serialization.
+  - Updated `tests/test_service_ops_status.py` to assert calendar scheduler
+    config and worker liveness in the trusted-operator status payload.
+  - Updated operator and ICD documentation in `README.md`, `README_CN.md`,
+    `docs/HOWTO.md`, `src/kazusa_ai_chatbot/calendar_scheduler/README.md`,
+    `src/kazusa_ai_chatbot/dispatcher/README.md`,
+    `src/kazusa_ai_chatbot/rag/recall/README.md`,
+    `src/kazusa_ai_chatbot/self_cognition/README.md`,
+    `src/kazusa_ai_chatbot/reflection_cycle/README.md`,
+    `src/kazusa_ai_chatbot/db/README.md`,
+    `src/kazusa_ai_chatbot/brain_service/README.md`,
+    `src/kazusa_ai_chatbot/event_logging/README.md`, and
+    `src/kazusa_ai_chatbot/action_spec/README.md` so they describe the
+    calendar scheduler cutover, historical `scheduled_events` migration-only
+    boundary, reflection phase calendar provider, RAG calendar-run collector,
+    and dispatcher delivery boundary.
+  - Verification command:
+    `venv\Scripts\python -m pytest tests/test_config.py tests/test_service_ops_status.py -q`.
+    Result: 59 passed in 5.09s.
+  - Syntax verification command:
+    `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\service.py src\kazusa_ai_chatbot\brain_service\contracts.py tests\test_service_ops_status.py`.
+    Result: passed.
+  - Static stale-documentation grep:
+    `rg -n "SCHEDULED_TASKS_ENABLED|load_pending_events|ScheduledEventCollector|collectors\.scheduled_events|collectors/scheduled_events|scheduler delivery|brain scheduler|scheduled/proactive|scheduled-action|local phase run provider|Stage 2|later-stage|planned later|not wired" README.md README_CN.md docs/HOWTO.md src/kazusa_ai_chatbot/calendar_scheduler/README.md src/kazusa_ai_chatbot/rag/recall/README.md src/kazusa_ai_chatbot/dispatcher/README.md src/kazusa_ai_chatbot/action_spec/README.md src/kazusa_ai_chatbot/self_cognition/README.md src/kazusa_ai_chatbot/reflection_cycle/README.md src/kazusa_ai_chatbot/db/README.md src/kazusa_ai_chatbot/brain_service/README.md src/kazusa_ai_chatbot/event_logging/README.md src/kazusa_ai_chatbot/service.py`.
+    Result: no matches; `rg` exited 1 as expected for this zero-match check.
+  - Static old-path grep:
+    `rg -n "scheduled_events|schedule_event|load_pending_events|PendingTaskIndex|SCHEDULED_TASKS_ENABLED" src/kazusa_ai_chatbot tests README.md README_CN.md docs/HOWTO.md`.
+    Result: no service startup hook, runtime facade, old enable flag, or old
+    production scheduler module matches. Remaining matches are historical
+    collection/index/schema references, maintenance-only migration helpers,
+    migration/decommission tests, historical cleanup diagnostics, and docs
+    explicitly describing `scheduled_events` as migration/audit-only data.
+  - Static old query/collector greps:
+    `rg -n "query_pending_scheduled_events|list_due_future_cognition_events|trigger_future_cognition" src/kazusa_ai_chatbot tests README.md README_CN.md docs/HOWTO.md`
+    and
+    `rg -n "ScheduledEventCollector|collectors\.scheduled_events|collectors/scheduled_events" src/kazusa_ai_chatbot tests README.md README_CN.md docs/HOWTO.md`.
+    Result: no stale collector/query references; remaining
+    `trigger_future_cognition` matches are the valid action capability,
+    migration classification, prompt-contract tests, and decommission tests.
+  - Reflection trigger grep:
+    `rg -n "reflection_phase_runs|reflection_hourly_slot|group_self_cognition_review" src/kazusa_ai_chatbot/calendar_scheduler tests/test_calendar_scheduler_reflection_phase.py`.
+    Result: no production split reflection trigger kinds or side collection.
+    Matches are allowed action strings in
+    `tests/test_calendar_scheduler_reflection_phase.py` and
+    `calendar_scheduler/README.md` forbidden/allowed-action wording.
   - README ICD check:
     `Test-Path -LiteralPath src/kazusa_ai_chatbot/calendar_scheduler/README.md`
     returned `True`; the README section grep matched document control,

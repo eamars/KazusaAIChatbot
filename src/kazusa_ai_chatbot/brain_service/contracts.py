@@ -130,6 +130,11 @@ class HealthResponse(BaseModel):
 
 
 class OpsRuntimeConfigResponse(BaseModel):
+    calendar_scheduler_enabled: bool
+    calendar_scheduler_poll_interval_seconds: int
+    calendar_scheduler_claim_limit: int
+    calendar_scheduler_lease_seconds: int
+    calendar_scheduler_max_attempts: int
     reflection_cycle_enabled: bool
     self_cognition_enabled: bool
     reflection_worker_interval_seconds: int

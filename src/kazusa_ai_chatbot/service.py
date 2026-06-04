@@ -571,8 +571,13 @@ def _ops_runtime_status_payload(
     workers = raw_workers if isinstance(raw_workers, Mapping) else {}
     raw_process = base_status.get("process", {})
     process = raw_process if isinstance(raw_process, Mapping) else {}
+    calendar_scheduler_worker = dict(workers.get("calendar_scheduler", {}))
     reflection_worker = dict(workers.get("reflection_cycle", {}))
     self_cognition_worker = dict(workers.get("self_cognition", {}))
+    calendar_scheduler_worker.update({
+        "enabled": CALENDAR_SCHEDULER_ENABLED,
+        "task_alive": _worker_task_alive(_calendar_worker_handle),
+    })
     reflection_worker.update({
         "enabled": REFLECTION_CYCLE_ENABLED,
         "task_alive": _worker_task_alive(_reflection_worker_handle),
@@ -586,6 +591,13 @@ def _ops_runtime_status_payload(
         "generated_at": str(base_status.get("generated_at", "")),
         "window_hours": int(base_status.get("window_hours", 24)),
         "config": {
+            "calendar_scheduler_enabled": CALENDAR_SCHEDULER_ENABLED,
+            "calendar_scheduler_poll_interval_seconds": (
+                CALENDAR_SCHEDULER_POLL_INTERVAL_SECONDS
+            ),
+            "calendar_scheduler_claim_limit": CALENDAR_SCHEDULER_CLAIM_LIMIT,
+            "calendar_scheduler_lease_seconds": CALENDAR_SCHEDULER_LEASE_SECONDS,
+            "calendar_scheduler_max_attempts": CALENDAR_SCHEDULER_MAX_ATTEMPTS,
             "reflection_cycle_enabled": REFLECTION_CYCLE_ENABLED,
             "self_cognition_enabled": SELF_COGNITION_ENABLED,
             "reflection_worker_interval_seconds": (
@@ -607,6 +619,7 @@ def _ops_runtime_status_payload(
         },
         "process": dict(process),
         "workers": {
+            "calendar_scheduler": calendar_scheduler_worker,
             "reflection_cycle": reflection_worker,
             "self_cognition": self_cognition_worker,
         },
@@ -2088,7 +2101,7 @@ async def ops_self_cognition_stats(
 
 @app.post("/runtime/adapters/register", response_model=RuntimeAdapterRegistrationResponse)
 async def register_runtime_adapter_endpoint(req: RuntimeAdapterRegistrationRequest):
-    """Register one cross-process adapter callback for scheduler delivery.
+    """Register one cross-process adapter callback for trusted delivery.
 
     Args:
         req: Remote adapter registration payload sent by an adapter process.

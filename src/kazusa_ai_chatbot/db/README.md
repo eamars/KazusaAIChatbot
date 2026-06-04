@@ -27,13 +27,14 @@ document-shape contracts.
 The database layer is the durable persistence boundary for Kazusa. It stores
 conversation history, user identity and relationship headers, long-term user
 memory units, character state, curated shared memory, reflection runs,
-scheduled events, conversation progress, interaction-style overlays, and
-persistent RAG initializer cache entries.
+calendar schedules and runs, conversation progress, interaction-style
+overlays, and persistent RAG initializer cache entries.
 
 The package deliberately hides raw MongoDB access from the rest of the system.
 Callers express intent through semantic helpers such as
 `save_conversation(...)`, `query_user_memory_units(...)`,
-`insert_scheduled_event(...)`, or `list_reflection_scope_messages(...)`.
+`list_pending_calendar_runs_for_source(...)`, or
+`list_reflection_scope_messages(...)`.
 Database internals translate that intent into collection access, indexes,
 filters, projections, aggregation pipelines, update operators, and exception
 handling.
@@ -63,8 +64,9 @@ runtime or maintenance interfaces described here.
 ### Runtime Callers
 
 Runtime callers are production packages on the live or background service path:
-brain service, RAG, cognition, dialog persistence, consolidation, scheduler,
-dispatcher, reflection cycle, conversation progress, and memory evolution.
+brain service, RAG, cognition, dialog persistence, consolidation, calendar
+scheduler, dispatcher, reflection cycle, conversation progress, and memory
+evolution.
 
 Runtime callers import from the `kazusa_ai_chatbot.db` facade unless this ICD
 names a narrower public package boundary for that subsystem.
@@ -142,8 +144,8 @@ The runtime facade exports helpers for:
   semantic/window updates;
 - character profile, character state, and character self-image persistence;
 - interaction-style image overlays for reflection-derived style guidance;
-- scheduled-event insert, query, state transition, completion, failure, and
-  cancellation;
+- calendar schedule/run query helpers used by recall and calendar-owned
+  repository operations;
 - persistent RAG initializer cache entries;
 - legacy shared-memory facade functions that are lazily resolved to avoid
   import cycles.
@@ -228,9 +230,9 @@ from kazusa_ai_chatbot.db import DatabaseOperationError
 Callers can catch `DatabaseOperationError` when they can degrade gracefully,
 record telemetry, or return a rejected operation.
 
-Functions that return `bool` for state transitions, such as scheduled-event
-status changes, use `False` for expected non-matches or invalid state
-transitions. Backend failures remain exceptional.
+Functions that return `bool` for state transitions use `False` for expected
+non-matches or invalid state transitions. Backend failures remain
+exceptional.
 
 ## Collection Contracts
 
@@ -357,11 +359,29 @@ The group-channel style image is the current durable group-image lane. It is
 keyed by platform and channel id, not by `global_user_id`, and must stay
 separate from user affinity, relationship insight, and `user_memory_units`.
 
+### `calendar_schedules`
+
+Stores durable typed schedule definitions for the calendar scheduler. The
+calendar scheduler package owns schedule creation, idempotency keys,
+recurrence metadata, status transitions, and raw collection writes through its
+repository. Runtime callers do not write this collection directly.
+
+### `calendar_runs`
+
+Stores due executions for typed calendar triggers. The calendar scheduler owns
+claim, lease, retry, completion, failure, skipped, and cancellation mechanics.
+Recall may read scoped pending calendar-run evidence through named DB helpers;
+source packets must project semantic due-state facts rather than raw calendar
+ids or lease fields.
+
 ### `scheduled_events`
 
-Stores pending, running, completed, failed, and cancelled scheduled tool
-events. The dispatcher and scheduler own semantic use of this collection
-through named helper functions.
+Historical collection from the removed process-local scheduler control plane.
+Production code must not read or write it. It may be inspected or updated only
+through maintenance helpers used by the one-time
+`migrate_scheduled_events_to_calendar_scheduler` script, where pending
+`trigger_future_cognition` rows are migrated and pending legacy direct
+`send_message` rows are cancelled.
 
 ### `self_cognition_action_attempts`
 
@@ -450,9 +470,9 @@ dropped only through maintenance helpers and explicit operator scripts.
 `db_bootstrap()` owns startup collection/index preparation and required seed
 documents. It creates current collections and indexes, including
 `user_memory_units`, reflection-run indexes, interaction-style indexes,
-scheduled-event indexes, self-cognition action-attempt indexes,
-self-cognition group-review reviewed-window indexes, and other runtime indexes
-required by the facade.
+calendar schedule/run indexes, historical scheduled-event migration indexes,
+self-cognition action-attempt indexes, self-cognition group-review
+reviewed-window indexes, and other runtime indexes required by the facade.
 
 Bootstrap is idempotent. It creates or updates indexes and seed singleton
 documents. Destructive data repair belongs in explicit migration plans.

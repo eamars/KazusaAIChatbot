@@ -7,10 +7,11 @@
 - Interface boundary: runtime packages and maintenance scripts -> typed
   calendar schedules and due runs
 - Storage owner: `calendar_schedules` and `calendar_runs`
-- Stage status: Stage 2 package, schema, repository, migration, and focused
-  tests are present. Service lifecycle wiring, production action-spec cutover,
-  RAG recall cutover, reflection worker cutover, and old scheduler deletion are
-  planned later-stage work and are not wired by this package slice.
+- Runtime status: calendar package, schemas, repository, migration script,
+  service worker lifecycle, future-cognition cutover, RAG recall cutover,
+  active-commitment due scheduling, reflection phase materialization, and old
+  scheduler runtime deletion are wired. The remaining trigger roster is still
+  closed and does not include delayed visible text.
 
 ## Owning package
 
@@ -31,16 +32,19 @@ The calendar answers one deterministic question: when should a typed Kazusa
 internal trigger become due? Owning subsystems re-read current state at
 execution time and decide what the current semantic action should be.
 
-Current Stage 2 boundaries:
+Current runtime boundaries:
 
 - runtime callers may build schedules/runs through `models.py`;
-- runtime or later lifecycle wiring may claim and finish runs through
-  `repository.py` and `worker.py`;
-- active-commitment write sites may call `handlers.py` to reconcile one due
-  schedule, but those write sites are not wired in Stage 2;
-- reflection code may convert `ReflectionPhaseRunIntent` values to calendar
-  runs through `reflection_phase.py`, but the reflection worker is not cut over
-  in Stage 2;
+- self-cognition claims and completes its own due `future_cognition` and
+  `commitment_due_cognition` runs through repository functions;
+- the service-owned calendar worker claims registered calendar trigger kinds
+  and currently registers `reflection_phase_slot` for durable reflection phase
+  execution;
+- active-commitment write sites call `handlers.py` to reconcile one due
+  schedule and pending run;
+- reflection code converts `ReflectionPhaseRunIntent` values to calendar runs
+  through `reflection_phase.py`, and the reflection worker reads expected
+  hourly work from the calendar-backed provider;
 - operator migration uses the script under `src/scripts`, not the calendar
   runtime repository, to read or mutate legacy `scheduled_events`.
 
@@ -106,8 +110,7 @@ The migration script exposes:
 
 ## Collection Contracts
 
-`calendar_schedules` stores durable schedule definitions. Required Stage 2
-fields are:
+`calendar_schedules` stores durable schedule definitions. Required fields are:
 
 - `schema_version`: always `calendar_schedule.v1`;
 - `owner`: always `calendar_scheduler`;
@@ -131,7 +134,7 @@ Bootstrap creates `calendar_schedules` and indexes:
 - `(status, next_run_at, trigger_kind)` as
   `calendar_schedule_status_next_trigger`.
 
-`calendar_runs` stores due executions. Required Stage 2 fields are:
+`calendar_runs` stores due executions. Required fields are:
 
 - `schema_version`: always `calendar_run.v1`;
 - `owner`: always `calendar_scheduler`;
@@ -175,8 +178,8 @@ Lease semantics:
 
 The calendar trigger roster is closed:
 
-- `future_cognition`: due run should create fresh cognition context in a later
-  wiring stage. It must not send prewritten text directly.
+- `future_cognition`: due run creates a fresh self-cognition source case. It
+  must not send prewritten text directly.
 - `commitment_due_cognition`: due run re-reads the active-commitment memory
   unit and skips stale or structurally mismatched rows. Payload is restricted
   to `unit_id`, `global_user_id`, and `due_at`; semantic memory text is not
@@ -185,8 +188,8 @@ The calendar trigger roster is closed:
   reflection and group self-cognition review remain allowed payload actions,
   not calendar trigger kinds.
 - `recurring_self_check`: recurring internal self-check trigger reserved by
-  the Stage 2 closed roster. Later wiring owns any runtime source-case
-  behavior.
+  the closed roster. Runtime source-case behavior requires a later approved
+  owner integration.
 
 The calendar roster must not include `send_message`,
 `reflection_hourly_slot`, or `group_self_cognition_review`.
@@ -210,9 +213,9 @@ The calendar representation maps mechanically to and from
 `reflection_hourly_slot` and `group_self_cognition_review` may appear only as
 values inside the intent payload's `allowed_actions`. They must not become
 calendar trigger kinds. The calendar package must not introduce a
-`reflection_phase_runs` collection or any side control plane. In Stage 2, this
-mapping exists and is tested, but the reflection worker cutover remains later
-planned work.
+`reflection_phase_runs` collection or any side control plane. The service
+calendar worker materializes and claims these runs, while daily readiness reads
+expected hourly work from durable calendar phase runs.
 
 ## Migration And Cutover
 
@@ -239,25 +242,22 @@ Apply rules:
   calendar writes.
 
 There is no compatibility layer, dual-write path, dual-read path, or fallback
-from calendar runs to `scheduled_events` in this package. Later stages must
-remove production reads and writes against the old scheduler runtime before
-full cutover sign-off.
+from calendar runs to `scheduled_events` in this package. Production reads and
+writes against the old scheduler runtime are removed; `scheduled_events` is
+historical migration/audit data only.
 
 ## Runtime Lifecycle, Ops, Event Logging, And Health
 
-Stage 2 provides the worker tick function and repository transitions, but it
-does not start a background service task. Later service lifecycle wiring must
-own:
+FastAPI lifespan owns the background calendar worker when
+`CALENDAR_SCHEDULER_ENABLED=true`. The service passes a closed handler
+registry, worker lease owner identity, poll interval, claim limit, lease
+duration, retry limit, and reflection phase materializer into
+`start_calendar_scheduler_worker(...)`.
 
-- calendar worker startup and shutdown;
-- worker lease owner identity;
-- poll interval, claim limit, lease duration, retry limit, and per-trigger
-  capacity from config;
-- operator health surfaces that report whether the worker is enabled, alive,
-  claiming, completing, failing, or blocked;
-- event logging for claim counts, completed counts, failed counts, skipped
-  counts, unsupported trigger kinds, stale commitment skips, and migration
-  summaries.
+`/ops/runtime-status` reports the configured calendar scheduler values and
+process-local worker liveness beside reflection and self-cognition worker
+state. Event logs remain observability only and are not the source of truth for
+claim state, run state, idempotency, lease recovery, or migration completion.
 
 Event logs are observability only. They must not become the source of truth for
 schedule state, run state, idempotency, lease recovery, or migration
@@ -265,7 +265,7 @@ completion. The durable collections remain the source of truth.
 
 ## Testing And Verification
 
-Stage 2 deterministic verification covers:
+Deterministic verification covers:
 
 - model builders and closed trigger/status contracts;
 - recurrence calculation and rejection of unsupported recurrence shapes;
@@ -280,7 +280,7 @@ Stage 2 deterministic verification covers:
 - DB bootstrap collections, unique idempotency indexes, run claim indexes, and
   facade schema exports.
 
-Required local checks for this package slice are:
+Required local checks for this package are:
 
 ```powershell
 venv\Scripts\python -m pytest tests/test_calendar_scheduler_models.py tests/test_calendar_scheduler_recurrence.py tests/test_calendar_scheduler_repository.py tests/test_calendar_scheduler_worker.py tests/test_calendar_scheduler_migration.py tests/test_calendar_scheduler_active_commitments.py tests/test_calendar_scheduler_reflection_phase.py -q

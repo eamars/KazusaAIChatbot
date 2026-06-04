@@ -43,7 +43,7 @@ The returned shape remains the standard capability result:
 ## Semantic Ownership
 
 Recall reconciles volatile current-episode progress, active commitments,
-pending scheduled events, and gated history proof for questions about active
+pending calendar runs, and gated history proof for questions about active
 agreements, ongoing promises, current plans, open loops, and where the current
 episode stands.
 
@@ -72,22 +72,26 @@ contract.
 | `review.py` | Candidate ranking, conflict notes, recall type/freshness projection, observation projection, and LLM candidate review. |
 | `collectors/progress.py` | Current-episode progress collector and progress-entry extraction. |
 | `collectors/commitments.py` | Active-commitment collector. |
-| `collectors/scheduled_events.py` | Scheduled-event collector. |
+| `collectors/calendar_runs.py` | Pending calendar-run collector. |
 | `collectors/history.py` | History-proof collector. |
 
 ## Collector Roster
 
 - `ProgressCollector`
 - `ActiveCommitmentCollector`
-- `ScheduledEventCollector`
+- `CalendarRunCollector`
 - `HistoryEvidenceCollector`
 
-Collector names, result payloads, and fact-source metadata remain unchanged.
+Collector result payloads and fact-source metadata stay prompt-safe: they may
+describe a scheduled future cognition or commitment due slot, but they must not
+expose calendar run ids, schedule ids, lease state, collection names, or
+migration metadata.
 
 ## Cache Policy
 
 Recall is volatile and not cached. It reports the existing volatile cache status
-and reads only scoped runtime/progress/scheduler/history material.
+and reads only scoped runtime, progress, calendar-run, commitment, and history
+material.
 
 ## LLM And Prompt Policy
 

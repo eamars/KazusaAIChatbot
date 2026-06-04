@@ -5,8 +5,8 @@
 - ICD id: `BS-ICD-001`
 - Owning package: `kazusa_ai_chatbot.brain_service`
 - Interface boundary: runtime adapters and debug clients -> brain service HTTP API
-- Runtime consumers: platform adapters, debug adapter, scheduler dispatcher,
-  service queue, persona graph, persistence, and health checks
+- Runtime consumers: platform adapters, debug adapter, calendar scheduler,
+  dispatcher, service queue, persona graph, persistence, and health checks
 - Contract owners: brain service API models in `contracts.py` and FastAPI route
   handlers in `service.py`
 
@@ -36,7 +36,7 @@ both inbound and outbound state:
   platform message id after delivery,
 - `/delivery_receipt` stores delivered platform message ids for future native
   reply hydration,
-- runtime adapter registration lets scheduler/proactive sends call adapter
+- runtime adapter registration lets dispatcher/proactive sends call adapter
   callback endpoints.
 
 ## Scope
@@ -47,7 +47,8 @@ This ICD covers:
 - Pydantic request and response models in `brain_service.contracts`.
 - Adapter obligations before and after calling `/chat`.
 - Delivery tracking and delivery receipt lifecycle.
-- Runtime adapter registration and heartbeat protocol for scheduled delivery.
+- Runtime adapter registration and heartbeat protocol for dispatcher or
+  proactive callback delivery.
 - Reply-context hydration behavior when an adapter supplies only a platform
   reply message id.
 - Compatibility rules for adding service fields and endpoints.
@@ -76,11 +77,12 @@ conversation rows, exposes health, and receives delivery receipts.
 The brain service consumes typed adapter metadata and normalized envelope
 fields.
 
-### Scheduler Dispatcher
+### Dispatcher Or Proactive Callback Caller
 
-The scheduler dispatcher is an internal caller that uses registered adapter
-callbacks to send accepted future messages. Scheduler delivery and normal
-`/chat` delivery receipts stay on separate service paths.
+The dispatcher or a future proactive-output owner can use registered adapter
+callbacks for trusted non-`/chat` delivery. Callback delivery and normal
+`/chat` delivery receipts stay on separate service paths. Calendar scheduler
+triggers do not by themselves send prewritten visible text.
 
 ## Boundary Summary
 
@@ -98,31 +100,33 @@ platform event
   -> conversation row gains delivered platform message id
 ```
 
-For scheduled or proactive delivery:
+For dispatcher or proactive callback delivery:
 
 ```text
 adapter startup
   -> POST /runtime/adapters/register
   -> periodic POST /runtime/adapters/heartbeat
-  -> brain scheduler selects registered adapter
+  -> brain delivery owner selects registered adapter
   -> brain calls adapter callback /send_message
   -> adapter returns SendResult(message_id)
 ```
 
 The two flows are related but separate. Normal `/chat` delivery receipts update
 assistant conversation rows. Runtime callback sends return `SendResult` for
-scheduler execution and are not backfilled into normal-chat rows by this ICD.
+dispatcher/proactive execution and are not backfilled into normal-chat rows by
+this ICD.
 
-Normal `/chat` responses and scheduled/proactive callback sends may include
+Normal `/chat` responses and dispatcher/proactive callback sends may include
 optional `delivery_mentions` metadata. This is adapter-owned rendering
 metadata: the brain keeps outbound text platform-neutral, and the adapter
 renders a native prefix user mention only when feasible. Missing, empty, or
 unrenderable mention metadata must not block text delivery.
 
 Visible `/chat` delivery follows selected `SurfaceOutputV1` text surfaces.
-Private action results, private finalization, scheduled-action results, and
-no-visible-output decisions may still make an episode consolidatable, but they
-do not create adapter sends or delivery receipts by themselves.
+Private action results, private finalization, calendar-triggered action
+results, and no-visible-output decisions may still make an episode
+consolidatable, but they do not create adapter sends or delivery receipts by
+themselves.
 
 ## Public Endpoints
 
@@ -132,11 +136,17 @@ Response model: `HealthResponse`.
 
 Purpose:
 
-- Report service readiness for the database, scheduler, and Cache2.
+- Report service readiness for the database, service graph, and Cache2.
 - Provide operational visibility without running the persona graph.
 
 Adapters can use this endpoint for startup diagnostics. Chat availability is
-reported by the health status, database status, and scheduler status fields.
+reported by the health status, database status, and service-graph status
+fields.
+
+The response field named `scheduler` is a legacy readiness field in
+`HealthResponse`; it is not the calendar scheduler liveness contract. Trusted
+operators use `/ops/runtime-status` for calendar scheduler enablement,
+configuration, and task liveness.
 
 ### `GET /ops/runtime-status`
 
@@ -150,8 +160,9 @@ Purpose:
 The response exposes:
 
 - `status`, `generated_at`, and `window_hours`;
-- `config` values for reflection and self-cognition worker enablement and
-  intervals;
+- `config` values for calendar, reflection, and self-cognition worker
+  enablement and intervals;
+- calendar claim, lease, and retry settings;
 - process-local worker `enabled` and `task_alive` values;
 - latest event timestamp/status for process, reflection, and self-cognition;
 - deterministic `semantic_descriptors`.
@@ -231,7 +242,7 @@ Purpose:
 | `attachments` | brain | Outbound attachments. Currently reserved for future use. |
 | `use_reply_feature` | brain | Adapter should use native reply rendering for the first outbound message when possible. |
 | `delivery_mentions` | brain then adapter | Optional platform-neutral mention requests. The brain emits these from dialog semantic intent after reply override; adapters decide native rendering, channel feasibility, and no-op fallback. |
-| `scheduled_followups` | brain | Count of scheduled follow-ups accepted during the turn. |
+| `scheduled_followups` | brain | Count of scheduled future-cognition follow-ups accepted during the turn. |
 | `delivery_tracking_id` | brain | Brain-generated identifier for the assistant row that should receive a delivery receipt. Empty means no receipt should be posted. |
 
 Adapter responsibilities:
@@ -340,14 +351,14 @@ Response model: `RuntimeAdapterRegistrationResponse`.
 
 Purpose:
 
-- Register a cross-process adapter callback so the brain scheduler can deliver
-  accepted future messages through that adapter.
+- Register a cross-process adapter callback so trusted dispatcher or proactive
+  delivery owners can send through that adapter.
 
 Fields:
 
 | Field | Required | Owner | Meaning |
 | --- | --- | --- | --- |
-| `platform` | yes | adapter | Platform key used by scheduled tasks. |
+| `platform` | yes | adapter | Platform key used by callback delivery tasks. |
 | `callback_url` | yes | adapter | Base URL exposed by the adapter process. |
 | `shared_secret` | no | adapter/operator | Bearer token expected by the adapter callback, if configured. |
 | `timeout_seconds` | no | adapter/operator | Brain-side timeout for callback sends. |
@@ -420,8 +431,8 @@ been released.
 
 When an episode has no visible text surface, the brain returns an empty
 `messages` list and no delivery tracking id. That episode can still be
-consolidated when private action results, scheduled-action results, private
-surface outputs, or private finalization exist.
+consolidated when private action results, calendar-triggered action results,
+private surface outputs, or private finalization exist.
 
 Delivery receipt adapters may still need bounded `not_found` retry behavior
 for transport timing and cross-process delivery, but a non-empty
@@ -454,8 +465,8 @@ Runtime adapters own:
 - Calling `/chat` and rendering `ChatResponse.messages`.
 - Extracting durable outbound platform message ids after successful sends.
 - Posting `/delivery_receipt` when the adapter supports durable outbound ids.
-- Registering and heartbeating runtime callback URLs when scheduler delivery
-  is enabled.
+- Registering and heartbeating runtime callback URLs when dispatcher or
+  proactive callback delivery is enabled.
 
 The brain service owns:
 
@@ -465,7 +476,8 @@ The brain service owns:
 - Reply context hydration from typed metadata and delivered conversation rows.
 - Persona graph invocation.
 - Assistant row persistence and delivery receipt updates.
-- Runtime adapter registry integration for scheduler dispatch.
+- Runtime adapter registry integration for dispatcher/proactive callback
+  dispatch.
 - Health response composition.
 
 The database package owns:
@@ -508,6 +520,6 @@ Receipt failure behavior:
 - Unexpected receipt status: adapter logs and stops.
 
 Runtime callback registration failures should be logged by adapters and retried
-through heartbeat/startup behavior. Missing runtime adapters cause scheduler
-delivery validation to reject or fail scheduled sends according to dispatcher
+through heartbeat/startup behavior. Missing runtime adapters cause dispatcher
+delivery validation to reject or fail callback sends according to dispatcher
 policy.
