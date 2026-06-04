@@ -13,7 +13,12 @@ from kazusa_ai_chatbot.config import (
     CONSOLIDATION_LLM_BASE_URL,
     CONSOLIDATION_LLM_MODEL,
 )
+from kazusa_ai_chatbot.calendar_scheduler import repository as calendar_repository
+from kazusa_ai_chatbot.calendar_scheduler.handlers import (
+    reconcile_active_commitment_calendar_schedule,
+)
 from kazusa_ai_chatbot.db import (
+    UserMemoryUnitStatus,
     UserMemoryUnitType,
     insert_user_memory_units,
     update_user_memory_unit_semantics,
@@ -1018,14 +1023,22 @@ async def process_memory_unit_candidate(state: ConsolidatorState, candidate: dic
             [candidate],
             storage_timestamp_utc=storage_timestamp_utc,
         )
-        unit_id = docs[0]["unit_id"]
+        created_unit = docs[0]
+        unit_id = created_unit["unit_id"]
+        if created_unit["unit_type"] == UserMemoryUnitType.ACTIVE_COMMITMENT:
+            await reconcile_active_commitment_calendar_schedule(
+                created_unit,
+                repository=calendar_repository,
+                storage_timestamp_utc=storage_timestamp_utc,
+            )
     else:
         rewrite_result = await _rewrite_memory_unit(state, candidate, merge_result)
+        lifecycle_fields = _candidate_lifecycle_updates(candidate)
         await update_user_memory_unit_semantics(
             merge_result["cluster_id"],
             rewrite_result,
             storage_timestamp_utc=storage_timestamp_utc,
-            lifecycle_fields=_candidate_lifecycle_updates(candidate),
+            lifecycle_fields=lifecycle_fields,
             merge_history_entry={
                 "timestamp": storage_timestamp_utc,
                 "decision": merge_result["decision"],
@@ -1034,6 +1047,31 @@ async def process_memory_unit_candidate(state: ConsolidatorState, candidate: dic
             },
         )
         unit_id = merge_result["cluster_id"]
+        if (
+            candidate["unit_type"] == UserMemoryUnitType.ACTIVE_COMMITMENT
+            and lifecycle_fields
+        ):
+            updated_unit = {
+                "unit_id": unit_id,
+                "global_user_id": global_user_id,
+                "unit_type": UserMemoryUnitType.ACTIVE_COMMITMENT,
+                "status": UserMemoryUnitStatus.ACTIVE,
+            }
+            for cluster in candidate_clusters:
+                if text_or_empty(cluster.get("unit_id")) == unit_id:
+                    updated_unit.update(cluster)
+                    break
+            updated_unit.update(rewrite_result)
+            updated_unit.update(lifecycle_fields)
+            updated_unit["unit_id"] = unit_id
+            updated_unit["global_user_id"] = global_user_id
+            updated_unit["unit_type"] = UserMemoryUnitType.ACTIVE_COMMITMENT
+            updated_unit["updated_at"] = storage_timestamp_utc
+            await reconcile_active_commitment_calendar_schedule(
+                updated_unit,
+                repository=calendar_repository,
+                storage_timestamp_utc=storage_timestamp_utc,
+            )
 
     if candidate["unit_type"] in {
         UserMemoryUnitType.STABLE_PATTERN,

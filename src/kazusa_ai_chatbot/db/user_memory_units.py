@@ -187,6 +187,24 @@ async def insert_user_memory_units(
     return docs
 
 
+async def get_user_memory_unit_by_unit_id(
+    unit_id: str,
+) -> UserMemoryUnitDoc | None:
+    """Read one memory unit by stable unit id without vector internals."""
+
+    clean_unit_id = text_or_empty(unit_id)
+    if not clean_unit_id:
+        return_value = None
+        return return_value
+
+    db = await get_db()
+    document = await db.user_memory_units.find_one(
+        {"unit_id": clean_unit_id},
+        {"_id": 0, "embedding": 0},
+    )
+    return document
+
+
 async def query_user_memory_units(
     global_user_id: str,
     *,

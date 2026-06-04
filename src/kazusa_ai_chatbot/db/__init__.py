@@ -10,7 +10,6 @@ Submodule map:
 * ``character``    — ``character_state`` operations
 * ``memory``       — ``memory`` operations
 * ``interaction_style_images`` — L3-only interaction style overlays
-* ``scheduled_events`` — scheduled-event persistence helpers
 """
 
 from __future__ import annotations
@@ -38,6 +37,8 @@ from kazusa_ai_chatbot.db.health import check_database_connection
 # ── Schemas ────────────────────────────────────────────────────────
 from kazusa_ai_chatbot.db.schemas import (
     AttachmentDoc,
+    CalendarRunDoc,
+    CalendarScheduleDoc,
     CharacterProfileDoc,
     CharacterReflectionRunDoc,
     ConversationEpisodeEntryDoc,
@@ -145,6 +146,7 @@ from kazusa_ai_chatbot.db.users import (
 
 from kazusa_ai_chatbot.db.user_memory_units import (
     build_user_memory_unit_doc,
+    get_user_memory_unit_by_unit_id,
     insert_user_memory_units,
     query_active_commitment_memory_units,
     query_active_commitment_memory_units_for_user,
@@ -169,17 +171,6 @@ from kazusa_ai_chatbot.db.character import (
     upsert_character_state,
 )
 
-from kazusa_ai_chatbot.db.scheduled_events import (
-    cancel_pending_scheduled_event,
-    claim_pending_scheduled_event_running,
-    insert_scheduled_event,
-    list_due_future_cognition_events,
-    list_pending_scheduler_events,
-    mark_scheduled_event_completed,
-    mark_scheduled_event_failed,
-    mark_scheduled_event_running,
-    query_pending_scheduled_events,
-)
 from kazusa_ai_chatbot.db.self_cognition import (
     find_self_cognition_group_review_window,
     list_self_cognition_action_attempts,
@@ -229,7 +220,8 @@ __all__ = [
     "get_query_text_embedding", "get_query_text_embeddings_batch",
     "get_text_embedding", "get_text_embeddings_batch",
     # Schemas
-    "AttachmentDoc", "CharacterProfileDoc", "CharacterReflectionRunDoc",
+    "AttachmentDoc", "CalendarRunDoc", "CalendarScheduleDoc",
+    "CharacterProfileDoc", "CharacterReflectionRunDoc",
     "ConversationEpisodeEntryDoc", "ConversationEpisodeStateDoc",
     "ConversationMessageDoc", "GlobalCharacterGrowthRunDoc",
     "GlobalCharacterGrowthTraitDoc", "InteractionStyleImageDoc",
@@ -281,7 +273,8 @@ __all__ = [
     "list_users_by_affinity", "list_users_by_display_name",
     "resolve_global_user_id", "search_users_by_display_name", "update_affinity",
     "update_last_relationship_insight",
-    "build_user_memory_unit_doc", "insert_user_memory_units",
+    "build_user_memory_unit_doc", "get_user_memory_unit_by_unit_id",
+    "insert_user_memory_units",
     "query_active_commitment_memory_units",
     "query_active_commitment_memory_units_for_user",
     "query_user_memory_units",
@@ -297,13 +290,6 @@ __all__ = [
     "upsert_character_self_image", "upsert_character_state",
     # Memory
     "enable_memory_vector_index", "get_active_promises", "save_memory", "search_memory",
-    # Scheduled events
-    "cancel_pending_scheduled_event", "insert_scheduled_event",
-    "claim_pending_scheduled_event_running",
-    "list_due_future_cognition_events", "list_pending_scheduler_events",
-    "mark_scheduled_event_completed",
-    "mark_scheduled_event_failed", "mark_scheduled_event_running",
-    "query_pending_scheduled_events",
     # Self-cognition action attempts
     "find_self_cognition_group_review_window",
     "list_self_cognition_action_attempts",

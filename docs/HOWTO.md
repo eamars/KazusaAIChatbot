@@ -71,12 +71,19 @@ EMBEDDING_MODEL=your-embedding-model
 # Character and service behavior
 CHARACTER_GLOBAL_USER_ID=00000000-0000-4000-8000-000000000001
 CONVERSATION_HISTORY_LIMIT=10
-SCHEDULED_TASKS_ENABLED=true
 COGNITION_VISUAL_DIRECTIVES_ENABLED=true
 COGNITION_RESOLVER_MAX_CYCLES=3
 COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS=120.0
 SELF_COGNITION_ENABLED=true
 CHARACTER_SLEEP_LOCAL_PERIOD=02:00-12:00
+
+# Durable calendar scheduler
+CALENDAR_SCHEDULER_ENABLED=true
+CALENDAR_SCHEDULER_POLL_INTERVAL_SECONDS=30
+CALENDAR_SCHEDULER_CLAIM_LIMIT=10
+CALENDAR_SCHEDULER_LEASE_SECONDS=300
+CALENDAR_SCHEDULER_MAX_ATTEMPTS=3
+CALENDAR_SCHEDULER_PER_TRIGGER_CAPACITY=5
 
 # Direct web search and URL-reader behavior
 SEARXNG_URL=http://your-searxng-host:8080
@@ -189,8 +196,8 @@ self-cognition worker runs do not invoke the L3 visual-directive LLM.
 `CHARACTER_SLEEP_LOCAL_PERIOD` defaults to `02:00-12:00` in
 `CHARACTER_TIME_ZONE`. During that local period, active-commitment
 self-cognition and reflection-attached group self-cognition do not trigger.
-Scheduled future cognition, reflection, consolidation, scheduler execution,
-dispatcher validation, and adapter delivery continue. Set
+Scheduled future cognition, durable calendar due-run handling, reflection,
+consolidation, dispatcher validation, and adapter delivery continue. Set
 `CHARACTER_SLEEP_LOCAL_PERIOD` to an empty value to disable this sleep-period
 suppression.
 
@@ -264,8 +271,9 @@ On startup the service:
 4. Compiles the top-level LangGraph pipeline.
 5. Hydrates persistent Cache2 initializer entries.
 6. Starts configured MCP servers.
-7. Loads pending scheduled events if scheduling is enabled.
-8. Starts the reflection worker when `REFLECTION_CYCLE_ENABLED=true`.
+7. Starts the durable calendar worker when `CALENDAR_SCHEDULER_ENABLED=true`.
+8. Starts the self-cognition worker when `SELF_COGNITION_ENABLED=true`.
+9. Starts the reflection worker when `REFLECTION_CYCLE_ENABLED=true`.
 
 ## Adapters
 
@@ -352,6 +360,10 @@ The Cache2 block intentionally exposes only agent names and aggregate lookup
 counts. It does not include cache keys, user identifiers, queries, dependency
 scopes, or cached retrieval results.
 
+The `scheduler` boolean is a legacy health-field name kept in the public
+response model. Use `/ops/runtime-status` for calendar scheduler enablement,
+configuration, and worker liveness.
+
 ### `GET /ops/runtime-status`
 
 Trusted-operator runtime status. This endpoint is separate from `/health` so
@@ -360,7 +372,8 @@ adapter readiness checks stay small and stable.
 The response contains only aggregate service state:
 
 - process last event status and timestamp,
-- effective reflection/self-cognition worker config,
+- effective calendar, reflection, and self-cognition worker config,
+- calendar poll interval, claim limit, lease duration, and retry limit,
 - effective reflection phase period, minimum slot spacing, maximum slots, and
   one-group-per-slot invariant,
 - process-local worker liveness flags,

@@ -46,7 +46,7 @@ At a high level, Kazusa provides:
 | Background consolidation         | Completed episodes update durable memory, relationship state, Cache2 invalidation, images, and progress from text plus action/surface traces. |
 | Reflection outside chat          | Hourly, daily, and promoted reflection runs are stored as audit records and only promoted context can enter normal cognition.      |
 | Idle self-cognition              | Background source cases can enter the same resolver-backed persona path, with source-bound delivery and normal consolidation rules. |
-| Scheduled follow-through         | Accepted future promises can become validated scheduled tasks delivered later through registered adapters.                         |
+| Calendar follow-through          | Accepted future promises and due commitments can become durable calendar triggers that run fresh cognition later.                  |
 | Event logging observability      | Runtime, LLM, RAG, action routing, surfaces, reflection, self-cognition, dispatcher, consolidation, and DB operations emit sanitized operational events. |
 
 ## What You Can Build
@@ -59,7 +59,7 @@ At a high level, Kazusa provides:
 | Memory and RAG experiments           | RAG 2, Cache2, scoped user memory, shared memory evolution, and conversation search are modular enough to inspect independently. |
 | Cross-platform adapter experiments   | New adapters only need to normalize platform events into the service contract and render returned messages.                      |
 | Idle cognition and reflection labs   | Self-cognition and reflection use bounded source packets and shared cognition boundaries without turning adapters into agents.   |
-| Promise and follow-through workflows | Accepted future commitments can be validated, persisted, deduplicated, and delivered later through registered adapters.          |
+| Promise and follow-through workflows | Accepted future commitments can be validated, persisted, deduplicated, and revisited later through durable calendar triggers.    |
 
 ## Supported LLMs
 
@@ -118,7 +118,7 @@ flowchart TD
     J[Adapter delivery and delivery receipts]
     K[Post-turn memory, progress, residue, consolidation]
     L[(MongoDB, model routes, Cache2, web/MCP runtimes)]
-    M[Scheduler, dispatcher, reflection, self-cognition workers]
+    M[Calendar scheduler, reflection, self-cognition workers]
     N[No persona turn / empty ChatResponse]
 
     A -->|ChatRequest + MessageEnvelope| B
@@ -135,8 +135,7 @@ flowchart TD
     P4 -->|private actions or no visible surface| K
     J --> K
     K --> L
-    M -->|self-cognition source cases| P1
-    M -->|scheduled delivery callbacks| J
+    M -->|calendar-triggered source cases| P1
     M --> L
 
     subgraph Persona["Persona turn"]
@@ -194,7 +193,7 @@ as persona by itself.
 Selected visible text surfaces go back to adapters through `ChatResponse` and
 delivery receipts. Private action results, no-visible-output decisions, and
 surface traces can still feed post-turn progress, consolidation, Cache2
-invalidation, residue recording, scheduler state, reflection, and
+invalidation, residue recording, calendar state, reflection, and
 self-cognition without creating a platform send.
 
 ## Design Principles
@@ -216,12 +215,12 @@ answers "how should the selected surface render it?"
 
 Kazusa does not flatten all context into one prompt. Immediate surface text,
 conversation progress, retrieved evidence, durable memory, promoted reflection,
-and scheduled commitments each have a separate lifecycle.
+and calendar-scheduled commitments each have a separate lifecycle.
 
 The internal monologue residue lane is a separate short-lived lane. It stores
 one compact first-person reason from a completed episode and projects it only
 into L2a as `internal_monologue_residue_context`. It is not
-`reflection_summary`, durable memory, visible dialog planning, or scheduler
+`reflection_summary`, durable memory, visible dialog planning, or calendar
 input.
 
 **Reflection does not shortcut into live chat**
@@ -233,7 +232,7 @@ inspection, but normal cognition only receives bounded, promoted, gated context.
 
 Platform adapters parse platform events, normalize typed envelopes, call the
 brain service, and deliver returned messages. Character identity, memory, RAG,
-cognition, and scheduling remain in the platform-neutral core.
+cognition, and calendar scheduling remain in the platform-neutral core.
 
 ## Runtime Layers
 
@@ -251,7 +250,8 @@ cognition, and scheduling remain in the platform-neutral core.
 | Consolidation            | Durable target routing, write-intent validation, and target-specific persistence        | [Consolidation ICD](src/kazusa_ai_chatbot/consolidation/README.md)                    |
 | Database                 | MongoDB collection ownership, embeddings, indexes, public persistence helpers           | [Database ICD](src/kazusa_ai_chatbot/db/README.md)                                     |
 | Event logging            | Sanitized operational telemetry, status snapshots, statistics, and export contracts     | [Event Logging ICD](src/kazusa_ai_chatbot/event_logging/README.md)                     |
-| Dispatcher and scheduler | Validated delayed tool execution for accepted future promises                           | [Dispatcher](src/kazusa_ai_chatbot/dispatcher/README.md)                               |
+| Calendar scheduler       | Durable typed trigger timing for future cognition, commitment due checks, and reflection phase slots | [Calendar Scheduler ICD](src/kazusa_ai_chatbot/calendar_scheduler/README.md) |
+| Dispatcher               | Adapter-facing delivery validation and callback transport helpers                       | [Dispatcher](src/kazusa_ai_chatbot/dispatcher/README.md)                               |
 | Self-cognition           | Idle source collection, self-cognition episodes, route tracking, and source-bound delivery | [Self-Cognition](src/kazusa_ai_chatbot/self_cognition/README.md)                    |
 | Reflection cycle         | Background reflection runs, promotion gates, prompt-safe reflection context             | [Reflection Cycle ICD](src/kazusa_ai_chatbot/reflection_cycle/README.md)               |
 | Memory evolution         | Curated shared memory lifecycle, lineage, seed reset, promoted memory writes            | [Memory Evolution ICD](src/kazusa_ai_chatbot/memory_evolution/README.md)               |
@@ -315,7 +315,8 @@ src/
     internal_monologue_residue/ Short-lived private residue lane for L2a
     db/                        MongoDB facade, schemas, collection owners
     event_logging/             Sanitized operational telemetry interface and ICD
-    dispatcher/                Delayed task validation and adapter handoff
+    calendar_scheduler/        Durable typed trigger scheduler and migration script support
+    dispatcher/                Adapter-facing delivery validation and handoff
     self_cognition/            Idle self-cognition triggers, tracking, and delivery
     reflection_cycle/          Background reflection and promotion
     memory_evolution/          Shared memory lifecycle and seed reset

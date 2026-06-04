@@ -278,13 +278,13 @@ suppression and dispatcher handoff. In production worker ticks, selected
 shared cognition path, then the worker hands the final text to dispatcher
 delivery in the same tick.
 
-`trigger_future_cognition` uses `scheduled_events` as an internal delayed
-trigger source. The action handler records a private non-dispatcher slot; a
-later self-cognition worker tick collects due slots as normal source cases and
-marks the source slot completed after the normal runner path returns. The
-model-facing source packet receives only semantic follow-up context, not
-scheduler ids, action-attempt ids, continuation schema versions, or depth
-limits.
+`trigger_future_cognition` uses the durable calendar scheduler as an internal
+delayed trigger source. The action handler records a private calendar
+`future_cognition` slot; a later self-cognition worker tick claims due calendar
+runs as normal source cases and marks the source slot completed or skipped
+after the normal runner path returns. The model-facing source packet receives
+only semantic follow-up context, not calendar ids, scheduler ids,
+action-attempt ids, continuation schema versions, or depth limits.
 Due-aware packets may render neutral due-state facts such as
 `约定状态: 已过期` as source state. Actionability strings and route
 instructions remain tracking metadata and must not be rendered to the
@@ -298,10 +298,9 @@ and consolidation-outcome metadata through
 operator view for long-term production counts and `/ops/self-cognition/stats`.
 
 Event-log rows store ids, route names, output modes, budget counters,
-consolidation write-success booleans, scheduled-event counts,
-cache-eviction counts, origin labels, and status labels; they must not include
-source packet text, action candidate text, raw target channels, or
-conversation bodies.
+consolidation write-success booleans, calendar source counts, cache-eviction
+counts, origin labels, and status labels; they must not include source packet
+text, action candidate text, raw target channels, or conversation bodies.
 
 ## Tracking Records
 

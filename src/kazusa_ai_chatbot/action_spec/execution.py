@@ -148,14 +148,20 @@ async def execute_action_specs_for_trace(
             else:
                 status = "scheduled"
                 completed_at = normalized_storage_timestamp_utc
-                scheduled_ids = future_result["scheduled_event_ids"]
+                scheduled_count = int(future_result["scheduled_count"])
+                trigger_kind = str(future_result["calendar_trigger_kind"])
                 result_summary = (
-                    "trigger_future_cognition scheduled: "
-                    f"{', '.join(scheduled_ids)}"
+                    "scheduled self-cognition follow-up: "
+                    f"scheduled_count={scheduled_count}"
                 )
                 execution_result = {
                     "status": status,
-                    "scheduled_event_ids": list(scheduled_ids),
+                    "calendar_trigger_kind": trigger_kind,
+                    "calendar_schedule_id": (
+                        future_result["calendar_schedule_id"]
+                    ),
+                    "calendar_run_id": future_result["calendar_run_id"],
+                    "scheduled_count": scheduled_count,
                     "future_result": future_result,
                 }
         elif action_attempt_id in executed_attempts:

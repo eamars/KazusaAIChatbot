@@ -7,7 +7,11 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
+from kazusa_ai_chatbot.calendar_scheduler import handlers as calendar_handlers
+from kazusa_ai_chatbot.calendar_scheduler import models as calendar_models
+from kazusa_ai_chatbot.calendar_scheduler import repository as calendar_repository
 from kazusa_ai_chatbot.config import (
+    CALENDAR_SCHEDULER_MAX_ATTEMPTS,
     CHARACTER_GLOBAL_USER_ID,
     SELF_COGNITION_TRIGGER_ACTIVE_COMMITMENT_ENABLED,
     SELF_COGNITION_TRIGGER_GROUP_CHAT_REVIEW_ENABLED,
@@ -15,8 +19,8 @@ from kazusa_ai_chatbot.config import (
 from kazusa_ai_chatbot.consolidation.target import SYNTHETIC_USER_IDS
 from kazusa_ai_chatbot.db import (
     get_conversation_history,
+    get_user_memory_unit_by_unit_id,
     get_user_profile,
-    list_due_future_cognition_events,
     query_active_commitment_memory_units,
 )
 from kazusa_ai_chatbot.reflection_cycle.activity_windows import (
@@ -48,6 +52,7 @@ _CHARACTER_PROFILE_FIELDS = frozenset(
         "linguistic_texture_profile",
     )
 )
+_SCHEDULED_FUTURE_COGNITION_SOURCE_KIND = "scheduled_future_cognition_slot"
 
 
 async def collect_self_cognition_cases(
@@ -82,7 +87,7 @@ async def collect_self_cognition_cases(
         and not is_self_cognition_sleep_period(now)
     )
     if active_commitment_enabled:
-        commitment_cases = await collect_active_commitment_cases(
+        commitment_cases = await collect_commitment_due_cognition_cases(
             now=now,
             character_profile=character_profile,
             max_cases=remaining_cases,
@@ -216,17 +221,17 @@ async def collect_scheduled_future_cognition_cases(
     now: datetime,
     character_profile: dict[str, Any],
     max_cases: int,
-    list_due_events_func: Callable[..., Any] | None = None,
+    list_due_calendar_runs_func: Callable[..., Any] | None = None,
     get_latest_private_channel_func: Callable[..., Any] | None = None,
     get_user_profile_func: Callable[..., Any] | None = None,
 ) -> list[models.SelfCognitionCase]:
-    """Build worker cases from due scheduled future-cognition slots.
+    """Build worker cases from due calendar future-cognition slots.
 
     Args:
         now: Current worker tick time.
         character_profile: Current character state snapshot.
         max_cases: Maximum due slots to project.
-        list_due_events_func: Optional test seam for scheduled-slot reads.
+        list_due_calendar_runs_func: Optional test seam for calendar-run reads.
         get_latest_private_channel_func: Optional test seam for private-channel
             target lookup.
         get_user_profile_func: Optional test seam for real user profile reads.
@@ -240,29 +245,36 @@ async def collect_scheduled_future_cognition_cases(
         return return_value
 
     current_now_utc = parse_storage_utc_datetime(now.isoformat())
-    due_events_reader = list_due_events_func or list_due_future_cognition_events
+    due_runs_reader = (
+        list_due_calendar_runs_func or calendar_repository.list_due_calendar_runs
+    )
     profile_reader = get_user_profile_func or get_user_profile
-    raw_events = due_events_reader(
+    raw_runs = due_runs_reader(
         current_timestamp_utc=current_now_utc.isoformat(),
+        trigger_kinds=[calendar_models.TRIGGER_FUTURE_COGNITION],
+        max_attempts=CALENDAR_SCHEDULER_MAX_ATTEMPTS,
         limit=max_cases,
     )
-    if inspect.isawaitable(raw_events):
-        raw_events = await raw_events
+    if inspect.isawaitable(raw_runs):
+        raw_runs = await raw_runs
 
-    if raw_events is None:
+    if raw_runs is None:
         return_value = []
         return return_value
-    events = raw_events if isinstance(raw_events, list) else list(raw_events)
+    runs = raw_runs if isinstance(raw_runs, list) else list(raw_runs)
 
     cases: list[models.SelfCognitionCase] = []
-    for event in events:
+    for run in runs:
         if len(cases) >= max_cases:
             break
-        if not isinstance(event, dict):
+        if not isinstance(run, dict):
             continue
-        if not _is_due_future_cognition_event(event, current_now_utc):
+        if not _is_due_future_cognition_run(run, current_now_utc):
             continue
-        source_user_id = _non_synthetic_user_id(event.get("source_user_id"))
+        source_scope = _calendar_source_scope(run)
+        source_user_id = _non_synthetic_user_id(
+            source_scope.get("source_user_id")
+        )
         if source_user_id:
             user_profile = await _call_maybe_async(
                 profile_reader,
@@ -271,7 +283,7 @@ async def collect_scheduled_future_cognition_cases(
         else:
             user_profile = None
         case = _build_scheduled_future_cognition_case(
-            event,
+            run,
             character_profile=character_profile,
             now=current_now_utc,
             user_profile=user_profile,
@@ -280,7 +292,7 @@ async def collect_scheduled_future_cognition_cases(
             continue
         await _attach_scheduled_delivery_binding(
             case,
-            event,
+            run,
             get_latest_private_channel_func=get_latest_private_channel_func,
         )
         cases.append(case)
@@ -356,6 +368,104 @@ async def collect_active_commitment_cases(
             rows[-1],
             get_latest_private_channel_func=get_latest_private_channel_func,
         )
+        cases.append(case)
+
+    return cases
+
+
+async def collect_commitment_due_cognition_cases(
+    *,
+    now: datetime,
+    character_profile: dict[str, Any],
+    max_cases: int,
+    list_due_calendar_runs_func: Callable[..., Any] | None = None,
+    memory_unit_reader_func: Callable[..., Any] | None = None,
+    get_conversation_history_func: Callable[..., Any] | None = None,
+    get_user_profile_func: Callable[..., Any] | None = None,
+    get_latest_private_channel_func: Callable[..., Any] | None = None,
+) -> list[models.SelfCognitionCase]:
+    """Build active-commitment cases from due commitment calendar runs."""
+
+    if max_cases <= 0:
+        return_value: list[models.SelfCognitionCase] = []
+        return return_value
+
+    current_now_utc = parse_storage_utc_datetime(now.isoformat())
+    due_run_reader = list_due_calendar_runs_func or (
+        calendar_repository.list_due_calendar_runs
+    )
+    memory_unit_reader_func = (
+        memory_unit_reader_func or get_user_memory_unit_by_unit_id
+    )
+    history_reader = get_conversation_history_func or get_conversation_history
+    profile_reader = get_user_profile_func or get_user_profile
+
+    raw_runs = await _call_maybe_async(
+        due_run_reader,
+        current_timestamp_utc=current_now_utc.isoformat(),
+        trigger_kinds=[calendar_models.TRIGGER_COMMITMENT_DUE_COGNITION],
+        max_attempts=CALENDAR_SCHEDULER_MAX_ATTEMPTS,
+        limit=max_cases,
+    )
+    if raw_runs is None:
+        return_value = []
+        return return_value
+
+    runs = raw_runs if isinstance(raw_runs, list) else list(raw_runs)
+    cases: list[models.SelfCognitionCase] = []
+
+    async def read_memory_unit(unit_id: str) -> dict[str, Any] | None:
+        stored_unit = await _call_maybe_async(memory_unit_reader_func, unit_id)
+        if isinstance(stored_unit, dict):
+            return_value = stored_unit
+        else:
+            return_value = None
+        return return_value
+
+    async def build_case(unit: dict[str, Any]) -> dict[str, Any]:
+        case = await _build_commitment_due_case_from_unit(
+            unit,
+            now=current_now_utc,
+            character_profile=character_profile,
+            history_reader=history_reader,
+            profile_reader=profile_reader,
+            get_latest_private_channel_func=get_latest_private_channel_func,
+        )
+        if case is None:
+            return_value: dict[str, Any] = {}
+        else:
+            return_value = case
+        return return_value
+
+    for run in runs:
+        if len(cases) >= max_cases:
+            break
+        if not isinstance(run, dict):
+            continue
+        if not _is_due_commitment_cognition_run(run, current_now_utc):
+            continue
+        run_id = text_or_empty(run.get("run_id"))
+        handler_result = await calendar_handlers.handle_commitment_due_cognition_run(
+            run,
+            memory_unit_reader=read_memory_unit,
+            active_commitment_case_builder=build_case,
+        )
+        if handler_result.get("status") == "skipped":
+            cases.append({
+                "case_name": models.CASE_COMMITMENT_DUPLICATE_TICK,
+                "case_id": f"commitment_due_skip:{run_id}",
+                "trigger_kind": models.TRIGGER_ACTIVE_COMMITMENT_DUE_CHECK,
+                "source_calendar_run_id": run_id,
+                "source_calendar_skip_reason": handler_result["reason"],
+            })
+            continue
+        if handler_result.get("status") != "case_created":
+            continue
+        case = dict(handler_result)
+        case.pop("status", None)
+        if not text_or_empty(case.get("case_name")):
+            continue
+        case["source_calendar_run_id"] = run_id
         cases.append(case)
 
     return cases
@@ -528,57 +638,108 @@ def _build_group_review_case(
     return case
 
 
-def _is_due_future_cognition_event(
-    event: dict[str, Any],
+def _is_due_future_cognition_run(
+    run: dict[str, Any],
     now: datetime,
 ) -> bool:
-    """Return whether a scheduler row is an eligible future-cognition slot."""
+    """Return whether a calendar run is an eligible future-cognition slot."""
 
-    if event.get("status") != "pending":
+    if run.get("status") not in (
+        calendar_models.RUN_STATUS_PENDING,
+        calendar_models.RUN_STATUS_RUNNING,
+    ):
         return_value = False
         return return_value
-    if event.get("tool") != "trigger_future_cognition":
+    if run.get("trigger_kind") != calendar_models.TRIGGER_FUTURE_COGNITION:
         return_value = False
         return return_value
 
-    execute_at = text_or_empty(event.get("execute_at"))
-    if not execute_at:
+    due_at = text_or_empty(run.get("due_at"))
+    if not due_at:
         return_value = False
         return return_value
     try:
-        execute_time = parse_storage_utc_datetime(execute_at)
+        due_time = parse_storage_utc_datetime(due_at)
     except ValueError:
         return_value = False
         return return_value
 
-    return_value = execute_time <= now
+    return_value = due_time <= now
+    return return_value
+
+
+def _is_due_commitment_cognition_run(
+    run: dict[str, Any],
+    now: datetime,
+) -> bool:
+    """Return whether a calendar run is an eligible commitment due slot."""
+
+    if run.get("status") not in (
+        calendar_models.RUN_STATUS_PENDING,
+        calendar_models.RUN_STATUS_RUNNING,
+    ):
+        return_value = False
+        return return_value
+    if (
+        run.get("trigger_kind")
+        != calendar_models.TRIGGER_COMMITMENT_DUE_COGNITION
+    ):
+        return_value = False
+        return return_value
+
+    run_id = text_or_empty(run.get("run_id"))
+    payload = run.get("payload")
+    if not run_id or not isinstance(payload, dict):
+        return_value = False
+        return return_value
+    for field_name in ("unit_id", "global_user_id", "due_at"):
+        if not text_or_empty(payload.get(field_name)):
+            return_value = False
+            return return_value
+
+    due_at = text_or_empty(run.get("due_at"))
+    if not due_at:
+        return_value = False
+        return return_value
+    try:
+        due_time = parse_storage_utc_datetime(due_at)
+    except ValueError:
+        return_value = False
+        return return_value
+
+    return_value = due_time <= now
     return return_value
 
 
 async def _attach_scheduled_delivery_binding(
     case: models.SelfCognitionCase,
-    event: dict[str, Any],
+    run: dict[str, Any],
     *,
     get_latest_private_channel_func: Callable[..., Any] | None,
 ) -> None:
     """Attach target binding metadata to a scheduled source case."""
 
-    source_user_id = _non_synthetic_user_id(event.get("source_user_id"))
+    source_scope = _calendar_source_scope(run)
+    source_user_id = _non_synthetic_user_id(source_scope.get("source_user_id"))
     binding = await resolve_self_cognition_delivery_target(
-        platform=text_or_empty(event.get("source_platform")),
-        source_platform_channel_id=text_or_empty(event.get("source_channel_id")),
-        source_channel_type=text_or_empty(event.get("source_channel_type")),
-        source_message_id=text_or_empty(event.get("source_message_id")),
+        platform=text_or_empty(source_scope.get("source_platform")),
+        source_platform_channel_id=text_or_empty(
+            source_scope.get("source_channel_id")
+        ),
+        source_channel_type=text_or_empty(
+            source_scope.get("source_channel_type")
+        ),
+        source_message_id=text_or_empty(source_scope.get("source_message_id")),
         source_ref=text_or_empty(case.get("case_id")),
         source_global_user_id=source_user_id,
         source_platform_bot_id=text_or_empty(
-            event.get("source_platform_bot_id")
+            source_scope.get("source_platform_bot_id")
         ),
         source_character_name=text_or_empty(
-            event.get("source_character_name")
+            source_scope.get("source_character_name")
         ),
-        guild_id=_optional_text(event.get("guild_id")),
-        bot_permission_role=text_or_empty(event.get("bot_role")),
+        guild_id=_optional_text(source_scope.get("guild_id")),
+        bot_permission_role=text_or_empty(source_scope.get("bot_role")),
         target_global_user_id=source_user_id,
         target_platform_user_id=None,
         get_latest_private_channel_func=get_latest_private_channel_func,
@@ -613,6 +774,57 @@ async def _attach_active_commitment_delivery_binding(
         get_latest_private_channel_func=get_latest_private_channel_func,
     )
     _attach_binding(case, binding)
+
+
+async def _build_commitment_due_case_from_unit(
+    unit: dict[str, Any],
+    *,
+    now: datetime,
+    character_profile: dict[str, Any],
+    history_reader: Callable[..., Any],
+    profile_reader: Callable[..., Any],
+    get_latest_private_channel_func: Callable[..., Any] | None,
+) -> models.SelfCognitionCase | None:
+    """Project a validated commitment due unit into a worker case."""
+
+    global_user_id = text_or_empty(unit.get("global_user_id"))
+    due_at = text_or_empty(unit.get("due_at"))
+    if not global_user_id or not due_at:
+        return_value = None
+        return return_value
+
+    due_state = _due_state(due_at, now)
+    if not due_state:
+        return_value = None
+        return return_value
+
+    rows = await _call_maybe_async(
+        history_reader,
+        global_user_id=global_user_id,
+        limit=models.SOURCE_VISIBLE_CONTEXT_LIMIT,
+    )
+    if not isinstance(rows, list) or not rows:
+        return_value = None
+        return return_value
+
+    user_profile = await _call_maybe_async(profile_reader, global_user_id)
+    if not isinstance(user_profile, dict):
+        user_profile = {}
+    case = _build_active_commitment_case(
+        unit,
+        rows,
+        user_profile=user_profile,
+        character_profile=character_profile,
+        now=now,
+        due_state=due_state,
+    )
+    await _attach_active_commitment_delivery_binding(
+        case,
+        unit,
+        rows[-1],
+        get_latest_private_channel_func=get_latest_private_channel_func,
+    )
+    return case
 
 
 def _attach_binding(
@@ -747,50 +959,60 @@ async def _call_maybe_async(
 
 
 def _build_scheduled_future_cognition_case(
-    event: dict[str, Any],
+    run: dict[str, Any],
     *,
     character_profile: dict[str, Any],
     now: datetime,
     user_profile: object = None,
 ) -> models.SelfCognitionCase | None:
-    """Project one due future-cognition slot into a normal worker case."""
+    """Project one due calendar future-cognition slot into a worker case."""
 
-    args = event.get("args")
-    if not isinstance(args, dict):
+    payload = run.get("payload")
+    if not isinstance(payload, dict):
         return_value = None
         return return_value
-    if args.get("episode_type") != "self_cognition":
+    if payload.get("episode_type") != "self_cognition":
         return_value = None
         return return_value
 
-    continuation_objective = text_or_empty(args.get("continuation_objective"))
+    continuation_objective = text_or_empty(
+        payload.get("continuation_objective")
+    )
     if not continuation_objective:
         return_value = None
         return return_value
-    event_id = text_or_empty(event.get("event_id"))
-    if not event_id:
+    run_id = text_or_empty(run.get("run_id"))
+    if not run_id:
         return_value = None
         return return_value
 
-    execute_at = text_or_empty(event.get("execute_at"))
+    due_at = text_or_empty(run.get("due_at"))
+    slot_source_id = _scheduled_future_cognition_slot_source_id(run_id)
+    case_id = slot_source_id
     source_action_attempt_id = text_or_empty(
-        args.get("source_action_attempt_id")
+        payload.get("source_action_attempt_id")
     )
-    source_platform = text_or_empty(event.get("source_platform"))
-    source_channel_id = text_or_empty(event.get("source_channel_id"))
-    source_channel_type = text_or_empty(event.get("source_channel_type"))
-    target_user_id = _non_synthetic_user_id(event.get("source_user_id"))
-    source_platform_bot_id = text_or_empty(event.get("source_platform_bot_id"))
+    source_scope = _calendar_source_scope(run)
+    source_platform = text_or_empty(source_scope.get("source_platform"))
+    source_channel_id = text_or_empty(source_scope.get("source_channel_id"))
+    source_channel_type = text_or_empty(
+        source_scope.get("source_channel_type")
+    )
+    target_user_id = _non_synthetic_user_id(source_scope.get("source_user_id"))
+    source_platform_bot_id = text_or_empty(
+        source_scope.get("source_platform_bot_id")
+    )
     if not target_user_id and source_channel_type == "group":
         display_name = "group audience"
     else:
         display_name = target_user_id or "scheduled follow-up"
     source_refs = _scheduled_future_cognition_source_refs(
-        args,
+        payload,
+        slot_source_id=slot_source_id,
         continuation_objective=continuation_objective,
-        execute_at=execute_at,
+        due_at=due_at,
     )
-    safe_continuation = _safe_continuation(args.get("continuation"))
+    safe_continuation = _safe_continuation(payload.get("continuation"))
     if target_user_id:
         if isinstance(user_profile, dict):
             case_user_profile = dict(user_profile)
@@ -801,10 +1023,10 @@ def _build_scheduled_future_cognition_case(
 
     case: models.SelfCognitionCase = {
         "case_name": models.CASE_SCHEDULED_FUTURE_COGNITION,
-        "case_id": event_id,
+        "case_id": case_id,
         "idle_timestamp_utc": now.isoformat(),
         "last_evidence_timestamp_utc": (
-            _scheduled_event_evidence_timestamp_utc(event)
+            _scheduled_run_evidence_timestamp_utc(run)
         ),
         "trigger_kind": models.TRIGGER_SCHEDULED_FUTURE_COGNITION,
         "semantic_due_state": models.DUE_STATE_DUE_NOW,
@@ -828,30 +1050,31 @@ def _build_scheduled_future_cognition_case(
         "current_mood": text_or_empty(character_profile.get("mood")),
         "global_vibe": text_or_empty(character_profile.get("global_vibe")),
         "platform_bot_id": source_platform_bot_id,
-        "source_scheduled_event_id": event_id,
+        "source_calendar_run_id": run_id,
         "source_action_attempt_id": source_action_attempt_id,
     }
     return case
 
 
 def _scheduled_future_cognition_source_refs(
-    args: dict[str, Any],
+    payload: dict[str, Any],
     *,
+    slot_source_id: str,
     continuation_objective: str,
-    execute_at: str,
+    due_at: str,
 ) -> list[models.SelfCognitionSourceRef]:
-    """Build prompt-safe source references for a scheduled cognition slot."""
+    """Build prompt-safe source references for a calendar cognition slot."""
 
     source_refs: list[models.SelfCognitionSourceRef] = [
         {
-            "source_kind": "scheduled_event",
-            "source_id": "scheduled_future_cognition_slot",
-            "due_at": execute_at or None,
+            "source_kind": _SCHEDULED_FUTURE_COGNITION_SOURCE_KIND,
+            "source_id": slot_source_id,
+            "due_at": due_at or None,
             "summary": continuation_objective,
         }
     ]
 
-    raw_source_refs = args.get("source_refs")
+    raw_source_refs = payload.get("source_refs")
     if not isinstance(raw_source_refs, list):
         return source_refs
 
@@ -866,6 +1089,17 @@ def _scheduled_future_cognition_source_refs(
         }
         source_refs.append(source_ref)
     return source_refs
+
+
+def _scheduled_future_cognition_slot_source_id(run_id: str) -> str:
+    """Build a prompt-safe identity for one scheduled cognition slot."""
+
+    digest = calendar_models.stable_json_hash({"source_slot": run_id})
+    digest_prefix = digest[:models.STABLE_ID_DIGEST_PREFIX_LENGTH]
+    source_id = (
+        f"{_SCHEDULED_FUTURE_COGNITION_SOURCE_KIND}:{digest_prefix}"
+    )
+    return source_id
 
 
 def _safe_action_source_kind(raw_ref: dict[str, Any]) -> str:
@@ -929,13 +1163,24 @@ def _profile_character_name(character_profile: dict[str, Any]) -> str:
     return name
 
 
-def _scheduled_event_evidence_timestamp_utc(event: dict[str, Any]) -> str:
+def _calendar_source_scope(run: dict[str, Any]) -> dict[str, Any]:
+    """Return calendar source scope or an empty mapping."""
+
+    value = run.get("source_scope")
+    if isinstance(value, dict):
+        source_scope = value
+    else:
+        source_scope = {}
+    return source_scope
+
+
+def _scheduled_run_evidence_timestamp_utc(run: dict[str, Any]) -> str:
     """Choose the visible timestamp for a scheduled slot case."""
 
-    execute_at = text_or_empty(event.get("execute_at"))
-    if execute_at:
-        return execute_at
-    created_at = text_or_empty(event.get("created_at"))
+    due_at = text_or_empty(run.get("due_at"))
+    if due_at:
+        return due_at
+    created_at = text_or_empty(run.get("created_at"))
     return created_at
 
 

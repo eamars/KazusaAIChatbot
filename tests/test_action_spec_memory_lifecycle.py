@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import pytest
 
+from kazusa_ai_chatbot.action_spec.handlers import (
+    memory_lifecycle as memory_lifecycle_module,
+)
 from kazusa_ai_chatbot.action_spec.handlers.memory_lifecycle import (
     build_user_memory_lifecycle_update,
     execute_user_memory_lifecycle_action,
@@ -182,10 +185,20 @@ async def test_memory_lifecycle_execute_uses_repository_owner(monkeypatch) -> No
             },
         }
 
+    async def _fake_reconcile(unit, **kwargs):
+        captured["reconciled_unit"] = unit
+        captured["reconcile_timestamp"] = kwargs["storage_timestamp_utc"]
+        return {"status": "cancelled", "unit_id": unit["unit_id"]}
+
     monkeypatch.setattr(
-        "kazusa_ai_chatbot.action_spec.handlers.memory_lifecycle."
+        memory_lifecycle_module,
         "update_user_memory_unit_lifecycle",
         _fake_update,
+    )
+    monkeypatch.setattr(
+        memory_lifecycle_module,
+        "reconcile_active_commitment_calendar_schedule",
+        _fake_reconcile,
     )
 
     result = await execute_user_memory_lifecycle_action(
@@ -198,6 +211,62 @@ async def test_memory_lifecycle_execute_uses_repository_owner(monkeypatch) -> No
     assert captured["unit_id"] == "promise-001"
     assert captured["status"] == "cancelled"
     assert captured["reason"] == _action_spec()["reason"]
+    assert captured["reconciled_unit"]["unit_id"] == "promise-001"
+
+
+@pytest.mark.asyncio
+async def test_memory_lifecycle_execute_reconciles_closed_commitment_schedule(
+    monkeypatch,
+) -> None:
+    """Successful lifecycle closure should cancel the commitment due schedule."""
+
+    captured: dict[str, object] = {}
+
+    async def _fake_update(unit_id, **kwargs):
+        captured["unit_id"] = unit_id
+        captured.update(kwargs)
+        return {
+            "unit_id": unit_id,
+            "status": kwargs["status"],
+            "matched_count": 1,
+            "modified_count": 1,
+            "merge_history_entry": {
+                "operation": "lifecycle_update",
+                "action_attempt_id": kwargs["action_attempt_id"],
+                "due_at": kwargs["due_at"],
+            },
+        }
+
+    async def _fake_reconcile(unit, **kwargs):
+        captured["reconciled_unit"] = unit
+        captured["reconcile_timestamp"] = kwargs["storage_timestamp_utc"]
+        return {"status": "cancelled", "unit_id": unit["unit_id"]}
+
+    monkeypatch.setattr(
+        memory_lifecycle_module,
+        "update_user_memory_unit_lifecycle",
+        _fake_update,
+    )
+    monkeypatch.setattr(
+        memory_lifecycle_module,
+        "reconcile_active_commitment_calendar_schedule",
+        _fake_reconcile,
+    )
+
+    result = await execute_user_memory_lifecycle_action(
+        _action_spec(),
+        storage_timestamp_utc="2026-05-16T00:00:00+00:00",
+        action_attempt_id="attempt-005",
+    )
+
+    assert result["status"] == "executed"
+    assert captured["reconciled_unit"] == {
+        "unit_id": "promise-001",
+        "unit_type": "active_commitment",
+        "status": "cancelled",
+        "due_at": "2026-05-07T00:00:00+00:00",
+    }
+    assert captured["reconcile_timestamp"] == "2026-05-16T00:00:00+00:00"
 
 
 def test_memory_lifecycle_rejects_non_utc_storage_timestamp() -> None:

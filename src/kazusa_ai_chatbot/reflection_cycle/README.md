@@ -220,10 +220,11 @@ promotion records a skipped/deferred result and performs no memory mutation.
 
 ## Worker Schedule
 
-FastAPI lifespan owns exactly one worker task when
+FastAPI lifespan owns exactly one reflection worker task when
 `REFLECTION_CYCLE_ENABLED` is true. The service passes an always-idle
 busy-probe callback so reflection and normal chat run independently; the worker
-never imports service state.
+never imports service state. Durable phase slot execution is owned by the
+calendar scheduler worker, not by a second reflection-local control plane.
 
 Default schedule:
 
@@ -239,14 +240,13 @@ Default schedule:
 Gates use `CHARACTER_TIME_ZONE`. Stage 1a hourly slots remain UTC, while daily
 grouping uses the character-local date of each hourly slot.
 
-The worker uses a local phase run provider as a lightweight, calendar-shaped
-scheduler consumer. At each phase-period boundary, the provider snapshots the
-current monitor-eligible channels as of `period_start_utc`, materializes
-deterministic `reflection_phase_slot` run intents, and rotates overflow
-channels across later periods. The worker executes due run intents through
-handler entrypoints and waits on its stop event until the next intra-period
-offset. With defaults, three selected channels run at `t+0`, `t+5`, and
-`t+10` inside the 15-minute period.
+The calendar scheduler snapshots monitor-eligible channels as of
+`period_start_utc`, materializes deterministic `reflection_phase_slot`
+calendar runs, and rotates overflow channels across later periods. The
+calendar worker claims those due runs, converts them back into
+`ReflectionPhaseRunIntent` values, and executes the reflection phase handler.
+With defaults, three selected channels run at `t+0`, `t+5`, and `t+10` inside
+the 15-minute period.
 
 Per phase intent:
 
@@ -272,10 +272,10 @@ There is no private fallback, retry loop, adapter capability probe, or
 reflection-specific group-review interval.
 
 Daily-channel synthesis is period-level maintenance, not per-slot catch-up.
-For scheduled worker runs it first asks the phase provider for the previous
-character-local day's expected hourly run ids and defers if any expected
-terminal hourly documents are missing. This avoids silently partial daily
-reflection when a phased hourly slot has not completed.
+For scheduled worker runs it asks the calendar-backed phase provider for the
+previous character-local day's expected hourly run ids and defers if any
+expected terminal hourly documents are missing. This avoids silently partial
+daily reflection when a phased hourly slot has not completed.
 
 Raw hourly or daily reflection output is not fed into self-cognition. The
 group-review phase handler shares the monitored activity projection only;

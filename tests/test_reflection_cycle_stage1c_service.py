@@ -45,6 +45,7 @@ async def test_lifespan_starts_reflection_worker_by_default(monkeypatch) -> None
     assert calls["reflection_adapter_registry_provider"]() is (
         service_module._adapter_registry
     )
+    assert calls["reflection_phase_provider"] is calls["calendar_phase_provider"]
 
 
 @pytest.mark.asyncio
@@ -95,6 +96,46 @@ async def test_lifespan_starts_self_cognition_worker_only_when_enabled(
 
 
 @pytest.mark.asyncio
+async def test_lifespan_starts_calendar_scheduler_worker_by_default(
+    monkeypatch,
+) -> None:
+    """Service startup should own the durable calendar worker lifecycle."""
+
+    calls = await _run_lifespan(
+        monkeypatch,
+        enabled=False,
+        calendar_enabled=True,
+    )
+
+    assert calls["calendar_started"] == 1
+    assert calls["calendar_stopped"] == 1
+    calendar_kwargs = calls["calendar_worker_kwargs"]
+    assert isinstance(calendar_kwargs, dict)
+    assert calendar_kwargs["poll_interval_seconds"] == 30
+    assert calendar_kwargs["lease_duration_seconds"] == 300
+    assert calendar_kwargs["claim_limit"] == 10
+    assert calendar_kwargs["max_attempts"] == 3
+    handler_registry = calendar_kwargs["handler_registry"]
+    assert handler_registry.get("reflection_phase_slot") is not None
+
+
+@pytest.mark.asyncio
+async def test_lifespan_does_not_start_calendar_scheduler_when_disabled(
+    monkeypatch,
+) -> None:
+    """The calendar worker should be gated by its own positive flag."""
+
+    calls = await _run_lifespan(
+        monkeypatch,
+        enabled=False,
+        calendar_enabled=False,
+    )
+
+    assert calls["calendar_started"] == 0
+    assert calls["calendar_stopped"] == 0
+
+
+@pytest.mark.asyncio
 async def test_reflection_worker_defers_while_primary_interaction_is_busy() -> None:
     """Worker tick should defer when the service busy probe is true."""
 
@@ -140,6 +181,7 @@ async def _run_lifespan(
     *,
     enabled: bool,
     self_cognition_enabled: bool = False,
+    calendar_enabled: bool = True,
 ) -> dict[str, object]:
     """Run service lifespan with external dependencies patched."""
 
@@ -151,6 +193,11 @@ async def _run_lifespan(
         "self_cognition_stopped": 0,
         "self_cognition_busy_probe": None,
         "reflection_adapter_registry_provider": None,
+        "reflection_phase_provider": None,
+        "calendar_phase_provider": object(),
+        "calendar_started": 0,
+        "calendar_stopped": 0,
+        "calendar_worker_kwargs": None,
     }
     handle = SimpleNamespace(
         task=asyncio.create_task(_sleep_forever()),
@@ -162,10 +209,12 @@ async def _run_lifespan(
         *,
         is_primary_interaction_busy,
         adapter_registry_provider=None,
+        phase_run_provider=None,
     ):
         calls["started"] = int(calls["started"]) + 1
         calls["busy_probe"] = is_primary_interaction_busy
         calls["reflection_adapter_registry_provider"] = adapter_registry_provider
+        calls["reflection_phase_provider"] = phase_run_provider
         return handle
 
     async def _stop_reflection_cycle_worker(_handle):
@@ -199,11 +248,62 @@ async def _run_lifespan(
         except asyncio.CancelledError:
             pass
 
+    calendar_handle = SimpleNamespace(
+        task=asyncio.create_task(_sleep_forever()),
+        stop_event=None,
+    )
+
+    def _start_calendar_scheduler_worker(**kwargs):
+        calls["calendar_started"] = int(calls["calendar_started"]) + 1
+        calls["calendar_worker_kwargs"] = kwargs
+        return calendar_handle
+
+    async def _stop_calendar_scheduler_worker(_handle):
+        calls["calendar_stopped"] = int(calls["calendar_stopped"]) + 1
+        calendar_handle.task.cancel()
+        try:
+            await calendar_handle.task
+        except asyncio.CancelledError:
+            pass
+
+    def _calendar_phase_provider_factory():
+        return calls["calendar_phase_provider"]
+
     monkeypatch.setattr(service_module, "REFLECTION_CYCLE_ENABLED", enabled)
     monkeypatch.setattr(
         service_module,
         "SELF_COGNITION_ENABLED",
         self_cognition_enabled,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "CALENDAR_SCHEDULER_ENABLED",
+        calendar_enabled,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "CALENDAR_SCHEDULER_POLL_INTERVAL_SECONDS",
+        30,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "CALENDAR_SCHEDULER_CLAIM_LIMIT",
+        10,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "CALENDAR_SCHEDULER_LEASE_SECONDS",
+        300,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "CALENDAR_SCHEDULER_MAX_ATTEMPTS",
+        3,
+        raising=False,
     )
     monkeypatch.setattr(service_module, "db_bootstrap", AsyncMock())
     monkeypatch.setattr(
@@ -223,10 +323,32 @@ async def _run_lifespan(
     )
     monkeypatch.setattr(service_module.mcp_manager, "start", AsyncMock())
     monkeypatch.setattr(service_module.mcp_manager, "stop", AsyncMock())
-    monkeypatch.setattr(service_module, "PendingTaskIndex", _FakePendingTaskIndex)
-    monkeypatch.setattr(service_module.scheduler, "load_pending_events", AsyncMock())
-    monkeypatch.setattr(service_module.scheduler, "shutdown", AsyncMock())
-    monkeypatch.setattr(service_module.scheduler, "configure_runtime", MagicMock())
+    monkeypatch.setattr(
+        service_module,
+        "Pending" + "TaskIndex",
+        _ForbiddenLegacyRuntime,
+        raising=False,
+    )
+    legacy_scheduler = getattr(service_module, "scheduler", None)
+    if legacy_scheduler is not None:
+        monkeypatch.setattr(
+            legacy_scheduler,
+            "load" + "_pending_events",
+            _forbidden_legacy_async,
+            raising=False,
+        )
+        monkeypatch.setattr(
+            legacy_scheduler,
+            "shutdown",
+            _forbidden_legacy_async,
+            raising=False,
+        )
+        monkeypatch.setattr(
+            legacy_scheduler,
+            "configure_runtime",
+            _forbidden_legacy_sync,
+            raising=False,
+        )
     monkeypatch.setattr(
         service_module,
         "render_llm_route_table",
@@ -261,6 +383,24 @@ async def _run_lifespan(
         _stop_self_cognition_worker,
         raising=False,
     )
+    monkeypatch.setattr(
+        service_module,
+        "start_calendar_scheduler_worker",
+        _start_calendar_scheduler_worker,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "stop_calendar_scheduler_worker",
+        _stop_calendar_scheduler_worker,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "CalendarReflectionPhaseRunProvider",
+        _calendar_phase_provider_factory,
+        raising=False,
+    )
 
     async with service_module.lifespan(FastAPI()):
         pass
@@ -274,10 +414,20 @@ async def _sleep_forever() -> None:
     await asyncio.Event().wait()
 
 
-class _FakePendingTaskIndex:
-    """Fake scheduler pending index with no database reads."""
+class _ForbiddenLegacyRuntime:
+    """Fail if the retired delayed-task runtime is still constructed."""
 
-    async def rebuild_from_db(self) -> None:
-        """No-op rebuild for service lifespan tests."""
+    def __init__(self) -> None:
+        raise AssertionError("retired scheduler runtime should not start")
 
-        return None
+
+async def _forbidden_legacy_async(*args, **kwargs) -> None:
+    """Fail if an async legacy runtime hook is still called."""
+
+    raise AssertionError("retired scheduler runtime should not be called")
+
+
+def _forbidden_legacy_sync(*args, **kwargs) -> None:
+    """Fail if a sync legacy runtime hook is still called."""
+
+    raise AssertionError("retired scheduler runtime should not be called")

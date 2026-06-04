@@ -26,13 +26,13 @@ layout, sanitizer internals, or repository helpers.
 The event logging module records durable, sanitized operational telemetry for
 long-term agent and operator analysis. It covers process lifecycle, worker
 ticks, LLM-stage health, recoverable runtime failures, live pipeline outcomes,
-queue decisions, RAG stages, dialog quality checks, scheduler delivery,
-approved database-operation outcomes, self-cognition cases, model contract
-drift, and resource health.
+queue decisions, RAG stages, dialog quality checks, calendar scheduler and
+dispatcher delivery events, approved database-operation outcomes,
+self-cognition cases, model contract drift, and resource health.
 
 The module is append-only and best-effort. A telemetry write must never change
 live chat behavior, reflection routing, self-cognition routing, dispatcher
-planning, scheduler execution, memory promotion, or adapter delivery.
+planning, calendar scheduler execution, memory promotion, or adapter delivery.
 On the live chat input path, routine successful enqueue, message persistence,
 assistant-message persistence, and turn completion are intentionally not
 mirrored into `event_log_events`; `conversation_history` is the canonical
@@ -416,7 +416,7 @@ by the matching public recorder.
 | `queue_intake` | `record_queue_intake_event` | `queue_intake` | `queue_depth`, `coalesced_count`, `dropped_count`, `protected_by_reply`, `listen_only` |
 | `rag_stage` | `record_rag_stage_event` | `agent_name` | `agent_name`, `slot_count`, `retrieval_count`, `cache_hit`, `no_evidence`, `latency_ms` |
 | `dialog_quality` | `record_dialog_quality_event` | `dialog_quality` | `usage_mode`, `evaluator_status`, `retry_count`, `failure_codes`, `anchor_count` |
-| `dispatcher` | `record_dispatcher_event` | `action_kind` | `action_kind`, `validation_status`, `adapter_available`, `scheduled_event_ids`, `rejection_codes` |
+| `dispatcher` | `record_dispatcher_event` | `action_kind` | `action_kind`, `validation_status`, `adapter_available`, legacy `scheduled_event_ids`, `rejection_codes` |
 | `database_operation` | `record_database_operation_event` | `operation_kind` | `collection`, `operation_kind`, `idempotency_result`, `latency_ms`, `document_ref` |
 | `self_cognition` | `record_self_cognition_event` | `trigger_kind` | `case_id`, `trigger_kind`, `selected_route`, `output_mode`, `budget`, `dispatch_status`, `consolidation_outcome` |
 | `model_contract` | `record_model_contract_event` | `violation_kind` | `stage_name`, `violation_kind`, `missing_fields`, `invalid_fields`, `repair_used` |
@@ -599,7 +599,7 @@ The public status builders expose bounded aggregate payloads:
 
 | Builder | Service endpoint | Purpose |
 |---|---|---|
-| `build_runtime_status(window_hours=24)` | `GET /ops/runtime-status` | process and worker liveness plus semantic worker error level |
+| `build_runtime_status(window_hours=24)` | `GET /ops/runtime-status` | process and worker event summaries plus semantic worker error level; service route adds calendar, reflection, and self-cognition liveness |
 | `build_reflection_stats(window_hours=24)` | `GET /ops/reflection/stats` | reflection counts, latest event refs, reflection health |
 | `build_self_cognition_stats(window_hours=24)` | `GET /ops/self-cognition/stats` | self-cognition run counts, latest refs, liveness label; service endpoint adds `enabled` and `task_alive` |
 

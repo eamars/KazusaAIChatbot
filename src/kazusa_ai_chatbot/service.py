@@ -16,13 +16,18 @@ import traceback
 from uuid import uuid4
 from collections.abc import Mapping
 from contextlib import asynccontextmanager, suppress
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import FastAPI, BackgroundTasks
 
 from kazusa_ai_chatbot.action_spec.execution import execute_action_specs_for_trace
 from kazusa_ai_chatbot.action_spec.results import has_consolidatable_output
 from kazusa_ai_chatbot.config import (
+    CALENDAR_SCHEDULER_CLAIM_LIMIT,
+    CALENDAR_SCHEDULER_ENABLED,
+    CALENDAR_SCHEDULER_LEASE_SECONDS,
+    CALENDAR_SCHEDULER_MAX_ATTEMPTS,
+    CALENDAR_SCHEDULER_POLL_INTERVAL_SECONDS,
     CHARACTER_GLOBAL_USER_ID,
     CHAT_HISTORY_RECENT_LIMIT,
     CONVERSATION_HISTORY_LIMIT,
@@ -32,10 +37,22 @@ from kazusa_ai_chatbot.config import (
     REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD,
     REFLECTION_PHASE_MIN_SLOT_SPACING_SECONDS,
     REFLECTION_WORKER_INTERVAL_SECONDS,
-    SCHEDULED_TASKS_ENABLED,
     SELF_COGNITION_ENABLED,
     SELF_COGNITION_MAX_CASES_PER_TICK,
     SELF_COGNITION_WORKER_INTERVAL_SECONDS,
+)
+from kazusa_ai_chatbot.calendar_scheduler import models as calendar_models
+from kazusa_ai_chatbot.calendar_scheduler import repository as calendar_repository
+from kazusa_ai_chatbot.calendar_scheduler.reflection_phase import (
+    CalendarReflectionPhaseRunProvider,
+    handle_reflection_phase_calendar_run,
+)
+from kazusa_ai_chatbot.calendar_scheduler.worker import (
+    CALENDAR_SCHEDULER_LEASE_OWNER,
+    CalendarRunHandlerRegistry,
+    CalendarSchedulerWorkerHandle,
+    start_calendar_scheduler_worker,
+    stop_calendar_scheduler_worker,
 )
 from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisode,
@@ -89,13 +106,10 @@ from kazusa_ai_chatbot.message_envelope import (
     project_reply_attachment_summaries,
 )
 from kazusa_ai_chatbot.utils import log_list_preview, log_preview, trim_history_dict
-from kazusa_ai_chatbot import event_logging, scheduler
+from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.dispatcher import (
     AdapterRegistry,
-    PendingTaskIndex,
     RemoteHttpAdapter,
-    ToolRegistry,
-    build_send_message_tool,
 )
 
 from kazusa_ai_chatbot.brain_service import (
@@ -506,6 +520,7 @@ _adapter_registry: AdapterRegistry | None = None
 _character_identity_backfilled: set[tuple[str, str, str]] = set()
 _chat_input_queue = ChatInputQueue()
 _chat_queue_worker_task: asyncio.Task | None = None
+_calendar_worker_handle: CalendarSchedulerWorkerHandle | None = None
 _reflection_worker_handle: ReflectionWorkerHandle | None = None
 _self_cognition_worker_handle: SelfCognitionWorkerHandle | None = None
 _primary_interaction_active_count = 0
@@ -532,6 +547,21 @@ def _worker_task_alive(handle: object | None) -> bool:
     return alive
 
 
+async def _handle_calendar_reflection_phase_run(
+    run: dict[str, Any],
+) -> dict[str, Any]:
+    """Execute one calendar-owned reflection phase slot with service deps."""
+
+    result = await handle_reflection_phase_calendar_run(
+        run,
+        now=storage_utc_now(),
+        dry_run=False,
+        is_primary_interaction_busy=lambda: False,
+        adapter_registry_provider=lambda: _adapter_registry,
+    )
+    return result
+
+
 def _ops_runtime_status_payload(
     base_status: Mapping[str, object],
 ) -> dict[str, object]:
@@ -541,8 +571,13 @@ def _ops_runtime_status_payload(
     workers = raw_workers if isinstance(raw_workers, Mapping) else {}
     raw_process = base_status.get("process", {})
     process = raw_process if isinstance(raw_process, Mapping) else {}
+    calendar_scheduler_worker = dict(workers.get("calendar_scheduler", {}))
     reflection_worker = dict(workers.get("reflection_cycle", {}))
     self_cognition_worker = dict(workers.get("self_cognition", {}))
+    calendar_scheduler_worker.update({
+        "enabled": CALENDAR_SCHEDULER_ENABLED,
+        "task_alive": _worker_task_alive(_calendar_worker_handle),
+    })
     reflection_worker.update({
         "enabled": REFLECTION_CYCLE_ENABLED,
         "task_alive": _worker_task_alive(_reflection_worker_handle),
@@ -556,6 +591,13 @@ def _ops_runtime_status_payload(
         "generated_at": str(base_status.get("generated_at", "")),
         "window_hours": int(base_status.get("window_hours", 24)),
         "config": {
+            "calendar_scheduler_enabled": CALENDAR_SCHEDULER_ENABLED,
+            "calendar_scheduler_poll_interval_seconds": (
+                CALENDAR_SCHEDULER_POLL_INTERVAL_SECONDS
+            ),
+            "calendar_scheduler_claim_limit": CALENDAR_SCHEDULER_CLAIM_LIMIT,
+            "calendar_scheduler_lease_seconds": CALENDAR_SCHEDULER_LEASE_SECONDS,
+            "calendar_scheduler_max_attempts": CALENDAR_SCHEDULER_MAX_ATTEMPTS,
             "reflection_cycle_enabled": REFLECTION_CYCLE_ENABLED,
             "self_cognition_enabled": SELF_COGNITION_ENABLED,
             "reflection_worker_interval_seconds": (
@@ -577,6 +619,7 @@ def _ops_runtime_status_payload(
         },
         "process": dict(process),
         "workers": {
+            "calendar_scheduler": calendar_scheduler_worker,
             "reflection_cycle": reflection_worker,
             "self_cognition": self_cognition_worker,
         },
@@ -1756,6 +1799,7 @@ async def _hydrate_rag_initializer_cache() -> int:
 async def lifespan(app: FastAPI):
     global _static_character_profile, _runtime_character_state
     global _graph, _adapter_registry
+    global _calendar_worker_handle
     global _reflection_worker_handle, _self_cognition_worker_handle
 
     process_correlation_id = uuid4().hex
@@ -1847,27 +1891,34 @@ async def lifespan(app: FastAPI):
                 status="ok",
             )
 
-        # 6. Build the scheduled delivery runtime
-        tool_registry = ToolRegistry()
-        tool_registry.register(build_send_message_tool())
+        # 6. Build runtime adapter registry and background workers
         adapter_registry = AdapterRegistry()
         _adapter_registry = adapter_registry
-        pending_index = PendingTaskIndex()
-        await pending_index.rebuild_from_db()
-        scheduler.configure_runtime(
-            tool_registry=tool_registry,
-            adapter_registry=adapter_registry,
-            pending_index=pending_index,
-        )
-
-        # 7. Load pending scheduled events
-        if SCHEDULED_TASKS_ENABLED:
-            await scheduler.load_pending_events()
-        else:
-            logger.info("Scheduler disabled via SCHEDULED_TASKS_ENABLED=false — skipping load_pending_events")
 
         logger.info(render_llm_route_table())
         _ensure_chat_input_worker_started()
+        if CALENDAR_SCHEDULER_ENABLED:
+            calendar_handler_registry = CalendarRunHandlerRegistry()
+            calendar_handler_registry.register(
+                calendar_models.TRIGGER_REFLECTION_PHASE_SLOT,
+                _handle_calendar_reflection_phase_run,
+            )
+            _calendar_worker_handle = start_calendar_scheduler_worker(
+                repository=calendar_repository,
+                handler_registry=calendar_handler_registry,
+                poll_interval_seconds=(
+                    CALENDAR_SCHEDULER_POLL_INTERVAL_SECONDS
+                ),
+                lease_owner=CALENDAR_SCHEDULER_LEASE_OWNER,
+                lease_duration_seconds=CALENDAR_SCHEDULER_LEASE_SECONDS,
+                claim_limit=CALENDAR_SCHEDULER_CLAIM_LIMIT,
+                max_attempts=CALENDAR_SCHEDULER_MAX_ATTEMPTS,
+            )
+        else:
+            logger.info(
+                "Calendar scheduler worker disabled via "
+                "CALENDAR_SCHEDULER_ENABLED=false"
+            )
         if SELF_COGNITION_ENABLED:
             _self_cognition_worker_handle = start_self_cognition_worker(
                 is_primary_interaction_busy=_primary_interaction_busy,
@@ -1878,10 +1929,12 @@ async def lifespan(app: FastAPI):
             logger.info(
                 "Self-cognition worker disabled via SELF_COGNITION_ENABLED=false"
             )
+        calendar_phase_provider = CalendarReflectionPhaseRunProvider()
         if REFLECTION_CYCLE_ENABLED:
             _reflection_worker_handle = start_reflection_cycle_worker(
                 is_primary_interaction_busy=lambda: False,
                 adapter_registry_provider=lambda: _adapter_registry,
+                phase_run_provider=calendar_phase_provider,
             )
         else:
             logger.info(
@@ -1933,6 +1986,9 @@ async def lifespan(app: FastAPI):
     finally:
         try:
             # Shutdown
+            if _calendar_worker_handle is not None:
+                await stop_calendar_scheduler_worker(_calendar_worker_handle)
+                _calendar_worker_handle = None
             if _self_cognition_worker_handle is not None:
                 await stop_self_cognition_worker(_self_cognition_worker_handle)
                 _self_cognition_worker_handle = None
@@ -1940,8 +1996,6 @@ async def lifespan(app: FastAPI):
                 await stop_reflection_cycle_worker(_reflection_worker_handle)
                 _reflection_worker_handle = None
             await _stop_chat_input_worker()
-            if SCHEDULED_TASKS_ENABLED:
-                await scheduler.shutdown()
             await mcp_manager.stop()
             await event_logging.record_process_event(
                 event_type="shutdown",
@@ -2047,7 +2101,7 @@ async def ops_self_cognition_stats(
 
 @app.post("/runtime/adapters/register", response_model=RuntimeAdapterRegistrationResponse)
 async def register_runtime_adapter_endpoint(req: RuntimeAdapterRegistrationRequest):
-    """Register one cross-process adapter callback for scheduler delivery.
+    """Register one cross-process adapter callback for trusted delivery.
 
     Args:
         req: Remote adapter registration payload sent by an adapter process.

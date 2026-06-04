@@ -197,12 +197,22 @@ async def test_process_memory_unit_candidate_creates_when_merge_cluster_id_is_un
     async def _insert_user_memory_units(global_user_id, units, **kwargs):
         captured["insert_user_id"] = global_user_id
         captured["inserted_units"] = units
-        return [{"unit_id": "created-safe-fallback"}]
+        return [{
+            **units[0],
+            "unit_id": "created-safe-fallback",
+            "global_user_id": global_user_id,
+            "status": "active",
+            "updated_at": kwargs["storage_timestamp_utc"],
+        }]
 
     async def _update_user_memory_unit_semantics(unit_id, semantics, **kwargs):
         raise AssertionError(
             "unknown merge cluster ids must not update existing units"
         )
+
+    async def _reconcile_active_commitment_calendar_schedule(unit, **kwargs):
+        captured["reconciled_unit"] = unit
+        return {"status": "scheduled", "unit_id": unit["unit_id"]}
 
     merge_judge_llm = _StaticAsyncLLM({
         "candidate_id": "candidate-unknown-cluster",
@@ -227,6 +237,11 @@ async def test_process_memory_unit_candidate_creates_when_merge_cluster_id_is_un
         "update_user_memory_unit_semantics",
         _update_user_memory_unit_semantics,
     )
+    monkeypatch.setattr(
+        memory_units_module,
+        "reconcile_active_commitment_calendar_schedule",
+        _reconcile_active_commitment_calendar_schedule,
+    )
 
     result = await memory_units_module.process_memory_unit_candidate(
         {
@@ -249,6 +264,7 @@ async def test_process_memory_unit_candidate_creates_when_merge_cluster_id_is_un
     }
     assert captured["insert_user_id"] == "user-1"
     assert captured["inserted_units"] == [candidate]
+    assert captured["reconciled_unit"]["unit_id"] == "created-safe-fallback"
 
 
 @pytest.mark.asyncio
@@ -271,7 +287,13 @@ async def test_process_memory_unit_candidate_reuses_rag_surfaced_units(monkeypat
 
     async def _insert_user_memory_units(global_user_id, units, **kwargs):
         captured["inserted_units"] = units
-        return [{"unit_id": "created-1"}]
+        return [{
+            **units[0],
+            "unit_id": "created-1",
+            "global_user_id": global_user_id,
+            "status": "active",
+            "updated_at": kwargs["storage_timestamp_utc"],
+        }]
 
     merge_judge_llm = _StaticAsyncLLM({
         "candidate_id": "candidate-1",

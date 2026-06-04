@@ -448,11 +448,31 @@ MAX_FACT_HARVESTER_RETRY = int(os.getenv("MAX_FACT_HARVESTER_RETRY", "3"))
 # RAG Cache2
 RAG_CACHE2_MAX_ENTRIES = int(os.getenv("RAG_CACHE2_MAX_ENTRIES", "5000"))
 
-# Scheduler (future_promise + followup_message events).
-SCHEDULED_TASKS_ENABLED = os.getenv(
-    "SCHEDULED_TASKS_ENABLED",
+# Calendar scheduler durable worker settings.
+CALENDAR_SCHEDULER_ENABLED = _bool_from_env(
+    "CALENDAR_SCHEDULER_ENABLED",
     "true",
-).lower() in ("1", "true", "yes")
+)
+CALENDAR_SCHEDULER_POLL_INTERVAL_SECONDS = _positive_int_from_env(
+    "CALENDAR_SCHEDULER_POLL_INTERVAL_SECONDS",
+    "30",
+)
+CALENDAR_SCHEDULER_CLAIM_LIMIT = _positive_int_from_env(
+    "CALENDAR_SCHEDULER_CLAIM_LIMIT",
+    "10",
+)
+CALENDAR_SCHEDULER_LEASE_SECONDS = _positive_int_from_env(
+    "CALENDAR_SCHEDULER_LEASE_SECONDS",
+    "300",
+)
+CALENDAR_SCHEDULER_MAX_ATTEMPTS = _positive_int_from_env(
+    "CALENDAR_SCHEDULER_MAX_ATTEMPTS",
+    "3",
+)
+CALENDAR_SCHEDULER_PER_TRIGGER_CAPACITY = _positive_int_from_env(
+    "CALENDAR_SCHEDULER_PER_TRIGGER_CAPACITY",
+    "5",
+)
 
 # Visual directives are service-side generation metadata, not an adapter debug
 # mode. Disable this to skip the L3 visual-agent LLM call globally.

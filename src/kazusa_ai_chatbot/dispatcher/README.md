@@ -1,54 +1,48 @@
 # Dispatcher Package
 
-`kazusa_ai_chatbot.dispatcher` now contains deterministic delivery primitives
-used by the scheduler and runtime adapters. It is not a cognition action
-planner, not a consolidator extension, and not an LLM-facing tool-call router.
+`kazusa_ai_chatbot.dispatcher` owns deterministic adapter-facing delivery
+primitives. It is not the calendar scheduler, not a cognition action planner,
+not a consolidator extension, and not an LLM-facing tool-call router.
 
 The package keeps:
 
-- `Task`: validated scheduler invocation payload.
-- `DispatchContext`: source-side delivery context persisted with scheduler
-  rows.
-- `ToolRegistry` and `ToolSpec`: deterministic registry for scheduler-owned
-  handlers.
-- `PendingTaskIndex`: in-process duplicate tracking for pending scheduler
-  rows.
 - `AdapterRegistry`, `MessagingAdapter`, `RemoteHttpAdapter`, and
   `SendResult`: adapter-facing delivery boundary.
+- `Task` and `DispatchContext`: validated send-handler payload shapes used by
+  explicit dispatcher calls and legacy migration diagnostics.
+- `ToolRegistry` and `ToolSpec`: deterministic handler registry primitives for
+  dispatcher-owned tools.
 - `build_send_message_tool()` and `handle_send_message(...)`: deterministic
-  scheduled message delivery handler.
+  message delivery handler.
 
-The removed runtime class cluster that generated, validated, and scheduled raw
-LLM delivery calls is no longer part of this package. Consolidation does not
-schedule user-visible text, and self-cognition does not hand prewritten text to
-delivery.
+The removed process-local scheduler runtime is no longer part of the service
+control plane. `PendingTaskIndex`, pending `scheduled_events` loading, and
+startup-time scheduler task reconstruction are gone. The durable timing owner
+is `kazusa_ai_chatbot.calendar_scheduler`.
 
-## Runtime Lifecycle
+## Runtime Boundary
 
 ```text
-service startup
-  -> build ToolRegistry
-       register deterministic scheduler tools, including send_message
-  -> build AdapterRegistry
-       adapters may be registered at runtime for each platform
-  -> rebuild PendingTaskIndex from pending scheduler rows
-  -> configure scheduler with tools + adapters + pending index
-  -> load pending scheduler events
+normal chat
+  -> brain service selects visible text
+  -> adapter sends returned ChatResponse messages
+  -> adapter posts delivery receipt when it has a platform message id
 
-scheduled time arrives
-  -> scheduler rehydrates Task and DispatchContext
-  -> tool handler runs
-  -> handler records write-ahead outbound conversation row
-  -> handler sends through the target platform adapter
-  -> scheduler marks event completed or failed
+explicit dispatcher send
+  -> trusted owner builds Task + DispatchContext
+  -> dispatcher validates target adapter capability
+  -> handler writes the outbound row before delivery
+  -> handler sends through AdapterRegistry
 ```
 
-The scheduler owns delayed execution. This package supplies the handler and
-adapter abstractions the scheduler needs to execute rows that already exist.
+The calendar scheduler does not call `send_message` as a trigger kind. Future
+or commitment due work becomes fresh cognition first; any later visible text
+must be selected by the normal cognition/dialog path and delivered through the
+appropriate adapter boundary.
 
-## Scheduler Task Shape
+## Task Shape
 
-`Task` is the validated invocation shape:
+`Task` is the validated invocation shape for dispatcher-owned tools:
 
 ```python
 Task(
@@ -59,7 +53,8 @@ Task(
 )
 ```
 
-`DispatchContext` carries source-side metadata needed at execution time:
+`DispatchContext` carries source-side metadata needed by deterministic
+handlers:
 
 ```python
 DispatchContext(
@@ -74,17 +69,14 @@ DispatchContext(
 )
 ```
 
-Important meanings:
-
-- `source_platform` identifies the platform associated with the scheduler row.
-- `source_channel_id` and `source_channel_type` preserve source context.
-- `bot_permission_role` is retained for scheduler row compatibility and future
-  permission checks.
-- `now` is the execution time used by deterministic handlers.
+`source_platform`, `source_channel_id`, and `source_channel_type` preserve the
+trusted source context. Semantic decisions about whether a promise should be
+scheduled or whether a character should speak belong upstream in cognition and
+self-cognition, not in this package.
 
 ## `send_message`
 
-The retained built-in scheduler tool is `send_message`.
+The built-in dispatcher tool remains `send_message`:
 
 ```python
 {
@@ -97,19 +89,20 @@ The retained built-in scheduler tool is `send_message`.
 }
 ```
 
-`delivery_mentions` is optional adapter-owned rendering metadata. The scheduler
-handler validates only that the field is structurally usable, preserves it
-inside task args, and passes it to the adapter unchanged. Mention feasibility,
-native syntax, and fallback behavior belong to the platform adapter.
+`delivery_mentions` is optional adapter-owned rendering metadata. The handler
+validates only that the field is structurally usable, preserves it inside task
+args, and passes it to the adapter unchanged. Mention feasibility, native
+syntax, and fallback behavior belong to the platform adapter.
 
-No current cognition or consolidation path creates new `send_message` scheduler
-rows. Existing pending rows can still be executed by the scheduler until a data
-migration cancels them.
+No current cognition or consolidation path creates delayed `send_message`
+calendar work. Legacy pending direct-send rows from the old `scheduled_events`
+control plane are cancelled by the approved migration instead of being
+converted into calendar runs.
 
 ## Adapter Boundary
 
-Adapters own delivery to external platforms. The scheduler handler speaks only
-to the `MessagingAdapter` protocol:
+Adapters own delivery to external platforms. The dispatcher handler speaks
+only to the `MessagingAdapter` protocol:
 
 ```python
 async def send_message(
@@ -134,47 +127,28 @@ or the request lacks the needed platform identity, it sends the original text.
 Prefix is the only approved placement for the current contract.
 
 `AdapterRegistry` maps platform keys to adapters. `RemoteHttpAdapter` bridges
-scheduled delivery to an adapter-owned HTTP endpoint, which lets the brain
-service execute scheduled work even when the live platform adapter runs in
-another process.
+dispatcher-owned delivery to an adapter-owned HTTP endpoint when the live
+platform adapter runs in another process.
 
 The HTTP contract for runtime adapter registration and heartbeat endpoints is
 owned by the [Brain Service ICD](../brain_service/README.md).
-
-## Deduplication
-
-`PendingTaskIndex` prevents duplicate pending tasks within the running process.
-
-The deduplication signature is based on:
-
-```python
-{
-    "tool": task.tool,
-    "args": task.args,
-    "execute_at": task.execute_at.isoformat(),
-}
-```
-
-The index is rebuilt from pending scheduler rows at service startup.
-Deduplication is structural. It does not decide whether two natural-language
-promises mean the same thing; semantic decisions belong upstream in cognition.
 
 ## Ownership
 
 LLMs own semantic decisions:
 
 - whether a user-visible response should exist;
-- whether a future cognition cycle should be scheduled;
+- whether a future cognition cycle should be requested;
 - whether a memory lifecycle action should retire a commitment.
 
 Deterministic code owns mechanics:
 
-- scheduler row execution;
 - adapter availability and channel capability checks at send time;
 - write-ahead conversation persistence;
 - delivery receipt updates;
-- duplicate detection for pending scheduler rows;
-- scheduler status transitions.
+- dispatcher status transitions and event-log metadata;
+- calendar run creation, claim, lease, retry, and migration in the
+  `calendar_scheduler` package.
 
 Consolidation may persist and learn from prompt-safe episode traces, but it
 must not schedule, dispatch, or author user-visible output.

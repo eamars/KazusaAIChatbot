@@ -314,10 +314,58 @@ async def run_daily_interaction_style_update(
     return result
 
 
+async def execute_reflection_phase_intent(
+    *,
+    intent: ReflectionPhaseRunIntent,
+    now: datetime,
+    dry_run: bool,
+    is_primary_interaction_busy: Callable[[], bool],
+    adapter_registry_provider: Callable[[], AdapterRegistry | None] | None = None,
+) -> list[ReflectionWorkerResult]:
+    """Execute one reflection phase intent through the production seam."""
+
+    results = await _run_reflection_phase_intent(
+        intent=intent,
+        now=now,
+        dry_run=dry_run,
+        is_primary_interaction_busy=is_primary_interaction_busy,
+        adapter_registry_provider=adapter_registry_provider,
+    )
+    return results
+
+
+async def collect_phase_scope_input_for_intent(
+    *,
+    intent: ReflectionPhaseRunIntent,
+    now: datetime,
+) -> ReflectionScopeInput:
+    """Fetch the fresh scope input for one reflection phase intent."""
+
+    channel_scope = await _collect_phase_scope_input(intent=intent, now=now)
+    return channel_scope
+
+
+def expected_hourly_run_ids_for_scope(
+    *,
+    channel_scope: ReflectionScopeInput,
+    character_local_date: str,
+    now: datetime,
+) -> list[str]:
+    """Build expected hourly run ids for one phase-selected scope."""
+
+    run_ids = _expected_hourly_run_ids_for_scope(
+        channel_scope=channel_scope,
+        character_local_date=character_local_date,
+        now=now,
+    )
+    return run_ids
+
+
 def start_reflection_cycle_worker(
     *,
     is_primary_interaction_busy: Callable[[], bool],
     adapter_registry_provider: Callable[[], AdapterRegistry | None] | None = None,
+    phase_run_provider: Any | None = None,
 ) -> ReflectionWorkerHandle:
     """Start the process-local reflection worker loop."""
 
@@ -327,6 +375,7 @@ def start_reflection_cycle_worker(
             stop_event=stop_event,
             is_primary_interaction_busy=is_primary_interaction_busy,
             adapter_registry_provider=adapter_registry_provider,
+            phase_run_provider=phase_run_provider,
         )
     )
     handle = ReflectionWorkerHandle(task=task, stop_event=stop_event)

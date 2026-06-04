@@ -8,7 +8,6 @@ from kazusa_ai_chatbot.dispatcher.adapter_iface import (
     UnknownPlatformError,
 )
 from kazusa_ai_chatbot.dispatcher.handlers import build_send_message_tool, handle_send_message
-from kazusa_ai_chatbot.dispatcher.pending_index import PendingTaskIndex
 from kazusa_ai_chatbot.dispatcher.remote_adapter import RemoteHttpAdapter
 from kazusa_ai_chatbot.dispatcher.task import (
     BotPermissionRole,
@@ -23,7 +22,6 @@ __all__ = [
     "BotPermissionRole",
     "DispatchContext",
     "MessagingAdapter",
-    "PendingTaskIndex",
     "RemoteHttpAdapter",
     "SendResult",
     "Task",

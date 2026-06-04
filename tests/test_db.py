@@ -17,6 +17,7 @@ import kazusa_ai_chatbot.db.conversation as db_conversation_module
 import kazusa_ai_chatbot.db.global_character_growth as db_global_growth_module
 import kazusa_ai_chatbot.db.memory as db_memory_module
 import kazusa_ai_chatbot.db.self_cognition as db_self_cognition_module
+import kazusa_ai_chatbot.db.script_operations as db_script_operations_module
 import kazusa_ai_chatbot.db.users as db_users_module
 from kazusa_ai_chatbot.db import (
     AFFINITY_DEFAULT,
@@ -81,6 +82,8 @@ class _BootstrapDb:
             "memory",
             "user_memory_units",
             "scheduled_events",
+            "calendar_schedules",
+            "calendar_runs",
             "self_cognition_action_attempts",
             "self_cognition_group_review_windows",
             "conversation_episode_state",
@@ -1008,6 +1011,163 @@ async def test_db_bootstrap_creates_platform_message_lookup_index(monkeypatch) -
         ],
         "kwargs": {"name": "conv_platform_channel_message_id"},
     } in index_specs
+
+
+@pytest.mark.asyncio
+async def test_db_bootstrap_creates_calendar_collections_and_indexes(
+    monkeypatch,
+) -> None:
+    """Bootstrap should prepare calendar schedules and due-run indexes."""
+
+    db = _BootstrapDb()
+    monkeypatch.setattr(db_bootstrap_module, "get_db", AsyncMock(return_value=db))
+    monkeypatch.setattr(db_bootstrap_module, "enable_vector_index", AsyncMock())
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_reflection_run_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_interaction_style_image_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_global_character_growth_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_event_log_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_internal_monologue_residue_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "purge_stale_initializer_entries",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "prune_persistent_entries",
+        AsyncMock(),
+    )
+
+    await db_bootstrap_module.db_bootstrap()
+
+    schedule_indexes = db.calendar_schedules.indexes
+    assert {
+        "keys": "idempotency_key",
+        "kwargs": {
+            "unique": True,
+            "name": "calendar_schedule_idempotency_unique",
+        },
+    } in schedule_indexes
+
+    run_indexes = db.calendar_runs.indexes
+    assert {
+        "keys": "idempotency_key",
+        "kwargs": {
+            "unique": True,
+            "name": "calendar_run_idempotency_unique",
+        },
+    } in run_indexes
+    assert {
+        "keys": [("status", 1), ("due_at", 1), ("trigger_kind", 1)],
+        "kwargs": {"name": "calendar_run_status_due_trigger"},
+    } in run_indexes
+    assert {
+        "keys": [("trigger_kind", 1), ("period_start_utc", 1), ("run_id", 1)],
+        "kwargs": {"name": "calendar_run_reflection_phase_period"},
+    } in run_indexes
+
+
+def test_db_facade_exports_calendar_schema_docs() -> None:
+    """Calendar schedule and run schemas should be public facade exports."""
+
+    assert db_module.CalendarScheduleDoc.__name__ == "CalendarScheduleDoc"
+    assert db_module.CalendarRunDoc.__name__ == "CalendarRunDoc"
+    assert "CalendarScheduleDoc" in db_module.__all__
+    assert "CalendarRunDoc" in db_module.__all__
+
+
+@pytest.mark.asyncio
+async def test_script_operations_loads_calendar_migration_events(
+    monkeypatch,
+) -> None:
+    """Calendar migration scripts should read legacy rows via maintenance DB."""
+
+    cursor = MagicMock()
+    cursor.to_list = AsyncMock(return_value=[{"event_id": "legacy-1"}])
+    db = _mock_db()
+    db.scheduled_events.find.return_value = cursor
+    monkeypatch.setattr(
+        db_script_operations_module,
+        "get_db",
+        AsyncMock(return_value=db),
+    )
+
+    rows = (
+        await db_script_operations_module
+        .list_scheduled_events_for_calendar_migration()
+    )
+
+    assert rows == [{"event_id": "legacy-1"}]
+    db.scheduled_events.find.assert_called_once_with({})
+    cursor.to_list.assert_awaited_once_with(length=None)
+
+
+@pytest.mark.asyncio
+async def test_script_operations_mutates_calendar_migration_legacy_status(
+    monkeypatch,
+) -> None:
+    """Calendar migration legacy writes should expose boolean match status."""
+
+    db = _mock_db()
+    db.scheduled_events.update_one = AsyncMock(
+        side_effect=[
+            MagicMock(matched_count=1),
+            MagicMock(matched_count=0),
+        ],
+    )
+    monkeypatch.setattr(
+        db_script_operations_module,
+        "get_db",
+        AsyncMock(return_value=db),
+    )
+
+    cancelled = await (
+        db_script_operations_module
+        .cancel_pending_send_message_for_calendar_migration("send-1")
+    )
+    migrated = await (
+        db_script_operations_module
+        .mark_pending_future_cognition_migrated_for_calendar_migration(
+            "future-1",
+        )
+    )
+
+    assert cancelled is True
+    assert migrated is False
+    cancel_call = db.scheduled_events.update_one.await_args_list[0]
+    migrated_call = db.scheduled_events.update_one.await_args_list[1]
+    assert cancel_call.args[0] == {
+        "event_id": "send-1",
+        "status": "pending",
+        "tool": "send_message",
+    }
+    assert cancel_call.args[1] == {"$set": {"status": "cancelled"}}
+    assert migrated_call.args[0] == {
+        "event_id": "future-1",
+        "status": "pending",
+        "tool": "trigger_future_cognition",
+    }
+    assert migrated_call.args[1] == {"$set": {"status": "migrated"}}
 
 
 @pytest.mark.asyncio
