@@ -147,6 +147,7 @@ from kazusa_ai_chatbot.db.users import (
 
 from kazusa_ai_chatbot.db.user_memory_units import (
     build_user_memory_unit_doc,
+    get_user_memory_unit_by_unit_id,
     insert_user_memory_units,
     query_active_commitment_memory_units,
     query_active_commitment_memory_units_for_user,
@@ -284,7 +285,8 @@ __all__ = [
     "list_users_by_affinity", "list_users_by_display_name",
     "resolve_global_user_id", "search_users_by_display_name", "update_affinity",
     "update_last_relationship_insight",
-    "build_user_memory_unit_doc", "insert_user_memory_units",
+    "build_user_memory_unit_doc", "get_user_memory_unit_by_unit_id",
+    "insert_user_memory_units",
     "query_active_commitment_memory_units",
     "query_active_commitment_memory_units_for_user",
     "query_user_memory_units",

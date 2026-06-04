@@ -27,6 +27,25 @@ async def upsert_calendar_schedule(schedule: dict[str, Any]) -> object:
     return result
 
 
+async def refresh_calendar_schedule_state(
+    schedule: dict[str, Any],
+) -> object:
+    """Upsert mutable schedule state while preserving original creation time."""
+
+    set_doc = dict(schedule)
+    created_at = set_doc.pop("created_at")
+    db = await get_db()
+    result = await db.calendar_schedules.update_one(
+        {"idempotency_key": schedule["idempotency_key"]},
+        {
+            "$set": set_doc,
+            "$setOnInsert": {"created_at": created_at},
+        },
+        upsert=True,
+    )
+    return result
+
+
 async def upsert_calendar_run(run: dict[str, Any]) -> object:
     """Insert a run once, keyed by idempotency key."""
 

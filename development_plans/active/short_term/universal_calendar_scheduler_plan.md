@@ -874,13 +874,13 @@ requests fallback execution.
   - Evidence: record test output and changed files.
   - Sign-off: `Codex/2026-06-04` after verification and evidence are recorded.
 
-- [ ] Stage 4 - active-commitment due scheduling complete
+- [x] Stage 4 - active-commitment due scheduling complete
 
   - Covers: active commitment create/update/reschedule/cancel hooks and
     `commitment_due_cognition` run handling.
   - Verify: `venv\Scripts\python -m pytest tests/test_calendar_scheduler_active_commitments.py tests/test_action_spec_memory_lifecycle.py tests/test_self_cognition_integration.py -q`.
   - Evidence: record test output and changed files.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+  - Sign-off: `Codex/2026-06-04` after verification and evidence are recorded.
 
 - [ ] Stage 5 - recall and reflection integrations complete
 
@@ -1256,5 +1256,60 @@ begins.
     Result: matches only in `src/kazusa_ai_chatbot/action_spec/attempt_ledger.py`
     as a legacy/default attempt-ledger shape and in tests asserting
     `trigger_future_cognition` no longer returns or records that field.
+  - `git diff --check` reported no whitespace errors; only LF/CRLF working
+    copy normalization warnings.
+- 2026-06-04 Stage 4 active-commitment due scheduling implemented:
+  - Production-code subagent `Hegel`
+    (`019e8fd4-9872-7243-87df-275d667975cd`) owned all production code
+    changes. Parent owned tests, verification, de-risk review, and plan
+    evidence.
+  - Changed active-commitment write hooks so create and merge/evolve due
+    changes reconcile `commitment_due_cognition` calendar schedules/runs
+    through `consolidation.memory_units.process_memory_unit_candidate`.
+  - Changed lifecycle closure so successful
+    `execute_user_memory_lifecycle_action(...)` reconciles the corresponding
+    active-commitment schedule to cancelled.
+  - Added `db.user_memory_units.get_user_memory_unit_by_unit_id(...)` and DB
+    facade export for execution-time re-read by calendar due handlers.
+  - Changed default self-cognition due-commitment collection from periodic
+    active-commitment polling to due `commitment_due_cognition`
+    `calendar_runs`, while preserving the old active-commitment source helper
+    for explicit direct tests and non-default paths.
+  - Changed self-cognition worker source calendar ownership so both
+    `future_cognition` and `commitment_due_cognition` runs are claimed,
+    completed, or skipped under the `self_cognition_worker` lease owner.
+  - De-risk fixes added during Stage 4:
+    - mutable active-commitment schedules now use
+      `refresh_calendar_schedule_state(...)`, which updates schedule state by
+      idempotency key while preserving original `created_at`;
+    - active-commitment reconciliation now also upserts the pending due run;
+    - stale, missing, wrong-type, wrong-user, due-mismatched, or unbuildable
+      commitment due runs project internal skip cases so the worker can mark
+      the source calendar run skipped instead of leaving it pending.
+  - Updated deterministic tests in
+    `tests/test_calendar_scheduler_active_commitments.py`,
+    `tests/test_calendar_scheduler_repository.py`,
+    `tests/test_action_spec_memory_lifecycle.py`,
+    `tests/test_self_cognition_integration.py`, and
+    `tests/test_user_memory_units_rag_flow.py`.
+  - Verification command:
+    `venv\Scripts\python -m pytest tests/test_calendar_scheduler_active_commitments.py tests/test_action_spec_memory_lifecycle.py tests/test_self_cognition_integration.py -q`.
+    Result: 64 passed in 2.23s.
+  - Adjacent verification command:
+    `venv\Scripts\python -m pytest tests/test_calendar_scheduler_repository.py tests/test_self_cognition_delivery_target.py tests/test_self_cognition_tracking.py -q`.
+    Result: 59 passed in 3.31s.
+  - Adjacent verification command:
+    `venv\Scripts\python -m pytest tests/test_user_memory_units_rag_flow.py -q`.
+    Result: 14 passed in 1.83s.
+  - Adjacent verification command:
+    `venv\Scripts\python -m pytest tests/test_db.py -q`.
+    Result: 66 passed, 13 deselected in 2.00s.
+  - Syntax verification command:
+    `venv\Scripts\python -m py_compile src/kazusa_ai_chatbot/action_spec/handlers/memory_lifecycle.py src/kazusa_ai_chatbot/calendar_scheduler/handlers.py src/kazusa_ai_chatbot/calendar_scheduler/repository.py src/kazusa_ai_chatbot/consolidation/memory_units.py src/kazusa_ai_chatbot/db/user_memory_units.py src/kazusa_ai_chatbot/self_cognition/models.py src/kazusa_ai_chatbot/self_cognition/sources.py src/kazusa_ai_chatbot/self_cognition/worker.py tests/test_action_spec_memory_lifecycle.py tests/test_calendar_scheduler_active_commitments.py tests/test_calendar_scheduler_repository.py tests/test_self_cognition_integration.py tests/test_user_memory_units_rag_flow.py`.
+    Result: passed.
+  - Static grep:
+    `rg -n "collect_active_commitment_cases\(|query_active_commitment_memory_units\(" src/kazusa_ai_chatbot/self_cognition tests/test_self_cognition_integration.py`.
+    Result: no production default-call matches; remaining matches are the
+    helper definition, subsystem README reference, and direct test coverage.
   - `git diff --check` reported no whitespace errors; only LF/CRLF working
     copy normalization warnings.

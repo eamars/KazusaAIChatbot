@@ -57,6 +57,46 @@ class _AsyncCursor:
 
 
 @pytest.mark.asyncio
+async def test_refresh_calendar_schedule_state_updates_mutable_schedule() -> None:
+    """Mutable schedules should keep calendar_schedules aligned with source state."""
+
+    from kazusa_ai_chatbot.calendar_scheduler import repository
+
+    db = _db()
+    schedule = {
+        "schedule_id": "calendar_schedule_commitment_1",
+        "idempotency_key": "commitment_due:commitment-1",
+        "trigger_kind": "commitment_due_cognition",
+        "status": "active",
+        "next_run_at": NOW_UTC,
+        "payload": {
+            "unit_id": "commitment-1",
+            "global_user_id": "user-1",
+            "due_at": NOW_UTC,
+        },
+        "created_at": NOW_UTC,
+        "updated_at": NOW_UTC,
+    }
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(repository, "get_db", AsyncMock(return_value=db))
+        result = await repository.refresh_calendar_schedule_state(schedule)
+
+    assert result.upserted_id == "x"
+    update_call = db.calendar_schedules.update_one.await_args
+    assert update_call.args[0] == {
+        "idempotency_key": schedule["idempotency_key"]
+    }
+    expected_set = dict(schedule)
+    expected_set.pop("created_at")
+    assert update_call.args[1] == {
+        "$set": expected_set,
+        "$setOnInsert": {"created_at": schedule["created_at"]},
+    }
+    assert update_call.kwargs == {"upsert": True}
+
+
+@pytest.mark.asyncio
 async def test_upsert_calendar_run_uses_idempotency_key() -> None:
     """Run materialization should be idempotent across repeated passes."""
 

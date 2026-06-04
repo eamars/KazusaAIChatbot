@@ -231,6 +231,7 @@ class SelfCognitionCase(TypedDict, total=False):
     promoted_reflection_context: dict[str, Any]
     budget: SelfCognitionBudget
     source_calendar_run_id: str
+    source_calendar_skip_reason: str
     source_action_attempt_id: str
     delivery_target: SelfCognitionDeliveryTarget
     target_binding_status: Literal["bound", "failed"]

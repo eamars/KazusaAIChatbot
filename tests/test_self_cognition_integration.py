@@ -259,6 +259,24 @@ def _future_cognition_run() -> dict[str, Any]:
     return run
 
 
+def _commitment_due_run() -> dict[str, Any]:
+    run = {
+        "run_id": "calendar_run_commitment_123",
+        "schedule_id": "calendar_schedule_commitment_123",
+        "trigger_kind": calendar_models.TRIGGER_COMMITMENT_DUE_COGNITION,
+        "due_at": "2026-05-13T00:00:00+00:00",
+        "created_at": "2026-05-12T23:00:00+00:00",
+        "status": calendar_models.RUN_STATUS_PENDING,
+        "payload": {
+            "unit_id": "promise-001",
+            "global_user_id": "673225019",
+            "due_at": "2026-05-13T00:00:00+00:00",
+        },
+        "source_scope": {},
+    }
+    return run
+
+
 def _future_cognition_case() -> dict[str, Any]:
     case = {
         "case_name": models.CASE_SCHEDULED_FUTURE_COGNITION,
@@ -864,12 +882,186 @@ async def test_scheduled_future_cognition_without_user_keeps_group_targetless() 
 
 
 @pytest.mark.asyncio
+async def test_collect_commitment_due_cognition_cases_projects_calendar_runs() -> None:
+    """Due commitment calendar runs should become normal commitment cases."""
+
+    run = _commitment_due_run()
+    unit = {
+        "unit_id": "promise-001",
+        "global_user_id": "673225019",
+        "unit_type": "active_commitment",
+        "status": "active",
+        "fact": "A promised follow-up is due.",
+        "subjective_appraisal": "The user may expect a check-in.",
+        "relationship_signal": "Following through matters.",
+        "due_at": "2026-05-13T00:00:00+00:00",
+        "last_seen_at": "2026-05-12T23:55:00+00:00",
+        "updated_at": "2026-05-12T23:55:00+00:00",
+    }
+    rows = [
+        {
+            "platform": "qq",
+            "platform_channel_id": "673225019",
+            "channel_type": "private",
+            "role": "user",
+            "global_user_id": "673225019",
+            "display_name": "User",
+            "body_text": "Please check back after the appointment.",
+            "timestamp": "2026-05-12T23:50:00+00:00",
+        }
+    ]
+
+    async def list_due_runs(**kwargs: Any) -> list[dict[str, Any]]:
+        assert kwargs["trigger_kinds"] == [
+            calendar_models.TRIGGER_COMMITMENT_DUE_COGNITION,
+        ]
+        assert kwargs["limit"] == 2
+        return [run]
+
+    async def read_memory_unit(unit_id: str) -> dict[str, Any]:
+        assert unit_id == "promise-001"
+        return unit
+
+    async def get_history(**kwargs: Any) -> list[dict[str, Any]]:
+        assert kwargs["global_user_id"] == "673225019"
+        return rows
+
+    async def get_profile(global_user_id: str) -> dict[str, Any]:
+        assert global_user_id == "673225019"
+        return {"affinity": 600, "display_name": "User"}
+
+    async def no_private_channel(**kwargs: Any) -> None:
+        del kwargs
+        return None
+
+    cases = await sources.collect_commitment_due_cognition_cases(
+        now=datetime(2026, 5, 13, 0, 30, tzinfo=timezone.utc),
+        character_profile={"name": "Character", "mood": "focused"},
+        max_cases=2,
+        list_due_calendar_runs_func=list_due_runs,
+        memory_unit_reader_func=read_memory_unit,
+        get_conversation_history_func=get_history,
+        get_user_profile_func=get_profile,
+        get_latest_private_channel_func=no_private_channel,
+    )
+
+    assert len(cases) == 1
+    assert cases[0]["case_name"] == models.CASE_COMMITMENT_PAST_DUE
+    assert cases[0]["trigger_kind"] == models.TRIGGER_ACTIVE_COMMITMENT_DUE_CHECK
+    assert cases[0]["source_calendar_run_id"] == "calendar_run_commitment_123"
+    assert cases[0]["source_refs"][0] == {
+        "source_kind": "user_memory_unit",
+        "source_id": "promise-001",
+        "due_at": "2026-05-13T00:00:00+00:00",
+        "summary": "A promised follow-up is due.",
+    }
+
+
+@pytest.mark.asyncio
+async def test_collect_commitment_due_cognition_cases_projects_stale_run_skip(
+) -> None:
+    """Stale due runs should reach the worker as terminal skip work."""
+
+    run = _commitment_due_run()
+    stale_unit = {
+        "unit_id": "promise-001",
+        "global_user_id": "673225019",
+        "unit_type": "active_commitment",
+        "status": "active",
+        "fact": "A promised follow-up was rescheduled.",
+        "subjective_appraisal": "The old due slot is stale.",
+        "relationship_signal": "Use only the current due time.",
+        "due_at": "2026-05-14T00:00:00+00:00",
+        "updated_at": "2026-05-13T00:10:00+00:00",
+    }
+
+    async def list_due_runs(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return [run]
+
+    async def read_memory_unit(unit_id: str) -> dict[str, Any]:
+        assert unit_id == "promise-001"
+        return stale_unit
+
+    cases = await sources.collect_commitment_due_cognition_cases(
+        now=datetime(2026, 5, 13, 0, 30, tzinfo=timezone.utc),
+        character_profile={"name": "Character", "mood": "focused"},
+        max_cases=2,
+        list_due_calendar_runs_func=list_due_runs,
+        memory_unit_reader_func=read_memory_unit,
+        get_conversation_history_func=lambda **kwargs: [],
+        get_user_profile_func=lambda global_user_id: {},
+        get_latest_private_channel_func=lambda **kwargs: None,
+    )
+
+    assert cases == [
+        {
+            "case_name": models.CASE_COMMITMENT_DUPLICATE_TICK,
+            "case_id": "commitment_due_skip:calendar_run_commitment_123",
+            "trigger_kind": models.TRIGGER_ACTIVE_COMMITMENT_DUE_CHECK,
+            "source_calendar_run_id": "calendar_run_commitment_123",
+            "source_calendar_skip_reason": "stale_active_commitment_due_at",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_collect_commitment_due_cognition_cases_skips_unbuildable_case(
+) -> None:
+    """Valid due runs should not stay pending when context cannot build a case."""
+
+    run = _commitment_due_run()
+    unit = {
+        "unit_id": "promise-001",
+        "global_user_id": "673225019",
+        "unit_type": "active_commitment",
+        "status": "active",
+        "fact": "A promised follow-up is due.",
+        "subjective_appraisal": "The user may expect a check-in.",
+        "relationship_signal": "Following through matters.",
+        "due_at": "2026-05-13T00:00:00+00:00",
+        "updated_at": "2026-05-12T23:55:00+00:00",
+    }
+
+    async def list_due_runs(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return [run]
+
+    async def read_memory_unit(unit_id: str) -> dict[str, Any]:
+        assert unit_id == "promise-001"
+        return unit
+
+    cases = await sources.collect_commitment_due_cognition_cases(
+        now=datetime(2026, 5, 13, 0, 30, tzinfo=timezone.utc),
+        character_profile={"name": "Character", "mood": "focused"},
+        max_cases=2,
+        list_due_calendar_runs_func=list_due_runs,
+        memory_unit_reader_func=read_memory_unit,
+        get_conversation_history_func=lambda **kwargs: [],
+        get_user_profile_func=lambda global_user_id: {},
+        get_latest_private_channel_func=lambda **kwargs: None,
+    )
+
+    assert cases == [
+        {
+            "case_name": models.CASE_COMMITMENT_DUPLICATE_TICK,
+            "case_id": "commitment_due_skip:calendar_run_commitment_123",
+            "trigger_kind": models.TRIGGER_ACTIVE_COMMITMENT_DUE_CHECK,
+            "source_calendar_run_id": "calendar_run_commitment_123",
+            "source_calendar_skip_reason": (
+                "active_commitment_case_unavailable"
+            ),
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_collect_self_cognition_cases_includes_future_slots(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The shared collector should include due scheduled cognition slots."""
 
-    async def no_commitments(**kwargs: Any) -> list[dict[str, Any]]:
+    async def no_commitment_due(**kwargs: Any) -> list[dict[str, Any]]:
         del kwargs
         return []
 
@@ -877,11 +1069,16 @@ async def test_collect_self_cognition_cases_includes_future_slots(
         del kwargs
         return [_future_cognition_case()]
 
-    monkeypatch.setattr(sources, "collect_active_commitment_cases", no_commitments)
     monkeypatch.setattr(
         sources,
         "collect_scheduled_future_cognition_cases",
         future_cases,
+    )
+    monkeypatch.setattr(
+        sources,
+        "collect_commitment_due_cognition_cases",
+        no_commitment_due,
+        raising=False,
     )
 
     cases = await sources.collect_self_cognition_cases(
@@ -893,6 +1090,108 @@ async def test_collect_self_cognition_cases_includes_future_slots(
     assert [case["trigger_kind"] for case in cases] == [
         models.TRIGGER_SCHEDULED_FUTURE_COGNITION,
     ]
+
+
+@pytest.mark.asyncio
+async def test_collect_self_cognition_cases_includes_calendar_commitment_due_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The default collector should read due commitments from calendar runs."""
+
+    async def no_scheduled(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return []
+
+    async def commitment_due_cases(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        case = _commitment_case_with_delivery_target()
+        case["source_calendar_run_id"] = "calendar_run_commitment_123"
+        return [case]
+
+    async def active_commitments(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        raise AssertionError("default collector should not poll commitments")
+
+    monkeypatch.setattr(
+        sources,
+        "collect_scheduled_future_cognition_cases",
+        no_scheduled,
+    )
+    monkeypatch.setattr(
+        sources,
+        "collect_commitment_due_cognition_cases",
+        commitment_due_cases,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        sources,
+        "collect_active_commitment_cases",
+        active_commitments,
+    )
+    monkeypatch.setattr(
+        sources,
+        "is_self_cognition_sleep_period",
+        lambda now: False,
+    )
+
+    cases = await sources.collect_self_cognition_cases(
+        now=datetime(2026, 5, 13, 0, 30, tzinfo=timezone.utc),
+        character_profile={"name": "TestCharacter"},
+        max_cases=3,
+    )
+
+    assert [case["source_calendar_run_id"] for case in cases] == [
+        "calendar_run_commitment_123",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_collect_self_cognition_cases_does_not_poll_active_commitments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Production active-commitment due checks are calendar-run driven."""
+
+    async def no_scheduled(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return []
+
+    async def no_commitment_due(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return []
+
+    async def active_commitments(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        raise AssertionError("default collector should not poll commitments")
+
+    monkeypatch.setattr(
+        sources,
+        "collect_scheduled_future_cognition_cases",
+        no_scheduled,
+    )
+    monkeypatch.setattr(
+        sources,
+        "collect_commitment_due_cognition_cases",
+        no_commitment_due,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        sources,
+        "collect_active_commitment_cases",
+        active_commitments,
+    )
+    monkeypatch.setattr(
+        sources,
+        "is_self_cognition_sleep_period",
+        lambda now: False,
+    )
+
+    cases = await sources.collect_self_cognition_cases(
+        now=datetime(2026, 5, 13, 0, 30, tzinfo=timezone.utc),
+        character_profile={"name": "TestCharacter"},
+        max_cases=3,
+    )
+
+    assert cases == []
 
 
 @pytest.mark.asyncio
@@ -1019,6 +1318,110 @@ async def test_worker_tick_marks_future_cognition_run_completed(
     assert result.processed_count == 1
     assert claimed_run_ids == ["calendar_run_future_123"]
     assert completed_run_ids == ["calendar_run_future_123"]
+
+
+@pytest.mark.asyncio
+async def test_worker_tick_marks_commitment_due_run_completed(
+    tmp_path: Path,
+) -> None:
+    """Processed commitment due calendar runs should be marked terminal."""
+
+    del tmp_path
+    claimed_run_ids: list[str] = []
+    completed_run_ids: list[str] = []
+    case = _commitment_case_with_delivery_target()
+    case["source_calendar_run_id"] = "calendar_run_commitment_123"
+
+    async def collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return [case]
+
+    async def run_case(case_arg: dict[str, Any]) -> dict[str, Any]:
+        assert case_arg["trigger_kind"] == (
+            models.TRIGGER_ACTIVE_COMMITMENT_DUE_CHECK
+        )
+        return {}
+
+    async def claim_run(run_id: str, **kwargs: Any) -> bool:
+        claimed_run_ids.append(run_id)
+        assert kwargs["trigger_kind"] == (
+            calendar_models.TRIGGER_COMMITMENT_DUE_COGNITION
+        )
+        assert kwargs["lease_owner"] == "self_cognition_worker"
+        return True
+
+    async def mark_completed(run_id: str, **kwargs: Any) -> bool:
+        completed_run_ids.append(run_id)
+        assert kwargs["lease_owner"] == "self_cognition_worker"
+        assert kwargs["result"]["status"] == "self_cognition_processed"
+        return True
+
+    result = await worker.run_self_cognition_worker_tick(
+        now=datetime(2026, 5, 13, 0, 30, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        run_case_func=run_case,
+        read_attempts_func=lambda **kwargs: [],
+        record_attempt_func=lambda attempt: None,
+        claim_calendar_run_func=claim_run,
+        complete_calendar_run_func=mark_completed,
+        max_cases=3,
+    )
+
+    assert result.processed_count == 1
+    assert claimed_run_ids == ["calendar_run_commitment_123"]
+    assert completed_run_ids == ["calendar_run_commitment_123"]
+
+
+@pytest.mark.asyncio
+async def test_worker_tick_skips_stale_commitment_due_run() -> None:
+    """Stale commitment due calendar runs should be terminal after claim."""
+
+    claimed_run_ids: list[str] = []
+    skipped_run_ids: list[str] = []
+    case = {
+        "case_name": models.CASE_COMMITMENT_DUPLICATE_TICK,
+        "case_id": "commitment_due_skip:calendar_run_commitment_123",
+        "trigger_kind": models.TRIGGER_ACTIVE_COMMITMENT_DUE_CHECK,
+        "source_calendar_run_id": "calendar_run_commitment_123",
+        "source_calendar_skip_reason": "stale_active_commitment_due_at",
+    }
+
+    async def collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return [case]
+
+    async def claim_run(run_id: str, **kwargs: Any) -> bool:
+        claimed_run_ids.append(run_id)
+        assert kwargs["trigger_kind"] == (
+            calendar_models.TRIGGER_COMMITMENT_DUE_COGNITION
+        )
+        return True
+
+    async def skip_run(run_id: str, **kwargs: Any) -> bool:
+        skipped_run_ids.append(run_id)
+        assert kwargs["reason"] == "stale_active_commitment_due_at"
+        assert kwargs["lease_owner"] == "self_cognition_worker"
+        return True
+
+    run_case = AsyncMock()
+    result = await worker.run_self_cognition_worker_tick(
+        now=datetime(2026, 5, 13, 0, 30, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        run_case_func=run_case,
+        read_attempts_func=lambda **kwargs: [],
+        record_attempt_func=lambda attempt: None,
+        claim_calendar_run_func=claim_run,
+        skip_calendar_run_func=skip_run,
+        max_cases=3,
+    )
+
+    assert result.processed_count == 0
+    assert result.skipped_count == 1
+    assert claimed_run_ids == ["calendar_run_commitment_123"]
+    assert skipped_run_ids == ["calendar_run_commitment_123"]
+    run_case.assert_not_called()
 
 
 @pytest.mark.asyncio

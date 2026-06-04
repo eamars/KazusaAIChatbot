@@ -28,10 +28,23 @@ def _active_commitment(*, due_at: str | None = DUE_AT) -> dict[str, Any]:
 class _RepositoryDouble:
     def __init__(self) -> None:
         self.upserted: list[dict[str, Any]] = []
+        self.refreshed: list[dict[str, Any]] = []
+        self.upserted_runs: list[dict[str, Any]] = []
         self.cancelled: list[dict[str, Any]] = []
 
     async def upsert_calendar_schedule(self, schedule: dict[str, Any]) -> object:
         self.upserted.append(schedule)
+        return object()
+
+    async def refresh_calendar_schedule_state(
+        self,
+        schedule: dict[str, Any],
+    ) -> object:
+        self.refreshed.append(schedule)
+        return object()
+
+    async def upsert_calendar_run(self, run: dict[str, Any]) -> object:
+        self.upserted_runs.append(run)
         return object()
 
     async def cancel_calendar_schedule_by_idempotency_key(
@@ -49,6 +62,26 @@ class _RepositoryDouble:
         return True
 
 
+def _consolidation_state() -> dict[str, Any]:
+    return {
+        "storage_timestamp_utc": NOW_UTC,
+        "global_user_id": "user-1",
+        "rag_result": {"user_memory_unit_candidates": []},
+    }
+
+
+def _candidate(*, due_at: str = DUE_AT) -> dict[str, Any]:
+    return {
+        "candidate_id": "candidate-1",
+        "unit_type": "active_commitment",
+        "fact": "The character accepted a follow-up.",
+        "subjective_appraisal": "The commitment should be checked later.",
+        "relationship_signal": "Follow through at the due time.",
+        "due_at": due_at,
+        "evidence_refs": [],
+    }
+
+
 @pytest.mark.asyncio
 async def test_reconcile_active_commitment_upserts_due_schedule() -> None:
     """Active commitments with absolute due_at should get one due trigger."""
@@ -64,8 +97,9 @@ async def test_reconcile_active_commitment_upserts_due_schedule() -> None:
     )
 
     assert result["status"] == "scheduled"
-    assert len(repository.upserted) == 1
-    schedule = repository.upserted[0]
+    assert repository.upserted == []
+    assert len(repository.refreshed) == 1
+    schedule = repository.refreshed[0]
     assert schedule["trigger_kind"] == models.TRIGGER_COMMITMENT_DUE_COGNITION
     assert schedule["next_run_at"] == DUE_AT
     assert schedule["idempotency_key"] == "commitment_due:commitment-1"
@@ -76,6 +110,13 @@ async def test_reconcile_active_commitment_upserts_due_schedule() -> None:
     }
     assert "fact" not in schedule["payload"]
     assert "subjective_appraisal" not in schedule["payload"]
+    assert len(repository.upserted_runs) == 1
+    run = repository.upserted_runs[0]
+    assert run["trigger_kind"] == models.TRIGGER_COMMITMENT_DUE_COGNITION
+    assert run["status"] == models.RUN_STATUS_PENDING
+    assert run["due_at"] == DUE_AT
+    assert run["schedule_id"] == schedule["schedule_id"]
+    assert run["payload"] == schedule["payload"]
     assert repository.cancelled == []
 
 
@@ -97,6 +138,8 @@ async def test_reconcile_active_commitment_cancels_closed_or_missing_due() -> No
 
     assert result["status"] == "cancelled"
     assert repository.upserted == []
+    assert repository.refreshed == []
+    assert repository.upserted_runs == []
     assert repository.cancelled == [
         {
             "idempotency_key": "commitment_due:commitment-1",
@@ -137,6 +180,7 @@ async def test_reconcile_active_commitment_rejects_unschedulable_units(
 
     assert result["status"] == expected_status
     assert repository.upserted == []
+    assert repository.refreshed == []
     assert repository.cancelled[0]["idempotency_key"] == (
         "commitment_due:commitment-1"
     )
@@ -178,6 +222,193 @@ async def test_commitment_due_handler_skips_stale_due_payload() -> None:
         "unit_id": "commitment-1",
     }
     assert built_cases == []
+
+
+@pytest.mark.asyncio
+async def test_consolidation_create_reconciles_active_commitment_schedule(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """New active commitments must materialize one calendar due schedule."""
+
+    from kazusa_ai_chatbot.consolidation import memory_units as memory_units_module
+
+    captured: dict[str, Any] = {}
+
+    async def retrieve_candidates(global_user_id: str, **kwargs: Any) -> list[dict]:
+        captured["retrieval_user_id"] = global_user_id
+        captured["surfaced_units"] = kwargs["surfaced_units"]
+        return []
+
+    async def judge_merge(candidate: dict, candidate_clusters: list[dict]) -> dict:
+        captured["merge_candidate"] = candidate
+        captured["merge_clusters"] = candidate_clusters
+        return {
+            "candidate_id": candidate["candidate_id"],
+            "decision": "create",
+            "cluster_id": "",
+            "reason": "new active commitment",
+        }
+
+    async def insert_units(
+        global_user_id: str,
+        units: list[dict],
+        **kwargs: Any,
+    ) -> list[dict]:
+        captured["insert_user_id"] = global_user_id
+        captured["insert_units"] = units
+        captured["insert_timestamp"] = kwargs["storage_timestamp_utc"]
+        return [{
+            **units[0],
+            "unit_id": "commitment-created",
+            "global_user_id": global_user_id,
+            "status": "active",
+            "updated_at": kwargs["storage_timestamp_utc"],
+        }]
+
+    async def reconcile_schedule(unit: dict, **kwargs: Any) -> dict[str, str]:
+        captured["reconciled_unit"] = unit
+        captured["reconcile_repository"] = kwargs["repository"]
+        captured["reconcile_timestamp"] = kwargs["storage_timestamp_utc"]
+        return {"status": "scheduled", "unit_id": unit["unit_id"]}
+
+    monkeypatch.setattr(
+        memory_units_module,
+        "retrieve_memory_unit_merge_candidates",
+        retrieve_candidates,
+    )
+    monkeypatch.setattr(
+        memory_units_module,
+        "_judge_memory_unit_merge",
+        judge_merge,
+    )
+    monkeypatch.setattr(
+        memory_units_module,
+        "insert_user_memory_units",
+        insert_units,
+    )
+    monkeypatch.setattr(
+        memory_units_module,
+        "reconcile_active_commitment_calendar_schedule",
+        reconcile_schedule,
+    )
+
+    result = await memory_units_module.process_memory_unit_candidate(
+        _consolidation_state(),
+        _candidate(),
+    )
+
+    assert result["unit_id"] == "commitment-created"
+    assert captured["insert_user_id"] == "user-1"
+    assert captured["insert_timestamp"] == NOW_UTC
+    assert captured["reconcile_timestamp"] == NOW_UTC
+    assert captured["reconciled_unit"]["unit_id"] == "commitment-created"
+    assert captured["reconciled_unit"]["unit_type"] == "active_commitment"
+    assert captured["reconciled_unit"]["status"] == "active"
+    assert captured["reconciled_unit"]["global_user_id"] == "user-1"
+    assert captured["reconciled_unit"]["due_at"] == DUE_AT
+
+
+@pytest.mark.asyncio
+async def test_consolidation_merge_reconciles_changed_commitment_due_schedule(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Merge/evolve updates that carry due_at must refresh calendar timing."""
+
+    from kazusa_ai_chatbot.consolidation import memory_units as memory_units_module
+
+    captured: dict[str, Any] = {}
+    updated_due_at = "2026-06-04T01:15:00+00:00"
+    existing_unit = {
+        **_active_commitment(),
+        "unit_id": "commitment-existing",
+        "due_at": DUE_AT,
+    }
+
+    async def retrieve_candidates(global_user_id: str, **kwargs: Any) -> list[dict]:
+        captured["retrieval_user_id"] = global_user_id
+        captured["surfaced_units"] = kwargs["surfaced_units"]
+        return [existing_unit]
+
+    async def judge_merge(candidate: dict, candidate_clusters: list[dict]) -> dict:
+        captured["merge_candidate"] = candidate
+        captured["merge_clusters"] = candidate_clusters
+        return {
+            "candidate_id": candidate["candidate_id"],
+            "decision": "evolve",
+            "cluster_id": "commitment-existing",
+            "reason": "same commitment with a new due time",
+        }
+
+    async def rewrite_unit(
+        state: dict,
+        candidate: dict,
+        merge_result: dict,
+    ) -> dict:
+        captured["rewrite_state"] = state
+        captured["rewrite_merge_result"] = merge_result
+        return {
+            "fact": candidate["fact"],
+            "subjective_appraisal": candidate["subjective_appraisal"],
+            "relationship_signal": candidate["relationship_signal"],
+        }
+
+    async def update_semantics(
+        unit_id: str,
+        semantics: dict,
+        **kwargs: Any,
+    ) -> None:
+        captured["updated_unit_id"] = unit_id
+        captured["updated_semantics"] = semantics
+        captured["lifecycle_fields"] = kwargs["lifecycle_fields"]
+        captured["merge_history"] = kwargs["merge_history_entry"]
+
+    async def reconcile_schedule(unit: dict, **kwargs: Any) -> dict[str, str]:
+        captured["reconciled_unit"] = unit
+        captured["reconcile_timestamp"] = kwargs["storage_timestamp_utc"]
+        return {"status": "scheduled", "unit_id": unit["unit_id"]}
+
+    monkeypatch.setattr(
+        memory_units_module,
+        "retrieve_memory_unit_merge_candidates",
+        retrieve_candidates,
+    )
+    monkeypatch.setattr(
+        memory_units_module,
+        "_judge_memory_unit_merge",
+        judge_merge,
+    )
+    monkeypatch.setattr(memory_units_module, "_rewrite_memory_unit", rewrite_unit)
+    monkeypatch.setattr(
+        memory_units_module,
+        "update_user_memory_unit_semantics",
+        update_semantics,
+    )
+    monkeypatch.setattr(
+        memory_units_module,
+        "reconcile_active_commitment_calendar_schedule",
+        reconcile_schedule,
+    )
+
+    result = await memory_units_module.process_memory_unit_candidate(
+        _consolidation_state(),
+        _candidate(due_at=updated_due_at),
+    )
+
+    assert result["unit_id"] == "commitment-existing"
+    assert captured["updated_unit_id"] == "commitment-existing"
+    assert captured["lifecycle_fields"] == {"due_at": updated_due_at}
+    assert captured["reconcile_timestamp"] == NOW_UTC
+    assert captured["reconciled_unit"] == {
+        "unit_id": "commitment-existing",
+        "global_user_id": "user-1",
+        "unit_type": "active_commitment",
+        "status": "active",
+        "fact": "The character accepted a follow-up.",
+        "subjective_appraisal": "The commitment should be checked later.",
+        "relationship_signal": "Follow through at the due time.",
+        "due_at": updated_due_at,
+        "updated_at": NOW_UTC,
+    }
 
 
 @pytest.mark.asyncio

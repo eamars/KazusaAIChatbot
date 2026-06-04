@@ -46,7 +46,13 @@ async def reconcile_active_commitment_calendar_schedule(
         idempotency_key=idempotency_key,
         storage_timestamp_utc=storage_timestamp_utc,
     )
-    await repository.upsert_calendar_schedule(schedule)
+    run = models.build_calendar_run_from_schedule(
+        schedule,
+        due_at=due_at,
+        storage_timestamp_utc=storage_timestamp_utc,
+    )
+    await repository.refresh_calendar_schedule_state(schedule)
+    await repository.upsert_calendar_run(run)
     result = {"status": "scheduled", "unit_id": unit_id}
     return result
 
@@ -82,6 +88,13 @@ async def handle_commitment_due_cognition_run(
         return result
 
     case = await active_commitment_case_builder(stored_unit)
+    if not isinstance(case, dict):
+        result = _skip(unit_id, "active_commitment_case_unavailable")
+        return result
+    case_name = case.get("case_name")
+    if not isinstance(case_name, str) or not case_name.strip():
+        result = _skip(unit_id, "active_commitment_case_unavailable")
+        return result
     result = {"status": "case_created", **case}
     return result
 

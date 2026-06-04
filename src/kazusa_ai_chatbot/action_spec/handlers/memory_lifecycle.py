@@ -12,6 +12,14 @@ from kazusa_ai_chatbot.action_spec.models import (
 from kazusa_ai_chatbot.action_spec.registry import (
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
 )
+from kazusa_ai_chatbot.calendar_scheduler import repository as calendar_repository
+from kazusa_ai_chatbot.calendar_scheduler.handlers import (
+    reconcile_active_commitment_calendar_schedule,
+)
+from kazusa_ai_chatbot.db.schemas import (
+    UserMemoryUnitStatus,
+    UserMemoryUnitType,
+)
 from kazusa_ai_chatbot.db.user_memory_units import (
     update_user_memory_unit_lifecycle,
 )
@@ -101,6 +109,20 @@ async def execute_user_memory_lifecycle_action(
         status = "unchanged"
     else:
         status = "not_found"
+    if (
+        result["matched_count"]
+        and result["status"] != UserMemoryUnitStatus.ACTIVE
+    ):
+        await reconcile_active_commitment_calendar_schedule(
+            {
+                "unit_id": result["unit_id"],
+                "unit_type": UserMemoryUnitType.ACTIVE_COMMITMENT,
+                "status": result["status"],
+                "due_at": update["due_at"],
+            },
+            repository=calendar_repository,
+            storage_timestamp_utc=update["timestamp"],
+        )
     return_value = {
         "status": status,
         "unit_id": result["unit_id"],
