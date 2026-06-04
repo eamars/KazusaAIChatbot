@@ -10,7 +10,6 @@ Submodule map:
 * ``character``    — ``character_state`` operations
 * ``memory``       — ``memory`` operations
 * ``interaction_style_images`` — L3-only interaction style overlays
-* ``scheduled_events`` — scheduled-event persistence helpers
 """
 
 from __future__ import annotations
@@ -172,17 +171,6 @@ from kazusa_ai_chatbot.db.character import (
     upsert_character_state,
 )
 
-from kazusa_ai_chatbot.db.scheduled_events import (
-    cancel_pending_scheduled_event,
-    claim_pending_scheduled_event_running,
-    insert_scheduled_event,
-    list_due_future_cognition_events,
-    list_pending_scheduler_events,
-    mark_scheduled_event_completed,
-    mark_scheduled_event_failed,
-    mark_scheduled_event_running,
-    query_pending_scheduled_events,
-)
 from kazusa_ai_chatbot.db.self_cognition import (
     find_self_cognition_group_review_window,
     list_self_cognition_action_attempts,
@@ -302,13 +290,6 @@ __all__ = [
     "upsert_character_self_image", "upsert_character_state",
     # Memory
     "enable_memory_vector_index", "get_active_promises", "save_memory", "search_memory",
-    # Scheduled events
-    "cancel_pending_scheduled_event", "insert_scheduled_event",
-    "claim_pending_scheduled_event_running",
-    "list_due_future_cognition_events", "list_pending_scheduler_events",
-    "mark_scheduled_event_completed",
-    "mark_scheduled_event_failed", "mark_scheduled_event_running",
-    "query_pending_scheduled_events",
     # Self-cognition action attempts
     "find_self_cognition_group_review_window",
     "list_self_cognition_action_attempts",

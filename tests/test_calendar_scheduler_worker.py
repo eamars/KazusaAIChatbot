@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from datetime import datetime, timezone
 from typing import Any
 
 import pytest
@@ -237,4 +239,84 @@ async def test_worker_tick_marks_skipped_handler_result_skipped() -> None:
             "storage_timestamp_utc": NOW_UTC,
             "reason": "stale_active_commitment_due_at",
         }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_calendar_worker_loop_materializes_reflection_period_before_claims() -> None:
+    """The service-owned worker loop should materialize phase runs before claims."""
+
+    from kazusa_ai_chatbot.calendar_scheduler import models, worker
+
+    now = datetime(2026, 6, 4, 0, 15, tzinfo=timezone.utc)
+    repository = _RepositoryDouble([])
+    calls: list[tuple[str, str]] = []
+
+    async def materialize_reflection_phase_period(
+        *,
+        period_start_utc: datetime,
+        storage_timestamp_utc: str,
+        repository: object,
+    ) -> dict[str, object]:
+        assert repository is repository_double
+        calls.append(("materialize", period_start_utc.isoformat()))
+        return {"materialized_count": 0, "run_ids": []}
+
+    async def run_worker_tick(**kwargs: Any) -> dict[str, int]:
+        assert kwargs["repository"] is repository_double
+        assert kwargs["current_timestamp_utc"] == NOW_UTC
+        assert kwargs["lease_owner"] == "calendar-worker-test"
+        assert kwargs["lease_duration_seconds"] == 300
+        assert kwargs["claim_limit"] == 2
+        assert kwargs["max_attempts"] == 3
+        handler_registry = kwargs["handler_registry"]
+        assert handler_registry.trigger_kinds() == [
+            models.TRIGGER_REFLECTION_PHASE_SLOT,
+        ]
+        calls.append(("tick", kwargs["current_timestamp_utc"]))
+        return {
+            "claimed_count": 0,
+            "completed_count": 0,
+            "failed_count": 0,
+            "skipped_count": 0,
+        }
+
+    repository_double = repository
+    registry = worker.CalendarRunHandlerRegistry()
+
+    async def handle_reflection_phase(run: dict[str, Any]) -> dict[str, Any]:
+        assert run["trigger_kind"] == models.TRIGGER_REFLECTION_PHASE_SLOT
+        result = {"status": "completed"}
+        return result
+
+    registry.register(
+        models.TRIGGER_REFLECTION_PHASE_SLOT,
+        handle_reflection_phase,
+    )
+
+    handle = worker.start_calendar_scheduler_worker(
+        repository=repository_double,
+        handler_registry=registry,
+        poll_interval_seconds=3600,
+        lease_owner="calendar-worker-test",
+        lease_duration_seconds=300,
+        claim_limit=2,
+        max_attempts=3,
+        now_func=lambda: now,
+        materialize_reflection_phase_period_func=(
+            materialize_reflection_phase_period
+        ),
+        run_worker_tick_func=run_worker_tick,
+    )
+    try:
+        for _ in range(20):
+            if len(calls) >= 2:
+                break
+            await asyncio.sleep(0.01)
+    finally:
+        await worker.stop_calendar_scheduler_worker(handle)
+
+    assert calls == [
+        ("materialize", NOW_UTC),
+        ("tick", NOW_UTC),
     ]

@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from kazusa_ai_chatbot.config import REFLECTION_WORKER_INTERVAL_SECONDS
 from kazusa_ai_chatbot.reflection_cycle import phase_scheduler
 from kazusa_ai_chatbot.reflection_cycle.models import (
     ReflectionScopeInput,
@@ -16,6 +17,7 @@ from kazusa_ai_chatbot.reflection_cycle.models import (
 
 PERIOD_START = datetime(1970, 1, 1, tzinfo=timezone.utc)
 STORAGE_NOW = "1970-01-01T00:00:00+00:00"
+OFFSET_WITHIN_PERIOD_SECONDS = 123
 
 
 def test_phase_intent_maps_mechanically_to_calendar_run() -> None:
@@ -138,6 +140,58 @@ async def test_materialize_phase_period_snapshots_at_period_start(
         "materialized_count": 1,
         "run_ids": [upserted_runs[0]["run_id"]],
     }
+
+
+@pytest.mark.asyncio
+async def test_materialize_phase_period_floors_unaligned_tick_to_boundary(
+    monkeypatch,
+) -> None:
+    """A worker poll inside a period should not create a new period id."""
+
+    from kazusa_ai_chatbot.calendar_scheduler import reflection_phase
+
+    captured_collect_kwargs: dict[str, object] = {}
+    upserted_runs: list[dict] = []
+    expected_period_start = PERIOD_START + timedelta(
+        seconds=REFLECTION_WORKER_INTERVAL_SECONDS,
+    )
+    offset_seconds = min(
+        OFFSET_WITHIN_PERIOD_SECONDS,
+        REFLECTION_WORKER_INTERVAL_SECONDS - 1,
+    )
+    unaligned_tick = expected_period_start + timedelta(seconds=offset_seconds)
+
+    class _InputSet:
+        selected_scopes = [_scope("scope-a")]
+
+    class _Repository:
+        async def upsert_calendar_run(self, run: dict) -> object:
+            upserted_runs.append(run)
+            return object()
+
+    async def _collect_reflection_inputs(**kwargs) -> _InputSet:
+        captured_collect_kwargs.update(kwargs)
+        input_set = _InputSet()
+        return input_set
+
+    monkeypatch.setattr(
+        reflection_phase,
+        "collect_reflection_inputs",
+        _collect_reflection_inputs,
+        raising=False,
+    )
+
+    await reflection_phase.materialize_reflection_phase_period(
+        period_start_utc=unaligned_tick,
+        storage_timestamp_utc=STORAGE_NOW,
+        repository=_Repository(),
+    )
+
+    assert captured_collect_kwargs["now"] == expected_period_start
+    assert upserted_runs[0]["period_start_utc"] == (
+        expected_period_start.isoformat()
+    )
+    assert upserted_runs[0]["due_at"] == expected_period_start.isoformat()
 
 
 @pytest.mark.asyncio

@@ -448,12 +448,6 @@ MAX_FACT_HARVESTER_RETRY = int(os.getenv("MAX_FACT_HARVESTER_RETRY", "3"))
 # RAG Cache2
 RAG_CACHE2_MAX_ENTRIES = int(os.getenv("RAG_CACHE2_MAX_ENTRIES", "5000"))
 
-# Scheduler (future_promise + followup_message events).
-SCHEDULED_TASKS_ENABLED = os.getenv(
-    "SCHEDULED_TASKS_ENABLED",
-    "true",
-).lower() in ("1", "true", "yes")
-
 # Calendar scheduler durable worker settings.
 CALENDAR_SCHEDULER_ENABLED = _bool_from_env(
     "CALENDAR_SCHEDULER_ENABLED",

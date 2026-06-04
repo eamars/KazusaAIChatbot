@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -443,10 +443,38 @@ async def test_lifespan_records_process_and_resource_events(monkeypatch) -> None
     )
     monkeypatch.setattr(service_module.mcp_manager, "start", AsyncMock())
     monkeypatch.setattr(service_module.mcp_manager, "stop", AsyncMock())
-    monkeypatch.setattr(service_module, "PendingTaskIndex", _FakePendingTaskIndex)
-    monkeypatch.setattr(service_module.scheduler, "configure_runtime", MagicMock())
-    monkeypatch.setattr(service_module.scheduler, "load_pending_events", AsyncMock())
-    monkeypatch.setattr(service_module.scheduler, "shutdown", AsyncMock())
+    monkeypatch.setattr(
+        service_module,
+        "CALENDAR_SCHEDULER_ENABLED",
+        False,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "Pending" + "TaskIndex",
+        _ForbiddenLegacyRuntime,
+        raising=False,
+    )
+    legacy_scheduler = getattr(service_module, "scheduler", None)
+    if legacy_scheduler is not None:
+        monkeypatch.setattr(
+            legacy_scheduler,
+            "configure_runtime",
+            _forbidden_legacy_sync,
+            raising=False,
+        )
+        monkeypatch.setattr(
+            legacy_scheduler,
+            "load" + "_pending_events",
+            _forbidden_legacy_async,
+            raising=False,
+        )
+        monkeypatch.setattr(
+            legacy_scheduler,
+            "shutdown",
+            _forbidden_legacy_async,
+            raising=False,
+        )
     monkeypatch.setattr(
         service_module,
         "render_llm_route_table",
@@ -481,10 +509,20 @@ async def test_lifespan_records_process_and_resource_events(monkeypatch) -> None
     ]
 
 
-class _FakePendingTaskIndex:
-    """Fake scheduler pending index with no database reads."""
+class _ForbiddenLegacyRuntime:
+    """Fail if the retired delayed-task runtime is still constructed."""
 
-    async def rebuild_from_db(self) -> None:
-        """No-op rebuild for service lifespan tests."""
+    def __init__(self) -> None:
+        raise AssertionError("retired scheduler runtime should not start")
 
-        return None
+
+async def _forbidden_legacy_async(*args, **kwargs) -> None:
+    """Fail if an async legacy runtime hook is still called."""
+
+    raise AssertionError("retired scheduler runtime should not be called")
+
+
+def _forbidden_legacy_sync(*args, **kwargs) -> None:
+    """Fail if a sync legacy runtime hook is still called."""
+
+    raise AssertionError("retired scheduler runtime should not be called")

@@ -9,8 +9,12 @@ import pytest
 
 from kazusa_ai_chatbot.config import RAG_PLANNER_LLM_BASE_URL
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_supervisor2 as supervisor2_module
-from kazusa_ai_chatbot.rag import recall as recall_module
 from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
+from kazusa_ai_chatbot.rag.recall.collectors import (
+    calendar_runs as calendar_runs_module,
+)
+from kazusa_ai_chatbot.rag.recall.collectors import commitments as commitments_module
+from kazusa_ai_chatbot.rag.recall.collectors import history as history_module
 from kazusa_ai_chatbot.time_boundary import local_time_context_from_storage_utc
 from tests.llm_trace import write_llm_trace
 
@@ -46,8 +50,8 @@ async def _empty_active_commitments(*args, **kwargs) -> list[dict]:
     return return_value
 
 
-async def _empty_scheduled_events(*args, **kwargs) -> list[dict]:
-    """Avoid unrelated scheduler/database dependency in live route checks."""
+async def _empty_calendar_runs(*args, **kwargs) -> list[dict]:
+    """Avoid unrelated calendar/database dependency in live route checks."""
     del args, kwargs
     return_value: list[dict] = []
     return return_value
@@ -116,9 +120,21 @@ async def _run_initializer_case(monkeypatch, case_id: str, query: str) -> list[s
     await get_rag_cache2_runtime().clear()
     monkeypatch.setattr(supervisor2_module, "upsert_initializer_entry", _noop_async)
     monkeypatch.setattr(supervisor2_module, "record_initializer_hit", _noop_async)
-    monkeypatch.setattr(recall_module, "query_user_memory_units", _empty_active_commitments)
-    monkeypatch.setattr(recall_module, "query_pending_scheduled_events", _empty_scheduled_events)
-    monkeypatch.setattr(recall_module, "get_conversation_history", _empty_history)
+    monkeypatch.setattr(
+        commitments_module,
+        "query_user_memory_units",
+        _empty_active_commitments,
+    )
+    monkeypatch.setattr(
+        calendar_runs_module,
+        "list_pending_calendar_runs_for_source",
+        _empty_calendar_runs,
+    )
+    monkeypatch.setattr(
+        history_module,
+        "get_conversation_history",
+        _empty_history,
+    )
 
     state = _initializer_state(query)
     result = await supervisor2_module.rag_initializer(state)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from kazusa_ai_chatbot.config import (
@@ -90,13 +90,16 @@ async def materialize_reflection_phase_period(
 ) -> dict[str, Any]:
     """Snapshot eligible scopes and upsert phase slot calendar runs."""
 
+    materialization_period_start = _reflection_phase_period_start(
+        period_start_utc
+    )
     input_set = await collect_reflection_inputs(
         lookback_hours=READONLY_REFLECTION_MONITOR_ELIGIBILITY_HOURS,
-        now=period_start_utc,
+        now=materialization_period_start,
         allow_fallback=False,
     )
     intents = phase_scheduler.build_phase_run_intents(
-        period_start_utc=period_start_utc,
+        period_start_utc=materialization_period_start,
         eligible_scopes=input_set.selected_scopes,
         phase_period_seconds=REFLECTION_WORKER_INTERVAL_SECONDS,
         max_slots_per_period=REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD,
@@ -118,6 +121,22 @@ async def materialize_reflection_phase_period(
         ],
     }
     return summary
+
+
+def _reflection_phase_period_start(value: datetime) -> datetime:
+    """Return the UTC phase-period boundary for materialization."""
+
+    if value.tzinfo is None:
+        raise ValueError("reflection phase timestamp must be timezone-aware")
+
+    value_utc = value.astimezone(timezone.utc)
+    timestamp_seconds = int(value_utc.timestamp())
+    period_offset_seconds = (
+        timestamp_seconds % REFLECTION_WORKER_INTERVAL_SECONDS
+    )
+    period_start = value_utc - timedelta(seconds=period_offset_seconds)
+    period_start = period_start.replace(microsecond=0)
+    return period_start
 
 
 async def handle_reflection_phase_calendar_run(
@@ -163,6 +182,17 @@ class CalendarReflectionPhaseRunProvider:
         self.repository = repository
         self.collect_phase_scope_input_func = collect_phase_scope_input_func
         self.expected_hourly_run_ids_func = expected_hourly_run_ids_func
+
+    async def period_run_intents(
+        self,
+        *,
+        period_start_utc: datetime,
+    ) -> list[phase_scheduler.ReflectionPhaseRunIntent]:
+        """Return no local intents because calendar claims own slot execution."""
+
+        _ = period_start_utc
+        intents: list[phase_scheduler.ReflectionPhaseRunIntent] = []
+        return intents
 
     async def expected_hourly_runs_for_character_local_date(
         self,

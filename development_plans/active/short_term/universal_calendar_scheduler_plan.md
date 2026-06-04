@@ -688,7 +688,6 @@ Expected modified files:
 - `src/kazusa_ai_chatbot/db/bootstrap.py`
 - `src/kazusa_ai_chatbot/db/schemas.py`
 - `src/kazusa_ai_chatbot/db/__init__.py`
-- `src/kazusa_ai_chatbot/db/scheduled_events.py`
 - `src/kazusa_ai_chatbot/db/script_operations.py`
 - `src/kazusa_ai_chatbot/db/user_memory_units.py`
 - `src/kazusa_ai_chatbot/action_spec/handlers/future_cognition.py`
@@ -726,6 +725,7 @@ Expected modified files:
 Expected deleted files:
 
 - `src/kazusa_ai_chatbot/scheduler.py`
+- `src/kazusa_ai_chatbot/db/scheduled_events.py`
 - `src/kazusa_ai_chatbot/dispatcher/pending_index.py`
 - `src/kazusa_ai_chatbot/rag/recall/collectors/scheduled_events.py`
 
@@ -890,7 +890,7 @@ requests fallback execution.
   - Evidence: record test output and changed files.
   - Sign-off: `Codex/2026-06-04` after verification and evidence are recorded.
 
-- [ ] Stage 6 - legacy scheduler decommission and migration script complete
+- [x] Stage 6 - legacy scheduler decommission and migration script complete
 
   - Covers: service startup/shutdown removal of old scheduler runtime,
     migration script, scheduler tests rewritten or removed, and old-path grep
@@ -899,7 +899,7 @@ requests fallback execution.
     `scheduled_events` scheduler reads or writes outside migration,
     historical cleanup diagnostics, and archived DB helpers.
   - Evidence: record test output, grep output, and migration dry-run summary.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+  - Sign-off: `Codex/2026-06-04` after verification and evidence are recorded.
 
 - [ ] Stage 7 - docs, ops status, and config tests complete
 
@@ -1372,3 +1372,87 @@ begins.
   - Residual documentation note: calendar and RAG READMEs still contain
     historical or stale scheduled-event/reflection-phase wording. Stage 7 owns
     docs and ops status updates.
+- 2026-06-04 Stage 6 legacy scheduler decommission and migration boundary
+  completed:
+  - Production-code subagent `Hegel`
+    (`019e8fd4-9872-7243-87df-275d667975cd`) owned all production code
+    changes. Parent owned tests, verification, de-risk review, and plan
+    evidence.
+  - Added calendar worker lifecycle APIs
+    `start_calendar_scheduler_worker(...)` and
+    `stop_calendar_scheduler_worker(...)`. The worker materializes
+    `reflection_phase_slot` calendar runs before claiming due runs and claims
+    only trigger kinds registered in the service-owned handler registry.
+  - Wired service startup/shutdown to the calendar worker when
+    `CALENDAR_SCHEDULER_ENABLED=true`, with a service registry containing only
+    `reflection_phase_slot` so self-cognition-owned `future_cognition` and
+    `commitment_due_cognition` runs remain outside the calendar worker claim
+    set.
+  - Passed `CalendarReflectionPhaseRunProvider()` into the reflection worker
+    startup seam so the process-local provider is no longer the production
+    durable reflection phase control plane. The calendar provider returns no
+    local phase intents because durable slot execution belongs to the calendar
+    worker, while daily readiness still reads expected hourly work from
+    calendar phase-slot runs.
+  - Fixed a review-found blocker where first-pass-after-boundary worker ticks
+    could materialize a non-boundary period id. Calendar reflection
+    materialization now floors unaligned timestamps to the
+    `REFLECTION_WORKER_INTERVAL_SECONDS` phase boundary before collecting
+    eligible scopes and building run intents.
+  - Removed the old process-local runtime files
+    `src/kazusa_ai_chatbot/scheduler.py`,
+    `src/kazusa_ai_chatbot/dispatcher/pending_index.py`, and
+    `src/kazusa_ai_chatbot/db/scheduled_events.py`. Removed
+    `SCHEDULED_TASKS_ENABLED`, old scheduler startup/shutdown calls,
+    `PendingTaskIndex` dispatcher facade export, and scheduled-event helper
+    exports from the DB facade.
+  - Replaced the old scheduler future-promise test surface with calendar
+    decommission/service lifecycle tests. Live LLM test references were
+    retargeted away from the removed scheduler runtime and stale Recall live
+    test monkeypatches now target the calendar-run collector module.
+  - Verification command:
+    `venv\Scripts\python -m pytest tests/test_calendar_scheduler_worker.py tests/test_calendar_scheduler_decommission.py tests/test_reflection_cycle_stage1c_service.py tests/test_service_event_logging.py tests/test_calendar_scheduler_migration.py tests/test_calendar_scheduler_reflection_phase.py -q`.
+    Result: 36 passed in 2.39s.
+  - Adjacent verification command:
+    `venv\Scripts\python -m pytest tests/test_config.py tests/test_db.py -q`.
+    Result: 121 passed, 13 deselected in 4.74s.
+  - Syntax verification command:
+    `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\calendar_scheduler\reflection_phase.py src\kazusa_ai_chatbot\calendar_scheduler\worker.py src\kazusa_ai_chatbot\reflection_cycle\worker.py src\kazusa_ai_chatbot\service.py src\kazusa_ai_chatbot\config.py src\kazusa_ai_chatbot\db\__init__.py src\kazusa_ai_chatbot\dispatcher\__init__.py src\kazusa_ai_chatbot\dispatcher\task.py tests\test_calendar_scheduler_worker.py tests\test_calendar_scheduler_decommission.py tests\test_calendar_scheduler_reflection_phase.py tests\test_reflection_cycle_stage1c_service.py tests\test_service_event_logging.py tests\test_rag_recall_live_llm.py tests\test_e2e_live_llm.py`.
+    Result: passed.
+  - Migration dry-run command:
+    `venv\Scripts\python -m scripts.migrate_scheduled_events_to_calendar_scheduler --dry-run --output test_artifacts/calendar_migration_dry_run.json`.
+    Result: command exited 0; summary reported `blocked=false`,
+    `dry_run=true`, `total_legacy_rows=106`, `total_pending=0`,
+    `unknown_tool=0`, `future_cognition_to_migrate=0`,
+    `legacy_send_message_to_cancel=0`, and `terminal_ignored=106`.
+  - Static grep:
+    `rg -n "scheduled_events|schedule_event|load_pending_events|PendingTaskIndex|SCHEDULED_TASKS_ENABLED" src/kazusa_ai_chatbot tests`.
+    Result: no production runtime scheduler module, service startup hook,
+    runtime facade, old enable flag, or old DB helper module matches. Remaining
+    matches are migration tests, historical cleanup diagnostics,
+    `db.script_operations` maintenance helpers, DB bootstrap/index/schema
+    historical references, and stale documentation owned by Stage 7.
+  - Static grep:
+    `rg -n "query_pending_scheduled_events|list_due_future_cognition_events|trigger_future_cognition" src/kazusa_ai_chatbot tests`.
+    Result: no production old scheduled-event query helper references.
+    Remaining matches are the valid `trigger_future_cognition` action
+    capability, migration maintenance classification/tests, prompt-contract
+    tests for the action capability, and the decommission test forbidden export
+    string.
+  - Static grep:
+    `rg -n "ScheduledEventCollector|collectors\.scheduled_events" src/kazusa_ai_chatbot tests`.
+    Result: remaining match only in `rag/recall/README.md`, which Stage 7 owns
+    as stale documentation.
+  - Static grep:
+    `rg -n "reflection_phase_runs|reflection_hourly_slot|group_self_cognition_review" src/kazusa_ai_chatbot/calendar_scheduler tests/test_calendar_scheduler_reflection_phase.py`.
+    Result: production Python has no split reflection trigger kinds and no
+    side collection. Matches are allowed action strings in
+    `tests/test_calendar_scheduler_reflection_phase.py` and documentation
+    wording in the calendar scheduler README.
+  - README ICD check:
+    `Test-Path -LiteralPath src/kazusa_ai_chatbot/calendar_scheduler/README.md`
+    returned `True`; the README section grep matched document control,
+    owning package, interface boundary, public interfaces, collection
+    contracts, trigger contracts, and forbidden paths.
+  - `git diff --check` reported no whitespace errors; only LF/CRLF working
+    copy normalization warnings.

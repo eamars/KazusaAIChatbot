@@ -13,11 +13,9 @@ import pytest
 import pytest_asyncio
 from fastapi import BackgroundTasks
 
-from kazusa_ai_chatbot import scheduler
 from kazusa_ai_chatbot import service as brain_service
 from kazusa_ai_chatbot.config import (
     DIALOG_GENERATOR_LLM_BASE_URL,
-    SCHEDULED_TASKS_ENABLED,
     SEARXNG_URL,
 )
 from kazusa_ai_chatbot.db import (
@@ -77,15 +75,9 @@ async def live_env():
 
     await mcp_manager.start()
 
-    if SCHEDULED_TASKS_ENABLED:
-        await scheduler.load_pending_events()
-
     yield {
         "mcp_tools": {tool.name for tool in mcp_manager.list_tools()},
     }
-
-    if SCHEDULED_TASKS_ENABLED:
-        await scheduler.shutdown()
 
     await mcp_manager.stop()
     await close_db()
@@ -1116,16 +1108,13 @@ async def test_live_graph_fact_extraction_persists_profile_updates(live_env) -> 
     assert any(keyword in persisted_blob for keyword in ("奥克兰", "软件工程师", "辣椒"))
 
 
-async def test_live_graph_future_promise_creates_scheduled_event(live_env) -> None:
-    if not SCHEDULED_TASKS_ENABLED:
-        pytest.skip("Scheduled tasks are disabled in this environment.")
-
+async def test_live_graph_future_promise_creates_calendar_run(live_env) -> None:
     identity = await _make_identity("promise", "LivePromiseUser")
     db = await get_db()
-    before_count = await db.scheduled_events.count_documents(
+    before_count = await db.calendar_runs.count_documents(
         {
-            "target_global_user_id": identity["global_user_id"],
-            "event_type": "future_promise",
+            "trigger_kind": "commitment_due_cognition",
+            "payload.global_user_id": identity["global_user_id"],
         }
     )
 
@@ -1138,10 +1127,10 @@ async def test_live_graph_future_promise_creates_scheduled_event(live_env) -> No
         platform_channel_id=identity["platform_channel_id"],
     )
 
-    after_count = await db.scheduled_events.count_documents(
+    after_count = await db.calendar_runs.count_documents(
         {
-            "target_global_user_id": identity["global_user_id"],
-            "event_type": "future_promise",
+            "trigger_kind": "commitment_due_cognition",
+            "payload.global_user_id": identity["global_user_id"],
         }
     )
 
