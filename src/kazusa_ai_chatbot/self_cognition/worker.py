@@ -11,7 +11,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from kazusa_ai_chatbot.calendar_scheduler import models as calendar_models
+from kazusa_ai_chatbot.calendar_scheduler import repository as calendar_repository
 from kazusa_ai_chatbot.config import (
+    CALENDAR_SCHEDULER_LEASE_SECONDS,
+    CALENDAR_SCHEDULER_MAX_ATTEMPTS,
     SELF_COGNITION_MAX_CASES_PER_TICK,
     SELF_COGNITION_WORKER_INTERVAL_SECONDS,
 )
@@ -30,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 _WORKER_STOP_TIMEOUT_SECONDS = 5.0
 _ATTEMPT_HISTORY_LIMIT = 1000
+_CALENDAR_LEASE_OWNER = "self_cognition_worker"
 
 
 @dataclass
@@ -107,8 +112,9 @@ async def run_self_cognition_worker_tick(
     run_case_func: Callable[..., Any] | None = None,
     read_attempts_func: Callable[..., Any] | None = None,
     record_attempt_func: Callable[..., Any] | None = None,
-    complete_scheduled_event_func: Callable[..., Any] | None = None,
-    claim_scheduled_event_func: Callable[..., Any] | None = None,
+    complete_calendar_run_func: Callable[..., Any] | None = None,
+    claim_calendar_run_func: Callable[..., Any] | None = None,
+    skip_calendar_run_func: Callable[..., Any] | None = None,
     adapter_registry_provider: Callable[[], AdapterRegistry | None] | None = None,
     max_cases: int = SELF_COGNITION_MAX_CASES_PER_TICK,
 ) -> SelfCognitionWorkerResult:
@@ -122,10 +128,12 @@ async def run_self_cognition_worker_tick(
         run_case_func: Optional test seam for self-cognition case projection.
         read_attempts_func: Optional test seam for prior attempt reads.
         record_attempt_func: Optional test seam for attempt persistence.
-        complete_scheduled_event_func: Optional test seam for source slot
+        complete_calendar_run_func: Optional test seam for source run
             completion.
-        claim_scheduled_event_func: Optional test seam for atomically claiming
-            source scheduler rows before processing.
+        claim_calendar_run_func: Optional test seam for atomically claiming
+            source calendar runs before processing.
+        skip_calendar_run_func: Optional test seam for terminal source run
+            skips.
         adapter_registry_provider: Optional live adapter registry provider.
         max_cases: Maximum cases to process in this tick.
 
@@ -163,11 +171,15 @@ async def run_self_cognition_worker_tick(
     active_record_attempt = record_attempt_func or (
         db.upsert_self_cognition_action_attempt
     )
-    active_complete_scheduled_event = (
-        complete_scheduled_event_func or db.mark_scheduled_event_completed
+    active_complete_calendar_run = (
+        complete_calendar_run_func
+        or calendar_repository.mark_calendar_run_completed
     )
-    active_claim_scheduled_event = (
-        claim_scheduled_event_func or db.claim_pending_scheduled_event_running
+    active_claim_calendar_run = (
+        claim_calendar_run_func or calendar_repository.claim_calendar_run
+    )
+    active_skip_calendar_run = (
+        skip_calendar_run_func or calendar_repository.mark_calendar_run_skipped
     )
     adapter_registry = _adapter_registry_for_tick(adapter_registry_provider)
 
@@ -176,9 +188,10 @@ async def run_self_cognition_worker_tick(
             result.deferred = True
             result.defer_reason = "primary interaction busy"
             break
-        claimed = await _claim_scheduled_future_cognition_event(
+        claimed = await _claim_scheduled_future_cognition_run(
             case,
-            claim_scheduled_event_func=active_claim_scheduled_event,
+            now=now,
+            claim_calendar_run_func=active_claim_calendar_run,
         )
         if not claimed:
             result.skipped_count += 1
@@ -186,9 +199,10 @@ async def run_self_cognition_worker_tick(
         if _target_binding_failed(case):
             result.skipped_count += 1
             await _record_target_binding_failed_event(case)
-            await _complete_scheduled_future_cognition_event(
+            await _skip_scheduled_future_cognition_run(
                 case,
-                complete_scheduled_event_func=active_complete_scheduled_event,
+                now=now,
+                skip_calendar_run_func=active_skip_calendar_run,
             )
             continue
         prior_attempts = await _call_maybe_async(
@@ -234,9 +248,10 @@ async def run_self_cognition_worker_tick(
             artifact_payloads=artifact_payloads,
             dispatch_status=dispatch_status,
         )
-        await _complete_scheduled_future_cognition_event(
+        await _complete_scheduled_future_cognition_run(
             case_for_run,
-            complete_scheduled_event_func=active_complete_scheduled_event,
+            now=now,
+            complete_calendar_run_func=active_complete_calendar_run,
         )
 
     await _record_worker_tick_event(result)
@@ -580,42 +595,85 @@ async def _record_worker_tick_event(result: SelfCognitionWorkerResult) -> None:
     )
 
 
-async def _claim_scheduled_future_cognition_event(
+async def _claim_scheduled_future_cognition_run(
     case: models.SelfCognitionCase,
     *,
-    claim_scheduled_event_func: Callable[..., Any],
+    now: datetime,
+    claim_calendar_run_func: Callable[..., Any],
 ) -> bool:
-    """Atomically claim a source scheduled cognition slot before processing."""
+    """Atomically claim a source calendar cognition run before processing."""
 
     if case.get("trigger_kind") != models.TRIGGER_SCHEDULED_FUTURE_COGNITION:
         return_value = True
         return return_value
 
-    event_id = case.get("source_scheduled_event_id")
-    if not isinstance(event_id, str) or not event_id:
+    run_id = case.get("source_calendar_run_id")
+    if not isinstance(run_id, str) or not run_id:
         return_value = False
         return return_value
 
-    claimed = await _call_maybe_async(claim_scheduled_event_func, event_id)
+    claimed = await _call_maybe_async(
+        claim_calendar_run_func,
+        run_id,
+        trigger_kind=calendar_models.TRIGGER_FUTURE_COGNITION,
+        current_timestamp_utc=now.isoformat(),
+        lease_owner=_CALENDAR_LEASE_OWNER,
+        lease_duration_seconds=CALENDAR_SCHEDULER_LEASE_SECONDS,
+        max_attempts=CALENDAR_SCHEDULER_MAX_ATTEMPTS,
+    )
     return_value = bool(claimed)
     return return_value
 
 
-async def _complete_scheduled_future_cognition_event(
+async def _complete_scheduled_future_cognition_run(
     case: models.SelfCognitionCase,
     *,
-    complete_scheduled_event_func: Callable[..., Any],
+    now: datetime,
+    complete_calendar_run_func: Callable[..., Any],
 ) -> None:
-    """Mark a source scheduled cognition slot consumed after processing."""
+    """Mark a source calendar cognition run consumed after processing."""
 
     if case.get("trigger_kind") != models.TRIGGER_SCHEDULED_FUTURE_COGNITION:
         return
 
-    event_id = case.get("source_scheduled_event_id")
-    if not isinstance(event_id, str) or not event_id:
+    run_id = case.get("source_calendar_run_id")
+    if not isinstance(run_id, str) or not run_id:
         return
 
-    await _call_maybe_async(complete_scheduled_event_func, event_id)
+    await _call_maybe_async(
+        complete_calendar_run_func,
+        run_id,
+        lease_owner=_CALENDAR_LEASE_OWNER,
+        storage_timestamp_utc=now.isoformat(),
+        result={
+            "status": "self_cognition_processed",
+            "case_name": str(case.get("case_name") or ""),
+        },
+    )
+
+
+async def _skip_scheduled_future_cognition_run(
+    case: models.SelfCognitionCase,
+    *,
+    now: datetime,
+    skip_calendar_run_func: Callable[..., Any],
+) -> None:
+    """Mark an unprocessable source calendar run skipped."""
+
+    if case.get("trigger_kind") != models.TRIGGER_SCHEDULED_FUTURE_COGNITION:
+        return
+
+    run_id = case.get("source_calendar_run_id")
+    if not isinstance(run_id, str) or not run_id:
+        return
+
+    await _call_maybe_async(
+        skip_calendar_run_func,
+        run_id,
+        lease_owner=_CALENDAR_LEASE_OWNER,
+        storage_timestamp_utc=now.isoformat(),
+        reason="target_binding_failed",
+    )
 
 
 async def _record_self_cognition_event_from_artifacts(

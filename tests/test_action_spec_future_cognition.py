@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from kazusa_ai_chatbot.calendar_scheduler import models as calendar_models
 from kazusa_ai_chatbot.action_spec.models import ActionValidationError
 from kazusa_ai_chatbot.action_spec.registry import (
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
@@ -60,31 +61,37 @@ def _future_cognition_action_spec() -> dict:
     }
 
 
-def test_build_future_cognition_event_uses_prompt_safe_scheduler_shape() -> None:
-    """The scheduled event should carry a typed cognition request, not ids."""
+def test_build_future_cognition_calendar_docs_use_prompt_safe_shape() -> None:
+    """Calendar rows should carry a typed cognition request, not visible text."""
 
     from kazusa_ai_chatbot.action_spec.handlers.future_cognition import (
-        build_future_cognition_scheduled_event,
+        build_future_cognition_calendar_documents,
     )
 
-    event = build_future_cognition_scheduled_event(
+    documents = build_future_cognition_calendar_documents(
         _future_cognition_action_spec(),
         storage_timestamp_utc="2026-05-15T21:00:00+00:00",
         action_attempt_id="action_attempt:future-123",
     )
-    serialized = json.dumps(event, sort_keys=True)
+    schedule = documents["schedule"]
+    run = documents["run"]
+    serialized_payload = json.dumps(schedule["payload"], sort_keys=True)
 
-    assert event["tool"] == TRIGGER_FUTURE_COGNITION_CAPABILITY
-    assert event["execute_at"] == "2026-05-15T22:00:00+00:00"
-    assert event["status"] == "pending"
-    assert event["args"]["episode_type"] == "self_cognition"
-    assert event["args"]["source_action_attempt_id"] == (
+    assert schedule["trigger_kind"] == calendar_models.TRIGGER_FUTURE_COGNITION
+    assert schedule["next_run_at"] == "2026-05-15T22:00:00+00:00"
+    assert schedule["status"] == calendar_models.SCHEDULE_STATUS_ACTIVE
+    assert schedule["payload"]["episode_type"] == "self_cognition"
+    assert schedule["payload"]["source_action_attempt_id"] == (
         "action_attempt:future-123"
     )
-    assert event["args"]["continuation_objective"] == (
+    assert schedule["payload"]["continuation_objective"] == (
         "Re-check whether a natural pause appeared."
     )
-    assert "context_summary" not in event["args"]
+    assert schedule["source_scope"]["source_platform"] == "orchestrator"
+    assert run["trigger_kind"] == calendar_models.TRIGGER_FUTURE_COGNITION
+    assert run["status"] == calendar_models.RUN_STATUS_PENDING
+    assert run["payload"] == schedule["payload"]
+    assert "context_summary" not in schedule["payload"]
     for forbidden in (
         "handler_id",
         "platform_channel_id",
@@ -93,15 +100,17 @@ def test_build_future_cognition_event_uses_prompt_safe_scheduler_shape() -> None
         "mongodb",
         "credential",
         '"params"',
+        "visible_text",
+        "send_message",
     ):
-        assert forbidden not in serialized
+        assert forbidden not in serialized_payload
 
 
-def test_future_cognition_event_copies_trusted_source_scope() -> None:
-    """Code-bound source scope should survive into the scheduled trigger."""
+def test_future_cognition_calendar_docs_copy_trusted_source_scope() -> None:
+    """Code-bound source scope should survive into calendar source scope."""
 
     from kazusa_ai_chatbot.action_spec.handlers.future_cognition import (
-        build_future_cognition_scheduled_event,
+        build_future_cognition_calendar_documents,
     )
 
     action_spec = _future_cognition_action_spec()
@@ -116,36 +125,37 @@ def test_future_cognition_event_copies_trusted_source_scope() -> None:
         }
     )
 
-    event = build_future_cognition_scheduled_event(
+    documents = build_future_cognition_calendar_documents(
         action_spec,
         storage_timestamp_utc="2026-05-15T21:00:00+00:00",
         action_attempt_id="action_attempt:future-123",
     )
+    schedule = documents["schedule"]
 
-    assert event["source_platform"] == "qq"
-    assert event["source_channel_id"] == "54369546"
-    assert event["source_channel_type"] == "group"
-    assert event["source_user_id"] == "673225019"
-    assert event["source_platform_bot_id"] == "bot-001"
-    assert event["source_character_name"] == "TestCharacter"
-    assert "source_channel_id" not in event["args"]
-    assert "source_user_id" not in event["args"]
+    assert schedule["source_scope"]["source_platform"] == "qq"
+    assert schedule["source_scope"]["source_channel_id"] == "54369546"
+    assert schedule["source_scope"]["source_channel_type"] == "group"
+    assert schedule["source_scope"]["source_user_id"] == "673225019"
+    assert schedule["source_scope"]["source_platform_bot_id"] == "bot-001"
+    assert schedule["source_scope"]["source_character_name"] == "TestCharacter"
+    assert "source_channel_id" not in schedule["payload"]
+    assert "source_user_id" not in schedule["payload"]
 
 
 def test_future_cognition_missing_source_user_does_not_fabricate_identity() -> None:
     """Missing source user should stay targetless instead of becoming a user."""
 
     from kazusa_ai_chatbot.action_spec.handlers.future_cognition import (
-        build_future_cognition_scheduled_event,
+        build_future_cognition_calendar_documents,
     )
 
-    event = build_future_cognition_scheduled_event(
+    documents = build_future_cognition_calendar_documents(
         _future_cognition_action_spec(),
         storage_timestamp_utc="2026-05-15T21:00:00+00:00",
         action_attempt_id="action_attempt:future-123",
     )
 
-    assert event["source_user_id"] == ""
+    assert documents["schedule"]["source_scope"]["source_user_id"] == ""
 
 
 @pytest.mark.asyncio
@@ -156,17 +166,24 @@ async def test_execute_future_cognition_schedules_without_inline_cognition(
 
     from kazusa_ai_chatbot.action_spec.handlers import future_cognition
 
-    scheduled_events: list[dict] = []
+    schedules: list[dict] = []
+    runs: list[dict] = []
 
-    async def fake_schedule_event(event: dict) -> str:
-        scheduled_events.append(event)
-        return_value = "scheduled-event-123"
-        return return_value
+    async def upsert_schedule(schedule: dict) -> None:
+        schedules.append(schedule)
+
+    async def upsert_run(run: dict) -> None:
+        runs.append(run)
 
     monkeypatch.setattr(
-        future_cognition.scheduler,
-        "schedule_event",
-        fake_schedule_event,
+        future_cognition.calendar_repository,
+        "upsert_calendar_schedule",
+        upsert_schedule,
+    )
+    monkeypatch.setattr(
+        future_cognition.calendar_repository,
+        "upsert_calendar_run",
+        upsert_run,
     )
 
     result = await future_cognition.execute_future_cognition_action(
@@ -175,29 +192,92 @@ async def test_execute_future_cognition_schedules_without_inline_cognition(
         action_attempt_id="action_attempt:future-123",
     )
 
-    assert result == {
-        "status": "scheduled",
-        "scheduled_event_ids": ["scheduled-event-123"],
-        "episode_type": "self_cognition",
-        "trigger_at": "2026-05-15T22:00:00+00:00",
-        "reason": "The character wants a later private cognition cycle.",
-    }
-    assert len(scheduled_events) == 1
-    assert scheduled_events[0]["tool"] == TRIGGER_FUTURE_COGNITION_CAPABILITY
+    assert result["status"] == "scheduled"
+    assert result["calendar_trigger_kind"] == (
+        calendar_models.TRIGGER_FUTURE_COGNITION
+    )
+    assert result["scheduled_count"] == 1
+    assert result["calendar_schedule_id"] == schedules[0]["schedule_id"]
+    assert result["calendar_run_id"] == runs[0]["run_id"]
+    assert result["episode_type"] == "self_cognition"
+    assert result["trigger_at"] == "2026-05-15T22:00:00+00:00"
+    assert result["reason"] == (
+        "The character wants a later private cognition cycle."
+    )
+    assert "scheduled_event_ids" not in result
+    assert len(schedules) == 1
+    assert len(runs) == 1
+    assert schedules[0]["trigger_kind"] == (
+        calendar_models.TRIGGER_FUTURE_COGNITION
+    )
+    assert runs[0]["schedule_id"] == schedules[0]["schedule_id"]
+
+
+@pytest.mark.asyncio
+async def test_execute_future_cognition_trace_records_calendar_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Action execution should not keep the old scheduled-event result shape."""
+
+    from kazusa_ai_chatbot.action_spec import execution as execution_module
+
+    async def execute_future_cognition_action(
+        action_spec: dict,
+        *,
+        storage_timestamp_utc: str,
+        action_attempt_id: str,
+    ) -> dict:
+        del action_spec, storage_timestamp_utc, action_attempt_id
+        return {
+            "status": "scheduled",
+            "calendar_trigger_kind": calendar_models.TRIGGER_FUTURE_COGNITION,
+            "calendar_schedule_id": "calendar_schedule_123",
+            "calendar_run_id": "calendar_run_123",
+            "scheduled_count": 1,
+            "episode_type": "self_cognition",
+            "trigger_at": "2026-05-15T22:00:00+00:00",
+            "reason": "The character wants a later private cognition cycle.",
+        }
+
+    monkeypatch.setattr(
+        execution_module,
+        "execute_future_cognition_action",
+        execute_future_cognition_action,
+    )
+
+    recorded_attempts: list[dict] = []
+
+    async def record_attempt(record: dict) -> None:
+        recorded_attempts.append(record)
+
+    results = await execution_module.execute_action_specs_for_trace(
+        [_future_cognition_action_spec()],
+        storage_timestamp_utc="2026-05-15T21:00:00+00:00",
+        record_attempt_func=record_attempt,
+    )
+
+    assert results[0]["status"] == "scheduled"
+    assert "scheduled self-cognition follow-up" in results[0]["result_summary"]
+    assert "calendar" not in results[0]["result_summary"]
+    assert "calendar_run_123" not in results[0]["result_summary"]
+    execution_result = recorded_attempts[0]["execution_result"]
+    assert execution_result["calendar_schedule_id"] == "calendar_schedule_123"
+    assert execution_result["calendar_run_id"] == "calendar_run_123"
+    assert "scheduled_event_ids" not in execution_result
 
 
 def test_future_cognition_rejects_raw_target_id() -> None:
     """The LLM must not select scheduler or adapter identifiers."""
 
     from kazusa_ai_chatbot.action_spec.handlers.future_cognition import (
-        build_future_cognition_scheduled_event,
+        build_future_cognition_calendar_documents,
     )
 
     action_spec = _future_cognition_action_spec()
     action_spec["target"]["target_id"] = "raw-channel-123"
 
     with pytest.raises(ActionValidationError, match="target_id"):
-        build_future_cognition_scheduled_event(
+        build_future_cognition_calendar_documents(
             action_spec,
             storage_timestamp_utc="2026-05-15T21:00:00+00:00",
             action_attempt_id="action_attempt:future-123",
@@ -208,14 +288,14 @@ def test_future_cognition_rejects_invalid_episode_type() -> None:
     """Only self-cognition follow-up slots are in scope for this plan."""
 
     from kazusa_ai_chatbot.action_spec.handlers.future_cognition import (
-        build_future_cognition_scheduled_event,
+        build_future_cognition_calendar_documents,
     )
 
     action_spec = _future_cognition_action_spec()
     action_spec["params"]["episode_type"] = "reflection_signal"
 
     with pytest.raises(ActionValidationError, match="episode_type"):
-        build_future_cognition_scheduled_event(
+        build_future_cognition_calendar_documents(
             action_spec,
             storage_timestamp_utc="2026-05-15T21:00:00+00:00",
             action_attempt_id="action_attempt:future-123",
@@ -226,14 +306,14 @@ def test_future_cognition_rejects_unbounded_continuation() -> None:
     """A future cognition request must keep continuation depth bounded."""
 
     from kazusa_ai_chatbot.action_spec.handlers.future_cognition import (
-        build_future_cognition_scheduled_event,
+        build_future_cognition_calendar_documents,
     )
 
     action_spec = _future_cognition_action_spec()
     action_spec["continuation"]["max_depth"] = 2
 
     with pytest.raises(ActionValidationError, match="max_depth"):
-        build_future_cognition_scheduled_event(
+        build_future_cognition_calendar_documents(
             action_spec,
             storage_timestamp_utc="2026-05-15T21:00:00+00:00",
             action_attempt_id="action_attempt:future-123",
@@ -244,14 +324,14 @@ def test_future_cognition_rejects_offset_aware_llm_trigger_time() -> None:
     """LLM-produced schedule times must be exact configured-local minutes."""
 
     from kazusa_ai_chatbot.action_spec.handlers.future_cognition import (
-        build_future_cognition_scheduled_event,
+        build_future_cognition_calendar_documents,
     )
 
     action_spec = _future_cognition_action_spec()
     action_spec["params"]["trigger_at"] = "2026-05-16T10:00:00+12:00"
 
     with pytest.raises(ActionValidationError, match="trigger_at"):
-        build_future_cognition_scheduled_event(
+        build_future_cognition_calendar_documents(
             action_spec,
             storage_timestamp_utc="2026-05-15T21:00:00+00:00",
             action_attempt_id="action_attempt:future-123",

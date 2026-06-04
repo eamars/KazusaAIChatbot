@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from kazusa_ai_chatbot import scheduler
+from kazusa_ai_chatbot.calendar_scheduler import models as calendar_models
+from kazusa_ai_chatbot.calendar_scheduler import repository as calendar_repository
 from kazusa_ai_chatbot.action_spec.models import (
     ACTION_CONTINUATION_VERSION,
     ActionValidationError,
@@ -19,7 +20,6 @@ from kazusa_ai_chatbot.time_boundary import (
 )
 
 MAX_FUTURE_COGNITION_CONTINUATION_DEPTH = 1
-FUTURE_COGNITION_TOOL = "trigger_future_cognition"
 _FORBIDDEN_RAW_ID_PARAM_KEYS = frozenset(
     (
         "adapter_id",
@@ -36,23 +36,24 @@ _FORBIDDEN_RAW_ID_PARAM_KEYS = frozenset(
 )
 
 
-def build_future_cognition_scheduled_event(
+def build_future_cognition_calendar_documents(
     action_spec: dict[str, Any],
     *,
     storage_timestamp_utc: str,
     action_attempt_id: str,
-) -> dict:
-    """Build a scheduler document for a future self-cognition slot.
+) -> dict[str, dict[str, Any]]:
+    """Build calendar rows for a future self-cognition slot.
 
     Args:
         action_spec: Selected ``trigger_future_cognition`` action spec.
         storage_timestamp_utc: Current episode storage UTC timestamp used as
-            creation time and as the immediate background slot time when no
+            creation time and as the immediate calendar due time when no
             trigger time was supplied.
         action_attempt_id: Stable action-attempt id for trace correlation.
 
     Returns:
-        Scheduler-shaped event document containing prompt-safe trigger args.
+        Calendar schedule and run documents containing semantic trigger
+        payload only.
 
     Raises:
         ActionValidationError: If the action is not a private bounded
@@ -77,31 +78,33 @@ def build_future_cognition_scheduled_event(
         execute_at = normalized_trigger_at
 
     continuation_objective = str(params["continuation_objective"]).strip()
-    event = {
-        "event_id": f"future_cognition:{action_attempt_id}",
-        "tool": FUTURE_COGNITION_TOOL,
-        "args": {
-            "episode_type": "self_cognition",
-            "trigger_at": normalized_trigger_at,
-            "continuation_objective": continuation_objective,
-            "source_action_attempt_id": action_attempt_id,
-            "source_refs": list(validated["source_refs"]),
-            "continuation": dict(validated["continuation"]),
-        },
-        "execute_at": execute_at,
-        "created_at": normalized_storage_timestamp_utc,
-        "status": "pending",
-        "source_platform": source_scope["source_platform"],
-        "source_channel_id": source_scope["source_channel_id"],
-        "source_channel_type": source_scope["source_channel_type"],
-        "source_user_id": source_scope["source_user_id"],
-        "source_message_id": action_attempt_id,
-        "source_platform_bot_id": source_scope["source_platform_bot_id"],
-        "source_character_name": source_scope["source_character_name"],
-        "guild_id": None,
-        "bot_role": "system",
+    payload = {
+        "episode_type": "self_cognition",
+        "trigger_at": normalized_trigger_at,
+        "continuation_objective": continuation_objective,
+        "source_action_attempt_id": action_attempt_id,
+        "source_refs": list(validated["source_refs"]),
+        "continuation": dict(validated["continuation"]),
     }
-    return event
+    idempotency_key = f"future_cognition:{action_attempt_id}"
+    schedule = calendar_models.build_one_time_calendar_schedule(
+        trigger_kind=calendar_models.TRIGGER_FUTURE_COGNITION,
+        due_at=execute_at,
+        payload=payload,
+        source_scope=source_scope,
+        idempotency_key=idempotency_key,
+        storage_timestamp_utc=normalized_storage_timestamp_utc,
+    )
+    run = calendar_models.build_calendar_run_from_schedule(
+        schedule,
+        due_at=execute_at,
+        storage_timestamp_utc=normalized_storage_timestamp_utc,
+    )
+    documents = {
+        "schedule": schedule,
+        "run": run,
+    }
+    return documents
 
 
 async def execute_future_cognition_action(
@@ -118,20 +121,26 @@ async def execute_future_cognition_action(
         action_attempt_id: Stable action-attempt id for trace correlation.
 
     Returns:
-        Prompt-safe execution result containing scheduled event ids.
+        Execution result containing calendar schedule/run audit evidence.
     """
 
-    event = build_future_cognition_scheduled_event(
+    documents = build_future_cognition_calendar_documents(
         action_spec,
         storage_timestamp_utc=storage_timestamp_utc,
         action_attempt_id=action_attempt_id,
     )
-    event_id = await scheduler.schedule_event(event)
+    schedule = documents["schedule"]
+    run = documents["run"]
+    await calendar_repository.upsert_calendar_schedule(schedule)
+    await calendar_repository.upsert_calendar_run(run)
     result = {
         "status": "scheduled",
-        "scheduled_event_ids": [event_id],
+        "calendar_trigger_kind": calendar_models.TRIGGER_FUTURE_COGNITION,
+        "calendar_schedule_id": schedule["schedule_id"],
+        "calendar_run_id": run["run_id"],
+        "scheduled_count": 1,
         "episode_type": "self_cognition",
-        "trigger_at": event["args"]["trigger_at"],
+        "trigger_at": schedule["payload"]["trigger_at"],
         "reason": str(action_spec["reason"]),
     }
     return result
@@ -199,8 +208,8 @@ def _reject_raw_id_params(params: dict[str, Any]) -> None:
             raise ActionValidationError(f"{key}: raw id params are not allowed")
 
 
-def _source_scope(scope: dict[str, Any]) -> dict[str, str]:
-    """Return trusted scheduler source fields from deterministic target scope."""
+def _source_scope(scope: dict[str, Any]) -> dict[str, str | None]:
+    """Return trusted calendar source fields from deterministic target scope."""
 
     source_scope = {
         "source_platform": _scope_text(scope, "source_platform") or "orchestrator",
@@ -210,6 +219,9 @@ def _source_scope(scope: dict[str, Any]) -> dict[str, str]:
         "source_user_id": _scope_text(scope, "source_user_id"),
         "source_platform_bot_id": _scope_text(scope, "source_platform_bot_id"),
         "source_character_name": _scope_text(scope, "source_character_name"),
+        "source_message_id": "",
+        "guild_id": None,
+        "bot_role": "system",
     }
     return source_scope
 

@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from kazusa_ai_chatbot.calendar_scheduler import models as calendar_models
 from kazusa_ai_chatbot.self_cognition import models, projection, sources
 
 
@@ -201,30 +202,33 @@ async def test_collectors_return_failed_case_when_target_binding_fails() -> None
     """Target binding failures should return auditable skipped cases."""
 
     now = datetime(2026, 5, 17, 5, 57, tzinfo=timezone.utc)
-    event = {
-        "event_id": "future-cognition-1",
-        "tool": "trigger_future_cognition",
-        "execute_at": "2026-05-17T05:57:00+00:00",
+    run = {
+        "run_id": "calendar_run_future_1",
+        "schedule_id": "calendar_schedule_future_1",
+        "trigger_kind": calendar_models.TRIGGER_FUTURE_COGNITION,
+        "due_at": "2026-05-17T05:57:00+00:00",
         "created_at": "2026-05-17T05:50:00+00:00",
-        "status": "pending",
-        "source_platform": "qq",
-        "source_channel_id": "",
-        "source_channel_type": "internal",
-        "source_user_id": "global-target",
-        "source_message_id": "msg-1",
-        "source_platform_bot_id": "",
-        "source_character_name": "Character",
-        "guild_id": None,
-        "bot_role": "user",
-        "args": {
+        "status": calendar_models.RUN_STATUS_PENDING,
+        "source_scope": {
+            "source_platform": "qq",
+            "source_channel_id": "",
+            "source_channel_type": "internal",
+            "source_user_id": "global-target",
+            "source_message_id": "msg-1",
+            "source_platform_bot_id": "",
+            "source_character_name": "Character",
+            "guild_id": None,
+            "bot_role": "user",
+        },
+        "payload": {
             "episode_type": "self_cognition",
             "continuation_objective": "Check whether the target is available.",
         },
     }
 
-    async def list_due_events(**kwargs: Any) -> list[dict[str, Any]]:
+    async def list_due_runs(**kwargs: Any) -> list[dict[str, Any]]:
         del kwargs
-        return [event]
+        return [run]
 
     async def latest_private_channel(**kwargs: Any) -> dict[str, str]:
         del kwargs
@@ -237,7 +241,7 @@ async def test_collectors_return_failed_case_when_target_binding_fails() -> None
         now=now,
         character_profile={"name": "Character"},
         max_cases=1,
-        list_due_events_func=list_due_events,
+        list_due_calendar_runs_func=list_due_runs,
         get_latest_private_channel_func=latest_private_channel,
         get_user_profile_func=user_profile,
     )

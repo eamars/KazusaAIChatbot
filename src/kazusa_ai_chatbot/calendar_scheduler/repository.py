@@ -39,6 +39,73 @@ async def upsert_calendar_run(run: dict[str, Any]) -> object:
     return result
 
 
+async def list_due_calendar_runs(
+    *,
+    current_timestamp_utc: str,
+    trigger_kinds: list[str],
+    max_attempts: int,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Return due runs eligible for later worker ownership claim."""
+
+    db = await get_db()
+    cursor = (
+        db.calendar_runs.find(
+            _due_run_claim_filter(
+                current_timestamp_utc=current_timestamp_utc,
+                trigger_kinds=trigger_kinds,
+                max_attempts=max_attempts,
+            )
+        )
+        .sort([("due_at", 1), ("run_id", 1)])
+        .limit(limit)
+    )
+    runs: list[dict[str, Any]] = []
+    async for run in cursor:
+        runs.append(run)
+    return runs
+
+
+async def claim_calendar_run(
+    run_id: str,
+    *,
+    trigger_kind: str,
+    current_timestamp_utc: str,
+    lease_owner: str,
+    max_attempts: int,
+    lease_expires_at: str | None = None,
+    lease_duration_seconds: int | None = None,
+) -> dict[str, Any] | None:
+    """Atomically claim one due run by id for source-case workers."""
+
+    if lease_expires_at is None:
+        if lease_duration_seconds is None:
+            raise ValueError("lease_expires_at or lease_duration_seconds required")
+        lease_expires_at = _lease_expiry(
+            current_timestamp_utc=current_timestamp_utc,
+            lease_duration_seconds=lease_duration_seconds,
+        )
+
+    db = await get_db()
+    claim_filter = _due_run_claim_filter(
+        current_timestamp_utc=current_timestamp_utc,
+        trigger_kinds=[trigger_kind],
+        max_attempts=max_attempts,
+    )
+    claim_filter["run_id"] = run_id
+    claim_filter["trigger_kind"] = trigger_kind
+    run = await db.calendar_runs.find_one_and_update(
+        claim_filter,
+        _claim_update(
+            current_timestamp_utc=current_timestamp_utc,
+            lease_owner=lease_owner,
+            lease_expires_at=lease_expires_at,
+        ),
+        return_document=ReturnDocument.AFTER,
+    )
+    return run
+
+
 async def claim_due_calendar_runs(
     *,
     current_timestamp_utc: str,
@@ -77,28 +144,16 @@ async def claim_due_calendar_runs(
     claimed: list[dict[str, Any]] = []
     for _ in range(limit):
         run = await db.calendar_runs.find_one_and_update(
-            {
-                "due_at": {"$lte": current_timestamp_utc},
-                "trigger_kind": {"$in": trigger_kinds},
-                "attempt_count": {"$lt": max_attempts},
-                "$or": [
-                    {"status": models.RUN_STATUS_PENDING},
-                    {
-                        "status": models.RUN_STATUS_RUNNING,
-                        "lease_expires_at": {"$lte": current_timestamp_utc},
-                    },
-                ],
-            },
-            {
-                "$set": {
-                    "status": models.RUN_STATUS_RUNNING,
-                    "claimed_at": current_timestamp_utc,
-                    "lease_owner": lease_owner,
-                    "lease_expires_at": lease_expires_at,
-                    "updated_at": current_timestamp_utc,
-                },
-                "$inc": {"attempt_count": 1},
-            },
+            _due_run_claim_filter(
+                current_timestamp_utc=current_timestamp_utc,
+                trigger_kinds=trigger_kinds,
+                max_attempts=max_attempts,
+            ),
+            _claim_update(
+                current_timestamp_utc=current_timestamp_utc,
+                lease_owner=lease_owner,
+                lease_expires_at=lease_expires_at,
+            ),
             sort=[("due_at", 1), ("run_id", 1)],
             return_document=ReturnDocument.AFTER,
         )
@@ -249,3 +304,47 @@ def _lease_expiry(
     )
     rendered = expires_at.isoformat()
     return rendered
+
+
+def _due_run_claim_filter(
+    *,
+    current_timestamp_utc: str,
+    trigger_kinds: list[str],
+    max_attempts: int,
+) -> dict[str, Any]:
+    """Build the shared due-run eligibility filter for reads and claims."""
+
+    claim_filter = {
+        "due_at": {"$lte": current_timestamp_utc},
+        "trigger_kind": {"$in": trigger_kinds},
+        "attempt_count": {"$lt": max_attempts},
+        "$or": [
+            {"status": models.RUN_STATUS_PENDING},
+            {
+                "status": models.RUN_STATUS_RUNNING,
+                "lease_expires_at": {"$lte": current_timestamp_utc},
+            },
+        ],
+    }
+    return claim_filter
+
+
+def _claim_update(
+    *,
+    current_timestamp_utc: str,
+    lease_owner: str,
+    lease_expires_at: str,
+) -> dict[str, Any]:
+    """Build the lease update applied by every claim operation."""
+
+    update = {
+        "$set": {
+            "status": models.RUN_STATUS_RUNNING,
+            "claimed_at": current_timestamp_utc,
+            "lease_owner": lease_owner,
+            "lease_expires_at": lease_expires_at,
+            "updated_at": current_timestamp_utc,
+        },
+        "$inc": {"attempt_count": 1},
+    }
+    return update

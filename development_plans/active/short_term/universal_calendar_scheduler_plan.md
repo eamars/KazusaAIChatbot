@@ -866,13 +866,13 @@ requests fallback execution.
   - Evidence: record changed files and focused test output.
   - Sign-off: `Codex/2026-06-04` after verification and evidence are recorded.
 
-- [ ] Stage 3 - future-cognition calendar integration complete
+- [x] Stage 3 - future-cognition calendar integration complete
 
   - Covers: action-spec future-cognition handler, self-cognition due-run
     collection, worker claim/completion, and source-packet contract updates.
   - Verify: `venv\Scripts\python -m pytest tests/test_action_spec_future_cognition.py tests/test_self_cognition_integration.py -q`.
   - Evidence: record test output and changed files.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+  - Sign-off: `Codex/2026-06-04` after verification and evidence are recorded.
 
 - [ ] Stage 4 - active-commitment due scheduling complete
 
@@ -1214,3 +1214,47 @@ begins.
   - Stage 2 code-quality review approved after fixes for lease-bound skipped
     transitions, failed legacy mutation reporting, and keeping migration
     script legacy DB access behind `db.script_operations`.
+- 2026-06-04 Stage 3 future-cognition calendar integration implemented:
+  - Production-code subagent `Hegel`
+    (`019e8fd4-9872-7243-87df-275d667975cd`) owned the production code
+    changes. Parent owned tests, verification, and plan evidence.
+  - Changed `trigger_future_cognition` execution from `scheduled_events`
+    writes to one-time `future_cognition` calendar schedule/run upserts.
+    Internal action-attempt audit evidence keeps calendar schedule/run ids,
+    while prompt-facing action summaries use the semantic phrase
+    `scheduled self-cognition follow-up` and omit raw calendar ids.
+  - Changed self-cognition due future-cognition collection to read due
+    `calendar_runs`, project prompt-safe `scheduled_future_cognition_slot`
+    source refs, and keep same-due runs distinct through a deterministic
+    prompt-safe slot digest instead of raw `calendar_run`, `schedule_id`, or
+    `action_attempt:*` strings.
+  - Changed self-cognition worker ownership from scheduled-event
+    claim/complete calls to calendar run claim, completion, and skipped
+    transitions with the named `self_cognition_worker` lease owner.
+  - Added calendar repository helpers for due-run listing and claim-by-run-id
+    source worker ownership.
+  - Updated deterministic tests in
+    `tests/test_action_spec_future_cognition.py`,
+    `tests/test_calendar_scheduler_repository.py`,
+    `tests/test_self_cognition_delivery_target.py`,
+    `tests/test_self_cognition_integration.py`, and
+    `tests/test_self_cognition_tracking.py`.
+    `tests/test_self_cognition_tracking.py` now patches the residue recorder
+    in its deterministic tests so this suite does not require a live residue
+    LLM endpoint.
+  - Verification command:
+    `venv\Scripts\python -m pytest tests/test_action_spec_future_cognition.py tests/test_self_cognition_integration.py -q`.
+    Result: 42 passed in 2.20s.
+  - Verification command:
+    `venv\Scripts\python -m pytest tests/test_calendar_scheduler_repository.py tests/test_self_cognition_delivery_target.py tests/test_self_cognition_tracking.py -q`.
+    Result: 58 passed in 3.12s.
+  - Static grep:
+    `rg -n 'build_future_cognition_scheduled_event|scheduler\.schedule_event|list_due_future_cognition_events|source_scheduled_event_id|claim_scheduled_event|complete_scheduled_event|mark_scheduled_event_completed|claim_pending_scheduled_event_running' src/kazusa_ai_chatbot/action_spec src/kazusa_ai_chatbot/self_cognition tests/test_action_spec_future_cognition.py tests/test_self_cognition_integration.py tests/test_self_cognition_delivery_target.py tests/test_self_cognition_tracking.py`.
+    Result: no matches; `rg` exited 1 as expected for this zero-match check.
+  - Static grep:
+    `rg -n 'scheduled_event_ids' src/kazusa_ai_chatbot/action_spec src/kazusa_ai_chatbot/self_cognition tests/test_action_spec_future_cognition.py tests/test_self_cognition_integration.py tests/test_self_cognition_delivery_target.py tests/test_self_cognition_tracking.py`.
+    Result: matches only in `src/kazusa_ai_chatbot/action_spec/attempt_ledger.py`
+    as a legacy/default attempt-ledger shape and in tests asserting
+    `trigger_future_cognition` no longer returns or records that field.
+  - `git diff --check` reported no whitespace errors; only LF/CRLF working
+    copy normalization warnings.

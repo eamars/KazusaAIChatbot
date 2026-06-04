@@ -20,6 +20,26 @@ from kazusa_ai_chatbot.self_cognition import sources, tracking
 from kazusa_ai_chatbot.self_cognition import runner
 
 
+@pytest.fixture(autouse=True)
+def _disable_live_residue_recorder(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep deterministic tracking tests off the residue recorder LLM."""
+
+    async def record_residue(**kwargs: Any) -> dict[str, Any]:
+        del kwargs
+        result = {
+            "written": False,
+            "skipped": True,
+            "failure_reason": "deterministic_test_fixture",
+        }
+        return result
+
+    monkeypatch.setattr(
+        runner,
+        "record_completed_episode_residue",
+        record_residue,
+    )
+
+
 def _target_scope(channel_type: str = "private") -> dict[str, str | None]:
     platform_channel_id = "673225019"
     user_id = "673225019"
@@ -236,7 +256,7 @@ def _scheduled_future_cognition_case() -> dict[str, Any]:
         "target_scope": _target_scope(channel_type="group"),
         "source_refs": [
             {
-                "source_kind": "scheduled_event",
+                "source_kind": "scheduled_future_cognition_slot",
                 "source_id": "scheduled_future_cognition_slot",
                 "due_at": "2026-05-10T00:30:00+00:00",
                 "summary": "Re-check whether the open hardware topic changed.",
@@ -249,7 +269,7 @@ def _scheduled_future_cognition_case() -> dict[str, Any]:
                 "timestamp": "2026-05-10T00:00:00+00:00",
             }
         ],
-        "source_scheduled_event_id": "future-cognition-001",
+        "source_calendar_run_id": "calendar_run_future_001",
     }
     return case
 

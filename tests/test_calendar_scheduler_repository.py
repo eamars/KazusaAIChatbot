@@ -34,6 +34,28 @@ def _db() -> MagicMock:
     return db
 
 
+class _AsyncCursor:
+    def __init__(self, docs: list[dict]) -> None:
+        self.docs = docs
+        self.sort_args = None
+        self.limit_value = None
+
+    def sort(self, args):
+        self.sort_args = args
+        return self
+
+    def limit(self, value: int):
+        self.limit_value = value
+        return self
+
+    def __aiter__(self):
+        return self._iterate()
+
+    async def _iterate(self):
+        for doc in self.docs:
+            yield doc
+
+
 @pytest.mark.asyncio
 async def test_upsert_calendar_run_uses_idempotency_key() -> None:
     """Run materialization should be idempotent across repeated passes."""
@@ -58,6 +80,93 @@ async def test_upsert_calendar_run_uses_idempotency_key() -> None:
     assert update_call.args[0] == {"idempotency_key": run["idempotency_key"]}
     assert update_call.args[1] == {"$setOnInsert": run}
     assert update_call.kwargs == {"upsert": True}
+
+
+@pytest.mark.asyncio
+async def test_list_due_calendar_runs_reads_eligible_runs_without_claiming() -> None:
+    """Source collectors may inspect due runs before worker ownership claim."""
+
+    from kazusa_ai_chatbot.calendar_scheduler import models, repository
+
+    db = _db()
+    cursor = _AsyncCursor([
+        {"run_id": "run-1", "trigger_kind": models.TRIGGER_FUTURE_COGNITION}
+    ])
+    db.calendar_runs.find = MagicMock(return_value=cursor)
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(repository, "get_db", AsyncMock(return_value=db))
+        runs = await repository.list_due_calendar_runs(
+            current_timestamp_utc=NOW_UTC,
+            trigger_kinds=[models.TRIGGER_FUTURE_COGNITION],
+            max_attempts=3,
+            limit=2,
+        )
+
+    assert runs == [
+        {"run_id": "run-1", "trigger_kind": models.TRIGGER_FUTURE_COGNITION}
+    ]
+    assert db.calendar_runs.find.call_args.args[0] == {
+        "due_at": {"$lte": NOW_UTC},
+        "trigger_kind": {"$in": [models.TRIGGER_FUTURE_COGNITION]},
+        "attempt_count": {"$lt": 3},
+        "$or": [
+            {"status": models.RUN_STATUS_PENDING},
+            {
+                "status": models.RUN_STATUS_RUNNING,
+                "lease_expires_at": {"$lte": NOW_UTC},
+            },
+        ],
+    }
+    assert cursor.sort_args == [("due_at", 1), ("run_id", 1)]
+    assert cursor.limit_value == 2
+
+
+@pytest.mark.asyncio
+async def test_claim_calendar_run_claims_one_named_due_run() -> None:
+    """Self-cognition should claim the same run projected into its case."""
+
+    from kazusa_ai_chatbot.calendar_scheduler import models, repository
+
+    db = _db()
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(repository, "get_db", AsyncMock(return_value=db))
+        claimed = await repository.claim_calendar_run(
+            "run-1",
+            trigger_kind=models.TRIGGER_FUTURE_COGNITION,
+            current_timestamp_utc=NOW_UTC,
+            lease_owner="self_cognition_worker",
+            lease_expires_at=LEASE_EXPIRES_AT,
+            max_attempts=3,
+        )
+
+    assert claimed == {"run_id": "run-1", "trigger_kind": "future_cognition"}
+    claim_call = db.calendar_runs.find_one_and_update.await_args
+    assert claim_call.args[0] == {
+        "run_id": "run-1",
+        "due_at": {"$lte": NOW_UTC},
+        "trigger_kind": models.TRIGGER_FUTURE_COGNITION,
+        "attempt_count": {"$lt": 3},
+        "$or": [
+            {"status": models.RUN_STATUS_PENDING},
+            {
+                "status": models.RUN_STATUS_RUNNING,
+                "lease_expires_at": {"$lte": NOW_UTC},
+            },
+        ],
+    }
+    assert claim_call.args[1] == {
+        "$set": {
+            "status": models.RUN_STATUS_RUNNING,
+            "claimed_at": NOW_UTC,
+            "lease_owner": "self_cognition_worker",
+            "lease_expires_at": LEASE_EXPIRES_AT,
+            "updated_at": NOW_UTC,
+        },
+        "$inc": {"attempt_count": 1},
+    }
+    assert claim_call.kwargs["return_document"] == ReturnDocument.AFTER
 
 
 @pytest.mark.asyncio

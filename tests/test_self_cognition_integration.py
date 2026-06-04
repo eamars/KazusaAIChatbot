@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from kazusa_ai_chatbot.calendar_scheduler import models as calendar_models
 from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
 from kazusa_ai_chatbot.db import user_memory_units as memory_units_module
 from kazusa_ai_chatbot.dispatcher import AdapterRegistry, SendResult
@@ -214,14 +215,15 @@ def _target_binding_failed_case() -> dict[str, Any]:
     return case
 
 
-def _future_cognition_event() -> dict[str, Any]:
-    event = {
-        "event_id": "future_cognition:action_attempt:future-123",
-        "tool": "trigger_future_cognition",
-        "execute_at": "2026-05-16T10:00:00+00:00",
+def _future_cognition_run() -> dict[str, Any]:
+    run = {
+        "run_id": "calendar_run_future_123",
+        "schedule_id": "calendar_schedule_future_123",
+        "trigger_kind": calendar_models.TRIGGER_FUTURE_COGNITION,
+        "due_at": "2026-05-16T10:00:00+00:00",
         "created_at": "2026-05-16T09:00:00+00:00",
-        "status": "pending",
-        "args": {
+        "status": calendar_models.RUN_STATUS_PENDING,
+        "payload": {
             "episode_type": "self_cognition",
             "trigger_at": "2026-05-16T10:00:00+00:00",
             "continuation_objective": "Re-check whether a natural pause appeared.",
@@ -242,28 +244,30 @@ def _future_cognition_event() -> dict[str, Any]:
                 "include_result_as": "scheduled_event",
             },
         },
-        "source_platform": "orchestrator",
-        "source_channel_id": "",
-        "source_channel_type": "internal",
-        "source_user_id": "self_cognition",
-        "source_message_id": "action_attempt:future-123",
-        "source_platform_bot_id": "",
-        "source_character_name": "",
-        "guild_id": None,
-        "bot_role": "system",
+        "source_scope": {
+            "source_platform": "orchestrator",
+            "source_channel_id": "",
+            "source_channel_type": "internal",
+            "source_user_id": "self_cognition",
+            "source_message_id": "action_attempt:future-123",
+            "source_platform_bot_id": "",
+            "source_character_name": "",
+            "guild_id": None,
+            "bot_role": "system",
+        },
     }
-    return event
+    return run
 
 
 def _future_cognition_case() -> dict[str, Any]:
     case = {
         "case_name": models.CASE_SCHEDULED_FUTURE_COGNITION,
-        "case_id": "future_cognition:action_attempt:future-123",
+        "case_id": "scheduled_future_cognition_slot:2026-05-16T10:00:00+00:00",
         "idle_timestamp_utc": "2026-05-16T10:00:00+00:00",
         "last_evidence_timestamp_utc": "2026-05-16T10:00:00+00:00",
         "trigger_kind": models.TRIGGER_SCHEDULED_FUTURE_COGNITION,
         "semantic_due_state": models.DUE_STATE_DUE_NOW,
-        "actionability": "scheduled_future_cognition_due",
+        "actionability": "scheduled_private_followup_ready_no_direct_contact",
         "target_scope": {
             "platform": "internal",
             "platform_channel_id": "",
@@ -272,14 +276,14 @@ def _future_cognition_case() -> dict[str, Any]:
         },
         "source_refs": [
             {
-                "source_kind": "scheduled_event",
-                "source_id": "future_cognition:action_attempt:future-123",
+                "source_kind": "scheduled_future_cognition_slot",
+                "source_id": "scheduled_future_cognition_slot",
                 "due_at": "2026-05-16T10:00:00+00:00",
                 "summary": "Re-check whether a natural pause appeared.",
             }
         ],
         "visible_context": [],
-        "source_scheduled_event_id": "future_cognition:action_attempt:future-123",
+        "source_calendar_run_id": "calendar_run_future_123",
         "target_binding_status": "bound",
         "delivery_target": _delivery_target(
             channel_id="group-1",
@@ -542,9 +546,9 @@ async def test_collect_scheduled_future_cognition_cases_projects_due_slots() -> 
     now = datetime(2026, 5, 16, 10, 0, tzinfo=timezone.utc)
     calls: list[dict[str, Any]] = []
 
-    async def list_due_events(**kwargs: Any) -> list[dict[str, Any]]:
+    async def list_due_runs(**kwargs: Any) -> list[dict[str, Any]]:
         calls.append(dict(kwargs))
-        return [_future_cognition_event()]
+        return [_future_cognition_run()]
 
     async def no_private_channel(**kwargs: Any) -> None:
         del kwargs
@@ -554,23 +558,31 @@ async def test_collect_scheduled_future_cognition_cases_projects_due_slots() -> 
         now=now,
         character_profile={"name": "TestCharacter"},
         max_cases=3,
-        list_due_events_func=list_due_events,
+        list_due_calendar_runs_func=list_due_runs,
         get_latest_private_channel_func=no_private_channel,
     )
 
-    assert calls == [{"current_timestamp_utc": now.isoformat(), "limit": 3}]
+    assert calls == [
+        {
+            "current_timestamp_utc": now.isoformat(),
+            "trigger_kinds": [calendar_models.TRIGGER_FUTURE_COGNITION],
+            "max_attempts": 3,
+            "limit": 3,
+        }
+    ]
     assert len(cases) == 1
     case = cases[0]
     assert case["case_name"] == models.CASE_SCHEDULED_FUTURE_COGNITION
     assert case["trigger_kind"] == models.TRIGGER_SCHEDULED_FUTURE_COGNITION
-    assert case["case_id"] == "future_cognition:action_attempt:future-123"
-    assert (
-        case["source_scheduled_event_id"]
-        == "future_cognition:action_attempt:future-123"
+    assert case["case_id"].startswith(
+        "scheduled_future_cognition_slot:"
     )
-    assert case["source_refs"][0]["source_kind"] == "scheduled_event"
-    assert case["source_refs"][0]["source_id"] == (
+    assert case["source_calendar_run_id"] == "calendar_run_future_123"
+    assert case["source_refs"][0]["source_kind"] == (
         "scheduled_future_cognition_slot"
+    )
+    assert case["source_refs"][0]["source_id"].startswith(
+        "scheduled_future_cognition_slot:"
     )
     assert case["source_refs"][0]["summary"] == (
         "Re-check whether a natural pause appeared."
@@ -587,6 +599,8 @@ async def test_collect_scheduled_future_cognition_cases_projects_due_slots() -> 
         "action_attempt:future-123",
         "episode-123",
         "future-123",
+        "calendar_run",
+        "calendar_schedule",
         "handler_id",
         "credential",
         "mongodb",
@@ -601,12 +615,80 @@ async def test_collect_scheduled_future_cognition_cases_projects_due_slots() -> 
 
 
 @pytest.mark.asyncio
+async def test_collect_scheduled_future_cognition_cases_keeps_same_due_runs_distinct() -> None:
+    """Same-time future-cognition slots need unique prompt-safe identities."""
+
+    now = datetime(2026, 5, 16, 10, 0, tzinfo=timezone.utc)
+    first_run = _future_cognition_run()
+    second_run = _future_cognition_run()
+    second_run["run_id"] = "calendar_run_future_456"
+    second_run["schedule_id"] = "calendar_schedule_future_456"
+    second_run["idempotency_key"] = "future_cognition:second:2026-05-16"
+    second_run["payload"] = dict(first_run["payload"])
+    second_run["payload"]["source_action_attempt_id"] = (
+        "action_attempt:future-456"
+    )
+
+    async def list_due_runs(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return [first_run, second_run]
+
+    async def no_private_channel(**kwargs: Any) -> None:
+        del kwargs
+        return None
+
+    cases = await sources.collect_scheduled_future_cognition_cases(
+        now=now,
+        character_profile={"name": "TestCharacter"},
+        max_cases=3,
+        list_due_calendar_runs_func=list_due_runs,
+        get_latest_private_channel_func=no_private_channel,
+    )
+
+    assert len(cases) == 2
+    case_ids = [case["case_id"] for case in cases]
+    assert len(set(case_ids)) == 2
+    assert case_ids[0].startswith("scheduled_future_cognition_slot:")
+    assert case_ids[1].startswith("scheduled_future_cognition_slot:")
+    source_ids = [case["source_refs"][0]["source_id"] for case in cases]
+    assert len(set(source_ids)) == 2
+    assert source_ids[0].startswith("scheduled_future_cognition_slot:")
+    assert source_ids[1].startswith("scheduled_future_cognition_slot:")
+
+    action_attempts = []
+    for case in cases:
+        trigger_record = tracking.build_trigger_record(case)
+        action_attempt = tracking.build_action_attempt(
+            case,
+            trigger_record,
+            existing_attempts=[],
+        )
+        action_attempts.append(action_attempt)
+        source_packet = projection.build_source_packet(case)
+        rendered_packet = projection.render_source_packet_text(source_packet)
+        serialized = json.dumps(source_packet, ensure_ascii=False).lower()
+        serialized = f"{serialized}\n{rendered_packet.lower()}"
+        for forbidden in (
+            "action_attempt:future",
+            "calendar_run",
+            "calendar_schedule",
+        ):
+            assert forbidden not in serialized
+
+    idempotency_keys = {
+        action_attempt["idempotency_key"]
+        for action_attempt in action_attempts
+    }
+    assert len(idempotency_keys) == 2
+
+
+@pytest.mark.asyncio
 async def test_collect_scheduled_future_cognition_cases_preserves_source_scope() -> None:
     """Scheduled future cognition should keep trusted scope for RAG/context."""
 
     now = datetime(2026, 5, 16, 10, 0, tzinfo=timezone.utc)
-    event = _future_cognition_event()
-    event.update(
+    run = _future_cognition_run()
+    run["source_scope"].update(
         {
             "source_platform": "qq",
             "source_channel_id": "54369546",
@@ -617,9 +699,9 @@ async def test_collect_scheduled_future_cognition_cases_preserves_source_scope()
         }
     )
 
-    async def list_due_events(**kwargs: Any) -> list[dict[str, Any]]:
+    async def list_due_runs(**kwargs: Any) -> list[dict[str, Any]]:
         del kwargs
-        return [event]
+        return [run]
 
     async def no_private_channel(**kwargs: Any) -> None:
         del kwargs
@@ -632,7 +714,7 @@ async def test_collect_scheduled_future_cognition_cases_preserves_source_scope()
         now=now,
         character_profile={"name": "TestCharacter"},
         max_cases=1,
-        list_due_events_func=list_due_events,
+        list_due_calendar_runs_func=list_due_runs,
         get_latest_private_channel_func=no_private_channel,
         get_user_profile_func=user_profile,
     )
@@ -653,8 +735,8 @@ async def test_scheduled_future_cognition_real_user_missing_profile_is_not_defau
     """A real scheduled source user must not receive a placeholder profile."""
 
     now = datetime(2026, 5, 16, 10, 0, tzinfo=timezone.utc)
-    event = _future_cognition_event()
-    event.update(
+    run = _future_cognition_run()
+    run["source_scope"].update(
         {
             "source_platform": "qq",
             "source_channel_id": "54369546",
@@ -663,9 +745,9 @@ async def test_scheduled_future_cognition_real_user_missing_profile_is_not_defau
         }
     )
 
-    async def list_due_events(**kwargs: Any) -> list[dict[str, Any]]:
+    async def list_due_runs(**kwargs: Any) -> list[dict[str, Any]]:
         del kwargs
-        return [event]
+        return [run]
 
     async def no_private_channel(**kwargs: Any) -> None:
         del kwargs
@@ -679,7 +761,7 @@ async def test_scheduled_future_cognition_real_user_missing_profile_is_not_defau
         now=now,
         character_profile={"name": "TestCharacter"},
         max_cases=1,
-        list_due_events_func=list_due_events,
+        list_due_calendar_runs_func=list_due_runs,
         get_latest_private_channel_func=no_private_channel,
         get_user_profile_func=missing_user_profile,
     )
@@ -693,8 +775,8 @@ async def test_scheduled_future_cognition_synthetic_user_stays_targetless() -> N
     """A stale synthetic scheduled user id must not become a user target."""
 
     now = datetime(2026, 5, 16, 10, 0, tzinfo=timezone.utc)
-    event = _future_cognition_event()
-    event.update(
+    run = _future_cognition_run()
+    run["source_scope"].update(
         {
             "source_platform": "qq",
             "source_channel_id": "54369546",
@@ -704,9 +786,9 @@ async def test_scheduled_future_cognition_synthetic_user_stays_targetless() -> N
         }
     )
 
-    async def list_due_events(**kwargs: Any) -> list[dict[str, Any]]:
+    async def list_due_runs(**kwargs: Any) -> list[dict[str, Any]]:
         del kwargs
-        return [event]
+        return [run]
 
     async def no_private_channel(**kwargs: Any) -> None:
         del kwargs
@@ -721,7 +803,7 @@ async def test_scheduled_future_cognition_synthetic_user_stays_targetless() -> N
         now=now,
         character_profile={"name": "TestCharacter"},
         max_cases=1,
-        list_due_events_func=list_due_events,
+        list_due_calendar_runs_func=list_due_runs,
         get_latest_private_channel_func=no_private_channel,
         get_user_profile_func=no_user_profile,
     )
@@ -743,8 +825,8 @@ async def test_scheduled_future_cognition_without_user_keeps_group_targetless() 
     """A group-origin scheduled slot must not fabricate a user target."""
 
     now = datetime(2026, 5, 16, 10, 0, tzinfo=timezone.utc)
-    event = _future_cognition_event()
-    event.update(
+    run = _future_cognition_run()
+    run["source_scope"].update(
         {
             "source_platform": "qq",
             "source_channel_id": "54369546",
@@ -755,9 +837,9 @@ async def test_scheduled_future_cognition_without_user_keeps_group_targetless() 
         }
     )
 
-    async def list_due_events(**kwargs: Any) -> list[dict[str, Any]]:
+    async def list_due_runs(**kwargs: Any) -> list[dict[str, Any]]:
         del kwargs
-        return [event]
+        return [run]
 
     async def no_private_channel(**kwargs: Any) -> None:
         del kwargs
@@ -767,7 +849,7 @@ async def test_scheduled_future_cognition_without_user_keeps_group_targetless() 
         now=now,
         character_profile={"name": "TestCharacter"},
         max_cases=1,
-        list_due_events_func=list_due_events,
+        list_due_calendar_runs_func=list_due_runs,
         get_latest_private_channel_func=no_private_channel,
     )
 
@@ -894,13 +976,14 @@ async def test_collect_self_cognition_cases_keeps_scheduled_future_slots_during_
 
 
 @pytest.mark.asyncio
-async def test_worker_tick_marks_future_cognition_slot_completed(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_worker_tick_marks_future_cognition_run_completed(
     tmp_path: Path,
 ) -> None:
-    """A processed scheduled cognition slot should not stay pending forever."""
+    """A processed calendar cognition run should not stay pending forever."""
 
-    completed_event_ids: list[str] = []
+    del tmp_path
+    claimed_run_ids: list[str] = []
+    completed_run_ids: list[str] = []
 
     async def collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
         del kwargs
@@ -910,11 +993,16 @@ async def test_worker_tick_marks_future_cognition_slot_completed(
         assert case["trigger_kind"] == models.TRIGGER_SCHEDULED_FUTURE_COGNITION
         return {}
 
-    async def mark_completed(event_id: str) -> bool:
-        completed_event_ids.append(event_id)
+    async def claim_run(run_id: str, **kwargs: Any) -> bool:
+        claimed_run_ids.append(run_id)
+        assert kwargs["lease_owner"] == "self_cognition_worker"
         return True
 
-    monkeypatch.setattr(worker.db, "mark_scheduled_event_completed", mark_completed)
+    async def mark_completed(run_id: str, **kwargs: Any) -> bool:
+        completed_run_ids.append(run_id)
+        assert kwargs["lease_owner"] == "self_cognition_worker"
+        assert kwargs["result"]["status"] == "self_cognition_processed"
+        return True
 
     result = await worker.run_self_cognition_worker_tick(
         now=datetime(2026, 5, 16, 10, 0, tzinfo=timezone.utc),
@@ -923,12 +1011,14 @@ async def test_worker_tick_marks_future_cognition_slot_completed(
         run_case_func=run_case,
         read_attempts_func=lambda **kwargs: [],
         record_attempt_func=lambda attempt: None,
-        claim_scheduled_event_func=lambda event_id: True,
+        claim_calendar_run_func=claim_run,
+        complete_calendar_run_func=mark_completed,
         max_cases=3,
     )
 
     assert result.processed_count == 1
-    assert completed_event_ids == ["future_cognition:action_attempt:future-123"]
+    assert claimed_run_ids == ["calendar_run_future_123"]
+    assert completed_run_ids == ["calendar_run_future_123"]
 
 
 @pytest.mark.asyncio
@@ -938,7 +1028,7 @@ async def test_worker_tick_skips_future_cognition_slot_when_claim_fails(
     """A due future-cognition slot should run only after an atomic claim."""
 
     processed_cases: list[dict[str, Any]] = []
-    completed_event_ids: list[str] = []
+    completed_run_ids: list[str] = []
 
     async def collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
         del kwargs
@@ -948,8 +1038,9 @@ async def test_worker_tick_skips_future_cognition_slot_when_claim_fails(
         processed_cases.append(case)
         return {}
 
-    async def mark_completed(event_id: str) -> bool:
-        completed_event_ids.append(event_id)
+    async def mark_completed(run_id: str, **kwargs: Any) -> bool:
+        del kwargs
+        completed_run_ids.append(run_id)
         return True
 
     result = await worker.run_self_cognition_worker_tick(
@@ -959,15 +1050,15 @@ async def test_worker_tick_skips_future_cognition_slot_when_claim_fails(
         run_case_func=run_case,
         read_attempts_func=lambda **kwargs: [],
         record_attempt_func=lambda attempt: None,
-        complete_scheduled_event_func=mark_completed,
-        claim_scheduled_event_func=lambda event_id: False,
+        complete_calendar_run_func=mark_completed,
+        claim_calendar_run_func=lambda run_id, **kwargs: False,
         max_cases=3,
     )
 
     assert result.processed_count == 0
     assert result.skipped_count == 1
     assert processed_cases == []
-    assert completed_event_ids == []
+    assert completed_run_ids == []
 
 
 @pytest.mark.asyncio
@@ -1179,22 +1270,25 @@ async def test_worker_missing_delivery_target_blocks_without_adapter_provider(
 
 
 @pytest.mark.asyncio
-async def test_worker_records_target_binding_failed_and_completes_scheduled_event(
+async def test_worker_records_target_binding_failed_and_skips_calendar_run(
     tmp_path: Path,
 ) -> None:
-    """Invalid scheduled source rows should be recorded and completed once."""
+    """Invalid scheduled source rows should be recorded and marked terminal."""
 
-    completed_event_ids: list[str] = []
+    del tmp_path
+    skipped_run_ids: list[str] = []
     case = _target_binding_failed_case()
     case["trigger_kind"] = models.TRIGGER_SCHEDULED_FUTURE_COGNITION
-    case["source_scheduled_event_id"] = "future-cognition-1"
+    case["source_calendar_run_id"] = "calendar_run_future_1"
 
     async def collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
         del kwargs
         return [case]
 
-    async def complete_event(event_id: str) -> bool:
-        completed_event_ids.append(event_id)
+    async def skip_run(run_id: str, **kwargs: Any) -> bool:
+        skipped_run_ids.append(run_id)
+        assert kwargs["lease_owner"] == "self_cognition_worker"
+        assert kwargs["reason"] == "target_binding_failed"
         return True
 
     result = await worker.run_self_cognition_worker_tick(
@@ -1204,8 +1298,8 @@ async def test_worker_records_target_binding_failed_and_completes_scheduled_even
         run_case_func=AsyncMock(),
         read_attempts_func=lambda **kwargs: [],
         record_attempt_func=lambda attempt: None,
-        complete_scheduled_event_func=complete_event,
-        claim_scheduled_event_func=lambda event_id: True,
+        skip_calendar_run_func=skip_run,
+        claim_calendar_run_func=lambda run_id, **kwargs: True,
         adapter_registry_provider=lambda: _adapter_registry(
             _FakeMessagingAdapter(),
         ),
@@ -1214,7 +1308,7 @@ async def test_worker_records_target_binding_failed_and_completes_scheduled_even
 
     assert result.processed_count == 0
     assert result.skipped_count == 1
-    assert completed_event_ids == ["future-cognition-1"]
+    assert skipped_run_ids == ["calendar_run_future_1"]
     self_kwargs = worker.event_logging.record_self_cognition_event.await_args.kwargs
     assert self_kwargs["status"] == "target_binding_failed"
     assert self_kwargs["dispatch_status"] == "target_binding_failed"
