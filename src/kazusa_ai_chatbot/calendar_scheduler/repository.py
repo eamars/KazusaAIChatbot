@@ -9,6 +9,7 @@ from pymongo import ReturnDocument
 
 from kazusa_ai_chatbot.calendar_scheduler import models
 from kazusa_ai_chatbot.db._client import get_db
+from kazusa_ai_chatbot.time_boundary import local_date_bounds_to_storage_utc_iso
 
 
 CALENDAR_SCHEDULES_COLLECTION = "calendar_schedules"
@@ -78,6 +79,75 @@ async def list_due_calendar_runs(
         )
         .sort([("due_at", 1), ("run_id", 1)])
         .limit(limit)
+    )
+    runs: list[dict[str, Any]] = []
+    async for run in cursor:
+        runs.append(run)
+    return runs
+
+
+async def list_pending_calendar_runs_for_source(
+    *,
+    platform: str,
+    platform_channel_id: str,
+    global_user_id: str,
+    current_timestamp_utc: str,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Return scoped pending future calendar runs for Recall evidence."""
+
+    db = await get_db()
+    cursor = (
+        db.calendar_runs.find(
+            {
+                "status": models.RUN_STATUS_PENDING,
+                "due_at": {"$gte": current_timestamp_utc},
+                "trigger_kind": {
+                    "$in": [
+                        models.TRIGGER_FUTURE_COGNITION,
+                        models.TRIGGER_COMMITMENT_DUE_COGNITION,
+                    ]
+                },
+                "$or": [
+                    {
+                        "source_scope.source_platform": platform,
+                        "source_scope.source_channel_id": platform_channel_id,
+                        "source_scope.source_user_id": global_user_id,
+                    },
+                    {"payload.global_user_id": global_user_id},
+                ],
+            }
+        )
+        .sort([("due_at", 1), ("run_id", 1)])
+        .limit(limit)
+    )
+    runs: list[dict[str, Any]] = []
+    async for run in cursor:
+        runs.append(run)
+    return runs
+
+
+async def list_reflection_phase_slot_calendar_runs_for_character_local_date(
+    *,
+    character_local_date: str,
+) -> list[dict[str, Any]]:
+    """Return durable phase slot runs whose due time falls on a local date."""
+
+    start_utc_iso, end_utc_iso = local_date_bounds_to_storage_utc_iso(
+        character_local_date,
+    )
+    db = await get_db()
+    cursor = (
+        db.calendar_runs.find(
+            {
+                "trigger_kind": models.TRIGGER_REFLECTION_PHASE_SLOT,
+                "due_at": {
+                    "$gte": start_utc_iso,
+                    "$lt": end_utc_iso,
+                },
+            }
+        )
+        .sort([("due_at", 1), ("run_id", 1)])
     )
     runs: list[dict[str, Any]] = []
     async for run in cursor:

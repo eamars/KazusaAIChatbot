@@ -34,18 +34,18 @@ _SOURCE_ORDERS = {
     "active_episode_agreement": [
         "conversation_progress",
         "user_memory_units",
-        "scheduled_events",
+        "calendar_runs",
         "conversation_history",
     ],
     "episode_position": [
         "conversation_progress",
         "user_memory_units",
-        "scheduled_events",
+        "calendar_runs",
         "conversation_history",
     ],
     "durable_commitment": [
         "user_memory_units",
-        "scheduled_events",
+        "calendar_runs",
         "conversation_progress",
         "conversation_history",
     ],
@@ -53,7 +53,7 @@ _SOURCE_ORDERS = {
         "conversation_history",
         "user_memory_units",
         "conversation_progress",
-        "scheduled_events",
+        "calendar_runs",
     ],
 }
 
@@ -188,24 +188,32 @@ def _dedupe_candidates(
     return_value = deduped
     return return_value
 
-def _event_claim(event: dict[str, Any]) -> str:
-    """Render one pending scheduled event as compact factual evidence."""
 
-    tool = text_or_empty(event.get("tool"))
-    execute_at = text_or_empty(event.get("execute_at"))
-    args = event.get("args")
-    text = ""
-    if tool == "send_message" and isinstance(args, dict):
-        text = text_or_empty(args.get("text"))
-        if not text:
-            text = text_or_empty(args.get("message"))
+_CALENDAR_RUN_TRIGGER_LABELS = {
+    "future_cognition": "future cognition",
+    "commitment_due_cognition": "commitment due cognition",
+}
 
-    if text:
-        claim = f"Pending scheduled event {tool} at {execute_at}: {text}"
-        return claim
 
-    claim = f"Pending scheduled event {tool} at {execute_at}"
+def _calendar_run_claim(run: dict[str, Any]) -> str:
+    """Render one pending calendar run as compact semantic evidence."""
+
+    trigger_kind = text_or_empty(run.get("trigger_kind"))
+    trigger_label = _CALENDAR_RUN_TRIGGER_LABELS.get(
+        trigger_kind,
+        "future action",
+    )
+    due_at = text_or_empty(run.get("due_at"))
+    payload = run.get("payload")
+    objective = ""
+    if isinstance(payload, dict):
+        objective = text_or_empty(payload.get("continuation_objective"))
+
+    claim = f"Pending calendar {trigger_label} at {due_at}"
+    if objective:
+        claim = f"{claim}: {objective}"
     return claim
+
 
 def _result_payload(
     *,

@@ -163,6 +163,53 @@ async def test_list_due_calendar_runs_reads_eligible_runs_without_claiming() -> 
 
 
 @pytest.mark.asyncio
+async def test_list_pending_calendar_runs_for_source_scopes_future_evidence() -> None:
+    """Recall evidence should read only scoped pending future calendar runs."""
+
+    from kazusa_ai_chatbot.calendar_scheduler import models, repository
+
+    db = _db()
+    cursor = _AsyncCursor([
+        {"run_id": "run-1", "trigger_kind": models.TRIGGER_FUTURE_COGNITION}
+    ])
+    db.calendar_runs.find = MagicMock(return_value=cursor)
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(repository, "get_db", AsyncMock(return_value=db))
+        runs = await repository.list_pending_calendar_runs_for_source(
+            platform="qq",
+            platform_channel_id="chan-1",
+            global_user_id="user-1",
+            current_timestamp_utc=NOW_UTC,
+            limit=3,
+        )
+
+    assert runs == [
+        {"run_id": "run-1", "trigger_kind": models.TRIGGER_FUTURE_COGNITION}
+    ]
+    assert db.calendar_runs.find.call_args.args[0] == {
+        "status": models.RUN_STATUS_PENDING,
+        "due_at": {"$gte": NOW_UTC},
+        "trigger_kind": {
+            "$in": [
+                models.TRIGGER_FUTURE_COGNITION,
+                models.TRIGGER_COMMITMENT_DUE_COGNITION,
+            ]
+        },
+        "$or": [
+            {
+                "source_scope.source_platform": "qq",
+                "source_scope.source_channel_id": "chan-1",
+                "source_scope.source_user_id": "user-1",
+            },
+            {"payload.global_user_id": "user-1"},
+        ],
+    }
+    assert cursor.sort_args == [("due_at", 1), ("run_id", 1)]
+    assert cursor.limit_value == 3
+
+
+@pytest.mark.asyncio
 async def test_claim_calendar_run_claims_one_named_due_run() -> None:
     """Self-cognition should claim the same run projected into its case."""
 

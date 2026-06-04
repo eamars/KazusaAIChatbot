@@ -5,12 +5,13 @@ from __future__ import annotations
 import pytest
 
 from kazusa_ai_chatbot.db.schemas import UserMemoryUnitStatus, UserMemoryUnitType
-from kazusa_ai_chatbot.db import scheduled_events as scheduled_module
 from kazusa_ai_chatbot.rag.recall import RecallAgent
 from kazusa_ai_chatbot.rag.recall import agent as recall_agent_module
 from kazusa_ai_chatbot.rag.recall.collectors import commitments as commitments_module
+from kazusa_ai_chatbot.rag.recall.collectors import (
+    calendar_runs as calendar_runs_module,
+)
 from kazusa_ai_chatbot.rag.recall.collectors import history as history_module
-from kazusa_ai_chatbot.rag.recall.collectors import scheduled_events as scheduled_events_module
 
 
 def _base_context(**overrides: object) -> dict:
@@ -60,7 +61,7 @@ async def _empty_active_commitments(
     return return_value
 
 
-async def _empty_scheduled_events(
+async def _empty_calendar_runs(
     *,
     platform: str,
     platform_channel_id: str,
@@ -68,7 +69,7 @@ async def _empty_scheduled_events(
     current_timestamp_utc: str,
     limit: int = 10,
 ) -> list[dict]:
-    """Return no scheduled events while preserving query arguments."""
+    """Return no calendar runs while preserving query arguments."""
     del platform, platform_channel_id, global_user_id
     del current_timestamp_utc, limit
     return_value: list[dict] = []
@@ -95,9 +96,9 @@ def _patch_empty_sources(monkeypatch) -> None:
     """Patch every external Recall source to an empty deterministic result."""
     monkeypatch.setattr(commitments_module, "query_user_memory_units", _empty_active_commitments)
     monkeypatch.setattr(
-        scheduled_events_module,
-        "query_pending_scheduled_events",
-        _empty_scheduled_events,
+        calendar_runs_module,
+        "list_pending_calendar_runs_for_source",
+        _empty_calendar_runs,
     )
     monkeypatch.setattr(history_module, "get_conversation_history", _empty_history)
 
@@ -114,8 +115,8 @@ async def test_recall_missing_mandatory_scope_does_not_query_db(monkeypatch) -> 
 
     monkeypatch.setattr(commitments_module, "query_user_memory_units", _fail_query)
     monkeypatch.setattr(
-        scheduled_events_module,
-        "query_pending_scheduled_events",
+        calendar_runs_module,
+        "list_pending_calendar_runs_for_source",
         _fail_query,
     )
     monkeypatch.setattr(history_module, "get_conversation_history", _fail_query)
@@ -156,9 +157,9 @@ async def test_recall_active_progress_answers_current_agreement(monkeypatch) -> 
 
     monkeypatch.setattr(commitments_module, "query_user_memory_units", _empty_active_commitments)
     monkeypatch.setattr(
-        scheduled_events_module,
-        "query_pending_scheduled_events",
-        _empty_scheduled_events,
+        calendar_runs_module,
+        "list_pending_calendar_runs_for_source",
+        _empty_calendar_runs,
     )
     monkeypatch.setattr(history_module, "get_conversation_history", _history_probe)
 
@@ -203,9 +204,9 @@ async def test_recall_durable_commitment_prefers_active_memory_units(monkeypatch
 
     monkeypatch.setattr(commitments_module, "query_user_memory_units", _commitments)
     monkeypatch.setattr(
-        scheduled_events_module,
-        "query_pending_scheduled_events",
-        _empty_scheduled_events,
+        calendar_runs_module,
+        "list_pending_calendar_runs_for_source",
+        _empty_calendar_runs,
     )
     monkeypatch.setattr(history_module, "get_conversation_history", _empty_history)
 
@@ -221,8 +222,8 @@ async def test_recall_durable_commitment_prefers_active_memory_units(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_recall_includes_pending_scheduled_events(monkeypatch) -> None:
-    """Pending scheduled events should appear as executable future evidence."""
+async def test_recall_includes_pending_calendar_runs(monkeypatch) -> None:
+    """Pending calendar runs should appear as executable future evidence."""
 
     async def _events(
         *,
@@ -239,10 +240,14 @@ async def test_recall_includes_pending_scheduled_events(monkeypatch) -> None:
         assert limit == 10
         return_value = [
             {
-                "event_id": "event-1",
-                "tool": "send_message",
-                "args": {"message": "Leave for the amusement park."},
-                "execute_at": "2026-05-02T01:00:00+00:00",
+                "run_id": "run-1",
+                "trigger_kind": "future_cognition",
+                "payload": {
+                    "continuation_objective": (
+                        "Re-evaluate leaving for the amusement park."
+                    )
+                },
+                "due_at": "2026-05-02T01:00:00+00:00",
                 "status": "pending",
             }
         ]
@@ -250,8 +255,8 @@ async def test_recall_includes_pending_scheduled_events(monkeypatch) -> None:
 
     monkeypatch.setattr(commitments_module, "query_user_memory_units", _empty_active_commitments)
     monkeypatch.setattr(
-        scheduled_events_module,
-        "query_pending_scheduled_events",
+        calendar_runs_module,
+        "list_pending_calendar_runs_for_source",
         _events,
     )
     monkeypatch.setattr(history_module, "get_conversation_history", _empty_history)
@@ -262,22 +267,24 @@ async def test_recall_includes_pending_scheduled_events(monkeypatch) -> None:
     )
 
     sources = {candidate["source"] for candidate in result["result"]["candidates"]}
-    scheduled_claims = [
+    calendar_claims = [
         candidate["claim"]
         for candidate in result["result"]["candidates"]
-        if candidate["source"] == "scheduled_events"
+        if candidate["source"] == "calendar_runs"
     ]
 
-    assert "scheduled_events" in sources
-    assert scheduled_claims == [
-        "Pending scheduled event send_message at 2026-05-02T01:00:00+00:00: "
-        "Leave for the amusement park."
+    assert "calendar_runs" in sources
+    assert calendar_claims == [
+        "Pending calendar future cognition at 2026-05-02T01:00:00+00:00: "
+        "Re-evaluate leaving for the amusement park."
     ]
 
 
 @pytest.mark.asyncio
-async def test_recall_active_mode_uses_commitment_before_scheduled_event(monkeypatch) -> None:
-    """Active recall without progress should select commitments before events."""
+async def test_recall_active_mode_uses_commitment_before_calendar_run(
+    monkeypatch,
+) -> None:
+    """Active recall without progress should select commitments before runs."""
 
     async def _commitments(
         global_user_id: str,
@@ -310,10 +317,14 @@ async def test_recall_active_mode_uses_commitment_before_scheduled_event(monkeyp
         del current_timestamp_utc, limit
         return_value = [
             {
-                "event_id": "event-1",
-                "tool": "send_message",
-                "args": {"message": "Scheduled event should remain supporting."},
-                "execute_at": "2026-05-02T01:00:00+00:00",
+                "run_id": "run-1",
+                "trigger_kind": "future_cognition",
+                "payload": {
+                    "continuation_objective": (
+                        "Calendar run should remain supporting."
+                    )
+                },
+                "due_at": "2026-05-02T01:00:00+00:00",
                 "status": "pending",
             }
         ]
@@ -321,8 +332,8 @@ async def test_recall_active_mode_uses_commitment_before_scheduled_event(monkeyp
 
     monkeypatch.setattr(commitments_module, "query_user_memory_units", _commitments)
     monkeypatch.setattr(
-        scheduled_events_module,
-        "query_pending_scheduled_events",
+        calendar_runs_module,
+        "list_pending_calendar_runs_for_source",
         _events,
     )
     monkeypatch.setattr(history_module, "get_conversation_history", _empty_history)
@@ -334,7 +345,7 @@ async def test_recall_active_mode_uses_commitment_before_scheduled_event(monkeyp
 
     assert result["resolved"] is True
     assert result["result"]["primary_source"] == "user_memory_units"
-    assert result["result"]["supporting_sources"] == ["scheduled_events"]
+    assert result["result"]["supporting_sources"] == ["calendar_runs"]
     assert "station" in result["result"]["selected_summary"]
     assert (
         "Active-episode state was unavailable"
@@ -390,9 +401,9 @@ async def test_recall_review_rejects_unrelated_fallback_commitments(monkeypatch)
 
     monkeypatch.setattr(commitments_module, "query_user_memory_units", _commitments)
     monkeypatch.setattr(
-        scheduled_events_module,
-        "query_pending_scheduled_events",
-        _empty_scheduled_events,
+        calendar_runs_module,
+        "list_pending_calendar_runs_for_source",
+        _empty_calendar_runs,
     )
     monkeypatch.setattr(history_module, "get_conversation_history", _empty_history)
     monkeypatch.setattr(recall_agent_module, "_review_recall_candidates", _review)
@@ -464,9 +475,9 @@ async def test_recall_review_accepts_matching_fallback_commitment(monkeypatch) -
 
     monkeypatch.setattr(commitments_module, "query_user_memory_units", _commitments)
     monkeypatch.setattr(
-        scheduled_events_module,
-        "query_pending_scheduled_events",
-        _empty_scheduled_events,
+        calendar_runs_module,
+        "list_pending_calendar_runs_for_source",
+        _empty_calendar_runs,
     )
     monkeypatch.setattr(history_module, "get_conversation_history", _empty_history)
     monkeypatch.setattr(recall_agent_module, "_review_recall_candidates", _review)
@@ -533,9 +544,9 @@ async def test_recall_active_review_accepts_exact_durable_memory_fallback(
 
     monkeypatch.setattr(commitments_module, "query_user_memory_units", _commitments)
     monkeypatch.setattr(
-        scheduled_events_module,
-        "query_pending_scheduled_events",
-        _empty_scheduled_events,
+        calendar_runs_module,
+        "list_pending_calendar_runs_for_source",
+        _empty_calendar_runs,
     )
     monkeypatch.setattr(history_module, "get_conversation_history", _empty_history)
     monkeypatch.setattr(recall_agent_module, "_review_recall_candidates", _review)
@@ -607,9 +618,9 @@ async def test_recall_active_review_accepts_broad_memory_inventory(
 
     monkeypatch.setattr(commitments_module, "query_user_memory_units", _commitments)
     monkeypatch.setattr(
-        scheduled_events_module,
-        "query_pending_scheduled_events",
-        _empty_scheduled_events,
+        calendar_runs_module,
+        "list_pending_calendar_runs_for_source",
+        _empty_calendar_runs,
     )
     monkeypatch.setattr(history_module, "get_conversation_history", _empty_history)
     monkeypatch.setattr(recall_agent_module, "_review_recall_candidates", _review)
@@ -644,9 +655,9 @@ async def test_recall_exact_history_runs_history_gate(monkeypatch) -> None:
 
     monkeypatch.setattr(commitments_module, "query_user_memory_units", _empty_active_commitments)
     monkeypatch.setattr(
-        scheduled_events_module,
-        "query_pending_scheduled_events",
-        _empty_scheduled_events,
+        calendar_runs_module,
+        "list_pending_calendar_runs_for_source",
+        _empty_calendar_runs,
     )
     monkeypatch.setattr(history_module, "get_conversation_history", _history_probe)
 
@@ -698,9 +709,9 @@ async def test_recall_ignores_stale_progress_and_uses_active_commitment(monkeypa
     }
     monkeypatch.setattr(commitments_module, "query_user_memory_units", _commitments)
     monkeypatch.setattr(
-        scheduled_events_module,
-        "query_pending_scheduled_events",
-        _empty_scheduled_events,
+        calendar_runs_module,
+        "list_pending_calendar_runs_for_source",
+        _empty_calendar_runs,
     )
     monkeypatch.setattr(history_module, "get_conversation_history", _empty_history)
 
@@ -754,9 +765,9 @@ async def test_recall_excludes_inactive_memory_units(monkeypatch) -> None:
 
     monkeypatch.setattr(commitments_module, "query_user_memory_units", _commitments)
     monkeypatch.setattr(
-        scheduled_events_module,
-        "query_pending_scheduled_events",
-        _empty_scheduled_events,
+        calendar_runs_module,
+        "list_pending_calendar_runs_for_source",
+        _empty_calendar_runs,
     )
     monkeypatch.setattr(history_module, "get_conversation_history", _empty_history)
 
@@ -802,78 +813,54 @@ async def test_recall_output_caps(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_query_pending_scheduled_events_scopes_read(monkeypatch) -> None:
-    """Scheduled-event helper should issue the exact bounded read query."""
+async def test_calendar_run_collector_scopes_pending_runs(monkeypatch) -> None:
+    """Calendar-run recall should issue one scoped pending-run read."""
     recorded: dict = {}
 
-    class _FakeCursor:
-        """Small async cursor recording sort and limit calls."""
-
-        def __init__(self) -> None:
-            self.docs = [
-                {
-                    "event_id": "event-1",
-                    "status": "pending",
-                    "execute_at": "2026-05-02T01:00:00+00:00",
-                }
-            ]
-            self.index = 0
-
-        def sort(self, field: str, direction: int):
-            recorded["sort"] = (field, direction)
-            return self
-
-        def limit(self, limit: int):
-            recorded["limit"] = limit
-            return self
-
-        def __aiter__(self):
-            return self
-
-        async def __anext__(self):
-            if self.index >= len(self.docs):
-                raise StopAsyncIteration
-            doc = self.docs[self.index]
-            self.index += 1
-            return doc
-
-    class _FakeCollection:
-        """Fake Mongo collection recording the find arguments."""
-
-        def find(self, query: dict, projection: dict):
-            recorded["query"] = query
-            recorded["projection"] = projection
-            return_value = _FakeCursor()
-            return return_value
-
-    class _FakeDb:
-        """Fake DB exposing only the scheduled events collection."""
-
-        def __init__(self) -> None:
-            self.scheduled_events = _FakeCollection()
-
-    async def _get_db():
-        return_value = _FakeDb()
+    async def _list_pending_calendar_runs_for_source(**kwargs):
+        recorded.update(kwargs)
+        return_value = [
+            {
+                "run_id": "run-1",
+                "trigger_kind": "future_cognition",
+                "payload": {
+                    "continuation_objective": (
+                        "Review the appointment follow-up."
+                    )
+                },
+                "due_at": "2026-05-02T01:00:00+00:00",
+                "status": "pending",
+            }
+        ]
         return return_value
 
-    monkeypatch.setattr(scheduled_module, "get_db", _get_db)
-
-    result = await scheduled_module.query_pending_scheduled_events(
-        platform="qq",
-        platform_channel_id="chan-1",
-        global_user_id="user-1",
-        current_timestamp_utc="2026-05-02T00:00:00+00:00",
-        limit=3,
+    monkeypatch.setattr(
+        calendar_runs_module,
+        "list_pending_calendar_runs_for_source",
+        _list_pending_calendar_runs_for_source,
     )
 
-    assert recorded["query"] == {
-        "status": "pending",
-        "source_platform": "qq",
-        "source_channel_id": "chan-1",
-        "source_user_id": "user-1",
-        "execute_at": {"$gte": "2026-05-02T00:00:00+00:00"},
+    candidates = await calendar_runs_module.CalendarRunCollector().collect(
+        _base_context(),
+    )
+
+    assert recorded == {
+        "platform": "qq",
+        "platform_channel_id": "chan-1",
+        "global_user_id": "user-1",
+        "current_timestamp_utc": "2026-05-02T00:00:00+00:00",
+        "limit": 10,
     }
-    assert recorded["projection"] == {"_id": 0}
-    assert recorded["sort"] == ("execute_at", 1)
-    assert recorded["limit"] == 3
-    assert result[0]["event_id"] == "event-1"
+    assert candidates == [
+        {
+            "source": "calendar_runs",
+            "claim": (
+                "Pending calendar future cognition at "
+                "2026-05-02T01:00:00+00:00: Review the appointment follow-up."
+            ),
+            "temporal_scope": "pending_future_action",
+            "lifecycle_status": "pending",
+            "evidence_time": "2026-05-02T01:00:00+00:00",
+            "authority": "supporting",
+        }
+    ]

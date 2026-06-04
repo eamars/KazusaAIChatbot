@@ -7,7 +7,7 @@ from kazusa_ai_chatbot.db import (
     UserMemoryUnitType,
     query_user_memory_units,
 )
-from kazusa_ai_chatbot.rag.recall.contracts import _candidate, _event_claim
+from kazusa_ai_chatbot.rag.recall.contracts import _candidate
 from kazusa_ai_chatbot.utils import text_or_empty
 
 class ActiveCommitmentCollector:

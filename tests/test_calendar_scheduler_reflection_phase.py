@@ -5,8 +5,13 @@ from __future__ import annotations
 import inspect
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from kazusa_ai_chatbot.reflection_cycle import phase_scheduler
-from kazusa_ai_chatbot.reflection_cycle.models import ReflectionScopeInput
+from kazusa_ai_chatbot.reflection_cycle.models import (
+    ReflectionScopeInput,
+    ReflectionWorkerResult,
+)
 
 
 PERIOD_START = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -76,13 +81,166 @@ def test_phase_calendar_mapping_does_not_split_trigger_kinds() -> None:
 
 
 def test_calendar_reflection_module_has_no_side_collection() -> None:
-    """The calendar path must not introduce reflection_phase_runs storage."""
+    """The calendar path must not introduce a side reflection collection."""
 
     from kazusa_ai_chatbot.calendar_scheduler import reflection_phase
 
     source = inspect.getsource(reflection_phase)
+    forbidden_collection = "reflection" + "_phase" + "_runs"
 
-    assert "reflection_phase_runs" not in source
+    assert forbidden_collection not in source
+
+
+@pytest.mark.asyncio
+async def test_materialize_phase_period_snapshots_at_period_start(
+    monkeypatch,
+) -> None:
+    """Calendar materialization should snapshot eligible scopes per period."""
+
+    from kazusa_ai_chatbot.calendar_scheduler import reflection_phase
+
+    captured_collect_kwargs: dict[str, object] = {}
+    upserted_runs: list[dict] = []
+
+    class _InputSet:
+        selected_scopes = [_scope("scope-a")]
+
+    class _Repository:
+        async def upsert_calendar_run(self, run: dict) -> object:
+            upserted_runs.append(run)
+            return object()
+
+    async def _collect_reflection_inputs(**kwargs) -> _InputSet:
+        captured_collect_kwargs.update(kwargs)
+        input_set = _InputSet()
+        return input_set
+
+    monkeypatch.setattr(
+        reflection_phase,
+        "collect_reflection_inputs",
+        _collect_reflection_inputs,
+        raising=False,
+    )
+
+    summary = await reflection_phase.materialize_reflection_phase_period(
+        period_start_utc=PERIOD_START,
+        storage_timestamp_utc=STORAGE_NOW,
+        repository=_Repository(),
+    )
+
+    assert captured_collect_kwargs["now"] == PERIOD_START
+    assert captured_collect_kwargs["allow_fallback"] is False
+    assert upserted_runs[0]["trigger_kind"] == "reflection_phase_slot"
+    assert upserted_runs[0]["period_start_utc"] == (
+        "1970-01-01T00:00:00+00:00"
+    )
+    assert summary == {
+        "materialized_count": 1,
+        "run_ids": [upserted_runs[0]["run_id"]],
+    }
+
+
+@pytest.mark.asyncio
+async def test_reflection_phase_calendar_handler_uses_execution_seam() -> None:
+    """Claimed calendar runs should execute through the reflection seam."""
+
+    from kazusa_ai_chatbot.calendar_scheduler import reflection_phase
+
+    intent = _phase_intent()
+    run = reflection_phase.build_reflection_phase_calendar_runs(
+        [intent],
+        storage_timestamp_utc=STORAGE_NOW,
+    )[0]
+    run["lease_owner"] = "calendar-worker"
+    captured: dict[str, object] = {}
+
+    async def _execute_phase_intent(**kwargs) -> list[ReflectionWorkerResult]:
+        captured.update(kwargs)
+        result = ReflectionWorkerResult(
+            run_kind="reflection_phase_slot",
+            dry_run=False,
+            processed_count=1,
+            succeeded_count=1,
+            run_ids=["hourly-run-1"],
+        )
+        return [result]
+
+    handler_result = await reflection_phase.handle_reflection_phase_calendar_run(
+        run,
+        now=PERIOD_START,
+        dry_run=False,
+        is_primary_interaction_busy=lambda: False,
+        adapter_registry_provider=None,
+        execute_phase_intent_func=_execute_phase_intent,
+    )
+
+    assert captured["intent"] == intent
+    assert "lease_owner" not in captured["intent"]
+    assert captured["now"] == PERIOD_START
+    assert handler_result == {
+        "status": "completed",
+        "run_kind": "reflection_phase_slot",
+        "processed_count": 1,
+        "succeeded_count": 1,
+        "failed_count": 0,
+        "skipped_count": 0,
+        "run_ids": ["hourly-run-1"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_calendar_provider_daily_readiness_uses_calendar_runs() -> None:
+    """Daily readiness should derive expected hourly ids from calendar runs."""
+
+    from kazusa_ai_chatbot.calendar_scheduler import reflection_phase
+
+    intent = _phase_intent()
+    run = reflection_phase.build_reflection_phase_calendar_runs(
+        [intent],
+        storage_timestamp_utc=STORAGE_NOW,
+    )[0]
+    captured: dict[str, object] = {}
+    channel_scope = _scope("scope-a")
+
+    class _Repository:
+        async def list_reflection_phase_slot_calendar_runs_for_character_local_date(
+            self,
+            *,
+            character_local_date: str,
+        ) -> list[dict]:
+            captured["character_local_date"] = character_local_date
+            return [run]
+
+    async def _collect_phase_scope_input(**kwargs) -> ReflectionScopeInput:
+        captured["intent"] = kwargs["intent"]
+        captured["now"] = kwargs["now"]
+        return channel_scope
+
+    def _expected_hourly_run_ids_for_scope(**kwargs) -> list[str]:
+        captured["channel_scope"] = kwargs["channel_scope"]
+        captured["expected_date"] = kwargs["character_local_date"]
+        captured["expected_now"] = kwargs["now"]
+        return ["hourly-run-1"]
+
+    provider = reflection_phase.CalendarReflectionPhaseRunProvider(
+        repository=_Repository(),
+        collect_phase_scope_input_func=_collect_phase_scope_input,
+        expected_hourly_run_ids_func=_expected_hourly_run_ids_for_scope,
+    )
+
+    rows = await provider.expected_hourly_runs_for_character_local_date(
+        character_local_date="1970-01-01",
+    )
+
+    assert captured["character_local_date"] == "1970-01-01"
+    assert captured["intent"] == intent
+    assert captured["now"] == PERIOD_START
+    assert captured["channel_scope"] == channel_scope
+    assert captured["expected_date"] == "1970-01-01"
+    assert captured["expected_now"] == PERIOD_START
+    assert len(rows) == 1
+    assert rows[0].channel_scope == channel_scope
+    assert rows[0].expected_run_ids == ["hourly-run-1"]
 
 
 def _phase_intent() -> phase_scheduler.ReflectionPhaseRunIntent:

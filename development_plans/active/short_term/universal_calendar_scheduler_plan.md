@@ -882,13 +882,13 @@ requests fallback execution.
   - Evidence: record test output and changed files.
   - Sign-off: `Codex/2026-06-04` after verification and evidence are recorded.
 
-- [ ] Stage 5 - recall and reflection integrations complete
+- [x] Stage 5 - recall and reflection integrations complete
 
   - Covers: RAG recall calendar evidence collector and reflection slot
     provider cutover, materialization, and trigger handlers.
   - Verify: `venv\Scripts\python -m pytest tests/test_rag_recall_agent.py tests/test_calendar_scheduler_reflection_phase.py tests/test_reflection_phase_scheduler.py tests/test_reflection_cycle_stage1c_worker.py -q`.
   - Evidence: record test output and changed files.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+  - Sign-off: `Codex/2026-06-04` after verification and evidence are recorded.
 
 - [ ] Stage 6 - legacy scheduler decommission and migration script complete
 
@@ -1313,3 +1313,62 @@ begins.
     helper definition, subsystem README reference, and direct test coverage.
   - `git diff --check` reported no whitespace errors; only LF/CRLF working
     copy normalization warnings.
+- 2026-06-04 Stage 5 recall and reflection integrations implemented:
+  - Production-code subagent `Hegel`
+    (`019e8fd4-9872-7243-87df-275d667975cd`) owned all production code
+    changes. Parent owned tests, verification, de-risk review, and plan
+    evidence.
+  - Replaced RAG recall scheduled-event evidence with
+    `CalendarRunCollector`, source label `calendar_runs`, and pending
+    calendar-run evidence for future cognition and commitment-due cognition.
+    Deleted `rag/recall/collectors/scheduled_events.py`; the recall agent no
+    longer imports `ScheduledEventCollector`.
+  - Added `list_pending_calendar_runs_for_source(...)` so recall evidence can
+    scope pending calendar runs by platform, channel, user, and global user
+    without reading `scheduled_events`.
+  - Added calendar-backed reflection phase materialization that snapshots
+    eligible scopes at `period_start_utc`, upserts deterministic
+    `reflection_phase_slot` `calendar_runs`, and returns bounded
+    materialization summaries.
+  - Added a claimed-run handler that converts `reflection_phase_slot`
+    calendar runs to `ReflectionPhaseRunIntent` and invokes the reflection
+    execution seam without changing reflection prompt contracts.
+  - Added `CalendarReflectionPhaseRunProvider` for daily readiness to derive
+    expected hourly run ids from durable calendar phase-slot runs.
+  - Added narrow reflection-cycle facades for phase intent execution, phase
+    scope collection, and expected hourly run-id derivation. No prompt
+    contract changes were made.
+  - Updated deterministic tests in
+    `tests/test_rag_recall_agent.py`,
+    `tests/test_calendar_scheduler_reflection_phase.py`, and
+    `tests/test_calendar_scheduler_repository.py`.
+  - Verification command:
+    `venv\Scripts\python -m pytest tests/test_rag_recall_agent.py tests/test_calendar_scheduler_reflection_phase.py tests/test_reflection_phase_scheduler.py tests/test_reflection_cycle_stage1c_worker.py -q`.
+    Result: 49 passed in 1.95s.
+  - Adjacent verification command:
+    `venv\Scripts\python -m pytest tests/test_calendar_scheduler_repository.py -q`.
+    Result: 10 passed in 1.36s.
+  - Syntax verification command:
+    `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\calendar_scheduler\reflection_phase.py src\kazusa_ai_chatbot\calendar_scheduler\repository.py src\kazusa_ai_chatbot\rag\recall\agent.py src\kazusa_ai_chatbot\rag\recall\contracts.py src\kazusa_ai_chatbot\rag\recall\collectors\calendar_runs.py src\kazusa_ai_chatbot\rag\recall\collectors\commitments.py src\kazusa_ai_chatbot\reflection_cycle\worker.py tests\test_calendar_scheduler_reflection_phase.py tests\test_calendar_scheduler_repository.py tests\test_rag_recall_agent.py`.
+    Result: passed.
+  - Static grep:
+    `rg -n "ScheduledEventCollector|collectors\.scheduled_events|query_pending_scheduled_events" src\kazusa_ai_chatbot\rag\recall -g "*.py"`.
+    Result: no matches; `rg` exited 1 as expected for this zero-match check.
+  - Static grep:
+    `rg -n "reflection_phase_runs" src\kazusa_ai_chatbot\calendar_scheduler -g "*.py" tests\test_calendar_scheduler_reflection_phase.py`.
+    Result: no matches; `rg` exited 1 as expected for this zero-match check.
+  - Static grep:
+    `rg -n "reflection_phase_runs|reflection_hourly_slot|group_self_cognition_review" src\kazusa_ai_chatbot\calendar_scheduler -g "*.py" tests\test_calendar_scheduler_reflection_phase.py`.
+    Result: matches only the allowed action strings in
+    `tests/test_calendar_scheduler_reflection_phase.py`; no production Python
+    matches for split reflection trigger kinds or side control collections.
+  - Broader old-path scan:
+    `rg -n "from kazusa_ai_chatbot\.rag\.recall\.collectors\.scheduled_events|ScheduledEventCollector|query_pending_scheduled_events|scheduled_event_collector|scheduled_candidates" src\kazusa_ai_chatbot -g "*.py"`.
+    Result: remaining matches are only legacy DB helper exports for the
+    one-time migration/decommission boundary. Stage 6 owns final legacy
+    scheduler decommission.
+  - `git diff --check` reported no whitespace errors; only LF/CRLF working
+    copy normalization warnings.
+  - Residual documentation note: calendar and RAG READMEs still contain
+    historical or stale scheduled-event/reflection-phase wording. Stage 7 owns
+    docs and ops status updates.

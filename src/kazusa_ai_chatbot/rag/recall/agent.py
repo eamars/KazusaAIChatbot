@@ -6,10 +6,16 @@ import logging
 from typing import Any
 
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
-from kazusa_ai_chatbot.rag.recall.collectors.commitments import ActiveCommitmentCollector
-from kazusa_ai_chatbot.rag.recall.collectors.history import HistoryEvidenceCollector
+from kazusa_ai_chatbot.rag.recall.collectors.calendar_runs import (
+    CalendarRunCollector,
+)
+from kazusa_ai_chatbot.rag.recall.collectors.commitments import (
+    ActiveCommitmentCollector,
+)
+from kazusa_ai_chatbot.rag.recall.collectors.history import (
+    HistoryEvidenceCollector,
+)
 from kazusa_ai_chatbot.rag.recall.collectors.progress import ProgressCollector
-from kazusa_ai_chatbot.rag.recall.collectors.scheduled_events import ScheduledEventCollector
 from kazusa_ai_chatbot.rag.recall.contracts import (
     _ACTIVE_MODES,
     _CANDIDATE_CLAIM_LIMIT,
@@ -54,7 +60,7 @@ class RecallAgent(BaseRAGHelperAgent):
         )
         self.progress_collector = ProgressCollector()
         self.active_commitment_collector = ActiveCommitmentCollector()
-        self.scheduled_event_collector = ScheduledEventCollector()
+        self.calendar_run_collector = CalendarRunCollector()
         self.history_evidence_collector = HistoryEvidenceCollector()
 
     async def run(
@@ -91,14 +97,14 @@ class RecallAgent(BaseRAGHelperAgent):
         commitment_candidates = await self.active_commitment_collector.collect(
             context["global_user_id"]
         )
-        scheduled_candidates = await self.scheduled_event_collector.collect(context)
+        calendar_candidates = await self.calendar_run_collector.collect(context)
         progress_unavailable = not progress_candidates
 
         candidates = _dedupe_candidates(
             [
                 *progress_candidates,
                 *commitment_candidates,
-                *scheduled_candidates,
+                *calendar_candidates,
             ]
         )
 
@@ -107,7 +113,7 @@ class RecallAgent(BaseRAGHelperAgent):
                 candidates = _dedupe_candidates(
                     [
                         *commitment_candidates,
-                        *scheduled_candidates,
+                        *calendar_candidates,
                     ]
                 )
             else:
