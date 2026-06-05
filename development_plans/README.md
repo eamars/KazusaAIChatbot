@@ -38,6 +38,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [napcat_qq_adapter_modularization_face_catalog_plan.md](active/short_term/napcat_qq_adapter_modularization_face_catalog_plan.md) | Large NapCat adapter package split and QQ face catalog plan | draft |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 
 ## Supporting Experiment Records
