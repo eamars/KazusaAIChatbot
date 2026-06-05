@@ -18,6 +18,7 @@ import pytest
 import adapters.delivery_receipts as delivery_receipts_module
 import adapters.discord_adapter as discord_module
 import adapters.napcat_qq_adapter as napcat_module
+import adapters.napcat_qq_adapter.mention_hydration as napcat_mentions_module
 from adapters.discord_adapter import DiscordAdapter
 from adapters.napcat_qq_adapter import NapCatWSAdapter
 from kazusa_ai_chatbot.dispatcher import AdapterRegistry, RemoteHttpAdapter
@@ -299,7 +300,7 @@ async def test_remote_http_adapter_posts_send_message_payload(monkeypatch):
 
     result = await adapter.send_message(
         channel_id="54369546",
-        text="今天天气真好呀",
+        text='今天天气真好呀',
         reply_to_msg_id="1615877136",
         channel_type="private",
         delivery_mentions=[mention],
@@ -310,7 +311,7 @@ async def test_remote_http_adapter_posts_send_message_payload(monkeypatch):
         "json": {
             "channel_id": "54369546",
             "channel_type": "private",
-            "text": "今天天气真好呀",
+            "text": '今天天气真好呀',
             "reply_to_msg_id": "1615877136",
             "delivery_mentions": [mention],
         },
@@ -447,8 +448,8 @@ async def test_napcat_hydrates_reply_target_from_platform_get_msg():
     ws = _FakeNapCatWebSocket({
         "message_id": 1733223276,
         "user_id": 3768713357,
-        "sender": {"nickname": "杏山千纱"},
-        "raw_message": "上一条千纱消息",
+        "sender": {"nickname": '杏山千纱'},
+        "raw_message": '上一条千纱消息',
     })
     reply_context = {"reply_to_message_id": "1733223276"}
 
@@ -457,8 +458,8 @@ async def test_napcat_hydrates_reply_target_from_platform_get_msg():
     assert reply_context == {
         "reply_to_message_id": "1733223276",
         "reply_to_platform_user_id": "3768713357",
-        "reply_to_display_name": "杏山千纱",
-        "reply_excerpt": "上一条千纱消息",
+        "reply_to_display_name": '杏山千纱',
+        "reply_excerpt": '上一条千纱消息',
     }
     assert ws.sent_payloads[0]["action"] == "get_msg"
     assert ws.sent_payloads[0]["params"] == {"message_id": 1733223276}
@@ -515,7 +516,7 @@ async def test_napcat_handle_event_forwards_typed_bot_reply_metadata():
         debug_modes={},
     )
     adapter.bot_id = "3768713357"
-    adapter.bot_name = "杏山千纱"
+    adapter.bot_name = '杏山千纱'
     adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
         "messages": [],
         "use_reply_feature": False,
@@ -523,8 +524,8 @@ async def test_napcat_handle_event_forwards_typed_bot_reply_metadata():
     ws = _FakeNapCatWebSocket({
         "message_id": 1733223276,
         "user_id": 3768713357,
-        "sender": {"nickname": "杏山千纱"},
-        "raw_message": "上一条千纱消息",
+        "sender": {"nickname": '杏山千纱'},
+        "raw_message": '上一条千纱消息',
     })
 
     await adapter.handle_event(
@@ -534,17 +535,17 @@ async def test_napcat_handle_event_forwards_typed_bot_reply_metadata():
             "message_id": 394466266,
             "group_id": 1082431481,
             "user_id": 3167827653,
-            "sender": {"nickname": "赛博马里奥"},
+            "sender": {"nickname": '赛博马里奥'},
             "message": [
                 {"type": "reply", "data": {"id": "1733223276"}},
-                {"type": "text", "data": {"text": "千纱さん，你来了呀"}},
+                {"type": "text", "data": {"text": '千纱さん，你来了呀'}},
             ],
         },
         ws,
     )
 
     payload = adapter.brain_client.post.await_args.kwargs["json"]
-    assert payload["message_envelope"]["body_text"] == "千纱さん，你来了呀"
+    assert payload["message_envelope"]["body_text"] == '千纱さん，你来了呀'
     assert payload["message_envelope"]["raw_wire_text"].startswith(
         "[CQ:reply,id=1733223276]"
     )
@@ -805,7 +806,7 @@ async def test_napcat_handle_event_hydrates_human_mention_nickname_and_cache():
             "group_id": 905393941,
             "user_id": 3167827653,
             "sender": {"nickname": "User A"},
-            "message": "[CQ:at,qq=673225019] 你怎么评价群友",
+            "message": '[CQ:at,qq=673225019] 你怎么评价群友',
         },
         ws,
     )
@@ -828,7 +829,7 @@ async def test_napcat_handle_event_hydrates_human_mention_nickname_and_cache():
     ]
     first_envelope = payloads[0]["message_envelope"]
     second_envelope = payloads[1]["message_envelope"]
-    assert first_envelope["body_text"] == "@Mention Nick 你怎么评价群友"
+    assert first_envelope["body_text"] == '@Mention Nick 你怎么评价群友'
     assert first_envelope["mentions"][0]["display_name"] == "Mention Nick"
     assert second_envelope["body_text"] == "@Mention Nick again"
     lookup_payloads = [
@@ -861,17 +862,18 @@ async def test_napcat_mention_display_cache_evicts_oldest_label():
         debug_modes={},
     )
 
-    for index in range(napcat_module._MENTION_DISPLAY_CACHE_LIMIT + 1):
+    cache_limit = napcat_mentions_module.MENTION_DISPLAY_CACHE_LIMIT
+    for index in range(cache_limit + 1):
         adapter._cache_qq_mention_display_name(
             ("905393941", str(index)),
             f"User {index}",
         )
 
     assert len(adapter._mention_display_cache) == (
-        napcat_module._MENTION_DISPLAY_CACHE_LIMIT
+        cache_limit
     )
     assert ("905393941", "0") not in adapter._mention_display_cache
-    assert ("905393941", str(napcat_module._MENTION_DISPLAY_CACHE_LIMIT)) in (
+    assert ("905393941", str(cache_limit)) in (
         adapter._mention_display_cache
     )
     await adapter.close()
@@ -942,7 +944,7 @@ async def test_napcat_handle_event_bounds_duplicate_timeout_lookups(
             awaitable.close()
         raise asyncio.TimeoutError("mention lookup timeout")
 
-    monkeypatch.setattr(napcat_module.asyncio, "wait_for", fake_wait_for)
+    monkeypatch.setattr(napcat_mentions_module.asyncio, "wait_for", fake_wait_for)
     adapter = NapCatWSAdapter(
         ws_url="ws://napcat.local/ws",
         ws_token="token",

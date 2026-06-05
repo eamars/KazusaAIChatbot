@@ -38,7 +38,6 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [napcat_qq_adapter_modularization_face_catalog_plan.md](active/short_term/napcat_qq_adapter_modularization_face_catalog_plan.md) | Large NapCat adapter package split and QQ face catalog plan | in_progress |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 
 ## Supporting Experiment Records
@@ -184,6 +183,7 @@ plans.
 | [multi_source_cognition_architecture_stage_09_multimodal_cognitive_input_sources_plan.md](archive/completed/short_term/multi_source_cognition_architecture_stage_09_multimodal_cognitive_input_sources_plan.md) |
 | [multi_source_cognition_architecture_stage_10_permissioned_proactive_output_plan.md](archive/completed/short_term/multi_source_cognition_architecture_stage_10_permissioned_proactive_output_plan.md) |
 | [native_shape_boundary_hardening_plan.md](archive/completed/short_term/native_shape_boundary_hardening_plan.md) |
+| [napcat_qq_adapter_modularization_face_catalog_plan.md](archive/completed/short_term/napcat_qq_adapter_modularization_face_catalog_plan.md) |
 | [outbound_adapter_channel_allowlist_plan.md](archive/completed/short_term/outbound_adapter_channel_allowlist_plan.md) |
 | [prompt_prefix_and_input_format_optimization_plan.md](archive/completed/short_term/prompt_prefix_and_input_format_optimization_plan.md) |
 | [prompt_safe_message_context_plan.md](archive/completed/short_term/prompt_safe_message_context_plan.md) |

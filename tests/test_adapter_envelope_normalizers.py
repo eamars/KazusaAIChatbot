@@ -61,6 +61,8 @@ def test_napcat_adapter_package_exposes_public_surface_only() -> None:
     assert callable(napcat_module.main)
     private_catalog_name = "_" + "QQ_FACE_IMAGE_DESCRIPTIONS"
     assert not hasattr(napcat_module, private_catalog_name)
+    assert not hasattr(napcat_module, "_MENTION_DISPLAY_CACHE_LIMIT")
+    assert not hasattr(napcat_module, "asyncio")
 
 
 def test_adapter_icds_define_required_boundaries() -> None:

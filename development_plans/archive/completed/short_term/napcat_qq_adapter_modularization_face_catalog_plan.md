@@ -4,7 +4,7 @@
 
 - Goal: split the monolithic NapCat QQ adapter into a package with stable public entrypoints and add a complete static QQ face semantic catalog.
 - Plan class: large
-- Status: in_progress
+- Status: completed
 - Mandatory skills: `development-plan`, `local-llm-architecture`, `py-style`, `cjk-safety`, `test-style-and-execution`
 - Overall cutover strategy: bigbang package conversion with compatibility at the import and CLI boundary only.
 - Highest-risk areas: breaking `python -m adapters.napcat_qq_adapter`, breaking existing imports from `adapters.napcat_qq_adapter`, over-splitting the first adapter package, and shipping incomplete or low-quality QQ face semantic labels.
@@ -296,16 +296,20 @@ class RuntimeNapCatAdapter(Protocol):
 
     async def can_send_message(
         self,
-        target_type: str,
-        target_id: str,
-    ) -> tuple[bool, str | None]:
+        channel_id: str,
+        *,
+        channel_type: str,
+    ) -> bool:
         ...
 
     async def send_message(
         self,
-        target_type: str,
-        target_id: str,
+        channel_id: str,
         text: str,
+        *,
+        channel_type: str,
+        reply_to_msg_id: str | None = None,
+        delivery_mentions: Sequence[dict] | None = None,
     ) -> SendResult:
         ...
 ```
@@ -526,14 +530,14 @@ Add deterministic tests for these cases:
 ## Progress Checklist
 
 - [x] Stage 1A - split contract tests established: import, CLI, and current behavior tests added; expected failures or baseline recorded.
-- [ ] Stage 1B - NapCat package split complete: package layout created, public imports and `python -m` preserved, behavior tests pass.
-- [ ] Stage 1C - ICDs complete: adapter class ICD and NapCat package ICD added and linked.
-- [ ] Stage 2A - face catalog source snapshot established: QFace source snapshot fixture committed with 317 numeric in-scope ids and source metadata.
-- [ ] Stage 2B - face catalog tests established: completeness and label-quality tests added with expected failures.
-- [ ] Stage 2C - full semantic catalog implemented: every accepted numeric id has a final LLM-facing description and focused face projection tests pass.
-- [ ] Stage 3 - verification complete: all commands in `Verification` pass and evidence is recorded.
-- [ ] Stage 4 - independent code review complete: findings, remediations, reruns, and residual risk recorded.
-- [ ] Stage 5 - lifecycle closed: plan status and registry updated after approved completion.
+- [x] Stage 1B - NapCat package split complete: package layout created, public imports and `python -m` preserved, behavior tests pass.
+- [x] Stage 1C - ICDs complete: adapter class ICD and NapCat package ICD added and linked.
+- [x] Stage 2A - face catalog source snapshot established: QFace source snapshot fixture committed with 317 numeric in-scope ids and source metadata.
+- [x] Stage 2B - face catalog tests established: completeness and label-quality tests added with expected failures.
+- [x] Stage 2C - full semantic catalog implemented: every accepted numeric id has a final LLM-facing description and focused face projection tests pass.
+- [x] Stage 3 - verification complete: all commands in `Verification` pass and evidence is recorded.
+- [x] Stage 4 - independent code review complete: findings, remediations, reruns, and residual risk recorded.
+- [x] Stage 5 - lifecycle closed: plan status and registry updated after approved completion.
 
 ## Verification
 
@@ -621,3 +625,12 @@ The parent agent fixes concrete findings directly only when the fix is inside th
 - Source discovery notes: NapCat docs confirm `face` message segments; OneBot docs confirm `[CQ:face,id=123]`; Koishi QFace provides a broad current id/name/resource list including `344`.
 - Accepted QFace snapshot: repository `https://github.com/koishijs/QFace`, commit `e476a706a7e508849c6031c3654051a02639964f`, file `public/assets/qq_emoji/_index.json`, captured on 2026-06-05, 482 total rows, 317 numeric `emojiId` rows in scope, and 165 Unicode emoji-style rows deferred.
 - 2026-06-05 Stage 1A parent test contract: `venv\Scripts\python.exe -m py_compile tests/test_adapter_envelope_normalizers.py tests/test_runtime_adapter_registration.py` passed. `venv\Scripts\python.exe -m pytest tests/test_runtime_adapter_registration.py::test_napcat_module_cli_help_exits_successfully -q` passed. `venv\Scripts\python.exe -m pytest tests/test_adapter_envelope_normalizers.py -q` produced the expected pre-implementation baseline: 9 failed and 11 passed; failures were missing package shape, missing ICDs, missing face source snapshot/catalog submodule, unknown faces still rendering the old generic image text, and catalog monkeypatch unable to import `face_catalog`. `venv\Scripts\python.exe -m pytest tests/test_runtime_adapter_registration.py::test_napcat_runtime_api_import_does_not_load_ws_adapter tests/test_runtime_adapter_registration.py::test_napcat_handle_event_omits_unknown_segment_list_face -q` produced the expected pre-implementation baseline: 2 failed; failures were missing `runtime_api` package submodule and structured unknown face still rendering the old generic image text.
+- 2026-06-05 Stage 1B implementation: production-code subagent converted `src/adapters/napcat_qq_adapter.py` into `src/adapters/napcat_qq_adapter/`, preserved package-root public imports, preserved `python -m adapters.napcat_qq_adapter`, split runtime API binding away from websocket implementation, and retained legacy test/debug access without exposing the QQ face catalog at package root.
+- 2026-06-05 Stage 1C ICDs: `src/adapters/README.md` and `src/adapters/napcat_qq_adapter/README.md` added and linked from `docs/HOWTO.md`.
+- 2026-06-05 Stage 2 implementation: `tests/fixtures/napcat_qq_face_source_snapshot.json` added with the accepted QFace snapshot metadata and reviewed labels; `face_catalog.py` contains 317 accepted numeric ids, including `344 -> 大怨种表情`; unknown, missing, malformed, and non-numeric ids are omitted.
+- 2026-06-05 Stage 3 verification: `venv\Scripts\python.exe -m py_compile ...` for the NapCat package and touched tests passed; `venv\Scripts\python.exe -m pytest tests/test_adapter_envelope_normalizers.py -q` passed 20 tests; `venv\Scripts\python.exe -m pytest tests/test_runtime_adapter_registration.py -q` passed 55 tests; `venv\Scripts\python.exe -m pytest tests/test_service_input_queue.py -q` passed 33 tests; `venv\Scripts\python.exe -m adapters.napcat_qq_adapter --help` passed with dotenv disabled; `git diff --check --cached` and `git diff --check` passed.
+- 2026-06-05 Stage 3 static checks: no stale dotted NapCat module-file references; QQ face handling grep hits are limited to the NapCat package and tests; `_QQ_FACE_IMAGE_DESCRIPTIONS`, `<image>表情</image>`, package-root private catalog imports, and `_QQ_FACE` imports have no source or test matches.
+- 2026-06-05 Stage 4 independent code review: subagent `019e9741-f498-73d0-9253-73740329f91a` reported one medium finding and one minor finding. Medium: package-root `__getattr__` still exposed `_MENTION_DISPLAY_CACHE_LIMIT` and a test depended on that private root symbol. Minor: the runtime adapter registration test contained CJK string literals with double-quoted delimiters.
+- 2026-06-05 Stage 4 remediation: removed the package-root legacy `_MENTION_DISPLAY_CACHE_LIMIT` lookup and root `asyncio` import, changed cache/timeout tests to import and patch `adapters.napcat_qq_adapter.mention_hydration`, added package-root assertions that `_MENTION_DISPLAY_CACHE_LIMIT` and `asyncio` are not exposed, and converted remaining CJK literals in `tests/test_runtime_adapter_registration.py` to single-quoted delimiters.
+- 2026-06-05 Stage 4 reruns: targeted `py_compile` passed for `src/adapters/napcat_qq_adapter/__init__.py`, `tests/test_adapter_envelope_normalizers.py`, and `tests/test_runtime_adapter_registration.py`; targeted review-fix tests passed 3 tests; full plan verification reruns passed `tests/test_adapter_envelope_normalizers.py` 20 tests, `tests/test_runtime_adapter_registration.py` 55 tests, `tests/test_service_input_queue.py` 33 tests, `venv\Scripts\python.exe -m adapters.napcat_qq_adapter --help`, full package/test `py_compile`, `git diff --check --cached`, and `git diff --check`. CJK double-quoted literal scans are clean for touched NapCat package files and touched tests. Residual risk: no live NapCat server was exercised; verification is deterministic unit and integration coverage only.
+- 2026-06-05 Stage 5 lifecycle closure: status changed to `completed`; registry updated; plan archived under `development_plans/archive/completed/short_term/` after implementation, verification, and independent code review gates completed.
