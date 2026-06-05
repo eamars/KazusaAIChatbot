@@ -1,0 +1,5106 @@
+{
+  "source": {
+    "repository": "https://github.com/koishijs/QFace",
+    "commit": "e476a706a7e508849c6031c3654051a02639964f",
+    "path": "public/assets/qq_emoji/_index.json",
+    "captured_at": "2026-06-05",
+    "total_rows": 482,
+    "numeric_rows": 317,
+    "unicode_emoji_rows": 165
+  },
+  "faces": [
+    {
+      "id": "0",
+      "source_describe": "/惊讶",
+      "asset_paths": [
+        "public/assets/qq_emoji/0/png/0.png",
+        "public/assets/qq_emoji/0/apng/0.png"
+      ],
+      "semantic_label": "惊讶表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "1",
+      "source_describe": "/撇嘴",
+      "asset_paths": [
+        "public/assets/qq_emoji/1/png/1.png",
+        "public/assets/qq_emoji/1/apng/1.png"
+      ],
+      "semantic_label": "撇嘴表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "2",
+      "source_describe": "/色",
+      "asset_paths": [
+        "public/assets/qq_emoji/2/png/2.png",
+        "public/assets/qq_emoji/2/apng/2.png"
+      ],
+      "semantic_label": "色表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "3",
+      "source_describe": "/发呆",
+      "asset_paths": [
+        "public/assets/qq_emoji/3/png/3.png",
+        "public/assets/qq_emoji/3/apng/3.png"
+      ],
+      "semantic_label": "发呆表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "4",
+      "source_describe": "/得意",
+      "asset_paths": [
+        "public/assets/qq_emoji/4/png/4.png",
+        "public/assets/qq_emoji/4/apng/4.png"
+      ],
+      "semantic_label": "得意表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "5",
+      "source_describe": "/流泪",
+      "asset_paths": [
+        "public/assets/qq_emoji/5/png/5_0.png",
+        "public/assets/qq_emoji/5/png/5.png",
+        "public/assets/qq_emoji/5/apng/5.png",
+        "public/assets/qq_emoji/5/lottie/5.json"
+      ],
+      "semantic_label": "流泪表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "6",
+      "source_describe": "/害羞",
+      "asset_paths": [
+        "public/assets/qq_emoji/6/png/6.png",
+        "public/assets/qq_emoji/6/apng/6.png"
+      ],
+      "semantic_label": "害羞表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "7",
+      "source_describe": "/闭嘴",
+      "asset_paths": [
+        "public/assets/qq_emoji/7/png/7.png",
+        "public/assets/qq_emoji/7/apng/7.png"
+      ],
+      "semantic_label": "闭嘴表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "8",
+      "source_describe": "/睡",
+      "asset_paths": [
+        "public/assets/qq_emoji/8/png/8.png",
+        "public/assets/qq_emoji/8/apng/8.png"
+      ],
+      "semantic_label": "睡表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "9",
+      "source_describe": "/大哭",
+      "asset_paths": [
+        "public/assets/qq_emoji/9/png/9.png",
+        "public/assets/qq_emoji/9/apng/9.png"
+      ],
+      "semantic_label": "大哭表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "10",
+      "source_describe": "/尴尬",
+      "asset_paths": [
+        "public/assets/qq_emoji/10/png/10.png",
+        "public/assets/qq_emoji/10/apng/10.png"
+      ],
+      "semantic_label": "尴尬表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "11",
+      "source_describe": "/发怒",
+      "asset_paths": [
+        "public/assets/qq_emoji/11/png/11.png",
+        "public/assets/qq_emoji/11/apng/11.png"
+      ],
+      "semantic_label": "发怒表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "12",
+      "source_describe": "/调皮",
+      "asset_paths": [
+        "public/assets/qq_emoji/12/png/12.png",
+        "public/assets/qq_emoji/12/apng/12.png"
+      ],
+      "semantic_label": "调皮表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "13",
+      "source_describe": "/呲牙",
+      "asset_paths": [
+        "public/assets/qq_emoji/13/png/13.png",
+        "public/assets/qq_emoji/13/apng/13.png"
+      ],
+      "semantic_label": "呲牙表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "14",
+      "source_describe": "/微笑",
+      "asset_paths": [
+        "public/assets/qq_emoji/14/png/14.png",
+        "public/assets/qq_emoji/14/apng/14.png"
+      ],
+      "semantic_label": "微笑表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "15",
+      "source_describe": "/难过",
+      "asset_paths": [
+        "public/assets/qq_emoji/15/png/15.png",
+        "public/assets/qq_emoji/15/apng/15.png"
+      ],
+      "semantic_label": "难过表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "16",
+      "source_describe": "/酷",
+      "asset_paths": [
+        "public/assets/qq_emoji/16/png/16.png",
+        "public/assets/qq_emoji/16/apng/16.png"
+      ],
+      "semantic_label": "酷表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "18",
+      "source_describe": "/抓狂",
+      "asset_paths": [
+        "public/assets/qq_emoji/18/png/18.png",
+        "public/assets/qq_emoji/18/apng/18.png"
+      ],
+      "semantic_label": "抓狂表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "19",
+      "source_describe": "/吐",
+      "asset_paths": [
+        "public/assets/qq_emoji/19/png/19.png",
+        "public/assets/qq_emoji/19/apng/19.png"
+      ],
+      "semantic_label": "吐表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "20",
+      "source_describe": "/偷笑",
+      "asset_paths": [
+        "public/assets/qq_emoji/20/png/20.png",
+        "public/assets/qq_emoji/20/apng/20.png"
+      ],
+      "semantic_label": "偷笑表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "21",
+      "source_describe": "/可爱",
+      "asset_paths": [
+        "public/assets/qq_emoji/21/png/21.png",
+        "public/assets/qq_emoji/21/apng/21.png"
+      ],
+      "semantic_label": "可爱表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "22",
+      "source_describe": "/白眼",
+      "asset_paths": [
+        "public/assets/qq_emoji/22/png/22.png",
+        "public/assets/qq_emoji/22/apng/22.png"
+      ],
+      "semantic_label": "白眼表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "23",
+      "source_describe": "/傲慢",
+      "asset_paths": [
+        "public/assets/qq_emoji/23/png/23.png",
+        "public/assets/qq_emoji/23/apng/23.png"
+      ],
+      "semantic_label": "傲慢表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "24",
+      "source_describe": "/饥饿",
+      "asset_paths": [
+        "public/assets/qq_emoji/24/png/24.png",
+        "public/assets/qq_emoji/24/apng/24.png"
+      ],
+      "semantic_label": "饥饿表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "25",
+      "source_describe": "/困",
+      "asset_paths": [
+        "public/assets/qq_emoji/25/png/25.png",
+        "public/assets/qq_emoji/25/apng/25.png"
+      ],
+      "semantic_label": "困表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "26",
+      "source_describe": "/惊恐",
+      "asset_paths": [
+        "public/assets/qq_emoji/26/png/26.png",
+        "public/assets/qq_emoji/26/apng/26.png"
+      ],
+      "semantic_label": "惊恐表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "27",
+      "source_describe": "/流汗",
+      "asset_paths": [
+        "public/assets/qq_emoji/27/png/27.png",
+        "public/assets/qq_emoji/27/apng/27.png"
+      ],
+      "semantic_label": "流汗表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "28",
+      "source_describe": "/憨笑",
+      "asset_paths": [
+        "public/assets/qq_emoji/28/png/28.png",
+        "public/assets/qq_emoji/28/apng/28.png"
+      ],
+      "semantic_label": "憨笑表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "29",
+      "source_describe": "/悠闲",
+      "asset_paths": [
+        "public/assets/qq_emoji/29/png/29.png",
+        "public/assets/qq_emoji/29/apng/29.png"
+      ],
+      "semantic_label": "悠闲表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "30",
+      "source_describe": "/奋斗",
+      "asset_paths": [
+        "public/assets/qq_emoji/30/png/30.png",
+        "public/assets/qq_emoji/30/apng/30.png"
+      ],
+      "semantic_label": "奋斗表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "31",
+      "source_describe": "/咒骂",
+      "asset_paths": [
+        "public/assets/qq_emoji/31/png/31.png",
+        "public/assets/qq_emoji/31/apng/31.png"
+      ],
+      "semantic_label": "咒骂表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "32",
+      "source_describe": "/疑问",
+      "asset_paths": [
+        "public/assets/qq_emoji/32/png/32.png",
+        "public/assets/qq_emoji/32/apng/32.png"
+      ],
+      "semantic_label": "疑问表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "33",
+      "source_describe": "/嘘",
+      "asset_paths": [
+        "public/assets/qq_emoji/33/png/33.png",
+        "public/assets/qq_emoji/33/apng/33.png"
+      ],
+      "semantic_label": "嘘表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "34",
+      "source_describe": "/晕",
+      "asset_paths": [
+        "public/assets/qq_emoji/34/png/34.png",
+        "public/assets/qq_emoji/34/apng/34.png"
+      ],
+      "semantic_label": "晕表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "35",
+      "source_describe": "/折磨",
+      "asset_paths": [
+        "public/assets/qq_emoji/35/png/35.png",
+        "public/assets/qq_emoji/35/apng/35.png"
+      ],
+      "semantic_label": "折磨表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "36",
+      "source_describe": "/衰",
+      "asset_paths": [
+        "public/assets/qq_emoji/36/png/36.png",
+        "public/assets/qq_emoji/36/apng/36.png"
+      ],
+      "semantic_label": "衰表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "37",
+      "source_describe": "/骷髅",
+      "asset_paths": [
+        "public/assets/qq_emoji/37/png/37.png",
+        "public/assets/qq_emoji/37/apng/37.png"
+      ],
+      "semantic_label": "骷髅表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "38",
+      "source_describe": "/敲打",
+      "asset_paths": [
+        "public/assets/qq_emoji/38/png/38.png",
+        "public/assets/qq_emoji/38/apng/38.png"
+      ],
+      "semantic_label": "敲打表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "39",
+      "source_describe": "/再见",
+      "asset_paths": [
+        "public/assets/qq_emoji/39/png/39.png",
+        "public/assets/qq_emoji/39/apng/39.png"
+      ],
+      "semantic_label": "再见表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "41",
+      "source_describe": "/发抖",
+      "asset_paths": [
+        "public/assets/qq_emoji/41/png/41.png",
+        "public/assets/qq_emoji/41/apng/41.png"
+      ],
+      "semantic_label": "发抖表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "42",
+      "source_describe": "/爱情",
+      "asset_paths": [
+        "public/assets/qq_emoji/42/png/42.png",
+        "public/assets/qq_emoji/42/apng/42.png"
+      ],
+      "semantic_label": "爱情表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "43",
+      "source_describe": "/跳跳",
+      "asset_paths": [
+        "public/assets/qq_emoji/43/png/43.png",
+        "public/assets/qq_emoji/43/apng/43.png"
+      ],
+      "semantic_label": "跳跳表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "46",
+      "source_describe": "/猪头",
+      "asset_paths": [
+        "public/assets/qq_emoji/46/png/46.png",
+        "public/assets/qq_emoji/46/apng/46.png"
+      ],
+      "semantic_label": "猪头表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "49",
+      "source_describe": "/拥抱",
+      "asset_paths": [
+        "public/assets/qq_emoji/49/png/49.png",
+        "public/assets/qq_emoji/49/apng/49.png"
+      ],
+      "semantic_label": "拥抱表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "53",
+      "source_describe": "/蛋糕",
+      "asset_paths": [
+        "public/assets/qq_emoji/53/png/53_0.png",
+        "public/assets/qq_emoji/53/png/53.png",
+        "public/assets/qq_emoji/53/apng/53.png",
+        "public/assets/qq_emoji/53/lottie/53.json"
+      ],
+      "semantic_label": "蛋糕表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "55",
+      "source_describe": "/炸弹",
+      "asset_paths": [],
+      "semantic_label": "炸弹表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "56",
+      "source_describe": "/刀",
+      "asset_paths": [
+        "public/assets/qq_emoji/56/png/56.png",
+        "public/assets/qq_emoji/56/apng/56.png"
+      ],
+      "semantic_label": "刀表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "59",
+      "source_describe": "/便便",
+      "asset_paths": [
+        "public/assets/qq_emoji/59/png/59.png",
+        "public/assets/qq_emoji/59/apng/59.png"
+      ],
+      "semantic_label": "便便表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "60",
+      "source_describe": "/咖啡",
+      "asset_paths": [
+        "public/assets/qq_emoji/60/png/60.png",
+        "public/assets/qq_emoji/60/apng/60.png"
+      ],
+      "semantic_label": "咖啡表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "63",
+      "source_describe": "/玫瑰",
+      "asset_paths": [
+        "public/assets/qq_emoji/63/png/63.png",
+        "public/assets/qq_emoji/63/apng/63.png"
+      ],
+      "semantic_label": "玫瑰表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "64",
+      "source_describe": "/凋谢",
+      "asset_paths": [
+        "public/assets/qq_emoji/64/png/64.png",
+        "public/assets/qq_emoji/64/apng/64.png"
+      ],
+      "semantic_label": "凋谢表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "66",
+      "source_describe": "/爱心",
+      "asset_paths": [
+        "public/assets/qq_emoji/66/png/66.png",
+        "public/assets/qq_emoji/66/apng/66.png"
+      ],
+      "semantic_label": "爱心表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "67",
+      "source_describe": "/心碎",
+      "asset_paths": [
+        "public/assets/qq_emoji/67/png/67.png",
+        "public/assets/qq_emoji/67/apng/67.png"
+      ],
+      "semantic_label": "心碎表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "74",
+      "source_describe": "/太阳",
+      "asset_paths": [
+        "public/assets/qq_emoji/74/png/74_0.png",
+        "public/assets/qq_emoji/74/png/74.png",
+        "public/assets/qq_emoji/74/apng/74.png",
+        "public/assets/qq_emoji/74/lottie/74.json"
+      ],
+      "semantic_label": "太阳表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "75",
+      "source_describe": "/月亮",
+      "asset_paths": [
+        "public/assets/qq_emoji/75/png/75_0.png",
+        "public/assets/qq_emoji/75/png/75.png",
+        "public/assets/qq_emoji/75/apng/75.png",
+        "public/assets/qq_emoji/75/lottie/75.json"
+      ],
+      "semantic_label": "月亮表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "76",
+      "source_describe": "/赞",
+      "asset_paths": [
+        "public/assets/qq_emoji/76/png/76.png",
+        "public/assets/qq_emoji/76/apng/76.png"
+      ],
+      "semantic_label": "赞表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "77",
+      "source_describe": "/踩",
+      "asset_paths": [
+        "public/assets/qq_emoji/77/png/77.png",
+        "public/assets/qq_emoji/77/apng/77.png"
+      ],
+      "semantic_label": "踩表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "78",
+      "source_describe": "/握手",
+      "asset_paths": [
+        "public/assets/qq_emoji/78/png/78.png",
+        "public/assets/qq_emoji/78/apng/78.png"
+      ],
+      "semantic_label": "握手表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "79",
+      "source_describe": "/胜利",
+      "asset_paths": [
+        "public/assets/qq_emoji/79/png/79.png",
+        "public/assets/qq_emoji/79/apng/79.png"
+      ],
+      "semantic_label": "胜利表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "85",
+      "source_describe": "/飞吻",
+      "asset_paths": [
+        "public/assets/qq_emoji/85/png/85.png",
+        "public/assets/qq_emoji/85/apng/85.png"
+      ],
+      "semantic_label": "飞吻表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "86",
+      "source_describe": "/怄火",
+      "asset_paths": [
+        "public/assets/qq_emoji/86/png/86.png",
+        "public/assets/qq_emoji/86/apng/86.png"
+      ],
+      "semantic_label": "怄火表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "89",
+      "source_describe": "/西瓜",
+      "asset_paths": [
+        "public/assets/qq_emoji/89/png/89.png",
+        "public/assets/qq_emoji/89/apng/89.png"
+      ],
+      "semantic_label": "西瓜表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "96",
+      "source_describe": "/冷汗",
+      "asset_paths": [
+        "public/assets/qq_emoji/96/png/96.png",
+        "public/assets/qq_emoji/96/apng/96.png"
+      ],
+      "semantic_label": "冷汗表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "97",
+      "source_describe": "/擦汗",
+      "asset_paths": [
+        "public/assets/qq_emoji/97/png/97.png",
+        "public/assets/qq_emoji/97/apng/97.png"
+      ],
+      "semantic_label": "擦汗表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "98",
+      "source_describe": "/抠鼻",
+      "asset_paths": [
+        "public/assets/qq_emoji/98/png/98.png",
+        "public/assets/qq_emoji/98/apng/98.png"
+      ],
+      "semantic_label": "抠鼻表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "99",
+      "source_describe": "/鼓掌",
+      "asset_paths": [
+        "public/assets/qq_emoji/99/png/99.png",
+        "public/assets/qq_emoji/99/apng/99.png"
+      ],
+      "semantic_label": "鼓掌表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "100",
+      "source_describe": "/糗大了",
+      "asset_paths": [
+        "public/assets/qq_emoji/100/png/100.png",
+        "public/assets/qq_emoji/100/apng/100.png"
+      ],
+      "semantic_label": "糗大了表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "101",
+      "source_describe": "/坏笑",
+      "asset_paths": [
+        "public/assets/qq_emoji/101/png/101.png",
+        "public/assets/qq_emoji/101/apng/101.png"
+      ],
+      "semantic_label": "坏笑表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "102",
+      "source_describe": "/左哼哼",
+      "asset_paths": [
+        "public/assets/qq_emoji/102/png/102.png",
+        "public/assets/qq_emoji/102/apng/102.png"
+      ],
+      "semantic_label": "左哼哼表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "103",
+      "source_describe": "/右哼哼",
+      "asset_paths": [
+        "public/assets/qq_emoji/103/png/103.png",
+        "public/assets/qq_emoji/103/apng/103.png"
+      ],
+      "semantic_label": "右哼哼表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "104",
+      "source_describe": "/哈欠",
+      "asset_paths": [
+        "public/assets/qq_emoji/104/png/104.png",
+        "public/assets/qq_emoji/104/apng/104.png"
+      ],
+      "semantic_label": "哈欠表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "105",
+      "source_describe": "/鄙视",
+      "asset_paths": [
+        "public/assets/qq_emoji/105/png/105.png",
+        "public/assets/qq_emoji/105/apng/105.png"
+      ],
+      "semantic_label": "鄙视表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "106",
+      "source_describe": "/委屈",
+      "asset_paths": [
+        "public/assets/qq_emoji/106/png/106.png",
+        "public/assets/qq_emoji/106/apng/106.png"
+      ],
+      "semantic_label": "委屈表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "107",
+      "source_describe": "/快哭了",
+      "asset_paths": [
+        "public/assets/qq_emoji/107/png/107.png",
+        "public/assets/qq_emoji/107/apng/107.png"
+      ],
+      "semantic_label": "快哭了表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "108",
+      "source_describe": "/阴险",
+      "asset_paths": [
+        "public/assets/qq_emoji/108/png/108.png",
+        "public/assets/qq_emoji/108/apng/108.png"
+      ],
+      "semantic_label": "阴险表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "109",
+      "source_describe": "/左亲亲",
+      "asset_paths": [
+        "public/assets/qq_emoji/109/png/109.png",
+        "public/assets/qq_emoji/109/apng/109.png"
+      ],
+      "semantic_label": "左亲亲表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "110",
+      "source_describe": "/吓",
+      "asset_paths": [
+        "public/assets/qq_emoji/110/png/110.png",
+        "public/assets/qq_emoji/110/apng/110.png"
+      ],
+      "semantic_label": "吓表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "111",
+      "source_describe": "/可怜",
+      "asset_paths": [
+        "public/assets/qq_emoji/111/png/111.png",
+        "public/assets/qq_emoji/111/apng/111.png"
+      ],
+      "semantic_label": "可怜表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "112",
+      "source_describe": "/菜刀",
+      "asset_paths": [
+        "public/assets/qq_emoji/112/png/112.png",
+        "public/assets/qq_emoji/112/apng/112.png"
+      ],
+      "semantic_label": "菜刀表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "114",
+      "source_describe": "/篮球",
+      "asset_paths": [
+        "public/assets/qq_emoji/114/png/114_0.png",
+        "public/assets/qq_emoji/114/png/114.png",
+        "public/assets/qq_emoji/114/apng/114.png",
+        "public/assets/qq_emoji/114/lottie/114_1.json",
+        "public/assets/qq_emoji/114/lottie/114_2.json",
+        "public/assets/qq_emoji/114/lottie/114_3.json",
+        "public/assets/qq_emoji/114/lottie/114_4.json",
+        "public/assets/qq_emoji/114/lottie/114_5.json",
+        "public/assets/qq_emoji/114/lottie/114.json"
+      ],
+      "semantic_label": "篮球表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "116",
+      "source_describe": "/示爱",
+      "asset_paths": [
+        "public/assets/qq_emoji/116/png/116.png",
+        "public/assets/qq_emoji/116/apng/116.png"
+      ],
+      "semantic_label": "示爱表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "118",
+      "source_describe": "/抱拳",
+      "asset_paths": [
+        "public/assets/qq_emoji/118/png/118.png",
+        "public/assets/qq_emoji/118/apng/118.png"
+      ],
+      "semantic_label": "抱拳表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "119",
+      "source_describe": "/勾引",
+      "asset_paths": [
+        "public/assets/qq_emoji/119/png/119.png",
+        "public/assets/qq_emoji/119/apng/119.png"
+      ],
+      "semantic_label": "勾引表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "120",
+      "source_describe": "/拳头",
+      "asset_paths": [
+        "public/assets/qq_emoji/120/png/120.png",
+        "public/assets/qq_emoji/120/apng/120.png"
+      ],
+      "semantic_label": "拳头表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "121",
+      "source_describe": "/差劲",
+      "asset_paths": [
+        "public/assets/qq_emoji/121/png/121.png",
+        "public/assets/qq_emoji/121/apng/121.png"
+      ],
+      "semantic_label": "差劲表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "122",
+      "source_describe": "/爱你",
+      "asset_paths": [],
+      "semantic_label": "爱你表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "123",
+      "source_describe": "/NO",
+      "asset_paths": [
+        "public/assets/qq_emoji/123/png/123.png",
+        "public/assets/qq_emoji/123/apng/123.png"
+      ],
+      "semantic_label": "拒绝否定表情",
+      "label_basis": "source_name_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "124",
+      "source_describe": "/OK",
+      "asset_paths": [
+        "public/assets/qq_emoji/124/png/124.png",
+        "public/assets/qq_emoji/124/apng/124.png"
+      ],
+      "semantic_label": "OK手势表情",
+      "label_basis": "source_name_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "125",
+      "source_describe": "/转圈",
+      "asset_paths": [
+        "public/assets/qq_emoji/125/png/125.png",
+        "public/assets/qq_emoji/125/apng/125.png"
+      ],
+      "semantic_label": "转圈表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "129",
+      "source_describe": "/挥手",
+      "asset_paths": [
+        "public/assets/qq_emoji/129/png/129.png",
+        "public/assets/qq_emoji/129/apng/129.png"
+      ],
+      "semantic_label": "挥手表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "137",
+      "source_describe": "/鞭炮",
+      "asset_paths": [
+        "public/assets/qq_emoji/137/png/137_0.png",
+        "public/assets/qq_emoji/137/png/137.png",
+        "public/assets/qq_emoji/137/apng/137.png",
+        "public/assets/qq_emoji/137/lottie/137.json"
+      ],
+      "semantic_label": "鞭炮表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "144",
+      "source_describe": "/喝彩",
+      "asset_paths": [
+        "public/assets/qq_emoji/144/png/144.png",
+        "public/assets/qq_emoji/144/apng/144.png"
+      ],
+      "semantic_label": "喝彩表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "146",
+      "source_describe": "/爆筋",
+      "asset_paths": [
+        "public/assets/qq_emoji/146/png/146.png",
+        "public/assets/qq_emoji/146/apng/146.png"
+      ],
+      "semantic_label": "爆筋表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "147",
+      "source_describe": "/棒棒糖",
+      "asset_paths": [
+        "public/assets/qq_emoji/147/png/147.png",
+        "public/assets/qq_emoji/147/apng/147.png"
+      ],
+      "semantic_label": "棒棒糖表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "148",
+      "source_describe": "/喝奶",
+      "asset_paths": [],
+      "semantic_label": "喝奶表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "169",
+      "source_describe": "/手枪",
+      "asset_paths": [
+        "public/assets/qq_emoji/169/png/169.png",
+        "public/assets/qq_emoji/169/apng/169.png"
+      ],
+      "semantic_label": "手枪表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "171",
+      "source_describe": "/茶",
+      "asset_paths": [
+        "public/assets/qq_emoji/171/png/171.png",
+        "public/assets/qq_emoji/171/apng/171.png"
+      ],
+      "semantic_label": "茶表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "172",
+      "source_describe": "/眨眼睛",
+      "asset_paths": [
+        "public/assets/qq_emoji/172/png/172.png",
+        "public/assets/qq_emoji/172/apng/172.png"
+      ],
+      "semantic_label": "眨眼睛表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "173",
+      "source_describe": "/泪奔",
+      "asset_paths": [
+        "public/assets/qq_emoji/173/png/173.png",
+        "public/assets/qq_emoji/173/apng/173.png"
+      ],
+      "semantic_label": "泪奔表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "174",
+      "source_describe": "/无奈",
+      "asset_paths": [
+        "public/assets/qq_emoji/174/png/174.png",
+        "public/assets/qq_emoji/174/apng/174.png"
+      ],
+      "semantic_label": "无奈表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "175",
+      "source_describe": "/卖萌",
+      "asset_paths": [
+        "public/assets/qq_emoji/175/png/175.png",
+        "public/assets/qq_emoji/175/apng/175.png"
+      ],
+      "semantic_label": "卖萌表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "176",
+      "source_describe": "/小纠结",
+      "asset_paths": [
+        "public/assets/qq_emoji/176/png/176.png",
+        "public/assets/qq_emoji/176/apng/176.png"
+      ],
+      "semantic_label": "小纠结表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "177",
+      "source_describe": "/喷血",
+      "asset_paths": [
+        "public/assets/qq_emoji/177/png/177.png",
+        "public/assets/qq_emoji/177/apng/177.png"
+      ],
+      "semantic_label": "喷血表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "178",
+      "source_describe": "/斜眼笑",
+      "asset_paths": [
+        "public/assets/qq_emoji/178/png/178.png",
+        "public/assets/qq_emoji/178/apng/178.png"
+      ],
+      "semantic_label": "斜眼笑表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "179",
+      "source_describe": "/doge",
+      "asset_paths": [
+        "public/assets/qq_emoji/179/png/179.png",
+        "public/assets/qq_emoji/179/apng/179.png"
+      ],
+      "semantic_label": "Doge狗头表情",
+      "label_basis": "source_name_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "180",
+      "source_describe": "/惊喜",
+      "asset_paths": [],
+      "semantic_label": "惊喜表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "181",
+      "source_describe": "/戳一戳",
+      "asset_paths": [
+        "public/assets/qq_emoji/181/png/181_0.png",
+        "public/assets/qq_emoji/181/png/181.png",
+        "public/assets/qq_emoji/181/apng/181.png",
+        "public/assets/qq_emoji/181/lottie/181.json"
+      ],
+      "semantic_label": "戳一戳表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "182",
+      "source_describe": "/笑哭",
+      "asset_paths": [
+        "public/assets/qq_emoji/182/png/182.png",
+        "public/assets/qq_emoji/182/apng/182.png"
+      ],
+      "semantic_label": "笑哭表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "183",
+      "source_describe": "/我最美",
+      "asset_paths": [
+        "public/assets/qq_emoji/183/png/183.png",
+        "public/assets/qq_emoji/183/apng/183.png"
+      ],
+      "semantic_label": "我最美表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "185",
+      "source_describe": "/羊驼",
+      "asset_paths": [
+        "public/assets/qq_emoji/185/png/185.png",
+        "public/assets/qq_emoji/185/apng/185.png"
+      ],
+      "semantic_label": "羊驼表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "187",
+      "source_describe": "/幽灵",
+      "asset_paths": [
+        "public/assets/qq_emoji/187/png/187.png",
+        "public/assets/qq_emoji/187/apng/187.png"
+      ],
+      "semantic_label": "幽灵表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "193",
+      "source_describe": "/大笑",
+      "asset_paths": [],
+      "semantic_label": "大笑表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "194",
+      "source_describe": "/不开心",
+      "asset_paths": [],
+      "semantic_label": "不开心表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "198",
+      "source_describe": "/呃",
+      "asset_paths": [],
+      "semantic_label": "呃表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "200",
+      "source_describe": "/求求",
+      "asset_paths": [],
+      "semantic_label": "求求表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "201",
+      "source_describe": "/点赞",
+      "asset_paths": [
+        "public/assets/qq_emoji/201/png/201.png",
+        "public/assets/qq_emoji/201/apng/201.png"
+      ],
+      "semantic_label": "点赞表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "202",
+      "source_describe": "/无聊",
+      "asset_paths": [],
+      "semantic_label": "无聊表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "203",
+      "source_describe": "/托脸",
+      "asset_paths": [],
+      "semantic_label": "托脸表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "204",
+      "source_describe": "/吃",
+      "asset_paths": [],
+      "semantic_label": "吃表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "206",
+      "source_describe": "/害怕",
+      "asset_paths": [],
+      "semantic_label": "害怕表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "210",
+      "source_describe": "/飙泪",
+      "asset_paths": [],
+      "semantic_label": "飙泪表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "211",
+      "source_describe": "/我不看",
+      "asset_paths": [],
+      "semantic_label": "我不看表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "212",
+      "source_describe": "/托腮",
+      "asset_paths": [
+        "public/assets/qq_emoji/212/png/212.png",
+        "public/assets/qq_emoji/212/apng/212.png"
+      ],
+      "semantic_label": "托腮表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "214",
+      "source_describe": "/啵啵",
+      "asset_paths": [],
+      "semantic_label": "啵啵表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "215",
+      "source_describe": "/糊脸",
+      "asset_paths": [],
+      "semantic_label": "糊脸表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "216",
+      "source_describe": "/拍头",
+      "asset_paths": [],
+      "semantic_label": "拍头表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "217",
+      "source_describe": "/扯一扯",
+      "asset_paths": [],
+      "semantic_label": "扯一扯表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "218",
+      "source_describe": "/舔一舔",
+      "asset_paths": [],
+      "semantic_label": "舔一舔表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "219",
+      "source_describe": "/蹭一蹭",
+      "asset_paths": [],
+      "semantic_label": "蹭一蹭表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "221",
+      "source_describe": "/顶呱呱",
+      "asset_paths": [],
+      "semantic_label": "顶呱呱表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "222",
+      "source_describe": "/抱抱",
+      "asset_paths": [],
+      "semantic_label": "抱抱表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "223",
+      "source_describe": "/暴击",
+      "asset_paths": [],
+      "semantic_label": "暴击表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "224",
+      "source_describe": "/开枪",
+      "asset_paths": [],
+      "semantic_label": "开枪表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "225",
+      "source_describe": "/撩一撩",
+      "asset_paths": [],
+      "semantic_label": "撩一撩表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "226",
+      "source_describe": "/拍桌",
+      "asset_paths": [],
+      "semantic_label": "拍桌表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "227",
+      "source_describe": "/拍手",
+      "asset_paths": [],
+      "semantic_label": "拍手表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "229",
+      "source_describe": "/干杯",
+      "asset_paths": [],
+      "semantic_label": "干杯表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "230",
+      "source_describe": "/嘲讽",
+      "asset_paths": [],
+      "semantic_label": "嘲讽表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "231",
+      "source_describe": "/哼",
+      "asset_paths": [],
+      "semantic_label": "哼表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "232",
+      "source_describe": "/佛系",
+      "asset_paths": [],
+      "semantic_label": "佛系表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "233",
+      "source_describe": "/掐一掐",
+      "asset_paths": [],
+      "semantic_label": "掐一掐表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "235",
+      "source_describe": "/颤抖",
+      "asset_paths": [],
+      "semantic_label": "颤抖表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "237",
+      "source_describe": "/偷看",
+      "asset_paths": [],
+      "semantic_label": "偷看表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "238",
+      "source_describe": "/扇脸",
+      "asset_paths": [],
+      "semantic_label": "扇脸表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "239",
+      "source_describe": "/原谅",
+      "asset_paths": [],
+      "semantic_label": "原谅表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "240",
+      "source_describe": "/喷脸",
+      "asset_paths": [],
+      "semantic_label": "喷脸表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "241",
+      "source_describe": "/生日快乐",
+      "asset_paths": [],
+      "semantic_label": "生日快乐表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "243",
+      "source_describe": "/甩头",
+      "asset_paths": [],
+      "semantic_label": "甩头表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "244",
+      "source_describe": "/扔狗",
+      "asset_paths": [],
+      "semantic_label": "扔狗表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "262",
+      "source_describe": "/脑阔疼",
+      "asset_paths": [
+        "public/assets/qq_emoji/262/png/262.png",
+        "public/assets/qq_emoji/262/apng/262.png"
+      ],
+      "semantic_label": "脑阔疼表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "263",
+      "source_describe": "/沧桑",
+      "asset_paths": [
+        "public/assets/qq_emoji/263/png/263.png",
+        "public/assets/qq_emoji/263/apng/263.png"
+      ],
+      "semantic_label": "沧桑表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "264",
+      "source_describe": "/捂脸",
+      "asset_paths": [
+        "public/assets/qq_emoji/264/png/264.png",
+        "public/assets/qq_emoji/264/apng/264.png"
+      ],
+      "semantic_label": "捂脸表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "265",
+      "source_describe": "/辣眼睛",
+      "asset_paths": [
+        "public/assets/qq_emoji/265/png/265.png",
+        "public/assets/qq_emoji/265/apng/265.png"
+      ],
+      "semantic_label": "辣眼睛表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "266",
+      "source_describe": "/哦哟",
+      "asset_paths": [
+        "public/assets/qq_emoji/266/png/266.png",
+        "public/assets/qq_emoji/266/apng/266.png"
+      ],
+      "semantic_label": "哦哟表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "267",
+      "source_describe": "/头秃",
+      "asset_paths": [
+        "public/assets/qq_emoji/267/png/267.png",
+        "public/assets/qq_emoji/267/apng/267.png"
+      ],
+      "semantic_label": "头秃表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "268",
+      "source_describe": "/问号脸",
+      "asset_paths": [
+        "public/assets/qq_emoji/268/png/268.png",
+        "public/assets/qq_emoji/268/apng/268.png"
+      ],
+      "semantic_label": "问号脸表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "269",
+      "source_describe": "/暗中观察",
+      "asset_paths": [
+        "public/assets/qq_emoji/269/png/269.png",
+        "public/assets/qq_emoji/269/apng/269.png"
+      ],
+      "semantic_label": "暗中观察表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "270",
+      "source_describe": "/emm",
+      "asset_paths": [
+        "public/assets/qq_emoji/270/png/270.png",
+        "public/assets/qq_emoji/270/apng/270.png"
+      ],
+      "semantic_label": "犹豫沉思表情",
+      "label_basis": "source_name_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "271",
+      "source_describe": "/吃瓜",
+      "asset_paths": [
+        "public/assets/qq_emoji/271/png/271.png",
+        "public/assets/qq_emoji/271/apng/270.png",
+        "public/assets/qq_emoji/271/apng/271.png"
+      ],
+      "semantic_label": "吃瓜表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "272",
+      "source_describe": "/呵呵哒",
+      "asset_paths": [
+        "public/assets/qq_emoji/272/png/272.png",
+        "public/assets/qq_emoji/272/apng/272.png"
+      ],
+      "semantic_label": "呵呵哒表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "273",
+      "source_describe": "/我酸了",
+      "asset_paths": [
+        "public/assets/qq_emoji/273/png/273.png",
+        "public/assets/qq_emoji/273/apng/273.png"
+      ],
+      "semantic_label": "我酸了表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "277",
+      "source_describe": "/汪汪",
+      "asset_paths": [
+        "public/assets/qq_emoji/277/png/277.png",
+        "public/assets/qq_emoji/277/apng/277.png"
+      ],
+      "semantic_label": "汪汪表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "278",
+      "source_describe": "/汗",
+      "asset_paths": [],
+      "semantic_label": "汗表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "281",
+      "source_describe": "/无眼笑",
+      "asset_paths": [
+        "public/assets/qq_emoji/281/png/281.png",
+        "public/assets/qq_emoji/281/apng/281.png"
+      ],
+      "semantic_label": "无眼笑表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "282",
+      "source_describe": "/敬礼",
+      "asset_paths": [
+        "public/assets/qq_emoji/282/png/282.png",
+        "public/assets/qq_emoji/282/apng/282.png"
+      ],
+      "semantic_label": "敬礼表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "283",
+      "source_describe": "/狂笑",
+      "asset_paths": [
+        "public/assets/qq_emoji/283/png/283.png",
+        "public/assets/qq_emoji/283/apng/283.png"
+      ],
+      "semantic_label": "狂笑表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "284",
+      "source_describe": "/面无表情",
+      "asset_paths": [
+        "public/assets/qq_emoji/284/png/284.png",
+        "public/assets/qq_emoji/284/apng/284.png"
+      ],
+      "semantic_label": "面无表情表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "285",
+      "source_describe": "/摸鱼",
+      "asset_paths": [
+        "public/assets/qq_emoji/285/png/285.png",
+        "public/assets/qq_emoji/285/apng/285.png"
+      ],
+      "semantic_label": "摸鱼表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "286",
+      "source_describe": "/魔鬼笑",
+      "asset_paths": [
+        "public/assets/qq_emoji/286/png/286.png",
+        "public/assets/qq_emoji/286/apng/286.png"
+      ],
+      "semantic_label": "魔鬼笑表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "287",
+      "source_describe": "/哦",
+      "asset_paths": [
+        "public/assets/qq_emoji/287/png/287.png",
+        "public/assets/qq_emoji/287/apng/287.png"
+      ],
+      "semantic_label": "哦表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "288",
+      "source_describe": "/请",
+      "asset_paths": [],
+      "semantic_label": "请表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "289",
+      "source_describe": "/睁眼",
+      "asset_paths": [
+        "public/assets/qq_emoji/289/png/289.png",
+        "public/assets/qq_emoji/289/apng/289.png"
+      ],
+      "semantic_label": "睁眼表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "290",
+      "source_describe": "/敲开心",
+      "asset_paths": [],
+      "semantic_label": "敲开心表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "292",
+      "source_describe": "/让我康康",
+      "asset_paths": [],
+      "semantic_label": "让我康康表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "293",
+      "source_describe": "/摸锦鲤",
+      "asset_paths": [
+        "public/assets/qq_emoji/293/png/293.png",
+        "public/assets/qq_emoji/293/apng/293.png"
+      ],
+      "semantic_label": "摸锦鲤表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "294",
+      "source_describe": "/期待",
+      "asset_paths": [
+        "public/assets/qq_emoji/294/png/294.png",
+        "public/assets/qq_emoji/294/apng/294.png"
+      ],
+      "semantic_label": "期待表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "295",
+      "source_describe": "/拿到红包",
+      "asset_paths": [
+        "public/assets/qq_emoji/295/png/295.png",
+        "public/assets/qq_emoji/295/apng/295.png"
+      ],
+      "semantic_label": "拿到红包表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "297",
+      "source_describe": "/拜谢",
+      "asset_paths": [
+        "public/assets/qq_emoji/297/png/297.png",
+        "public/assets/qq_emoji/297/apng/297.png"
+      ],
+      "semantic_label": "拜谢表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "298",
+      "source_describe": "/元宝",
+      "asset_paths": [
+        "public/assets/qq_emoji/298/png/298.png",
+        "public/assets/qq_emoji/298/apng/298.png"
+      ],
+      "semantic_label": "元宝表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "299",
+      "source_describe": "/牛啊",
+      "asset_paths": [
+        "public/assets/qq_emoji/299/png/299.png",
+        "public/assets/qq_emoji/299/apng/299.png"
+      ],
+      "semantic_label": "牛啊表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "300",
+      "source_describe": "/胖三斤",
+      "asset_paths": [
+        "public/assets/qq_emoji/300/png/300.png",
+        "public/assets/qq_emoji/300/apng/300.png"
+      ],
+      "semantic_label": "胖三斤表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "301",
+      "source_describe": "/好闪",
+      "asset_paths": [],
+      "semantic_label": "好闪表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "302",
+      "source_describe": "/左拜年",
+      "asset_paths": [
+        "public/assets/qq_emoji/302/png/302.png",
+        "public/assets/qq_emoji/302/apng/302.png"
+      ],
+      "semantic_label": "左拜年表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "303",
+      "source_describe": "/右拜年",
+      "asset_paths": [
+        "public/assets/qq_emoji/303/png/303.png",
+        "public/assets/qq_emoji/303/apng/303.png"
+      ],
+      "semantic_label": "右拜年表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "305",
+      "source_describe": "/右亲亲",
+      "asset_paths": [
+        "public/assets/qq_emoji/305/png/305.png",
+        "public/assets/qq_emoji/305/apng/305.png"
+      ],
+      "semantic_label": "右亲亲表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "306",
+      "source_describe": "/牛气冲天",
+      "asset_paths": [
+        "public/assets/qq_emoji/306/png/306.png",
+        "public/assets/qq_emoji/306/apng/306.png"
+      ],
+      "semantic_label": "牛气冲天表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "307",
+      "source_describe": "/喵喵",
+      "asset_paths": [
+        "public/assets/qq_emoji/307/png/307.png",
+        "public/assets/qq_emoji/307/apng/307.png"
+      ],
+      "semantic_label": "喵喵表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "311",
+      "source_describe": "/打call",
+      "asset_paths": [
+        "public/assets/qq_emoji/311/png/311_0.png",
+        "public/assets/qq_emoji/311/png/311.png",
+        "public/assets/qq_emoji/311/apng/311.png",
+        "public/assets/qq_emoji/311/lottie/311.json"
+      ],
+      "semantic_label": "打call表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "312",
+      "source_describe": "/变形",
+      "asset_paths": [
+        "public/assets/qq_emoji/312/png/312_0.png",
+        "public/assets/qq_emoji/312/png/312.png",
+        "public/assets/qq_emoji/312/apng/312.png",
+        "public/assets/qq_emoji/312/lottie/312.json"
+      ],
+      "semantic_label": "变形表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "314",
+      "source_describe": "/仔细分析",
+      "asset_paths": [
+        "public/assets/qq_emoji/314/png/314_0.png",
+        "public/assets/qq_emoji/314/png/314.png",
+        "public/assets/qq_emoji/314/apng/314.png",
+        "public/assets/qq_emoji/314/lottie/314.json"
+      ],
+      "semantic_label": "仔细分析表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "317",
+      "source_describe": "/菜汪",
+      "asset_paths": [
+        "public/assets/qq_emoji/317/png/317_0.png",
+        "public/assets/qq_emoji/317/png/317.png",
+        "public/assets/qq_emoji/317/apng/317.png",
+        "public/assets/qq_emoji/317/lottie/317.json"
+      ],
+      "semantic_label": "菜汪表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "318",
+      "source_describe": "/崇拜",
+      "asset_paths": [
+        "public/assets/qq_emoji/318/png/318_0.png",
+        "public/assets/qq_emoji/318/png/318.png",
+        "public/assets/qq_emoji/318/apng/318.png",
+        "public/assets/qq_emoji/318/lottie/318.json"
+      ],
+      "semantic_label": "崇拜表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "319",
+      "source_describe": "/比心",
+      "asset_paths": [
+        "public/assets/qq_emoji/319/png/319_0.png",
+        "public/assets/qq_emoji/319/png/319.png",
+        "public/assets/qq_emoji/319/apng/319.png",
+        "public/assets/qq_emoji/319/lottie/319.json"
+      ],
+      "semantic_label": "比心表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "320",
+      "source_describe": "/庆祝",
+      "asset_paths": [
+        "public/assets/qq_emoji/320/png/320_0.png",
+        "public/assets/qq_emoji/320/png/320.png",
+        "public/assets/qq_emoji/320/apng/320.png",
+        "public/assets/qq_emoji/320/lottie/320.json"
+      ],
+      "semantic_label": "庆祝表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "322",
+      "source_describe": "/拒绝",
+      "asset_paths": [],
+      "semantic_label": "拒绝表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "323",
+      "source_describe": "/嫌弃",
+      "asset_paths": [
+        "public/assets/qq_emoji/323/png/323.png",
+        "public/assets/qq_emoji/323/apng/323.png"
+      ],
+      "semantic_label": "嫌弃表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "324",
+      "source_describe": "/吃糖",
+      "asset_paths": [
+        "public/assets/qq_emoji/324/png/324_0.png",
+        "public/assets/qq_emoji/324/png/324.png",
+        "public/assets/qq_emoji/324/apng/324.png",
+        "public/assets/qq_emoji/324/lottie/324.json"
+      ],
+      "semantic_label": "吃糖表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "325",
+      "source_describe": "/惊吓",
+      "asset_paths": [
+        "public/assets/qq_emoji/325/png/325_0.png",
+        "public/assets/qq_emoji/325/png/325.png",
+        "public/assets/qq_emoji/325/apng/325.png",
+        "public/assets/qq_emoji/325/lottie/325.json"
+      ],
+      "semantic_label": "惊吓表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "326",
+      "source_describe": "/生气",
+      "asset_paths": [
+        "public/assets/qq_emoji/326/png/326_0.png",
+        "public/assets/qq_emoji/326/png/326.png",
+        "public/assets/qq_emoji/326/apng/326.png",
+        "public/assets/qq_emoji/326/lottie/326.json"
+      ],
+      "semantic_label": "生气表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "332",
+      "source_describe": "/举牌牌",
+      "asset_paths": [
+        "public/assets/qq_emoji/332/png/332.png",
+        "public/assets/qq_emoji/332/apng/332.png"
+      ],
+      "semantic_label": "举牌牌表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "333",
+      "source_describe": "/烟花",
+      "asset_paths": [
+        "public/assets/qq_emoji/333/png/333_0.png",
+        "public/assets/qq_emoji/333/png/333.png",
+        "public/assets/qq_emoji/333/apng/333.png",
+        "public/assets/qq_emoji/333/lottie/333.json"
+      ],
+      "semantic_label": "烟花表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "334",
+      "source_describe": "/虎虎生威",
+      "asset_paths": [
+        "public/assets/qq_emoji/334/png/334.png",
+        "public/assets/qq_emoji/334/apng/334.png"
+      ],
+      "semantic_label": "虎虎生威表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "336",
+      "source_describe": "/豹富",
+      "asset_paths": [
+        "public/assets/qq_emoji/336/png/336.png",
+        "public/assets/qq_emoji/336/apng/336.png"
+      ],
+      "semantic_label": "豹富表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "337",
+      "source_describe": "/花朵脸",
+      "asset_paths": [
+        "public/assets/qq_emoji/337/png/337_0.png",
+        "public/assets/qq_emoji/337/png/337.png",
+        "public/assets/qq_emoji/337/apng/337.png",
+        "public/assets/qq_emoji/337/lottie/337.json"
+      ],
+      "semantic_label": "花朵脸表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "338",
+      "source_describe": "/我想开了",
+      "asset_paths": [
+        "public/assets/qq_emoji/338/png/338_0.png",
+        "public/assets/qq_emoji/338/png/338.png",
+        "public/assets/qq_emoji/338/apng/338.png",
+        "public/assets/qq_emoji/338/lottie/338.json"
+      ],
+      "semantic_label": "我想开了表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "339",
+      "source_describe": "/舔屏",
+      "asset_paths": [
+        "public/assets/qq_emoji/339/png/339_0.png",
+        "public/assets/qq_emoji/339/png/339.png",
+        "public/assets/qq_emoji/339/apng/339.png",
+        "public/assets/qq_emoji/339/lottie/339.json"
+      ],
+      "semantic_label": "舔屏表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "341",
+      "source_describe": "/打招呼",
+      "asset_paths": [
+        "public/assets/qq_emoji/341/png/341_0.png",
+        "public/assets/qq_emoji/341/png/341.png",
+        "public/assets/qq_emoji/341/apng/341.png",
+        "public/assets/qq_emoji/341/lottie/341.json"
+      ],
+      "semantic_label": "打招呼表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "342",
+      "source_describe": "/酸Q",
+      "asset_paths": [
+        "public/assets/qq_emoji/342/png/342_0.png",
+        "public/assets/qq_emoji/342/png/342.png",
+        "public/assets/qq_emoji/342/apng/342.png",
+        "public/assets/qq_emoji/342/lottie/342.json"
+      ],
+      "semantic_label": "酸Q表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "343",
+      "source_describe": "/我方了",
+      "asset_paths": [
+        "public/assets/qq_emoji/343/png/343_0.png",
+        "public/assets/qq_emoji/343/png/343.png",
+        "public/assets/qq_emoji/343/apng/343.png",
+        "public/assets/qq_emoji/343/lottie/343.json"
+      ],
+      "semantic_label": "我方了表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "344",
+      "source_describe": "/大怨种",
+      "asset_paths": [
+        "public/assets/qq_emoji/344/png/344_0.png",
+        "public/assets/qq_emoji/344/png/344.png",
+        "public/assets/qq_emoji/344/apng/344.png",
+        "public/assets/qq_emoji/344/lottie/344.json"
+      ],
+      "semantic_label": "大怨种表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "345",
+      "source_describe": "/红包多多",
+      "asset_paths": [
+        "public/assets/qq_emoji/345/png/345_0.png",
+        "public/assets/qq_emoji/345/png/345.png",
+        "public/assets/qq_emoji/345/apng/345.png",
+        "public/assets/qq_emoji/345/lottie/345.json"
+      ],
+      "semantic_label": "红包多多表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "346",
+      "source_describe": "/你真棒棒",
+      "asset_paths": [
+        "public/assets/qq_emoji/346/png/346_0.png",
+        "public/assets/qq_emoji/346/png/346.png",
+        "public/assets/qq_emoji/346/apng/346.png",
+        "public/assets/qq_emoji/346/lottie/346.json"
+      ],
+      "semantic_label": "你真棒棒表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "347",
+      "source_describe": "/大展宏兔",
+      "asset_paths": [
+        "public/assets/qq_emoji/347/png/347.png",
+        "public/assets/qq_emoji/347/apng/347.png"
+      ],
+      "semantic_label": "大展宏兔表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "348",
+      "source_describe": "/福萝卜",
+      "asset_paths": [],
+      "semantic_label": "福萝卜表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "349",
+      "source_describe": "/坚强",
+      "asset_paths": [
+        "public/assets/qq_emoji/349/png/349_0.png",
+        "public/assets/qq_emoji/349/png/349.png",
+        "public/assets/qq_emoji/349/apng/349.png",
+        "public/assets/qq_emoji/349/lottie/349.json"
+      ],
+      "semantic_label": "坚强表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "350",
+      "source_describe": "/贴贴",
+      "asset_paths": [
+        "public/assets/qq_emoji/350/png/350_0.png",
+        "public/assets/qq_emoji/350/png/350.png",
+        "public/assets/qq_emoji/350/apng/350.png",
+        "public/assets/qq_emoji/350/lottie/350.json"
+      ],
+      "semantic_label": "贴贴表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "351",
+      "source_describe": "/敲敲",
+      "asset_paths": [
+        "public/assets/qq_emoji/351/png/351_0.png",
+        "public/assets/qq_emoji/351/png/351.png",
+        "public/assets/qq_emoji/351/apng/351.png",
+        "public/assets/qq_emoji/351/lottie/351.json"
+      ],
+      "semantic_label": "敲敲表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "352",
+      "source_describe": "/咦",
+      "asset_paths": [
+        "public/assets/qq_emoji/352/png/352.png",
+        "public/assets/qq_emoji/352/apng/352.png"
+      ],
+      "semantic_label": "咦表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "353",
+      "source_describe": "/拜托",
+      "asset_paths": [
+        "public/assets/qq_emoji/353/png/353.png",
+        "public/assets/qq_emoji/353/apng/353.png"
+      ],
+      "semantic_label": "拜托表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "354",
+      "source_describe": "/尊嘟假嘟",
+      "asset_paths": [
+        "public/assets/qq_emoji/354/png/354.png",
+        "public/assets/qq_emoji/354/apng/354.png"
+      ],
+      "semantic_label": "尊嘟假嘟表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "355",
+      "source_describe": "/耶",
+      "asset_paths": [
+        "public/assets/qq_emoji/355/png/355.png",
+        "public/assets/qq_emoji/355/apng/355.png"
+      ],
+      "semantic_label": "耶表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "356",
+      "source_describe": "/666",
+      "asset_paths": [
+        "public/assets/qq_emoji/356/png/356.png",
+        "public/assets/qq_emoji/356/apng/356.png"
+      ],
+      "semantic_label": "夸赞厉害表情",
+      "label_basis": "source_name_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "357",
+      "source_describe": "/裂开",
+      "asset_paths": [
+        "public/assets/qq_emoji/357/png/357.png",
+        "public/assets/qq_emoji/357/apng/357.png"
+      ],
+      "semantic_label": "裂开表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "358",
+      "source_describe": "/骰子",
+      "asset_paths": [
+        "public/assets/qq_emoji/358/png/358_0.png",
+        "public/assets/qq_emoji/358/png/358.png",
+        "public/assets/qq_emoji/358/apng/358.png",
+        "public/assets/qq_emoji/358/lottie/358_1.json",
+        "public/assets/qq_emoji/358/lottie/358_2.json",
+        "public/assets/qq_emoji/358/lottie/358_3.json",
+        "public/assets/qq_emoji/358/lottie/358_4.json",
+        "public/assets/qq_emoji/358/lottie/358_5.json",
+        "public/assets/qq_emoji/358/lottie/358_6.json",
+        "public/assets/qq_emoji/358/lottie/358.json"
+      ],
+      "semantic_label": "骰子表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "359",
+      "source_describe": "/包剪锤",
+      "asset_paths": [
+        "public/assets/qq_emoji/359/png/359_0.png",
+        "public/assets/qq_emoji/359/png/359.png",
+        "public/assets/qq_emoji/359/apng/359.png",
+        "public/assets/qq_emoji/359/lottie/359_1.json",
+        "public/assets/qq_emoji/359/lottie/359_2.json",
+        "public/assets/qq_emoji/359/lottie/359_3.json",
+        "public/assets/qq_emoji/359/lottie/359.json"
+      ],
+      "semantic_label": "包剪锤表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "360",
+      "source_describe": "/亲亲",
+      "asset_paths": [
+        "public/assets/qq_emoji/360/png/360_0.png",
+        "public/assets/qq_emoji/360/png/360.png",
+        "public/assets/qq_emoji/360/apng/360.png",
+        "public/assets/qq_emoji/360/lottie/360.json"
+      ],
+      "semantic_label": "亲亲表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "361",
+      "source_describe": "/狗狗笑哭",
+      "asset_paths": [
+        "public/assets/qq_emoji/361/png/361_0.png",
+        "public/assets/qq_emoji/361/png/361.png",
+        "public/assets/qq_emoji/361/apng/361.png",
+        "public/assets/qq_emoji/361/lottie/361.json"
+      ],
+      "semantic_label": "狗狗笑哭表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "362",
+      "source_describe": "/好兄弟",
+      "asset_paths": [
+        "public/assets/qq_emoji/362/png/362_0.png",
+        "public/assets/qq_emoji/362/png/362.png",
+        "public/assets/qq_emoji/362/apng/362.png",
+        "public/assets/qq_emoji/362/lottie/362.json"
+      ],
+      "semantic_label": "好兄弟表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "363",
+      "source_describe": "/狗狗可怜",
+      "asset_paths": [
+        "public/assets/qq_emoji/363/png/363_0.png",
+        "public/assets/qq_emoji/363/png/363.png",
+        "public/assets/qq_emoji/363/apng/363.png",
+        "public/assets/qq_emoji/363/lottie/363.json"
+      ],
+      "semantic_label": "狗狗可怜表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "364",
+      "source_describe": "/超级赞",
+      "asset_paths": [
+        "public/assets/qq_emoji/364/png/364_0.png",
+        "public/assets/qq_emoji/364/png/364.png",
+        "public/assets/qq_emoji/364/apng/364.png",
+        "public/assets/qq_emoji/364/lottie/364.json"
+      ],
+      "semantic_label": "超级赞表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "365",
+      "source_describe": "/狗狗生气",
+      "asset_paths": [
+        "public/assets/qq_emoji/365/png/365_0.png",
+        "public/assets/qq_emoji/365/png/365.png",
+        "public/assets/qq_emoji/365/apng/365.png",
+        "public/assets/qq_emoji/365/lottie/365.json"
+      ],
+      "semantic_label": "狗狗生气表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "366",
+      "source_describe": "/芒狗",
+      "asset_paths": [
+        "public/assets/qq_emoji/366/png/366_0.png",
+        "public/assets/qq_emoji/366/png/366.png",
+        "public/assets/qq_emoji/366/apng/366.png",
+        "public/assets/qq_emoji/366/lottie/366.json"
+      ],
+      "semantic_label": "芒狗表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "367",
+      "source_describe": "/狗狗疑问",
+      "asset_paths": [
+        "public/assets/qq_emoji/367/png/367_0.png",
+        "public/assets/qq_emoji/367/png/367.png",
+        "public/assets/qq_emoji/367/apng/367.png",
+        "public/assets/qq_emoji/367/lottie/367.json"
+      ],
+      "semantic_label": "狗狗疑问表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "368",
+      "source_describe": "/奥特笑哭",
+      "asset_paths": [
+        "public/assets/qq_emoji/368/png/368_0.png",
+        "public/assets/qq_emoji/368/png/368.png",
+        "public/assets/qq_emoji/368/apng/368.png",
+        "public/assets/qq_emoji/368/lottie/368.json"
+      ],
+      "semantic_label": "奥特笑哭表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "369",
+      "source_describe": "/彩虹",
+      "asset_paths": [
+        "public/assets/qq_emoji/369/png/369_0.png",
+        "public/assets/qq_emoji/369/png/369.png",
+        "public/assets/qq_emoji/369/apng/369.png",
+        "public/assets/qq_emoji/369/lottie/369.json"
+      ],
+      "semantic_label": "彩虹表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "370",
+      "source_describe": "/祝贺",
+      "asset_paths": [
+        "public/assets/qq_emoji/370/png/370_0.png",
+        "public/assets/qq_emoji/370/png/370.png",
+        "public/assets/qq_emoji/370/apng/370.png",
+        "public/assets/qq_emoji/370/lottie/370.json"
+      ],
+      "semantic_label": "祝贺表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "371",
+      "source_describe": "/冒泡",
+      "asset_paths": [
+        "public/assets/qq_emoji/371/png/371_0.png",
+        "public/assets/qq_emoji/371/png/371.png",
+        "public/assets/qq_emoji/371/apng/371.png",
+        "public/assets/qq_emoji/371/lottie/371.json"
+      ],
+      "semantic_label": "冒泡表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "372",
+      "source_describe": "/气呼呼",
+      "asset_paths": [
+        "public/assets/qq_emoji/372/png/372_0.png",
+        "public/assets/qq_emoji/372/png/372.png",
+        "public/assets/qq_emoji/372/apng/372.png",
+        "public/assets/qq_emoji/372/lottie/372.json"
+      ],
+      "semantic_label": "气呼呼表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "373",
+      "source_describe": "/忙",
+      "asset_paths": [
+        "public/assets/qq_emoji/373/png/373_0.png",
+        "public/assets/qq_emoji/373/png/373.png",
+        "public/assets/qq_emoji/373/apng/373.png",
+        "public/assets/qq_emoji/373/lottie/373.json"
+      ],
+      "semantic_label": "忙表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "374",
+      "source_describe": "/波波流泪",
+      "asset_paths": [
+        "public/assets/qq_emoji/374/png/374_0.png",
+        "public/assets/qq_emoji/374/png/374.png",
+        "public/assets/qq_emoji/374/apng/374.png",
+        "public/assets/qq_emoji/374/lottie/374.json"
+      ],
+      "semantic_label": "波波流泪表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "375",
+      "source_describe": "/超级鼓掌",
+      "asset_paths": [
+        "public/assets/qq_emoji/375/png/375_0.png",
+        "public/assets/qq_emoji/375/png/375.png",
+        "public/assets/qq_emoji/375/apng/375.png",
+        "public/assets/qq_emoji/375/lottie/375.json"
+      ],
+      "semantic_label": "超级鼓掌表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "376",
+      "source_describe": "/跺脚",
+      "asset_paths": [
+        "public/assets/qq_emoji/376/png/376_0.png",
+        "public/assets/qq_emoji/376/png/376.png",
+        "public/assets/qq_emoji/376/apng/376.png",
+        "public/assets/qq_emoji/376/lottie/376.json"
+      ],
+      "semantic_label": "跺脚表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "377",
+      "source_describe": "/嗨",
+      "asset_paths": [
+        "public/assets/qq_emoji/377/png/377_0.png",
+        "public/assets/qq_emoji/377/png/377.png",
+        "public/assets/qq_emoji/377/apng/377.png",
+        "public/assets/qq_emoji/377/lottie/377.json"
+      ],
+      "semantic_label": "嗨表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "378",
+      "source_describe": "/企鹅笑哭",
+      "asset_paths": [
+        "public/assets/qq_emoji/378/png/378_0.png",
+        "public/assets/qq_emoji/378/png/378.png",
+        "public/assets/qq_emoji/378/apng/378.png",
+        "public/assets/qq_emoji/378/lottie/378.json"
+      ],
+      "semantic_label": "企鹅笑哭表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "379",
+      "source_describe": "/企鹅流泪",
+      "asset_paths": [
+        "public/assets/qq_emoji/379/png/379_0.png",
+        "public/assets/qq_emoji/379/png/379.png",
+        "public/assets/qq_emoji/379/apng/379.png",
+        "public/assets/qq_emoji/379/lottie/379.json"
+      ],
+      "semantic_label": "企鹅流泪表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "380",
+      "source_describe": "/真棒",
+      "asset_paths": [
+        "public/assets/qq_emoji/380/png/380_0.png",
+        "public/assets/qq_emoji/380/png/380.png",
+        "public/assets/qq_emoji/380/apng/380.png",
+        "public/assets/qq_emoji/380/lottie/380.json"
+      ],
+      "semantic_label": "真棒表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "381",
+      "source_describe": "/路过",
+      "asset_paths": [
+        "public/assets/qq_emoji/381/png/381_0.png",
+        "public/assets/qq_emoji/381/png/381.png",
+        "public/assets/qq_emoji/381/apng/381.png",
+        "public/assets/qq_emoji/381/lottie/381.json"
+      ],
+      "semantic_label": "路过表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "382",
+      "source_describe": "/emo",
+      "asset_paths": [
+        "public/assets/qq_emoji/382/png/382_0.png",
+        "public/assets/qq_emoji/382/png/382.png",
+        "public/assets/qq_emoji/382/apng/382.png",
+        "public/assets/qq_emoji/382/lottie/382.json"
+      ],
+      "semantic_label": "emo低落表情",
+      "label_basis": "source_name_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "383",
+      "source_describe": "/企鹅爱心",
+      "asset_paths": [
+        "public/assets/qq_emoji/383/png/383_0.png",
+        "public/assets/qq_emoji/383/png/383.png",
+        "public/assets/qq_emoji/383/apng/383.png",
+        "public/assets/qq_emoji/383/lottie/383.json"
+      ],
+      "semantic_label": "企鹅爱心表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "384",
+      "source_describe": "/晚安",
+      "asset_paths": [
+        "public/assets/qq_emoji/384/png/384_0.png",
+        "public/assets/qq_emoji/384/png/384.png",
+        "public/assets/qq_emoji/384/apng/384.png",
+        "public/assets/qq_emoji/384/lottie/384.json"
+      ],
+      "semantic_label": "晚安表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "385",
+      "source_describe": "/太气了",
+      "asset_paths": [
+        "public/assets/qq_emoji/385/png/385_0.png",
+        "public/assets/qq_emoji/385/png/385.png",
+        "public/assets/qq_emoji/385/apng/385.png",
+        "public/assets/qq_emoji/385/lottie/385.json"
+      ],
+      "semantic_label": "太气了表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "386",
+      "source_describe": "/呜呜呜",
+      "asset_paths": [
+        "public/assets/qq_emoji/386/png/386_0.png",
+        "public/assets/qq_emoji/386/png/386.png",
+        "public/assets/qq_emoji/386/apng/386.png",
+        "public/assets/qq_emoji/386/lottie/386.json"
+      ],
+      "semantic_label": "呜呜呜表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "387",
+      "source_describe": "/太好笑",
+      "asset_paths": [
+        "public/assets/qq_emoji/387/png/387_0.png",
+        "public/assets/qq_emoji/387/png/387.png",
+        "public/assets/qq_emoji/387/apng/387.png",
+        "public/assets/qq_emoji/387/lottie/387.json"
+      ],
+      "semantic_label": "太好笑表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "388",
+      "source_describe": "/太头疼",
+      "asset_paths": [
+        "public/assets/qq_emoji/388/png/388_0.png",
+        "public/assets/qq_emoji/388/png/388.png",
+        "public/assets/qq_emoji/388/apng/388.png",
+        "public/assets/qq_emoji/388/lottie/388.json"
+      ],
+      "semantic_label": "太头疼表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "389",
+      "source_describe": "/太赞了",
+      "asset_paths": [
+        "public/assets/qq_emoji/389/png/389_0.png",
+        "public/assets/qq_emoji/389/png/389.png",
+        "public/assets/qq_emoji/389/apng/389.png",
+        "public/assets/qq_emoji/389/lottie/389.json"
+      ],
+      "semantic_label": "太赞了表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "390",
+      "source_describe": "/太头秃",
+      "asset_paths": [
+        "public/assets/qq_emoji/390/png/390_0.png",
+        "public/assets/qq_emoji/390/png/390.png",
+        "public/assets/qq_emoji/390/apng/390.png",
+        "public/assets/qq_emoji/390/lottie/390.json"
+      ],
+      "semantic_label": "太头秃表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "391",
+      "source_describe": "/太沧桑",
+      "asset_paths": [
+        "public/assets/qq_emoji/391/png/391_0.png",
+        "public/assets/qq_emoji/391/png/391.png",
+        "public/assets/qq_emoji/391/apng/391.png",
+        "public/assets/qq_emoji/391/lottie/391.json"
+      ],
+      "semantic_label": "太沧桑表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "392",
+      "source_describe": "/龙年快乐",
+      "asset_paths": [
+        "public/assets/qq_emoji/392/png/392_0.png",
+        "public/assets/qq_emoji/392/png/392.png",
+        "public/assets/qq_emoji/392/apng/392.png",
+        "public/assets/qq_emoji/392/lottie/392.json"
+      ],
+      "semantic_label": "龙年快乐表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "393",
+      "source_describe": "/新年中龙",
+      "asset_paths": [
+        "public/assets/qq_emoji/393/png/393_0.png",
+        "public/assets/qq_emoji/393/png/393.png",
+        "public/assets/qq_emoji/393/apng/393.png",
+        "public/assets/qq_emoji/393/lottie/393.json"
+      ],
+      "semantic_label": "新年中龙表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "394",
+      "source_describe": "/新年大龙",
+      "asset_paths": [
+        "public/assets/qq_emoji/394/png/394_0.png",
+        "public/assets/qq_emoji/394/png/394.png",
+        "public/assets/qq_emoji/394/apng/394.png",
+        "public/assets/qq_emoji/394/lottie/surprise/100_padLandScape.json",
+        "public/assets/qq_emoji/394/lottie/surprise/100.json",
+        "public/assets/qq_emoji/394/lottie/394_1.json",
+        "public/assets/qq_emoji/394/lottie/394_2.json",
+        "public/assets/qq_emoji/394/lottie/394_3.json",
+        "public/assets/qq_emoji/394/lottie/394_4.json",
+        "public/assets/qq_emoji/394/lottie/394_5.json",
+        "public/assets/qq_emoji/394/lottie/394_6.json",
+        "public/assets/qq_emoji/394/lottie/394.json"
+      ],
+      "semantic_label": "新年大龙表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "395",
+      "source_describe": "/略略略",
+      "asset_paths": [
+        "public/assets/qq_emoji/395/png/395_0.png",
+        "public/assets/qq_emoji/395/png/395.png",
+        "public/assets/qq_emoji/395/apng/395.png",
+        "public/assets/qq_emoji/395/lottie/395.json"
+      ],
+      "semantic_label": "略略略表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "396",
+      "source_describe": "/狼狗",
+      "asset_paths": [
+        "public/assets/qq_emoji/396/png/396_0.png",
+        "public/assets/qq_emoji/396/png/396.png",
+        "public/assets/qq_emoji/396/apng/396.png",
+        "public/assets/qq_emoji/396/lottie/396.json"
+      ],
+      "semantic_label": "狼狗表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "397",
+      "source_describe": "/抛媚眼",
+      "asset_paths": [
+        "public/assets/qq_emoji/397/png/397_0.png",
+        "public/assets/qq_emoji/397/png/397.png",
+        "public/assets/qq_emoji/397/apng/397.png",
+        "public/assets/qq_emoji/397/lottie/397.json"
+      ],
+      "semantic_label": "抛媚眼表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "398",
+      "source_describe": "/超级ok",
+      "asset_paths": [
+        "public/assets/qq_emoji/398/png/398_0.png",
+        "public/assets/qq_emoji/398/png/398.png",
+        "public/assets/qq_emoji/398/apng/398.png",
+        "public/assets/qq_emoji/398/lottie/398.json"
+      ],
+      "semantic_label": "超级ok表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "399",
+      "source_describe": "/tui",
+      "asset_paths": [
+        "public/assets/qq_emoji/399/png/399_0.png",
+        "public/assets/qq_emoji/399/png/399.png",
+        "public/assets/qq_emoji/399/apng/399.png",
+        "public/assets/qq_emoji/399/lottie/399.json"
+      ],
+      "semantic_label": "吐口水嫌弃表情",
+      "label_basis": "source_name_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "400",
+      "source_describe": "/快乐",
+      "asset_paths": [
+        "public/assets/qq_emoji/400/png/400_0.png",
+        "public/assets/qq_emoji/400/png/400.png",
+        "public/assets/qq_emoji/400/apng/400.png",
+        "public/assets/qq_emoji/400/lottie/400.json"
+      ],
+      "semantic_label": "快乐表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "401",
+      "source_describe": "/超级转圈",
+      "asset_paths": [
+        "public/assets/qq_emoji/401/png/401_0.png",
+        "public/assets/qq_emoji/401/png/401.png",
+        "public/assets/qq_emoji/401/apng/401.png",
+        "public/assets/qq_emoji/401/lottie/401.json"
+      ],
+      "semantic_label": "超级转圈表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "402",
+      "source_describe": "/别说话",
+      "asset_paths": [
+        "public/assets/qq_emoji/402/png/402_0.png",
+        "public/assets/qq_emoji/402/png/402.png",
+        "public/assets/qq_emoji/402/apng/402.png",
+        "public/assets/qq_emoji/402/lottie/402.json"
+      ],
+      "semantic_label": "别说话表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "403",
+      "source_describe": "/出去玩",
+      "asset_paths": [
+        "public/assets/qq_emoji/403/png/403_0.png",
+        "public/assets/qq_emoji/403/png/403.png",
+        "public/assets/qq_emoji/403/apng/403.png",
+        "public/assets/qq_emoji/403/lottie/403.json"
+      ],
+      "semantic_label": "出去玩表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "404",
+      "source_describe": "/闪亮登场",
+      "asset_paths": [
+        "public/assets/qq_emoji/404/png/404_0.png",
+        "public/assets/qq_emoji/404/png/404.png",
+        "public/assets/qq_emoji/404/apng/404.png",
+        "public/assets/qq_emoji/404/lottie/404.json"
+      ],
+      "semantic_label": "闪亮登场表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "405",
+      "source_describe": "/好运来",
+      "asset_paths": [
+        "public/assets/qq_emoji/405/png/405_0.png",
+        "public/assets/qq_emoji/405/png/405.png",
+        "public/assets/qq_emoji/405/apng/405.png",
+        "public/assets/qq_emoji/405/lottie/405.json"
+      ],
+      "semantic_label": "好运来表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "406",
+      "source_describe": "/姐是女王",
+      "asset_paths": [
+        "public/assets/qq_emoji/406/png/406_0.png",
+        "public/assets/qq_emoji/406/png/406.png",
+        "public/assets/qq_emoji/406/apng/406.png",
+        "public/assets/qq_emoji/406/lottie/406.json"
+      ],
+      "semantic_label": "姐是女王表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "407",
+      "source_describe": "/我听听",
+      "asset_paths": [
+        "public/assets/qq_emoji/407/png/407_0.png",
+        "public/assets/qq_emoji/407/png/407.png",
+        "public/assets/qq_emoji/407/apng/407.png",
+        "public/assets/qq_emoji/407/lottie/407.json"
+      ],
+      "semantic_label": "我听听表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "408",
+      "source_describe": "/臭美",
+      "asset_paths": [
+        "public/assets/qq_emoji/408/png/408_0.png",
+        "public/assets/qq_emoji/408/png/408.png",
+        "public/assets/qq_emoji/408/apng/408.png",
+        "public/assets/qq_emoji/408/lottie/408.json"
+      ],
+      "semantic_label": "臭美表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "409",
+      "source_describe": "/送你花花",
+      "asset_paths": [
+        "public/assets/qq_emoji/409/png/409_0.png",
+        "public/assets/qq_emoji/409/png/409.png",
+        "public/assets/qq_emoji/409/apng/409.png",
+        "public/assets/qq_emoji/409/lottie/409.json"
+      ],
+      "semantic_label": "送你花花表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "410",
+      "source_describe": "/么么哒",
+      "asset_paths": [
+        "public/assets/qq_emoji/410/png/410_0.png",
+        "public/assets/qq_emoji/410/png/410.png",
+        "public/assets/qq_emoji/410/apng/410.png",
+        "public/assets/qq_emoji/410/lottie/410.json"
+      ],
+      "semantic_label": "么么哒表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "411",
+      "source_describe": "/一起嗨",
+      "asset_paths": [
+        "public/assets/qq_emoji/411/png/411_0.png",
+        "public/assets/qq_emoji/411/png/411.png",
+        "public/assets/qq_emoji/411/apng/411.png",
+        "public/assets/qq_emoji/411/lottie/411.json"
+      ],
+      "semantic_label": "一起嗨表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "412",
+      "source_describe": "/开心",
+      "asset_paths": [
+        "public/assets/qq_emoji/412/png/412_0.png",
+        "public/assets/qq_emoji/412/png/412.png",
+        "public/assets/qq_emoji/412/apng/412.png",
+        "public/assets/qq_emoji/412/lottie/412.json"
+      ],
+      "semantic_label": "开心表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "413",
+      "source_describe": "/摇起来",
+      "asset_paths": [
+        "public/assets/qq_emoji/413/png/413_0.png",
+        "public/assets/qq_emoji/413/png/413.png",
+        "public/assets/qq_emoji/413/apng/413.png",
+        "public/assets/qq_emoji/413/lottie/413.json"
+      ],
+      "semantic_label": "摇起来表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "415",
+      "source_describe": "/划龙舟",
+      "asset_paths": [
+        "public/assets/qq_emoji/415/png/415_0.png",
+        "public/assets/qq_emoji/415/png/415.png",
+        "public/assets/qq_emoji/415/apng/415.png",
+        "public/assets/qq_emoji/415/lottie/415.json"
+      ],
+      "semantic_label": "划龙舟表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "416",
+      "source_describe": "/中龙舟",
+      "asset_paths": [
+        "public/assets/qq_emoji/416/png/416_0.png",
+        "public/assets/qq_emoji/416/png/416.png",
+        "public/assets/qq_emoji/416/apng/416.png",
+        "public/assets/qq_emoji/416/lottie/416.json"
+      ],
+      "semantic_label": "中龙舟表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "417",
+      "source_describe": "/大龙舟",
+      "asset_paths": [
+        "public/assets/qq_emoji/417/png/417_0.png",
+        "public/assets/qq_emoji/417/png/417.png",
+        "public/assets/qq_emoji/417/apng/417.png",
+        "public/assets/qq_emoji/417/lottie/surprise/100_padLandScape.json",
+        "public/assets/qq_emoji/417/lottie/surprise/100.json",
+        "public/assets/qq_emoji/417/lottie/417_1.json",
+        "public/assets/qq_emoji/417/lottie/417_2.json",
+        "public/assets/qq_emoji/417/lottie/417_3.json",
+        "public/assets/qq_emoji/417/lottie/417_4.json",
+        "public/assets/qq_emoji/417/lottie/417_5.json",
+        "public/assets/qq_emoji/417/lottie/417_6.json",
+        "public/assets/qq_emoji/417/lottie/417.json"
+      ],
+      "semantic_label": "大龙舟表情",
+      "label_basis": "source_name",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "419",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/419/png/419_0.png",
+        "public/assets/qq_emoji/419/png/419.png",
+        "public/assets/qq_emoji/419/apng/419.png",
+        "public/assets/qq_emoji/419/lottie/419.json"
+      ],
+      "semantic_label": "绿色火车头表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "420",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/420/png/420_0.png",
+        "public/assets/qq_emoji/420/png/420.png",
+        "public/assets/qq_emoji/420/apng/420.png",
+        "public/assets/qq_emoji/420/lottie/420.json"
+      ],
+      "semantic_label": "双节绿色小火车表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "421",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/421/png/421_0.png",
+        "public/assets/qq_emoji/421/png/421.png",
+        "public/assets/qq_emoji/421/apng/421.png",
+        "public/assets/qq_emoji/421/lottie/surprise/100_padLandScape.json",
+        "public/assets/qq_emoji/421/lottie/surprise/100.json",
+        "public/assets/qq_emoji/421/lottie/421_1.json",
+        "public/assets/qq_emoji/421/lottie/421_2.json",
+        "public/assets/qq_emoji/421/lottie/421_3.json",
+        "public/assets/qq_emoji/421/lottie/421_4.json",
+        "public/assets/qq_emoji/421/lottie/421_5.json",
+        "public/assets/qq_emoji/421/lottie/421_6.json",
+        "public/assets/qq_emoji/421/lottie/421.json"
+      ],
+      "semantic_label": "绿色小火车表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "422",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/422/png/422_0.png",
+        "public/assets/qq_emoji/422/png/422.png",
+        "public/assets/qq_emoji/422/apng/422.png",
+        "public/assets/qq_emoji/422/lottie/422.json"
+      ],
+      "semantic_label": "莲花坐姿笑脸表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "423",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/423/png/423_0.png",
+        "public/assets/qq_emoji/423/png/423.png",
+        "public/assets/qq_emoji/423/apng/423.png",
+        "public/assets/qq_emoji/423/lottie/423.json"
+      ],
+      "semantic_label": "长城高铁旅行表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "424",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/424/png/424_0.png",
+        "public/assets/qq_emoji/424/png/424.png",
+        "public/assets/qq_emoji/424/apng/424.png",
+        "public/assets/qq_emoji/424/lottie/424.json"
+      ],
+      "semantic_label": "按红色按钮表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "425",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/425/png/425_0.png",
+        "public/assets/qq_emoji/425/png/425.png",
+        "public/assets/qq_emoji/425/apng/425.png",
+        "public/assets/qq_emoji/425/lottie/425.json"
+      ],
+      "semantic_label": "跪地眼泪汪汪表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "426",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/426/png/426_0.png",
+        "public/assets/qq_emoji/426/png/426.png",
+        "public/assets/qq_emoji/426/apng/426.png",
+        "public/assets/qq_emoji/426/lottie/426.json"
+      ],
+      "semantic_label": "叼玫瑰抛媚眼表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "427",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/427/png/427_0.png",
+        "public/assets/qq_emoji/427/png/427.png",
+        "public/assets/qq_emoji/427/apng/427.png",
+        "public/assets/qq_emoji/427/lottie/427.json"
+      ],
+      "semantic_label": "脸色发绿干呕表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "428",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/428/png/428.png",
+        "public/assets/qq_emoji/428/apng/428.png"
+      ],
+      "semantic_label": "疲惫无语脸表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "429",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/429/png/429_0.png",
+        "public/assets/qq_emoji/429/png/429.png",
+        "public/assets/qq_emoji/429/apng/429.png",
+        "public/assets/qq_emoji/429/lottie/429.json"
+      ],
+      "semantic_label": "橙色小蛇表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "430",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/430/png/430_0.png",
+        "public/assets/qq_emoji/430/png/430.png",
+        "public/assets/qq_emoji/430/apng/430.png",
+        "public/assets/qq_emoji/430/lottie/430.json"
+      ],
+      "semantic_label": "彩色小蛇表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "431",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/431/png/431_0.png",
+        "public/assets/qq_emoji/431/png/431.png",
+        "public/assets/qq_emoji/431/apng/431.png",
+        "public/assets/qq_emoji/431/lottie/surprise/100_padLandScape.json",
+        "public/assets/qq_emoji/431/lottie/surprise/100.json",
+        "public/assets/qq_emoji/431/lottie/431_1.json",
+        "public/assets/qq_emoji/431/lottie/431_2.json",
+        "public/assets/qq_emoji/431/lottie/431_3.json",
+        "public/assets/qq_emoji/431/lottie/431_4.json",
+        "public/assets/qq_emoji/431/lottie/431_5.json",
+        "public/assets/qq_emoji/431/lottie/431_6.json",
+        "public/assets/qq_emoji/431/lottie/431.json"
+      ],
+      "semantic_label": "灰色小蛇剪影表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "432",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/432/png/432_0.png",
+        "public/assets/qq_emoji/432/png/432.png",
+        "public/assets/qq_emoji/432/apng/432.png",
+        "public/assets/qq_emoji/432/lottie/432.json"
+      ],
+      "semantic_label": "万事顺利蛇年表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "450",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/450/png/450_0.png",
+        "public/assets/qq_emoji/450/png/450.png",
+        "public/assets/qq_emoji/450/apng/450.png",
+        "public/assets/qq_emoji/450/lottie/450.json"
+      ],
+      "semantic_label": "委屈皱脸表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "451",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/451/png/451_0.png",
+        "public/assets/qq_emoji/451/png/451.png",
+        "public/assets/qq_emoji/451/apng/451.png",
+        "public/assets/qq_emoji/451/lottie/451.json"
+      ],
+      "semantic_label": "花痴爱心眼表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "452",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/452/png/452_0.png",
+        "public/assets/qq_emoji/452/png/452.png",
+        "public/assets/qq_emoji/452/apng/452.png",
+        "public/assets/qq_emoji/452/lottie/452.json"
+      ],
+      "semantic_label": "单纯微笑表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "453",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/453/png/453_0.png",
+        "public/assets/qq_emoji/453/png/453.png",
+        "public/assets/qq_emoji/453/apng/453.png",
+        "public/assets/qq_emoji/453/lottie/453.json"
+      ],
+      "semantic_label": "激动流鼻涕表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "454",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/454/png/454_0.png",
+        "public/assets/qq_emoji/454/png/454.png",
+        "public/assets/qq_emoji/454/apng/454.png",
+        "public/assets/qq_emoji/454/lottie/454.json"
+      ],
+      "semantic_label": "戴墨镜酷笑表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "455",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/455/png/455_0.png",
+        "public/assets/qq_emoji/455/png/455.png",
+        "public/assets/qq_emoji/455/apng/455.png",
+        "public/assets/qq_emoji/455/lottie/455.json"
+      ],
+      "semantic_label": "期待星星眼表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "456",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/456/png/456_0.png",
+        "public/assets/qq_emoji/456/png/456.png",
+        "public/assets/qq_emoji/456/apng/456.png",
+        "public/assets/qq_emoji/456/lottie/456.json"
+      ],
+      "semantic_label": "闭嘴胶带表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "457",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/457/png/457_0.png",
+        "public/assets/qq_emoji/457/png/457.png",
+        "public/assets/qq_emoji/457/apng/457.png",
+        "public/assets/qq_emoji/457/lottie/457.json"
+      ],
+      "semantic_label": "睡觉流口水表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "458",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/458/png/458_0.png",
+        "public/assets/qq_emoji/458/png/458.png",
+        "public/assets/qq_emoji/458/apng/458.png",
+        "public/assets/qq_emoji/458/lottie/458.json"
+      ],
+      "semantic_label": "戳脸思考表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "459",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/459/png/459_0.png",
+        "public/assets/qq_emoji/459/png/459.png",
+        "public/assets/qq_emoji/459/apng/459.png",
+        "public/assets/qq_emoji/459/lottie/459.json"
+      ],
+      "semantic_label": "涂口红魅惑表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "460",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/460/png/460_0.png",
+        "public/assets/qq_emoji/460/png/460.png",
+        "public/assets/qq_emoji/460/apng/460.png",
+        "public/assets/qq_emoji/460/lottie/460.json"
+      ],
+      "semantic_label": "冷漠嫌弃表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "461",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/461/png/461_0.png",
+        "public/assets/qq_emoji/461/png/461.png",
+        "public/assets/qq_emoji/461/apng/461.png",
+        "public/assets/qq_emoji/461/lottie/461.json"
+      ],
+      "semantic_label": "加载卡住表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "462",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/462/png/462_0.png",
+        "public/assets/qq_emoji/462/png/462.png",
+        "public/assets/qq_emoji/462/apng/462.png",
+        "public/assets/qq_emoji/462/lottie/462.json"
+      ],
+      "semantic_label": "笑出汗表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "463",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/463/png/463_0.png",
+        "public/assets/qq_emoji/463/png/463.png",
+        "public/assets/qq_emoji/463/apng/463.png",
+        "public/assets/qq_emoji/463/lottie/463.json"
+      ],
+      "semantic_label": "新年卷轴表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "464",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/464/png/464_0.png",
+        "public/assets/qq_emoji/464/png/464.png",
+        "public/assets/qq_emoji/464/apng/464.png",
+        "public/assets/qq_emoji/464/lottie/464.json"
+      ],
+      "semantic_label": "开车得意表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "465",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/465/png/465_0.png",
+        "public/assets/qq_emoji/465/png/465.png",
+        "public/assets/qq_emoji/465/apng/465.png",
+        "public/assets/qq_emoji/465/lottie/465.json"
+      ],
+      "semantic_label": "发红包表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "466",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/466/png/466_0.png",
+        "public/assets/qq_emoji/466/png/466.png",
+        "public/assets/qq_emoji/466/apng/466.png",
+        "public/assets/qq_emoji/466/lottie/466.json"
+      ],
+      "semantic_label": "托腮坏笑表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "467",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/467/png/467_0.png",
+        "public/assets/qq_emoji/467/png/467.png",
+        "public/assets/qq_emoji/467/apng/467.png",
+        "public/assets/qq_emoji/467/lottie/467.json"
+      ],
+      "semantic_label": "被摸头表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "468",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/468/png/468_0.png",
+        "public/assets/qq_emoji/468/png/468.png",
+        "public/assets/qq_emoji/468/apng/468.png",
+        "public/assets/qq_emoji/468/lottie/468.json"
+      ],
+      "semantic_label": "抓纸紧张表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "469",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/469/png/469_0.png",
+        "public/assets/qq_emoji/469/png/469.png",
+        "public/assets/qq_emoji/469/apng/469.png",
+        "public/assets/qq_emoji/469/lottie/469.json"
+      ],
+      "semantic_label": "嘘声保密表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "470",
+      "source_describe": "",
+      "asset_paths": [
+        "public/assets/qq_emoji/470/png/470.png",
+        "public/assets/qq_emoji/470/apng/470.png"
+      ],
+      "semantic_label": "红色河豚企鹅表情",
+      "label_basis": "asset_review",
+      "review_status": "reviewed"
+    },
+    {
+      "id": "〽",
+      "source_describe": "/股票",
+      "asset_paths": [],
+      "semantic_label": "股票表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "☀",
+      "source_describe": "/晴天",
+      "asset_paths": [
+        "public/assets/qq_emoji/☀/png/☀.png"
+      ],
+      "semantic_label": "晴天表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "☁",
+      "source_describe": "/云朵",
+      "asset_paths": [],
+      "semantic_label": "云朵表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "☎",
+      "source_describe": "/电话",
+      "asset_paths": [],
+      "semantic_label": "电话表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "☔",
+      "source_describe": "/雨天",
+      "asset_paths": [],
+      "semantic_label": "雨天表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "☕",
+      "source_describe": "/咖啡",
+      "asset_paths": [
+        "public/assets/qq_emoji/☕/png/☕.png"
+      ],
+      "semantic_label": "咖啡表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "☝",
+      "source_describe": "/向上",
+      "asset_paths": [],
+      "semantic_label": "向上表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "☺",
+      "source_describe": "/可爱",
+      "asset_paths": [
+        "public/assets/qq_emoji/☺/png/☺.png"
+      ],
+      "semantic_label": "可爱表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "♣",
+      "source_describe": "/扑克",
+      "asset_paths": [],
+      "semantic_label": "扑克表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "♨",
+      "source_describe": "/热",
+      "asset_paths": [],
+      "semantic_label": "热表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "⚡",
+      "source_describe": "/闪电",
+      "asset_paths": [],
+      "semantic_label": "闪电表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "⛄",
+      "source_describe": "/雪人",
+      "asset_paths": [],
+      "semantic_label": "雪人表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "⛪",
+      "source_describe": "/教堂",
+      "asset_paths": [],
+      "semantic_label": "教堂表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "⛵",
+      "source_describe": "/船",
+      "asset_paths": [],
+      "semantic_label": "船表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "✈",
+      "source_describe": "/飞机",
+      "asset_paths": [],
+      "semantic_label": "飞机表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "✌",
+      "source_describe": "/胜利",
+      "asset_paths": [],
+      "semantic_label": "胜利表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "✨",
+      "source_describe": "/闪光",
+      "asset_paths": [
+        "public/assets/qq_emoji/✨/png/✨.png"
+      ],
+      "semantic_label": "闪光表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "❌",
+      "source_describe": "/错误",
+      "asset_paths": [],
+      "semantic_label": "错误表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "❔",
+      "source_describe": "/问号",
+      "asset_paths": [
+        "public/assets/qq_emoji/❔/png/❔.png"
+      ],
+      "semantic_label": "问号表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "❕",
+      "source_describe": "/叹号",
+      "asset_paths": [],
+      "semantic_label": "叹号表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "⭐",
+      "source_describe": "/星星",
+      "asset_paths": [],
+      "semantic_label": "星星表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "⭕",
+      "source_describe": "/正确",
+      "asset_paths": [],
+      "semantic_label": "正确表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🀄",
+      "source_describe": "/麻将",
+      "asset_paths": [],
+      "semantic_label": "麻将表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🌂",
+      "source_describe": "/雨伞",
+      "asset_paths": [],
+      "semantic_label": "雨伞表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🌙",
+      "source_describe": "/月亮",
+      "asset_paths": [],
+      "semantic_label": "月亮表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🌴",
+      "source_describe": "/椰子树",
+      "asset_paths": [],
+      "semantic_label": "椰子树表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🌹",
+      "source_describe": "/玫瑰",
+      "asset_paths": [
+        "public/assets/qq_emoji/🌹/png/🌹.png"
+      ],
+      "semantic_label": "玫瑰表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🍉",
+      "source_describe": "/西瓜",
+      "asset_paths": [
+        "public/assets/qq_emoji/🍉/png/🍉.png"
+      ],
+      "semantic_label": "西瓜表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🍊",
+      "source_describe": "/橙子",
+      "asset_paths": [],
+      "semantic_label": "橙子表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🍎",
+      "source_describe": "/苹果",
+      "asset_paths": [
+        "public/assets/qq_emoji/🍎/png/🍎.png"
+      ],
+      "semantic_label": "苹果表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🍓",
+      "source_describe": "/草莓",
+      "asset_paths": [
+        "public/assets/qq_emoji/🍓/png/🍓.png"
+      ],
+      "semantic_label": "草莓表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🍔",
+      "source_describe": "/汉堡",
+      "asset_paths": [],
+      "semantic_label": "汉堡表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🍙",
+      "source_describe": "/饭团",
+      "asset_paths": [],
+      "semantic_label": "饭团表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🍚",
+      "source_describe": "/米饭",
+      "asset_paths": [],
+      "semantic_label": "米饭表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🍜",
+      "source_describe": "/拉面",
+      "asset_paths": [
+        "public/assets/qq_emoji/🍜/png/🍜.png"
+      ],
+      "semantic_label": "拉面表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🍝",
+      "source_describe": "/意面",
+      "asset_paths": [],
+      "semantic_label": "意面表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🍞",
+      "source_describe": "/面包",
+      "asset_paths": [
+        "public/assets/qq_emoji/🍞/png/🍞.png"
+      ],
+      "semantic_label": "面包表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🍟",
+      "source_describe": "/薯条",
+      "asset_paths": [],
+      "semantic_label": "薯条表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🍣",
+      "source_describe": "/寿司",
+      "asset_paths": [],
+      "semantic_label": "寿司表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🍧",
+      "source_describe": "/刨冰",
+      "asset_paths": [
+        "public/assets/qq_emoji/🍧/png/🍧.png"
+      ],
+      "semantic_label": "刨冰表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🍳",
+      "source_describe": "/煎蛋",
+      "asset_paths": [],
+      "semantic_label": "煎蛋表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🍸",
+      "source_describe": "/高脚杯",
+      "asset_paths": [],
+      "semantic_label": "高脚杯表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🍺",
+      "source_describe": "/啤酒",
+      "asset_paths": [
+        "public/assets/qq_emoji/🍺/png/🍺.png"
+      ],
+      "semantic_label": "啤酒表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🍻",
+      "source_describe": "/干杯",
+      "asset_paths": [
+        "public/assets/qq_emoji/🍻/png/🍻.png"
+      ],
+      "semantic_label": "干杯表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🎀",
+      "source_describe": "/蝴蝶结",
+      "asset_paths": [],
+      "semantic_label": "蝴蝶结表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🎂",
+      "source_describe": "/蛋糕",
+      "asset_paths": [],
+      "semantic_label": "蛋糕表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🎄",
+      "source_describe": "/圣诞树",
+      "asset_paths": [],
+      "semantic_label": "圣诞树表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🎈",
+      "source_describe": "/气球",
+      "asset_paths": [],
+      "semantic_label": "气球表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🎉",
+      "source_describe": "/庆祝",
+      "asset_paths": [
+        "public/assets/qq_emoji/🎉/png/🎉.png"
+      ],
+      "semantic_label": "庆祝表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🎤",
+      "source_describe": "/话筒",
+      "asset_paths": [],
+      "semantic_label": "话筒表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🎥",
+      "source_describe": "/摄影机",
+      "asset_paths": [],
+      "semantic_label": "摄影机表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🎰",
+      "source_describe": "/老虎机",
+      "asset_paths": [],
+      "semantic_label": "老虎机表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🎸",
+      "source_describe": "/吉他",
+      "asset_paths": [],
+      "semantic_label": "吉他表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🏆",
+      "source_describe": "/奖杯",
+      "asset_paths": [],
+      "semantic_label": "奖杯表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🏠",
+      "source_describe": "/家",
+      "asset_paths": [],
+      "semantic_label": "家表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🏥",
+      "source_describe": "/医院",
+      "asset_paths": [],
+      "semantic_label": "医院表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🏦",
+      "source_describe": "/银行",
+      "asset_paths": [],
+      "semantic_label": "银行表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🏧",
+      "source_describe": "/取款机",
+      "asset_paths": [],
+      "semantic_label": "取款机表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🏨",
+      "source_describe": "/酒店",
+      "asset_paths": [],
+      "semantic_label": "酒店表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🏪",
+      "source_describe": "/便利店",
+      "asset_paths": [
+        "public/assets/qq_emoji/🏪/png/🏪.png"
+      ],
+      "semantic_label": "便利店表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🐎",
+      "source_describe": "/骑马",
+      "asset_paths": [
+        "public/assets/qq_emoji/🐎/png/🐎.png"
+      ],
+      "semantic_label": "骑马表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🐔",
+      "source_describe": "/公鸡",
+      "asset_paths": [
+        "public/assets/qq_emoji/🐔/png/🐔.png"
+      ],
+      "semantic_label": "公鸡表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🐙",
+      "source_describe": "/章鱼",
+      "asset_paths": [],
+      "semantic_label": "章鱼表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🐚",
+      "source_describe": "/海螺",
+      "asset_paths": [],
+      "semantic_label": "海螺表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🐛",
+      "source_describe": "/虫",
+      "asset_paths": [
+        "public/assets/qq_emoji/🐛/png/🐛.png"
+      ],
+      "semantic_label": "虫表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🐠",
+      "source_describe": "/鱼",
+      "asset_paths": [],
+      "semantic_label": "鱼表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🐤",
+      "source_describe": "/小鸡",
+      "asset_paths": [],
+      "semantic_label": "小鸡表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🐧",
+      "source_describe": "/企鹅",
+      "asset_paths": [],
+      "semantic_label": "企鹅表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🐨",
+      "source_describe": "/树懒",
+      "asset_paths": [],
+      "semantic_label": "树懒表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🐭",
+      "source_describe": "/老鼠",
+      "asset_paths": [],
+      "semantic_label": "老鼠表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🐮",
+      "source_describe": "/牛",
+      "asset_paths": [
+        "public/assets/qq_emoji/🐮/png/🐮.png"
+      ],
+      "semantic_label": "牛表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🐯",
+      "source_describe": "/老虎",
+      "asset_paths": [],
+      "semantic_label": "老虎表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🐳",
+      "source_describe": "/鲸鱼",
+      "asset_paths": [
+        "public/assets/qq_emoji/🐳/png/🐳.png"
+      ],
+      "semantic_label": "鲸鱼表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🐵",
+      "source_describe": "/猴",
+      "asset_paths": [
+        "public/assets/qq_emoji/🐵/png/🐵.png"
+      ],
+      "semantic_label": "猴表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🐶",
+      "source_describe": "/狗",
+      "asset_paths": [
+        "public/assets/qq_emoji/🐶/png/🐶.png"
+      ],
+      "semantic_label": "狗表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🐷",
+      "source_describe": "/猪",
+      "asset_paths": [
+        "public/assets/qq_emoji/🐷/png/🐷.png"
+      ],
+      "semantic_label": "猪表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🐸",
+      "source_describe": "/青蛙",
+      "asset_paths": [
+        "public/assets/qq_emoji/🐸/png/🐸.png"
+      ],
+      "semantic_label": "青蛙表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "👀",
+      "source_describe": "/眼睛",
+      "asset_paths": [
+        "public/assets/qq_emoji/👀/png/👀.png"
+      ],
+      "semantic_label": "眼睛表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "👂",
+      "source_describe": "/耳朵",
+      "asset_paths": [],
+      "semantic_label": "耳朵表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "👃",
+      "source_describe": "/鼻子",
+      "asset_paths": [],
+      "semantic_label": "鼻子表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "👄",
+      "source_describe": "/嘴唇",
+      "asset_paths": [],
+      "semantic_label": "嘴唇表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "👆",
+      "source_describe": "/向上",
+      "asset_paths": [
+        "public/assets/qq_emoji/👆/png/👆.png"
+      ],
+      "semantic_label": "向上表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "👇",
+      "source_describe": "/向下",
+      "asset_paths": [],
+      "semantic_label": "向下表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "👈",
+      "source_describe": "/向左",
+      "asset_paths": [],
+      "semantic_label": "向左表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "👉",
+      "source_describe": "/向右",
+      "asset_paths": [],
+      "semantic_label": "向右表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "👊",
+      "source_describe": "/拳头",
+      "asset_paths": [
+        "public/assets/qq_emoji/👊/png/👊.png"
+      ],
+      "semantic_label": "拳头表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "👌",
+      "source_describe": "/好的",
+      "asset_paths": [
+        "public/assets/qq_emoji/👌/png/👌.png"
+      ],
+      "semantic_label": "好的表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "👍",
+      "source_describe": "/厉害",
+      "asset_paths": [
+        "public/assets/qq_emoji/👍/png/👍.png"
+      ],
+      "semantic_label": "厉害表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "👎",
+      "source_describe": "/鄙视",
+      "asset_paths": [
+        "public/assets/qq_emoji/👎/png/👎.png"
+      ],
+      "semantic_label": "鄙视表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "👏",
+      "source_describe": "/鼓掌",
+      "asset_paths": [
+        "public/assets/qq_emoji/👏/png/👏.png"
+      ],
+      "semantic_label": "鼓掌表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "👑",
+      "source_describe": "/皇冠",
+      "asset_paths": [],
+      "semantic_label": "皇冠表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "👒",
+      "source_describe": "/帽子",
+      "asset_paths": [],
+      "semantic_label": "帽子表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "👕",
+      "source_describe": "/衣服",
+      "asset_paths": [],
+      "semantic_label": "衣服表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "👗",
+      "source_describe": "/连衣裙",
+      "asset_paths": [],
+      "semantic_label": "连衣裙表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "👙",
+      "source_describe": "/内衣",
+      "asset_paths": [],
+      "semantic_label": "内衣表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "👜",
+      "source_describe": "/包",
+      "asset_paths": [],
+      "semantic_label": "包表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "👟",
+      "source_describe": "/鞋子",
+      "asset_paths": [],
+      "semantic_label": "鞋子表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "👠",
+      "source_describe": "/高跟鞋",
+      "asset_paths": [],
+      "semantic_label": "高跟鞋表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "👢",
+      "source_describe": "/靴子",
+      "asset_paths": [
+        "public/assets/qq_emoji/👢/png/👢.png"
+      ],
+      "semantic_label": "靴子表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "👣",
+      "source_describe": "/脚印",
+      "asset_paths": [],
+      "semantic_label": "脚印表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "👦",
+      "source_describe": "/男孩",
+      "asset_paths": [
+        "public/assets/qq_emoji/👦/png/👦.png"
+      ],
+      "semantic_label": "男孩表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "👧",
+      "source_describe": "/女孩",
+      "asset_paths": [
+        "public/assets/qq_emoji/👧/png/👧.png"
+      ],
+      "semantic_label": "女孩表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "👨",
+      "source_describe": "/爸爸",
+      "asset_paths": [],
+      "semantic_label": "爸爸表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "👩",
+      "source_describe": "/妈妈",
+      "asset_paths": [],
+      "semantic_label": "妈妈表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "👻",
+      "source_describe": "/幽灵",
+      "asset_paths": [
+        "public/assets/qq_emoji/👻/png/👻.png"
+      ],
+      "semantic_label": "幽灵表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "👼",
+      "source_describe": "/天使",
+      "asset_paths": [],
+      "semantic_label": "天使表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "💀",
+      "source_describe": "/骷髅",
+      "asset_paths": [],
+      "semantic_label": "骷髅表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "💄",
+      "source_describe": "/口红",
+      "asset_paths": [],
+      "semantic_label": "口红表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "💈",
+      "source_describe": "/理发厅",
+      "asset_paths": [],
+      "semantic_label": "理发厅表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "💉",
+      "source_describe": "/打针",
+      "asset_paths": [
+        "public/assets/qq_emoji/💉/png/💉.png"
+      ],
+      "semantic_label": "打针表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "💊",
+      "source_describe": "/药丸",
+      "asset_paths": [],
+      "semantic_label": "药丸表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "💍",
+      "source_describe": "/戒指",
+      "asset_paths": [],
+      "semantic_label": "戒指表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "💓",
+      "source_describe": "/爱心",
+      "asset_paths": [
+        "public/assets/qq_emoji/💓/png/💓.png"
+      ],
+      "semantic_label": "爱心表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "💝",
+      "source_describe": "/礼物",
+      "asset_paths": [
+        "public/assets/qq_emoji/💝/png/💝.png"
+      ],
+      "semantic_label": "礼物表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "💣",
+      "source_describe": "/炸弹",
+      "asset_paths": [
+        "public/assets/qq_emoji/💣/png/💣.png"
+      ],
+      "semantic_label": "炸弹表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "💤",
+      "source_describe": "/睡觉",
+      "asset_paths": [
+        "public/assets/qq_emoji/💤/png/💤.png"
+      ],
+      "semantic_label": "睡觉表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "💦",
+      "source_describe": "/水",
+      "asset_paths": [
+        "public/assets/qq_emoji/💦/png/💦.png"
+      ],
+      "semantic_label": "水表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "💨",
+      "source_describe": "/吹气",
+      "asset_paths": [
+        "public/assets/qq_emoji/💨/png/💨.png"
+      ],
+      "semantic_label": "吹气表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "💩",
+      "source_describe": "/便便",
+      "asset_paths": [
+        "public/assets/qq_emoji/💩/png/💩.png"
+      ],
+      "semantic_label": "便便表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "💪",
+      "source_describe": "/肌肉",
+      "asset_paths": [
+        "public/assets/qq_emoji/💪/png/💪.png"
+      ],
+      "semantic_label": "肌肉表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "💰",
+      "source_describe": "/钱",
+      "asset_paths": [],
+      "semantic_label": "钱表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "💻",
+      "source_describe": "/电脑",
+      "asset_paths": [],
+      "semantic_label": "电脑表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "💿",
+      "source_describe": "/光碟",
+      "asset_paths": [],
+      "semantic_label": "光碟表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "📠",
+      "source_describe": "/传真",
+      "asset_paths": [],
+      "semantic_label": "传真表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "📫",
+      "source_describe": "/邮箱",
+      "asset_paths": [
+        "public/assets/qq_emoji/📫/png/📫.png"
+      ],
+      "semantic_label": "邮箱表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "📱",
+      "source_describe": "/手机",
+      "asset_paths": [],
+      "semantic_label": "手机表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "📷",
+      "source_describe": "/相机",
+      "asset_paths": [],
+      "semantic_label": "相机表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🔑",
+      "source_describe": "/钥匙",
+      "asset_paths": [],
+      "semantic_label": "钥匙表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🔒",
+      "source_describe": "/锁",
+      "asset_paths": [],
+      "semantic_label": "锁表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🔔",
+      "source_describe": "/铃铛",
+      "asset_paths": [],
+      "semantic_label": "铃铛表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🔥",
+      "source_describe": "/火",
+      "asset_paths": [
+        "public/assets/qq_emoji/🔥/png/🔥.png"
+      ],
+      "semantic_label": "火表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🔫",
+      "source_describe": "/手枪",
+      "asset_paths": [
+        "public/assets/qq_emoji/🔫/png/🔫.png"
+      ],
+      "semantic_label": "手枪表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "😁",
+      "source_describe": "/呲牙",
+      "asset_paths": [
+        "public/assets/qq_emoji/😁/png/😁.png"
+      ],
+      "semantic_label": "呲牙表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "😂",
+      "source_describe": "/激动",
+      "asset_paths": [
+        "public/assets/qq_emoji/😂/png/😂.png"
+      ],
+      "semantic_label": "激动表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "😄",
+      "source_describe": "/高兴",
+      "asset_paths": [
+        "public/assets/qq_emoji/😄/png/😄.png"
+      ],
+      "semantic_label": "高兴表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "😉",
+      "source_describe": "/媚眼",
+      "asset_paths": [],
+      "semantic_label": "媚眼表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "😊",
+      "source_describe": "/嘿嘿",
+      "asset_paths": [
+        "public/assets/qq_emoji/😊/png/😊.png"
+      ],
+      "semantic_label": "嘿嘿表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "😌",
+      "source_describe": "/羞涩",
+      "asset_paths": [
+        "public/assets/qq_emoji/😌/png/😌.png"
+      ],
+      "semantic_label": "羞涩表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "😍",
+      "source_describe": "/花痴",
+      "asset_paths": [
+        "public/assets/qq_emoji/😍/png/😍.png"
+      ],
+      "semantic_label": "花痴表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "😏",
+      "source_describe": "/哼哼",
+      "asset_paths": [
+        "public/assets/qq_emoji/😏/png/😏.png"
+      ],
+      "semantic_label": "哼哼表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "😒",
+      "source_describe": "/不屑",
+      "asset_paths": [
+        "public/assets/qq_emoji/😒/png/😒.png"
+      ],
+      "semantic_label": "不屑表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "😓",
+      "source_describe": "/汗",
+      "asset_paths": [
+        "public/assets/qq_emoji/😓/png/😓.png"
+      ],
+      "semantic_label": "汗表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "😔",
+      "source_describe": "/失落",
+      "asset_paths": [
+        "public/assets/qq_emoji/😔/png/😔.png"
+      ],
+      "semantic_label": "失落表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "😘",
+      "source_describe": "/飞吻",
+      "asset_paths": [
+        "public/assets/qq_emoji/😘/png/😘.png"
+      ],
+      "semantic_label": "飞吻表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "😚",
+      "source_describe": "/亲亲",
+      "asset_paths": [
+        "public/assets/qq_emoji/😚/png/😚.png"
+      ],
+      "semantic_label": "亲亲表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "😜",
+      "source_describe": "/淘气",
+      "asset_paths": [
+        "public/assets/qq_emoji/😜/png/😜.png"
+      ],
+      "semantic_label": "淘气表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "😝",
+      "source_describe": "/吐舌",
+      "asset_paths": [
+        "public/assets/qq_emoji/😝/png/😝.png"
+      ],
+      "semantic_label": "吐舌表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "😭",
+      "source_describe": "/大哭",
+      "asset_paths": [
+        "public/assets/qq_emoji/😭/png/😭.png"
+      ],
+      "semantic_label": "大哭表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "😰",
+      "source_describe": "/紧张",
+      "asset_paths": [
+        "public/assets/qq_emoji/😰/png/😰.png"
+      ],
+      "semantic_label": "紧张表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "😱",
+      "source_describe": "/害怕",
+      "asset_paths": [
+        "public/assets/qq_emoji/😱/png/😱.png"
+      ],
+      "semantic_label": "害怕表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "😳",
+      "source_describe": "/瞪眼",
+      "asset_paths": [
+        "public/assets/qq_emoji/😳/png/😳.png"
+      ],
+      "semantic_label": "瞪眼表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🙏",
+      "source_describe": "/合十",
+      "asset_paths": [
+        "public/assets/qq_emoji/🙏/png/🙏.png"
+      ],
+      "semantic_label": "合十表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🚀",
+      "source_describe": "/火箭",
+      "asset_paths": [],
+      "semantic_label": "火箭表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🚄",
+      "source_describe": "/列车",
+      "asset_paths": [],
+      "semantic_label": "列车表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🚌",
+      "source_describe": "/公交",
+      "asset_paths": [],
+      "semantic_label": "公交表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🚗",
+      "source_describe": "/汽车",
+      "asset_paths": [],
+      "semantic_label": "汽车表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🚤",
+      "source_describe": "/快艇",
+      "asset_paths": [],
+      "semantic_label": "快艇表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🚥",
+      "source_describe": "/信号灯",
+      "asset_paths": [],
+      "semantic_label": "信号灯表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🚧",
+      "source_describe": "/路障",
+      "asset_paths": [],
+      "semantic_label": "路障表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🚬",
+      "source_describe": "/吸烟",
+      "asset_paths": [
+        "public/assets/qq_emoji/🚬/png/🚬.png"
+      ],
+      "semantic_label": "吸烟表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🚲",
+      "source_describe": "/自行车",
+      "asset_paths": [],
+      "semantic_label": "自行车表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🚹",
+      "source_describe": "/男性",
+      "asset_paths": [],
+      "semantic_label": "男性表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🚺",
+      "source_describe": "/女性",
+      "asset_paths": [],
+      "semantic_label": "女性表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🚽",
+      "source_describe": "/马桶",
+      "asset_paths": [],
+      "semantic_label": "马桶表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    },
+    {
+      "id": "🛀",
+      "source_describe": "/浴缸",
+      "asset_paths": [],
+      "semantic_label": "浴缸表情",
+      "label_basis": "deferred_unicode_emoji",
+      "review_status": "deferred"
+    }
+  ]
+}

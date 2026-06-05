@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
+import os
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -14,10 +18,14 @@ import pytest
 import adapters.delivery_receipts as delivery_receipts_module
 import adapters.discord_adapter as discord_module
 import adapters.napcat_qq_adapter as napcat_module
+import adapters.napcat_qq_adapter.mention_hydration as napcat_mentions_module
 from adapters.discord_adapter import DiscordAdapter
 from adapters.napcat_qq_adapter import NapCatWSAdapter
 from kazusa_ai_chatbot.dispatcher import AdapterRegistry, RemoteHttpAdapter
 from kazusa_ai_chatbot import service as service_module
+
+
+_ROOT = Path(__file__).resolve().parents[1]
 
 
 class _DummyResponse:
@@ -176,6 +184,51 @@ def _target_user_mention(
     }
 
 
+def _napcat_runtime_api_module():
+    runtime_api_module = importlib.import_module(
+        "adapters.napcat_qq_adapter.runtime_api",
+    )
+    return runtime_api_module
+
+
+def test_napcat_runtime_api_import_does_not_load_ws_adapter() -> None:
+    """Runtime callback API should not depend on websocket adapter import."""
+
+    sys.modules.pop("adapters.napcat_qq_adapter.runtime_api", None)
+    sys.modules.pop("adapters.napcat_qq_adapter.ws_adapter", None)
+
+    runtime_api_module = _napcat_runtime_api_module()
+
+    assert "adapters.napcat_qq_adapter.ws_adapter" not in sys.modules
+    assert hasattr(runtime_api_module, "runtime_app")
+    assert callable(runtime_api_module.bind_runtime_adapter)
+    assert callable(runtime_api_module.current_runtime_adapter)
+
+
+def test_napcat_module_cli_help_exits_successfully() -> None:
+    """The documented NapCat module command should expose CLI help."""
+
+    env = dict(os.environ)
+    env["PYTHON_DOTENV_DISABLED"] = "1"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "adapters.napcat_qq_adapter",
+            "--help",
+        ],
+        cwd=_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "--channels" in result.stdout
+
+
 def test_register_remote_runtime_adapter_registers_proxy_in_service(monkeypatch):
     """The brain service should store a remote adapter proxy by platform."""
 
@@ -247,7 +300,7 @@ async def test_remote_http_adapter_posts_send_message_payload(monkeypatch):
 
     result = await adapter.send_message(
         channel_id="54369546",
-        text="今天天气真好呀",
+        text='今天天气真好呀',
         reply_to_msg_id="1615877136",
         channel_type="private",
         delivery_mentions=[mention],
@@ -258,7 +311,7 @@ async def test_remote_http_adapter_posts_send_message_payload(monkeypatch):
         "json": {
             "channel_id": "54369546",
             "channel_type": "private",
-            "text": "今天天气真好呀",
+            "text": '今天天气真好呀',
             "reply_to_msg_id": "1615877136",
             "delivery_mentions": [mention],
         },
@@ -395,8 +448,8 @@ async def test_napcat_hydrates_reply_target_from_platform_get_msg():
     ws = _FakeNapCatWebSocket({
         "message_id": 1733223276,
         "user_id": 3768713357,
-        "sender": {"nickname": "杏山千纱"},
-        "raw_message": "上一条千纱消息",
+        "sender": {"nickname": '杏山千纱'},
+        "raw_message": '上一条千纱消息',
     })
     reply_context = {"reply_to_message_id": "1733223276"}
 
@@ -405,8 +458,8 @@ async def test_napcat_hydrates_reply_target_from_platform_get_msg():
     assert reply_context == {
         "reply_to_message_id": "1733223276",
         "reply_to_platform_user_id": "3768713357",
-        "reply_to_display_name": "杏山千纱",
-        "reply_excerpt": "上一条千纱消息",
+        "reply_to_display_name": '杏山千纱',
+        "reply_excerpt": '上一条千纱消息',
     }
     assert ws.sent_payloads[0]["action"] == "get_msg"
     assert ws.sent_payloads[0]["params"] == {"message_id": 1733223276}
@@ -463,7 +516,7 @@ async def test_napcat_handle_event_forwards_typed_bot_reply_metadata():
         debug_modes={},
     )
     adapter.bot_id = "3768713357"
-    adapter.bot_name = "杏山千纱"
+    adapter.bot_name = '杏山千纱'
     adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
         "messages": [],
         "use_reply_feature": False,
@@ -471,8 +524,8 @@ async def test_napcat_handle_event_forwards_typed_bot_reply_metadata():
     ws = _FakeNapCatWebSocket({
         "message_id": 1733223276,
         "user_id": 3768713357,
-        "sender": {"nickname": "杏山千纱"},
-        "raw_message": "上一条千纱消息",
+        "sender": {"nickname": '杏山千纱'},
+        "raw_message": '上一条千纱消息',
     })
 
     await adapter.handle_event(
@@ -482,17 +535,17 @@ async def test_napcat_handle_event_forwards_typed_bot_reply_metadata():
             "message_id": 394466266,
             "group_id": 1082431481,
             "user_id": 3167827653,
-            "sender": {"nickname": "赛博马里奥"},
+            "sender": {"nickname": '赛博马里奥'},
             "message": [
                 {"type": "reply", "data": {"id": "1733223276"}},
-                {"type": "text", "data": {"text": "千纱さん，你来了呀"}},
+                {"type": "text", "data": {"text": '千纱さん，你来了呀'}},
             ],
         },
         ws,
     )
 
     payload = adapter.brain_client.post.await_args.kwargs["json"]
-    assert payload["message_envelope"]["body_text"] == "千纱さん，你来了呀"
+    assert payload["message_envelope"]["body_text"] == '千纱さん，你来了呀'
     assert payload["message_envelope"]["raw_wire_text"].startswith(
         "[CQ:reply,id=1733223276]"
     )
@@ -617,6 +670,50 @@ async def test_napcat_handle_event_projects_segment_list_face_to_body_text():
 
 
 @pytest.mark.asyncio
+async def test_napcat_handle_event_omits_unknown_segment_list_face() -> None:
+    """Unknown structured QQ face segments should not invent body text."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["1082431481"],
+        debug_modes={},
+    )
+    adapter.bot_id = "3768713357"
+    adapter.bot_name = "Kazusa"
+    adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
+        "messages": [],
+        "use_reply_feature": False,
+    }))
+    ws = _FakeNapCatWebSocket({})
+
+    await adapter.handle_event(
+        {
+            "post_type": "message",
+            "message_type": "group",
+            "message_id": 394466269,
+            "group_id": 1082431481,
+            "user_id": 3167827653,
+            "sender": {"nickname": "User A"},
+            "message": [
+                {"type": "face", "data": {"id": 999999}},
+            ],
+        },
+        ws,
+    )
+
+    payload = adapter.brain_client.post.await_args.kwargs["json"]
+    assert payload["message_envelope"]["body_text"] == ""
+    assert payload["message_envelope"]["raw_wire_text"] == "[CQ:face,id=999999]"
+    await adapter.close()
+
+
+@pytest.mark.asyncio
 async def test_napcat_handle_event_uses_segment_nickname_without_lookup():
     """QQ segment mention labels should be used before platform lookup."""
 
@@ -709,7 +806,7 @@ async def test_napcat_handle_event_hydrates_human_mention_nickname_and_cache():
             "group_id": 905393941,
             "user_id": 3167827653,
             "sender": {"nickname": "User A"},
-            "message": "[CQ:at,qq=673225019] 你怎么评价群友",
+            "message": '[CQ:at,qq=673225019] 你怎么评价群友',
         },
         ws,
     )
@@ -732,7 +829,7 @@ async def test_napcat_handle_event_hydrates_human_mention_nickname_and_cache():
     ]
     first_envelope = payloads[0]["message_envelope"]
     second_envelope = payloads[1]["message_envelope"]
-    assert first_envelope["body_text"] == "@Mention Nick 你怎么评价群友"
+    assert first_envelope["body_text"] == '@Mention Nick 你怎么评价群友'
     assert first_envelope["mentions"][0]["display_name"] == "Mention Nick"
     assert second_envelope["body_text"] == "@Mention Nick again"
     lookup_payloads = [
@@ -765,17 +862,18 @@ async def test_napcat_mention_display_cache_evicts_oldest_label():
         debug_modes={},
     )
 
-    for index in range(napcat_module._MENTION_DISPLAY_CACHE_LIMIT + 1):
+    cache_limit = napcat_mentions_module.MENTION_DISPLAY_CACHE_LIMIT
+    for index in range(cache_limit + 1):
         adapter._cache_qq_mention_display_name(
             ("905393941", str(index)),
             f"User {index}",
         )
 
     assert len(adapter._mention_display_cache) == (
-        napcat_module._MENTION_DISPLAY_CACHE_LIMIT
+        cache_limit
     )
     assert ("905393941", "0") not in adapter._mention_display_cache
-    assert ("905393941", str(napcat_module._MENTION_DISPLAY_CACHE_LIMIT)) in (
+    assert ("905393941", str(cache_limit)) in (
         adapter._mention_display_cache
     )
     await adapter.close()
@@ -846,7 +944,7 @@ async def test_napcat_handle_event_bounds_duplicate_timeout_lookups(
             awaitable.close()
         raise asyncio.TimeoutError("mention lookup timeout")
 
-    monkeypatch.setattr(napcat_module.asyncio, "wait_for", fake_wait_for)
+    monkeypatch.setattr(napcat_mentions_module.asyncio, "wait_for", fake_wait_for)
     adapter = NapCatWSAdapter(
         ws_url="ws://napcat.local/ws",
         ws_token="token",
@@ -1577,8 +1675,9 @@ async def test_napcat_runtime_endpoint_accepts_delivery_mentions():
     )
     ws = _FakeNapCatWebSocket({"message_id": "outbound-endpoint"})
     adapter._ws = ws
-    previous_runtime_adapter = napcat_module._runtime_adapter
-    napcat_module._runtime_adapter = adapter
+    runtime_api_module = _napcat_runtime_api_module()
+    previous_runtime_adapter = runtime_api_module.current_runtime_adapter()
+    runtime_api_module.bind_runtime_adapter(adapter)
 
     try:
         transport = httpx.ASGITransport(app=napcat_module.runtime_app)
@@ -1605,7 +1704,7 @@ async def test_napcat_runtime_endpoint_accepts_delivery_mentions():
             {"type": "text", "data": {"text": " scheduled hello"}},
         ]
     finally:
-        napcat_module._runtime_adapter = previous_runtime_adapter
+        runtime_api_module.bind_runtime_adapter(previous_runtime_adapter)
         await adapter.close()
 
 
@@ -1626,8 +1725,9 @@ async def test_napcat_runtime_send_message_uses_private_message_type():
     )
     ws = _FakeNapCatWebSocket({"message_id": "outbound-private"})
     adapter._ws = ws
-    previous_runtime_adapter = napcat_module._runtime_adapter
-    napcat_module._runtime_adapter = adapter
+    runtime_api_module = _napcat_runtime_api_module()
+    previous_runtime_adapter = runtime_api_module.current_runtime_adapter()
+    runtime_api_module.bind_runtime_adapter(adapter)
 
     try:
         transport = httpx.ASGITransport(app=napcat_module.runtime_app)
@@ -1653,7 +1753,7 @@ async def test_napcat_runtime_send_message_uses_private_message_type():
             "message": "scheduled private hello",
         }
     finally:
-        napcat_module._runtime_adapter = previous_runtime_adapter
+        runtime_api_module.bind_runtime_adapter(previous_runtime_adapter)
         await adapter.close()
 
 

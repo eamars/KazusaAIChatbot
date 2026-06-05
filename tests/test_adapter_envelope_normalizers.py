@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import importlib
+import json
+import re
+from pathlib import Path
 from types import SimpleNamespace
 
 from adapters import napcat_qq_adapter as napcat_module
@@ -14,6 +18,138 @@ from kazusa_ai_chatbot.message_envelope import (
 )
 
 
+_ROOT = Path(__file__).resolve().parents[1]
+_NAPCAT_FACE_SOURCE_SNAPSHOT = (
+    _ROOT / "tests" / "fixtures" / "napcat_qq_face_source_snapshot.json"
+)
+_REQUIRED_ADAPTER_ICD_SECTIONS = (
+    "Adapter Responsibility Boundary",
+    "Required Adapter Lifecycle",
+    "Optional Runtime Send Interface",
+    "Message Envelope Contract",
+    "Runtime Registration Contract",
+    "Forbidden Adapter Behavior",
+    "Testing Expectations",
+)
+_REQUIRED_NAPCAT_ICD_SECTIONS = (
+    "Public Imports And CLI",
+    "Submodule Responsibility Table",
+    "Inbound QQ Segment Flow",
+    "CQ Projection And Face Catalog Contract",
+    "Runtime API Binding Contract",
+    "Unknown Face Omission Contract",
+    "Source Snapshot And Label Maintenance",
+    "Verification Commands",
+)
+
+
+def _face_catalog_module():
+    catalog_module = importlib.import_module(
+        "adapters.napcat_qq_adapter.face_catalog",
+    )
+    return catalog_module
+
+
+def test_napcat_adapter_package_exposes_public_surface_only() -> None:
+    """NapCat adapter should be a package with stable public imports."""
+
+    assert hasattr(napcat_module, "__path__")
+    assert callable(napcat_module.NapCatWSAdapter)
+    assert callable(napcat_module.QQEnvelopeNormalizer)
+    assert callable(napcat_module.project_qq_semantic_text)
+    assert hasattr(napcat_module, "runtime_app")
+    assert callable(napcat_module.main)
+    private_catalog_name = "_" + "QQ_FACE_IMAGE_DESCRIPTIONS"
+    assert not hasattr(napcat_module, private_catalog_name)
+    assert not hasattr(napcat_module, "_MENTION_DISPLAY_CACHE_LIMIT")
+    assert not hasattr(napcat_module, "asyncio")
+
+
+def test_adapter_icds_define_required_boundaries() -> None:
+    """Adapter ICDs should name the contracts needed for future adapter work."""
+
+    adapter_readme = (_ROOT / "src" / "adapters" / "README.md").read_text(
+        encoding="utf-8",
+    )
+    napcat_readme = (
+        _ROOT / "src" / "adapters" / "napcat_qq_adapter" / "README.md"
+    ).read_text(encoding="utf-8")
+
+    for section in _REQUIRED_ADAPTER_ICD_SECTIONS:
+        assert f"## {section}" in adapter_readme
+    for section in _REQUIRED_NAPCAT_ICD_SECTIONS:
+        assert f"## {section}" in napcat_readme
+
+
+def test_qq_face_catalog_matches_reviewed_source_snapshot() -> None:
+    """The production QQ face catalog should cover the reviewed numeric source."""
+
+    catalog_module = _face_catalog_module()
+    snapshot = json.loads(
+        _NAPCAT_FACE_SOURCE_SNAPSHOT.read_text(encoding="utf-8"),
+    )
+    source = snapshot["source"]
+    assert source == {
+        "repository": "https://github.com/koishijs/QFace",
+        "commit": "e476a706a7e508849c6031c3654051a02639964f",
+        "path": "public/assets/qq_emoji/_index.json",
+        "captured_at": "2026-06-05",
+        "total_rows": 482,
+        "numeric_rows": 317,
+        "unicode_emoji_rows": 165,
+    }
+
+    faces = snapshot["faces"]
+    numeric_rows = [
+        face for face in faces
+        if face["id"].isascii() and face["id"].isdecimal()
+    ]
+    expected_labels = {
+        face["id"]: face["semantic_label"]
+        for face in numeric_rows
+    }
+
+    assert len(faces) == 482
+    assert len(numeric_rows) == 317
+    assert catalog_module.QQ_FACE_IMAGE_DESCRIPTIONS == expected_labels
+    assert catalog_module.qq_face_image_description("344") == '大怨种表情'
+
+
+def test_qq_face_catalog_labels_are_reviewed_and_prompt_safe() -> None:
+    """Reviewed catalog labels should be meaningful prompt-facing image text."""
+
+    snapshot = json.loads(
+        _NAPCAT_FACE_SOURCE_SNAPSHOT.read_text(encoding="utf-8"),
+    )
+    placeholder_labels = {
+        'QQ表情',
+        '表情',
+        '未知表情',
+        '未命名表情',
+    }
+    raw_id_label_pattern = re.compile(r"^#?\d+$")
+
+    for face in snapshot["faces"]:
+        face_id = face["id"]
+        if not face_id.isascii() or not face_id.isdecimal():
+            continue
+        semantic_label = face["semantic_label"].strip()
+        source_describe = face["source_describe"].strip()
+
+        assert face["review_status"] == "reviewed"
+        assert semantic_label
+        assert semantic_label not in placeholder_labels
+        assert raw_id_label_pattern.fullmatch(semantic_label) is None
+        assert "[CQ:" not in semantic_label
+        assert "<image>" not in semantic_label
+        assert "</image>" not in semantic_label
+        assert "<" not in semantic_label
+        assert ">" not in semantic_label
+        assert "&" not in semantic_label
+        if not source_describe:
+            assert face["label_basis"] == "asset_review"
+
+
 def test_qq_normalizer_rewrites_cq_mentions_as_readable_tokens() -> None:
     """QQ normalizer should keep CQ syntax out while preserving mention labels."""
 
@@ -24,7 +160,7 @@ def test_qq_normalizer_rewrites_cq_mentions_as_readable_tokens() -> None:
         content=(
             "[CQ:reply,id=1733223276]"
             "[CQ:at,qq=3768713357] what are these "
-            "[CQ:at,qq=673225019][CQ:face,id=1]"
+            "[CQ:at,qq=673225019][CQ:face,id=344]"
         ),
         platform_bot_id="3768713357",
         mention_display_names={
@@ -46,7 +182,7 @@ def test_qq_normalizer_rewrites_cq_mentions_as_readable_tokens() -> None:
     )
 
     assert envelope["body_text"] == (
-        '@Kazusa what are these @Other User <image>表情</image>'
+        '@Kazusa what are these @Other User <image>大怨种表情</image>'
     )
     assert "<@3768713357>" not in envelope["body_text"]
     assert "[CQ:" not in envelope["body_text"]
@@ -184,8 +320,8 @@ def test_qq_normalizer_preserves_inline_face_position() -> None:
     assert envelope["body_text"] == '我 <image>大怨种表情</image> 服了'
 
 
-def test_qq_normalizer_projects_unknown_face_as_generic_expression() -> None:
-    """Unmapped QQ faces should stay visible without invented meaning."""
+def test_qq_normalizer_omits_unknown_face() -> None:
+    """Unmapped QQ faces should not invent visible meaning."""
 
     handlers = build_default_attachment_handler_registry()
     request = SimpleNamespace(
@@ -203,11 +339,11 @@ def test_qq_normalizer_projects_unknown_face_as_generic_expression() -> None:
         handlers,
     )
 
-    assert envelope["body_text"] == '<image>表情</image>'
+    assert envelope["body_text"] == ""
 
 
-def test_qq_normalizer_projects_face_without_id_as_generic_expression() -> None:
-    """Closed face segments without usable IDs should not disappear."""
+def test_qq_normalizer_omits_face_without_id() -> None:
+    """Closed face segments without usable IDs should not invent meaning."""
 
     handlers = build_default_attachment_handler_registry()
     request = SimpleNamespace(
@@ -225,7 +361,29 @@ def test_qq_normalizer_projects_face_without_id_as_generic_expression() -> None:
         handlers,
     )
 
-    assert envelope["body_text"] == '<image>表情</image>'
+    assert envelope["body_text"] == ""
+
+
+def test_qq_normalizer_omits_unknown_inline_face() -> None:
+    """Unknown QQ faces can appear between adjacent authored text."""
+
+    handlers = build_default_attachment_handler_registry()
+    request = SimpleNamespace(
+        platform="qq",
+        channel_type="group",
+        content='我[CQ:face,id=999999]服了',
+        platform_bot_id="3768713357",
+        reply_context={},
+        attachments=[],
+    )
+
+    envelope = QQEnvelopeNormalizer().normalize(
+        request,
+        PassthroughMentionResolver(),
+        handlers,
+    )
+
+    assert envelope["body_text"] == '我服了'
 
 
 def test_qq_normalizer_reads_face_id_from_any_parameter_position() -> None:
@@ -269,16 +427,14 @@ def test_qq_normalizer_preserves_multiple_adjacent_faces() -> None:
         handlers,
     )
 
-    assert envelope["body_text"] == (
-        '<image>大怨种表情</image> <image>表情</image>'
-    )
+    assert envelope["body_text"] == '<image>大怨种表情</image>'
 
 
 def test_qq_normalizer_escapes_face_description_boundaries(monkeypatch) -> None:
     """Face mapping descriptions should not break image boundaries."""
 
     monkeypatch.setitem(
-        napcat_module._QQ_FACE_IMAGE_DESCRIPTIONS,
+        _face_catalog_module().QQ_FACE_IMAGE_DESCRIPTIONS,
         "888",
         "A < B & C",
     )

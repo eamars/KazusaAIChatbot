@@ -277,6 +277,9 @@ On startup the service:
 
 ## Adapters
 
+Adapter ownership boundaries and runtime callback contracts are documented in
+the [Adapter ICD](../src/adapters/README.md).
+
 ### Debug Web UI
 
 ```bash
