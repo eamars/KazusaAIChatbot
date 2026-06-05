@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
+import os
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -18,6 +22,9 @@ from adapters.discord_adapter import DiscordAdapter
 from adapters.napcat_qq_adapter import NapCatWSAdapter
 from kazusa_ai_chatbot.dispatcher import AdapterRegistry, RemoteHttpAdapter
 from kazusa_ai_chatbot import service as service_module
+
+
+_ROOT = Path(__file__).resolve().parents[1]
 
 
 class _DummyResponse:
@@ -174,6 +181,51 @@ def _target_user_mention(
         "display_name": "Target User",
         "requested_by": "dialog.mention_target_user",
     }
+
+
+def _napcat_runtime_api_module():
+    runtime_api_module = importlib.import_module(
+        "adapters.napcat_qq_adapter.runtime_api",
+    )
+    return runtime_api_module
+
+
+def test_napcat_runtime_api_import_does_not_load_ws_adapter() -> None:
+    """Runtime callback API should not depend on websocket adapter import."""
+
+    sys.modules.pop("adapters.napcat_qq_adapter.runtime_api", None)
+    sys.modules.pop("adapters.napcat_qq_adapter.ws_adapter", None)
+
+    runtime_api_module = _napcat_runtime_api_module()
+
+    assert "adapters.napcat_qq_adapter.ws_adapter" not in sys.modules
+    assert hasattr(runtime_api_module, "runtime_app")
+    assert callable(runtime_api_module.bind_runtime_adapter)
+    assert callable(runtime_api_module.current_runtime_adapter)
+
+
+def test_napcat_module_cli_help_exits_successfully() -> None:
+    """The documented NapCat module command should expose CLI help."""
+
+    env = dict(os.environ)
+    env["PYTHON_DOTENV_DISABLED"] = "1"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "adapters.napcat_qq_adapter",
+            "--help",
+        ],
+        cwd=_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "--channels" in result.stdout
 
 
 def test_register_remote_runtime_adapter_registers_proxy_in_service(monkeypatch):
@@ -613,6 +665,50 @@ async def test_napcat_handle_event_projects_segment_list_face_to_body_text():
     assert payload["message_envelope"]["raw_wire_text"] == (
         '我[CQ:face,id=344]服了'
     )
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_napcat_handle_event_omits_unknown_segment_list_face() -> None:
+    """Unknown structured QQ face segments should not invent body text."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["1082431481"],
+        debug_modes={},
+    )
+    adapter.bot_id = "3768713357"
+    adapter.bot_name = "Kazusa"
+    adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
+        "messages": [],
+        "use_reply_feature": False,
+    }))
+    ws = _FakeNapCatWebSocket({})
+
+    await adapter.handle_event(
+        {
+            "post_type": "message",
+            "message_type": "group",
+            "message_id": 394466269,
+            "group_id": 1082431481,
+            "user_id": 3167827653,
+            "sender": {"nickname": "User A"},
+            "message": [
+                {"type": "face", "data": {"id": 999999}},
+            ],
+        },
+        ws,
+    )
+
+    payload = adapter.brain_client.post.await_args.kwargs["json"]
+    assert payload["message_envelope"]["body_text"] == ""
+    assert payload["message_envelope"]["raw_wire_text"] == "[CQ:face,id=999999]"
     await adapter.close()
 
 
@@ -1577,8 +1673,9 @@ async def test_napcat_runtime_endpoint_accepts_delivery_mentions():
     )
     ws = _FakeNapCatWebSocket({"message_id": "outbound-endpoint"})
     adapter._ws = ws
-    previous_runtime_adapter = napcat_module._runtime_adapter
-    napcat_module._runtime_adapter = adapter
+    runtime_api_module = _napcat_runtime_api_module()
+    previous_runtime_adapter = runtime_api_module.current_runtime_adapter()
+    runtime_api_module.bind_runtime_adapter(adapter)
 
     try:
         transport = httpx.ASGITransport(app=napcat_module.runtime_app)
@@ -1605,7 +1702,7 @@ async def test_napcat_runtime_endpoint_accepts_delivery_mentions():
             {"type": "text", "data": {"text": " scheduled hello"}},
         ]
     finally:
-        napcat_module._runtime_adapter = previous_runtime_adapter
+        runtime_api_module.bind_runtime_adapter(previous_runtime_adapter)
         await adapter.close()
 
 
@@ -1626,8 +1723,9 @@ async def test_napcat_runtime_send_message_uses_private_message_type():
     )
     ws = _FakeNapCatWebSocket({"message_id": "outbound-private"})
     adapter._ws = ws
-    previous_runtime_adapter = napcat_module._runtime_adapter
-    napcat_module._runtime_adapter = adapter
+    runtime_api_module = _napcat_runtime_api_module()
+    previous_runtime_adapter = runtime_api_module.current_runtime_adapter()
+    runtime_api_module.bind_runtime_adapter(adapter)
 
     try:
         transport = httpx.ASGITransport(app=napcat_module.runtime_app)
@@ -1653,7 +1751,7 @@ async def test_napcat_runtime_send_message_uses_private_message_type():
             "message": "scheduled private hello",
         }
     finally:
-        napcat_module._runtime_adapter = previous_runtime_adapter
+        runtime_api_module.bind_runtime_adapter(previous_runtime_adapter)
         await adapter.close()
 
 

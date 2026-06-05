@@ -4,7 +4,7 @@
 
 - Goal: split the monolithic NapCat QQ adapter into a package with stable public entrypoints and add a complete static QQ face semantic catalog.
 - Plan class: large
-- Status: draft
+- Status: in_progress
 - Mandatory skills: `development-plan`, `local-llm-architecture`, `py-style`, `cjk-safety`, `test-style-and-execution`
 - Overall cutover strategy: bigbang package conversion with compatibility at the import and CLI boundary only.
 - Highest-risk areas: breaking `python -m adapters.napcat_qq_adapter`, breaking existing imports from `adapters.napcat_qq_adapter`, over-splitting the first adapter package, and shipping incomplete or low-quality QQ face semantic labels.
@@ -525,7 +525,7 @@ Add deterministic tests for these cases:
 
 ## Progress Checklist
 
-- [ ] Stage 1A - split contract tests established: import, CLI, and current behavior tests added; expected failures or baseline recorded.
+- [x] Stage 1A - split contract tests established: import, CLI, and current behavior tests added; expected failures or baseline recorded.
 - [ ] Stage 1B - NapCat package split complete: package layout created, public imports and `python -m` preserved, behavior tests pass.
 - [ ] Stage 1C - ICDs complete: adapter class ICD and NapCat package ICD added and linked.
 - [ ] Stage 2A - face catalog source snapshot established: QFace source snapshot fixture committed with 317 numeric in-scope ids and source metadata.
@@ -620,3 +620,4 @@ The parent agent fixes concrete findings directly only when the fix is inside th
 - Draft created on 2026-06-05 after closing `qq_face_projection_empty_input_guard_bugfix_plan.md`.
 - Source discovery notes: NapCat docs confirm `face` message segments; OneBot docs confirm `[CQ:face,id=123]`; Koishi QFace provides a broad current id/name/resource list including `344`.
 - Accepted QFace snapshot: repository `https://github.com/koishijs/QFace`, commit `e476a706a7e508849c6031c3654051a02639964f`, file `public/assets/qq_emoji/_index.json`, captured on 2026-06-05, 482 total rows, 317 numeric `emojiId` rows in scope, and 165 Unicode emoji-style rows deferred.
+- 2026-06-05 Stage 1A parent test contract: `venv\Scripts\python.exe -m py_compile tests/test_adapter_envelope_normalizers.py tests/test_runtime_adapter_registration.py` passed. `venv\Scripts\python.exe -m pytest tests/test_runtime_adapter_registration.py::test_napcat_module_cli_help_exits_successfully -q` passed. `venv\Scripts\python.exe -m pytest tests/test_adapter_envelope_normalizers.py -q` produced the expected pre-implementation baseline: 9 failed and 11 passed; failures were missing package shape, missing ICDs, missing face source snapshot/catalog submodule, unknown faces still rendering the old generic image text, and catalog monkeypatch unable to import `face_catalog`. `venv\Scripts\python.exe -m pytest tests/test_runtime_adapter_registration.py::test_napcat_runtime_api_import_does_not_load_ws_adapter tests/test_runtime_adapter_registration.py::test_napcat_handle_event_omits_unknown_segment_list_face -q` produced the expected pre-implementation baseline: 2 failed; failures were missing `runtime_api` package submodule and structured unknown face still rendering the old generic image text.
