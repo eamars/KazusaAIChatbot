@@ -58,8 +58,13 @@ _runtime_adapter: "NapCatWSAdapter | None" = None
 
 _CQ_REPLY_PATTERN = re.compile(r"\[CQ:reply,id=([^\],]+)[^\]]*\]")
 _CQ_AT_PATTERN = re.compile(r"\[CQ:at,qq=([^\],]+)[^\]]*\]")
+_CQ_FACE_PATTERN = re.compile(r"\[CQ:face(?P<params>(?:,[^\]]*)?)\]")
 _CQ_ANY_PATTERN = re.compile(r"\[CQ:[^\]]+\]")
 _MENTION_DISPLAY_CACHE_LIMIT = 512
+_QQ_FACE_IMAGE_DESCRIPTIONS = {
+    "344": '大怨种表情',
+}
+_QQ_GENERIC_FACE_IMAGE_DESCRIPTION = '表情'
 
 
 def _qq_mention_entity_kind(platform_user_id: str, platform_bot_id: str) -> str:
@@ -71,6 +76,47 @@ def _qq_mention_entity_kind(platform_user_id: str, platform_bot_id: str) -> str:
         return_value = "bot"
     else:
         return_value = "user"
+    return return_value
+
+
+def _cq_param_value(params: str, field_name: str) -> str:
+    """Return one CQ segment parameter value from a comma-delimited tail."""
+
+    for raw_param in params.split(","):
+        if "=" not in raw_param:
+            continue
+        key, value = raw_param.split("=", 1)
+        if key.strip() != field_name:
+            continue
+        return_value = value.strip()
+        return return_value
+
+    return_value = ""
+    return return_value
+
+
+def _escape_image_description(description: str) -> str:
+    """Escape literal image-boundary characters in a QQ face description."""
+
+    escaped = description.replace("&", "&amp;")
+    escaped = escaped.replace("<", "&lt;")
+    escaped = escaped.replace(">", "&gt;")
+    return_value = escaped
+    return return_value
+
+
+def _qq_face_image_block(face_id: str) -> str:
+    """Render one QQ system face as prompt-facing visual text."""
+
+    description = _QQ_GENERIC_FACE_IMAGE_DESCRIPTION
+    if face_id.isascii() and face_id.isdecimal():
+        description = _QQ_FACE_IMAGE_DESCRIPTIONS.get(
+            face_id,
+            _QQ_GENERIC_FACE_IMAGE_DESCRIPTION,
+        )
+
+    escaped_description = _escape_image_description(description)
+    return_value = f"<image>{escaped_description}</image>"
     return return_value
 
 
@@ -112,8 +158,16 @@ def project_qq_semantic_text(
         return_value = f" {token} "
         return return_value
 
+    def face_replacement(match: re.Match[str]) -> str:
+        params = match.group("params")
+        face_id = _cq_param_value(params, "id")
+        image_block = _qq_face_image_block(face_id)
+        return_value = f" {image_block} "
+        return return_value
+
     body_text = _CQ_REPLY_PATTERN.sub(" ", raw_wire_text)
     body_text = _CQ_AT_PATTERN.sub(replacement, body_text)
+    body_text = _CQ_FACE_PATTERN.sub(face_replacement, body_text)
     body_text = _CQ_ANY_PATTERN.sub(" ", body_text)
     projected_text = normalize_body_spacing(body_text)
     return projected_text

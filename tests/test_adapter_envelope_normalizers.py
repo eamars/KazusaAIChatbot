@@ -45,7 +45,9 @@ def test_qq_normalizer_rewrites_cq_mentions_as_readable_tokens() -> None:
         handlers,
     )
 
-    assert envelope["body_text"] == "@Kazusa what are these @Other User"
+    assert envelope["body_text"] == (
+        '@Kazusa what are these @Other User <image>表情</image>'
+    )
     assert "<@3768713357>" not in envelope["body_text"]
     assert "[CQ:" not in envelope["body_text"]
     assert envelope["mentions"][0]["entity_kind"] == "bot"
@@ -133,6 +135,186 @@ def test_qq_normalizer_sanitizes_mixed_reply_excerpt_cq() -> None:
 
     assert envelope["reply"]["excerpt"] == "look nice"
     assert "[CQ:" not in envelope["reply"]["excerpt"]
+
+
+def test_qq_normalizer_projects_known_face_as_inline_image_block() -> None:
+    """QQ face-only messages should preserve the visible expression."""
+
+    handlers = build_default_attachment_handler_registry()
+    request = SimpleNamespace(
+        platform="qq",
+        channel_type="group",
+        content="[CQ:face,id=344]",
+        platform_bot_id="3768713357",
+        reply_context={},
+        attachments=[],
+    )
+
+    envelope = QQEnvelopeNormalizer().normalize(
+        request,
+        PassthroughMentionResolver(),
+        handlers,
+    )
+
+    assert envelope["body_text"] == '<image>大怨种表情</image>'
+    assert "[CQ:" not in envelope["body_text"]
+    assert "344" not in envelope["body_text"]
+    assert envelope["raw_wire_text"] == "[CQ:face,id=344]"
+
+
+def test_qq_normalizer_preserves_inline_face_position() -> None:
+    """QQ faces may appear between authored text fragments."""
+
+    handlers = build_default_attachment_handler_registry()
+    request = SimpleNamespace(
+        platform="qq",
+        channel_type="group",
+        content='我[CQ:face,id=344]服了',
+        platform_bot_id="3768713357",
+        reply_context={},
+        attachments=[],
+    )
+
+    envelope = QQEnvelopeNormalizer().normalize(
+        request,
+        PassthroughMentionResolver(),
+        handlers,
+    )
+
+    assert envelope["body_text"] == '我 <image>大怨种表情</image> 服了'
+
+
+def test_qq_normalizer_projects_unknown_face_as_generic_expression() -> None:
+    """Unmapped QQ faces should stay visible without invented meaning."""
+
+    handlers = build_default_attachment_handler_registry()
+    request = SimpleNamespace(
+        platform="qq",
+        channel_type="group",
+        content="[CQ:face,id=999999]",
+        platform_bot_id="3768713357",
+        reply_context={},
+        attachments=[],
+    )
+
+    envelope = QQEnvelopeNormalizer().normalize(
+        request,
+        PassthroughMentionResolver(),
+        handlers,
+    )
+
+    assert envelope["body_text"] == '<image>表情</image>'
+
+
+def test_qq_normalizer_projects_face_without_id_as_generic_expression() -> None:
+    """Closed face segments without usable IDs should not disappear."""
+
+    handlers = build_default_attachment_handler_registry()
+    request = SimpleNamespace(
+        platform="qq",
+        channel_type="group",
+        content="[CQ:face]",
+        platform_bot_id="3768713357",
+        reply_context={},
+        attachments=[],
+    )
+
+    envelope = QQEnvelopeNormalizer().normalize(
+        request,
+        PassthroughMentionResolver(),
+        handlers,
+    )
+
+    assert envelope["body_text"] == '<image>表情</image>'
+
+
+def test_qq_normalizer_reads_face_id_from_any_parameter_position() -> None:
+    """QQ face projection should not depend on CQ parameter order."""
+
+    handlers = build_default_attachment_handler_registry()
+    request = SimpleNamespace(
+        platform="qq",
+        channel_type="group",
+        content="[CQ:face,foo=bar,id=344]",
+        platform_bot_id="3768713357",
+        reply_context={},
+        attachments=[],
+    )
+
+    envelope = QQEnvelopeNormalizer().normalize(
+        request,
+        PassthroughMentionResolver(),
+        handlers,
+    )
+
+    assert envelope["body_text"] == '<image>大怨种表情</image>'
+
+
+def test_qq_normalizer_preserves_multiple_adjacent_faces() -> None:
+    """Adjacent QQ faces should remain ordered and separated."""
+
+    handlers = build_default_attachment_handler_registry()
+    request = SimpleNamespace(
+        platform="qq",
+        channel_type="group",
+        content="[CQ:face,id=344][CQ:face,id=999999]",
+        platform_bot_id="3768713357",
+        reply_context={},
+        attachments=[],
+    )
+
+    envelope = QQEnvelopeNormalizer().normalize(
+        request,
+        PassthroughMentionResolver(),
+        handlers,
+    )
+
+    assert envelope["body_text"] == (
+        '<image>大怨种表情</image> <image>表情</image>'
+    )
+
+
+def test_qq_normalizer_escapes_face_description_boundaries(monkeypatch) -> None:
+    """Face mapping descriptions should not break image boundaries."""
+
+    monkeypatch.setitem(
+        napcat_module._QQ_FACE_IMAGE_DESCRIPTIONS,
+        "888",
+        "A < B & C",
+    )
+
+    projected = napcat_module.project_qq_semantic_text(
+        "[CQ:face,id=888]",
+        "3768713357",
+        {},
+    )
+
+    assert projected == "<image>A &lt; B &amp; C</image>"
+
+
+def test_qq_normalizer_projects_faces_in_reply_excerpt() -> None:
+    """QQ face reply excerpts should keep the visible expression."""
+
+    handlers = build_default_attachment_handler_registry()
+    request = SimpleNamespace(
+        platform="qq",
+        channel_type="group",
+        content="[CQ:reply,id=1733223276]what is this?",
+        platform_bot_id="3768713357",
+        reply_context={
+            "reply_to_message_id": "1733223276",
+            "reply_excerpt": "[CQ:face,id=344]",
+        },
+        attachments=[],
+    )
+
+    envelope = QQEnvelopeNormalizer().normalize(
+        request,
+        PassthroughMentionResolver(),
+        handlers,
+    )
+
+    assert envelope["reply"]["excerpt"] == '<image>大怨种表情</image>'
 
 
 def test_qq_semantic_text_projection_is_adapter_owned() -> None:

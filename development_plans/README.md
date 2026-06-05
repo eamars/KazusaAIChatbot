@@ -116,6 +116,7 @@ plans.
 | [memory_lifecycle_specialist_routing_plan.md](archive/completed/bugfix/memory_lifecycle_specialist_routing_plan.md) |
 | [no_due_commitment_lifecycle_resolution_plan.md](archive/completed/bugfix/no_due_commitment_lifecycle_resolution_plan.md) |
 | [quote_aware_rag_sequence_plan.md](archive/completed/bugfix/quote_aware_rag_sequence_plan.md) |
+| [qq_face_projection_empty_input_guard_bugfix_plan.md](archive/completed/bugfix/qq_face_projection_empty_input_guard_bugfix_plan.md) |
 | [rag_active_turn_conversation_row_exclusion_plan.md](archive/completed/bugfix/rag_active_turn_conversation_row_exclusion_plan.md) |
 | [rag_hybrid_search_time_config_plan.md](archive/completed/bugfix/rag_hybrid_search_time_config_plan.md) |
 | [rag_memory_evidence_remember_me_inner_path_bugfix_plan.md](archive/completed/bugfix/rag_memory_evidence_remember_me_inner_path_bugfix_plan.md) |

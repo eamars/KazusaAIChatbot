@@ -545,7 +545,7 @@ async def test_napcat_handle_event_sends_readable_bot_mention_and_typed_envelope
             "message": (
                 "[CQ:reply,id=1733223276]"
                 "[CQ:at,qq=3768713357] what does this mean?"
-                "[CQ:face,id=1]"
+                "[CQ:face,id=344]"
             ),
         },
         ws,
@@ -554,13 +554,65 @@ async def test_napcat_handle_event_sends_readable_bot_mention_and_typed_envelope
     payload = adapter.brain_client.post.await_args.kwargs["json"]
     assert "content" not in payload
     assert all(key != "mentioned" + "_bot" for key in payload)
-    assert payload["message_envelope"]["body_text"] == "@Kazusa what does this mean?"
+    assert payload["message_envelope"]["body_text"] == (
+        '@Kazusa what does this mean? <image>大怨种表情</image>'
+    )
     assert payload["message_envelope"]["raw_wire_text"].startswith(
         "[CQ:reply,id=1733223276]"
     )
     assert payload["message_envelope"]["mentions"][0]["entity_kind"] == "bot"
     assert payload["message_envelope"]["mentions"][0]["display_name"] == "Kazusa"
     assert payload["message_envelope"]["addressed_to_global_user_ids"]
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_napcat_handle_event_projects_segment_list_face_to_body_text():
+    """QQ structured face segments should reach the brain as image text."""
+
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["1082431481"],
+        debug_modes={},
+    )
+    adapter.bot_id = "3768713357"
+    adapter.bot_name = "Kazusa"
+    adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
+        "messages": [],
+        "use_reply_feature": False,
+    }))
+    ws = _FakeNapCatWebSocket({})
+
+    await adapter.handle_event(
+        {
+            "post_type": "message",
+            "message_type": "group",
+            "message_id": 394466268,
+            "group_id": 1082431481,
+            "user_id": 3167827653,
+            "sender": {"nickname": "User A"},
+            "message": [
+                {"type": "text", "data": {"text": '我'}},
+                {"type": "face", "data": {"id": 344}},
+                {"type": "text", "data": {"text": '服了'}},
+            ],
+        },
+        ws,
+    )
+
+    payload = adapter.brain_client.post.await_args.kwargs["json"]
+    assert payload["message_envelope"]["body_text"] == (
+        '我 <image>大怨种表情</image> 服了'
+    )
+    assert payload["message_envelope"]["raw_wire_text"] == (
+        '我[CQ:face,id=344]服了'
+    )
     await adapter.close()
 
 

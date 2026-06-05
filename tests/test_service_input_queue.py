@@ -1201,6 +1201,177 @@ async def test_worker_derives_graph_input_from_message_envelope(monkeypatch) -> 
 
 
 @pytest.mark.asyncio
+async def test_worker_skips_graph_for_empty_no_content_turn(monkeypatch) -> None:
+    """Empty turns without prompt-usable media should persist and stop."""
+
+    await _reset_queue_state()
+    saved_docs = []
+
+    class _Graph:
+        """Expose a mock graph call for no-content assertions."""
+
+        def __init__(self):
+            self.ainvoke = AsyncMock(return_value={
+                "should_respond": False,
+                "use_reply_feature": False,
+                "final_dialog": [],
+                "future_promises": [],
+                "consolidation_state": None,
+            })
+
+    async def _save_conversation(doc):
+        saved_docs.append(doc)
+        return_value = f"row-{doc['platform_message_id']}"
+        return return_value
+
+    graph = _Graph()
+    monkeypatch.setattr(service_module, "save_conversation", _save_conversation)
+    _patch_common_dependencies(monkeypatch, graph)
+
+    item = _item(
+        1,
+        platform_user_id="user-1",
+        content="",
+    )
+    service_module._chat_input_queue.extend_for_test([item])
+
+    service_module._ensure_chat_input_worker_started()
+    await service_module._chat_input_queue.notify_for_test()
+
+    response = await asyncio.wait_for(item.future, timeout=1.0)
+
+    assert response.messages == []
+    assert saved_docs[0]["body_text"] == ""
+    graph.ainvoke.assert_not_awaited()
+    pipeline_event = service_module.event_logging.record_pipeline_turn_event
+    pipeline_event.assert_awaited_once()
+    event_kwargs = pipeline_event.await_args.kwargs
+    assert event_kwargs["status"] == "completed"
+    assert event_kwargs["final_outcome"] == "no_content"
+    assert event_kwargs["severity"] == "info"
+
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_worker_keeps_image_only_turn_on_graph_path(monkeypatch) -> None:
+    """Image-only input should not be suppressed by the empty guard."""
+
+    await _reset_queue_state()
+    captured_state = {}
+    saved_docs = []
+
+    class _Graph:
+        """Capture graph state for an image-only turn."""
+
+        async def ainvoke(self, state):
+            captured_state.update(state)
+            return {
+                "should_respond": False,
+                "use_reply_feature": False,
+                "final_dialog": [],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    async def _save_conversation(doc):
+        saved_docs.append(doc)
+        return_value = f"row-{doc['platform_message_id']}"
+        return return_value
+
+    monkeypatch.setattr(service_module, "save_conversation", _save_conversation)
+    _patch_common_dependencies(monkeypatch, _Graph())
+
+    item = _item(
+        1,
+        platform_user_id="user-1",
+        content="",
+        content_type="image",
+        attachments=[{
+            "media_type": "image/jpeg",
+            "base64_data": "image-bytes",
+            "description": "image description",
+        }],
+    )
+    service_module._chat_input_queue.extend_for_test([item])
+
+    service_module._ensure_chat_input_worker_started()
+    await service_module._chat_input_queue.notify_for_test()
+
+    response = await asyncio.wait_for(item.future, timeout=1.0)
+
+    assert response.messages == []
+    assert captured_state["user_input"] == ""
+    assert captured_state["user_multimedia_input"] == [{
+        "content_type": "image/jpeg",
+        "base64_data": "image-bytes",
+        "description": "image description",
+    }]
+    assert saved_docs[0]["body_text"] == ""
+
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_worker_keeps_collapsed_non_empty_content_on_graph_path(
+    monkeypatch,
+) -> None:
+    """Collapsed content should remain usable even if the survivor is empty."""
+
+    await _reset_queue_state()
+    captured_state = {}
+
+    class _Graph:
+        """Capture graph state for collapsed non-empty content."""
+
+        async def ainvoke(self, state):
+            captured_state.update(state)
+            return {
+                "should_respond": False,
+                "use_reply_feature": False,
+                "final_dialog": [],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    async def _save_conversation(doc):
+        return_value = f"row-{doc['platform_message_id']}"
+        return return_value
+
+    monkeypatch.setattr(service_module, "save_conversation", _save_conversation)
+    _patch_common_dependencies(monkeypatch, _Graph())
+
+    first = _item(
+        1,
+        channel_type="private",
+        platform_channel_id="dm-1",
+        platform_user_id="user-1",
+        content="",
+    )
+    second = _item(
+        2,
+        channel_type="private",
+        platform_channel_id="dm-1",
+        platform_user_id="user-1",
+        content="follow-up",
+    )
+    service_module._chat_input_queue.extend_for_test([first, second])
+
+    service_module._ensure_chat_input_worker_started()
+    await service_module._chat_input_queue.notify_for_test()
+
+    collapsed_response = await asyncio.wait_for(second.future, timeout=1.0)
+    survivor_response = await asyncio.wait_for(first.future, timeout=1.0)
+
+    assert collapsed_response.messages == []
+    assert survivor_response.messages == []
+    assert captured_state["user_input"] == "\nfollow-up"
+    assert captured_state["active_turn_platform_message_ids"] == ["1", "2"]
+
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
 async def test_worker_resolves_cross_user_envelope_targets(monkeypatch) -> None:
     """Service intake should resolve user mentions and reply targets by profile."""
 

@@ -719,6 +719,55 @@ def _active_turn_conversation_row_ids(item: QueuedChatItem) -> list[str]:
     return return_value
 
 
+def _has_prompt_usable_multimedia_input(
+    multimedia_input: list[MultiMediaDoc],
+) -> bool:
+    """Return whether current-turn media can produce graph input."""
+
+    for item in multimedia_input:
+        content_type = item.get("content_type", "")
+        base64_data = item.get("base64_data", "")
+        description = item.get("description", "")
+        if (
+            content_type.startswith("image/")
+            and bool(base64_data or description.strip())
+        ):
+            return_value = True
+            return return_value
+        if content_type.startswith("audio/") and bool(description.strip()):
+            return_value = True
+            return return_value
+
+    return_value = False
+    return return_value
+
+
+def _is_no_content_turn(
+    *,
+    user_input: str,
+    combined_content: str | None,
+    multimedia_input: list[MultiMediaDoc],
+    media_description_rows: list[Mapping[str, object]],
+) -> bool:
+    """Return whether a persisted turn has no prompt-usable content."""
+
+    if user_input.strip():
+        return_value = False
+        return return_value
+    if combined_content is not None and combined_content.strip():
+        return_value = False
+        return return_value
+    if _has_prompt_usable_multimedia_input(multimedia_input):
+        return_value = False
+        return return_value
+    if media_description_rows:
+        return_value = False
+        return return_value
+
+    return_value = True
+    return return_value
+
+
 def _build_text_chat_episode_ids(
     *,
     platform: str,
@@ -1205,15 +1254,45 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             logger.info(f'Debug modes active: {active_flags}')
 
         user_input = item.combined_content or message_envelope["body_text"]
+        media_description_rows = [
+            *build_text_chat_media_description_rows(multimedia_input),
+            *build_reply_media_description_rows(reply_context),
+        ]
+        if _is_no_content_turn(
+            user_input=user_input,
+            combined_content=item.combined_content,
+            multimedia_input=multimedia_input,
+            media_description_rows=media_description_rows,
+        ):
+            logger.info(
+                "No-content chat turn persisted without graph invocation: "
+                f"platform={req.platform} "
+                f'channel={req.platform_channel_id or "<dm>"} '
+                f'message={req.platform_message_id or "<none>"}'
+            )
+            _chat_input_queue.complete(item, ChatResponse())
+            stages_reached.append("no_content")
+            stages_reached.append("response_completed")
+            await event_logging.record_pipeline_turn_event(
+                component=SERVICE_COMPONENT,
+                correlation_id=correlation_id,
+                status="completed",
+                queue_wait_ms=_queue_wait_ms(item),
+                stages_reached=stages_reached,
+                final_outcome="no_content",
+                scheduled_followups=0,
+                debug_modes=debug_mode_names,
+                scope=scope,
+                duration_ms=_elapsed_ms(turn_started_at),
+                severity="info",
+            )
+            return
+
         prompt_message_context = project_prompt_message_context(
             message_envelope=message_envelope,
             multimedia_input=multimedia_input,
             reply_context=reply_context,
         )
-        media_description_rows = [
-            *build_text_chat_media_description_rows(multimedia_input),
-            *build_reply_media_description_rows(reply_context),
-        ]
         is_collapsed_turn = bool(item.collapsed_items)
         active_turn_platform_message_ids = _active_turn_platform_message_ids(item)
         active_turn_conversation_row_ids = _active_turn_conversation_row_ids(item)
