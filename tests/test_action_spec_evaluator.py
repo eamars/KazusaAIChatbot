@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
 from kazusa_ai_chatbot.action_spec.registry import (
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
@@ -13,6 +15,8 @@ from kazusa_ai_chatbot.action_spec.registry import (
     build_initial_action_capabilities,
     project_prompt_affordances,
 )
+
+BACKGROUND_ARTIFACT_REQUEST_CAPABILITY = "background_artifact_request"
 
 
 def _cognitive_source_ref() -> dict:
@@ -146,17 +150,62 @@ def _action_spec(kind: str) -> dict:
     }
 
 
+def _background_artifact_action_spec() -> dict:
+    return {
+        "schema_version": "action_spec.v1",
+        "kind": BACKGROUND_ARTIFACT_REQUEST_CAPABILITY,
+        "cognition_mode": "deliberative",
+        "source_refs": [_cognitive_source_ref()],
+        "target": {
+            "schema_version": "action_target.v1",
+            "target_kind": "current_user",
+            "target_id": None,
+            "owner": "background_artifact",
+            "scope": {
+                "source_platform": "debug",
+                "source_channel_id": "debug:user:test-user",
+                "source_channel_type": "private",
+                "source_message_id": "message-001",
+                "source_platform_bot_id": "debug-bot-001",
+                "source_character_name": "Test Character",
+                "requester_global_user_id": (
+                    "00000000-0000-4000-8000-000000000002"
+                ),
+                "requester_platform_user_id": "debug-user-001",
+                "requester_display_name": "Test User",
+            },
+        },
+        "params": {
+            "work_kind": "coding_snippet",
+            "objective": "Generate a Fibonacci function snippet.",
+            "input_summary": "The user asked for a simple Fibonacci generator.",
+            "requested_delivery": "send_result_when_done",
+            "max_output_chars": 3000,
+        },
+        "urgency": "background",
+        "visibility": "private",
+        "deadline": None,
+        "continuation": _no_continuation(),
+        "reason": "The user requested bounded async snippet work.",
+    }
+
+
 def test_initial_registry_contains_only_approved_runtime_capabilities() -> None:
     """The first registry slice must not expose deferred future tools."""
 
     capabilities = build_initial_action_capabilities()
 
     assert set(capabilities) == {
+        BACKGROUND_ARTIFACT_REQUEST_CAPABILITY,
         MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
         APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
         SPEAK_CAPABILITY,
         TRIGGER_FUTURE_COGNITION_CAPABILITY,
     }
+    assert (
+        capabilities[BACKGROUND_ARTIFACT_REQUEST_CAPABILITY]["owner_module"]
+        == "background_artifact"
+    )
     assert (
         capabilities[MEMORY_LIFECYCLE_UPDATE_CAPABILITY]["owner_module"]
         == "memory_lifecycle_specialist"
@@ -174,6 +223,35 @@ def test_initial_registry_contains_only_approved_runtime_capabilities() -> None:
     assert "web_research" not in capabilities
     assert "schedule_self_check" not in capabilities
     assert "note_open_loop" not in capabilities
+
+
+def test_background_artifact_route_schema_matches_router_contract() -> None:
+    """L2d should see semantic async-artifact fields, not queue internals."""
+
+    capabilities = build_initial_action_capabilities()
+    capability = capabilities[BACKGROUND_ARTIFACT_REQUEST_CAPABILITY]
+    schema = capability["input_schema"]
+    properties = schema["properties"]
+
+    assert schema["required"] == [
+        "work_kind",
+        "objective",
+        "input_summary",
+        "requested_delivery",
+        "max_output_chars",
+    ]
+    assert properties["work_kind"]["enum"] == [
+        "coding_snippet",
+        "text_rewrite",
+        "summary",
+    ]
+    assert properties["requested_delivery"]["enum"] == [
+        "send_result_when_done",
+    ]
+    assert "job_id" not in properties
+    assert "source_channel_id" not in properties
+    assert "adapter_id" not in properties
+    assert capability["category"] == "action"
 
 
 def test_memory_lifecycle_route_schema_matches_router_contract() -> None:
@@ -232,6 +310,7 @@ def test_prompt_affordance_projection_excludes_runtime_internals() -> None:
 
     assert "memory_lifecycle_update" in serialized
     assert "apply_memory_lifecycle_update" not in serialized
+    assert "background_artifact_request" in serialized
     assert "speak" in serialized
     assert "trigger_future_cognition" in serialized
     assert "send_message" not in serialized
@@ -248,6 +327,9 @@ def test_prompt_affordance_projection_excludes_runtime_internals() -> None:
         "platform_channel_id",
         "channel_id",
         "raw_channel",
+        "job_id",
+        "lease",
+        "retry",
     ):
         assert forbidden not in serialized
 
@@ -341,6 +423,55 @@ def test_evaluator_accepts_private_future_cognition_trigger() -> None:
 
     assert result["ok"] is True
     assert result["handler_owner"] == "orchestrator"
+
+
+def test_background_artifact_request_validates_bounded_params() -> None:
+    """Accepted async artifact work should validate before durable enqueue."""
+
+    evaluator = ActionSpecEvaluator(build_initial_action_capabilities())
+
+    result = evaluator.evaluate(_background_artifact_action_spec())
+
+    assert result["ok"] is True
+    assert result["handler_owner"] == "background_artifact"
+    assert result["action_spec"]["target"]["target_kind"] == "current_user"
+    assert result["action_spec"]["params"]["work_kind"] == "coding_snippet"
+    assert result["action_spec"]["params"]["max_output_chars"] == 3000
+
+
+def test_background_artifact_request_rejects_shell_scope() -> None:
+    """Snippet work must not expand into shell or filesystem execution."""
+
+    evaluator = ActionSpecEvaluator(build_initial_action_capabilities())
+    action_spec = _background_artifact_action_spec()
+    action_spec["params"]["work_kind"] = "coding_repo_edit"
+
+    result = evaluator.evaluate(action_spec)
+
+    assert result["ok"] is False
+    assert any("work_kind" in error for error in result["errors"])
+
+
+@pytest.mark.parametrize(
+    "scope_field",
+    (
+        "source_channel_id",
+        "requester_global_user_id",
+    ),
+)
+def test_background_artifact_request_rejects_missing_delivery_target_scope(
+    scope_field: str,
+) -> None:
+    """Async artifact enqueue must not acknowledge undeliverable jobs."""
+
+    evaluator = ActionSpecEvaluator(build_initial_action_capabilities())
+    action_spec = _background_artifact_action_spec()
+    del action_spec["target"]["scope"][scope_field]
+
+    result = evaluator.evaluate(action_spec)
+
+    assert result["ok"] is False
+    assert any(scope_field in error for error in result["errors"])
 
 
 def test_evaluator_validates_continuation_contract() -> None:

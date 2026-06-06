@@ -1087,6 +1087,63 @@ async def test_db_bootstrap_creates_calendar_collections_and_indexes(
     } in run_indexes
 
 
+@pytest.mark.asyncio
+async def test_db_bootstrap_creates_background_artifact_collection_and_indexes(
+    monkeypatch,
+) -> None:
+    """Bootstrap should prepare durable background artifact job storage."""
+
+    db = _BootstrapDb()
+    ensure_background_artifact = AsyncMock()
+    monkeypatch.setattr(db_bootstrap_module, "get_db", AsyncMock(return_value=db))
+    monkeypatch.setattr(db_bootstrap_module, "enable_vector_index", AsyncMock())
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_reflection_run_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_interaction_style_image_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_global_character_growth_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_event_log_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_internal_monologue_residue_indexes",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "ensure_background_artifact_job_indexes",
+        ensure_background_artifact,
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "purge_stale_initializer_entries",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        db_bootstrap_module,
+        "prune_persistent_entries",
+        AsyncMock(),
+    )
+
+    await db_bootstrap_module.db_bootstrap()
+
+    assert "background_artifact_jobs" in db.collections
+    ensure_background_artifact.assert_awaited_once()
+
+
 def test_db_facade_exports_calendar_schema_docs() -> None:
     """Calendar schedule and run schemas should be public facade exports."""
 

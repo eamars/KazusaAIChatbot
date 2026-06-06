@@ -20,6 +20,7 @@ L2d semantic action request
   -> owner handler
        l3_text / l3_image surface handler
        memory_lifecycle private handler
+       background_artifact queue handler
        orchestrator future-cognition request
   -> ActionResultV1 and SurfaceOutputV1
   -> EpisodeTraceV1
@@ -82,6 +83,7 @@ internal executable capabilities stay hidden from L2d prompts.
 | `speak` | `l3_text` | `user_visible` | Selects a text surface. L2d provides surface intent, not final wording. |
 | `memory_lifecycle_update` | `memory_lifecycle_specialist` | `private` | Selects specialist review for active-commitment lifecycle changes. L2d does not choose a memory target or lifecycle decision. |
 | `apply_memory_lifecycle_update` | `memory_lifecycle` | `private` | Internal executable DB update produced after specialist alias validation. It is not projected to L2d. |
+| `background_artifact_request` | `background_artifact` | `private` | Queues bounded text-only artifact work and returns a pending result trace after durable persistence. |
 | `trigger_future_cognition` | `orchestrator` | `private` | Requests a later cognition cycle contract; it does not call cognition directly. |
 
 `send_message` is intentionally absent from the L2d registry. User-visible
@@ -89,6 +91,15 @@ text is represented as `speak`, routed through the selected L3 text surface,
 and delivered only through the normal live response path. Delayed user-visible
 contact must be represented as `trigger_future_cognition`, so the character can
 decide again at execution time whether to speak.
+
+Background artifact handoff is different from delayed contact. L2d may request
+`background_artifact_request` only as a semantic, private, background action
+with a prompt-safe `work_kind` of `coding_snippet`, `text_rewrite`, or
+`summary`. Deterministic execution validates the bounded payload, persists a
+job through the background artifact facade, and exposes only pending queue
+status, work kind, and an acknowledgement constraint to L3. Raw job ids,
+adapter ids, target ids, leases, retries, filesystem paths, credentials, and
+worker state stay out of L2d and L3 prompts.
 
 Prompt-safe capability projection hides `handler_id`, adapter ids, raw channel
 ids, credentials, collection names, and database internals.
@@ -173,3 +184,4 @@ external image generation service in the current implementation.
 - Do not let the consolidator execute, dispatch, schedule, or select actions.
 - Do not retire promises by deterministic age cleanup.
 - Do not add arbitrary shell, HTTP, file, adapter, or MongoDB tools.
+- Do not let background artifact workers deliver adapter text directly.

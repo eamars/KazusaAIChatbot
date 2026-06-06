@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, TypeAlias, TypedDict
+from typing import Literal, NotRequired, TypeAlias, TypedDict
 
 from kazusa_ai_chatbot.action_spec.models import (
     ActionContinuationV1,
@@ -46,6 +46,12 @@ class ActionResultV1(TypedDict):
     result_refs: list[EvidenceRefV1]
     continuation: ActionContinuationV1
     completed_at: str | None
+    queue_state: NotRequired[str]
+    work_kind: NotRequired[str]
+    objective_summary: NotRequired[str]
+    operational_owner: NotRequired[str]
+    job_ref: NotRequired[str]
+    acknowledgement_constraint: NotRequired[str]
 
 
 class SurfaceOutputV1(TypedDict):
@@ -104,6 +110,7 @@ def build_action_result(
     *,
     status: ActionResultStatus = "validated",
     result_summary: str = "",
+    result_refs: list[EvidenceRefV1] | None = None,
     completed_at: str | None = None,
 ) -> ActionResultV1:
     """Build a result row for one validated, rejected, or pending action.
@@ -113,6 +120,8 @@ def build_action_result(
         eval_result: Deterministic evaluation result for ``action_spec``.
         status: Result status recorded for trace and consolidation.
         result_summary: Prompt-safe summary of what happened.
+        result_refs: Optional prompt-safe evidence references for handler
+            results.
         completed_at: Optional completion timestamp.
 
     Returns:
@@ -133,7 +142,7 @@ def build_action_result(
         "status": status,
         "visibility": _action_visibility(action_spec),
         "result_summary": summary,
-        "result_refs": [],
+        "result_refs": list(result_refs or []),
         "continuation": _action_continuation(action_spec),
         "completed_at": completed_at,
     }

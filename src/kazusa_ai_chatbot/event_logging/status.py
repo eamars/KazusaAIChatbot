@@ -68,10 +68,20 @@ async def build_runtime_status(*, window_hours: int = 24) -> dict[str, object]:
         **base_filter,
         "component": "self_cognition.worker",
     })
+    background_artifact_latest = await _latest_event({
+        **base_filter,
+        "component": "background_artifact.worker",
+    })
     worker_error_count = await _count({
         **base_filter,
         "event_family": "runtime_error",
-        "component": {"$in": ["reflection_cycle.worker", "self_cognition.worker"]},
+        "component": {
+            "$in": [
+                "reflection_cycle.worker",
+                "self_cognition.worker",
+                "background_artifact.worker",
+            ],
+        },
     })
     status = {
         "status": "ok",
@@ -89,6 +99,14 @@ async def build_runtime_status(*, window_hours: int = 24) -> dict[str, object]:
             "self_cognition": {
                 "last_event_at": str(self_cognition_latest.get("occurred_at", "")),
                 "last_status": str(self_cognition_latest.get("status", "unknown")),
+            },
+            "background_artifact": {
+                "last_event_at": str(
+                    background_artifact_latest.get("occurred_at", "")
+                ),
+                "last_status": str(
+                    background_artifact_latest.get("status", "unknown")
+                ),
             },
         },
         "semantic_descriptors": {
@@ -226,7 +244,11 @@ async def build_snapshot_source_counts(
             **base_filter,
             "event_family": "runtime_error",
             "component": {
-                "$in": ["reflection_cycle.worker", "self_cognition.worker"],
+                "$in": [
+                    "reflection_cycle.worker",
+                    "self_cognition.worker",
+                    "background_artifact.worker",
+                ],
             },
         }),
     }

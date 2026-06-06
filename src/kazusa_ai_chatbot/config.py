@@ -230,6 +230,19 @@ JSON_REPAIR_LLM_BASE_URL = os.environ["JSON_REPAIR_LLM_BASE_URL"]
 JSON_REPAIR_LLM_API_KEY = os.environ["JSON_REPAIR_LLM_API_KEY"]
 JSON_REPAIR_LLM_MODEL = os.environ["JSON_REPAIR_LLM_MODEL"]
 
+BACKGROUND_ARTIFACT_LLM_BASE_URL = os.getenv(
+    "BACKGROUND_ARTIFACT_LLM_BASE_URL",
+    COGNITION_LLM_BASE_URL,
+)
+BACKGROUND_ARTIFACT_LLM_API_KEY = os.getenv(
+    "BACKGROUND_ARTIFACT_LLM_API_KEY",
+    COGNITION_LLM_API_KEY,
+)
+BACKGROUND_ARTIFACT_LLM_MODEL = os.getenv(
+    "BACKGROUND_ARTIFACT_LLM_MODEL",
+    COGNITION_LLM_MODEL,
+)
+
 # Embedding model (LM Studio)
 EMBEDDING_BASE_URL = os.environ["EMBEDDING_BASE_URL"]
 EMBEDDING_API_KEY = os.environ["EMBEDDING_API_KEY"]
@@ -504,6 +517,37 @@ SELF_COGNITION_WORKER_INTERVAL_SECONDS = _positive_int_from_env(
 SELF_COGNITION_MAX_CASES_PER_TICK = _positive_int_from_env(
     "SELF_COGNITION_MAX_CASES_PER_TICK",
     "3",
+)
+
+# Background artifacts run as text-only asynchronous jobs. The worker produces
+# artifacts only; result delivery returns through source-bound cognition.
+BACKGROUND_ARTIFACT_WORKER_ENABLED = _bool_from_env(
+    "BACKGROUND_ARTIFACT_WORKER_ENABLED",
+    "true",
+)
+BACKGROUND_ARTIFACT_WORKER_INTERVAL_SECONDS = _positive_int_from_env(
+    "BACKGROUND_ARTIFACT_WORKER_INTERVAL_SECONDS",
+    "45",
+)
+BACKGROUND_ARTIFACT_WORKER_CLAIM_LIMIT = _positive_int_from_env(
+    "BACKGROUND_ARTIFACT_WORKER_CLAIM_LIMIT",
+    "2",
+)
+BACKGROUND_ARTIFACT_WORKER_LEASE_SECONDS = _positive_int_from_env(
+    "BACKGROUND_ARTIFACT_WORKER_LEASE_SECONDS",
+    "180",
+)
+BACKGROUND_ARTIFACT_WORKER_MAX_ATTEMPTS = _positive_int_from_env(
+    "BACKGROUND_ARTIFACT_WORKER_MAX_ATTEMPTS",
+    "4",
+)
+BACKGROUND_ARTIFACT_INPUT_CHAR_LIMIT = _positive_int_from_env(
+    "BACKGROUND_ARTIFACT_INPUT_CHAR_LIMIT",
+    "8000",
+)
+BACKGROUND_ARTIFACT_OUTPUT_CHAR_LIMIT = _positive_int_from_env(
+    "BACKGROUND_ARTIFACT_OUTPUT_CHAR_LIMIT",
+    "3000",
 )
 # Source packets enter cognition as internal-monologue percepts, so the default
 # budget stays aligned with the existing internal-thought cognition boundary.

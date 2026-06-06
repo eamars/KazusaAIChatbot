@@ -7,7 +7,7 @@
   work outside the `/chat` wait path, and later deliver the result to the
   original requester through cognition/dialog/dispatcher.
 - Plan class: high_risk_migration
-- Status: in_progress
+- Status: completed
 - Mandatory skills: `development-plan`, `local-llm-architecture`,
   `no-prepost-user-input`, `debug-llm`, `py-style`, `cjk-safety`,
   `test-style-and-execution`
@@ -510,8 +510,8 @@ Stage 1+ production sequence:
    wire config, service startup/shutdown, route reporting, ops status,
    event-log aggregate descriptors, README/HOWTO, and subsystem ICD updates.
 6. Stage 1F - live/local validation and review:
-   run one-case-at-a-time L2d and worker LLM checks, debug-channel smoke, then
-   independent code review.
+   run one-case-at-a-time L2d and worker LLM checks, record debug-channel smoke
+   status, then independent code review.
 
 ## Execution Model
 
@@ -561,41 +561,49 @@ Stage 1+ production sequence:
   - Verify: `LLM Call And Context Budget` records semantic question, required
     inputs, output fields, deterministic owners, rejected inputs, and
     prompt/load impact.
-- [ ] Live/local LLM checks completed.
+- [x] Live/local LLM checks completed.
   - Scope: run one case at a time after production prompt/payload edits.
   - Verify: `Execution Evidence` records trace paths and manual route-quality
     inspection for L2d and worker checks.
+  - Sign-off: parent verification, 2026-06-06; evidence recorded below with
+    residual text-rewrite input-projection risk.
 - [x] User approval for production-code execution recorded.
   - Scope: user explicitly authorizes Stage 1+ production implementation.
   - Verify: approval is recorded in `Execution Evidence`.
-- [ ] Stage 1A focused tests established.
+- [x] Stage 1A focused tests established.
   - Scope: add or update tests listed in `Verification` before production
     implementation.
   - Verify: expected failures or accepted baselines are recorded.
-- [ ] Stage 1B durable job owner implemented.
+- [x] Stage 1B durable job owner implemented.
   - Scope: background artifact module, DB helpers, bootstrap, leases, runtime,
     and worker tick.
   - Verify: focused background artifact job/runtime/worker tests pass.
-- [ ] Stage 1C live graph handoff implemented.
+  - Sign-off: parent verification, 2026-06-06; evidence recorded below.
+- [x] Stage 1C live graph handoff implemented.
   - Scope: action spec, L2d materialization, pre-surface enqueue, schema, L3
     acknowledgement gating, and action results.
   - Verify: focused L2d/action-spec/persona graph tests pass.
-- [ ] Stage 1D result delivery implemented.
+  - Sign-off: parent verification, 2026-06-06; evidence recorded below.
+- [x] Stage 1D result delivery implemented.
   - Scope: result-ready cognitive episode, prompt selection, delivery tick,
     dispatcher handoff, and duplicate suppression.
   - Verify: focused delivery and prompt-selection tests pass.
-- [ ] Stage 1E service, docs, and observability implemented.
+  - Sign-off: parent verification, 2026-06-06; evidence recorded below.
+- [x] Stage 1E service, docs, and observability implemented.
   - Scope: config, route report, service runtime startup/shutdown, ops status,
     event-log status, README/HOWTO, and ICD docs.
   - Verify: focused config/service/docs/status tests pass.
-- [ ] Production implementation executed under the reviewed checklist.
+  - Sign-off: parent verification, 2026-06-06; evidence recorded below.
+- [x] Production implementation executed under the reviewed checklist.
   - Scope: run only the production stages added by the Stage 1+ plan revision.
   - Verify: all revised verification commands pass or accepted blockers are
     recorded.
-- [ ] Independent code review completed after production verification.
+  - Sign-off: parent verification, 2026-06-06; evidence recorded below.
+- [x] Independent code review completed after production verification.
   - Scope: full implementation diff, plan alignment, tests, artifacts, and
     residual risks.
   - Verify: findings, fixes, rerun commands, and approval status are recorded.
+  - Sign-off: Cicero final re-review, 2026-06-06; no blocking findings remain.
 
 ## Verification
 
@@ -708,9 +716,11 @@ Current acceptance:
 - Stage 0 artifacts and report are present.
 - Stage 0 sign-off and learnings are recorded in this active plan.
 - The active plan registry points to this plan.
-- Production implementation has not yet been executed.
+- Stage 1+ production implementation has been executed by the designated
+  production-code subagent and independently re-reviewed with no blocking
+  findings remaining.
 
-Production acceptance after separately reviewed and approved implementation:
+Production acceptance after reviewed implementation:
 
 - `/chat` returns after acknowledgement and durable enqueue.
 - Other users can continue normal chat while a job runs.
@@ -741,10 +751,9 @@ Index/bootstrap requirements:
 
 - unique `job_id`;
 - unique `idempotency_key`;
-- `(status, work_kind, created_at)`;
-- `(status, lease_expires_at)`;
-- `(status, completed_at)`;
-- `(requester_global_user_id, status, created_at)`.
+- `(status, created_at)`;
+- `(lease_expires_at, status)`;
+- `(delivery_state, updated_at)`.
 
 ## Contracts And Data Shapes
 
@@ -759,6 +768,7 @@ from kazusa_ai_chatbot.background_artifact import (
     BackgroundArtifactQueueResult,
     BackgroundArtifactRuntimeHandle,
     enqueue_background_artifact_request,
+    run_background_artifact_runtime_tick,
     start_background_artifact_runtime,
     stop_background_artifact_runtime,
 )
@@ -774,7 +784,7 @@ async def enqueue_background_artifact_request(
 def start_background_artifact_runtime(
     *,
     is_primary_interaction_busy: Callable[[], bool],
-    adapter_registry_provider: Callable[[], object | None],
+    deliver_result_episode_func: Callable[..., Awaitable[dict[str, object]]] | None = None,
 ) -> BackgroundArtifactRuntimeHandle: ...
 
 async def stop_background_artifact_runtime(
@@ -783,9 +793,10 @@ async def stop_background_artifact_runtime(
 ```
 
 `background_artifact.worker`, `background_artifact.delivery`,
-`background_artifact.jobs`, `background_artifact.prompts`, and
-`background_artifact.result_source` are internals. Existing callers must not
-import them directly outside focused tests.
+`background_artifact.prompts`, and `background_artifact.result_source` are
+internals. Existing callers must not import them directly outside focused
+tests. The queue helper is exposed through the public package entrypoint; DB
+row mutation stays behind the `kazusa_ai_chatbot.db` facade.
 
 ### Stage 1+ Symbol Contract
 
@@ -935,15 +946,12 @@ max_attempts
 created_at
 updated_at
 completed_at
-result_summary
 artifact_text
 failure_summary
 delivery_tracking_id
 delivered_conversation_message_id
 artifact_char_count
 delivery_attempt_count
-last_delivery_attempt_at
-terminal_reason
 ```
 
 ### Result-Ready Source
@@ -994,12 +1002,11 @@ Background worker contract:
   objective, or return an unsupported/failure result.
 - Required inputs: `work_kind`, bounded objective, bounded source text or
   summary, `max_output_chars`, and refusal boundaries.
-- Output fields: `status`, `artifact_text` or `failure_summary`,
-  `result_summary`, and `artifact_char_count`.
+- Output fields: `status`, `artifact_text`, and `failure_summary`.
 - Caps: input 8000 chars, artifact output 3000 chars in first scope.
 - Deterministic owners: claiming, leases, attempts, status transitions,
-  idempotency, output caps, persistence, delivery scheduling, and terminal
-  failure.
+  idempotency, output caps, artifact character count, persistence, delivery
+  scheduling, and terminal failure.
 - Rejected inputs: adapter targets, raw conversation rows, credentials, DB
   internals, job lease internals, shell/filesystem/network affordances,
   repository paths, package-install requests, and dispatch targets.
@@ -1190,6 +1197,442 @@ venv\Scripts\python -m experiments.background_artifact_handoff.report --output-d
 - Remaining incomplete execution gates: focused tests, production
   implementation, live/local LLM traces, debug-channel smoke, independent code
   review, remediation, and lifecycle completion.
+
+### 2026-06-06 Stage 1A Focused Test Contract
+
+- Branch: `feature/background-artifact-handoff-stage1`.
+- Production code changes before this gate: none.
+- Test files changed by parent:
+  `tests/test_action_spec_models.py`,
+  `tests/test_action_spec_evaluator.py`,
+  `tests/test_action_spec_results.py`,
+  `tests/test_cognitive_episode_contract.py`,
+  `tests/test_multi_source_cognition_stage_03_prompt_selection.py`, and
+  `tests/test_l2d_l3_surface_handoff.py`.
+- Command run:
+
+```powershell
+venv\Scripts\python -m pytest tests/test_action_spec_models.py::test_capability_spec_accepts_background_artifact_owner tests/test_action_spec_evaluator.py::test_background_artifact_request_validates_bounded_params tests/test_action_spec_results.py::test_background_artifact_result_ref_projects_prompt_safe_job_ref tests/test_cognitive_episode_contract.py::test_background_artifact_result_ready_builder_creates_valid_episode tests/test_multi_source_cognition_stage_03_prompt_selection.py::test_selector_returns_background_artifact_result_variant_for_every_stage tests/test_l2d_l3_surface_handoff.py::test_background_artifact_acknowledgement_requires_pending_queue_result -q
+```
+
+- Expected result recorded: 6 failures.
+- Failure summary:
+  `background_artifact` is not an allowed action owner;
+  `background_artifact_request` is not registered/evaluable;
+  `build_action_result()` lacks `result_refs`;
+  `build_background_artifact_result_ready_cognitive_episode()` does not exist;
+  `background_artifact_result_ready` is not an allowed cognition source; and
+  L3 text-surface intent does not include queued background artifact
+  acknowledgement constraints.
+- Stage 1A sign-off: parent agent, 2026-06-06. Next gate is one production-code
+  subagent for Stage 1B-1E production implementation inside the approved change
+  surface.
+
+Additional Stage 1A test-contract evidence:
+
+- Additional test files changed by parent:
+  `tests/test_config.py`, `tests/test_llm_route_report.py`,
+  `tests/test_service_ops_status.py`, `tests/test_event_logging_status.py`,
+  `tests/test_background_artifact_runtime.py`,
+  `tests/test_background_artifact_jobs.py`,
+  `tests/test_background_artifact_worker.py`, and
+  `tests/test_background_artifact_delivery.py`.
+- Command run:
+
+```powershell
+venv\Scripts\python -m pytest tests/test_background_artifact_runtime.py tests/test_background_artifact_jobs.py tests/test_background_artifact_worker.py tests/test_background_artifact_delivery.py tests/test_config.py::TestRouteLlmConfig::test_background_artifact_worker_config_values_are_present tests/test_llm_route_report.py::test_llm_route_inventory_contains_all_routes_once tests/test_service_ops_status.py::test_ops_runtime_status_merges_config_and_worker_liveness tests/test_event_logging_status.py::test_build_runtime_status_uses_bounded_latest_events -q
+```
+
+- Expected result recorded: 9 failures.
+- Failure summary:
+  `kazusa_ai_chatbot.background_artifact` and
+  `kazusa_ai_chatbot.db.background_artifact_jobs` do not exist;
+  the mandatory background artifact ICD README does not exist;
+  background artifact worker config constants do not exist;
+  `BACKGROUND_ARTIFACT_LLM` is absent from route reporting;
+  service ops status has no background artifact worker config/liveness fields;
+  and event-log runtime status does not report the background artifact worker
+  family.
+
+Additional L2d fixture evidence:
+
+- Additional test files changed by parent:
+  `tests/l2d_action_selection_cases.py`,
+  `tests/test_l2d_action_selection_cases.py`, and
+  `tests/fixtures/l2d_background_artifact_cases.json`.
+- Command run:
+
+```powershell
+venv\Scripts\python -m pytest tests/test_l2d_action_selection_cases.py::test_compare_accepts_background_artifact_request_params tests/test_l2d_action_selection_cases.py::test_background_artifact_fixture_file_loads -q
+```
+
+- Expected result recorded: 1 failure and 1 pass.
+- Failure summary:
+  the new background artifact fixture file loads and can be selected, but
+  action comparison rejects `background_artifact_request` until production
+  action registration and evaluator support exist.
+
+Additional DB bootstrap evidence:
+
+- Additional test file changed by parent: `tests/test_db.py`.
+- Command run:
+
+```powershell
+venv\Scripts\python -m pytest tests/test_db.py::test_db_bootstrap_creates_background_artifact_collection_and_indexes -q
+```
+
+- Expected result recorded: 1 failure.
+- Failure summary:
+  `kazusa_ai_chatbot.db.bootstrap` has no
+  `ensure_background_artifact_job_indexes` helper yet, so bootstrap cannot
+  delegate durable background artifact job index setup.
+
+Additional graph handoff evidence:
+
+- Additional test file changed by parent: `tests/test_persona_supervisor2.py`.
+- Command run:
+
+```powershell
+venv\Scripts\python -m pytest tests/test_persona_supervisor2.py::test_background_artifact_executes_before_l3_acknowledgement -q
+```
+
+- Current in-progress production result recorded: collection fails before the
+  graph assertion because `src\kazusa_ai_chatbot\config.py` reads
+  `BACKGROUND_ARTIFACT_LLM_BASE_URL` through direct `os.environ[...]` at import
+  time. The evidence was sent back to the production-code subagent because
+  production code remains under that single subagent's ownership.
+- Intended graph contract:
+  background artifact enqueue results must be present as
+  `pre_surface_action_results` before `call_l3_text_surface_handler` runs, and
+  the final episode trace must include the pending background artifact result.
+- Rerun after production subagent updates and parent test isolation:
+  the same command passes with 1 test passed, and the test now patches
+  pending-resume and memory-lifecycle stages to avoid live DB access.
+
+### 2026-06-06 Stage 1B-1E Production Verification
+
+- Production-code subagent: Faraday
+  (`019e9b14-cbe7-7d93-8cfd-855bb468e777`).
+- Subagent handoff: implementation stopped on parent request after production
+  files, focused test commands, static checks, known unrun live LLM/full-suite
+  checks, and residual delivery/RAG risks were reported.
+- Parent manifest check:
+  changed production/runtime documentation files are inside the approved
+  `Change Surface`; parent-owned test and plan files are outside the
+  production-code subagent ownership boundary.
+
+Focused background artifact module command:
+
+```powershell
+venv\Scripts\python -m pytest tests/test_background_artifact_jobs.py tests/test_background_artifact_worker.py tests/test_background_artifact_delivery.py tests/test_background_artifact_runtime.py -q
+```
+
+- Result: 5 passed.
+
+Focused production integration command:
+
+```powershell
+venv\Scripts\python -m pytest tests/test_config.py tests/test_llm_route_report.py tests/test_db.py::test_db_bootstrap_creates_background_artifact_collection_and_indexes tests/test_service_ops_status.py tests/test_event_logging_status.py tests/test_action_spec_models.py tests/test_action_spec_evaluator.py tests/test_action_spec_results.py tests/test_cognitive_episode_contract.py tests/test_multi_source_cognition_stage_03_prompt_selection.py tests/test_cognition_prompt_contract_text.py tests/test_l2d_action_selection_cases.py tests/test_cognition_resolver_l2d_contract.py tests/test_l2d_l3_surface_handoff.py tests/test_persona_supervisor2_schema.py tests/test_persona_supervisor2.py tests/test_service_background_consolidation.py -q
+```
+
+- Result: 247 passed.
+
+Original Stage 1A focused slice rerun:
+
+```powershell
+venv\Scripts\python -m pytest tests/test_action_spec_models.py::test_capability_spec_accepts_background_artifact_owner tests/test_action_spec_evaluator.py::test_background_artifact_request_validates_bounded_params tests/test_action_spec_results.py::test_background_artifact_result_ref_projects_prompt_safe_job_ref tests/test_cognitive_episode_contract.py::test_background_artifact_result_ready_builder_creates_valid_episode tests/test_multi_source_cognition_stage_03_prompt_selection.py::test_selector_returns_background_artifact_result_variant_for_every_stage tests/test_l2d_l3_surface_handoff.py::test_background_artifact_acknowledgement_requires_pending_queue_result -q
+```
+
+- Result: 6 passed.
+
+Static and compile checks:
+
+```powershell
+venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\action_spec\models.py src\kazusa_ai_chatbot\action_spec\registry.py src\kazusa_ai_chatbot\action_spec\evaluator.py src\kazusa_ai_chatbot\action_spec\execution.py src\kazusa_ai_chatbot\action_spec\results.py src\kazusa_ai_chatbot\action_spec\handlers\background_artifact.py src\kazusa_ai_chatbot\background_artifact\__init__.py src\kazusa_ai_chatbot\background_artifact\models.py src\kazusa_ai_chatbot\background_artifact\jobs.py src\kazusa_ai_chatbot\background_artifact\prompts.py src\kazusa_ai_chatbot\background_artifact\worker.py src\kazusa_ai_chatbot\background_artifact\delivery.py src\kazusa_ai_chatbot\background_artifact\runtime.py src\kazusa_ai_chatbot\background_artifact\result_source.py src\kazusa_ai_chatbot\db\background_artifact_jobs.py src\kazusa_ai_chatbot\cognition_episode.py src\kazusa_ai_chatbot\nodes\persona_supervisor2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2d.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_prompt_selection.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_l3_surface.py src\kazusa_ai_chatbot\service.py src\kazusa_ai_chatbot\config.py src\kazusa_ai_chatbot\llm_route_report.py src\kazusa_ai_chatbot\event_logging\status.py
+Select-String -LiteralPath 'src\kazusa_ai_chatbot\background_artifact\worker.py' -Pattern 'AdapterRegistry|dispatcher|send_message|RemoteHttpAdapter'
+Get-ChildItem -LiteralPath 'src\kazusa_ai_chatbot\calendar_scheduler','src\kazusa_ai_chatbot\proactive_output' -Recurse | Select-String -Pattern 'background_artifact'
+Select-String -LiteralPath 'README.md','docs\HOWTO.md','src\kazusa_ai_chatbot\config.py','src\kazusa_ai_chatbot\llm_route_report.py','tests\test_config.py','tests\test_llm_route_report.py' -Pattern 'BACKGROUND_ARTIFACT_LLM'
+Select-String -LiteralPath 'src\kazusa_ai_chatbot\background_artifact\README.md' -Pattern '^## Document Control|^## Purpose|^## Scope|^## Parties|^## Boundary Summary|^## Public Interface|^## Job Lifecycle|^## LLM Input Contract|^## Forbidden Paths'
+Test-Path -LiteralPath 'src\kazusa_ai_chatbot\background_artifact\README.md'
+git diff --check
+```
+
+- Result:
+  `py_compile` passed; forbidden worker import scan returned no matches;
+  calendar/proactive scan returned no matches; route/ICD scans found expected
+  rows; README path exists; `git diff --check` returned no whitespace errors.
+
+Live/local L2d one-case checks:
+
+```powershell
+$env:L2D_LIVE_CASE_FILE='tests\fixtures\l2d_background_artifact_cases.json'; $env:L2D_LIVE_CASE_ID='coding_snippet_accept_fibonacci'; venv\Scripts\python -m pytest tests/test_l2d_action_selection_live_llm.py::test_l2d_live_case_against_frozen_upstream -q -m live_llm
+$env:L2D_LIVE_CASE_FILE='tests\fixtures\l2d_background_artifact_cases.json'; $env:L2D_LIVE_CASE_ID='text_rewrite_accept_polish'; venv\Scripts\python -m pytest tests/test_l2d_action_selection_live_llm.py::test_l2d_live_case_against_frozen_upstream -q -m live_llm
+$env:L2D_LIVE_CASE_FILE='tests\fixtures\l2d_background_artifact_cases.json'; $env:L2D_LIVE_CASE_ID='summary_accept_chat_recap'; venv\Scripts\python -m pytest tests/test_l2d_action_selection_live_llm.py::test_l2d_live_case_against_frozen_upstream -q -m live_llm
+$env:L2D_LIVE_CASE_FILE='tests\fixtures\l2d_background_artifact_cases.json'; $env:L2D_LIVE_CASE_ID='risky_coding_shell_install_rejected'; venv\Scripts\python -m pytest tests/test_l2d_action_selection_live_llm.py::test_l2d_live_case_against_frozen_upstream -q -m live_llm
+```
+
+- Result:
+  `coding_snippet_accept_fibonacci`, `summary_accept_chat_recap`, and
+  `risky_coding_shell_install_rejected` passed. `text_rewrite_accept_polish`
+  failed route comparison because the model emitted a
+  `human_clarification` request and no action specs.
+- Trace paths:
+  `test_artifacts/llm_traces/l2d_action_selection_live_llm__coding_snippet_accept_fibonacci.json`,
+  `test_artifacts/llm_traces/l2d_action_selection_live_llm__text_rewrite_accept_polish.json`,
+  `test_artifacts/llm_traces/l2d_action_selection_live_llm__summary_accept_chat_recap.json`,
+  and
+  `test_artifacts/llm_traces/l2d_action_selection_live_llm__risky_coding_shell_install_rejected.json`.
+- Human-readable review:
+  `test_artifacts/llm_reviews/background_artifact_l2d_live_review_20260606.md`.
+- Live LLM quality note:
+  the failed rewrite case is attributed to input projection, not a direct
+  prompt-boundary failure. The prompt payload says the user asked to polish a
+  supplied short message, but it does not include the concrete source text, so
+  the model's clarification request is defensible. Do not over-tune the prompt
+  to this fixture; track it as an input-projection risk.
+- Live/local LLM gate status:
+  not fully signed off. L2d was run one case at a time with 3 passes and 1
+  route-quality failure. A background artifact worker live LLM test file from
+  the manifest is not present and was not run.
+
+Additional delivery duplicate-suppression test evidence:
+
+- Additional parent-owned tests added:
+  `tests/test_background_artifact_jobs.py::test_delivery_in_progress_claim_requires_ready_delivery_state`
+  and
+  `tests/test_background_artifact_delivery.py::test_service_result_ready_delivery_uses_dispatcher_boundary`.
+- Command run:
+
+```powershell
+venv\Scripts\python -m pytest tests/test_background_artifact_jobs.py tests/test_background_artifact_delivery.py -q
+```
+
+- Result before production fix:
+  3 passed and 1 failed.
+- Failure summary:
+  `mark_background_artifact_delivery_in_progress()` updates by `job_id` only,
+  so it can reopen already delivered, active delivery, or otherwise non-ready
+  rows. The expected filter is restricted to
+  `status in [completed, failed, delivery_failed]` and
+  `delivery_state in [ready, failed]`. The failure was sent back to the same
+  production-code subagent for a minimal production fix.
+- Production-code subagent fix:
+  `src\kazusa_ai_chatbot\db\background_artifact_jobs.py` now atomically claims
+  delivery only for ready deliverable rows. The production-code subagent
+  reported `py_compile` passed and the focused delivery/job command passed.
+- Parent rerun after fix:
+
+```powershell
+venv\Scripts\python -m pytest tests/test_background_artifact_jobs.py tests/test_background_artifact_delivery.py -q
+```
+
+- Result after fix: 4 passed.
+- Parent broad rerun after fix:
+
+```powershell
+venv\Scripts\python -m pytest tests/test_background_artifact_jobs.py tests/test_background_artifact_worker.py tests/test_background_artifact_delivery.py tests/test_background_artifact_runtime.py tests/test_config.py tests/test_llm_route_report.py tests/test_db.py::test_db_bootstrap_creates_background_artifact_collection_and_indexes tests/test_service_ops_status.py tests/test_event_logging_status.py tests/test_action_spec_models.py tests/test_action_spec_evaluator.py tests/test_action_spec_results.py tests/test_cognitive_episode_contract.py tests/test_multi_source_cognition_stage_03_prompt_selection.py tests/test_cognition_prompt_contract_text.py tests/test_l2d_action_selection_cases.py tests/test_cognition_resolver_l2d_contract.py tests/test_l2d_l3_surface_handoff.py tests/test_persona_supervisor2_schema.py tests/test_persona_supervisor2.py tests/test_service_background_consolidation.py -q
+```
+
+- Result after fix: 254 passed.
+
+### 2026-06-06 Independent Code Review Findings
+
+- Independent review subagent: Cicero
+  (`019e9b40-5a5b-7f73-b623-4654ea398629`).
+- Review scope:
+  full implementation diff, approved plan, focused test evidence, LLM traces,
+  persistence/delivery boundaries, and changed-file manifest.
+- Review outcome:
+  findings require remediation before final sign-off; the independent code
+  review checklist remains unchecked.
+- Blocker:
+  result-ready prompt selection can return
+  `background_artifact_result_ready_background_artifact_result`, but stage
+  prompt-template maps did not register that variant, so completed-job
+  delivery could raise `KeyError` before cognition/dialog.
+- High-risk finding:
+  worker completion and failure transitions updated by `job_id` only, without
+  proving the current worker lease owner.
+- High-risk finding:
+  background artifact enqueue could acknowledge jobs whose trusted target
+  scope lacked delivery-critical fields such as `source_channel_id` or
+  `requester_global_user_id`.
+- Medium-risk finding:
+  the failed live L2d `text_rewrite_accept_polish` case is an input-projection
+  gap because the model-facing payload did not contain the concrete source
+  text to rewrite.
+- Medium-risk finding:
+  plan/interface drift must be reconciled for the result-delivery runtime
+  callback shape, DB indexes, and any modified README files outside the
+  approved `Change Surface`.
+
+Review-derived red-test command:
+
+```powershell
+venv\Scripts\python -m pytest tests/test_multi_source_cognition_stage_03_prompt_selection.py::test_result_ready_variant_is_registered_in_stage_prompt_maps tests/test_background_artifact_jobs.py::test_worker_completion_requires_current_lease_owner tests/test_background_artifact_jobs.py::test_worker_failure_requires_current_lease_owner tests/test_background_artifact_worker.py::test_worker_threads_lease_owner_when_completing_job tests/test_background_artifact_worker.py::test_worker_threads_lease_owner_when_failing_job tests/test_action_spec_evaluator.py::test_background_artifact_request_rejects_missing_delivery_target_scope -q
+```
+
+- Result before production remediation: 7 failed.
+- Failure summary:
+  stage prompt handlers do not register the result-ready variant; DB
+  completion/failure helpers do not accept `lease_owner`; worker completion and
+  failure calls do not pass `lease_owner`; and the action evaluator still
+  accepts missing delivery target scope for `source_channel_id` and
+  `requester_global_user_id`.
+- Remediation ownership:
+  the same production-code subagent, Faraday
+  (`019e9b14-cbe7-7d93-8cfd-855bb468e777`), owns production fixes for these
+  findings. Parent owns tests, reruns, evidence, and final review status.
+
+### 2026-06-06 Review Remediation Verification
+
+- Production-code subagent: Faraday
+  (`019e9b14-cbe7-7d93-8cfd-855bb468e777`).
+- Parent-owned tests added or updated:
+  `tests/test_multi_source_cognition_stage_03_prompt_selection.py`,
+  `tests/test_background_artifact_jobs.py`,
+  `tests/test_background_artifact_worker.py`,
+  `tests/test_action_spec_evaluator.py`,
+  `tests/test_l2d_action_selection_cases.py`, and
+  `tests/test_background_artifact_worker_live_llm.py`.
+- Production remediation:
+  prompt maps register the result-ready variant; worker completion/failure
+  require the current lease owner; the worker threads `worker_id` into leased
+  DB updates; and background artifact action validation rejects missing trusted
+  delivery target scope before enqueue.
+- Manifest remediation:
+  `src/kazusa_ai_chatbot/db/README.md`,
+  `src/kazusa_ai_chatbot/dispatcher/README.md`, and
+  `src/kazusa_ai_chatbot/consolidation/README.md` now have no diff.
+- Plan/interface reconciliation:
+  this plan now records the implemented `deliver_result_episode_func` callback
+  boundary and the actual background artifact DB indexes used by bootstrap.
+  It also records the narrower first-scope worker output and job-row contract:
+  worker output is `status`, `artifact_text`, and `failure_summary`; job
+  `artifact_char_count` is computed deterministically during completion.
+
+Review-derived focused command:
+
+```powershell
+venv\Scripts\python -m pytest tests/test_multi_source_cognition_stage_03_prompt_selection.py::test_result_ready_variant_is_registered_in_stage_prompt_maps tests/test_background_artifact_jobs.py::test_worker_completion_requires_current_lease_owner tests/test_background_artifact_jobs.py::test_worker_failure_requires_current_lease_owner tests/test_background_artifact_worker.py::test_worker_threads_lease_owner_when_completing_job tests/test_background_artifact_worker.py::test_worker_threads_lease_owner_when_failing_job tests/test_action_spec_evaluator.py::test_background_artifact_request_rejects_missing_delivery_target_scope -q
+```
+
+- Result after remediation: 7 passed.
+
+Focused production verification command:
+
+```powershell
+venv\Scripts\python -m pytest tests/test_background_artifact_jobs.py tests/test_background_artifact_worker.py tests/test_background_artifact_delivery.py tests/test_background_artifact_runtime.py tests/test_config.py tests/test_llm_route_report.py tests/test_db.py::test_db_bootstrap_creates_background_artifact_collection_and_indexes tests/test_service_ops_status.py tests/test_event_logging_status.py tests/test_action_spec_models.py tests/test_action_spec_evaluator.py tests/test_action_spec_results.py tests/test_cognitive_episode_contract.py tests/test_multi_source_cognition_stage_03_prompt_selection.py tests/test_cognition_prompt_contract_text.py tests/test_l2d_action_selection_cases.py tests/test_cognition_resolver_l2d_contract.py tests/test_l2d_l3_surface_handoff.py tests/test_persona_supervisor2_schema.py tests/test_persona_supervisor2.py tests/test_service_background_consolidation.py -q
+```
+
+- Result after remediation: 261 passed.
+
+Worker live/local LLM command:
+
+```powershell
+venv\Scripts\python -m pytest tests/test_background_artifact_worker_live_llm.py::test_background_artifact_worker_live_case -q -m live_llm -s
+```
+
+- Result: 1 passed.
+- Trace:
+  `test_artifacts/llm_traces/background_artifact_worker_live_llm__coding_snippet_fibonacci.json`.
+- Human-readable review:
+  `test_artifacts/llm_reviews/background_artifact_worker_live_review_20260606.md`.
+- Quality note:
+  the worker produced a bounded Python Fibonacci snippet from semantic input
+  only. The payload excluded adapter ids, channel ids, leases, retries, DB
+  fields, filesystem paths, credentials, and delivery mechanics.
+- Residual delivery risk:
+  if the process crashes after `delivery_in_progress` is claimed and before a
+  terminal delivery update, the row may require manual repair or a follow-up
+  delivery-lease recovery plan. This plan covers duplicate suppression and
+  normal failure retry, not crash recovery for in-progress delivery claims.
+
+Static checks after remediation:
+
+```powershell
+venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\action_spec\handlers\background_artifact.py src\kazusa_ai_chatbot\background_artifact\worker.py src\kazusa_ai_chatbot\db\background_artifact_jobs.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l1.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2c2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l3.py
+git diff --check
+rg "AdapterRegistry|dispatcher|send_message|RemoteHttpAdapter" src\kazusa_ai_chatbot\background_artifact\worker.py
+rg "background_artifact" src\kazusa_ai_chatbot\calendar_scheduler src\kazusa_ai_chatbot\proactive_output
+Select-String -LiteralPath 'src\kazusa_ai_chatbot\background_artifact\README.md' -Pattern '^## Document Control|^## Purpose|^## Scope|^## Parties|^## Boundary Summary|^## Public Interface|^## Job Lifecycle|^## LLM Input Contract|^## Forbidden Paths'
+```
+
+- Result:
+  `py_compile` passed; `git diff --check` reported no whitespace errors and
+  only line-ending warnings; worker forbidden import scan returned no matches;
+  calendar/proactive scan returned no matches; ICD heading scan found expected
+  sections.
+
+Public facade import remediation:
+
+- Review-derived test added:
+  `tests/test_background_artifact_runtime.py::test_action_handler_uses_public_background_artifact_entrypoint`.
+- Result before production remediation:
+  failed because `src/kazusa_ai_chatbot/action_spec/handlers/background_artifact.py`
+  imported `kazusa_ai_chatbot.background_artifact.jobs` directly.
+- Production-code subagent fix:
+  Faraday changed the handler to import `enqueue_background_artifact_request`
+  through the public `kazusa_ai_chatbot.background_artifact` facade.
+- Parent rerun:
+
+```powershell
+venv\Scripts\python -m pytest tests/test_background_artifact_runtime.py::test_action_handler_uses_public_background_artifact_entrypoint tests/test_action_spec_evaluator.py::test_background_artifact_request_validates_bounded_params -q
+```
+
+- Result after fix: 2 passed.
+
+Focused production verification after public-facade fix:
+
+```powershell
+venv\Scripts\python -m pytest tests/test_background_artifact_jobs.py tests/test_background_artifact_worker.py tests/test_background_artifact_delivery.py tests/test_background_artifact_runtime.py tests/test_config.py tests/test_llm_route_report.py tests/test_db.py::test_db_bootstrap_creates_background_artifact_collection_and_indexes tests/test_service_ops_status.py tests/test_event_logging_status.py tests/test_action_spec_models.py tests/test_action_spec_evaluator.py tests/test_action_spec_results.py tests/test_cognitive_episode_contract.py tests/test_multi_source_cognition_stage_03_prompt_selection.py tests/test_cognition_prompt_contract_text.py tests/test_l2d_action_selection_cases.py tests/test_cognition_resolver_l2d_contract.py tests/test_l2d_l3_surface_handoff.py tests/test_persona_supervisor2_schema.py tests/test_persona_supervisor2.py tests/test_service_background_consolidation.py -q
+```
+
+- Result after public-facade fix: 262 passed.
+
+Static checks after public-facade fix:
+
+```powershell
+venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\action_spec\handlers\background_artifact.py src\kazusa_ai_chatbot\background_artifact\worker.py src\kazusa_ai_chatbot\db\background_artifact_jobs.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l1.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2c2.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l3.py
+git diff --check
+rg "background_artifact\.jobs" src\kazusa_ai_chatbot\action_spec\handlers\background_artifact.py
+rg "AdapterRegistry|dispatcher|send_message|RemoteHttpAdapter" src\kazusa_ai_chatbot\background_artifact\worker.py
+rg "background_artifact" src\kazusa_ai_chatbot\calendar_scheduler src\kazusa_ai_chatbot\proactive_output
+git diff --name-only -- src\kazusa_ai_chatbot\db\README.md src\kazusa_ai_chatbot\dispatcher\README.md src\kazusa_ai_chatbot\consolidation\README.md
+```
+
+- Result:
+  `py_compile` passed; `git diff --check` reported no whitespace errors and
+  only line-ending warnings; public-facade forbidden import scan returned no
+  matches; worker forbidden import scan returned no matches; calendar/proactive
+  scan returned no matches; out-of-manifest README diff check returned no
+  files.
+
+Final independent code-review outcome:
+
+- Review subagent: Cicero
+  (`019e9b40-5a5b-7f73-b623-4654ea398629`).
+- Review result:
+  no blocking findings remain under the updated active plan.
+- Closed findings:
+  result-ready prompt-map registration; worker completion/failure lease-owner
+  guards; delivery claim state guard; undeliverable enqueue rejection; public
+  facade import boundary; and out-of-manifest README drift.
+- Accepted residual risks:
+  the L2d `text_rewrite_accept_polish` live failure remains a recorded
+  input-projection risk; `delivery_in_progress` crash recovery is out of this
+  first scope; worker live LLM evidence covers one `coding_snippet` case only;
+  live debug-channel smoke was not run in this turn.
+- Final review sign-off:
+  Cicero final re-review, 2026-06-06.
+
+## Completion Closure
+
+- Closed by parent agent on 2026-06-06 after user requested plan closure.
+- Final implementation verification and independent review evidence are
+  recorded in `Execution Evidence`; no blocking review findings remain.
+- Accepted residual risks are intentionally not reopened in this completed
+  plan. Follow-up work must use a separate active plan.
 
 ## Risks
 

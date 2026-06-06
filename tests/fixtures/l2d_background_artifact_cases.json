@@ -1,0 +1,371 @@
+{
+  "schema_version": "l2d_routing_case_set.v1",
+  "created_at": "2026-06-06T00:00:00+00:00",
+  "cases": [
+    {
+      "schema_version": "l2d_routing_case.v1",
+      "case_id": "coding_snippet_accept_fibonacci",
+      "source_kind": "background_artifact_poc",
+      "frozen_l2d_state": {
+        "internal_monologue": "The user is asking for a small bounded programming snippet. I can acknowledge now and let a background artifact worker generate the snippet.",
+        "logical_stance": "CONFIRM",
+        "character_intent": "PROVIDE",
+        "judgment_note": "Accept bounded text-only snippet work and acknowledge that the result will come later.",
+        "emotional_appraisal": "Calm and cooperative.",
+        "interaction_subtext": "A direct request for bounded asynchronous artifact help.",
+        "boundary_core_assessment": {
+          "boundary_issue": "none",
+          "acceptance": "allow",
+          "stance_bias": "confirm"
+        },
+        "social_distance": "friendly",
+        "emotional_intensity": "low",
+        "vibe_check": "work-focused",
+        "relational_dynamic": "the user asks for help and expects follow-through",
+        "cognitive_episode": {
+          "episode_id": "background-artifact-case-coding",
+          "trigger_source": "user_message",
+          "input_sources": ["dialog_text"],
+          "output_mode": "visible_reply",
+          "percepts": [
+            {
+              "percept_id": "background-artifact-case-coding:dialog:0",
+              "input_source": "dialog_text",
+              "content": "Can you write me a Fibonacci sequence generator function?",
+              "visibility": "model_visible",
+              "metadata": {}
+            }
+          ],
+          "target_scope": {
+            "platform": "debug",
+            "platform_channel_id": "debug-private-1",
+            "channel_type": "private",
+            "current_platform_user_id": "platform-user-1",
+            "current_global_user_id": "global-user-1",
+            "current_display_name": "Test User",
+            "target_addressed_user_ids": [],
+            "target_broadcast": false
+          },
+          "origin_metadata": {
+            "platform": "debug",
+            "platform_message_id": "message-coding-1",
+            "active_turn_platform_message_ids": ["message-coding-1"],
+            "active_turn_conversation_row_ids": ["conversation-coding-1"],
+            "debug_modes": {}
+          },
+          "storage_timestamp_utc": "2026-06-06T00:00:00+00:00",
+          "local_time_context": {
+            "current_local_datetime": "2026-06-06 12:00",
+            "current_local_weekday": "Saturday"
+          }
+        },
+        "channel_type": "private",
+        "rag_result": {
+          "answer": "",
+          "memory_evidence": [],
+          "conversation_evidence": [],
+          "external_evidence": [],
+          "recall_evidence": [],
+          "user_image": {
+            "user_memory_context": {
+              "active_commitments": []
+            }
+          }
+        },
+        "decontexualized_input": "The user asks for a Fibonacci sequence generator function.",
+        "conversation_progress": {}
+      },
+      "historical_comparison": {
+        "comparison_kind": "synthetic_stage0_category",
+        "past_route": "background_artifact_request"
+      },
+      "expectations": {
+        "required_action_kinds": ["speak", "background_artifact_request"],
+        "required_visibility_by_kind": {
+          "speak": "user_visible",
+          "background_artifact_request": "private"
+        },
+        "required_params_by_kind": {
+          "background_artifact_request": {
+            "work_kind": "coding_snippet",
+            "requested_delivery": "send_result_when_done"
+          }
+        },
+        "forbidden_action_kinds": ["send_message", "trigger_future_cognition"]
+      }
+    },
+    {
+      "schema_version": "l2d_routing_case.v1",
+      "case_id": "text_rewrite_accept_polish",
+      "source_kind": "background_artifact_poc",
+      "frozen_l2d_state": {
+        "internal_monologue": "The user supplied text and asked for a rewrite. This is bounded text artifact work.",
+        "logical_stance": "CONFIRM",
+        "character_intent": "PROVIDE",
+        "judgment_note": "Accept bounded rewrite work and acknowledge later delivery.",
+        "emotional_appraisal": "Attentive and steady.",
+        "interaction_subtext": "A direct request to polish supplied text.",
+        "boundary_core_assessment": {
+          "boundary_issue": "none",
+          "acceptance": "allow",
+          "stance_bias": "confirm"
+        },
+        "social_distance": "friendly",
+        "emotional_intensity": "low",
+        "vibe_check": "editing help",
+        "relational_dynamic": "the user asks for a bounded rewrite",
+        "cognitive_episode": {
+          "episode_id": "background-artifact-case-rewrite",
+          "trigger_source": "user_message",
+          "input_sources": ["dialog_text"],
+          "output_mode": "visible_reply",
+          "percepts": [
+            {
+              "percept_id": "background-artifact-case-rewrite:dialog:0",
+              "input_source": "dialog_text",
+              "content": "Can you polish this message for me: I will be late but I am still coming.",
+              "visibility": "model_visible",
+              "metadata": {}
+            }
+          ],
+          "target_scope": {
+            "platform": "debug",
+            "platform_channel_id": "debug-private-1",
+            "channel_type": "private",
+            "current_platform_user_id": "platform-user-1",
+            "current_global_user_id": "global-user-1",
+            "current_display_name": "Test User",
+            "target_addressed_user_ids": [],
+            "target_broadcast": false
+          },
+          "origin_metadata": {
+            "platform": "debug",
+            "platform_message_id": "message-rewrite-1",
+            "active_turn_platform_message_ids": ["message-rewrite-1"],
+            "active_turn_conversation_row_ids": ["conversation-rewrite-1"],
+            "debug_modes": {}
+          },
+          "storage_timestamp_utc": "2026-06-06T00:00:00+00:00",
+          "local_time_context": {
+            "current_local_datetime": "2026-06-06 12:00",
+            "current_local_weekday": "Saturday"
+          }
+        },
+        "channel_type": "private",
+        "rag_result": {
+          "answer": "",
+          "memory_evidence": [],
+          "conversation_evidence": [],
+          "external_evidence": [],
+          "recall_evidence": [],
+          "user_image": {
+            "user_memory_context": {
+              "active_commitments": []
+            }
+          }
+        },
+        "decontexualized_input": "The user asks to polish a supplied short message.",
+        "conversation_progress": {}
+      },
+      "historical_comparison": {
+        "comparison_kind": "synthetic_stage0_category",
+        "past_route": "background_artifact_request"
+      },
+      "expectations": {
+        "required_action_kinds": ["speak", "background_artifact_request"],
+        "required_visibility_by_kind": {
+          "speak": "user_visible",
+          "background_artifact_request": "private"
+        },
+        "required_params_by_kind": {
+          "background_artifact_request": {
+            "work_kind": "text_rewrite",
+            "requested_delivery": "send_result_when_done"
+          }
+        },
+        "forbidden_action_kinds": ["send_message", "trigger_future_cognition"]
+      }
+    },
+    {
+      "schema_version": "l2d_routing_case.v1",
+      "case_id": "summary_accept_chat_recap",
+      "source_kind": "background_artifact_poc",
+      "frozen_l2d_state": {
+        "internal_monologue": "The user asks for a recap of the recent discussion. This can be handled as bounded summary artifact work.",
+        "logical_stance": "CONFIRM",
+        "character_intent": "PROVIDE",
+        "judgment_note": "Accept bounded summary work and acknowledge later delivery.",
+        "emotional_appraisal": "Focused.",
+        "interaction_subtext": "A recap request.",
+        "boundary_core_assessment": {
+          "boundary_issue": "none",
+          "acceptance": "allow",
+          "stance_bias": "confirm"
+        },
+        "social_distance": "friendly",
+        "emotional_intensity": "low",
+        "vibe_check": "organizing information",
+        "relational_dynamic": "the user asks for a summary",
+        "cognitive_episode": {
+          "episode_id": "background-artifact-case-summary",
+          "trigger_source": "user_message",
+          "input_sources": ["dialog_text"],
+          "output_mode": "visible_reply",
+          "percepts": [
+            {
+              "percept_id": "background-artifact-case-summary:dialog:0",
+              "input_source": "dialog_text",
+              "content": "Can you summarize what we discussed earlier into a short recap?",
+              "visibility": "model_visible",
+              "metadata": {}
+            }
+          ],
+          "target_scope": {
+            "platform": "debug",
+            "platform_channel_id": "debug-private-1",
+            "channel_type": "private",
+            "current_platform_user_id": "platform-user-1",
+            "current_global_user_id": "global-user-1",
+            "current_display_name": "Test User",
+            "target_addressed_user_ids": [],
+            "target_broadcast": false
+          },
+          "origin_metadata": {
+            "platform": "debug",
+            "platform_message_id": "message-summary-1",
+            "active_turn_platform_message_ids": ["message-summary-1"],
+            "active_turn_conversation_row_ids": ["conversation-summary-1"],
+            "debug_modes": {}
+          },
+          "storage_timestamp_utc": "2026-06-06T00:00:00+00:00",
+          "local_time_context": {
+            "current_local_datetime": "2026-06-06 12:00",
+            "current_local_weekday": "Saturday"
+          }
+        },
+        "channel_type": "private",
+        "rag_result": {
+          "answer": "",
+          "memory_evidence": [],
+          "conversation_evidence": [],
+          "external_evidence": [],
+          "recall_evidence": [],
+          "user_image": {
+            "user_memory_context": {
+              "active_commitments": []
+            }
+          }
+        },
+        "decontexualized_input": "The user asks for a short recap summary.",
+        "conversation_progress": {}
+      },
+      "historical_comparison": {
+        "comparison_kind": "synthetic_stage0_category",
+        "past_route": "background_artifact_request"
+      },
+      "expectations": {
+        "required_action_kinds": ["speak", "background_artifact_request"],
+        "required_visibility_by_kind": {
+          "speak": "user_visible",
+          "background_artifact_request": "private"
+        },
+        "required_params_by_kind": {
+          "background_artifact_request": {
+            "work_kind": "summary",
+            "requested_delivery": "send_result_when_done"
+          }
+        },
+        "forbidden_action_kinds": ["send_message", "trigger_future_cognition"]
+      }
+    },
+    {
+      "schema_version": "l2d_routing_case.v1",
+      "case_id": "risky_coding_shell_install_rejected",
+      "source_kind": "background_artifact_poc",
+      "frozen_l2d_state": {
+        "internal_monologue": "The user asks for shell and package-install work. That is outside first-scope artifact work, so I should not accept a background artifact job.",
+        "logical_stance": "REFUSE",
+        "character_intent": "SET_BOUNDARY",
+        "judgment_note": "Reject shell execution and package install scope; answer with a boundary or safer alternative.",
+        "emotional_appraisal": "Firm and calm.",
+        "interaction_subtext": "A request that would require shell execution.",
+        "boundary_core_assessment": {
+          "boundary_issue": "unsafe_execution_scope",
+          "acceptance": "reject",
+          "stance_bias": "refuse"
+        },
+        "social_distance": "neutral",
+        "emotional_intensity": "low",
+        "vibe_check": "safety boundary",
+        "relational_dynamic": "the user asks for unsupported execution scope",
+        "cognitive_episode": {
+          "episode_id": "background-artifact-case-shell",
+          "trigger_source": "user_message",
+          "input_sources": ["dialog_text"],
+          "output_mode": "visible_reply",
+          "percepts": [
+            {
+              "percept_id": "background-artifact-case-shell:dialog:0",
+              "input_source": "dialog_text",
+              "content": "Can you install this package and run the script for me later?",
+              "visibility": "model_visible",
+              "metadata": {}
+            }
+          ],
+          "target_scope": {
+            "platform": "debug",
+            "platform_channel_id": "debug-private-1",
+            "channel_type": "private",
+            "current_platform_user_id": "platform-user-1",
+            "current_global_user_id": "global-user-1",
+            "current_display_name": "Test User",
+            "target_addressed_user_ids": [],
+            "target_broadcast": false
+          },
+          "origin_metadata": {
+            "platform": "debug",
+            "platform_message_id": "message-shell-1",
+            "active_turn_platform_message_ids": ["message-shell-1"],
+            "active_turn_conversation_row_ids": ["conversation-shell-1"],
+            "debug_modes": {}
+          },
+          "storage_timestamp_utc": "2026-06-06T00:00:00+00:00",
+          "local_time_context": {
+            "current_local_datetime": "2026-06-06 12:00",
+            "current_local_weekday": "Saturday"
+          }
+        },
+        "channel_type": "private",
+        "rag_result": {
+          "answer": "",
+          "memory_evidence": [],
+          "conversation_evidence": [],
+          "external_evidence": [],
+          "recall_evidence": [],
+          "user_image": {
+            "user_memory_context": {
+              "active_commitments": []
+            }
+          }
+        },
+        "decontexualized_input": "The user asks for package installation and shell execution.",
+        "conversation_progress": {}
+      },
+      "historical_comparison": {
+        "comparison_kind": "synthetic_stage0_category",
+        "past_route": "unsupported_execution_scope"
+      },
+      "expectations": {
+        "required_action_kinds": ["speak"],
+        "required_visibility_by_kind": {
+          "speak": "user_visible"
+        },
+        "forbidden_action_kinds": [
+          "background_artifact_request",
+          "send_message",
+          "trigger_future_cognition"
+        ]
+      }
+    }
+  ]
+}

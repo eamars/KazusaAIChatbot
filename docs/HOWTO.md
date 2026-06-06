@@ -50,6 +50,9 @@ WEB_SEARCH_LLM_MODEL=your-chat-model
 COGNITION_LLM_BASE_URL=http://localhost:1234/v1
 COGNITION_LLM_API_KEY=lm-studio
 COGNITION_LLM_MODEL=your-chat-model
+BACKGROUND_ARTIFACT_LLM_BASE_URL=http://localhost:1234/v1
+BACKGROUND_ARTIFACT_LLM_API_KEY=lm-studio
+BACKGROUND_ARTIFACT_LLM_MODEL=your-chat-model
 DIALOG_GENERATOR_LLM_BASE_URL=http://localhost:1234/v1
 DIALOG_GENERATOR_LLM_API_KEY=lm-studio
 DIALOG_GENERATOR_LLM_MODEL=your-chat-model
@@ -84,6 +87,15 @@ CALENDAR_SCHEDULER_CLAIM_LIMIT=10
 CALENDAR_SCHEDULER_LEASE_SECONDS=300
 CALENDAR_SCHEDULER_MAX_ATTEMPTS=3
 CALENDAR_SCHEDULER_PER_TRIGGER_CAPACITY=5
+
+# Background artifact handoff
+BACKGROUND_ARTIFACT_WORKER_ENABLED=true
+BACKGROUND_ARTIFACT_WORKER_INTERVAL_SECONDS=15
+BACKGROUND_ARTIFACT_WORKER_CLAIM_LIMIT=2
+BACKGROUND_ARTIFACT_WORKER_LEASE_SECONDS=300
+BACKGROUND_ARTIFACT_WORKER_MAX_ATTEMPTS=3
+BACKGROUND_ARTIFACT_INPUT_CHAR_LIMIT=12000
+BACKGROUND_ARTIFACT_OUTPUT_CHAR_LIMIT=3000
 
 # Direct web search and URL-reader behavior
 SEARXNG_URL=http://your-searxng-host:8080
@@ -151,9 +163,11 @@ DISCORD_RUNTIME_PORT=8012
 NAPCAT_RUNTIME_PORT=8011
 ```
 
-All route-specific chat model variables are required. Route-specific variables
-replace the retired generic `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL`
-settings. Missing route variables stop config loading.
+All route-specific chat model variables are required except the background
+artifact route, which falls back to the cognition route when omitted.
+Route-specific variables replace the retired generic `LLM_BASE_URL`,
+`LLM_API_KEY`, and `LLM_MODEL` settings. Missing required route variables stop
+config loading.
 
 `CHARACTER_GLOBAL_USER_ID` defaults to
 `00000000-0000-4000-8000-000000000001`. Set it explicitly in production so the
@@ -200,6 +214,14 @@ Scheduled future cognition, durable calendar due-run handling, reflection,
 consolidation, dispatcher validation, and adapter delivery continue. Set
 `CHARACTER_SLEEP_LOCAL_PERIOD` to an empty value to disable this sleep-period
 suppression.
+
+`BACKGROUND_ARTIFACT_WORKER_ENABLED` controls the Stage 1 text-only artifact
+worker. Queued jobs support only `coding_snippet`, `text_rewrite`, and
+`summary`; the worker does not write files, run shell commands, install
+packages, download resources, research the web, process attachments, or send
+adapter text directly. Completed jobs re-enter the brain as
+`background_artifact_result_ready` cognition, then use the existing dialog and
+delivery boundary for any visible result.
 
 Reflection phase scheduling spreads monitor-eligible channels across the
 `REFLECTION_WORKER_INTERVAL_SECONDS` period instead of running all group

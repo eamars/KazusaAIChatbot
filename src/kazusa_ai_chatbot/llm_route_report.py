@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from kazusa_ai_chatbot.config import (
+    BACKGROUND_ARTIFACT_LLM_BASE_URL,
+    BACKGROUND_ARTIFACT_LLM_MODEL,
     COGNITION_LLM_BASE_URL,
     COGNITION_LLM_MODEL,
     CONSOLIDATION_LLM_BASE_URL,
@@ -84,6 +86,11 @@ LLM_ROUTE_CONFIGS: tuple[dict[str, str], ...] = (
         "route": "JSON_REPAIR_LLM",
         "model": JSON_REPAIR_LLM_MODEL,
         "source_url": JSON_REPAIR_LLM_BASE_URL,
+    },
+    {
+        "route": "BACKGROUND_ARTIFACT_LLM",
+        "model": BACKGROUND_ARTIFACT_LLM_MODEL,
+        "source_url": BACKGROUND_ARTIFACT_LLM_BASE_URL,
     },
     {
         "route": "EMBEDDING",

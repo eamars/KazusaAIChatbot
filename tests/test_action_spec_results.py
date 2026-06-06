@@ -110,6 +110,49 @@ def _memory_lifecycle_action_spec() -> dict:
     }
 
 
+def _background_artifact_action_spec() -> dict:
+    return {
+        "schema_version": "action_spec.v1",
+        "kind": "background_artifact_request",
+        "cognition_mode": "deliberative",
+        "source_refs": [
+            {
+                "schema_version": "action_source_ref.v1",
+                "ref_kind": "cognitive_episode",
+                "ref_id": "episode-001",
+                "owner": "cognition_episode",
+                "relationship": "basis",
+                "evidence_refs": [],
+            }
+        ],
+        "target": {
+            "schema_version": "action_target.v1",
+            "target_kind": "current_user",
+            "target_id": None,
+            "owner": "background_artifact",
+            "scope": {"requester_display_name": "Test User"},
+        },
+        "params": {
+            "work_kind": "coding_snippet",
+            "objective": "Generate a Fibonacci function snippet.",
+            "input_summary": "The user asked for a simple Fibonacci generator.",
+            "requested_delivery": "send_result_when_done",
+            "max_output_chars": 3000,
+        },
+        "urgency": "background",
+        "visibility": "private",
+        "deadline": None,
+        "continuation": {
+            "schema_version": "action_continuation.v1",
+            "mode": "none",
+            "episode_type": None,
+            "max_depth": 0,
+            "include_result_as": None,
+        },
+        "reason": "The character accepted bounded async snippet work.",
+    }
+
+
 def test_action_result_uses_evaluator_identity_without_raw_params() -> None:
     """Action results should be traceable without exposing action params."""
 
@@ -130,6 +173,53 @@ def test_action_result_uses_evaluator_identity_without_raw_params() -> None:
     assert result["status"] == "executed"
     assert "params" not in result
     assert "handler_id" not in result
+
+
+def test_background_artifact_result_ref_projects_prompt_safe_job_ref() -> None:
+    """Queued artifact results should expose only prompt-safe job evidence."""
+
+    action_spec = _background_artifact_action_spec()
+    eval_result = {
+        "ok": True,
+        "action_spec": action_spec,
+        "capability": None,
+        "idempotency_key": "action_spec:v1:background-artifact-001",
+        "handler_owner": "background_artifact",
+        "errors": [],
+    }
+    job_ref = {
+        "schema_version": "evidence_ref.v1",
+        "evidence_kind": "system_event",
+        "evidence_id": "background_artifact_job:job-001",
+        "owner": "background_artifact_job",
+        "excerpt": "queued coding_snippet artifact request",
+        "observed_at": "2026-05-16T00:00:00+00:00",
+    }
+
+    result = build_action_result(
+        action_spec,
+        eval_result,
+        status="pending",
+        result_summary="Background artifact job queued.",
+        result_refs=[job_ref],
+    )
+
+    trace = build_episode_trace(
+        episode_id="episode-001",
+        trigger_source="user_message",
+        created_at="2026-05-16T00:00:00+00:00",
+        action_specs=[action_spec],
+        action_results=[result],
+        surface_outputs=[],
+    )
+    projection = project_episode_trace_for_consolidation(trace)
+    serialized = json.dumps(projection, ensure_ascii=False)
+
+    assert result["result_refs"] == [job_ref]
+    assert projection["action_results"][0]["evidence_refs"] == [job_ref]
+    assert "params" not in serialized
+    assert "source_channel_id" not in serialized
+    assert "adapter" not in serialized.lower()
 
 
 def test_episode_trace_projection_omits_handler_ids_and_raw_params() -> None:

@@ -7,6 +7,7 @@ from copy import deepcopy
 
 import pytest
 
+from kazusa_ai_chatbot import cognition_episode as cognition_episode_module
 from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisode,
     CognitiveEpisodeValidationError,
@@ -163,6 +164,51 @@ def test_text_chat_builder_creates_valid_user_message_episode() -> None:
             "metadata": {},
         }
     ]
+
+
+def test_background_artifact_result_ready_builder_creates_valid_episode() -> None:
+    """Completed artifact jobs should enter cognition through a typed source."""
+
+    builder = getattr(
+        cognition_episode_module,
+        "build_background_artifact_result_ready_cognitive_episode",
+    )
+
+    episode = builder(
+        episode_id="background_artifact_result_ready:job-001",
+        percept_id="background_artifact_result_ready:job-001:result:0",
+        storage_timestamp_utc="2026-05-09T07:30:00+00:00",
+        local_time_context=_local_time_context(),
+        job_id="job-001",
+        work_kind="coding_snippet",
+        objective_summary="Generate a Fibonacci function snippet.",
+        artifact_text="def fib(n): return n if n < 2 else fib(n-1) + fib(n-2)",
+        failure_summary="",
+        platform="debug",
+        platform_channel_id="debug-private-1",
+        channel_type="private",
+        platform_message_id="job-001",
+        requester_platform_user_id="platform-user-1",
+        requester_global_user_id="global-user-1",
+        requester_display_name="Test User",
+        source_character_name="Test Character",
+    )
+
+    validate_cognitive_episode(episode)
+
+    assert episode["trigger_source"] == "background_artifact_result_ready"
+    assert episode["input_sources"] == ["background_artifact_result"]
+    assert episode["output_mode"] == "visible_reply"
+    assert episode["target_scope"]["current_global_user_id"] == "global-user-1"
+    assert episode["percepts"][0]["input_source"] == "background_artifact_result"
+    assert episode["percepts"][0]["visibility"] == "model_visible"
+    assert episode["percepts"][0]["metadata"] == {
+        "job_id": "job-001",
+        "work_kind": "coding_snippet",
+        "objective_summary": "Generate a Fibonacci function snippet.",
+        "failure_summary": "",
+        "source_character_name": "Test Character",
+    }
 
 
 def test_text_chat_builder_defaults_optional_collections() -> None:

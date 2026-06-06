@@ -173,6 +173,7 @@ _FACTS_HARVESTER_PROMPT = '''\
 - `content_anchors` 表示 `{character_name}` 生成回复前的草案意图，只能作为候选计划，不能单独证明承诺已经成立。
 - `final_dialog` 是 `{character_name}` 本轮最终输出；`user_message` 时是可见回复，`internal_thought` 时是私有 finalization，是判断接受、拒绝、保留选择权或形成承诺的最高优先级证据。
 - `episode_trace_projection` 是动作和表面输出的安全摘要；它只能帮助判断本轮实际选择、执行或跳过了哪些动作，不能替代用户事实来源。
+- 如果 `episode_trace_projection.action_results` 显示 `background_artifact_request` 已经进入 `pending`，或 evidence owner 是 `background_artifact_job`，说明稍后交付由后台 artifact job 拥有；不要为同一件后台产物再生成 `future_promises`。它可以作为动作审计证据，但不是 consolidator 需要复制的一条承诺。
 - 当 `final_dialog`、`content_anchors`、`decontexualized_input` 冲突时，承诺判断优先级为 `final_dialog` > `content_anchors` > `decontexualized_input`。
 
 # 来源权威性
@@ -369,6 +370,7 @@ _FACT_HARVESTER_EVALUATOR_PROMPT = '''\
 - `rag_result` 用于检查旧闻、重复和非生成证据。
 - `supervisor_trace` 只能作为检索充分性参考，不能替代事实或承诺证据。
 - `episode_trace_projection` 是动作和表面输出的安全摘要；它只能帮助判断本轮实际选择、执行或跳过了哪些动作，不能替代用户事实来源。
+- 如果候选 `future_promises` 只是重复一个已由 `background_artifact_request` / `background_artifact_job` 拥有的稍后产物交付，必须判 FAIL 并要求删除该候选；后台 job 已经是操作性所有者。
 
 # 来源权威性审计
 - 强事实来源：`user_message` 来源中用户在 `decontexualized_input` 明确陈述的自身事实，以及 `rag_result.memory_evidence`、`conversation_evidence`、`external_evidence` 中的证据。`internal_thought` 来源中的 `decontexualized_input` 不是用户事实来源。

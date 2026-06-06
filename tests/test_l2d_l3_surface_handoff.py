@@ -228,6 +228,58 @@ def _action_directives() -> dict:
     return directives
 
 
+def test_background_artifact_acknowledgement_requires_pending_queue_result() -> None:
+    """L3 should see promise permission only after durable enqueue succeeded."""
+
+    state = _cognition_state()
+    state["pre_surface_action_results"] = [
+        {
+            "action_attempt_id": "action_attempt:background-artifact-001",
+            "action_kind": "background_artifact_request",
+            "status": "pending",
+            "queue_state": "queued",
+            "work_kind": "coding_snippet",
+            "objective_summary": "Generate a Fibonacci function snippet.",
+            "operational_owner": "background_artifact_job",
+            "job_ref": "background_artifact_job:job-001",
+            "acknowledgement_constraint": "promise_allowed",
+        }
+    ]
+
+    intent = l3_surface_module._selected_text_surface_intent(state)
+
+    assert "background_artifact_request" in intent
+    assert "coding_snippet" in intent
+    assert "Generate a Fibonacci function snippet." in intent
+    assert "promise_allowed" in intent
+    assert "background_artifact_job:job-001" not in intent
+
+
+def test_background_artifact_failed_enqueue_blocks_later_delivery_promise() -> None:
+    """L3 should not promise later delivery when durable enqueue failed."""
+
+    state = _cognition_state()
+    state["pre_surface_action_results"] = [
+        {
+            "action_attempt_id": "action_attempt:background-artifact-001",
+            "action_kind": "background_artifact_request",
+            "status": "failed",
+            "queue_state": "none",
+            "work_kind": "coding_snippet",
+            "objective_summary": "Generate a Fibonacci function snippet.",
+            "operational_owner": "none",
+            "job_ref": "",
+            "acknowledgement_constraint": "promise_forbidden_explain_failure",
+        }
+    ]
+
+    intent = l3_surface_module._selected_text_surface_intent(state)
+
+    assert "background_artifact_request" in intent
+    assert "promise_forbidden_explain_failure" in intent
+    assert "promise_allowed" not in intent
+
+
 @pytest.mark.asyncio
 async def test_cognition_subgraph_runs_l2c2_before_l2d() -> None:
     """The cognition subgraph should feed social context into L2d."""

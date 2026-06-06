@@ -113,6 +113,9 @@ async def call_cognition_subconscious(state: CognitionState) -> CognitionState:
         "text_chat_user_message_image_audio_observation": _COGNITION_SUBCONSCIOUS_PROMPT,
         "reflection_signal_reflection_artifact": _COGNITION_SUBCONSCIOUS_PROMPT,
         "internal_thought_internal_monologue": _COGNITION_SUBCONSCIOUS_PROMPT,
+        "background_artifact_result_ready_background_artifact_result": (
+            _COGNITION_SUBCONSCIOUS_PROMPT
+        ),
     }[selection["variant"]]
     
     system_prompt = SystemMessage(content=prompt_template.format(

@@ -177,6 +177,17 @@ from kazusa_ai_chatbot.db.self_cognition import (
     upsert_self_cognition_group_review_window,
     upsert_self_cognition_action_attempt,
 )
+from kazusa_ai_chatbot.db.background_artifact_jobs import (
+    claim_background_artifact_job,
+    complete_background_artifact_job,
+    ensure_background_artifact_job_indexes,
+    fail_background_artifact_job,
+    find_deliverable_background_artifact_jobs,
+    insert_background_artifact_job,
+    mark_background_artifact_delivered,
+    mark_background_artifact_delivery_failed,
+    mark_background_artifact_delivery_in_progress,
+)
 
 from kazusa_ai_chatbot.db.rag_cache2_persistent import (
     build_initializer_version_key,
@@ -295,6 +306,15 @@ __all__ = [
     "list_self_cognition_action_attempts",
     "upsert_self_cognition_group_review_window",
     "upsert_self_cognition_action_attempt",
+    "claim_background_artifact_job",
+    "complete_background_artifact_job",
+    "ensure_background_artifact_job_indexes",
+    "fail_background_artifact_job",
+    "find_deliverable_background_artifact_jobs",
+    "insert_background_artifact_job",
+    "mark_background_artifact_delivered",
+    "mark_background_artifact_delivery_failed",
+    "mark_background_artifact_delivery_in_progress",
     # Persistent Cache2
     "build_initializer_version_key", "load_initializer_entries",
     "prune_persistent_entries", "purge_stale_initializer_entries",

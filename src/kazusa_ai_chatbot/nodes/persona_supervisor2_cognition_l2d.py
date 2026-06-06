@@ -15,6 +15,7 @@ from kazusa_ai_chatbot.action_spec.models import (
     validate_action_spec,
 )
 from kazusa_ai_chatbot.action_spec.registry import (
+    BACKGROUND_ARTIFACT_REQUEST_CAPABILITY,
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
@@ -24,6 +25,7 @@ from kazusa_ai_chatbot.config import (
     COGNITION_LLM_API_KEY,
     COGNITION_LLM_BASE_URL,
     COGNITION_LLM_MODEL,
+    BACKGROUND_ARTIFACT_OUTPUT_CHAR_LIMIT,
 )
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ALLOWED_RESOLVER_CAPABILITIES,
@@ -53,6 +55,12 @@ ALLOWED_ACTION_CAPABILITIES = frozenset((
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
+    BACKGROUND_ARTIFACT_REQUEST_CAPABILITY,
+))
+BACKGROUND_ARTIFACT_WORK_KINDS = frozenset((
+    "coding_snippet",
+    "text_rewrite",
+    "summary",
 ))
 
 
@@ -63,6 +71,7 @@ class ActionRequestV1(TypedDict, total=False):
     decision: str
     reason: str
     detail: str
+    work_kind: str
 
 
 def build_action_initializer_payload(
@@ -437,7 +446,7 @@ def _normalize_action_requests(parsed: object) -> list[ActionRequestV1]:
             "capability": capability,
             "reason": reason,
         }
-        for optional_field in ("decision", "detail"):
+        for optional_field in ("decision", "detail", "work_kind"):
             field_value = _semantic_text(raw_request, optional_field)
             if field_value:
                 normalized_request[optional_field] = field_value
@@ -815,6 +824,8 @@ def _materialize_action_request(
             state,
             continuation_objective=continuation_objective,
         )
+    elif capability == BACKGROUND_ARTIFACT_REQUEST_CAPABILITY:
+        action_spec = _build_background_artifact_action_spec(request, state)
     else:
         logger.warning(f"L2d dropped unsupported action capability: {capability}")
         return None
@@ -954,6 +965,89 @@ def _build_future_cognition_action_spec(
     return action_spec
 
 
+def _build_background_artifact_action_spec(
+    request: ActionRequestV1,
+    state: CognitionState,
+) -> dict[str, object] | None:
+    """Build the bounded text artifact queue action."""
+
+    work_kind = _semantic_text(request, "work_kind")
+    if work_kind not in BACKGROUND_ARTIFACT_WORK_KINDS:
+        logger.warning(
+            f"L2d dropped background artifact request with work_kind={work_kind!r}"
+        )
+        return None
+
+    objective = _semantic_text(request, "detail")
+    if not objective:
+        objective = request["reason"]
+    input_summary = _state_text(state, "decontexualized_input")
+    if not input_summary:
+        input_summary = _state_text(state, "user_input")
+    if not input_summary:
+        input_summary = objective
+
+    action_spec = _build_action_spec(
+        kind=BACKGROUND_ARTIFACT_REQUEST_CAPABILITY,
+        source_refs=[_current_episode_source_ref()],
+        target={
+            "schema_version": "action_target.v1",
+            "target_kind": "current_user",
+            "target_id": None,
+            "owner": "background_artifact",
+            "scope": _background_artifact_target_scope(state),
+        },
+        params={
+            "work_kind": work_kind,
+            "objective": objective,
+            "input_summary": input_summary,
+            "requested_delivery": "send_result_when_done",
+            "max_output_chars": BACKGROUND_ARTIFACT_OUTPUT_CHAR_LIMIT,
+        },
+        urgency="background",
+        visibility="private",
+        deadline=None,
+        reason=request["reason"],
+    )
+    return action_spec
+
+
+def _background_artifact_target_scope(
+    state: CognitionState,
+) -> dict[str, object]:
+    """Bind trusted source scope for durable artifact handoff."""
+
+    episode = state.get("cognitive_episode")
+    target_scope: Mapping[str, object] = {}
+    origin_metadata: Mapping[str, object] = {}
+    if isinstance(episode, Mapping):
+        raw_target_scope = episode.get("target_scope")
+        if isinstance(raw_target_scope, Mapping):
+            target_scope = raw_target_scope
+        raw_origin_metadata = episode.get("origin_metadata")
+        if isinstance(raw_origin_metadata, Mapping):
+            origin_metadata = raw_origin_metadata
+
+    scope = {
+        "source_platform": _state_text(state, "platform"),
+        "source_channel_id": _state_text(state, "platform_channel_id"),
+        "source_channel_type": _state_text(state, "channel_type"),
+        "source_message_id": _mapping_text(
+            origin_metadata,
+            "platform_message_id",
+        ),
+        "source_platform_bot_id": _state_text(state, "platform_bot_id"),
+        "source_character_name": _character_name_for_scope(state),
+        "requester_global_user_id": _state_text(state, "global_user_id"),
+        "requester_platform_user_id": _mapping_text(
+            target_scope,
+            "current_platform_user_id",
+        ),
+        "requester_display_name": _state_text(state, "user_name"),
+    }
+    return scope
+
+
 def _future_cognition_objective(
     requests: list[ActionRequestV1],
     *,
@@ -998,6 +1092,17 @@ def _state_text(state: CognitionState, field_name: str) -> str:
     """Return one optional text value from the trusted cognition state."""
 
     raw_value = state.get(field_name)
+    if not isinstance(raw_value, str):
+        return_value = ""
+        return return_value
+    return_value = raw_value.strip()
+    return return_value
+
+
+def _mapping_text(value: Mapping[str, object], field_name: str) -> str:
+    """Return one optional text value from a trusted mapping."""
+
+    raw_value = value.get(field_name)
     if not isinstance(raw_value, str):
         return_value = ""
         return return_value
@@ -1136,6 +1241,7 @@ _ACTION_INITIALIZER_PROMPT = '''\
 - `speak` 是可见文字回复。选择它表示我决定把话说到当前外部频道；之后才会交给 L3/dialog 渲染为可见文本。
 - `memory_lifecycle_update` 是私有活动承诺生命周期复核。只选择复核需要，不选择具体承诺、别名、数据库目标或生命周期决定。
 - `trigger_future_cognition` 是私有未来认知。只在我需要等待或消费一个具体新信息后再处理具体问题、任务或承诺时选择。
+- `background_artifact_request` 是私有后台文字产物请求。只在我已经接受一项有边界、可稍后交付的文字工作时选择，并且必须同时选择一个 `speak` 动作用来当前回合确认排队状态。只支持 `coding_snippet`、`text_rewrite`、`summary` 三种 `work_kind`。不要把它用于文件写入、shell、包安装、仓库修改、测试执行、下载、网页研究、图片、附件或分块交付。
 
 # 解析器续轮原则
 这些规则优先于普通选择流程：
@@ -1194,8 +1300,9 @@ _ACTION_INITIALIZER_PROMPT = '''\
 9. 玩笑式提到我、嘈杂群聊、轻度调侃，不自动要求边界反击；只有前序裁决已经形成外部化理由，才选择 `speak`。
 10. 当前活动承诺可能被本轮输入或已形成决定影响时，选择 `memory_lifecycle_update`，并在 `detail` 写清需要复核的语义原因。
 11. 当前回合存在具体未完成问题，且继续处理依赖未来新信息时，选择 `trigger_future_cognition`。普通等待、情绪余波、关系观察和更自然的时机不生成未来认知动作。
-12. 没有需要解析、外部化或私有处理的真实动作时，返回空数组。
-13. 同一轮可以选择多个彼此独立的请求，最多 3 个。
+12. 如果当前用户目标是有边界的后台文字产物，且前序判断已经接受这项异步工作，可以选择 `background_artifact_request`。`work_kind` 必须只从 `coding_snippet`、`text_rewrite`、`summary` 中选一个；`detail` 写后台产物目标，`reason` 写为什么角色愿意排队。必须同时选择 `speak`，让 L3 根据实际入队结果决定能否承诺稍后发送。
+13. 没有需要解析、外部化或私有处理的真实动作时，返回空数组。
+14. 同一轮可以选择多个彼此独立的请求，最多 3 个。
 
 # 未来认知判断
 - 只有等待或消费具体新信息后才能继续处理具体问题、任务或承诺时，才选择 `trigger_future_cognition`。
@@ -1243,8 +1350,9 @@ _ACTION_INITIALIZER_PROMPT = '''\
   },
   "action_requests": [
     {
-      "capability": "speak | memory_lifecycle_update | trigger_future_cognition",
+      "capability": "speak | memory_lifecycle_update | trigger_future_cognition | background_artifact_request",
       "decision": "简短语义决定；memory_lifecycle_update 可省略或留空",
+      "work_kind": "仅 background_artifact_request 使用：coding_snippet | text_rewrite | summary；其他动作省略",
       "detail": "精确语义字符串，描述当前动作目标，不是最终发言文本，不复制资料结构或元数据",
       "reason": "选择这个动作的简短语义理由"
     }

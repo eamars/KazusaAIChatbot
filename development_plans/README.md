@@ -38,7 +38,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [background_artifact_handoff_poc_plan.md](active/short_term/background_artifact_handoff_poc_plan.md) | High-risk POC-gated async artifact handoff plan | in_progress |
+| [l2d_router_split_and_background_ack_plan.md](active/short_term/l2d_router_split_and_background_ack_plan.md) | Large L2d router split and background acknowledgement hardening plan | draft |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 
 ## Supporting Experiment Records
@@ -140,6 +140,7 @@ plans.
 | Plan |
 |---|
 | [cache2_agent_stats_health_plan.md](archive/completed/short_term/cache2_agent_stats_health_plan.md) |
+| [background_artifact_handoff_poc_plan.md](archive/completed/short_term/background_artifact_handoff_poc_plan.md) |
 | [character_local_time_context_plan.md](archive/completed/short_term/character_local_time_context_plan.md) |
 | [character_profile_runtime_state_split_plan.md](archive/completed/short_term/character_profile_runtime_state_split_plan.md) |
 | [character_reflection_cycle_stage1a_plan.md](archive/completed/short_term/character_reflection_cycle_stage1a_plan.md) |

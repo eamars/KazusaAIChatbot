@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from typing import Any
 
 import pytest
@@ -20,8 +21,16 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection impo
     CognitionPromptStage,
     select_cognition_prompt_variant,
 )
+from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l1 as l1_module
+from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2 as l2_module
+from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2c2 as l2c2_module
+from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
+
+_BACKGROUND_ARTIFACT_RESULT_VARIANT = (
+    "background_artifact_result_ready_background_artifact_result"
+)
 
 _APPROVED_STAGES: tuple[CognitionPromptStage, ...] = (
     "l1_subconscious",
@@ -84,6 +93,18 @@ _VALID_OUTPUT_PAYLOADS: dict[CognitionPromptStage, dict[str, object]] = {
         "visual_vibe": ["plain"],
     },
 }
+
+_RESULT_READY_PROMPT_HANDLERS = (
+    (l1_module, "call_cognition_subconscious"),
+    (l2_module, "call_cognition_consciousness"),
+    (l2_module, "call_boundary_core_agent"),
+    (l2_module, "call_judgment_core_agent"),
+    (l2c2_module, "call_social_context_appraisal"),
+    (l3_module, "call_style_agent"),
+    (l3_module, "call_content_anchor_agent"),
+    (l3_module, "call_preference_adapter"),
+    (l3_module, "call_visual_agent"),
+)
 
 _WRONG_OUTPUT_VALUES: dict[CognitionPromptStage, object] = {
     "l1_subconscious": [],
@@ -160,6 +181,33 @@ def _reflection_episode(
     return episode
 
 
+def _background_artifact_result_episode() -> CognitiveEpisode:
+    """Build a completed-artifact source episode fixture."""
+
+    turn_clock = build_turn_clock("2026-05-01 09:00:00")
+    episode = _text_chat_episode(output_mode="visible_reply")
+    episode["episode_id"] = "background_artifact_result_ready:job-001"
+    episode["trigger_source"] = "background_artifact_result_ready"
+    episode["input_sources"] = ["background_artifact_result"]
+    episode["storage_timestamp_utc"] = turn_clock["storage_timestamp_utc"]
+    episode["local_time_context"] = turn_clock["local_time_context"]
+    episode["percepts"] = [
+        {
+            "percept_id": "background_artifact_result_ready:job-001:result:0",
+            "input_source": "background_artifact_result",
+            "content": "Artifact ready: Fibonacci function snippet.",
+            "visibility": "model_visible",
+            "metadata": {
+                "job_id": "job-001",
+                "work_kind": "coding_snippet",
+                "objective_summary": "Generate a Fibonacci function snippet.",
+                "failure_summary": "",
+            },
+        },
+    ]
+    return episode
+
+
 def _retrieved_memory_text_episode() -> CognitiveEpisode:
     """Build a chat episode with an unsupported extra input source.
 
@@ -213,6 +261,44 @@ def test_selector_returns_text_chat_variant_for_every_stage() -> None:
             "input_sources": ["dialog_text"],
             "output_mode": "visible_reply",
         }
+
+
+def test_selector_returns_background_artifact_result_variant_for_every_stage() -> None:
+    """Completed background artifacts should use their own prompt variant."""
+
+    episode = _background_artifact_result_episode()
+
+    for stage in _APPROVED_STAGES:
+        selection = select_cognition_prompt_variant(
+            episode=episode,
+            stage=stage,
+        )
+
+        assert selection == {
+            "stage": stage,
+            "variant": (
+                "background_artifact_result_ready_background_artifact_result"
+            ),
+            "prompt_key": (
+                f"{stage}."
+                "background_artifact_result_ready_background_artifact_result"
+            ),
+            "trigger_source": "background_artifact_result_ready",
+            "input_sources": ["background_artifact_result"],
+            "output_mode": "visible_reply",
+        }
+
+
+def test_result_ready_variant_is_registered_in_stage_prompt_maps() -> None:
+    """Every cognition stage handler must accept the selected result variant."""
+
+    for module, handler_name in _RESULT_READY_PROMPT_HANDLERS:
+        handler_source = inspect.getsource(getattr(module, handler_name))
+
+        assert _BACKGROUND_ARTIFACT_RESULT_VARIANT in handler_source, (
+            f"{module.__name__}.{handler_name} does not register "
+            f"{_BACKGROUND_ARTIFACT_RESULT_VARIANT}"
+        )
 
 
 @pytest.mark.parametrize("output_mode", ("visible_reply", "think_only", "silent"))

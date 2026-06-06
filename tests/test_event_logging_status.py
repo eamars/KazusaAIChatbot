@@ -48,6 +48,7 @@ async def test_build_runtime_status_uses_bounded_latest_events(monkeypatch) -> N
         [{"occurred_at": "2026-05-14T00:00:00+00:00", "status": "startup"}],
         [{"occurred_at": "2026-05-14T00:01:00+00:00", "status": "succeeded"}],
         [{"occurred_at": "2026-05-14T00:02:00+00:00", "status": "disabled"}],
+        [{"occurred_at": "2026-05-14T00:03:00+00:00", "status": "succeeded"}],
     ])
     monkeypatch.setattr(status_module.repository, "count_events", count_events)
     monkeypatch.setattr(status_module.repository, "find_events", find_events)
@@ -60,10 +61,11 @@ async def test_build_runtime_status_uses_bounded_latest_events(monkeypatch) -> N
     assert isinstance(workers, dict)
     assert workers["reflection_cycle"]["last_status"] == "succeeded"
     assert workers["self_cognition"]["last_status"] == "disabled"
+    assert workers["background_artifact"]["last_status"] == "succeeded"
     descriptors = status["semantic_descriptors"]
     assert isinstance(descriptors, dict)
     assert descriptors["worker_error_level"] == "low"
-    assert find_events.await_count == 3
+    assert find_events.await_count == 4
     assert count_events.await_count == 1
 
 

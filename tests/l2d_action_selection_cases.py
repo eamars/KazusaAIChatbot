@@ -10,7 +10,11 @@ from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
 
 L2D_ROUTING_CASE_SET_SCHEMA_VERSION = "l2d_routing_case_set.v1"
 L2D_ROUTING_CASE_SCHEMA_VERSION = "l2d_routing_case.v1"
-L2D_ROUTING_SOURCE_KINDS = frozenset(("qq_history", "self_cognition"))
+L2D_ROUTING_SOURCE_KINDS = frozenset((
+    "qq_history",
+    "self_cognition",
+    "background_artifact_poc",
+))
 
 
 def load_l2d_routing_case_set(path: Path) -> dict[str, Any]:
