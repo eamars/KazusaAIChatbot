@@ -114,7 +114,10 @@ Sanitization follows a recover-first order:
 2. Strip or rewrite recoverable source markers from prose using the shared
    public RAG evidence sanitizer. Trace-only provenance markers such as
    `evidence_time=` are handled by this shared boundary, not by
-   source-specific projection exceptions.
+   source-specific projection exceptions. Bare provenance ID labels such as
+   `ID: 1445207392` and `scope_global_user_id=<value>` are stripped so
+   cognition receives display names or semantic roles instead of raw
+   internal identifiers.
 3. Drop raw adapter wire lines such as CQ message syntax. CQ material should be
    stopped by adapters before RAG; if it reaches RAG evidence, it is ignored
    rather than shown to cognition.

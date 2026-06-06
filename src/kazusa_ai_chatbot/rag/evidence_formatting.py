@@ -59,6 +59,10 @@ _GLOBAL_USER_ID_TEXT_RE = re.compile(
     rf"{_UUID_PATTERN}\)?",
     flags=re.IGNORECASE,
 )
+_SCOPE_GLOBAL_USER_ID_TEXT_RE = re.compile(
+    r"\bscope_global_user_id\s*(?::|=)\s*\S+",
+    flags=re.IGNORECASE,
+)
 _SEPARATOR_SOURCE_ID_RE = re.compile(
     rf"\s*(?:\|\s*|\(\s*|\[\s*){_UUID_PATTERN}(?:\s*\)|\s*\])?",
     flags=re.IGNORECASE,
@@ -95,6 +99,10 @@ _SOURCE_ID_LABEL_RE = re.compile(
 _READABLE_MESSAGE_ID_TEXT_RE = re.compile(
     r"(?:\bmessage\s*id\s*(?:is|=|:)?\s*\d{5,}\b)"
     r"|(?:消息\s*(?:ID|id|编号)\s*(?:为|是|=|:)?\s*\d{5,})",
+    flags=re.IGNORECASE,
+)
+_BARE_PROVENANCE_ID_RE = re.compile(
+    r"\bID\s*(?::|：|=)\s*\d{6,}\b",
     flags=re.IGNORECASE,
 )
 _INTERNAL_PUBLIC_LABEL_REPLACEMENTS = (
@@ -192,8 +200,10 @@ def sanitize_public_rag_evidence_text(value: object) -> str:
     text = _replace_internal_public_labels(text)
     text = _SOURCE_ID_PREFIX_RE.sub("", text)
     text = _GLOBAL_USER_ID_TEXT_RE.sub("", text)
+    text = _SCOPE_GLOBAL_USER_ID_TEXT_RE.sub("", text)
     text = _SOURCE_ID_TEXT_RE.sub("[来源标识已省略]", text)
     text = _READABLE_MESSAGE_ID_TEXT_RE.sub("消息记录", text)
+    text = _BARE_PROVENANCE_ID_RE.sub("", text)
     text = _SEPARATOR_SOURCE_ID_RE.sub("", text)
     text = _UUID_RE.sub("[来源标识已省略]", text)
     text = _SOURCE_ID_LABEL_RE.sub("来源标识", text)
@@ -581,6 +591,10 @@ def _collect_text_violations(
         return
 
     if _READABLE_MESSAGE_ID_TEXT_RE.search(value):
+        violations.append(path)
+        return
+
+    if _BARE_PROVENANCE_ID_RE.search(value):
         violations.append(path)
         return
 

@@ -1266,3 +1266,117 @@ def test_cognition_rag_result_preserves_public_recall_payload() -> None:
     assert l3_payload["recall_evidence"][0]["primary_source"] == "conversation_progress"
     assert "user_memory_unit_candidates" not in l2_payload
     assert "user_memory_unit_candidates" not in l3_payload
+
+
+def test_project_known_facts_replaces_bare_id_in_conversation_evidence() -> None:
+    """Conversation evidence with bare provenance ID must use display name."""
+
+    result = project_known_facts(
+        [
+            {
+                "slot": "conversation",
+                "agent": "conversation_evidence_agent",
+                "resolved": True,
+                "summary": "ID: 1445207392 asked about the schedule.",
+                "raw_result": {
+                    "projection_payload": {
+                        "summaries": [
+                            "ID: 1445207392: What time is the meeting?"
+                        ],
+                        "rows": [
+                            {
+                                "summary": "ID: 1445207392: What time is the meeting?",
+                                "display_name": "Sublime",
+                                "timestamp": "2026-06-01T08:30:00+00:00",
+                            }
+                        ],
+                    }
+                },
+            }
+        ],
+        current_user_id="user-1",
+        character_user_id="character-1",
+    )
+
+    evidence = result["conversation_evidence"][0]
+
+    assert "1445207392" not in evidence
+    assert "ID:" not in evidence
+    assert "Sublime" in evidence
+    assert "asked about the schedule" in evidence
+
+
+def test_project_known_facts_replaces_bare_fullwidth_id_in_conversation_evidence() -> None:
+    """Fullwidth colon ID label must also be stripped from conversation evidence."""
+
+    result = project_known_facts(
+        [
+            {
+                "slot": "conversation",
+                "agent": "conversation_evidence_agent",
+                "resolved": True,
+                "summary": 'ID\uff1a1445207392 mentioned the plan.',
+                "raw_result": {
+                    "projection_payload": {
+                        "rows": [
+                            {
+                                "summary": 'ID\uff1a1445207392: mentioned the plan.',
+                                "display_name": "Sublime",
+                            }
+                        ],
+                    }
+                },
+            }
+        ],
+        current_user_id="user-1",
+        character_user_id="character-1",
+    )
+
+    evidence = result["conversation_evidence"][0]
+
+    assert "1445207392" not in evidence
+    assert "Sublime" in evidence
+
+
+def test_project_known_facts_does_not_present_scope_global_user_id_as_evidence_content() -> None:
+    """Memory evidence content must not present scope_global_user_id as the target."""
+
+    result = project_known_facts(
+        [
+            {
+                "slot": "memory",
+                "agent": "memory_evidence_agent",
+                "resolved": True,
+                "summary": (
+                    'scope_global_user_id=user-1 prefers jasmine tea.'
+                ),
+                "raw_result": {
+                    "projection_payload": {
+                        "memory_rows": [
+                            {
+                                "content": (
+                                    'scope_global_user_id=user-1: '
+                                    'prefers jasmine tea in the evening.'
+                                ),
+                                "source_system": "user_memory_units",
+                                "scope_type": "user_continuity",
+                                "scope_global_user_id": "user-1",
+                            },
+                        ],
+                    }
+                },
+            }
+        ],
+        current_user_id="user-1",
+        character_user_id="character-1",
+    )
+
+    entry = result["memory_evidence"][0]
+    summary_text = entry.get("summary", "")
+    content_text = entry.get("content", "")
+
+    assert "scope_global_user_id" not in summary_text
+    assert "scope_global_user_id" not in content_text
+    assert "=user-1" not in summary_text
+    assert "=user-1" not in content_text
+    assert "jasmine tea" in content_text

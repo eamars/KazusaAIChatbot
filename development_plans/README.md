@@ -38,6 +38,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [media_descriptor_cache_plan.md](active/short_term/media_descriptor_cache_plan.md) | Medium media descriptor cache using Cache2 persistent layer | draft |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 
 ## Supporting Experiment Records
@@ -50,6 +51,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [rag2_cognition_identity_evidence_content_bugfix_plan.md](active/bugfix/rag2_cognition_identity_evidence_content_bugfix_plan.md) | Large RAG2 cognition-facing identity evidence content bugfix plan | completed |
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
 
 ## Reference Documents
