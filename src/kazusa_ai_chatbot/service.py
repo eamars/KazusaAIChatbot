@@ -32,6 +32,7 @@ from kazusa_ai_chatbot.config import (
     CHAT_HISTORY_RECENT_LIMIT,
     CONVERSATION_HISTORY_LIMIT,
     COGNITION_VISUAL_DIRECTIVES_ENABLED,
+    MEDIA_DESCRIPTOR_CACHE_MAX_HYDRATION_ENTRIES,
     RAG_CACHE2_MAX_ENTRIES,
     REFLECTION_CYCLE_ENABLED,
     REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD,
@@ -87,6 +88,7 @@ from kazusa_ai_chatbot.db import (
     get_conversation_history,
     get_user_profile,
     load_initializer_entries,
+    load_media_descriptor_entries,
     query_active_commitment_memory_units_for_user,
     resolve_global_user_id,
     save_conversation,
@@ -151,7 +153,10 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_memory_lifecycle import (
     call_post_surface_memory_lifecycle_review,
 )
 from kazusa_ai_chatbot.consolidation.core import call_consolidation_subgraph
-from kazusa_ai_chatbot.rag.cache2_policy import INITIALIZER_CACHE_NAME
+from kazusa_ai_chatbot.rag.cache2_policy import (
+    INITIALIZER_CACHE_NAME,
+    MEDIA_DESCRIPTOR_CACHE_NAME,
+)
 from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
 from kazusa_ai_chatbot.reflection_cycle import (
     ReflectionWorkerHandle,
@@ -1874,6 +1879,22 @@ async def _hydrate_rag_initializer_cache() -> int:
     return loaded_count
 
 
+async def _hydrate_media_descriptor_cache() -> int:
+    """Hydrate current-version persistent media descriptor cache rows into memory.
+
+    Returns:
+        Number of valid rows loaded into the process-local Cache2 runtime.
+    """
+    loaded_count = await brain_cache_startup.hydrate_media_descriptor_cache(
+        load_media_descriptor_entries_func=load_media_descriptor_entries,
+        get_rag_cache2_runtime_func=get_rag_cache2_runtime,
+        cache_name=MEDIA_DESCRIPTOR_CACHE_NAME,
+        max_entries=MEDIA_DESCRIPTOR_CACHE_MAX_HYDRATION_ENTRIES,
+        logger=logger,
+    )
+    return loaded_count
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _static_character_profile, _runtime_character_state
@@ -1905,6 +1926,18 @@ async def lifespan(app: FastAPI):
             resource_kind="cache",
             availability="available",
             latency_ms=_elapsed_ms(cache_started_at),
+            status="ok",
+        )
+
+        # 2b. Hydrate persistent media descriptor cache
+        media_cache_started_at = time.perf_counter()
+        await _hydrate_media_descriptor_cache()
+        await event_logging.record_resource_health_event(
+            component=SERVICE_COMPONENT,
+            resource_name="media_descriptor_cache",
+            resource_kind="cache",
+            availability="available",
+            latency_ms=_elapsed_ms(media_cache_started_at),
             status="ok",
         )
 
