@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import binascii
 import hashlib
 import json
 import logging
@@ -29,12 +30,12 @@ from kazusa_ai_chatbot.message_envelope import (
     project_prompt_message_context,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
+from kazusa_ai_chatbot.nodes.referent_resolution import normalize_referents
 from kazusa_ai_chatbot.rag.cache2_policy import (
     MEDIA_DESCRIPTOR_CACHE_NAME,
     build_media_descriptor_cache_key,
 )
 from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
-from kazusa_ai_chatbot.nodes.referent_resolution import normalize_referents
 from kazusa_ai_chatbot.state import IMProcessState
 from kazusa_ai_chatbot.utils import get_llm, log_preview, parse_llm_json_output
 
@@ -194,19 +195,31 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
                 continue
 
             # -- Cache probe ------------------------------------------------
-            content_hash = hashlib.sha256(
-                base64.b64decode(piece["base64_data"]),
-            ).hexdigest()
-            cache_key = build_media_descriptor_cache_key(
-                content_type=piece["content_type"],
-                content_hash=content_hash,
-            )
+            try:
+                content_hash = hashlib.sha256(
+                    base64.b64decode(piece["base64_data"]),
+                ).hexdigest()
+            except binascii.Error as exc:
+                logger.warning(
+                    f"Skipping cache for corrupt base64 data: {exc} "
+                    f"user={user_name} platform_user={platform_user_id} "
+                    f"media_type={piece['content_type']}"
+                )
+                cache_key = None
+            else:
+                cache_key = build_media_descriptor_cache_key(
+                    content_type=piece["content_type"],
+                    content_hash=content_hash,
+                )
+
             runtime = get_rag_cache2_runtime()
-            cached_result = await runtime.get(
-                cache_key,
-                cache_name=MEDIA_DESCRIPTOR_CACHE_NAME,
-                agent_name="media_descriptor",
-            )
+            cached_result = None
+            if cache_key is not None:
+                cached_result = await runtime.get(
+                    cache_key,
+                    cache_name=MEDIA_DESCRIPTOR_CACHE_NAME,
+                    agent_name="media_descriptor",
+                )
 
             if cached_result is not None:
                 # Cache hit — reconstruct output from cached LLM result
@@ -293,20 +306,21 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
                 )
 
                 # Store in LRU and fire-and-forget persistent write
-                await runtime.store(
-                    cache_key=cache_key,
-                    cache_name=MEDIA_DESCRIPTOR_CACHE_NAME,
-                    result=dict(result),
-                    dependencies=[],
-                    metadata={"content_type": piece["content_type"]},
-                )
-                asyncio.create_task(
-                    upsert_media_descriptor_entry(
+                if cache_key is not None:
+                    await runtime.store(
                         cache_key=cache_key,
+                        cache_name=MEDIA_DESCRIPTOR_CACHE_NAME,
                         result=dict(result),
+                        dependencies=[],
                         metadata={"content_type": piece["content_type"]},
                     )
-                )
+                    asyncio.create_task(
+                        upsert_media_descriptor_entry(
+                            cache_key=cache_key,
+                            result=dict(result),
+                            metadata={"content_type": piece["content_type"]},
+                        )
+                    )
 
             output_multimedia_input.append({
                 "content_type": piece["content_type"],

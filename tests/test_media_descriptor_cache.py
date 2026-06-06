@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import base64
-import hashlib
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 from pymongo.errors import PyMongoError
@@ -16,7 +14,6 @@ from kazusa_ai_chatbot.rag.cache2_policy import (
     MEDIA_DESCRIPTOR_MODEL_VERSION,
     MEDIA_DESCRIPTOR_PROMPT_VERSION,
     build_media_descriptor_cache_key,
-    build_media_descriptor_version_key,
 )
 from kazusa_ai_chatbot.rag.cache2_runtime import RAGCache2Runtime
 
@@ -135,13 +132,6 @@ def _patch_db(monkeypatch: pytest.MonkeyPatch, collection: _FakeCollection) -> N
 # ---------------------------------------------------------------------------
 # cache2_policy tests
 # ---------------------------------------------------------------------------
-
-
-def test_build_media_descriptor_version_key() -> None:
-    """Version key is a human-readable pipe-joined string."""
-    version_key = build_media_descriptor_version_key()
-    assert version_key == _current_media_version()
-    assert "|" in version_key
 
 
 def test_build_media_descriptor_cache_key_deterministic() -> None:

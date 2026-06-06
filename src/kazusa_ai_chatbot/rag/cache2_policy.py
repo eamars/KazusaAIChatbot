@@ -745,16 +745,6 @@ def build_persistent_memory_search_dependencies(args: dict[str, Any]) -> list[Ca
 # ---------------------------------------------------------------------------
 
 
-def build_media_descriptor_version_key() -> str:
-    """Build the composite version key for media descriptor cache entries.
-
-    Returns:
-        Pipe-joined string of prompt and model version constants.
-    """
-    return_value = f"{MEDIA_DESCRIPTOR_PROMPT_VERSION}|{MEDIA_DESCRIPTOR_MODEL_VERSION}"
-    return return_value
-
-
 def build_media_descriptor_cache_key(
     *,
     content_type: str,
@@ -770,12 +760,13 @@ def build_media_descriptor_cache_key(
         Stable exact-match cache key incorporating content identity and
         the current descriptor version.
     """
+    version_key = f"{MEDIA_DESCRIPTOR_PROMPT_VERSION}|{MEDIA_DESCRIPTOR_MODEL_VERSION}"
     return_value = stable_cache_key(
         MEDIA_DESCRIPTOR_CACHE_NAME,
         {
             "content_type": content_type,
             "content_hash": content_hash,
-            "version_key": build_media_descriptor_version_key(),
+            "version_key": version_key,
         },
     )
     return return_value

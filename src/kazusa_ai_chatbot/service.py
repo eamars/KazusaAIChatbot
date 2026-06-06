@@ -1869,10 +1869,11 @@ async def _hydrate_rag_initializer_cache() -> int:
         Number of valid rows loaded into the process-local Cache2 runtime.
     """
 
-    loaded_count = await brain_cache_startup.hydrate_rag_initializer_cache(
-        load_initializer_entries_func=load_initializer_entries,
+    loaded_count = await brain_cache_startup.hydrate_persistent_cache(
+        load_entries_func=load_initializer_entries,
         get_rag_cache2_runtime_func=get_rag_cache2_runtime,
         cache_name=INITIALIZER_CACHE_NAME,
+        label="RAG initializer",
         max_entries=RAG_CACHE2_MAX_ENTRIES,
         logger=logger,
     )
@@ -1885,10 +1886,11 @@ async def _hydrate_media_descriptor_cache() -> int:
     Returns:
         Number of valid rows loaded into the process-local Cache2 runtime.
     """
-    loaded_count = await brain_cache_startup.hydrate_media_descriptor_cache(
-        load_media_descriptor_entries_func=load_media_descriptor_entries,
+    loaded_count = await brain_cache_startup.hydrate_persistent_cache(
+        load_entries_func=load_media_descriptor_entries,
         get_rag_cache2_runtime_func=get_rag_cache2_runtime,
         cache_name=MEDIA_DESCRIPTOR_CACHE_NAME,
+        label="media descriptor",
         max_entries=MEDIA_DESCRIPTOR_CACHE_MAX_HYDRATION_ENTRIES,
         logger=logger,
     )
