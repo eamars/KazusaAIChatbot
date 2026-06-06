@@ -39,6 +39,7 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [background_artifact_handoff_poc_plan.md](active/short_term/background_artifact_handoff_poc_plan.md) | High-risk POC-gated async artifact handoff plan | in_progress |
+| [media_descriptor_cache_plan.md](active/short_term/media_descriptor_cache_plan.md) | Medium media descriptor cache using Cache2 persistent layer | draft |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 
 ## Supporting Experiment Records

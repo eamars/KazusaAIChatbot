@@ -1,3 +1,7 @@
+import asyncio
+import base64
+import binascii
+import hashlib
 import json
 import logging
 
@@ -17,7 +21,9 @@ from kazusa_ai_chatbot.cognition_episode import (
     replace_text_chat_media_percepts,
 )
 from kazusa_ai_chatbot.db import (
+    record_media_descriptor_hit,
     update_conversation_attachment_descriptions,
+    upsert_media_descriptor_entry,
 )
 from kazusa_ai_chatbot.message_envelope import (
     MAX_PROMPT_ATTACHMENT_DESCRIPTION_CHARS,
@@ -25,6 +31,11 @@ from kazusa_ai_chatbot.message_envelope import (
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.nodes.referent_resolution import normalize_referents
+from kazusa_ai_chatbot.rag.cache2_policy import (
+    MEDIA_DESCRIPTOR_CACHE_NAME,
+    build_media_descriptor_cache_key,
+)
+from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
 from kazusa_ai_chatbot.state import IMProcessState
 from kazusa_ai_chatbot.utils import get_llm, log_preview, parse_llm_json_output
 
@@ -183,63 +194,133 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
                 output_multimedia_input.append(output_piece)
                 continue
 
-            # Call vision descriptor
-            system_prompt = SystemMessage(content=_VISION_DESCRIPTOR_PROMPT.format(
-                max_description_chars=MAX_PROMPT_ATTACHMENT_DESCRIPTION_CHARS,
-            ))
-            human_message = HumanMessage(content=[
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        # You must combine the mime_type and base64 into a Data URI string
-                        "url": f"data:{piece['content_type']};base64,{piece['base64_data']}"
-                    },
-                }
-            ])
-
-            description = ""
+            # -- Cache probe ------------------------------------------------
             try:
-                response = await _vision_descriptor_llm.ainvoke([
-                    system_prompt,
-                    human_message,
-                ])
-            except Exception as exc:
+                content_hash = hashlib.sha256(
+                    base64.b64decode(piece["base64_data"]),
+                ).hexdigest()
+            except binascii.Error as exc:
                 logger.warning(
-                    f"Image descriptor fallback after LLM exception: {exc} "
+                    f"Skipping cache for corrupt base64 data: {exc} "
                     f"user={user_name} platform_user={platform_user_id} "
-                    f"media_type={piece['content_type']}",
-                    exc_info=True,
+                    f"media_type={piece['content_type']}"
                 )
-                result = {}
+                cache_key = None
             else:
+                cache_key = build_media_descriptor_cache_key(
+                    content_type=piece["content_type"],
+                    content_hash=content_hash,
+                )
+
+            runtime = get_rag_cache2_runtime()
+            cached_result = None
+            if cache_key is not None:
+                cached_result = await runtime.get(
+                    cache_key,
+                    cache_name=MEDIA_DESCRIPTOR_CACHE_NAME,
+                    agent_name="media_descriptor",
+                )
+
+            if cached_result is not None:
+                # Cache hit — reconstruct output from cached LLM result
+                result = cached_result if isinstance(cached_result, dict) else {}
+                raw_description = result.get("description", "")
+                description = raw_description if isinstance(raw_description, str) else ""
+                description = description.strip()
+                image_observation = _build_current_image_observation(
+                    result=result,
+                    description=description,
+                    source_message_id=state["platform_message_id"],
+                )
+                summary = image_observation["summary"]
+                if not description and isinstance(summary, str):
+                    description = summary
+                logger.debug(
+                    f"Image descriptor cache hit: user={user_name} "
+                    f"platform_user={platform_user_id} "
+                    f"media_type={piece['content_type']} "
+                    f"description={log_preview(description)}"
+                )
+                asyncio.create_task(record_media_descriptor_hit(cache_key))
+            else:
+                # Cache miss — call vision LLM
+                system_prompt = SystemMessage(content=_VISION_DESCRIPTOR_PROMPT.format(
+                    max_description_chars=MAX_PROMPT_ATTACHMENT_DESCRIPTION_CHARS,
+                ))
+                human_message = HumanMessage(content=[
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{piece['content_type']};base64,{piece['base64_data']}"
+                        },
+                    }
+                ])
+
+                description = ""
                 try:
-                    result = parse_llm_json_output(response.content)
+                    response = await _vision_descriptor_llm.ainvoke([
+                        system_prompt,
+                        human_message,
+                    ])
                 except Exception as exc:
                     logger.warning(
-                        f"Image descriptor fallback after parse exception: {exc} "
+                        f"Image descriptor fallback after LLM exception: {exc} "
                         f"user={user_name} platform_user={platform_user_id} "
-                        f"media_type={piece['content_type']} "
-                        f"raw={log_preview(response.content)}",
+                        f"media_type={piece['content_type']}",
                         exc_info=True,
                     )
                     result = {}
+                else:
+                    try:
+                        result = parse_llm_json_output(response.content)
+                    except Exception as exc:
+                        logger.warning(
+                            f"Image descriptor fallback after parse exception: {exc} "
+                            f"user={user_name} platform_user={platform_user_id} "
+                            f"media_type={piece['content_type']} "
+                            f"raw={log_preview(response.content)}",
+                            exc_info=True,
+                        )
+                        result = {}
 
-            if not isinstance(result, dict):
-                result = {}
-            raw_description = result.get("description", "")
-            if isinstance(raw_description, str):
-                description = raw_description
-            description = description.strip()
-            image_observation = _build_current_image_observation(
-                result=result,
-                description=description,
-                source_message_id=state["platform_message_id"],
-            )
-            summary = image_observation["summary"]
-            if not description and isinstance(summary, str):
-                description = summary
+                if not isinstance(result, dict):
+                    result = {}
+                raw_description = result.get("description", "")
+                if isinstance(raw_description, str):
+                    description = raw_description
+                description = description.strip()
+                image_observation = _build_current_image_observation(
+                    result=result,
+                    description=description,
+                    source_message_id=state["platform_message_id"],
+                )
+                summary = image_observation["summary"]
+                if not description and isinstance(summary, str):
+                    description = summary
 
-            logger.debug(f'Image description: user={user_name} platform_user={platform_user_id} media_type={piece["content_type"]} description={log_preview(description)}')
+                logger.debug(
+                    f"Image description: user={user_name} "
+                    f"platform_user={platform_user_id} "
+                    f"media_type={piece['content_type']} "
+                    f"description={log_preview(description)}"
+                )
+
+                # Store in LRU and fire-and-forget persistent write
+                if cache_key is not None:
+                    await runtime.store(
+                        cache_key=cache_key,
+                        cache_name=MEDIA_DESCRIPTOR_CACHE_NAME,
+                        result=dict(result),
+                        dependencies=[],
+                        metadata={"content_type": piece["content_type"]},
+                    )
+                    asyncio.create_task(
+                        upsert_media_descriptor_entry(
+                            cache_key=cache_key,
+                            result=dict(result),
+                            metadata={"content_type": piece["content_type"]},
+                        )
+                    )
 
             output_multimedia_input.append({
                 "content_type": piece["content_type"],

@@ -53,6 +53,10 @@ PERSISTENT_MEMORY_KEYWORD_POLICY_VERSION = "persistent_memory_keyword:v3"
 PERSISTENT_MEMORY_SEARCH_CACHE_NAME = "rag2_persistent_memory_search_agent"
 PERSISTENT_MEMORY_SEARCH_POLICY_VERSION = "persistent_memory_search:v3"
 
+MEDIA_DESCRIPTOR_CACHE_NAME = "media_descriptor"
+MEDIA_DESCRIPTOR_PROMPT_VERSION = "vision_descriptor:v1"
+MEDIA_DESCRIPTOR_MODEL_VERSION = "vision_model:v1"
+
 # ---------------------------------------------------------------------------
 # Shared utilities
 # ---------------------------------------------------------------------------
@@ -733,4 +737,36 @@ def build_persistent_memory_search_dependencies(args: dict[str, Any]) -> list[Ca
         Single user-profile dependency scoped by the effective user filter.
     """
     return_value = _build_persistent_memory_dependencies(args)
+    return return_value
+
+
+# ---------------------------------------------------------------------------
+# media_descriptor (vision LLM cache)
+# ---------------------------------------------------------------------------
+
+
+def build_media_descriptor_cache_key(
+    *,
+    content_type: str,
+    content_hash: str,
+) -> str:
+    """Build the exact cache key for a media descriptor result.
+
+    Args:
+        content_type: MIME type of the media (e.g. ``image/png``).
+        content_hash: SHA-256 hex digest of the decoded raw bytes.
+
+    Returns:
+        Stable exact-match cache key incorporating content identity and
+        the current descriptor version.
+    """
+    version_key = f"{MEDIA_DESCRIPTOR_PROMPT_VERSION}|{MEDIA_DESCRIPTOR_MODEL_VERSION}"
+    return_value = stable_cache_key(
+        MEDIA_DESCRIPTOR_CACHE_NAME,
+        {
+            "content_type": content_type,
+            "content_hash": content_hash,
+            "version_key": version_key,
+        },
+    )
     return return_value

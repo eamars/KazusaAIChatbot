@@ -8,7 +8,10 @@ from typing import Any
 from pymongo import ASCENDING, DESCENDING
 from pymongo.errors import PyMongoError
 
-from kazusa_ai_chatbot.config import RAG_CACHE2_MAX_ENTRIES
+from kazusa_ai_chatbot.config import (
+    MEDIA_DESCRIPTOR_CACHE_MAX_HYDRATION_ENTRIES,
+    RAG_CACHE2_MAX_ENTRIES,
+)
 from kazusa_ai_chatbot.db._client import get_db
 from kazusa_ai_chatbot.db.schemas import RAGCache2PersistentEntryDoc
 from kazusa_ai_chatbot.rag.cache2_policy import (
@@ -17,6 +20,9 @@ from kazusa_ai_chatbot.rag.cache2_policy import (
     INITIALIZER_POLICY_VERSION,
     INITIALIZER_PROMPT_VERSION,
     INITIALIZER_STRATEGY_SCHEMA_VERSION,
+    MEDIA_DESCRIPTOR_CACHE_NAME,
+    MEDIA_DESCRIPTOR_MODEL_VERSION,
+    MEDIA_DESCRIPTOR_PROMPT_VERSION,
 )
 from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
 
@@ -261,4 +267,241 @@ async def prune_persistent_entries(
     deleted_count = int(delete_result.deleted_count)
     if deleted_count:
         logger.info(f"Pruned {deleted_count} persistent Cache2 rows for cache_name={cache_name}")
+    return deleted_count
+
+
+# ---------------------------------------------------------------------------
+# Media descriptor persistent helpers
+# ---------------------------------------------------------------------------
+
+
+def build_media_descriptor_version_key() -> str:
+    """Build the durable version fingerprint for media descriptor entries.
+
+    Returns:
+        A human-readable pipe-joined version key from the prompt and model
+        version constants.
+    """
+    return_value = f"{MEDIA_DESCRIPTOR_PROMPT_VERSION}|{MEDIA_DESCRIPTOR_MODEL_VERSION}"
+    return return_value
+
+
+async def purge_stale_media_descriptor_entries() -> int:
+    """Delete persisted media descriptor rows that do not match current versions.
+
+    Returns:
+        Number of rows deleted. Returns ``0`` if MongoDB is unavailable.
+    """
+    try:
+        collection = await _get_collection()
+    except PyMongoError as exc:
+        logger.exception(
+            f"Could not get persistent Cache2 collection for media descriptor purge: {exc}"
+        )
+        return 0
+
+    delete_filter = {
+        "cache_name": MEDIA_DESCRIPTOR_CACHE_NAME,
+        "version_key": {"$ne": build_media_descriptor_version_key()},
+    }
+    try:
+        result = await collection.delete_many(delete_filter)
+    except PyMongoError as exc:
+        logger.exception(f"Could not purge stale media descriptor cache entries: {exc}")
+        return 0
+
+    deleted_count = int(result.deleted_count)
+    if deleted_count:
+        logger.info(f"Purged {deleted_count} stale persistent media descriptor cache entries")
+    return deleted_count
+
+
+async def load_media_descriptor_entries(
+    *,
+    limit: int = MEDIA_DESCRIPTOR_CACHE_MAX_HYDRATION_ENTRIES,
+) -> list[RAGCache2PersistentEntryDoc]:
+    """Load current-version persistent media descriptor entries for hydration.
+
+    Args:
+        limit: Maximum number of rows to load.
+
+    Returns:
+        Current-version rows ordered by ``updated_at`` descending (most
+        recently accessed first). Returns an empty list on MongoDB failure.
+    """
+    try:
+        collection = await _get_collection()
+    except PyMongoError as exc:
+        logger.exception(
+            f"Could not get persistent Cache2 collection for media descriptor hydration: {exc}"
+        )
+        return []
+
+    query = {
+        "cache_name": MEDIA_DESCRIPTOR_CACHE_NAME,
+        "version_key": build_media_descriptor_version_key(),
+    }
+    try:
+        cursor = (
+            collection
+            .find(query)
+            .sort([("updated_at", DESCENDING)])
+            .limit(limit)
+        )
+        docs = await cursor.to_list(length=limit)
+    except PyMongoError as exc:
+        logger.exception(f"Could not load persistent media descriptor cache entries: {exc}")
+        return []
+
+    return_value = [dict(doc) for doc in docs]
+    return return_value
+
+
+async def upsert_media_descriptor_entry(
+    *,
+    cache_key: str,
+    result: dict[str, Any],
+    metadata: dict[str, Any],
+) -> None:
+    """Persist one cacheable media descriptor entry.
+
+    Args:
+        cache_key: Stable Cache2 key for the media descriptor.
+        result: Cache payload — the structured vision LLM output dict.
+        metadata: Operational metadata for debugging.
+
+    Returns:
+        None. MongoDB failures are logged and swallowed.
+    """
+    try:
+        collection = await _get_collection()
+    except PyMongoError as exc:
+        logger.exception(
+            f"Could not get persistent Cache2 collection for media descriptor key={cache_key}: {exc}"
+        )
+        return
+
+    write_time = _now_iso()
+    update = {
+        "$set": {
+            "cache_name": MEDIA_DESCRIPTOR_CACHE_NAME,
+            "version_key": build_media_descriptor_version_key(),
+            "result": dict(result),
+            "metadata": dict(metadata),
+            "updated_at": write_time,
+        },
+        "$setOnInsert": {
+            "created_at": write_time,
+        },
+        "$inc": {
+            "hit_count": 0,
+        },
+    }
+    try:
+        await collection.update_one({"_id": cache_key}, update, upsert=True)
+    except PyMongoError as exc:
+        logger.exception(
+            f"Could not upsert persistent media descriptor key={cache_key}: {exc}"
+        )
+
+
+async def record_media_descriptor_hit(cache_key: str) -> None:
+    """Record a persistent hit counter update for one media descriptor cache key.
+
+    Args:
+        cache_key: Stable Cache2 key that was served from memory.
+
+    Returns:
+        None. Missing rows and MongoDB failures do not affect the caller.
+    """
+    try:
+        collection = await _get_collection()
+    except PyMongoError as exc:
+        logger.exception(
+            f"Could not get persistent Cache2 collection for media descriptor key={cache_key}: {exc}"
+        )
+        return
+
+    update = {
+        "$inc": {"hit_count": 1},
+        "$set": {"updated_at": _now_iso()},
+    }
+    try:
+        await collection.update_one({"_id": cache_key}, update, upsert=False)
+    except PyMongoError as exc:
+        logger.exception(
+            f"Could not record persistent media descriptor hit key={cache_key}: {exc}"
+        )
+
+
+async def prune_media_descriptor_entries(
+    *,
+    max_entries: int,
+) -> int:
+    """Prune oldest media descriptor rows beyond the persistent cap.
+
+    Unlike ``prune_persistent_entries`` which sorts by hit count, this helper
+    sorts by ``updated_at`` ascending so the least recently accessed entries
+    are discarded first.
+
+    Args:
+        max_entries: Maximum rows to retain for the media descriptor namespace.
+
+    Returns:
+        Number of rows deleted. Returns ``0`` on MongoDB failure.
+    """
+    try:
+        collection = await _get_collection()
+    except PyMongoError as exc:
+        logger.exception(
+            f"Could not get persistent Cache2 collection for media descriptor prune: {exc}"
+        )
+        return 0
+
+    query = {"cache_name": MEDIA_DESCRIPTOR_CACHE_NAME}
+    try:
+        row_count = await collection.count_documents(query)
+    except PyMongoError as exc:
+        logger.exception(
+            f"Could not count persistent media descriptor rows: {exc}"
+        )
+        return 0
+
+    excess_count = row_count - max_entries
+    if excess_count <= 0:
+        return 0
+
+    try:
+        cursor = (
+            collection
+            .find(query, {"_id": 1})
+            .sort([("updated_at", ASCENDING)])
+            .limit(excess_count)
+        )
+        docs_to_delete = await cursor.to_list(length=excess_count)
+    except PyMongoError as exc:
+        logger.exception(
+            f"Could not select persistent media descriptor prune rows: {exc}"
+        )
+        return 0
+
+    ids_to_delete = [doc["_id"] for doc in docs_to_delete if "_id" in doc]
+    if not ids_to_delete:
+        return 0
+
+    delete_filter = {
+        "cache_name": MEDIA_DESCRIPTOR_CACHE_NAME,
+        "_id": {"$in": ids_to_delete},
+    }
+    try:
+        delete_result = await collection.delete_many(delete_filter)
+    except PyMongoError as exc:
+        logger.exception(
+            f"Could not prune persistent media descriptor rows: {exc}"
+        )
+        return 0
+
+    deleted_count = int(delete_result.deleted_count)
+    if deleted_count:
+        logger.info(f"Pruned {deleted_count} persistent media descriptor cache rows")
     return deleted_count
