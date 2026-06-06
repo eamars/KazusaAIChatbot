@@ -38,7 +38,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [l2d_router_split_and_background_ack_plan.md](active/short_term/l2d_router_split_and_background_ack_plan.md) | Large L2d router split and background acknowledgement hardening plan | draft |
+| [l2d_router_split_and_background_ack_plan.md](active/short_term/l2d_router_split_and_background_ack_plan.md) | High-risk L2d router split and background worker-subagent migration plan | draft |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 
 ## Supporting Experiment Records
