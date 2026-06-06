@@ -1240,11 +1240,14 @@ def _candidate_preview_text(candidate: object) -> str:
             return_value = ""
             return return_value
 
-        return text
+        preview = sanitize_public_rag_evidence_text(text)
+        return preview
 
-    preview = _clip_llm_summary_text(
-        candidate,
-        limit=_FINALIZER_UNRESOLVED_CANDIDATE_TEXT_LIMIT,
+    preview = sanitize_public_rag_evidence_text(
+        _clip_llm_summary_text(
+            candidate,
+            limit=_FINALIZER_UNRESOLVED_CANDIDATE_TEXT_LIMIT,
+        )
     )
     return preview
 

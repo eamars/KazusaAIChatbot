@@ -477,3 +477,73 @@ async def test_rag_finalizer_hides_unresolved_raw_candidates(
     }
     payload_text = json.dumps(llm.payload, ensure_ascii=False)
     assert "This unconfirmed candidate must not enter" not in payload_text
+
+
+@pytest.mark.asyncio
+async def test_rag_finalizer_strips_bare_provenance_id_from_answer(
+    monkeypatch,
+) -> None:
+    """Finalizer output must not contain bare provenance ID labels."""
+
+    llm = _FakeFinalizerLLM(
+        content="ID: 1445207392 said he would bring the cake."
+    )
+    monkeypatch.setattr(module, "_finalizer_llm", llm)
+    monkeypatch.setattr(
+        module.event_logging,
+        "record_llm_stage_event",
+        _noop_record_llm_stage_event,
+    )
+
+    result = await module.rag_finalizer(
+        {
+            "original_query": "who is bringing cake",
+            "known_facts": [
+                {
+                    "slot": "Conversation-evidence: retrieve cake commitment",
+                    "agent": "conversation_evidence_agent",
+                    "resolved": True,
+                    "summary": "ID: 1445207392 committed to bringing the cake.",
+                    "raw_result": {
+                        "selected_summary": (
+                            "ID: 1445207392 committed to bringing the cake."
+                        ),
+                    },
+                    "attempts": 1,
+                }
+            ],
+            "context": {},
+        }
+    )
+
+    answer = result["final_answer"]
+    assert "1445207392" not in answer
+    assert "ID:" not in answer
+
+
+def test_unresolved_finalizer_answer_strips_bare_id_from_candidate_preview() -> None:
+    """All-unresolved deterministic output must not leak bare provenance IDs."""
+
+    answer = module._unresolved_finalizer_answer(
+        [
+            {
+                "slot": "Conversation-evidence: retrieve message",
+                "agent": "conversation_evidence_agent",
+                "resolved": False,
+                "summary": "ID: 1445207392 nearby message.",
+                "raw_result": {
+                    "missing_context": ["conversation_evidence"],
+                    "candidates": [
+                        {
+                            "source": "conversation:platform_message_id:319042975",
+                            "claim": "ID: 1445207392 said something relevant.",
+                        },
+                    ],
+                },
+                "attempts": 1,
+            }
+        ]
+    )
+
+    assert "1445207392" not in answer
+    assert "319042975" not in answer

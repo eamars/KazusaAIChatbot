@@ -581,8 +581,26 @@ Status: in progress.
     `platform_message_id`, `message id: <digits>`, but not bare `ID: 1445207392`.
   - Change surface, cutover policy, risks, and deferred items verified as
     correct and well-scoped.
-- Focused deterministic tests before implementation: pending.
-- Production implementation evidence: pending.
-- Deterministic verification after implementation: pending.
-- Readable saved-trace/debug-LLM validation: pending.
+- Focused deterministic tests before implementation: completed 2026-06-07.
+  - 5 new tests added across `test_rag_projection.py` and
+    `test_rag_finalizer_time_context.py`.
+  - All 5 failed pre-implementation as expected; 43 existing tests passed.
+  - Tests cover: bare `ID: <number>` in conversation evidence, fullwidth colon
+    variant `ID：<number>`, `scope_global_user_id=<value>` in memory evidence
+    content, bare provenance ID in finalizer LLM answer, bare provenance ID
+    in deterministic unresolved candidate preview.
+- Production implementation evidence: completed 2026-06-07.
+  - `evidence_formatting.py`: added `_BARE_PROVENANCE_ID_RE` (6+ digit bare
+    ID), `_SCOPE_GLOBAL_USER_ID_TEXT_RE` (scope_global_user_id=value).
+    Wired both into `sanitize_public_rag_evidence_text` and
+    `_collect_text_violations`.
+  - `persona_supervisor2_rag_evaluator.py`: `_candidate_preview_text` now
+    sanitizes candidate text via `sanitize_public_rag_evidence_text` before
+    returning.
+  - `rag/README.md`: documented bare provenance ID and scope_global_user_id
+    stripping in sanitization policy.
+- Deterministic verification after implementation: completed 2026-06-07.
+  - 48/48 tests pass (43 existing + 5 new). Zero regressions.
+- Readable saved-trace/debug-LLM validation: deferred (no live LLM trace
+  available in this session; plan recommends post-deploy validation).
 - Independent code review: pending.
