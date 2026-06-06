@@ -88,14 +88,14 @@ CALENDAR_SCHEDULER_LEASE_SECONDS=300
 CALENDAR_SCHEDULER_MAX_ATTEMPTS=3
 CALENDAR_SCHEDULER_PER_TRIGGER_CAPACITY=5
 
-# Background artifact handoff
-BACKGROUND_ARTIFACT_WORKER_ENABLED=true
-BACKGROUND_ARTIFACT_WORKER_INTERVAL_SECONDS=15
-BACKGROUND_ARTIFACT_WORKER_CLAIM_LIMIT=2
-BACKGROUND_ARTIFACT_WORKER_LEASE_SECONDS=300
-BACKGROUND_ARTIFACT_WORKER_MAX_ATTEMPTS=3
-BACKGROUND_ARTIFACT_INPUT_CHAR_LIMIT=12000
-BACKGROUND_ARTIFACT_OUTPUT_CHAR_LIMIT=3000
+# Background work handoff
+BACKGROUND_WORK_WORKER_ENABLED=true
+BACKGROUND_WORK_WORKER_INTERVAL_SECONDS=15
+BACKGROUND_WORK_WORKER_CLAIM_LIMIT=2
+BACKGROUND_WORK_WORKER_LEASE_SECONDS=300
+BACKGROUND_WORK_WORKER_MAX_ATTEMPTS=3
+BACKGROUND_WORK_INPUT_CHAR_LIMIT=12000
+BACKGROUND_WORK_OUTPUT_CHAR_LIMIT=3000
 
 # Direct web search and URL-reader behavior
 SEARXNG_URL=http://your-searxng-host:8080
@@ -215,13 +215,16 @@ consolidation, dispatcher validation, and adapter delivery continue. Set
 `CHARACTER_SLEEP_LOCAL_PERIOD` to an empty value to disable this sleep-period
 suppression.
 
-`BACKGROUND_ARTIFACT_WORKER_ENABLED` controls the Stage 1 text-only artifact
-worker. Queued jobs support only `coding_snippet`, `text_rewrite`, and
-`summary`; the worker does not write files, run shell commands, install
-packages, download resources, research the web, process attachments, or send
-adapter text directly. Completed jobs re-enter the brain as
-`background_artifact_result_ready` cognition, then use the existing dialog and
-delivery boundary for any visible result.
+`BACKGROUND_WORK_WORKER_ENABLED` controls the generic background-work runtime.
+L2d may only queue a semantic `background_work_request`; the runtime router then
+chooses a worker and task without receiving adapter targets, job refs, tool
+arguments, or final visible text. The current text-artifact worker remains
+text-only and does not write files, run shell commands, install packages,
+download resources, research the web, process attachments, create images, or
+send adapter text directly. Completed jobs re-enter the brain as
+`background_work_result_ready` cognition, then use the existing dialog and
+delivery boundary for any visible result. `BACKGROUND_ARTIFACT_*` settings are
+legacy aliases only for compatibility.
 
 Reflection phase scheduling spreads monitor-eligible channels across the
 `REFLECTION_WORKER_INTERVAL_SECONDS` period instead of running all group

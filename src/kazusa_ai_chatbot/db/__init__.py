@@ -188,6 +188,17 @@ from kazusa_ai_chatbot.db.background_artifact_jobs import (
     mark_background_artifact_delivery_failed,
     mark_background_artifact_delivery_in_progress,
 )
+from kazusa_ai_chatbot.db.background_work_jobs import (
+    claim_background_work_job,
+    complete_background_work_job,
+    ensure_background_work_job_indexes,
+    fail_background_work_job,
+    find_deliverable_background_work_jobs,
+    insert_background_work_job,
+    mark_background_work_delivered,
+    mark_background_work_delivery_failed,
+    mark_background_work_delivery_in_progress,
+)
 
 from kazusa_ai_chatbot.db.rag_cache2_persistent import (
     build_initializer_version_key,
@@ -315,6 +326,15 @@ __all__ = [
     "mark_background_artifact_delivered",
     "mark_background_artifact_delivery_failed",
     "mark_background_artifact_delivery_in_progress",
+    "claim_background_work_job",
+    "complete_background_work_job",
+    "ensure_background_work_job_indexes",
+    "fail_background_work_job",
+    "find_deliverable_background_work_jobs",
+    "insert_background_work_job",
+    "mark_background_work_delivered",
+    "mark_background_work_delivery_failed",
+    "mark_background_work_delivery_in_progress",
     # Persistent Cache2
     "build_initializer_version_key", "load_initializer_entries",
     "prune_persistent_entries", "purge_stale_initializer_entries",

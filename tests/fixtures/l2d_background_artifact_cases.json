@@ -60,6 +60,14 @@
           }
         },
         "channel_type": "private",
+        "platform": "debug",
+        "platform_channel_id": "debug-private-1",
+        "platform_message_id": "message-coding-1",
+        "platform_bot_id": "debug-bot-001",
+        "character_name": "Test Character",
+        "platform_user_id": "platform-user-1",
+        "global_user_id": "global-user-1",
+        "user_name": "Test User",
         "rag_result": {
           "answer": "",
           "memory_evidence": [],
@@ -80,18 +88,21 @@
         "past_route": "background_artifact_request"
       },
       "expectations": {
-        "required_action_kinds": ["speak", "background_artifact_request"],
+        "required_action_kinds": ["speak", "background_work_request"],
         "required_visibility_by_kind": {
           "speak": "user_visible",
-          "background_artifact_request": "private"
+          "background_work_request": "private"
         },
         "required_params_by_kind": {
-          "background_artifact_request": {
-            "work_kind": "coding_snippet",
+          "background_work_request": {
             "requested_delivery": "send_result_when_done"
           }
         },
-        "forbidden_action_kinds": ["send_message", "trigger_future_cognition"]
+        "forbidden_action_kinds": [
+          "background_artifact_request",
+          "send_message",
+          "trigger_future_cognition"
+        ]
       }
     },
     {
@@ -152,6 +163,14 @@
           }
         },
         "channel_type": "private",
+        "platform": "debug",
+        "platform_channel_id": "debug-private-1",
+        "platform_message_id": "message-rewrite-1",
+        "platform_bot_id": "debug-bot-001",
+        "character_name": "Test Character",
+        "platform_user_id": "platform-user-1",
+        "global_user_id": "global-user-1",
+        "user_name": "Test User",
         "rag_result": {
           "answer": "",
           "memory_evidence": [],
@@ -172,18 +191,21 @@
         "past_route": "background_artifact_request"
       },
       "expectations": {
-        "required_action_kinds": ["speak", "background_artifact_request"],
+        "required_action_kinds": ["speak", "background_work_request"],
         "required_visibility_by_kind": {
           "speak": "user_visible",
-          "background_artifact_request": "private"
+          "background_work_request": "private"
         },
         "required_params_by_kind": {
-          "background_artifact_request": {
-            "work_kind": "text_rewrite",
+          "background_work_request": {
             "requested_delivery": "send_result_when_done"
           }
         },
-        "forbidden_action_kinds": ["send_message", "trigger_future_cognition"]
+        "forbidden_action_kinds": [
+          "background_artifact_request",
+          "send_message",
+          "trigger_future_cognition"
+        ]
       }
     },
     {
@@ -244,6 +266,14 @@
           }
         },
         "channel_type": "private",
+        "platform": "debug",
+        "platform_channel_id": "debug-private-1",
+        "platform_message_id": "message-summary-1",
+        "platform_bot_id": "debug-bot-001",
+        "character_name": "Test Character",
+        "platform_user_id": "platform-user-1",
+        "global_user_id": "global-user-1",
+        "user_name": "Test User",
         "rag_result": {
           "answer": "",
           "memory_evidence": [],
@@ -264,18 +294,21 @@
         "past_route": "background_artifact_request"
       },
       "expectations": {
-        "required_action_kinds": ["speak", "background_artifact_request"],
+        "required_action_kinds": ["speak", "background_work_request"],
         "required_visibility_by_kind": {
           "speak": "user_visible",
-          "background_artifact_request": "private"
+          "background_work_request": "private"
         },
         "required_params_by_kind": {
-          "background_artifact_request": {
-            "work_kind": "summary",
+          "background_work_request": {
             "requested_delivery": "send_result_when_done"
           }
         },
-        "forbidden_action_kinds": ["send_message", "trigger_future_cognition"]
+        "forbidden_action_kinds": [
+          "background_artifact_request",
+          "send_message",
+          "trigger_future_cognition"
+        ]
       }
     },
     {
@@ -336,6 +369,14 @@
           }
         },
         "channel_type": "private",
+        "platform": "debug",
+        "platform_channel_id": "debug-private-1",
+        "platform_message_id": "message-shell-1",
+        "platform_bot_id": "debug-bot-001",
+        "character_name": "Test Character",
+        "platform_user_id": "platform-user-1",
+        "global_user_id": "global-user-1",
+        "user_name": "Test User",
         "rag_result": {
           "answer": "",
           "memory_evidence": [],
@@ -362,6 +403,7 @@
         },
         "forbidden_action_kinds": [
           "background_artifact_request",
+          "background_work_request",
           "send_message",
           "trigger_future_cognition"
         ]

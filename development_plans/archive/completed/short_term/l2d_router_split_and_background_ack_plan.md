@@ -6,7 +6,7 @@
   Web Agent 3 style router and worker-subagent architecture, while preserving
   the visible-handoff invariant for promised background work.
 - Plan class: high_risk_migration
-- Status: draft
+- Status: completed
 - Mandatory skills: `development-plan`, `local-llm-architecture`,
   `no-prepost-user-input`, `debug-llm`, `py-style`, `cjk-safety`,
   `test-style-and-execution`
@@ -83,8 +83,9 @@ owns top-level `work_kind`. `work_kind` becomes worker-local to the first
   result in `Execution Evidence`.
 - The `Execution Model` must use parent-led native subagent execution unless
   the user explicitly approves fallback execution.
-- Plan status is not production-code authorization. Production edits require
-  explicit user approval after this draft is reviewed.
+- Plan status is not production-code authorization. Production edits are
+  authorized for this plan by the user's 2026-06-06 instruction to start
+  execution with exactly one production-code subagent.
 - Any change that touches an existing LLM prompt, prompt payload, parser
   contract, or output schema must pass an LLM rewrite and input-audit gate
   before implementation. The gate must warrant whether the affected prompt must
@@ -464,6 +465,9 @@ work added to `/chat` is deterministic validation and durable enqueue.
 - `src/kazusa_ai_chatbot/background_work/worker.py`: background runtime tick
   that claims jobs, runs router, dispatches workers, and records completion or
   failure.
+- `src/kazusa_ai_chatbot/background_work/runtime.py`: service-owned runtime
+  loop that combines worker and delivery ticks without entering the live
+  `/chat` response path.
 - `src/kazusa_ai_chatbot/background_work/router.py`: background-work router
   prompt, LLM call, parser, and normalization.
 - `src/kazusa_ai_chatbot/background_work/providers.py`: deterministic
@@ -715,13 +719,13 @@ work added to `/chat` is deterministic validation and durable enqueue.
 
 ## Progress Checklist
 
-- [ ] Stage 0 - plan review and approval
+- [x] Stage 0 - plan review and approval
   - Covers: this draft, registry row, Web Agent 3 alignment, and user approval.
   - Verify: independent plan review records no blockers.
   - Evidence: record review result in `Execution Evidence`.
   - Handoff: next agent starts at Stage 1.
-  - Sign-off: `<agent/date>` after user approval.
-- [ ] Stage 1 - focused test contract established
+  - Sign-off: `Codex / 2026-06-06` after user approval.
+- [x] Stage 1 - focused test contract established
   - Covers: L2d route-only parser, no-silent enqueue invariant, generic queue
     contract, router contract, service runtime/status contract, and first
     worker two-stage contract. It also records the LLM rewrite/input-audit gate
@@ -731,8 +735,8 @@ work added to `/chat` is deterministic validation and durable enqueue.
     `venv\Scripts\python -m pytest tests/test_l2d_action_selection_cases.py tests/test_l2d_l3_surface_handoff.py tests/test_background_work_jobs.py tests/test_background_work_router.py tests/test_background_work_text_artifact.py tests/test_service_ops_status.py tests/test_event_logging_status.py -q`
   - Evidence: record expected failures or baseline.
   - Handoff: next agent starts production-code subagent for Stage 2.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage 2 - generic background-work infrastructure implemented
+  - Sign-off: `Codex / 2026-06-06`.
+- [x] Stage 2 - generic background-work infrastructure implemented
   - Covers: `background_work` ICD, models, queue facade, DB facade, indexes,
     router contract, provider dispatch, worker registry, service
     startup/shutdown, runtime-status typing, and event-status aggregation.
@@ -740,8 +744,9 @@ work added to `/chat` is deterministic validation and durable enqueue.
     `venv\Scripts\python -m pytest tests/test_background_work_jobs.py tests/test_background_work_router.py tests/test_background_work_providers.py tests/test_service_ops_status.py tests/test_event_logging_status.py tests/test_event_logging_interface.py tests/test_fetch_ops_status_script.py tests/test_config.py tests/test_db.py -q`
   - Evidence: changed production files and focused test result.
   - Handoff: next agent starts Stage 3.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage 3 - first worker and result-ready delivery implemented
+  - Sign-off: `Codex / 2026-06-06` with the out-of-scope reflection
+    time-boundary residual documented in `Execution Evidence`.
+- [x] Stage 3 - first worker and result-ready delivery implemented
   - Covers: `text_artifact` worker, prompt-safe worker result, result-source
     projection, result-ready cognition handoff, service delivery entrypoint,
     and legacy artifact behavior.
@@ -749,8 +754,8 @@ work added to `/chat` is deterministic validation and durable enqueue.
     `venv\Scripts\python -m pytest tests/test_background_work_text_artifact.py tests/test_background_work_delivery.py tests/test_cognitive_episode_contract.py -q`
   - Evidence: changed production files and focused result.
   - Handoff: next agent starts Stage 4.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage 4 - L2d and graph wiring implemented
+  - Sign-off: `Codex / 2026-06-06`.
+- [x] Stage 4 - L2d and graph wiring implemented
   - Covers: route-only L2d, generic background-work enqueue, no-silent handoff
     invariant, L3 pending/rejection consumption, and optional goal-progress
     narrowing.
@@ -758,22 +763,24 @@ work added to `/chat` is deterministic validation and durable enqueue.
     `venv\Scripts\python -m pytest tests/test_l2d_action_selection_cases.py tests/test_l2d_l3_surface_handoff.py tests/test_persona_supervisor2.py tests/test_action_spec_evaluator.py -q`
   - Evidence: changed production files and focused result.
   - Handoff: next agent starts Stage 5.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage 5 - prompt-quality and regression verification complete
+  - Sign-off: `Codex / 2026-06-06`.
+- [x] Stage 5 - prompt-quality and regression verification complete
   - Covers: prompt-contract greps, one-case live LLM checks, focused
     deterministic regression, and human-readable LLM review artifact.
   - Verify: all commands in `Verification`.
   - Evidence: trace paths, review artifact, command outputs, and residual
     risks.
   - Handoff: next agent starts independent code review.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage 6 - independent code review complete
+  - Sign-off: `Codex / 2026-06-06` with the out-of-scope reflection
+    time-boundary residual and stale broad-grep correction documented in
+    `Execution Evidence`.
+- [x] Stage 6 - independent code review complete
   - Covers: review of full diff, plan alignment, prompt boundaries, tests, and
     evidence.
   - Verify: review findings resolved and affected checks rerun.
   - Evidence: review subagent identity, findings, fixes, residual risks.
   - Handoff: ready for final lifecycle sign-off.
-  - Sign-off: `<agent/date>`.
+  - Sign-off: `Codex / 2026-06-06`.
 
 ## Verification
 
@@ -783,7 +790,12 @@ work added to `/chat` is deterministic validation and durable enqueue.
 venv\Scripts\python -m pytest tests/test_l2d_action_selection_cases.py tests/test_l2d_l3_surface_handoff.py tests/test_persona_supervisor2.py tests/test_action_spec_evaluator.py tests/test_background_work_jobs.py tests/test_background_work_router.py tests/test_background_work_providers.py tests/test_background_work_text_artifact.py tests/test_background_work_delivery.py tests/test_cognitive_episode_contract.py tests/test_service_ops_status.py tests/test_event_logging_status.py tests/test_event_logging_interface.py tests/test_fetch_ops_status_script.py tests/test_config.py tests/test_db.py -q
 ```
 
-Expected result after implementation: all selected deterministic tests pass.
+Expected result after implementation: all selected deterministic tests pass,
+except the documented pre-existing reflection-cycle time-boundary residual is
+accepted for this plan only when `git diff --` confirms no changes in
+`src/kazusa_ai_chatbot/reflection_cycle/phase_scheduler.py`,
+`src/kazusa_ai_chatbot/reflection_cycle/worker.py`, or
+`tests/test_event_logging_interface.py`.
 
 ### Live LLM Tests
 
@@ -801,19 +813,19 @@ The parent must write a human-readable review artifact under
 ### Static Checks
 
 ```powershell
-venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\service.py src\kazusa_ai_chatbot\brain_service\contracts.py src\kazusa_ai_chatbot\event_logging\status.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2d.py src\kazusa_ai_chatbot\nodes\persona_supervisor2.py src\kazusa_ai_chatbot\background_work\models.py src\kazusa_ai_chatbot\background_work\router.py src\kazusa_ai_chatbot\background_work\worker.py src\kazusa_ai_chatbot\background_work\providers.py src\kazusa_ai_chatbot\background_work\delivery.py src\kazusa_ai_chatbot\background_work\result_source.py src\kazusa_ai_chatbot\background_work\subagent\text_artifact.py
+venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\service.py src\kazusa_ai_chatbot\brain_service\contracts.py src\kazusa_ai_chatbot\event_logging\status.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2d.py src\kazusa_ai_chatbot\nodes\persona_supervisor2.py src\kazusa_ai_chatbot\background_work\models.py src\kazusa_ai_chatbot\background_work\router.py src\kazusa_ai_chatbot\background_work\worker.py src\kazusa_ai_chatbot\background_work\runtime.py src\kazusa_ai_chatbot\background_work\providers.py src\kazusa_ai_chatbot\background_work\delivery.py src\kazusa_ai_chatbot\background_work\result_source.py src\kazusa_ai_chatbot\background_work\subagent\__init__.py src\kazusa_ai_chatbot\background_work\subagent\text_artifact.py
 git diff --check
 rg "AdapterRegistry|dispatcher|send_message|RemoteHttpAdapter" src\kazusa_ai_chatbot\background_work src\kazusa_ai_chatbot\background_artifact
-rg "work_kind|coding_snippet|text_rewrite|summary" src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2d.py
+rg "work_kind|coding_snippet|text_rewrite|task_type" src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2d.py
 rg "首轮 artifact|artifact 阶段|resolver_capability_requests.*background_artifact_request" src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2d.py src\kazusa_ai_chatbot\background_work
 rg "background_artifact_worker" src\kazusa_ai_chatbot\service.py src\kazusa_ai_chatbot\brain_service\contracts.py src\kazusa_ai_chatbot\event_logging\status.py
 ```
 
 Expected static results: compile succeeds; `git diff --check` has no
 whitespace errors; forbidden delivery imports do not appear in background
-worker files; the L2d prompt no longer mentions worker-local `work_kind` or
-text-artifact task labels; runtime prompts do not contain user-facing
-implementation vocabulary such as `首轮 artifact`.
+worker files; the L2d prompt no longer mentions worker-local `work_kind`,
+`task_type`, or text-artifact task labels; runtime prompts do not contain
+user-facing implementation vocabulary such as `首轮 artifact`.
 The final `background_artifact_worker` grep may return retained compatibility
 fields only when they are documented in the changed README files and tests.
 
@@ -921,7 +933,223 @@ This plan is complete when:
   an existing LLM prompt, payload, parser contract, or output schema requires
   the LLM rewrite/input-audit gate and an organic logic-flow rewrite decision.
   Added a separate LLM drafting rule for newly drafted prompts or LLM stages.
-- This plan remains draft and is not approved for production edits.
+- 2026-06-06 execution start: user explicitly instructed the agent to start
+  executing this development plan with exactly one production-code subagent
+  using `gpt-5.5` high reasoning, and a later review subagent using `gpt-5.5`
+  xhigh reasoning. The parent confirmed native subagent support and model
+  overrides are available. Plan lifecycle moved to `in_progress`; Stage 0 is
+  signed off.
+- 2026-06-06 Stage 1 LLM rewrite/input-audit gate:
+  - Existing L2d prompt and parser contract in
+    `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_l2d.py`
+    warrants a full affected-prompt rewrite because the output schema changes
+    from action-param generation to route-only background-work selection. The
+    prompt must preserve organic flow across role, procedure, input audit,
+    output schema, parser assumptions, and downstream materialization. It must
+    remove prompt-visible `work_kind`, text-artifact labels, worker registry,
+    job mechanics, leases, retries, DB fields, adapter ids, delivery state, and
+    worker-local schemas. The semantic question is: should the character speak
+    now, request resolver work, request private action work, accept a generic
+    background-work candidate with a bounded task brief, or take no action?
+  - Existing prompt-facing capability projection in
+    `src/kazusa_ai_chatbot/action_spec/registry.py` warrants a coherent
+    projection rewrite from `background_artifact_request` to route-only
+    `background_work_request`; no `work_kind`, worker name, worker-local task
+    type, target id, job id, or execution parameter may be model-facing.
+  - Existing L3 prompt-facing intent projection in
+    `src/kazusa_ai_chatbot/nodes/persona_supervisor2_l3_surface.py` does not
+    warrant a full L3 prompt rewrite. It requires a payload projection update
+    so L3 sees only background-work pending or rejection acknowledgement
+    constraints and never raw job refs or worker internals.
+- 2026-06-06 Stage 1 LLM drafting-rule gate for new prompts:
+  - `background_work.router` semantic question: choose only `action`,
+    `worker`, `task`, and `reason` for a queued background-work job. Required
+    inputs: bounded task brief, prompt-safe source summary, max output chars,
+    and worker descriptions. Deterministic owners: queue claim, validation,
+    provider dispatch, retries, leases, permissions, persistence, and delivery.
+    Rejected inputs: adapter ids, DB schema, job ids, delivery handles,
+    filesystem paths, shell commands, tool parameters, and worker-local task
+    schemas.
+  - `background_work.subagent.text_artifact` task-router semantic question:
+    classify a text-artifact task as `coding_snippet`, `text_rewrite`,
+    `summary`, `unsupported`, or `needs_user_input`. Required inputs: selected
+    task, prompt-safe source summary, and output cap. Rejected output:
+    artifact text, code, rewrites, summaries, tool params, adapter ids, and
+    delivery decisions.
+  - `background_work.subagent.text_artifact` generator semantic question:
+    produce one bounded text artifact or failure summary for a validated
+    worker-local task type. Required inputs: validated task type, task,
+    prompt-safe source summary, and output cap. Rejected output: worker route,
+    task-type selection, provider dispatch, persistence mutation, adapter
+    delivery, and cognition calls.
+- 2026-06-06 Stage 1 focused test contract baseline:
+  - Added focused tests:
+    `tests/test_background_work_jobs.py`,
+    `tests/test_background_work_router.py`,
+    `tests/test_background_work_text_artifact.py`.
+  - Updated focused tests:
+    `tests/test_l2d_action_selection_cases.py`,
+    `tests/test_l2d_l3_surface_handoff.py`,
+    `tests/test_service_ops_status.py`,
+    `tests/test_event_logging_status.py`.
+  - Command:
+    `venv\Scripts\python -m pytest tests/test_l2d_action_selection_cases.py tests/test_l2d_l3_surface_handoff.py tests/test_background_work_jobs.py tests/test_background_work_router.py tests/test_background_work_text_artifact.py tests/test_service_ops_status.py tests/test_event_logging_status.py -q`
+  - Result before implementation: 32 passed, 13 failed. Expected failures:
+    missing `kazusa_ai_chatbot.background_work`, missing
+    `kazusa_ai_chatbot.db.background_work_jobs`, unsupported
+    `background_work_request`, L3 ignoring `background_work_request`
+    acknowledgement rows, missing `BACKGROUND_WORK_*` service config fields,
+    and event runtime status still reporting `background_artifact` instead of
+    `background_work`.
+  - Stage 1 signed off by `Codex / 2026-06-06`.
+- 2026-06-06 production subagent implementation:
+  - Production-code subagent: Erdos
+    (`019e9c3b-f05e-7662-8370-494371df8815`), `gpt-5.5` high reasoning.
+  - Created production files under `src/kazusa_ai_chatbot/background_work/`,
+    `src/kazusa_ai_chatbot/db/background_work_jobs.py`, and
+    `src/kazusa_ai_chatbot/action_spec/handlers/background_work.py`.
+    `src/kazusa_ai_chatbot/background_work/runtime.py` was added as the
+    service loop split for the new module and is now listed in `Change
+    Surface`.
+  - Modified the planned service, action-spec, cognition, config, DB,
+    event-logging, and README surfaces to route new live-turn work through
+    generic `background_work`.
+  - Parent-directed follow-up fixed L2d materialization to read trusted
+    target-scope fields from the cognitive episode when top-level debug
+    fields are absent, then removed debug invented defaults so missing
+    required identity still fails deterministic validation.
+- 2026-06-06 Stage 2 verification:
+  - Command:
+    `venv\Scripts\python -m pytest tests/test_background_work_jobs.py tests/test_background_work_router.py tests/test_background_work_providers.py tests/test_service_ops_status.py tests/test_event_logging_status.py tests/test_event_logging_interface.py tests/test_fetch_ops_status_script.py tests/test_config.py tests/test_db.py -q`
+  - Result: 153 passed, 1 failed, 13 deselected.
+  - Accepted residual for this plan: the only failure is
+    `tests/test_event_logging_interface.py::test_stage7_sources_import_time_boundary_for_time_conversion`,
+    which reports direct timezone conversion in
+    `src/kazusa_ai_chatbot/reflection_cycle/phase_scheduler.py` and
+    `src/kazusa_ai_chatbot/reflection_cycle/worker.py`. `git diff --` for
+    those two files and `tests/test_event_logging_interface.py` is empty, and
+    reflection is explicitly deferred by this plan.
+- 2026-06-06 Stage 3 verification:
+  - Command:
+    `venv\Scripts\python -m pytest tests/test_background_work_text_artifact.py tests/test_background_work_delivery.py tests/test_cognitive_episode_contract.py -q`
+  - Result: 23 passed.
+- 2026-06-06 Stage 4 verification:
+  - Command:
+    `venv\Scripts\python -m pytest tests/test_l2d_action_selection_cases.py tests/test_l2d_l3_surface_handoff.py tests/test_persona_supervisor2.py tests/test_action_spec_evaluator.py -q`
+  - Result: 58 passed.
+  - Additional focused gate:
+    `venv\Scripts\python -m pytest tests/test_l2d_action_selection_cases.py tests/test_l2d_l3_surface_handoff.py tests/test_background_work_jobs.py tests/test_background_work_router.py tests/test_background_work_text_artifact.py tests/test_service_ops_status.py tests/test_event_logging_status.py -q`
+    returned 45 passed.
+- 2026-06-06 Stage 5 deterministic and static verification:
+  - Full deterministic command in `Verification` returned
+    234 passed, 1 failed, 13 deselected, with the same accepted
+    reflection-cycle residual described above.
+  - `venv\Scripts\python -m py_compile` over the planned production file list,
+    including `src\kazusa_ai_chatbot\background_work\runtime.py`, succeeded.
+  - `git diff --check` returned exit code 0 with CRLF working-copy warnings
+    only.
+  - `rg "AdapterRegistry|dispatcher|send_message|RemoteHttpAdapter" src\kazusa_ai_chatbot\background_work src\kazusa_ai_chatbot\background_artifact`
+    returned no matches.
+  - The original broad L2d grep
+    `rg "work_kind|coding_snippet|text_rewrite|summary" ...` produced false
+    positives on generic `summary` context fields. The active static gate was
+    corrected to
+    `rg "work_kind|coding_snippet|text_rewrite|task_type" src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition_l2d.py`,
+    which returned no matches.
+  - Runtime prompt vocabulary grep and `background_artifact_worker` source
+    grep both returned no matches in the planned production surfaces.
+- 2026-06-06 Stage 5 live LLM evidence:
+  - L2d one-case live run passed. Trace:
+    `test_artifacts/llm_traces/l2d_action_selection_live_llm__coding_snippet_accept_fibonacci__20260606T100612694830Z.json`.
+    Observed route: `background_work_request` plus `speak`; evaluator accepted
+    both specs; leakage errors were empty. Minor quality concern: the `speak`
+    detail still used the phrase "background artifact".
+  - Background-work router live run passed. Trace:
+    `test_artifacts/llm_traces/background_work_router_live_llm__fibonacci_text_artifact_route.json`.
+    Observed decision: `execute` / `text_artifact` / Fibonacci task brief /
+    short reason; leakage errors were empty.
+  - Text-artifact worker live run passed. Trace:
+    `test_artifacts/llm_traces/background_work_text_artifact_live_llm__fibonacci_code_snippet.json`.
+    Observed task-router output: `task_type="coding_snippet"`. Observed
+    generator output: `status="succeeded"` with a compact Python
+    `fibonacci(n)` function.
+  - Human-readable LLM review artifact:
+    `test_artifacts/llm_reviews/l2d_background_work_router_review_20260606.md`.
+- 2026-06-06 Stage 6 independent code review and remediation:
+  - Review subagent: Herschel
+    (`019e9c6f-4aa3-7373-ba2a-3e6a7a707985`), `gpt-5.5` xhigh reasoning.
+  - Findings: one blocking background-work result prompt-projection issue,
+    two important runtime-contract issues, and two minor documentation or
+    wording issues.
+  - Blocking finding: `background_work_result_ready` cognition stored
+    `task_brief` and `result_summary` but projected legacy `work_kind` and
+    `objective_summary` to prompt payloads. Fixed by projecting only
+    `task_brief`, `failure_summary`, `result_summary`, and
+    `source_character_name` for the new source.
+  - LLM input-audit for this remediation: the projection change touches prompt
+    payload data, not prompt text or output schema. A full prompt rewrite is
+    not warranted because the existing Stage 1 source contract already says
+    background-work result sources expose task/result/failure semantic context
+    while hiding worker and platform metadata. Deterministic tests now assert
+    the exact prompt-facing field set and forbid `work_kind`,
+    `objective_summary`, `source_platform_bot_id`, and `worker_metadata`.
+  - Important finding: queued `max_output_chars` reached the top-level router
+    but not worker execution. Fixed by threading the job cap through
+    `dispatch_background_work(...)`, the worker registry callable contract,
+    and `text_artifact.execute(...)`.
+  - Important finding: result-ready delivery dropped `source_platform_bot_id`.
+    Fixed by storing it in the background-work cognitive episode metadata,
+    passing it from `result_source.py`, and using it in service character
+    identity and `DispatchContext`.
+  - Minor documentation finding: ICD sections still described the old
+    background-artifact worker/status surface. Fixed in the changed README/ICD
+    surfaces. Parent cleanup additionally replaced stale event-logging purpose
+    wording with the generic background-work runtime contract.
+  - Minor live-LLM quality finding: the accepted L2d trace still used the
+    phrase "background artifact" in a `speak` detail. This remains a
+    non-blocking quality residual because action specs and leakage checks were
+    correct, and the user rejected fixture-specific prompt tuning.
+  - Parent added failing review-remediation tests. Pre-fix targeted command:
+    `venv\Scripts\python -m pytest tests/test_background_work_delivery.py tests/test_background_work_providers.py tests/test_background_work_text_artifact.py tests/test_cognitive_episode_contract.py -q`
+    returned 6 failed and 22 passed.
+  - Parent added a compatibility red/green test for shared result delivery:
+    `venv\Scripts\python -m pytest tests/test_background_artifact_delivery.py tests/test_background_work_delivery.py -q`
+    first returned 1 failed and 4 passed, then returned 5 passed after the
+    service preserved artifact versus background-work source text and
+    dispatcher permission roles.
+  - Review-focused rerun after remediation:
+    `venv\Scripts\python -m pytest tests/test_background_artifact_delivery.py tests/test_background_work_delivery.py tests/test_background_work_providers.py tests/test_background_work_text_artifact.py tests/test_cognitive_episode_contract.py -q`
+    returned 30 passed.
+  - Stage 3 rerun:
+    `venv\Scripts\python -m pytest tests/test_background_work_text_artifact.py tests/test_background_work_delivery.py tests/test_cognitive_episode_contract.py -q`
+    returned 25 passed.
+  - Stage 4 rerun:
+    `venv\Scripts\python -m pytest tests/test_l2d_action_selection_cases.py tests/test_l2d_l3_surface_handoff.py tests/test_persona_supervisor2.py tests/test_action_spec_evaluator.py -q`
+    returned 58 passed.
+  - Stage 2 rerun:
+    `venv\Scripts\python -m pytest tests/test_background_work_jobs.py tests/test_background_work_router.py tests/test_background_work_providers.py tests/test_service_ops_status.py tests/test_event_logging_status.py tests/test_event_logging_interface.py tests/test_fetch_ops_status_script.py tests/test_config.py tests/test_db.py -q`
+    returned 154 passed, 1 failed, 13 deselected. The only failure was the
+    accepted reflection-cycle time-boundary residual.
+  - Residual isolation check:
+    `git diff -- src/kazusa_ai_chatbot/reflection_cycle/phase_scheduler.py src/kazusa_ai_chatbot/reflection_cycle/worker.py tests/test_event_logging_interface.py`
+    returned no diff; the isolated reflection test still failed only on those
+    two reflection files.
+  - Full deterministic rerun:
+    `venv\Scripts\python -m pytest tests/test_l2d_action_selection_cases.py tests/test_l2d_l3_surface_handoff.py tests/test_persona_supervisor2.py tests/test_action_spec_evaluator.py tests/test_background_work_jobs.py tests/test_background_work_router.py tests/test_background_work_providers.py tests/test_background_work_text_artifact.py tests/test_background_work_delivery.py tests/test_cognitive_episode_contract.py tests/test_service_ops_status.py tests/test_event_logging_status.py tests/test_event_logging_interface.py tests/test_fetch_ops_status_script.py tests/test_config.py tests/test_db.py -q`
+    returned 237 passed, 1 failed, 13 deselected, with the same accepted
+    reflection residual.
+  - Static checks after review remediation: `py_compile` over the planned
+    production files including `background_work/subagent/__init__.py`
+    succeeded; `git diff --check` returned exit code 0 with CRLF warnings
+    only; all forbidden greps returned no matches.
+  - Documentation drift grep for stale background-artifact runtime/status
+    phrases returned no matches in the changed public docs and subsystem ICDs.
+  - Live LLM tests were not rerun after review remediation because no L2d,
+    background-work router, or text-artifact prompt text changed after Stage 5.
+    Stage 5 live traces remain the prompt-quality evidence for those LLM
+    stages.
+  - Stage 6 sign-off: `Codex / 2026-06-06`; no unresolved blocking review
+    findings remain.
 
 ## Risks
 

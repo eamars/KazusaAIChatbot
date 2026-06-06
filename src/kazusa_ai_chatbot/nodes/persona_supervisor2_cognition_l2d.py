@@ -15,7 +15,7 @@ from kazusa_ai_chatbot.action_spec.models import (
     validate_action_spec,
 )
 from kazusa_ai_chatbot.action_spec.registry import (
-    BACKGROUND_ARTIFACT_REQUEST_CAPABILITY,
+    BACKGROUND_WORK_REQUEST_CAPABILITY,
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
@@ -25,7 +25,7 @@ from kazusa_ai_chatbot.config import (
     COGNITION_LLM_API_KEY,
     COGNITION_LLM_BASE_URL,
     COGNITION_LLM_MODEL,
-    BACKGROUND_ARTIFACT_OUTPUT_CHAR_LIMIT,
+    BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
 )
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ALLOWED_RESOLVER_CAPABILITIES,
@@ -55,12 +55,7 @@ ALLOWED_ACTION_CAPABILITIES = frozenset((
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
-    BACKGROUND_ARTIFACT_REQUEST_CAPABILITY,
-))
-BACKGROUND_ARTIFACT_WORK_KINDS = frozenset((
-    "coding_snippet",
-    "text_rewrite",
-    "summary",
+    BACKGROUND_WORK_REQUEST_CAPABILITY,
 ))
 
 
@@ -71,7 +66,7 @@ class ActionRequestV1(TypedDict, total=False):
     decision: str
     reason: str
     detail: str
-    work_kind: str
+    task_brief: str
 
 
 def build_action_initializer_payload(
@@ -446,7 +441,7 @@ def _normalize_action_requests(parsed: object) -> list[ActionRequestV1]:
             "capability": capability,
             "reason": reason,
         }
-        for optional_field in ("decision", "detail", "work_kind"):
+        for optional_field in ("decision", "detail"):
             field_value = _semantic_text(raw_request, optional_field)
             if field_value:
                 normalized_request[optional_field] = field_value
@@ -824,8 +819,8 @@ def _materialize_action_request(
             state,
             continuation_objective=continuation_objective,
         )
-    elif capability == BACKGROUND_ARTIFACT_REQUEST_CAPABILITY:
-        action_spec = _build_background_artifact_action_spec(request, state)
+    elif capability == BACKGROUND_WORK_REQUEST_CAPABILITY:
+        action_spec = _build_background_work_action_spec(request, state)
     else:
         logger.warning(f"L2d dropped unsupported action capability: {capability}")
         return None
@@ -965,44 +960,32 @@ def _build_future_cognition_action_spec(
     return action_spec
 
 
-def _build_background_artifact_action_spec(
+def _build_background_work_action_spec(
     request: ActionRequestV1,
     state: CognitionState,
 ) -> dict[str, object] | None:
-    """Build the bounded text artifact queue action."""
+    """Build the generic background-work queue action."""
 
-    work_kind = _semantic_text(request, "work_kind")
-    if work_kind not in BACKGROUND_ARTIFACT_WORK_KINDS:
-        logger.warning(
-            f"L2d dropped background artifact request with work_kind={work_kind!r}"
-        )
-        return None
-
-    objective = _semantic_text(request, "detail")
-    if not objective:
-        objective = request["reason"]
-    input_summary = _state_text(state, "decontexualized_input")
-    if not input_summary:
-        input_summary = _state_text(state, "user_input")
-    if not input_summary:
-        input_summary = objective
+    task_brief = _semantic_text(request, "task_brief")
+    if not task_brief:
+        task_brief = _semantic_text(request, "detail")
+    if not task_brief:
+        task_brief = request["reason"]
 
     action_spec = _build_action_spec(
-        kind=BACKGROUND_ARTIFACT_REQUEST_CAPABILITY,
+        kind=BACKGROUND_WORK_REQUEST_CAPABILITY,
         source_refs=[_current_episode_source_ref()],
         target={
             "schema_version": "action_target.v1",
             "target_kind": "current_user",
             "target_id": None,
-            "owner": "background_artifact",
-            "scope": _background_artifact_target_scope(state),
+            "owner": "background_work",
+            "scope": _background_work_target_scope(state),
         },
         params={
-            "work_kind": work_kind,
-            "objective": objective,
-            "input_summary": input_summary,
+            "task_brief": task_brief,
             "requested_delivery": "send_result_when_done",
-            "max_output_chars": BACKGROUND_ARTIFACT_OUTPUT_CHAR_LIMIT,
+            "max_output_chars": BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
         },
         urgency="background",
         visibility="private",
@@ -1012,10 +995,10 @@ def _build_background_artifact_action_spec(
     return action_spec
 
 
-def _background_artifact_target_scope(
+def _background_work_target_scope(
     state: CognitionState,
 ) -> dict[str, object]:
-    """Bind trusted source scope for durable artifact handoff."""
+    """Bind trusted source scope for durable background-work handoff."""
 
     episode = state.get("cognitive_episode")
     target_scope: Mapping[str, object] = {}
@@ -1028,22 +1011,57 @@ def _background_artifact_target_scope(
         if isinstance(raw_origin_metadata, Mapping):
             origin_metadata = raw_origin_metadata
 
+    source_platform = _state_or_mapping_text(
+        state,
+        "platform",
+        target_scope,
+        "platform",
+    )
+    source_character_name = _character_name_for_scope(state)
+
     scope = {
-        "source_platform": _state_text(state, "platform"),
-        "source_channel_id": _state_text(state, "platform_channel_id"),
-        "source_channel_type": _state_text(state, "channel_type"),
-        "source_message_id": _mapping_text(
+        "source_platform": source_platform,
+        "source_channel_id": _state_or_mapping_text(
+            state,
+            "platform_channel_id",
+            target_scope,
+            "platform_channel_id",
+        ),
+        "source_channel_type": _state_or_mapping_text(
+            state,
+            "channel_type",
+            target_scope,
+            "channel_type",
+        ),
+        "source_message_id": _state_or_mapping_text(
+            state,
+            "platform_message_id",
             origin_metadata,
             "platform_message_id",
         ),
-        "source_platform_bot_id": _state_text(state, "platform_bot_id"),
-        "source_character_name": _character_name_for_scope(state),
-        "requester_global_user_id": _state_text(state, "global_user_id"),
-        "requester_platform_user_id": _mapping_text(
+        "source_platform_bot_id": _source_platform_bot_id_for_scope(
+            state,
+            origin_metadata,
+        ),
+        "source_character_name": source_character_name,
+        "requester_global_user_id": _state_or_mapping_text(
+            state,
+            "global_user_id",
+            target_scope,
+            "current_global_user_id",
+        ),
+        "requester_platform_user_id": _state_or_mapping_text(
+            state,
+            "platform_user_id",
             target_scope,
             "current_platform_user_id",
         ),
-        "requester_display_name": _state_text(state, "user_name"),
+        "requester_display_name": _state_or_mapping_text(
+            state,
+            "user_name",
+            target_scope,
+            "current_display_name",
+        ),
     }
     return scope
 
@@ -1110,8 +1128,42 @@ def _mapping_text(value: Mapping[str, object], field_name: str) -> str:
     return return_value
 
 
+def _state_or_mapping_text(
+    state: CognitionState,
+    state_field_name: str,
+    fallback_mapping: Mapping[str, object],
+    fallback_field_name: str,
+) -> str:
+    """Read top-level state text, falling back to a trusted episode mapping."""
+
+    state_value = _state_text(state, state_field_name)
+    if state_value:
+        return state_value
+
+    fallback_value = _mapping_text(fallback_mapping, fallback_field_name)
+    return fallback_value
+
+
+def _source_platform_bot_id_for_scope(
+    state: CognitionState,
+    origin_metadata: Mapping[str, object],
+) -> str:
+    """Return the source bot id from trusted state or origin metadata."""
+
+    platform_bot_id = _state_text(state, "platform_bot_id")
+    if platform_bot_id:
+        return platform_bot_id
+
+    return_value = _mapping_text(origin_metadata, "platform_bot_id")
+    return return_value
+
+
 def _character_name_for_scope(state: CognitionState) -> str:
     """Return the active character name when present in trusted state."""
+
+    character_name = _state_text(state, "character_name")
+    if character_name:
+        return character_name
 
     profile = state.get("character_profile")
     if not isinstance(profile, dict):
@@ -1241,7 +1293,7 @@ _ACTION_INITIALIZER_PROMPT = '''\
 - `speak` 是可见文字回复。选择它表示我决定把话说到当前外部频道；之后才会交给 L3/dialog 渲染为可见文本。
 - `memory_lifecycle_update` 是私有活动承诺生命周期复核。只选择复核需要，不选择具体承诺、别名、数据库目标或生命周期决定。
 - `trigger_future_cognition` 是私有未来认知。只在我需要等待或消费一个具体新信息后再处理具体问题、任务或承诺时选择。
-- `background_artifact_request` 是私有后台文字产物请求。只在我已经接受一项有边界、可稍后交付的文字工作时选择，并且必须同时选择一个 `speak` 动作用来当前回合确认排队状态。只支持 `coding_snippet`、`text_rewrite`、`summary` 三种 `work_kind`。不要把它用于文件写入、shell、包安装、仓库修改、测试执行、下载、网页研究、图片、附件或分块交付。
+- `background_work_request` 是私有后台工作请求。只在我已经接受一项有边界、可稍后交付的文字工作时选择，并且必须同时选择一个 `speak` 动作用来当前回合确认排队状态。这里只写普通语义任务摘要 `task_brief`；不要选择 worker、后台工作分类、工具参数、文件路径、adapter 目标、数据库字段、最终可见文本或任何执行细节。不要把它用于文件写入、shell、包安装、仓库修改、测试执行、下载、网页研究、图片、附件或分块交付。
 
 # 解析器续轮原则
 这些规则优先于普通选择流程：
@@ -1300,7 +1352,7 @@ _ACTION_INITIALIZER_PROMPT = '''\
 9. 玩笑式提到我、嘈杂群聊、轻度调侃，不自动要求边界反击；只有前序裁决已经形成外部化理由，才选择 `speak`。
 10. 当前活动承诺可能被本轮输入或已形成决定影响时，选择 `memory_lifecycle_update`，并在 `detail` 写清需要复核的语义原因。
 11. 当前回合存在具体未完成问题，且继续处理依赖未来新信息时，选择 `trigger_future_cognition`。普通等待、情绪余波、关系观察和更自然的时机不生成未来认知动作。
-12. 如果当前用户目标是有边界的后台文字产物，且前序判断已经接受这项异步工作，可以选择 `background_artifact_request`。`work_kind` 必须只从 `coding_snippet`、`text_rewrite`、`summary` 中选一个；`detail` 写后台产物目标，`reason` 写为什么角色愿意排队。必须同时选择 `speak`，让 L3 根据实际入队结果决定能否承诺稍后发送。
+12. 如果当前用户目标是有边界的后台文字工作，且前序判断已经接受这项异步工作，可以选择 `background_work_request`。`task_brief` 或 `detail` 只写后台任务的普通语义摘要，`reason` 写为什么角色愿意排队。必须同时选择 `speak`，让 L3 根据实际入队结果决定能否承诺稍后发送。
 13. 没有需要解析、外部化或私有处理的真实动作时，返回空数组。
 14. 同一轮可以选择多个彼此独立的请求，最多 3 个。
 
@@ -1350,9 +1402,9 @@ _ACTION_INITIALIZER_PROMPT = '''\
   },
   "action_requests": [
     {
-      "capability": "speak | memory_lifecycle_update | trigger_future_cognition | background_artifact_request",
+      "capability": "speak | memory_lifecycle_update | trigger_future_cognition | background_work_request",
       "decision": "简短语义决定；memory_lifecycle_update 可省略或留空",
-      "work_kind": "仅 background_artifact_request 使用：coding_snippet | text_rewrite | summary；其他动作省略",
+      "task_brief": "仅 background_work_request 使用：普通语义任务摘要；其他动作省略",
       "detail": "精确语义字符串，描述当前动作目标，不是最终发言文本，不复制资料结构或元数据",
       "reason": "选择这个动作的简短语义理由"
     }

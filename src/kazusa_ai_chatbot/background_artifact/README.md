@@ -1,76 +1,45 @@
-# Background Artifact
+# Background Artifact Compatibility
 
 ## Document Control
 
-This ICD describes the Stage 1 background artifact handoff boundary.
+This ICD describes the legacy background-artifact compatibility boundary. New
+work uses `kazusa_ai_chatbot.background_work`.
 
 ## Purpose
 
-Background artifact jobs let cognition accept bounded text-only work that can
-finish after the live response turn. The live turn may acknowledge a queued job,
-but the finished artifact re-enters the character brain as a source-bound
-cognitive episode.
+Background artifact rows were the earlier text-only async job format. They are
+kept so old queued, completed, or deliverable rows can still finish through the
+existing cognition and dialog boundary. New live turns should queue
+`background_work_request` jobs instead.
 
-## Scope
+## Compatibility Scope
 
-Stage 1 supports only text artifacts for `coding_snippet`, `text_rewrite`, and
-`summary`. Jobs do not write files, run shell commands, install packages, mutate
-repositories, download assets, perform web research, create images, handle
-attachments, or stream chunked delivery.
+The legacy package may process existing text-artifact rows and old
+`BACKGROUND_ARTIFACT_*` configuration aliases. It is not the top-level runtime
+contract for new work. L2d does not receive or emit `background_artifact_request`
+for new turns.
 
-## Parties
+## Current Runtime Boundary
 
-- L2d selects the semantic `background_artifact_request` capability.
-- Action-spec execution validates and queues the request.
-- `background_artifact.worker` claims jobs and produces text artifacts.
-- `background_artifact.delivery` turns finished jobs into result-ready cognition
-  sources and hands final delivery to the existing service boundary.
-- `db.background_artifact_jobs` owns raw MongoDB access for job rows.
+New background work follows this path:
 
-## Boundary Summary
+```text
+L2d background_work_request
+  -> action-spec validation
+  -> db.background_work_jobs queued row
+  -> background_work.router route-only worker choice
+  -> background_work.subagent.* worker execution
+  -> background_work_result_ready cognition
+  -> L3/dialog owned final visible wording
+```
 
-Adapters remain thin. The worker never sends user-visible text directly. Result
-delivery must go through cognition, dialog, and the dispatcher boundary owned by
-the service layer. Calendar scheduler, proactive output, and future-cognition
-polling are not job owners for this subsystem.
+Workers never send adapter text directly, call cognition directly, write files,
+run shell commands, install packages, mutate repositories, download assets,
+perform web research, create images, handle attachments, or stream chunked
+delivery.
 
-## Public Interface
+## Legacy Public Interface
 
-- `BackgroundArtifactQueueRequest`
-- `BackgroundArtifactQueueResult`
-- `BackgroundArtifactRuntimeHandle`
-- `enqueue_background_artifact_request(...)`
-- `run_background_artifact_runtime_tick(...)`
-- `start_background_artifact_runtime(...)`
-- `stop_background_artifact_runtime(...)`
-
-Runtime callers use these entrypoints and the public DB facade exports. Raw
-MongoDB calls stay inside `kazusa_ai_chatbot.db.background_artifact_jobs`.
-
-## Job Lifecycle
-
-Jobs move through `queued`, `in_progress`, `completed`, `failed`,
-`delivery_in_progress`, `delivered`, and `delivery_failed`. Queue acknowledgement
-is allowed only after a durable queued row exists. Completed or failed jobs are
-converted into `background_artifact_result_ready` cognitive episodes before any
-visible result is delivered.
-
-## LLM Input Contract
-
-The artifact worker sees only semantic work fields:
-
-- `work_kind`
-- `objective`
-- `input_summary`
-- `max_output_chars`
-
-The prompt and payload exclude adapter IDs, target channels, job leases, retry
-state, database names, filesystem paths, credentials, and queue mechanics.
-
-## Forbidden Paths
-
-The feature must not use `calendar_scheduler`, `proactive_output`,
-consolidator-generated promises, or `trigger_future_cognition` as the job owner
-or polling loop. The worker must not import adapter delivery or dispatcher
-modules, and it must not perform execution, filesystem, network research, image,
-attachment, package-install, or repository mutation work.
+The old `BackgroundArtifact*` exports and `db.background_artifact_jobs` facade
+remain for compatibility with existing rows. Runtime callers should prefer the
+generic `BackgroundWork*` exports and `db.background_work_jobs` facade.

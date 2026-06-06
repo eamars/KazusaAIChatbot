@@ -13,8 +13,14 @@ from kazusa_ai_chatbot.db._client import enable_vector_index, get_db
 from kazusa_ai_chatbot.background_artifact.models import (
     BACKGROUND_ARTIFACT_JOBS_COLLECTION,
 )
+from kazusa_ai_chatbot.background_work.models import (
+    BACKGROUND_WORK_JOBS_COLLECTION,
+)
 from kazusa_ai_chatbot.db.background_artifact_jobs import (
     ensure_background_artifact_job_indexes,
+)
+from kazusa_ai_chatbot.db.background_work_jobs import (
+    ensure_background_work_job_indexes,
 )
 from kazusa_ai_chatbot.db.conversation import (
     CONVERSATION_VECTOR_FILTER_FIELDS,
@@ -96,6 +102,7 @@ async def db_bootstrap() -> None:
         EVENT_LOG_SNAPSHOTS_COLLECTION,
         SELF_COGNITION_ACTION_ATTEMPTS_COLLECTION,
         SELF_COGNITION_GROUP_REVIEW_WINDOWS_COLLECTION,
+        BACKGROUND_WORK_JOBS_COLLECTION,
         BACKGROUND_ARTIFACT_JOBS_COLLECTION,
         INTERNAL_MONOLOGUE_RESIDUE_COLLECTION,
     ]
@@ -219,6 +226,7 @@ async def db_bootstrap() -> None:
         name="self_cognition_group_review_window_reviewed_at",
     )
     await ensure_background_artifact_job_indexes()
+    await ensure_background_work_job_indexes()
     await db.conversation_episode_state.create_index(
         [("platform", 1), ("platform_channel_id", 1), ("global_user_id", 1)],
         unique=True,

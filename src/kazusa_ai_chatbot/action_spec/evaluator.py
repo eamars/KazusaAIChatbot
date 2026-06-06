@@ -17,6 +17,9 @@ from kazusa_ai_chatbot.action_spec.handlers.future_cognition import (
 from kazusa_ai_chatbot.action_spec.handlers.background_artifact import (
     validate_background_artifact_action,
 )
+from kazusa_ai_chatbot.action_spec.handlers.background_work import (
+    validate_background_work_action,
+)
 from kazusa_ai_chatbot.action_spec.models import (
     ActionEvalResult,
     ActionValidationError,
@@ -27,6 +30,7 @@ from kazusa_ai_chatbot.action_spec.models import (
 from kazusa_ai_chatbot.action_spec.registry import (
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     BACKGROUND_ARTIFACT_REQUEST_CAPABILITY,
+    BACKGROUND_WORK_REQUEST_CAPABILITY,
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
@@ -124,6 +128,8 @@ def _validate_kind_specific_contract(action_spec: dict[str, Any]) -> None:
         validate_future_cognition_action(action_spec)
     elif kind == BACKGROUND_ARTIFACT_REQUEST_CAPABILITY:
         validate_background_artifact_action(action_spec)
+    elif kind == BACKGROUND_WORK_REQUEST_CAPABILITY:
+        validate_background_work_action(action_spec)
 
 
 def _validate_speak_contract(action_spec: dict[str, Any]) -> None:

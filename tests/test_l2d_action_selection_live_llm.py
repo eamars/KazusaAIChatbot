@@ -15,6 +15,7 @@ from pymongo.errors import PyMongoError
 
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
 from kazusa_ai_chatbot.db import close_db, get_character_profile
+from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2d as l2d
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2d import (
     build_action_initializer_payload,
     call_action_initializer,
@@ -28,6 +29,7 @@ from tests.l2d_action_selection_cases import (
     load_l2d_routing_case_set,
     select_l2d_routing_case,
 )
+from kazusa_ai_chatbot.utils import parse_llm_json_output
 from tests.llm_trace import write_llm_trace
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -43,6 +45,7 @@ _CASE_FILE_ENV = "L2D_LIVE_CASE_FILE"
 _CASE_ID_ENV = "L2D_LIVE_CASE_ID"
 REAL_COMMITMENT_CASE_LIMIT = 1
 _FORBIDDEN_ACTION_SPEC_FRAGMENTS = (
+    "background_artifact_request",
     "handler_id",
     "credentials",
     "api_key",
@@ -50,10 +53,16 @@ _FORBIDDEN_ACTION_SPEC_FRAGMENTS = (
     "mongo",
     "collection",
     "self_cognition_action_attempts",
+    "work_kind",
+    "task_type",
+    "coding_snippet",
+    "text_rewrite",
 )
 
 
-async def test_l2d_live_case_against_frozen_upstream() -> None:
+async def test_l2d_live_case_against_frozen_upstream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Run one frozen upstream case through L2d and compare route shape."""
 
     await _skip_if_llm_unavailable()
@@ -64,10 +73,18 @@ async def test_l2d_live_case_against_frozen_upstream() -> None:
     frozen_state = case["frozen_l2d_state"]
     prompt_payload = build_action_initializer_payload(frozen_state)
 
+    capturing_llm = _CapturingLLM(l2d._action_initializer_llm)
+    monkeypatch.setattr(l2d, "_action_initializer_llm", capturing_llm)
     result = await call_action_initializer(frozen_state)
+    raw_output = capturing_llm.raw_output
+    raw_parsed_output = parse_llm_json_output(raw_output)
     action_specs = result["action_specs"]
     report = compare_action_specs_to_expectations(case, action_specs)
     leakage_errors = _action_spec_leakage_errors(action_specs)
+    background_specs = [
+        action_spec for action_spec in action_specs
+        if action_spec.get("kind") == "background_work_request"
+    ]
     trace_path = write_llm_trace(
         "l2d_action_selection_live_llm",
         case_id,
@@ -77,9 +94,12 @@ async def test_l2d_live_case_against_frozen_upstream() -> None:
             "source_kind": case["source_kind"],
             "historical_comparison": case["historical_comparison"],
             "prompt_payload": prompt_payload,
+            "raw_model_output": raw_output,
+            "raw_parsed_output": raw_parsed_output,
             "parsed_output": result,
             "comparison_report": report,
             "leakage_errors": leakage_errors,
+            "background_work_specs": background_specs,
             "judgment": "manual_review_required_for_l2d_route_quality",
         },
     )
@@ -91,6 +111,10 @@ async def test_l2d_live_case_against_frozen_upstream() -> None:
     assert len(action_specs) <= 3
     assert leakage_errors == []
     assert report["ok"] is True, report["errors"]
+    assert len(background_specs) == 1
+    task_brief = background_specs[0]["params"]["task_brief"]
+    assert isinstance(task_brief, str)
+    assert task_brief.strip()
 
 
 @pytest.mark.live_db
@@ -279,3 +303,19 @@ def _action_spec_leakage_errors(action_specs: list[dict]) -> list[str]:
         if fragment in serialized:
             errors.append(f"forbidden runtime fragment leaked: {fragment}")
     return errors
+
+
+class _CapturingLLM:
+    """Capture raw LLM output while preserving the production call path."""
+
+    def __init__(self, inner_llm: object) -> None:
+        self._inner_llm = inner_llm
+        self.raw_output = ""
+
+    async def ainvoke(self, messages: object) -> object:
+        """Call the wrapped LLM and store the raw message content."""
+
+        response = await self._inner_llm.ainvoke(messages)
+        self.raw_output = str(response.content)
+        return_value = response
+        return return_value

@@ -28,13 +28,13 @@ from kazusa_ai_chatbot.config import (
     CALENDAR_SCHEDULER_LEASE_SECONDS,
     CALENDAR_SCHEDULER_MAX_ATTEMPTS,
     CALENDAR_SCHEDULER_POLL_INTERVAL_SECONDS,
-    BACKGROUND_ARTIFACT_INPUT_CHAR_LIMIT,
-    BACKGROUND_ARTIFACT_OUTPUT_CHAR_LIMIT,
-    BACKGROUND_ARTIFACT_WORKER_CLAIM_LIMIT,
-    BACKGROUND_ARTIFACT_WORKER_ENABLED,
-    BACKGROUND_ARTIFACT_WORKER_INTERVAL_SECONDS,
-    BACKGROUND_ARTIFACT_WORKER_LEASE_SECONDS,
-    BACKGROUND_ARTIFACT_WORKER_MAX_ATTEMPTS,
+    BACKGROUND_WORK_INPUT_CHAR_LIMIT,
+    BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
+    BACKGROUND_WORK_WORKER_CLAIM_LIMIT,
+    BACKGROUND_WORK_WORKER_ENABLED,
+    BACKGROUND_WORK_WORKER_INTERVAL_SECONDS,
+    BACKGROUND_WORK_WORKER_LEASE_SECONDS,
+    BACKGROUND_WORK_WORKER_MAX_ATTEMPTS,
     CHARACTER_GLOBAL_USER_ID,
     CHAT_HISTORY_RECENT_LIMIT,
     CONVERSATION_HISTORY_LIMIT,
@@ -173,10 +173,10 @@ from kazusa_ai_chatbot.self_cognition import (
     start_self_cognition_worker,
     stop_self_cognition_worker,
 )
-from kazusa_ai_chatbot.background_artifact import (
-    BackgroundArtifactRuntimeHandle,
-    start_background_artifact_runtime,
-    stop_background_artifact_runtime,
+from kazusa_ai_chatbot.background_work import (
+    BackgroundWorkRuntimeHandle,
+    start_background_work_runtime,
+    stop_background_work_runtime,
 )
 
 logger = logging.getLogger(__name__)
@@ -537,7 +537,7 @@ _chat_queue_worker_task: asyncio.Task | None = None
 _calendar_worker_handle: CalendarSchedulerWorkerHandle | None = None
 _reflection_worker_handle: ReflectionWorkerHandle | None = None
 _self_cognition_worker_handle: SelfCognitionWorkerHandle | None = None
-_background_artifact_worker_handle: BackgroundArtifactRuntimeHandle | None = None
+_background_work_worker_handle: BackgroundWorkRuntimeHandle | None = None
 _primary_interaction_active_count = 0
 
 
@@ -589,7 +589,7 @@ def _ops_runtime_status_payload(
     calendar_scheduler_worker = dict(workers.get("calendar_scheduler", {}))
     reflection_worker = dict(workers.get("reflection_cycle", {}))
     self_cognition_worker = dict(workers.get("self_cognition", {}))
-    background_artifact_worker = dict(workers.get("background_artifact", {}))
+    background_work_worker = dict(workers.get("background_work", {}))
     calendar_scheduler_worker.update({
         "enabled": CALENDAR_SCHEDULER_ENABLED,
         "task_alive": _worker_task_alive(_calendar_worker_handle),
@@ -602,9 +602,9 @@ def _ops_runtime_status_payload(
         "enabled": SELF_COGNITION_ENABLED,
         "task_alive": _worker_task_alive(_self_cognition_worker_handle),
     })
-    background_artifact_worker.update({
-        "enabled": BACKGROUND_ARTIFACT_WORKER_ENABLED,
-        "task_alive": _worker_task_alive(_background_artifact_worker_handle),
+    background_work_worker.update({
+        "enabled": BACKGROUND_WORK_WORKER_ENABLED,
+        "task_alive": _worker_task_alive(_background_work_worker_handle),
     })
     payload = {
         "status": str(base_status.get("status", "ok")),
@@ -620,9 +620,7 @@ def _ops_runtime_status_payload(
             "calendar_scheduler_max_attempts": CALENDAR_SCHEDULER_MAX_ATTEMPTS,
             "reflection_cycle_enabled": REFLECTION_CYCLE_ENABLED,
             "self_cognition_enabled": SELF_COGNITION_ENABLED,
-            "background_artifact_worker_enabled": (
-                BACKGROUND_ARTIFACT_WORKER_ENABLED
-            ),
+            "background_work_worker_enabled": BACKGROUND_WORK_WORKER_ENABLED,
             "reflection_worker_interval_seconds": (
                 REFLECTION_WORKER_INTERVAL_SECONDS
             ),
@@ -639,31 +637,25 @@ def _ops_runtime_status_payload(
             "self_cognition_max_cases_per_tick": (
                 SELF_COGNITION_MAX_CASES_PER_TICK
             ),
-            "background_artifact_worker_interval_seconds": (
-                BACKGROUND_ARTIFACT_WORKER_INTERVAL_SECONDS
+            "background_work_worker_interval_seconds": (
+                BACKGROUND_WORK_WORKER_INTERVAL_SECONDS
             ),
-            "background_artifact_worker_claim_limit": (
-                BACKGROUND_ARTIFACT_WORKER_CLAIM_LIMIT
+            "background_work_worker_claim_limit": BACKGROUND_WORK_WORKER_CLAIM_LIMIT,
+            "background_work_worker_lease_seconds": (
+                BACKGROUND_WORK_WORKER_LEASE_SECONDS
             ),
-            "background_artifact_worker_lease_seconds": (
-                BACKGROUND_ARTIFACT_WORKER_LEASE_SECONDS
+            "background_work_worker_max_attempts": (
+                BACKGROUND_WORK_WORKER_MAX_ATTEMPTS
             ),
-            "background_artifact_worker_max_attempts": (
-                BACKGROUND_ARTIFACT_WORKER_MAX_ATTEMPTS
-            ),
-            "background_artifact_input_char_limit": (
-                BACKGROUND_ARTIFACT_INPUT_CHAR_LIMIT
-            ),
-            "background_artifact_output_char_limit": (
-                BACKGROUND_ARTIFACT_OUTPUT_CHAR_LIMIT
-            ),
+            "background_work_input_char_limit": BACKGROUND_WORK_INPUT_CHAR_LIMIT,
+            "background_work_output_char_limit": BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
         },
         "process": dict(process),
         "workers": {
             "calendar_scheduler": calendar_scheduler_worker,
             "reflection_cycle": reflection_worker,
             "self_cognition": self_cognition_worker,
-            "background_artifact": background_artifact_worker,
+            "background_work": background_work_worker,
         },
         "semantic_descriptors": dict(
             base_status.get("semantic_descriptors", {}),
@@ -737,11 +729,15 @@ def _background_artifact_result_text(episode: CognitiveEpisode) -> str:
     percepts = episode.get("percepts", [])
     result_percept = {}
     for percept in percepts:
-        if percept.get("input_source") != "background_artifact_result":
+        if percept.get("input_source") not in (
+            "background_artifact_result",
+            "background_work_result",
+        ):
             continue
         result_percept = percept
         break
 
+    input_source = str(result_percept.get("input_source", "")).strip()
     metadata = result_percept.get("metadata", {})
     if not isinstance(metadata, Mapping):
         metadata = {}
@@ -749,8 +745,11 @@ def _background_artifact_result_text(episode: CognitiveEpisode) -> str:
     objective = str(metadata.get("objective_summary", "")).strip()
     failure_summary = str(metadata.get("failure_summary", "")).strip()
     status = "failed" if failure_summary else "completed"
+    result_label = "Background artifact result"
+    if input_source == "background_work_result":
+        result_label = "Background work result"
     summary_parts = [
-        f"Background artifact result is {status}.",
+        f"{result_label} is {status}.",
     ]
     if work_kind:
         summary_parts.append(f"Work kind: {work_kind}.")
@@ -758,6 +757,24 @@ def _background_artifact_result_text(episode: CognitiveEpisode) -> str:
         summary_parts.append(f"Objective: {objective}.")
     result_text = " ".join(summary_parts)
     return result_text
+
+
+def _background_result_metadata(episode: CognitiveEpisode) -> Mapping[str, object]:
+    """Return metadata from the background result percept."""
+
+    for percept in episode["percepts"]:
+        if percept.get("input_source") not in (
+            "background_artifact_result",
+            "background_work_result",
+        ):
+            continue
+        metadata = percept.get("metadata", {})
+        if isinstance(metadata, Mapping):
+            return metadata
+        break
+
+    return_value: Mapping[str, object] = {}
+    return return_value
 
 
 def _background_artifact_prompt_message_context(
@@ -834,6 +851,19 @@ async def _run_background_artifact_result_post_turn(
         )
 
 
+async def _run_background_work_result_post_turn(
+    consolidation_state: dict,
+    *,
+    visible_response_sent: bool,
+) -> None:
+    """Run non-blocking post-turn consumers for delivered background work."""
+
+    await _run_background_artifact_result_post_turn(
+        consolidation_state,
+        visible_response_sent=visible_response_sent,
+    )
+
+
 async def _deliver_background_artifact_result_episode(
     episode: CognitiveEpisode,
 ) -> dict[str, Any]:
@@ -868,17 +898,18 @@ async def _deliver_background_artifact_result_episode(
         await _refresh_runtime_character_state()
         user_profile = await get_user_profile(requester_global_user_id)
         character_name = _static_character_profile.get("name", "Character")
-        for percept in episode["percepts"]:
-            metadata = percept.get("metadata", {})
-            if not isinstance(metadata, Mapping):
-                continue
-            source_name = str(metadata.get("source_character_name", "")).strip()
-            if source_name:
-                character_name = source_name
-                break
+        result_metadata = _background_result_metadata(episode)
+        source_name = str(
+            result_metadata.get("source_character_name", "")
+        ).strip()
+        if source_name:
+            character_name = source_name
+        source_platform_bot_id = str(
+            result_metadata.get("source_platform_bot_id", "")
+        ).strip()
         character_global_user_id = await _ensure_character_global_identity(
             platform=platform,
-            platform_bot_id="",
+            platform_bot_id=source_platform_bot_id,
             character_name=character_name,
         )
         character_profile = compose_character_profile(
@@ -901,6 +932,12 @@ async def _deliver_background_artifact_result_episode(
                 f"artifact result: {exc}"
             )
             promoted_reflection_context = {}
+
+        trigger_source = str(episode["trigger_source"])
+        is_background_work_result = trigger_source == "background_work_result_ready"
+        bot_permission_role = "background_artifact_result"
+        if is_background_work_result:
+            bot_permission_role = "background_work_result"
 
         debug_modes: DebugModes = {}
         if not COGNITION_VISUAL_DIRECTIVES_ENABLED:
@@ -928,7 +965,7 @@ async def _deliver_background_artifact_result_episode(
             "cognitive_episode": episode,
             "user_multimedia_input": [],
             "user_profile": user_profile,
-            "platform_bot_id": "",
+            "platform_bot_id": source_platform_bot_id,
             "character_name": character_name,
             "character_profile": character_profile,
             "platform_channel_id": platform_channel_id,
@@ -938,7 +975,7 @@ async def _deliver_background_artifact_result_episode(
             "chat_history_recent": chat_history_recent,
             "reply_context": {},
             "should_respond": True,
-            "reason_to_respond": "background_artifact_result_ready",
+            "reason_to_respond": trigger_source,
             "use_reply_feature": False,
             "channel_topic": "",
             "indirect_speech_context": "",
@@ -985,10 +1022,10 @@ async def _deliver_background_artifact_result_episode(
                     "platform_message_id"
                 ],
                 guild_id=None,
-                bot_permission_role="background_artifact_result",
+                bot_permission_role=bot_permission_role,
                 now=storage_utc_now(),
                 source_channel_type=channel_type,
-                source_platform_bot_id="",
+                source_platform_bot_id=source_platform_bot_id,
                 source_character_name=character_name,
             ),
             adapter_registry,
@@ -1004,16 +1041,31 @@ async def _deliver_background_artifact_result_episode(
 
     consolidation_state = result.get("consolidation_state")
     if isinstance(consolidation_state, dict):
-        await _run_background_artifact_result_post_turn(
-            consolidation_state,
-            visible_response_sent=True,
-        )
+        if not is_background_work_result:
+            await _run_background_artifact_result_post_turn(
+                consolidation_state,
+                visible_response_sent=True,
+            )
+        else:
+            await _run_background_work_result_post_turn(
+                consolidation_state,
+                visible_response_sent=True,
+            )
     delivery_result = {
         "status": "delivered",
         "conversation_message_id": dispatch_result["conversation_message_id"],
         "delivery_tracking_id": dispatch_result["delivery_tracking_id"],
         "adapter_message_id": dispatch_result["adapter_message_id"],
     }
+    return delivery_result
+
+
+async def _deliver_background_work_result_episode(
+    episode: CognitiveEpisode,
+) -> dict[str, Any]:
+    """Run background-work result cognition and dispatcher delivery."""
+
+    delivery_result = await _deliver_background_artifact_result_episode(episode)
     return delivery_result
 
 
@@ -2208,7 +2260,7 @@ async def lifespan(app: FastAPI):
     global _graph, _adapter_registry
     global _calendar_worker_handle
     global _reflection_worker_handle, _self_cognition_worker_handle
-    global _background_artifact_worker_handle
+    global _background_work_worker_handle
 
     process_correlation_id = uuid4().hex
     host_label = socket.gethostname()
@@ -2337,19 +2389,19 @@ async def lifespan(app: FastAPI):
             logger.info(
                 "Self-cognition worker disabled via SELF_COGNITION_ENABLED=false"
             )
-        if BACKGROUND_ARTIFACT_WORKER_ENABLED:
-            _background_artifact_worker_handle = (
-                start_background_artifact_runtime(
+        if BACKGROUND_WORK_WORKER_ENABLED:
+            _background_work_worker_handle = (
+                start_background_work_runtime(
                     is_primary_interaction_busy=_primary_interaction_busy,
                     deliver_result_episode_func=(
-                        _deliver_background_artifact_result_episode
+                        _deliver_background_work_result_episode
                     ),
                 )
             )
         else:
             logger.info(
-                "Background artifact worker disabled via "
-                "BACKGROUND_ARTIFACT_WORKER_ENABLED=false"
+                "Background work worker disabled via "
+                "BACKGROUND_WORK_WORKER_ENABLED=false"
             )
         calendar_phase_provider = CalendarReflectionPhaseRunProvider()
         if REFLECTION_CYCLE_ENABLED:
@@ -2414,11 +2466,11 @@ async def lifespan(app: FastAPI):
             if _self_cognition_worker_handle is not None:
                 await stop_self_cognition_worker(_self_cognition_worker_handle)
                 _self_cognition_worker_handle = None
-            if _background_artifact_worker_handle is not None:
-                await stop_background_artifact_runtime(
-                    _background_artifact_worker_handle,
+            if _background_work_worker_handle is not None:
+                await stop_background_work_runtime(
+                    _background_work_worker_handle,
                 )
-                _background_artifact_worker_handle = None
+                _background_work_worker_handle = None
             if _reflection_worker_handle is not None:
                 await stop_reflection_cycle_worker(_reflection_worker_handle)
                 _reflection_worker_handle = None

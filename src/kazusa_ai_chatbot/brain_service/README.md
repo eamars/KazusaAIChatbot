@@ -38,7 +38,7 @@ both inbound and outbound state:
   reply hydration,
 - runtime adapter registration lets dispatcher/proactive sends call adapter
   callback endpoints.
-- background artifact worker lifecycle is started, stopped, and reported by the
+- background-work worker lifecycle is started, stopped, and reported by the
   service runtime while result delivery still returns through cognition/dialog.
 
 ## Scope
@@ -51,7 +51,7 @@ This ICD covers:
 - Delivery tracking and delivery receipt lifecycle.
 - Runtime adapter registration and heartbeat protocol for dispatcher or
   proactive callback delivery.
-- Background artifact worker enablement, liveness, and result-ready delivery
+- Background-work worker enablement, liveness, and result-ready delivery
   boundary.
 - Reply-context hydration behavior when an adapter supplies only a platform
   reply message id.
@@ -164,13 +164,13 @@ Purpose:
 The response exposes:
 
 - `status`, `generated_at`, and `window_hours`;
-- `config` values for calendar, reflection, self-cognition, and background
-  artifact worker
+- `config` values for calendar, reflection, self-cognition, and background-work
+  worker
   enablement and intervals;
 - calendar claim, lease, and retry settings;
 - process-local worker `enabled` and `task_alive` values;
 - latest event timestamp/status for process, reflection, self-cognition, and
-  background artifact worker activity;
+  background-work worker activity;
 - deterministic `semantic_descriptors`.
 
 This endpoint must not expose message bodies, prompt text, generated dialog,
@@ -440,11 +440,12 @@ When an episode has no visible text surface, the brain returns an empty
 consolidated when private action results, calendar-triggered action results,
 private surface outputs, or private finalization exist.
 
-When L2d selects `background_artifact_request`, the persona graph queues the
+When L2d selects `background_work_request`, the persona graph queues the
 durable job before selected L3 text runs and records a pending result in the
-episode trace. Completed jobs later return as
-`background_artifact_result_ready` cognitive episodes. The background artifact
-worker must not call adapters or dispatcher delivery directly.
+episode trace. Completed jobs later return as `background_work_result_ready`
+cognitive episodes. Background-work workers must not call adapters, dispatcher
+delivery, or cognition directly. Legacy `background_artifact_result_ready`
+episodes remain compatibility input for old rows only.
 
 Delivery receipt adapters may still need bounded `not_found` retry behavior
 for transport timing and cross-process delivery, but a non-empty

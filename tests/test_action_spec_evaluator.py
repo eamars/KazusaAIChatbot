@@ -9,6 +9,7 @@ import pytest
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
 from kazusa_ai_chatbot.action_spec.registry import (
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+    BACKGROUND_WORK_REQUEST_CAPABILITY,
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
@@ -190,6 +191,44 @@ def _background_artifact_action_spec() -> dict:
     }
 
 
+def _background_work_action_spec() -> dict:
+    return {
+        "schema_version": "action_spec.v1",
+        "kind": BACKGROUND_WORK_REQUEST_CAPABILITY,
+        "cognition_mode": "deliberative",
+        "source_refs": [_cognitive_source_ref()],
+        "target": {
+            "schema_version": "action_target.v1",
+            "target_kind": "current_user",
+            "target_id": None,
+            "owner": "background_work",
+            "scope": {
+                "source_platform": "debug",
+                "source_channel_id": "debug:user:test-user",
+                "source_channel_type": "private",
+                "source_message_id": "message-001",
+                "source_platform_bot_id": "debug-bot-001",
+                "source_character_name": "Test Character",
+                "requester_global_user_id": (
+                    "00000000-0000-4000-8000-000000000002"
+                ),
+                "requester_platform_user_id": "debug-user-001",
+                "requester_display_name": "Test User",
+            },
+        },
+        "params": {
+            "task_brief": "Generate a Fibonacci function snippet.",
+            "requested_delivery": "send_result_when_done",
+            "max_output_chars": 3000,
+        },
+        "urgency": "background",
+        "visibility": "private",
+        "deadline": None,
+        "continuation": _no_continuation(),
+        "reason": "The user requested bounded async text work.",
+    }
+
+
 def test_initial_registry_contains_only_approved_runtime_capabilities() -> None:
     """The first registry slice must not expose deferred future tools."""
 
@@ -197,6 +236,7 @@ def test_initial_registry_contains_only_approved_runtime_capabilities() -> None:
 
     assert set(capabilities) == {
         BACKGROUND_ARTIFACT_REQUEST_CAPABILITY,
+        BACKGROUND_WORK_REQUEST_CAPABILITY,
         MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
         APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
         SPEAK_CAPABILITY,
@@ -205,6 +245,10 @@ def test_initial_registry_contains_only_approved_runtime_capabilities() -> None:
     assert (
         capabilities[BACKGROUND_ARTIFACT_REQUEST_CAPABILITY]["owner_module"]
         == "background_artifact"
+    )
+    assert (
+        capabilities[BACKGROUND_WORK_REQUEST_CAPABILITY]["owner_module"]
+        == "background_work"
     )
     assert (
         capabilities[MEMORY_LIFECYCLE_UPDATE_CAPABILITY]["owner_module"]
@@ -225,33 +269,30 @@ def test_initial_registry_contains_only_approved_runtime_capabilities() -> None:
     assert "note_open_loop" not in capabilities
 
 
-def test_background_artifact_route_schema_matches_router_contract() -> None:
-    """L2d should see semantic async-artifact fields, not queue internals."""
+def test_background_work_route_schema_matches_router_contract() -> None:
+    """L2d should see route-only async-work fields, not worker internals."""
 
     capabilities = build_initial_action_capabilities()
-    capability = capabilities[BACKGROUND_ARTIFACT_REQUEST_CAPABILITY]
+    capability = capabilities[BACKGROUND_WORK_REQUEST_CAPABILITY]
     schema = capability["input_schema"]
     properties = schema["properties"]
 
     assert schema["required"] == [
-        "work_kind",
-        "objective",
-        "input_summary",
+        "task_brief",
         "requested_delivery",
         "max_output_chars",
-    ]
-    assert properties["work_kind"]["enum"] == [
-        "coding_snippet",
-        "text_rewrite",
-        "summary",
     ]
     assert properties["requested_delivery"]["enum"] == [
         "send_result_when_done",
     ]
+    assert "work_kind" not in properties
+    assert "worker" not in properties
+    assert "task_type" not in properties
     assert "job_id" not in properties
     assert "source_channel_id" not in properties
     assert "adapter_id" not in properties
     assert capability["category"] == "action"
+    assert capability["owner_module"] == "background_work"
 
 
 def test_memory_lifecycle_route_schema_matches_router_contract() -> None:
@@ -310,7 +351,8 @@ def test_prompt_affordance_projection_excludes_runtime_internals() -> None:
 
     assert "memory_lifecycle_update" in serialized
     assert "apply_memory_lifecycle_update" not in serialized
-    assert "background_artifact_request" in serialized
+    assert "background_work_request" in serialized
+    assert "background_artifact_request" not in serialized
     assert "speak" in serialized
     assert "trigger_future_cognition" in serialized
     assert "send_message" not in serialized
@@ -330,6 +372,10 @@ def test_prompt_affordance_projection_excludes_runtime_internals() -> None:
         "job_id",
         "lease",
         "retry",
+        "work_kind",
+        "task_type",
+        "coding_snippet",
+        "text_rewrite",
     ):
         assert forbidden not in serialized
 
@@ -466,6 +512,59 @@ def test_background_artifact_request_rejects_missing_delivery_target_scope(
 
     evaluator = ActionSpecEvaluator(build_initial_action_capabilities())
     action_spec = _background_artifact_action_spec()
+    del action_spec["target"]["scope"][scope_field]
+
+    result = evaluator.evaluate(action_spec)
+
+    assert result["ok"] is False
+    assert any(scope_field in error for error in result["errors"])
+
+
+def test_background_work_request_validates_route_only_params() -> None:
+    """Generic background work validates before durable enqueue."""
+
+    evaluator = ActionSpecEvaluator(build_initial_action_capabilities())
+
+    result = evaluator.evaluate(_background_work_action_spec())
+
+    assert result["ok"] is True
+    assert result["handler_owner"] == "background_work"
+    assert result["action_spec"]["target"]["target_kind"] == "current_user"
+    assert result["action_spec"]["params"]["task_brief"] == (
+        "Generate a Fibonacci function snippet."
+    )
+    assert result["action_spec"]["params"]["max_output_chars"] == 3000
+    assert "work_kind" not in result["action_spec"]["params"]
+    assert "task_type" not in result["action_spec"]["params"]
+
+
+def test_background_work_request_rejects_worker_local_params() -> None:
+    """L2d-routed background work must not smuggle worker-local choices."""
+
+    evaluator = ActionSpecEvaluator(build_initial_action_capabilities())
+    action_spec = _background_work_action_spec()
+    action_spec["params"]["work_kind"] = "coding_snippet"
+
+    result = evaluator.evaluate(action_spec)
+
+    assert result["ok"] is False
+    assert any("worker-local" in error for error in result["errors"])
+
+
+@pytest.mark.parametrize(
+    "scope_field",
+    (
+        "source_channel_id",
+        "requester_global_user_id",
+    ),
+)
+def test_background_work_request_rejects_missing_delivery_target_scope(
+    scope_field: str,
+) -> None:
+    """Generic background-work enqueue must not acknowledge undeliverable jobs."""
+
+    evaluator = ActionSpecEvaluator(build_initial_action_capabilities())
+    action_spec = _background_work_action_spec()
     del action_spec["target"]["scope"][scope_field]
 
     result = evaluator.evaluate(action_spec)

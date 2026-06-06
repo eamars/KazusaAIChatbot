@@ -61,10 +61,12 @@ async def test_build_runtime_status_uses_bounded_latest_events(monkeypatch) -> N
     assert isinstance(workers, dict)
     assert workers["reflection_cycle"]["last_status"] == "succeeded"
     assert workers["self_cognition"]["last_status"] == "disabled"
-    assert workers["background_artifact"]["last_status"] == "succeeded"
+    assert workers["background_work"]["last_status"] == "succeeded"
     descriptors = status["semantic_descriptors"]
     assert isinstance(descriptors, dict)
     assert descriptors["worker_error_level"] == "low"
+    worker_query = find_events.await_args_list[3].kwargs["query"]
+    assert worker_query["component"] == "background_work.worker"
     assert find_events.await_count == 4
     assert count_events.await_count == 1
 

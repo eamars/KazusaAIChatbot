@@ -14,6 +14,7 @@ APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY = "apply_memory_lifecycle_update"
 SPEAK_CAPABILITY = "speak"
 TRIGGER_FUTURE_COGNITION_CAPABILITY = "trigger_future_cognition"
 BACKGROUND_ARTIFACT_REQUEST_CAPABILITY = "background_artifact_request"
+BACKGROUND_WORK_REQUEST_CAPABILITY = "background_work_request"
 
 
 def build_initial_action_capabilities() -> dict[str, CapabilitySpecV1]:
@@ -29,6 +30,7 @@ def build_initial_action_capabilities() -> dict[str, CapabilitySpecV1]:
         BACKGROUND_ARTIFACT_REQUEST_CAPABILITY: (
             _background_artifact_capability()
         ),
+        BACKGROUND_WORK_REQUEST_CAPABILITY: _background_work_capability(),
     }
     for capability in capabilities.values():
         validate_capability_spec(capability)
@@ -49,7 +51,9 @@ def project_prompt_affordances(
         elif capability_kind == TRIGGER_FUTURE_COGNITION_CAPABILITY:
             projection.append(_future_cognition_projection())
         elif capability_kind == BACKGROUND_ARTIFACT_REQUEST_CAPABILITY:
-            projection.append(_background_artifact_projection())
+            continue
+        elif capability_kind == BACKGROUND_WORK_REQUEST_CAPABILITY:
+            projection.append(_background_work_projection())
     return projection
 
 
@@ -269,6 +273,48 @@ def _background_artifact_capability() -> CapabilitySpecV1:
     return return_value
 
 
+def _background_work_capability() -> CapabilitySpecV1:
+    """Build the generic background-work request capability."""
+
+    return_value: CapabilitySpecV1 = {
+        "schema_version": "capability_spec.v1",
+        "capability_kind": BACKGROUND_WORK_REQUEST_CAPABILITY,
+        "category": "action",
+        "owner_module": "background_work",
+        "input_schema": {
+            "type": "object",
+            "required": [
+                "task_brief",
+                "requested_delivery",
+                "max_output_chars",
+            ],
+            "properties": {
+                "task_brief": {"type": "string"},
+                "requested_delivery": {
+                    "type": "string",
+                    "enum": ["send_result_when_done"],
+                },
+                "max_output_chars": {"type": "integer"},
+            },
+        },
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string"},
+                "queue_state": {"type": "string"},
+                "task_summary": {"type": "string"},
+            },
+        },
+        "handler_id": "background_work.enqueue.v1",
+        "lifecycle_hooks": ["validate", "enqueue_background_work"],
+        "permission_policy": "policy:background_work.enqueue.v1",
+        "rate_limit_policy": "policy:action.default_rate_limit.v1",
+        "audit_policy": "policy:action.audit.v1",
+        "prompt_projection_policy": "policy:prompt.action_safe.v1",
+    }
+    return return_value
+
+
 def _background_artifact_projection() -> dict[str, object]:
     """Return prompt-safe background artifact affordance metadata."""
 
@@ -286,6 +332,25 @@ def _background_artifact_projection() -> dict[str, object]:
         ],
         "execution_boundary": (
             "durable artifact queue creates later source-bound cognition"
+        ),
+    }
+    return return_value
+
+
+def _background_work_projection() -> dict[str, object]:
+    """Return prompt-safe generic background-work affordance metadata."""
+
+    return_value = {
+        "capability": BACKGROUND_WORK_REQUEST_CAPABILITY,
+        "available": True,
+        "visibility": "private",
+        "semantic_input_summary": [
+            "Use only for accepted bounded background text work.",
+            "Provide a short task_brief, not worker names or task types.",
+            "Pair this private request with a visible speak acknowledgement.",
+        ],
+        "execution_boundary": (
+            "durable background-work queue routes to a worker after chat"
         ),
     }
     return return_value

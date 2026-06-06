@@ -66,8 +66,8 @@ stage_0_msg_decontexualizer
        aliases active commitments for specialist review
        materializes private `apply_memory_lifecycle_update` actions
        writes prompt-safe `memory_lifecycle_context`
-  -> stage_2a_background_artifact_enqueue
-       persists selected `background_artifact_request` jobs
+  -> stage_2a_background_work_enqueue
+       persists selected `background_work_request` jobs
        writes prompt-safe pending results into `pre_surface_action_results`
   -> route
        selected speak action -> stage_3_action
@@ -122,14 +122,15 @@ prompt-safe aliases, and deterministic code resolves those aliases into
 `memory_lifecycle_context` role anchors, so content can avoid reopening a
 fulfilled promise without seeing persistence ids.
 
-Background artifact handoff follows the same semantic/action separation. L2d
-may select `background_artifact_request` with a semantic `work_kind`, objective,
-input summary, and bounded output size. The persona graph persists those jobs
-in `stage_2a_background_artifact_enqueue` before any selected L3 text surface
-runs, then places the pending queue result in `pre_surface_action_results`.
-L3 may acknowledge only the semantic pending state and work kind; it must not
-see raw job ids, target ids, adapter ids, leases, retry state, filesystem paths,
-or worker internals.
+Background work handoff follows the same semantic/action separation. L2d may
+select `background_work_request` with only a semantic task brief, reason, and
+bounded output size. The persona graph persists those jobs in
+`stage_2a_background_work_enqueue` before any selected L3 text surface runs,
+then places the pending queue result in `pre_surface_action_results`. A
+background-work router later chooses the worker and task; L2d does not choose
+worker-local parameters. L3 may acknowledge only the semantic pending or failed
+state; it must not see raw job ids, target ids, adapter ids, leases, retry
+state, filesystem paths, worker names, or worker internals.
 
 After a visible text response is sent, the service may run a post-surface
 lifecycle review for active commitments. That review is fed only by direct
@@ -174,15 +175,16 @@ Current supported cognition prompt variants are selected by
 | Trigger source | Input source | Output modes | Normal use |
 | --- | --- | --- | --- |
 | `user_message` | `dialog_text` plus optional `image_observation` and `audio_observation` | `visible_reply`, `think_only`, `silent` | Normal live chat. |
-| `background_artifact_result_ready` | `background_artifact_result` | `visible_reply`, `think_only`, `silent` | Completed or failed background artifact result returning through cognition and dialog. |
+| `background_work_result_ready` | `background_work_result` | `visible_reply`, `think_only`, `silent` | Completed or failed background-work result returning through cognition and dialog. |
 | `reflection_signal` | `reflection_artifact` | `think_only`, `preview`, `silent` | Reflection dry-run cognition. |
 | `internal_thought` | `internal_monologue` | `think_only`, `preview`, `silent` | Legacy prompt-variant label used by current self-cognition worker paths. Architecturally this is a self-cognition trigger, not a downstream action consumer. |
 
 The selector validates the episode and exposes only prompt-safe fields:
 
 - current-turn media observations are bounded and structured,
-- background artifact result sources expose only artifact/failure summaries and
-  semantic request context,
+- background-work result sources expose only task/result/failure summaries and
+  semantic request context; legacy artifact result sources keep their old
+  artifact/failure summary projection,
 - reflection artifacts are passed as one visible artifact,
 - internal-thought dry runs pass a residue id, an internal monologue, and an
   audit-only action latch,
