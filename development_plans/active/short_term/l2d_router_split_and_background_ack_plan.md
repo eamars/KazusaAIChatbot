@@ -85,6 +85,22 @@ owns top-level `work_kind`. `work_kind` becomes worker-local to the first
   the user explicitly approves fallback execution.
 - Plan status is not production-code authorization. Production edits require
   explicit user approval after this draft is reviewed.
+- Any change that touches an existing LLM prompt, prompt payload, parser
+  contract, or output schema must pass an LLM rewrite and input-audit gate
+  before implementation. The gate must warrant whether the affected prompt must
+  be rewritten to preserve organic logic flow across role, procedure, input
+  format, output contract, examples, parser assumptions, and downstream
+  consumers. If a new block, policy list, schema section, or example cluster is
+  added, rewrite the full affected prompt instead of appending an isolated
+  instruction. This rewrite is limited to the affected prompt and does not
+  authorize unrelated prompt rewrites.
+- Any newly drafted LLM prompt or LLM stage must follow the LLM drafting rule
+  before implementation: define the smallest semantic question, required
+  model-facing inputs, output fields, deterministic owners, rejected inputs,
+  rejected complexity, parser assumptions, downstream consumers, and evidence
+  needed before adding more prompt scope. The prompt must be drafted as a
+  coherent role/procedure/input/output contract, not as an accumulated list of
+  patches.
 - No LLM may both route/classify and generate semantic parameters, tool
   parameters, or artifacts. This applies at every level, including worker-local
   task classification inside `text_artifact`.
@@ -138,6 +154,10 @@ owns top-level `work_kind`. `work_kind` becomes worker-local to the first
 - Preserve L3/dialog as the only owner of visible wording.
 - Preserve completed background-work delivery through source-bound cognition;
   workers must never send adapter messages directly.
+- Record the LLM rewrite/input-audit result for every touched existing prompt
+  and the LLM drafting-rule result for every newly drafted prompt in
+  `Execution Evidence` before production-code subagent implementation touches
+  those prompt files.
 
 ## Deferred
 
@@ -652,18 +672,22 @@ work added to `/chat` is deterministic validation and durable enqueue.
    - `text_artifact` task router classifies coding/rewrite/summary without
      generating artifacts;
    - `text_artifact` generator produces artifacts without choosing task type.
-2. Parent runs the focused tests and records the expected failures or baseline.
-3. Parent starts exactly one production-code subagent for production edits.
-4. Production-code subagent implements generic background-work contracts,
+2. Parent records the LLM rewrite/input-audit gate for every existing prompt
+   that will be touched and the LLM drafting-rule gate for every new prompt or
+   LLM stage. The record must include the organic logic-flow decision for each
+   affected prompt before any production prompt edit begins.
+3. Parent runs the focused tests and records the expected failures or baseline.
+4. Parent starts exactly one production-code subagent for production edits.
+5. Production-code subagent implements generic background-work contracts,
    queue, router, provider dispatch, worker registry, service runtime/status
    migration, result-ready delivery, first worker, graph wiring, and invariant
    enforcement inside the approved change surface.
-5. Parent adds or updates integration, prompt-contract, and live LLM tests while
+6. Parent adds or updates integration, prompt-contract, and live LLM tests while
    the production subagent works.
-6. Parent reruns focused deterministic tests, integration tests, static checks,
+7. Parent reruns focused deterministic tests, integration tests, static checks,
    and one-case live LLM checks.
-7. Parent starts the independent code-review subagent.
-8. Parent remediates review findings only inside the approved change surface,
+8. Parent starts the independent code-review subagent.
+9. Parent remediates review findings only inside the approved change surface,
    reruns affected checks, and records evidence.
 
 ## Execution Model
@@ -672,10 +696,15 @@ work added to `/chat` is deterministic validation and durable enqueue.
   evidence, review feedback remediation, lifecycle updates, and final sign-off.
 - Parent agent establishes the focused test contract first and records the
   expected failure or baseline before production implementation starts.
+- Parent agent owns the LLM rewrite/input-audit gate for existing prompts and
+  the LLM drafting-rule gate for new prompts. The production-code subagent must
+  not touch prompt files until the parent records those gate results in
+  `Execution Evidence`.
 - Production-code subagent: exactly one native subagent, started after the
-  focused test contract is established; owns production code changes only;
-  does not edit tests unless the parent explicitly directs it; closes after
-  planned production code changes are complete, excluding review fixes.
+  focused test contract, LLM rewrite/input-audit gate, and LLM drafting-rule
+  gate are established; owns production code changes only; does not edit tests
+  unless the parent explicitly directs it; closes after planned production code
+  changes are complete, excluding review fixes.
 - Parent agent may continue integration tests, regression tests, static checks,
   and validation work while the production-code subagent edits production code.
 - Independent code-review subagent: exactly one native subagent, started after
@@ -695,7 +724,9 @@ work added to `/chat` is deterministic validation and durable enqueue.
 - [ ] Stage 1 - focused test contract established
   - Covers: L2d route-only parser, no-silent enqueue invariant, generic queue
     contract, router contract, service runtime/status contract, and first
-    worker two-stage contract.
+    worker two-stage contract. It also records the LLM rewrite/input-audit gate
+    for existing prompts and the LLM drafting-rule gate for new prompts before
+    prompt files are edited.
   - Verify:
     `venv\Scripts\python -m pytest tests/test_l2d_action_selection_cases.py tests/test_l2d_l3_surface_handoff.py tests/test_background_work_jobs.py tests/test_background_work_router.py tests/test_background_work_text_artifact.py tests/test_service_ops_status.py tests/test_event_logging_status.py -q`
   - Evidence: record expected failures or baseline.
@@ -822,6 +853,9 @@ Review scope:
   documentation, test, and command artifact.
 - L2d prompt ownership, input audit, output schema, and local LLM context
   budget.
+- Existing prompt rewrites preserve organic logic flow instead of appending
+  isolated rules, and new prompts satisfy the LLM drafting rule before
+  implementation.
 - Background-work router public boundary, worker registry, and no combined
   route/classification plus parameter/artifact-generation rule.
 - Worker-subagent result contract and forbidden runtime fields.
@@ -857,6 +891,9 @@ This plan is complete when:
   valid visible handoff route.
 - Deterministic tests, static checks, and one-case-at-a-time live LLM reviews
   pass or have accepted documented residual risks.
+- Execution evidence records an LLM rewrite/input-audit gate for every touched
+  existing prompt and an LLM drafting-rule gate for every new prompt or LLM
+  stage.
 - Independent code review reports no blocking findings.
 
 ## Execution Evidence
@@ -877,9 +914,13 @@ This plan is complete when:
   - The plan class was too small for a durable queue plus runtime behavior
     migration. Fixed by changing the class to `high_risk_migration`.
 - 2026-06-06 post-review hygiene checks: placeholder/open-choice scan returned
-  no matches; plan length is 894 lines, within the `high_risk_migration`
+  no matches; plan length is 941 lines, within the `high_risk_migration`
   contract; `git diff --check` returned no whitespace errors and only CRLF
-  working-copy warnings for the two changed plan files.
+  working-copy warnings for the changed plan file.
+- 2026-06-06 prompt-gate clarification: added an explicit rule that touching
+  an existing LLM prompt, payload, parser contract, or output schema requires
+  the LLM rewrite/input-audit gate and an organic logic-flow rewrite decision.
+  Added a separate LLM drafting rule for newly drafted prompts or LLM stages.
 - This plan remains draft and is not approved for production edits.
 
 ## Risks
@@ -887,6 +928,8 @@ This plan is complete when:
 | Risk | Mitigation | Verification |
 |---|---|---|
 | L2d route regression | Route-only focused tests and live LLM review | `test_l2d_action_selection_live_llm.py` |
+| Prompt edits become bolt-on policy blocks | LLM rewrite/input-audit gate requires an organic logic-flow rewrite decision before prompt edits | `Execution Evidence` and code review |
+| New prompts grow without clear semantic ownership | LLM drafting rule defines question, inputs, outputs, owners, rejected inputs, and downstream consumers before implementation | `Execution Evidence` and prompt-contract tests |
 | Background router starts generating params | Strict output contract and parser tests | `test_background_work_router.py` |
 | Text-artifact worker combines classification and generation | Separate task-router and generator contracts with patched and live LLM tests | `test_background_work_text_artifact.py` |
 | Worker registry becomes a hidden tool marketplace | One enabled worker, deferred future workers, registry tests | `test_background_work_providers.py` |
