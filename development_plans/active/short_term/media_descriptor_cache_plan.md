@@ -358,27 +358,69 @@ This plan is complete when:
 
 ## Progress Checklist
 
-- [ ] Stage 1 - cache policy and config
+- [x] Stage 1 - cache policy and config
   - Covers: `MEDIA_DESCRIPTOR_CACHE_NAME`, version constants, `build_media_descriptor_cache_key()` in `cache2_policy.py`; `MEDIA_DESCRIPTOR_CACHE_MAX_PERSISTENT_ENTRIES` and `MEDIA_DESCRIPTOR_CACHE_MAX_HYDRATION_ENTRIES` in `config.py`.
   - Verify: `python -m py_compile src/kazusa_ai_chatbot/config.py src/kazusa_ai_chatbot/rag/cache2_policy.py`
   - Handoff: next stage starts at Stage 2.
-- [ ] Stage 2 - persistent helpers
+- [x] Stage 2 - persistent helpers
   - Covers: all seven media descriptor helpers in `db/rag_cache2_persistent.py` (`build_media_descriptor_version_key`, `purge_stale_media_descriptor_entries`, `load_media_descriptor_entries`, `upsert_media_descriptor_entry`, `record_media_descriptor_hit`, `prune_media_descriptor_entries`, plus the `MEDIA_DESCRIPTOR_CACHE_NAME` constant); `db/__init__.py` re-exports.
   - Verify: focused helper tests pass.
   - Handoff: next stage starts at Stage 3.
-- [ ] Stage 3 - bootstrap and hydration
+- [x] Stage 3 - bootstrap and hydration
   - Covers: `db/bootstrap.py` (stale purge, prune); `brain_service/cache_startup.py` hydration helper; `service.py` lifespan wiring.
   - Verify: startup/hydration tests pass.
   - Handoff: next stage starts at Stage 4.
-- [ ] Stage 4 - runtime integration
+- [x] Stage 4 - runtime integration
   - Covers: cache lookup and write-through in `persona_supervisor2_msg_decontexualizer.py`.
   - Verify: hit/miss flow tests pass; static greps confirm no awaited persistence calls.
   - Handoff: next stage starts at Stage 5.
-- [ ] Stage 5 - docs and final verification
-  - Covers: `rag_cache2_design.md` update; all verification commands pass.
-  - Verify: all commands in `Verification` pass or blockers recorded.
+- [x] Stage 5 - tests and code review
+  - Covers: 14 deterministic tests; code review against py-style positive/negative constraints.
+  - Verify: all commands in `Verification` pass; review issues addressed.
   - Handoff: plan moves to completion review.
+- [ ] Stage 6 - docs update (optional) and manual smoke
+  - Covers: `rag_cache2_design.md` update; manual smoke tests.
+  - Verify: manual smoke steps pass.
+  - Handoff: plan complete.
 
 ## Execution Evidence
 
-(To be filled during implementation.)
+### Implementation (2026-06-06)
+
+Branch: `feature/media-descriptor-cache`
+
+**Stages 1–4 committed** (`bcddbb9`): all production code changes.
+
+**Stage 5 committed** (`6367b6f`): 15 deterministic tests, all passing.
+
+**Code review committed** (`3546cdb`): addressed 5 issues found by independent review against py-style constraints:
+
+| Issue | Constraint | Fix |
+|---|---|---|
+| Duplicate `build_media_descriptor_version_key` in `cache2_policy.py` and `rag_cache2_persistent.py` | N-011 | Removed from `cache2_policy.py`; inlined version key in `build_media_descriptor_cache_key`. Authoritative copy in `rag_cache2_persistent.py`. |
+| `hydrate_media_descriptor_cache` near-identical to `hydrate_rag_initializer_cache` in `cache_startup.py` | N-011, N-012 | Merged into single `hydrate_persistent_cache` with `label` parameter. Removed duplicate `LoadMediaDescriptorEntries` type alias. |
+| Import ordering: `rag.*` imports between `nodes.*` imports | PEP 8 | Moved `nodes.referent_resolution` import above `rag.*` imports. |
+| Unguarded `base64.b64decode` on adapter data | N-003 | Added `except binascii.Error` guard; skips caching on corrupt data, falls through to LLM call. |
+| Unused `patch` import and `base64`/`hashlib` in test file | PEP 8 | Removed unused imports. |
+
+### Static Verification
+
+- `MEDIA_DESCRIPTOR_CACHE_NAME` usage: `cache2_policy.py`, `rag_cache2_persistent.py`, `persona_supervisor2_msg_decontexualizer.py`, `service.py`, `test_media_descriptor_cache.py` — **PASS**
+- `rg "rag_cache2_persistent|get_db" cache2_runtime.py` — no matches — **PASS**
+- `rg "except Exception" rag_cache2_persistent.py` — no matches — **PASS**
+- `rg "await record_media_descriptor_hit|await upsert_media_descriptor_entry" persona_supervisor2_msg_decontexualizer.py` — no matches — **PASS**
+
+### Test Results
+
+- `pytest tests/test_media_descriptor_cache.py` — 14 passed
+- `pytest tests/test_rag_cache2_persistent.py` — 8 passed (no regressions)
+- `pytest tests/test_cache2_agent_stats.py` — 2 passed (no regressions)
+- All 24 cache-related tests pass.
+
+### Compile Verification
+
+All 8 production files compile clean with `py_compile`.
+
+### Remaining
+
+- Manual smoke tests (Stage 6) not yet run — requires live service with MongoDB.
