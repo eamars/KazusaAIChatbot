@@ -7,7 +7,7 @@
   display names, semantic roles, or omission while preserving the existing
   returned `rag_result` shape.
 - Plan class: large
-- Status: approved
+- Status: completed
 - Mandatory skills: `development-plan`, `local-llm-architecture`,
   `debug-llm`, `py-style`, `cjk-safety`, `test-style-and-execution`
 - Overall cutover strategy: bigbang for cognition-facing evidence wording;
@@ -563,7 +563,7 @@ inside this plan's approved change surface.
 
 ## Execution Evidence
 
-Status: in progress.
+Status: completed.
 
 - Plan review: completed 2026-06-07.
   - All claims verified against codebase.
@@ -603,4 +603,12 @@ Status: in progress.
   - 48/48 tests pass (43 existing + 5 new). Zero regressions.
 - Readable saved-trace/debug-LLM validation: deferred (no live LLM trace
   available in this session; plan recommends post-deploy validation).
-- Independent code review: pending.
+- Independent code review: completed 2026-06-07.
+  - All 4 changed production/doc files and 2 test files reviewed against
+    PEP 8, P-001–P-016, N-001–N-018.
+  - Zero constraint violations found.
+  - Residual risks noted: `_BARE_PROVENANCE_ID_RE` case-insensitive `\bID\b`
+    could match legitimate prose `id: 123456` (low risk, 6-digit minimum);
+    `_SCOPE_GLOBAL_USER_ID_TEXT_RE` `\S+` greedy match (low risk, pattern
+    always appears as prefix/assignment).
+  - No code changes required.

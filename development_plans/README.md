@@ -52,7 +52,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [rag2_cognition_identity_evidence_content_bugfix_plan.md](active/bugfix/rag2_cognition_identity_evidence_content_bugfix_plan.md) | Large RAG2 cognition-facing identity evidence content bugfix plan | draft |
+| [rag2_cognition_identity_evidence_content_bugfix_plan.md](active/bugfix/rag2_cognition_identity_evidence_content_bugfix_plan.md) | Large RAG2 cognition-facing identity evidence content bugfix plan | completed |
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
 
 ## Reference Documents
