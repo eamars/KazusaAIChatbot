@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from kazusa_ai_chatbot.background_work.models import (
     BackgroundWorkResult,
     BackgroundWorkRouterDecision,
+    BackgroundWorkWorkerDecision,
 )
 from kazusa_ai_chatbot.background_work.subagent import (
     discover_background_work_workers,
@@ -26,18 +27,20 @@ async def execute_background_work_decision(
 ) -> BackgroundWorkResult:
     """Execute one sanitized background-work route decision."""
 
-    sanitized_decision: BackgroundWorkRouterDecision = {
+    sanitized_decision: BackgroundWorkWorkerDecision = {
         "action": _decision_text(decision, "action"),
         "worker": _decision_text(decision, "worker"),
-        "task": _decision_text(decision, "task"),
         "reason": _decision_text(decision, "reason"),
     }
+    source_summary = _decision_text(decision, "source_summary")
+    if source_summary:
+        sanitized_decision["source_summary"] = source_summary
     result = await dispatch_background_work(sanitized_decision)
     return result
 
 
 async def dispatch_background_work(
-    decision: BackgroundWorkRouterDecision,
+    decision: BackgroundWorkRouterDecision | BackgroundWorkWorkerDecision,
     *,
     max_output_chars: int = BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
 ) -> BackgroundWorkResult:
@@ -68,8 +71,16 @@ async def dispatch_background_work(
         return result
 
     execute_func = _worker_execute_func(worker)
+    worker_decision: BackgroundWorkWorkerDecision = {
+        "action": decision["action"],
+        "worker": decision["worker"],
+        "reason": decision["reason"],
+    }
+    source_summary = decision.get("source_summary")
+    if isinstance(source_summary, str) and source_summary.strip():
+        worker_decision["source_summary"] = source_summary.strip()
     result = await execute_func(
-        decision,
+        worker_decision,
         max_output_chars=max_output_chars,
     )
     return result

@@ -346,7 +346,7 @@ def _background_work_projection() -> dict[str, object]:
         "visibility": "private",
         "semantic_input_summary": [
             "Use only for accepted bounded background text work.",
-            "Provide a short task_brief, not worker names or task types.",
+            "Provide a route reason and detail, not worker names or task types.",
             "Pair this private request with a visible speak acknowledgement.",
         ],
         "execution_boundary": (

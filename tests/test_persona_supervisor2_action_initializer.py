@@ -176,24 +176,22 @@ def _future_cognition_request() -> dict:
 
 
 def test_action_initializer_payload_is_prompt_safe() -> None:
-    """L2d should receive one semantic string, not raw transport internals."""
+    """L2d should receive a JSON string, not raw transport internals."""
 
     action_context = l2d_module.build_action_initializer_payload(_state())
+    payload = json.loads(action_context)
     serialized = action_context.lower()
 
-    assert action_context.startswith("当前行动上下文：")
-    assert "触发来源：user_message" in action_context
-    assert "输出要求：visible_reply" in action_context
-    assert "场景：private 对话" in action_context
-    assert "距离=friendly but not intrusive" in action_context
-    assert "强度=quiet and low pressure" in action_context
-    assert "氛围=relaxed daily conversation" in action_context
-    assert "关系=stable trust with room to wait" in action_context
-    assert "活动承诺线索：有" in action_context
+    assert isinstance(payload, dict)
+    assert "source" in payload
+    assert payload["source"]["trigger_source"] == "user_message"
+    assert payload["source"]["output_mode"] == "visible_reply"
+    assert payload["source"]["channel_type"] == "private"
+    assert payload["cognition"]["social_distance"] == "friendly but not intrusive"
+    assert payload["cognition"]["emotional_intensity"] == "quiet and low pressure"
+    assert payload["cognition"]["vibe_check"] == "relaxed daily conversation"
+    assert payload["cognition"]["relational_dynamic"] == "stable trust with room to wait"
     assert "Reveal the spice answer." in action_context
-    assert "semantic_input_summary" not in serialized
-    assert "execution_boundary" not in serialized
-    assert "available_capabilities" not in serialized
     assert "send_message" not in serialized
     for forbidden in (
         "raw-channel-123",
@@ -257,27 +255,38 @@ def test_action_initializer_prompt_follows_cognition_prompt_structure() -> None:
         "# 输出格式",
     ):
         assert required_section in prompt
-    assert "你是角色的语义行动选择层" in prompt
-    assert "用户消息只包含本轮动态行动上下文" in prompt
+    assert "你是角色的语义行动路由层" in prompt
+    assert "JSON 只包含语义上下文" in prompt
     assert "行动请求只描述我想做什么" in prompt
     assert "解析请求只描述下一步需要什么证据、事实、澄清或审批" in prompt
-    assert "`speak` 是可见文字回复" in prompt
     assert "内心独白是证据，不是动作" in prompt
     assert "群聊参与习惯" in prompt
     assert "不能替代当前场景" in prompt
     assert "只返回合法 JSON 字符串" in prompt
-    assert "`speak`" in prompt
-    assert "`trigger_future_cognition`" in prompt
+    assert "不要从本提示词推断固定能力清单" in prompt
+    assert "capabilities.resolver_affordances" in prompt
+    assert "capabilities.action_affordances" in prompt
     assert "只有线索或只有未确认候选时" in prompt
     assert "不得把目标属性升格为已确认事实" in prompt
     assert "具体当前外部断言" in prompt
     assert "`send_message`" not in prompt
-    assert "用户消息是一段中文行动上下文字符串，不是 JSON" in prompt
+    assert "用户消息是一个 JSON 对象" in prompt
     assert "具体新信息" in prompt
     assert "具体问题、任务或承诺" in prompt
     assert "action_requests" in prompt
     assert "resolver_capability_requests" in prompt
-    assert "resolver_capability_request.v1" in prompt
+    assert "work_seed" in prompt
+    assert "resolver_capability_request.v1" not in prompt
+    assert "resolver_goal_progress.v1" not in prompt
+    assert "schema_version" not in prompt
+    assert "rag_evidence" not in prompt
+    assert "web_evidence" not in prompt
+    assert "human_clarification" not in prompt
+    assert "approval_preparation" not in prompt
+    assert "self_goal_resolution" not in prompt
+    assert "memory_lifecycle_update" not in prompt
+    assert "background_work_request" not in prompt
+    assert "trigger_future_cognition" not in prompt
     assert "available_capabilities" not in prompt
     assert "scheduled_recall" not in prompt
     assert "system_probe" not in prompt
@@ -316,10 +325,12 @@ def test_action_initializer_payload_includes_group_engagement_context() -> None:
 
     action_context = l2d_module.build_action_initializer_payload(state)
 
-    assert "群聊参与习惯：" in action_context
-    assert "Join clear direct group openings." in action_context
-    assert "Stay with the current group topic." in action_context
-    assert "confidence=high" in action_context
+    payload = json.loads(action_context)
+    assert "group_engagement" in payload
+    ge = payload["group_engagement"]
+    assert "Join clear direct group openings." in ge["engagement_guidelines"]
+    assert "Stay with the current group topic." in ge["engagement_guidelines"]
+    assert ge["confidence"] == "high"
     assert "Do not leak this to L2d." not in action_context
 
 
@@ -334,8 +345,8 @@ def test_action_initializer_payload_omits_group_engagement_for_private() -> None
 
     action_context = l2d_module.build_action_initializer_payload(state)
 
-    assert "群聊参与习惯：" not in action_context
-    assert "Join clear direct group openings." not in action_context
+    payload = json.loads(action_context)
+    assert "group_engagement" not in payload
 
 
 def test_action_initializer_hides_lifecycle_without_active_commitments() -> None:
@@ -348,7 +359,8 @@ def test_action_initializer_hides_lifecycle_without_active_commitments() -> None
 
     action_context = l2d_module.build_action_initializer_payload(state)
 
-    assert "活动承诺线索：无" in action_context
+    payload = json.loads(action_context)
+    assert payload["evidence"]["active_commitment_clues"] == []
     assert "memory_lifecycle_update" not in action_context
 
 
@@ -375,7 +387,8 @@ def test_action_initializer_offers_lifecycle_route_for_multiple_commitments() ->
 
     action_context = l2d_module.build_action_initializer_payload(state)
 
-    assert "活动承诺线索：有" in action_context
+    payload = json.loads(action_context)
+    assert len(payload["evidence"]["active_commitment_clues"]) == 2
     assert "promise-001" not in action_context
     assert "promise-002" not in action_context
 
@@ -578,7 +591,8 @@ async def test_action_initializer_accepts_multiple_valid_action_specs(
         "detail": "Review whether active commitment lifecycle changed.",
     }
     human_context = fake_llm.messages[1].content
-    assert human_context.startswith("当前行动上下文：")
+    human_payload = json.loads(human_context)
+    assert isinstance(human_payload, dict)
     assert "trigger_context" not in human_context
     assert "available_capabilities" not in human_context
 

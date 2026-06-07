@@ -24,9 +24,31 @@ def test_router_normalizer_excludes_worker_local_payload() -> None:
     assert decision == {
         "action": "execute",
         "worker": "text_artifact",
-        "task": "Generate a Fibonacci function snippet.",
         "reason": "The task is bounded text artifact work.",
     }
+
+
+def test_background_work_router_decision_is_route_only() -> None:
+    """Router decisions must contain only route fields: action, worker, reason.
+    No worker-facing task string or task parameters."""
+
+    router = importlib.import_module("kazusa_ai_chatbot.background_work.router")
+    normalize = getattr(router, "normalize_background_work_router_output")
+
+    decision = normalize({
+        "action": "execute",
+        "worker": "text_artifact",
+        "task": "Generate a Fibonacci function snippet.",
+        "reason": "The task is bounded text artifact work.",
+    })
+
+    assert "action" in decision
+    assert "worker" in decision
+    assert "reason" in decision
+    assert "task" not in decision, (
+        "router decision must not contain a worker-facing 'task' field; "
+        "routers only route, they do not generate worker parameters"
+    )
 
 
 def test_router_payload_contains_worker_descriptions_not_job_mechanics() -> None:

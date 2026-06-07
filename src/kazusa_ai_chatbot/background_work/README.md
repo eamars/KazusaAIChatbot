@@ -15,8 +15,7 @@ and result delivery happen after the live response path.
 ## Boundary
 
 - L2d may request only generic `background_work_request` handoff.
-- The background-work router emits only `action`, `worker`, `task`, and
-  `reason`.
+- The background-work router emits only `action`, `worker`, and `reason`.
 - Worker subagents own worker-local semantic parameters and artifacts.
 - L3/dialog remain the only visible wording owners.
 - Workers never send adapter text, call cognition directly, run shell or
@@ -32,7 +31,8 @@ separate LLM stages:
    `unsupported`, or `needs_user_input`.
 2. Generator: produces one bounded text artifact or a failure summary.
 
-The generic queue and router do not expose those worker-local task labels.
+The generic queue and router do not expose those worker-local task labels or
+worker-facing task rewrites.
 
 ## Persistence
 

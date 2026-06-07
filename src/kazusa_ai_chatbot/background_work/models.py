@@ -81,8 +81,13 @@ class BackgroundWorkRouterDecision(TypedDict):
 
     action: BackgroundWorkRouterAction
     worker: str
-    task: str
     reason: str
+
+
+class BackgroundWorkWorkerDecision(BackgroundWorkRouterDecision, total=False):
+    """Route decision plus deterministic context passed to a worker."""
+
+    source_summary: str
 
 
 class BackgroundWorkResult(TypedDict):

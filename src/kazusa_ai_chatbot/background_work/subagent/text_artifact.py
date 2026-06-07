@@ -9,7 +9,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.background_work.models import (
     BackgroundWorkResult,
-    BackgroundWorkRouterDecision,
+    BackgroundWorkWorkerDecision,
 )
 from kazusa_ai_chatbot.config import (
     BACKGROUND_WORK_LLM_API_KEY,
@@ -38,7 +38,6 @@ class TextArtifactTaskRouterDecision(TypedDict):
     """Worker-local task classification output."""
 
     task_type: TextArtifactTaskType
-    task: str
     reason: str
 
 
@@ -52,10 +51,10 @@ class TextArtifactGeneratorResult(TypedDict):
 
 
 TEXT_ARTIFACT_TASK_ROUTER_PROMPT = '''\
-You classify a routed text-artifact task for a worker-local generator.
-Choose only the text-artifact task type and a clean task brief. Do not produce
-artifact text, code, rewrites, summaries, tool arguments, files, adapter data,
-delivery decisions, or job ids.
+You classify a routed text-artifact task into one task type.
+Choose only the task type. Do not produce artifact text, code, rewrites,
+summaries, cleaned task briefs, tool arguments, files, adapter data, delivery
+decisions, or job ids.
 
 # Task Types
 - coding_snippet: produce a bounded code text snippet only.
@@ -69,7 +68,6 @@ delivery decisions, or job ids.
 Return strict JSON:
 {
   "task_type": "coding_snippet | text_rewrite | summary | unsupported | needs_user_input",
-  "task": "clean generator-facing task brief",
   "reason": "short classification reason"
 }
 '''
@@ -129,7 +127,6 @@ def normalize_text_artifact_task_router_output(
     if not isinstance(parsed, dict):
         result: TextArtifactTaskRouterDecision = {
             "task_type": "unsupported",
-            "task": "",
             "reason": "Text-artifact task router returned malformed output.",
         }
         return result
@@ -143,13 +140,11 @@ def normalize_text_artifact_task_router_output(
         "needs_user_input",
     ):
         task_type = "unsupported"
-    task = _bounded_text(parsed.get("task"))
     reason = _bounded_text(parsed.get("reason"))
     if not reason:
         reason = "No task-router reason was provided."
     decision: TextArtifactTaskRouterDecision = {
         "task_type": task_type,
-        "task": task,
         "reason": reason,
     }
     return decision
@@ -198,7 +193,7 @@ async def _generate_text_artifact(
 
     payload = build_text_artifact_generator_payload(
         task_type=task_decision["task_type"],
-        task=task_decision["task"],
+        task=source_summary,
         source_summary=source_summary,
         max_output_chars=max_output_chars,
     )
@@ -273,15 +268,15 @@ def normalize_text_artifact_generator_output(
 
 
 async def execute(
-    decision: BackgroundWorkRouterDecision,
+    decision: BackgroundWorkWorkerDecision,
     *,
     max_output_chars: int = BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
 ) -> BackgroundWorkResult:
     """Run the text-artifact worker after background-work routing."""
 
-    source_summary = decision["task"]
+    source_summary = decision.get("source_summary", "")
     task_decision = await _route_text_artifact_task(
-        task=decision["task"],
+        task=source_summary,
         source_summary=source_summary,
         max_output_chars=max_output_chars,
     )

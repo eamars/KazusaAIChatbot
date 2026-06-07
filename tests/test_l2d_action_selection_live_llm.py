@@ -168,7 +168,7 @@ async def test_l2d_live_routes_real_active_commitment_lifecycle_update() -> None
         f"trace={trace_path} kinds={json.dumps(observed_kinds)}"
     )
 
-    assert "活动承诺线索：有" in prompt_payload
+    assert "active_commitment_clues" in prompt_payload
     assert active_commitment["unit_id"] not in prompt_payload
     assert "speak" not in observed_kinds
     assert len(lifecycle_specs) == 1

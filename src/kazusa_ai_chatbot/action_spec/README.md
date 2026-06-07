@@ -94,13 +94,14 @@ decide again at execution time whether to speak.
 
 Background work handoff is different from delayed contact. L2d may request
 `background_work_request` only as a semantic, private, route-only background
-action with a prompt-safe task brief. Deterministic execution validates the
-bounded payload and persists a job through the background-work facade before L3
-can acknowledge it. A later background-work router chooses the worker and task;
-L2d never chooses worker-local parameters. L3 sees only semantic pending or
-failure acknowledgement state. Raw job ids, adapter ids, target ids, leases,
-retries, filesystem paths, credentials, worker choices, and worker state stay
-out of L2d and L3 prompts.
+action with a route reason and surface intent. Deterministic materialization
+builds the trusted `task_brief` from prompt-safe state before queue validation
+and persistence. A later background-work router chooses only the worker; worker
+subagents own task classification and artifact generation. L2d never chooses
+worker-local parameters. L3 sees only semantic pending or failure
+acknowledgement state. Raw job ids, adapter ids, target ids, leases, retries,
+filesystem paths, credentials, worker choices, and worker state stay out of L2d
+and L3 prompts.
 
 Prompt-safe capability projection hides `handler_id`, adapter ids, raw channel
 ids, credentials, collection names, and database internals.

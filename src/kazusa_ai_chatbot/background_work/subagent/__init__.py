@@ -6,7 +6,7 @@ from typing import Protocol, TypedDict
 
 from kazusa_ai_chatbot.background_work.models import (
     BackgroundWorkResult,
-    BackgroundWorkRouterDecision,
+    BackgroundWorkWorkerDecision,
 )
 from kazusa_ai_chatbot.background_work.subagent import text_artifact
 
@@ -24,7 +24,7 @@ class BackgroundWorkExecute(Protocol):
 
     async def __call__(
         self,
-        decision: BackgroundWorkRouterDecision,
+        decision: BackgroundWorkWorkerDecision,
         *,
         max_output_chars: int,
     ) -> BackgroundWorkResult:

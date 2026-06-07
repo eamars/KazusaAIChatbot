@@ -63,7 +63,7 @@ async def test_background_work_text_artifact_live_case() -> None:
 
     generator_payload = build_text_artifact_generator_payload(
         task_type=task_decision["task_type"],
-        task=task_decision["task"],
+        task=source_summary,
         source_summary=source_summary,
         max_output_chars=max_output_chars,
     )
@@ -103,7 +103,9 @@ async def test_background_work_text_artifact_live_case() -> None:
     )
 
     assert task_decision["task_type"] == "coding_snippet"
-    assert task_decision["task"]
+    assert "task" not in task_decision, (
+        "task classifier must not emit a cleaned 'task' string"
+    )
     assert "artifact_text" not in task_decision
     assert generator_result["status"] == "succeeded"
     assert "def " in generator_result["artifact_text"]

@@ -77,8 +77,10 @@ async def test_background_work_router_live_case() -> None:
 
     assert decision["action"] == "execute"
     assert decision["worker"] == "text_artifact"
-    assert decision["task"]
     assert decision["reason"]
+    assert "task" not in decision, (
+        "router decision must not contain a worker-facing 'task' field"
+    )
     assert leakage_errors == []
 
 

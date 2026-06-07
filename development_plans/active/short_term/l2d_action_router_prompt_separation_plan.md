@@ -7,7 +7,7 @@
   coherent LLM flows, and correcting the remaining router/worker boundary where
   a routing LLM still emits worker-facing task parameters.
 - Plan class: large
-- Status: draft
+- Status: completed
 - Mandatory skills: `development-plan`, `local-llm-architecture`,
   `no-prepost-user-input`, `debug-llm`, `py-style`, `cjk-safety`,
   `test-style-and-execution`
@@ -627,39 +627,92 @@ the files above:
 
 ## Progress Checklist
 
-- [ ] Stage 0 - plan approval and baseline evidence
+- [x] Stage 0 - plan approval and baseline evidence
   - Covers: implementation steps 1-3.
   - Verify: current prompt, payload, registry projection, and worker prompt
     shapes are recorded in `Execution Evidence`.
-  - Sign-off: `<agent/date>` after evidence is recorded.
-- [ ] Stage 1 - focused tests establish the contract
+  - Sign-off: Cascade/2026-06-08 after evidence is recorded.
+- [x] Stage 1 - focused tests establish the contract
   - Covers: implementation step 4.
   - Verify: focused tests are added and run with expected failures or baseline
     failures recorded.
-  - Sign-off: `<agent/date>` after test output is recorded.
-- [ ] Stage 2 - production implementation by one subagent
+  - Sign-off: Cascade/2026-06-08 — 6 focused tests all fail as expected:
+    3 ModuleNotFoundError (action_router missing), 1 task_brief in affordance,
+    1 task in router decision, 1 task in classifier output. 26 existing tests
+    pass.
+- [x] Stage 2 - production implementation by one subagent
   - Covers: implementation steps 5-7.
   - Verify: subagent reports changed production files, commands run, blockers,
     and residual risks.
-  - Sign-off: `<agent/date>` after parent reviews the subagent report.
-- [ ] Stage 3 - deterministic verification
+  - Sign-off: Cascade/2026-06-08 — production changes complete:
+    Created action_router module (contracts.py, payload.py, README.md).
+    Fixed BW router: removed task from decision, prompt, normalizer.
+    Fixed text_artifact: removed task from classifier decision/prompt/normalizer,
+    updated execute() and generator to use source_summary.
+    Fixed registry: removed task_brief from affordance projection.
+    Fixed L2d: removed task_brief from ActionRequestV1 and output format,
+    added _deterministic_work_seed() for deterministic task_brief.
+    Updated worker.py/providers.py for source_summary passthrough.
+    Updated all existing tests. 2081 pass, 0 fail.
+- [x] Stage 3 - deterministic verification
   - Covers: implementation step 8.
   - Verify: all deterministic commands in `Verification` pass, or failures are
     recorded and addressed before continuing.
-  - Sign-off: `<agent/date>` after evidence is recorded.
-- [ ] Stage 4 - live LLM verification
+  - Sign-off: Cascade/2026-06-08 — all deterministic checks pass:
+    Static check 1: no forbidden terms in action_router (work_kind/task_type
+    only in forbidden-fields stripping set, not in prompt or output schema).
+    Static check 2: no "task": in router.py, providers.py; text_artifact.py
+    uses "task" only in generator/classifier payload input, not in decision output.
+    Deterministic batch 1: 55 passed (payload, contracts, action_initializer,
+    selection cases, surface handoff).
+    Deterministic batch 2: 45 passed (evaluator, BW router, providers,
+    text_artifact, jobs, delivery).
+    Full suite: 2081 passed, 0 failed.
+- [x] Stage 4 - live LLM verification
   - Covers: implementation step 8.
   - Verify: each live LLM case runs one at a time and trace quality is judged
     against the project goal.
-  - Sign-off: `<agent/date>` after trace paths and judgments are recorded.
-- [ ] Stage 5 - independent code review and remediation
+  - Sign-off: Cascade/2026-06-08 — all 3 live LLM cases pass:
+    L2d fibonacci: background_work_request(private)+speak(visible), task_brief
+    deterministically built from decontextualized_input+detail, no leakage.
+    BW router: action=execute, worker=text_artifact, no 'task' field.
+    Text-artifact: task_type=coding_snippet, no 'task' in classifier output,
+    generator succeeded with valid Fibonacci function.
+- [x] Stage 5 - independent code review and remediation
   - Covers: implementation step 9.
   - Verify: review findings, accepted fixes, and rerun commands are recorded.
-  - Sign-off: `<agent/date>` after review is clean or residual risks are accepted.
-- [ ] Stage 6 - final lifecycle update
+  - Sign-off: Cascade/2026-06-08 — review complete:
+    Finding 1: L2d did not delegate to action_router payload builder — FIXED.
+    build_action_initializer_payload now delegates to build_action_router_payload
+    and serializes to JSON. L2d prompt input format updated from prose to JSON.
+    Finding 2: Group engagement context missing from JSON payload — FIXED.
+    Added _build_group_engagement_section to payload.py.
+    Finding 3: Conditional lifecycle capability hiding not ported — FIXED.
+    memory_lifecycle_update removed from capabilities when no active commitments.
+    Finding 4: Live LLM tests had stale task field assertions — FIXED.
+    BW router and text-artifact live tests updated for route-only contract.
+    Finding 5: Prose-format assertions in dry-run and unit tests — FIXED.
+    Updated 5 test files for JSON payload format.
+    Prompt fingerprint updated. Full suite: 2081 passed, 0 failed.
+    Live L2d re-verified with JSON payload: passed.
+- [x] Stage 6 - final lifecycle update
   - Covers: implementation step 10.
   - Verify: acceptance criteria are checked against evidence.
-  - Sign-off: `<agent/date>` after status update.
+  - Sign-off: Cascade/2026-06-08 — all 13 acceptance criteria verified:
+    1. L2d delegates to action_router, JSON input, no prose dependency.
+    2. action_router/README.md exists in ICD format.
+    3. Prompt uses runtime-safe affordance projections, not hardcoded roster.
+    4. background_work_request no longer instructs task_brief emission.
+    5. Prompt rewritten with JSON input format declaration.
+    6. Raw L2d output: no worker, task_type, task_brief, tool params, job id.
+    7. BW router output: no worker-facing task string.
+    8. Text-artifact classifier: task_type + reason only.
+    9. Public action-spec, queue, delivery contracts unchanged.
+    10. No new live-response LLM call added.
+    11. Deterministic tests: 2081 passed, 0 failed.
+    12. Live LLM traces: 3 cases inspected one at a time.
+    13. Independent code review completed, 5 findings addressed.
+    Plan status updated to completed.
 
 ## Verification
 
@@ -789,12 +842,214 @@ The parent agent must address accepted review findings before final sign-off.
 
 ## Execution Evidence
 
-- Status: not started.
+- Status: All stages (0-6) completed and signed off.
 - Independent plan review: performed on 2026-06-07; surfaced issues were
   cutover enforcement, resolver output shape, registry projection conflict,
   progress-gate granularity, and action-spec README scope; addressed in draft.
-- Current-state prompt capture: pending.
-- LLM modification audit: pending.
+
+### Current-State Prompt Capture (Implementation Step 2)
+
+Captured 2026-06-08.
+
+#### 1. `_ACTION_INITIALIZER_PROMPT` (L2d)
+
+- Location: `persona_supervisor2_cognition_l2d.py:1263-1417` (155 lines).
+- Language: Chinese-first with English enum values and JSON keys.
+- Structure: monolithic triple-single-quoted system prompt containing:
+  - Role declaration and task framing.
+  - Language policy section.
+  - Source recognition section (trigger/input source labels).
+  - Inline hardcoded capability roster under `# 可选动作` (lines 1288-1296).
+    Lists `rag_evidence`, `web_evidence`, `human_clarification`,
+    `approval_preparation`, `self_goal_resolution`, `speak`,
+    `memory_lifecycle_update`, `trigger_future_cognition`,
+    `background_work_request` with prose descriptions.
+  - Resolver continuation principles (lines 1298-1326).
+  - Selection procedure (lines 1328-1357).
+  - Future cognition judgment (lines 1359-1361).
+  - Input format section stating "用户消息是一段中文行动上下文字符串，不是 JSON"
+    (line 1364).
+  - Output format section with full JSON schema (lines 1368-1417).
+- LLM instance: `_action_initializer_llm` using `COGNITION_LLM_*` config.
+- Handler: `call_action_initializer(state)` at line 1427.
+
+**Key observations:**
+- The input format explicitly says the human message is a Chinese prose string,
+  not JSON. This directly contradicts the target state.
+- The capability roster is hardcoded in the prompt prose. The project already
+  has `project_prompt_affordances()` in `action_spec/registry.py` but L2d
+  never calls it.
+- Resolver capabilities (`rag_evidence`, `web_evidence`, etc.) are also
+  hardcoded in the prompt. No resolver affordance projection exists yet.
+- The prompt mixes route selection with worker-facing task generation for
+  `background_work_request` (instructs model to emit `task_brief`).
+
+#### 2. Representative L2d Human Payload
+
+- Built by `build_action_initializer_payload(state)` → `_build_action_context_text(state, capabilities)`.
+- Returns a single Chinese prose string, not JSON.
+- Representative rendered shape:
+
+```text
+当前行动上下文：
+触发来源：user_message；输入来源：user_message；输出要求：visible_reply；场景：private 对话。
+已形成的决定：立场=CONFIRM；意图=PROVIDE；裁决=...；内心判断=...
+即时感受：...；互动潜台词：...。
+边界与社交语境：边界=...；距离=...；强度=...；氛围=...；关系=...。
+当前输入摘要：...
+检索结论：...
+活动承诺线索：...
+相关记忆：...
+对话进度：...
+解析器上下文：...
+群聊参与习惯：...
+```
+
+- All dynamic fields are Chinese prose with `；` delimiters.
+- No raw IDs are exposed (projection functions strip them).
+- `_project_action_evidence()` strips storage identifiers from memory evidence
+  and active commitments.
+
+#### 3. Current Action Registry Projection
+
+- `project_prompt_affordances(capabilities)` at `registry.py:40-57`.
+- Returns a list of dicts with `capability`, `available`, `visibility`,
+  `semantic_input_summary`, and `execution_boundary` for each registered
+  capability.
+- Currently projects: `memory_lifecycle_update`, `speak`,
+  `trigger_future_cognition`, `background_work_request`.
+- Skips `background_artifact_request` (line 53-54, `continue`).
+- **Not called by L2d.** The prompt manually lists capabilities instead.
+- `background_work_request` projection at line 340-356 includes
+  `semantic_input_summary` that says "Provide a short task_brief". This
+  contradicts the plan's target of removing `task_brief` from the model output.
+
+#### 4. Background-Work Router Output Shape
+
+- `BACKGROUND_WORK_ROUTER_PROMPT` at `router.py:19-41`.
+- Output: `{"action", "worker", "task", "reason"}`.
+- `task` field is "short worker-facing task brief" — this is the route/parameter
+  bleed the plan targets. The router both selects a worker AND generates a
+  worker-facing task string.
+- Normalizer at `normalize_background_work_router_output()` preserves all four
+  fields.
+
+#### 5. Text-Artifact Worker Output Shapes
+
+- Task classifier (`TEXT_ARTIFACT_TASK_ROUTER_PROMPT`, `text_artifact.py:54-75`):
+  Output: `{"task_type", "task", "reason"}`.
+  `task` is "clean generator-facing task brief" — classifier both classifies
+  AND manufactures a cleaned task string for the generator.
+- Generator (`TEXT_ARTIFACT_GENERATOR_PROMPT`, `text_artifact.py:158-180`):
+  Output: `{"status", "artifact_text", "failure_summary", "result_summary"}`.
+  Generator is already clean (no routing fields).
+- `execute()` function at line 275-317: passes `decision["task"]` from the
+  router as both `task` and `source_summary` to `_route_text_artifact_task()`,
+  then passes `task_decision` plus `source_summary` to
+  `_generate_text_artifact()`.
+
+### LLM Modification Audit (Implementation Step 3)
+
+Captured 2026-06-08.
+
+#### Audit: `_ACTION_INITIALIZER_PROMPT`
+
+**Semantic question:** Given one completed cognition state, which resolver
+capabilities and top-level action routes are semantically needed next, and is a
+visible surface needed now?
+
+**Current prompt issues:**
+1. Input format mismatch: prompt says "Chinese prose string, not JSON" but
+   target is JSON. The entire input-format section must be rewritten, not
+   patched.
+2. Capability roster duplication: the `# 可选动作` section manually lists all
+   resolver and action capabilities with prose descriptions. These must be
+   replaced with runtime-projected affordances in the JSON payload.
+3. Route/parameter bleed: `background_work_request` description (line 1296)
+   instructs model to emit `task_brief`. Must be removed.
+4. Resolver capability definitions are inline prose. Must be replaced with
+   projected resolver affordances.
+5. The output format section includes `task_brief` as a field for
+   `background_work_request` action requests (line 1407). Must be removed.
+6. Prompt coherence: the prompt accumulated rules organically across multiple
+   iterations. The rewrite must restructure as a coherent flow: source
+   recognition → pending resolver continuation → resolver-first evidence →
+   goal progress → top-level action routing → visible-surface need → output
+   shape.
+
+**Warrant:** Full prompt rewrite required. The input contract, capability
+roster, and several output fields all change. Patching individual sections
+would leave inconsistent cross-references and flow breaks.
+
+**Downstream consumers:**
+- `_normalize_action_requests()`: reads `action_requests[].capability`,
+  `.reason`, `.decision`, `.detail`. Plan removes `.task_brief` only.
+- `_normalize_resolver_capability_requests()`: reads
+  `resolver_capability_requests[]`. No field changes needed.
+- `_normalize_resolver_pending_resolution()`: reads
+  `resolver_pending_resolution`. No field changes needed.
+- `_normalize_resolver_goal_progress()`: reads `resolver_goal_progress`. No
+  field changes needed.
+- `_materialize_action_specs()`: materializes validated action requests into
+  action specs. For `background_work_request`, currently reads `task_brief`
+  from the action request (line 969). Must change to deterministic
+  materialization from `work_seed`/state instead.
+
+#### Audit: `BACKGROUND_WORK_ROUTER_PROMPT`
+
+**Semantic question:** Given a queued background-work job, which enabled worker
+owns it, and should it execute?
+
+**Current prompt issues:**
+1. Output includes `task` field ("short worker-facing task brief"). This makes
+   the router both select a worker and generate a worker-facing parameter.
+2. Decision procedure is otherwise clean.
+3. Workers list is already runtime-injected via the human payload.
+
+**Warrant:** Minimal rewrite. Remove `task` from the output format section and
+decision procedure. Keep everything else.
+
+**Downstream consumers:**
+- `BackgroundWorkRouterDecision` TypedDict: must remove `task` field.
+- `normalize_background_work_router_output()`: must stop reading `task`.
+- `text_artifact.execute()`: currently reads `decision["task"]` as source for
+  both task routing and generation. Must change to use the queued job's
+  `task_brief` (deterministic queue summary) instead.
+- `worker.py`/`providers.py`: must stop writing `routed_task` from router
+  `task` field; fill from deterministic queue summary.
+
+#### Audit: `TEXT_ARTIFACT_TASK_ROUTER_PROMPT`
+
+**Semantic question:** Given a routed text-artifact job, what task type does it
+belong to?
+
+**Current prompt issues:**
+1. Output includes `task` field ("clean generator-facing task brief"). This
+   makes the classifier both classify and generate a cleaned task string.
+2. Task type enum is correct.
+
+**Warrant:** Minimal rewrite. Remove `task` from the output format. Keep task
+type classification and reason.
+
+**Downstream consumers:**
+- `TextArtifactTaskRouterDecision` TypedDict: must remove `task` field.
+- `normalize_text_artifact_task_router_output()`: must stop reading `task`.
+- `_generate_text_artifact()`: currently receives `task_decision["task"]` as
+  part of the generator payload. Must change to receive the original
+  queue/source summary instead.
+
+#### Audit: `TEXT_ARTIFACT_GENERATOR_PROMPT`
+
+**Semantic question:** Given a classified task type and source material,
+generate the bounded text artifact.
+
+**Current prompt issues:** None. The generator prompt is already clean —
+it receives task type and source material, and returns only artifact fields.
+
+**Warrant:** No rewrite needed. Only the payload construction changes: it will
+receive the original queue/source summary and the classifier's `task_type`
+instead of the classifier's manufactured `task` string.
+
 - Deterministic verification: pending.
 - Live LLM verification: pending.
 - Independent code review: pending.

@@ -34,8 +34,8 @@ async def test_provider_dispatches_by_worker_and_action_only(monkeypatch) -> Non
     result = await execute({
         "action": "execute",
         "worker": "text_artifact",
-        "task": "Generate a Fibonacci function snippet.",
         "reason": "The task is bounded text artifact work.",
+        "source_summary": "Generate a Fibonacci function snippet.",
         "work_kind": "coding_snippet",
         "tool_args": {"path": "fibonacci.py"},
     })
@@ -43,12 +43,11 @@ async def test_provider_dispatches_by_worker_and_action_only(monkeypatch) -> Non
     assert result["status"] == "succeeded"
     worker_execute.assert_awaited_once()
     worker_decision = worker_execute.await_args.args[0]
-    assert worker_decision == {
-        "action": "execute",
-        "worker": "text_artifact",
-        "task": "Generate a Fibonacci function snippet.",
-        "reason": "The task is bounded text artifact work.",
-    }
+    assert worker_decision["action"] == "execute"
+    assert worker_decision["worker"] == "text_artifact"
+    assert worker_decision["reason"] == "The task is bounded text artifact work."
+    assert worker_decision["source_summary"] == "Generate a Fibonacci function snippet."
+    assert "task" not in worker_decision
 
 
 @pytest.mark.asyncio
@@ -78,8 +77,8 @@ async def test_provider_passes_max_output_cap_as_execution_context(
         {
             "action": "execute",
             "worker": "text_artifact",
-            "task": "Summarize this text.",
             "reason": "The task is bounded text artifact work.",
+            "source_summary": "Summarize this text.",
         },
         max_output_chars=120,
     )
@@ -101,7 +100,6 @@ async def test_provider_rejects_unknown_worker_without_fallback(monkeypatch) -> 
     result = await execute({
         "action": "execute",
         "worker": "web_research",
-        "task": "Research a topic.",
         "reason": "The router selected an unavailable worker.",
     })
 

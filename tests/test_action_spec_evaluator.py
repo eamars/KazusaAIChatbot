@@ -590,3 +590,24 @@ def test_evaluator_validates_continuation_contract() -> None:
 
     assert result["ok"] is False
     assert any("episode_type" in error for error in result["errors"])
+
+
+def test_prompt_affordances_do_not_ask_l2d_for_background_task_brief() -> None:
+    """The background_work_request prompt affordance must not instruct the
+    model to emit task_brief. That field is deterministically materialized."""
+
+    capabilities = build_initial_action_capabilities()
+    affordances = project_prompt_affordances(capabilities)
+
+    bw_affordances = [
+        a for a in affordances
+        if a["capability"] == BACKGROUND_WORK_REQUEST_CAPABILITY
+    ]
+    assert len(bw_affordances) == 1
+
+    bw = bw_affordances[0]
+    serialized = repr(bw).lower()
+    assert "task_brief" not in serialized, (
+        "background_work_request affordance must not mention task_brief; "
+        "the trusted task_brief is built by deterministic materialization"
+    )

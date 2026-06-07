@@ -59,8 +59,10 @@ async def run_background_work_worker_tick(
                 worker_descriptions=worker_descriptions(),
                 max_output_chars=int(job["max_output_chars"]),
             )
+            worker_decision = dict(router_decision)
+            worker_decision["source_summary"] = source_summary
             worker_result = await dispatch_background_work(
-                router_decision,
+                worker_decision,
                 max_output_chars=int(job["max_output_chars"]),
             )
         except Exception as exc:
@@ -83,7 +85,7 @@ async def run_background_work_worker_tick(
                 lease_owner=worker_id,
                 router_action=router_decision["action"],
                 worker=worker_result["worker"],
-                routed_task=router_decision["task"],
+                routed_task=source_summary,
                 router_reason=router_decision["reason"],
                 artifact_text=worker_result["artifact_text"],
                 result_summary=worker_result["result_summary"],
@@ -97,7 +99,7 @@ async def run_background_work_worker_tick(
                 lease_owner=worker_id,
                 router_action=router_decision["action"],
                 worker=worker_result["worker"],
-                routed_task=router_decision["task"],
+                routed_task=source_summary,
                 router_reason=router_decision["reason"],
                 failure_summary=worker_result["failure_summary"],
                 result_summary=worker_result["result_summary"],

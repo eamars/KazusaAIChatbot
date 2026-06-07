@@ -26,6 +26,29 @@ def test_text_artifact_exposes_two_separate_llm_stage_contracts() -> None:
         assert hasattr(module, name)
 
 
+def test_text_artifact_task_router_does_not_emit_clean_task() -> None:
+    """Task classifier must output only task_type and reason.
+    It must not manufacture a cleaned task string for the generator."""
+
+    module = importlib.import_module(
+        "kazusa_ai_chatbot.background_work.subagent.text_artifact"
+    )
+    normalize = getattr(module, "normalize_text_artifact_task_router_output")
+
+    decision = normalize({
+        "task_type": "coding_snippet",
+        "task": "Generate a clean Fibonacci function.",
+        "reason": "The task asks for bounded code text.",
+    })
+
+    assert "task_type" in decision
+    assert "reason" in decision
+    assert "task" not in decision, (
+        "task classifier must not emit a cleaned 'task' string; "
+        "classifiers classify, they do not generate worker parameters"
+    )
+
+
 def test_task_router_normalizer_excludes_artifact_text() -> None:
     """Worker-local classification must not return generated artifacts."""
 
@@ -43,7 +66,6 @@ def test_task_router_normalizer_excludes_artifact_text() -> None:
 
     assert decision == {
         "task_type": "coding_snippet",
-        "task": "Generate a Fibonacci function snippet.",
         "reason": "The task asks for bounded code text.",
     }
 
@@ -83,7 +105,6 @@ async def test_execute_uses_job_max_output_cap_for_worker_stages(
     )
     route_task = AsyncMock(return_value={
         "task_type": "summary",
-        "task": "Summarize this text.",
         "reason": "The task is a bounded summary.",
     })
     generate = AsyncMock(return_value={
@@ -99,8 +120,8 @@ async def test_execute_uses_job_max_output_cap_for_worker_stages(
         {
             "action": "execute",
             "worker": "text_artifact",
-            "task": "Summarize this text.",
             "reason": "The task is bounded text artifact work.",
+            "source_summary": "Summarize this text.",
         },
         max_output_chars=120,
     )

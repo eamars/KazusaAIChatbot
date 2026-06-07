@@ -18,8 +18,8 @@ from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output
 
 BACKGROUND_WORK_ROUTER_PROMPT = '''\
 You route queued background work to one enabled worker.
-Choose only whether the task can execute, which worker owns it, and the
-worker-facing task brief. Do not produce worker-local task types, tool
+Choose only whether the task can execute and which worker owns it.
+Do not produce worker-facing task briefs, worker-local task types, tool
 arguments, files, adapter data, delivery decisions, job ids, or final text.
 
 # Decision Procedure
@@ -35,7 +35,6 @@ Return strict JSON with exactly these semantic fields:
 {
   "action": "execute | reject | needs_user_input | stop",
   "worker": "text_artifact | none",
-  "task": "short worker-facing task brief",
   "reason": "short reason for the route"
 }
 '''
@@ -107,7 +106,6 @@ def normalize_background_work_router_output(
         result: BackgroundWorkRouterDecision = {
             "action": "reject",
             "worker": "none",
-            "task": "",
             "reason": "Background-work router returned malformed output.",
         }
         return result
@@ -120,14 +118,12 @@ def normalize_background_work_router_output(
         worker = "none"
     if action != "execute":
         worker = "none"
-    task = _bounded_text(parsed.get("task"))
     reason = _bounded_text(parsed.get("reason"))
     if not reason:
         reason = "No route reason was provided."
     decision: BackgroundWorkRouterDecision = {
         "action": action,
         "worker": worker,
-        "task": task,
         "reason": reason,
     }
     return decision

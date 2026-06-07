@@ -10,6 +10,7 @@ from kazusa_ai_chatbot.background_work.models import (
     BackgroundWorkQueueResult,
     BackgroundWorkResult,
     BackgroundWorkRouterDecision,
+    BackgroundWorkWorkerDecision,
 )
 from kazusa_ai_chatbot.background_work.runtime import (
     BackgroundWorkRuntimeHandle,
@@ -25,6 +26,7 @@ __all__ = [
     "BackgroundWorkQueueResult",
     "BackgroundWorkResult",
     "BackgroundWorkRouterDecision",
+    "BackgroundWorkWorkerDecision",
     "BackgroundWorkRuntimeHandle",
     "enqueue_background_work_request",
     "run_background_work_runtime_tick",
