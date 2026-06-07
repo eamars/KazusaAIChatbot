@@ -38,6 +38,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [l2d_action_router_prompt_separation_plan.md](active/short_term/l2d_action_router_prompt_separation_plan.md) | Large top-level action-router prompt and boundary separation plan | draft |
 | [media_descriptor_cache_plan.md](active/short_term/media_descriptor_cache_plan.md) | Medium media descriptor cache using Cache2 persistent layer | draft |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 
@@ -51,7 +52,6 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [rag2_cognition_identity_evidence_content_bugfix_plan.md](active/bugfix/rag2_cognition_identity_evidence_content_bugfix_plan.md) | Large RAG2 cognition-facing identity evidence content bugfix plan | completed |
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
 
 ## Reference Documents
@@ -117,6 +117,7 @@ plans.
 | [lm_studio_model_unload_retry_bugfix_plan.md](archive/completed/bugfix/lm_studio_model_unload_retry_bugfix_plan.md) |
 | [memory_lifecycle_specialist_routing_plan.md](archive/completed/bugfix/memory_lifecycle_specialist_routing_plan.md) |
 | [no_due_commitment_lifecycle_resolution_plan.md](archive/completed/bugfix/no_due_commitment_lifecycle_resolution_plan.md) |
+| [rag2_cognition_identity_evidence_content_bugfix_plan.md](archive/completed/bugfix/rag2_cognition_identity_evidence_content_bugfix_plan.md) |
 | [quote_aware_rag_sequence_plan.md](archive/completed/bugfix/quote_aware_rag_sequence_plan.md) |
 | [qq_face_projection_empty_input_guard_bugfix_plan.md](archive/completed/bugfix/qq_face_projection_empty_input_guard_bugfix_plan.md) |
 | [rag_active_turn_conversation_row_exclusion_plan.md](archive/completed/bugfix/rag_active_turn_conversation_row_exclusion_plan.md) |
