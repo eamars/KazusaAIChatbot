@@ -44,12 +44,8 @@ def test_background_artifact_readme_has_icd_sections() -> None:
     for heading in (
         "Document Control",
         "Purpose",
-        "Scope",
-        "Parties",
-        "Boundary Summary",
-        "Public Interface",
-        "Job Lifecycle",
-        "LLM Input Contract",
-        "Forbidden Paths",
+        "Compatibility Scope",
+        "Current Runtime Boundary",
+        "Legacy Public Interface",
     ):
         assert heading in readme_text

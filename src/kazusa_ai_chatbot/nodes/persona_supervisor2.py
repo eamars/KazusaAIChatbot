@@ -340,9 +340,8 @@ async def stage_2a_background_work_enqueue(
         return return_value
     if not _cognition_selects_text_surface(state):
         action_results = [
-            _background_work_no_handoff_result(spec, state)
+            _background_no_handoff_result(spec, state)
             for spec in background_specs
-            if spec.get("kind") == BACKGROUND_WORK_REQUEST_CAPABILITY
         ]
         return_value = {
             "pre_surface_action_results": action_results,
@@ -360,32 +359,35 @@ async def stage_2a_background_work_enqueue(
     return return_value
 
 
-def _background_work_no_handoff_result(
+def _background_no_handoff_result(
     action_spec: dict,
     state: GlobalPersonaState,
 ) -> dict:
     """Build a prompt-safe rejection when no visible acknowledgement exists."""
 
-    action_attempt_id = _first_valid_action_attempt_id(
-        state,
-        BACKGROUND_WORK_REQUEST_CAPABILITY,
-    )
+    action_kind = str(action_spec.get("kind", BACKGROUND_WORK_REQUEST_CAPABILITY))
+    action_attempt_id = _first_valid_action_attempt_id(state, action_kind)
     if action_attempt_id is None:
         action_attempt_id = ""
     params = action_spec.get("params")
     task_summary = ""
     if isinstance(params, dict):
-        value = params.get("task_brief")
-        if isinstance(value, str):
-            task_summary = value.strip()
+        for field_name in ("task_brief", "objective_summary"):
+            value = params.get(field_name)
+            if isinstance(value, str) and value.strip():
+                task_summary = value.strip()
+                break
+    handler_owner = "background_work"
+    if action_kind == BACKGROUND_ARTIFACT_REQUEST_CAPABILITY:
+        handler_owner = "background_artifact"
     result = {
         "schema_version": "action_result.v1",
         "action_attempt_id": action_attempt_id,
-        "action_kind": BACKGROUND_WORK_REQUEST_CAPABILITY,
-        "handler_owner": "background_work",
+        "action_kind": action_kind,
+        "handler_owner": handler_owner,
         "status": "failed",
         "result_summary": (
-            "background_work_request failed: visible acknowledgement missing"
+            f"{action_kind} failed: visible acknowledgement missing"
         ),
         "result_refs": [],
         "completed_at": state["storage_timestamp_utc"],

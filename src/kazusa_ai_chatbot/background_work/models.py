@@ -44,6 +44,7 @@ class BackgroundWorkQueueRequest(TypedDict):
     action_attempt_id: str
     idempotency_key: str
     task_brief: str
+    source_context: NotRequired[str]
     source_platform: str
     source_channel_id: str
     source_channel_type: str
@@ -133,6 +134,7 @@ class BackgroundWorkJobDoc(TypedDict, total=False):
     worker: str
     routed_task: str
     router_reason: str
+    source_context: str
     artifact_text: str
     artifact_char_count: int
     failure_summary: str
@@ -140,6 +142,7 @@ class BackgroundWorkJobDoc(TypedDict, total=False):
     worker_metadata: dict[str, object]
     completed_at: str
     delivery_attempt_count: int
+    delivery_failure_summary: str
     delivery_tracking_id: str
     delivered_conversation_message_id: str
     delivered_at: str

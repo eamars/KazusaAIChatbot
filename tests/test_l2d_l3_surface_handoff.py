@@ -1218,3 +1218,40 @@ async def test_l3_content_anchor_logs_output(caplog) -> None:
     ]
     assert "Content anchor output: anchors=" in caplog.text
     assert "[DECISION] Answer directly." in caplog.text
+
+
+def test_legacy_background_artifact_no_handoff_produces_explicit_rejection() -> None:
+    """Legacy background_artifact_request specs should get explicit failure results
+    when no visible acknowledgement exists, not be silently dropped."""
+
+    result = persona_module._background_no_handoff_result(
+        {
+            "kind": "background_artifact_request",
+            "params": {"objective_summary": "Write a poem."},
+        },
+        _cognition_state(),
+    )
+
+    assert result["action_kind"] == "background_artifact_request"
+    assert result["status"] == "failed"
+    assert "visible acknowledgement missing" in result["result_summary"]
+    assert result["acknowledgement_constraint"] == "promise_forbidden_explain_failure"
+    assert result["handler_owner"] == "background_artifact"
+    assert result["task_summary"] == "Write a poem."
+
+
+def test_background_work_no_handoff_result_uses_task_brief() -> None:
+    """background_work_request no-handoff should extract task_brief."""
+
+    result = persona_module._background_no_handoff_result(
+        {
+            "kind": "background_work_request",
+            "params": {"task_brief": "Generate a Fibonacci function."},
+        },
+        _cognition_state(),
+    )
+
+    assert result["action_kind"] == "background_work_request"
+    assert result["status"] == "failed"
+    assert result["handler_owner"] == "background_work"
+    assert result["task_summary"] == "Generate a Fibonacci function."

@@ -12,6 +12,7 @@ from kazusa_ai_chatbot.background_work.models import (
     BACKGROUND_WORK_JOBS_COLLECTION,
     BackgroundWorkJobDoc,
 )
+from kazusa_ai_chatbot.config import BACKGROUND_WORK_DELIVERY_MAX_ATTEMPTS
 from kazusa_ai_chatbot.db._client import get_db
 from kazusa_ai_chatbot.db.errors import DatabaseOperationError
 from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
@@ -215,6 +216,7 @@ async def fail_background_work_job(
 async def find_deliverable_background_work_jobs(
     *,
     limit: int,
+    max_delivery_attempts: int = BACKGROUND_WORK_DELIVERY_MAX_ATTEMPTS,
 ) -> list[BackgroundWorkJobDoc]:
     """Return completed or failed jobs that are ready for result delivery."""
 
@@ -226,6 +228,7 @@ async def find_deliverable_background_work_jobs(
                 {
                     "status": {"$in": ["completed", "failed", "delivery_failed"]},
                     "delivery_state": {"$in": ["ready", "failed"]},
+                    "delivery_attempt_count": {"$lt": max_delivery_attempts},
                 },
                 {"_id": 0},
             )
@@ -320,7 +323,7 @@ async def mark_background_work_delivery_failed(
         "$set": {
             "status": "delivery_failed",
             "delivery_state": "failed",
-            "failure_summary": failure_summary,
+            "delivery_failure_summary": failure_summary,
             "updated_at": failed_at,
         }
     }

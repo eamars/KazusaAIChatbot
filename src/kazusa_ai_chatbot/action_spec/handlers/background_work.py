@@ -106,10 +106,12 @@ async def enqueue_background_work_action(
     validated = validate_background_work_action(action_spec)
     params = validated["params"]
     scope = validated["target"]["scope"]
+    source_context = str(validated.get("reason", "")).strip()
     queue_request: BackgroundWorkQueueRequest = {
         "action_attempt_id": action_attempt_id,
         "idempotency_key": f"background_work:{action_attempt_id}",
         "task_brief": _param_text(params, "task_brief"),
+        "source_context": source_context,
         "requested_delivery": "send_result_when_done",
         "max_output_chars": int(params["max_output_chars"]),
         "source_platform": _scope_text(scope, "source_platform"),

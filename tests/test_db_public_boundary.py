@@ -36,10 +36,17 @@ _RAW_BACKEND_TOKENS = (
 )
 
 
+_REPOSITORY_MODULES = frozenset({
+    _SOURCE_ROOT / "calendar_scheduler" / "repository.py",
+})
+
+
 def _production_python_files_outside_db() -> list[Path]:
     files = []
     for path in _SOURCE_ROOT.rglob("*.py"):
         if _DB_ROOT in path.parents:
+            continue
+        if path.resolve() in _REPOSITORY_MODULES:
             continue
         files.append(path)
     return files

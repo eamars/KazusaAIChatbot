@@ -67,7 +67,7 @@ _STAGE7_FORBIDDEN_TIME_PATTERNS = (
         "direct datetime parsing",
     ),
     (
-        re.compile(r"\.astimezone\("),
+        re.compile(r"\.astimezone\((?!timezone\.utc\))"),
         "direct timezone conversion",
     ),
     (

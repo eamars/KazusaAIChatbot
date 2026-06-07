@@ -196,3 +196,57 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
     assert dispatch_context.bot_permission_role == "background_work_result"
     assert dispatch_context.source_platform_bot_id == "bot-1"
     post_turn.assert_awaited_once()
+
+
+def test_delivery_failure_summary_field_exists_in_job_schema() -> None:
+    """Job doc should carry delivery_failure_summary separate from failure_summary."""
+
+    models = importlib.import_module("kazusa_ai_chatbot.background_work.models")
+    annotations = models.BackgroundWorkJobDoc.__annotations__
+    assert "delivery_failure_summary" in annotations
+    assert "failure_summary" in annotations
+
+
+def test_delivery_failure_summary_initialized_empty() -> None:
+    """New jobs should start with empty delivery_failure_summary."""
+
+    jobs = importlib.import_module("kazusa_ai_chatbot.background_work.jobs")
+    build = getattr(jobs, "_build_job_document")
+    request = {
+        "action_attempt_id": "action_attempt:dfs-001",
+        "idempotency_key": "background_work:dfs-001",
+        "task_brief": "Test delivery failure field.",
+        "source_platform": "debug",
+        "source_channel_id": "debug:user:test",
+        "source_channel_type": "private",
+        "source_message_id": "message-001",
+        "source_platform_bot_id": "bot-001",
+        "source_character_name": "Test Character",
+        "requester_global_user_id": "global-user-001",
+        "requester_platform_user_id": "debug-user-001",
+        "requester_display_name": "Test User",
+        "requested_delivery": "send_result_when_done",
+        "max_output_chars": 3000,
+        "storage_timestamp_utc": "2026-06-06T00:00:00+00:00",
+    }
+    job = build(
+        request,
+        job_id="job-dfs-001",
+        storage_timestamp_utc="2026-06-06T00:00:00+00:00",
+    )
+    assert job["delivery_failure_summary"] == ""
+    assert job["failure_summary"] == ""
+
+
+def test_delivery_retry_cap_query_uses_max_delivery_attempts() -> None:
+    """find_deliverable should filter by delivery_attempt_count cap."""
+
+    db_module = importlib.import_module(
+        "kazusa_ai_chatbot.db.background_work_jobs"
+    )
+    import inspect
+
+    sig = inspect.signature(db_module.find_deliverable_background_work_jobs)
+    assert "max_delivery_attempts" in sig.parameters
+    param = sig.parameters["max_delivery_attempts"]
+    assert param.default > 0

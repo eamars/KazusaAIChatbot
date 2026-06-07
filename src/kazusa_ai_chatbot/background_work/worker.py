@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 from uuid import uuid4
 
@@ -19,6 +20,8 @@ from kazusa_ai_chatbot.db.background_work_jobs import (
     fail_background_work_job,
 )
 from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
+
+logger = logging.getLogger(__name__)
 
 BACKGROUND_WORK_WORKER_COMPONENT = "background_work.worker"
 
@@ -48,16 +51,31 @@ async def run_background_work_worker_tick(
         if job is None:
             break
         processed_count += 1
-        router_decision = await route_background_work(
-            task_brief=job["task_brief"],
-            source_summary=job["task_brief"],
-            worker_descriptions=worker_descriptions(),
-            max_output_chars=int(job["max_output_chars"]),
-        )
-        worker_result = await dispatch_background_work(
-            router_decision,
-            max_output_chars=int(job["max_output_chars"]),
-        )
+        source_summary = job.get("source_context", "").strip() or job["task_brief"]
+        try:
+            router_decision = await route_background_work(
+                task_brief=job["task_brief"],
+                source_summary=source_summary,
+                worker_descriptions=worker_descriptions(),
+                max_output_chars=int(job["max_output_chars"]),
+            )
+            worker_result = await dispatch_background_work(
+                router_decision,
+                max_output_chars=int(job["max_output_chars"]),
+            )
+        except Exception as exc:
+            logger.exception(
+                f"Background-work job {job['job_id']} failed during "
+                f"routing or dispatch: {exc}"
+            )
+            await fail_background_work_job(
+                job_id=job["job_id"],
+                lease_owner=worker_id,
+                failure_summary=f"Unhandled error during routing or dispatch: {type(exc).__name__}: {str(exc)[:200]}",
+                failed_at=storage_utc_now_iso(),
+            )
+            failed_count += 1
+            continue
         completed_at = storage_utc_now_iso()
         if worker_result["status"] == "succeeded":
             await complete_background_work_job(
