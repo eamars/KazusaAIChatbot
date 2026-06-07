@@ -1680,7 +1680,7 @@ async def test_napcat_runtime_endpoint_accepts_delivery_mentions():
     runtime_api_module.bind_runtime_adapter(adapter)
 
     try:
-        transport = httpx.ASGITransport(app=napcat_module.runtime_app)
+        transport = httpx.ASGITransport(app=runtime_api_module.runtime_app)
         async with httpx.AsyncClient(
             transport=transport,
             base_url="http://runtime.local",
@@ -1730,7 +1730,7 @@ async def test_napcat_runtime_send_message_uses_private_message_type():
     runtime_api_module.bind_runtime_adapter(adapter)
 
     try:
-        transport = httpx.ASGITransport(app=napcat_module.runtime_app)
+        transport = httpx.ASGITransport(app=runtime_api_module.runtime_app)
         async with httpx.AsyncClient(
             transport=transport,
             base_url="http://runtime.local",

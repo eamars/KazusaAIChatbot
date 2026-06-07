@@ -443,6 +443,9 @@ async def call_style_agent(state: CognitionState) -> CognitionState:
         "text_chat_user_message_image_audio_observation": _STYLE_AGENT_PROMPT,
         "reflection_signal_reflection_artifact": _STYLE_AGENT_PROMPT,
         "internal_thought_internal_monologue": _STYLE_AGENT_PROMPT,
+        "background_artifact_result_ready_background_artifact_result": (
+            _STYLE_AGENT_PROMPT
+        ),
     }[selection["variant"]]
 
     system_prompt = SystemMessage(content=prompt_template.format(
@@ -707,6 +710,9 @@ async def call_content_anchor_agent(state: CognitionState) -> CognitionState:
         "text_chat_user_message_image_audio_observation": _CONTENT_ANCHOR_AGENT_PROMPT,
         "reflection_signal_reflection_artifact": _CONTENT_ANCHOR_AGENT_PROMPT,
         "internal_thought_internal_monologue": _CONTENT_ANCHOR_AGENT_PROMPT,
+        "background_artifact_result_ready_background_artifact_result": (
+            _CONTENT_ANCHOR_AGENT_PROMPT
+        ),
     }[selection["variant"]]
 
     system_prompt = SystemMessage(content=prompt_template.format(
@@ -878,6 +884,9 @@ async def call_preference_adapter(state: CognitionState) -> CognitionState:
         "text_chat_user_message_image_audio_observation": _PREFERENCE_ADAPTER_PROMPT,
         "reflection_signal_reflection_artifact": _PREFERENCE_ADAPTER_PROMPT,
         "internal_thought_internal_monologue": _PREFERENCE_ADAPTER_PROMPT,
+        "background_artifact_result_ready_background_artifact_result": (
+            _PREFERENCE_ADAPTER_PROMPT
+        ),
     }[selection["variant"]]
 
     system_prompt = SystemMessage(content=prompt_template.format(
@@ -1087,6 +1096,9 @@ async def call_visual_agent(state: CognitionState) -> CognitionState:
         "text_chat_user_message_image_audio_observation": _VISUAL_AGENT_PROMPT,
         "reflection_signal_reflection_artifact": _VISUAL_AGENT_PROMPT,
         "internal_thought_internal_monologue": _VISUAL_AGENT_PROMPT,
+        "background_artifact_result_ready_background_artifact_result": (
+            _VISUAL_AGENT_PROMPT
+        ),
     }[selection["variant"]]
 
     control_sensitivity = float(boundary_profile["control_sensitivity"])

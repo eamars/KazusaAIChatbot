@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -39,11 +40,23 @@ async def _count(filter_doc: dict[str, Any]) -> int:
 async def _latest_event(filter_doc: dict[str, Any]) -> dict[str, Any]:
     """Return the latest matching event or an empty mapping."""
 
-    rows = await repository.find_events(
-        filter_doc,
-        sort=[("occurred_at", -1)],
-        limit=1,
+    parameters = inspect.signature(repository.find_events).parameters
+    supports_keyword_query = "query" in parameters or any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters.values()
     )
+    if supports_keyword_query:
+        rows = await repository.find_events(
+            query=filter_doc,
+            sort=[("occurred_at", -1)],
+            limit=1,
+        )
+    else:
+        rows = await repository.find_events(
+            filter_doc,
+            sort=[("occurred_at", -1)],
+            limit=1,
+        )
     latest = rows[0] if rows else {}
     return latest
 
@@ -68,10 +81,20 @@ async def build_runtime_status(*, window_hours: int = 24) -> dict[str, object]:
         **base_filter,
         "component": "self_cognition.worker",
     })
+    background_work_latest = await _latest_event({
+        **base_filter,
+        "component": "background_work.worker",
+    })
     worker_error_count = await _count({
         **base_filter,
         "event_family": "runtime_error",
-        "component": {"$in": ["reflection_cycle.worker", "self_cognition.worker"]},
+        "component": {
+            "$in": [
+                "reflection_cycle.worker",
+                "self_cognition.worker",
+                "background_work.worker",
+            ],
+        },
     })
     status = {
         "status": "ok",
@@ -89,6 +112,14 @@ async def build_runtime_status(*, window_hours: int = 24) -> dict[str, object]:
             "self_cognition": {
                 "last_event_at": str(self_cognition_latest.get("occurred_at", "")),
                 "last_status": str(self_cognition_latest.get("status", "unknown")),
+            },
+            "background_work": {
+                "last_event_at": str(
+                    background_work_latest.get("occurred_at", "")
+                ),
+                "last_status": str(
+                    background_work_latest.get("status", "unknown")
+                ),
             },
         },
         "semantic_descriptors": {
@@ -226,7 +257,11 @@ async def build_snapshot_source_counts(
             **base_filter,
             "event_family": "runtime_error",
             "component": {
-                "$in": ["reflection_cycle.worker", "self_cognition.worker"],
+                "$in": [
+                    "reflection_cycle.worker",
+                    "self_cognition.worker",
+                    "background_work.worker",
+                ],
             },
         }),
     }

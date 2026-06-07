@@ -134,6 +134,9 @@ async def call_social_context_appraisal(state: CognitionState) -> CognitionState
         "text_chat_user_message_image_audio_observation": _CONTEXTUAL_AGENT_PROMPT,
         "reflection_signal_reflection_artifact": _CONTEXTUAL_AGENT_PROMPT,
         "internal_thought_internal_monologue": _CONTEXTUAL_AGENT_PROMPT,
+        "background_artifact_result_ready_background_artifact_result": (
+            _CONTEXTUAL_AGENT_PROMPT
+        ),
     }[selection["variant"]]
 
     control_sensitivity = float(boundary_profile["control_sensitivity"])

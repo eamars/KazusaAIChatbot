@@ -86,6 +86,36 @@ def _positive_int_from_env_alias(
     return value
 
 
+def _bool_from_env_alias(
+    primary_name: str,
+    legacy_name: str,
+    default: str,
+) -> bool:
+    """Read a bool with one temporary legacy env alias."""
+
+    primary_raw = os.getenv(primary_name)
+    legacy_raw = os.getenv(legacy_name)
+    if primary_raw is not None and legacy_raw is not None:
+        primary_value = _bool_from_value(primary_name, primary_raw)
+        legacy_value = _bool_from_value(legacy_name, legacy_raw)
+        if primary_value != legacy_value:
+            raise ValueError(
+                f"{primary_name} conflicts with {legacy_name}"
+            )
+        return primary_value
+
+    if primary_raw is not None:
+        value = _bool_from_value(primary_name, primary_raw)
+        return value
+
+    if legacy_raw is not None:
+        value = _bool_from_value(legacy_name, legacy_raw)
+        return value
+
+    value = _bool_from_value(primary_name, default)
+    return value
+
+
 def _bounded_float_from_env(
     name: str,
     default: str,
@@ -106,6 +136,13 @@ def _bool_from_env(name: str, default: str) -> bool:
     """Read a boolean environment setting and fail fast if invalid."""
 
     raw_value = os.getenv(name, default)
+    value = _bool_from_value(name, raw_value)
+    return value
+
+
+def _bool_from_value(name: str, raw_value: str) -> bool:
+    """Parse a boolean config value and fail fast if invalid."""
+
     normalized_value = raw_value.strip().lower()
     if normalized_value in ("1", "true", "yes"):
         return_value = True
@@ -229,6 +266,31 @@ CONSOLIDATION_LLM_MODEL = os.environ["CONSOLIDATION_LLM_MODEL"]
 JSON_REPAIR_LLM_BASE_URL = os.environ["JSON_REPAIR_LLM_BASE_URL"]
 JSON_REPAIR_LLM_API_KEY = os.environ["JSON_REPAIR_LLM_API_KEY"]
 JSON_REPAIR_LLM_MODEL = os.environ["JSON_REPAIR_LLM_MODEL"]
+
+BACKGROUND_ARTIFACT_LLM_BASE_URL = os.getenv(
+    "BACKGROUND_ARTIFACT_LLM_BASE_URL",
+    COGNITION_LLM_BASE_URL,
+)
+BACKGROUND_ARTIFACT_LLM_API_KEY = os.getenv(
+    "BACKGROUND_ARTIFACT_LLM_API_KEY",
+    COGNITION_LLM_API_KEY,
+)
+BACKGROUND_ARTIFACT_LLM_MODEL = os.getenv(
+    "BACKGROUND_ARTIFACT_LLM_MODEL",
+    COGNITION_LLM_MODEL,
+)
+BACKGROUND_WORK_LLM_BASE_URL = os.getenv(
+    "BACKGROUND_WORK_LLM_BASE_URL",
+    BACKGROUND_ARTIFACT_LLM_BASE_URL,
+)
+BACKGROUND_WORK_LLM_API_KEY = os.getenv(
+    "BACKGROUND_WORK_LLM_API_KEY",
+    BACKGROUND_ARTIFACT_LLM_API_KEY,
+)
+BACKGROUND_WORK_LLM_MODEL = os.getenv(
+    "BACKGROUND_WORK_LLM_MODEL",
+    BACKGROUND_ARTIFACT_LLM_MODEL,
+)
 
 # Embedding model (LM Studio)
 EMBEDDING_BASE_URL = os.environ["EMBEDDING_BASE_URL"]
@@ -513,6 +575,57 @@ SELF_COGNITION_MAX_CASES_PER_TICK = _positive_int_from_env(
     "SELF_COGNITION_MAX_CASES_PER_TICK",
     "3",
 )
+
+# Background work runs as asynchronous worker-subagent jobs. Legacy
+# BACKGROUND_ARTIFACT_* settings remain aliases for existing deployments.
+BACKGROUND_WORK_WORKER_ENABLED = _bool_from_env_alias(
+    "BACKGROUND_WORK_WORKER_ENABLED",
+    "BACKGROUND_ARTIFACT_WORKER_ENABLED",
+    "true",
+)
+BACKGROUND_WORK_WORKER_INTERVAL_SECONDS = _positive_int_from_env_alias(
+    "BACKGROUND_WORK_WORKER_INTERVAL_SECONDS",
+    "BACKGROUND_ARTIFACT_WORKER_INTERVAL_SECONDS",
+    "45",
+)
+BACKGROUND_WORK_WORKER_CLAIM_LIMIT = _positive_int_from_env_alias(
+    "BACKGROUND_WORK_WORKER_CLAIM_LIMIT",
+    "BACKGROUND_ARTIFACT_WORKER_CLAIM_LIMIT",
+    "2",
+)
+BACKGROUND_WORK_WORKER_LEASE_SECONDS = _positive_int_from_env_alias(
+    "BACKGROUND_WORK_WORKER_LEASE_SECONDS",
+    "BACKGROUND_ARTIFACT_WORKER_LEASE_SECONDS",
+    "180",
+)
+BACKGROUND_WORK_WORKER_MAX_ATTEMPTS = _positive_int_from_env_alias(
+    "BACKGROUND_WORK_WORKER_MAX_ATTEMPTS",
+    "BACKGROUND_ARTIFACT_WORKER_MAX_ATTEMPTS",
+    "4",
+)
+BACKGROUND_WORK_INPUT_CHAR_LIMIT = _positive_int_from_env_alias(
+    "BACKGROUND_WORK_INPUT_CHAR_LIMIT",
+    "BACKGROUND_ARTIFACT_INPUT_CHAR_LIMIT",
+    "8000",
+)
+BACKGROUND_WORK_OUTPUT_CHAR_LIMIT = _positive_int_from_env_alias(
+    "BACKGROUND_WORK_OUTPUT_CHAR_LIMIT",
+    "BACKGROUND_ARTIFACT_OUTPUT_CHAR_LIMIT",
+    "3000",
+)
+BACKGROUND_WORK_DELIVERY_MAX_ATTEMPTS = _positive_int_from_env(
+    "BACKGROUND_WORK_DELIVERY_MAX_ATTEMPTS",
+    "6",
+)
+BACKGROUND_ARTIFACT_WORKER_ENABLED = BACKGROUND_WORK_WORKER_ENABLED
+BACKGROUND_ARTIFACT_WORKER_INTERVAL_SECONDS = (
+    BACKGROUND_WORK_WORKER_INTERVAL_SECONDS
+)
+BACKGROUND_ARTIFACT_WORKER_CLAIM_LIMIT = BACKGROUND_WORK_WORKER_CLAIM_LIMIT
+BACKGROUND_ARTIFACT_WORKER_LEASE_SECONDS = BACKGROUND_WORK_WORKER_LEASE_SECONDS
+BACKGROUND_ARTIFACT_WORKER_MAX_ATTEMPTS = BACKGROUND_WORK_WORKER_MAX_ATTEMPTS
+BACKGROUND_ARTIFACT_INPUT_CHAR_LIMIT = BACKGROUND_WORK_INPUT_CHAR_LIMIT
+BACKGROUND_ARTIFACT_OUTPUT_CHAR_LIMIT = BACKGROUND_WORK_OUTPUT_CHAR_LIMIT
 # Source packets enter cognition as internal-monologue percepts, so the default
 # budget stays aligned with the existing internal-thought cognition boundary.
 SELF_COGNITION_SOURCE_PACKET_CHAR_LIMIT = _positive_int_from_env(

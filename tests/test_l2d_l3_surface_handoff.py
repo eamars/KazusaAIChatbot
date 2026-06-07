@@ -228,6 +228,107 @@ def _action_directives() -> dict:
     return directives
 
 
+def test_background_artifact_acknowledgement_requires_pending_queue_result() -> None:
+    """L3 should see promise permission only after durable enqueue succeeded."""
+
+    state = _cognition_state()
+    state["pre_surface_action_results"] = [
+        {
+            "action_attempt_id": "action_attempt:background-artifact-001",
+            "action_kind": "background_artifact_request",
+            "status": "pending",
+            "queue_state": "queued",
+            "work_kind": "coding_snippet",
+            "objective_summary": "Generate a Fibonacci function snippet.",
+            "operational_owner": "background_artifact_job",
+            "job_ref": "background_artifact_job:job-001",
+            "acknowledgement_constraint": "promise_allowed",
+        }
+    ]
+
+    intent = l3_surface_module._selected_text_surface_intent(state)
+
+    assert "background_artifact_request" in intent
+    assert "coding_snippet" in intent
+    assert "Generate a Fibonacci function snippet." in intent
+    assert "promise_allowed" in intent
+    assert "background_artifact_job:job-001" not in intent
+
+
+def test_background_artifact_failed_enqueue_blocks_later_delivery_promise() -> None:
+    """L3 should not promise later delivery when durable enqueue failed."""
+
+    state = _cognition_state()
+    state["pre_surface_action_results"] = [
+        {
+            "action_attempt_id": "action_attempt:background-artifact-001",
+            "action_kind": "background_artifact_request",
+            "status": "failed",
+            "queue_state": "none",
+            "work_kind": "coding_snippet",
+            "objective_summary": "Generate a Fibonacci function snippet.",
+            "operational_owner": "none",
+            "job_ref": "",
+            "acknowledgement_constraint": "promise_forbidden_explain_failure",
+        }
+    ]
+
+    intent = l3_surface_module._selected_text_surface_intent(state)
+
+    assert "background_artifact_request" in intent
+    assert "promise_forbidden_explain_failure" in intent
+    assert "promise_allowed" not in intent
+
+
+def test_background_work_acknowledgement_requires_pending_queue_result() -> None:
+    """L3 should see background-work promise permission only after enqueue."""
+
+    state = _cognition_state()
+    state["pre_surface_action_results"] = [
+        {
+            "action_attempt_id": "action_attempt:background-work-001",
+            "action_kind": "background_work_request",
+            "status": "pending",
+            "queue_state": "queued",
+            "task_summary": "Generate a Fibonacci function snippet.",
+            "operational_owner": "background_work_job",
+            "job_ref": "background_work_job:job-001",
+            "acknowledgement_constraint": "promise_allowed",
+        }
+    ]
+
+    intent = l3_surface_module._selected_text_surface_intent(state)
+
+    assert "background_work_request" in intent
+    assert "Generate a Fibonacci function snippet." in intent
+    assert "promise_allowed" in intent
+    assert "background_work_job:job-001" not in intent
+
+
+def test_background_work_failed_enqueue_blocks_later_delivery_promise() -> None:
+    """L3 should not promise later delivery when background-work enqueue failed."""
+
+    state = _cognition_state()
+    state["pre_surface_action_results"] = [
+        {
+            "action_attempt_id": "action_attempt:background-work-001",
+            "action_kind": "background_work_request",
+            "status": "failed",
+            "queue_state": "none",
+            "task_summary": "Generate a Fibonacci function snippet.",
+            "operational_owner": "none",
+            "job_ref": "",
+            "acknowledgement_constraint": "promise_forbidden_explain_failure",
+        }
+    ]
+
+    intent = l3_surface_module._selected_text_surface_intent(state)
+
+    assert "background_work_request" in intent
+    assert "promise_forbidden_explain_failure" in intent
+    assert "promise_allowed" not in intent
+
+
 @pytest.mark.asyncio
 async def test_cognition_subgraph_runs_l2c2_before_l2d() -> None:
     """The cognition subgraph should feed social context into L2d."""
@@ -1117,3 +1218,40 @@ async def test_l3_content_anchor_logs_output(caplog) -> None:
     ]
     assert "Content anchor output: anchors=" in caplog.text
     assert "[DECISION] Answer directly." in caplog.text
+
+
+def test_legacy_background_artifact_no_handoff_produces_explicit_rejection() -> None:
+    """Legacy background_artifact_request specs should get explicit failure results
+    when no visible acknowledgement exists, not be silently dropped."""
+
+    result = persona_module._background_no_handoff_result(
+        {
+            "kind": "background_artifact_request",
+            "params": {"objective_summary": "Write a poem."},
+        },
+        _cognition_state(),
+    )
+
+    assert result["action_kind"] == "background_artifact_request"
+    assert result["status"] == "failed"
+    assert "visible acknowledgement missing" in result["result_summary"]
+    assert result["acknowledgement_constraint"] == "promise_forbidden_explain_failure"
+    assert result["handler_owner"] == "background_artifact"
+    assert result["task_summary"] == "Write a poem."
+
+
+def test_background_work_no_handoff_result_uses_task_brief() -> None:
+    """background_work_request no-handoff should extract task_brief."""
+
+    result = persona_module._background_no_handoff_result(
+        {
+            "kind": "background_work_request",
+            "params": {"task_brief": "Generate a Fibonacci function."},
+        },
+        _cognition_state(),
+    )
+
+    assert result["action_kind"] == "background_work_request"
+    assert result["status"] == "failed"
+    assert result["handler_owner"] == "background_work"
+    assert result["task_summary"] == "Generate a Fibonacci function."

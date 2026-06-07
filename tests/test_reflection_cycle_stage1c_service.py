@@ -182,6 +182,7 @@ async def _run_lifespan(
     enabled: bool,
     self_cognition_enabled: bool = False,
     calendar_enabled: bool = True,
+    background_work_enabled: bool = False,
 ) -> dict[str, object]:
     """Run service lifespan with external dependencies patched."""
 
@@ -198,6 +199,8 @@ async def _run_lifespan(
         "calendar_started": 0,
         "calendar_stopped": 0,
         "calendar_worker_kwargs": None,
+        "background_work_started": 0,
+        "background_work_stopped": 0,
     }
     handle = SimpleNamespace(
         task=asyncio.create_task(_sleep_forever()),
@@ -269,6 +272,45 @@ async def _run_lifespan(
     def _calendar_phase_provider_factory():
         return calls["calendar_phase_provider"]
 
+    background_work_handle = SimpleNamespace(
+        task=asyncio.create_task(_sleep_forever()),
+        stop_event=None,
+    )
+
+    def _start_background_work_runtime(**kwargs):
+        calls["background_work_started"] = (
+            int(calls["background_work_started"]) + 1
+        )
+        return background_work_handle
+
+    async def _stop_background_work_runtime(_handle):
+        calls["background_work_stopped"] = (
+            int(calls["background_work_stopped"]) + 1
+        )
+        background_work_handle.task.cancel()
+        try:
+            await background_work_handle.task
+        except asyncio.CancelledError:
+            pass
+
+    monkeypatch.setattr(
+        service_module,
+        "BACKGROUND_WORK_WORKER_ENABLED",
+        background_work_enabled,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "start_background_work_runtime",
+        _start_background_work_runtime,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "stop_background_work_runtime",
+        _stop_background_work_runtime,
+        raising=False,
+    )
     monkeypatch.setattr(service_module, "REFLECTION_CYCLE_ENABLED", enabled)
     monkeypatch.setattr(
         service_module,

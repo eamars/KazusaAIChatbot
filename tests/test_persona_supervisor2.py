@@ -128,6 +128,79 @@ def _speak_action_spec() -> dict:
     }
 
 
+def _background_artifact_action_spec() -> dict:
+    return {
+        "schema_version": "action_spec.v1",
+        "kind": "background_artifact_request",
+        "cognition_mode": "deliberative",
+        "source_refs": [
+            {
+                "schema_version": "action_source_ref.v1",
+                "ref_kind": "cognitive_episode",
+                "ref_id": "episode-123",
+                "owner": "cognition",
+                "relationship": "basis",
+                "evidence_refs": [],
+            }
+        ],
+        "target": {
+            "schema_version": "action_target.v1",
+            "target_kind": "current_user",
+            "target_id": None,
+            "owner": "background_artifact",
+            "scope": {"requester_display_name": "TestUser"},
+        },
+        "params": {
+            "work_kind": "coding_snippet",
+            "objective": "Generate a Fibonacci function snippet.",
+            "input_summary": "The user asked for a simple Fibonacci generator.",
+            "requested_delivery": "send_result_when_done",
+            "max_output_chars": 3000,
+        },
+        "urgency": "background",
+        "visibility": "private",
+        "deadline": None,
+        "continuation": {
+            "schema_version": "action_continuation.v1",
+            "mode": "none",
+            "episode_type": None,
+            "max_depth": 0,
+            "include_result_as": None,
+        },
+        "reason": "The character accepted bounded async snippet work.",
+    }
+
+
+def _background_artifact_pending_result() -> dict:
+    return {
+        "schema_version": "action_result.v1",
+        "action_attempt_id": "action_attempt:background-artifact-001",
+        "action_kind": "background_artifact_request",
+        "handler_owner": "background_artifact",
+        "status": "pending",
+        "visibility": "private",
+        "result_summary": "Background artifact job queued.",
+        "result_refs": [
+            {
+                "schema_version": "evidence_ref.v1",
+                "evidence_kind": "system_event",
+                "evidence_id": "background_artifact_job:job-001",
+                "owner": "background_artifact_job",
+                "excerpt": "queued coding_snippet artifact request",
+                "observed_at": "2024-01-01T00:00:00+00:00",
+            }
+        ],
+        "continuation": {
+            "schema_version": "action_continuation.v1",
+            "mode": "none",
+            "episode_type": None,
+            "max_depth": 0,
+            "include_result_as": None,
+        },
+        "completed_at": None,
+    }
+
+
 def _action_directives() -> dict:
     return {
         "contextual_directives": {
@@ -258,6 +331,111 @@ def test_route_after_cognition_allows_no_visible_action() -> None:
     }
 
     assert _route_after_cognition(state) == "silent"
+
+
+@pytest.mark.asyncio
+async def test_background_artifact_executes_before_l3_acknowledgement() -> None:
+    """L3 acknowledgements should be based on pre-surface enqueue results."""
+
+    state = _base_discord_state()
+    action_specs = [_background_artifact_action_spec(), _speak_action_spec()]
+    l3_states = []
+
+    async def _execute_action_specs(
+        selected_specs,
+        *,
+        storage_timestamp_utc,
+        executed_action_attempt_ids=None,
+        record_attempt_func=None,
+        enqueue_background_artifact_func=None,
+    ):
+        del (
+            storage_timestamp_utc,
+            executed_action_attempt_ids,
+            record_attempt_func,
+            enqueue_background_artifact_func,
+        )
+        results = []
+        for selected_spec in selected_specs:
+            if selected_spec["kind"] == "background_artifact_request":
+                results.append(_background_artifact_pending_result())
+            elif selected_spec["kind"] == "speak":
+                results.append({
+                    "schema_version": "action_result.v1",
+                    "action_attempt_id": "action_attempt:speak-001",
+                    "action_kind": "speak",
+                    "handler_owner": "l3_text",
+                    "status": "executed",
+                    "visibility": "user_visible",
+                    "result_summary": "Text surface rendered.",
+                    "result_refs": [],
+                    "continuation": {
+                        "schema_version": "action_continuation.v1",
+                        "mode": "none",
+                        "episode_type": None,
+                        "max_depth": 0,
+                        "include_result_as": None,
+                    },
+                    "completed_at": "2024-01-01T00:00:00+00:00",
+                })
+        return results
+
+    async def _l3_text_surface_handler(l3_state):
+        l3_states.append(dict(l3_state))
+        return {"action_directives": _action_directives()}
+
+    with (
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_msg_decontexualizer",
+            new_callable=AsyncMock,
+            return_value={"decontexualized_input": "Hello"},
+        ),
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_resolver_loop",
+            new_callable=AsyncMock,
+            return_value=_resolver_update(action_specs),
+        ),
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2."
+            "load_matching_pending_resume_into_state",
+            new_callable=AsyncMock,
+            side_effect=lambda persona_state: persona_state,
+        ),
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2."
+            "call_memory_lifecycle_update_handler",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2."
+            "execute_action_specs_for_trace",
+            _execute_action_specs,
+        ),
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2."
+            "call_l3_text_surface_handler",
+            _l3_text_surface_handler,
+        ),
+        patch(
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",
+            new_callable=AsyncMock,
+            return_value={
+                "final_dialog": ["I'll send it when it's ready."],
+                "target_addressed_user_ids": ["uuid-123"],
+                "target_broadcast": False,
+                "mention_target_user": True,
+            },
+        ),
+    ):
+        result = await persona_supervisor2(state)
+
+    assert l3_states[0]["pre_surface_action_results"] == [
+        _background_artifact_pending_result()
+    ]
+    assert result["episode_trace"]["action_results"][0]["action_kind"] == (
+        "background_artifact_request"
+    )
 
 
 @pytest.mark.asyncio

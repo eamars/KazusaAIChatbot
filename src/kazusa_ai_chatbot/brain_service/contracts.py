@@ -137,12 +137,19 @@ class OpsRuntimeConfigResponse(BaseModel):
     calendar_scheduler_max_attempts: int
     reflection_cycle_enabled: bool
     self_cognition_enabled: bool
+    background_work_worker_enabled: bool
     reflection_worker_interval_seconds: int
     reflection_phase_min_slot_spacing_seconds: int
     reflection_phase_max_slots_per_period: int
     reflection_phase_groups_per_slot: int
     self_cognition_worker_interval_seconds: int
     self_cognition_max_cases_per_tick: int
+    background_work_worker_interval_seconds: int
+    background_work_worker_claim_limit: int
+    background_work_worker_lease_seconds: int
+    background_work_worker_max_attempts: int
+    background_work_input_char_limit: int
+    background_work_output_char_limit: int
 
 
 class OpsProcessStatusResponse(BaseModel):

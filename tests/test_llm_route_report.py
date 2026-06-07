@@ -14,6 +14,7 @@ EXPECTED_ROUTE_TABLE_ROWS = (
     "DIALOG_EVALUATOR_LLM",
     "CONSOLIDATION_LLM",
     "JSON_REPAIR_LLM",
+    "BACKGROUND_ARTIFACT_LLM",
     "EMBEDDING",
 )
 
@@ -77,6 +78,7 @@ def test_llm_route_table_omits_api_keys() -> None:
         config.DIALOG_EVALUATOR_LLM_API_KEY,
         config.CONSOLIDATION_LLM_API_KEY,
         config.JSON_REPAIR_LLM_API_KEY,
+        config.BACKGROUND_ARTIFACT_LLM_API_KEY,
         config.EMBEDDING_API_KEY,
     )
     for api_key in api_keys:

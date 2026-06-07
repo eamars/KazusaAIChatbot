@@ -52,6 +52,10 @@ def _runtime_status_payload() -> dict[str, object]:
                 "last_event_at": "2026-05-14T00:03:00+00:00",
                 "last_status": "disabled",
             },
+            "background_work": {
+                "last_event_at": "2026-05-14T00:03:30+00:00",
+                "last_status": "succeeded",
+            },
         },
         "semantic_descriptors": {
             "worker_error_level": "none",
@@ -125,6 +129,7 @@ async def test_ops_runtime_status_merges_config_and_worker_liveness(
     )
     monkeypatch.setattr(service_module, "REFLECTION_CYCLE_ENABLED", True)
     monkeypatch.setattr(service_module, "SELF_COGNITION_ENABLED", False)
+    monkeypatch.setattr(service_module, "BACKGROUND_WORK_WORKER_ENABLED", True)
     monkeypatch.setattr(service_module, "CALENDAR_SCHEDULER_ENABLED", True)
     monkeypatch.setattr(
         service_module,
@@ -178,6 +183,36 @@ async def test_ops_runtime_status_merges_config_and_worker_liveness(
     )
     monkeypatch.setattr(
         service_module,
+        "BACKGROUND_WORK_WORKER_INTERVAL_SECONDS",
+        45,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "BACKGROUND_WORK_WORKER_CLAIM_LIMIT",
+        2,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "BACKGROUND_WORK_WORKER_LEASE_SECONDS",
+        180,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "BACKGROUND_WORK_WORKER_MAX_ATTEMPTS",
+        4,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "BACKGROUND_WORK_INPUT_CHAR_LIMIT",
+        8000,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "BACKGROUND_WORK_OUTPUT_CHAR_LIMIT",
+        3000,
+    )
+    monkeypatch.setattr(
+        service_module,
         "_reflection_worker_handle",
         SimpleNamespace(task=_FakeTask(done=False)),
     )
@@ -190,6 +225,11 @@ async def test_ops_runtime_status_merges_config_and_worker_liveness(
         service_module,
         "_self_cognition_worker_handle",
         None,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_background_work_worker_handle",
+        SimpleNamespace(task=_FakeTask(done=False)),
     )
 
     response = await service_module.ops_runtime_status(window_hours=6)
@@ -205,12 +245,19 @@ async def test_ops_runtime_status_merges_config_and_worker_liveness(
         "calendar_scheduler_max_attempts": 5,
         "reflection_cycle_enabled": True,
         "self_cognition_enabled": False,
+        "background_work_worker_enabled": True,
         "reflection_worker_interval_seconds": 900,
         "reflection_phase_min_slot_spacing_seconds": 60,
         "reflection_phase_max_slots_per_period": 3,
         "reflection_phase_groups_per_slot": 1,
         "self_cognition_worker_interval_seconds": 3600,
         "self_cognition_max_cases_per_tick": 3,
+        "background_work_worker_interval_seconds": 45,
+        "background_work_worker_claim_limit": 2,
+        "background_work_worker_lease_seconds": 180,
+        "background_work_worker_max_attempts": 4,
+        "background_work_input_char_limit": 8000,
+        "background_work_output_char_limit": 3000,
     }
     assert payload["workers"]["calendar_scheduler"]["task_alive"] is True
     assert payload["workers"]["calendar_scheduler"]["enabled"] is True
@@ -218,6 +265,8 @@ async def test_ops_runtime_status_merges_config_and_worker_liveness(
     assert payload["workers"]["reflection_cycle"]["enabled"] is True
     assert payload["workers"]["self_cognition"]["task_alive"] is False
     assert payload["workers"]["self_cognition"]["enabled"] is False
+    assert payload["workers"]["background_work"]["task_alive"] is True
+    assert payload["workers"]["background_work"]["enabled"] is True
     assert "private" not in json.dumps(payload, sort_keys=True)
     build_runtime_status.assert_awaited_once_with(window_hours=6)
 

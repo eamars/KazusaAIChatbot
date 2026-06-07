@@ -58,6 +58,8 @@ ALLOWED_CAPABILITY_OWNERS = frozenset(
         "orchestrator",
         "l3_text",
         "l3_image",
+        "background_artifact",
+        "background_work",
     )
 )
 ALLOWED_COGNITION_MODES = frozenset(("deliberative", "reflex"))
@@ -162,6 +164,8 @@ class CapabilitySpecV1(TypedDict):
         "orchestrator",
         "l3_text",
         "l3_image",
+        "background_artifact",
+        "background_work",
     ]
     input_schema: dict[str, object]
     output_schema: dict[str, object]

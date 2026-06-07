@@ -101,8 +101,8 @@ _PROMPT_FINGERPRINTS = (
     (
         "_ACTION_INITIALIZER_PROMPT",
         l2d_module._ACTION_INITIALIZER_PROMPT,
-        21373,
-        "8520dc18981472421634551ad835ccfdc6a8668bab580fe2a169b25348d45131",
+        17248,
+        "1e92ccadea08d15e6649d2c0d0ec6e27bab2d838e963b5008a3082b8e2eee6c0",
     ),
     (
         "_STYLE_AGENT_PROMPT",
@@ -1469,13 +1469,13 @@ async def test_internal_thought_prompt_rendering_uses_only_residue_payload(
     l2d_llm = llms["_action_initializer_llm"]
     assert l2d_llm.messages
     l2d_context = l2d_llm.messages[1].content
-    assert l2d_context.startswith("当前行动上下文：")
-    assert "触发来源：internal_thought" in l2d_context
-    assert "输入来源：internal_monologue" in l2d_context
-    assert "距离=neutral" in l2d_context
-    assert "强度=low" in l2d_context
-    assert "氛围=quiet" in l2d_context
-    assert "关系=stable" in l2d_context
+    l2d_payload = json.loads(l2d_context)
+    assert l2d_payload["source"]["trigger_source"] == "internal_thought"
+    assert "internal_monologue" in l2d_payload["source"]["input_sources"]
+    assert l2d_payload["cognition"]["social_distance"] == "neutral"
+    assert l2d_payload["cognition"]["emotional_intensity"] == "low"
+    assert l2d_payload["cognition"]["vibe_check"] == "quiet"
+    assert l2d_payload["cognition"]["relational_dynamic"] == "stable"
     assert "cognitive_episode" not in l2d_context
     assert "raw_reflection_run" not in l2d_context
     assert "available_capabilities" not in l2d_context

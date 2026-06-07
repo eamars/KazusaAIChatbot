@@ -29,6 +29,9 @@ ticks, LLM-stage health, recoverable runtime failures, live pipeline outcomes,
 queue decisions, RAG stages, dialog quality checks, calendar scheduler and
 dispatcher delivery events, approved database-operation outcomes,
 self-cognition cases, model contract drift, and resource health.
+Background-work runtime ticks use the existing `worker` family; failures use
+`runtime_error`. Legacy background-artifact compatibility rows use the same
+families without introducing a second event contract.
 
 The module is append-only and best-effort. A telemetry write must never change
 live chat behavior, reflection routing, self-cognition routing, dispatcher
@@ -599,7 +602,7 @@ The public status builders expose bounded aggregate payloads:
 
 | Builder | Service endpoint | Purpose |
 |---|---|---|
-| `build_runtime_status(window_hours=24)` | `GET /ops/runtime-status` | process and worker event summaries plus semantic worker error level; service route adds calendar, reflection, and self-cognition liveness |
+| `build_runtime_status(window_hours=24)` | `GET /ops/runtime-status` | process and worker event summaries plus semantic worker error level; service route adds calendar, reflection, self-cognition, and background-work liveness |
 | `build_reflection_stats(window_hours=24)` | `GET /ops/reflection/stats` | reflection counts, latest event refs, reflection health |
 | `build_self_cognition_stats(window_hours=24)` | `GET /ops/self-cognition/stats` | self-cognition run counts, latest refs, liveness label; service endpoint adds `enabled` and `task_alive` |
 
@@ -637,6 +640,8 @@ instrumentation surface is:
 | Module | Approved event families |
 |---|---|
 | `service.py` | `process`, `resource_health`, `queue_intake`, `pipeline_turn`, `runtime_error`, `database_operation` |
+| `background_work.runtime` | `worker`, `runtime_error` |
+| `background_artifact.runtime` | `worker`, `runtime_error` for legacy compatibility rows only |
 | `reflection_cycle.worker` | `worker`, `llm_stage`, `model_contract`, `database_operation`, `runtime_error` |
 | `self_cognition.worker` | `worker`, `self_cognition`, `dispatcher`, `runtime_error` |
 | `self_cognition.runner` | `self_cognition`, `llm_stage`, `model_contract` |

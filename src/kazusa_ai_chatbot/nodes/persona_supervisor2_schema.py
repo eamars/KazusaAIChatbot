@@ -107,6 +107,7 @@ class GlobalPersonaState(TypedDict):
     internal_monologue: str
     action_directives: dict
     action_specs: NotRequired[list[ActionSpecV1]]
+    pre_surface_action_results: NotRequired[list[ActionResultV1]]
     action_results: NotRequired[list[ActionResultV1]]
     surface_outputs: NotRequired[list[SurfaceOutputV1]]
     episode_trace: NotRequired[EpisodeTraceV1]
@@ -213,6 +214,7 @@ class CognitionState(TypedDict):
 
     action_directives: dict
     action_specs: NotRequired[list[ActionSpecV1]]
+    pre_surface_action_results: NotRequired[list[ActionResultV1]]
     action_results: NotRequired[list[ActionResultV1]]
     surface_outputs: NotRequired[list[SurfaceOutputV1]]
     episode_trace: NotRequired[EpisodeTraceV1]

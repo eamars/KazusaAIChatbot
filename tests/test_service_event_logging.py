@@ -489,6 +489,12 @@ async def test_lifespan_records_process_and_resource_events(monkeypatch) -> None
     monkeypatch.setattr(service_module, "close_db", AsyncMock())
     monkeypatch.setattr(service_module, "REFLECTION_CYCLE_ENABLED", False)
     monkeypatch.setattr(service_module, "SELF_COGNITION_ENABLED", False)
+    monkeypatch.setattr(
+        service_module,
+        "BACKGROUND_WORK_WORKER_ENABLED",
+        False,
+        raising=False,
+    )
 
     async with service_module.lifespan(service_module.app):
         pass
@@ -505,6 +511,7 @@ async def test_lifespan_records_process_and_resource_events(monkeypatch) -> None
     assert resource_names == [
         "mongo",
         "rag_initializer_cache",
+        "media_descriptor_cache",
         "mcp_manager",
     ]
 

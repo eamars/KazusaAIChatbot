@@ -44,6 +44,7 @@ At a high level, Kazusa provides:
 | RAG 2 evidence retrieval         | Demand-driven helper agents retrieve user profiles, memories, conversation history, live facts, web evidence, and recall state.   |
 | Layered cognition                | Cognition decides stance, boundaries, judgment, style, action needs, and response goals before selected L3 surfaces render output. |
 | Background consolidation         | Completed episodes update durable memory, relationship state, Cache2 invalidation, images, and progress from text plus action/surface traces. |
+| Background artifact handoff      | Bounded text-only artifact work can be queued during a live turn and later re-enter cognition as a source-bound result episode.                |
 | Reflection outside chat          | Hourly, daily, and promoted reflection runs are stored as audit records and only promoted context can enter normal cognition.      |
 | Idle self-cognition              | Background source cases can enter the same resolver-backed persona path, with source-bound delivery and normal consolidation rules. |
 | Calendar follow-through          | Accepted future promises and due commitments can become durable calendar triggers that run fresh cognition later.                  |
@@ -83,6 +84,7 @@ HOWTO. One working-style configuration looks like this:
 | `RAG_SUBAGENT_LLM`         | `local-model`                            | `http://localhost:1234/v1` |
 | `WEB_SEARCH_LLM`           | `local-model`                            | `http://localhost:1234/v1` |
 | `COGNITION_LLM`            | `local-model`                            | `http://localhost:1234/v1` |
+| `BACKGROUND_ARTIFACT_LLM`  | `local-model`                            | `http://localhost:1234/v1` |
 | `DIALOG_GENERATOR_LLM`     | `deepseek-v4-flash`                      | `https://api.deepseek.com` |
 | `DIALOG_EVALUATOR_LLM`     | `local-model`                            | `http://localhost:1234/v1` |
 | `CONSOLIDATION_LLM`        | `local-model`                            | `http://localhost:1234/v1` |
@@ -195,6 +197,15 @@ delivery receipts. Private action results, no-visible-output decisions, and
 surface traces can still feed post-turn progress, consolidation, Cache2
 invalidation, residue recording, calendar state, reflection, and
 self-cognition without creating a platform send.
+
+Background work requests are selected by cognition as `background_work_request`,
+validated and queued by deterministic action-spec execution, and acknowledged
+only after a durable pending job exists. A route-only background-work router
+chooses the worker and semantic task after the live turn; the text-artifact
+worker has its own task router and generator stages. Completed results return
+as `background_work_result_ready` cognition rather than being sent directly by
+workers. Legacy background-artifact rows remain compatibility data, not the new
+top-level runtime contract.
 
 ## Design Principles
 

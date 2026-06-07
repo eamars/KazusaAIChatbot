@@ -404,15 +404,16 @@ async def test_l1_subconscious_payload_passes_character_state_in_human_json(
 
 
 def test_l2d_prompt_defines_speak_and_scene_grounded_detail() -> None:
-    """L2d must keep speak visible and detail grounded in the current scene."""
+    """L2d must keep visible-surface action semantics and detail grounded in
+    the current scene.  The new prompt uses generic affordance terms instead
+    of hardcoded capability names."""
     prompt_text = l2d_module._ACTION_INITIALIZER_PROMPT
 
-    assert '`speak`' in prompt_text
     _assert_contains_any(
         '_ACTION_INITIALIZER_PROMPT',
         prompt_text,
-        ('可见文字回复', '可见外部频道文字', '当前外部频道'),
-        '`speak` as visible external-channel text',
+        ('可见表面动作', '可见动作', 'action_affordances'),
+        'visible-surface action concept (replaces hardcoded `speak`)',
     )
     _assert_contains_any(
         '_ACTION_INITIALIZER_PROMPT',
@@ -423,7 +424,7 @@ def test_l2d_prompt_defines_speak_and_scene_grounded_detail() -> None:
     _assert_contains_any(
         '_ACTION_INITIALIZER_PROMPT',
         prompt_text,
-        ('不要生成最终发言文本', '不是最终对话文本', '不得生成最终对话文本'),
+        ('不要生成最终发言文本', '不是最终发言文本', '不得生成最终对话文本'),
         '`detail` not as final dialog text',
     )
     _assert_contains_any(
@@ -435,67 +436,150 @@ def test_l2d_prompt_defines_speak_and_scene_grounded_detail() -> None:
 
 
 def test_l2d_prompt_preserves_resolver_terminal_boundaries() -> None:
-    """L2d should keep resolver selection inside source and terminal limits."""
+    """L2d should keep resolver selection inside source and terminal limits.
+
+    The new prompt uses generic affordance references instead of hardcoded
+    capability names.  Assertions are grouped by the behavioral contract they
+    guard so that failures point to the rule that regressed.
+    """
     prompt_text = l2d_module._ACTION_INITIALIZER_PROMPT
 
+    # -- affordance-driven capability selection (replaces hardcoded names) --
     for required_text in (
-        '`approval_preparation`',
-        '`human_clarification`',
-        '`self_goal_resolution`',
-        '触发来源是 `user_message`',
-        '不是 resolver capability',
-        'blocked observation',
-        'pending resume',
-        '不要再次请求同一个 blocked capability',
-        '不要重复请求同类检索',
-        '更窄、不同、未尝试的证据目标',
-        'approval preview 必须能力扎根',
-        '不得编造上下文没有提供的工具、权限、外部执行机制或验证机制',
-        '时效性、公开来源绑定或用户明确要求核实来源的事实',
-        '区分来源确认、角色推断和当前无法验证的部分',
-        '来源类别、证据轨道或比较对象',
-        '不得改写成跨来源一致、无冲突或已确认',
-        '继续处理原始用户目标',
-        '不要只确认“收到”就结束',
-        '回答原始目标的可见回复目标',
-        '而不是把用户补充信息当作新的独立闲聊',
-        '主要交付部分',
-        '不要只回答其中一个子问题后把必要交付推迟到下一轮',
-        '给出完整的最佳努力结果、证据限制和必要步骤',
-        '非必需偏好或排序口径',
-        '解析器续轮原则',
-        '返回一个 `speak` action_request',
-        '最小缺口',
-        '触发来源：user_message',
-        '禁止返回 `self_goal_resolution`',
-        '必须写入 `resolver_capability_requests`',
-        '绝不能写入 `action_requests.capability`',
-        '缺少可选范围、标准或排序口径不等于缺少必须由用户提供的信息',
-        '没有本轮 `rag_evidence` observation',
-        '不要直接选择 `speak` 跳过审批准备',
-        '不得编造监控、校验、自动检查或外部执行能力',
-        '不要继续换同义词重复搜索',
-        '已有证据和一般判断完成的分析、决策、方案或排查任务',
-        '当前外部断言',
-        '可行动标准和最后核实步骤',
-        '分析、决策、方案设计、风险清单或下一步行动',
-        '不要为了给一般判断背书而启动 `web_evidence`',
-        '必须有本轮 `web_evidence` observation 支撑后才能 `speak` 给出',
-        '否则先请求 `web_evidence`',
-        '只给阻塞说明、可行动标准和最后核实步骤',
-        '需要先收束目标、整理优先级、拆解私有后续判断或形成下一步内部目标',
+        'capabilities.resolver_affordances',
+        'capabilities.action_affordances',
         'resolver_capability_requests[].capability_kind',
-        '私有目标收束已经完成',
-        '没有新的具体私有动作就返回空数组',
-        '`resolver_goal_progress`',
-        '语义进度表',
-        '不得替换原始目标',
-        '`pending`、`partial`、`satisfied`、`blocked`',
-        '`resolver_goal_progress.final_response_requirements` 是 L3/dialog 的交付清单',
-        '"schema_version": "resolver_goal_progress.v1"',
-        '"final_response_requirements"',
     ):
         assert required_text in prompt_text
+
+    # -- source identification and trigger boundaries --
+    _assert_contains_any(
+        '_ACTION_INITIALIZER_PROMPT',
+        prompt_text,
+        ('触发来源', 'trigger_source'),
+        'trigger-source awareness',
+    )
+    assert 'user_message' in prompt_text
+
+    # -- blocked / pending resume handling --
+    assert 'blocked' in prompt_text
+    assert 'pending_resolver_resume' in prompt_text
+    _assert_contains_any(
+        '_ACTION_INITIALIZER_PROMPT',
+        prompt_text,
+        ('不要再次请求同一', '不要再次请求同一个 blocked'),
+        'blocked capability dedup rule',
+    )
+    assert '不要重复请求同类检索' in prompt_text
+    assert '更窄、不同、未尝试的证据目标' in prompt_text
+
+    # -- approval and fabrication guardrails --
+    assert 'approval preview 必须能力扎根' in prompt_text
+    assert '不得编造上下文没有提供的工具、权限、外部执行机制或验证机制' in prompt_text
+    _assert_contains_any(
+        '_ACTION_INITIALIZER_PROMPT',
+        prompt_text,
+        ('不得编造监控', '不得编造'),
+        'no fabricated monitoring or execution capabilities',
+    )
+    _assert_contains_any(
+        '_ACTION_INITIALIZER_PROMPT',
+        prompt_text,
+        ('不要直接选择 `speak` 跳过审批准备',
+         '跳过审批', '审批准备'),
+        'no skipping approval preparation',
+    )
+
+    # -- evidence quality and source boundaries --
+    assert '时效性、公开来源绑定或用户明确要求核实来源的事实' in prompt_text
+    assert '区分来源确认、角色推断和当前无法验证的部分' in prompt_text
+    assert '来源类别、证据轨道或比较对象' in prompt_text
+    assert '不得改写成跨来源一致、无冲突或已确认' in prompt_text
+    assert '当前外部断言' in prompt_text
+    assert 'observation' in prompt_text
+
+    # -- original goal continuity --
+    _assert_contains_any(
+        '_ACTION_INITIALIZER_PROMPT',
+        prompt_text,
+        ('继续处理原始用户目标', '继续推进', 'original_goal'),
+        'original goal continuity',
+    )
+    _assert_contains_any(
+        '_ACTION_INITIALIZER_PROMPT',
+        prompt_text,
+        ('不要只确认"收到"就结束', '不要只确认收到', '不要只确认'),
+        'must not just acknowledge receipt',
+    )
+    assert '回答原始目标的可见回复目标' in prompt_text
+    assert '而不是把用户补充信息当作新的独立闲聊' in prompt_text
+    assert '主要交付部分' in prompt_text
+    assert '不要只回答其中一个子问题后把必要交付推迟到下一轮' in prompt_text
+    _assert_contains_any(
+        '_ACTION_INITIALIZER_PROMPT',
+        prompt_text,
+        ('给出完整的最佳努力结果、证据限制和必要步骤',
+         '最佳努力'),
+        'best-effort result with evidence limitations',
+    )
+    assert '非必需偏好或排序口径' in prompt_text
+
+    # -- resolver continuation principles --
+    assert '解析器续轮原则' in prompt_text
+    _assert_contains_any(
+        '_ACTION_INITIALIZER_PROMPT',
+        prompt_text,
+        ('返回一个 `speak` action_request', '可见表面动作'),
+        'fallback to visible surface action',
+    )
+    assert '最小缺口' in prompt_text
+    assert '缺少可选范围、标准或排序口径不等于缺少必须由用户提供的信息' in prompt_text
+
+    # -- evidence-before-speak rules (generic, not hardcoded capability names) --
+    _assert_contains_any(
+        '_ACTION_INITIALIZER_PROMPT',
+        prompt_text,
+        ('不要为了给一般判断背书而启动 `web_evidence`',
+         '不要为了给一般判断背书而启动',
+         '证据能力'),
+        'no evidence capability for backing general judgment',
+    )
+    assert '可行动标准和最后核实步骤' in prompt_text
+    assert '只给阻塞说明、可行动标准和最后核实步骤' in prompt_text
+    assert '不要继续换同义词重复搜索' in prompt_text
+    assert '已有证据和一般判断完成的分析、决策、方案或排查任务' in prompt_text
+    assert '分析、决策、方案设计、风险清单或下一步行动' in prompt_text
+
+    # -- internal goal convergence --
+    _assert_contains_any(
+        '_ACTION_INITIALIZER_PROMPT',
+        prompt_text,
+        ('需要先收束目标、整理优先级、拆解私有后续判断或形成下一步内部目标',
+         '内部目标收束'),
+        'internal goal convergence concept',
+    )
+    assert '私有目标收束已经完成' in prompt_text
+    assert '没有新的具体私有动作就返回空数组' in prompt_text
+
+    # -- resolver_goal_progress structure --
+    assert 'resolver_goal_progress' in prompt_text
+    assert '语义进度表' in prompt_text
+    assert '不得替换原始目标' in prompt_text
+    _assert_contains_any(
+        '_ACTION_INITIALIZER_PROMPT',
+        prompt_text,
+        ('`pending`、`partial`、`satisfied`、`blocked`',
+         'pending、partial、satisfied、blocked'),
+        'deliverable status enum vocabulary',
+    )
+    _assert_contains_any(
+        '_ACTION_INITIALIZER_PROMPT',
+        prompt_text,
+        ('`resolver_goal_progress.final_response_requirements` 是 L3/dialog 的交付清单',
+         'final_response_requirements', '交付清单'),
+        'final response requirements as deliverable checklist',
+    )
+    assert '"final_response_requirements"' in prompt_text
 
 
 def test_l3_content_anchor_scope_preserves_complete_plan_deliverables() -> None:
@@ -586,12 +670,13 @@ def test_prompts_preserve_structured_output_enums() -> None:
     ):
         assert enum_value in l2_module._BOUNDARY_CORE_PROMPT
 
-    for capability in (
-        'speak',
-        'memory_lifecycle_update',
-        'trigger_future_cognition',
+    l2d_prompt = l2d_module._ACTION_INITIALIZER_PROMPT
+    for affordance_concept in (
+        'action_affordances',
+        'resolver_affordances',
+        'action_requests',
     ):
-        assert capability in l2d_module._ACTION_INITIALIZER_PROMPT
+        assert affordance_concept in l2d_prompt
 
 
 def test_prompts_do_not_use_forbidden_self_cognition_wording() -> None:

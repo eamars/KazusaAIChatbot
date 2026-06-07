@@ -337,6 +337,9 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
         "text_chat_user_message_image_audio_observation": _COGNITION_CONSCIOUSNESS_PROMPT,
         "reflection_signal_reflection_artifact": _COGNITION_CONSCIOUSNESS_PROMPT,
         "internal_thought_internal_monologue": _COGNITION_CONSCIOUSNESS_PROMPT,
+        "background_artifact_result_ready_background_artifact_result": (
+            _COGNITION_CONSCIOUSNESS_PROMPT
+        ),
     }[selection["variant"]]
 
     system_prompt = SystemMessage(content=prompt_template.format(
@@ -517,6 +520,9 @@ async def call_boundary_core_agent(state: CognitionState) -> CognitionState:
         "text_chat_user_message_image_audio_observation": _BOUNDARY_CORE_PROMPT,
         "reflection_signal_reflection_artifact": _BOUNDARY_CORE_PROMPT,
         "internal_thought_internal_monologue": _BOUNDARY_CORE_PROMPT,
+        "background_artifact_result_ready_background_artifact_result": (
+            _BOUNDARY_CORE_PROMPT
+        ),
     }[selection["variant"]]
 
     self_integrity = float(boundary_profile["self_integrity"])
@@ -701,6 +707,9 @@ async def call_judgment_core_agent(state: CognitionState) -> CognitionState:
         "text_chat_user_message_image_audio_observation": _JUDGEMENT_CORE_PROMPT,
         "reflection_signal_reflection_artifact": _JUDGEMENT_CORE_PROMPT,
         "internal_thought_internal_monologue": _JUDGEMENT_CORE_PROMPT,
+        "background_artifact_result_ready_background_artifact_result": (
+            _JUDGEMENT_CORE_PROMPT
+        ),
     }[selection["variant"]]
 
     system_prompt = SystemMessage(content=prompt_template.format(

@@ -7,6 +7,8 @@ from langgraph.graph import END, START, StateGraph
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
 from kazusa_ai_chatbot.action_spec.execution import execute_action_specs_for_trace
 from kazusa_ai_chatbot.action_spec.registry import (
+    BACKGROUND_ARTIFACT_REQUEST_CAPABILITY,
+    BACKGROUND_WORK_REQUEST_CAPABILITY,
     SPEAK_CAPABILITY,
 )
 from kazusa_ai_chatbot.action_spec.results import (
@@ -302,12 +304,113 @@ async def _action_results_for_state(
 ) -> list[dict]:
     """Evaluate selected actions into traceable action results."""
 
+    pre_surface_results = _pre_surface_action_results_for_state(state)
+    remaining_specs = [
+        spec
+        for spec in _selected_action_specs(state)
+        if spec.get("kind") not in (
+            BACKGROUND_ARTIFACT_REQUEST_CAPABILITY,
+            BACKGROUND_WORK_REQUEST_CAPABILITY,
+        )
+    ]
     action_results = await execute_action_specs_for_trace(
-        _selected_action_specs(state),
+        remaining_specs,
         storage_timestamp_utc=state["storage_timestamp_utc"],
         executed_action_attempt_ids=executed_action_attempt_ids,
     )
-    return action_results
+    return_value = [*pre_surface_results, *action_results]
+    return return_value
+
+
+async def stage_2a_background_work_enqueue(
+    state: GlobalPersonaState,
+) -> dict:
+    """Queue background requests before L3 builds acknowledgement."""
+
+    background_specs = [
+        spec
+        for spec in _selected_action_specs(state)
+        if spec.get("kind") in (
+            BACKGROUND_ARTIFACT_REQUEST_CAPABILITY,
+            BACKGROUND_WORK_REQUEST_CAPABILITY,
+        )
+    ]
+    if not background_specs:
+        return_value: dict[str, object] = {}
+        return return_value
+    if not _cognition_selects_text_surface(state):
+        action_results = [
+            _background_no_handoff_result(spec, state)
+            for spec in background_specs
+        ]
+        return_value = {
+            "pre_surface_action_results": action_results,
+        }
+        return return_value
+
+    action_results = await execute_action_specs_for_trace(
+        background_specs,
+        storage_timestamp_utc=state["storage_timestamp_utc"],
+        enqueue_background_artifact_func=None,
+    )
+    return_value = {
+        "pre_surface_action_results": action_results,
+    }
+    return return_value
+
+
+def _background_no_handoff_result(
+    action_spec: dict,
+    state: GlobalPersonaState,
+) -> dict:
+    """Build a prompt-safe rejection when no visible acknowledgement exists."""
+
+    action_kind = str(action_spec.get("kind", BACKGROUND_WORK_REQUEST_CAPABILITY))
+    action_attempt_id = _first_valid_action_attempt_id(state, action_kind)
+    if action_attempt_id is None:
+        action_attempt_id = ""
+    params = action_spec.get("params")
+    task_summary = ""
+    if isinstance(params, dict):
+        for field_name in ("task_brief", "objective_summary"):
+            value = params.get(field_name)
+            if isinstance(value, str) and value.strip():
+                task_summary = value.strip()
+                break
+    handler_owner = "background_work"
+    if action_kind == BACKGROUND_ARTIFACT_REQUEST_CAPABILITY:
+        handler_owner = "background_artifact"
+    result = {
+        "schema_version": "action_result.v1",
+        "action_attempt_id": action_attempt_id,
+        "action_kind": action_kind,
+        "handler_owner": handler_owner,
+        "status": "failed",
+        "result_summary": (
+            f"{action_kind} failed: visible acknowledgement missing"
+        ),
+        "result_refs": [],
+        "completed_at": state["storage_timestamp_utc"],
+        "queue_state": "none",
+        "task_summary": task_summary,
+        "operational_owner": "none",
+        "job_ref": "",
+        "acknowledgement_constraint": "promise_forbidden_explain_failure",
+    }
+    return result
+
+
+def _pre_surface_action_results_for_state(
+    state: GlobalPersonaState,
+) -> list[dict]:
+    """Return pre-surface queue results already produced this episode."""
+
+    raw_results = state.get("pre_surface_action_results")
+    if not isinstance(raw_results, list):
+        return_value: list[dict] = []
+        return return_value
+    results = [row for row in raw_results if isinstance(row, dict)]
+    return results
 
 
 def _episode_trace_update(
@@ -542,6 +645,10 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "stage_2_memory_lifecycle",
         call_memory_lifecycle_update_handler,
     )
+    persona_builder.add_node(
+        "stage_2a_background_work_enqueue",
+        stage_2a_background_work_enqueue,
+    )
     persona_builder.add_node("stage_3_action", call_action_subgraph)  # perform action
     persona_builder.add_node("stage_3_no_response", stage_3_no_response)
     persona_builder.add_edge(START, "stage_0_msg_decontexualizer")
@@ -553,8 +660,12 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "stage_1_goal_resolver",
         "stage_2_memory_lifecycle",
     )
-    persona_builder.add_conditional_edges(
+    persona_builder.add_edge(
         "stage_2_memory_lifecycle",
+        "stage_2a_background_work_enqueue",
+    )
+    persona_builder.add_conditional_edges(
+        "stage_2a_background_work_enqueue",
         _route_after_cognition,
         {
             "silent": "stage_3_no_response",
