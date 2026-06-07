@@ -517,6 +517,7 @@ def build_background_artifact_result_ready_cognitive_episode(
     requester_platform_user_id: str,
     requester_global_user_id: str,
     requester_display_name: str,
+    source_platform_bot_id: str,
     source_character_name: str,
 ) -> CognitiveEpisode:
     """Build a source-bound episode for a completed artifact job."""
@@ -526,6 +527,7 @@ def build_background_artifact_result_ready_cognitive_episode(
         "work_kind": work_kind,
         "objective_summary": objective_summary,
         "failure_summary": failure_summary,
+        "source_platform_bot_id": source_platform_bot_id,
         "source_character_name": source_character_name,
     }
     percept: CognitivePercept = {

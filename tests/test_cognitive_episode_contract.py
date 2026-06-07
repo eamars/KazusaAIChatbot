@@ -191,6 +191,7 @@ def test_background_artifact_result_ready_builder_creates_valid_episode() -> Non
         requester_platform_user_id="platform-user-1",
         requester_global_user_id="global-user-1",
         requester_display_name="Test User",
+        source_platform_bot_id="bot-1",
         source_character_name="Test Character",
     )
 
@@ -207,6 +208,7 @@ def test_background_artifact_result_ready_builder_creates_valid_episode() -> Non
         "work_kind": "coding_snippet",
         "objective_summary": "Generate a Fibonacci function snippet.",
         "failure_summary": "",
+        "source_platform_bot_id": "bot-1",
         "source_character_name": "Test Character",
     }
 

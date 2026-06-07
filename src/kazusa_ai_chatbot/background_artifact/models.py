@@ -111,6 +111,7 @@ class BackgroundArtifactJobDoc(TypedDict, total=False):
     failure_summary: str
     completed_at: str
     delivery_attempt_count: int
+    delivery_failure_summary: str
     delivery_tracking_id: str
     delivered_conversation_message_id: str
     delivered_at: str

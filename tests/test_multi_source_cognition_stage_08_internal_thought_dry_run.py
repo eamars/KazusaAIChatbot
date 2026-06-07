@@ -101,8 +101,8 @@ _PROMPT_FINGERPRINTS = (
     (
         "_ACTION_INITIALIZER_PROMPT",
         l2d_module._ACTION_INITIALIZER_PROMPT,
-        22364,
-        "7dd771a8709d10d23b0b43c23f5e76322b66af9a4dce20f3d069acd0bc6c48b2",
+        17248,
+        "1e92ccadea08d15e6649d2c0d0ec6e27bab2d838e963b5008a3082b8e2eee6c0",
     ),
     (
         "_STYLE_AGENT_PROMPT",

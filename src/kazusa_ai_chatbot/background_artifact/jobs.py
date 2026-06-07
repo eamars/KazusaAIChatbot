@@ -114,6 +114,7 @@ def _build_job_document(
         "failure_summary": "",
         "completed_at": "",
         "delivery_attempt_count": 0,
+        "delivery_failure_summary": "",
         "delivery_tracking_id": "",
         "delivered_conversation_message_id": "",
         "delivered_at": "",

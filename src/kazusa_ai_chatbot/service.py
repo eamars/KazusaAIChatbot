@@ -912,6 +912,8 @@ async def _deliver_background_artifact_result_episode(
         source_platform_bot_id = str(
             result_metadata.get("source_platform_bot_id", "")
         ).strip()
+        if not source_platform_bot_id:
+            raise ValueError("source_platform_bot_id is required")
         character_global_user_id = await _ensure_character_global_identity(
             platform=platform,
             platform_bot_id=source_platform_bot_id,

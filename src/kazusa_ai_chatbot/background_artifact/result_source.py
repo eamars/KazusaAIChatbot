@@ -36,6 +36,7 @@ def build_result_ready_episode_from_job(
         requester_platform_user_id=job.get("requester_platform_user_id", ""),
         requester_global_user_id=job.get("requester_global_user_id", ""),
         requester_display_name=job.get("requester_display_name", ""),
+        source_platform_bot_id=job.get("source_platform_bot_id", ""),
         source_character_name=job.get("source_character_name", ""),
     )
     return episode
