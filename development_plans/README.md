@@ -41,6 +41,7 @@ long_term/todo.md
 | [l2d_action_router_prompt_separation_plan.md](active/short_term/l2d_action_router_prompt_separation_plan.md) | Large top-level action-router prompt and boundary separation plan | draft |
 | [media_descriptor_cache_plan.md](active/short_term/media_descriptor_cache_plan.md) | Medium media descriptor cache using Cache2 persistent layer | draft |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
+| [unconditional_shared_memory_prewarm_plan.md](active/short_term/unconditional_shared_memory_prewarm_plan.md) | Large first-cycle shared memory prewarm plan | draft |
 
 ## Supporting Experiment Records
 
@@ -52,7 +53,10 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [cross_thread_image_contamination_bugfix_plan.md](active/bugfix/cross_thread_image_contamination_bugfix_plan.md) | Small observation-only bugfix draft for QQ group image/thread source contamination | draft |
+| [qq_replied_image_description_unavailable_queue_prune_bugfix_plan.md](active/bugfix/qq_replied_image_description_unavailable_queue_prune_bugfix_plan.md) | Small observation-only bugfix draft for replied image description loss after queue pruning | draft |
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
+| [self_other_inversion_personality_question_bugfix_plan.md](active/bugfix/self_other_inversion_personality_question_bugfix_plan.md) | Small observation-only bugfix draft for Chinese self/other referent inversion | draft |
 
 ## Reference Documents
 
