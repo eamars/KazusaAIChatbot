@@ -6,11 +6,17 @@ Agent implementations live in the layer-specific submodules:
   - persona_supervisor2_cognition_l2c2 (L2c2 social context)
   - persona_supervisor2_cognition_l2d  (L2d action selection)
 """
+import asyncio
 from collections.abc import Mapping
 import logging
+from typing import Any
 
 from langgraph.graph import StateGraph, START, END
 
+from kazusa_ai_chatbot.cognition_resolver.capabilities import (
+    merge_shared_memory_prewarm_result,
+    run_first_cycle_shared_memory_prewarm,
+)
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ResolverValidationError,
     validate_resolver_capability_request,
@@ -106,16 +112,37 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
     """
 
     residue_context = state.get("internal_monologue_residue_context", "")
+    prewarm_task: asyncio.Task[dict[str, Any]] | None = None
+    resolver_state = state.get("resolver_state")
+    if (
+        isinstance(resolver_state, Mapping)
+        and resolver_state.get("cycle_index") == 0
+    ):
+        prewarm_task = asyncio.create_task(
+            run_first_cycle_shared_memory_prewarm(state),
+        )
 
     async def call_l2a_conscious_framing(
         cognition_state: CognitionState,
     ) -> CognitionState:
         """Inject private residue only into the L2a consciousness node."""
 
+        rag_result = cognition_state["rag_result"]
+        if prewarm_task is not None:
+            prewarm_rag_result = await prewarm_task
+            rag_result = merge_shared_memory_prewarm_result(
+                rag_result,
+                prewarm_rag_result,
+            )
+
         l2a_state = dict(cognition_state)
         l2a_state["internal_monologue_residue_context"] = residue_context
+        l2a_state["rag_result"] = rag_result
         result = await call_cognition_consciousness(l2a_state)
-        return result
+        result_with_rag = dict(result)
+        result_with_rag["rag_result"] = rag_result
+        return_value = result_with_rag
+        return return_value
 
     sub_agent_builder = StateGraph(CognitionState)
 
@@ -234,6 +261,7 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
     resolver_goal_progress = _validated_resolver_goal_progress(
         result.get("resolver_goal_progress"),
     )
+    rag_result = result.get("rag_result", state["rag_result"])
 
     logger.info(
         f"Cognition output: stance={logical_stance} "
@@ -267,6 +295,7 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
         "emotional_intensity": emotional_intensity,
         "vibe_check": vibe_check,
         "relational_dynamic": relational_dynamic,
+        "rag_result": rag_result,
     }
     if resolver_pending_resolution is not None:
         return_value["resolver_pending_resolution"] = resolver_pending_resolution

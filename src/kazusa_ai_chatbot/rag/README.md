@@ -221,7 +221,17 @@ persona_supervisor2
 The RAG loop is slot-driven. `unknown_slots` is the work queue and the stop
 condition: slots are drained one at a time, and each completed attempt appends
 a fact row to `known_facts`. The persona graph decides whether to enter this
-loop through L2d action selection, not through a mandatory pre-cognition step.
+loop through L2d action selection, not through a mandatory pre-cognition full
+RAG step.
+
+The first resolver cycle has one narrower prewarm lane: it may start a
+shared-memory-only lookup through the existing persona RAG request intake,
+call only `PersistentMemorySearchAgent`, project through
+`project_known_facts(...)`, and merge confirmed shared `memory` rows into
+`rag_result.memory_evidence` before L2a reads `rag_result`. This lane does not
+run `MemoryEvidenceAgent`, does not read `user_memory_units`, does not populate
+`rag_result.answer`, and does not create a resolver observation. Full RAG 2
+remains L2d-selected.
 
 The default loop cap is four dispatch iterations. This prevents open-ended
 agentic search and keeps normal chatbot latency bounded. Future RAG

@@ -41,7 +41,6 @@ long_term/todo.md
 | [l2d_action_router_prompt_separation_plan.md](active/short_term/l2d_action_router_prompt_separation_plan.md) | Large top-level action-router prompt and boundary separation plan | draft |
 | [media_descriptor_cache_plan.md](active/short_term/media_descriptor_cache_plan.md) | Medium media descriptor cache using Cache2 persistent layer | draft |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
-| [unconditional_shared_memory_prewarm_plan.md](active/short_term/unconditional_shared_memory_prewarm_plan.md) | Large first-cycle shared memory prewarm plan | draft |
 
 ## Supporting Experiment Records
 
@@ -222,6 +221,7 @@ plans.
 | [searxng_mcp_phaseout_plan.md](archive/completed/short_term/searxng_mcp_phaseout_plan.md) |
 | [service_module_separation_stage1_plan.md](archive/completed/short_term/service_module_separation_stage1_plan.md) |
 | [typed_message_envelope_stage2_plan.md](archive/completed/short_term/typed_message_envelope_stage2_plan.md) |
+| [unconditional_shared_memory_prewarm_plan.md](archive/completed/short_term/unconditional_shared_memory_prewarm_plan.md) |
 | [universal_calendar_scheduler_plan.md](archive/completed/short_term/universal_calendar_scheduler_plan.md) |
 | [user_style_engagement_consumer_plan.md](archive/completed/short_term/user_style_engagement_consumer_plan.md) |
 | [user_memory_unit_rolling_window_plan.md](archive/completed/short_term/user_memory_unit_rolling_window_plan.md) |

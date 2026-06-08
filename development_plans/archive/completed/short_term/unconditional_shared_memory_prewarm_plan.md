@@ -6,7 +6,7 @@
   L2a cognition can see relevant rows from the shared `memory` collection
   without restoring the old full RAG-first path.
 - Plan class: large
-- Status: draft
+- Status: completed
 - Mandatory skills: `development-plan`, `local-llm-architecture`,
   `py-style`, `cjk-safety`, `test-style-and-execution`
 - Overall cutover strategy: bigbang for the new first-cycle prewarm behavior;
@@ -466,20 +466,22 @@ The prewarm result should be smaller than normal RAG2 evidence because only
 
 ## Progress Checklist
 
-- [ ] Stage 1 - focused prewarm contract tests established
+- [x] Stage 1 - focused prewarm contract tests established
   - Covers: implementation steps 1-2.
   - Verify: `venv\Scripts\python.exe -m pytest tests\test_shared_memory_prewarm.py -q`
     and `venv\Scripts\python.exe -m pytest tests\test_persona_supervisor2_cognition_prewarm.py -q`.
   - Evidence: record expected pre-implementation failures in `Execution Evidence`.
   - Handoff: next agent starts production implementation at Stage 2.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 2 - shared-memory prewarm helper implemented
+  - Sign-off: `Codex parent / 2026-06-08` after verification and evidence
+    are recorded.
+- [x] Stage 2 - shared-memory prewarm helper implemented
   - Covers: implementation step 4.
   - Verify: `venv\Scripts\python.exe -m pytest tests\test_shared_memory_prewarm.py -q`.
   - Evidence: record changed files and focused test output.
   - Handoff: next agent wires cognition integration at Stage 3.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 3 - L2a first-consumer join integrated
+  - Sign-off: `Codex parent / 2026-06-08` after verification and evidence
+    are recorded.
+- [x] Stage 3 - L2a first-consumer join integrated
   - Covers: implementation step 5.
   - Verify:
     `venv\Scripts\python.exe -m pytest tests\test_persona_supervisor2_cognition_prewarm.py -q`
@@ -487,20 +489,23 @@ The prewarm result should be smaller than normal RAG2 evidence because only
     `venv\Scripts\python.exe -m pytest tests\test_cognition_resolver_persona_graph.py -q`.
   - Evidence: record test output and unresolved-result behavior.
   - Handoff: next agent updates docs and runs regressions.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 4 - documentation and regression verification complete
+  - Sign-off: `Codex parent / 2026-06-08` after verification and evidence
+    are recorded.
+- [x] Stage 4 - documentation and regression verification complete
   - Covers: implementation steps 7-9.
   - Verify: all commands under `Verification`.
   - Evidence: record command outputs and static grep results.
   - Handoff: next agent starts independent review.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 5 - independent code review complete
+  - Sign-off: `Codex parent / 2026-06-08` after verification and evidence
+    are recorded.
+- [x] Stage 5 - independent code review complete
   - Covers: implementation step 10.
   - Verify: review subagent approval plus rerun of affected tests after fixes.
   - Evidence: record findings, fixes, rerun commands, residual risks, and
     approval status in `Execution Evidence`.
   - Handoff: parent may mark the plan completed only after this checkpoint.
-  - Sign-off: `<agent/date>` after review approval and evidence are recorded.
+  - Sign-off: `Codex parent / 2026-06-08` after review approval and evidence
+    are recorded.
 
 ## Verification
 
@@ -559,11 +564,12 @@ Plan review record, 2026-06-08:
   `rag_result` propagation contract, clarified existing RAG intake versus
   additional retrieval reads, removed the extra control-path design, and fixed
   stale static-grep expectations.
-- Non-blocking findings: the plan remains `draft` and is not executable until
-  the user approves it; production execution still requires the native
-  subagent execution model described in `Execution Model`.
-- Approval status: no unresolved blockers remain for draft-plan discussion;
-  not approved for implementation while status is `draft`.
+- Non-blocking findings: at review time, the plan was `draft` and not
+  executable until user approval; execution later began after explicit user
+  approval on 2026-06-08 and still required the native subagent execution
+  model described in `Execution Model`.
+- Approval status: no unresolved blockers remained for draft-plan discussion;
+  the plan was approved for execution by the user on 2026-06-08.
 
 ## Independent Code Review
 
@@ -596,15 +602,111 @@ Record findings, fixes, commands rerun, residual risks, and approval status in
 
 ## Execution Evidence
 
-No implementation has started. During approved execution, record evidence here
-immediately after each completed checklist stage:
+Execution started on 2026-06-08 after explicit user approval to execute the
+plan. During approved execution, record evidence here immediately after each
+completed checklist stage:
 
 - Stage 1 focused test baseline:
+  - Branch: `feature/unconditional-shared-memory-prewarm`.
+  - Added parent-owned focused tests:
+    `tests/test_shared_memory_prewarm.py` and
+    `tests/test_persona_supervisor2_cognition_prewarm.py`.
+  - Syntax check passed:
+    `venv\Scripts\python.exe -m py_compile tests\test_shared_memory_prewarm.py tests\test_persona_supervisor2_cognition_prewarm.py`.
+  - Expected pre-implementation failure recorded:
+    `venv\Scripts\python.exe -m pytest tests\test_shared_memory_prewarm.py -q`
+    failed four tests because
+    `run_first_cycle_shared_memory_prewarm(...)` and
+    `merge_shared_memory_prewarm_result(...)` do not exist in
+    `kazusa_ai_chatbot.cognition_resolver.capabilities`.
+  - Expected pre-implementation failure recorded:
+    `venv\Scripts\python.exe -m pytest tests\test_persona_supervisor2_cognition_prewarm.py -q`
+    failed five tests because L2a does not receive prewarm memory evidence,
+    `call_cognition_subgraph(...)` does not return `rag_result`, and no
+    prewarm task is started for the first resolver cycle.
 - Stage 2 helper implementation verification:
+  - Production-code subagent `Godel` implemented
+    `run_first_cycle_shared_memory_prewarm(...)` and
+    `merge_shared_memory_prewarm_result(...)` in
+    `src/kazusa_ai_chatbot/cognition_resolver/capabilities.py`.
+  - Parent adjusted worker-failure handling to catch concrete external failure
+    types only: `OpenAIError`, `PyMongoError`, and `TimeoutError`.
+  - Focused helper verification passed:
+    `venv\Scripts\python.exe -m pytest tests\test_shared_memory_prewarm.py -q`
+    reported 4 passed.
+  - Syntax check passed for production and test files:
+    `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\cognition_resolver\capabilities.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition.py tests\test_shared_memory_prewarm.py tests\test_persona_supervisor2_cognition_prewarm.py`.
+  - Style grep for broad exception handlers, direct call-expression returns,
+    and nested `.get(...)` chains returned no matches in the changed Python
+    files; exit code 1 was the expected no-match result.
 - Stage 3 cognition integration verification:
+  - Focused cognition prewarm verification passed:
+    `venv\Scripts\python.exe -m pytest tests\test_persona_supervisor2_cognition_prewarm.py -q`
+    reported 5 passed.
+  - Existing persona graph verification passed:
+    `venv\Scripts\python.exe -m pytest tests\test_cognition_resolver_persona_graph.py -q`
+    reported 3 passed.
+  - Unresolved-result behavior was covered by
+    `test_l2a_uses_base_rag_result_when_prewarm_unresolved`, which passed and
+    confirmed L2a receives the original base `rag_result` when the prewarm
+    result has no usable shared-memory evidence.
 - Stage 4 documentation, regression, static grep, and compile verification:
+  - Documentation updated:
+    `src/kazusa_ai_chatbot/rag/README.md` now documents the
+    shared-memory-only first-cycle prewarm lane and distinguishes it from
+    L2d-selected full RAG 2; `src/kazusa_ai_chatbot/nodes/README.md` now
+    documents the first-cycle prewarm join before L2a and L2b independence.
+  - Static grep passed with no matches for forbidden user-memory or top-level
+    memory capability calls:
+    `rg -n "MemoryEvidenceAgent|UserMemoryEvidenceAgent|user_memory_evidence_agent|query_user_memory_units|search_user_memory_units" src\kazusa_ai_chatbot\cognition_resolver\capabilities.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition.py`
+    returned no output; exit code 1 was the expected no-match result.
+  - Static grep passed with no matches for production writes that populate
+    prewarm answer text:
+    `rg -n 'rag_result\["answer"\].*=|"answer": .*prewarm|prewarm.*answer' src\kazusa_ai_chatbot\cognition_resolver\capabilities.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition.py`
+    returned no output; exit code 1 was the expected no-match result. An
+    earlier attempt with incorrect PowerShell quoting failed with a regex parse
+    error and was not counted as evidence.
+  - Static compile passed:
+    `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\cognition_resolver\capabilities.py src\kazusa_ai_chatbot\nodes\persona_supervisor2_cognition.py`.
+  - Focused tests passed:
+    `venv\Scripts\python.exe -m pytest tests\test_shared_memory_prewarm.py -q`
+    reported 4 passed;
+    `venv\Scripts\python.exe -m pytest tests\test_persona_supervisor2_cognition_prewarm.py -q`
+    reported 5 passed; and
+    `venv\Scripts\python.exe -m pytest tests\test_cognition_resolver_persona_graph.py -q`
+    reported 3 passed.
+  - Resolver regression batch passed:
+    `venv\Scripts\python.exe -m pytest tests\test_cognition_resolver_contracts.py tests\test_cognition_resolver_loop.py tests\test_cognition_resolver_persona_graph.py -q`
+    reported 57 passed.
+  - RAG projection and helper regression batch passed:
+    `venv\Scripts\python.exe -m pytest tests\test_rag_projection.py tests\test_rag_phase3_capability_agents.py tests\test_rag_hybrid_agents.py -q`
+    reported 132 passed.
+  - Scoped user-memory regression batch passed:
+    `venv\Scripts\python.exe -m pytest tests\test_user_memory_evidence_agent.py tests\test_user_memory_units_rag_flow.py -q`
+    reported 26 passed.
 - Stage 5 independent code review findings and approval:
+  - Independent code-review subagent `Kierkegaard`
+    (`019ea4d4-3de1-7f30-aed2-503883ff7398`) reviewed the approved plan,
+    full working-tree diff, changed production files, new tests, updated docs,
+    lifecycle records, and parent-recorded verification evidence.
+  - Review finding status: no blocking findings and no non-blocking
+    implementation issues requiring remediation.
+  - Review approval status: approved for Stage 5 sign-off.
+  - Review residual-risk note addressed by parent: the L2b independence test
+    previously used a short `asyncio.sleep(...)` timing probe. Parent replaced
+    it with `asyncio.Event` synchronization and retained only a test hang
+    guard around the patched graph call.
+  - Affected verification after the review-derived test update passed:
+    `venv\Scripts\python.exe -m py_compile tests\test_persona_supervisor2_cognition_prewarm.py`;
+    `venv\Scripts\python.exe -m pytest tests\test_persona_supervisor2_cognition_prewarm.py -q`
+    reported 5 passed; and a focused style/static grep for
+    `asyncio.sleep`, broad exception handlers, direct call-expression returns,
+    and nested `.get(...)` chains in
+    `tests\test_persona_supervisor2_cognition_prewarm.py` returned no output,
+    with exit code 1 as the expected no-match result.
 - Residual risks or blocked commands:
+  - No blocked commands remain. The review subagent did not identify residual
+    implementation risk after the parent-owned timing-probe test update.
 
 ## Acceptance Criteria
 

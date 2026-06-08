@@ -53,6 +53,7 @@ Inside `persona_supervisor2`, the live persona graph is:
 stage_0_msg_decontexualizer
   -> stage_1_goal_resolver
        bounded resolver loop
+       first cycle may prewarm shared `memory` evidence before L2a
        each cycle runs L1 subconscious
        each cycle runs L2 consciousness + boundary + judgment + social context
        each cycle runs L2d action initializer
@@ -85,6 +86,13 @@ self-resolution are capability observations that feed another complete
 L1/L2/L2d cognition pass before final L3/dialog rendering. Simple turns can
 still behave like a one-cycle resolver: cognition selects `speak` or silence
 without requesting extra evidence.
+
+The first resolver cycle may also run a limited shared-memory prewarm in
+parallel with early cognition work. That prewarm uses the existing RAG intake
+and shared persistent-memory worker, merges only safe shared
+`memory_evidence` before L2a, and is not recorded as a resolver capability
+observation. Scoped `user_memory_units` retrieval remains available only
+through cognition-selected RAG 2 evidence.
 
 The returned `consolidation_state` is the completed persona snapshot. The
 service uses it after visible surface handling to record conversation progress
@@ -346,6 +354,12 @@ L2a is the rational interpretation layer. It reads L1, decontextualized input,
 RAG evidence, user memory context, current commitments, promoted reflection
 context, conversation progress, projected internal monologue residue, affinity,
 mood, and global vibe.
+
+On the first resolver cycle, L2a is also the join point for the bounded
+shared-memory prewarm result. If that prewarm finds confirmed shared
+`memory` rows, L2a sees them as normal `rag_result.memory_evidence`; if it
+fails or returns no usable evidence, L2a receives the same base `rag_result`
+shape as before. L2b continues independently of this join.
 
 It outputs a candidate:
 
