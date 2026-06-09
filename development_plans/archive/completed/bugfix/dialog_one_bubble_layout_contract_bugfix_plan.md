@@ -5,7 +5,7 @@
 - Goal: align the dialog prompt contract with the actual one-bubble delivery
   path while preserving technical and code-block formatting.
 - Plan class: large
-- Status: in_progress
+- Status: completed
 - Mandatory skills: `development-plan`, `local-llm-architecture`,
   `py-style`, `cjk-safety`, `test-style-and-execution`, `debug-llm`
 - Overall cutover strategy: bigbang prompt wording replacement with the
@@ -648,14 +648,14 @@ prompt edits unless the user explicitly approves fallback execution.
   - Sign-off: `parent/2026-06-10` after all five live LLM cases passed and
     latest traces were manually inspected.
 
-- [ ] Stage 6 - review and lifecycle sign-off complete
+- [x] Stage 6 - review and lifecycle sign-off complete
   - Covers: implementation steps 23-25.
   - Files: this plan and `development_plans/README.md`.
   - Verify: focused diff review and independent code review complete.
   - Evidence: record review result, remediation, residual risk, and final
     user sign-off.
   - Handoff: none.
-  - Sign-off: pending user acceptance of the final verification evidence.
+  - Sign-off: `owner/2026-06-10` after user requested closing the plan.
 
 ## Verification
 
@@ -787,5 +787,6 @@ completion.
   prompt-flow rewrite: synonym brittleness in the casual live test and Markdown
   table leakage in the technical comparison path. Final traces show evaluator
   pass, non-empty visible fragments, preserved fixed-format blocks, and no table
-  rows in the technical comparison case. Lifecycle status remains
-  `in_progress` pending user acceptance of this evidence.
+  rows in the technical comparison case. Lifecycle status closed as `completed` after user requested plan closure.
+
+- Archived on 2026-06-10 during active-plan cleanup.
