@@ -275,8 +275,14 @@ For the newest selected group-review window, reflection source preparation may
 also add one optional first-person observational digest under
 `conversation_progress.group_scene_digest = {"digest": str}`. The digest is
 generated only from the already-selected bounded window rows and compact
-activity labels. It is source hydration for noisy group flow, not RAG evidence,
-raw reflection output, persistence state, or action guidance.
+activity labels. Digest rows preserve visible `display_name` values so the
+summary can name who spoke; internal global ids, platform ids, message ids,
+URLs, and `participant_N` aliases are not rendered into the digest prompt or
+output contract. Assistant rows are summarized as the current role's own
+visible speech, and the digest states whether newer text exists after the
+current role's last visible line. It is source hydration for noisy group flow,
+not RAG evidence, raw reflection output, persistence state, a speaker target,
+or action guidance.
 
 Daily-channel synthesis is period-level maintenance, not per-slot catch-up.
 For scheduled worker runs it asks the calendar-backed phase provider for the

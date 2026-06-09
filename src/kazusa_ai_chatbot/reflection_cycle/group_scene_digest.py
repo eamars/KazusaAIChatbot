@@ -51,22 +51,35 @@ _DIGEST_ACTION_GUIDANCE_PARTS = (
 GROUP_SCENE_DIGEST_SYSTEM_PROMPT = '''\
 你负责把一段已选中的群聊窗口压缩成一个给当前角色自己阅读的观察摘要。
 
-# 任务边界
-- 只概括 human payload 里的当前窗口行和 activity_labels。
-- 不使用外部知识、长期记忆、检索结果、历史数据库行、平台原始语法或附件链接。
-- 输入中的 active_character 表示我自己；participant_N 表示群成员的抽象代称。
-- 媒体/空内容只能写成可见文字线索不足，不要猜测图片或附件内容。
+# 输入含义
+- 信息来源限定为 human payload 里的 message_rows 和 activity_labels。
+- message_rows 按时间顺序排列；display_name 是该行的可见发言者名称。
+- activity_labels.assistant_presence 表示窗口里是否有当前角色自己的发言。
+- role="assistant" 的行是当前角色自己的可见发言；摘要中写成“我（display_name）”。
+- text 里的 @名称 属于该行可见文字，表示该行发言者艾特或提到了这个名称。
+- content_activity="empty_or_media_only" 表示该行没有可概括的可见文字。
 
 # 摘要视角
 - digest 用简体中文，写成第一人称观察资料。
-- 可以使用“我看到...”或“这段群聊里...我...”。
-- 只说明群聊里的可见先后关系、我是否已经在窗口中参与过、以及最后是否还有新的文字线索。
-- 不要写成系统判定、用户对我说的话、第三人称故事，或对后续行动的建议。
+- 说明群聊里的可见先后关系、被概括的发言者 display_name、我是否已经在窗口中参与过、以及我最后发言后是否还有新的文字线索。
+- 再次提到发言者时继续使用 display_name，让后续 cognition 能直接看出谁在说话。
+
+# 生成步骤
+1. 按 message_rows 的顺序阅读，保持这个顺序。
+2. 对需要概括的 user 行，写 display_name 问、说或提到的可见内容；如果 text 里有 @名称，把 @名称 保留为该行文字的一部分。
+3. 把 assistant 行的 text 当作原文引用处理，优先写成：我（display_name）说：“text”。
+4. 引用内容只从该行 text 复制或轻微压缩；引用里的 `你`、`我`、称呼和语气词保持原样。
+5. display_name 放在引用外标记这行是谁说的；assistant 行的被回复者只来自 text 原文。
+6. 窗口里有 role="assistant" 行时，概括每条 assistant 行的可见文字内容。
+7. 最后补一句当前角色发言后的状态，先看 activity_labels.assistant_presence，再看 message_rows：
+   - assistant_presence="present" 且最后一条 assistant 后还有 user 行：写“我最后发言后，display_name 说/问/提到：...”。
+   - assistant_presence="present" 且最后一行是 assistant：写“我最后发言后没有新的文字线索”。
+   - assistant_presence 不是 "present"：写“我没有在这个窗口中发言”。
 
 # 输出格式
-只返回合法 JSON 对象，且只能包含一个字符串字段：
+输出为一个 JSON 对象，包含一个字符串字段：
 {
-  "digest": "这段群聊里，participant_1 先问了一个问题，我随后已经回应过；后面只有媒体/空内容，文字线索不足。"
+  "digest": "一段简体中文第一人称观察摘要"
 }
 '''
 _group_scene_digest_llm = get_llm(
@@ -135,14 +148,14 @@ def build_group_scene_digest_messages(
 def build_group_scene_digest_prompt_payload(
     window: GroupActivityWindow,
 ) -> dict[str, Any]:
-    """Project one group window into deidentified digest prompt input.
+    """Project one group window into explicit-name digest prompt input.
 
     Args:
         window: Group activity window from reflection source preparation.
 
     Returns:
         Prompt payload containing only window bounds, compact labels, and
-        abstract speaker refs for bounded message rows.
+        visible display names for bounded message rows.
     """
 
     payload = {
@@ -204,10 +217,9 @@ def normalize_group_scene_digest_output(
 def _digest_message_rows(
     window: GroupActivityWindow,
 ) -> list[dict[str, str]]:
-    """Build deidentified chronological rows for the digest prompt."""
+    """Build explicit visible-name chronological rows for the digest prompt."""
 
     selected_rows = window.participant_rows[-_GROUP_SCENE_DIGEST_ROW_LIMIT:]
-    participant_refs: dict[str, str] = {}
     message_rows: list[dict[str, str]] = []
     for row in selected_rows:
         role = text_or_empty(row.get("role")) or "unknown"
@@ -218,11 +230,7 @@ def _digest_message_rows(
         message_row = {
             "timestamp": text_or_empty(row.get("timestamp")),
             "role": role,
-            "speaker_ref": _speaker_ref(
-                row,
-                role=role,
-                participant_refs=participant_refs,
-            ),
+            "display_name": _digest_display_name(row, role=role),
             "content_activity": _content_activity(body_text),
             "text": body_text,
         }
@@ -230,36 +238,17 @@ def _digest_message_rows(
     return message_rows
 
 
-def _speaker_ref(
-    row: dict[str, Any],
-    *,
-    role: str,
-    participant_refs: dict[str, str],
-) -> str:
-    """Return the abstract speaker ref for one prompt row."""
+def _digest_display_name(row: dict[str, Any], *, role: str) -> str:
+    """Return the visible prompt-facing speaker name for one digest row."""
 
-    if role == "assistant":
-        return_value = "active_character"
+    display_name = text_or_empty(row.get("display_name"))
+    if display_name:
+        return_value = display_name
         return return_value
-
-    identity_key = _participant_identity_key(row)
-    if identity_key not in participant_refs:
-        participant_number = len(participant_refs) + 1
-        participant_refs[identity_key] = f"participant_{participant_number}"
-    return_value = participant_refs[identity_key]
-    return return_value
-
-
-def _participant_identity_key(row: dict[str, Any]) -> str:
-    """Build a stable internal participant key without exposing it."""
-
-    for field_name in ("global_user_id", "platform_user_id", "display_name"):
-        value = text_or_empty(row.get(field_name))
-        if value:
-            return_value = f"{field_name}:{value}"
-            return return_value
-    timestamp = text_or_empty(row.get("timestamp"))
-    return_value = f"row:{timestamp}"
+    if role == "assistant":
+        return_value = "当前角色"
+        return return_value
+    return_value = "未知发言者"
     return return_value
 
 

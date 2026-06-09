@@ -52,6 +52,7 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [cross_thread_image_contamination_bugfix_plan.md](active/bugfix/cross_thread_image_contamination_bugfix_plan.md) | Small observation-only bugfix draft for QQ group image/thread source contamination | draft |
+| [dialog_one_bubble_layout_contract_bugfix_plan.md](active/bugfix/dialog_one_bubble_layout_contract_bugfix_plan.md) | Large prompt-only dialog layout contract bugfix plan | draft |
 | [qq_replied_image_description_unavailable_queue_prune_bugfix_plan.md](active/bugfix/qq_replied_image_description_unavailable_queue_prune_bugfix_plan.md) | Small observation-only bugfix draft for replied image description loss after queue pruning | draft |
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
 | [self_other_inversion_personality_question_bugfix_plan.md](active/bugfix/self_other_inversion_personality_question_bugfix_plan.md) | Small observation-only bugfix draft for Chinese self/other referent inversion | draft |
@@ -113,6 +114,7 @@ plans.
 | [dialog_anchor_authority_stale_history_bugfix_plan.md](archive/completed/bugfix/dialog_anchor_authority_stale_history_bugfix_plan.md) |
 | [dialog_evaluator_guess_owner_boundary_bugfix_plan.md](archive/completed/bugfix/dialog_evaluator_guess_owner_boundary_bugfix_plan.md) |
 | [generic_cognition_prompt_migration_plan.md](archive/completed/bugfix/generic_cognition_prompt_migration_plan.md) |
+| [group_scene_digest_explicit_participants_bugfix_plan.md](archive/completed/bugfix/group_scene_digest_explicit_participants_bugfix_plan.md) |
 | [history_media_projection_image_boundary_plan.md](archive/completed/bugfix/history_media_projection_image_boundary_plan.md) |
 | [l3_content_anchor_open_loop_resolution_plan.md](archive/completed/bugfix/l3_content_anchor_open_loop_resolution_plan.md) |
 | [llm_semantic_descriptor_validation_bugfix_plan.md](archive/completed/bugfix/llm_semantic_descriptor_validation_bugfix_plan.md) |
