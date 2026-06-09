@@ -175,6 +175,19 @@ Overall strategy: bigbang
 | Code/fixed-format blocks | bigbang | Allow required fenced code blocks inside `final_dialog` while keeping top-level JSON output. |
 | Tests | bigbang | Add focused deterministic prompt tests and five real LLM layout cases. |
 
+## Cutover Policy Enforcement
+
+- The responsible execution agent must follow the selected policy for each
+  area.
+- The agent must not choose a more conservative strategy by default.
+- Bigbang prompt areas must replace old multi-send wording directly instead
+  of preserving it as an alternate path.
+- Compatible schema areas preserve only the existing `final_dialog` and
+  `mention_target_user` surfaces listed in this plan.
+- No compatibility shim, adapter fallback, second delivery path, parser repair,
+  or formatter may be added to preserve the old fragment-send interpretation.
+- Any change to a cutover policy requires user approval before implementation.
+
 ## Target State
 
 ```text
@@ -261,6 +274,11 @@ content anchors.
   database retrieval.
 - Each real LLM test must write a durable trace under `test_artifacts` using
   the existing `tests.llm_trace.write_llm_trace` helper.
+- Because the live test file exercises the full `dialog_agent` path, its
+  endpoint skip helper must check both the `DIALOG_GENERATOR_LLM` and
+  `DIALOG_EVALUATOR_LLM` route endpoints before running cases.
+- Each real LLM test must build and trace `joined_dialog = "\n".join(final_dialog)`
+  because that joined string is the visible one-bubble surface users see.
 
 ## Change Surface
 
@@ -279,11 +297,21 @@ content anchors.
     - `test_dialog_evaluator_prompt_audits_layout_without_line_budget`
   - Update existing prompt-text assertions only when they assert the old
     multi-send or Markdown-ban wording.
+  - Keep or add assertions that decorative Markdown and top-level Markdown
+    answers remain disallowed, while required fenced code blocks inside JSON
+    string values are allowed.
 
 - `tests/test_dialog_one_bubble_layout_live_llm.py`
   - Create a focused real LLM test file with one test function per scenario.
   - Use simulated L3 `action_directives` and the full `dialog_agent` path.
   - Write one trace per case.
+  - Write the trace before case-specific quality assertions so failed baseline
+    or post-change cases still leave inspectable raw evidence.
+  - Include these trace fields for every case: case id, model route/base URL
+    for generator and evaluator, simulated L3 action directives, user name,
+    contextual directives, raw result, `final_dialog`, `joined_dialog`,
+    `mention_target_user`, structural validation results, and manual
+    inspection notes placeholder.
 
 - `development_plans/README.md`
   - Add this draft plan to the active bugfix registry.
@@ -360,9 +388,16 @@ wording and focused live evidence, not new runtime machinery.
    - File: `tests/test_dialog_one_bubble_layout_live_llm.py`
    - Reuse the live endpoint skip pattern from
      `tests/test_dialog_generator_live_llm_contract.py`.
+   - Extend the skip helper to check both `DIALOG_GENERATOR_LLM_BASE_URL` and
+     `DIALOG_EVALUATOR_LLM_BASE_URL`, because the full `dialog_agent` path uses
+     both routes.
    - Use `tests.llm_trace.write_llm_trace`.
    - Build full dialog states with simulated L3 `action_directives`.
    - Do not parameterize the five real LLM cases.
+   - Add a small helper that returns `joined_dialog = "\n".join(final_dialog)`
+     after asserting `final_dialog` is a non-empty `list[str]`.
+   - Add a small helper that writes the trace before any case-specific content
+     assertion runs.
    - Evidence: record the new test names and trace payload fields.
 
 5. Add live LLM case 1: group casual direct reply.
@@ -436,7 +471,9 @@ wording and focused live evidence, not new runtime machinery.
     - Expected before implementation: the case records current behavior and
       can fail structurally or qualitatively if the old prompt mishandles code
       fences or fragment semantics.
-    - Evidence: record trace path and manual judgment.
+    - Evidence: record trace path and manual judgment. If the command fails,
+      inspect whether the trace was written before failure; if no trace exists,
+      fix only the test trace-ordering helper before continuing.
 
 11. Start the production-code subagent for prompt-only edits.
     - Provide this plan, the deterministic failing tests, the baseline live
@@ -477,62 +514,69 @@ wording and focused live evidence, not new runtime machinery.
     - Expected after implementation: pass.
     - Evidence: record command output.
 
-16. Run existing dialog deterministic tests.
+16. Run the updated existing multi-part prompt contract test.
+    - Command:
+      `venv\Scripts\python.exe -m pytest tests\test_dialog_agent.py::test_dialog_prompts_preserve_multi_part_deliverables -q`
+    - Expected after implementation: pass with updated expectations that
+      reject decorative Markdown but allow required fenced code blocks.
+    - Evidence: record command output.
+
+17. Run existing dialog deterministic tests.
     - Command:
       `venv\Scripts\python.exe -m pytest tests\test_dialog_agent.py -q`
     - Expected after implementation: pass.
     - Evidence: record command output.
 
-17. Run real LLM case 1 and inspect trace.
+18. Run real LLM case 1 and inspect trace.
     - Command:
       `venv\Scripts\python.exe -m pytest tests\test_dialog_one_bubble_layout_live_llm.py::test_live_dialog_one_bubble_group_casual_reply -q -s`
     - Expected: structural assertions pass and manual inspection accepts the
       one-bubble group layout.
     - Evidence: record trace path and judgment.
 
-18. Run real LLM case 2 and inspect trace.
+19. Run real LLM case 2 and inspect trace.
     - Command:
       `venv\Scripts\python.exe -m pytest tests\test_dialog_one_bubble_layout_live_llm.py::test_live_dialog_one_bubble_private_soft_reply -q -s`
     - Expected: structural assertions pass and manual inspection accepts the
       private-chat layout.
     - Evidence: record trace path and judgment.
 
-19. Run real LLM case 3 and inspect trace.
+20. Run real LLM case 3 and inspect trace.
     - Command:
       `venv\Scripts\python.exe -m pytest tests\test_dialog_one_bubble_layout_live_llm.py::test_live_dialog_one_bubble_group_technical_comparison -q -s`
     - Expected: structural assertions pass, required GPU facts appear, and
       manual inspection accepts semantic grouping without a line budget.
     - Evidence: record trace path and judgment.
 
-20. Run real LLM case 4 and inspect trace.
+21. Run real LLM case 4 and inspect trace.
     - Command:
       `venv\Scripts\python.exe -m pytest tests\test_dialog_one_bubble_layout_live_llm.py::test_live_dialog_one_bubble_python_code_block_preserved -q -s`
     - Expected: structural assertions pass, fenced Python formatting is
       preserved, and manual inspection finds no character voice inside code.
     - Evidence: record trace path and judgment.
 
-21. Run real LLM case 5 and inspect trace.
+22. Run real LLM case 5 and inspect trace.
     - Command:
       `venv\Scripts\python.exe -m pytest tests\test_dialog_one_bubble_layout_live_llm.py::test_live_dialog_one_bubble_json_example_preserved -q -s`
     - Expected: structural assertions pass, the JSON example has nine visible
       rows, and manual inspection finds no character voice inside JSON.
     - Evidence: record trace path and judgment.
 
-22. Run focused diff review.
+23. Run focused diff review.
     - Command:
       `git diff -- src/kazusa_ai_chatbot/nodes/dialog_agent.py tests/test_dialog_agent.py tests/test_dialog_one_bubble_layout_live_llm.py development_plans/README.md development_plans/active/bugfix/dialog_one_bubble_layout_contract_bugfix_plan.md`
     - Expected: production diff is prompt-only; test and plan diffs match this
       plan.
     - Evidence: record review notes.
 
-23. Run independent code review.
+24. Run independent code review.
     - Scope: prompt-only diff, deterministic prompt tests, live LLM test design,
       trace evidence, and absence of out-of-scope production changes.
     - Expected: no blocking findings, or findings remediated inside approved
       change surface.
     - Evidence: record review result and any remediation commands.
 
-24. Complete lifecycle update after acceptance.
+25. Complete lifecycle update after acceptance.
     - Update this plan's `Status` and `Execution Evidence` only after the user
       accepts the verification evidence.
     - Do not mark complete if any required live LLM trace is uninspected,
@@ -581,7 +625,7 @@ prompt edits unless the user explicitly approves fallback execution.
   - Sign-off: `<agent/date>` after evidence is recorded.
 
 - [ ] Stage 4 - deterministic verification complete
-  - Covers: implementation steps 15-16.
+  - Covers: implementation steps 15-17.
   - Files: `tests/test_dialog_agent.py`.
   - Verify: focused prompt tests and full dialog-agent deterministic tests pass.
   - Evidence: record command outputs.
@@ -589,7 +633,7 @@ prompt edits unless the user explicitly approves fallback execution.
   - Sign-off: `<agent/date>` after evidence is recorded.
 
 - [ ] Stage 5 - real LLM verification complete
-  - Covers: implementation steps 17-21.
+  - Covers: implementation steps 18-22.
   - Files: `tests/test_dialog_one_bubble_layout_live_llm.py`,
     `test_artifacts/llm_traces/*`.
   - Verify: five live LLM cases are run one at a time and each trace is
@@ -599,7 +643,7 @@ prompt edits unless the user explicitly approves fallback execution.
   - Sign-off: `<agent/date>` after evidence is recorded.
 
 - [ ] Stage 6 - review and lifecycle sign-off complete
-  - Covers: implementation steps 22-24.
+  - Covers: implementation steps 23-25.
   - Files: this plan and `development_plans/README.md`.
   - Verify: focused diff review and independent code review complete.
   - Evidence: record review result, remediation, residual risk, and final
@@ -624,6 +668,7 @@ venv\Scripts\python.exe -m pytest tests\test_dialog_agent.py::test_dialog_genera
 Existing deterministic dialog tests:
 
 ```powershell
+venv\Scripts\python.exe -m pytest tests\test_dialog_agent.py::test_dialog_prompts_preserve_multi_part_deliverables -q
 venv\Scripts\python.exe -m pytest tests\test_dialog_agent.py -q
 ```
 
