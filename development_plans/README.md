@@ -38,7 +38,6 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [l2d_action_router_prompt_separation_plan.md](active/short_term/l2d_action_router_prompt_separation_plan.md) | Large top-level action-router prompt and boundary separation plan | draft |
 | [media_descriptor_cache_plan.md](active/short_term/media_descriptor_cache_plan.md) | Medium media descriptor cache using Cache2 persistent layer | draft |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 
@@ -55,6 +54,7 @@ long_term/todo.md
 | [cross_thread_image_contamination_bugfix_plan.md](active/bugfix/cross_thread_image_contamination_bugfix_plan.md) | Small observation-only bugfix draft for QQ group image/thread source contamination | draft |
 | [qq_replied_image_description_unavailable_queue_prune_bugfix_plan.md](active/bugfix/qq_replied_image_description_unavailable_queue_prune_bugfix_plan.md) | Small observation-only bugfix draft for replied image description loss after queue pruning | draft |
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
+| [reflection_group_scene_digest_self_cognition_bugfix_plan.md](active/bugfix/reflection_group_scene_digest_self_cognition_bugfix_plan.md) | Medium reflection-owned one-string group scene digest bugfix draft for noisy group self-cognition flow understanding | draft |
 | [self_other_inversion_personality_question_bugfix_plan.md](active/bugfix/self_other_inversion_personality_question_bugfix_plan.md) | Small observation-only bugfix draft for Chinese self/other referent inversion | draft |
 
 ## Reference Documents
@@ -172,6 +172,7 @@ plans.
 | [interaction_style_image_plan.md](archive/completed/short_term/interaction_style_image_plan.md) |
 | [live_context_runtime_facts_plan.md](archive/completed/short_term/live_context_runtime_facts_plan.md) |
 | [llm_routing_migration_plan.md](archive/completed/short_term/llm_routing_migration_plan.md) |
+| [l2d_action_router_prompt_separation_plan.md](archive/completed/short_term/l2d_action_router_prompt_separation_plan.md) |
 | [l2d_l3_surface_handoff_plan.md](archive/completed/short_term/l2d_l3_surface_handoff_plan.md) |
 | [l2d_router_split_and_background_ack_plan.md](archive/completed/short_term/l2d_router_split_and_background_ack_plan.md) |
 | [memory_evidence_scoped_user_continuity_plan.md](archive/completed/short_term/memory_evidence_scoped_user_continuity_plan.md) |
