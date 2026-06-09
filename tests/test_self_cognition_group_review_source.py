@@ -18,6 +18,24 @@ from kazusa_ai_chatbot.reflection_cycle.activity_windows import (
 from kazusa_ai_chatbot.self_cognition import models, projection, runner, sources
 
 
+@pytest.fixture(autouse=True)
+def _skip_default_scene_digest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep source-collector tests off the real digest LLM by default."""
+
+    async def no_scene_digest(**kwargs: Any) -> None:
+        del kwargs
+        return None
+
+    monkeypatch.setattr(
+        sources,
+        "build_group_scene_digest",
+        no_scene_digest,
+        raising=False,
+    )
+
+
 @pytest.mark.asyncio
 async def test_collect_group_chat_review_cases_builds_same_group_cases(
     monkeypatch: pytest.MonkeyPatch,
@@ -454,6 +472,72 @@ async def test_collect_group_review_cases_attaches_participant_context(
     assert "participant_context" in serialized_packet
     assert "delivery_target" not in serialized_packet
     assert "user-1" not in serialized_packet
+
+
+@pytest.mark.asyncio
+async def test_collect_group_review_cases_attaches_scene_digest(
+) -> None:
+    """Valid scene digest should reach the rendered source packet."""
+
+    now = datetime(2026, 5, 18, 4, 15, tzinfo=timezone.utc)
+    windows = build_group_activity_windows(
+        scope=_group_scope(),
+        window_start=datetime(2026, 5, 18, 4, 0, tzinfo=timezone.utc),
+        window_end=datetime(2026, 5, 18, 4, 30, tzinfo=timezone.utc),
+        now=now,
+        character_global_user_id="character-global",
+        platform_bot_id="bot-1",
+    )
+    captured_window = None
+
+    async def participant_context_builder(**kwargs: Any) -> None:
+        del kwargs
+        return None
+
+    async def scene_digest_builder(**kwargs: Any) -> dict[str, str]:
+        nonlocal captured_window
+        captured_window = kwargs["window"]
+        digest = {
+            "digest": (
+                "这段群聊里，participant_1 问了我一个问题，"
+                "我已经在窗口里接过一次。"
+            ),
+        }
+        return digest
+
+    cases = await sources.collect_group_review_cases(
+        now=now,
+        character_profile={
+            "name": "Character",
+            "global_user_id": "character-global",
+            "platform_bot_id": "bot-1",
+        },
+        windows=windows,
+        max_cases=1,
+        participant_context_builder=participant_context_builder,
+        scene_digest_builder=scene_digest_builder,
+    )
+
+    assert len(cases) == 1
+    assert captured_window == windows[0]
+    case = cases[0]
+    assert case["conversation_progress"]["group_scene_digest"] == {
+        "digest": (
+            "这段群聊里，participant_1 问了我一个问题，"
+            "我已经在窗口里接过一次。"
+        ),
+    }
+
+    source_packet = projection.build_source_packet(case)
+    rendered_packet = projection.render_source_packet_text(source_packet)
+    serialized_packet = json.dumps(source_packet, ensure_ascii=False)
+
+    assert "group_scene_digest" in rendered_packet
+    assert "participant_1 问了我一个问题" in rendered_packet
+    assert "delivery_target" not in serialized_packet
+    assert "user-1" not in serialized_packet
+    assert "qq-user-1" not in serialized_packet
+    assert "bot-1" not in serialized_packet
 
 
 @pytest.mark.asyncio

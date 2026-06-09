@@ -5,7 +5,7 @@
 - Goal: add one reflection-owned group digest string to group self-cognition
   source packets so noisy group flow is easier for cognition to read.
 - Plan class: medium
-- Status: draft
+- Status: completed
 - Mandatory skills: `development-plan`, `local-llm-architecture`,
   `py-style`, `cjk-safety`, `test-style-and-execution`
 - Overall cutover strategy: compatible optional source-packet field; omit the
@@ -77,8 +77,8 @@ Current ownership stays unchanged:
   feasibility, and no retry loop after parsed-but-invalid JSON.
 - After context compaction or major checklist sign-off, reread this plan before
   continuing. Before final completion, run the `Independent Code Review` gate.
-- Execution is parent-led with native subagents unless the user explicitly
-  approves fallback execution.
+- Execution is inline without subagents for this implementation because the
+  user explicitly requested fallback execution without subagents.
 
 ## Must Do
 
@@ -199,7 +199,7 @@ plus compact activity labels.
 - `src/kazusa_ai_chatbot/reflection_cycle/group_scene_digest.py`
   - `GROUP_SCENE_DIGEST_MAX_CHARS`
   - digest system prompt
-  - `build_group_scene_digest(window) -> dict[str, str] | None`
+  - `async build_group_scene_digest(window) -> dict[str, str] | None`
   - private prompt-payload and strict parse helpers
   - prompt-render verification helper or test-visible prompt payload builder
 
@@ -265,8 +265,8 @@ plus compact activity labels.
    `tests/test_reflection_cycle_group_scene_digest.py`.
 2. Add failing source attachment/rendering tests in
    `tests/test_self_cognition_group_review_source.py`.
-3. Start the production-code subagent with ownership limited to the files in
-   `Change Surface`.
+3. Execute production-code changes inline with ownership limited to the files
+   in `Change Surface`.
 4. Implement `group_scene_digest.py` with deidentified prompt payload,
    first-person observational prompt contract, one-string JSON parsing,
    bounding, prompt-render verification coverage, and omission on invalid
@@ -274,42 +274,42 @@ plus compact activity labels.
 5. Wire source attachment in `self_cognition.sources`.
 6. Update the two README files.
 7. Run focused tests, full verification, and record evidence.
-8. Run independent code review; fix only in approved scope and rerun affected
-   verification.
+8. Run an independent inline code review pass; fix only in approved scope and
+   rerun affected verification.
 
 ## Execution Model
 
-- Parent owns test contract, verification, evidence, review coordination,
-  lifecycle updates, and final sign-off.
-- Production-code subagent owns production files only and closes after planned
-  implementation.
-- Independent code-review subagent reviews the approved plan, diff, and
-  evidence; it does not implement fixes.
-- If native subagents are unavailable, stop before production-code edits unless
-  the user explicitly requests fallback execution.
+- The executor owns test contract, implementation, verification, evidence,
+  review pass, lifecycle updates, and final sign-off.
+- No subagents are used in this execution.
+- The independent code-review gate is still required as a separate review pass
+  over the approved plan, diff, and evidence before completion.
 
 ## Progress Checklist
 
-- [ ] Stage 1 - test contract added.
+- [x] Stage 1 - test contract added.
   - Verify:
     `venv\Scripts\python -m pytest tests/test_reflection_cycle_group_scene_digest.py -q`
     and
     `venv\Scripts\python -m pytest tests/test_self_cognition_group_review_source.py -q`.
-  - Evidence: record expected pre-implementation failures.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage 2 - digest builder and source attachment implemented.
+  - Evidence: pre-implementation module test failed during collection with
+    missing `reflection_cycle.group_scene_digest`; source test failed with
+    `collect_group_review_cases()` unexpected keyword `scene_digest_builder`.
+  - Sign-off: `Codex/2026-06-09`.
+- [x] Stage 2 - digest builder and source attachment implemented.
   - Verify focused tests plus:
     `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\reflection_cycle\group_scene_digest.py`
     and
     `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\self_cognition\sources.py`.
-  - Evidence: record changed files and focused test output.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage 3 - full verification and independent code review complete.
+  - Evidence: `py_compile` passed for both production files;
+    `tests/test_reflection_cycle_group_scene_digest.py -q` passed 12 tests;
+    `tests/test_self_cognition_group_review_source.py -q` passed 13 tests.
+  - Sign-off: `Codex/2026-06-09`.
+- [x] Stage 3 - full verification and independent code review complete.
   - Verify all commands in `Verification`; rerun affected commands after any
     review fix.
-  - Evidence: record command summaries, review findings, fixes, and residual
-    risks.
-  - Sign-off: `<agent/date>`.
+  - Evidence: full verification and review outcome recorded below.
+  - Sign-off: `Codex/2026-06-09`.
 
 ## Verification
 
@@ -379,5 +379,35 @@ digest. Record findings, fixes, reruns, and approval in `Execution Evidence`.
 - Follow-up review adjustment: 2026-06-09. Clarified the exact JSON parser
   helper and made the hard-coded-name/runtime-plan-wording static check's
   expected result explicit.
-- Independent plan review: pending.
-- Implementation, verification, and independent code review: pending.
+- Independent plan review: 2026-06-09. No blockers after inline-execution and
+  async-builder corrections; execution remains bounded to one optional digest
+  string, no cognition/RAG/dialog/action-router changes, and no subagents.
+- Inline execution started: 2026-06-09 per user request.
+- Implementation: 2026-06-09. Added
+  `src/kazusa_ai_chatbot/reflection_cycle/group_scene_digest.py`, wired
+  `self_cognition.sources.collect_group_review_cases(...)` to attach valid
+  `conversation_progress.group_scene_digest`, added focused tests, and updated
+  reflection/self-cognition READMEs.
+- Verification: 2026-06-09.
+  - `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\reflection_cycle\group_scene_digest.py`: passed.
+  - `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\self_cognition\sources.py`: passed.
+  - `venv\Scripts\python -m pytest tests/test_reflection_cycle_group_scene_digest.py -q`: 12 passed.
+  - `venv\Scripts\python -m pytest tests/test_reflection_cycle_activity_windows.py -q`: 5 passed.
+  - `venv\Scripts\python -m pytest tests/test_self_cognition_group_review_source.py -q`: 13 passed.
+  - `venv\Scripts\python -m pytest tests/test_self_cognition_integration.py -q`: 42 passed.
+  - Schema-creep static grep: no production matches; `rg` returned no output.
+  - Action-guidance static grep: matches only the negative fixtures in
+    `tests/test_reflection_cycle_group_scene_digest.py` lines 106-108.
+  - RAG/background static grep: no production matches; `rg` returned no output.
+  - Hard-coded character/runtime-plan static grep: no production matches; `rg`
+    returned no output.
+- Independent code review: 2026-06-09 inline fallback review. Reviewed the
+  approved plan, full changed-file set including untracked new files, focused
+  and regression test results, and static checks. Findings: none requiring
+  code changes. The implementation stays within the approved change surface,
+  keeps the digest one string inside JSON, avoids cognition/RAG/dialog/action
+  routing/persistence/adapter/scheduler changes, keeps prompt payload rows
+  deidentified, and documents the source-hydration boundary. Residual risk:
+  digest wording quality still depends on the configured `CONSOLIDATION_LLM`,
+  but invalid, empty, multi-field, and explicit action-guidance outputs are
+  omitted. Approved for completion.

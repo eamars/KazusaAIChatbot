@@ -27,6 +27,9 @@ from kazusa_ai_chatbot.reflection_cycle.activity_windows import (
     GroupActivityWindow,
     build_group_activity_windows,
 )
+from kazusa_ai_chatbot.reflection_cycle.group_scene_digest import (
+    build_group_scene_digest,
+)
 from kazusa_ai_chatbot.reflection_cycle.selector import collect_reflection_inputs
 from kazusa_ai_chatbot.self_cognition import models
 from kazusa_ai_chatbot.self_cognition.group_review_participant_context import (
@@ -164,6 +167,7 @@ async def collect_group_review_cases(
     windows: list[GroupActivityWindow],
     max_cases: int,
     participant_context_builder: Callable[..., Any] | None = None,
+    scene_digest_builder: Callable[..., Any] | None = None,
 ) -> list[models.SelfCognitionCase]:
     """Build group-review cases from precomputed activity windows."""
 
@@ -171,6 +175,7 @@ async def collect_group_review_cases(
     context_builder = (
         participant_context_builder or build_group_review_participant_context
     )
+    digest_builder = scene_digest_builder or build_group_scene_digest
     for window in windows:
         if len(cases) >= max_cases:
             break
@@ -195,6 +200,14 @@ async def collect_group_review_cases(
             case["conversation_progress"]["participant_context"] = (
                 participant_context
             )
+        scene_digest = await _call_maybe_async(
+            digest_builder,
+            window=window,
+        )
+        if _is_group_scene_digest(scene_digest):
+            case["conversation_progress"]["group_scene_digest"] = {
+                "digest": scene_digest["digest"].strip(),
+            }
         binding = await resolve_self_cognition_delivery_target(
             platform=window.platform,
             source_platform_channel_id=window.platform_channel_id,
@@ -844,6 +857,23 @@ def _attach_binding(
         target = binding
         case["target_binding_status"] = "bound"
         case["delivery_target"] = target
+
+
+def _is_group_scene_digest(value: object) -> bool:
+    """Return whether a value matches the optional digest source contract."""
+
+    if not isinstance(value, dict):
+        return_value = False
+        return return_value
+    if set(value.keys()) != {"digest"}:
+        return_value = False
+        return return_value
+    digest = value["digest"]
+    if not isinstance(digest, str):
+        return_value = False
+        return return_value
+    return_value = bool(digest.strip())
+    return return_value
 
 
 def _target_binding_failure(

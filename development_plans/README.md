@@ -54,7 +54,6 @@ long_term/todo.md
 | [cross_thread_image_contamination_bugfix_plan.md](active/bugfix/cross_thread_image_contamination_bugfix_plan.md) | Small observation-only bugfix draft for QQ group image/thread source contamination | draft |
 | [qq_replied_image_description_unavailable_queue_prune_bugfix_plan.md](active/bugfix/qq_replied_image_description_unavailable_queue_prune_bugfix_plan.md) | Small observation-only bugfix draft for replied image description loss after queue pruning | draft |
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
-| [reflection_group_scene_digest_self_cognition_bugfix_plan.md](active/bugfix/reflection_group_scene_digest_self_cognition_bugfix_plan.md) | Medium reflection-owned one-string group scene digest bugfix draft for noisy group self-cognition flow understanding | draft |
 | [self_other_inversion_personality_question_bugfix_plan.md](active/bugfix/self_other_inversion_personality_question_bugfix_plan.md) | Small observation-only bugfix draft for Chinese self/other referent inversion | draft |
 
 ## Reference Documents
@@ -128,6 +127,7 @@ plans.
 | [rag_memory_evidence_remember_me_inner_path_bugfix_plan.md](archive/completed/bugfix/rag_memory_evidence_remember_me_inner_path_bugfix_plan.md) |
 | [rag_conversation_evidence_current_episode_boundary_bugfix_plan.md](archive/completed/bugfix/rag_conversation_evidence_current_episode_boundary_bugfix_plan.md) |
 | [rag_retrieval_top_k_embedding_tuning_plan.md](archive/completed/bugfix/rag_retrieval_top_k_embedding_tuning_plan.md) |
+| [reflection_group_scene_digest_self_cognition_bugfix_plan.md](archive/completed/bugfix/reflection_group_scene_digest_self_cognition_bugfix_plan.md) |
 | [reflection_global_promotion_replay_bugfix_plan.md](archive/completed/bugfix/reflection_global_promotion_replay_bugfix_plan.md) |
 | [resolver_image_only_empty_input_bugfix_plan.md](archive/completed/bugfix/resolver_image_only_empty_input_bugfix_plan.md) |
 | [self_cognition_background_context_budget_bugfix_plan.md](archive/completed/bugfix/self_cognition_background_context_budget_bugfix_plan.md) |

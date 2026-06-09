@@ -165,6 +165,13 @@ is rendered. Missing identity degrades to visible-only context; display-name
 identity lookup, background participant profiles, web lookup, and full RAG
 supervisor planning are not used.
 
+Group review may also attach
+`conversation_progress.group_scene_digest = {"digest": str}`. This is a single
+first-person observational string generated from the selected activity window
+to help cognition read noisy group flow. It is optional source hydration only:
+it does not add a deterministic flow state, route decision, response gate,
+speaker target, or action recommendation.
+
 When these cases are consolidated, the deterministic target plan gives the
 group channel its own target eligibility. Group-review participant presence is
 not enough to create a user lane. The source label `self_cognition` is

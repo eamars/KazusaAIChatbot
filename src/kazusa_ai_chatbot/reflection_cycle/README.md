@@ -271,6 +271,13 @@ labels. Selected visible speech targets the same group channel as the source.
 There is no private fallback, retry loop, adapter capability probe, or
 reflection-specific group-review interval.
 
+For the newest selected group-review window, reflection source preparation may
+also add one optional first-person observational digest under
+`conversation_progress.group_scene_digest = {"digest": str}`. The digest is
+generated only from the already-selected bounded window rows and compact
+activity labels. It is source hydration for noisy group flow, not RAG evidence,
+raw reflection output, persistence state, or action guidance.
+
 Daily-channel synthesis is period-level maintenance, not per-slot catch-up.
 For scheduled worker runs it asks the calendar-backed phase provider for the
 previous character-local day's expected hourly run ids and defers if any
