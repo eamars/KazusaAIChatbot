@@ -4,7 +4,7 @@
 
 - Goal: Cache the vision LLM output of `multimedia_descriptor_agent` so that identical images bypass the vision LLM call and serve a cached description + structured observation.
 - Plan class: medium
-- Status: in_progress
+- Status: completed
 - Overall cutover strategy: compatible
 - Highest-risk areas: cache key stability across platforms (same image may arrive with slightly different base64 from different re-encodings — accepted as separate entries); persistent collection growth without a background sweeper; stale cached descriptions surviving a vision prompt or model change.
 - Acceptance criteria: identical base64 payloads produce cache hits that skip the vision LLM call; cache entries survive brain-service restarts; changing the vision descriptor prompt version or model invalidates all stale entries on next startup; the persistent collection is bounded by a configurable time-ordered oldest-first prune at bootstrap; the response path never awaits a MongoDB read or write for media descriptor cache operations.
@@ -378,9 +378,11 @@ This plan is complete when:
   - Covers: 14 deterministic tests; code review against py-style positive/negative constraints.
   - Verify: all commands in `Verification` pass; review issues addressed.
   - Handoff: plan moves to completion review.
-- [ ] Stage 6 - docs update (optional) and manual smoke
+- [x] Stage 6 - docs update and manual smoke waived during archival
   - Covers: `rag_cache2_design.md` update; manual smoke tests.
-  - Verify: manual smoke steps pass.
+  - Verify: not run; earlier production implementation and deterministic
+    verification were already complete, and this stage was optional cleanup
+    scope.
   - Handoff: plan complete.
 
 ## Execution Evidence
@@ -423,4 +425,6 @@ All 8 production files compile clean with `py_compile`.
 
 ### Remaining
 
-- Manual smoke tests (Stage 6) not yet run — requires live service with MongoDB.
+- Manual smoke tests were not run before archival; production implementation and deterministic verification were already complete, and docs/smoke were optional cleanup scope.
+
+- Archived on 2026-06-10 during active-plan cleanup.

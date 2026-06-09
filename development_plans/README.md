@@ -38,7 +38,6 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [media_descriptor_cache_plan.md](active/short_term/media_descriptor_cache_plan.md) | Medium media descriptor cache using Cache2 persistent layer | draft |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 
 ## Supporting Experiment Records
@@ -51,11 +50,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [cross_thread_image_contamination_bugfix_plan.md](active/bugfix/cross_thread_image_contamination_bugfix_plan.md) | Small observation-only bugfix draft for QQ group image/thread source contamination | draft |
-| [dialog_one_bubble_layout_contract_bugfix_plan.md](active/bugfix/dialog_one_bubble_layout_contract_bugfix_plan.md) | Large prompt-only dialog layout contract bugfix plan | draft |
-| [qq_replied_image_description_unavailable_queue_prune_bugfix_plan.md](active/bugfix/qq_replied_image_description_unavailable_queue_prune_bugfix_plan.md) | Small observation-only bugfix draft for replied image description loss after queue pruning | draft |
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
-| [self_other_inversion_personality_question_bugfix_plan.md](active/bugfix/self_other_inversion_personality_question_bugfix_plan.md) | Small observation-only bugfix draft for Chinese self/other referent inversion | draft |
 
 ## Reference Documents
 
@@ -110,9 +105,11 @@ plans.
 | [consolidation_module_boundary_migration_bugfix_plan.md](archive/completed/bugfix/consolidation_module_boundary_migration_bugfix_plan.md) |
 | [consolidator_facts_prompt_budget_bugfix_plan.md](archive/completed/bugfix/consolidator_facts_prompt_budget_bugfix_plan.md) |
 | [conversation_progress_identity_leakage_bugfix_plan.md](archive/completed/bugfix/conversation_progress_identity_leakage_bugfix_plan.md) |
+| [cross_thread_image_contamination_bugfix_plan.md](archive/completed/bugfix/cross_thread_image_contamination_bugfix_plan.md) |
 | [decontextualizer_scope_users_referent_bugfix_plan.md](archive/completed/bugfix/decontextualizer_scope_users_referent_bugfix_plan.md) |
 | [dialog_anchor_authority_stale_history_bugfix_plan.md](archive/completed/bugfix/dialog_anchor_authority_stale_history_bugfix_plan.md) |
 | [dialog_evaluator_guess_owner_boundary_bugfix_plan.md](archive/completed/bugfix/dialog_evaluator_guess_owner_boundary_bugfix_plan.md) |
+| [dialog_one_bubble_layout_contract_bugfix_plan.md](archive/completed/bugfix/dialog_one_bubble_layout_contract_bugfix_plan.md) |
 | [generic_cognition_prompt_migration_plan.md](archive/completed/bugfix/generic_cognition_prompt_migration_plan.md) |
 | [group_scene_digest_explicit_participants_bugfix_plan.md](archive/completed/bugfix/group_scene_digest_explicit_participants_bugfix_plan.md) |
 | [history_media_projection_image_boundary_plan.md](archive/completed/bugfix/history_media_projection_image_boundary_plan.md) |
@@ -124,6 +121,7 @@ plans.
 | [rag2_cognition_identity_evidence_content_bugfix_plan.md](archive/completed/bugfix/rag2_cognition_identity_evidence_content_bugfix_plan.md) |
 | [quote_aware_rag_sequence_plan.md](archive/completed/bugfix/quote_aware_rag_sequence_plan.md) |
 | [qq_face_projection_empty_input_guard_bugfix_plan.md](archive/completed/bugfix/qq_face_projection_empty_input_guard_bugfix_plan.md) |
+| [qq_replied_image_description_unavailable_queue_prune_bugfix_plan.md](archive/completed/bugfix/qq_replied_image_description_unavailable_queue_prune_bugfix_plan.md) |
 | [rag_active_turn_conversation_row_exclusion_plan.md](archive/completed/bugfix/rag_active_turn_conversation_row_exclusion_plan.md) |
 | [rag_hybrid_search_time_config_plan.md](archive/completed/bugfix/rag_hybrid_search_time_config_plan.md) |
 | [rag_memory_evidence_remember_me_inner_path_bugfix_plan.md](archive/completed/bugfix/rag_memory_evidence_remember_me_inner_path_bugfix_plan.md) |
@@ -138,6 +136,7 @@ plans.
 | [self_cognition_group_speak_selection_bugfix_plan.md](archive/completed/bugfix/self_cognition_group_speak_selection_bugfix_plan.md) |
 | [self_cognition_sleep_period_plan.md](archive/completed/bugfix/self_cognition_sleep_period_plan.md) |
 | [self_cognition_speak_delivery_bugfix_plan.md](archive/completed/bugfix/self_cognition_speak_delivery_bugfix_plan.md) |
+| [self_other_inversion_personality_question_bugfix_plan.md](archive/completed/bugfix/self_other_inversion_personality_question_bugfix_plan.md) |
 | [task_dispatcher_json_contract_bugfix_plan.md](archive/completed/bugfix/task_dispatcher_json_contract_bugfix_plan.md) |
 | [temporal_grounding_rag_episode_state_plan.md](archive/completed/bugfix/temporal_grounding_rag_episode_state_plan.md) |
 | [time_source_boundary_bugfix_plan.md](archive/completed/bugfix/time_source_boundary_bugfix_plan.md) |
@@ -177,6 +176,7 @@ plans.
 | [l2d_action_router_prompt_separation_plan.md](archive/completed/short_term/l2d_action_router_prompt_separation_plan.md) |
 | [l2d_l3_surface_handoff_plan.md](archive/completed/short_term/l2d_l3_surface_handoff_plan.md) |
 | [l2d_router_split_and_background_ack_plan.md](archive/completed/short_term/l2d_router_split_and_background_ack_plan.md) |
+| [media_descriptor_cache_plan.md](archive/completed/short_term/media_descriptor_cache_plan.md) |
 | [memory_evidence_scoped_user_continuity_plan.md](archive/completed/short_term/memory_evidence_scoped_user_continuity_plan.md) |
 | [memory_evolution_stage1b_plan.md](archive/completed/short_term/memory_evolution_stage1b_plan.md) |
 | [message_coalescing_queue_module_plan.md](archive/completed/short_term/message_coalescing_queue_module_plan.md) |

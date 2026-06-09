@@ -6,7 +6,7 @@
   describe him and identify the current evidence needed before an executable
   bugfix plan is written.
 - Plan class: small
-- Status: draft
+- Status: completed
 - Mandatory skills: `development-plan`, `local-llm-architecture`,
   `debug-llm`, `py-style`, `cjk-safety`, `test-style-and-execution`
 - Overall cutover strategy: not selected; this draft is observation-only and
@@ -140,7 +140,7 @@ The current evidence points toward these ownership boundaries:
 
 ## Observation-Only Scope
 
-This draft only records the failure mode and observations.
+This completed observation record only records the failure mode and observations.
 
 It does not authorize:
 
@@ -170,4 +170,10 @@ reproduce a controlled equivalent before proposing a fix:
 
 The executable plan must be written only after this discovery can identify the
 smallest owning stage and the smallest safe change surface.
+
+## Lifecycle
+
+- Archived on 2026-06-10 during active-plan cleanup as a completed
+  observation-only incident record. Future implementation work requires a new
+  active executable plan.
 
