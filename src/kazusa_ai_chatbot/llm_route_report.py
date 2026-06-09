@@ -5,6 +5,8 @@ from __future__ import annotations
 from kazusa_ai_chatbot.config import (
     BACKGROUND_ARTIFACT_LLM_BASE_URL,
     BACKGROUND_ARTIFACT_LLM_MODEL,
+    BOUNDARY_CORE_LLM_BASE_URL,
+    BOUNDARY_CORE_LLM_MODEL,
     COGNITION_LLM_BASE_URL,
     COGNITION_LLM_MODEL,
     CONSOLIDATION_LLM_BASE_URL,
@@ -66,6 +68,11 @@ LLM_ROUTE_CONFIGS: tuple[dict[str, str], ...] = (
         "route": "COGNITION_LLM",
         "model": COGNITION_LLM_MODEL,
         "source_url": COGNITION_LLM_BASE_URL,
+    },
+    {
+        "route": "BOUNDARY_CORE_LLM",
+        "model": BOUNDARY_CORE_LLM_MODEL,
+        "source_url": BOUNDARY_CORE_LLM_BASE_URL,
     },
     {
         "route": "DIALOG_GENERATOR_LLM",

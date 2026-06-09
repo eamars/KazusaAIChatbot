@@ -84,6 +84,7 @@ HOWTO. One working-style configuration looks like this:
 | `RAG_SUBAGENT_LLM`         | `local-model`                            | `http://localhost:1234/v1` |
 | `WEB_SEARCH_LLM`           | `local-model`                            | `http://localhost:1234/v1` |
 | `COGNITION_LLM`            | `local-model`                            | `http://localhost:1234/v1` |
+| `BOUNDARY_CORE_LLM`        | `local-model`                            | `http://localhost:1234/v1` |
 | `BACKGROUND_ARTIFACT_LLM`  | `local-model`                            | `http://localhost:1234/v1` |
 | `DIALOG_GENERATOR_LLM`     | `deepseek-v4-flash`                      | `https://api.deepseek.com` |
 | `DIALOG_EVALUATOR_LLM`     | `local-model`                            | `http://localhost:1234/v1` |

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
+
 EXPECTED_ROUTE_TABLE_ROWS = (
     "RELEVANCE_AGENT_LLM",
     "VISION_DESCRIPTOR_LLM",
@@ -10,6 +13,7 @@ EXPECTED_ROUTE_TABLE_ROWS = (
     "RAG_SUBAGENT_LLM",
     "WEB_SEARCH_LLM",
     "COGNITION_LLM",
+    "BOUNDARY_CORE_LLM",
     "DIALOG_GENERATOR_LLM",
     "DIALOG_EVALUATOR_LLM",
     "CONSOLIDATION_LLM",
@@ -74,6 +78,7 @@ def test_llm_route_table_omits_api_keys() -> None:
         config.RAG_SUBAGENT_LLM_API_KEY,
         config.WEB_SEARCH_LLM_API_KEY,
         config.COGNITION_LLM_API_KEY,
+        config.BOUNDARY_CORE_LLM_API_KEY,
         config.DIALOG_GENERATOR_LLM_API_KEY,
         config.DIALOG_EVALUATOR_LLM_API_KEY,
         config.CONSOLIDATION_LLM_API_KEY,
@@ -84,3 +89,35 @@ def test_llm_route_table_omits_api_keys() -> None:
     for api_key in api_keys:
         if api_key:
             assert api_key not in table
+
+
+def test_boundary_core_node_uses_boundary_route(tmp_path) -> None:
+    """Boundary Core binds its LLM client to the dedicated route."""
+
+    from tests.test_config import _configured_subprocess_env_without_dotenv
+
+    env = _configured_subprocess_env_without_dotenv()
+    env["COGNITION_LLM_BASE_URL"] = "http://cognition.example/v1"
+    env["COGNITION_LLM_MODEL"] = "cognition-model"
+    env["BOUNDARY_CORE_LLM_BASE_URL"] = "http://boundary.example/v1/"
+    env["BOUNDARY_CORE_LLM_MODEL"] = "boundary-model"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from kazusa_ai_chatbot.nodes import "
+                "persona_supervisor2_cognition_l2 as l2; "
+                "print('|'.join(l2._boundary_core_llm._model_key))"
+            ),
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == "http://boundary.example/v1|boundary-model"

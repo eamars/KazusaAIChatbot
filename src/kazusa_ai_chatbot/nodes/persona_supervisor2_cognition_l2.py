@@ -2,6 +2,9 @@
 from kazusa_ai_chatbot.config import (
     AFFINITY_MAX,
     AFFINITY_MIN,
+    BOUNDARY_CORE_LLM_API_KEY,
+    BOUNDARY_CORE_LLM_BASE_URL,
+    BOUNDARY_CORE_LLM_MODEL,
     COGNITION_LLM_API_KEY,
     COGNITION_LLM_BASE_URL,
     COGNITION_LLM_MODEL,
@@ -500,9 +503,9 @@ _BOUNDARY_CORE_PROMPT = '''\
 _boundary_core_llm = get_llm(
     temperature=0,
     top_p=1.0,
-    model=COGNITION_LLM_MODEL,
-    base_url=COGNITION_LLM_BASE_URL,
-    api_key=COGNITION_LLM_API_KEY,
+    model=BOUNDARY_CORE_LLM_MODEL,
+    base_url=BOUNDARY_CORE_LLM_BASE_URL,
+    api_key=BOUNDARY_CORE_LLM_API_KEY,
 )
 async def call_boundary_core_agent(state: CognitionState) -> CognitionState:
     # Get attributes

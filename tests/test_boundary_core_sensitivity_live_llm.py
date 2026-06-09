@@ -7,7 +7,10 @@ import os
 import httpx
 import pytest
 
-from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
+from kazusa_ai_chatbot.config import (
+    BOUNDARY_CORE_LLM_BASE_URL,
+    COGNITION_LLM_BASE_URL,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l1 import (
     call_cognition_subconscious,
 )
@@ -121,30 +124,31 @@ _OWNER_USER_PROFILE = {
 }
 
 
-async def _skip_if_llm_unavailable() -> None:
-    """Skip when the configured cognition LLM endpoint cannot be reached."""
+async def _skip_if_route_unavailable(base_url: str, route_label: str) -> None:
+    """Skip when one configured live LLM endpoint cannot be reached."""
 
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
-            response = await client.get(f"{COGNITION_LLM_BASE_URL.rstrip('/')}/models")
+            response = await client.get(f"{base_url.rstrip('/')}/models")
     except httpx.HTTPError as exc:
         pytest.skip(
-            f"Cognition LLM endpoint is unavailable: "
-            f"{COGNITION_LLM_BASE_URL}; {exc}"
+            f"{route_label} LLM endpoint is unavailable: "
+            f"{base_url}; {exc}"
         )
 
     if response.status_code >= 500:
         pytest.skip(
-            f"Cognition LLM endpoint returned server error "
-            f"{response.status_code}: {COGNITION_LLM_BASE_URL}"
+            f"{route_label} LLM endpoint returned server error "
+            f"{response.status_code}: {base_url}"
         )
 
 
 @pytest.fixture()
 async def ensure_live_cognition_llm() -> None:
-    """Ensure the cognition live LLM endpoint is reachable."""
+    """Ensure live LLM endpoints used by this diagnostic are reachable."""
 
-    await _skip_if_llm_unavailable()
+    await _skip_if_route_unavailable(COGNITION_LLM_BASE_URL, "Cognition")
+    await _skip_if_route_unavailable(BOUNDARY_CORE_LLM_BASE_URL, "Boundary Core")
 
 
 def _history_row(
