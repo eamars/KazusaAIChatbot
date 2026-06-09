@@ -199,6 +199,11 @@ def test_dialog_prompts_preserve_multi_part_deliverables() -> None:
     evaluator_prompt = _DIALOG_EVALUATOR_PROMPT
 
     for required_text in (
+        '# 生成流程',
+        '先列出必须交付的内容',
+        '再选择角色表达',
+        '组织单气泡布局',
+        '处理固定格式块',
         '完整方案',
         '多候选推荐',
         '主要组成部分',
@@ -206,41 +211,54 @@ def test_dialog_prompts_preserve_multi_part_deliverables() -> None:
         '[SCOPE]` 是表达量参考，不是删减语义的许可',
         '覆盖优先于简短',
         '多候选、多风险、多步骤或对比类回复必须把每一项写成普通字符串片段',
-        '不要用对象、字典、嵌套数组、编号字段或 Markdown 表格表达选项',
+        '不要用对象、字典、嵌套数组、编号字段或 Markdown 表格表达选项、参数或对比',
+        '技术对比使用普通聊天行',
+        'FP16: GB300 2250 TFLOPS vs Pro6000 125 TFLOPS',
         '技术选型、风险清单、RCA、部署计划、工具组合建议',
         '信息密度优先',
         '比喻或感官化修辞最多一次',
         '给出时间切分或时间范围',
-        '不得压缩成模糊方向',
-        '不得省略结束时间、误算时长',
         '不一致近似值',
+        '数值与单位作为一组不可拆开的事实照抄原单位',
         '无法给出具体对象',
-        '不得新增锚点没有出现过的具体实体',
         '泛化说明不得偷换成具体对象示例',
         '不要用具体名称举例',
-        '临时处理状态或延后承诺',
+        '临时处理状态或延后承诺替代当前交付',
         '不得以新的认可请求替代收束',
         '最小核实清单',
-        '完整建议不要以新的问题结尾',
-        '使用 6-12 个短字符串片段是允许的',
-        '不要为了显得自然而只输出第一项候选或第一条风险',
+        '一个可见聊天气泡',
+        '布局单位',
+        '`final_dialog` 会被运行时用换行连接',
+        '每个布局单位必须承载可见文字或整个固定格式块',
+        '不要插入 `""` 作为段落间隔',
+        '每个数组元素必须是非空字符串',
+        '不是空白占位',
+        '固定格式块字符串内部可以保留必要空行',
         '每个元素必须是字符串',
-        '严禁包含 HTML 或 Markdown 渲染标签',
+        '固定格式块',
+        '不要返回顶层数组、裸字符串、Markdown 代码块或任何额外说明',
+        '返回 JSON 前先做三项自检',
+        '普通技术对比没有以 `|` 开头的表格行',
     ):
         assert required_text in generator_prompt
 
     for required_text in (
+        '# 审核流程',
+        '建立锚点清单',
+        '对照可见气泡',
+        '审核单气泡布局和固定格式块',
+        '审核表达安全',
+        '最后看软风格',
         '完整方案',
         '多部分交付',
         '风险说明',
         '先定一家试试',
-        '结构化任务密度',
         '时间切分忠实',
         '行动骨架忠实',
         '改写成不一致近似值',
+        '技术数值边界',
+        '数值与单位是一组事实',
         '把完整安排压缩成更短安排',
-        '不得用连续比喻替代结论、风险、步骤或依据',
-        '不得以无必要的新问题结尾',
         '具体对象禁令',
         '不得新增锚点未出现过的具体实体',
         '举例禁令',
@@ -248,9 +266,68 @@ def test_dialog_prompts_preserve_multi_part_deliverables() -> None:
         '终止收束禁令',
         '临时处理状态或延后承诺',
         '新的认可请求结尾',
-        '必须驳回',
+        'should_stop=false',
     ):
         assert required_text in evaluator_prompt
+
+
+def test_dialog_generator_prompt_describes_one_bubble_layout_contract() -> None:
+    """Generator prompt should describe final_dialog as one visible bubble."""
+
+    prompt = _DIALOG_GENERATOR_PROMPT
+
+    assert '一个可见聊天气泡' in prompt
+    assert '`final_dialog` 会被运行时用换行连接' in prompt
+    assert '布局单位' in prompt
+    assert '每个布局单位必须承载可见文字或整个固定格式块' in prompt
+    assert '不要插入 `""` 作为段落间隔' in prompt
+    assert '返回 JSON 前先做三项自检' in prompt
+    assert '每个数组元素必须是非空字符串' in prompt
+    assert '平台分别发送' not in prompt
+    assert '打一段、发一段' not in prompt
+    assert '要发送的台词片段' not in prompt
+    assert '使用 6-12 个短字符串片段是允许的' not in prompt
+
+
+def test_dialog_prompts_preserve_fixed_format_blocks() -> None:
+    """Dialog prompts should preserve code and fixed-format block layout."""
+
+    generator_prompt = _DIALOG_GENERATOR_PROMPT
+    evaluator_prompt = _DIALOG_EVALUATOR_PROMPT
+
+    for required_text in (
+        '固定格式块',
+        '代码块',
+        'JSON 示例',
+        '缩进',
+        '空行',
+        'fenced code block',
+        '角色语气只能放在固定格式块外',
+    ):
+        assert required_text in generator_prompt
+
+    for required_text in (
+        '固定格式块',
+        '代码块',
+        'JSON 示例',
+        '缩进',
+        'fenced code block',
+        '不得因为必要代码围栏而驳回',
+    ):
+        assert required_text in evaluator_prompt
+
+
+def test_dialog_evaluator_prompt_audits_layout_without_line_budget() -> None:
+    """Evaluator should audit one-bubble layout without line-count caps."""
+
+    prompt = _DIALOG_EVALUATOR_PROMPT
+
+    assert '单个可见聊天气泡' in prompt
+    assert '布局可读性' in prompt
+    assert '技术对比、参数列表和多候选推荐应使用普通聊天行' in prompt
+    assert '以 `|` 分隔的 Markdown 表格不通过' in prompt
+    assert '不得仅因技术交付使用多行而驳回' in prompt
+    assert '不得按固定行数、固定段数或固定字数判定失败' in prompt
 
 
 @pytest.mark.asyncio
@@ -283,11 +360,20 @@ def test_dialog_evaluator_prompt_orders_hard_gates_before_style() -> None:
     """Evaluator prompt should read as an ordered weak-model audit."""
 
     prompt = _DIALOG_EVALUATOR_PROMPT
-    assert '不要从上下文自行决定话题、意图或风格' in prompt
-    assert prompt.index('# 通过条件') < prompt.index('# 硬门槛')
-    assert prompt.index('# 硬门槛') < prompt.index('# 软风格')
-    assert prompt.index('# 软风格') < prompt.index('# 动态通过逻辑')
-    assert prompt.index('# 动态通过逻辑') < prompt.index('# 审核顺序')
+    assert '不重新决定话题、意图、是否回答或角色立场' in prompt
+    assert prompt.index('1. **建立锚点清单**') < prompt.index(
+        '2. **对照可见气泡**',
+    )
+    assert prompt.index('2. **对照可见气泡**') < prompt.index(
+        '3. **审核单气泡布局和固定格式块**',
+    )
+    assert prompt.index('3. **审核单气泡布局和固定格式块**') < prompt.index(
+        '4. **审核表达安全**',
+    )
+    assert prompt.index('4. **审核表达安全**') < prompt.index(
+        '5. **最后看软风格**',
+    )
+    assert prompt.index('5. **最后看软风格**') < prompt.index('# 通过逻辑')
     assert '"should_stop": boolean' in prompt
     assert 'should_stop=false` 表示必须把 `feedback` 交回生成器重试' in prompt
 
@@ -314,17 +400,15 @@ def test_dialog_evaluator_prompt_rejects_guess_owner_flip() -> None:
 
     prompt = _DIALOG_EVALUATOR_PROMPT
     assert '指代与动作所有权' in prompt
-    assert '指代基准' in prompt
-    assert '硬失败速查' in prompt
-    assert '默认猜测动作属于被回应者' in prompt
+    assert '审核对象' in prompt
+    assert '先确认猜测动作和偏好所有者是谁' in prompt
     assert '我/我的/自己' in prompt
     assert '你/对方/你们' in prompt
-    assert '猜测对象' in prompt
+    assert '猜测动作' in prompt
     assert '当前角色' in prompt
     assert '偏好' in prompt
-    assert '我会想看' in prompt
     assert '我想看' in prompt
-    assert '必须驳回' in prompt
+    assert '台词不得改成猜当前角色想看' in prompt
 
 
 def test_dialog_generator_prompt_has_no_decision_ownership() -> None:
@@ -359,7 +443,8 @@ def test_dialog_prompts_use_content_anchors_as_semantic_authority() -> None:
     assert '身体词边界' in _DIALOG_EVALUATOR_PROMPT
     assert '不得包含心跳、心脏、脸红' in _DIALOG_EVALUATOR_PROMPT
     assert '只有同时满足以下条件才返回 `should_stop=true`' in _DIALOG_EVALUATOR_PROMPT
-    assert '没有把另一个对象、提议、请求、问题或偏好所有者当作核心话题' in (
+    assert '话题一致' in _DIALOG_EVALUATOR_PROMPT
+    assert '核心对象、提议、请求、问题必须来自 `content_anchors`' in (
         _DIALOG_EVALUATOR_PROMPT
     )
     assert '`retry` 只是输入里的计数字段' in _DIALOG_EVALUATOR_PROMPT

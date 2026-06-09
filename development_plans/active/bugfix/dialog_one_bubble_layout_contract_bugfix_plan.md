@@ -5,7 +5,7 @@
 - Goal: align the dialog prompt contract with the actual one-bubble delivery
   path while preserving technical and code-block formatting.
 - Plan class: large
-- Status: draft
+- Status: in_progress
 - Mandatory skills: `development-plan`, `local-llm-architecture`,
   `py-style`, `cjk-safety`, `test-style-and-execution`, `debug-llm`
 - Overall cutover strategy: bigbang prompt wording replacement with the
@@ -17,8 +17,9 @@
 - Acceptance criteria: prompt-only production diff, deterministic prompt
   contract tests pass, and at least five one-at-a-time real LLM dialog tests
   produce inspected traces that satisfy the one-bubble layout contract.
-- Current execution state: draft only; this plan does not authorize production
-  prompt edits until the user explicitly approves implementation.
+- Current execution state: user authorized execution on 2026-06-10; plan
+  review changes were committed on `main` as `b4ac91b`, and development is
+  running on branch `bugfix/dialog-one-bubble-layout-contract`.
 
 ## Context
 
@@ -467,7 +468,7 @@ wording and focused live evidence, not new runtime machinery.
 
 10. Run one baseline live LLM case before prompt edits.
     - Command:
-      `venv\Scripts\python.exe -m pytest tests\test_dialog_one_bubble_layout_live_llm.py::test_live_dialog_one_bubble_python_code_block_preserved -q -s`
+      `venv\Scripts\python.exe -m pytest tests\test_dialog_one_bubble_layout_live_llm.py::test_live_dialog_one_bubble_python_code_block_preserved -m live_llm -q -s`
     - Expected before implementation: the case records current behavior and
       can fail structurally or qualitatively if the old prompt mishandles code
       fences or fragment semantics.
@@ -529,35 +530,35 @@ wording and focused live evidence, not new runtime machinery.
 
 18. Run real LLM case 1 and inspect trace.
     - Command:
-      `venv\Scripts\python.exe -m pytest tests\test_dialog_one_bubble_layout_live_llm.py::test_live_dialog_one_bubble_group_casual_reply -q -s`
+      `venv\Scripts\python.exe -m pytest tests\test_dialog_one_bubble_layout_live_llm.py::test_live_dialog_one_bubble_group_casual_reply -m live_llm -q -s`
     - Expected: structural assertions pass and manual inspection accepts the
       one-bubble group layout.
     - Evidence: record trace path and judgment.
 
 19. Run real LLM case 2 and inspect trace.
     - Command:
-      `venv\Scripts\python.exe -m pytest tests\test_dialog_one_bubble_layout_live_llm.py::test_live_dialog_one_bubble_private_soft_reply -q -s`
+      `venv\Scripts\python.exe -m pytest tests\test_dialog_one_bubble_layout_live_llm.py::test_live_dialog_one_bubble_private_soft_reply -m live_llm -q -s`
     - Expected: structural assertions pass and manual inspection accepts the
       private-chat layout.
     - Evidence: record trace path and judgment.
 
 20. Run real LLM case 3 and inspect trace.
     - Command:
-      `venv\Scripts\python.exe -m pytest tests\test_dialog_one_bubble_layout_live_llm.py::test_live_dialog_one_bubble_group_technical_comparison -q -s`
+      `venv\Scripts\python.exe -m pytest tests\test_dialog_one_bubble_layout_live_llm.py::test_live_dialog_one_bubble_group_technical_comparison -m live_llm -q -s`
     - Expected: structural assertions pass, required GPU facts appear, and
       manual inspection accepts semantic grouping without a line budget.
     - Evidence: record trace path and judgment.
 
 21. Run real LLM case 4 and inspect trace.
     - Command:
-      `venv\Scripts\python.exe -m pytest tests\test_dialog_one_bubble_layout_live_llm.py::test_live_dialog_one_bubble_python_code_block_preserved -q -s`
+      `venv\Scripts\python.exe -m pytest tests\test_dialog_one_bubble_layout_live_llm.py::test_live_dialog_one_bubble_python_code_block_preserved -m live_llm -q -s`
     - Expected: structural assertions pass, fenced Python formatting is
       preserved, and manual inspection finds no character voice inside code.
     - Evidence: record trace path and judgment.
 
 22. Run real LLM case 5 and inspect trace.
     - Command:
-      `venv\Scripts\python.exe -m pytest tests\test_dialog_one_bubble_layout_live_llm.py::test_live_dialog_one_bubble_json_example_preserved -q -s`
+      `venv\Scripts\python.exe -m pytest tests\test_dialog_one_bubble_layout_live_llm.py::test_live_dialog_one_bubble_json_example_preserved -m live_llm -q -s`
     - Expected: structural assertions pass, the JSON example has nine visible
       rows, and manual inspection finds no character voice inside JSON.
     - Evidence: record trace path and judgment.
@@ -600,39 +601,43 @@ prompt edits unless the user explicitly approves fallback execution.
 
 ## Progress Checklist
 
-- [ ] Stage 1 - deterministic prompt contract established
+- [x] Stage 1 - deterministic prompt contract established
   - Covers: implementation steps 1-3.
   - Files: `tests/test_dialog_agent.py`.
   - Verify: focused deterministic tests fail before prompt implementation.
   - Evidence: record failing assertion summary in `Execution Evidence`.
   - Handoff: next agent starts at Stage 2.
-  - Sign-off: `<agent/date>` after evidence is recorded.
+  - Sign-off: `parent/2026-06-10` after syntax check and red deterministic
+    prompt-test evidence were recorded.
 
-- [ ] Stage 2 - live LLM scenarios added and baseline recorded
+- [x] Stage 2 - live LLM scenarios added and baseline recorded
   - Covers: implementation steps 4-10.
   - Files: `tests/test_dialog_one_bubble_layout_live_llm.py`.
   - Verify: one baseline live case runs with a durable trace.
   - Evidence: record trace path and manual judgment.
   - Handoff: next agent starts at Stage 3.
-  - Sign-off: `<agent/date>` after evidence is recorded.
+  - Sign-off: `parent/2026-06-10` after baseline live trace and manual
+    judgment were recorded.
 
-- [ ] Stage 3 - prompt-only implementation complete
+- [x] Stage 3 - prompt-only implementation complete
   - Covers: implementation steps 11-14.
   - Files: `src/kazusa_ai_chatbot/nodes/dialog_agent.py`.
   - Verify: CJK syntax verification passes.
   - Evidence: record changed prompt sections and syntax-check output.
   - Handoff: next agent starts at Stage 4.
-  - Sign-off: `<agent/date>` after evidence is recorded.
+  - Sign-off: `parent/2026-06-10` after production-worker handoff, parent
+    follow-up prompt hardening, and syntax verification were recorded.
 
-- [ ] Stage 4 - deterministic verification complete
+- [x] Stage 4 - deterministic verification complete
   - Covers: implementation steps 15-17.
   - Files: `tests/test_dialog_agent.py`.
   - Verify: focused prompt tests and full dialog-agent deterministic tests pass.
   - Evidence: record command outputs.
   - Handoff: next agent starts at Stage 5.
-  - Sign-off: `<agent/date>` after evidence is recorded.
+  - Sign-off: `parent/2026-06-10` after focused prompt and full dialog-agent
+    deterministic tests passed.
 
-- [ ] Stage 5 - real LLM verification complete
+- [x] Stage 5 - real LLM verification complete
   - Covers: implementation steps 18-22.
   - Files: `tests/test_dialog_one_bubble_layout_live_llm.py`,
     `test_artifacts/llm_traces/*`.
@@ -640,7 +645,8 @@ prompt edits unless the user explicitly approves fallback execution.
     manually inspected.
   - Evidence: record trace paths and pass/fail judgment for every case.
   - Handoff: next agent starts at Stage 6.
-  - Sign-off: `<agent/date>` after evidence is recorded.
+  - Sign-off: `parent/2026-06-10` after all five live LLM cases passed and
+    latest traces were manually inspected.
 
 - [ ] Stage 6 - review and lifecycle sign-off complete
   - Covers: implementation steps 23-25.
@@ -649,7 +655,7 @@ prompt edits unless the user explicitly approves fallback execution.
   - Evidence: record review result, remediation, residual risk, and final
     user sign-off.
   - Handoff: none.
-  - Sign-off: `<agent/date>` after evidence is recorded.
+  - Sign-off: pending user acceptance of the final verification evidence.
 
 ## Verification
 
@@ -675,11 +681,11 @@ venv\Scripts\python.exe -m pytest tests\test_dialog_agent.py -q
 Real LLM tests must run one at a time:
 
 ```powershell
-venv\Scripts\python.exe -m pytest tests\test_dialog_one_bubble_layout_live_llm.py::test_live_dialog_one_bubble_group_casual_reply -q -s
-venv\Scripts\python.exe -m pytest tests\test_dialog_one_bubble_layout_live_llm.py::test_live_dialog_one_bubble_private_soft_reply -q -s
-venv\Scripts\python.exe -m pytest tests\test_dialog_one_bubble_layout_live_llm.py::test_live_dialog_one_bubble_group_technical_comparison -q -s
-venv\Scripts\python.exe -m pytest tests\test_dialog_one_bubble_layout_live_llm.py::test_live_dialog_one_bubble_python_code_block_preserved -q -s
-venv\Scripts\python.exe -m pytest tests\test_dialog_one_bubble_layout_live_llm.py::test_live_dialog_one_bubble_json_example_preserved -q -s
+venv\Scripts\python.exe -m pytest tests\test_dialog_one_bubble_layout_live_llm.py::test_live_dialog_one_bubble_group_casual_reply -m live_llm -q -s
+venv\Scripts\python.exe -m pytest tests\test_dialog_one_bubble_layout_live_llm.py::test_live_dialog_one_bubble_private_soft_reply -m live_llm -q -s
+venv\Scripts\python.exe -m pytest tests\test_dialog_one_bubble_layout_live_llm.py::test_live_dialog_one_bubble_group_technical_comparison -m live_llm -q -s
+venv\Scripts\python.exe -m pytest tests\test_dialog_one_bubble_layout_live_llm.py::test_live_dialog_one_bubble_python_code_block_preserved -m live_llm -q -s
+venv\Scripts\python.exe -m pytest tests\test_dialog_one_bubble_layout_live_llm.py::test_live_dialog_one_bubble_json_example_preserved -m live_llm -q -s
 ```
 
 Every real LLM trace must be inspected before the next command runs. A passing
@@ -751,5 +757,35 @@ completion.
 
 ## Execution Evidence
 
-Record execution evidence here after implementation starts. Do not pre-fill
-evidence during draft planning.
+- 2026-06-10 setup: user authorized execution with one production-code
+  subagent and one independent review subagent. Parent committed
+  `b4ac91b docs: tighten dialog one-bubble plan` on `main`, then created
+  `bugfix/dialog-one-bubble-layout-contract`.
+- Stage 1: parent added deterministic prompt-contract tests and the five-case
+  live LLM test file. Syntax check passed. Focused prompt tests failed red
+  before implementation for missing one-bubble, fixed-format, and evaluator
+  layout wording.
+- Stage 2: baseline Python code-block live case passed with
+  `-m live_llm`; trace:
+  `test_artifacts/llm_traces/dialog_one_bubble_layout_live_llm__python_code_block_preserved.json`.
+- Stage 3: final implementation remained prompt-only in
+  `_DIALOG_GENERATOR_PROMPT` and `_DIALOG_EVALUATOR_PROMPT`. Parent rewrote the
+  generator and evaluator flow as ordered LLM procedures, then added schema-near
+  checks for non-empty layout units, plain-line technical comparisons, and
+  fixed-format block preservation.
+- Stage 4: syntax and render checks passed, and
+  `venv\Scripts\python.exe -m pytest tests\test_dialog_agent.py -q` passed
+  with `26 passed`.
+- Stage 5: all five live LLM cases passed one at a time after trace
+  inspection. Final traces:
+  `group_casual_reply__20260609T211100470290Z`,
+  `private_soft_reply__20260609T211118138470Z`,
+  `group_technical_comparison__20260609T211136874686Z`,
+  `python_code_block_preserved__20260609T211154874283Z`,
+  `json_example_preserved__20260609T211213938090Z`.
+- Stage 6 review: parent review found and fixed two surfaced issues after the
+  prompt-flow rewrite: synonym brittleness in the casual live test and Markdown
+  table leakage in the technical comparison path. Final traces show evaluator
+  pass, non-empty visible fragments, preserved fixed-format blocks, and no table
+  rows in the technical comparison case. Lifecycle status remains
+  `in_progress` pending user acceptance of this evidence.
