@@ -749,13 +749,13 @@ Tests:
   - Handoff: next agent starts at Stage 2.
   - Sign-off: `parent/2026-06-10` after evidence is recorded.
 
-- [ ] Stage 2 - live LLM scaffolding and baseline recorded
+- [x] Stage 2 - live LLM scaffolding and baseline recorded
   - Covers: implementation steps 5-13.
   - Files: `tests/test_l3_dialog_content_plan_live_llm.py`.
   - Verify: one baseline live case writes a trace.
   - Evidence: record trace path and manual judgment.
   - Handoff: next agent starts at Stage 3.
-  - Sign-off: `<agent/date>` after evidence is recorded.
+  - Sign-off: `parent/2026-06-10` after evidence is recorded.
 
 - [ ] Stage 3 - production cutover complete
   - Covers: implementation steps 14-17.
@@ -974,3 +974,20 @@ Stage 1 - focused contract tests established:
   calls `_content_anchors_with_goal_progress`, and dialog prompts still use
   old anchor terminology.
 - Residual risk: none for Stage 1; failures match the approved cutover target.
+
+Stage 2 - live LLM scaffolding and baseline recorded:
+
+- Added `tests/test_l3_dialog_content_plan_live_llm.py` with seven real LLM
+  cases A-G and durable trace writing.
+- Baseline command:
+  `venv\Scripts\python.exe -m pytest tests\test_l3_dialog_content_plan_live_llm.py::test_live_dialog_content_plan_casual_golden -m live_llm -q -s`
+- Baseline result before production implementation: passed structurally and
+  wrote trace.
+- Trace:
+  `test_artifacts\llm_traces\l3_dialog_content_plan_live_llm__live_dialog_content_plan_casual_golden.json`
+- Observed output:
+  `哎呀，你今天怎么突然这么有精神嘛……`
+  / `不过这种相处方式确实挺让人舒服的。`
+- Manual judgment: the one-bubble structure and JSON contract were valid, but
+  the first sentence invented unsupported content (`今天怎么突然这么有精神`) absent
+  from `semantic_content`; this confirms the prompt rewrite target.
