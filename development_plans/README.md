@@ -50,6 +50,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [l3_dialog_content_plan_contract_bugfix_plan.md](active/bugfix/l3_dialog_content_plan_contract_bugfix_plan.md) | High-risk L3/dialog content-plan contract migration | in_progress |
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
 
 ## Reference Documents
