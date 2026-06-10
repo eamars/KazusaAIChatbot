@@ -739,7 +739,7 @@ Tests:
 
 ## Progress Checklist
 
-- [ ] Stage 1 - focused contract tests established
+- [x] Stage 1 - focused contract tests established
   - Covers: implementation steps 1-4.
   - Files: `tests/test_l3_dialog_content_plan_contract.py` plus updated
     prompt-text tests.
@@ -747,7 +747,7 @@ Tests:
     `content_plan` contract.
   - Evidence: record failing assertion summary in `Execution Evidence`.
   - Handoff: next agent starts at Stage 2.
-  - Sign-off: `<agent/date>` after evidence is recorded.
+  - Sign-off: `parent/2026-06-10` after evidence is recorded.
 
 - [ ] Stage 2 - live LLM scaffolding and baseline recorded
   - Covers: implementation steps 5-13.
@@ -960,3 +960,17 @@ Pre-execution status:
 During approved execution, record each checklist sign-off here with command
 outputs, trace paths, review findings, fixes, reruns, residual risks, and user
 sign-off.
+
+Stage 1 - focused contract tests established:
+
+- Added `tests/test_l3_dialog_content_plan_contract.py`.
+- Command:
+  `venv\Scripts\python.exe -m pytest tests\test_l3_dialog_content_plan_contract.py -q`
+- Baseline result before production implementation: expected failure,
+  6 failed.
+- Failure summary: dialog validation does not require `content_plan`, old
+  `content_anchors` is still accepted, content-plan normalization is missing,
+  `call_content_plan_agent` / `_content_plan_agent_llm` do not exist, L4 still
+  calls `_content_anchors_with_goal_progress`, and dialog prompts still use
+  old anchor terminology.
+- Residual risk: none for Stage 1; failures match the approved cutover target.
