@@ -13,7 +13,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2 import (
     call_judgment_core_agent,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (
-    call_content_anchor_agent,
+    call_content_plan_agent,
 )
 from tests.llm_trace import write_llm_trace
 
@@ -114,10 +114,10 @@ async def test_live_judgment_core_prefers_referents(
 
 
 @pytest.mark.asyncio
-async def test_live_content_anchor_clarifies_live_failure_input(
+async def test_live_CONTENT_PLAN_clarifies_live_failure_input(
     ensure_live_llm: None,
 ) -> None:
-    """Content Anchor should ask what the unresolved demonstrative means."""
+    """Content Plan should ask what the unresolved demonstrative means."""
 
     del ensure_live_llm
     state = {
@@ -147,41 +147,38 @@ async def test_live_content_anchor_clarifies_live_failure_input(
     }
 
     started_at = perf_counter()
-    result = await call_content_anchor_agent(state)
+    result = await call_content_plan_agent(state)
     duration_seconds = perf_counter() - started_at
-    anchors = result["content_anchors"]
+    content_plan = result["content_plan"]
+    plan_text = "\n".join(content_plan.values())
     trace_path = write_llm_trace(
         "cognition_referents_live",
-        "content_anchor_live_failure_input",
+        "CONTENT_PLAN_live_failure_input",
         {
             "input": state,
             "output": result,
             "duration_seconds": duration_seconds,
             "judgment": (
-                "E3 Content Anchor must turn unresolved referents into a "
+                "E3 Content Plan must turn unresolved referents into a "
                 "narrow clarification question for the live failure input."
             ),
         },
     )
 
     logger.info(
-        f"live_cognition_referents content_anchor trace={trace_path} "
+        f"live_cognition_referents content_plan trace={trace_path} "
         f"duration_seconds={duration_seconds:.3f} result={result!r}"
     )
-    answer_anchors = [
-        anchor for anchor in anchors if anchor.startswith("[ANSWER]")
-    ]
-    assert answer_anchors
-    assert "这些" in " ".join(answer_anchors)
-    assert all(not anchor.startswith("[FACT]") for anchor in anchors)
+    assert content_plan
+    assert "这些" in plan_text
     assert duration_seconds < 30.0
 
 
 @pytest.mark.asyncio
-async def test_live_content_anchor_keeps_mixed_referent_question_narrow(
+async def test_live_CONTENT_PLAN_keeps_mixed_referent_question_narrow(
     ensure_live_llm: None,
 ) -> None:
-    """Content Anchor should clarify only the unresolved part of mixed referents."""
+    """Content Plan should clarify only the unresolved part of mixed referents."""
 
     del ensure_live_llm
     state = {
@@ -217,33 +214,29 @@ async def test_live_content_anchor_keeps_mixed_referent_question_narrow(
     }
 
     started_at = perf_counter()
-    result = await call_content_anchor_agent(state)
+    result = await call_content_plan_agent(state)
     duration_seconds = perf_counter() - started_at
-    anchors = result["content_anchors"]
+    content_plan = result["content_plan"]
+    plan_text = "\n".join(content_plan.values())
     trace_path = write_llm_trace(
         "cognition_referents_live",
-        "content_anchor_mixed_referents",
+        "CONTENT_PLAN_mixed_referents",
         {
             "input": state,
             "output": result,
             "duration_seconds": duration_seconds,
             "judgment": (
-                "E3 Content Anchor should narrow the clarification to the "
+                "E3 Content Plan should narrow the clarification to the "
                 "unresolved object while preserving resolved context."
             ),
         },
     )
 
     logger.info(
-        f"live_cognition_referents mixed_content_anchor trace={trace_path} "
+        f"live_cognition_referents mixed_CONTENT_PLAN trace={trace_path} "
         f"duration_seconds={duration_seconds:.3f} result={result!r}"
     )
-    answer_anchors = [
-        anchor for anchor in anchors if anchor.startswith("[ANSWER]")
-    ]
-    answer_text = " ".join(answer_anchors)
-    assert answer_anchors
-    assert "话" in answer_text
-    assert "哪" in answer_text or "具体" in answer_text
-    assert all(not anchor.startswith("[FACT]") for anchor in anchors)
+    assert content_plan
+    assert "话" in plan_text
+    assert "哪" in plan_text or "具体" in plan_text
     assert duration_seconds < 30.0

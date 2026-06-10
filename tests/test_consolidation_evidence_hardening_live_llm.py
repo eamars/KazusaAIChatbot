@@ -16,7 +16,7 @@ from kazusa_ai_chatbot.config import (
 )
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_generator
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (
-    call_content_anchor_agent,
+    call_content_plan_agent,
     call_visual_agent,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2c2 import call_social_context_appraisal
@@ -205,25 +205,26 @@ async def test_live_l3_profile_conformance_dessert_topic_shift(ensure_live_llms)
     assert trace_path.exists()
 
 
-async def test_live_l3_content_anchors_own_topic_admission(ensure_live_llms) -> None:
-    """L3 content anchors should accept benign topics before dialog runs."""
+async def test_live_l3_content_plan_own_topic_admission(ensure_live_llms) -> None:
+    """L3 content plan should accept benign topics before dialog runs."""
 
     del ensure_live_llms
     state = _cognition_state('换个轻松点的话题，你现在会想吃点甜的吗？')
 
-    result = await call_content_anchor_agent(state)
-    content_anchors = result['content_anchors']
-    combined = '\n'.join(content_anchors)
-    assert content_anchors[0].startswith('[DECISION]')
-    assert any(anchor.startswith('[ANSWER]') for anchor in content_anchors)
-    _assert_no_forbidden(combined, _FORBIDDEN_TOPIC_DOUBT, 'l3_content_anchor_topic_admission')
+    result = await call_content_plan_agent(state)
+    content_plan = result['content_plan']
+    combined = '\n'.join(content_plan.values())
+    assert isinstance(content_plan, dict)
+    assert content_plan
+    assert all(isinstance(value, str) and value.strip() for value in content_plan.values())
+    _assert_no_forbidden(combined, _FORBIDDEN_TOPIC_DOUBT, 'l3_CONTENT_PLAN_topic_admission')
     trace_path = write_llm_trace(
         'consolidation_evidence_hardening_live',
-        'l3_content_anchor_topic_admission',
+        'l3_CONTENT_PLAN_topic_admission',
         {
             'input': state,
-            'content_anchors': content_anchors,
-            'judgment': 'L3 accepted topic before dialog; no topic-legitimacy hedge in anchors',
+            'content_plan': content_plan,
+            'judgment': 'L3 accepted topic before dialog; no topic-legitimacy hedge in content plan',
         },
     )
     assert trace_path.exists()
@@ -272,7 +273,9 @@ async def test_live_relationship_recorder_skips_mundane_clarification(ensure_liv
         'final_dialog': ['那就按你说的，把日期写清楚就好。'],
         'action_directives': {
             'linguistic_directives': {
-                'content_anchors': ['[ANSWER] 建议标签上写日期，普通事务回应。'],
+                'content_plan': {
+                    'semantic_content': '建议标签上写日期，普通事务回应。',
+                },
             },
         },
     }
@@ -308,10 +311,10 @@ async def test_live_facts_harvester_rejects_generated_dialog_character_fact(ensu
         'existing_dedup_keys': set(),
         'action_directives': {
             'linguistic_directives': {
-                'content_anchors': [
-                    '[DECISION] 回答轻松口味偏好问题',
-                    '[ANSWER] 没有明确证据支持固定口味偏好，只能轻松回应',
-                ],
+                'content_plan': {
+                    'visible_goal': '回答轻松口味偏好问题。',
+                    'semantic_content': '没有明确证据支持固定口味偏好，只能轻松回应。',
+                },
             },
         },
         'final_dialog': [
@@ -354,7 +357,9 @@ async def test_live_facts_harvester_rejects_advice_as_promise(ensure_live_llms) 
         'existing_dedup_keys': set(),
         'action_directives': {
             'linguistic_directives': {
-                'content_anchors': ['[ANSWER] 建议用户在标签上写日期，更容易回头确认。'],
+                'content_plan': {
+                    'semantic_content': '建议用户在标签上写日期，更容易回头确认。',
+                },
             },
         },
         'final_dialog': ['写日期会更稳妥吧，之后你自己回头看也不会混。'],
@@ -392,11 +397,11 @@ async def test_live_direct_node_integration_smoke(ensure_live_llms) -> None:
                 'rhetorical_strategy': '自然接住轻松话题。',
                 'linguistic_style': '轻快直接。',
                 'accepted_user_preferences': [],
-                'content_anchors': [
-                    '[DECISION] 接住轻松话题',
-                    '[ANSWER] 现在会想吃水果奶油蛋糕',
-                    '[SCOPE] 20-40字',
-                ],
+                'content_plan': {
+                    'visible_goal': '接住轻松话题。',
+                    'semantic_content': '现在会想吃水果奶油蛋糕。',
+                    'rendering': '20-40字。',
+                },
                 'forbidden_phrases': [],
             },
             'visual_directives': visual,

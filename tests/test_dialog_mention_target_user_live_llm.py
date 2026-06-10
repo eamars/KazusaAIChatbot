@@ -48,7 +48,7 @@ def _dialog_state(*, direct_target: bool) -> dict:
     """Build a real dialog-agent state for mention-decision validation.
 
     Args:
-        direct_target: Whether the content anchors should aim at the current
+        direct_target: Whether the content plan should aim at the current
             user personally.
 
     Returns:
@@ -68,12 +68,15 @@ def _dialog_state(*, direct_target: bool) -> dict:
                 "Casual chat fragments, playful but clear."
             ),
             "accepted_user_preferences": [],
-            "content_anchors": [
-                "[DECISION] Directly nudge the current target user to resume the overdue challenge.",
-                "[FACT] The user promised a harder challenge on 2026-05-07 and it is now overdue.",
-                "[ANSWER] Ask for the challenge in a light teasing way.",
-                "[SCOPE] 1-2 short chat fragments; direct to the current target user.",
-            ],
+            "content_plan": {
+                "visible_goal": "Directly nudge the current target user to resume the overdue challenge.",
+                "semantic_content": (
+                    "The user promised a harder challenge on 2026-05-07 and "
+                    "it is now overdue; ask for the challenge in a light "
+                    "teasing way."
+                ),
+                "rendering": "1-2 short chat fragments; direct to the current target user.",
+            },
             "forbidden_phrases": [],
         }
         contextual_directives = {
@@ -95,12 +98,12 @@ def _dialog_state(*, direct_target: bool) -> dict:
                 "Casual chat fragments, lightly amused."
             ),
             "accepted_user_preferences": [],
-            "content_anchors": [
-                "[DECISION] Make a general comment about the current chat mood.",
-                "[FACT] The group has been talking about AI character tropes.",
-                "[SOCIAL] Do not address or challenge one specific user.",
-                "[SCOPE] 1 short chat fragment; broadcast-like, not personally aimed.",
-            ],
+            "content_plan": {
+                "visible_goal": "Make a general comment about the current chat mood.",
+                "semantic_content": "The group has been talking about AI character tropes.",
+                "voice": "Do not address or challenge one specific user.",
+                "rendering": "1 short chat fragment; broadcast-like, not personally aimed.",
+            },
             "forbidden_phrases": [],
         }
         contextual_directives = {
@@ -162,9 +165,9 @@ def _record_trace(case_id: str, input_state: dict, result: dict, judgment: str) 
         "dialog_mention_target_user_live_llm",
         case_id,
         {
-            "content_anchors": input_state["action_directives"][
+            "content_plan": input_state["action_directives"][
                 "linguistic_directives"
-            ]["content_anchors"],
+            ]["content_plan"],
             "result": result,
             "judgment": judgment,
         },

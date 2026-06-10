@@ -118,7 +118,7 @@ def _consolidation_state() -> dict:
         "user_name": "Test User",
         "user_profile": {"global_user_id": "global-user-1", "affinity": 500},
         "character_profile": {"name": "Character"},
-        "action_directives": {"linguistic_directives": {"content_anchors": []}},
+        "action_directives": {"linguistic_directives": {"content_plan": {}}},
         "internal_monologue": "test",
         "final_dialog": ["ok"],
         "interaction_subtext": "",
@@ -814,7 +814,7 @@ async def test_post_turn_lifecycle_iterates_after_productive_passes() -> None:
                 "lifecycle_decisions": [
                     {"target_alias": "commitment_1", "decision": "fulfilled"}
                 ],
-                "content_anchor_roles": [],
+                "content_plan_roles": [],
                 "visible_alias_count": 1,
                 "omitted_alias_count": 0,
                 "warnings": [],

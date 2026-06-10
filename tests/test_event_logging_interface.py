@@ -300,7 +300,7 @@ async def test_dialog_quality_event_persists_usage_mode(monkeypatch) -> None:
         evaluator_status="passed",
         retry_count=1,
         failure_codes=[],
-        anchor_count=3,
+        content_plan_entry_count=3,
         status="succeeded",
     )
 
@@ -308,6 +308,7 @@ async def test_dialog_quality_event_persists_usage_mode(monkeypatch) -> None:
     payload = captured["payload"]
     assert isinstance(payload, dict)
     assert payload["usage_mode"] == "self_cognition_private_finalization"
+    assert payload["content_plan_entry_count"] == 3
 
 
 @pytest.mark.asyncio

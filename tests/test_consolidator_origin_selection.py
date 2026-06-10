@@ -74,7 +74,7 @@ def _self_cognition_global_state() -> dict:
         "channel_type": "private",
         "platform_message_id": "self_cognition:case-1",
         "action_directives": {
-            "linguistic_directives": {"content_anchors": []},
+            "linguistic_directives": {"content_plan": {}},
         },
         "internal_monologue": "The missed promise still feels unresolved.",
         "final_dialog": ["Private finalization for consolidation only."],

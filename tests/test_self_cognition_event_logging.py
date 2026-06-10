@@ -75,7 +75,7 @@ def _action_cognition_output() -> dict[str, Any]:
                 "rhetorical_strategy": "answer the scheduled follow-up",
                 "linguistic_style": "brief",
                 "accepted_user_preferences": [],
-                "content_anchors": ["[ANSWER] Checking in now."],
+                "content_plan": {"semantic_content": "Checking in now."},
                 "forbidden_phrases": [],
             },
         },

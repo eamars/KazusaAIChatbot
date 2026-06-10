@@ -6,7 +6,7 @@
   native `content_plan: dict[str, str]` contract so dialog renders one resolved
   semantic plan instead of translating every anchor label into visible text.
 - Plan class: high_risk_migration
-- Status: in_progress
+- Status: completed
 - Mandatory skills: `development-plan`, `local-llm-architecture`, `py-style`,
   `cjk-safety`, `test-style-and-execution`, `debug-llm`
 - Overall cutover strategy: bigbang for runtime prompt/state/test contracts;
@@ -757,39 +757,39 @@ Tests:
   - Handoff: next agent starts at Stage 3.
   - Sign-off: `parent/2026-06-10` after evidence is recorded.
 
-- [ ] Stage 3 - production cutover complete
+- [x] Stage 3 - production cutover complete
   - Covers: implementation steps 14-17.
   - Files: primary runtime source files in `Change Surface`.
   - Verify: syntax and prompt-render checks pass.
   - Evidence: record production subagent summary, changed files, and command
     output.
   - Handoff: next agent starts at Stage 4.
-  - Sign-off: `<agent/date>` after evidence is recorded.
+  - Sign-off: `parent/2026-06-10` after evidence is recorded.
 
-- [ ] Stage 4 - deterministic and static verification complete
+- [x] Stage 4 - deterministic and static verification complete
   - Covers: implementation steps 18-20.
   - Files: source, docs, and affected tests.
   - Verify: focused tests, affected regression clusters, and static greps pass.
   - Evidence: record commands and results.
   - Handoff: next agent starts at Stage 5.
-  - Sign-off: `<agent/date>` after evidence is recorded.
+  - Sign-off: `parent/2026-06-10` after evidence is recorded.
 
-- [ ] Stage 5 - real LLM validation complete
+- [x] Stage 5 - real LLM validation complete
   - Covers: implementation step 21.
   - Files: live LLM trace outputs and review artifact.
   - Verify: cases A-G run one at a time and raw traces are inspected.
   - Evidence: record trace paths, quality notes, and review artifact path.
   - Handoff: next agent starts at Stage 6.
-  - Sign-off: `<agent/date>` after evidence is recorded.
+  - Sign-off: `parent/2026-06-10` after evidence is recorded.
 
-- [ ] Stage 6 - independent code review and lifecycle sign-off complete
+- [x] Stage 6 - independent code review and lifecycle sign-off complete
   - Covers: implementation steps 22-25.
   - Verify: independent review reports no unresolved blocking findings, or
     findings are remediated and affected checks rerun.
   - Evidence: record review summary, fixes, reruns, residual risks, and user
     sign-off.
   - Handoff: none.
-  - Sign-off: `<agent/date>` after evidence is recorded.
+  - Sign-off: `parent/2026-06-10` after evidence is recorded.
 
 ## Verification
 
@@ -991,3 +991,109 @@ Stage 2 - live LLM scaffolding and baseline recorded:
 - Manual judgment: the one-bubble structure and JSON contract were valid, but
   the first sentence invented unsupported content (`今天怎么突然这么有精神`) absent
   from `semantic_content`; this confirms the prompt rewrite target.
+
+Stage 3 - production cutover complete:
+
+- Production cutover replaced the runtime L3/dialog handoff with native
+  `content_plan: dict[str, str]` and removed the deterministic post-L3
+  anchor append path.
+- Changed runtime source includes L3 content-plan generation and collection,
+  dialog validation/generation/evaluation, conversation progress,
+  consolidation, self-cognition tracking, memory lifecycle, event logging,
+  docs, and the stale utility sample.
+- Resolver goal progress and resolver observations now enter the L3
+  content-plan input instead of being appended as old `[ANSWER]` or `[SCOPE]`
+  anchors after L3.
+- Syntax and prompt-render checks:
+  `venv\Scripts\python.exe -m py_compile ...` for changed runtime/test Python
+  files passed.
+- Prompt render checks passed for `_STYLE_AGENT_PROMPT`,
+  `_CONTENT_PLAN_AGENT_PROMPT`, `_PREFERENCE_ADAPTER_PROMPT`, and
+  `_VISUAL_AGENT_PROMPT`.
+- Parent review finding during Stage 6: touched L3 prompt constants for style,
+  preference, and visual stages still used triple-double prompt delimiters.
+  Fixed by switching only those prompt constants to triple-single delimiters;
+  reran `py_compile`, prompt-render checks, focused tests, and prompt
+  fingerprint tests.
+
+Stage 4 - deterministic and static verification complete:
+
+- Focused deterministic suite:
+  `venv\Scripts\python.exe -m pytest tests\test_l3_dialog_content_plan_contract.py tests\test_dialog_agent.py tests\test_l2d_l3_surface_handoff.py -q`
+  -> 51 passed.
+- Conversation/progress/consolidation/memory/self-cognition/event cluster:
+  `venv\Scripts\python.exe -m pytest tests\test_conversation_progress_cognition.py tests\test_conversation_progress_runtime.py tests\test_conversation_progress_recorder.py tests\test_consolidator_facts_rag2.py tests\test_consolidator_reflection_prompts.py tests\test_consolidator_source_aware_payloads.py tests\test_memory_lifecycle_specialist.py tests\test_self_cognition_tracking.py tests\test_rag_dialog_event_logging.py tests\test_event_logging_interface.py -q`
+  -> 103 passed.
+- Multi-source prompt-selection/dry-run cluster:
+  `venv\Scripts\python.exe -m pytest tests\test_multi_source_cognition_stage_03_prompt_selection.py tests\test_multi_source_cognition_stage_07_reflection_dry_run.py tests\test_multi_source_cognition_stage_08_internal_thought_dry_run.py -q`
+  -> 89 passed.
+- Broad affected regression group:
+  `venv\Scripts\python.exe -m pytest tests\test_consolidation_origin_metadata.py tests\test_consolidator_efficiency.py tests\test_consolidator_origin_policy_db_writer.py tests\test_consolidator_origin_selection.py tests\test_llm_time_payload_projection.py tests\test_dialog_mention_target_user.py tests\test_persona_supervisor2.py tests\test_cognition_prompt_contract_text.py tests\test_multi_source_cognition_stage_09_multimodal_input_sources.py tests\test_service_background_consolidation.py tests\test_conversation_progress_history_policy.py tests\test_self_cognition_event_logging.py tests\test_self_cognition_integration.py tests\test_multi_source_cognition_stage_00_regression_baseline.py -q`
+  -> 180 passed.
+- Static greps:
+  `rg -n "content_anchors|content_anchor" src\kazusa_ai_chatbot` -> no matches.
+  `rg -n "anchor_count" src\kazusa_ai_chatbot` -> no matches.
+  `rg -n "content_anchors|content_anchor|anchor_count" tests` -> only
+  negative old-shape assertions in
+  `tests\test_l3_dialog_content_plan_contract.py`.
+  `rg -n '["'']content_plan["'']\s*:\s*\[' tests` -> no matches.
+- Diff hygiene:
+  `git diff --check` passed; only expected line-ending warnings were emitted.
+
+Stage 5 - real LLM validation complete:
+
+- Real LLM tests A-G were run individually with `-m live_llm -q -s` and raw
+  traces were inspected before sign-off.
+- Latest inspected traces:
+  - A:
+    `test_artifacts\llm_traces\l3_dialog_content_plan_live_llm__l3_content_plan_casual_overloaded_source__20260610T032456188029Z.json`
+  - B:
+    `test_artifacts\llm_traces\l3_dialog_content_plan_live_llm__l3_content_plan_technical_comparison.json`
+  - C:
+    `test_artifacts\llm_traces\l3_dialog_content_plan_live_llm__l3_content_plan_code_block_source.json`
+  - D:
+    `test_artifacts\llm_traces\l3_dialog_content_plan_live_llm__live_dialog_content_plan_casual_golden__20260610T034308374121Z.json`
+  - E:
+    `test_artifacts\llm_traces\l3_dialog_content_plan_live_llm__live_dialog_content_plan_technical_golden__20260610T033347618622Z.json`
+  - F:
+    `test_artifacts\llm_traces\l3_dialog_content_plan_live_llm__live_dialog_content_plan_code_block_golden.json`
+  - G:
+    `test_artifacts\llm_traces\l3_dialog_content_plan_live_llm__live_dialog_content_plan_private_soft_reply.json`
+- Agent-authored review artifact:
+  `test_artifacts\llm_reviews\l3_dialog_content_plan_contract_20260610T0343Z.md`.
+- Manual quality judgment: A, D did not invent generic continuation or
+  Agent-topic content; B, E preserved provided technical numbers and did not
+  retain unsupported comparison drift after evaluator retry; C, F preserved
+  fenced code blocks; G used warmer private tone without adding promises or
+  tasks.
+- Residual risk: technical dialog generator can still emit an empty fragment in
+  raw JSON; deterministic normalization drops it before evaluator approval and
+  visible output is unaffected. This remains a formatting tendency to monitor.
+
+Stage 6 - independent code review and lifecycle sign-off complete:
+
+- User explicitly changed execution mode after compaction: no further
+  subagents; parent must own unit tests, real LLM tests, independent review,
+  fixes, and final sign-off. This is the approved fallback execution path for
+  the plan's independent review gate.
+- Parent-only independent review inspected the approved plan, runtime/test/doc
+  diff, verification results, static greps, live traces, and review artifact.
+- Review checks:
+  - no runtime `content_anchors`, `content_anchor`, `anchor_count`, or
+    `l3_content_anchor_agent` references remain;
+  - no old bracket-label dependency vocabulary remains in L3/dialog runtime
+    prompts;
+  - no code-side hard enumeration or hard read of `visible_goal`,
+    `semantic_content`, `voice`, or `rendering` is used for validation;
+  - no compatibility shim, alias, parser, converter, dual read, new LLM call,
+    adapter change, or delivery schema change was introduced;
+  - changed prompt flows are coherent stage procedures rather than migration
+    notes or isolated appended warning blocks;
+  - review artifact was authored from raw trace evidence, not generated by a
+    script.
+- Review finding fixed: touched L3 prompt constants for style, preference, and
+  visual agents used triple-double prompt delimiters. Changed only the prompt
+  delimiters to triple-single, then reran syntax, render, focused deterministic
+  suite, and prompt fingerprint checks.
+- No unresolved blocking findings remain. Parent lifecycle sign-off recorded
+  on 2026-06-10.

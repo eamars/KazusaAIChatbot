@@ -18,7 +18,7 @@ from kazusa_ai_chatbot.consolidation.origin import (
 )
 from kazusa_ai_chatbot.consolidation.schema import (
     ConsolidatorState,
-    content_anchors_from_action_directives,
+    content_plan_from_action_directives,
 )
 from kazusa_ai_chatbot.rag.prompt_projection import project_tool_result_for_llm
 from kazusa_ai_chatbot.utils import get_llm, log_list_preview, log_preview, parse_llm_json_output
@@ -170,16 +170,16 @@ _FACTS_HARVESTER_PROMPT = '''\
 - `consolidation_origin.trigger_source` 指明本轮 consolidation 的来源。
 - 当 trigger_source 是 `user_message` 时，`decontexualized_input` 是 `user_name` 指向的用户本轮真正表达的内容。
 - 当 trigger_source 是 `internal_thought` 时，`decontexualized_input` 是角色内部触发文本，概括当前认知焦点与证据，不是用户原话。
-- `content_anchors` 表示 `{character_name}` 生成回复前的草案意图，只能作为候选计划，不能单独证明承诺已经成立。
+- `content_plan` 表示 `{character_name}` 生成回复前的内容计划，只能作为候选计划，不能单独证明承诺已经成立。
 - `final_dialog` 是 `{character_name}` 本轮最终输出；`user_message` 时是可见回复，`internal_thought` 时是私有 finalization，是判断接受、拒绝、保留选择权或形成承诺的最高优先级证据。
 - `episode_trace_projection` 是动作和表面输出的安全摘要；它只能帮助判断本轮实际选择、执行或跳过了哪些动作，不能替代用户事实来源。
 - 如果 `episode_trace_projection.action_results` 显示 `background_artifact_request` 已经进入 `pending`，或 evidence owner 是 `background_artifact_job`，说明稍后交付由后台 artifact job 拥有；不要为同一件后台产物再生成 `future_promises`。它可以作为动作审计证据，但不是 consolidator 需要复制的一条承诺。
-- 当 `final_dialog`、`content_anchors`、`decontexualized_input` 冲突时，承诺判断优先级为 `final_dialog` > `content_anchors` > `decontexualized_input`。
+- 当 `final_dialog`、`content_plan`、`decontexualized_input` 冲突时，承诺判断优先级为 `final_dialog` > `content_plan` > `decontexualized_input`。
 
 # 来源权威性
 - 强事实来源：`user_message` 来源中用户在 `decontexualized_input` 明确陈述的自身事实；`rag_result.memory_evidence`、`conversation_evidence`、`external_evidence` 中已有或检索出的事实。`internal_thought` 来源中的 `decontexualized_input` 不是用户事实来源，只能说明当前内部关注点。
 - 回忆证据来源：`rag_result.recall_evidence` 可以证明当前约定、承诺、计划或进度的来源。若 `primary_source` 是 `conversation_progress` 且没有 `user_memory_units`、`conversation_history` 或本轮用户明确事实支持，它只能作为回合操作证据，不能单独授权写入 `{character_name}` 的稳定事实。
-- 回合局部支持：`final_dialog` 与 `content_anchors` 可说明本轮角色说了什么、准备怎么回应，但不能单独制造角色的长期偏好、角色设定或角色 lore。
+- 回合局部支持：`final_dialog` 与 `content_plan` 可说明本轮角色说了什么、准备怎么回应，但不能单独制造角色的长期偏好、角色设定或角色 lore。
 - 弱/非事实来源：内部独白、情绪评估、互动潜台词不是客观事实来源；即使上游出现，也只能作为主观体感。
 - 生成回复自污染禁止：如果某个候选事实只来自角色本轮即兴回复，而没有用户明确陈述或 `rag_result` 中的检索证据支持，不得写成 `{character_name}` 的稳定偏好、习惯、设定或事实。
 
@@ -197,7 +197,7 @@ _FACTS_HARVESTER_PROMPT = '''\
 - `future_promises` 只记录 `{character_name}` 已经接受的未来义务、双方约定、后续行为或会持续影响后续回合的操作性规则。
 - 用户要求 `{character_name}` 使用特定称呼、句尾、口癖、语气或回复格式时，如果 `final_dialog` 明确接受并准备后续沿用，优先作为 `future_promises` 中的持续规则，而不是改写成 `{character_name}` 喜欢或习惯这种说法。
 - 每个候选 promise 必须通过四步链：
-  1. 从 `decontexualized_input` 或 `content_anchors` 识别未来事项或持续规则候选。
+  1. 从 `decontexualized_input` 或 `content_plan` 识别未来事项或持续规则候选。
   2. 判断现实义务主体是不是 `{character_name}`；用户自己要做、用户计划做、物品流程、当前任务流程、或角色给建议/评价/提醒都不是角色承诺。
   3. 在 `final_dialog` 中找到 `{character_name}` 明确接受、答应、确认后续履行或形成双方约定的证据。
   4. 将 `action` 写成 `{character_name}` 未来要执行或持续遵守的具体动作。
@@ -256,7 +256,7 @@ human payload 是以下 JSON：
     }},
     "supervisor_trace": {{"unknown_slots": ["未解决槽位"], "loop_count": 1}},
     "existing_dedup_keys": ["已存在事实或承诺的稳定去重键"],
-    "content_anchors": ["回复前的内容锚点"],
+    "content_plan": {{"semantic_content": "回复前的内容计划"}},
     "final_dialog": ["{character_name} 本轮可见回复或私有 finalization"],
     "episode_trace_projection": {{
         "action_results": ["动作结果摘要，不包含 handler、raw params 或数据库内部字段"],
@@ -315,7 +315,7 @@ async def facts_harvester(state: ConsolidatorState) -> dict:
         "rag_result": rag_result,
         "supervisor_trace": rag_result.get("supervisor_trace", {}),
         "existing_dedup_keys": sorted(state.get("existing_dedup_keys", set())),
-        "content_anchors": content_anchors_from_action_directives(
+        "content_plan": content_plan_from_action_directives(
             state.get("action_directives"),
         ),
         "final_dialog": state["final_dialog"],
@@ -366,7 +366,7 @@ _FACT_HARVESTER_EVALUATOR_PROMPT = '''\
 - 当 trigger_source 是 `user_message` 时，`decontexualized_input` 是用户本轮表达，可用于核对 `user_name` 指向用户的状态、事实或偏好。
 - 当 trigger_source 是 `internal_thought` 时，`decontexualized_input` 是角色内部触发文本，不是用户原话；用户事实必须来自 `rag_result`、近期对话证据或其他明确证据。
 - 承诺基准是 `final_dialog`；`user_message` 时它是角色可见回复，`internal_thought` 时它是私有 finalization。
-- `content_anchors` 只能补足 `final_dialog` 中省略的对象或条件，不能单独制造承诺。
+- `content_plan` 只能补足 `final_dialog` 中省略的对象或条件，不能单独制造承诺。
 - `rag_result` 用于检查旧闻、重复和非生成证据。
 - `supervisor_trace` 只能作为检索充分性参考，不能替代事实或承诺证据。
 - `episode_trace_projection` 是动作和表面输出的安全摘要；它只能帮助判断本轮实际选择、执行或跳过了哪些动作，不能替代用户事实来源。
@@ -375,7 +375,7 @@ _FACT_HARVESTER_EVALUATOR_PROMPT = '''\
 # 来源权威性审计
 - 强事实来源：`user_message` 来源中用户在 `decontexualized_input` 明确陈述的自身事实，以及 `rag_result.memory_evidence`、`conversation_evidence`、`external_evidence` 中的证据。`internal_thought` 来源中的 `decontexualized_input` 不是用户事实来源。
 - 回忆证据来源：`rag_result.recall_evidence` 是约定、承诺或进度的来源证据。progress-only recall 只能说明当前操作状态；若没有 durable memory、conversation proof 或本轮用户明确事实支持，不能作为 `{character_name}` 稳定事实依据。
-- 回合局部支持：`final_dialog` 与 `content_anchors` 只能证明本轮说法或候选计划，不能单独制造角色长期偏好、角色设定或角色 lore。
+- 回合局部支持：`final_dialog` 与 `content_plan` 只能证明本轮说法或候选计划，不能单独制造角色长期偏好、角色设定或角色 lore。
 - 弱/非事实来源：内部独白、情绪评估、互动潜台词不是客观事实来源。
 - 若 `new_facts` 中的 `{character_name}` 稳定事实只来自 generated dialog 或 `final_dialog`，而没有 `rag_result` 中的检索证据或用户明确事实支持，必须判 FAIL。
 - 若用户只是询问 `{character_name}` 的偏好、状态或习惯，而候选事实来自角色在 `final_dialog` 中的第一人称回答，必须判 FAIL。
@@ -407,7 +407,7 @@ _FACT_HARVESTER_EVALUATOR_PROMPT = '''\
 - `action` 不得包含计划词、猜测词或相对时间词；到期或执行时间只应出现在 `due_time`。
 - 如果候选承诺有执行时间、截止时间、提醒时间、展示日、挑战日或验收日，`due_time` 必须是本地 `YYYY-MM-DD HH:MM`。
 - 无到期日的持续规则可以 `due_time: null`。
-- 如果候选承诺依赖相对时间或相对顺序才能成立，但 `due_time` 为 null，且无法从 `decontexualized_input`、`content_anchors`、`final_dialog`、`timestamp` 或消息证据看出绝对日期、时间或当前状态，必须判 FAIL 并要求删除该候选。
+- 如果候选承诺依赖相对时间或相对顺序才能成立，但 `due_time` 为 null，且无法从 `decontexualized_input`、`content_plan`、`final_dialog`、`timestamp` 或消息证据看出绝对日期、时间或当前状态，必须判 FAIL 并要求删除该候选。
 
 # 审计步骤
 1. 确认 `user_name` 和 `{character_name}`，逐项检查 `new_facts` 与 `future_promises` 是否主体倒置。
@@ -463,7 +463,7 @@ human payload 是以下 JSON：
         "action_results": ["安全动作结果摘要"],
         "surface_outputs": ["安全表面输出摘要"]
     }},
-    "content_anchors": ["回复前的内容锚点"],
+    "content_plan": {{"semantic_content": "回复前的内容计划"}},
     "final_dialog": ["{character_name} 本轮可见回复或私有 finalization"],
     "logical_stance": "CONFIRM | REFUSE | TENTATIVE | DIVERGE | CHALLENGE",
     "character_intent": "PROVIDE | BANTAR | REJECT | EVADE | CONFRONT | DISMISS | CLARIFY"
@@ -504,7 +504,7 @@ async def fact_harvester_evaluator(state: ConsolidatorState) -> dict:
         "rag_result": rag_result,
         "supervisor_trace": rag_result.get("supervisor_trace", {}),
         "episode_trace_projection": state.get("episode_trace_projection", {}),
-        "content_anchors": content_anchors_from_action_directives(
+        "content_plan": content_plan_from_action_directives(
             state.get("action_directives"),
         ),
         "final_dialog": state["final_dialog"],

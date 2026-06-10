@@ -52,7 +52,10 @@ def _base_global_state():
             "linguistic_directives": {
                 "rhetorical_strategy": "direct greeting",
                 "linguistic_style": "warm and concise",
-                "content_anchors": ["greet user"],
+                "content_plan": {
+                    "semantic_content": "Greet the user warmly.",
+                    "rendering": "One visible chat bubble; concise.",
+                },
                 "forbidden_phrases": [],
             },
         },
@@ -138,7 +141,7 @@ def test_validate_dialog_action_directives_requires_contextual_directives() -> N
 
 
 def test_validate_dialog_action_directives_accepts_complete_directives() -> None:
-    """Dialog validation should return the directive dictionaries unchanged."""
+    """Dialog validation should return normalized directive dictionaries."""
 
     state = _base_global_state()
 
@@ -146,9 +149,10 @@ def test_validate_dialog_action_directives_accepts_complete_directives() -> None
         validate_dialog_action_directives(state, usage_mode="unit_test")
     )
 
-    assert linguistic_directives is state["action_directives"][
-        "linguistic_directives"
-    ]
+    assert linguistic_directives["content_plan"] == {
+        "semantic_content": "Greet the user warmly.",
+        "rendering": "One visible chat bubble; concise.",
+    }
     assert contextual_directives is state["action_directives"][
         "contextual_directives"
     ]
@@ -172,24 +176,22 @@ class TestDialogAgentState:
 def test_dialog_evaluator_prompt_preserves_concise_safe_dialog() -> None:
     """Evaluator prompt should not force rewrites of short safe on-topic dialog."""
 
-    assert "简短、贴锚点、安全的台词应通过" in _DIALOG_EVALUATOR_PROMPT
+    assert "简短、贴计划、安全的台词应通过" in _DIALOG_EVALUATOR_PROMPT
     assert "硬门槛全部通过后，才看软风格" in _DIALOG_EVALUATOR_PROMPT
     assert "动作描写、物理感官、不可见状态" in _DIALOG_EVALUATOR_PROMPT
 
 
-def test_dialog_evaluator_prompt_checks_anchor_fidelity() -> None:
-    """Evaluator prompt should judge dialog against every anchor class."""
+def test_dialog_evaluator_prompt_checks_content_plan_fidelity() -> None:
+    """Evaluator prompt should judge dialog against one content plan."""
 
     prompt = _DIALOG_EVALUATOR_PROMPT
-    assert '`content_anchors` 是唯一语义权威' in prompt
-    assert '锚点忠实：不得缺失、替换、反转或绕开' in prompt
-    assert '[DECISION]' in prompt
-    assert '[FACT]' in prompt
-    assert '[ANSWER]' in prompt
-    assert '[SOCIAL]' in prompt
-    assert '[AVOID_REPEAT]' in prompt
-    assert '[PROGRESSION]' in prompt
-    assert '[SCOPE]' in prompt
+    assert '`content_plan` 是本轮可见回复的语义计划' in prompt
+    assert '`semantic_content` 如果存在' in prompt
+    assert '计划忠实：不得缺失、替换、反转或绕开' in prompt
+    assert '不要把每个字段机械当成独立可见段落' in prompt
+    assert '[DECISION]' not in prompt
+    assert '[ANSWER]' not in prompt
+    assert '[SCOPE]' not in prompt
 
 
 def test_dialog_prompts_preserve_multi_part_deliverables() -> None:
@@ -200,7 +202,7 @@ def test_dialog_prompts_preserve_multi_part_deliverables() -> None:
 
     for required_text in (
         '# 生成流程',
-        '先列出必须交付的内容',
+        '先建立语义计划',
         '再选择角色表达',
         '组织单气泡布局',
         '处理固定格式块',
@@ -208,8 +210,10 @@ def test_dialog_prompts_preserve_multi_part_deliverables() -> None:
         '多候选推荐',
         '主要组成部分',
         '不得只说先做其中一部分',
-        '[SCOPE]` 是表达量参考，不是删减语义的许可',
-        '覆盖优先于简短',
+        '`visible_goal` 说明本轮表达目的，`voice` 调节语气，`rendering` 调节布局',
+        '先进入技术忠实模式',
+        '不添加计划没有的强弱、层级、可比性、压制、差距或夸张判断',
+        '不要为了显得自然只输出第一项候选或第一条风险',
         '多候选、多风险、多步骤或对比类回复必须把每一项写成普通字符串片段',
         '不要用对象、字典、嵌套数组、编号字段或 Markdown 表格表达选项、参数或对比',
         '技术对比使用普通聊天行',
@@ -220,11 +224,17 @@ def test_dialog_prompts_preserve_multi_part_deliverables() -> None:
         '给出时间切分或时间范围',
         '不一致近似值',
         '数值与单位作为一组不可拆开的事实照抄原单位',
-        '无法给出具体对象',
-        '泛化说明不得偷换成具体对象示例',
-        '不要用具体名称举例',
+        '适用场景、规模词、对象类别和比较强度属于事实内容',
+        '不要把“更适合”改成“专门针对”“就适合”或“只适合”',
+        '不要把“较小规模”改成“小规模”',
+        '技术对比的开场句也会改变事实框架',
+        '否则不要用新的评判句开头',
+        '直接按计划列数据和结论',
+        '调侃只能落在语气词、连接句或收束口吻上',
+        '如果计划说明没有已确认事实、无法给出具体对象',
+        '只能停留在计划允许的泛化类别、行动骨架、筛选标准和最小核实清单',
+        '不得改成继续追问',
         '临时处理状态或延后承诺替代当前交付',
-        '不得以新的认可请求替代收束',
         '最小核实清单',
         '一个可见聊天气泡',
         '布局单位',
@@ -244,7 +254,7 @@ def test_dialog_prompts_preserve_multi_part_deliverables() -> None:
 
     for required_text in (
         '# 审核流程',
-        '建立锚点清单',
+        '建立语义计划',
         '对照可见气泡',
         '审核单气泡布局和固定格式块',
         '审核表达安全',
@@ -258,12 +268,20 @@ def test_dialog_prompts_preserve_multi_part_deliverables() -> None:
         '改写成不一致近似值',
         '技术数值边界',
         '数值与单位是一组事实',
+        '先审核技术忠实',
+        '必须 `should_stop=false`',
+        '技术结论边界',
+        '把“较小规模”改成“小规模”，或把“更适合”改成“专门针对”“就适合”“只适合”',
+        '可比性判断和比较强度必须忠实于 `semantic_content`',
+        '技术开场边界',
+        '不得补一个新的强弱、可比性、层级或夸张结论开场',
+        '计划没有的比较判断属于事实越界',
         '把完整安排压缩成更短安排',
-        '具体对象禁令',
-        '不得新增锚点未出现过的具体实体',
-        '举例禁令',
-        '没有锚点确认的具体名称时',
-        '终止收束禁令',
+        '具体对象边界',
+        '不得新增计划未出现过的具体实体',
+        '举例边界',
+        '没有计划确认的具体名称时',
+        '终止收束边界',
         '临时处理状态或延后承诺',
         '新的认可请求结尾',
         'should_stop=false',
@@ -325,7 +343,7 @@ def test_dialog_evaluator_prompt_audits_layout_without_line_budget() -> None:
     assert '单个可见聊天气泡' in prompt
     assert '布局可读性' in prompt
     assert '技术对比、参数列表和多候选推荐应使用普通聊天行' in prompt
-    assert '以 `|` 分隔的 Markdown 表格不通过' in prompt
+    assert '只有当 `content_plan` 中的固定格式内容已经是表格时才保留表格' in prompt
     assert '不得仅因技术交付使用多行而驳回' in prompt
     assert '不得按固定行数、固定段数或固定字数判定失败' in prompt
 
@@ -361,7 +379,7 @@ def test_dialog_evaluator_prompt_orders_hard_gates_before_style() -> None:
 
     prompt = _DIALOG_EVALUATOR_PROMPT
     assert '不重新决定话题、意图、是否回答或角色立场' in prompt
-    assert prompt.index('1. **建立锚点清单**') < prompt.index(
+    assert prompt.index('1. **建立语义计划**') < prompt.index(
         '2. **对照可见气泡**',
     )
     assert prompt.index('2. **对照可见气泡**') < prompt.index(
@@ -379,10 +397,10 @@ def test_dialog_evaluator_prompt_orders_hard_gates_before_style() -> None:
 
 
 def test_dialog_evaluator_prompt_rejects_unsupported_concrete_content() -> None:
-    """Evaluator prompt should reject concrete claims not backed by anchors."""
+    """Evaluator prompt should reject concrete claims not backed by the plan."""
 
     prompt = _DIALOG_EVALUATOR_PROMPT
-    rule_start = prompt.index('事实边界：不得添加 `content_anchors` 未授权')
+    rule_start = prompt.index('事实边界：不得添加 `content_plan` 未授权')
     unsupported_rule = prompt[rule_start:rule_start + 500]
 
     assert '具体实体' in unsupported_rule
@@ -391,8 +409,8 @@ def test_dialog_evaluator_prompt_rejects_unsupported_concrete_content() -> None:
     assert '时间' in unsupported_rule
     assert '地点' in unsupported_rule
     assert '承诺' in unsupported_rule
-    assert '具体对象禁令' in prompt
-    assert '只能保留锚点允许的泛化类别、行动骨架、筛选标准和核实清单' in prompt
+    assert '具体对象边界' in prompt
+    assert '只能保留计划允许的泛化类别、行动骨架、筛选标准和核实清单' in prompt
 
 
 def test_dialog_evaluator_prompt_rejects_guess_owner_flip() -> None:
@@ -414,20 +432,25 @@ def test_dialog_evaluator_prompt_rejects_guess_owner_flip() -> None:
 def test_dialog_generator_prompt_has_no_decision_ownership() -> None:
     """Dialog generation stays an execution renderer, not a decision stage."""
 
-    assert "only turns upstream decisions" in (dialog_module.__doc__ or "")
+    assert "turns the upstream content plan into natural chat text" in (
+        dialog_module.__doc__ or ""
+    )
     assert "logical_stance" not in _DIALOG_GENERATOR_PROMPT
     assert "character_intent" not in _DIALOG_GENERATOR_PROMPT
     assert "boundary_profile" not in _DIALOG_GENERATOR_PROMPT
     assert "话题合法性" not in _DIALOG_GENERATOR_PROMPT
 
 
-def test_dialog_prompts_use_content_anchors_as_semantic_authority() -> None:
-    """Generator and evaluator prompts should not expose stale history fields."""
+def test_dialog_prompts_use_content_plan_as_semantic_authority() -> None:
+    """Generator and evaluator prompts should use content_plan authority."""
 
-    assert 'content_anchors` 是本轮可见回复的唯一语义内容来源' in _DIALOG_GENERATOR_PROMPT
-    assert '目标时间改成当前时间' in _DIALOG_GENERATOR_PROMPT
-    assert '等待确认条件必须精确保留' in _DIALOG_GENERATOR_PROMPT
-    assert '不要原样说出这些内部标签' in _DIALOG_GENERATOR_PROMPT
+    assert 'content_plan` 是本轮可见回复的语义计划' in _DIALOG_GENERATOR_PROMPT
+    assert 'semantic_content` 作为可见事实' in _DIALOG_GENERATOR_PROMPT
+    assert '避免省略结束时间、误算时长或改写成不一致近似值' in (
+        _DIALOG_GENERATOR_PROMPT
+    )
+    assert '等待确认条件、代码和具体结论' in _DIALOG_GENERATOR_PROMPT
+    assert '把它们改写成用户可理解的自然说法' in _DIALOG_GENERATOR_PROMPT
     assert '刚才没有查到可靠结果' in _DIALOG_GENERATOR_PROMPT
     assert '只能保留社交含义' in _DIALOG_GENERATOR_PROMPT
     assert '不得原样输出这些身体词' in _DIALOG_GENERATOR_PROMPT
@@ -435,16 +458,16 @@ def test_dialog_prompts_use_content_anchors_as_semantic_authority() -> None:
     assert 'tone' '_history' not in _DIALOG_GENERATOR_PROMPT
     assert 'last_user' '_message' not in _DIALOG_EVALUATOR_PROMPT
     assert 'internal_monologue' not in _DIALOG_EVALUATOR_PROMPT
-    assert '`content_anchors` 是唯一语义权威' in _DIALOG_EVALUATOR_PROMPT
+    assert '`content_plan` 是本轮可见回复的语义计划' in _DIALOG_EVALUATOR_PROMPT
     assert '精确值边界' in _DIALOG_EVALUATOR_PROMPT
-    assert '当前值或另一个锚点里的值' in _DIALOG_EVALUATOR_PROMPT
+    assert '当前值或另一个计划字段里的值' in _DIALOG_EVALUATOR_PROMPT
     assert '内部标签边界' in _DIALOG_EVALUATOR_PROMPT
     assert '不得原样暴露这些内部标签' in _DIALOG_EVALUATOR_PROMPT
     assert '身体词边界' in _DIALOG_EVALUATOR_PROMPT
     assert '不得包含心跳、心脏、脸红' in _DIALOG_EVALUATOR_PROMPT
     assert '只有同时满足以下条件才返回 `should_stop=true`' in _DIALOG_EVALUATOR_PROMPT
     assert '话题一致' in _DIALOG_EVALUATOR_PROMPT
-    assert '核心对象、提议、请求、问题必须来自 `content_anchors`' in (
+    assert '核心对象、提议、请求、问题必须来自 `content_plan`' in (
         _DIALOG_EVALUATOR_PROMPT
     )
     assert '`retry` 只是输入里的计数字段' in _DIALOG_EVALUATOR_PROMPT

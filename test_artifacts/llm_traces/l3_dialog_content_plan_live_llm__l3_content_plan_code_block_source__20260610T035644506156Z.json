@@ -1,0 +1,41 @@
+{
+  "test_name": "l3_dialog_content_plan_live_llm",
+  "case_id": "l3_content_plan_code_block_source",
+  "recorded_at": "2026-06-10T03:56:44.506180+00:00",
+  "payload": {
+    "case_id": "l3_content_plan_code_block_source",
+    "model": "gemma-4-26b-a4b-it-claude-opus-distill-v2",
+    "base_url": "http://localhost:1234/v1",
+    "input": {
+      "case_id": "l3_content_plan_code_block_source",
+      "channel_type": "private",
+      "user_input": "给我这个函数，代码别改格式。",
+      "decontexualized_input": "用户要求交付一个固定格式 Python 函数。",
+      "internal_monologue": "The code block must be preserved literally.",
+      "logical_stance": "CONFIRM",
+      "character_intent": "PROVIDE",
+      "judgment_note": "给出代码块，角色语气只能放在代码块外。",
+      "selected_text_surface_intent": "把 fenced python code block 放进 semantic_content；缩进、空行和代码内容不得改。",
+      "rag_answer": "```python\ndef normalize_name(value: str) -> str:\n    cleaned = value.strip()\n    if not cleaned:\n        return \"anonymous\"\n    return cleaned.lower()\n```"
+    },
+    "parsed_output": {
+      "content_plan": {
+        "visible_goal": "交付用户要求的 Python 函数代码块",
+        "semantic_content": "这是你要的函数：\n\n```python\ndef normalize_name(value: str) -> str:\n    cleaned = value.strip()\n    if not cleaned:\n        return \"anonymous\"\n    return cleaned.lower()\n```",
+        "voice": "自然、直接，像是在顺手帮对方解决一个小问题，没有多余的客套或解释",
+        "rendering": "单气泡输出；代码块必须保留 fenced python 格式且不改动内部缩进与空行"
+      }
+    },
+    "content_plan": {
+      "visible_goal": "交付用户要求的 Python 函数代码块",
+      "semantic_content": "这是你要的函数：\n\n```python\ndef normalize_name(value: str) -> str:\n    cleaned = value.strip()\n    if not cleaned:\n        return \"anonymous\"\n    return cleaned.lower()\n```",
+      "voice": "自然、直接，像是在顺手帮对方解决一个小问题，没有多余的客套或解释",
+      "rendering": "单气泡输出；代码块必须保留 fenced python 格式且不改动内部缩进与空行"
+    },
+    "structural_validation": {
+      "content_plan_is_dict": true,
+      "all_keys_are_strings": true,
+      "all_values_are_strings": true
+    }
+  }
+}

@@ -230,7 +230,10 @@ async def test_dialog_generator_payload_excludes_raw_history_and_monologue(monke
                 "rhetorical_strategy": "direct",
                 "linguistic_style": "brief",
                 "accepted_user_preferences": [],
-                "content_anchors": ["[DECISION] answer", "[SCOPE] short"],
+                "content_plan": {
+                    "semantic_content": "answer",
+                    "rendering": "short",
+                },
                 "forbidden_phrases": [],
             },
             "contextual_directives": {
@@ -281,7 +284,10 @@ async def test_dialog_evaluator_payload_excludes_history_message_and_monologue(m
                 "rhetorical_strategy": "direct",
                 "linguistic_style": "brief",
                 "accepted_user_preferences": [],
-                "content_anchors": ["[DECISION] answer", "[SCOPE] short"],
+                "content_plan": {
+                    "semantic_content": "answer",
+                    "rendering": "short",
+                },
                 "forbidden_phrases": [],
             },
             "contextual_directives": {
@@ -334,8 +340,8 @@ def test_context_budget_workload_summary_records_payload_counts() -> None:
         "dialog_generator_tone_messages": 0,
         "dialog_generator_raw_history_messages": 0,
         "dialog_generator_internal_monologue": False,
-        "content_anchor_progress_cap_chars": 5000,
-        "content_anchor_raw_history_messages": 0,
+        "content_plan_progress_cap_chars": 5000,
+        "content_plan_raw_history_messages": 0,
         "dialog_evaluator_raw_history_messages": 0,
         "dialog_evaluator_last_user" "_message_only": False,
         "dialog_evaluator_internal_monologue": False,
@@ -358,7 +364,7 @@ def test_context_budget_workload_summary_records_payload_counts() -> None:
             "dialog_generator_tone" "_history": 0,
             "dialog_generator_raw_history": 0,
             "dialog_generator_internal_monologue": 0,
-            "content_anchor_conversation_progress_cap": 5000,
+            "content_plan_conversation_progress_cap": 5000,
             "dialog_evaluator_raw_history": 0,
             "dialog_evaluator_last_user" "_message": 0,
             "dialog_evaluator_internal_monologue": 0,
@@ -377,7 +383,7 @@ def test_context_budget_workload_summary_records_payload_counts() -> None:
     assert bounded_payload["dialog_generator_tone_messages"] == 0
     assert bounded_payload["dialog_generator_raw_history_messages"] == 0
     assert bounded_payload["dialog_generator_internal_monologue"] is False
-    assert bounded_payload["content_anchor_raw_history_messages"] == 0
+    assert bounded_payload["content_plan_raw_history_messages"] == 0
     assert bounded_payload["dialog_evaluator_raw_history_messages"] == 0
     assert bounded_payload["dialog_evaluator_last_user" "_message_only"] is False
     assert bounded_payload["dialog_evaluator_internal_monologue"] is False

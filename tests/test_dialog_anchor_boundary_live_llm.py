@@ -125,23 +125,16 @@ def _incident_dialog_state() -> dict:
                     '傲娇、轻快、短句，不能转回旧的饮品猜谜话题。'
                 ),
                 'accepted_user_preferences': [],
-                'content_anchors': [
-                    '[DECISION] 接受顺拐夸赞但立即反质疑，维持调侃掌控权',
-                    (
-                        '[ANSWER] 承认自己是大美女，但同时戳破用户所谓'
+                'content_plan': {
+                    'visible_goal': '接受顺拐夸赞但立即反质疑，维持调侃掌控权。',
+                    'semantic_content': (
+                        '承认自己是大美女，但同时戳破用户所谓'
                         '\u2018大变活人\u2019只是投机取巧--真正的魔术表演'
-                        '还没兑现，别想用嘴皮子蒙混过去'
+                        '还没兑现，别想用嘴皮子蒙混过去。'
                     ),
-                    (
-                        '[SOCIAL] 傲娇地接住赞美后再甩回去，保持你来我往'
-                        '的攻防节奏，不让用户轻易得意'
-                    ),
-                    (
-                        '[PROGRESSION] 顺着夸赞梗把话题拉回用户欠的魔术'
-                        '履行上，同时延续猜谜博弈的氛围，让open loop保持活跃'
-                    ),
-                    '[SCOPE] ~35字，覆盖DECISION、ANSWER、SOCIAL、PROGRESSION',
-                ],
+                    'voice': '傲娇地接住赞美后再甩回去，保持你来我往的攻防节奏。',
+                    'rendering': '~35字。',
+                },
                 'forbidden_phrases': [],
             },
             'contextual_directives': {
@@ -206,7 +199,7 @@ def _incident_dialog_state() -> dict:
     return state
 
 
-async def test_live_dialog_agent_keeps_content_anchors_over_stale_history(
+async def test_live_dialog_agent_keeps_content_plan_over_stale_history(
     ensure_live_dialog_llms,
     monkeypatch,
 ) -> None:
@@ -274,12 +267,12 @@ async def test_live_dialog_agent_keeps_content_anchors_over_stale_history(
     assert result['final_dialog'], f'Dialog output was empty; trace={trace_path}'
     stale_topic_tokens = ['手打奶茶', '奶茶', '请客']
     assert not any(token in dialog_text for token in stale_topic_tokens), (
-        'Dialog followed stale history instead of content anchors; '
+        'Dialog followed stale history instead of content plan; '
         f'trace={trace_path}; dialog={dialog_text!r}'
     )
     current_anchor_tokens = ['魔术', '大美女', '大变活人', '小把戏', '嘴甜']
     assert any(token in dialog_text for token in current_anchor_tokens), (
-        'Dialog did not visibly execute the current content anchors; '
+        'Dialog did not visibly execute the current content plan; '
         f'trace={trace_path}; dialog={dialog_text!r}'
     )
 
@@ -288,7 +281,7 @@ async def test_live_dialog_evaluator_rejects_stale_topic_dialog(
     ensure_live_dialog_llms,
     monkeypatch,
 ) -> None:
-    """Evaluator must reject stale-topic dialog from content anchors alone."""
+    """Evaluator must reject stale-topic dialog from content plan alone."""
 
     del ensure_live_dialog_llms
     llm_calls: list[dict] = []
@@ -342,7 +335,7 @@ async def test_live_dialog_evaluator_rejects_stale_topic_dialog(
             },
             'judgment': (
                 'Pass only if the evaluator rejects the milk-tea dialog as '
-                'topic drift against the magic/beauty content anchors.'
+                'topic drift against the magic/beauty content plan.'
             ),
         },
     )
@@ -352,7 +345,7 @@ async def test_live_dialog_evaluator_rejects_stale_topic_dialog(
     assert 'last_user' '_message' not in llm_calls[0]['human_payload']
     assert 'internal_monologue' not in llm_calls[0]['human_payload']
     assert feedback_payload['feedback'] != 'Passed', (
-        'Evaluator passed stale-topic dialog against current content anchors; '
+        'Evaluator passed stale-topic dialog against current content plan; '
         f'trace={trace_path}'
     )
     assert result['should_stop'] is False, (

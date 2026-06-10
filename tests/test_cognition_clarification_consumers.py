@@ -108,8 +108,8 @@ def _judgment_state() -> dict:
     }
 
 
-def _content_anchor_state() -> dict:
-    """Build the minimal state required by Content Anchor.
+def _content_plan_state() -> dict:
+    """Build the minimal state required by the content-plan agent.
 
     Returns:
         Cognition-state subset for the L3b test.
@@ -178,40 +178,40 @@ async def test_judgment_core_requires_referents(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_content_anchor_agent_receives_referent_signal(monkeypatch) -> None:
-    """Content Anchor should receive referent-derived clarification fields."""
+async def test_content_plan_agent_receives_referent_signal(monkeypatch) -> None:
+    """Content-plan agent should receive referent clarification fields."""
     fake_llm = _CapturingAsyncLLM({
-        "content_anchors": [
-            "[DECISION] 先追问缺失对象",
-            "[ANSWER] 你说的这些具体是指什么？",
-            "[SCOPE] 简短追问即可",
-        ]
+        "content_plan": {
+            "visible_goal": "先追问缺失对象。",
+            "semantic_content": "你说的这些具体是指什么？",
+            "rendering": "简短追问即可。",
+        }
     })
-    monkeypatch.setattr(l3_module, "_content_anchor_agent_llm", fake_llm)
+    monkeypatch.setattr(l3_module, "_content_plan_agent_llm", fake_llm)
 
-    result = await l3_module.call_content_anchor_agent(_content_anchor_state())
+    result = await l3_module.call_content_plan_agent(_content_plan_state())
 
     payload = json.loads(fake_llm.messages[1].content)
     assert payload["referents"] == [
         {"phrase": "这些", "referent_role": "object", "status": "unresolved"}
     ]
-    assert result["content_anchors"][1].startswith("[ANSWER]")
+    assert result["content_plan"]["semantic_content"] == "你说的这些具体是指什么？"
 
 
 @pytest.mark.asyncio
-async def test_content_anchor_agent_requires_referents(monkeypatch) -> None:
-    """Content Anchor should enforce the structured referents contract."""
+async def test_content_plan_agent_requires_referents(monkeypatch) -> None:
+    """Content-plan agent should enforce the structured referents contract."""
     fake_llm = _CapturingAsyncLLM({
-        "content_anchors": [
-            "[DECISION] 先追问缺失对象",
-            "[ANSWER] 你说的这些具体是指什么？",
-            "[SCOPE] 简短追问即可",
-        ]
+        "content_plan": {
+            "visible_goal": "先追问缺失对象。",
+            "semantic_content": "你说的这些具体是指什么？",
+            "rendering": "简短追问即可。",
+        }
     })
-    monkeypatch.setattr(l3_module, "_content_anchor_agent_llm", fake_llm)
+    monkeypatch.setattr(l3_module, "_content_plan_agent_llm", fake_llm)
 
-    state = _content_anchor_state()
+    state = _content_plan_state()
     state.pop("referents")
 
     with pytest.raises(KeyError):
-        await l3_module.call_content_anchor_agent(state)
+        await l3_module.call_content_plan_agent(state)

@@ -21,10 +21,10 @@ class _DummyResponse:
 
 
 class _StaticAsyncLLM:
-    """Async LLM fake returning a fixed content-anchor payload."""
+    """Async LLM fake returning a fixed content-plan payload."""
 
     async def ainvoke(self, _messages: list) -> _DummyResponse:
-        """Return a minimal content-anchor response.
+        """Return a minimal content-plan response.
 
         Args:
             _messages: Prompt messages supplied by the caller.
@@ -33,8 +33,9 @@ class _StaticAsyncLLM:
             Dummy response with JSON content.
         """
         return_value = _DummyResponse(
-            '{"content_anchors": ["[DECISION] 先澄清对象", '
-            '"[ANSWER] 你说的这些具体是指什么？", "[SCOPE] 简短追问"]}'
+            '{"content_plan": {"visible_goal": "先澄清对象", '
+            '"semantic_content": "你说的这些具体是指什么？", '
+            '"rendering": "简短追问"}}'
         )
         return return_value
 
@@ -152,15 +153,15 @@ async def test_skip_branch_does_not_call_adapter(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_content_anchor_accepts_skipped_rag_result_shape(monkeypatch) -> None:
-    """Content Anchor should not raise on the skipped-RAG projection shape."""
-    monkeypatch.setattr(l3_module, "_content_anchor_agent_llm", _StaticAsyncLLM())
+async def test_content_plan_accepts_skipped_rag_result_shape(monkeypatch) -> None:
+    """Content-plan agent should not raise on skipped-RAG projection shape."""
+    monkeypatch.setattr(l3_module, "_content_plan_agent_llm", _StaticAsyncLLM())
     rag_result = await supervisor_module.run_rag_evidence_for_persona_state(
         _clarification_state(),
         agent_name="resolver_rag_evidence",
     )
 
-    result = await l3_module.call_content_anchor_agent({
+    result = await l3_module.call_content_plan_agent({
         "character_profile": {"name": "Kazusa"},
         "decontexualized_input": "这些是什么意思？",
         "referents": [
@@ -174,4 +175,4 @@ async def test_content_anchor_accepts_skipped_rag_result_shape(monkeypatch) -> N
         "cognitive_episode": _minimal_text_chat_episode(),
     })
 
-    assert result["content_anchors"][1].startswith("[ANSWER]")
+    assert result["content_plan"]["semantic_content"] == "你说的这些具体是指什么？"

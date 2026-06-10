@@ -139,7 +139,7 @@ def _fake_consolidator_state(*, local_time_context: dict | None = None) -> dict:
         "subjective_appraisals": [],
         "character_profile": {"name": "TestChar"},
         "action_directives": {
-            "linguistic_directives": {"content_anchors": []},
+            "linguistic_directives": {"content_plan": {}},
         },
     }
 

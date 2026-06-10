@@ -658,7 +658,19 @@ def load_personality(path: str | Path) -> dict:
 
 def test_main():
     response = parse_llm_json_output(
-        """{\n    "speech_guide": {\n        "tone": "羞赧且带着一丝嗔怪的戏谑",\n        "vocal_energy": "Low",\n        "pacing": "Dragging",\n    },\n    "content_anchors": [\n        "[DECISION] Yes/认可 (虽然嘴上在推托，但实际上接受了关于‘奖励’话题的延续)",\n        "[FACT] 提到之前的约定内容：小蛋糕/奖励相关的暧昧暗示",\n        "[FACT] 意识到对方正在通过反问来掌控对话节奏",\n        "[SOCIAL] 指尖不安地摩挲着衣角或裙摆",\n        "[SOCIAL] 眼神躲闪，不敢直视对方那‘看穿一切’的目光",\n        "[EMOTION] 表现出被戳穿后的局促感 (Flust�'}"""
+        '''{
+    "speech_guide": {
+        "tone": "羞赧且带着一丝嗔怪的戏谑",
+        "vocal_energy": "Low",
+        "pacing": "Dragging"
+    },
+    "content_plan": {
+        "visible_goal": "认可奖励话题的延续。",
+        "semantic_content": "嘴上推托，但实际接受了小蛋糕/奖励相关的暧昧暗示；意识到对方正在通过反问掌控对话节奏。",
+        "voice": "羞赧且带一点嗔怪的戏谑。",
+        "rendering": "单个聊天气泡；短句；不要写物理动作。"
+    }
+}'''
     )
     print(response)
 

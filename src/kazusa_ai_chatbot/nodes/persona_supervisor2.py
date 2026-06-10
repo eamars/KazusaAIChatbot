@@ -284,7 +284,7 @@ def _empty_action_directives() -> dict:
             "rhetorical_strategy": "",
             "linguistic_style": "",
             "accepted_user_preferences": [],
-            "content_anchors": [],
+            "content_plan": {},
             "forbidden_phrases": [],
         },
         "visual_directives": {

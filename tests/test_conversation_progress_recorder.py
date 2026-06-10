@@ -92,7 +92,10 @@ def _record_input(
         "prior_episode_state": None,
         "decontexualized_input": "I meant the other thing.",
         "chat_history_recent": [],
-        "content_anchors": ["[DECISION] accept the clarification"],
+        "content_plan": {
+            "semantic_content": "Accept the clarification.",
+            "rendering": "One visible chat bubble; concise.",
+        },
         "logical_stance": "CONFIRM",
         "character_intent": "PROVIDE",
         "final_dialog": ["Got it, then I will use that meaning."],

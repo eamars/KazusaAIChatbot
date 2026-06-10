@@ -159,7 +159,9 @@ def _dialog_global_state() -> dict[str, object]:
                 "rhetorical_strategy": "answer directly",
                 "linguistic_style": "concise",
                 "accepted_user_preferences": [],
-                "content_anchors": ["[ANSWER] acknowledge the request"],
+                "content_plan": {
+                    "semantic_content": "Acknowledge the request.",
+                },
                 "forbidden_phrases": [],
             },
         },
@@ -579,5 +581,5 @@ async def test_dialog_agent_records_quality_without_dialog_text(monkeypatch) -> 
     assert kwargs["usage_mode"] == "live_visible_reply"
     assert kwargs["evaluator_status"] == "passed"
     assert kwargs["retry_count"] == 1
-    assert kwargs["anchor_count"] == 1
+    assert kwargs["content_plan_entry_count"] == 1
     assert "secret full graph reply" not in _serialized(kwargs)

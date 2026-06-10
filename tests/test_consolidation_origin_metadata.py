@@ -122,7 +122,7 @@ def _global_state() -> dict:
         "channel_type": "group",
         "platform_message_id": "message-1",
         "action_directives": {
-            "linguistic_directives": {"content_anchors": []},
+            "linguistic_directives": {"content_plan": {}},
         },
         "internal_monologue": "Answer normally.",
         "final_dialog": ["ok"],

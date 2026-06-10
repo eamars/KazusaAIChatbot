@@ -71,7 +71,7 @@ class ConversationProgressRecordInput(TypedDict):
     prior_episode_state: ConversationEpisodeStateDoc | None
     decontexualized_input: str
     chat_history_recent: list[dict]
-    content_anchors: list[str]
+    content_plan: dict[str, str]
     logical_stance: str
     character_intent: str
     final_dialog: list[str]

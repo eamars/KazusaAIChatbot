@@ -64,7 +64,9 @@ def _state() -> dict:
         "final_dialog": ["那就按你说的来吧。"],
         "action_directives": {
             "linguistic_directives": {
-                "content_anchors": ["[FACTUAL] 按普通事务回应。"],
+                "content_plan": {
+                    "semantic_content": "按普通事务回应。",
+                },
             },
         },
     }
@@ -127,7 +129,7 @@ async def test_relationship_recorder_receives_reassurance_context(monkeypatch) -
     assert "描述“我”如何理解" not in system_prompt
     assert payload["decontexualized_input"] == "不是在拉开距离，只是顺手整理线材。"
     assert payload["final_dialog"] == ["那就按你说的来吧。"]
-    assert payload["content_anchors"] == ["[FACTUAL] 按普通事务回应。"]
+    assert payload["content_plan"] == {"semantic_content": "按普通事务回应。"}
     assert result["affinity_delta"] == 0
     assert result["subjective_appraisals"] == []
     assert result["last_relationship_insight"] == ""
@@ -148,5 +150,5 @@ async def test_relationship_recorder_accepts_no_surface_action(monkeypatch) -> N
     result = await reflection_module.relationship_recorder(state)
 
     payload = json.loads(llm.messages[1].content)
-    assert payload["content_anchors"] == []
+    assert payload["content_plan"] == {}
     assert result["affinity_delta"] == 0

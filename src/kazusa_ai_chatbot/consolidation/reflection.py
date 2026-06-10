@@ -21,7 +21,7 @@ from kazusa_ai_chatbot.consolidation.origin import (
 )
 from kazusa_ai_chatbot.consolidation.schema import (
     ConsolidatorState,
-    content_anchors_from_action_directives,
+    content_plan_from_action_directives,
     normalize_subjective_appraisals,
 )
 from kazusa_ai_chatbot.utils import (
@@ -189,7 +189,7 @@ _RELATIONSHIP_RECORDER_PROMPT = """\
 - `character_intent`: {character_name}本轮最终选择的行动意图，说明她是在正常提供、调侃拉扯、回避、拒绝、澄清还是对抗。
 - `decontexualized_input`: 由 `consolidation_origin.trigger_source` 定义；`user_message` 时是用户本轮真实表达，`internal_thought` 时是内部触发文本，不是用户原话。
 - `final_dialog`: {character_name}本轮最终输出；`user_message` 时是可见回复，`internal_thought` 时是私有 finalization，用于判断关系意义是否真的被接住。
-- `content_anchors`: 回复前的内容锚点。只能作为中等强度证据，不能单独制造关系记忆。
+- `content_plan`: 回复前的内容计划。只能作为中等强度证据，不能单独制造关系记忆。
 
 # 生成步骤
 1. 先检查 `internal_monologue`、`emotional_appraisal`、`interaction_subtext` 是否有明确主观关系证据。
@@ -198,7 +198,7 @@ _RELATIONSHIP_RECORDER_PROMPT = """\
 4. 若没有明确关系证据，输出 `skip: true` 且 `affinity_delta: 0`。
 5. 若有证据，写短主观评价证据，供下游 memory-unit consolidator 使用；不要复述对话。
 6. 最后选择 -5 到 +5 的 `affinity_delta`，不确定时选 0。
-7. 按证据强度排序：强证据是 `final_dialog`、用户明确陈述、RAG/既有事实；中证据是 `content_anchors`、`logical_stance`、`character_intent`；弱证据是 `internal_monologue`、`emotional_appraisal`、`interaction_subtext`。
+7. 按证据强度排序：强证据是 `final_dialog`、用户明确陈述、RAG/既有事实；中证据是 `content_plan`、`logical_stance`、`character_intent`；弱证据是 `internal_monologue`、`emotional_appraisal`、`interaction_subtext`。
 
 # 记忆视角契约
 - 本契约适用于你生成的可长期保存的 `subjective_appraisals` 与 `last_relationship_insight`。
@@ -231,7 +231,7 @@ _RELATIONSHIP_RECORDER_PROMPT = """\
     "character_intent": "string",
     "decontexualized_input": "string",
     "final_dialog": ["{character_name} 本轮可见回复或私有 finalization"],
-    "content_anchors": ["回复前的内容锚点"]
+    "content_plan": {{"semantic_content": "回复前的内容计划"}}
 }}
 
 # 记录准则
@@ -300,7 +300,7 @@ async def relationship_recorder(state: ConsolidatorState) -> dict:
         "character_intent": state["character_intent"],
         "decontexualized_input": state["decontexualized_input"],
         "final_dialog": state["final_dialog"],
-        "content_anchors": content_anchors_from_action_directives(
+        "content_plan": content_plan_from_action_directives(
             state.get("action_directives"),
         ),
     }, character_name=character_name)

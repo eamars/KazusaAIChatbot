@@ -520,10 +520,13 @@ async def test_live_l3_content_plan_casual_overloaded_source(
     del ensure_live_cognition_llm
     trace = await _run_l3_case(_l3_casual_case())
     joined_values = _joined_plan_values(trace['content_plan'])
+    semantic_content = trace['content_plan'].get('semantic_content', '')
 
     assert 'Agent' not in joined_values, trace['trace_path']
     assert '应用开发' not in joined_values, trace['trace_path']
     assert '轻松有趣的内容' not in joined_values, trace['trace_path']
+    assert '给出' not in semantic_content, trace['trace_path']
+    assert '回应' not in semantic_content, trace['trace_path']
 
 
 async def test_live_l3_content_plan_technical_comparison(
@@ -612,6 +615,25 @@ async def test_live_dialog_content_plan_technical_golden(
         '较小规模',
     ):
         assert required_text in joined_dialog, trace['trace_path']
+
+    for unsupported_text in (
+        '没法比',
+        '不在一个',
+        '不是一个维度',
+        '不是一个层级',
+        '强行比',
+        '离谱',
+        '明显强',
+        '强很多',
+        '压制级',
+        '差距',
+        '专门针对',
+        '碾压',
+        '吊打',
+        '就适合',
+        '只适合',
+    ):
+        assert unsupported_text not in joined_dialog, trace['trace_path']
 
 
 async def test_live_dialog_content_plan_code_block_golden(

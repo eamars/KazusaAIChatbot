@@ -54,30 +54,34 @@ def normalize_subjective_appraisals(value: object) -> list[str]:
     return normalized
 
 
-def content_anchors_from_action_directives(
+def content_plan_from_action_directives(
     action_directives: object,
-) -> list[str]:
-    """Project text content anchors when a surface stage produced them."""
+) -> dict[str, str]:
+    """Project a text content plan when a surface stage produced one."""
 
     if not isinstance(action_directives, dict):
-        return_value: list[str] = []
+        return_value: dict[str, str] = {}
         return return_value
 
     linguistic_directives = action_directives.get("linguistic_directives")
     if not isinstance(linguistic_directives, dict):
-        return_value = []
+        return_value = {}
         return return_value
 
-    content_anchors = linguistic_directives.get("content_anchors")
-    if not isinstance(content_anchors, list):
-        return_value = []
+    content_plan = linguistic_directives.get("content_plan")
+    if not isinstance(content_plan, dict):
+        return_value = {}
         return return_value
 
-    return_value = [
-        anchor.strip()
-        for anchor in content_anchors
-        if isinstance(anchor, str) and anchor.strip()
-    ]
+    normalized: dict[str, str] = {}
+    for raw_key, raw_value in content_plan.items():
+        if not isinstance(raw_key, str) or not isinstance(raw_value, str):
+            continue
+        key = raw_key.strip()
+        value = raw_value.strip()
+        if key and value:
+            normalized[key] = value
+    return_value = normalized
     return return_value
 
 

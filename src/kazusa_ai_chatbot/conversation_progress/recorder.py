@@ -40,7 +40,7 @@ _RECORDER_PROMPT = '''\
 
 # 阅读顺序
 先看本轮实际发出的内容，再决定旧进度还能不能用：
-1. `final_dialog` 和 `content_anchors`：这一轮最后说了什么、用了哪些锚点。
+1. `final_dialog` 和 `content_plan`：这一轮最后说了什么、回复前的内容计划是什么。
 2. `decontexualized_input`：用户这一轮真正想表达什么。
 3. `logical_stance` 和 `character_intent`：这一轮大致是什么态度。
 4. `chat_history_recent`：附近几句是谁说的、怎么接上的。
@@ -77,7 +77,7 @@ _RECORDER_PROMPT = '''\
 - 只能靠“今天”“明天”“稍后”“饭后”等上下文才看得懂的项目，不适合留到下一轮；能锚定就写绝对时间，不能锚定就删掉时间成分或整项删除。
 - 旧状态里的相对日期、相对时段、先后条件、事件后条件不要修复、不要猜、不要滚到当前日期之后；除非本轮重新确认且证据足够锚定，否则直接删除。
 - 历史原话可以含有相对时间，但本记录不是历史引用库；不要把旧原话复制进有效字段。
-- 本轮用户、`content_anchors` 或 `final_dialog` 没有正向重申的旧时间性未闭合事项，默认删除。
+- 本轮用户、`content_plan` 或 `final_dialog` 没有正向重申的旧时间性未闭合事项，默认删除。
 - 本轮回应如果是在降低压力、放下旧安排或避免继续追问，就不要把旧时间性事项重新写成有效未闭合事项。
 - 不要把“今天上午休息确认”原样写进 `current_thread`；改成“上午休息确认”，或在确有必要时写“2026-05-10 上午休息确认”。
 - 不要把“下周二香料笔记”直接写进 `avoid_reopening`；改成“旧香料笔记安排不要主动重提”，或锚定成绝对日期。
@@ -126,7 +126,7 @@ _RECORDER_PROMPT = '''\
     "chat_history_recent": [
         {{"speaker_name": "用户显示名或 {character_name}", "speaker_kind": "user | character | other", "body_text": "消息文本", "timestamp": "可选本地 YYYY-MM-DD HH:MM"}}
     ],
-    "content_anchors": ["刚结束回复使用过的内容锚点"],
+    "content_plan": {{"semantic_content": "刚结束回复前的内容计划"}},
     "logical_stance": "CONFIRM | REFUSE | TENTATIVE | DIVERGE | CHALLENGE",
     "character_intent": "PROVIDE | BANTAR | REJECT | EVADE | CONFRONT | DISMISS | CLARIFY",
     "final_dialog": ["本轮最终实际发出的回复文本"],
@@ -277,7 +277,7 @@ async def record_with_llm(record_input: ConversationProgressRecordInput) -> dict
             record_input["chat_history_recent"],
             character_name=character_name,
         ),
-        "content_anchors": record_input["content_anchors"],
+        "content_plan": record_input["content_plan"],
         "logical_stance": record_input["logical_stance"],
         "character_intent": record_input["character_intent"],
         "final_dialog": record_input["final_dialog"],

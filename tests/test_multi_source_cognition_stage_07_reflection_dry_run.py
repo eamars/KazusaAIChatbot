@@ -39,7 +39,7 @@ _APPROVED_STAGES: tuple[CognitionPromptStage, ...] = (
     "l2d_action_selection",
     "l2c2_social_context_appraisal",
     "l3_style_agent",
-    "l3_content_anchor_agent",
+    "l3_content_plan_agent",
     "l3_preference_adapter",
     "l3_visual_agent",
 )
@@ -93,26 +93,26 @@ _PROMPT_FINGERPRINTS = (
     (
         "_STYLE_AGENT_PROMPT",
         l3_module._STYLE_AGENT_PROMPT,
-        7033,
-        "2b06474ba46bca3a348fd8d926fdd93e7aa49225030f1d4f58d7737174bf8c71",
+        7026,
+        "b1cabe7003a6fd8ca7f8f47c15fe97c4399e7b9b1d4dde0fabca2198d526efc8",
     ),
     (
-        "_CONTENT_ANCHOR_AGENT_PROMPT",
-        l3_module._CONTENT_ANCHOR_AGENT_PROMPT,
-        21115,
-        "9162c058e5fa9295a17c079afade56ead3e6a2edcc307174f2e20da004442447",
+        "_CONTENT_PLAN_AGENT_PROMPT",
+        l3_module._CONTENT_PLAN_AGENT_PROMPT,
+        10425,
+        "38b4bbe41532b54c029538f0a63843101184191f413994250d28207a5e1ec19f",
     ),
     (
         "_PREFERENCE_ADAPTER_PROMPT",
         l3_module._PREFERENCE_ADAPTER_PROMPT,
-        7660,
-        "75ac96a8aeec479cb963662ffa7f86346a15a0c8816e248eb415d0b4195d07c6",
+        7666,
+        "2de70347de55f1827ef235764d35246b2fb7109d64ab2495fa2db4ce990521a9",
     ),
     (
         "_VISUAL_AGENT_PROMPT",
         l3_module._VISUAL_AGENT_PROMPT,
-        7965,
-        "371a2ae8b10a28460b677fed37552c6a9e8358274712e03ef07351a77c289b53",
+        7936,
+        "28e8ac752d123f76a55b0703a61d292e55aca49cf0ea6d9efd80c0f7f5775b65",
     ),
 )
 
@@ -420,8 +420,11 @@ def _llm_output_payloads() -> dict[str, dict[str, Any]]:
             "linguistic_style": "plain",
             "forbidden_phrases": [],
         },
-        "_content_anchor_agent_llm": {
-            "content_anchors": ["[DECISION] keep internal", "[SCOPE] dry run"],
+        "_content_plan_agent_llm": {
+            "content_plan": {
+                "semantic_content": "Keep the reflection dry run internal.",
+                "rendering": "No visible reply is emitted.",
+            },
         },
         "_preference_adapter_llm": {
             "accepted_user_preferences": [],
@@ -502,8 +505,8 @@ def _patch_cognition_llms(
     monkeypatch.setattr(l3_module, "_style_agent_llm", llms["_style_agent_llm"])
     monkeypatch.setattr(
         l3_module,
-        "_content_anchor_agent_llm",
-        llms["_content_anchor_agent_llm"],
+        "_content_plan_agent_llm",
+        llms["_content_plan_agent_llm"],
     )
     monkeypatch.setattr(
         l3_module,

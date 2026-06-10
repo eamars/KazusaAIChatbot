@@ -256,12 +256,11 @@ def _recorder_input() -> ConversationProgressRecordInput:
                 'timestamp': '2026-05-08T21:47:00+12:00',
             },
         ],
-        'content_anchors': [
-            '[DECISION] 接住今天上午休息的话题。',
-            '[ANSWER] 可以先休息。',
-            '[PROGRESSION] 不主动扩大旧奖励条件。',
-            '[SCOPE] ~30字。',
-        ],
+        'content_plan': {
+            'visible_goal': '接住今天上午休息的话题。',
+            'semantic_content': '可以先休息；不主动扩大旧奖励条件。',
+            'rendering': '~30字。',
+        },
         'logical_stance': 'CONFIRM',
         'character_intent': 'PROVIDE',
         'final_dialog': ['今天上午先休息吧。旧安排先别继续加压。'],
@@ -352,9 +351,9 @@ def _facts_harvester_state() -> dict[str, Any]:
         'existing_dedup_keys': set(),
         'action_directives': {
             'linguistic_directives': {
-                'content_anchors': [
-                    '[DECISION] 接受明天早上提醒检查香料清单',
-                ],
+                'content_plan': {
+                    'semantic_content': '接受明天早上提醒检查香料清单。',
+                },
             },
         },
         'final_dialog': [

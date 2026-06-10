@@ -89,7 +89,7 @@ def _preference_state() -> dict:
         "logical_stance": "CONFIRM",
         "character_intent": "PROVIDE",
         "linguistic_style": "concise",
-        "content_anchors": [],
+        "content_plan": {},
     }
 
 

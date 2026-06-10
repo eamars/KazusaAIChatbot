@@ -213,7 +213,10 @@ def _action_directives() -> dict:
             "rhetorical_strategy": "answer directly",
             "linguistic_style": "brief",
             "accepted_user_preferences": [],
-            "content_anchors": ["[DECISION] answer", "[SCOPE] short"],
+            "content_plan": {
+                "semantic_content": "answer",
+                "rendering": "short",
+            },
             "forbidden_phrases": [],
         },
         "visual_directives": {

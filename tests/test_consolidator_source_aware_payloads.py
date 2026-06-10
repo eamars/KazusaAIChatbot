@@ -102,7 +102,9 @@ def _state() -> dict[str, Any]:
         "platform_message_id": "self_cognition:case-1",
         "action_directives": {
             "linguistic_directives": {
-                "content_anchors": ["[PROGRESSION] revisit missed promise"],
+                "content_plan": {
+                    "semantic_content": "Revisit the missed promise.",
+                },
             },
         },
         "internal_monologue": "The missed promise still feels unresolved.",

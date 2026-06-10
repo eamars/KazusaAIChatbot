@@ -22,7 +22,7 @@ CognitionPromptStage = Literal[
     "l2c2_social_context_appraisal",
     "l2d_action_selection",
     "l3_style_agent",
-    "l3_content_anchor_agent",
+    "l3_content_plan_agent",
     "l3_preference_adapter",
     "l3_visual_agent",
 ]

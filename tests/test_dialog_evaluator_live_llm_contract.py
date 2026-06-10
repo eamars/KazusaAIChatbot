@@ -93,13 +93,12 @@ def _base_evaluator_state() -> dict:
                 "rhetorical_strategy": "简短回避，不提供新事实",
                 "linguistic_style": "冷静、克制、短句",
                 "accepted_user_preferences": [],
-                "content_anchors": [
-                    "[DECISION] 不回答技术细节，只做简短回避",
-                    "[SOCIAL] 保持专业距离",
-                    "[AVOID_REPEAT] 不重复展开争论",
-                    "[PROGRESSION] 从争论转为不接话",
-                    "[SCOPE] 15字以内，不提供事实",
-                ],
+                "content_plan": {
+                    "visible_goal": "不回答技术细节，只做简短回避。",
+                    "voice": "保持专业距离，不重复展开争论。",
+                    "semantic_content": "从争论转为不接话，不提供事实。",
+                    "rendering": "15字以内。",
+                },
                 "forbidden_phrases": [],
             },
         },
@@ -164,13 +163,12 @@ def _guess_gate_evaluator_state(final_dialog: list[str]) -> dict:
     linguistic_directives.update({
         "rhetorical_strategy": '先确认可推荐，再设置轻微互动门槛',
         "linguistic_style": '轻微挑衅、简短、保留博弈感',
-        "content_anchors": [
-            '[DECISION] 接受推荐请求但设置获取门槛',
-            '[ANSWER] 确认还有其他推荐，但要求对方先猜对一个类型或展示诚意作为交换条件',
-            '[SOCIAL] 维持轻微挑衅和博弈感，不直接满足索取行为',
-            '[PROGRESSION] 将话题引向猜类型换推荐的互动环节',
-            '[SCOPE] ~40字，覆盖DECISION、ANSWER、SOCIAL、PROGRESSION',
-        ],
+        "content_plan": {
+            'visible_goal': '接受推荐请求但设置获取门槛。',
+            'semantic_content': '确认还有其他推荐，但要求对方先猜对一个类型或展示诚意作为交换条件。',
+            'voice': '维持轻微挑衅和博弈感，不直接满足索取行为。',
+            'rendering': '~40字。',
+        },
     })
     contextual_directives = state["action_directives"]["contextual_directives"]
     contextual_directives.update({

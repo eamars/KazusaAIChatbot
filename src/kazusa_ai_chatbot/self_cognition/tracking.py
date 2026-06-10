@@ -231,9 +231,9 @@ def classify_route(
         route = _route_with_action_attempt(action_spec_route, action_attempt)
         return route
 
-    anchor_route = _route_from_content_anchors(cognition_output)
-    if anchor_route:
-        route = _route_with_action_attempt(anchor_route, action_attempt)
+    content_plan_route = _route_from_content_plan(cognition_output)
+    if content_plan_route:
+        route = _route_with_action_attempt(content_plan_route, action_attempt)
         return route
 
     case_name = _string_field(case, "case_name")
@@ -457,26 +457,26 @@ def _route_from_action_specs(cognition_output: dict[str, Any]) -> str:
     return return_value
 
 
-def _route_from_content_anchors(cognition_output: dict[str, Any]) -> str:
-    """Map explicit content-anchor markers to self-cognition routes."""
+def _route_from_content_plan(cognition_output: dict[str, Any]) -> str:
+    """Map explicit content-plan markers to self-cognition routes."""
 
-    anchors = _content_anchors(cognition_output)
-    for anchor in anchors:
-        if models.PROGRESS_MAINTENANCE_MARKER in anchor:
+    plan_values = _content_plan_values(cognition_output)
+    for plan_value in plan_values:
+        if models.PROGRESS_MAINTENANCE_MARKER in plan_value:
             return_value = models.ROUTE_PROGRESS_MAINTENANCE
             return return_value
-        if models.AUDIT_ONLY_MARKER in anchor:
+        if models.AUDIT_ONLY_MARKER in plan_value:
             return_value = models.ROUTE_AUDIT_ONLY
             return return_value
-        if models.SILENT_NO_WRITE_MARKER in anchor:
+        if models.SILENT_NO_WRITE_MARKER in plan_value:
             return_value = models.ROUTE_SILENT_NO_WRITE
             return return_value
     return_value = ""
     return return_value
 
 
-def _content_anchors(cognition_output: dict[str, Any]) -> list[str]:
-    """Read non-empty linguistic content anchors from cognition output."""
+def _content_plan_values(cognition_output: dict[str, Any]) -> list[str]:
+    """Read non-empty linguistic content-plan values from cognition output."""
 
     action_directives = cognition_output.get("action_directives")
     if not isinstance(action_directives, dict):
@@ -488,17 +488,17 @@ def _content_anchors(cognition_output: dict[str, Any]) -> list[str]:
         return_value = []
         return return_value
 
-    content_anchors = linguistic_directives.get("content_anchors")
-    if not isinstance(content_anchors, list):
+    content_plan = linguistic_directives.get("content_plan")
+    if not isinstance(content_plan, dict):
         return_value = []
         return return_value
 
-    anchors = [
-        item
-        for item in content_anchors
-        if isinstance(item, str) and item.strip()
+    plan_values = [
+        value
+        for value in content_plan.values()
+        if isinstance(value, str) and value.strip()
     ]
-    return anchors
+    return plan_values
 
 
 def _case_target_scope(case: models.SelfCognitionCase) -> dict[str, Any]:

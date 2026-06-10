@@ -357,11 +357,11 @@ def _cognition_state() -> dict[str, Any]:
             "rhetorical_strategy": "answer briefly",
             "linguistic_style": "plain",
             "forbidden_phrases": [],
-            "content_anchors": [
-                "[DECISION] answer",
-                "[ANSWER] keep it short",
-                "[SCOPE] short",
-            ],
+            "content_plan": {
+                "visible_goal": "answer",
+                "semantic_content": "keep it short",
+                "rendering": "short",
+            },
             "interaction_style_context": {
                 "user_style": {
                     "speech_guidelines": [],
@@ -462,7 +462,10 @@ def _text_surface_update() -> dict[str, Any]:
                 "rhetorical_strategy": "answer briefly",
                 "linguistic_style": "plain",
                 "accepted_user_preferences": [],
-                "content_anchors": ["[DECISION] answer", "[SCOPE] short"],
+                "content_plan": {
+                    "semantic_content": "answer",
+                    "rendering": "short",
+                },
                 "forbidden_phrases": [],
             },
             "visual_directives": {
@@ -519,7 +522,7 @@ def _dialog_state() -> dict[str, Any]:
                 "rhetorical_strategy": cognition_state["rhetorical_strategy"],
                 "linguistic_style": cognition_state["linguistic_style"],
                 "accepted_user_preferences": [],
-                "content_anchors": cognition_state["content_anchors"],
+                "content_plan": cognition_state["content_plan"],
                 "forbidden_phrases": [],
             },
         },
@@ -614,7 +617,7 @@ def _graph_result() -> dict[str, Any]:
             "rag_result": _rag_result(),
             "internal_monologue": "test",
             "action_directives": {
-                "linguistic_directives": {"content_anchors": []},
+                "linguistic_directives": {"content_plan": {}},
                 "contextual_directives": {},
             },
             "interaction_subtext": "",
@@ -1397,18 +1400,18 @@ async def test_existing_cognition_and_dialog_prompts_render_with_mocked_llms(
         {"internal_monologue", "interaction_style_context"},
     )
 
-    anchor_llm = _CaptureLLM({
-        "content_anchors": [
-            "[DECISION] answer",
-            "[ANSWER] keep it short",
-            "[SCOPE] short",
-        ],
+    plan_llm = _CaptureLLM({
+        "content_plan": {
+            "visible_goal": "answer",
+            "semantic_content": "keep it short",
+            "rendering": "short",
+        },
     })
-    monkeypatch.setattr(l3_module, "_content_anchor_agent_llm", anchor_llm)
-    anchor_result = await l3_module.call_content_anchor_agent(state)
-    assert anchor_result["content_anchors"][0].startswith("[DECISION]")
+    monkeypatch.setattr(l3_module, "_content_plan_agent_llm", plan_llm)
+    plan_result = await l3_module.call_content_plan_agent(state)
+    assert plan_result["content_plan"]["semantic_content"] == "keep it short"
     _assert_prompt_messages(
-        anchor_llm,
+        plan_llm,
         {"decontexualized_input", "referents", "rag_result"},
     )
 
@@ -1420,7 +1423,7 @@ async def test_existing_cognition_and_dialog_prompts_render_with_mocked_llms(
         preference_llm,
         {
             "decontexualized_input",
-            "content_anchors",
+            "content_plan",
             "user_memory_context",
         },
     )
@@ -1436,7 +1439,7 @@ async def test_existing_cognition_and_dialog_prompts_render_with_mocked_llms(
     assert visual_result["visual_vibe"] == ["plain"]
     _assert_prompt_messages(
         visual_llm,
-        {"prompt_message_context", "content_anchors", "conversation_progress"},
+        {"prompt_message_context", "content_plan", "conversation_progress"},
     )
     assert [selection["stage"] for selection in selector_calls] == [
         "l1_subconscious",
@@ -1445,7 +1448,7 @@ async def test_existing_cognition_and_dialog_prompts_render_with_mocked_llms(
         "l2c1_judgment_synthesis",
         "l2c2_social_context_appraisal",
         "l3_style_agent",
-        "l3_content_anchor_agent",
+        "l3_content_plan_agent",
         "l3_preference_adapter",
         "l3_visual_agent",
     ]
