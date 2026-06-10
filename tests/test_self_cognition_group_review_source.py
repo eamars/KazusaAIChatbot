@@ -532,8 +532,9 @@ async def test_collect_group_review_cases_attaches_scene_digest(
     rendered_packet = projection.render_source_packet_text(source_packet)
     serialized_packet = json.dumps(source_packet, ensure_ascii=False)
 
-    assert "group_scene_digest" in rendered_packet
+    assert "group_scene_digest" not in rendered_packet
     assert "participant_1 问了我一个问题" in rendered_packet
+    assert "group_scene_digest" in serialized_packet
     assert "delivery_target" not in serialized_packet
     assert "user-1" not in serialized_packet
     assert "qq-user-1" not in serialized_packet
@@ -586,17 +587,17 @@ def test_group_review_source_packet_uses_active_group_review_contract() -> None:
 
     assert source_packet["instruction"] != models.SELF_COGNITION_INPUT_TEXT
     assert source_packet["instruction"] == (
-        "我刚看到群里刚刚发生的一段现场。里面有人把话题指向我。"
+        "我刚看到群里刚刚发生的一段现场。"
+        "这段现场里有我之前说的话。"
+        "里面有人把话题指向我。"
     )
     assert rendered_packet.startswith(
-        "我刚看到群里刚刚发生的一段现场。里面有人把话题指向我。"
+        "我刚看到群里刚刚发生的一段现场。"
+        "这段现场里有我之前说的话。"
+        "里面有人把话题指向我。"
         "\n\n# 当前聊天窗口"
     )
     _assert_no_group_source_trigger_labels(rendered_packet)
-    assert (
-        "我刚看到群里刚刚发生的一段现场。我之前没有插话，"
-        "这段里也没有人把话题交给我。"
-    ) not in rendered_packet
     assert "group_chat_trigger_review" in serialized_packet
     assert "active_group_review_same_channel_no_fallback" in serialized_packet
     assert "group_chat_trigger_review" not in rendered_packet
@@ -627,19 +628,71 @@ def test_group_review_source_packet_uses_ambient_sentence_when_not_addressed(
     rendered_packet = projection.render_source_packet_text(source_packet)
 
     assert source_packet["instruction"] == (
-        "我刚看到群里刚刚发生的一段现场。我之前没有插话，"
-        "这段里也没有人把话题交给我。"
+        "我刚看到群里刚刚发生的一段现场。"
+        "这段现场里有我之前说的话。"
+        "这段里没有人把话题交给我。"
     )
     assert rendered_packet.startswith(
-        "我刚看到群里刚刚发生的一段现场。我之前没有插话，"
-        "这段里也没有人把话题交给我。"
+        "我刚看到群里刚刚发生的一段现场。"
+        "这段现场里有我之前说的话。"
+        "这段里没有人把话题交给我。"
         "\n\n# 当前聊天窗口"
     )
     _assert_no_group_source_trigger_labels(rendered_packet)
-    assert (
-        "我刚看到群里刚刚发生的一段现场。里面有人把话题指向我。"
-        not in rendered_packet
+
+
+def test_group_review_instruction_uses_digest_when_available() -> None:
+    """Instruction should prefer the LLM-generated scene digest."""
+
+    case = _group_review_case()
+    case["conversation_progress"]["group_scene_digest"] = {
+        "digest": (
+            '我（杏山千纱）说了：\u201c诶？你居然知道我在用GLM啊？\u201d，'
+            '我最后发言后，蚝爹油说：千纱不可以在有codex的时候悄悄出bug'
+        ),
+    }
+
+    source_packet = projection.build_source_packet(case)
+
+    assert source_packet["instruction"].startswith(
+        "我刚看到群里刚刚发生的一段现场。\n"
     )
+    assert "杏山千纱" in source_packet["instruction"]
+    assert "蚝爹油" in source_packet["instruction"]
+    assert "没有插话" not in source_packet["instruction"]
+
+
+def test_group_review_fallback_when_assistant_presence_absent() -> None:
+    """Without assistant_presence label, fallback should report no chiming in."""
+
+    case = _group_review_case()
+    case["group_activity_window"]["semantic_labels"].pop(
+        "assistant_presence", None,
+    )
+
+    source_packet = projection.build_source_packet(case)
+
+    assert "没有插话" in source_packet["instruction"]
+
+
+def test_group_review_instruction_never_contradicts_assistant_presence() -> None:
+    """Regression: instruction must not say '没有插话' when bot is present."""
+
+    case = _group_review_case()
+    case["conversation_progress"]["activity_labels"]["bot_addressing"] = (
+        "ambient_group_context"
+    )
+    case["group_activity_window"]["semantic_labels"]["bot_addressing"] = (
+        "ambient_group_context"
+    )
+    case["group_activity_window"]["semantic_labels"]["assistant_presence"] = (
+        "present"
+    )
+
+    source_packet = projection.build_source_packet(case)
+
+    assert "没有插话" not in source_packet["instruction"]
+    assert "有我之前说的话" in source_packet["instruction"]
 
 
 def test_group_review_cognition_state_does_not_invent_target_user() -> None:
@@ -886,6 +939,7 @@ def _group_review_case() -> dict[str, Any]:
             "semantic_labels": {
                 "activity_level": "quiet",
                 "bot_addressing": "directly_addressed",
+                "assistant_presence": "present",
             },
             "delivery_target": "dm-1",
         },
