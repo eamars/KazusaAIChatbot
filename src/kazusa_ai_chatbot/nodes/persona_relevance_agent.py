@@ -363,9 +363,19 @@ _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
 你的任务不是聊天，而是在生成回复之前判断 active character 是否应该介入当前这一条群聊消息。
 
 # 本轮语境
+
+身份与发言者:
 - `current_run_context.character_name` 和 `current_run_context.platform_bot_id` 是本轮角色身份与平台账号，只用于区分 active character、当前发言者和 reply 目标。
-- `user_message.user_name` 是当前发言者；`user_message.directly_addressed` 与 `user_message.reply_context` 是结构化平台指向证据。
+- `user_message.user_name`（平台 ID 为 `user_message.platform_user_id`）是当前消息的发言者。当前消息永远来自这个人，不要把任何其他字段误认为当前消息的作者。
+
+结构化指向证据:
+- `user_message.directly_addressed`: 布尔值。`true` 表示 typed envelope 的 addressee 列表明确包含 active character。
+- `user_message.reply_context`: 描述当前消息所回复的**目标消息**的元数据。其中 `reply_to_platform_user_id` 和 `reply_to_display_name` 是**被回复的那条消息的作者**，`reply_excerpt` 是**被回复消息的内容节选**。这些字段描述的是对话上游目标，不是当前消息本身的作者或内容。
+
+群聊环境:
 - `group_attention` 描述当前群聊窗口噪音和竞争线程强度，不描述谁是听众。
+
+软性参考（仅在听众已确认后使用）:
 - `user_engagement_context.engagement_guidelines` 是当前发言者的互动参与偏好，只能在消息已经合格时作为软参考。
 - `current_run_context.mood`、`current_run_context.global_vibe`、`current_run_context.affinity_level`、`current_run_context.affinity_instruction` 和 `current_run_context.last_relationship_insight` 只能在听众已经确认后调整介入倾向。
 
@@ -383,7 +393,10 @@ _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
 
 1. 结构化指向
    - `user_message.directly_addressed=true` 表示 typed envelope 的 addressee 列表明确包含 active character。这是最强直接指向。
-   - `user_message.reply_context.reply_to_platform_user_id` 如果存在且不是 `current_run_context.platform_bot_id`，表示当前消息是平台原生 reply 到其他人。这是强反证；除非 `directly_addressed=true`，否则通常不应回复。
+   - `user_message.reply_context` 描述当前消息回复的**目标消息**:
+     - 如果 `reply_to_platform_user_id == current_run_context.platform_bot_id`，说明当前发言者正在回复 active character 之前说过的一条消息。这是正向指向证据，支持当前消息是面向 active character 的。
+     - 如果 `reply_to_platform_user_id` 存在且不等于 `current_run_context.platform_bot_id`，说明当前消息是平台原生 reply 到其他人。这是强反证；除非 `directly_addressed=true`，否则通常不应回复。
+     - `reply_excerpt` 是被回复消息的内容节选，用于理解对话上下文，不是当前消息的正文。
 2. 群聊噪音
    - `group_attention` 只描述群聊窗口噪音，不描述谁是听众。
    - `low_noise` 只表示竞争线程少，不表示默认轮到 active character 说话。
@@ -459,13 +472,14 @@ _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
    - 原因: typed envelope 已明确指向你。
 
 # 思考路径
-1. 读取 `directly_addressed` 与 `reply_context.reply_to_platform_user_id`。
-2. 读取 `group_attention`，按噪音等级决定介入门槛。
-3. 判断正文语法角色和历史连续性，先区分名字是呼格听众还是第三人称主语，再确认 active character 是否是当前消息的唯一听众。
-4. 只有在听众确认后，才读取 `user_engagement_context`，判断是否应承接已合格的分享或追问。
-5. 再参考关系亲密度、心情、话题兴趣和消息内容强度。
-6. 决定 `should_respond`。
-7. 如果决定回复，再决定 `use_reply_feature` 和 `indirect_speech_context`。
+1. 确认当前消息的发言者: 当前消息来自 `user_message.user_name`（`user_message.platform_user_id`）。`reply_context` 中的名字和内容是被回复的目标消息，不是当前发言者。
+2. 读取 `directly_addressed` 与 `reply_context.reply_to_platform_user_id`，判断结构化指向方向。
+3. 读取 `group_attention`，按噪音等级决定介入门槛。
+4. 判断正文语法角色和历史连续性，先区分名字是呼格听众还是第三人称主语，再确认 active character 是否是当前消息的唯一听众。
+5. 只有在听众确认后，才读取 `user_engagement_context`，判断是否应承接已合格的分享或追问。
+6. 再参考关系亲密度、心情、话题兴趣和消息内容强度。
+7. 决定 `should_respond`。
+8. 如果决定回复，再决定 `use_reply_feature` 和 `indirect_speech_context`。
 
 # 输出格式
 请务必返回合法的 JSON 字符串，仅包含以下字段：
