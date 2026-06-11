@@ -648,12 +648,15 @@ def test_l3_style_prompt_does_not_seed_literal_texture_examples() -> None:
         assert forbidden_text not in prompt_text
 
     for required_text in (
-        '# 角色底色',
-        '# 角色声纹约束',
-        '优先级高于本轮临时风格建议',
-        '不要把声纹描述复制成台词',
+        '# 工作边界',
+        '# 核心转换',
+        '# 角色表达依据',
+        '## 性格底色怎样影响风格',
+        '## 声纹质感怎样影响风格',
+        '先处理说话视角风险，再应用角色表达依据',
+        '是否没有把声纹描述复制成台词',
         '文本内容计划由独立阶段生成',
-        '不要把十个维度全部堆进 `linguistic_style`',
+        '是否没有让十个声纹维度全部堆进 `linguistic_style`',
     ):
         assert required_text in prompt_text
 
@@ -663,7 +666,7 @@ def test_l3_style_prompt_omits_input_schema_but_explains_fields() -> None:
 
     prompt_text = l3_module._STYLE_AGENT_PROMPT
 
-    style_prompt_end = prompt_text.index('# 输出格式 (JSON)')
+    style_prompt_end = prompt_text.index('# 输出格式')
     style_prompt_body = prompt_text[:style_prompt_end]
 
     assert '# 输入格式' not in prompt_text
@@ -683,9 +686,29 @@ def test_l3_style_prompt_omits_input_schema_but_explains_fields() -> None:
         '`reflection_artifact`',
         '`internal_thought_residue`',
         '# 生成流程',
-        '# 表达边界',
+        '# 输出前自检',
     ):
         assert required_text in style_prompt_body
+
+
+def test_l3_preference_prompt_stays_out_of_style_ownership() -> None:
+    """Preference adapter should not duplicate style-agent responsibility."""
+
+    prompt_text = l3_module._PREFERENCE_ADAPTER_PROMPT
+
+    assert '# 输入格式' not in prompt_text
+    for required_text in (
+        '# 工作边界',
+        '`accepted_user_preferences` 只是下游表达的软约束',
+        '不决定一般风格、修辞策略、角色声纹、句长、情绪露出或社交包装',
+        '这些属于语言风格阶段和最终台词生成阶段',
+        '`linguistic_style` 是上游语言风格约束',
+        '只用于检查冲突，不要改写或扩展它',
+        '是否没有输出一般风格、角色声纹、修辞策略、内容计划、事实或承诺',
+        '# 输出前自检',
+        '# 输出格式',
+    ):
+        assert required_text in prompt_text
 
 
 def test_prompts_preserve_structured_output_enums() -> None:

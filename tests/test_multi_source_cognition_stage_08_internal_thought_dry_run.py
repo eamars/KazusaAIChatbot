@@ -101,14 +101,14 @@ _PROMPT_FINGERPRINTS = (
     (
         "_ACTION_INITIALIZER_PROMPT",
         l2d_module._ACTION_INITIALIZER_PROMPT,
-        17248,
-        "1e92ccadea08d15e6649d2c0d0ec6e27bab2d838e963b5008a3082b8e2eee6c0",
+        17886,
+        "fc8bec1ff152453e5b64bb88d0e1387f1ef955f3bddc54ffc09e524ca5bdfea8",
     ),
     (
         "_STYLE_AGENT_PROMPT",
         l3_module._STYLE_AGENT_PROMPT,
-        7026,
-        "b1cabe7003a6fd8ca7f8f47c15fe97c4399e7b9b1d4dde0fabca2198d526efc8",
+        9438,
+        "5f87f9353423815b947cebb707de8dc4623867741b62ad635103692c498a9851",
     ),
     (
         "_CONTENT_PLAN_AGENT_PROMPT",
@@ -119,8 +119,8 @@ _PROMPT_FINGERPRINTS = (
     (
         "_PREFERENCE_ADAPTER_PROMPT",
         l3_module._PREFERENCE_ADAPTER_PROMPT,
-        7666,
-        "2de70347de55f1827ef235764d35246b2fb7109d64ab2495fa2db4ce990521a9",
+        4865,
+        "a2396cb3e0979941375b0599dfdf9331a86e577988f51bc80da6491fd3225bde",
     ),
     (
         "_VISUAL_AGENT_PROMPT",
