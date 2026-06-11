@@ -130,14 +130,15 @@ class TestSemanticContent:
 
     def test_hesitation_low_no_fillers(self):
         desc = get_hesitation_density_description(0.0)
-        assert "不用" in desc and "填充词" in desc
+        assert "不添加" in desc and "填充" in desc
 
     def test_hesitation_high_has_fillers(self):
-        assert "那个" in get_hesitation_density_description(1.0) or "嗯" in get_hesitation_density_description(1.0)
+        desc = get_hesitation_density_description(1.0)
+        assert "迟疑" in desc and "content_plan" in desc
 
     def test_formalism_avoidance_low_allows_formal(self):
         desc = get_formalism_avoidance_description(0.0)
-        assert "因为" in desc or "然而" in desc or "综上" in desc
+        assert "正式" in desc or "论述" in desc or "规整" in desc
 
     def test_formalism_avoidance_high_bans_formal(self):
         desc = get_formalism_avoidance_description(1.0)
@@ -145,15 +146,15 @@ class TestSemanticContent:
 
     def test_self_deprecation_low_forbids_self_minimising(self):
         desc = get_self_deprecation_description(0.0)
-        assert "禁" in desc or "从不" in desc
+        assert "不要" in desc or "不自贬" in desc
 
     def test_emotional_leakage_high_mentions_punctuation(self):
         desc = get_emotional_leakage_description(1.0)
-        assert "颤" in desc or "破碎" in desc or "标点" in desc
+        assert "情绪" in desc and "content_plan" in desc
 
     def test_direct_assertion_low_is_indirect(self):
         desc = get_direct_assertion_description(0.0)
-        assert "绕" in desc or "侧面" in desc or "含糊" in desc
+        assert "含蓄" in desc or "间接" in desc
 
     def test_direct_assertion_high_is_direct(self):
         desc = get_direct_assertion_description(1.0)
@@ -161,7 +162,9 @@ class TestSemanticContent:
 
     def test_kazusa_fragmentation_level(self):
         """fragmentation=0.3 -> level 3 -> occasional split messages."""
-        assert "五六条" in get_fragmentation_description(0.3)
+        desc = get_fragmentation_description(0.3)
+        assert "轻微碎片感" in desc
+        assert "content_plan" in desc
 
     def test_kazusa_emotional_leakage_level(self):
         """emotional_leakage=0.7 → level 7 → visible leakage description."""
@@ -172,3 +175,42 @@ class TestSemanticContent:
         """self_deprecation=0.15 → level 2 → infrequent self-deprecation."""
         desc = get_self_deprecation_description(0.15)
         assert "很少" in desc or "偶尔" in desc
+
+    def test_descriptions_do_not_include_copyable_phrase_inventory(self):
+        """Texture descriptors should not seed exact catchphrases."""
+
+        forbidden_snippets = [
+            "「",
+            "」",
+            "不然呢",
+            "你觉得呢",
+            "是吗",
+            "因为……所以",
+            "综上所述",
+            "我这种人",
+            "啊啊啊",
+            "不是不是",
+        ]
+
+        for fn in ALL_DESCRIBERS:
+            for index in range(11):
+                desc = fn(index / 10)
+                assert not any(
+                    snippet in desc
+                    for snippet in forbidden_snippets
+                ), f"{fn.__name__} level {index} contains copyable phrasing"
+
+    def test_high_risk_style_axes_preserve_content_plan_authority(self):
+        """Style descriptors must not authorize semantic drift."""
+
+        high_risk_describers = [
+            get_counter_questioning_description,
+            get_softener_density_description,
+            get_abstraction_reframing_description,
+            get_direct_assertion_description,
+            get_emotional_leakage_description,
+            get_self_deprecation_description,
+        ]
+
+        for fn in high_risk_describers:
+            assert "content_plan" in fn(1.0)
