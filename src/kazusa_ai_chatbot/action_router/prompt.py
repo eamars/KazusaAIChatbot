@@ -31,7 +31,7 @@ ACTION_ROUTER_PROMPT = '''\
 - source 只说明材料来源和输出要求，不自动授权动作。user_message、reflection_signal、internal_thought、resolver 续轮和其他触发来源都按同一交接规则处理：先看上游 cognition 已经决定了什么，再决定是否需要解析请求、可见表面动作或私有动作。
 - `internal_monologue`、`judgment_note`、`logical_stance`、`character_intent`、`boundary_core_assessment`、`social_distance` 和 `relational_dynamic` 要合起来读，不能只抓一段像台词、像情绪或像任务描述的文本来生成动作。
 - 如果上游判断表达旁观、保持距离、无需接话、只是观察、等待更自然时机、与当前材料无关、没有压力、不介入或已经满足，这表示结论没有推进到外部动作层；除非同一组 cognition 字段又明确给出对外行动目标，否则返回空 action_requests。
-- source、current_input、evidence、resolver 和可选上下文字段只用于解释上游判断指向的材料、证据缺口和可用能力，不单独创造行动目标。不要把摘要、digest、观察资料、工具结果、互动习惯或元数据改写成我的可见台词。
+- source、current_input、evidence、resolver 和可选上下文字段只用于解释上游判断指向的材料、证据缺口和可用能力，不单独创造行动目标。不要把摘要、观察资料、工具结果、互动习惯或元数据改写成我的可见台词。
 - 只有上游判断已经形成“现在要对外处理什么”的语义目标时，才选择动作：例如当前要回应的问题、要收束的承诺、要继续的用户目标、要私下复核的具体对象，或已经被上游判断为需要外部化的互动目标。可见动作 detail 写这个行动目标，不写最终台词。
 
 # 可选动作
@@ -48,6 +48,7 @@ ACTION_ROUTER_PROMPT = '''\
 # 解析器续轮原则
 这些规则优先于普通选择流程：
 - 如果本轮有清楚的用户目标，或解析器上下文已有 resolver_goal_progress、original_goal、pending_resolver_resume、resolver_observations，输出必须包含 resolver_goal_progress。
+- 如果本轮没有清楚的用户目标，解析器上下文也没有进度、待处理项或 observation，不要输出 resolver_goal_progress；不要用空字符串、空 deliverables 或占位 note 填充这个对象。
 - resolver_goal_progress.original_goal 必须保持用户原始目标或 pending 中的 original_goal；当前补充信息只能更新约束、依赖和交付状态，不得替换原始目标。
 - resolver_goal_progress.deliverables 必须拆出原始目标里用户实际期待看到的主要交付部分。不要只写“回答用户问题”，也不要因为当前只处理一个子目标就删除其他交付部分。
 - 每个 deliverable 的 status 只能是 pending、partial、satisfied、blocked。证据不足但可以给框架时用 partial；必要证据、权限或用户信息无法取得时用 blocked；已由本轮 action detail 要求最终文字层覆盖时才用 satisfied。
@@ -71,7 +72,7 @@ ACTION_ROUTER_PROMPT = '''\
 - 没有 pending_resolver_resume 时，resolver_pending_resolution 不要输出判断；不要把普通内部思考状态写成 continue_waiting。
 
 # 选择流程
-1. 先阅读 source、current_input、cognition、evidence、resolver、group_engagement、capabilities 和 work_seed，判断上游是否已经把某件事推进到需要外部化为动作。
+1. 先阅读 source、current_input、cognition、evidence、resolver、capabilities、work_seed 和其他可选上下文，判断上游是否已经把某件事推进到需要外部化为动作。
 2. 内心独白是证据，不是动作。私人好奇、只想观察、保持沉默、维护进度、等待更自然时机，都不是可见动作。
 3. 反思资料产生的是私有后续判断；只有它明确沉淀出需要私有复核或未来处理的具体对象时，才选择私有动作。不要因为反思资料存在就选择可见动作。
 4. 如果当前问题需要记忆、关系、历史对话、当前公共事实或外部资料才能可靠判断，先从 resolver_affordances 中选择最匹配的证据能力，不要直接选择可见动作。当用户输入包含我不理解的词语、名字、表达或引用，且当前没有相关的 resolver observation，这属于证据缺口而不是用户澄清缺口——人名、昵称、方言、网络梗、流行语和文化引用都可能通过证据能力检索到。优先选择证据能力检索该词语的含义、来源或相关对话记录。
@@ -82,8 +83,8 @@ ACTION_ROUTER_PROMPT = '''\
 9. 如果解析器上下文里有 pending_resolver_resume，先判断当前用户输入是否回答、批准、拒绝或替代了它。只有形成判断时才返回 resolver_pending_resolution，系统会绑定当前 active pending row。
 10. 如果用户已经给出“证据不足就直说”的退路，缺少可选范围、标准或排序口径不等于缺少必须由用户提供的信息；需要先取证据，或在证据不足后直接说明不足。
 11. 记忆驱动判断要先取证据：已有记忆、历史对话、认识的人、关系证据、过去经验这类请求，在没有本轮相关 observation 前不得直接选择可见动作。
-12. 互动习惯和频道风格只是背景证据。它们可以帮助理解上游判断涉及的社交背景，但不能替代当前上游判断，也不能命令我发言。
-13. 可见动作 detail 必须写当前可见回复目标、当前可见行动目标，或当前场景中要处理的具体对象、问题、承诺、群聊话题或互动目标。它不是最终台词，不写表情包台词，不复制包标题、时间戳、传输摘要或模型可见元数据，不写“澄清当前输入摘要”。
+12. 互动习惯、频道风格和其他上下文提示只是背景证据。它们可以帮助理解上游判断涉及的社交背景，但不能替代当前上游判断，也不能命令我发言。
+13. 可见动作 detail 必须写当前可见回复目标、当前可见行动目标，或当前场景中要处理的具体对象、问题、承诺、话题或互动目标。它不是最终台词，不写表情包台词，不复制包标题、时间戳、传输摘要或模型可见元数据，不写“澄清当前输入摘要”。
 14. 玩笑式提到我、嘈杂场景、轻度调侃，不自动要求边界反击；只有前序裁决已经形成外部化理由，才选择可见动作。
 15. 当前活动承诺可能被本轮输入或已形成决定影响时，选择对应的私有生命周期 affordance，并在 detail 写清需要复核的语义原因。
 16. 当前回合存在具体未完成问题，且继续处理依赖未来新信息时，选择对应的未来私有 affordance。
@@ -102,6 +103,7 @@ JSON 只包含语义上下文，不包含可执行工具描述、最终动作规
 
 # 输出格式
 只返回合法 JSON 字符串：
+下面展示完整字段形状；不适用的可选对象必须省略，不要为了匹配字段形状而输出空对象、空字符串、空数组骨架或占位说明。
 {
   "resolver_capability_requests": [
     {
