@@ -475,6 +475,76 @@ def test_dialog_prompts_use_content_plan_as_semantic_authority() -> None:
     assert '强制 `should_stop: true`' not in _DIALOG_EVALUATOR_PROMPT
 
 
+def test_dialog_rendered_voice_constraints_do_not_seed_literal_phrases() -> None:
+    """Rendered voice constraints should not invite catchphrase copying."""
+
+    state = _base_global_state()
+    ltp = state["character_profile"]["linguistic_texture_profile"]
+    ltp["counter_questioning"] = 0.6
+    ltp["softener_density"] = 1.0
+    character_profile = state["character_profile"]
+    personality_brief = character_profile["personality_brief"]
+
+    prompt = _DIALOG_GENERATOR_PROMPT.format(
+        character_name=character_profile["name"],
+        character_logic=personality_brief["logic"],
+        character_tempo=personality_brief["tempo"],
+        character_defense=personality_brief["defense"],
+        character_quirks=personality_brief["quirks"],
+        character_taboos=personality_brief["taboos"],
+        ltp_hesitation_density=dialog_module.get_hesitation_density_description(
+            ltp["hesitation_density"],
+        ),
+        ltp_fragmentation=dialog_module.get_fragmentation_description(
+            ltp["fragmentation"],
+        ),
+        ltp_emotional_leakage=dialog_module.get_emotional_leakage_description(
+            ltp["emotional_leakage"],
+        ),
+        ltp_rhythmic_bounce=dialog_module.get_rhythmic_bounce_description(
+            ltp["rhythmic_bounce"],
+        ),
+        ltp_direct_assertion=dialog_module.get_direct_assertion_description(
+            ltp["direct_assertion"],
+        ),
+        ltp_softener_density=dialog_module.get_softener_density_description(
+            ltp["softener_density"],
+        ),
+        ltp_counter_questioning=dialog_module.get_counter_questioning_description(
+            ltp["counter_questioning"],
+        ),
+        ltp_formalism_avoidance=(
+            dialog_module.get_formalism_avoidance_description(
+                ltp["formalism_avoidance"],
+            )
+        ),
+        ltp_abstraction_reframing=(
+            dialog_module.get_abstraction_reframing_description(
+                ltp["abstraction_reframing"],
+            )
+        ),
+        ltp_self_deprecation=dialog_module.get_self_deprecation_description(
+            ltp["self_deprecation"],
+        ),
+    )
+    voice_start = prompt.index("# 角色声纹约束")
+    voice_end = prompt.index("# 输入字段含义")
+    voice_block = prompt[voice_start:voice_end]
+
+    assert "已定语义目标" in voice_block
+    for forbidden_text in (
+        "不然呢",
+        "你觉得呢",
+        "是吗",
+        "content_plan",
+        "内容计划",
+        "本轮计划",
+        "「",
+        "」",
+    ):
+        assert forbidden_text not in voice_block
+
+
 def test_build_interaction_history_recent_excludes_other_user_messages():
     """Scoped history should keep only the current user's turns and bot replies."""
     history = [

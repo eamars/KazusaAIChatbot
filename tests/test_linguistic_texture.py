@@ -134,7 +134,7 @@ class TestSemanticContent:
 
     def test_hesitation_high_has_fillers(self):
         desc = get_hesitation_density_description(1.0)
-        assert "迟疑" in desc and "content_plan" in desc
+        assert "迟疑" in desc and "已定语义目标" in desc
 
     def test_formalism_avoidance_low_allows_formal(self):
         desc = get_formalism_avoidance_description(0.0)
@@ -150,7 +150,7 @@ class TestSemanticContent:
 
     def test_emotional_leakage_high_mentions_punctuation(self):
         desc = get_emotional_leakage_description(1.0)
-        assert "情绪" in desc and "content_plan" in desc
+        assert "情绪" in desc and "已定语义目标" in desc
 
     def test_direct_assertion_low_is_indirect(self):
         desc = get_direct_assertion_description(0.0)
@@ -164,7 +164,7 @@ class TestSemanticContent:
         """fragmentation=0.3 -> level 3 -> occasional split messages."""
         desc = get_fragmentation_description(0.3)
         assert "轻微碎片感" in desc
-        assert "content_plan" in desc
+        assert "已定语义目标" in desc
 
     def test_kazusa_emotional_leakage_level(self):
         """emotional_leakage=0.7 → level 7 → visible leakage description."""
@@ -190,6 +190,8 @@ class TestSemanticContent:
             "我这种人",
             "啊啊啊",
             "不是不是",
+            "内容计划",
+            "本轮计划",
         ]
 
         for fn in ALL_DESCRIBERS:
@@ -200,7 +202,7 @@ class TestSemanticContent:
                     for snippet in forbidden_snippets
                 ), f"{fn.__name__} level {index} contains copyable phrasing"
 
-    def test_high_risk_style_axes_preserve_content_plan_authority(self):
+    def test_high_risk_style_axes_preserve_semantic_authority(self):
         """Style descriptors must not authorize semantic drift."""
 
         high_risk_describers = [
@@ -213,4 +215,14 @@ class TestSemanticContent:
         ]
 
         for fn in high_risk_describers:
-            assert "content_plan" in fn(1.0)
+            assert "已定语义目标" in fn(1.0)
+
+    @pytest.mark.parametrize("fn", ALL_DESCRIBERS)
+    def test_descriptions_use_schema_field_names_consistently(self, fn):
+        """Prompt fragments should reference the visible field name."""
+
+        for index in range(11):
+            desc = fn(index / 10)
+            assert "content_plan" not in desc
+            assert "内容计划" not in desc
+            assert "本轮计划" not in desc

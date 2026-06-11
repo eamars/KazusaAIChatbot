@@ -631,6 +631,63 @@ def test_l3_content_plan_scope_preserves_complete_plan_deliverables() -> None:
     assert '[SCOPE]' not in prompt_text
 
 
+def test_l3_style_prompt_does_not_seed_literal_texture_examples() -> None:
+    """Style prompt should not turn texture guidance into phrase inventory."""
+
+    prompt_text = l3_module._STYLE_AGENT_PROMPT
+
+    for forbidden_text in (
+        '**示例：**',
+        '非要我说出来',
+        '胸口好像',
+        '嗯，我,其实想说',
+        '固定感官化比喻',
+        '「',
+        '」',
+    ):
+        assert forbidden_text not in prompt_text
+
+    for required_text in (
+        '# 角色底色',
+        '# 角色声纹约束',
+        '优先级高于本轮临时风格建议',
+        '不要把声纹描述复制成台词',
+        '文本内容计划由独立阶段生成',
+        '不要把十个维度全部堆进 `linguistic_style`',
+    ):
+        assert required_text in prompt_text
+
+
+def test_l3_style_prompt_omits_input_schema_but_explains_fields() -> None:
+    """Style prompt should explain consumed fields without a JSON input block."""
+
+    prompt_text = l3_module._STYLE_AGENT_PROMPT
+
+    style_prompt_end = prompt_text.index('# 输出格式 (JSON)')
+    style_prompt_body = prompt_text[:style_prompt_end]
+
+    assert '# 输入格式' not in prompt_text
+    for required_text in (
+        '# 本轮输入字段说明',
+        '`logical_stance` 是立场边界',
+        '`character_intent` 是行动意图',
+        '`internal_monologue` 是上游意识层',
+        '`character_mood` 是当前瞬间情绪',
+        '`global_vibe` 是当前环境氛围',
+        '`last_relationship_insight` 是与当前用户的关系动态',
+        '`media_observations` 是当前图片或音频的结构化观察',
+        '`interaction_style_context.user_style` 是用户互动风格建议',
+        '`group_channel_style` 只在群聊输入中出现',
+        '`chat_history` 是最多两条近期表面文本',
+        '`decontexualized_input`',
+        '`reflection_artifact`',
+        '`internal_thought_residue`',
+        '# 生成流程',
+        '# 表达边界',
+    ):
+        assert required_text in style_prompt_body
+
+
 def test_prompts_preserve_structured_output_enums() -> None:
     """Prompt rewrites must keep downstream enum vocabularies visible."""
     for enum_value in ('CONFIRM', 'REFUSE', 'TENTATIVE', 'DIVERGE', 'CHALLENGE'):
