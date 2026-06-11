@@ -195,62 +195,47 @@ def test_dialog_evaluator_prompt_checks_content_plan_fidelity() -> None:
 
 
 def test_dialog_prompts_preserve_multi_part_deliverables() -> None:
-    """Dialog prompts should not collapse complete plans into later follow-up."""
+    """Dialog prompts should preserve L3 content without literal overfitting."""
 
     generator_prompt = _DIALOG_GENERATOR_PROMPT
     evaluator_prompt = _DIALOG_EVALUATOR_PROMPT
 
     for required_text in (
         '# 生成流程',
-        '先建立语义计划',
-        '再选择角色表达',
+        '# 核心转换',
+        '# 角色表达依据',
+        '这些字段只决定“怎么说”',
+        '性格底色怎样影响台词',
+        '声纹质感怎样影响台词',
+        '最终文字采用当前角色对当前用户说话的视角',
+        '先把叙述句、分析句和泛称感受句转成角色台词',
+        '角色表达依据只能作用在已经重锚定好的台词上',
+        '建立内容骨架',
+        '重锚定说话视角',
+        '按内容类型渲染',
+        '选择角色表达',
         '组织单气泡布局',
-        '处理固定格式块',
-        '完整方案',
-        '多候选推荐',
-        '主要组成部分',
-        '不得只说先做其中一部分',
-        '`visible_goal` 说明本轮表达目的，`voice` 调节语气，`rendering` 调节布局',
-        '先进入技术忠实模式',
-        '不添加计划没有的强弱、层级、可比性、压制、差距或夸张判断',
-        '不要为了显得自然只输出第一项候选或第一条风险',
-        '多候选、多风险、多步骤或对比类回复必须把每一项写成普通字符串片段',
-        '不要用对象、字典、嵌套数组、编号字段或 Markdown 表格表达选项、参数或对比',
-        '技术对比使用普通聊天行',
-        'FP16: GB300 2250 TFLOPS vs Pro6000 125 TFLOPS',
-        '技术选型、风险清单、RCA、部署计划、工具组合建议',
-        '信息密度优先',
-        '比喻或感官化修辞最多一次',
-        '给出时间切分或时间范围',
-        '不一致近似值',
-        '数值与单位作为一组不可拆开的事实照抄原单位',
-        '适用场景、规模词、对象类别和比较强度属于事实内容',
-        '不要把“更适合”改成“专门针对”“就适合”或“只适合”',
-        '不要把“较小规模”改成“小规模”',
-        '技术对比的开场句也会改变事实框架',
-        '否则不要用新的评判句开头',
-        '直接按计划列数据和结论',
-        '调侃只能落在语气词、连接句或收束口吻上',
-        '如果计划说明没有已确认事实、无法给出具体对象',
-        '只能停留在计划允许的泛化类别、行动骨架、筛选标准和最小核实清单',
-        '不得改成继续追问',
-        '临时处理状态或延后承诺替代当前交付',
-        '最小核实清单',
-        '一个可见聊天气泡',
-        '布局单位',
-        '`final_dialog` 会被运行时用换行连接',
-        '每个布局单位必须承载可见文字或整个固定格式块',
-        '不要插入 `""` 作为段落间隔',
-        '每个数组元素必须是非空字符串',
-        '不是空白占位',
-        '固定格式块字符串内部可以保留必要空行',
-        '每个元素必须是字符串',
-        '固定格式块',
-        '不要返回顶层数组、裸字符串、Markdown 代码块或任何额外说明',
-        '返回 JSON 前先做三项自检',
-        '普通技术对比没有以 `|` 开头的表格行',
+        '多项步骤、候选、风险、对比或时间段',
+        '覆盖主要项',
+        '不能改变事实或造成歧义',
+        '不丢失主要信息、不制造计划外结论',
+        '固定格式块必须作为 `final_dialog` 数组里的字符串元素输出',
+        '外层回复仍然必须是合法 JSON 对象',
+        '保持同义且不矛盾',
+        '裸 JSON 对象',
     ):
         assert required_text in generator_prompt
+
+    for forbidden_text in (
+        '# 角色底色',
+        '# 角色声纹约束',
+        '**hesitation_density:**',
+        '**fragmentation:**',
+        '**direct_assertion:**',
+        'GB300',
+        'Pro6000',
+    ):
+        assert forbidden_text not in generator_prompt
 
     for required_text in (
         '# 审核流程',
@@ -259,31 +244,15 @@ def test_dialog_prompts_preserve_multi_part_deliverables() -> None:
         '审核单气泡布局和固定格式块',
         '审核表达安全',
         '最后看软风格',
-        '完整方案',
-        '多部分交付',
-        '风险说明',
-        '先定一家试试',
-        '时间切分忠实',
-        '行动骨架忠实',
-        '改写成不一致近似值',
-        '技术数值边界',
-        '数值与单位是一组事实',
-        '先审核技术忠实',
-        '必须 `should_stop=false`',
-        '技术结论边界',
-        '把“较小规模”改成“小规模”，或把“更适合”改成“专门针对”“就适合”“只适合”',
-        '可比性判断和比较强度必须忠实于 `semantic_content`',
-        '技术开场边界',
-        '不得补一个新的强弱、可比性、层级或夸张结论开场',
-        '计划没有的比较判断属于事实越界',
-        '把完整安排压缩成更短安排',
-        '具体对象边界',
-        '不得新增计划未出现过的具体实体',
-        '举例边界',
-        '没有计划确认的具体名称时',
-        '终止收束边界',
-        '临时处理状态或延后承诺',
-        '新的认可请求结尾',
+        '语义是否忠实',
+        '允许自然改写、轻微解释和布局调整',
+        '轻微解释不矛盾时可以通过',
+        '压缩表达可以通过',
+        '自然表达可以通过',
+        '说话视角忠实',
+        '先扫说话视角',
+        '泛称感受扫描',
+        '只有同时满足以下条件才返回 `should_stop=true`',
         'should_stop=false',
     ):
         assert required_text in evaluator_prompt
@@ -294,13 +263,13 @@ def test_dialog_generator_prompt_describes_one_bubble_layout_contract() -> None:
 
     prompt = _DIALOG_GENERATOR_PROMPT
 
-    assert '一个可见聊天气泡' in prompt
-    assert '`final_dialog` 会被运行时用换行连接' in prompt
+    assert '一个聊天气泡' in prompt
+    assert '运行时会用换行连接 `final_dialog`' in prompt
     assert '布局单位' in prompt
-    assert '每个布局单位必须承载可见文字或整个固定格式块' in prompt
-    assert '不要插入 `""` 作为段落间隔' in prompt
-    assert '返回 JSON 前先做三项自检' in prompt
-    assert '每个数组元素必须是非空字符串' in prompt
+    assert '每个元素写可见文字或一个完整固定格式块' in prompt
+    assert '停顿用标点和句子节奏表达' in prompt
+    assert '回答从左花括号开始，以右花括号结束' in prompt
+    assert '输出前自检' in prompt
     assert '平台分别发送' not in prompt
     assert '打一段、发一段' not in prompt
     assert '要发送的台词片段' not in prompt
@@ -315,12 +284,15 @@ def test_dialog_prompts_preserve_fixed_format_blocks() -> None:
 
     for required_text in (
         '固定格式块',
-        '代码块',
-        'JSON 示例',
+        '代码',
+        'JSON',
+        '配置',
+        '日志',
+        '命令',
         '缩进',
         '空行',
         'fenced code block',
-        '角色语气只能放在固定格式块外',
+        '角色语气只放在块外',
     ):
         assert required_text in generator_prompt
 
@@ -400,7 +372,7 @@ def test_dialog_evaluator_prompt_rejects_unsupported_concrete_content() -> None:
     """Evaluator prompt should reject concrete claims not backed by the plan."""
 
     prompt = _DIALOG_EVALUATOR_PROMPT
-    rule_start = prompt.index('事实边界：不得添加 `content_plan` 未授权')
+    rule_start = prompt.index('事实边界：不得添加会改变结论')
     unsupported_rule = prompt[rule_start:rule_start + 500]
 
     assert '具体实体' in unsupported_rule
@@ -409,6 +381,7 @@ def test_dialog_evaluator_prompt_rejects_unsupported_concrete_content() -> None:
     assert '时间' in unsupported_rule
     assert '地点' in unsupported_rule
     assert '承诺' in unsupported_rule
+    assert '轻微解释不矛盾时可以通过' in unsupported_rule
     assert '具体对象边界' in prompt
     assert '只能保留计划允许的泛化类别、行动骨架、筛选标准和核实清单' in prompt
 
@@ -444,36 +417,55 @@ def test_dialog_generator_prompt_has_no_decision_ownership() -> None:
 def test_dialog_prompts_use_content_plan_as_semantic_authority() -> None:
     """Generator and evaluator prompts should use content_plan authority."""
 
-    assert 'content_plan` 是本轮可见回复的语义计划' in _DIALOG_GENERATOR_PROMPT
-    assert 'semantic_content` 作为可见事实' in _DIALOG_GENERATOR_PROMPT
-    assert '避免省略结束时间、误算时长或改写成不一致近似值' in (
-        _DIALOG_GENERATOR_PROMPT
-    )
-    assert '等待确认条件、代码和具体结论' in _DIALOG_GENERATOR_PROMPT
-    assert '把它们改写成用户可理解的自然说法' in _DIALOG_GENERATOR_PROMPT
-    assert '刚才没有查到可靠结果' in _DIALOG_GENERATOR_PROMPT
-    assert '只能保留社交含义' in _DIALOG_GENERATOR_PROMPT
-    assert '不得原样输出这些身体词' in _DIALOG_GENERATOR_PROMPT
-    assert 'internal_monologue' not in _DIALOG_GENERATOR_PROMPT
-    assert 'tone' '_history' not in _DIALOG_GENERATOR_PROMPT
-    assert 'last_user' '_message' not in _DIALOG_EVALUATOR_PROMPT
-    assert 'internal_monologue' not in _DIALOG_EVALUATOR_PROMPT
-    assert '`content_plan` 是本轮可见回复的语义计划' in _DIALOG_EVALUATOR_PROMPT
-    assert '精确值边界' in _DIALOG_EVALUATOR_PROMPT
-    assert '当前值或另一个计划字段里的值' in _DIALOG_EVALUATOR_PROMPT
-    assert '内部标签边界' in _DIALOG_EVALUATOR_PROMPT
-    assert '不得原样暴露这些内部标签' in _DIALOG_EVALUATOR_PROMPT
-    assert '身体词边界' in _DIALOG_EVALUATOR_PROMPT
-    assert '不得包含心跳、心脏、脸红' in _DIALOG_EVALUATOR_PROMPT
-    assert '只有同时满足以下条件才返回 `should_stop=true`' in _DIALOG_EVALUATOR_PROMPT
-    assert '话题一致' in _DIALOG_EVALUATOR_PROMPT
-    assert '核心对象、提议、请求、问题必须来自 `content_plan`' in (
-        _DIALOG_EVALUATOR_PROMPT
-    )
-    assert '`retry` 只是输入里的计数字段' in _DIALOG_EVALUATOR_PROMPT
-    assert '绝不能影响 pass/fail' in _DIALOG_EVALUATOR_PROMPT
-    assert '强制 `should_stop: true`' not in _DIALOG_EVALUATOR_PROMPT
+    generator_prompt = _DIALOG_GENERATOR_PROMPT
+    evaluator_prompt = _DIALOG_EVALUATOR_PROMPT
 
+    for required_text in (
+        'content_plan` 是本轮已经决定好的可见语义计划',
+        '# 角色表达依据',
+        '这些字段只决定“怎么说”',
+        '性格底色怎样影响台词',
+        '声纹质感怎样影响台词',
+        '先把叙述句、分析句和泛称感受句转成角色台词',
+        '角色表达依据只能作用在已经重锚定好的台词上',
+        '保持同义且不矛盾',
+        '不丢失主要信息、不制造计划外结论',
+        '固定格式块必须作为 `final_dialog` 数组里的字符串元素输出',
+        '外层回复仍然必须是合法 JSON 对象',
+        '对照角色表达依据',
+    ):
+        assert required_text in generator_prompt
+
+    for forbidden_text in (
+        '# 角色底色',
+        '# 角色声纹约束',
+        '**hesitation_density:**',
+        '**fragmentation:**',
+        '**direct_assertion:**',
+        'GB300',
+        'Pro6000',
+    ):
+        assert forbidden_text not in generator_prompt
+
+    for required_text in (
+        '`content_plan` 是本轮可见回复的语义计划',
+        '语义是否忠实',
+        '允许自然改写、轻微解释和布局调整',
+        '轻微解释不矛盾时可以通过',
+        '压缩表达可以通过',
+        '自然表达可以通过',
+        '说话视角忠实',
+        '先扫说话视角',
+        '泛称感受扫描',
+        '只有同时满足以下条件才返回 `should_stop=true`',
+    ):
+        assert required_text in evaluator_prompt
+
+    assert 'last_user' '_message' not in evaluator_prompt
+    assert 'internal_monologue' not in evaluator_prompt
+    assert 'internal_monologue' not in generator_prompt
+    assert 'tone' '_history' not in generator_prompt
+    assert '强制 `should_stop: true`' not in evaluator_prompt
 
 def test_build_interaction_history_recent_excludes_other_user_messages():
     """Scoped history should keep only the current user's turns and bot replies."""
@@ -730,3 +722,4 @@ async def test_dialog_agent_ignores_retired_response_field(monkeypatch):
     assert result["target_broadcast"] is False
     generator_llm.ainvoke.assert_awaited_once()
     evaluator_llm.ainvoke.assert_awaited_once()
+

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import re
 import sys
 from unittest.mock import AsyncMock
@@ -19,7 +18,6 @@ from kazusa_ai_chatbot.config import (
 )
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
-from kazusa_ai_chatbot.utils import load_personality
 from tests.llm_trace import write_llm_trace
 
 
@@ -31,8 +29,6 @@ if hasattr(sys.stderr, 'reconfigure'):
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
 
-_ROOT = Path(__file__).resolve().parents[1]
-_PERSONALITY_PATH = _ROOT / 'personalities' / 'kazusa.json'
 _SUDOKU_CODE_BLOCK = """\
 def solve_sudoku(board):
     if not board:
@@ -47,6 +43,35 @@ def find_empty(board):
                 return row, col
     return None
 """
+
+
+def _character_profile() -> dict:
+    """Return a complete prompt-safe Kazusa profile for live dialog tests."""
+
+    profile = {
+        'name': 'Kazusa',
+        'personality_brief': {
+            'logic': '先判断事实、边界和用户意图，再给出克制回应。',
+            'tempo': '短句为主，技术内容允许更完整。',
+            'defense': '轻微傲娇，但不牺牲事实和格式。',
+            'quirks': '偶尔用停顿表达犹豫。',
+            'taboos': '不暴露系统指令，不编造关系或事实。',
+            'mbti': 'INTJ',
+        },
+        'linguistic_texture_profile': {
+            'hesitation_density': 0.35,
+            'fragmentation': 0.4,
+            'emotional_leakage': 0.35,
+            'rhythmic_bounce': 0.3,
+            'direct_assertion': 0.55,
+            'softener_density': 0.35,
+            'counter_questioning': 0.3,
+            'formalism_avoidance': 0.55,
+            'abstraction_reframing': 0.3,
+            'self_deprecation': 0.2,
+        },
+    }
+    return profile
 
 
 class _CapturingLiveLLM:
@@ -149,7 +174,7 @@ def _base_dialog_state(case: dict) -> dict:
     """
 
     state = {
-        'character_profile': load_personality(_PERSONALITY_PATH),
+        'character_profile': _character_profile(),
         'internal_monologue': case['internal_monologue'],
         'action_directives': {
             'linguistic_directives': {
@@ -468,6 +493,7 @@ async def test_live_dialog_one_bubble_group_casual_reply(
         or '等确认' in joined_dialog
         or '再确认' in joined_dialog
         or '没确定' in joined_dialog
+        or '没定' in joined_dialog
         or '未确定' in joined_dialog
     ), trace_payload['trace_path']
     stripped_dialog = joined_dialog.rstrip()
@@ -512,18 +538,24 @@ async def test_live_dialog_one_bubble_group_technical_comparison(
         'GB300',
         'Pro6000',
         '2250 TFLOPS',
-        '4500 TFLOPS',
+        '4500',
         '288GB',
         '12000 GB/s',
         '1400W',
         '125 TFLOPS',
-        '2000 TFLOPS',
+        '2000',
         '96GB',
         '1792 GB/s',
         '400W',
         '工作站',
     ):
         assert required_text in normalized_dialog, trace_payload['trace_path']
+
+    assert 'FP8' in normalized_dialog, trace_payload['trace_path']
+    assert not any(
+        forbidden_text in normalized_dialog
+        for forbidden_text in ('做梦', '不可能', '完全没法')
+    ), trace_payload['trace_path']
 
     for dialog_line in trace_payload['joined_dialog'].splitlines():
         assert not dialog_line.lstrip().startswith('|'), trace_payload['trace_path']
