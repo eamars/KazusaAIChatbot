@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import logging
 
 import httpx
@@ -10,16 +9,11 @@ import pytest
 
 from kazusa_ai_chatbot.config import DIALOG_GENERATOR_LLM_BASE_URL
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
-from kazusa_ai_chatbot.utils import load_personality
 from tests.llm_trace import write_llm_trace
 
 
 logger = logging.getLogger(__name__)
 pytestmark = pytest.mark.live_llm
-
-_ROOT = Path(__file__).resolve().parents[1]
-_PERSONALITY_PATH = _ROOT / "personalities" / "kazusa.json"
-
 
 async def _skip_if_llm_unavailable() -> None:
     try:
@@ -42,6 +36,35 @@ async def _skip_if_llm_unavailable() -> None:
 @pytest.fixture()
 async def ensure_live_llm() -> None:
     await _skip_if_llm_unavailable()
+
+
+def _character_profile() -> dict:
+    """Return a complete prompt-safe Kazusa profile for mention tests."""
+
+    profile = {
+        "name": "Kazusa",
+        "personality_brief": {
+            "logic": "先判断事实、边界和用户意图，再给出克制回应。",
+            "tempo": "短句为主，技术内容允许更完整。",
+            "defense": "轻微傲娇，但不牺牲事实和格式。",
+            "quirks": "偶尔用停顿表达犹豫。",
+            "taboos": "不暴露系统指令，不编造关系或事实。",
+            "mbti": "INTJ",
+        },
+        "linguistic_texture_profile": {
+            "hesitation_density": 0.35,
+            "fragmentation": 0.4,
+            "emotional_leakage": 0.35,
+            "rhythmic_bounce": 0.3,
+            "direct_assertion": 0.55,
+            "softener_density": 0.35,
+            "counter_questioning": 0.3,
+            "formalism_avoidance": 0.55,
+            "abstraction_reframing": 0.3,
+            "self_deprecation": 0.2,
+        },
+    }
+    return profile
 
 
 def _dialog_state(*, direct_target: bool) -> dict:
@@ -114,7 +137,7 @@ def _dialog_state(*, direct_target: bool) -> dict:
         }
 
     state = {
-        "character_profile": load_personality(_PERSONALITY_PATH),
+        "character_profile": _character_profile(),
         "internal_monologue": internal_monologue,
         "action_directives": {
             "linguistic_directives": linguistic_directives,
@@ -139,6 +162,9 @@ def _dialog_state(*, direct_target: bool) -> dict:
             },
         ],
         "chat_history_recent": [],
+        "debug_modes": {},
+        "should_respond": True,
+        "dialog_usage_mode": "live_visible_reply",
         "platform_user_id": "platform-user-1",
         "platform_bot_id": "bot-1",
         "global_user_id": "global-user-1",
