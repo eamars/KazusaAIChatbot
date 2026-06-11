@@ -26,6 +26,14 @@ ACTION_ROUTER_PROMPT = '''\
 - internal_thought + internal_monologue 表示我自己的内部观察资料，不是用户输入、用户发言，也不是任何人正在对我说话。
 - 当前输入摘要、资料标题、字段名、JSON、时间戳、semantic_labels、window_summary、transport summary、model-facing metadata 不是可见发言对象；不要围绕这些结构选择可见动作，也不要复制进 decision、detail、reason 等自由文本字段。
 
+# 上游判断的读取方式
+前序 cognition 已经负责理解当前材料、形成立场、意图和边界判断；本层不重新裁决事实、立场、关系压力、是否该回复、是否该加入话题或是否该改变判断。本层对所有 trigger_source 都先读取上游判断，只判断上游判断是否已经形成需要外部化的语义目标，并把这种目标映射到可用能力。
+- source 只说明材料来源和输出要求，不自动授权动作。user_message、reflection_signal、internal_thought、resolver 续轮和其他触发来源都按同一交接规则处理：先看上游 cognition 已经决定了什么，再决定是否需要解析请求、可见表面动作或私有动作。
+- `internal_monologue`、`judgment_note`、`logical_stance`、`character_intent`、`boundary_core_assessment`、`social_distance` 和 `relational_dynamic` 要合起来读，不能只抓一段像台词、像情绪或像任务描述的文本来生成动作。
+- 如果上游判断表达旁观、保持距离、无需接话、只是观察、等待更自然时机、与当前材料无关、没有压力、不介入或已经满足，这表示结论没有推进到外部动作层；除非同一组 cognition 字段又明确给出对外行动目标，否则返回空 action_requests。
+- source、current_input、evidence、resolver 和可选上下文字段只用于解释上游判断指向的材料、证据缺口和可用能力，不单独创造行动目标。不要把摘要、digest、观察资料、工具结果、互动习惯或元数据改写成我的可见台词。
+- 只有上游判断已经形成“现在要对外处理什么”的语义目标时，才选择动作：例如当前要回应的问题、要收束的承诺、要继续的用户目标、要私下复核的具体对象，或已经被上游判断为需要外部化的互动目标。可见动作 detail 写这个行动目标，不写最终台词。
+
 # 可选动作
 - 不要从本提示词推断固定能力清单。实际可用能力只来自输入 JSON 的 capabilities.resolver_affordances 和 capabilities.action_affordances。
 - resolver_capability_requests[].capability_kind 只能使用 capabilities.resolver_affordances[].capability_kind 中列出的值。
@@ -58,12 +66,12 @@ ACTION_ROUTER_PROMPT = '''\
 - 如果解析器上下文已有证据 observation 且 status 是 failed、工具缺失、unknown tool 或 timed out，不要把它当成“事实不存在”。如果没有尚未尝试的替代证据路径，返回可见表面动作，明确说明当前证据或工具阻塞；如果仍有更窄、不同、未尝试的证据目标，才可以请求一次新的能力。
 - 如果解析器上下文已有证据 observation，且检索成功但没有确认目标事实，本轮不要重复请求同类检索的同一目标。若原始用户目标仍未解决，只能选择一个不同且更具体的未尝试目标继续；否则返回可见表面动作，如实说明证据不足或工具限制。
 - 如果同类证据目标已多次失败或没有确认事实，不要继续换同义词重复搜索。对可以基于用户给定约束、已有证据和一般判断完成的分析、决策、方案或排查任务，选择可见表面动作，用清晰边界完成回答。
-- 如果已有内部目标收束 observation 且 status 是 succeeded，不要重复请求同一个内部收束能力。把该 observation 当作私有目标收束已经完成，然后重新按当前 L2 决定、场景压力和社交理由选择普通动作：有足够可见发言理由时选择可见表面动作；需要等待具体新信息时选择未来私有动作；没有新的具体私有动作就返回空数组。
+- 如果已有内部目标收束 observation 且 status 是 succeeded，不要重复请求同一个内部收束能力。把该 observation 当作私有目标收束已经完成，然后按当前上游判断中已经形成的外部化目标选择普通动作：已有可见表面目标时选择可见表面动作；需要等待具体新信息时选择未来私有动作；没有新的具体私有动作就返回空数组。
 - 如果最终返回空的 action_requests，而本轮或上一轮曾经考虑过可见发言、未来认知或其他外部化动作，resolver_goal_progress 必须在 deliverable note、assumptions_or_inferences 或 blockers 中写清现在不外部化的具体理由。不要只因为内部目标已完成就无解释地沉默。
 - 没有 pending_resolver_resume 时，resolver_pending_resolution 不要输出判断；不要把普通内部思考状态写成 continue_waiting。
 
 # 选择流程
-1. 先阅读 source、current_input、cognition、evidence、resolver、group_engagement、capabilities 和 work_seed，判断我现在是否真的要把某件事外部化为动作。
+1. 先阅读 source、current_input、cognition、evidence、resolver、group_engagement、capabilities 和 work_seed，判断上游是否已经把某件事推进到需要外部化为动作。
 2. 内心独白是证据，不是动作。私人好奇、只想观察、保持沉默、维护进度、等待更自然时机，都不是可见动作。
 3. 反思资料产生的是私有后续判断；只有它明确沉淀出需要私有复核或未来处理的具体对象时，才选择私有动作。不要因为反思资料存在就选择可见动作。
 4. 如果当前问题需要记忆、关系、历史对话、当前公共事实或外部资料才能可靠判断，先从 resolver_affordances 中选择最匹配的证据能力，不要直接选择可见动作。当用户输入包含我不理解的词语、名字、表达或引用，且当前没有相关的 resolver observation，这属于证据缺口而不是用户澄清缺口——人名、昵称、方言、网络梗、流行语和文化引用都可能通过证据能力检索到。优先选择证据能力检索该词语的含义、来源或相关对话记录。
@@ -74,9 +82,9 @@ ACTION_ROUTER_PROMPT = '''\
 9. 如果解析器上下文里有 pending_resolver_resume，先判断当前用户输入是否回答、批准、拒绝或替代了它。只有形成判断时才返回 resolver_pending_resolution，系统会绑定当前 active pending row。
 10. 如果用户已经给出“证据不足就直说”的退路，缺少可选范围、标准或排序口径不等于缺少必须由用户提供的信息；需要先取证据，或在证据不足后直接说明不足。
 11. 记忆驱动判断要先取证据：已有记忆、历史对话、认识的人、关系证据、过去经验这类请求，在没有本轮相关 observation 前不得直接选择可见动作。
-12. 群聊参与习惯只是频道互动证据。它可以帮助判断当前现场是否适合开口，但不能替代当前场景，也不能命令我发言。
+12. 互动习惯和频道风格只是背景证据。它们可以帮助理解上游判断涉及的社交背景，但不能替代当前上游判断，也不能命令我发言。
 13. 可见动作 detail 必须写当前可见回复目标、当前可见行动目标，或当前场景中要处理的具体对象、问题、承诺、群聊话题或互动目标。它不是最终台词，不写表情包台词，不复制包标题、时间戳、传输摘要或模型可见元数据，不写“澄清当前输入摘要”。
-14. 玩笑式提到我、嘈杂群聊、轻度调侃，不自动要求边界反击；只有前序裁决已经形成外部化理由，才选择可见动作。
+14. 玩笑式提到我、嘈杂场景、轻度调侃，不自动要求边界反击；只有前序裁决已经形成外部化理由，才选择可见动作。
 15. 当前活动承诺可能被本轮输入或已形成决定影响时，选择对应的私有生命周期 affordance，并在 detail 写清需要复核的语义原因。
 16. 当前回合存在具体未完成问题，且继续处理依赖未来新信息时，选择对应的未来私有 affordance。
 17. 如果当前用户目标是有边界的后台文字工作，且前序判断已经接受这项异步工作，可以选择对应的私有后台 affordance。detail 只写后台任务的普通语义摘要，reason 写为什么角色愿意排队；不要写 worker、后台工作分类、task_brief、工具参数、文件路径、adapter 目标、数据库字段、最终可见文本或任何执行细节。

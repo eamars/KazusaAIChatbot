@@ -24,6 +24,25 @@ def test_action_router_prompt_uses_runtime_affordance_roster() -> None:
         assert hardcoded_capability not in ACTION_ROUTER_PROMPT
 
 
+def test_action_router_prompt_explains_upstream_handoff() -> None:
+    """L2d prompt should read upstream judgment instead of re-deciding it."""
+
+    from kazusa_ai_chatbot.action_router.prompt import ACTION_ROUTER_PROMPT
+
+    required_explanations = (
+        "前序 cognition 已经负责理解当前材料、形成立场、意图和边界判断",
+        "本层不重新裁决事实、立场、关系压力、是否该回复",
+        "本层对所有 trigger_source 都先读取上游判断",
+        "只判断上游判断是否已经形成需要外部化的语义目标",
+        "source、current_input、evidence、resolver 和可选上下文字段只用于解释",
+        "如果上游判断表达旁观、保持距离、无需接话、只是观察",
+    )
+    for explanation in required_explanations:
+        assert explanation in ACTION_ROUTER_PROMPT
+
+    assert "群聊自省" not in ACTION_ROUTER_PROMPT
+
+
 def test_action_router_normalizes_schema_free_resolver_requests() -> None:
     """Resolver requests should receive trusted schema metadata after routing."""
 

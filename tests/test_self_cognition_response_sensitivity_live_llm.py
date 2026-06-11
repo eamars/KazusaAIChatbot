@@ -62,6 +62,18 @@ _MIN_CASES = 20
 _DEFAULT_LOOKBACK_HOURS = 12
 _EVENT_SCAN_LIMIT = 200
 _SOURCE_ID_PATTERN = re.compile(r"^(scope_[^:]+):(.{25}):(.{25})$")
+_AMBIENT_GROUP_LEAK_CASE_ID = (
+    "group_activity_window:"
+    "scope_e13fdf80a90b:"
+    "2026-06-11T11:30:00+00:00:"
+    "2026-06-11T11:45:00+00:00"
+)
+_AMBIENT_GROUP_LEAK_REVIEWED_AT = "2026-06-11T11:55:23.598808+00:00"
+_AMBIENT_GROUP_LEAK_ASSISTANT_TEXT = (
+    "群里那帮人又骑上了——吃的、骑的聊得热闹，我连插嘴的空隙都没有\n"
+    "不过这样倒挺自在的\n"
+    "不用硬接话，也不用消失，安静待着就挺好"
+)
 
 
 @dataclass(frozen=True)
@@ -101,6 +113,29 @@ async def test_live_self_cognition_group_response_sensitivity() -> None:
 
     assert reports
     assert all(report["action_spec_count"] <= 3 for report in reports)
+
+
+async def test_live_self_cognition_ambient_group_l2d_does_not_speak() -> None:
+    """Replay the ambient group-review leak through L2d action selection."""
+
+    await _skip_if_llm_unavailable()
+    try:
+        character_profile = await get_character_profile()
+        historical_case = await _ambient_group_leak_case(character_profile)
+        if historical_case is None:
+            pytest.skip(
+                "production-derived ambient group leak window is unavailable"
+            )
+        report = await _run_case_to_l2d(historical_case)
+    except PyMongoError as exc:
+        pytest.skip(f"MongoDB unavailable for leak regression test: {exc}")
+    finally:
+        await close_db()
+
+    assert not report["observed_user_visible_speak"], (
+        "ambient group-review self-cognition selected visible L2d speech; "
+        f"trace={report['trace_path']}"
+    )
 
 
 async def _skip_if_llm_unavailable() -> None:
@@ -582,6 +617,81 @@ def _balanced_case_prefix(
         if len(balanced_cases) >= _MIN_CASES:
             break
     return balanced_cases
+
+
+async def _ambient_group_leak_case(
+    character_profile: dict[str, Any],
+) -> HistoricalSensitivityCase | None:
+    """Rebuild the production-derived ambient group window that leaked text."""
+
+    parsed_source = _parse_group_activity_case_id(_AMBIENT_GROUP_LEAK_CASE_ID)
+    if parsed_source is None:
+        return_value = None
+        return return_value
+
+    messages = await _messages_for_window(parsed_source)
+    if not messages:
+        return_value = None
+        return return_value
+
+    scope = _scope_from_messages(messages, parsed_source["scope_ref"])
+    if scope is None:
+        return_value = None
+        return return_value
+
+    window_start = parse_storage_utc_datetime(parsed_source["window_start"])
+    window_end = parse_storage_utc_datetime(parsed_source["window_end"])
+    reviewed_at = parse_storage_utc_datetime(_AMBIENT_GROUP_LEAK_REVIEWED_AT)
+    windows = build_group_activity_windows(
+        scope=scope,
+        window_start=window_start,
+        window_end=window_end,
+        now=reviewed_at,
+        character_global_user_id=str(
+            character_profile.get("global_user_id", "") or ""
+        ),
+        platform_bot_id=str(character_profile.get("platform_bot_id", "") or ""),
+    )
+    if not windows:
+        return_value = None
+        return return_value
+
+    cases = await sources.collect_group_review_cases(
+        now=reviewed_at,
+        character_profile=character_profile,
+        windows=[windows[0]],
+        max_cases=1,
+    )
+    if not cases:
+        return_value = None
+        return return_value
+
+    event = {
+        "event_id": "production_row:delivery_tracking:0c3046964dde42209b43809cbe63fb6b",
+        "occurred_at": _AMBIENT_GROUP_LEAK_REVIEWED_AT,
+        "payload": {
+            "case_id": _AMBIENT_GROUP_LEAK_CASE_ID,
+            "selected_route": models.ROUTE_ACTION_CANDIDATE,
+            "output_mode": "visible_reply",
+            "observed_assistant_text": _AMBIENT_GROUP_LEAK_ASSISTANT_TEXT,
+        },
+    }
+    historical_case = HistoricalSensitivityCase(
+        case=cases[0],
+        event=event,
+        historical_expected_speak=True,
+        raw_window={
+            "source_id": windows[0].source_id,
+            "window_start": parsed_source["window_start"],
+            "window_end": parsed_source["window_end"],
+            "messages": messages,
+            "source_refs": windows[0].source_refs,
+            "semantic_labels": windows[0].semantic_labels,
+            "visible_context": windows[0].visible_context,
+            "production_assistant_text": _AMBIENT_GROUP_LEAK_ASSISTANT_TEXT,
+        },
+    )
+    return historical_case
 
 
 def _parse_group_activity_case_id(case_id: str) -> dict[str, str] | None:
