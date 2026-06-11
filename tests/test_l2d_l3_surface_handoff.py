@@ -212,10 +212,10 @@ def _action_directives() -> dict:
             "rhetorical_strategy": "answer directly",
             "linguistic_style": "brief",
             "accepted_user_preferences": [],
-            "content_anchors": [
-                "[DECISION] Answer directly.",
-                "[ANSWER] Known fact.",
-            ],
+            "content_plan": {
+                "semantic_content": "Known fact.",
+                "rendering": "One visible chat bubble; concise.",
+            },
             "forbidden_phrases": [],
         },
         "visual_directives": {
@@ -587,13 +587,13 @@ async def test_parent_graph_preserves_social_context_for_selected_l3() -> None:
 
     captured_content_state: dict = {}
 
-    async def content_anchor(state: dict) -> dict:
+    async def content_plan(state: dict) -> dict:
         captured_content_state.update(state)
         return {
-            "content_anchors": [
-                "[DECISION] Answer directly.",
-                "[ANSWER] Known fact.",
-            ],
+            "content_plan": {
+                "semantic_content": "Known fact.",
+                "rendering": "One visible chat bubble; concise.",
+            },
         }
 
     with (
@@ -638,7 +638,7 @@ async def test_parent_graph_preserves_social_context_for_selected_l3() -> None:
                 "forbidden_phrases": [],
             },
         ),
-        patch.object(l3_surface_module, "call_content_anchor_agent", content_anchor),
+        patch.object(l3_surface_module, "call_content_plan_agent", content_plan),
         patch.object(
             l3_surface_module,
             "call_preference_adapter",
@@ -770,13 +770,13 @@ async def test_l3_text_surface_contract_excludes_retired_response_field() -> Non
         ),
         patch.object(
             l3_surface,
-            "call_content_anchor_agent",
+            "call_content_plan_agent",
             new_callable=AsyncMock,
             return_value={
-                "content_anchors": [
-                    "[DECISION] Answer directly.",
-                    "[ANSWER] Known fact.",
-                ],
+                "content_plan": {
+                    "semantic_content": "Known fact.",
+                    "rendering": "One visible chat bubble; concise.",
+                },
             },
         ),
         patch.object(
@@ -806,7 +806,7 @@ async def test_l3_text_surface_contract_excludes_retired_response_field() -> Non
 
 
 @pytest.mark.asyncio
-async def test_l3_content_anchor_receives_selected_speak_intent_only() -> None:
+async def test_l3_content_plan_receives_selected_speak_intent_only() -> None:
     """L3 should consume a prompt-safe text intent, not raw action specs."""
 
     from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface
@@ -822,13 +822,13 @@ async def test_l3_content_anchor_receives_selected_speak_intent_only() -> None:
     }
     state["action_specs"] = [speak_spec]
 
-    async def content_anchor(state: dict) -> dict:
+    async def content_plan(state: dict) -> dict:
         captured_content_state.update(state)
         return {
-            "content_anchors": [
-                "[DECISION] Answer directly.",
-                "[ANSWER] Known fact.",
-            ],
+            "content_plan": {
+                "semantic_content": "Known fact.",
+                "rendering": "One visible chat bubble; concise.",
+            },
         }
 
     with (
@@ -850,8 +850,8 @@ async def test_l3_content_anchor_receives_selected_speak_intent_only() -> None:
         ),
         patch.object(
             l3_surface,
-            "call_content_anchor_agent",
-            content_anchor,
+            "call_content_plan_agent",
+            content_plan,
         ),
         patch.object(
             l3_surface,
@@ -1025,14 +1025,10 @@ def test_selected_text_surface_intent_includes_resolver_observation_summaries() 
     assert "raw-observation-id" not in selected_intent
 
 
-def test_l3_content_anchors_include_resolver_observation_summaries() -> None:
-    """Dialog directives should keep prior evidence even if L3 compresses it."""
+def test_l3_content_plan_input_includes_resolver_observation_summaries() -> None:
+    """Content-plan input should keep prior prompt-safe evidence observations."""
 
     state = _cognition_state()
-    state["content_anchors"] = [
-        "[DECISION] Answer directly.",
-        "[SCOPE] short.",
-    ]
     state["resolver_state"] = {
         "observations": [
             {
@@ -1060,25 +1056,25 @@ def test_l3_content_anchors_include_resolver_observation_summaries() -> None:
         ],
     }
 
-    content_anchors = l3_module._content_anchors_with_goal_progress(state)
-    joined_anchors = "\n".join(content_anchors)
+    observation_context = l3_module._resolver_observations_for_content_plan(state)
 
-    assert content_anchors.index("[SCOPE] short.") > 0
-    assert "已完成证据观察摘要" in joined_anchors
+    assert "resolver_obs_1" in observation_context
+    assert "capability=web_evidence" in observation_context
+    assert "status=succeeded" in observation_context
     assert "Wynyard Quarter and Britomart are CBD evening walking options" in (
-        joined_anchors
+        observation_context
     )
-    assert "succeeded 可作为来源支持事实" in joined_anchors
-    assert "不得输出内部观察别名或能力名" in joined_anchors
-    assert "raw-observation-id" not in joined_anchors
+    assert "summary=Found Wynyard Quarter and Britomart." in observation_context
+    assert "raw-observation-id" not in observation_context
 
 
 @pytest.mark.asyncio
-async def test_l3_directives_preserve_goal_progress_when_anchor_omits_it() -> None:
-    """Dialog directives should keep L2d goal progress even if L3 compresses it."""
+async def test_l3_content_plan_receives_goal_progress_before_generation() -> None:
+    """Selected L3 should pass L2d goal progress into the content-plan agent."""
 
     from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface
 
+    captured_content_state: dict = {}
     state = _cognition_state()
     state["resolver_goal_progress"] = {
         "schema_version": "resolver_goal_progress.v1",
@@ -1107,6 +1103,18 @@ async def test_l3_directives_preserve_goal_progress_when_anchor_omits_it() -> No
         ],
     }
 
+    async def content_plan(state: dict) -> dict:
+        captured_content_state.update(state)
+        return {
+            "content_plan": {
+                "semantic_content": (
+                    "Give the compact final plan with dinner, walking route, "
+                    "time split, and verification checklist."
+                ),
+                "rendering": "One visible chat bubble; cover all deliverables.",
+            },
+        }
+
     with (
         patch.object(
             l3_surface,
@@ -1126,15 +1134,8 @@ async def test_l3_directives_preserve_goal_progress_when_anchor_omits_it() -> No
         ),
         patch.object(
             l3_surface,
-            "call_content_anchor_agent",
-            new_callable=AsyncMock,
-            return_value={
-                "content_anchors": [
-                    "[DECISION] Answer directly.",
-                    "[ANSWER] Give a compact plan.",
-                    "[SCOPE] short.",
-                ],
-            },
+            "call_content_plan_agent",
+            content_plan,
         ),
         patch.object(
             l3_surface,
@@ -1156,68 +1157,48 @@ async def test_l3_directives_preserve_goal_progress_when_anchor_omits_it() -> No
     ):
         result = await l3_surface.call_l3_text_surface_handler(state)
 
-    content_anchors = result["action_directives"]["linguistic_directives"][
-        "content_anchors"
-    ]
-
-    assert content_anchors[-1].startswith("[SCOPE]")
-    goal_anchor = "\n".join(content_anchors)
-    assert "目标进度交付清单" in goal_anchor
-    assert "原始目标：安排两小时计划：吃饭，加一段路线。" in goal_anchor
-    assert any(
-        "目标进度交付项 1" in anchor
-        for anchor in content_anchors
-    )
-    assert any(
-        "目标进度交付项 2" in anchor
-        for anchor in content_anchors
-    )
-    assert "晚餐候选和证据边界" in goal_anchor
-    assert "两小时路线和时间切分" in goal_anchor
-    assert "来源已确认：用户在奥克兰 CBD" in goal_anchor
-    assert "推断或未确认：可以给出路线骨架" in goal_anchor
-    assert "不得把推断或未确认内容写成已确认" in goal_anchor
-    assert "覆盖晚餐、散步、时间切分和最终核实清单" in goal_anchor
-    assert any(
-        anchor.startswith("[ANSWER] 最终可见回答必须覆盖")
-        and "覆盖晚餐、散步、时间切分和最终核实清单" in anchor
-        for anchor in content_anchors
-    )
-    assert any(
-        anchor.startswith("[SCOPE] 交付覆盖要求")
-        for anchor in content_anchors
-    )
-    assert content_anchors.index("[SCOPE] short.") > 0
-    assert content_anchors[-1] == (
-        "[SCOPE] 完整方案、路线、时间切分、风险、候选对比或核实清单"
-        "需要更多台词片段时，覆盖优先于简短。"
-    )
+    selected_intent = captured_content_state["selected_text_surface_intent"]
+    assert "目标进度：" in selected_intent
+    assert "original_goal=安排两小时计划：吃饭，加一段路线。" in selected_intent
+    assert "晚餐候选和证据边界" in selected_intent
+    assert "两小时路线和时间切分" in selected_intent
+    assert "source_backed_facts: 用户在奥克兰 CBD" in selected_intent
+    assert "assumptions_or_inferences: 可以给出路线骨架" in selected_intent
+    assert "blockers: 无法确认 19:30 营业状态" in selected_intent
+    assert "覆盖晚餐、散步、时间切分和最终核实清单" in selected_intent
+    assert result["action_directives"]["linguistic_directives"]["content_plan"] == {
+        "semantic_content": (
+            "Give the compact final plan with dinner, walking route, "
+            "time split, and verification checklist."
+        ),
+        "rendering": "One visible chat bubble; cover all deliverables.",
+    }
 
 
 @pytest.mark.asyncio
-async def test_l3_content_anchor_logs_output(caplog) -> None:
-    """Content-anchor output should be visible in normal runtime logs."""
+async def test_l3_content_plan_logs_output(caplog) -> None:
+    """Content-plan output should be visible in normal runtime logs."""
 
     llm = AsyncMock()
     llm.ainvoke.return_value = SimpleNamespace(
         content=json.dumps({
-            "content_anchors": [
-                "[DECISION] Answer directly.",
-                "[SCOPE] short.",
-            ],
+            "content_plan": {
+                "semantic_content": "Answer directly.",
+                "rendering": "One visible chat bubble; short.",
+            },
         }),
     )
 
-    with patch.object(l3_module, "_content_anchor_agent_llm", llm):
+    with patch.object(l3_module, "_content_plan_agent_llm", llm):
         caplog.set_level(logging.INFO, logger=l3_module.__name__)
-        result = await l3_module.call_content_anchor_agent(_cognition_state())
+        result = await l3_module.call_content_plan_agent(_cognition_state())
 
-    assert result["content_anchors"] == [
-        "[DECISION] Answer directly.",
-        "[SCOPE] short.",
-    ]
-    assert "Content anchor output: anchors=" in caplog.text
-    assert "[DECISION] Answer directly." in caplog.text
+    assert result["content_plan"] == {
+        "semantic_content": "Answer directly.",
+        "rendering": "One visible chat bubble; short.",
+    }
+    assert "Content plan output: entries=2" in caplog.text
+    assert "Answer directly." in caplog.text
 
 
 def test_legacy_background_artifact_no_handoff_produces_explicit_rejection() -> None:

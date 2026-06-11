@@ -153,7 +153,11 @@ def render_source_packet_text(packet: models.SourcePacket) -> str:
             _render_visible_context(packet['visible_context']),
             '',
             '# 对话进度',
-            _compact_value(packet.get('conversation_progress', {})),
+            _compact_value(
+                _render_conversation_progress(
+                    packet.get('conversation_progress', {}),
+                ),
+            ),
         ]
     )
     rendered_text = "\n".join(lines)
@@ -169,14 +173,7 @@ def _instruction_for_case(case: models.SelfCognitionCase) -> str:
 
     trigger_kind = _string_field(case, "trigger_kind")
     if trigger_kind == models.TRIGGER_GROUP_CHAT_REVIEW:
-        group_activity_window = _group_activity_window(case)
-        if _is_directly_addressed_group_window(group_activity_window):
-            return_value = '我刚看到群里刚刚发生的一段现场。里面有人把话题指向我。'
-            return return_value
-        return_value = (
-            '我刚看到群里刚刚发生的一段现场。'
-            '我之前没有插话，这段里也没有人把话题交给我。'
-        )
+        return_value = _group_review_instruction(case)
         return return_value
     target_scope = _target_scope(case)
     if target_scope["channel_type"] == "private":
@@ -186,6 +183,86 @@ def _instruction_for_case(case: models.SelfCognitionCase) -> str:
         return_value = '来源位置：我所在群聊窗口的最近可见内容。'
         return return_value
     return_value = models.SELF_COGNITION_INPUT_TEXT
+    return return_value
+
+
+def _group_review_instruction(case: models.SelfCognitionCase) -> str:
+    """Build instruction for a group_chat_review trigger.
+
+    Prefer the LLM-generated scene digest when available.  The digest
+    already describes whether the character spoke in the window and what
+    happened after, making the instruction factually consistent with
+    visible_context.
+
+    When the digest is unavailable, fall back to a multi-signal
+    deterministic framing that checks both ``assistant_presence`` and
+    ``bot_addressing`` so the instruction never contradicts the evidence.
+    """
+
+    _GROUP_REVIEW_PREAMBLE = '我刚看到群里刚刚发生的一段现场。'
+
+    digest_text = _group_scene_digest_text(case)
+    if digest_text:
+        return_value = f'{_GROUP_REVIEW_PREAMBLE}\n{digest_text}'
+        return return_value
+
+    return_value = _deterministic_group_review_instruction(
+        case,
+        preamble=_GROUP_REVIEW_PREAMBLE,
+    )
+    return return_value
+
+
+def _group_scene_digest_text(case: models.SelfCognitionCase) -> str:
+    """Extract the scene digest string from a group review case."""
+
+    conversation_progress = case.get("conversation_progress")
+    if not isinstance(conversation_progress, dict):
+        return_value = ""
+        return return_value
+    group_scene_digest = conversation_progress.get("group_scene_digest")
+    if not isinstance(group_scene_digest, dict):
+        return_value = ""
+        return return_value
+    digest = group_scene_digest.get("digest")
+    if not isinstance(digest, str):
+        return_value = ""
+        return return_value
+    return_value = digest.strip()
+    return return_value
+
+
+def _deterministic_group_review_instruction(
+    case: models.SelfCognitionCase,
+    *,
+    preamble: str,
+) -> str:
+    """Multi-signal fallback when the scene digest is unavailable.
+
+    Checks both ``assistant_presence`` and ``bot_addressing`` to build an
+    instruction that never contradicts what ``visible_context`` contains.
+    """
+
+    group_activity_window = _group_activity_window(case)
+    assistant_present = _is_assistant_present_group_window(
+        group_activity_window,
+    )
+    directly_addressed = _is_directly_addressed_group_window(
+        group_activity_window,
+    )
+
+    participation_line = (
+        '这段现场里有我之前说的话。'
+        if assistant_present
+        else '这段现场里我之前没有插话。'
+    )
+    addressing_line = (
+        '里面有人把话题指向我。'
+        if directly_addressed
+        else '这段里没有人把话题交给我。'
+    )
+
+    return_value = f'{preamble}{participation_line}{addressing_line}'
     return return_value
 
 
@@ -280,6 +357,20 @@ def _is_directly_addressed_group_window(
     bot_addressing = semantic_labels.get("bot_addressing", "")
     is_directly_addressed = bot_addressing == "directly_addressed"
     return is_directly_addressed
+
+
+def _is_assistant_present_group_window(
+    group_activity_window: dict[str, Any] | None,
+) -> bool:
+    """Return whether semantic labels say the bot spoke in the window."""
+
+    if group_activity_window is None:
+        return_value = False
+        return return_value
+    semantic_labels = group_activity_window.get("semantic_labels", {})
+    assistant_presence = semantic_labels.get("assistant_presence", "")
+    is_present = assistant_presence == "present"
+    return is_present
 
 
 def _source_packet_reason_line(packet: models.SourcePacket) -> str:
@@ -463,6 +554,31 @@ def _render_visible_context(rows: list[dict[str, Any]]) -> str:
         speaker = display_name or role
         lines.append(f'- {timestamp} {speaker}: {body_text}')
     rendered = '\n'.join(lines)
+    return rendered
+
+
+def _render_conversation_progress(
+    conversation_progress: dict[str, Any] | object,
+) -> dict[str, Any] | object:
+    """Return conversation progress without fields already in instruction.
+
+    The ``group_scene_digest`` is promoted to the instruction text for
+    group-review cases, so it is stripped here to avoid duplicating it in
+    the rendered percept body sent to the LLM.  The original structured
+    packet retains the full ``conversation_progress``.
+    """
+
+    if not isinstance(conversation_progress, dict):
+        return_value = conversation_progress
+        return return_value
+    if "group_scene_digest" not in conversation_progress:
+        return_value = conversation_progress
+        return return_value
+    rendered = {
+        key: value
+        for key, value in conversation_progress.items()
+        if key != "group_scene_digest"
+    }
     return rendered
 
 

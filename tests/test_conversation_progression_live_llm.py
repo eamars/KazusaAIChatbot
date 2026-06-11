@@ -26,7 +26,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2 import (
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (
     call_surface_directive_collector,
-    call_content_anchor_agent,
+    call_content_plan_agent,
     call_preference_adapter,
     call_style_agent,
     call_visual_agent,
@@ -562,7 +562,7 @@ async def _run_live_cognition_and_dialog(state: dict) -> tuple[dict, dict]:
     l3b = await call_style_agent(state)
     state.update(l3b)
 
-    l3b_anchor = await call_content_anchor_agent(state)
+    l3b_anchor = await call_content_plan_agent(state)
     state.update(l3b_anchor)
 
     l3b_pref = await call_preference_adapter(state)
@@ -596,7 +596,7 @@ async def _judge_progression(
         "prior_user_disclosures": prior_user_disclosures,
         "overused_assistant_move": case["overused_assistant_move"],
         "recent_history": prior_history,
-        "content_anchors": cognition_state.get("content_anchors", []),
+        "content_plan": cognition_state.get("content_plan", []),
         "final_dialog": dialog.get("final_dialog", []),
     }
     response = await _progression_judge_llm.ainvoke(
@@ -751,7 +751,7 @@ async def _record_progression_sequence(case: dict) -> None:
             **turn,
             "prior_user_disclosures": prior_user_disclosures,
             "conversation_progress": conversation_progress,
-            "content_anchors": cognition_state.get("content_anchors", []),
+            "content_plan": cognition_state.get("content_plan", []),
             "forbidden_phrases": cognition_state.get("forbidden_phrases", []),
             "logical_stance": cognition_state.get("logical_stance", ""),
             "character_intent": cognition_state.get("character_intent", ""),

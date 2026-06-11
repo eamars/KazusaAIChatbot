@@ -205,7 +205,7 @@ class CognitionState(TypedDict):
     accepted_user_preferences: list[str]
     forbidden_phrases: list[str]
 
-    content_anchors: list[str]
+    content_plan: dict[str, str]
 
     facial_expression: list[str]
     body_language: list[str]

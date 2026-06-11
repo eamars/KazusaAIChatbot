@@ -66,7 +66,10 @@ def _dialog_state() -> dict:
                 "rhetorical_strategy": "direct",
                 "linguistic_style": "brief",
                 "accepted_user_preferences": [],
-                "content_anchors": ["[DECISION] answer", "[SCOPE] short"],
+                "content_plan": {
+                    "semantic_content": "answer",
+                    "rendering": "short",
+                },
                 "forbidden_phrases": [],
             },
             "contextual_directives": {

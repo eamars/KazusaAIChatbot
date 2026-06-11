@@ -440,9 +440,11 @@ def _progress_cognition_output() -> dict[str, Any]:
         "affinity_delta": -1,
         "action_directives": {
             "linguistic_directives": {
-                "content_anchors": [
-                    "[AUDIT_ONLY] The missed promise should be remembered.",
-                ],
+                "content_plan": {
+                    "semantic_content": (
+                        "[AUDIT_ONLY] The missed promise should be remembered."
+                    ),
+                },
             },
         },
     }
@@ -473,7 +475,7 @@ def _visible_action_directives() -> dict[str, Any]:
             "rhetorical_strategy": "answer the scheduled follow-up",
             "linguistic_style": "brief",
             "accepted_user_preferences": [],
-            "content_anchors": ["[ANSWER] Checking in now."],
+            "content_plan": {"semantic_content": "Checking in now."},
             "forbidden_phrases": [],
         },
     }

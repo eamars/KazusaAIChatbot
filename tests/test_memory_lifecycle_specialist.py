@@ -183,10 +183,10 @@ def test_no_change_output_materializes_no_actions_and_prompt_safe_context() -> N
     normalized = module.normalize_memory_lifecycle_output(
         {
             "decision": "no_lifecycle_change",
-            "content_anchor_roles": [
+            "content_plan_roles": [
                 {
                     "role": "keep_waiting",
-                    "anchor": "No promise has been fulfilled yet.",
+                    "instruction": "No promise has been fulfilled yet.",
                 }
             ],
         },
@@ -231,10 +231,10 @@ def test_valid_alias_materializes_apply_action_and_prompt_safe_context() -> None
                     "evidence_anchor": "The user delivered item 2.",
                 }
             ],
-            "content_anchor_roles": [
+            "content_plan_roles": [
                 {
                     "role": "avoid_reopening",
-                    "anchor": "Do not reopen item 2 as unfulfilled.",
+                    "instruction": "Do not reopen item 2 as unfulfilled.",
                 }
             ],
         },
@@ -285,7 +285,7 @@ def test_materialization_caps_valid_lifecycle_updates_to_three() -> None:
                 }
                 for index in range(1, 5)
             ],
-            "content_anchor_roles": [],
+            "content_plan_roles": [],
         },
         prepared["alias_bindings"],
     )
@@ -343,10 +343,10 @@ async def test_post_surface_review_uses_final_dialog_and_direct_rows(
                 "evidence_anchor": "final_dialog 明确说提拉米苏债都清了",
             }
         ],
-        "content_anchor_roles": [
+        "content_plan_roles": [
             {
                 "role": "acknowledge_fulfillment",
-                "anchor": "提拉米苏债已清，不要再当作欠账重开",
+                "instruction": "提拉米苏债已清，不要再当作欠账重开",
             }
         ],
     })
@@ -395,7 +395,7 @@ async def test_post_surface_review_leaves_ambiguous_dessert_open(
     fake_llm = _FakeAsyncLLM({
         "decision": "no_lifecycle_change",
         "lifecycle_decisions": [],
-        "content_anchor_roles": [],
+        "content_plan_roles": [],
     })
     monkeypatch.setattr(module, "_memory_lifecycle_specialist_llm", fake_llm)
 
@@ -431,10 +431,10 @@ async def test_handler_consumes_route_and_materializes_apply_action(
                 "evidence_anchor": "The user delivered the promised item.",
             }
         ],
-        "content_anchor_roles": [
+        "content_plan_roles": [
             {
                 "role": "avoid_reopening",
-                "anchor": "Do not reopen the fulfilled commitment.",
+                "instruction": "Do not reopen the fulfilled commitment.",
             }
         ],
     })
@@ -453,10 +453,10 @@ async def test_handler_consumes_route_and_materializes_apply_action(
         APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     ]
     assert action_specs[1]["params"]["unit_id"] == "unit-001"
-    assert result["memory_lifecycle_context"]["content_anchor_roles"] == [
+    assert result["memory_lifecycle_context"]["content_plan_roles"] == [
         {
             "role": "avoid_reopening",
-            "anchor": "Do not reopen the fulfilled commitment.",
+            "instruction": "Do not reopen the fulfilled commitment.",
         }
     ]
     assert "unit_id" not in serialized_prompt

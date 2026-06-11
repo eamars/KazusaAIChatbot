@@ -103,10 +103,9 @@ def _base_record_input() -> ConversationProgressRecordInput:
                 "body_text": '哼，你倒是挺会装懂的嘛。',
             },
         ],
-        "content_anchors": [
-            '承认用户知道答案但还嘴硬拖了一下',
-            '不要继续催同一题',
-        ],
+        "content_plan": {
+            "semantic_content": "承认用户知道答案但还嘴硬拖了一下；不要继续催同一题。",
+        },
         "logical_stance": "CONFIRM",
         "character_intent": "PROVIDE",
         "final_dialog": ['……好啦，算你答对。下一题我可不会放水。'],
@@ -277,7 +276,7 @@ async def test_live_recorder_preserves_user_owned_helper_term(
             "body_text": '名字可以先保留，重点是它到底帮你学什么。',
         },
     ]
-    record_input["content_anchors"] = [
+    record_input["content_plan"] = [
         '学习助手是用户项目名',
         '确认项目名暂时保留',
     ]
@@ -348,7 +347,7 @@ async def test_live_recorder_returns_string_items_for_progress_lists(
             "timestamp": '2026-05-10T03:19:00+00:00',
         },
     ]
-    record_input["content_anchors"] = [
+    record_input["content_plan"] = [
         '接受亲昵称呼交换',
         '确认周五提拉米苏加双倍',
         '收束本轮甜点博弈',

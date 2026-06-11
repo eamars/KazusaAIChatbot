@@ -518,7 +518,7 @@ async def record_dialog_quality_event(
     evaluator_status: str,
     retry_count: int,
     failure_codes: Sequence[str],
-    anchor_count: int,
+    content_plan_entry_count: int,
     status: str,
     run_id: str = "",
     severity: EventSeverity = "info",
@@ -531,7 +531,7 @@ async def record_dialog_quality_event(
         "evaluator_status": sanitize_short_text(evaluator_status, limit=100),
         "retry_count": retry_count,
         "failure_codes": sanitize_string_list(failure_codes),
-        "anchor_count": anchor_count,
+        "content_plan_entry_count": content_plan_entry_count,
     }
     result = await _record_event(
         event_family="dialog_quality",

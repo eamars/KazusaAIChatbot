@@ -120,7 +120,13 @@ def _state() -> dict:
             "supervisor_trace": {"loop_count": 1, "unknown_slots": [], "dispatched": []},
         },
         "existing_dedup_keys": {"drink_preference_green_tea"},
-        "action_directives": {"linguistic_directives": {"content_anchors": ["[DECISION] 接受记住"]}},
+        "action_directives": {
+            "linguistic_directives": {
+                "content_plan": {
+                    "semantic_content": "接受记住用户偏好。",
+                },
+            },
+        },
         "final_dialog": ["嗯，我会记住你喜欢红茶。"],
         "logical_stance": "CONFIRM",
         "character_intent": "PROVIDE",
@@ -269,7 +275,7 @@ async def test_facts_harvester_accepts_no_surface_action(monkeypatch) -> None:
     await facts_module.facts_harvester(state)
 
     payload = json.loads(llm.messages[1].content)
-    assert payload["content_anchors"] == []
+    assert payload["content_plan"] == {}
 
 
 @pytest.mark.asyncio
@@ -331,7 +337,7 @@ async def test_fact_harvester_evaluator_accepts_no_surface_action(monkeypatch) -
     await facts_module.fact_harvester_evaluator(state)
 
     payload = json.loads(llm.messages[1].content)
-    assert payload["content_anchors"] == []
+    assert payload["content_plan"] == {}
 
 
 @pytest.mark.asyncio

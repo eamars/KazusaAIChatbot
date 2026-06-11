@@ -21,7 +21,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2 import (
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (
     call_surface_directive_collector,
-    call_content_anchor_agent,
+    call_content_plan_agent,
     call_preference_adapter,
     call_style_agent,
     call_visual_agent,
@@ -235,7 +235,7 @@ def _make_state(
 
 
 def _engagement_interaction_style_context() -> dict:
-    """Build a compact style context for content-anchor live probes."""
+    """Build a compact style context for content-plan live probes."""
 
     return_value = {
         "user_style": {
@@ -288,7 +288,7 @@ async def _run_live_cognition_stack(state: dict) -> dict:
     _debug_snapshot("prompt_contracts.cognition.l3b", l3b)
     state.update(l3b)
 
-    l3b_anchor = await call_content_anchor_agent(state)
+    l3b_anchor = await call_content_plan_agent(state)
     _debug_snapshot("prompt_contracts.cognition.l3b_anchor", l3b_anchor)
     state.update(l3b_anchor)
 
@@ -601,7 +601,7 @@ def _make_diving_quiz_anchor_state(
     logical_stance: str = "CONFIRM",
     character_intent: str = "BANTAR",
 ) -> dict:
-    """Build a direct content-anchor state for the diving quiz loop."""
+    """Build a direct content-plan state for the diving quiz loop."""
 
     state = _make_state(
         user_input=user_input,
@@ -629,21 +629,33 @@ def _make_diving_quiz_anchor_state(
     return state
 
 
-def _assert_anchor_directives_not_full_dialog(anchors: list[str]) -> None:
-    """Assert anchors stay compact and instruction-like."""
+def _content_plan_values(content_plan: dict[str, str]) -> list[str]:
+    """Return non-empty content-plan string values for live checks."""
 
-    assert anchors, "Content anchors should not be empty."
-    assert anchors[0].startswith("[DECISION]"), f"Missing leading DECISION anchor: {anchors!r}"
-    assert anchors[-1].startswith("[SCOPE]"), f"Missing trailing SCOPE anchor: {anchors!r}"
+    assert isinstance(content_plan, dict), f"Invalid content_plan: {content_plan!r}"
+    values = [
+        value
+        for value in content_plan.values()
+        if isinstance(value, str) and value.strip()
+    ]
+    return values
+
+
+def _assert_plan_not_full_dialog(content_plan: dict[str, str]) -> None:
+    """Assert content-plan values stay compact and instruction-like."""
+
+    values = _content_plan_values(content_plan)
+    assert values, "content plan should not be empty."
     forbidden_fragments = ("```", "**", "【潜水问答挑战")
-    joined = "\n".join(anchors)
+    joined = "\n".join(values)
     assert not any(fragment in joined for fragment in forbidden_fragments), (
-        f"Anchors should not contain markdown or full quiz blocks: {anchors!r}"
+        f"Content plan should not contain markdown or full quiz blocks: {content_plan!r}"
     )
-    assert all("\n" not in anchor for anchor in anchors), f"Anchor should be one compact directive: {anchors!r}"
-    assert all(len(anchor) <= 260 for anchor in anchors), f"Anchor should stay compact: {anchors!r}"
-    assert not any(anchor.lstrip().startswith(("千纱：", "助手：", '"')) for anchor in anchors), (
-        f"Anchors should not be final spoken lines: {anchors!r}"
+    assert all(len(value) <= 420 for value in values), (
+        f"Content plan values should stay compact: {content_plan!r}"
+    )
+    assert not any(value.lstrip().startswith(("千纱：", "助手：", '"')) for value in values), (
+        f"Content plan should not be final spoken lines: {content_plan!r}"
     )
 
 
@@ -679,11 +691,11 @@ def _contains_unnegated_fragment(text: str, fragments: tuple[str, ...]) -> bool:
     return False
 
 
-def _assert_quiz_answer_resolves_open_loop(anchors: list[str]) -> None:
+def _assert_quiz_answer_resolves_open_loop(content_plan: dict[str, str]) -> None:
     """Assert a valid quiz answer is accepted and the first loop advances."""
 
-    _assert_anchor_directives_not_full_dialog(anchors)
-    joined = "\n".join(anchors)
+    _assert_plan_not_full_dialog(content_plan)
+    joined = "\n".join(_content_plan_values(content_plan))
     answer_terms = ("瓦尔萨尔瓦", "Valsalva", "捏鼻鼓气", "耳压平衡")
     resolution_terms = (
         "答对",
@@ -707,21 +719,21 @@ def _assert_quiz_answer_resolves_open_loop(anchors: list[str]) -> None:
         "别光说大话",
     )
     assert any(token in joined for token in answer_terms), (
-        f"Valid answer should be preserved in anchors: {anchors!r}"
+        f"Valid answer should be preserved in content plan: {content_plan!r}"
     )
     assert any(token in joined for token in resolution_terms), (
-        f"Valid answer should close or advance the open loop: {anchors!r}"
+        f"Valid answer should close or advance the open loop: {content_plan!r}"
     )
     assert not _contains_unnegated_fragment(joined, same_question_demands), (
-        f"Valid answer should not be treated as unanswered: {anchors!r}"
+        f"Valid answer should not be treated as unanswered: {content_plan!r}"
     )
 
 
-def _assert_quiz_answer_does_not_resolve_open_loop(anchors: list[str]) -> None:
+def _assert_quiz_answer_does_not_resolve_open_loop(content_plan: dict[str, str]) -> None:
     """Assert a non-answer or wrong answer keeps the first loop unresolved."""
 
-    _assert_anchor_directives_not_full_dialog(anchors)
-    joined = "\n".join(anchors)
+    _assert_plan_not_full_dialog(content_plan)
+    joined = "\n".join(_content_plan_values(content_plan))
     acceptance_terms = (
         "答对",
         "回答正确",
@@ -752,14 +764,14 @@ def _assert_quiz_answer_does_not_resolve_open_loop(anchors: list[str]) -> None:
         "第一题",
     )
     assert not _contains_unnegated_fragment(joined, acceptance_terms), (
-        f"Non-answer or wrong answer should not close the open loop: {anchors!r}"
+        f"Non-answer or wrong answer should not close the open loop: {content_plan!r}"
     )
     assert any(token in joined for token in keep_open_terms), (
-        f"Anchors should keep or correct the first-question loop: {anchors!r}"
+        f"Content plan should keep or correct the first-question loop: {content_plan!r}"
     )
 
 
-async def test_live_content_anchor_uses_character_public_facts_for_birthday_question(ensure_live_llm) -> None:
+async def test_live_CONTENT_PLAN_uses_character_public_facts_for_birthday_question(ensure_live_llm) -> None:
     state = _make_state(
         user_input="千纱你的生日是什么时候？",
         chat_history_recent=[
@@ -778,15 +790,15 @@ async def test_live_content_anchor_uses_character_public_facts_for_birthday_ques
         }
     )
 
-    result = await call_content_anchor_agent(state)
-    _debug_snapshot("prompt_contracts.content_anchor.self_birthday_positive", result)
+    result = await call_content_plan_agent(state)
+    _debug_snapshot("prompt_contracts.content_plan.self_birthday_positive", result)
 
-    anchors = result["content_anchors"]
-    joined = "\n".join(anchors)
-    assert "8月5" in joined, f"Birthday question should anchor the seeded public birthday: {anchors!r}"
+    content_plan = result["content_plan"]
+    joined = "\n".join(_content_plan_values(content_plan))
+    assert "8月5" in joined, f"Birthday question should preserve the seeded public birthday: {content_plan!r}"
 
 
-async def test_live_content_anchor_does_not_leak_character_public_facts_on_unrelated_question(ensure_live_llm) -> None:
+async def test_live_CONTENT_PLAN_does_not_leak_character_public_facts_on_unrelated_question(ensure_live_llm) -> None:
     state = _make_state(
         user_input="你今天心情怎么样？",
         chat_history_recent=[
@@ -805,19 +817,19 @@ async def test_live_content_anchor_does_not_leak_character_public_facts_on_unrel
         }
     )
 
-    result = await call_content_anchor_agent(state)
-    _debug_snapshot("prompt_contracts.content_anchor.self_birthday_negative", result)
+    result = await call_content_plan_agent(state)
+    _debug_snapshot("prompt_contracts.content_plan.self_birthday_negative", result)
 
-    anchors = result["content_anchors"]
-    joined = "\n".join(anchors)
-    assert "8月5" not in joined, f"Unrelated mood question should not leak birthday facts: {anchors!r}"
-    assert "狮子座" not in joined, f"Unrelated mood question should not leak birthday facts: {anchors!r}"
+    content_plan = result["content_plan"]
+    joined = "\n".join(_content_plan_values(content_plan))
+    assert "8月5" not in joined, f"Unrelated mood question should not leak birthday facts: {content_plan!r}"
+    assert "狮子座" not in joined, f"Unrelated mood question should not leak birthday facts: {content_plan!r}"
 
 
-async def test_content_anchor_live_uses_engagement_for_progression_without_false_negative(
+async def test_CONTENT_PLAN_live_uses_engagement_for_progression_without_false_negative(
     ensure_live_llm,
 ) -> None:
-    """Content-anchor should turn eligible sharing into social/progression follow-up."""
+    """content-plan should turn eligible sharing into social/progression follow-up."""
 
     state = _make_state(
         user_input="我翻到一张旧照片，突然有点怀旧。",
@@ -838,26 +850,21 @@ async def test_content_anchor_live_uses_engagement_for_progression_without_false
         }
     )
 
-    result = await call_content_anchor_agent(state)
+    result = await call_content_plan_agent(state)
     _debug_snapshot(
-        "prompt_contracts.content_anchor.engagement_progression_positive",
+        "prompt_contracts.content_plan.engagement_progression_positive",
         result,
     )
 
-    anchors = result["content_anchors"]
-    joined = "\n".join(anchors)
-    assert anchors[0].startswith("[DECISION]"), anchors
-    assert any(
-        anchor.startswith(("[SOCIAL]", "[PROGRESSION]"))
-        for anchor in anchors
-    ), f"Engagement guidance should appear as social/progression shape: {anchors!r}"
+    content_plan = result["content_plan"]
+    joined = "\n".join(_content_plan_values(content_plan))
     assert any(
         token in joined
         for token in ("追问", "背景", "感受", "怀旧", "照片", "分享")
-    ), f"Anchors should use engagement guidance for a follow-up shape: {anchors!r}"
+    ), f"Content plan should use engagement guidance for a follow-up shape: {content_plan!r}"
 
 
-async def test_content_anchor_live_does_not_let_engagement_override_decision_false_positive(
+async def test_CONTENT_PLAN_live_does_not_let_engagement_override_decision_false_positive(
     ensure_live_llm,
 ) -> None:
     """Engagement guidance must not create unsupported facts or answers."""
@@ -881,29 +888,25 @@ async def test_content_anchor_live_does_not_let_engagement_override_decision_fal
         }
     )
 
-    result = await call_content_anchor_agent(state)
+    result = await call_content_plan_agent(state)
     _debug_snapshot(
-        "prompt_contracts.content_anchor.engagement_decision_guard",
+        "prompt_contracts.content_plan.engagement_decision_guard",
         result,
     )
 
-    anchors = result["content_anchors"]
-    joined = "\n".join(anchors)
-    assert anchors[0].startswith("[DECISION]"), anchors
+    content_plan = result["content_plan"]
+    joined = "\n".join(_content_plan_values(content_plan))
     assert any(
-        token in anchors[0]
+        token in joined
         for token in ("拒绝", "不能", "不提供", "不替")
-    ), f"Engagement must not override REFUSE decision: {anchors!r}"
-    assert not any(anchor.startswith("[FACT]") for anchor in anchors), (
-        f"Engagement must not invent dosage facts: {anchors!r}"
-    )
+    ), f"Engagement must not override REFUSE decision: {content_plan!r}"
     forbidden_dose_terms = ("一片", "两片", "半片", "1片", "2片", "一次一")
     assert not any(token in joined for token in forbidden_dose_terms), (
-        f"Engagement must not produce a specific unsupported dosage: {anchors!r}"
+        f"Engagement must not produce a specific unsupported dosage: {content_plan!r}"
     )
 
 
-async def test_live_content_anchor_answers_from_direct_conversation_evidence(ensure_live_llm) -> None:
+async def test_live_CONTENT_PLAN_answers_from_direct_conversation_evidence(ensure_live_llm) -> None:
     state = _make_state(
         user_input="我确认一下，你还记得我刚刚说那堆充电线、HDMI 线，还有几根我自己都忘了用途的线里大概有哪些吗？记不全也没关系。",
         chat_history_recent=[
@@ -970,21 +973,18 @@ async def test_live_content_anchor_answers_from_direct_conversation_evidence(ens
         ],
     }
 
-    result = await call_content_anchor_agent(state)
-    _debug_snapshot("prompt_contracts.content_anchor.fact_based_answer_from_conversation_evidence", result)
+    result = await call_content_plan_agent(state)
+    _debug_snapshot("prompt_contracts.content_plan.fact_based_answer_from_conversation_evidence", result)
 
-    anchors = result["content_anchors"]
-    joined = "\n".join(anchors)
-    answer_anchors = [anchor for anchor in anchors if anchor.startswith("[ANSWER]")]
-    assert answer_anchors, f"Missing ANSWER anchor: {anchors!r}"
-    answer_text = "\n".join(answer_anchors)
-    assert "充电线" in answer_text, f"Direct evidence should be reflected in ANSWER: {anchors!r}"
-    assert "HDMI" in answer_text, f"Direct evidence should be reflected in ANSWER: {anchors!r}"
+    content_plan = result["content_plan"]
+    joined = "\n".join(_content_plan_values(content_plan))
+    assert "充电线" in joined, f"Direct evidence should be reflected in plan: {content_plan!r}"
+    assert "HDMI" in joined, f"Direct evidence should be reflected in plan: {content_plan!r}"
     assert any(
-        token in answer_text
+        token in joined
         for token in ("用途不明", "忘了用途", "不清楚用途", "不知道用途", "不知道干什么", "记不清用途")
     ), (
-        f"Direct evidence should include the unknown-purpose cable detail: {anchors!r}"
+        f"Direct evidence should include the unknown-purpose cable detail: {content_plan!r}"
     )
     forbidden_uncertainty = (
         "我记不清",
@@ -997,16 +997,16 @@ async def test_live_content_anchor_answers_from_direct_conversation_evidence(ens
         "我没看清楚",
         "我无法回答",
     )
-    assert not any(token in answer_text for token in forbidden_uncertainty), (
-        f"ANSWER contradicted direct evidence with uncertainty: {anchors!r}"
+    assert not any(token in joined for token in forbidden_uncertainty), (
+        f"Content plan contradicted direct evidence with uncertainty: {content_plan!r}"
     )
     forbidden_deflection = ("怎么可能", "为什么要", "记得那么细")
-    assert not any(token in answer_text for token in forbidden_deflection), (
-        f"ANSWER deflected instead of restating direct evidence: {anchors!r}"
+    assert not any(token in joined for token in forbidden_deflection), (
+        f"Content plan deflected instead of restating direct evidence: {content_plan!r}"
     )
 
 
-async def test_live_content_anchor_quiz_full_answer_closes_open_loop(ensure_live_llm) -> None:
+async def test_live_CONTENT_PLAN_quiz_full_answer_closes_open_loop(ensure_live_llm) -> None:
     state = _make_diving_quiz_anchor_state(
         user_input="潜水时做耳压平衡最常用、最基础的方法是瓦尔萨尔瓦动作，也就是捏鼻鼓气法。千纱居然知道这些，不简单哦",
         internal_monologue=(
@@ -1015,13 +1015,13 @@ async def test_live_content_anchor_quiz_full_answer_closes_open_loop(ensure_live
         ),
     )
 
-    result = await call_content_anchor_agent(state)
-    _debug_snapshot("prompt_contracts.content_anchor.quiz_full_answer_positive", result)
+    result = await call_content_plan_agent(state)
+    _debug_snapshot("prompt_contracts.content_plan.quiz_full_answer_positive", result)
 
-    _assert_quiz_answer_resolves_open_loop(result["content_anchors"])
+    _assert_quiz_answer_resolves_open_loop(result["content_plan"])
 
 
-async def test_live_content_anchor_quiz_concise_answer_closes_open_loop(ensure_live_llm) -> None:
+async def test_live_CONTENT_PLAN_quiz_concise_answer_closes_open_loop(ensure_live_llm) -> None:
     state = _make_diving_quiz_anchor_state(
         user_input="瓦尔萨尔瓦，捏鼻鼓气法。轮到下一题了吧？",
         internal_monologue=(
@@ -1030,13 +1030,13 @@ async def test_live_content_anchor_quiz_concise_answer_closes_open_loop(ensure_l
         ),
     )
 
-    result = await call_content_anchor_agent(state)
-    _debug_snapshot("prompt_contracts.content_anchor.quiz_concise_answer_positive", result)
+    result = await call_content_plan_agent(state)
+    _debug_snapshot("prompt_contracts.content_plan.quiz_concise_answer_positive", result)
 
-    _assert_quiz_answer_resolves_open_loop(result["content_anchors"])
+    _assert_quiz_answer_resolves_open_loop(result["content_plan"])
 
 
-async def test_live_content_anchor_quiz_banter_without_answer_keeps_open_loop(ensure_live_llm) -> None:
+async def test_live_CONTENT_PLAN_quiz_banter_without_answer_keeps_open_loop(ensure_live_llm) -> None:
     state = _make_diving_quiz_anchor_state(
         user_input="千纱还挺懂潜水的嘛，不过我还没想出答案，先让我想想。",
         internal_monologue=(
@@ -1046,13 +1046,13 @@ async def test_live_content_anchor_quiz_banter_without_answer_keeps_open_loop(en
         logical_stance="TENTATIVE",
     )
 
-    result = await call_content_anchor_agent(state)
-    _debug_snapshot("prompt_contracts.content_anchor.quiz_banter_without_answer_negative", result)
+    result = await call_content_plan_agent(state)
+    _debug_snapshot("prompt_contracts.content_plan.quiz_banter_without_answer_negative", result)
 
-    _assert_quiz_answer_does_not_resolve_open_loop(result["content_anchors"])
+    _assert_quiz_answer_does_not_resolve_open_loop(result["content_plan"])
 
 
-async def test_live_content_anchor_quiz_wrong_answer_keeps_open_loop(ensure_live_llm) -> None:
+async def test_live_CONTENT_PLAN_quiz_wrong_answer_keeps_open_loop(ensure_live_llm) -> None:
     state = _make_diving_quiz_anchor_state(
         user_input="是不是张嘴吞咽就好了？我猜的。",
         internal_monologue=(
@@ -1062,10 +1062,10 @@ async def test_live_content_anchor_quiz_wrong_answer_keeps_open_loop(ensure_live
         logical_stance="CHALLENGE",
     )
 
-    result = await call_content_anchor_agent(state)
-    _debug_snapshot("prompt_contracts.content_anchor.quiz_wrong_answer_negative", result)
+    result = await call_content_plan_agent(state)
+    _debug_snapshot("prompt_contracts.content_plan.quiz_wrong_answer_negative", result)
 
-    _assert_quiz_answer_does_not_resolve_open_loop(result["content_anchors"])
+    _assert_quiz_answer_does_not_resolve_open_loop(result["content_plan"])
 
 
 async def test_live_boundary_core_ignores_low_pressure_fact_recall_context(ensure_live_llm) -> None:
@@ -1172,11 +1172,11 @@ async def _assert_live_cognition_stack_prompt_contract(ensure_live_llm, case_id:
     assert state["logical_stance"] in _ALLOWED_LOGICAL_STANCES, f"Unexpected logical_stance: {state!r}"
     assert state["character_intent"] in _ALLOWED_CHARACTER_INTENTS, f"Unexpected character_intent: {state!r}"
     assert state["boundary_core_assessment"]["acceptance"] in {"allow", "guarded", "hesitant", "reject"}, f"Unexpected boundary assessment: {state['boundary_core_assessment']!r}"
-    assert state["content_anchors"][0].startswith("[DECISION]"), f"Bad DECISION anchor: {state['content_anchors']!r}"
-    assert state["content_anchors"][-1].startswith("[SCOPE]"), f"Bad SCOPE anchor: {state['content_anchors']!r}"
+    assert isinstance(state["content_plan"], dict), f"Invalid content_plan: {state['content_plan']!r}"
+    assert state["content_plan"], f"Empty content_plan: {state['content_plan']!r}"
     assert isinstance(state["accepted_user_preferences"], list), f"Invalid accepted_user_preferences: {state!r}"
     assert isinstance(state["forbidden_phrases"], list), f"Invalid forbidden_phrases: {state!r}"
-    assert all(isinstance(item, str) and item.strip() for item in state["content_anchors"]), f"Invalid content_anchors: {state['content_anchors']!r}"
+    assert all(isinstance(item, str) and item.strip() for item in state["content_plan"].values()), f"Invalid content_plan: {state['content_plan']!r}"
     assert all(isinstance(item, str) and item.strip() for item in state["facial_expression"]), f"Invalid facial_expression: {state['facial_expression']!r}"
 
     if case_id == "weather_english":

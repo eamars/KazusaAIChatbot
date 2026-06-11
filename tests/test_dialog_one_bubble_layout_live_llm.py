@@ -156,7 +156,7 @@ def _base_dialog_state(case: dict) -> dict:
                 'rhetorical_strategy': case['rhetorical_strategy'],
                 'linguistic_style': case['linguistic_style'],
                 'accepted_user_preferences': [],
-                'content_anchors': case['content_anchors'],
+                'content_plan': case['content_plan'],
                 'forbidden_phrases': [],
             },
             'contextual_directives': case['contextual_directives'],
@@ -299,12 +299,12 @@ def _group_casual_case() -> dict:
         'internal_monologue': '群里在轻松整理东西，直接给个清楚分类就好。',
         'rhetorical_strategy': '直接回应 Jigsaw 的轻量协作问题。',
         'linguistic_style': '轻松、短句、适合群里扫一眼。',
-        'content_anchors': [
-            '[DECISION] 直接回应 Jigsaw 的轻量协作问题',
-            '[ANSWER] 先按用途把东西分成充电、视频输出、待确认三类',
-            '[SOCIAL] 语气轻松，适合群里一眼读完',
-            '[SCOPE] 简短但完整',
-        ],
+        'content_plan': {
+            'visible_goal': '直接回应 Jigsaw 的轻量协作问题。',
+            'semantic_content': '先按用途把东西分成充电、视频输出、待确认三类。',
+            'voice': '语气轻松，适合群里一眼读完。',
+            'rendering': '简短但完整。',
+        },
         'contextual_directives': {
             'social_distance': '熟悉群友，轻松但不黏',
             'emotional_intensity': '低',
@@ -326,12 +326,12 @@ def _private_soft_case() -> dict:
         'internal_monologue': '对方有点不确定，私聊里可以稳一点接住。',
         'rhetorical_strategy': '接住不确定感，然后给明确结论。',
         'linguistic_style': '私聊语气，中短，柔和但别太甜。',
-        'content_anchors': [
-            '[DECISION] 接住用户的不确定感并给出明确结论',
-            '[ANSWER] 这个计划可以先按今晚版本执行，明早再复查',
-            '[SOCIAL] 私聊里可以比群聊多一点安抚，但不要撒娇过度',
-            '[SCOPE] 中短',
-        ],
+        'content_plan': {
+            'visible_goal': '接住用户的不确定感并给出明确结论。',
+            'semantic_content': '这个计划可以先按今晚版本执行，明早再复查。',
+            'voice': '私聊里可以比群聊多一点安抚，但不要撒娇过度。',
+            'rendering': '中短。',
+        },
         'contextual_directives': {
             'social_distance': '较熟的私聊距离',
             'emotional_intensity': '中低，对方有一点焦虑',
@@ -353,22 +353,18 @@ def _technical_comparison_case() -> dict:
         'internal_monologue': '技术对比要把数字说全，语气可以轻一点但不能省事实。',
         'rhetorical_strategy': '正面对比两张卡，先结论再数字依据。',
         'linguistic_style': '群聊技术回答，信息密度优先。',
-        'content_anchors': [
-            '[DECISION] 正面对比 GB300 和 Pro6000',
-            (
-                '[FACT] GB300: FP16 2250 TFLOPS, FP8 4500 TFLOPS, '
-                '288GB HBM3e, 12000 GB/s, TDP 1400W, FP32 90 TFLOPS'
+        'content_plan': {
+            'visible_goal': '正面对比 GB300 和 Pro6000。',
+            'semantic_content': (
+                'GB300: FP16 2250 TFLOPS, FP8 4500 TFLOPS, '
+                '288GB HBM3e, 12000 GB/s, TDP 1400W, FP32 90 TFLOPS。'
+                'Pro6000: FP16 125 TFLOPS, FP8 2000 TFLOPS, '
+                '96GB GDDR7, 约1792 GB/s, TDP 400W, FP32 125 TFLOPS。'
+                'GB300 更适合超大规模训练和推理；'
+                'Pro6000 更适合工作站或较小规模推理。'
             ),
-            (
-                '[FACT] Pro6000: FP16 125 TFLOPS, FP8 2000 TFLOPS, '
-                '96GB GDDR7, 约1792 GB/s, TDP 400W, FP32 125 TFLOPS'
-            ),
-            (
-                '[ANSWER] GB300 更适合超大规模训练和推理；'
-                'Pro6000 更适合工作站或较小规模推理'
-            ),
-            '[SCOPE] 信息密度优先，允许多行完成对比',
-        ],
+            'rendering': '信息密度优先，允许多行完成对比。',
+        },
         'contextual_directives': {
             'social_distance': '熟悉群友技术讨论',
             'emotional_intensity': '低',
@@ -390,21 +386,17 @@ def _python_code_case() -> dict:
         'internal_monologue': '上游已经准备了代码块，代码格式比语气更重要。',
         'rhetorical_strategy': '短句交付已经给定的代码，角色语气只放在代码块外。',
         'linguistic_style': '技术交付，轻微傲娇，不要污染代码。',
-        'content_anchors': [
-            '[DECISION] 交付上游已经给定的 Python 数独代码块',
-            '[ANSWER] 输入约定是 9 行字符串，0 表示空格；不要补写或改写算法',
-            (
-                '[ANSWER] 必须输出下面这个 fenced python code block；'
+        'content_plan': {
+            'visible_goal': '交付上游已经给定的 Python 数独代码块。',
+            'semantic_content': (
+                '输入约定是 9 行字符串，0 表示空格；不要补写或改写算法。'
+                '必须输出下面这个 fenced python code block；'
                 '代码内容、缩进和空行不得改变:\n'
                 f'```python\n{_SUDOKU_CODE_BLOCK}```'
             ),
-            (
-                '[FACT] 代码块内必须保留 def solve_sudoku(board):、'
-                'def find_empty(board):、四空格缩进和两个函数之间的空行'
-            ),
-            '[SOCIAL] 角色语气只能放在代码块外',
-            '[SCOPE] 代码块优先保持格式，不压缩代码',
-        ],
+            'voice': '角色语气只能放在代码块外。',
+            'rendering': '代码块优先保持格式，不压缩代码。',
+        },
         'contextual_directives': {
             'social_distance': '熟悉群友，允许轻微吐槽',
             'emotional_intensity': '低',
@@ -426,14 +418,15 @@ def _json_example_case() -> dict:
         'internal_monologue': '刚才例子不完整，这次要给完整 9x9，别把玩笑塞进 JSON。',
         'rhetorical_strategy': '承认前面不完整，然后给完整输入格式。',
         'linguistic_style': '技术说明，简洁，代码块外保留一点角色语气。',
-        'content_anchors': [
-            '[DECISION] 给出输入格式和完整例子',
-            '[ANSWER] JSON 顶层键是 puzzle',
-            '[ANSWER] puzzle 必须包含 9 行，每行 9 个数字，0 表示空位',
-            '[ANSWER] 必须输出完整 9x9 JSON fenced block',
-            '[SOCIAL] 可以在块外承认刚才说得不完整，但不要把歉意写进 JSON',
-            '[SCOPE] 完整例子优先，不能只给三行',
-        ],
+        'content_plan': {
+            'visible_goal': '给出输入格式和完整例子。',
+            'semantic_content': (
+                'JSON 顶层键是 puzzle；puzzle 必须包含 9 行，每行 9 个数字，'
+                '0 表示空位；必须输出完整 9x9 JSON fenced block。'
+            ),
+            'voice': '可以在块外承认刚才说得不完整，但不要把歉意写进 JSON。',
+            'rendering': '完整例子优先，不能只给三行。',
+        },
         'contextual_directives': {
             'social_distance': '熟悉群友，刚被指出例子不完整',
             'emotional_intensity': '低到中，有轻微尴尬',

@@ -582,60 +582,53 @@ def test_l2d_prompt_preserves_resolver_terminal_boundaries() -> None:
     assert '"final_response_requirements"' in prompt_text
 
 
-def test_l3_content_anchor_scope_preserves_complete_plan_deliverables() -> None:
-    """Content anchors should leave enough room for multi-part answers."""
+def test_l3_content_plan_scope_preserves_complete_plan_deliverables() -> None:
+    """Content plan should leave enough room for multi-part answers."""
 
-    prompt_text = l3_module._CONTENT_ANCHOR_AGENT_PROMPT
+    prompt_text = l3_module._CONTENT_PLAN_AGENT_PROMPT
 
     for required_text in (
-        '完整方案',
-        '多候选推荐',
-        '风险说明',
-        '给足覆盖空间',
-        '不要用过短篇幅迫使下游只回答一个子问题',
-        '保留交付清单',
-        '含 `原始目标`',
-        '不能取代原始目标',
-        '保留原始目标中的主要交付部分',
-        '保留原始目标',
-        '必须把原始目标和当前补充约束合并处理',
-        '不得只回答当前补充约束或检索结果里最显眼的一部分',
-        '可执行的时间切分和行动顺序',
-        '尽量写成具体时段',
-        '起点或待确认对象 -> 可公开核实的中间锚点 -> 结束点或回退点',
-        '不得只写模糊方向',
-        '不得只列候选或把计划收束成新的口味、预算、时间偏好追问',
-        '证据边界',
-        '不得把缺失证据改写成已确认事实',
-        '来源类别边界',
-        '多个来源类别、证据轨道或比较对象',
-        '不得被改写成一致、无冲突或已确认',
-        '当前事实防编造',
-        '不要在 `[ANSWER]` 要求下游给出具体当前断言',
-        '具体对象、属性、状态、时间和可用性',
-        '必须来自 `[FACT]` 或 `rag_result.external_evidence`',
-        '必须禁止下游给出具体断言',
-        '泛化说明不得偷换成具体对象示例',
-        '行动骨架和最终核实清单',
-        '证据阻塞不是新的 HIL 澄清',
-        '必须完成最佳努力阻塞答复',
-        '不能把主回应改成新的追问或认可请求',
-        '可调整条件只能作为可选退路',
-        '终止型证据阻塞必须在当前可见回答内收束',
-        '临时处理状态或延后承诺',
-        '把已要求的主要交付推迟到下一轮',
-        '不能发明当前事实',
-        '250-500 字或多段短句',
-        '角色口吻可以碎片化，但交付不能碎片化到不可用',
-        '含 `目标进度` 或 `resolver_goal_progress`',
+        '你决定“本轮要说什么”',
+        '`semantic_content` 是本轮用户可见回复的语义载荷',
+        '下游只能改写它，不能替你补事实、话题、问题、结论、代码、例子或下一步',
+        '不要把生成任务写进 `semantic_content`',
+        '不要写“给出一个俏皮回应”',
+        '要写“被对方逗乐了，有点小得意',
+        '具体要问的内容',
+        '固定格式块必须作为一个字符串原样进入 `semantic_content`',
+        '缩进、空行、符号和顺序不变',
+        '只能把它们整理成本轮内容计划',
+        '`selected_text_surface_intent` 是已选择文本输出时传下来的语义目标',
         '已清洗的 resolver observation 摘要',
-        '该收束目标优先于 `character_intent = CLARIFY`',
-        'deliverables、blockers 和 final_response_requirements',
-        '不得只回答最新 evidence 或最显眼的一个子问题',
-        'pending`、`partial` 和 `blocked` 的交付项',
-        '新的澄清或认可请求',
+        '可用于保留已查到的事实、风险和失败边界',
+        '合并交付范围',
+        '含原始目标、目标进度、deliverables、blockers 或 final_response_requirements',
+        '把这些转成可见回答骨架',
+        '当前输入可能只是补充约束，不能缩小原始目标',
+        '实时、易变或来源绑定的事实',
+        '无法确认的部分、可说的泛化范围、核实办法或行动骨架',
+        '不要补造具体当前对象、状态、时间或可用性',
+        '写出 resolved semantic content',
+        '下游不需要再决定“说什么”',
+        '`visible_goal` 写交互目的',
+        '`voice` 写温度和分寸',
+        '`rendering` 写单气泡内的布局、长短和固定格式保护',
+        '不能新增事实或话题',
+        '轻松接梗',
+        '技术对比',
+        '保留所有已给数值、单位和结论',
+        '固定格式代码',
+        '直接包含 fenced code block',
+        '证据不足',
+        '当前来源未确认 X',
+        '本轮可见回复的实际语义载荷；下游可改写但不需要再决定说什么',
+        '必须已经写在计划值里',
     ):
         assert required_text in prompt_text
+
+    assert '[DECISION]' not in prompt_text
+    assert '[ANSWER]' not in prompt_text
+    assert '[SCOPE]' not in prompt_text
 
 
 def test_prompts_preserve_structured_output_enums() -> None:

@@ -1,0 +1,44 @@
+{
+  "test_name": "l3_dialog_content_plan_live_llm",
+  "case_id": "l3_content_plan_casual_overloaded_source",
+  "recorded_at": "2026-06-10T03:56:22.166560+00:00",
+  "payload": {
+    "case_id": "l3_content_plan_casual_overloaded_source",
+    "model": "gemma-4-26b-a4b-it-claude-opus-distill-v2",
+    "base_url": "http://localhost:1234/v1",
+    "input": {
+      "case_id": "l3_content_plan_casual_overloaded_source",
+      "channel_type": "group",
+      "user_input": "不敢不敢？什么意思啊～",
+      "decontexualized_input": "用户轻松调侃，等角色接住这个玩笑。",
+      "internal_monologue": "This should stay as a light tease, not branch into a new Agent topic.",
+      "logical_stance": "CONFIRM",
+      "character_intent": "BANTAR",
+      "judgment_note": "接受轻松调侃，表达被逗乐和舒服即可。",
+      "selected_text_surface_intent": "只接住调侃；不要转去 Agent 应用开发。",
+      "conversation_progress": {
+        "current_thread": "轻松调侃",
+        "progression_guidance": "短回复，别开新话题。"
+      }
+    },
+    "parsed_output": {
+      "content_plan": {
+        "visible_goal": "接住对方的调侃并维持这种轻松愉快的互动氛围",
+        "semantic_content": "被逗乐了；顺着对方的话轻快地回过去，保持这种舒服的节奏感",
+        "voice": "轻松、带着一点点笑意和从容的分寸感",
+        "rendering": "单行短句，不需要复杂布局"
+      }
+    },
+    "content_plan": {
+      "visible_goal": "接住对方的调侃并维持这种轻松愉快的互动氛围",
+      "semantic_content": "被逗乐了；顺着对方的话轻快地回过去，保持这种舒服的节奏感",
+      "voice": "轻松、带着一点点笑意和从容的分寸感",
+      "rendering": "单行短句，不需要复杂布局"
+    },
+    "structural_validation": {
+      "content_plan_is_dict": true,
+      "all_keys_are_strings": true,
+      "all_values_are_strings": true
+    }
+  }
+}

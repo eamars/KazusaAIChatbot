@@ -74,7 +74,10 @@ async def test_runtime_record_writes_and_updates_cache(monkeypatch) -> None:
             "prior_episode_state": None,
             "decontexualized_input": "what is the third point?",
             "chat_history_recent": [],
-            "content_anchors": ["[DECISION] answer"],
+            "content_plan": {
+                "semantic_content": "Answer the current question.",
+                "rendering": "One visible chat bubble; concise.",
+            },
             "logical_stance": "CONFIRM",
             "character_intent": "PROVIDE",
             "final_dialog": ["The third point is about scope."],
@@ -121,7 +124,10 @@ async def test_runtime_record_does_not_cache_stale_write(monkeypatch) -> None:
             "prior_episode_state": None,
             "decontexualized_input": "hello",
             "chat_history_recent": [],
-            "content_anchors": [],
+            "content_plan": {
+                "semantic_content": "Say hello.",
+                "rendering": "One visible chat bubble; concise.",
+            },
             "logical_stance": "CONFIRM",
             "character_intent": "PROVIDE",
             "final_dialog": ["hello"],

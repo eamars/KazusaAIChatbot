@@ -32,9 +32,9 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2 import (
     call_cognition_consciousness,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (
-    _CONTENT_ANCHOR_AGENT_PROMPT,
+    _CONTENT_PLAN_AGENT_PROMPT,
     _cognition_rag_result as _l3_cognition_rag_result,
-    call_content_anchor_agent,
+    call_content_plan_agent,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection import (
     build_cognition_prompt_source_payload,
@@ -230,12 +230,12 @@ You evaluate image-aware character cognition outputs.
   "option_b": {
     "l1": "production L1 output",
     "l2": "production L2 output",
-    "content_anchor": "production L3 content-anchor output"
+    "content_plan": "production L3 content-plan output"
   },
   "option_d": {
     "l1": "test-side direct-image L1 output",
     "l2": "test-side direct-image L2 output",
-    "content_anchor": "test-side direct-image L3 content-anchor output"
+    "content_plan": "test-side direct-image L3 content-plan output"
   }
 }
 
@@ -280,12 +280,12 @@ You evaluate text+image character cognition outputs.
   "option_b": {
     "l1": "production L1 output",
     "l2": "production L2 output",
-    "content_anchor": "production L3 content-anchor output"
+    "content_plan": "production L3 content-plan output"
   },
   "option_d": {
     "l1": "test-side direct-image L1 output",
     "l2": "test-side direct-image L2 output",
-    "content_anchor": "test-side direct-image L3 content-anchor output"
+    "content_plan": "test-side direct-image L3 content-plan output"
   }
 }
 
@@ -733,7 +733,7 @@ def _base_layer_state(
         user_message: Text intent for the current turn.
 
     Returns:
-        State containing the fields consumed by L1, L2, and content anchor.
+        State containing the fields consumed by L1, L2, and Content Plan.
     """
 
     state: dict[str, Any] = {
@@ -783,7 +783,7 @@ async def _run_production_layers_with_descriptor(
         user_message: Text intent attached to the current image turn.
 
     Returns:
-        Selected L1, L2, and content-anchor outputs.
+        Selected L1, L2, and content-plan outputs.
     """
 
     descriptor_text = json.dumps(descriptor, ensure_ascii=False)
@@ -801,13 +801,13 @@ async def _run_production_layers_with_descriptor(
     state.update(l1)
     l2 = await call_cognition_consciousness(state)
     state.update(l2)
-    content_anchor = await call_content_anchor_agent(state)
-    state.update(content_anchor)
+    content_plan = await call_content_plan_agent(state)
+    state.update(content_plan)
 
     result = {
         "l1": l1,
         "l2": l2,
-        "content_anchor": content_anchor,
+        "content_plan": content_plan,
     }
     return result
 
@@ -869,7 +869,7 @@ async def _run_direct_image_layer_copy(
         user_message: Text intent attached to the direct-image turn.
 
     Returns:
-        Selected L1, L2, and content-anchor outputs.
+        Selected L1, L2, and content-plan outputs.
     """
 
     state = _base_layer_state(
@@ -958,7 +958,7 @@ async def _run_direct_image_layer_copy(
 
     anchor_selection = select_cognition_prompt_variant(
         episode=state["cognitive_episode"],
-        stage="l3_content_anchor_agent",
+        stage="l3_content_plan_agent",
     )
     anchor_payload = {
         "decontexualized_input": state["decontexualized_input"],
@@ -973,10 +973,10 @@ async def _run_direct_image_layer_copy(
         episode=state["cognitive_episode"],
         selection=anchor_selection,
     ))
-    anchor_prompt = _CONTENT_ANCHOR_AGENT_PROMPT.format(
+    anchor_prompt = _CONTENT_PLAN_AGENT_PROMPT.format(
         character_name=character_profile["name"],
     )
-    content_anchor = await _direct_layer_invoke(
+    content_plan = await _direct_layer_invoke(
         system_prompt=anchor_prompt,
         payload=anchor_payload,
         image_path=image_path,
@@ -985,7 +985,7 @@ async def _run_direct_image_layer_copy(
     result = {
         "l1": l1,
         "l2": l2,
-        "content_anchor": content_anchor,
+        "content_plan": content_plan,
     }
     return result
 
@@ -1112,13 +1112,14 @@ def _assert_layer_contract(payload: dict[str, Any]) -> None:
         "CLARIFY",
     }
 
-    anchors = payload["content_anchor"]["content_anchors"]
-    assert isinstance(anchors, list)
-    assert anchors
-    assert isinstance(anchors[0], str)
-    assert anchors[0].startswith("[DECISION]")
-    assert isinstance(anchors[-1], str)
-    assert anchors[-1].startswith("[SCOPE]")
+    content_plan = payload["content_plan"]["content_plan"]
+    assert isinstance(content_plan, dict)
+    assert content_plan
+    assert all(
+        isinstance(key, str) and key.strip()
+        and isinstance(value, str) and value.strip()
+        for key, value in content_plan.items()
+    )
 
 
 def _assert_judge_contract(payload: dict[str, Any]) -> None:

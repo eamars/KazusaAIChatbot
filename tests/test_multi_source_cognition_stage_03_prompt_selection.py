@@ -40,7 +40,7 @@ _APPROVED_STAGES: tuple[CognitionPromptStage, ...] = (
     "l2c2_social_context_appraisal",
     "l2d_action_selection",
     "l3_style_agent",
-    "l3_content_anchor_agent",
+    "l3_content_plan_agent",
     "l3_preference_adapter",
     "l3_visual_agent",
 )
@@ -80,8 +80,11 @@ _VALID_OUTPUT_PAYLOADS: dict[CognitionPromptStage, dict[str, object]] = {
         "linguistic_style": "plain",
         "forbidden_phrases": [],
     },
-    "l3_content_anchor_agent": {
-        "content_anchors": ["[DECISION] answer"],
+    "l3_content_plan_agent": {
+        "content_plan": {
+            "semantic_content": "Answer the user directly.",
+            "rendering": "One concise visible reply.",
+        },
     },
     "l3_preference_adapter": {
         "accepted_user_preferences": [],
@@ -101,7 +104,7 @@ _RESULT_READY_PROMPT_HANDLERS = (
     (l2_module, "call_judgment_core_agent"),
     (l2c2_module, "call_social_context_appraisal"),
     (l3_module, "call_style_agent"),
-    (l3_module, "call_content_anchor_agent"),
+    (l3_module, "call_content_plan_agent"),
     (l3_module, "call_preference_adapter"),
     (l3_module, "call_visual_agent"),
 )
@@ -114,7 +117,7 @@ _WRONG_OUTPUT_VALUES: dict[CognitionPromptStage, object] = {
     "l2c2_social_context_appraisal": [],
     "l2d_action_selection": "not a list",
     "l3_style_agent": [],
-    "l3_content_anchor_agent": "not a list",
+    "l3_content_plan_agent": "not a dict",
     "l3_preference_adapter": "not a list",
     "l3_visual_agent": "not a list",
 }

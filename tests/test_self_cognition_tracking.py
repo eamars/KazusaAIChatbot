@@ -290,7 +290,10 @@ def _action_cognition_output(text: str) -> dict[str, Any]:
                 "rhetorical_strategy": "answer the scheduled follow-up",
                 "linguistic_style": "brief",
                 "accepted_user_preferences": [],
-                "content_anchors": [f"[ANSWER] {text}"],
+                "content_plan": {
+                    "semantic_content": text,
+                    "rendering": "One visible chat bubble; concise.",
+                },
                 "forbidden_phrases": [],
             },
         },
@@ -305,9 +308,9 @@ def _progress_cognition_output() -> dict[str, Any]:
         "character_intent": "keep progress internally visible",
         "action_directives": {
             "linguistic_directives": {
-                "content_anchors": [
-                    "[PROGRESS_MAINTENANCE] Track the commitment quietly.",
-                ],
+                "content_plan": {
+                    "semantic_content": "Track the commitment quietly.",
+                },
             },
         },
     }
@@ -329,7 +332,7 @@ def _silent_cognition_output() -> dict[str, Any]:
         "logical_stance": "no outward contact is warranted",
         "character_intent": "stay silent",
         "self_cognition_route": models.ROUTE_AUDIT_ONLY,
-        "action_directives": {"linguistic_directives": {"content_anchors": []}},
+        "action_directives": {"linguistic_directives": {"content_plan": {}}},
     }
     return output
 
@@ -483,7 +486,10 @@ def _surface_action_directives() -> dict[str, Any]:
             "rhetorical_strategy": "answer the scheduled follow-up",
             "linguistic_style": "brief",
             "accepted_user_preferences": [],
-            "content_anchors": ["[ANSWER] Continue the GPU model topic."],
+            "content_plan": {
+                "semantic_content": "Continue the GPU model topic.",
+                "rendering": "One visible chat bubble; concise.",
+            },
             "forbidden_phrases": [],
         },
         "visual_directives": {
@@ -508,7 +514,9 @@ def _speak_cognition_output_with_partial_directives() -> dict[str, Any]:
         "relational_dynamic": "scheduled follow-up",
         "action_directives": {
             "linguistic_directives": {
-                "content_anchors": ["[ANSWER] Continue the GPU model topic."],
+                "content_plan": {
+                    "semantic_content": "Continue the GPU model topic.",
+                },
             },
         },
         "action_specs": [_speak_action_spec()],
@@ -803,7 +811,7 @@ def test_classify_route_returns_action_candidate_when_cognition_selects_contact(
     assert route == models.ROUTE_ACTION_CANDIDATE
 
 
-def test_classify_route_does_not_use_answer_anchor_without_speak_action() -> None:
+def test_classify_route_does_not_use_content_plan_without_speak_action() -> None:
     case = _commitment_case()
     route = tracking.classify_route(
         case,
@@ -812,9 +820,11 @@ def test_classify_route_does_not_use_answer_anchor_without_speak_action() -> Non
             "character_intent": "PROVIDE",
             "action_directives": {
                 "linguistic_directives": {
-                    "content_anchors": [
-                        "[ANSWER] Check whether the user has started work.",
-                    ],
+                    "content_plan": {
+                        "semantic_content": (
+                            "Check whether the user has started work."
+                        ),
+                    },
                 },
             },
             "action_specs": [],
@@ -1243,7 +1253,7 @@ def test_runner_executes_private_lifecycle_action_for_consolidation(
             "character_intent": "DISMISS",
             "internal_monologue": "Close the stale commitment privately.",
             "judgment_note": "The commitment should be abandoned.",
-            "action_directives": {"linguistic_directives": {"content_anchors": []}},
+            "action_directives": {"linguistic_directives": {"content_plan": {}}},
             "action_specs": [_memory_lifecycle_action_spec()],
         },
         consolidation_client=consolidation_client,
@@ -1289,7 +1299,7 @@ def test_runner_routes_lifecycle_intent_through_specialist_before_execution(
                         "evidence_anchor": "The commitment is stale.",
                     }
                 ],
-                "content_anchor_roles": [
+                "content_plan_roles": [
                     {
                         "role": "avoid_reopening",
                         "anchor": "Do not reopen the stale commitment.",
@@ -1345,7 +1355,7 @@ def test_runner_routes_lifecycle_intent_through_specialist_before_execution(
             "character_intent": "DISMISS",
             "internal_monologue": "Review the stale commitment privately.",
             "judgment_note": "The commitment may need lifecycle review.",
-            "action_directives": {"linguistic_directives": {"content_anchors": []}},
+            "action_directives": {"linguistic_directives": {"content_plan": {}}},
             "action_specs": [_memory_lifecycle_route_action_spec()],
         },
         apply_consolidation=False,
@@ -1407,7 +1417,7 @@ def test_runner_does_not_execute_private_actions_by_default(
             "character_intent": "DISMISS",
             "internal_monologue": "Close the stale commitment privately.",
             "judgment_note": "The commitment should be abandoned.",
-            "action_directives": {"linguistic_directives": {"content_anchors": []}},
+            "action_directives": {"linguistic_directives": {"content_plan": {}}},
             "action_specs": [_memory_lifecycle_action_spec()],
         },
         consolidation_client=consolidation_client,

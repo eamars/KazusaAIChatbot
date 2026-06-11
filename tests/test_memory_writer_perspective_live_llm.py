@@ -854,7 +854,7 @@ def _relationship_false_negative_payload() -> dict[str, Any]:
             '用户说：我愿意把边界讲清楚，是因为我信任你会认真听。'
         ),
         'final_dialog': ['谢谢你直说，我会认真记住这个边界。'],
-        'content_anchors': ['用户明确表达信任和边界说明。'],
+        'content_plan': {'semantic_content': '用户明确表达信任和边界说明。'},
     }
 
 
@@ -870,7 +870,7 @@ def _relationship_false_positive_payload() -> dict[str, Any]:
         'character_intent': 'PROVIDE',
         'decontexualized_input': '用户说：我只是今天很累，不是在疏远你。',
         'final_dialog': ['嗯，先休息吧。'],
-        'content_anchors': ['普通疲惫说明，不是关系事件。'],
+        'content_plan': {'semantic_content': '普通疲惫说明，不是关系事件。'},
     }
 
 

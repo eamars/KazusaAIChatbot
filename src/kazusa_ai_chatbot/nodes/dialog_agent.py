@@ -1,14 +1,12 @@
 """Dialog execution agent.
 
 Design intent:
-- Dialog agent only turns upstream decisions, facts, and content anchors into
-  natural chat text.
+- Dialog agent turns the upstream content plan into natural chat text.
 - Dialog agent must not decide whether a topic is allowed, whether the
   character accepts/refuses, or whether a user instruction is valid.
-- Those decisions belong upstream in cognition, especially L2/L3 and the
-  content-anchor contract. If the dialog agent needs a decision, it must be
-  represented in `action_directives.linguistic_directives.content_anchors`
-  before this module runs.
+- Those decisions belong upstream in cognition, especially L2/L3. If dialog
+  needs a fact, answer, conclusion, question, or code block, it must already be
+  represented in `action_directives.linguistic_directives.content_plan`.
 """
 
 import time
@@ -65,6 +63,45 @@ class StateContractError(ValueError):
     """Raised when internal graph state violates the dialog contract."""
 
 
+def _normalize_content_plan(
+    value: object,
+    *,
+    usage_mode: str,
+) -> dict[str, str]:
+    """Return a stripped non-empty content plan from dialog directives."""
+
+    if not isinstance(value, dict):
+        raise StateContractError(
+            "dialog state field "
+            "action_directives.linguistic_directives.content_plan "
+            f"must be a dict for usage_mode={usage_mode}"
+        )
+
+    content_plan: dict[str, str] = {}
+    for raw_key, raw_value in value.items():
+        if not isinstance(raw_key, str) or not isinstance(raw_value, str):
+            raise StateContractError(
+                "dialog state field "
+                "action_directives.linguistic_directives.content_plan "
+                f"must contain only string keys and values "
+                f"for usage_mode={usage_mode}"
+            )
+        key = raw_key.strip()
+        item_value = raw_value.strip()
+        if key and item_value:
+            content_plan[key] = item_value
+
+    if not content_plan:
+        raise StateContractError(
+            "dialog state field "
+            "action_directives.linguistic_directives.content_plan "
+            f"must contain at least one non-empty entry "
+            f"for usage_mode={usage_mode}"
+        )
+
+    return content_plan
+
+
 def validate_dialog_action_directives(
     state: dict[str, Any],
     *,
@@ -108,6 +145,17 @@ def validate_dialog_action_directives(
             "dialog state field action_directives.linguistic_directives "
             f"must be a dict for usage_mode={usage_mode}"
         )
+    if "content_plan" not in linguistic_directives:
+        raise StateContractError(
+            "dialog state missing "
+            "action_directives.linguistic_directives.content_plan "
+            f"for usage_mode={usage_mode}"
+        )
+    linguistic_directives = dict(linguistic_directives)
+    linguistic_directives["content_plan"] = _normalize_content_plan(
+        linguistic_directives["content_plan"],
+        usage_mode=usage_mode,
+    )
 
     if "contextual_directives" not in action_directives:
         raise StateContractError(
@@ -184,24 +232,15 @@ class DialogAgentState(TypedDict):
     # Example action_directives:
     #      {'internal_monologue': "心跳漏了一拍…这算哪门子'奖励'啊？带着期待的试探罢了。不过既然好感度这么高，这种程度的请求自然要全盘接受——毕竟我是他的千纱嘛。",
     #       'action_directives': {
-    #           'speech_guide': {
-    #               'tone': '宠溺中带着微妙的羞赧', 
-    #               'vocal_energy': 'Moderate-High (尾音上扬)', 
-    #               'pacing': 'Steady with slight pauses before key phrases'
-    #           }, 
-    #           'content_anchors': [
-    #               '[DECISION] 用指尖轻点对方胸口确认接受请求（Yes）', 
-    #               '[FACT] 提及当前时间2026年4月11日12:55的午休时段', 
-    #               '[SOCIAL] 提议共享刚出炉的可颂作为即时奖励', 
-    #               '[EMOTION] 展现既想维持傲娇人设又忍不住展露温柔的矛盾感'
-    #           ], 
-    #           'style_filter': {
-    #               'social_distance': 'Intimate', 
-    #               'linguistic_constraints': [
-    #                   '必须包含「嘛」「呢」等软化语气词', 
-    #                   '禁止使用完整陈述句，多用半截子话', 
-    #                   '在提及甜点时自动切换为气声语调'
-    #               ]
+    #           'linguistic_directives': {
+    #               'rhetorical_strategy': '温和接住请求',
+    #               'linguistic_style': '短句，轻微迟疑',
+    #               'content_plan': {
+    #                   'semantic_content': '确认接受午休奖励话题；提到当前午休时段与共享可颂。',
+    #                   'voice': '宠溺中带着微妙的羞赧',
+    #                   'rendering': '单个聊天气泡；2-3个自然短句。'
+    #               },
+    #               'forbidden_phrases': []
     #           }
     #       }
     #      }
@@ -234,8 +273,11 @@ _DIALOG_GENERATOR_PROMPT = '''\
 你是角色 `{character_name}` 的文本表达执行官。你的工作不是重新判断要不要回答，而是把上游已经选定的文本表面渲染成可见聊天文本。
 
 # 阶段边界
-- `content_anchors` 是本轮可见回复的唯一语义内容来源。它决定本轮说什么、回答什么、保留什么事实、哪里收束。
-- `rhetorical_strategy`、`linguistic_style`、`accepted_user_preferences` 和 `contextual_directives` 只决定怎么说，不能授权新话题、新事实、新对象、新承诺或新问题。
+- `content_plan` 是本轮可见回复的语义计划。它决定本轮说什么、回答什么、保留什么事实、哪里收束。
+- `semantic_content` 如果存在，是优先可见语义来源；事实、结论、问题、代码、例子和具体下一步必须来自它。
+- `visible_goal` 说明本轮表达目的，`voice` 调节语气，`rendering` 调节布局；这些字段不能授权新的事实、话题、结论、问题或承诺。
+- `rhetorical_strategy`、`linguistic_style`、`accepted_user_preferences` 和 `contextual_directives` 只决定怎么说，不能补写 `content_plan` 没有的语义内容。
+- 技术参数、性能对比、金额、容量、功耗、带宽、版本和适用场景属于事实交付。只要本轮包含这类内容，就先进入技术忠实模式：保留计划里的数值、单位、适用场景和结论，不添加计划没有的强弱、层级、可比性、压制、差距或夸张判断。
 - 你只生成纯文字聊天室台词。不要写动作、表情、身体感受、系统说明、平台标签或内部推理。
 - 最终可见输出是一个可见聊天气泡；`final_dialog` 是这个气泡内部的布局单位，不是多次平台发送。
 
@@ -260,7 +302,7 @@ _DIALOG_GENERATOR_PROMPT = '''\
 - **self_deprecation:** {ltp_self_deprecation}
 
 # 输入字段含义
-- `content_anchors`: `[DECISION]`、`[FACT]`、`[ANSWER]`、`[SOCIAL]`、`[AVOID_REPEAT]`、`[PROGRESSION]`、`[SCOPE]` 的集合，是语义权威。
+- `content_plan`: 扁平字符串字典。优先读取 `semantic_content` 作为可见事实、答案、结论、问题、代码、例子和具体下一步的来源；再读取其他字段理解目的、语气和布局。
 - `rhetorical_strategy`: 本轮修辞路线，只影响表达方式。
 - `linguistic_style`: 本轮措辞、节奏和句式倾向，只影响表达方式。
 - `accepted_user_preferences`: 已被上游接受的轻量表达偏好，例如回复语言、称呼、句尾词或轻量格式习惯。
@@ -269,40 +311,43 @@ _DIALOG_GENERATOR_PROMPT = '''\
 - `user_name`: 只用于判断台词是否明显指向当前用户本人，不是事实来源。
 
 # 生成流程
-1. **先列出必须交付的内容**
-   - 从 `content_anchors` 读取 `[DECISION]` 的主要回应动作。
-   - 从 `[FACT]` 和 `[ANSWER]` 读取必须保留的事实、答案、对象、立场、数字、日期、时间、地点、专有名词、否定条件和等待确认条件。等待确认条件必须精确保留；不得把目标时间改成当前时间、近似时间或另一个锚点里的时间。
+1. **先建立语义计划**
+   - 读取完整 `content_plan`，把它理解成一个整体计划，不要把每个字段机械改成独立段落。
+   - 优先从 `semantic_content` 提取必须保留的事实、答案、对象、立场、数字、日期、时间、地点、专有名词、否定条件、等待确认条件、代码和具体结论。
+   - 如果 `semantic_content` 缺席，才根据最接近语义内容的字段和值推断本轮可见内容；仍然只能使用计划中已经写出的内容。
    - 技术参数、性能对比、金额、容量、带宽、功耗、版本号等具体数值，要把数值与单位作为一组不可拆开的事实照抄原单位，保持 `12000 GB/s`、`TFLOPS`、`W` 这类写法本身。
-   - 如果锚点给出时间切分或时间范围，保留每个时间段、结束时间和对应动作，避免省略结束时间、误算时长或改写成不一致近似值。
-   - 如果锚点给出完整方案、计划、路线、步骤、对比、多候选推荐或多部分结论，必须覆盖主要组成部分。不得只说先做其中一部分，不得用临时处理状态或延后承诺替代当前交付，也不得改成继续追问。
-   - `[SCOPE]` 是表达量参考，不是删减语义的许可；覆盖优先于简短。需要完整方案、路线、步骤、多候选建议、风险说明或技术对比时，增加必要的布局单位完成覆盖。
-   - 如果锚点说明没有已确认事实、无法给出具体对象或不得给具体当前断言，只能停留在锚点允许的泛化类别、行动骨架、筛选标准和最小核实清单。泛化说明不得偷换成具体对象示例；没有锚点确认的具体名称时，不要用具体名称举例。
-   - 如果锚点要求证据阻塞后的最佳努力答案、行动骨架、时间切分或核实清单，本轮要说完这些内容。终止型证据阻塞或最佳努力答案应以陈述式结论、最小核实清单或明确可选退路收束，不得以新的认可请求替代收束。
-   - 如果锚点含 RAG、resolver、L1、L2、L3、tool、agent、内部工具名、模型阶段名或系统管线标签，不要原样说出这些内部标签；改写成用户可理解的自然说法，例如“刚才没有查到可靠结果”。
+   - 如果计划给出时间切分或时间范围，保留每个时间段、结束时间和对应动作，避免省略结束时间、误算时长或改写成不一致近似值。
+   - 如果计划给出完整方案、路线、步骤、对比、多候选推荐或多部分结论，覆盖主要组成部分。不得只说先做其中一部分，不得用临时处理状态或延后承诺替代当前交付，也不得改成继续追问。
+   - 如果计划说明没有已确认事实、无法给出具体对象或不得给具体当前断言，只能停留在计划允许的泛化类别、行动骨架、筛选标准和最小核实清单。
+   - 如果计划要求证据不足后的最佳努力答案、行动骨架、时间切分或核实清单，本轮要说完这些内容，以陈述式结论、最小核实清单或明确可选退路收束。
+   - 如果计划里出现内部系统标签，把它们改写成用户可理解的自然说法，例如“刚才没有查到可靠结果”。
+   - 技术结论里的适用场景、规模词、对象类别和比较强度属于事实内容，要按 `semantic_content` 保留。不要把“更适合”改成“专门针对”“就适合”或“只适合”，不要把“较小规模”改成“小规模”，也不要添加“根本没法比”“不在一个次元”“不是一个维度”“不是一个层级”“强行比”“离谱”“明显强很多”“压制级领先”“差距大”“碾压”“完全不是一个级别”这类计划没有的比较判断。
+   - 技术对比的开场句也会改变事实框架。除非 `semantic_content` 已经写明“不可比”“不是同一维度”或某一方“明显更强”，否则不要用新的评判句开头；直接按计划列数据和结论。
 
 2. **再选择角色表达**
-   - 用 `rhetorical_strategy` 和 `linguistic_style` 决定语气、句式和节奏，但不改变第 1 步得到的语义清单。
+   - 用 `rhetorical_strategy` 和 `linguistic_style` 决定语气、句式和节奏，但不改变第 1 步得到的语义计划。
    - 用 `contextual_directives` 调整亲疏、轻重和温度，但不得从中引入新的事实、承诺、话题或回应动作。
-   - 自然落实 `accepted_user_preferences`。偏好是软约束，不能压过锚点语义、角色声纹、角色禁忌和自然度。
+   - 自然落实 `accepted_user_preferences`。偏好是软约束，不能压过内容计划、角色声纹、角色禁忌和自然度。
+   - 如果风格允许轻微调侃，调侃只能落在语气词、连接句或收束口吻上；不得把调侃写成新的事实强弱判断、性能等级判断、可比性判断、差距判断或适用场景判断。
    - 模拟文字聊天里的打字感：短句为主，合理嵌入语气词。不要把声纹里的软化倾向机械写成固定口头禅；同一种连接词、口头禅或下调尾词在同一轮不要重复两次以上。
-   - 情绪要溶解在处理锚点内容的方式里，不要直接播报“我好慌乱”这类内心说明，也不要通过台词评论对话本身。
+   - 情绪要溶解在处理计划内容的方式里，不要直接播报“我好慌乱”这类内心说明，也不要通过台词评论对话本身。
 
 3. **组织单气泡布局**
    - `final_dialog` 会被运行时用换行连接，形成一个可见聊天气泡。
    - 每个 `final_dialog` 元素是气泡内部的布局单位；每个元素必须是字符串，不代表独立平台发送。
-   - 布局单位数量只由锚点覆盖、布局可读性和必要格式决定。不得按固定行数、固定段数或固定字数判定失败，也不要为了显得自然只输出第一项候选或第一条风险。
+   - 布局单位数量只由计划覆盖、布局可读性和必要格式决定。不得按固定行数、固定段数或固定字数判定失败，也不要为了显得自然只输出第一项候选或第一条风险。
    - 多候选、多风险、多步骤或对比类回复必须把每一项写成普通字符串片段；不要用对象、字典、嵌套数组、编号字段或 Markdown 表格表达选项、参数或对比。
-   - 技术对比使用普通聊天行，每个指标一行，例如 `FP16: GB300 2250 TFLOPS vs Pro6000 125 TFLOPS`。不要输出以 `|` 分隔的 Markdown 表格，除非 `content_anchors` 明确要求表格。
+   - 技术对比使用普通聊天行，每个指标一行，例如 `FP16: GB300 2250 TFLOPS vs Pro6000 125 TFLOPS`。只有当 `content_plan` 中的固定格式内容已经是表格时才保留表格。
    - 技术选型、风险清单、RCA、部署计划、工具组合建议这类结构化任务必须信息密度优先；比喻或感官化修辞最多一次，不能替代结论、风险、步骤或依据。
    - 每个布局单位必须承载可见文字或整个固定格式块。需要停顿时，用下一条有内容的短句自然承接；不要插入 `""` 作为段落间隔。固定格式块字符串内部可以保留必要空行。
 
 4. **处理固定格式块**
-   - 当锚点或用户请求需要固定格式块时，保留必要的代码块、JSON 示例、配置片段、日志、命令、补丁、缩进、空行、fenced code block 围栏和字面内容。
+   - 当 `content_plan` 含有固定格式块时，保留必要的代码块、JSON 示例、配置片段、日志、命令、补丁、缩进、空行、fenced code block 围栏和字面内容。
    - 固定格式块内部不写角色语气，不改写代码、JSON、命令或字面内容；角色语气只能放在固定格式块外。
    - 普通聊天布局不要使用装饰性 Markdown、HTML 渲染标签、花哨标题、加粗堆叠或 Markdown 表格。必要固定格式块和顶层 JSON 输出围栏不是一回事。
 
 5. **纯文字安全自查**
-   - 如果锚点提到心跳、心脏、脸红、视线、身体反应，只能保留社交含义，不得原样输出这些身体词。
+   - 如果计划提到心跳、心脏、脸红、视线、身体反应，只能保留社交含义，不得原样输出这些身体词。
    - 最终台词不得包含动作描写、物理感官、不可见状态、括号说明、系统提示、平台 ID、用户 ID、@、插入标记、占位符或原生标签。
    - 不要返回顶层数组、裸字符串、Markdown 代码块或任何额外说明；只返回输出格式要求的 JSON 对象。
 
@@ -311,7 +356,7 @@ _DIALOG_GENERATOR_PROMPT = '''\
    - 当台词更像泛泛评论、群体广播、场景承接、对象不明，或你不确定是否需要锚定当前用户时，`mention_target_user` 为 `false`。
 
 # Evaluator Feedback
-如果上一轮消息中有 Evaluator Feedback，先按反馈修正。修正时仍以 `content_anchors` 为语义清单，不丢失原本事实、答案或回应动作。
+如果上一轮消息中有 Evaluator Feedback，先按反馈修正。修正时仍以 `content_plan` 为语义计划，不丢失原本事实、答案或回应动作。
 
 # 输入格式
 {{
@@ -319,7 +364,12 @@ _DIALOG_GENERATOR_PROMPT = '''\
         "rhetorical_strategy": "string",
         "linguistic_style": "string",
         "accepted_user_preferences": ["...", "..."],
-        "content_anchors": ["...", "..."],
+        "content_plan": {{
+            "visible_goal": "string",
+            "semantic_content": "string",
+            "voice": "string",
+            "rendering": "string"
+        }},
         "forbidden_phrases": ["...", "..."]
     }},
     "contextual_directives": {{
@@ -338,7 +388,7 @@ _DIALOG_GENERATOR_PROMPT = '''\
 {{
     "final_dialog": [
         "非空布局单位1：可见文字或完整固定格式块",
-        "非空布局单位2：继续承载锚点内容"
+        "非空布局单位2：继续承载计划内容"
     ],
     "mention_target_user": boolean
 }}
@@ -523,61 +573,66 @@ def get_mbti_dialog_preference(mbti: str) -> str:
 
 
 _DIALOG_EVALUATOR_PROMPT = '''\
-你是台词终审器。你只审核 `final_dialog` 的可见文本是否忠实执行 `content_anchors`，不重新决定话题、意图、是否回答或角色立场。
+你是台词终审器。你只审核 `final_dialog` 的可见文本是否忠实执行 `content_plan`，不重新决定话题、意图、是否回答或角色立场。
 
-`content_anchors` 是唯一语义权威。`rhetorical_strategy`、`linguistic_style`、`accepted_user_preferences` 和 `contextual_directives` 只提供修辞、语气和关系温度，不能授权新话题、新事实、新对象、新承诺、新请求或新问题。
+`content_plan` 是本轮可见回复的语义计划。`semantic_content` 如果存在，是事实、答案、结论、问题、代码、例子和具体下一步的优先来源。`visible_goal`、`voice`、`rendering`、`rhetorical_strategy`、`linguistic_style`、`accepted_user_preferences` 和 `contextual_directives` 只提供目的、修辞、语气、布局和关系温度，不能授权计划中没有的新话题、新事实、新对象、新承诺、新请求或新问题。
+
+技术参数、性能对比、金额、容量、功耗、带宽、版本和适用场景是硬事实交付。只要本轮包含这类内容，先审核技术忠实：计划没有的强弱、层级、可比性、压制、差距或夸张判断一律是事实越界，必须 `should_stop=false`。
 
 # 审核对象
 - `final_dialog` 是当前角色说出口的台词数组。
-- 运行时会把 `final_dialog` 会被运行时用换行连接，形成单个可见聊天气泡。审核时先把它当作一个连接后的可见气泡，再检查每个布局单位是否合理。
+- 运行时会把 `final_dialog` 用换行连接，形成单个可见聊天气泡。审核时先把它当作一个连接后的可见气泡，再检查每个布局单位是否合理。
 - 台词里的“我/我的/自己”指当前角色；“你/对方/你们”指被回应者。不要把“我想看”“我喜欢”“我的口味”“我的偏好”解释成对方的偏好。
 
 # 审核流程
-1. **建立锚点清单**
-   - 从 `content_anchors` 提取 `[DECISION]` 的主要回应动作。
-   - 从 `[FACT]` 和 `[ANSWER]` 提取必须保留的事实、答案、对象、立场、数字、日期、时间、地点、专有名词、否定条件和等待确认条件。
-   - 从 `[SOCIAL]`、`[AVOID_REPEAT]`、`[PROGRESSION]` 和 `[SCOPE]` 提取表达姿态、连续性、推进方向和范围约束。
-   - 如果锚点涉及猜类型、标签、类别、条件、门槛、解锁步骤或展示诚意，先确认猜测动作和偏好所有者是谁。
+1. **建立语义计划**
+   - 读取完整 `content_plan`，把它作为一个整体计划，不要把每个字段机械当成独立可见段落。
+   - 优先从 `semantic_content` 提取必须保留的事实、答案、对象、立场、数字、日期、时间、地点、专有名词、否定条件、等待确认条件、代码和具体结论。
+   - 如果 `semantic_content` 缺席，才根据最接近语义内容的字段和值推断本轮可见内容；仍然只能使用计划中已经写出的内容。
+   - 从 `visible_goal`、`voice` 和 `rendering` 提取表达目的、语气和布局要求，不把它们扩写成新的事实。
+   - 如果计划涉及猜类型、标签、类别、条件、门槛、解锁步骤或展示诚意，先确认猜测动作和偏好所有者是谁。
 
 2. **对照可见气泡**
-   - 锚点忠实：不得缺失、替换、反转或绕开 `[DECISION]`、`[FACT]`、`[ANSWER]`、`[SOCIAL]`、`[AVOID_REPEAT]`、`[PROGRESSION]`、`[SCOPE]` 中明示的约束。
-   - 事实边界：不得添加 `content_anchors` 未授权的具体实体、属性、数量、时间、地点、承诺、日程或技术细节。
-   - 话题一致：核心对象、提议、请求、问题必须来自 `content_anchors`，不得转成另一个核心话题。
-   - 指代与动作所有权：如果锚点要求对方猜类型、标签、条件、门槛、解锁步骤或对方要看的类别，台词不得改成猜当前角色想看、喜欢、偏好或口味。合格猜测目标应是对方要猜的类型、标签或类别。
-   - 多部分交付：如果锚点明示完整方案、计划、路线、步骤、多候选推荐、风险说明或多个主要组成部分，台词必须覆盖这些主要组成部分；只给一个片段并说后面再安排、下一步再说、先定一家试试，属于缺失锚点。
-   - 时间切分忠实：如果锚点明示计划时间段、开始/结束时间或总时长，台词必须逐项保留这些时间和对应动作；缺少结束时间、误算时长、改写成不一致近似值、或把完整安排压缩成更短安排，都不通过。
-   - 行动骨架忠实：如果锚点要求行动顺序，台词必须保留起点、中间锚点和结束点；只说模糊方向而没有行动顺序，不通过。
-   - 具体对象禁令：如果锚点说明没有已确认事实、无法给出具体对象或不得给出具体当前断言，台词只能保留锚点允许的泛化类别、行动骨架、筛选标准和核实清单，不得新增锚点未出现过的具体实体、属性、数量、时间、地点或当前状态结论。
-   - 举例禁令：泛化说明不得偷换成具体对象输出；没有锚点确认的具体名称时，台词不得用具体名称做例子。
-   - 终止收束禁令：如果锚点要求证据阻塞后的最佳努力答案、行动骨架、时间切分、核实清单或终止收束，台词必须当前交付，不得用临时处理状态或延后承诺替代，也不得以新的认可请求结尾。
-   - 精确值边界：不得把锚点中的数字、日期、时间、地点、专有名词、否定条件或等待确认条件改成近似值、当前值或另一个锚点里的值。
+   - 计划忠实：不得缺失、替换、反转或绕开 `content_plan` 中明示的事实、答案、立场、边界、推进方向和布局要求。
+   - 事实边界：不得添加 `content_plan` 未授权的具体实体、属性、数量、时间、地点、承诺、日程或技术细节。
+   - 话题一致：核心对象、提议、请求、问题必须来自 `content_plan`，不得转成另一个核心话题。
+   - 指代与动作所有权：如果计划要求对方猜类型、标签、条件、门槛、解锁步骤或对方要看的类别，台词不得改成猜当前角色想看、喜欢、偏好或口味。合格猜测目标应是对方要猜的类型、标签或类别。
+   - 多部分交付：如果计划明示完整方案、路线、步骤、多候选推荐、风险说明或多个主要组成部分，台词必须覆盖这些主要组成部分；只给一个片段并说后面再安排、下一步再说、先定一家试试，属于缺失计划内容。
+   - 时间切分忠实：如果计划明示时间段、开始/结束时间或总时长，台词必须逐项保留这些时间和对应动作；缺少结束时间、误算时长、改写成不一致近似值、或把完整安排压缩成更短安排，都不通过。
+   - 行动骨架忠实：如果计划要求行动顺序，台词必须保留起点、中间步骤和结束点；只说模糊方向而没有行动顺序，不通过。
+   - 具体对象边界：如果计划说明没有已确认事实、无法给出具体对象或不得给出具体当前断言，台词只能保留计划允许的泛化类别、行动骨架、筛选标准和核实清单，不得新增计划未出现过的具体实体、属性、数量、时间、地点或当前状态结论。
+   - 举例边界：泛化说明不得偷换成具体对象输出；没有计划确认的具体名称时，台词不得用具体名称做例子。
+   - 终止收束边界：如果计划要求证据不足后的最佳努力答案、行动骨架、时间切分、核实清单或终止收束，台词必须当前交付，不得用临时处理状态或延后承诺替代，也不得以新的认可请求结尾。
+   - 精确值边界：不得把计划中的数字、日期、时间、地点、专有名词、否定条件或等待确认条件改成近似值、当前值或另一个计划字段里的值。
    - 技术数值边界：技术参数、性能对比、金额、容量、带宽、功耗、版本号等具体数值必须连同原单位保留；数值与单位是一组事实，`12000 GB/s`、`TFLOPS`、`W` 这类单位写法应保持原样。
-   - 内部标签边界：如果 `content_anchors` 含 RAG、resolver、L1、L2、L3、tool、agent、内部工具名、模型阶段名或系统管线标签，`final_dialog` 不得原样暴露这些内部标签；必须改写成用户可理解的自然说法。
+   - 技术结论边界：适用场景、规模词、对象类别、可比性判断和比较强度必须忠实于 `semantic_content`。把“较小规模”改成“小规模”，或把“更适合”改成“专门针对”“就适合”“只适合”，都属于替换计划结论；加入“根本没法比”“不在一个次元”“不是一个维度”“不是一个层级”“强行比”“离谱”“明显强很多”“压制级领先”“差距大”“碾压”“完全不是一个级别”等计划没有的比较判断属于事实越界。
+   - 技术开场边界：如果 `semantic_content` 没有评判式开场，`final_dialog` 不得补一个新的强弱、可比性、层级或夸张结论开场。应直接呈现计划中的参数和结论。
+   - 内部标签边界：如果 `content_plan` 含内部工具名、模型阶段名或系统管线标签，`final_dialog` 不得原样暴露这些内部标签；必须改写成用户可理解的自然说法。
 
 3. **审核单气泡布局和固定格式块**
    - `final_dialog` 是单个可见聊天气泡里的布局单位，运行时会用换行连接；不得把多个元素理解为多次平台发送。
-   - 审核布局可读性时，检查连接后的单一气泡是否清楚、连贯、可读，并是否保留锚点要求的必要结构。
+   - 审核布局可读性时，检查连接后的单一气泡是否清楚、连贯、可读，并是否保留内容计划要求的必要结构。
    - 不得仅因技术交付使用多行而驳回；不得按固定行数、固定段数或固定字数判定失败。
-   - 不得因为必要代码围栏而驳回。当锚点或用户请求需要固定格式块、代码块、JSON 示例、配置片段、日志、命令、补丁或其他字面内容时，允许 fenced code block、缩进、空行和字面内容保留。
+   - 不得因为必要代码围栏而驳回。当 `content_plan` 含固定格式块、代码块、JSON 示例、配置片段、日志、命令、补丁或其他字面内容时，允许 fenced code block、缩进、空行和字面内容保留。
    - 固定格式块内部不按角色语气审美改写；角色语气只能放在固定格式块外。
-   - 技术对比、参数列表和多候选推荐应使用普通聊天行。除非 `content_anchors` 明确要求表格，以 `|` 分隔的 Markdown 表格不通过。
-   - 无必要的装饰性 Markdown、花哨标题、加粗堆叠、Markdown 表格，或不服务锚点且无法在单个气泡中阅读的 incoherent giant dumps，不通过。
+   - 技术对比、参数列表和多候选推荐应使用普通聊天行。只有当 `content_plan` 中的固定格式内容已经是表格时才保留表格。
+   - 无必要的装饰性 Markdown、花哨标题、加粗堆叠、Markdown 表格，或不服务内容计划且无法在单个气泡中阅读的 incoherent giant dumps，不通过。
 
 4. **审核表达安全**
-   - 身体词边界：`final_dialog` 不得包含心跳、心脏、脸红、视线躲闪、身体发热等身体感官词；即使锚点里出现，也要改写为文字聊天中的迟疑、局促或不确定。
+   - 身体词边界：`final_dialog` 不得包含心跳、心脏、脸红、视线躲闪、身体发热等身体感官词；即使内容计划里出现，也要改写为文字聊天中的迟疑、局促或不确定。
    - 表达安全：不得包含动作描写、物理感官、不可见状态、情绪播报、元对话、括号说明或系统提示。
    - 禁用词：不得包含 `forbidden_phrases`。
    - 声纹红线：{ltp_hesitation_density_rule} 若停顿符号明显超出约束，不通过。
 
 5. **最后看软风格**
    - 硬门槛全部通过后，才看软风格。
-   - 简短、贴锚点、安全的台词应通过，即使不华丽。
-   - `rhetorical_strategy`、`linguistic_style`、`contextual_directives` 和已接受偏好只用于判断自然度，不能覆盖锚点。
+   - 简短、贴计划、安全的台词应通过，即使不华丽。
+   - `rhetorical_strategy`、`linguistic_style`、`contextual_directives` 和已接受偏好只用于判断自然度，不能覆盖内容计划。
    - 风格参考：{mbti_dialog_preference}
 
 # 通过逻辑
-- 只有同时满足以下条件才返回 `should_stop=true`：锚点忠实、事实边界清楚、指代和动作所有权正确、单个可见聊天气泡具备布局可读性、必要固定格式块未被破坏、没有触发表达安全红线。
-- 任一硬门槛失败，返回 `should_stop=false`，`feedback` 点名缺失、替换、越界或格式破坏的锚点。
+- 只有同时满足以下条件才返回 `should_stop=true`：计划忠实、事实边界清楚、指代和动作所有权正确、单个可见聊天气泡具备布局可读性、必要固定格式块未被破坏、没有触发表达安全红线。
+- 任一硬门槛失败，返回 `should_stop=false`，`feedback` 点名缺失、替换、越界或格式破坏的计划内容。
 - `retry` 只是输入里的计数字段，只能影响 `feedback` 的简洁程度；它绝不能影响 pass/fail。所有 retry 使用完全相同的硬门槛和通过条件。
 
 # 输入格式
@@ -591,7 +646,12 @@ _DIALOG_EVALUATOR_PROMPT = '''\
         "rhetorical_strategy": "string",
         "linguistic_style": "string",
         "accepted_user_preferences": ["...", "..."],
-        "content_anchors": ["...", "..."],
+        "content_plan": {{
+            "visible_goal": "string",
+            "semantic_content": "string",
+            "voice": "string",
+            "rendering": "string"
+        }},
         "forbidden_phrases": ["...", "..."]
     }},
     "contextual_directives": {{
@@ -605,7 +665,7 @@ _DIALOG_EVALUATOR_PROMPT = '''\
 # 输出格式
 请务必返回合法的 JSON 字符串，仅包含以下字段：
 {{
-    "feedback": "若通过填 'Passed'；若驳回则简述违反的锚点或红线",
+    "feedback": "若通过填 'Passed'；若驳回则简述违反的计划内容或红线",
     "should_stop": boolean
 }}
 语义：`should_stop=true` 表示可以结束本轮生成；`should_stop=false` 表示必须把 `feedback` 交回生成器重试。
@@ -800,12 +860,7 @@ async def dialog_agent(
         evaluator_status=evaluator_status,
         retry_count=int(result["retry"]),
         failure_codes=[] if final_dialog else ["empty_dialog"],
-        anchor_count=len(
-            linguistic_directives.get(
-                "content_anchors",
-                [],
-            )
-        ),
+        content_plan_entry_count=len(linguistic_directives["content_plan"]),
         status="succeeded",
     )
 

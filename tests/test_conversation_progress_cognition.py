@@ -95,20 +95,20 @@ async def test_visual_agent_skip_returns_empty_directives_without_llm(
 
 
 @pytest.mark.asyncio
-async def test_content_anchor_agent_receives_conversation_progress(monkeypatch) -> None:
-    """Content Anchor input includes compact progress guidance."""
+async def test_content_plan_agent_receives_conversation_progress(monkeypatch) -> None:
+    """Content-plan input includes compact progress guidance."""
 
     fake_llm = _CapturingLLM({
-        "content_anchors": [
-            "[DECISION] answer the current question",
-            "[AVOID_REPEAT] reassurance",
-            "[PROGRESSION] provide the missing detail",
-            "[SCOPE] ~30 words",
-        ],
+        "content_plan": {
+            "semantic_content": (
+                "Answer the missing third point without repeating reassurance."
+            ),
+            "rendering": "One visible chat bubble; concise.",
+        },
     })
-    monkeypatch.setattr(l3_module, "_content_anchor_agent_llm", fake_llm)
+    monkeypatch.setattr(l3_module, "_content_plan_agent_llm", fake_llm)
 
-    result = await l3_module.call_content_anchor_agent({
+    result = await l3_module.call_content_plan_agent({
         "cognitive_episode": _minimal_text_chat_episode(),
         "character_profile": {"name": "Kazusa"},
         "decontexualized_input": "what is the missing third point?",
@@ -144,34 +144,40 @@ async def test_content_anchor_agent_receives_conversation_progress(monkeypatch) 
     assert human_payload["conversation_progress"]["overused_moves"] == ["reassurance"]
     assert human_payload["conversation_progress"]["conversation_mode"] == "task_support"
     assert human_payload["conversation_progress"]["next_affordances"] == ["give a concrete third contribution angle"]
-    assert result["content_anchors"][1].startswith("[AVOID_REPEAT]")
+    assert "repeating reassurance" in result["content_plan"]["semantic_content"]
 
 
-def test_content_anchor_prompt_allows_progression_anchor_labels() -> None:
-    """Prompt contract explicitly allows the new progress labels."""
+def test_content_plan_prompt_allows_progression_plan_roles() -> None:
+    """Prompt contract reads progress and lifecycle plan roles."""
 
-    assert "[AVOID_REPEAT]" in l3_module._CONTENT_ANCHOR_AGENT_PROMPT
-    assert "[PROGRESSION]" in l3_module._CONTENT_ANCHOR_AGENT_PROMPT
-    assert "conversation_progress" in l3_module._CONTENT_ANCHOR_AGENT_PROMPT
-    assert "next_affordances" in l3_module._CONTENT_ANCHOR_AGENT_PROMPT
-    assert "avoid_reopening" in l3_module._CONTENT_ANCHOR_AGENT_PROMPT
+    prompt = l3_module._CONTENT_PLAN_AGENT_PROMPT
+    assert "content_plan_roles" in prompt
+    assert "avoid_reopening" in prompt
+    assert "acknowledge_fulfillment" in prompt
+    assert "keep_waiting" in prompt
+    assert "conversation_progress" in prompt
+    assert "next_affordances" in prompt
+    assert "[AVOID_REPEAT]" not in prompt
+    assert "[PROGRESSION]" not in prompt
 
 
-def test_content_anchor_prompt_requires_fact_based_answers_without_case_example() -> None:
+def test_content_plan_prompt_requires_fact_based_answers_without_case_example() -> None:
     """Prompt keeps L3 bound to upstream stance while preserving direct facts."""
 
-    prompt = l3_module._CONTENT_ANCHOR_AGENT_PROMPT
+    prompt = l3_module._CONTENT_PLAN_AGENT_PROMPT
 
-    assert "依赖树（先解析上游，再生成下游）" in prompt
-    assert "logical_stance + character_intent" in prompt
-    assert "不能反向改变 `logical_stance`、`character_intent` 或已选 `[FACT]`" in prompt
-    assert "不要在这里修正上游立场" in prompt
-    assert "若 `rag_result.answer` 直接回答当前问题，它是最高优先级检索事实摘要" in prompt
-    assert "`[ANSWER]` 不得与 `[DECISION]` 或 `[FACT]` 矛盾" in prompt
-    assert "应保留这些具体内容，避免替换成泛称" in prompt
-    assert "`character_intent = CLARIFY` 时，`[ANSWER]` 必须是缩小歧义范围的追问" in prompt
-    assert "在服从[DECISION]的前提下" in prompt
-    assert "只按上方“依赖树”和“解析步骤”执行" in prompt
+    assert "`logical_stance` 与 `character_intent` 是已定的 L2 立场和意图" in prompt
+    assert "内容计划只能执行它们，不能改判" in prompt
+    assert "不要在这里改写 `logical_stance`、`character_intent`、检索事实或上游意识判断" in prompt
+    assert "`answer` 是最高优先级的直接检索结论" in prompt
+    assert "技术对比：`semantic_content` 应保留所有已给数值、单位和结论" in prompt
+    assert "处理证据边界" in prompt
+    assert "# 生成步骤" in prompt
+    assert "确定本轮任务" in prompt
+    assert "收集可见语义" in prompt
+    assert "[ANSWER]" not in prompt
+    assert "[DECISION]" not in prompt
+    assert "[FACT]" not in prompt
     assert "`TENTATIVE` 不是事实不确定" not in prompt
     assert "禁止把已知事实改写成第一人称认知失败" not in prompt
     assert "充电线" not in prompt
@@ -234,11 +240,10 @@ def _profile_conformance_state() -> dict:
         "logical_stance": "CONFIRM",
         "character_intent": "BANTAR",
         "judgment_note": "普通闲聊可以自然接住。",
-        "content_anchors": [
-            "[DECISION] 接住轻松话题",
-            "[ANSWER] 可以说一个自然的甜食偏好",
-            "[SCOPE] ~30字",
-        ],
+        "content_plan": {
+            "semantic_content": "可以说一个自然的甜食偏好。",
+            "rendering": "单个聊天气泡，约30字。",
+        },
         "social_distance": "日常轻松",
         "emotional_intensity": "轻微活力",
         "vibe_check": "普通闲聊",
@@ -302,11 +307,11 @@ async def test_visual_agent_receives_boundary_profile_contract(monkeypatch) -> N
     assert "已提供的检索记忆/事实上下文" in system_prompt
     assert "静态画面" in system_prompt
     assert "单帧" in system_prompt
-    assert "content_anchors" in system_prompt
+    assert "content_plan" in system_prompt
     assert "RAG" not in system_prompt
     assert human_payload["boundary_core_assessment"]["stance_bias"] == "confirm"
     assert human_payload["logical_stance"] == "CONFIRM"
-    assert human_payload["content_anchors"][0].startswith("[DECISION]")
+    assert human_payload["content_plan"]["semantic_content"].startswith("可以说")
     assert human_payload["contextual_directives"]["vibe_check"] == "普通闲聊"
     assert human_payload["prompt_message_context"]["body_text"] == "换个轻松点的话题，你现在会想吃点甜的吗？"
     assert "boundary_profile" not in human_payload
@@ -434,17 +439,18 @@ def test_projection_preserves_relative_age_for_prior_disclosure() -> None:
 def test_dialog_evaluator_prompt_uses_existing_feedback_for_avoid_repeat() -> None:
     """Evaluator prompt includes the move-level repeat backstop."""
 
-    assert "[AVOID_REPEAT]" in dialog_module._DIALOG_EVALUATOR_PROMPT
-    assert "[PROGRESSION]" in dialog_module._DIALOG_EVALUATOR_PROMPT
+    assert "推进方向" in dialog_module._DIALOG_EVALUATOR_PROMPT
+    assert "计划忠实" in dialog_module._DIALOG_EVALUATOR_PROMPT
     assert "feedback" in dialog_module._DIALOG_EVALUATOR_PROMPT
 
 
-def test_content_anchor_prompt_owns_topic_admission_decision() -> None:
-    """Topic-admission decisions belong to L3 content anchors, not dialog."""
+def test_content_plan_prompt_owns_topic_admission_decision() -> None:
+    """Topic-admission decisions belong to L3 content plan, not dialog."""
 
-    prompt = l3_module._CONTENT_ANCHOR_AGENT_PROMPT
+    prompt = l3_module._CONTENT_PLAN_AGENT_PROMPT
 
-    assert "话题准入决定必须在这里完成" in prompt
-    assert "若上游 `logical_stance` 已确认" in prompt
-    assert "只有当上游立场或意图已经表达保留" in prompt
+    assert "你决定“本轮要说什么”" in prompt
+    assert "`semantic_content` 是本轮用户可见回复的语义载荷" in prompt
+    assert "下游只能改写它，不能替你补事实、话题、问题、结论、代码、例子或下一步" in prompt
+    assert "它们只能解释如何渲染 `semantic_content`，不能新增事实或话题" in prompt
     assert "dialog" not in prompt.lower()

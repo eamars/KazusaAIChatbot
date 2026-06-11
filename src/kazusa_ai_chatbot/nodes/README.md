@@ -613,14 +613,14 @@ The L3 branches are:
 | --- | --- | --- |
 | `l3_interaction_style_context_loader` | `interaction_style_context` | Sanitized user/channel interaction-style overlays from storage. |
 | `l3_style_agent` | `rhetorical_strategy`, `linguistic_style`, `forbidden_phrases` | How to package the already-decided stance in character voice. |
-| `l3_content_anchor_agent` | `content_anchors` | What dialog must do, answer, avoid, or cover. |
+| `l3_content_plan_agent` | `content_plan` | One resolved semantic plan for what dialog should render. |
 | `l3_preference_adapter` | `accepted_user_preferences` | User expression preferences that the character has accepted and can execute. |
 | `l3_visual_agent` | `facial_expression`, `body_language`, `gaze_direction`, `visual_vibe` | Optional still-frame visual directives and promptable guidance for image generation surfaces. |
 
 L3 is where a selected surface action becomes an executable communication
-plan. The most important text artifact is `content_anchors`. Dialog is
-evaluated against these anchors, so they are the bridge from internal decision
-to visible wording.
+plan. The most important text artifact is `content_plan`. Dialog renders this
+single resolved plan, so L3 must include the visible facts, conclusions, code,
+and scope before dialog runs.
 
 L3 does not decide whether to create a visible text surface. That decision
 belongs to the selected `speak` action from L2d. If no visible surface is selected,
@@ -657,11 +657,12 @@ Shown as the combined L3 surface before L4 collection.
   "rhetorical_strategy": "Give a direct definition, then one concrete reason it matters.",
   "linguistic_style": "Concise, plain, lightly conversational.",
   "forbidden_phrases": [],
-  "content_anchors": [
-    "[DECISION] Answer the user's question directly.",
-    "[ANSWER] A Python virtual environment is an isolated workspace for a project, so its packages and settings do not interfere with other projects.",
-    "[SCOPE] One short paragraph; no setup tutorial."
-  ],
+  "content_plan": {
+    "visible_goal": "Answer the user's question directly and concisely.",
+    "semantic_content": "A Python virtual environment is an isolated workspace for a project, so its packages and settings do not interfere with other projects.",
+    "voice": "Concise, plain, lightly conversational.",
+    "rendering": "One visible chat bubble; one short paragraph; no setup tutorial."
+  },
   "accepted_user_preferences": [
     "Keep the reply to one short paragraph."
   ],
@@ -703,7 +704,7 @@ L4 collects L3 outputs into `action_directives`:
             "rhetorical_strategy": str,
             "linguistic_style": str,
             "accepted_user_preferences": list[str],
-            "content_anchors": list[str],
+            "content_plan": dict[str, str],
             "forbidden_phrases": list[str],
         },
         "visual_directives": {
@@ -731,11 +732,12 @@ Example input:
   "rhetorical_strategy": "Give a direct definition, then one concrete reason it matters.",
   "linguistic_style": "Concise, plain, lightly conversational.",
   "accepted_user_preferences": ["Keep the reply to one short paragraph."],
-  "content_anchors": [
-    "[DECISION] Answer the user's question directly.",
-    "[ANSWER] A Python virtual environment is an isolated workspace for a project, so its packages and settings do not interfere with other projects.",
-    "[SCOPE] One short paragraph; no setup tutorial."
-  ],
+  "content_plan": {
+    "visible_goal": "Answer the user's question directly and concisely.",
+    "semantic_content": "A Python virtual environment is an isolated workspace for a project, so its packages and settings do not interfere with other projects.",
+    "voice": "Concise, plain, lightly conversational.",
+    "rendering": "One visible chat bubble; one short paragraph; no setup tutorial."
+  },
   "forbidden_phrases": [],
   "facial_expression": ["Neutral attentive expression with relaxed brows."],
   "body_language": ["Still, composed posture facing the conversation."],
@@ -759,11 +761,12 @@ Example output:
       "rhetorical_strategy": "Give a direct definition, then one concrete reason it matters.",
       "linguistic_style": "Concise, plain, lightly conversational.",
       "accepted_user_preferences": ["Keep the reply to one short paragraph."],
-      "content_anchors": [
-        "[DECISION] Answer the user's question directly.",
-        "[ANSWER] A Python virtual environment is an isolated workspace for a project, so its packages and settings do not interfere with other projects.",
-        "[SCOPE] One short paragraph; no setup tutorial."
-      ],
+      "content_plan": {
+        "visible_goal": "Answer the user's question directly and concisely.",
+        "semantic_content": "A Python virtual environment is an isolated workspace for a project, so its packages and settings do not interfere with other projects.",
+        "voice": "Concise, plain, lightly conversational.",
+        "rendering": "One visible chat bubble; one short paragraph; no setup tutorial."
+      },
       "forbidden_phrases": []
     },
     "visual_directives": {
@@ -816,13 +819,13 @@ The implemented flow is:
    L2c2 produces social temperature and relationship framing before action
    selection.
    L2d selects zero or more semantic actions. When a text surface is selected,
-   style, content-anchor, preference, and visual agents build
+   style, content-plan, preference, and visual agents build
    `action_directives` using the L2c2 social fields.
 
 8. Dialog or selected surface generation
    Dialog generator writes `final_dialog` from `internal_monologue` and
    `action_directives`.
-   Dialog evaluator checks anchor fidelity, unauthorized facts, physical/action
+   Dialog evaluator checks plan fidelity, unauthorized facts, physical/action
    pollution, forbidden phrases, and style constraints.
 
 9. Episode trace and post-turn consolidation
@@ -862,7 +865,7 @@ The generator receives:
 - immutable character voice constraints from `linguistic_texture_profile`.
 
 The evaluator checks whether generated dialog faithfully executes
-`content_anchors` and stays inside expression rules. It does not decide whether
+`content_plan` and stays inside expression rules. It does not decide whether
 the character should answer. It checks whether the text obeys the cognition
 decision already made.
 
@@ -870,7 +873,7 @@ The dialog layer must not:
 
 - change `logical_stance`,
 - accept or reject a user request on its own,
-- invent facts not authorized by `content_anchors`,
+- invent facts not authorized by `content_plan`,
 - expose physical actions, facial expressions, or hidden internal monologue in
   a text chat response,
 - turn visual directives into chat text.
@@ -891,11 +894,12 @@ Example input:
       "rhetorical_strategy": "Give a direct definition, then one concrete reason it matters.",
       "linguistic_style": "Concise, plain, lightly conversational.",
       "accepted_user_preferences": ["Keep the reply to one short paragraph."],
-      "content_anchors": [
-        "[DECISION] Answer the user's question directly.",
-        "[ANSWER] A Python virtual environment is an isolated workspace for a project, so its packages and settings do not interfere with other projects.",
-        "[SCOPE] One short paragraph; no setup tutorial."
-      ],
+      "content_plan": {
+        "visible_goal": "Answer the user's question directly and concisely.",
+        "semantic_content": "A Python virtual environment is an isolated workspace for a project, so its packages and settings do not interfere with other projects.",
+        "voice": "Concise, plain, lightly conversational.",
+        "rendering": "One visible chat bubble; one short paragraph; no setup tutorial."
+      },
       "forbidden_phrases": []
     }
   },
@@ -914,7 +918,7 @@ Example output:
 }
 ```
 
-Interpretation: dialog has produced visible wording from the anchors. It did
+Interpretation: dialog has produced visible wording from the content plan. It did
 not mention facial expression, expose the internal monologue, add setup steps,
 or change the decision.
 

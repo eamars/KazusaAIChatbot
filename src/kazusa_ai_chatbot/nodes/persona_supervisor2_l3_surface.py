@@ -12,7 +12,7 @@ from kazusa_ai_chatbot.cognition_resolver.state import (
     MAX_PROJECTED_RESOLVER_OBSERVATIONS,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (
-    call_content_anchor_agent,
+    call_content_plan_agent,
     call_interaction_style_context_loader,
     call_preference_adapter,
     call_surface_directive_collector,
@@ -273,7 +273,7 @@ async def call_l3_text_surface_handler(state: GlobalPersonaState) -> dict:
         call_interaction_style_context_loader,
     )
     surface_builder.add_node("l3_style_agent", call_style_agent)
-    surface_builder.add_node("l3_content_anchor_agent", call_content_anchor_agent)
+    surface_builder.add_node("l3_content_plan_agent", call_content_plan_agent)
     surface_builder.add_node("l3_preference_adapter", call_preference_adapter)
     surface_builder.add_node("l3_visual_agent", call_visual_agent)
     surface_builder.add_node(
@@ -284,11 +284,14 @@ async def call_l3_text_surface_handler(state: GlobalPersonaState) -> dict:
     surface_builder.add_edge(START, "l3_interaction_style_context_loader")
     surface_builder.add_edge(
         "l3_interaction_style_context_loader",
-        "l3_content_anchor_agent",
+        "l3_content_plan_agent",
     )
-    surface_builder.add_edge("l3_content_anchor_agent", "l3_visual_agent")
+    surface_builder.add_edge("l3_content_plan_agent", "l3_visual_agent")
     surface_builder.add_edge("l3_interaction_style_context_loader", "l3_style_agent")
-    surface_builder.add_edge("l3_style_agent", "l3_preference_adapter")
+    surface_builder.add_edge(
+        ["l3_style_agent", "l3_content_plan_agent"],
+        "l3_preference_adapter",
+    )
     surface_builder.add_edge(
         ["l3_preference_adapter", "l3_visual_agent"],
         "l4_surface_directive_collector",

@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 ACTIVE_COMMITMENT_ALIAS_LIMIT = 12
 LIFECYCLE_UPDATE_LIMIT = 3
 _ALLOWED_LIFECYCLE_DECISIONS = frozenset(LIFECYCLE_STATUS_BY_DECISION)
-_ALLOWED_CONTENT_ANCHOR_ROLES = frozenset(
+_ALLOWED_CONTENT_PLAN_ROLES = frozenset(
     ("avoid_reopening", "acknowledge_fulfillment", "keep_waiting")
 )
 
@@ -47,7 +47,7 @@ _MEMORY_LIFECYCLE_SPECIALIST_PROMPT = '''\
 2. 只在证据清楚时输出生命周期变化。含糊玩笑、普通寒暄、新计划、还没兑现、只是在继续等待，都不要关闭承诺。
 3. 如果需要改变多个承诺，按证据从最清楚到最弱排序。
 4. 只使用输入中存在的 `target_alias`。不要发明别名，不要输出数据库字段。
-5. 为下游文字锚点提供简短角色语义锚点，帮助避免把已完成承诺重新说成未完成。
+5. 为下游内容计划提供简短角色语义指令，帮助避免把已完成承诺重新说成未完成。
 
 # 输入格式
 用户消息是 JSON，包含：
@@ -71,16 +71,16 @@ _MEMORY_LIFECYCLE_SPECIALIST_PROMPT = '''\
       "evidence_anchor": "支持这个判断的短证据"
     }
   ],
-  "content_anchor_roles": [
+  "content_plan_roles": [
     {
       "role": "avoid_reopening | acknowledge_fulfillment | keep_waiting",
-      "anchor": "给内容锚点生成器看的短语义锚点"
+      "instruction": "给内容计划生成器看的短语义指令"
     }
   ]
 }
 
 如果没有生命周期变化，返回：
-{"decision": "no_lifecycle_change", "lifecycle_decisions": [], "content_anchor_roles": []}
+{"decision": "no_lifecycle_change", "lifecycle_decisions": [], "content_plan_roles": []}
 '''
 _memory_lifecycle_specialist_llm = get_llm(
     temperature=0.1,
@@ -118,7 +118,7 @@ async def call_memory_lifecycle_update_handler(
             visible_alias_count=0,
             omitted_alias_count=0,
             lifecycle_decisions=[],
-            content_anchor_roles=[],
+            content_plan_roles=[],
             warnings=["没有可复核的活动承诺。"],
         )
         return_value = {
@@ -307,15 +307,15 @@ def materialize_memory_lifecycle_actions(
         typed_decisions,
         alias_bindings,
     )
-    raw_content_anchor_roles = normalized.get("content_anchor_roles")
-    content_anchor_roles = (
-        raw_content_anchor_roles
-        if isinstance(raw_content_anchor_roles, list)
+    raw_content_plan_roles = normalized.get("content_plan_roles")
+    content_plan_roles = (
+        raw_content_plan_roles
+        if isinstance(raw_content_plan_roles, list)
         else []
     )
     typed_roles = [
         role
-        for role in content_anchor_roles
+        for role in content_plan_roles
         if isinstance(role, dict)
     ]
     raw_warnings = normalized.get("warnings")
@@ -333,7 +333,7 @@ def materialize_memory_lifecycle_actions(
         visible_alias_count=visible_alias_count,
         omitted_alias_count=omitted_alias_count,
         lifecycle_decisions=typed_decisions,
-        content_anchor_roles=typed_roles,
+        content_plan_roles=typed_roles,
         warnings=typed_warnings,
     )
     materialized = {
@@ -384,7 +384,7 @@ def _combine_memory_lifecycle_contexts(
     """Combine prompt-safe lifecycle contexts from alias chunks."""
 
     lifecycle_decisions: list[dict[str, str]] = []
-    content_anchor_roles: list[dict[str, str]] = []
+    content_plan_roles: list[dict[str, str]] = []
     warnings: list[str] = []
     visible_alias_count = 0
     omitted_alias_count = 0
@@ -405,9 +405,9 @@ def _combine_memory_lifecycle_contexts(
                 for raw_decision in raw_decisions
                 if isinstance(raw_decision, dict)
             )
-        raw_roles = context.get("content_anchor_roles")
+        raw_roles = context.get("content_plan_roles")
         if isinstance(raw_roles, list):
-            content_anchor_roles.extend(
+            content_plan_roles.extend(
                 raw_role
                 for raw_role in raw_roles
                 if isinstance(raw_role, dict)
@@ -425,7 +425,7 @@ def _combine_memory_lifecycle_contexts(
         visible_alias_count=visible_alias_count,
         omitted_alias_count=omitted_alias_count,
         lifecycle_decisions=lifecycle_decisions,
-        content_anchor_roles=content_anchor_roles,
+        content_plan_roles=content_plan_roles,
         warnings=warnings,
     )
     return context
@@ -748,7 +748,7 @@ def _normalize_specialist_output(
         normalized = {
             "decision": "skipped",
             "lifecycle_decisions": [],
-            "content_anchor_roles": [],
+            "content_plan_roles": [],
             "warnings": ["生命周期专员输出不是对象。"],
         }
         return normalized
@@ -768,14 +768,14 @@ def _normalize_specialist_output(
         lifecycle_decisions = []
         warnings.append("生命周期专员输出了不支持的总决定。")
 
-    content_anchor_roles = _valid_content_anchor_roles(
-        parsed.get("content_anchor_roles"),
+    content_plan_roles = _valid_content_plan_roles(
+        parsed.get("content_plan_roles"),
         warnings,
     )
     normalized = {
         "decision": decision,
         "lifecycle_decisions": lifecycle_decisions,
-        "content_anchor_roles": content_anchor_roles,
+        "content_plan_roles": content_plan_roles,
         "warnings": warnings,
     }
     return normalized
@@ -831,36 +831,36 @@ def _valid_lifecycle_decisions(
     return capped_decisions
 
 
-def _valid_content_anchor_roles(
+def _valid_content_plan_roles(
     raw_roles: object,
     warnings: list[str],
 ) -> list[dict[str, str]]:
-    """Keep prompt-safe content-anchor roles from specialist output."""
+    """Keep prompt-safe content-plan roles from specialist output."""
 
     if raw_roles is None:
         return_value: list[dict[str, str]] = []
         return return_value
     if not isinstance(raw_roles, list):
-        warnings.append("内容锚点角色不是有效列表。")
+        warnings.append("内容计划角色不是有效列表。")
         return_value = []
         return return_value
 
     valid_roles: list[dict[str, str]] = []
     for raw_role in raw_roles:
         if not isinstance(raw_role, dict):
-            warnings.append("已忽略非对象内容锚点角色。")
+            warnings.append("已忽略非对象内容计划角色。")
             continue
         role = _optional_text(raw_role, "role")
-        anchor = _optional_text(raw_role, "anchor")
-        if role not in _ALLOWED_CONTENT_ANCHOR_ROLES:
-            warnings.append(f"已忽略不支持的内容锚点角色：{role or '空'}。")
+        instruction = _optional_text(raw_role, "instruction")
+        if role not in _ALLOWED_CONTENT_PLAN_ROLES:
+            warnings.append(f"已忽略不支持的内容计划角色：{role or '空'}。")
             continue
-        if not anchor:
-            warnings.append(f"已忽略缺少锚点文本的内容角色：{role}。")
+        if not instruction:
+            warnings.append(f"已忽略缺少指令文本的内容角色：{role}。")
             continue
         valid_roles.append({
             "role": role,
-            "anchor": anchor,
+            "instruction": instruction,
         })
     return valid_roles
 
@@ -978,7 +978,7 @@ def _memory_lifecycle_context(
     visible_alias_count: int,
     omitted_alias_count: int,
     lifecycle_decisions: list[dict[str, str]],
-    content_anchor_roles: list[dict[str, str]],
+    content_plan_roles: list[dict[str, str]],
     warnings: list[str],
 ) -> dict[str, object]:
     """Build the prompt-safe lifecycle context for downstream L3 stages."""
@@ -990,7 +990,7 @@ def _memory_lifecycle_context(
         "visible_alias_count": visible_alias_count,
         "omitted_alias_count": omitted_alias_count,
         "lifecycle_decisions": lifecycle_decisions,
-        "content_anchor_roles": content_anchor_roles,
+        "content_plan_roles": content_plan_roles,
         "warnings": warnings,
     }
     return context

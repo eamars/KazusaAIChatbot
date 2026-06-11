@@ -17,7 +17,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2 import (
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (
     call_surface_directive_collector,
-    call_content_anchor_agent,
+    call_content_plan_agent,
     call_preference_adapter,
     call_style_agent,
     call_visual_agent,
@@ -238,9 +238,9 @@ async def _run_live_cognition_stack(state: dict) -> dict:
     _debug_snapshot("cognition.l3b", l3b)
     state.update(l3b)
 
-    l3b_anchor = await call_content_anchor_agent(state)
-    _debug_snapshot("cognition.l3b_anchor", l3b_anchor)
-    state.update(l3b_anchor)
+    l3b_plan = await call_content_plan_agent(state)
+    _debug_snapshot("cognition.l3b_plan", l3b_plan)
+    state.update(l3b_plan)
 
     l3b_pref = await call_preference_adapter(state)
     _debug_snapshot("cognition.l3b_pref", l3b_pref)
@@ -290,10 +290,12 @@ async def test_live_cognition_stack_exercises_each_stage_llm(ensure_live_llm) ->
     assert state["rhetorical_strategy"].strip(), f"Missing style output: {state!r}"
     assert state["linguistic_style"].strip(), f"Missing linguistic_style: {state!r}"
     assert isinstance(state["forbidden_phrases"], list), f"Invalid forbidden_phrases: {state!r}"
-    assert isinstance(state["content_anchors"], list), f"Invalid content_anchors: {state!r}"
-    assert state["content_anchors"], f"Empty content_anchors: {state!r}"
-    assert state["content_anchors"][0].startswith("[DECISION]"), f"Bad DECISION anchor: {state['content_anchors']!r}"
-    assert state["content_anchors"][-1].startswith("[SCOPE]"), f"Bad SCOPE anchor: {state['content_anchors']!r}"
+    assert isinstance(state["content_plan"], dict), f"Invalid content_plan: {state!r}"
+    assert state["content_plan"], f"Empty content_plan: {state!r}"
+    assert all(
+        isinstance(value, str) and value.strip()
+        for value in state["content_plan"].values()
+    ), f"Invalid content_plan values: {state['content_plan']!r}"
     assert isinstance(state["accepted_user_preferences"], list), f"Invalid accepted_user_preferences: {state!r}"
     assert isinstance(state["facial_expression"], list), f"Invalid facial_expression: {state!r}"
     assert isinstance(state["body_language"], list), f"Invalid body_language: {state!r}"
@@ -348,12 +350,12 @@ async def test_live_cognition_propagates_explicit_future_group_message_details(e
 
     state = await _run_live_cognition_stack(state)
 
-    anchors = state["content_anchors"]
-    joined_anchors = "\n".join(anchors)
+    plan = state["content_plan"]
+    joined_plan = "\n".join(plan.values())
     linguistic_directives = state["action_directives"]["linguistic_directives"]
-    joined_action_anchors = "\n".join(linguistic_directives["content_anchors"])
+    joined_action_plan = "\n".join(linguistic_directives["content_plan"].values())
 
-    assert "54369546" in joined_anchors, f"Group id did not propagate through cognition anchors: {anchors!r}"
-    assert "今天天气真好呀" in joined_anchors, f"Message body did not propagate through cognition anchors: {anchors!r}"
-    assert "54369546" in joined_action_anchors, f"Collector lost the group id: {linguistic_directives!r}"
-    assert "今天天气真好呀" in joined_action_anchors, f"Collector lost the message body: {linguistic_directives!r}"
+    assert "54369546" in joined_plan, f"Group id did not propagate through cognition plan: {plan!r}"
+    assert "今天天气真好呀" in joined_plan, f"Message body did not propagate through cognition plan: {plan!r}"
+    assert "54369546" in joined_action_plan, f"Collector lost the group id: {linguistic_directives!r}"
+    assert "今天天气真好呀" in joined_action_plan, f"Collector lost the message body: {linguistic_directives!r}"

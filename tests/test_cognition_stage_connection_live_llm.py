@@ -216,8 +216,8 @@ def _wrap_l3_stages(monkeypatch, stage_outputs: dict[str, Any]) -> None:
     _wrap_async_stage(
         monkeypatch,
         l3_surface_module,
-        "call_content_anchor_agent",
-        "l3_content_anchor_agent",
+        "call_content_plan_agent",
+        "l3_content_plan_agent",
         stage_outputs,
     )
     _wrap_async_stage(

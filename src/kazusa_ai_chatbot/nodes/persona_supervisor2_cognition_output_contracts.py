@@ -43,8 +43,8 @@ _REQUIRED_OUTPUT_FIELDS: dict[CognitionPromptStage, dict[str, type[object]]] = {
         "linguistic_style": str,
         "forbidden_phrases": list,
     },
-    "l3_content_anchor_agent": {
-        "content_anchors": list,
+    "l3_content_plan_agent": {
+        "content_plan": dict,
     },
     "l3_preference_adapter": {
         "accepted_user_preferences": list,

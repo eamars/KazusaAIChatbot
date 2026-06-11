@@ -110,7 +110,7 @@ def _state(*, origin: ConsolidationOriginMetadata | None = None) -> dict[str, An
         "affinity_delta": 1,
         "decontexualized_input": "remember tea",
         "final_dialog": ["I will remind you later."],
-        "action_directives": {"linguistic_directives": {"content_anchors": []}},
+        "action_directives": {"linguistic_directives": {"content_plan": {}}},
         "consolidation_origin": origin,
     }
     state["consolidation_target_plan"] = build_consolidation_target_plan(state)

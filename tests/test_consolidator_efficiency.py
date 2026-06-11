@@ -76,7 +76,7 @@ def _global_state() -> dict:
         "platform_channel_id": "chan-1",
         "channel_type": "group",
         "platform_message_id": "msg-1",
-        "action_directives": {"linguistic_directives": {"content_anchors": []}},
+        "action_directives": {"linguistic_directives": {"content_plan": {}}},
         "internal_monologue": "test",
         "final_dialog": ["ok"],
         "interaction_subtext": "",
