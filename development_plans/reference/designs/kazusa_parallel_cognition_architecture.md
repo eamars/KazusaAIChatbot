@@ -1,5 +1,9 @@
 # Parallel Cognition Architecture for Kazusa
 
+## Status
+
+- Status: reference
+
 **Version:** Draft v0.1  
 **Purpose:** Define a psychology-first cognition architecture for richer human-like emotional simulation, especially concealment, hesitation, secrecy, self-protection, guilt, shame, partial disclosure, and lying-like behavior.  
 **Core recommendation:** Do **not** simply lengthen the existing cognition chain. Separate cognition into a reusable module, then run multiple internal appraisal streams in parallel. The public answer should emerge from conflict resolution among those streams.

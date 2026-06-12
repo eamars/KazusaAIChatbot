@@ -2,7 +2,8 @@
 
 ## Status
 
-Decision-only reference. Do not execute this document as a development plan.
+- Status: reference
+- Decision-only reference. Do not execute this document as a development plan.
 The one-off repository experiment files used to support this decision were
 removed on 2026-05-12 after the conclusion was recorded.
 

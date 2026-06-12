@@ -1,5 +1,9 @@
 # Self-Cognition RAG Resolver Evidence Review - 2026-06-01
 
+## Status
+
+- Status: reference evidence
+
 ## Scope
 
 This review covers the `resolver-self-cognition-rag` branch after extending the

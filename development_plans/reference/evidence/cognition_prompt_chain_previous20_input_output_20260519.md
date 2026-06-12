@@ -1,5 +1,9 @@
 # cognition prompt chain previous-20 input and output 2026-05-19
 
+## Status
+
+- Status: reference evidence
+
 ## Purpose
 
 This companion reference records the actual input windows and key generated

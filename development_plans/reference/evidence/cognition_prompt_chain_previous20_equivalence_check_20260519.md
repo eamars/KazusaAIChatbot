@@ -1,5 +1,9 @@
 # cognition prompt chain previous-20 equivalence check 2026-05-19
 
+## Status
+
+- Status: reference evidence
+
 ## Purpose
 
 This reference records the real LLM equivalence check requested after the

@@ -1,5 +1,9 @@
 # cognition prompt chain side-by-side comparison 2026-05-19
 
+## Status
+
+- Status: reference evidence
+
 ## Purpose
 
 This reference records the real LLM comparison used to support the generic

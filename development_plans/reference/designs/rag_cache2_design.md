@@ -1,5 +1,9 @@
 # RAG Cache 2 Design
 
+## Status
+
+- Status: reference
+
 ## Goals
 
 - Cache expensive reusable retrieval work at the individual RAG helper-agent level.
