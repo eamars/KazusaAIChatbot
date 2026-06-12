@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -1821,6 +1822,24 @@ async def test_search_memory_keyword():
 
 
 @pytest.mark.asyncio
+async def test_search_memory_keyword_escapes_regex_metacharacters():
+    """Keyword memory search should treat user text as literal text."""
+    db = _mock_db()
+    cursor = AsyncMock()
+    cursor.to_list = AsyncMock(return_value=[])
+    db.memory.find.return_value.limit.return_value = cursor
+
+    query = r"\p{Han}"
+    with _patched_get_db(db):
+        await search_memory(query, method="keyword", limit=5)
+
+    call_filter = db.memory.find.call_args[0][0]
+    expected_pattern = re.escape(query)
+    assert call_filter["$or"][0]["memory_name"]["$regex"] == expected_pattern
+    assert call_filter["$or"][1]["content"]["$regex"] == expected_pattern
+
+
+@pytest.mark.asyncio
 async def test_search_memory_vector():
     """Vector search uses $vectorSearch aggregation pipeline."""
     db = _mock_db()
@@ -2154,6 +2173,33 @@ async def test_search_conversation_history_keyword_mocked():
     call_filter = db.conversation_history.find.call_args[0][0]
     assert call_filter["$or"][0]["body_text"]["$regex"] == "keyword"
     assert call_filter["$or"][1]["attachments.description"]["$regex"] == "keyword"
+
+
+@pytest.mark.asyncio
+async def test_search_conversation_history_keyword_escapes_regex_metacharacters():
+    """Keyword conversation search should treat user text as literal text."""
+    db = _mock_db()
+    cursor = AsyncMock()
+    cursor.to_list = AsyncMock(return_value=[])
+    db.conversation_history.find.return_value.sort.return_value.limit.return_value = (
+        cursor
+    )
+
+    query = r"\p{Han}"
+    with _patched_get_db(db):
+        await db_module.search_conversation_history(
+            query,
+            method="keyword",
+            limit=2,
+        )
+
+    call_filter = db.conversation_history.find.call_args[0][0]
+    expected_pattern = re.escape(query)
+    assert call_filter["$or"][0]["body_text"]["$regex"] == expected_pattern
+    assert (
+        call_filter["$or"][1]["attachments.description"]["$regex"]
+        == expected_pattern
+    )
 
 
 @pytest.mark.asyncio

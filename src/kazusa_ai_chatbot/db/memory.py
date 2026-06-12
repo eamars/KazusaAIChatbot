@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from kazusa_ai_chatbot.config import (
@@ -194,7 +195,7 @@ async def search_memory(
     Args:
         query: The search query string.
         limit: Maximum number of results.
-        method: ``"keyword"`` for regex text search, ``"vector"`` for semantic search.
+        method: ``"keyword"`` for literal text search, ``"vector"`` for semantic search.
         source_global_user_id: Optional filter on origin user.
         memory_type: Optional filter (e.g. ``"fact"``, ``"promise"``).
         source_kind: Optional filter (e.g. ``"conversation_extracted"``).
@@ -229,10 +230,11 @@ async def search_memory(
         extra_filter["expiry_timestamp"] = expiry_cond
 
     if method == "keyword":
+        escaped_query = re.escape(query)
         base_filter: dict[str, Any] = {
             "$or": [
-                {"memory_name": {"$regex": query, "$options": "i"}},
-                {"content": {"$regex": query, "$options": "i"}},
+                {"memory_name": {"$regex": escaped_query, "$options": "i"}},
+                {"content": {"$regex": escaped_query, "$options": "i"}},
             ]
         }
         base_filter.update(extra_filter)

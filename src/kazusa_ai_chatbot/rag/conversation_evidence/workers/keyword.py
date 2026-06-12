@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 _GENERATOR_PROMPT = Template('''\
 你是 `search_conversation_keyword` 的参数生成器。
-该工具只接受一个 keyword 字符串，并对消息内容执行大小写不敏感的 regex 匹配。
+该工具只接受一个 keyword 字符串，并对消息内容执行大小写不敏感的字面匹配。
 
 ## Keyword 选择规则
 

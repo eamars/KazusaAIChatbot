@@ -195,14 +195,16 @@ async def search_conversation_keyword(
     from_timestamp: str | None = None,
     to_timestamp: str | None = None,
 ) -> list[dict]:
-    """Search conversation history by exact keyword/phrase match (regex, case-insensitive).
+    """Search conversation history by exact keyword/phrase match.
 
     Use this tool when the search target is a specific term, technical phrase, or
     proper noun that must appear literally in the text (e.g. "HTTP", "DDR5").
     Prefer this over search_conversation when you know the exact wording.
 
     Args:
-        keyword (Mandatory): Exact term or short phrase to match (regex, case-insensitive). Do not pass a full sentence — use the core noun/phrase only.
+        keyword (Mandatory): Exact term or short phrase to match literally,
+            case-insensitively. Do not pass a full sentence — use the core
+            noun/phrase only.
         global_user_id (Optional): Filter results to one user UUID.
         top_k (Optional): Maximum number of results.
         platform (Optional): Platform filter, e.g. "discord", "qq".
@@ -243,7 +245,7 @@ async def search_persistent_memory_keyword(
     source_global_user_id: str | None = None,
     memory_type: str | None = None,
 ) -> list[dict]:
-    """Search persistent memory by exact keyword/phrase match (regex, case-insensitive).
+    """Search persistent memory by exact keyword/phrase match.
 
     Use this tool when the search target is a specific term, technical phrase, or
     proper noun that must appear literally in the stored memory content or name
@@ -255,7 +257,8 @@ async def search_persistent_memory_keyword(
     - Do not pass a full sentence — use the core noun/phrase only.
 
     Args:
-        keyword (Mandatory): Exact term or short phrase to match (regex, case-insensitive).
+        keyword (Mandatory): Exact term or short phrase to match literally,
+            case-insensitively.
         top_k (Optional): Maximum number of results.
         source_global_user_id (Optional): Filter by source user UUID.
         memory_type (Optional): Deprecated for RAG retrieval; retained for

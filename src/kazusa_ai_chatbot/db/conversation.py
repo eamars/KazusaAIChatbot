@@ -235,10 +235,11 @@ def _merge_attachment_descriptions(
     return updated_attachments
 
 
-def _keyword_text_filter(pattern: str) -> dict[str, Any]:
-    """Build a case-insensitive filter for searchable conversation text."""
+def _keyword_text_filter(keyword: str) -> dict[str, Any]:
+    """Build a case-insensitive literal filter for searchable conversation text."""
 
-    regex_filter = {"$regex": pattern, "$options": "i"}
+    escaped_keyword = re.escape(keyword)
+    regex_filter = {"$regex": escaped_keyword, "$options": "i"}
     filter_doc: dict[str, Any] = {
         "$or": [
             {"body_text": regex_filter},
@@ -376,7 +377,7 @@ async def search_conversation_history(
         platform_channel_id: Optional channel filter.
         global_user_id: Optional user filter (internal UUID).
         limit: Maximum number of results.
-        method: "keyword" for regex text search, "vector" for semantic search.
+        method: "keyword" for literal text search, "vector" for semantic search.
 
     Returns:
         A list of ``(similarity_score, message_doc)`` tuples. Keyword results
@@ -478,7 +479,7 @@ async def aggregate_conversation_by_user(
     if global_user_id:
         match_filter["global_user_id"] = global_user_id
     if keyword:
-        match_filter.update(_keyword_text_filter(re.escape(keyword)))
+        match_filter.update(_keyword_text_filter(keyword))
     if from_timestamp or to_timestamp:
         match_filter["timestamp"] = {}
         if from_timestamp:
