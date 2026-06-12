@@ -433,7 +433,7 @@ normalized return payload.
 ## Inactive Variant Notes
 
 Create
-`development_plans/reference/multi_source_cognition_stage_03_inactive_prompt_variant_notes.md`.
+`(removed) multi_source_cognition_stage_03_inactive_prompt_variant_notes.md`.
 
 This reference file must describe only inactive future direction for:
 
@@ -451,7 +451,7 @@ work.
 - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_prompt_selection.py`
 - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_output_contracts.py`
 - `tests/test_multi_source_cognition_stage_03_prompt_selection.py`
-- `development_plans/reference/multi_source_cognition_stage_03_inactive_prompt_variant_notes.md`
+- `(removed) multi_source_cognition_stage_03_inactive_prompt_variant_notes.md`
 
 ### Modify
 
@@ -967,7 +967,7 @@ constant digests and lengths still match the `Prompt Text Fingerprint Guard`.
 Stage 4 inactive reference notes added:
 
 - Added
-  `development_plans/reference/multi_source_cognition_stage_03_inactive_prompt_variant_notes.md`.
+  `(removed) multi_source_cognition_stage_03_inactive_prompt_variant_notes.md`.
 - The reference note covers only inactive future direction for
   `reflection_signal` with `reflection_artifact` and `internal_thought` with
   `internal_monologue`. It contains no production prompt text and states that
