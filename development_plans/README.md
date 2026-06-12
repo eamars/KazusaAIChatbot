@@ -38,6 +38,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [cognition_chain_module_separation_plan.md](active/short_term/cognition_chain_module_separation_plan.md) | Large cognition module separation plan | draft |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 
 ## Supporting Experiment Records
@@ -51,6 +52,7 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
+| [self_cognition_group_digest_context_evidence_bugfix_plan.md](active/bugfix/self_cognition_group_digest_context_evidence_bugfix_plan.md) | Large self-cognition group digest and evidence bugfix plan | draft |
 
 ## Reference Documents
 
@@ -59,6 +61,7 @@ long_term/todo.md
 | [action_spec_effector_expansion_architecture.md](reference/designs/action_spec_effector_expansion_architecture.md) | Architecture reference |
 | [cognition_contracts_design.md](reference/designs/cognition_contracts_design.md) | Authoritative contract reference |
 | [cognition_core_evolution_progression.md](reference/designs/cognition_core_evolution_progression.md) | Architectural progression |
+| [kazusa_parallel_cognition_architecture.md](reference/designs/kazusa_parallel_cognition_architecture.md) | Architecture reference |
 | [rag_cache2_design.md](reference/designs/rag_cache2_design.md) | Design reference |
 | [rag_hybrid_search_architecture_decision.md](reference/designs/rag_hybrid_search_architecture_decision.md) | Design reference |
 | [self_cognition_loop_architecture.md](reference/designs/self_cognition_loop_architecture.md) | Architecture reference |
