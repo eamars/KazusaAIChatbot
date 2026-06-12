@@ -28,13 +28,6 @@ _INPUT_SOURCES = frozenset((
     "background_artifact_result",
     "background_work_result",
 ))
-_PUBLIC_INPUT_SOURCE_MAP = {
-    "chat_message": "dialog_text",
-    "self_cognition": "internal_monologue",
-    "reflection": "reflection_artifact",
-    "scheduled_followup": "internal_monologue",
-    "background_result": "background_work_result",
-}
 _PUBLIC_OUTPUT_MODE_MAP = {
     "live_response": "visible_reply",
     "background_cognition": "think_only",
@@ -112,13 +105,7 @@ def _trigger_source(value: object) -> str:
     if isinstance(value, str) and value in _TRIGGER_SOURCES:
         return_value = value
         return return_value
-    if value == "self_cognition":
-        return_value = "internal_thought"
-        return return_value
-    if value == "background_result":
-        return_value = "background_work_result_ready"
-        return return_value
-    return_value = "user_message"
+    return_value = str(value)
     return return_value
 
 
@@ -145,14 +132,10 @@ def _input_sources(
 def _input_source(value: object) -> str:
     """Return one prompt-selection input source."""
 
-    if isinstance(value, str):
-        if value in _INPUT_SOURCES:
-            return_value = value
-            return return_value
-        mapped_value = _PUBLIC_INPUT_SOURCE_MAP.get(value)
-        if mapped_value is not None:
-            return mapped_value
-    return_value = "dialog_text"
+    if isinstance(value, str) and value in _INPUT_SOURCES:
+        return_value = value
+        return return_value
+    return_value = str(value)
     return return_value
 
 

@@ -27,6 +27,36 @@ The caller owns:
 - executable action materialization and validation;
 - action execution, persistence, scheduling, delivery, and consolidation.
 
+## Source Labels
+
+`CognitionChainInputV1.episode.model_visible_percepts` is part of the
+deterministic caller-to-core interface. Its `input_source` labels are the
+canonical source vocabulary consumed directly by prompt selection and
+source-specific prompt payload construction. They are not a type system for
+the LLM.
+
+The LLM receives rendered semantic payload fields such as the current message,
+media observations, `internal_thought_residue`, `reflection_artifact`, or a
+background result summary. It should not be asked to infer routing behavior
+from source labels.
+
+The accepted source labels are:
+
+| Source label | Normal producer |
+| --- | --- |
+| `dialog_text` | Live user-message turns. |
+| `internal_monologue` | Self-cognition or scheduled internal packets. |
+| `reflection_artifact` | Promoted reflection dry runs. |
+| `background_artifact_result` | Legacy completed background-artifact returns. |
+| `background_work_result` | Completed background-work returns. |
+| `image_observation` | Current-turn image observations. |
+| `audio_observation` | Current-turn audio observations. |
+
+Connectors must preserve the source identity of existing `CognitiveEpisode`
+percepts when building `CognitionChainInputV1`. They must not translate source
+labels through compatibility vocabularies or default self-cognition,
+reflection, scheduled, or background sources to live-chat `dialog_text`.
+
 ## Public Entrypoints
 
 - `run_cognition_chain(input_payload, services)`

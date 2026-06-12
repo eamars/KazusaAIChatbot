@@ -79,6 +79,11 @@ for preserving character judgment and topic fit; they are not the product goal.
 - LLM stages own semantic judgment.
 - Deterministic code owns validation, persistence, limits, permissions, cache
   invalidation, scheduler execution, and adapter delivery.
+- Avoid compatibility shim layers at all cost unless the user explicitly
+  instructs otherwise. Prefer big-bang contract updates where the caller,
+  callee, tests, and ICD all move to one canonical boundary in the same scope.
+  Do not introduce parallel vocabularies, alias modules, fallback mappers, or
+  translation bridges merely to preserve old call shapes during a refactor.
 - RAG evidence must not be treated as persona or final stance.
 - Reflection runs outside live chat. Raw reflection output must not enter normal
   cognition directly; only promoted, gated context may be used.

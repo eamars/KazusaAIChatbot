@@ -164,7 +164,7 @@ def test_persona_connector_projects_media_observations_to_chain_input() -> None:
         for percept in chain_input["episode"]["model_visible_percepts"]
     ]
     assert percept_sources == [
-        "chat_message",
+        "dialog_text",
         "image_observation",
         "audio_observation",
     ]
@@ -172,6 +172,66 @@ def test_persona_connector_projects_media_observations_to_chain_input() -> None:
     assert "raw-bytes" not in rendered
     assert "raw-audio" not in rendered
     assert "example.invalid" not in rendered
+
+
+def test_persona_connector_preserves_self_cognition_source_for_prompt_selection() -> None:
+    from kazusa_ai_chatbot.cognition_chain_core.episode_projection import (
+        build_prompt_selection_episode,
+    )
+    from kazusa_ai_chatbot.cognition_chain_core.prompt_selection import (
+        select_cognition_prompt_variant,
+    )
+    from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
+        build_cognition_chain_input_from_global_state,
+    )
+
+    state = _global_state()
+    percept_content = json.dumps(
+        {
+            "residue": {
+                "residue_id": "self_cognition:case-1",
+                "internal_monologue": "Review the idle source packet.",
+            },
+            "action_latch": {
+                "status": "local_tracking",
+                "outward_action": "allowed_to_be_considered",
+            },
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    state["cognitive_episode"] = {
+        "episode_id": "self_cognition:tracking:case-1",
+        "trigger_source": "internal_thought",
+        "input_sources": ["internal_monologue"],
+        "output_mode": "preview",
+        "percepts": [{
+            "percept_id": "self_cognition:source_packet",
+            "input_source": "internal_monologue",
+            "content": percept_content,
+            "visibility": "model_visible",
+            "metadata": {"source": "self_cognition_source_packet"},
+        }],
+        "origin_metadata": {
+            "debug_modes": {"no_visual_directives": True},
+        },
+    }
+
+    chain_input = build_cognition_chain_input_from_global_state(state)
+    prompt_episode = build_prompt_selection_episode(chain_input)
+    selection = select_cognition_prompt_variant(
+        episode=prompt_episode,
+        stage="l1_subconscious",
+    )
+
+    assert chain_input["episode"]["model_visible_percepts"] == [{
+        "percept_id": "self_cognition:source_packet",
+        "input_source": "internal_monologue",
+        "content": percept_content,
+        "metadata_summary": ["self_cognition_source_packet"],
+    }]
+    assert prompt_episode["input_sources"] == ["internal_monologue"]
+    assert selection["variant"] == "internal_thought_internal_monologue"
 
 
 def test_persona_connector_materializes_semantic_actions_after_core_output() -> None:

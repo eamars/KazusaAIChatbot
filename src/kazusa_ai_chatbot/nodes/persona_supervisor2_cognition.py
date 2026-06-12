@@ -587,9 +587,16 @@ def _model_visible_percepts_from_state(
 ) -> list[dict[str, object]]:
     """Build public model-visible percept rows from graph state."""
 
+    episode_percepts = _model_visible_percepts_from_episode(
+        cognitive_episode.get("percepts"),
+    )
+    if episode_percepts:
+        return_value = episode_percepts
+        return return_value
+
     percepts: list[dict[str, object]] = [{
         "percept_id": "current_input",
-        "input_source": "chat_message",
+        "input_source": "dialog_text",
         "content": state["decontexualized_input"],
         "metadata_summary": [],
     }]
@@ -610,6 +617,44 @@ def _model_visible_percepts_from_state(
             "metadata_summary": [observation["source_summary"]],
         })
     return percepts
+
+
+def _model_visible_percepts_from_episode(value: object) -> list[dict[str, object]]:
+    """Project existing cognitive-episode percepts into the core input ICD."""
+
+    if not isinstance(value, list):
+        return_value: list[dict[str, object]] = []
+        return return_value
+    percepts: list[dict[str, object]] = []
+    for index, percept in enumerate(value, start=1):
+        if not isinstance(percept, Mapping):
+            continue
+        content = _text(percept.get("content"))
+        if not content:
+            continue
+        percepts.append({
+            "percept_id": _text(percept.get("percept_id"))
+            or f"episode_percept_{index}",
+            "input_source": _text(percept.get("input_source")),
+            "content": content,
+            "metadata_summary": _metadata_summary(percept.get("metadata")),
+        })
+    return_value = percepts
+    return return_value
+
+
+def _metadata_summary(value: object) -> list[str]:
+    """Project non-sensitive episode percept metadata into short labels."""
+
+    if not isinstance(value, Mapping):
+        return_value = ["episode percept"]
+        return return_value
+    source = value.get("source")
+    if isinstance(source, str) and source.strip():
+        return_value = [source.strip()]
+        return return_value
+    return_value = ["episode percept"]
+    return return_value
 
 
 def _media_percepts_from_episode(value: object) -> list[dict[str, object]]:

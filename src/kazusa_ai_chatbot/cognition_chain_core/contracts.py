@@ -33,13 +33,13 @@ class TextEvidenceV1(TypedDict):
 class ModelVisiblePerceptV1(TypedDict):
     percept_id: str
     input_source: Literal[
-        "chat_message",
+        "dialog_text",
         "image_observation",
         "audio_observation",
-        "self_cognition",
-        "reflection",
-        "scheduled_followup",
-        "background_result",
+        "internal_monologue",
+        "reflection_artifact",
+        "background_artifact_result",
+        "background_work_result",
     ]
     content: str
     metadata_summary: list[str]
@@ -411,14 +411,23 @@ _EPISODE_OUTPUT_MODES = frozenset((
     "background_cognition",
     "dry_run",
 ))
+_EPISODE_TRIGGER_SOURCES = frozenset((
+    "user_message",
+    "reflection_signal",
+    "internal_thought",
+    "scheduled_recall",
+    "system_probe",
+    "background_artifact_result_ready",
+    "background_work_result_ready",
+))
 _MODEL_VISIBLE_PERCEPT_INPUT_SOURCES = frozenset((
-    "chat_message",
+    "dialog_text",
     "image_observation",
     "audio_observation",
-    "self_cognition",
-    "reflection",
-    "scheduled_followup",
-    "background_result",
+    "internal_monologue",
+    "reflection_artifact",
+    "background_artifact_result",
+    "background_work_result",
 ))
 _MEDIA_MODALITIES = frozenset((
     "image",
@@ -624,11 +633,27 @@ def _validate_episode(value: object) -> None:
     """Validate nested public episode fields that affect prompt routing."""
 
     episode = _require_mapping(value, "episode")
+    trigger_source = episode.get("trigger_source")
+    if trigger_source not in _EPISODE_TRIGGER_SOURCES:
+        raise CognitionChainContractError(
+            "episode.trigger_source must be one of "
+            f"{sorted(_EPISODE_TRIGGER_SOURCES)}"
+        )
     output_mode = episode.get("output_mode")
     if output_mode not in _EPISODE_OUTPUT_MODES:
         raise CognitionChainContractError(
             f"episode.output_mode must be one of {sorted(_EPISODE_OUTPUT_MODES)}"
         )
+    raw_input_sources = _require_list(
+        episode.get("input_sources"),
+        "input sources",
+    )
+    for index, input_source in enumerate(raw_input_sources):
+        if input_source not in _MODEL_VISIBLE_PERCEPT_INPUT_SOURCES:
+            raise CognitionChainContractError(
+                f"episode.input_sources[{index}] must be one of "
+                f"{sorted(_MODEL_VISIBLE_PERCEPT_INPUT_SOURCES)}"
+            )
     raw_percepts = _require_list(
         episode.get("model_visible_percepts"),
         "model visible percepts",

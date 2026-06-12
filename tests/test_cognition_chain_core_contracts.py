@@ -16,7 +16,7 @@ def _chain_input() -> dict:
             "output_mode": "live_response",
             "model_visible_percepts": [{
                 "percept_id": "percept-1",
-                "input_source": "chat_message",
+                "input_source": "dialog_text",
                 "content": "hello",
                 "metadata_summary": [],
             }],
@@ -176,6 +176,19 @@ def test_cognition_chain_input_rejects_unknown_output_mode() -> None:
 
     payload = _chain_input()
     payload["episode"]["output_mode"] = "not-a-mode"
+
+    with pytest.raises(CognitionChainContractError):
+        validate_cognition_chain_input(payload)
+
+
+def test_cognition_chain_input_rejects_compatibility_source_label() -> None:
+    from kazusa_ai_chatbot.cognition_chain_core.contracts import (
+        CognitionChainContractError,
+        validate_cognition_chain_input,
+    )
+
+    payload = _chain_input()
+    payload["episode"]["input_sources"] = ["chat_message"]
 
     with pytest.raises(CognitionChainContractError):
         validate_cognition_chain_input(payload)
