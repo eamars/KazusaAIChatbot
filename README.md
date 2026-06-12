@@ -255,7 +255,7 @@ cognition, and calendar scheduling remain in the platform-neutral core.
 | Message envelope         | Typed inbound content, mentions, replies, attachments, addressees, broadcast state      | [Message Envelope ICD](src/kazusa_ai_chatbot/message_envelope/README.md)               |
 | Conversation progress    | Short-term episode state used by cognition to avoid loops and stale reopenings          | [Conversation Progress](src/kazusa_ai_chatbot/conversation_progress/README.md)         |
 | Internal monologue residue | Short-lived private first-person residue loaded only into L2a cognition               | [Internal Monologue Residue ICD](src/kazusa_ai_chatbot/internal_monologue_residue/README.md) |
-| Cognition resolver       | Bounded recurrence state, capability observations, HIL/pending resume, and cycle traces | [Cognition Resolver](src/kazusa_ai_chatbot/cognition_resolver/)                        |
+| Cognition resolver       | Bounded recurrence state, capability observations, HIL/pending resume, and cycle traces | [Cognition Resolver ICD](src/kazusa_ai_chatbot/cognition_resolver/README.md)            |
 | RAG 2                    | Slot-driven helper-agent retrieval and Cache2 evidence projection                       | [RAG 2](src/kazusa_ai_chatbot/rag/README.md)                                           |
 | Cognition and dialog     | Character stance, boundaries, judgment, style, visual directives, and final wording     | [Cognition Nodes](src/kazusa_ai_chatbot/nodes/README.md)                              |
 | Action spec              | L2d action residues, capability registry, evaluator, results, surfaces, and traces      | [Action Spec](src/kazusa_ai_chatbot/action_spec/README.md)                            |
@@ -378,7 +378,7 @@ permissioned preview contracts rather than production sends.
 | [Action Spec](src/kazusa_ai_chatbot/action_spec/README.md)               | Modality-neutral action contracts and trace handoff               |
 | [Consolidation ICD](src/kazusa_ai_chatbot/consolidation/README.md)       | Durable target routing and write-intent validation                |
 | [Event Logging ICD](src/kazusa_ai_chatbot/event_logging/README.md)        | Sanitized telemetry interface, event taxonomy, and ops statistics |
-| [Cognition Resolver](src/kazusa_ai_chatbot/cognition_resolver/)           | Bounded resolver loop, capability observations, HIL, and traces   |
+| [Cognition Resolver ICD](src/kazusa_ai_chatbot/cognition_resolver/README.md) | Bounded resolver loop, capability observations, HIL, and traces |
 | [RAG 2](src/kazusa_ai_chatbot/rag/README.md)                             | Retrieval architecture and evidence projection                    |
 | [Cognition Nodes](src/kazusa_ai_chatbot/nodes/README.md)                 | Layered cognition, dialog, and node-package design contracts      |
 | [Self-Cognition](src/kazusa_ai_chatbot/self_cognition/README.md)          | Idle cognition source collection, tracking, and delivery          |
