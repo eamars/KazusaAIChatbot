@@ -137,7 +137,7 @@ Relevant architecture documents:
 - `src/kazusa_ai_chatbot/rag/README.md`
 - `src/kazusa_ai_chatbot/nodes/README.md`
 - `development_plans/archive/completed/short_term/rag2_cognition_ready_evidence_plan.md`
-- `development_plans/reference/evidence/rag2_recall_quality_experiment_plan.md`
+- `development_plans/reference/designs/rag2_recall_quality_experiment_plan.md`
 
 ## Mandatory Skills
 

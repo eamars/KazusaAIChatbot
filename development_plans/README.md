@@ -44,7 +44,7 @@ long_term/todo.md
 
 | Document | Type | Status | Supports |
 |---|---|---|---|
-| [rag2_recall_quality_experiment_plan.md](reference/evidence/rag2_recall_quality_experiment_plan.md) | Experiment decision and supporting evidence | reference evidence | [rag2_cognition_ready_evidence_plan.md](archive/completed/short_term/rag2_cognition_ready_evidence_plan.md) |
+| [rag2_recall_quality_experiment_plan.md](reference/designs/rag2_recall_quality_experiment_plan.md) | Experiment decision and supporting evidence | reference evidence | [rag2_cognition_ready_evidence_plan.md](archive/completed/short_term/rag2_cognition_ready_evidence_plan.md) |
 
 ## Active Bugfix Plans
 
@@ -62,11 +62,11 @@ long_term/todo.md
 | [kazusa_parallel_cognition_architecture.md](reference/designs/kazusa_parallel_cognition_architecture.md) | Architecture reference |
 | [rag_cache2_design.md](reference/designs/rag_cache2_design.md) | Design reference |
 | [rag_hybrid_search_architecture_decision.md](reference/designs/rag_hybrid_search_architecture_decision.md) | Design reference |
-| [cognition_prompt_chain_side_by_side_comparison_20260519.md](reference/evidence/cognition_prompt_chain_side_by_side_comparison_20260519.md) | Supporting evidence |
-| [cognition_prompt_chain_previous20_equivalence_check_20260519.md](reference/evidence/cognition_prompt_chain_previous20_equivalence_check_20260519.md) | Supporting evidence |
-| [cognition_prompt_chain_previous20_input_output_20260519.md](reference/evidence/cognition_prompt_chain_previous20_input_output_20260519.md) | Supporting evidence |
-| [rag2_recall_quality_experiment_plan.md](reference/evidence/rag2_recall_quality_experiment_plan.md) | Supporting experiment evidence |
-| [self_cognition_rag_resolver_evidence_review_20260601.md](reference/evidence/self_cognition_rag_resolver_evidence_review_20260601.md) | Supporting real LLM evidence |
+| (removed) cognition_prompt_chain_side_by_side_comparison_20260519.md | Supporting evidence |
+| (removed) cognition_prompt_chain_previous20_equivalence_check_20260519.md | Supporting evidence |
+| (removed) cognition_prompt_chain_previous20_input_output_20260519.md | Supporting evidence |
+| [rag2_recall_quality_experiment_plan.md](reference/designs/rag2_recall_quality_experiment_plan.md) | Supporting experiment evidence |
+| (removed) self_cognition_rag_resolver_evidence_review_20260601.md | Supporting real LLM evidence |
 
 ## Triage
 
@@ -244,3 +244,4 @@ plans.
 | [self_cognition_tracking_icd.md](archive/superseded/self_cognition_tracking_icd.md) |
 | [rag_supervisor2_inner_loop_agents_plan.md](archive/superseded/rag_supervisor2_inner_loop_agents_plan.md) |
 | [short_circuit_early_stop_plan.md](archive/superseded/short_circuit_early_stop_plan.md) |
+

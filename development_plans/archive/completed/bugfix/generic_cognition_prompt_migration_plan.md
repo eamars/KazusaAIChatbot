@@ -21,7 +21,7 @@
 ## Context
 
 The supporting evidence is recorded in
-`development_plans/reference/evidence/cognition_prompt_chain_side_by_side_comparison_20260519.md`.
+`(removed) cognition_prompt_chain_side_by_side_comparison_20260519.md` (test artifact).
 
 Accepted conclusion: the corrected generic prompt family is the migration
 target. It produces more natural character judgment than the current baseline
@@ -219,7 +219,7 @@ Modify only these test files, or add the listed new test file:
 Modify only these documentation or plan files:
 
 - `development_plans/active/bugfix/generic_cognition_prompt_migration_plan.md`
-- `development_plans/reference/evidence/cognition_prompt_chain_side_by_side_comparison_20260519.md`
+- `(removed) cognition_prompt_chain_side_by_side_comparison_20260519.md` (test artifact)
 - `development_plans/README.md`
 
 Forbidden files and directories:

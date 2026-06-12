@@ -253,7 +253,7 @@ Real LLM diagnostic:
 - Raw output:
   `test_artifacts/cognition_resolver/real_db_comparison_20260601/self_cognition_l2d_diagnostics.json`
 - Human-readable review:
-  `development_plans/reference/evidence/self_cognition_rag_resolver_evidence_review_20260601.md`
+  `(removed) self_cognition_rag_resolver_evidence_review_20260601.md` (removed test report)
 
 Results:
 

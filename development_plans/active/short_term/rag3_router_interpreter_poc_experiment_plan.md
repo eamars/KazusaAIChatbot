@@ -635,7 +635,7 @@ Candidate source files to inspect when building the case set:
 - `development_plans/archive/completed/short_term/rag_2_1_initializer_subagent_contract_plan.md`
 - `development_plans/archive/completed/short_term/rag_phase3_development_plan.md`
 - `development_plans/archive/completed/short_term/rag2_phase4_continuation_plan.md`
-- `development_plans/reference/evidence/rag2_recall_quality_experiment_plan.md`
+- `development_plans/reference/designs/rag2_recall_quality_experiment_plan.md`
 
 ## Experiment Stages
 
