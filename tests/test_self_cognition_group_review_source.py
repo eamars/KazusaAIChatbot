@@ -502,8 +502,13 @@ async def test_collect_group_review_cases_attaches_scene_digest(
                 "这段群聊里，participant_1 问了我一个问题，"
                 "我已经在窗口里接过一次。"
             ),
+            "summary": "participant_1 问我问题，我已经接过一次。",
         }
         return digest
+
+    async def conversation_evidence_builder(**kwargs: Any) -> list[str]:
+        del kwargs
+        return []
 
     cases = await sources.collect_group_review_cases(
         now=now,
@@ -516,6 +521,7 @@ async def test_collect_group_review_cases_attaches_scene_digest(
         max_cases=1,
         participant_context_builder=participant_context_builder,
         scene_digest_builder=scene_digest_builder,
+        conversation_evidence_builder=conversation_evidence_builder,
     )
 
     assert len(cases) == 1
@@ -527,6 +533,9 @@ async def test_collect_group_review_cases_attaches_scene_digest(
             "我已经在窗口里接过一次。"
         ),
     }
+    assert case["conversation_progress"]["summary"] == (
+        "participant_1 问我问题，我已经接过一次。"
+    )
 
     source_packet = projection.build_source_packet(case)
     rendered_packet = projection.render_source_packet_text(source_packet)
@@ -534,11 +543,122 @@ async def test_collect_group_review_cases_attaches_scene_digest(
 
     assert "group_scene_digest" not in rendered_packet
     assert "participant_1 问了我一个问题" in rendered_packet
+    assert "participant_1 问我问题，我已经接过一次" in rendered_packet
     assert "group_scene_digest" in serialized_packet
+    assert '"summary"' in serialized_packet
     assert "delivery_target" not in serialized_packet
     assert "user-1" not in serialized_packet
     assert "qq-user-1" not in serialized_packet
     assert "bot-1" not in serialized_packet
+
+
+def test_group_review_summary_conversation_context_bounds_before_window(
+) -> None:
+    """Summary evidence search should be bounded before reviewed rows."""
+
+    window = _laxi_review_window()
+    window_start_utc = "2026-06-12T00:15:00+00:00"
+
+    task = sources._group_review_summary_conversation_task(
+        summary="W 和温格围绕受凉、拉稀和没力气开玩笑。",
+        window_start_utc=window_start_utc,
+    )
+    context = sources._group_review_summary_conversation_context(
+        summary="W 和温格围绕受凉、拉稀和没力气开玩笑。",
+        window=window,
+        target_scope={
+            "platform": "qq",
+            "platform_channel_id": "group-laxi",
+            "channel_type": "group",
+            "user_id": None,
+        },
+        character_profile={
+            "name": "Character",
+            "global_user_id": "character-global",
+        },
+        window_start_utc=window_start_utc,
+        current_timestamp_utc="2026-06-12T00:25:00+00:00",
+    )
+
+    assert task.startswith("Conversation-evidence: Find earlier same-channel")
+    assert "W 和温格围绕受凉、拉稀和没力气开玩笑" in task
+    assert context["original_query"] == "W 和温格围绕受凉、拉稀和没力气开玩笑。"
+    assert context["platform"] == "qq"
+    assert context["platform_channel_id"] == "group-laxi"
+    assert context["to_timestamp"] < window_start_utc
+    assert context["from_timestamp"] < window_start_utc
+    assert context["conversation_search_top_k"] == (
+        sources.GROUP_REVIEW_CONVERSATION_EVIDENCE_LIMIT
+    )
+    assert len(context["active_turn_platform_message_ids"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_collect_group_review_cases_attaches_summary_conversation_evidence(
+) -> None:
+    """Summary-derived conversation evidence should reach the source packet."""
+
+    now = datetime(2026, 6, 12, 0, 25, tzinfo=timezone.utc)
+    window = _laxi_review_window()
+    captured_evidence_payload: dict[str, Any] = {}
+
+    async def participant_context_builder(**kwargs: Any) -> None:
+        del kwargs
+        return None
+
+    async def scene_digest_builder(**kwargs: Any) -> dict[str, str]:
+        del kwargs
+        digest = {
+            "digest": (
+                "我没有在这个窗口中发言。W 的话承接温格前面说骑行、"
+                "受凉和肠胃状态的上下文。"
+            ),
+            "summary": "W 和温格围绕骑行、受凉和拉稀没力气开玩笑。",
+        }
+        return digest
+
+    async def conversation_evidence_builder(**kwargs: Any) -> list[str]:
+        captured_evidence_payload.update(kwargs)
+        evidence = [
+            "温格高艾菲波加查: 山里爬坡 出汗 下坡 那山风呼呼吹肚子上",
+            "1816: 那应该就是肠胃保护了",
+        ]
+        return evidence
+
+    cases = await sources.collect_group_review_cases(
+        now=now,
+        character_profile={
+            "name": "Character",
+            "global_user_id": "character-global",
+            "platform_bot_id": "bot-1",
+        },
+        windows=[window],
+        max_cases=1,
+        participant_context_builder=participant_context_builder,
+        scene_digest_builder=scene_digest_builder,
+        conversation_evidence_builder=conversation_evidence_builder,
+    )
+
+    assert len(cases) == 1
+    case = cases[0]
+    assert captured_evidence_payload["summary"] == (
+        "W 和温格围绕骑行、受凉和拉稀没力气开玩笑。"
+    )
+    assert captured_evidence_payload["window"] == window
+    assert case["conversation_progress"]["summary"] == (
+        "W 和温格围绕骑行、受凉和拉稀没力气开玩笑。"
+    )
+    assert case["conversation_progress"]["conversation_evidence"] == [
+        "温格高艾菲波加查: 山里爬坡 出汗 下坡 那山风呼呼吹肚子上",
+        "1816: 那应该就是肠胃保护了",
+    ]
+
+    source_packet = projection.build_source_packet(case)
+    rendered_packet = projection.render_source_packet_text(source_packet)
+
+    assert "conversation_evidence" in rendered_packet
+    assert "山里爬坡 出汗 下坡" in rendered_packet
+    assert "那应该就是肠胃保护了" in rendered_packet
 
 
 @pytest.mark.asyncio
@@ -845,6 +965,72 @@ def _private_scope() -> ReflectionScopeInput:
         ],
     )
     return scope
+
+
+def _laxi_review_window():
+    """Build a group-review window with earlier topic context."""
+
+    messages = [
+        _message(
+            "user",
+            "2026-06-12T00:03:00+00:00",
+            "山风太冷，温格受凉了。",
+            global_user_id="user-1816",
+            platform_user_id="qq-1816",
+        ),
+        _message(
+            "user",
+            "2026-06-12T00:10:00+00:00",
+            "温格高艾菲波加查说刚才爬山没力气。",
+            global_user_id="user-wenge",
+            platform_user_id="qq-wenge",
+        ),
+        _message(
+            "user",
+            "2026-06-12T00:17:00+00:00",
+            "你这拉稀还能骑就不对",
+            global_user_id="user-w",
+            platform_user_id="qq-w",
+            platform_message_id="w-reviewed-1",
+        ),
+        _message(
+            "user",
+            "2026-06-12T00:18:00+00:00",
+            "正常拉稀是没力气的",
+            global_user_id="user-w",
+            platform_user_id="qq-w",
+            platform_message_id="w-reviewed-2",
+        ),
+    ]
+    messages[0]["display_name"] = "1816"
+    messages[1]["display_name"] = "温格高艾菲波加查"
+    messages[2]["display_name"] = "W"
+    messages[3]["display_name"] = "W"
+    scope = ReflectionScopeInput(
+        scope_ref="scope_group_laxi",
+        platform="qq",
+        platform_channel_id="group-laxi",
+        channel_type="group",
+        assistant_message_count=0,
+        user_message_count=len(messages),
+        total_message_count=len(messages),
+        first_timestamp="2026-06-12T00:03:00+00:00",
+        last_timestamp="2026-06-12T00:18:00+00:00",
+        messages=messages,
+    )
+    windows = build_group_activity_windows(
+        scope=scope,
+        window_start=datetime(2026, 6, 12, 0, 0, tzinfo=timezone.utc),
+        window_end=datetime(2026, 6, 12, 0, 25, tzinfo=timezone.utc),
+        now=datetime(2026, 6, 12, 0, 25, tzinfo=timezone.utc),
+        character_global_user_id="character-global",
+        platform_bot_id="bot-1",
+    )
+    window = next(
+        item for item in windows
+        if item.window_start == datetime(2026, 6, 12, 0, 15, tzinfo=timezone.utc)
+    )
+    return window
 
 
 def _message(

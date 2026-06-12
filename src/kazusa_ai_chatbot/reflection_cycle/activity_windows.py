@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
+from kazusa_ai_chatbot.config import CONVERSATION_HISTORY_LIMIT
 from kazusa_ai_chatbot.reflection_cycle.models import (
     READONLY_REFLECTION_MAX_MESSAGE_CHARS,
     ReflectionInputSet,
@@ -36,6 +37,7 @@ class GroupActivityWindow:
     message_count: int
     visible_context: list[dict[str, str]]
     participant_rows: list[dict[str, Any]]
+    digest_participant_rows: list[dict[str, Any]]
     source_refs: list[dict[str, Any]]
 
     @property
@@ -108,12 +110,15 @@ def build_group_activity_windows(
     aligned_end = parse_storage_utc_datetime(
         normalize_storage_utc_iso(window_end.isoformat()),
     )
+    valid_messages = _valid_scope_messages(
+        messages=list(scope.messages),
+        aligned_start=aligned_start,
+        aligned_end=aligned_end,
+    )
     buckets: dict[datetime, list[dict[str, Any]]] = {}
-    for message in scope.messages:
+    for message in valid_messages:
         timestamp = _message_timestamp(message)
         if timestamp is None:
-            continue
-        if timestamp < aligned_start or timestamp >= aligned_end:
             continue
         message_window_start = _aligned_window_start(timestamp)
         if message_window_start not in buckets:
@@ -128,6 +133,10 @@ def build_group_activity_windows(
         )
         if not messages:
             continue
+        digest_messages = _digest_exposure_messages(
+            scope_messages=valid_messages,
+            window_messages=messages,
+        )
         bucket_end = bucket_start + timedelta(
             minutes=GROUP_ACTIVITY_WINDOW_MINUTES,
         )
@@ -153,6 +162,7 @@ def build_group_activity_windows(
             message_count=len(messages),
             visible_context=_visible_context(messages),
             participant_rows=_participant_rows(messages),
+            digest_participant_rows=_participant_rows(digest_messages),
             source_refs=_source_refs(
                 scope_ref=scope.scope_ref,
                 window_start=bucket_start,
@@ -262,6 +272,57 @@ def _semantic_labels(
     }
     labels["window_summary"] = _window_summary(labels)
     return labels
+
+
+def _valid_scope_messages(
+    *,
+    messages: list[dict[str, Any]],
+    aligned_start: datetime,
+    aligned_end: datetime,
+) -> list[dict[str, Any]]:
+    """Return valid same-scope rows inside the projection range."""
+
+    timestamped_messages: list[tuple[datetime, dict[str, Any]]] = []
+    for message in messages:
+        timestamp = _message_timestamp(message)
+        if timestamp is None:
+            continue
+        if timestamp < aligned_start or timestamp >= aligned_end:
+            continue
+        timestamped_messages.append((timestamp, message))
+    timestamped_messages.sort(key=lambda item: item[0])
+    valid_messages = [
+        message
+        for _, message in timestamped_messages
+    ]
+    return valid_messages
+
+
+def _digest_exposure_messages(
+    *,
+    scope_messages: list[dict[str, Any]],
+    window_messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return rolling same-scope rows available to the group digest."""
+
+    if not window_messages:
+        return_value: list[dict[str, Any]] = []
+        return return_value
+
+    latest_window_timestamp = _message_timestamp(window_messages[-1])
+    if latest_window_timestamp is None:
+        selected_messages = window_messages[-CONVERSATION_HISTORY_LIMIT:]
+        return selected_messages
+
+    eligible_messages: list[dict[str, Any]] = []
+    for message in scope_messages:
+        timestamp = _message_timestamp(message)
+        if timestamp is None:
+            continue
+        if timestamp <= latest_window_timestamp:
+            eligible_messages.append(message)
+    selected_messages = eligible_messages[-CONVERSATION_HISTORY_LIMIT:]
+    return selected_messages
 
 
 def _activity_level(message_count: int) -> str:

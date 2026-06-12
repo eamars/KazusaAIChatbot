@@ -12,6 +12,7 @@ from kazusa_ai_chatbot.config import (
     CONSOLIDATION_LLM_API_KEY,
     CONSOLIDATION_LLM_BASE_URL,
     CONSOLIDATION_LLM_MODEL,
+    CONVERSATION_HISTORY_LIMIT,
 )
 from kazusa_ai_chatbot.reflection_cycle.activity_windows import (
     GroupActivityWindow,
@@ -26,7 +27,8 @@ from kazusa_ai_chatbot.utils import (
 logger = logging.getLogger(__name__)
 
 GROUP_SCENE_DIGEST_MAX_CHARS = 500
-_GROUP_SCENE_DIGEST_ROW_LIMIT = 8
+GROUP_SCENE_SUMMARY_MAX_CHARS = 160
+_GROUP_SCENE_DIGEST_ROW_LIMIT = CONVERSATION_HISTORY_LIMIT
 _GROUP_SCENE_DIGEST_ROW_TEXT_LIMIT = 280
 _DIGEST_ACTION_GUIDANCE_MARKERS = (
     "不要回复",
@@ -49,11 +51,12 @@ _DIGEST_ACTION_GUIDANCE_PARTS = (
 
 
 GROUP_SCENE_DIGEST_SYSTEM_PROMPT = '''\
-你负责把一段已选中的群聊窗口压缩成一个给当前角色自己阅读的观察摘要。
+你负责把一段已选中的群聊现场压缩成当前角色自己阅读的观察资料。
 
 # 输入含义
 - 信息来源限定为 human payload 里的 message_rows 和 activity_labels。
 - message_rows 按时间顺序排列；display_name 是该行的可见发言者名称。
+- message_rows 可能比当前 15 分钟窗口更宽，用来补足话题承接关系；不要把更早的行误认为当前窗口内的新发言。
 - activity_labels.assistant_presence 表示窗口里是否有当前角色自己的发言。
 - role="assistant" 的行是当前角色自己的可见发言；摘要中写成“我（display_name）”。
 - text 里的 @名称 属于该行可见文字，表示该行发言者艾特或提到了这个名称。
@@ -63,6 +66,7 @@ GROUP_SCENE_DIGEST_SYSTEM_PROMPT = '''\
 - digest 用简体中文，写成第一人称观察资料。
 - 说明群聊里的可见先后关系、被概括的发言者 display_name、我是否已经在窗口中参与过、以及我最后发言后是否还有新的文字线索。
 - 再次提到发言者时继续使用 display_name，让后续 cognition 能直接看出谁在说话。
+- summary 用简体中文，写成很短的群聊话题概述，只描述主要参与者、话题和指向关系；不要写行动建议。
 
 # 生成步骤
 1. 按 message_rows 的顺序阅读，保持这个顺序。
@@ -77,9 +81,10 @@ GROUP_SCENE_DIGEST_SYSTEM_PROMPT = '''\
    - assistant_presence 不是 "present"：写“我没有在这个窗口中发言”。
 
 # 输出格式
-输出为一个 JSON 对象，包含一个字符串字段：
+输出为一个 JSON 对象，包含必填字符串字段 digest，以及可选字符串字段 summary：
 {
-  "digest": "一段简体中文第一人称观察摘要"
+  "digest": "一段简体中文第一人称观察摘要",
+  "summary": "一句很短的群聊话题概述"
 }
 '''
 _group_scene_digest_llm = get_llm(
@@ -101,8 +106,9 @@ async def build_group_scene_digest(
             self-cognition review.
 
     Returns:
-        `{"digest": str}` when the LLM returns a valid one-string summary;
-        otherwise `None` so source collection can omit the optional field.
+        `{"digest": str}` plus an optional ``summary`` when the
+        LLM returns valid strings; otherwise `None` so source collection can
+        omit the optional field.
     """
 
     messages = build_group_scene_digest_messages(window)
@@ -177,20 +183,22 @@ def build_group_scene_digest_prompt_payload(
 def normalize_group_scene_digest_output(
     parsed_output: object,
 ) -> dict[str, str] | None:
-    """Validate the one-string digest JSON contract.
+    """Validate the digest JSON contract.
 
     Args:
         parsed_output: Parsed LLM output from `parse_llm_json_output`.
 
     Returns:
-        Bounded `{"digest": str}` when the shape and content are valid;
-        otherwise `None`.
+        Bounded `{"digest": str}` with an optional summary string when the
+        shape and content are valid; otherwise `None`.
     """
 
     if not isinstance(parsed_output, dict):
         return_value = None
         return return_value
-    if set(parsed_output.keys()) != {"digest"}:
+    allowed_keys = {"digest", "summary"}
+    output_keys = set(parsed_output.keys())
+    if "digest" not in output_keys or not output_keys.issubset(allowed_keys):
         return_value = None
         return return_value
 
@@ -211,6 +219,18 @@ def normalize_group_scene_digest_output(
         return return_value
 
     return_value = {"digest": digest}
+    if "summary" in parsed_output:
+        raw_summary = parsed_output["summary"]
+        if not isinstance(raw_summary, str):
+            return return_value
+        summary = _bounded_text(
+            raw_summary,
+            limit=GROUP_SCENE_SUMMARY_MAX_CHARS,
+        )
+        if summary:
+            if _contains_action_guidance(summary):
+                return return_value
+            return_value["summary"] = summary
     return return_value
 
 
@@ -219,7 +239,9 @@ def _digest_message_rows(
 ) -> list[dict[str, str]]:
     """Build explicit visible-name chronological rows for the digest prompt."""
 
-    selected_rows = window.participant_rows[-_GROUP_SCENE_DIGEST_ROW_LIMIT:]
+    selected_rows = (
+        window.digest_participant_rows[-_GROUP_SCENE_DIGEST_ROW_LIMIT:]
+    )
     message_rows: list[dict[str, str]] = []
     for row in selected_rows:
         role = text_or_empty(row.get("role")) or "unknown"

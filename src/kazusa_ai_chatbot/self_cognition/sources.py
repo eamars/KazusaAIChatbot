@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Callable
-from datetime import datetime
+from collections.abc import Mapping
+from datetime import datetime, timedelta
 from typing import Any
 
 from kazusa_ai_chatbot.calendar_scheduler import handlers as calendar_handlers
@@ -31,6 +32,7 @@ from kazusa_ai_chatbot.reflection_cycle.group_scene_digest import (
     build_group_scene_digest,
 )
 from kazusa_ai_chatbot.reflection_cycle.selector import collect_reflection_inputs
+from kazusa_ai_chatbot.rag.conversation_evidence import ConversationEvidenceAgent
 from kazusa_ai_chatbot.self_cognition import models
 from kazusa_ai_chatbot.self_cognition.group_review_participant_context import (
     build_group_review_participant_context,
@@ -39,6 +41,7 @@ from kazusa_ai_chatbot.self_cognition.sleep_period import (
     is_self_cognition_sleep_period,
 )
 from kazusa_ai_chatbot.time_boundary import (
+    format_storage_utc_for_llm,
     normalize_storage_utc_iso,
     parse_storage_utc_datetime,
 )
@@ -56,6 +59,10 @@ _CHARACTER_PROFILE_FIELDS = frozenset(
     )
 )
 _SCHEDULED_FUTURE_COGNITION_SOURCE_KIND = "scheduled_future_cognition_slot"
+GROUP_REVIEW_CONVERSATION_EVIDENCE_LOOKBACK_HOURS = 72
+GROUP_REVIEW_CONVERSATION_EVIDENCE_LIMIT = 5
+GROUP_REVIEW_CONVERSATION_EVIDENCE_CHAR_LIMIT = 360
+GROUP_REVIEW_CONVERSATION_EVIDENCE_ATTEMPTS = 1
 
 
 async def collect_self_cognition_cases(
@@ -168,6 +175,7 @@ async def collect_group_review_cases(
     max_cases: int,
     participant_context_builder: Callable[..., Any] | None = None,
     scene_digest_builder: Callable[..., Any] | None = None,
+    conversation_evidence_builder: Callable[..., Any] | None = None,
 ) -> list[models.SelfCognitionCase]:
     """Build group-review cases from precomputed activity windows."""
 
@@ -176,6 +184,10 @@ async def collect_group_review_cases(
         participant_context_builder or build_group_review_participant_context
     )
     digest_builder = scene_digest_builder or build_group_scene_digest
+    evidence_builder = (
+        conversation_evidence_builder
+        or build_group_review_summary_conversation_evidence
+    )
     for window in windows:
         if len(cases) >= max_cases:
             break
@@ -208,6 +220,26 @@ async def collect_group_review_cases(
             case["conversation_progress"]["group_scene_digest"] = {
                 "digest": scene_digest["digest"].strip(),
             }
+            summary = _group_scene_summary(scene_digest)
+            if summary:
+                case["conversation_progress"]["summary"] = summary
+                conversation_evidence = await _call_maybe_async(
+                    evidence_builder,
+                    summary=summary,
+                    window=window,
+                    target_scope=case["target_scope"],
+                    character_profile=character_profile,
+                    current_timestamp_utc=normalize_storage_utc_iso(
+                        now.isoformat(),
+                    ),
+                )
+                evidence_items = _conversation_evidence_items(
+                    conversation_evidence,
+                )
+                if evidence_items:
+                    case["conversation_progress"]["conversation_evidence"] = (
+                        evidence_items
+                    )
         binding = await resolve_self_cognition_delivery_target(
             platform=window.platform,
             source_platform_channel_id=window.platform_channel_id,
@@ -228,6 +260,47 @@ async def collect_group_review_cases(
         cases.append(case)
 
     return cases
+
+
+async def build_group_review_summary_conversation_evidence(
+    *,
+    summary: str,
+    window: GroupActivityWindow,
+    target_scope: Mapping[str, Any],
+    character_profile: Mapping[str, Any],
+    current_timestamp_utc: str,
+    conversation_agent: ConversationEvidenceAgent | None = None,
+) -> list[str]:
+    """Retrieve bounded earlier same-channel evidence for a group topic."""
+
+    clean_summary = text_or_empty(summary).strip()
+    if not clean_summary:
+        return_value: list[str] = []
+        return return_value
+
+    window_start_utc = normalize_storage_utc_iso(window.window_start.isoformat())
+    task = _group_review_summary_conversation_task(
+        summary=clean_summary,
+        window_start_utc=window_start_utc,
+    )
+    context = _group_review_summary_conversation_context(
+        summary=clean_summary,
+        window=window,
+        target_scope=target_scope,
+        character_profile=character_profile,
+        window_start_utc=window_start_utc,
+        current_timestamp_utc=current_timestamp_utc,
+    )
+    agent = conversation_agent
+    if agent is None:
+        agent = ConversationEvidenceAgent()
+    raw_result = await agent.run(
+        task,
+        context,
+        max_attempts=GROUP_REVIEW_CONVERSATION_EVIDENCE_ATTEMPTS,
+    )
+    return_value = _conversation_evidence_items(raw_result)
+    return return_value
 
 
 async def collect_scheduled_future_cognition_cases(
@@ -865,14 +938,181 @@ def _is_group_scene_digest(value: object) -> bool:
     if not isinstance(value, dict):
         return_value = False
         return return_value
-    if set(value.keys()) != {"digest"}:
+    allowed_keys = {"digest", "summary"}
+    output_keys = set(value.keys())
+    if "digest" not in output_keys or not output_keys.issubset(allowed_keys):
         return_value = False
         return return_value
     digest = value["digest"]
     if not isinstance(digest, str):
         return_value = False
         return return_value
+    if "summary" in value:
+        summary = value["summary"]
+        if not isinstance(summary, str):
+            return_value = False
+            return return_value
     return_value = bool(digest.strip())
+    return return_value
+
+
+def _group_review_summary_conversation_task(
+    *,
+    summary: str,
+    window_start_utc: str,
+) -> str:
+    """Build the topic-search task string for earlier group conversation."""
+
+    window_start_local = format_storage_utc_for_llm(window_start_utc)
+    task = (
+        "Conversation-evidence: Find earlier same-channel conversation before "
+        f"{window_start_local} that helps explain this group topic: {summary}"
+    )
+    return task
+
+
+def _group_review_summary_conversation_context(
+    *,
+    summary: str,
+    window: GroupActivityWindow,
+    target_scope: Mapping[str, Any],
+    character_profile: Mapping[str, Any],
+    window_start_utc: str,
+    current_timestamp_utc: str,
+) -> dict[str, Any]:
+    """Build trusted runtime constraints for topic conversation evidence."""
+
+    lookback_start_utc = _group_review_summary_lookback_start(window_start_utc)
+    search_end_utc = _group_review_summary_search_end(window_start_utc)
+    context = {
+        "platform": text_or_empty(target_scope.get("platform")),
+        "platform_channel_id": text_or_empty(
+            target_scope.get("platform_channel_id"),
+        ),
+        "channel_type": text_or_empty(target_scope.get("channel_type")),
+        "current_timestamp_utc": current_timestamp_utc,
+        "from_timestamp": lookback_start_utc,
+        "to_timestamp": search_end_utc,
+        "conversation_search_top_k": GROUP_REVIEW_CONVERSATION_EVIDENCE_LIMIT,
+        "original_query": text_or_empty(summary),
+        "current_slot": "group review topic evidence",
+        "known_facts": [text_or_empty(window.labels.get("window_summary"))],
+        "active_turn_platform_message_ids": (
+            _window_platform_message_ids(window.participant_rows)
+        ),
+        "active_turn_conversation_row_ids": [],
+        "character_profile": {
+            "global_user_id": text_or_empty(
+                character_profile.get("global_user_id"),
+            ),
+            "name": text_or_empty(character_profile.get("name")),
+        },
+    }
+    return context
+
+
+def _group_review_summary_search_end(window_start_utc: str) -> str:
+    """Return the inclusive search end strictly before the reviewed window."""
+
+    window_start = parse_storage_utc_datetime(window_start_utc)
+    search_end = window_start - timedelta(microseconds=1)
+    search_end_utc = normalize_storage_utc_iso(search_end.isoformat())
+    return search_end_utc
+
+
+def _group_review_summary_lookback_start(window_start_utc: str) -> str:
+    """Return the earliest timestamp searched for topic evidence."""
+
+    window_start = parse_storage_utc_datetime(window_start_utc)
+    lookback_start = window_start - timedelta(
+        hours=GROUP_REVIEW_CONVERSATION_EVIDENCE_LOOKBACK_HOURS,
+    )
+    lookback_start_utc = normalize_storage_utc_iso(lookback_start.isoformat())
+    return lookback_start_utc
+
+
+def _window_platform_message_ids(rows: list[dict[str, Any]]) -> list[str]:
+    """Return platform message ids from the reviewed activity window."""
+
+    message_ids = [
+        message_id
+        for row in rows
+        if (message_id := text_or_empty(row.get("platform_message_id")))
+    ]
+    return message_ids
+
+
+def _conversation_evidence_items(value: object) -> list[str]:
+    """Return bounded evidence strings from a conversation helper result."""
+
+    if isinstance(value, list):
+        evidence = _string_items(
+            value,
+            limit=GROUP_REVIEW_CONVERSATION_EVIDENCE_LIMIT,
+            char_limit=GROUP_REVIEW_CONVERSATION_EVIDENCE_CHAR_LIMIT,
+        )
+        return evidence
+
+    if not isinstance(value, Mapping):
+        evidence = []
+        return evidence
+
+    result_payload = value.get("result")
+    if not isinstance(result_payload, Mapping):
+        evidence = []
+        return evidence
+
+    raw_evidence = result_payload.get("evidence")
+    evidence = _string_items(
+        raw_evidence,
+        limit=GROUP_REVIEW_CONVERSATION_EVIDENCE_LIMIT,
+        char_limit=GROUP_REVIEW_CONVERSATION_EVIDENCE_CHAR_LIMIT,
+    )
+    if evidence:
+        return evidence
+
+    selected_summary = text_or_empty(result_payload.get("selected_summary"))
+    evidence = _string_items(
+        selected_summary.splitlines(),
+        limit=GROUP_REVIEW_CONVERSATION_EVIDENCE_LIMIT,
+        char_limit=GROUP_REVIEW_CONVERSATION_EVIDENCE_CHAR_LIMIT,
+    )
+    return evidence
+
+
+def _string_items(
+    value: object,
+    *,
+    limit: int,
+    char_limit: int,
+) -> list[str]:
+    """Return capped non-empty text items from a list-like value."""
+
+    if not isinstance(value, list):
+        items: list[str] = []
+        return items
+
+    items = []
+    for item in value:
+        text = text_or_empty(item)
+        if not text:
+            continue
+        if len(text) > char_limit:
+            text = f"{text[:char_limit - 3].rstrip()}..."
+        items.append(text)
+        if len(items) >= limit:
+            break
+    return items
+
+
+def _group_scene_summary(value: dict[str, Any]) -> str:
+    """Return the optional short digest summary string."""
+
+    summary = value.get("summary")
+    if not isinstance(summary, str):
+        return_value = ""
+        return return_value
+    return_value = summary.strip()
     return return_value
 
 

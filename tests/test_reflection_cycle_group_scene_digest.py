@@ -103,6 +103,91 @@ def test_group_scene_digest_payload_truncates_oldest_rows_not_latest() -> None:
     assert "张伟：后面我只是补一句主板供电" in visible_text
 
 
+def test_group_scene_digest_payload_uses_wide_digest_rows() -> None:
+    """Digest input should include rolling same-scope rows before the window."""
+
+    scope = ReflectionScopeInput(
+        scope_ref="scope_group_laxi",
+        platform="qq",
+        platform_channel_id="group-laxi",
+        channel_type="group",
+        assistant_message_count=0,
+        user_message_count=5,
+        total_message_count=5,
+        first_timestamp="2026-06-12T00:03:00+00:00",
+        last_timestamp="2026-06-12T00:26:00+00:00",
+        messages=[
+            _message(
+                role="user",
+                timestamp="2026-06-12T00:03:00+00:00",
+                body_text="山风太冷，温格受凉了。",
+                global_user_id="user-1816",
+                platform_user_id="qq-1816",
+                display_name="1816",
+            ),
+            _message(
+                role="user",
+                timestamp="2026-06-12T00:10:00+00:00",
+                body_text="温格高艾菲波加查说刚才爬山没力气。",
+                global_user_id="user-wenge",
+                platform_user_id="qq-wenge",
+                display_name="温格高艾菲波加查",
+            ),
+            _message(
+                role="user",
+                timestamp="2026-06-12T00:17:00+00:00",
+                body_text="正常拉稀怎么会还有力气骑。",
+                global_user_id="user-w",
+                platform_user_id="qq-w",
+                display_name="W",
+            ),
+            _message(
+                role="user",
+                timestamp="2026-06-12T00:18:00+00:00",
+                body_text="你这不像没力气。",
+                global_user_id="user-w",
+                platform_user_id="qq-w",
+                display_name="W",
+            ),
+            _message(
+                role="user",
+                timestamp="2026-06-12T00:26:00+00:00",
+                body_text="future row must not leak into the selected window digest.",
+                global_user_id="user-future",
+                platform_user_id="qq-future",
+                display_name="未来发言者",
+            ),
+        ],
+    )
+
+    windows = build_group_activity_windows(
+        scope=scope,
+        window_start=datetime(2026, 6, 12, 0, 0, tzinfo=timezone.utc),
+        window_end=datetime(2026, 6, 12, 0, 25, tzinfo=timezone.utc),
+        now=datetime(2026, 6, 12, 0, 25, tzinfo=timezone.utc),
+        character_global_user_id="character-global",
+        platform_bot_id="bot-1",
+    )
+    selected_window = next(
+        window for window in windows
+        if window.window_start == datetime(2026, 6, 12, 0, 15, tzinfo=timezone.utc)
+    )
+
+    payload = group_scene_digest.build_group_scene_digest_prompt_payload(
+        selected_window,
+    )
+    visible_window_text = "\n".join(
+        row["body_text"]
+        for row in selected_window.visible_context
+    )
+    digest_text = "\n".join(row["text"] for row in payload["message_rows"])
+
+    assert "温格高艾菲波加查说刚才爬山没力气" not in visible_window_text
+    assert "温格高艾菲波加查说刚才爬山没力气" in digest_text
+    assert "正常拉稀怎么会还有力气骑" in digest_text
+    assert "future row must not leak" not in digest_text
+
+
 def test_group_scene_digest_prompt_contract_is_first_person_only() -> None:
     """Prompt rendering should keep one-string first-person summary rules."""
 
@@ -113,6 +198,7 @@ def test_group_scene_digest_prompt_contract_is_first_person_only() -> None:
 
     assert "第一人称" in rendered
     assert "digest" in rendered
+    assert "summary" in rendered
     assert "display_name" in rendered
     assert '# 生成步骤' in rendered
     assert 'assistant 行的 text 当作原文引用' in rendered
@@ -147,6 +233,43 @@ def test_group_scene_digest_normalizes_one_string_output() -> None:
         len(normalized["digest"])
         <= group_scene_digest.GROUP_SCENE_DIGEST_MAX_CHARS
     )
+
+
+def test_group_scene_digest_normalizes_optional_short_summary() -> None:
+    """A short string topic summary may accompany the full digest."""
+
+    normalized = group_scene_digest.normalize_group_scene_digest_output({
+        "digest": "我看到 W 的调侃承接的是温格前面说身体不舒服。",
+        "summary": "W 和温格围绕受凉、拉稀和没力气开玩笑。",
+    })
+
+    assert normalized == {
+        "digest": "我看到 W 的调侃承接的是温格前面说身体不舒服。",
+        "summary": "W 和温格围绕受凉、拉稀和没力气开玩笑。",
+    }
+
+
+@pytest.mark.parametrize(
+    "parsed_output",
+    [
+        {"digest": "我看到这段群聊有人问问题。", "summary": 7},
+        {"digest": "我看到这段群聊有人问问题。", "summary": ""},
+        {
+            "digest": "我看到这段群聊有人问问题。",
+            "summary": "这段应该保持沉默。",
+        },
+    ],
+)
+def test_group_scene_digest_omits_invalid_optional_summary(
+    parsed_output: dict[str, Any],
+) -> None:
+    """An invalid optional summary should not suppress a valid digest."""
+
+    normalized = group_scene_digest.normalize_group_scene_digest_output(
+        parsed_output,
+    )
+
+    assert normalized == {"digest": "我看到这段群聊有人问问题。"}
 
 
 @pytest.mark.parametrize(
@@ -188,7 +311,8 @@ async def test_build_group_scene_digest_invokes_llm_once(
             response = SimpleNamespace(
                 content=(
                     '{"digest": "这段群聊里，user 问了词义，'
-                    '我（assistant）随后已经解释过；后面只有媒体/空内容。"}'
+                    '我（assistant）随后已经解释过；后面只有媒体/空内容。",'
+                    '"summary": "user 问词义，我已经解释过。"}'
                 ),
             )
             return response
@@ -207,7 +331,8 @@ async def test_build_group_scene_digest_invokes_llm_once(
         "digest": (
             "这段群聊里，user 问了词义，"
             "我（assistant）随后已经解释过；后面只有媒体/空内容。"
-        )
+        ),
+        "summary": "user 问词义，我已经解释过。",
     }
     assert len(captured_messages) == 2
 
@@ -360,6 +485,22 @@ def _busy_truncation_window():
         ),
         _message(
             role="user",
+            timestamp="2026-05-18T04:00:50+00:00",
+            body_text="old noisy row 05",
+            global_user_id="old-5",
+            platform_user_id="qq-old-5",
+            display_name="旧话题五",
+        ),
+        _message(
+            role="user",
+            timestamp="2026-05-18T04:00:55+00:00",
+            body_text="old noisy row 06",
+            global_user_id="old-6",
+            platform_user_id="qq-old-6",
+            display_name="旧话题六",
+        ),
+        _message(
+            role="user",
             timestamp="2026-05-18T04:01:00+00:00",
             body_text="总是跌倒的企鹅：用串口 Linux 启动",
             global_user_id="user-penguin",
@@ -414,7 +555,7 @@ def _busy_truncation_window():
         platform_channel_id="group-1",
         channel_type="group",
         assistant_message_count=1,
-        user_message_count=9,
+        user_message_count=11,
         total_message_count=len(messages),
         first_timestamp="2026-05-18T04:00:10+00:00",
         last_timestamp="2026-05-18T04:06:00+00:00",

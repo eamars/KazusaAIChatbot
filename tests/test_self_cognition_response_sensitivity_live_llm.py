@@ -74,6 +74,23 @@ _AMBIENT_GROUP_LEAK_ASSISTANT_TEXT = (
     "不过这样倒挺自在的\n"
     "不用硬接话，也不用消失，安静待着就挺好"
 )
+_LAXI_AMBIENT_GROUP_CASE_ID = (
+    "group_activity_window:"
+    "scope_e13fdf80a90b:"
+    "2026-06-12T00:15:00+00:00:"
+    "2026-06-12T00:30:00+00:00"
+)
+_LAXI_AMBIENT_GROUP_SOURCE_CUTOFF = "2026-06-12T00:25:29.899000+00:00"
+_LAXI_AMBIENT_GROUP_REVIEWED_AT = "2026-06-12T00:25:44.861727+00:00"
+_LAXI_AMBIENT_GROUP_ASSISTANT_TEXT = (
+    "拉稀这种事……旁观者心态还挺自在的。\n"
+    "不用硬聊也不用消失，顺着听就好。"
+)
+_LAXI_MODE_BASELINE_15M_DIGEST = "baseline_15m_digest"
+_LAXI_MODE_EXPANDED_DIGEST_ONLY = "expanded_digest_only"
+_LAXI_MODE_EXPANDED_DIGEST_PLUS_CONVERSATION_EVIDENCE = (
+    "expanded_digest_plus_conversation_evidence"
+)
 
 
 @dataclass(frozen=True)
@@ -136,6 +153,92 @@ async def test_live_self_cognition_ambient_group_l2d_does_not_speak() -> None:
         "ambient group-review self-cognition selected visible L2d speech; "
         f"trace={report['trace_path']}"
     )
+
+
+async def test_live_self_cognition_laxi_expanded_digest_only_records_output(
+) -> None:
+    """Replay expanded digest alone and record whether it still speaks."""
+
+    await _skip_if_llm_unavailable()
+    try:
+        character_profile = await get_character_profile()
+        historical_case = await _laxi_ambient_group_case(
+            character_profile,
+            digest_mode=_LAXI_MODE_EXPANDED_DIGEST_ONLY,
+        )
+        if historical_case is None:
+            pytest.skip(
+                "production-derived laxi ambient group window is unavailable"
+            )
+        report = await _run_case_to_l2d(
+            historical_case,
+            evidence_mode=_LAXI_MODE_EXPANDED_DIGEST_ONLY,
+        )
+    except PyMongoError as exc:
+        pytest.skip(f"MongoDB unavailable for laxi regression test: {exc}")
+    finally:
+        await close_db()
+
+    assert report["action_spec_count"] <= 3
+
+
+async def test_live_self_cognition_laxi_baseline_15m_digest_reproduces_speak(
+) -> None:
+    """Replay the same laxi case with the old 15-minute digest scope."""
+
+    await _skip_if_llm_unavailable()
+    try:
+        character_profile = await get_character_profile()
+        historical_case = await _laxi_ambient_group_case(
+            character_profile,
+            digest_mode=_LAXI_MODE_BASELINE_15M_DIGEST,
+        )
+        if historical_case is None:
+            pytest.skip(
+                "production-derived laxi ambient group window is unavailable"
+            )
+        report = await _run_case_to_l2d(
+            historical_case,
+            evidence_mode=_LAXI_MODE_BASELINE_15M_DIGEST,
+        )
+    except PyMongoError as exc:
+        pytest.skip(f"MongoDB unavailable for laxi baseline test: {exc}")
+    finally:
+        await close_db()
+
+    assert report["observed_user_visible_speak"], (
+        "baseline 15-minute digest did not reproduce visible speech; "
+        f"trace={report['trace_path']}"
+    )
+
+
+async def test_live_self_cognition_laxi_expanded_digest_with_evidence_records_output(
+) -> None:
+    """Replay expanded digest plus pre-cognition evidence and record output."""
+
+    await _skip_if_llm_unavailable()
+    try:
+        character_profile = await get_character_profile()
+        historical_case = await _laxi_ambient_group_case(
+            character_profile,
+            digest_mode=_LAXI_MODE_EXPANDED_DIGEST_PLUS_CONVERSATION_EVIDENCE,
+        )
+        if historical_case is None:
+            pytest.skip(
+                "production-derived laxi ambient group window is unavailable"
+            )
+        report = await _run_case_to_l2d(
+            historical_case,
+            evidence_mode=(
+                _LAXI_MODE_EXPANDED_DIGEST_PLUS_CONVERSATION_EVIDENCE
+            ),
+        )
+    except PyMongoError as exc:
+        pytest.skip(f"MongoDB unavailable for laxi evidence test: {exc}")
+    finally:
+        await close_db()
+
+    assert report["action_spec_count"] <= 3
 
 
 async def _skip_if_llm_unavailable() -> None:
@@ -305,6 +408,56 @@ async def _messages_for_window(parsed_source: dict[str, str]) -> list[dict[str, 
                 "addressed_to_global_user_ids": 1,
                 "mentions": 1,
                 "is_directed_at_character": 1,
+                "reply_context": 1,
+            },
+        )
+        .sort("timestamp", 1)
+    )
+    rows = await cursor.to_list(length=None)
+    matching_rows = [
+        row for row in rows
+        if _row_scope_ref(row) == parsed_source["scope_ref"]
+    ]
+    return matching_rows
+
+
+async def _messages_for_scope_until(
+    parsed_source: dict[str, str],
+    *,
+    start_at: datetime,
+    end_at: datetime,
+) -> list[dict[str, Any]]:
+    """Read same-scope group rows up to a selected historical cutoff."""
+
+    db = await get_db()
+    cursor = (
+        db.conversation_history
+        .find(
+            {
+                "timestamp": {
+                    "$gte": start_at.isoformat(),
+                    "$lt": end_at.isoformat(),
+                },
+                "role": {"$in": ["assistant", "user"]},
+                "channel_type": "group",
+            },
+            {
+                "_id": 0,
+                "platform": 1,
+                "platform_channel_id": 1,
+                "channel_type": 1,
+                "role": 1,
+                "platform_user_id": 1,
+                "global_user_id": 1,
+                "display_name": 1,
+                "body_text": 1,
+                "timestamp": 1,
+                "platform_message_id": 1,
+                "message_id": 1,
+                "addressed_to_global_user_ids": 1,
+                "mentions": 1,
+                "is_directed_at_character": 1,
+                "reply_context": 1,
             },
         )
         .sort("timestamp", 1)
@@ -356,6 +509,8 @@ def _scope_from_messages(
 
 async def _run_case_to_l2d(
     historical_case: HistoricalSensitivityCase,
+    *,
+    evidence_mode: str = "",
 ) -> dict[str, Any]:
     """Run a rebuilt case through the shared cognition subgraph before dialog."""
 
@@ -377,11 +532,15 @@ async def _run_case_to_l2d(
         historical_case.historical_expected_speak
     )
     case_id = historical_case.case["case_id"]
+    trace_name = "self_cognition_group_response_sensitivity_live_llm"
+    if evidence_mode:
+        trace_name = f"{trace_name}_{evidence_mode}"
     trace_path = write_llm_trace(
-        "self_cognition_group_response_sensitivity_live_llm",
+        trace_name,
         case_id,
         {
             "case_id": case_id,
+            "evidence_mode": evidence_mode,
             "slot": {
                 "window_start": historical_case.raw_window["window_start"],
                 "window_end": historical_case.raw_window["window_end"],
@@ -417,6 +576,7 @@ async def _run_case_to_l2d(
         "observed_user_visible_speak_reasons": speak_reasons,
         "matches_historical": matches_historical,
         "action_spec_count": len(action_specs),
+        "evidence_mode": evidence_mode,
         "trace_path": str(trace_path),
     }
     logger.info(
@@ -692,6 +852,156 @@ async def _ambient_group_leak_case(
         },
     )
     return historical_case
+
+
+async def _laxi_ambient_group_case(
+    character_profile: dict[str, Any],
+    *,
+    digest_mode: str,
+) -> HistoricalSensitivityCase | None:
+    """Rebuild the production-derived ambient health-joke group window."""
+
+    parsed_source = _parse_group_activity_case_id(_LAXI_AMBIENT_GROUP_CASE_ID)
+    if parsed_source is None:
+        return_value = None
+        return return_value
+
+    window_start = parse_storage_utc_datetime(parsed_source["window_start"])
+    window_end = parse_storage_utc_datetime(parsed_source["window_end"])
+    source_cutoff = parse_storage_utc_datetime(
+        _LAXI_AMBIENT_GROUP_SOURCE_CUTOFF,
+    )
+    if digest_mode == _LAXI_MODE_BASELINE_15M_DIGEST:
+        window_messages = await _messages_for_window(parsed_source)
+        messages = [
+            message
+            for message in window_messages
+            if parse_storage_utc_datetime(str(message["timestamp"]))
+            < source_cutoff
+        ]
+        build_start = window_start
+    elif digest_mode == _LAXI_MODE_EXPANDED_DIGEST_ONLY:
+        messages = await _messages_for_scope_until(
+            parsed_source,
+            start_at=window_start - timedelta(hours=3),
+            end_at=source_cutoff,
+        )
+    elif digest_mode == _LAXI_MODE_EXPANDED_DIGEST_PLUS_CONVERSATION_EVIDENCE:
+        messages = await _messages_for_scope_until(
+            parsed_source,
+            start_at=window_start - timedelta(hours=3),
+            end_at=source_cutoff,
+        )
+    else:
+        raise ValueError(f"unsupported laxi digest mode: {digest_mode}")
+
+    if not messages:
+        return_value = None
+        return return_value
+    if digest_mode in {
+        _LAXI_MODE_EXPANDED_DIGEST_ONLY,
+        _LAXI_MODE_EXPANDED_DIGEST_PLUS_CONVERSATION_EVIDENCE,
+    }:
+        build_start = parse_storage_utc_datetime(str(messages[0]["timestamp"]))
+
+    scope = _scope_from_messages(messages, parsed_source["scope_ref"])
+    if scope is None:
+        return_value = None
+        return return_value
+
+    reviewed_at = parse_storage_utc_datetime(_LAXI_AMBIENT_GROUP_REVIEWED_AT)
+    windows = build_group_activity_windows(
+        scope=scope,
+        window_start=build_start,
+        window_end=window_end,
+        now=reviewed_at,
+        character_global_user_id=str(
+            character_profile.get("global_user_id", "") or ""
+        ),
+        platform_bot_id=str(character_profile.get("platform_bot_id", "") or ""),
+    )
+    if not windows:
+        return_value = None
+        return return_value
+
+    selected_window = _matching_window(windows, parsed_source)
+    if selected_window is None:
+        return_value = None
+        return return_value
+
+    if digest_mode == _LAXI_MODE_EXPANDED_DIGEST_PLUS_CONVERSATION_EVIDENCE:
+        conversation_evidence_builder = None
+    else:
+        conversation_evidence_builder = _no_summary_conversation_evidence
+    cases = await sources.collect_group_review_cases(
+        now=reviewed_at,
+        character_profile=character_profile,
+        windows=[selected_window],
+        max_cases=1,
+        conversation_evidence_builder=conversation_evidence_builder,
+    )
+    if not cases:
+        return_value = None
+        return return_value
+
+    event = {
+        "event_id": (
+            "production_row:delivery_tracking:"
+            "0fc15b7e4abd4fcd979de4c8971d6378"
+        ),
+        "occurred_at": _LAXI_AMBIENT_GROUP_REVIEWED_AT,
+        "payload": {
+            "case_id": _LAXI_AMBIENT_GROUP_CASE_ID,
+            "selected_route": models.ROUTE_ACTION_CANDIDATE,
+            "output_mode": "visible_reply",
+            "observed_assistant_text": _LAXI_AMBIENT_GROUP_ASSISTANT_TEXT,
+        },
+    }
+    historical_case = HistoricalSensitivityCase(
+        case=cases[0],
+        event=event,
+        historical_expected_speak=True,
+        raw_window={
+            "source_id": selected_window.source_id,
+            "window_start": parsed_source["window_start"],
+            "window_end": parsed_source["window_end"],
+            "evidence_mode": digest_mode,
+            "messages": messages,
+            "source_refs": selected_window.source_refs,
+            "semantic_labels": selected_window.semantic_labels,
+            "visible_context": selected_window.visible_context,
+            "digest_participant_rows": selected_window.digest_participant_rows,
+            "production_assistant_text": _LAXI_AMBIENT_GROUP_ASSISTANT_TEXT,
+        },
+    )
+    return historical_case
+
+
+async def _no_summary_conversation_evidence(**kwargs: Any) -> list[str]:
+    """Disable pre-cognition evidence for comparison modes."""
+
+    del kwargs
+    evidence: list[str] = []
+    return evidence
+
+
+def _matching_window(
+    windows: list[Any],
+    parsed_source: dict[str, str],
+) -> Any | None:
+    """Return the activity window that matches the historical source id."""
+
+    expected_source_id = (
+        f"{parsed_source['scope_ref']}:"
+        f"{parsed_source['window_start']}:"
+        f"{parsed_source['window_end']}"
+    )
+    for window in windows:
+        if window.source_id == expected_source_id:
+            return_value = window
+            return return_value
+    return_value = None
+    return return_value
 
 
 def _parse_group_activity_case_id(case_id: str) -> dict[str, str] | None:

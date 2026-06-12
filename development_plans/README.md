@@ -52,7 +52,7 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
-| [self_cognition_group_digest_context_evidence_bugfix_plan.md](active/bugfix/self_cognition_group_digest_context_evidence_bugfix_plan.md) | Large self-cognition group digest and evidence bugfix plan | draft |
+| [self_cognition_group_digest_context_evidence_bugfix_plan.md](active/bugfix/self_cognition_group_digest_context_evidence_bugfix_plan.md) | Large self-cognition group digest and evidence bugfix plan | in_progress |
 
 ## Reference Documents
 
