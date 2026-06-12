@@ -37,7 +37,7 @@ def test_action_selection_prompt_explains_upstream_handoff() -> None:
         "前序 cognition 已经负责理解当前材料、形成立场、意图和边界判断",
         "本层不重新裁决事实、立场、关系压力、是否该回复",
         "本层对所有 trigger_source 都先读取上游判断",
-        "只判断上游判断是否已经形成需要外部化的语义目标",
+        "只判断上游判断是否已经形成需要动作层处理的语义目标",
         "source、current_input、evidence、resolver 和可选上下文字段只用于解释",
         "如果上游判断表达旁观、保持距离、无需接话、只是观察",
         "不要用空字符串、空 deliverables 或占位 note 填充这个对象",
