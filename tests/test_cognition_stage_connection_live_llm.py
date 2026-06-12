@@ -14,7 +14,13 @@ import pytest
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as cognition_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2d as l2d_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import (
+    l1 as l1_module,
+    l2 as l2_module,
+    l2c2 as l2c2_module,
+    l2d as l2d_module,
+    l3 as l3_module,
+)
 from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface_module
 from tests.cognition_stage_connection_cases import (
     build_cognition_connection_comparison_report,
@@ -137,8 +143,10 @@ def _require_reconnected_production_symbols() -> None:
     """Fail clearly if the production graph is still on the legacy symbols."""
 
     required = (
-        (cognition_module, "call_social_context_appraisal"),
-        (l3_surface_module, "call_surface_directive_collector"),
+        (cognition_module, "call_cognition_subgraph"),
+        (l3_surface_module, "call_l3_text_surface_handler"),
+        (l2c2_module, "call_social_context_appraisal"),
+        (l3_module, "call_surface_directive_collector"),
     )
     missing = [
         name
@@ -154,43 +162,43 @@ def _wrap_cognition_stages(monkeypatch, stage_outputs: dict[str, Any]) -> None:
 
     _wrap_async_stage(
         monkeypatch,
-        cognition_module,
+        l1_module,
         "call_cognition_subconscious",
         "l1_subconscious",
         stage_outputs,
     )
     _wrap_async_stage(
         monkeypatch,
-        cognition_module,
+        l2_module,
         "call_cognition_consciousness",
         "l2a_conscious_framing",
         stage_outputs,
     )
     _wrap_async_stage(
         monkeypatch,
-        cognition_module,
+        l2_module,
         "call_boundary_core_agent",
         "l2b_boundary_appraisal",
         stage_outputs,
     )
     _wrap_async_stage(
         monkeypatch,
-        cognition_module,
+        l2_module,
         "call_judgment_core_agent",
         "l2c1_judgment_synthesis",
         stage_outputs,
     )
     _wrap_async_stage(
         monkeypatch,
-        cognition_module,
+        l2c2_module,
         "call_social_context_appraisal",
         "l2c2_social_context_appraisal",
         stage_outputs,
     )
     _wrap_async_stage(
         monkeypatch,
-        cognition_module,
-        "call_action_initializer",
+        l2d_module,
+        "select_semantic_actions",
         "l2d_action_selection",
         stage_outputs,
     )
@@ -201,42 +209,42 @@ def _wrap_l3_stages(monkeypatch, stage_outputs: dict[str, Any]) -> None:
 
     _wrap_async_stage(
         monkeypatch,
-        l3_surface_module,
+        l3_module,
         "call_interaction_style_context_loader",
         "l3_interaction_style_context_loader",
         stage_outputs,
     )
     _wrap_async_stage(
         monkeypatch,
-        l3_surface_module,
+        l3_module,
         "call_style_agent",
         "l3_style_agent",
         stage_outputs,
     )
     _wrap_async_stage(
         monkeypatch,
-        l3_surface_module,
+        l3_module,
         "call_content_plan_agent",
         "l3_content_plan_agent",
         stage_outputs,
     )
     _wrap_async_stage(
         monkeypatch,
-        l3_surface_module,
+        l3_module,
         "call_preference_adapter",
         "l3_preference_adapter",
         stage_outputs,
     )
     _wrap_async_stage(
         monkeypatch,
-        l3_surface_module,
+        l3_module,
         "call_visual_agent",
         "l3_visual_agent",
         stage_outputs,
     )
     _wrap_async_stage(
         monkeypatch,
-        l3_surface_module,
+        l3_module,
         "call_surface_directive_collector",
         "l4_surface_directive_collector",
         stage_outputs,
@@ -257,7 +265,7 @@ def _wrap_async_stage(
     async def wrapped(state: dict[str, Any]) -> dict[str, Any]:
         if stage_name == "l2d_action_selection":
             stage_outputs["l2d_action_selection_prompt_payload"] = (
-                l2d_module.build_action_initializer_payload(state)
+                l2d_module.build_action_selection_payload_text(state)
             )
         result = await original(state)
         stage_outputs[stage_name] = result

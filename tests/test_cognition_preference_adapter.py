@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import call_preference_adapter
+from kazusa_ai_chatbot.cognition_chain_core.stages.l3 import call_preference_adapter
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 
@@ -100,7 +100,7 @@ async def test_preference_adapter_accepts_string_preferences(
     """Preference adapter preserves native string preference items."""
 
     monkeypatch.setattr(
-        "kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3._preference_adapter_llm",
+        "kazusa_ai_chatbot.cognition_chain_core.stages.l3._preference_adapter_llm",
         _FakePreferenceAdapterLlm('{"accepted_user_preferences":[" concise replies ", "soft tone"]}'),
     )
 
@@ -116,7 +116,7 @@ async def test_preference_adapter_does_not_stringify_container_items(
     """Preference adapter must not turn dict/list preference items into repr text."""
 
     monkeypatch.setattr(
-        "kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3._preference_adapter_llm",
+        "kazusa_ai_chatbot.cognition_chain_core.stages.l3._preference_adapter_llm",
         _FakePreferenceAdapterLlm(
             '{"accepted_user_preferences":[{"text":"do not stringify"},["bad"]," keep me "]}'
         ),
@@ -137,7 +137,7 @@ async def test_preference_adapter_preserves_commitment_over_style_overlay(
         '{"accepted_user_preferences":["讨论工作时尽量使用更短的句子。"]}'
     )
     monkeypatch.setattr(
-        "kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3._preference_adapter_llm",
+        "kazusa_ai_chatbot.cognition_chain_core.stages.l3._preference_adapter_llm",
         fake_llm,
     )
     state = _preference_state()

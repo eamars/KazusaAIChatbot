@@ -1,19 +1,24 @@
 """L1 — Subconscious cognition agent and MBTI natural-response helper."""
-from kazusa_ai_chatbot.config import COGNITION_LLM_API_KEY, COGNITION_LLM_BASE_URL, COGNITION_LLM_MODEL
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_output_contracts import (
-    validate_cognition_output_contract,
-)
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection import (
-    build_cognition_prompt_source_payload,
-    select_cognition_prompt_variant,
-)
-from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import CognitionState
-from kazusa_ai_chatbot.utils import get_llm, log_preview, parse_llm_json_output
+
+import json
+import logging
+from contextvars import ContextVar, Token
+from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-import logging
-import json
+from kazusa_ai_chatbot.cognition_chain_core.contracts import (
+    AsyncChatModel,
+    require_injected_llm,
+)
+from kazusa_ai_chatbot.cognition_chain_core.output_contracts import (
+    validate_cognition_output_contract,
+)
+from kazusa_ai_chatbot.cognition_chain_core.prompt_selection import (
+    build_cognition_prompt_source_payload,
+    select_cognition_prompt_variant,
+)
+from kazusa_ai_chatbot.cognition_chain_core.utils import parse_llm_json_output
 
 logger = logging.getLogger(__name__)
 
@@ -92,14 +97,29 @@ _COGNITION_SUBCONSCIOUS_PROMPT = '''\
   "interaction_subtext": "简体中文字符串，捕捉潜台词，不写最终立场"
 }}
 '''
-_subconscious_llm = get_llm(
-    temperature=0.4,
-    top_p=0.7,
-    model=COGNITION_LLM_MODEL,
-    base_url=COGNITION_LLM_BASE_URL,
-    api_key=COGNITION_LLM_API_KEY,
+_subconscious_llm: AsyncChatModel | None = None
+_subconscious_llm_context: ContextVar[AsyncChatModel | None] = ContextVar(
+    "subconscious_llm",
+    default=None,
 )
-async def call_cognition_subconscious(state: CognitionState) -> CognitionState:
+
+
+def set_subconscious_llm(
+    llm: AsyncChatModel | None,
+) -> Token[AsyncChatModel | None]:
+    """Bind the L1 model for the current run context."""
+
+    token = _subconscious_llm_context.set(llm)
+    return token
+
+
+def reset_subconscious_llm(token: Token[AsyncChatModel | None]) -> None:
+    """Restore the previous L1 model binding for this run context."""
+
+    _subconscious_llm_context.reset(token)
+
+
+async def call_cognition_subconscious(state: dict[str, Any]) -> dict[str, Any]:
     mbti = state["character_profile"]["personality_brief"]["mbti"]
     episode = state["cognitive_episode"]
     selection = select_cognition_prompt_variant(
@@ -141,7 +161,11 @@ async def call_cognition_subconscious(state: CognitionState) -> CognitionState:
         selection=selection,
     ))
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
-    response = await _subconscious_llm.ainvoke([
+    llm = require_injected_llm(
+        _subconscious_llm_context.get() or _subconscious_llm,
+        "subconscious_llm",
+    )
+    response = await llm.ainvoke([
         system_prompt,
         human_message,
     ])

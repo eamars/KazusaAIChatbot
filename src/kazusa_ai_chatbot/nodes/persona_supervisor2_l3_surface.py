@@ -1,8 +1,15 @@
-"""Selected L3 text-surface handler."""
+"""Kazusa connector for selected L3 text-surface planning."""
 
-from langgraph.graph import END, START, StateGraph
+import logging
 
 from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
+from kazusa_ai_chatbot.cognition_chain_core.contracts import (
+    CognitionTextSurfaceInputV1,
+    validate_text_surface_input,
+)
+from kazusa_ai_chatbot.cognition_chain_core.surface import (
+    run_text_surface_planning,
+)
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ResolverValidationError,
     project_goal_progress_for_cognition,
@@ -11,19 +18,19 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
 from kazusa_ai_chatbot.cognition_resolver.state import (
     MAX_PROJECTED_RESOLVER_OBSERVATIONS,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (
-    call_content_plan_agent,
-    call_interaction_style_context_loader,
-    call_preference_adapter,
-    call_surface_directive_collector,
-    call_style_agent,
-    call_visual_agent,
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
+    build_cognition_chain_input_from_global_state,
+    build_cognition_chain_services,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import (
-    CognitionState,
     GlobalPersonaState,
 )
-from kazusa_ai_chatbot.utils import build_interaction_history_recent
+from kazusa_ai_chatbot.db import (
+    build_interaction_style_context,
+    empty_interaction_style_overlay,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def _selected_text_surface_intent(state: GlobalPersonaState) -> str:
@@ -45,6 +52,158 @@ def _selected_text_surface_intent(state: GlobalPersonaState) -> str:
         return return_value
 
     return_value = ""
+    return return_value
+
+
+def build_text_surface_input_from_global_state(
+    state: GlobalPersonaState,
+) -> CognitionTextSurfaceInputV1:
+    """Project graph state into the selected text-surface core contract."""
+
+    selected_intent = _selected_text_surface_intent_object(state)
+    payload: CognitionTextSurfaceInputV1 = {
+        "schema_version": "cognition_text_surface_input.v1",
+        "chain_input": build_cognition_chain_input_from_global_state(state),
+        "cognition_residue": {
+            "emotional_appraisal": state["emotional_appraisal"],
+            "interaction_subtext": state["interaction_subtext"],
+            "internal_monologue": state["internal_monologue"],
+            "logical_stance": state["logical_stance"],
+            "character_intent": state["character_intent"],
+            "judgment_note": state["judgment_note"],
+            "social_distance": state["social_distance"],
+            "emotional_intensity": state["emotional_intensity"],
+            "vibe_check": state["vibe_check"],
+            "relational_dynamic": state["relational_dynamic"],
+        },
+        "selected_text_surface_intent": selected_intent,
+        "pre_surface_action_results": _pre_surface_action_result_prompts(state),
+        "memory_lifecycle_context": _memory_lifecycle_context_prompt(state),
+        "interaction_style_context": _empty_interaction_style_context(
+            state["channel_type"],
+        ),
+    }
+    validated_payload = validate_text_surface_input(payload)
+    return validated_payload
+
+
+def _selected_text_surface_intent_object(
+    state: GlobalPersonaState,
+) -> dict[str, str]:
+    """Project one selected speak action into prompt-safe structured intent."""
+
+    raw_specs = state.get("action_specs")
+    if not isinstance(raw_specs, list):
+        return_value = _empty_text_surface_intent()
+        return return_value
+
+    for action_spec in raw_specs:
+        if not isinstance(action_spec, dict):
+            continue
+        if action_spec.get("kind") != SPEAK_CAPABILITY:
+            continue
+        params = action_spec.get("params")
+        if not isinstance(params, dict):
+            params = {}
+        requirements = params.get("surface_requirements")
+        if not isinstance(requirements, dict):
+            requirements = {}
+        return_value = {
+            "decision": "visible_reply",
+            "original_goal": _resolved_pending_original_goal(state),
+            "goal_progress_summary": _resolver_goal_progress_text(state),
+            "observation_summary": _resolver_observations_text(state),
+            "speak_intent": _selected_text_surface_intent(state),
+            "detail": _row_text(requirements, "detail"),
+            "tone": _row_text(requirements, "tone"),
+            "reason": _row_text(action_spec, "reason"),
+        }
+        return return_value
+
+    return_value = _empty_text_surface_intent()
+    return return_value
+
+
+def _empty_text_surface_intent() -> dict[str, str]:
+    """Return an empty but schema-complete selected text intent."""
+
+    return_value = {
+        "decision": "visible_reply",
+        "original_goal": "",
+        "goal_progress_summary": "",
+        "observation_summary": "",
+        "speak_intent": "",
+        "detail": "",
+        "tone": "",
+        "reason": "",
+    }
+    return return_value
+
+
+def _pre_surface_action_result_prompts(
+    state: GlobalPersonaState,
+) -> list[dict[str, str]]:
+    """Project pre-surface action results into the core surface contract."""
+
+    raw_results = state.get("pre_surface_action_results")
+    if not isinstance(raw_results, list):
+        return_value: list[dict[str, str]] = []
+        return return_value
+
+    rows: list[dict[str, str]] = []
+    for row in raw_results:
+        if not isinstance(row, dict):
+            continue
+        action_kind = _row_text(row, "action_kind")
+        if action_kind not in (
+            "background_work_request",
+            "background_artifact_request",
+            "memory_lifecycle_update",
+        ):
+            continue
+        rows.append({
+            "action_kind": action_kind,
+            "status": _row_text(row, "status"),
+            "queue_state": _row_text(row, "queue_state"),
+            "task_summary": _row_text(row, "task_summary"),
+            "objective_summary": _row_text(row, "objective_summary"),
+            "acknowledgement_constraint": _row_text(
+                row,
+                "acknowledgement_constraint",
+            ),
+        })
+    return rows
+
+
+def _memory_lifecycle_context_prompt(
+    state: GlobalPersonaState,
+) -> dict[str, object]:
+    """Project memory lifecycle context for selected L3 planning."""
+
+    raw_context = state.get("memory_lifecycle_context")
+    if not isinstance(raw_context, dict):
+        return_value = {
+            "active_commitment_aliases": [],
+            "pending_memory_updates_summary": "",
+            "recent_memory_resolution_summary": "",
+        }
+        return return_value
+    aliases = raw_context.get("active_commitment_aliases")
+    if not isinstance(aliases, list):
+        aliases = []
+    return_value = {
+        "active_commitment_aliases": [
+            alias for alias in aliases if isinstance(alias, str)
+        ],
+        "pending_memory_updates_summary": _row_text(
+            raw_context,
+            "pending_memory_updates_summary",
+        ),
+        "recent_memory_resolution_summary": _row_text(
+            raw_context,
+            "recent_memory_resolution_summary",
+        ),
+    }
     return return_value
 
 
@@ -257,6 +416,38 @@ def _resolved_pending_original_goal(state: GlobalPersonaState) -> str:
     return return_value
 
 
+async def _load_interaction_style_context(
+    state: GlobalPersonaState,
+) -> dict[str, object]:
+    """Load DB-backed style overlays before entering cognition core."""
+
+    channel_type = state["channel_type"]
+    try:
+        context = await build_interaction_style_context(
+            global_user_id=state["global_user_id"],
+            channel_type=channel_type,
+            platform=state["platform"],
+            platform_channel_id=state["platform_channel_id"],
+        )
+    except Exception as exc:
+        logger.exception(f"Interaction style context load failed: {exc}")
+        context = _empty_interaction_style_context(channel_type)
+    return context
+
+
+def _empty_interaction_style_context(channel_type: str) -> dict[str, object]:
+    """Return an empty L3-facing interaction style context."""
+
+    context: dict[str, object] = {
+        "user_style": empty_interaction_style_overlay(),
+        "application_order": ["user_style"],
+    }
+    if channel_type == "group":
+        context["group_channel_style"] = empty_interaction_style_overlay()
+        context["application_order"] = ["user_style", "group_channel_style"]
+    return context
+
+
 async def call_l3_text_surface_handler(state: GlobalPersonaState) -> dict:
     """Run L3 directive generation for a selected text surface.
 
@@ -267,96 +458,15 @@ async def call_l3_text_surface_handler(state: GlobalPersonaState) -> dict:
         Partial state update containing collected text-surface directives.
     """
 
-    surface_builder = StateGraph(CognitionState)
-    surface_builder.add_node(
-        "l3_interaction_style_context_loader",
-        call_interaction_style_context_loader,
+    surface_input = build_text_surface_input_from_global_state(state)
+    surface_input["interaction_style_context"] = (
+        await _load_interaction_style_context(state)
     )
-    surface_builder.add_node("l3_style_agent", call_style_agent)
-    surface_builder.add_node("l3_content_plan_agent", call_content_plan_agent)
-    surface_builder.add_node("l3_preference_adapter", call_preference_adapter)
-    surface_builder.add_node("l3_visual_agent", call_visual_agent)
-    surface_builder.add_node(
-        "l4_surface_directive_collector",
-        call_surface_directive_collector,
+    surface_input = validate_text_surface_input(surface_input)
+    result = await run_text_surface_planning(
+        surface_input,
+        build_cognition_chain_services(),
     )
-
-    surface_builder.add_edge(START, "l3_interaction_style_context_loader")
-    surface_builder.add_edge(
-        "l3_interaction_style_context_loader",
-        "l3_content_plan_agent",
-    )
-    surface_builder.add_edge("l3_content_plan_agent", "l3_visual_agent")
-    surface_builder.add_edge("l3_interaction_style_context_loader", "l3_style_agent")
-    surface_builder.add_edge(
-        ["l3_style_agent", "l3_content_plan_agent"],
-        "l3_preference_adapter",
-    )
-    surface_builder.add_edge(
-        ["l3_preference_adapter", "l3_visual_agent"],
-        "l4_surface_directive_collector",
-    )
-    surface_builder.add_edge("l4_surface_directive_collector", END)
-
-    surface_graph = surface_builder.compile()
-    interaction_history_recent = build_interaction_history_recent(
-        state["chat_history_wide"],
-        state["platform_user_id"],
-        state["platform_bot_id"],
-        state["global_user_id"],
-    )
-    initial_state: CognitionState = {
-        "character_profile": state["character_profile"],
-        "storage_timestamp_utc": state["storage_timestamp_utc"],
-        "local_time_context": state["local_time_context"],
-        "user_input": state["user_input"],
-        "prompt_message_context": state["prompt_message_context"],
-        "platform": state["platform"],
-        "platform_channel_id": state["platform_channel_id"],
-        "channel_type": state["channel_type"],
-        "global_user_id": state["global_user_id"],
-        "user_name": state["user_name"],
-        "user_profile": state["user_profile"],
-        "platform_bot_id": state["platform_bot_id"],
-        "chat_history_recent": interaction_history_recent,
-        "reply_context": state["reply_context"],
-        "indirect_speech_context": state["indirect_speech_context"],
-        "channel_topic": state["channel_topic"],
-        "conversation_progress": state.get("conversation_progress"),
-        "promoted_reflection_context": state.get("promoted_reflection_context"),
-        "decontexualized_input": state["decontexualized_input"],
-        "referents": state["referents"],
-        "rag_result": state["rag_result"],
-        "emotional_appraisal": state["emotional_appraisal"],
-        "interaction_subtext": state["interaction_subtext"],
-        "internal_monologue": state["internal_monologue"],
-        "character_intent": state["character_intent"],
-        "logical_stance": state["logical_stance"],
-        "judgment_note": state["judgment_note"],
-        "social_distance": state["social_distance"],
-        "emotional_intensity": state["emotional_intensity"],
-        "vibe_check": state["vibe_check"],
-        "relational_dynamic": state["relational_dynamic"],
-    }
-    cognitive_episode = state.get("cognitive_episode")
-    if cognitive_episode is not None:
-        initial_state["cognitive_episode"] = cognitive_episode
-    selected_text_surface_intent = _selected_text_surface_intent(state)
-    if selected_text_surface_intent:
-        initial_state["selected_text_surface_intent"] = (
-            selected_text_surface_intent
-        )
-    resolver_state = state.get("resolver_state")
-    if resolver_state is not None:
-        initial_state["resolver_state"] = resolver_state
-    resolver_goal_progress = state.get("resolver_goal_progress")
-    if resolver_goal_progress is not None:
-        initial_state["resolver_goal_progress"] = resolver_goal_progress
-    memory_lifecycle_context = state.get("memory_lifecycle_context")
-    if isinstance(memory_lifecycle_context, dict):
-        initial_state["memory_lifecycle_context"] = memory_lifecycle_context
-
-    result = await surface_graph.ainvoke(initial_state)
     return_value = {
         "action_directives": result["action_directives"],
     }

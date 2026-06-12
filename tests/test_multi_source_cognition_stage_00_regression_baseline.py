@@ -16,11 +16,11 @@ from kazusa_ai_chatbot import service as service_module
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as supervisor_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l1 as l1_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2 as l2_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2c2 as l2c2_module
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection import (
+from kazusa_ai_chatbot.cognition_chain_core.stages import l1 as l1_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l2 as l2_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l3 as l3_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l2c2 as l2c2_module
+from kazusa_ai_chatbot.cognition_chain_core.prompt_selection import (
     select_cognition_prompt_variant,
 )
 from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY

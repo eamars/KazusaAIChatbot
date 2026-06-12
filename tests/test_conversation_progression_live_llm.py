@@ -18,20 +18,20 @@ from kazusa_ai_chatbot.config import (
     COGNITION_LLM_MODEL,
 )
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l1 import call_cognition_subconscious
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2 import (
+from kazusa_ai_chatbot.cognition_chain_core.stages.l1 import call_cognition_subconscious
+from kazusa_ai_chatbot.cognition_chain_core.stages.l2 import (
     call_boundary_core_agent,
     call_cognition_consciousness,
     call_judgment_core_agent,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (
+from kazusa_ai_chatbot.cognition_chain_core.stages.l3 import (
     call_surface_directive_collector,
     call_content_plan_agent,
     call_preference_adapter,
     call_style_agent,
     call_visual_agent,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2c2 import call_social_context_appraisal
+from kazusa_ai_chatbot.cognition_chain_core.stages.l2c2 import call_social_context_appraisal
 from kazusa_ai_chatbot.time_boundary import (
     build_turn_clock_from_storage_utc,
     storage_utc_now_iso,

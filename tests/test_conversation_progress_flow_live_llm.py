@@ -18,7 +18,7 @@ from kazusa_ai_chatbot.config import (
     COGNITION_LLM_MODEL,
 )
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import call_content_plan_agent
+from kazusa_ai_chatbot.cognition_chain_core.stages.l3 import call_content_plan_agent
 from kazusa_ai_chatbot.time_boundary import (
     build_turn_clock_from_storage_utc,
     storage_utc_now_iso,

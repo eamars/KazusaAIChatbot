@@ -204,7 +204,7 @@ def _patch_cognition_nodes(
         "call_social_context_appraisal",
         _l2c2_agent,
     )
-    monkeypatch.setattr(cognition_module, "call_action_initializer", _l2d_agent)
+    monkeypatch.setattr(cognition_module, "select_semantic_actions", _l2d_agent)
 
 
 @pytest.mark.asyncio

@@ -15,11 +15,11 @@ from kazusa_ai_chatbot.config import (
     DIALOG_GENERATOR_LLM_BASE_URL,
 )
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_generator
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (
+from kazusa_ai_chatbot.cognition_chain_core.stages.l3 import (
     call_content_plan_agent,
     call_visual_agent,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2c2 import call_social_context_appraisal
+from kazusa_ai_chatbot.cognition_chain_core.stages.l2c2 import call_social_context_appraisal
 from kazusa_ai_chatbot.consolidation.facts import facts_harvester
 from kazusa_ai_chatbot.consolidation.reflection import relationship_recorder
 from kazusa_ai_chatbot.utils import load_personality

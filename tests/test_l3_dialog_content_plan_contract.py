@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l3 as l3_module
 from kazusa_ai_chatbot.nodes.dialog_agent import (
     StateContractError,
     validate_dialog_action_directives,

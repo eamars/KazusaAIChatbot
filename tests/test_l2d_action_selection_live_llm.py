@@ -15,10 +15,16 @@ from pymongo.errors import PyMongoError
 
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
 from kazusa_ai_chatbot.db import close_db, get_character_profile
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2d as l2d
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2d import (
-    build_action_initializer_payload,
-    call_action_initializer,
+from kazusa_ai_chatbot.cognition_chain_core.stages import l2d as l2d
+from kazusa_ai_chatbot.cognition_chain_core.stages.l2d import (
+    build_action_selection_payload_text,
+    select_semantic_actions,
+)
+from kazusa_ai_chatbot.nodes import (
+    persona_supervisor2_cognition_actions as action_connector,
+)
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
+    build_cognition_chain_services,
 )
 from kazusa_ai_chatbot.self_cognition import runner as self_cognition_runner
 from kazusa_ai_chatbot.self_cognition.sources import (
@@ -71,14 +77,18 @@ async def test_l2d_live_case_against_frozen_upstream(
     case_set = load_l2d_routing_case_set(case_file)
     case = select_l2d_routing_case(case_set, case_id)
     frozen_state = case["frozen_l2d_state"]
-    prompt_payload = build_action_initializer_payload(frozen_state)
+    prompt_payload = build_action_selection_payload_text(frozen_state)
 
-    capturing_llm = _CapturingLLM(l2d._action_initializer_llm)
-    monkeypatch.setattr(l2d, "_action_initializer_llm", capturing_llm)
-    result = await call_action_initializer(frozen_state)
+    action_selection_llm = build_cognition_chain_services().action_selection_llm
+    capturing_llm = _CapturingLLM(action_selection_llm)
+    monkeypatch.setattr(l2d, "_action_selection_llm", capturing_llm)
+    result = await select_semantic_actions(frozen_state)
     raw_output = capturing_llm.raw_output
     raw_parsed_output = parse_llm_json_output(raw_output)
-    action_specs = result["action_specs"]
+    action_specs = action_connector.materialize_semantic_action_requests(
+        result.get("semantic_action_requests", []),
+        frozen_state,
+    )
     report = compare_action_specs_to_expectations(case, action_specs)
     leakage_errors = _action_spec_leakage_errors(action_specs)
     background_specs = [
@@ -124,14 +134,14 @@ async def test_l2d_live_routes_real_active_commitment_lifecycle_update() -> None
     await _skip_if_llm_unavailable()
     case = await _load_real_active_commitment_case()
     frozen_state = _lifecycle_update_state_from_case(case)
-    prompt_payload = build_action_initializer_payload(frozen_state)
+    prompt_payload = build_action_selection_payload_text(frozen_state)
     rag_result = frozen_state["rag_result"]
     user_image = rag_result["user_image"]
     user_memory_context = user_image["user_memory_context"]
     active_commitments = user_memory_context["active_commitments"]
     active_commitment = active_commitments[0]
 
-    result = await call_action_initializer(frozen_state)
+    result = await select_semantic_actions(frozen_state)
     action_specs = result["action_specs"]
     observed_kinds = [
         action_spec["kind"]

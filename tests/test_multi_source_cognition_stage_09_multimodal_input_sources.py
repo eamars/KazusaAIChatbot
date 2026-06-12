@@ -13,10 +13,10 @@ import pytest
 
 from kazusa_ai_chatbot import chat_input_queue as queue_module
 from kazusa_ai_chatbot import service as service_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l1 as l1_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2 as l2_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2c2 as l2c2_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l1 as l1_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l2 as l2_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l3 as l3_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l2c2 as l2c2_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_msg_decontexualizer as decontextualizer_module
 from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisodeValidationError,
@@ -30,7 +30,7 @@ from kazusa_ai_chatbot.rag.cognitive_episode_adapter import (
     RAGEpisodeAdapterError,
     build_text_chat_rag_request,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection import (
+from kazusa_ai_chatbot.cognition_chain_core.prompt_selection import (
     CognitionPromptSelectionError,
     CognitionPromptStage,
     build_cognition_prompt_source_payload,

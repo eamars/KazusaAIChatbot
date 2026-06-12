@@ -108,7 +108,7 @@ def test_boundary_core_node_uses_boundary_route(tmp_path) -> None:
             "-c",
             (
                 "from kazusa_ai_chatbot.nodes import "
-                "persona_supervisor2_cognition_l2 as l2; "
+                "cognition_chain_core.stages.l2 as l2; "
                 "print('|'.join(l2._boundary_core_llm._model_key))"
             ),
         ],

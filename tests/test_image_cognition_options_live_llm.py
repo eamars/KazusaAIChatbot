@@ -20,23 +20,23 @@ from kazusa_ai_chatbot.config import (
     VISION_DESCRIPTOR_LLM_BASE_URL,
     VISION_DESCRIPTOR_LLM_MODEL,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l1 import (
+from kazusa_ai_chatbot.cognition_chain_core.stages.l1 import (
     _COGNITION_SUBCONSCIOUS_PROMPT,
     call_cognition_subconscious,
     get_mbti_natural_response,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2 import (
+from kazusa_ai_chatbot.cognition_chain_core.stages.l2 import (
     _COGNITION_CONSCIOUSNESS_PROMPT,
     _cognition_rag_result as _l2_cognition_rag_result,
     _current_user_rag_bundle,
     call_cognition_consciousness,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (
+from kazusa_ai_chatbot.cognition_chain_core.stages.l3 import (
     _CONTENT_PLAN_AGENT_PROMPT,
     _cognition_rag_result as _l3_cognition_rag_result,
     call_content_plan_agent,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection import (
+from kazusa_ai_chatbot.cognition_chain_core.prompt_selection import (
     build_cognition_prompt_source_payload,
     select_cognition_prompt_variant,
 )

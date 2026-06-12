@@ -1,70 +1,68 @@
 """Selected L3 surface and collector calls."""
-from collections.abc import Mapping
 
-from kazusa_ai_chatbot.config import (
-    COGNITION_LLM_API_KEY,
-    COGNITION_LLM_BASE_URL,
-    COGNITION_LLM_MODEL,
-)
-from kazusa_ai_chatbot.cognition_resolver.contracts import (
-    ResolverValidationError,
-    project_goal_progress_for_cognition,
-    project_observations_for_cognition,
-)
-from kazusa_ai_chatbot.cognition_episode import CognitiveEpisodeValidationError
-from kazusa_ai_chatbot.cognition_resolver.state import (
-    MAX_PROJECTED_RESOLVER_OBSERVATIONS,
-)
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_output_contracts import (
-    validate_cognition_output_contract,
-)
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection import (
-    build_cognition_prompt_source_payload,
-    CognitionPromptSelectionError,
-    select_cognition_prompt_variant,
-)
-from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import CognitionState
-from kazusa_ai_chatbot.nodes.referent_resolution import normalize_referents
-from kazusa_ai_chatbot.utils import get_llm, log_preview, parse_llm_json_output
-from kazusa_ai_chatbot.nodes.linguistic_texture import (
-    get_fragmentation_description,
-    get_hesitation_density_description,
-    get_counter_questioning_description,
-    get_softener_density_description,
-    get_formalism_avoidance_description,
-    get_abstraction_reframing_description,
-    get_direct_assertion_description,
-    get_emotional_leakage_description,
-    get_rhythmic_bounce_description,
-    get_self_deprecation_description,
-)
-from kazusa_ai_chatbot.nodes.boundary_profile import (
+import json
+import logging
+from collections.abc import Mapping
+from contextvars import ContextVar, Token
+from typing import Any
+
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from kazusa_ai_chatbot.cognition_chain_core.boundary_profile import (
     get_boundary_recovery_description,
     get_compliance_strategy_description,
     get_control_intimacy_misread_description,
     get_control_sensitivity_description,
     get_relationship_priority_description,
 )
-from kazusa_ai_chatbot.db import (
-    build_interaction_style_context,
-    empty_interaction_style_overlay,
+from kazusa_ai_chatbot.cognition_chain_core.contracts import (
+    AsyncChatModel,
+    require_injected_llm,
 )
-from kazusa_ai_chatbot.rag.prompt_projection import project_tool_result_for_llm
-from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import empty_user_memory_context
-from kazusa_ai_chatbot.time_boundary import (
+from kazusa_ai_chatbot.cognition_chain_core.linguistic_texture import (
+    get_abstraction_reframing_description,
+    get_counter_questioning_description,
+    get_direct_assertion_description,
+    get_emotional_leakage_description,
+    get_formalism_avoidance_description,
+    get_fragmentation_description,
+    get_hesitation_density_description,
+    get_rhythmic_bounce_description,
+    get_self_deprecation_description,
+    get_softener_density_description,
+)
+from kazusa_ai_chatbot.cognition_chain_core.output_contracts import (
+    validate_cognition_output_contract,
+)
+from kazusa_ai_chatbot.cognition_chain_core.prompt_selection import (
+    CognitionPromptSelectionError,
+    build_cognition_prompt_source_payload,
+    select_cognition_prompt_variant,
+)
+from kazusa_ai_chatbot.cognition_chain_core.referent_resolution import (
+    normalize_referents,
+)
+from kazusa_ai_chatbot.cognition_chain_core.utils import (
+    empty_user_memory_context,
     format_storage_utc_history_for_llm,
+    log_preview,
+    parse_llm_json_output,
+    project_tool_result_for_llm,
 )
-
-from langchain_core.messages import HumanMessage, SystemMessage
-
-import logging
-import json
-from typing import Any
+from kazusa_ai_chatbot.cognition_episode import CognitiveEpisodeValidationError
+from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    ResolverValidationError,
+    project_goal_progress_for_cognition,
+    project_observations_for_cognition,
+)
+from kazusa_ai_chatbot.cognition_resolver.state import (
+    MAX_PROJECTED_RESOLVER_OBSERVATIONS,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def _current_user_rag_bundle(state: CognitionState) -> dict[str, Any]:
+def _current_user_rag_bundle(state: dict[str, Any]) -> dict[str, Any]:
     """Return the projected current-user bundle from ``rag_result`` when present.
 
     Args:
@@ -73,8 +71,11 @@ def _current_user_rag_bundle(state: CognitionState) -> dict[str, Any]:
     Returns:
         The projected current-user profile bundle, or an empty dict when absent.
     """
-    rag_result = state["rag_result"]
-    user_bundle = rag_result["user_image"]
+    rag_result = state.get("rag_result", {})
+    if not isinstance(rag_result, dict):
+        user_bundle = {}
+    else:
+        user_bundle = rag_result.get("user_image", {})
     if not isinstance(user_bundle, dict):
         user_bundle = {}
     if "user_memory_context" not in user_bundle:
@@ -291,19 +292,32 @@ def _empty_interaction_style_context(channel_type: str) -> dict:
     """Return an empty L3-facing interaction style context."""
 
     context = {
-        "user_style": empty_interaction_style_overlay(),
+        "user_style": _empty_interaction_style_overlay(),
         "application_order": ["user_style"],
     }
     if channel_type == "group":
-        context["group_channel_style"] = empty_interaction_style_overlay()
+        context["group_channel_style"] = _empty_interaction_style_overlay()
         context["application_order"] = ["user_style", "group_channel_style"]
     return context
 
 
+def _empty_interaction_style_overlay() -> dict[str, object]:
+    """Return the empty runtime style overlay used by L3 consumers."""
+
+    return_value: dict[str, object] = {
+        "speech_guidelines": [],
+        "social_guidelines": [],
+        "pacing_guidelines": [],
+        "engagement_guidelines": [],
+        "confidence": "",
+    }
+    return return_value
+
+
 async def call_interaction_style_context_loader(
-    state: CognitionState,
-) -> CognitionState:
-    """Load sanitized interaction style overlays for L3 style consumers.
+    state: dict[str, Any],
+) -> dict[str, Any]:
+    """Pass caller-supplied interaction style overlays to L3 consumers.
 
     Args:
         state: Cognition state after L2 judgment.
@@ -313,15 +327,10 @@ async def call_interaction_style_context_loader(
     """
 
     channel_type = state["channel_type"]
-    try:
-        context = await build_interaction_style_context(
-            global_user_id=state["global_user_id"],
-            channel_type=channel_type,
-            platform=state["platform"],
-            platform_channel_id=state["platform_channel_id"],
-        )
-    except Exception as exc:
-        logger.exception(f"Interaction style context load failed: {exc}")
+    raw_context = state.get("interaction_style_context")
+    if isinstance(raw_context, Mapping):
+        context = dict(raw_context)
+    else:
         context = _empty_interaction_style_context(channel_type)
 
     return_value = {
@@ -446,14 +455,29 @@ _STYLE_AGENT_PROMPT = '''\
     "forbidden_phrases": ["禁止出现的违和词汇", ...]
 }}
 '''
-_style_agent_llm = get_llm(
-    temperature=0.55,
-    top_p=0.85,
-    model=COGNITION_LLM_MODEL,
-    base_url=COGNITION_LLM_BASE_URL,
-    api_key=COGNITION_LLM_API_KEY,
+_style_agent_llm: AsyncChatModel | None = None
+_style_agent_llm_context: ContextVar[AsyncChatModel | None] = ContextVar(
+    "style_agent_llm",
+    default=None,
 )
-async def call_style_agent(state: CognitionState) -> CognitionState:
+
+
+def set_style_agent_llm(
+    llm: AsyncChatModel | None,
+) -> Token[AsyncChatModel | None]:
+    """Bind the style model for the current run context."""
+
+    token = _style_agent_llm_context.set(llm)
+    return token
+
+
+def reset_style_agent_llm(token: Token[AsyncChatModel | None]) -> None:
+    """Restore the previous style model binding for this run context."""
+
+    _style_agent_llm_context.reset(token)
+
+
+async def call_style_agent(state: dict[str, Any]) -> dict[str, Any]:
     character_profile = state["character_profile"]
     episode = state["cognitive_episode"]
     selection = select_cognition_prompt_variant(
@@ -511,7 +535,11 @@ async def call_style_agent(state: CognitionState) -> CognitionState:
         selection=selection,
     ))
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
-    response = await _style_agent_llm.ainvoke([
+    llm = require_injected_llm(
+        _style_agent_llm_context.get() or _style_agent_llm,
+        "style_agent_llm",
+    )
+    response = await llm.ainvoke([
         system_prompt,
         human_message,
     ])
@@ -621,13 +649,28 @@ _CONTENT_PLAN_AGENT_PROMPT = '''\
 - 普通字符串尽量紧凑；只有代码、JSON、配置、日志、命令、补丁或表格等固定格式内容可以在单个字符串中保留换行。
 - `semantic_content` 是下游可见事实和结论的首要来源。需要说出的事实、问题、代码、例子、边界或下一步必须已经写在计划值里。
 '''
-_content_plan_agent_llm = get_llm(
-    temperature=0.45,
-    top_p=0.85,
-    model=COGNITION_LLM_MODEL,
-    base_url=COGNITION_LLM_BASE_URL,
-    api_key=COGNITION_LLM_API_KEY,
+_content_plan_agent_llm: AsyncChatModel | None = None
+_content_plan_agent_llm_context: ContextVar[AsyncChatModel | None] = ContextVar(
+    "content_plan_agent_llm",
+    default=None,
 )
+
+
+def set_content_plan_agent_llm(
+    llm: AsyncChatModel | None,
+) -> Token[AsyncChatModel | None]:
+    """Bind the content-plan model for the current run context."""
+
+    token = _content_plan_agent_llm_context.set(llm)
+    return token
+
+
+def reset_content_plan_agent_llm(token: Token[AsyncChatModel | None]) -> None:
+    """Restore the previous content-plan model binding for this run context."""
+
+    _content_plan_agent_llm_context.reset(token)
+
+
 def _normalize_content_plan(value: object) -> dict[str, str]:
     """Normalize one native content-plan mapping from LLM output."""
 
@@ -649,7 +692,7 @@ def _normalize_content_plan(value: object) -> dict[str, str]:
     return content_plan
 
 
-def _resolver_goal_progress_for_content_plan(state: CognitionState) -> str:
+def _resolver_goal_progress_for_content_plan(state: dict[str, Any]) -> str:
     """Return prompt-safe resolver goal progress for the L3 content plan."""
 
     raw_goal_progress = state.get("resolver_goal_progress")
@@ -671,7 +714,7 @@ def _resolver_goal_progress_for_content_plan(state: CognitionState) -> str:
     return return_value
 
 
-def _resolver_observations_for_content_plan(state: CognitionState) -> str:
+def _resolver_observations_for_content_plan(state: dict[str, Any]) -> str:
     """Return bounded prompt-safe resolver observations for the content plan."""
 
     resolver_state = state.get("resolver_state")
@@ -748,7 +791,7 @@ def _content_plan_source_payload(
     return source_payload
 
 
-async def call_content_plan_agent(state: CognitionState) -> CognitionState:
+async def call_content_plan_agent(state: dict[str, Any]) -> dict[str, Any]:
     character_profile = state["character_profile"]
     episode = state["cognitive_episode"]
     selection = _content_plan_prompt_selection(episode)
@@ -800,7 +843,11 @@ async def call_content_plan_agent(state: CognitionState) -> CognitionState:
         selection=selection,
     ))
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
-    response = await _content_plan_agent_llm.ainvoke([
+    llm = require_injected_llm(
+        _content_plan_agent_llm_context.get() or _content_plan_agent_llm,
+        "content_plan_agent_llm",
+    )
+    response = await llm.ainvoke([
         system_prompt,
         human_message,
     ])
@@ -881,16 +928,29 @@ _PREFERENCE_ADAPTER_PROMPT = '''\
     "accepted_user_preferences": ["下游可直接执行的软约束", ...]
 }}
 '''
-_preference_adapter_llm = get_llm(
-    temperature=0.15,
-    top_p=0.8,
-    model=COGNITION_LLM_MODEL,
-    base_url=COGNITION_LLM_BASE_URL,
-    api_key=COGNITION_LLM_API_KEY,
+_preference_adapter_llm: AsyncChatModel | None = None
+_preference_adapter_llm_context: ContextVar[AsyncChatModel | None] = ContextVar(
+    "preference_adapter_llm",
+    default=None,
 )
 
 
-async def call_preference_adapter(state: CognitionState) -> CognitionState:
+def set_preference_adapter_llm(
+    llm: AsyncChatModel | None,
+) -> Token[AsyncChatModel | None]:
+    """Bind the preference model for the current run context."""
+
+    token = _preference_adapter_llm_context.set(llm)
+    return token
+
+
+def reset_preference_adapter_llm(token: Token[AsyncChatModel | None]) -> None:
+    """Restore the previous preference model binding for this run context."""
+
+    _preference_adapter_llm_context.reset(token)
+
+
+async def call_preference_adapter(state: dict[str, Any]) -> dict[str, Any]:
     decontexualized_input = state["decontexualized_input"]
     current_user_bundle = _current_user_rag_bundle(state)
     user_memory_context = current_user_bundle["user_memory_context"]
@@ -938,7 +998,11 @@ async def call_preference_adapter(state: CognitionState) -> CognitionState:
         selection=selection,
     ))
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
-    response = await _preference_adapter_llm.ainvoke([
+    llm = require_injected_llm(
+        _preference_adapter_llm_context.get() or _preference_adapter_llm,
+        "preference_adapter_llm",
+    )
+    response = await llm.ainvoke([
         system_prompt,
         human_message,
     ])
@@ -1082,14 +1146,29 @@ _VISUAL_AGENT_PROMPT = '''\
     "visual_vibe": ["场景、构图、人物占位、镜头距离、背景物、光线、色温、空气感与整体静态氛围", ...]
 }}
 '''
-_visual_agent_llm = get_llm(
-    temperature=0.65,
-    top_p=0.9,
-    model=COGNITION_LLM_MODEL,
-    base_url=COGNITION_LLM_BASE_URL,
-    api_key=COGNITION_LLM_API_KEY,
+_visual_agent_llm: AsyncChatModel | None = None
+_visual_agent_llm_context: ContextVar[AsyncChatModel | None] = ContextVar(
+    "visual_agent_llm",
+    default=None,
 )
-async def call_visual_agent(state: CognitionState) -> CognitionState:
+
+
+def set_visual_agent_llm(
+    llm: AsyncChatModel | None,
+) -> Token[AsyncChatModel | None]:
+    """Bind the visual model for the current run context."""
+
+    token = _visual_agent_llm_context.set(llm)
+    return token
+
+
+def reset_visual_agent_llm(token: Token[AsyncChatModel | None]) -> None:
+    """Restore the previous visual model binding for this run context."""
+
+    _visual_agent_llm_context.reset(token)
+
+
+async def call_visual_agent(state: dict[str, Any]) -> dict[str, Any]:
     episode = state["cognitive_episode"]
     debug_modes = episode["origin_metadata"]["debug_modes"]
     if debug_modes.get("no_visual_directives"):
@@ -1175,7 +1254,11 @@ async def call_visual_agent(state: CognitionState) -> CognitionState:
         selection=selection,
     ))
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
-    response = await _visual_agent_llm.ainvoke([
+    llm = require_injected_llm(
+        _visual_agent_llm_context.get() or _visual_agent_llm,
+        "visual_agent_llm",
+    )
+    response = await llm.ainvoke([
         system_prompt,
         human_message,
     ])
@@ -1214,8 +1297,8 @@ async def call_visual_agent(state: CognitionState) -> CognitionState:
 # ---------------------------------------------------------------------------
 
 async def call_surface_directive_collector(
-    state: CognitionState,
-) -> CognitionState:
+    state: dict[str, Any],
+) -> dict[str, Any]:
     """
     Collect all the outputs from L3 agents and pass them to the next stage in Persona Supervisor.
     """

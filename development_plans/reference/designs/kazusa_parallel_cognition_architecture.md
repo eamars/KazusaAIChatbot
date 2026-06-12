@@ -1647,7 +1647,7 @@ This can be done without immediately adding all streams.
 Repository execution artifact:
 
 ```text
-development_plans/active/short_term/cognition_chain_module_separation_plan.md
+development_plans/archive/completed/short_term/cognition_chain_module_separation_plan.md
 ```
 
 That plan is the separation-only Phase 1 work contract. It keeps the current

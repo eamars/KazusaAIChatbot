@@ -1,32 +1,32 @@
 """L2c2 social context appraisal cognition agent."""
+
 import json
+from contextvars import ContextVar, Token
+from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from kazusa_ai_chatbot.config import (
-    COGNITION_LLM_API_KEY,
-    COGNITION_LLM_BASE_URL,
-    COGNITION_LLM_MODEL,
-)
-from kazusa_ai_chatbot.nodes.boundary_profile import (
+from kazusa_ai_chatbot.cognition_chain_core.boundary_profile import (
     get_boundary_recovery_description,
     get_compliance_strategy_description,
     get_control_intimacy_misread_description,
     get_control_sensitivity_description,
     get_relationship_priority_description,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_output_contracts import (
+from kazusa_ai_chatbot.cognition_chain_core.contracts import (
+    AsyncChatModel,
+    require_injected_llm,
+)
+from kazusa_ai_chatbot.cognition_chain_core.output_contracts import (
     validate_cognition_output_contract,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection import (
+from kazusa_ai_chatbot.cognition_chain_core.prompt_selection import (
     build_cognition_prompt_source_payload,
     select_cognition_prompt_variant,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import CognitionState
-from kazusa_ai_chatbot.time_boundary import format_storage_utc_history_for_llm
-from kazusa_ai_chatbot.utils import (
+from kazusa_ai_chatbot.cognition_chain_core.utils import (
     build_affinity_block,
-    get_llm,
+    format_storage_utc_history_for_llm,
     parse_llm_json_output,
 )
 
@@ -110,16 +110,29 @@ _CONTEXTUAL_AGENT_PROMPT = '''\
   "relational_dynamic": "简体中文字符串；主语优先省略；不要复制资料结构或元数据"
 }}
 '''
-_contextual_agent_llm = get_llm(
-    temperature=0.45,
-    top_p=0.85,
-    model=COGNITION_LLM_MODEL,
-    base_url=COGNITION_LLM_BASE_URL,
-    api_key=COGNITION_LLM_API_KEY,
+_contextual_agent_llm: AsyncChatModel | None = None
+_contextual_agent_llm_context: ContextVar[AsyncChatModel | None] = ContextVar(
+    "contextual_agent_llm",
+    default=None,
 )
 
 
-async def call_social_context_appraisal(state: CognitionState) -> CognitionState:
+def set_contextual_agent_llm(
+    llm: AsyncChatModel | None,
+) -> Token[AsyncChatModel | None]:
+    """Bind the L2c2 model for the current run context."""
+
+    token = _contextual_agent_llm_context.set(llm)
+    return token
+
+
+def reset_contextual_agent_llm(token: Token[AsyncChatModel | None]) -> None:
+    """Restore the previous L2c2 model binding for this run context."""
+
+    _contextual_agent_llm_context.reset(token)
+
+
+async def call_social_context_appraisal(state: dict[str, Any]) -> dict[str, Any]:
     character_profile = state["character_profile"]
     boundary_profile = character_profile["boundary_profile"]
     episode = state["cognitive_episode"]
@@ -186,7 +199,11 @@ async def call_social_context_appraisal(state: CognitionState) -> CognitionState
         ),
     )
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
-    response = await _contextual_agent_llm.ainvoke([
+    llm = require_injected_llm(
+        _contextual_agent_llm_context.get() or _contextual_agent_llm,
+        "contextual_agent_llm",
+    )
+    response = await llm.ainvoke([
         system_prompt,
         human_message,
     ])

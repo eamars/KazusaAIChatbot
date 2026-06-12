@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection import (
+from kazusa_ai_chatbot.cognition_chain_core.prompt_selection import (
     CognitionPromptStage,
 )
 

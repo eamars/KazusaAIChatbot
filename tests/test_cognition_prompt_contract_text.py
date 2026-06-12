@@ -11,11 +11,13 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l1 as l1_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2 as l2_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2c2 as l2c2_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2d as l2d_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l1 as l1_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l2 as l2_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l2c2 as l2c2_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l3 as l3_module
+from kazusa_ai_chatbot.cognition_chain_core.action_selection_prompt import (
+    ACTION_ROUTER_PROMPT,
+)
 from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
 
 
@@ -46,9 +48,9 @@ _AFFECTED_PROMPTS = (
         l2c2_module._CONTEXTUAL_AGENT_PROMPT,
     ),
     (
-        'L2d action initializer',
-        '_ACTION_INITIALIZER_PROMPT',
-        l2d_module._ACTION_INITIALIZER_PROMPT,
+        'L2d action selection',
+        'ACTION_ROUTER_PROMPT',
+        ACTION_ROUTER_PROMPT,
     ),
 )
 _SELF_COGNITION_SOURCE_TERMS = (
@@ -407,28 +409,28 @@ def test_l2d_prompt_defines_speak_and_scene_grounded_detail() -> None:
     """L2d must keep visible-surface action semantics and detail grounded in
     the current scene.  The new prompt uses generic affordance terms instead
     of hardcoded capability names."""
-    prompt_text = l2d_module._ACTION_INITIALIZER_PROMPT
+    prompt_text = ACTION_ROUTER_PROMPT
 
     _assert_contains_any(
-        '_ACTION_INITIALIZER_PROMPT',
+        'ACTION_ROUTER_PROMPT',
         prompt_text,
         ('可见表面动作', '可见动作', 'action_affordances'),
         'visible-surface action concept (replaces hardcoded `speak`)',
     )
     _assert_contains_any(
-        '_ACTION_INITIALIZER_PROMPT',
+        'ACTION_ROUTER_PROMPT',
         prompt_text,
         ('当前场景', '当前可见回复目标', '当前可见行动目标'),
         '`detail` as the current scene action target',
     )
     _assert_contains_any(
-        '_ACTION_INITIALIZER_PROMPT',
+        'ACTION_ROUTER_PROMPT',
         prompt_text,
         ('不要生成最终发言文本', '不是最终发言文本', '不得生成最终对话文本'),
         '`detail` not as final dialog text',
     )
     _assert_contains_any(
-        '_ACTION_INITIALIZER_PROMPT',
+        'ACTION_ROUTER_PROMPT',
         prompt_text,
         ('包标题', '时间戳', '传输摘要', '模型可见元数据'),
         '`detail` not as packet metadata',
@@ -442,7 +444,7 @@ def test_l2d_prompt_preserves_resolver_terminal_boundaries() -> None:
     capability names.  Assertions are grouped by the behavioral contract they
     guard so that failures point to the rule that regressed.
     """
-    prompt_text = l2d_module._ACTION_INITIALIZER_PROMPT
+    prompt_text = ACTION_ROUTER_PROMPT
 
     # -- affordance-driven capability selection (replaces hardcoded names) --
     for required_text in (
@@ -454,7 +456,7 @@ def test_l2d_prompt_preserves_resolver_terminal_boundaries() -> None:
 
     # -- source identification and trigger boundaries --
     _assert_contains_any(
-        '_ACTION_INITIALIZER_PROMPT',
+        'ACTION_ROUTER_PROMPT',
         prompt_text,
         ('触发来源', 'trigger_source'),
         'trigger-source awareness',
@@ -465,7 +467,7 @@ def test_l2d_prompt_preserves_resolver_terminal_boundaries() -> None:
     assert 'blocked' in prompt_text
     assert 'pending_resolver_resume' in prompt_text
     _assert_contains_any(
-        '_ACTION_INITIALIZER_PROMPT',
+        'ACTION_ROUTER_PROMPT',
         prompt_text,
         ('不要再次请求同一', '不要再次请求同一个 blocked'),
         'blocked capability dedup rule',
@@ -477,13 +479,13 @@ def test_l2d_prompt_preserves_resolver_terminal_boundaries() -> None:
     assert 'approval preview 必须能力扎根' in prompt_text
     assert '不得编造上下文没有提供的工具、权限、外部执行机制或验证机制' in prompt_text
     _assert_contains_any(
-        '_ACTION_INITIALIZER_PROMPT',
+        'ACTION_ROUTER_PROMPT',
         prompt_text,
         ('不得编造监控', '不得编造'),
         'no fabricated monitoring or execution capabilities',
     )
     _assert_contains_any(
-        '_ACTION_INITIALIZER_PROMPT',
+        'ACTION_ROUTER_PROMPT',
         prompt_text,
         ('不要直接选择 `speak` 跳过审批准备',
          '跳过审批', '审批准备'),
@@ -500,13 +502,13 @@ def test_l2d_prompt_preserves_resolver_terminal_boundaries() -> None:
 
     # -- original goal continuity --
     _assert_contains_any(
-        '_ACTION_INITIALIZER_PROMPT',
+        'ACTION_ROUTER_PROMPT',
         prompt_text,
         ('继续处理原始用户目标', '继续推进', 'original_goal'),
         'original goal continuity',
     )
     _assert_contains_any(
-        '_ACTION_INITIALIZER_PROMPT',
+        'ACTION_ROUTER_PROMPT',
         prompt_text,
         ('不要只确认"收到"就结束', '不要只确认收到', '不要只确认'),
         'must not just acknowledge receipt',
@@ -516,7 +518,7 @@ def test_l2d_prompt_preserves_resolver_terminal_boundaries() -> None:
     assert '主要交付部分' in prompt_text
     assert '不要只回答其中一个子问题后把必要交付推迟到下一轮' in prompt_text
     _assert_contains_any(
-        '_ACTION_INITIALIZER_PROMPT',
+        'ACTION_ROUTER_PROMPT',
         prompt_text,
         ('给出完整的最佳努力结果、证据限制和必要步骤',
          '最佳努力'),
@@ -527,7 +529,7 @@ def test_l2d_prompt_preserves_resolver_terminal_boundaries() -> None:
     # -- resolver continuation principles --
     assert '解析器续轮原则' in prompt_text
     _assert_contains_any(
-        '_ACTION_INITIALIZER_PROMPT',
+        'ACTION_ROUTER_PROMPT',
         prompt_text,
         ('返回一个 `speak` action_request', '可见表面动作'),
         'fallback to visible surface action',
@@ -537,7 +539,7 @@ def test_l2d_prompt_preserves_resolver_terminal_boundaries() -> None:
 
     # -- evidence-before-speak rules (generic, not hardcoded capability names) --
     _assert_contains_any(
-        '_ACTION_INITIALIZER_PROMPT',
+        'ACTION_ROUTER_PROMPT',
         prompt_text,
         ('不要为了给一般判断背书而启动 `web_evidence`',
          '不要为了给一般判断背书而启动',
@@ -552,7 +554,7 @@ def test_l2d_prompt_preserves_resolver_terminal_boundaries() -> None:
 
     # -- internal goal convergence --
     _assert_contains_any(
-        '_ACTION_INITIALIZER_PROMPT',
+        'ACTION_ROUTER_PROMPT',
         prompt_text,
         ('需要先收束目标、整理优先级、拆解私有后续判断或形成下一步内部目标',
          '内部目标收束'),
@@ -566,14 +568,14 @@ def test_l2d_prompt_preserves_resolver_terminal_boundaries() -> None:
     assert '语义进度表' in prompt_text
     assert '不得替换原始目标' in prompt_text
     _assert_contains_any(
-        '_ACTION_INITIALIZER_PROMPT',
+        'ACTION_ROUTER_PROMPT',
         prompt_text,
         ('`pending`、`partial`、`satisfied`、`blocked`',
          'pending、partial、satisfied、blocked'),
         'deliverable status enum vocabulary',
     )
     _assert_contains_any(
-        '_ACTION_INITIALIZER_PROMPT',
+        'ACTION_ROUTER_PROMPT',
         prompt_text,
         ('`resolver_goal_progress.final_response_requirements` 是 L3/dialog 的交付清单',
          'final_response_requirements', '交付清单'),
@@ -743,7 +745,7 @@ def test_prompts_preserve_structured_output_enums() -> None:
     ):
         assert enum_value in l2_module._BOUNDARY_CORE_PROMPT
 
-    l2d_prompt = l2d_module._ACTION_INITIALIZER_PROMPT
+    l2d_prompt = ACTION_ROUTER_PROMPT
     for affordance_concept in (
         'action_affordances',
         'resolver_affordances',

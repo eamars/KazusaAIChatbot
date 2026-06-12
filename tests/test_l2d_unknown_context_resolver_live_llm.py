@@ -25,10 +25,16 @@ import httpx
 import pytest
 
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2d as l2d
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2d import (
-    build_action_initializer_payload,
-    call_action_initializer,
+from kazusa_ai_chatbot.cognition_chain_core.stages import l2d as l2d
+from kazusa_ai_chatbot.cognition_chain_core.stages.l2d import (
+    build_action_selection_payload_text,
+    select_semantic_actions,
+)
+from kazusa_ai_chatbot.nodes import (
+    persona_supervisor2_cognition_actions as action_connector,
+)
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
+    build_cognition_chain_services,
 )
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 from tests.llm_trace import write_llm_trace
@@ -143,16 +149,20 @@ async def _run_l2d_and_trace(
 ) -> dict:
     """Run L2d, write a trace file, and return an observation dict."""
 
-    prompt_payload = build_action_initializer_payload(frozen_state)
+    prompt_payload = build_action_selection_payload_text(frozen_state)
 
-    capturing_llm = _CapturingLLM(l2d._action_initializer_llm)
-    monkeypatch.setattr(l2d, "_action_initializer_llm", capturing_llm)
+    action_selection_llm = build_cognition_chain_services().action_selection_llm
+    capturing_llm = _CapturingLLM(action_selection_llm)
+    monkeypatch.setattr(l2d, "_action_selection_llm", capturing_llm)
 
-    result = await call_action_initializer(frozen_state)
+    result = await select_semantic_actions(frozen_state)
 
     raw_output = capturing_llm.raw_output
     raw_parsed_output = parse_llm_json_output(raw_output)
-    action_specs = result.get("action_specs", [])
+    action_specs = action_connector.materialize_semantic_action_requests(
+        result.get("semantic_action_requests", []),
+        frozen_state,
+    )
     resolver_requests = result.get("resolver_capability_requests", [])
 
     observed_action_kinds = [

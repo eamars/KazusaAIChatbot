@@ -18,23 +18,23 @@ from pymongo.errors import PyMongoError
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
 from kazusa_ai_chatbot.db import close_db, get_character_profile
 from kazusa_ai_chatbot.db._client import get_db
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l1 import (
+from kazusa_ai_chatbot.cognition_chain_core.stages.l1 import (
     call_cognition_subconscious,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2 import (
+from kazusa_ai_chatbot.cognition_chain_core.stages.l2 import (
     call_boundary_core_agent,
     call_cognition_consciousness,
     call_judgment_core_agent,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2c2 import (
+from kazusa_ai_chatbot.cognition_chain_core.stages.l2c2 import (
     call_social_context_appraisal,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     call_group_engagement_action_context_loader,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2d import (
-    build_action_initializer_payload,
-    call_action_initializer,
+from kazusa_ai_chatbot.cognition_chain_core.stages.l2d import (
+    build_action_selection_payload_text,
+    select_semantic_actions,
 )
 from kazusa_ai_chatbot.reflection_cycle.activity_windows import (
     build_group_activity_windows,
@@ -523,8 +523,8 @@ async def _run_case_to_l2d(
     l2d_state, stage_outputs = await _run_cognition_stages_before_dialog(
         cognition_state,
     )
-    l2d_prompt_payload = build_action_initializer_payload(l2d_state)
-    l2d_output = await call_action_initializer(l2d_state)
+    l2d_prompt_payload = build_action_selection_payload_text(l2d_state)
+    l2d_output = await select_semantic_actions(l2d_state)
     action_specs = l2d_output["action_specs"]
     observed_speak = _observed_user_visible_speak(action_specs)
     speak_reasons = _observed_user_visible_speak_reasons(action_specs)

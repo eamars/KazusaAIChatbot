@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from kazusa_ai_chatbot.internal_monologue_residue import recorder
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l1 as l1_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2 as l2_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l1 as l1_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l2 as l2_module
 
 
 _ROOT = Path(__file__).resolve().parents[1]

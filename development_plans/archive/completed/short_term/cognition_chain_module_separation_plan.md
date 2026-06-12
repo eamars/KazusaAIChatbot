@@ -7,7 +7,7 @@
   `persona_supervisor2_cognition` and the selected L3 surface wrapper as thin
   Kazusa graph connectors.
 - Plan class: large
-- Status: draft
+- Status: complete
 - Mandatory skills: `development-plan`, `local-llm-architecture`, `py-style`,
   `cjk-safety`, and `test-style-and-execution`.
 - Overall cutover strategy: compatible module separation. Preserve current
@@ -284,6 +284,7 @@ class CognitionEpisodePromptV1(TypedDict):
     model_visible_percepts: list[ModelVisiblePerceptV1]
     target_scope_summary: str
     origin_summary: str
+    origin_metadata: NotRequired[Mapping[str, Any]]
 
 
 class CharacterPromptV1(TypedDict):
@@ -294,9 +295,9 @@ class CharacterPromptV1(TypedDict):
     age: str
     birthday: str
     backstory: str
-    personality_brief: str
-    boundary_profile: str
-    linguistic_texture_profile: str
+    personality_brief: Mapping[str, Any]
+    boundary_profile: Mapping[str, Any]
+    linguistic_texture_profile: Mapping[str, Any]
     mood: str
     global_vibe: str
 
@@ -311,10 +312,11 @@ class PromptSafeUserMemoryContextV1(TypedDict):
 class UserPromptV1(TypedDict):
     global_user_id: str
     display_name: str
-    affinity: str
+    affinity: int | str
     affinity_level: str
     last_relationship_insight: str
     memory_context: PromptSafeUserMemoryContextV1
+    profile: NotRequired[Mapping[str, Any]]
 
 
 class ReferentPromptV1(TypedDict):
@@ -333,44 +335,48 @@ class CurrentEventPromptV1(TypedDict):
     user_input: str
     decontextualized_input: str
     indirect_speech_context: str
-    referents: list[ReferentPromptV1]
+    referents: list[Mapping[str, Any]]
     media_observations: list[MediaObservationPromptV1]
     reply_context_summary: str
     prompt_message_context_summary: str
+    reply_context: NotRequired[Mapping[str, Any]]
+    prompt_message_context: NotRequired[Mapping[str, Any]]
 
 
 class ScenePromptV1(TypedDict):
     platform: str
     channel_type: str
     channel_topic: str
-    local_time_context: str
+    local_time_context: Mapping[str, Any]
     storage_timestamp_utc: str
-    interaction_history_recent: list[str]
+    interaction_history_recent: list[Mapping[str, Any]]
 
 
 class ConversationContextPromptV1(TypedDict):
-    conversation_progress: str
-    promoted_reflection_context: str
+    conversation_progress: Mapping[str, Any] | str
+    promoted_reflection_context: Mapping[str, Any] | str
     internal_monologue_residue_context: str
     previous_action_summary: str
 
 
 class EvidencePromptV1(TypedDict):
     rag_answer: str
-    current_user_rag_bundle: str
+    current_user_rag_bundle: Mapping[str, Any] | str
     memory_evidence: list[TextEvidenceV1]
     conversation_evidence: list[TextEvidenceV1]
     external_evidence: list[TextEvidenceV1]
     recall_evidence: list[TextEvidenceV1]
     supervisor_trace: list[str]
+    rag_result: NotRequired[Mapping[str, Any]]
 
 
 class ResolverPromptV1(TypedDict):
     resolver_context: str
-    pending_resume: str
-    goal_progress: str
+    pending_resume: Mapping[str, Any] | str
+    goal_progress: Mapping[str, Any] | str
     recent_observations: list[str]
     max_projected_observations: int
+    resolver_state: NotRequired[Mapping[str, Any]]
 
 
 class ActionAffordanceV1(TypedDict):
@@ -382,7 +388,7 @@ class ActionAffordanceV1(TypedDict):
     ]
     available: bool
     visibility: Literal["public", "private", "internal"]
-    semantic_input_summary: str
+    semantic_input_summary: str | list[str]
     output_kind: Literal["semantic_action_request"]
 
 
@@ -391,6 +397,7 @@ class RuntimeContextV1(TypedDict):
     visual_directives_enabled: bool
     max_action_requests: int
     max_resolver_requests: int
+    background_work_output_char_limit: int
 ```
 
 ### `CognitionChainInputV1`
@@ -408,6 +415,7 @@ class CognitionChainInputV1(TypedDict):
     resolver: ResolverPromptV1
     available_actions: list[ActionAffordanceV1]
     runtime_context: RuntimeContextV1
+    action_selection_context: NotRequired[Mapping[str, Any]]
 ```
 
 The Kazusa connector maps existing `GlobalPersonaState` fields into this
@@ -480,7 +488,7 @@ class ResolverCapabilityRequestV1(TypedDict):
     ]
     objective: str
     reason: str
-    priority: Literal["low", "normal", "high"]
+    priority: Literal["now", "background"]
 
 
 class ResolverPendingResolutionV1(TypedDict):
@@ -594,6 +602,7 @@ class CognitionTextSurfaceInputV1(TypedDict):
     selected_text_surface_intent: SelectedTextSurfaceIntentV1
     pre_surface_action_results: list[PreSurfaceActionResultPromptV1]
     memory_lifecycle_context: MemoryLifecycleContextPromptV1
+    interaction_style_context: Mapping[str, Any]
 ```
 
 `selected_text_surface_intent.speak_intent` is prompt-safe and must not contain
@@ -870,43 +879,45 @@ receive explicit user approval through a new or amended plan.
 
 ## Progress Checklist
 
-- [ ] Stage 1 - focused contract tests established
+- [x] Stage 1 - focused contract tests established
   - Covers: implementation steps 1 and 2.
   - Verify: run the new focused tests and record expected missing-module or
     baseline results.
   - Evidence: record command output in `Execution Evidence`.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 2 - core contracts and README created
+  - Sign-off: `Codex/2026-06-12` after verification and evidence are recorded.
+- [x] Stage 2 - core contracts and README created
   - Covers: implementation step 4.
   - Verify: `venv\Scripts\python -m py_compile
     src\kazusa_ai_chatbot\cognition_chain_core\contracts.py`.
   - Evidence: record changed files and compile output.
-  - Sign-off: `<agent/date>` after rereading this plan.
-- [ ] Stage 3 - stage implementation moved behind core
+  - Sign-off: `Codex/2026-06-12` after rereading this plan.
+- [x] Stage 3 - stage implementation moved behind core
   - Covers: implementation steps 5 through 7.
   - Verify: py_compile all files under `cognition_chain_core` and run focused
     core tests.
   - Evidence: record command output and any moved-file notes.
-  - Sign-off: `<agent/date>` after rereading this plan.
-- [ ] Stage 4 - Kazusa connectors rewired
+  - Sign-off: `Codex/2026-06-12` after rereading this plan.
+- [x] Stage 4 - Kazusa connectors rewired
   - Covers: implementation step 8.
   - Verify: connector tests for `call_cognition_subgraph(...)` and
     `call_l3_text_surface_handler(...)` pass.
   - Evidence: record test output and connector changed files.
-  - Sign-off: `<agent/date>` after rereading this plan.
-- [ ] Stage 5 - import migration and regression checks complete
+  - Sign-off: `Codex/2026-06-12` after rereading this plan.
+- [x] Stage 5 - import migration and regression checks complete
   - Covers: implementation steps 9 through 11.
   - Verify: static greps, focused deterministic tests, and available live LLM
     smoke checks pass.
   - Evidence: record every command and inspected live LLM case result.
-  - Sign-off: `<agent/date>` after rereading this plan.
-- [ ] Stage 6 - independent code review complete
+  - Sign-off: `Codex/2026-06-12` after rereading this plan.
+- [x] Stage 6 - independent code review complete
   - Covers: implementation steps 12 and 13.
   - Verify: independent code-review subagent reports approval or all findings
-    are remediated and affected checks rerun.
+    are remediated and affected checks rerun. After the user explicitly
+    disallowed further subagent calls, the parent agent completed the remaining
+    review using the same scope.
   - Evidence: record review findings, fixes, rerun commands, and residual
     risks.
-  - Sign-off: `<agent/date>` before lifecycle completion.
+  - Sign-off: `Codex/2026-06-12` before lifecycle completion.
 
 ## Verification
 
@@ -914,7 +925,7 @@ receive explicit user approval through a new or amended plan.
 
 - `rg "from kazusa_ai_chatbot\\.nodes\\.persona_supervisor2_cognition_(l1|l2|l2c2|l2d|l3)" src tests`
   - Expected result: no matches. `rg` exit code `1` is success for this gate.
-- `rg "call_cognition_subconscious|call_cognition_consciousness|call_boundary_core_agent|call_judgment_core_agent|call_social_context_appraisal|call_action_initializer|call_content_plan_agent|call_style_agent|call_preference_adapter|call_visual_agent" src tests`
+- `rg "call_cognition_subconscious|call_cognition_consciousness|call_boundary_core_agent|call_judgment_core_agent|call_social_context_appraisal|select_semantic_actions|call_content_plan_agent|call_style_agent|call_preference_adapter|call_visual_agent" src tests`
   - Expected result: direct imports or calls outside `cognition_chain_core`,
     connector entrypoint tests, and explicitly named core-stage tests are
     removed. `rg` exit code `1` is success when no forbidden direct call exists.
@@ -969,6 +980,11 @@ Run this gate after all `Verification` commands pass and before final sign-off.
 The parent agent must create one independent code-review subagent through the
 current harness's native subagent capability. If native subagents are
 unavailable, stop unless the user explicitly approves fallback execution.
+
+On 2026-06-12, after three independent review passes and remediations, the
+user explicitly instructed the parent agent to stop calling subagents and take
+over code review and fix ownership. From that point, the remaining review gate
+is a parent-agent local review using the same scope below.
 
 Review scope:
 
@@ -1032,4 +1048,197 @@ This plan is complete when:
 
 ## Execution Evidence
 
-- Not started. This draft plan does not authorize implementation.
+- 2026-06-12: User approved the plan and explicitly requested parent-agent
+  execution without a production-code subagent. The independent code-review
+  subagent gate remains required at the end of implementation.
+- 2026-06-12 Stage 1 red tests:
+  `venv\Scripts\python -m pytest tests\test_cognition_chain_core_contracts.py -q`
+  failed with missing `kazusa_ai_chatbot.cognition_chain_core`;
+  `venv\Scripts\python -m pytest tests\test_cognition_chain_core_action_selection.py -q`
+  failed with missing `kazusa_ai_chatbot.cognition_chain_core`;
+  `venv\Scripts\python -m pytest tests\test_cognition_chain_connector_mapping.py -q`
+  failed with missing connector mapper functions. This is the expected
+  pre-implementation failure.
+- 2026-06-12 Stage 2: added core ICD, public contracts, contract validators,
+  and core action-selection normalization. Corrected the plan's resolver
+  priority contract to `now | background` to match the existing route prompt
+  and preserve prompt behavior. Verified with
+  `venv\Scripts\python -m py_compile src\kazusa_ai_chatbot\cognition_chain_core\contracts.py src\kazusa_ai_chatbot\cognition_chain_core\action_selection.py src\kazusa_ai_chatbot\cognition_chain_core\action_selection_prompt.py`
+  and
+  `venv\Scripts\python -m pytest tests\test_cognition_chain_core_contracts.py tests\test_cognition_chain_core_action_selection.py -q`;
+  both passed.
+- 2026-06-12 Stage 3: moved L1, L2, L2c2, L2d route selection, L3,
+  prompt-selection, and cognition output-contract implementation into
+  `src/kazusa_ai_chatbot/cognition_chain_core/`. Added injected-service graph
+  runners, core graph state channels, and route-only semantic action selection.
+  The core no longer constructs LLM clients at import time and no longer
+  imports Kazusa graph state or project action-spec types. Verified with
+  `venv\Scripts\python -m py_compile` across the changed core modules and the
+  combined deterministic test command recorded below.
+- 2026-06-12 Stage 4: rewired
+  `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition.py` and
+  `src/kazusa_ai_chatbot/nodes/persona_supervisor2_l3_surface.py` as graph
+  connectors. Added
+  `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_actions.py` for
+  deterministic semantic-request to project-action materialization. Preserved
+  group-engagement ordering by projecting prompt-safe engagement context into
+  the public chain input before core entry. Verified by connector tests in the
+  combined deterministic command below.
+- 2026-06-12 Stage 5: migrated test and source imports away from deleted
+  `nodes/persona_supervisor2_cognition_l*` modules, renamed action-selection
+  test wording, and removed stale direct initializer patch points. Static grep
+  gates passed with `rg` exit code `1`:
+  `rg -n "action_initializer|_action_initializer_llm|call_action_initializer|build_action_initializer_payload|persona_supervisor2_cognition_(l1|l2|l2c2|l2d|l3|output_contracts|prompt_selection)" src tests`
+  and
+  `rg -n "get_llm|COGNITION_LLM|BOUNDARY_CORE_LLM|GlobalPersonaState|CognitionState|ActionSpecV1|kazusa_ai_chatbot\.action_router" src\kazusa_ai_chatbot\cognition_chain_core`.
+  Combined deterministic verification passed:
+  `venv\Scripts\python -m pytest tests\test_cognition_chain_core_contracts.py tests\test_cognition_chain_core_action_selection.py tests\test_cognition_chain_connector_mapping.py tests\test_cognition_prompt_contract_text.py tests\test_cognition_resolver_l2d_contract.py tests\test_l2d_l3_surface_handoff.py tests\test_cognition_resolver_persona_graph.py tests\test_persona_supervisor2_action_selection.py -q`
+  with `69 passed`.
+- 2026-06-12 Stage 6 initial independent review: subagent
+  `019eba25-7c3a-7552-bf12-577eb7883279` reported five findings:
+  public ICD was validated but not used as the runtime boundary; L2d core still
+  rebuilt Kazusa action affordances and config; L3 core still loaded DB-backed
+  interaction style context; plan ICD wording did not match the implemented V1
+  shapes; and stale `action_router` tests/package remained.
+- 2026-06-12 Stage 6 remediation before follow-up review: connectors now call
+  only `run_cognition_chain(...)` and `run_text_surface_planning(...)`;
+  group-engagement and interaction-style DB loading happen in Kazusa
+  connectors before core entry; `CognitionChainInputV1` and
+  `CognitionTextSurfaceInputV1` carry structured prompt-safe projections used
+  by runtime; action-selection core consumes caller-provided
+  `available_action_affordances` and no longer imports `action_spec`, config,
+  DB, `GlobalPersonaState`, `CognitionState`, or `ActionSpecV1`; the obsolete
+  `src/kazusa_ai_chatbot/action_router/` package was deleted; action-router
+  tests were renamed and migrated to `cognition_chain_core.action_selection`;
+  this plan's contract code block was updated to match the implemented V1 ICD.
+- 2026-06-12 Stage 6 remediation verification: `venv\Scripts\python -m
+  py_compile` passed across changed core, connector, and migrated test files.
+  Static boundary greps passed with `rg` exit code `1`:
+  `rg -n "action_initializer|_action_initializer_llm|call_action_initializer|build_action_initializer_payload|persona_supervisor2_cognition_(l1|l2|l2c2|l2d|l3|output_contracts|prompt_selection)" src tests`,
+  `rg -n "get_llm|COGNITION_LLM|BOUNDARY_CORE_LLM|GlobalPersonaState|CognitionState|ActionSpecV1|kazusa_ai_chatbot\.action_router|kazusa_ai_chatbot\.db|kazusa_ai_chatbot\.action_spec|BACKGROUND_WORK_OUTPUT_CHAR_LIMIT|CapabilitySpecV1" src\kazusa_ai_chatbot\cognition_chain_core`,
+  `rg -n "kazusa_ai_chatbot\.action_router|action_router|action-router" src tests`,
+  and
+  `rg -n "run_cognition_state_graph|run_text_surface_state_graph" src\kazusa_ai_chatbot\nodes tests`.
+  After removing the unused pre-action-selection service hook, a targeted grep
+  for the retired hook names across `src` and `tests` also passed with `rg`
+  exit code `1`; compile and the affected L2d graph ordering tests passed.
+  Focused deterministic verification passed:
+  `venv\Scripts\python -m pytest tests\test_cognition_chain_core_contracts.py tests\test_cognition_chain_core_action_selection.py tests\test_cognition_chain_connector_mapping.py tests\test_cognition_prompt_contract_text.py tests\test_cognition_resolver_l2d_contract.py tests\test_l2d_l3_surface_handoff.py tests\test_cognition_resolver_persona_graph.py tests\test_persona_supervisor2_action_selection.py tests\test_action_selection_payload.py tests\test_action_selection_prompt_contract.py -q`
+  with `74 passed`. `git diff --check` passed with line-ending warnings only.
+- 2026-06-12 Stage 6 follow-up remediation: added prompt-selection episode
+  projection from `CognitionChainInputV1` so public `output_mode` values do
+  not leak into old prompt-selection internals; kept caller-provided action
+  affordances and runtime caps authoritative through declared LangGraph state
+  channels; normalized public current-user memory summaries into the legacy
+  RAG slot consumed by moved L2 internals; copied pure helper ownership into
+  the core so moved stages do not import `nodes`; and marked new files with
+  `git add -N` so untracked implementation files are visible in review diffs.
+  Public-entrypoint smoke completed through `run_cognition_chain(...)` and
+  returned `cognition_chain_output.v1` with one selected semantic speak
+  action. Static boundary greps passed with `rg` exit code `1` for retired
+  stage modules, action-router references, project-local core imports, direct
+  node calls into internal state-graph entrypoints, and the retired
+  pre-action-selection hook names. Focused deterministic verification passed:
+  `venv\Scripts\python -m pytest tests\test_cognition_chain_core_contracts.py tests\test_cognition_chain_core_action_selection.py tests\test_cognition_chain_connector_mapping.py tests\test_cognition_prompt_contract_text.py tests\test_cognition_resolver_l2d_contract.py tests\test_l2d_l3_surface_handoff.py tests\test_cognition_resolver_persona_graph.py tests\test_persona_supervisor2_action_selection.py tests\test_action_selection_payload.py tests\test_action_selection_prompt_contract.py -q`
+  with `74 passed`. `git diff --check` passed with line-ending warnings only.
+- 2026-06-12 Stage 6 second independent review: subagent
+  `019eba25-7c3a-7552-bf12-577eb7883279` reported five remaining alignment
+  findings: core still imported `kazusa_ai_chatbot.utils`, public surface
+  planning did not provide `boundary_core_assessment` to L3 visual, public
+  surface RAG projection could still require legacy `rag_result.user_image`,
+  media observations were not projected through the public ICD, and nested
+  public contract validation did not reject unknown enums before LLM calls.
+- 2026-06-12 Stage 6 second remediation: added
+  `cognition_chain_core.utils` for pure log preview, affinity mapping, and
+  injectable JSON parsing; public chain and surface entrypoints now install
+  `CognitionChainServices.parse_json`; moved core stages no longer import
+  `kazusa_ai_chatbot.utils`; surface planning now derives a prompt-safe
+  boundary assessment from public residue and mirrors the main-chain
+  current-user memory fallback into the legacy RAG slot consumed by moved L3
+  internals; L3 RAG helper tolerates absent legacy RAG internals; Kazusa
+  connector now projects prompt-safe image/audio observations and model-visible
+  media percepts without raw bytes, URLs, or adapter IDs; public episode
+  projection consumes direct `current_event.media_observations`; and contract
+  validators now reject unknown nested output-mode, percept-source,
+  media-modality, action-capability, action-visibility, and action-output-kind
+  values.
+- 2026-06-12 Stage 6 second remediation verification: focused public-boundary
+  tests now include invalid enum rejection, public text-surface smoke without
+  legacy RAG shape, and connector media projection. Focused deterministic
+  verification passed:
+  `venv\Scripts\python -m pytest tests\test_cognition_chain_core_contracts.py tests\test_cognition_chain_core_action_selection.py tests\test_cognition_chain_connector_mapping.py tests\test_cognition_prompt_contract_text.py tests\test_cognition_resolver_l2d_contract.py tests\test_l2d_l3_surface_handoff.py tests\test_cognition_resolver_persona_graph.py tests\test_persona_supervisor2_action_selection.py tests\test_action_selection_payload.py tests\test_action_selection_prompt_contract.py -q`
+  with `78 passed`. Static boundary greps passed with `rg` exit code `1`,
+  including the expanded check for `kazusa_ai_chatbot.utils` under
+  `cognition_chain_core`. `git diff --check` passed with line-ending warnings
+  only.
+- 2026-06-12 Stage 6 third independent review: subagent
+  `019eba25-7c3a-7552-bf12-577eb7883279` reported two remaining findings:
+  transitive reusable-core coupling through RAG/time helper imports, and
+  process-global service injection through stage-module LLM/parser globals.
+- 2026-06-12 Stage 6 third remediation: moved the pure prompt projection,
+  empty user-memory context, and history formatting needed by moved stages into
+  `cognition_chain_core.utils`, removing imports from `kazusa_ai_chatbot.rag`,
+  `kazusa_ai_chatbot.time_boundary`, and `kazusa_ai_chatbot.utils` under the
+  core. Public entrypoints now bind LLMs and parser through `ContextVar`
+  setters, so concurrent `run_cognition_chain(...)` and
+  `run_text_surface_planning(...)` calls do not mutate shared stage-module
+  globals. The old stage globals remain only as direct-stage test fallbacks and
+  are not assigned by public core entrypoints.
+- 2026-06-12 Stage 6 third remediation verification:
+  `venv\Scripts\python -m py_compile` passed for touched core files. Focused
+  deterministic verification passed:
+  `venv\Scripts\python -m pytest tests\test_cognition_chain_core_contracts.py tests\test_cognition_chain_core_action_selection.py tests\test_cognition_chain_connector_mapping.py tests\test_cognition_prompt_contract_text.py tests\test_cognition_resolver_l2d_contract.py tests\test_l2d_l3_surface_handoff.py tests\test_cognition_resolver_persona_graph.py tests\test_persona_supervisor2_action_selection.py tests\test_action_selection_payload.py tests\test_action_selection_prompt_contract.py -q`
+  with `78 passed`. Static greps under `cognition_chain_core` for project
+  helper imports and public-entrypoint stage-global assignments passed with
+  `rg` exit code `1`. `git diff --check` passed with line-ending warnings only.
+- 2026-06-12 Stage 6 local review takeover: user explicitly instructed the
+  parent agent to stop calling subagents and take over review and remediation.
+  Local review found one remaining parallel-safety issue: public entrypoints
+  bound parser and LLM services through `ContextVar` setters, but did not reset
+  those bindings after graph execution. This could leak stale services into a
+  later direct-stage call in the same async context and weaken the future
+  parallel self-competition boundary.
+- 2026-06-12 Stage 6 local remediation: `ContextVar` setters for the JSON
+  parser and L1/L2/L2c2/L2d/L3 model bindings now return reset tokens, with
+  matching reset helpers. `run_cognition_state_graph(...)` and
+  `run_text_surface_state_graph(...)` bind services once per graph invocation
+  and restore prior bindings in `finally` blocks. Added deterministic coverage
+  `test_public_text_surface_entrypoint_resets_injected_parser`. Cleaned moved
+  stage module import headers so module docstrings remain first and CJK prompt
+  files still compile.
+- 2026-06-12 Stage 6 final local verification: `venv\Scripts\python -m
+  py_compile src\kazusa_ai_chatbot\cognition_chain_core\utils.py
+  src\kazusa_ai_chatbot\cognition_chain_core\chain.py
+  src\kazusa_ai_chatbot\cognition_chain_core\surface.py
+  src\kazusa_ai_chatbot\cognition_chain_core\stages\l1.py
+  src\kazusa_ai_chatbot\cognition_chain_core\stages\l2.py
+  src\kazusa_ai_chatbot\cognition_chain_core\stages\l2c2.py
+  src\kazusa_ai_chatbot\cognition_chain_core\stages\l2d.py
+  src\kazusa_ai_chatbot\cognition_chain_core\stages\l3.py` passed. Focused
+  deterministic verification passed:
+  `venv\Scripts\python -m pytest tests\test_cognition_chain_core_contracts.py tests\test_cognition_chain_core_action_selection.py tests\test_cognition_chain_connector_mapping.py tests\test_cognition_prompt_contract_text.py tests\test_cognition_resolver_l2d_contract.py tests\test_l2d_l3_surface_handoff.py tests\test_cognition_resolver_persona_graph.py tests\test_persona_supervisor2_action_selection.py tests\test_action_selection_payload.py tests\test_action_selection_prompt_contract.py -q`
+  with `79 passed`. Static boundary greps for retired node stage imports,
+  deleted `action_router`, direct node calls into core state-graph runners,
+  retired pre-action-selection hooks, project-local core imports, stage-global
+  public-entrypoint assignments, and `ActionSpecV1`/`GlobalPersonaState`/
+  `CognitionState` under `cognition_chain_core` all passed with `rg` exit code
+  `1`. `git diff --check` passed with line-ending warnings only. No remaining
+  blocking local-review findings.
+- 2026-06-12 Stage 6 live smoke verification: migrated live smoke fixtures to
+  the separated core boundary by adding explicit `cognitive_episode` state,
+  prompt-safe direct-stage defaults, and direct-stage service binding/reset in
+  test code only. `venv\Scripts\python -m pytest -m live_llm
+  tests/test_cognition_live_llm.py::test_live_cognition_stack_exercises_each_stage_llm
+  -q -s` passed after manual inspection of logged L1 through L4 outputs; the
+  model produced coherent stage outputs and an English rainy-day content plan
+  aligned with the test request. `venv\Scripts\python -m pytest -m live_llm
+  tests/test_l2d_action_selection_live_llm.py::test_l2d_live_case_against_frozen_upstream
+  -q -s` skipped because `L2D_LIVE_CASE_FILE` was not configured.
+  `venv\Scripts\python -m pytest -m live_llm
+  tests/test_cognition_stage_connection_live_llm.py::test_live_cognition_stage_connection_case
+  -q -s` skipped because `COGNITION_CONNECTION_CASE_FILE` was not configured
+  after its legacy symbol guard was migrated to core-stage wrappers. Final
+  deterministic verification reran and passed with `79 passed`; final compile
+  and static boundary greps passed; `git diff --check` passed with line-ending
+  warnings only. Residual risk: skipped one-case live L2d and full connection
+  smokes should be run when their required fixture files are provided.

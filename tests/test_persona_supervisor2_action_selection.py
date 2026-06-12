@@ -1,4 +1,4 @@
-"""Deterministic tests for the isolated L2d action initializer."""
+"""Deterministic tests for split L2d action selection and materialization."""
 
 from __future__ import annotations
 
@@ -12,7 +12,13 @@ from kazusa_ai_chatbot.action_spec.registry import (
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
 )
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2d as l2d_module
+from kazusa_ai_chatbot.cognition_chain_core.action_selection_prompt import (
+    ACTION_ROUTER_PROMPT,
+)
+from kazusa_ai_chatbot.cognition_chain_core.stages import l2d as l2d_module
+from kazusa_ai_chatbot.nodes import (
+    persona_supervisor2_cognition_actions as action_connector,
+)
 from kazusa_ai_chatbot.self_cognition import models as self_cognition_models
 from kazusa_ai_chatbot.self_cognition import runner as self_cognition_runner
 from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
@@ -29,6 +35,19 @@ class _FakeLLM:
         self.messages = messages
         response = SimpleNamespace(content=self.content)
         return response
+
+
+async def _select_and_materialize(state: dict) -> dict:
+    selected = await l2d_module.select_semantic_actions(state)
+    action_specs = action_connector.materialize_semantic_action_requests(
+        selected.get("semantic_action_requests", []),
+        state,
+    )
+    result = {
+        **selected,
+        "action_specs": action_specs,
+    }
+    return result
 
 
 def _episode() -> dict:
@@ -86,6 +105,47 @@ def _state() -> dict:
         "emotional_intensity": "quiet and low pressure",
         "vibe_check": "relaxed daily conversation",
         "relational_dynamic": "stable trust with room to wait",
+        "available_action_affordances": [
+            {
+                "capability": "speak",
+                "available": True,
+                "visibility": "public",
+                "semantic_input_summary": [
+                    "Use when the character wants a text surface to exist.",
+                ],
+                "output_kind": "semantic_action_request",
+            },
+            {
+                "capability": MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+                "available": True,
+                "visibility": "private",
+                "semantic_input_summary": [
+                    "Use when active commitments need semantic lifecycle review.",
+                ],
+                "output_kind": "semantic_action_request",
+            },
+            {
+                "capability": "trigger_future_cognition",
+                "available": True,
+                "visibility": "private",
+                "semantic_input_summary": [
+                    "Use when the character wants a later private cognition cycle.",
+                ],
+                "output_kind": "semantic_action_request",
+            },
+            {
+                "capability": "background_work_request",
+                "available": True,
+                "visibility": "private",
+                "semantic_input_summary": [
+                    "Use only for accepted bounded background text work.",
+                ],
+                "output_kind": "semantic_action_request",
+            },
+        ],
+        "max_action_requests": 3,
+        "max_resolver_requests": 3,
+        "background_work_output_char_limit": 4000,
         "rag_result": {
             "answer": "The active commitment is overdue.",
             "user_image": {
@@ -175,10 +235,10 @@ def _future_cognition_request() -> dict:
     }
 
 
-def test_action_initializer_payload_is_prompt_safe() -> None:
+def test_action_selection_payload_is_prompt_safe() -> None:
     """L2d should receive a JSON string, not raw transport internals."""
 
-    action_context = l2d_module.build_action_initializer_payload(_state())
+    action_context = l2d_module.build_action_selection_payload_text(_state())
     payload = json.loads(action_context)
     serialized = action_context.lower()
 
@@ -241,10 +301,10 @@ def test_self_cognition_source_ref_binds_active_commitment_context() -> None:
     ]
 
 
-def test_action_initializer_prompt_follows_cognition_prompt_structure() -> None:
+def test_action_selection_prompt_follows_cognition_prompt_structure() -> None:
     """The L2d prompt should follow the established cognition prompt pattern."""
 
-    prompt = l2d_module._ACTION_INITIALIZER_PROMPT
+    prompt = ACTION_ROUTER_PROMPT
 
     for required_section in (
         "# 语言政策",
@@ -260,8 +320,6 @@ def test_action_initializer_prompt_follows_cognition_prompt_structure() -> None:
     assert "行动请求只描述我想做什么" in prompt
     assert "解析请求只描述下一步需要什么证据、事实、澄清或审批" in prompt
     assert "内心独白是证据，不是动作" in prompt
-    assert "群聊参与习惯" in prompt
-    assert "不能替代当前场景" in prompt
     assert "只返回合法 JSON 字符串" in prompt
     assert "不要从本提示词推断固定能力清单" in prompt
     assert "capabilities.resolver_affordances" in prompt
@@ -307,7 +365,7 @@ def test_action_initializer_prompt_follows_cognition_prompt_structure() -> None:
     assert "系统会绑定当前 active pending row" in prompt
 
 
-def test_action_initializer_payload_includes_group_engagement_context() -> None:
+def test_action_selection_payload_includes_group_engagement_context() -> None:
     """Group self-cognition should expose bounded engagement before L2d."""
 
     state = _state()
@@ -323,7 +381,7 @@ def test_action_initializer_payload_includes_group_engagement_context() -> None:
         "confidence": "high",
     }
 
-    action_context = l2d_module.build_action_initializer_payload(state)
+    action_context = l2d_module.build_action_selection_payload_text(state)
 
     payload = json.loads(action_context)
     assert "group_engagement" in payload
@@ -334,7 +392,7 @@ def test_action_initializer_payload_includes_group_engagement_context() -> None:
     assert "Do not leak this to L2d." not in action_context
 
 
-def test_action_initializer_payload_omits_group_engagement_for_private() -> None:
+def test_action_selection_payload_omits_group_engagement_for_private() -> None:
     """Private chat should not receive group-channel engagement guidance."""
 
     state = _state()
@@ -343,13 +401,13 @@ def test_action_initializer_payload_omits_group_engagement_for_private() -> None
         "confidence": "high",
     }
 
-    action_context = l2d_module.build_action_initializer_payload(state)
+    action_context = l2d_module.build_action_selection_payload_text(state)
 
     payload = json.loads(action_context)
     assert "group_engagement" not in payload
 
 
-def test_action_initializer_hides_lifecycle_without_active_commitments() -> None:
+def test_action_selection_hides_lifecycle_without_active_commitments() -> None:
     """Lifecycle should not be offered when no active commitment exists."""
 
     state = _state()
@@ -357,14 +415,14 @@ def test_action_initializer_hides_lifecycle_without_active_commitments() -> None
         "active_commitments"
     ] = []
 
-    action_context = l2d_module.build_action_initializer_payload(state)
+    action_context = l2d_module.build_action_selection_payload_text(state)
 
     payload = json.loads(action_context)
     assert payload["evidence"]["active_commitment_clues"] == []
     assert "memory_lifecycle_update" not in action_context
 
 
-def test_action_initializer_offers_lifecycle_route_for_multiple_commitments() -> None:
+def test_action_selection_offers_lifecycle_route_for_multiple_commitments() -> None:
     """Multiple active commitments should still allow specialist routing."""
 
     state = _state()
@@ -385,7 +443,7 @@ def test_action_initializer_offers_lifecycle_route_for_multiple_commitments() ->
         },
     ]
 
-    action_context = l2d_module.build_action_initializer_payload(state)
+    action_context = l2d_module.build_action_selection_payload_text(state)
 
     payload = json.loads(action_context)
     assert len(payload["evidence"]["active_commitment_clues"]) == 2
@@ -394,7 +452,7 @@ def test_action_initializer_offers_lifecycle_route_for_multiple_commitments() ->
 
 
 @pytest.mark.asyncio
-async def test_action_initializer_ignores_lifecycle_target_fields_from_llm(
+async def test_action_selection_ignores_lifecycle_target_fields_from_llm(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Unknown target fields from L2d must not become DB lifecycle params."""
@@ -429,9 +487,9 @@ async def test_action_initializer_ignores_lifecycle_target_fields_from_llm(
             },
         ],
     }))
-    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
 
-    result = await l2d_module.call_action_initializer(state)
+    result = await _select_and_materialize(state)
 
     assert len(result["action_specs"]) == 1
     action_spec = result["action_specs"][0]
@@ -473,9 +531,9 @@ async def test_future_cognition_materialization_binds_trusted_source_scope(
     fake_llm = _FakeLLM(json.dumps({
         "action_requests": [_future_cognition_request()],
     }))
-    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
 
-    result = await l2d_module.call_action_initializer(state)
+    result = await _select_and_materialize(state)
 
     action_spec = result["action_specs"][0]
     assert action_spec["kind"] == "trigger_future_cognition"
@@ -521,9 +579,9 @@ async def test_future_cognition_uses_own_detail_as_objective(
     fake_llm = _FakeLLM(json.dumps({
         "action_requests": [speak_request, future_request],
     }, ensure_ascii=False))
-    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
 
-    result = await l2d_module.call_action_initializer(_state())
+    result = await _select_and_materialize(_state())
 
     future_specs = [
         spec for spec in result["action_specs"]
@@ -554,15 +612,15 @@ async def test_scheduled_future_cognition_cannot_chain_another_future_slot(
     fake_llm = _FakeLLM(json.dumps({
         "action_requests": [_future_cognition_request()],
     }))
-    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
 
-    result = await l2d_module.call_action_initializer(state)
+    result = await _select_and_materialize(state)
 
     assert result["action_specs"] == []
 
 
 @pytest.mark.asyncio
-async def test_action_initializer_accepts_multiple_valid_action_specs(
+async def test_action_selection_accepts_multiple_valid_action_specs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """L2d can select more than one independent action in one cognition cycle."""
@@ -574,9 +632,9 @@ async def test_action_initializer_accepts_multiple_valid_action_specs(
             _future_cognition_request(),
         ],
     }))
-    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
 
-    result = await l2d_module.call_action_initializer(_state())
+    result = await _select_and_materialize(_state())
 
     assert [spec["kind"] for spec in result["action_specs"]] == [
         "speak",
@@ -598,7 +656,7 @@ async def test_action_initializer_accepts_multiple_valid_action_specs(
 
 
 @pytest.mark.asyncio
-async def test_action_initializer_drops_misplaced_resolver_request(
+async def test_action_selection_drops_misplaced_resolver_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Resolver capability names in action rows are contract drift."""
@@ -613,16 +671,16 @@ async def test_action_initializer_drops_misplaced_resolver_request(
             },
         ],
     }, ensure_ascii=False))
-    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
 
-    result = await l2d_module.call_action_initializer(_state())
+    result = await _select_and_materialize(_state())
 
     assert result["action_specs"] == []
     assert result["resolver_capability_requests"] == []
 
 
 @pytest.mark.asyncio
-async def test_action_initializer_drops_misplaced_terminal_action(
+async def test_action_selection_drops_misplaced_terminal_action(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Terminal action names in resolver rows are contract drift."""
@@ -639,16 +697,16 @@ async def test_action_initializer_drops_misplaced_terminal_action(
         ],
         "action_requests": [],
     }, ensure_ascii=False))
-    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
 
-    result = await l2d_module.call_action_initializer(_state())
+    result = await _select_and_materialize(_state())
 
     assert result["resolver_capability_requests"] == []
     assert result["action_specs"] == []
 
 
 @pytest.mark.asyncio
-async def test_action_initializer_returns_valid_goal_progress(
+async def test_action_selection_returns_valid_goal_progress(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """L2d should be able to emit the goal checklist beside resolver work."""
@@ -691,9 +749,9 @@ async def test_action_initializer_returns_valid_goal_progress(
         },
         "action_requests": [],
     }, ensure_ascii=False))
-    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
 
-    result = await l2d_module.call_action_initializer(_state())
+    result = await _select_and_materialize(_state())
 
     assert result["resolver_goal_progress"]["original_goal"] == (
         "安排两小时低预算计划。"
@@ -705,7 +763,7 @@ async def test_action_initializer_returns_valid_goal_progress(
 
 
 @pytest.mark.asyncio
-async def test_action_initializer_derives_visible_requirements_from_open_goal(
+async def test_action_selection_derives_visible_requirements_from_open_goal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Open L2d deliverables should reach L3 even when requirements are empty."""
@@ -740,9 +798,9 @@ async def test_action_initializer_derives_visible_requirements_from_open_goal(
             _speak_request("基于现有证据给用户可见计划。"),
         ],
     }, ensure_ascii=False))
-    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
 
-    result = await l2d_module.call_action_initializer(_state())
+    result = await _select_and_materialize(_state())
 
     requirements = result["resolver_goal_progress"][
         "final_response_requirements"
@@ -754,7 +812,7 @@ async def test_action_initializer_derives_visible_requirements_from_open_goal(
 
 
 @pytest.mark.asyncio
-async def test_action_initializer_completes_partial_visible_requirements(
+async def test_action_selection_completes_partial_visible_requirements(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Existing requirements should be extended for uncovered open deliverables."""
@@ -791,9 +849,9 @@ async def test_action_initializer_completes_partial_visible_requirements(
             _speak_request("基于现有证据给用户可见计划。"),
         ],
     }, ensure_ascii=False))
-    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
 
-    result = await l2d_module.call_action_initializer(_state())
+    result = await _select_and_materialize(_state())
 
     goal_progress = result["resolver_goal_progress"]
     assert goal_progress["schema_version"] == "resolver_goal_progress.v1"
@@ -804,7 +862,7 @@ async def test_action_initializer_completes_partial_visible_requirements(
 
 
 @pytest.mark.asyncio
-async def test_action_initializer_binds_pending_resolution_to_active_row(
+async def test_action_selection_binds_pending_resolution_to_active_row(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """L2d should judge pending semantics while Python binds the row id."""
@@ -818,7 +876,7 @@ async def test_action_initializer_binds_pending_resolution_to_active_row(
             _speak_request("继续完成原始目标。"),
         ],
     }, ensure_ascii=False))
-    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
     state = _state()
     state["pending_resolver_resume"] = {
         "schema_version": "resolver_pending_resume.v1",
@@ -836,7 +894,7 @@ async def test_action_initializer_binds_pending_resolution_to_active_row(
         "expires_at_utc": "2026-05-16T21:00:00+00:00",
     }
 
-    result = await l2d_module.call_action_initializer(state)
+    result = await _select_and_materialize(state)
 
     assert result["resolver_pending_resolution"] == {
         "schema_version": "resolver_pending_resolution.v1",
@@ -856,7 +914,7 @@ async def test_action_initializer_binds_pending_resolution_to_active_row(
 
 
 @pytest.mark.asyncio
-async def test_action_initializer_ignores_model_supplied_pending_id(
+async def test_action_selection_ignores_model_supplied_pending_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Opaque pending ids from L2d should never choose the row to update."""
@@ -872,7 +930,7 @@ async def test_action_initializer_ignores_model_supplied_pending_id(
             _speak_request("说明审批后的结果。"),
         ],
     }, ensure_ascii=False))
-    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
     state = _state()
     state["pending_resolver_resume"] = {
         "schema_version": "resolver_pending_resume.v1",
@@ -890,7 +948,7 @@ async def test_action_initializer_ignores_model_supplied_pending_id(
         "expires_at_utc": "2026-05-16T21:00:00+00:00",
     }
 
-    result = await l2d_module.call_action_initializer(state)
+    result = await _select_and_materialize(state)
 
     assert result["resolver_pending_resolution"] == {
         "schema_version": "resolver_pending_resolution.v1",
@@ -903,7 +961,7 @@ async def test_action_initializer_ignores_model_supplied_pending_id(
 
 
 @pytest.mark.asyncio
-async def test_action_initializer_keeps_action_when_pending_request_repeats(
+async def test_action_selection_keeps_action_when_pending_request_repeats(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A repeated pending resolver request should not hide a valid answer."""
@@ -922,7 +980,7 @@ async def test_action_initializer_keeps_action_when_pending_request_repeats(
             _speak_request("explain the approval preview"),
         ],
     }, ensure_ascii=False))
-    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
     state = _state()
     state["pending_resolver_resume"] = {
         "schema_version": "resolver_pending_resume.v1",
@@ -940,7 +998,7 @@ async def test_action_initializer_keeps_action_when_pending_request_repeats(
         "expires_at_utc": "2026-05-16T21:00:00+00:00",
     }
 
-    result = await l2d_module.call_action_initializer(state)
+    result = await _select_and_materialize(state)
 
     assert result["resolver_capability_requests"] == []
     assert [spec["kind"] for spec in result["action_specs"]] == ["speak"]
@@ -948,7 +1006,7 @@ async def test_action_initializer_keeps_action_when_pending_request_repeats(
 
 
 @pytest.mark.asyncio
-async def test_action_initializer_recovers_pending_capability_action(
+async def test_action_selection_recovers_pending_capability_action(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A pending resolver answer should become text even with the wrong name."""
@@ -972,7 +1030,7 @@ async def test_action_initializer_recovers_pending_capability_action(
             },
         ],
     }))
-    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
     state = _state()
     state["pending_resolver_resume"] = {
         "schema_version": "resolver_pending_resume.v1",
@@ -990,7 +1048,7 @@ async def test_action_initializer_recovers_pending_capability_action(
         "expires_at_utc": "2026-05-16T21:00:00+00:00",
     }
 
-    result = await l2d_module.call_action_initializer(state)
+    result = await _select_and_materialize(state)
 
     assert result["resolver_capability_requests"] == []
     assert [spec["kind"] for spec in result["action_specs"]] == ["speak"]
@@ -1004,7 +1062,7 @@ async def test_action_initializer_recovers_pending_capability_action(
 
 
 @pytest.mark.asyncio
-async def test_action_initializer_surfaces_repeated_pending_without_action(
+async def test_action_selection_surfaces_repeated_pending_without_action(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A repeated pending resolver request should still reach L3 text."""
@@ -1021,7 +1079,7 @@ async def test_action_initializer_surfaces_repeated_pending_without_action(
         ],
         "action_requests": [],
     }))
-    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
     state = _state()
     state["pending_resolver_resume"] = {
         "schema_version": "resolver_pending_resume.v1",
@@ -1039,7 +1097,7 @@ async def test_action_initializer_surfaces_repeated_pending_without_action(
         "expires_at_utc": "2026-05-16T21:00:00+00:00",
     }
 
-    result = await l2d_module.call_action_initializer(state)
+    result = await _select_and_materialize(state)
 
     assert result["resolver_capability_requests"] == []
     assert [spec["kind"] for spec in result["action_specs"]] == ["speak"]
@@ -1053,7 +1111,7 @@ async def test_action_initializer_surfaces_repeated_pending_without_action(
 
 
 @pytest.mark.asyncio
-async def test_action_initializer_drops_invalid_specs_and_caps_valid_specs(
+async def test_action_selection_drops_invalid_specs_and_caps_valid_specs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Malformed rows should be skipped and valid rows capped before graph merge."""
@@ -1068,9 +1126,9 @@ async def test_action_initializer_drops_invalid_specs_and_caps_valid_specs(
             _speak_request("fourth"),
         ],
     }))
-    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
 
-    result = await l2d_module.call_action_initializer(_state())
+    result = await _select_and_materialize(_state())
 
     assert len(result["action_specs"]) == 3
     assert [spec["reason"] for spec in result["action_specs"]] == [

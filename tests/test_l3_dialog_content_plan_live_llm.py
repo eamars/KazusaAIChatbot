@@ -19,7 +19,7 @@ from kazusa_ai_chatbot.config import (
     DIALOG_GENERATOR_LLM_MODEL,
 )
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l3 as l3_module
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 from tests.llm_trace import write_llm_trace

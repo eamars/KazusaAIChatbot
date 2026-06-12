@@ -1,47 +1,49 @@
 """L2 — Consciousness, Boundary Core, and Judgment Core cognition agents."""
-from kazusa_ai_chatbot.config import (
-    AFFINITY_MAX,
-    AFFINITY_MIN,
-    BOUNDARY_CORE_LLM_API_KEY,
-    BOUNDARY_CORE_LLM_BASE_URL,
-    BOUNDARY_CORE_LLM_MODEL,
-    COGNITION_LLM_API_KEY,
-    COGNITION_LLM_BASE_URL,
-    COGNITION_LLM_MODEL,
+
+import json
+import logging
+from contextvars import ContextVar, Token
+from typing import Any
+
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from kazusa_ai_chatbot.cognition_chain_core.boundary_profile import (
+    get_authority_skepticism_description,
+    get_boundary_recovery_description,
+    get_compliance_strategy_description,
+    get_control_intimacy_misread_description,
+    get_control_sensitivity_description,
+    get_relationship_priority_description,
+    get_self_integrity_description,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_output_contracts import (
+from kazusa_ai_chatbot.cognition_chain_core.contracts import (
+    AsyncChatModel,
+    require_injected_llm,
+)
+from kazusa_ai_chatbot.cognition_chain_core.output_contracts import (
     validate_cognition_output_contract,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection import (
+from kazusa_ai_chatbot.cognition_chain_core.prompt_selection import (
     build_cognition_prompt_source_payload,
     select_cognition_prompt_variant,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import CognitionState
-from kazusa_ai_chatbot.nodes.referent_resolution import (
+from kazusa_ai_chatbot.cognition_chain_core.referent_resolution import (
     needs_referent_clarification,
     normalize_referents,
     unresolved_referent_reason,
 )
-from kazusa_ai_chatbot.utils import build_affinity_block, get_llm, log_preview, parse_llm_json_output
-from kazusa_ai_chatbot.nodes.boundary_profile import (
-    get_self_integrity_description,
-    get_control_sensitivity_description,
-    get_relationship_priority_description,
-    get_control_intimacy_misread_description,
-    get_compliance_strategy_description,
-    get_boundary_recovery_description,
-    get_authority_skepticism_description,
+from kazusa_ai_chatbot.cognition_chain_core.utils import (
+    build_affinity_block,
+    empty_user_memory_context,
+    log_preview,
+    parse_llm_json_output,
+    project_tool_result_for_llm,
 )
-from kazusa_ai_chatbot.rag.prompt_projection import project_tool_result_for_llm
-from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import empty_user_memory_context
-
-from langchain_core.messages import HumanMessage, SystemMessage
-
-import logging
-import json
-from typing import Any
 
 logger = logging.getLogger(__name__)
+
+AFFINITY_MIN = 0
+AFFINITY_MAX = 1000
 
 
 _SUPERVISOR_TRACE_PRIVATE_KEYS = frozenset((
@@ -86,7 +88,7 @@ def _normalize_affinity(affinity: int) -> float:
     return affinity_weight
 
 
-def _current_user_rag_bundle(state: CognitionState) -> dict[str, Any]:
+def _current_user_rag_bundle(state: dict[str, Any]) -> dict[str, Any]:
     """Return the projected current-user bundle from ``rag_result`` when present.
 
     Args:
@@ -95,8 +97,11 @@ def _current_user_rag_bundle(state: CognitionState) -> dict[str, Any]:
     Returns:
         The projected current-user profile bundle, or an empty dict when absent.
     """
-    rag_result = state["rag_result"]
-    user_bundle = rag_result["user_image"]
+    rag_result = state.get("rag_result", {})
+    if not isinstance(rag_result, dict):
+        user_bundle = {}
+    else:
+        user_bundle = rag_result.get("user_image", {})
     if not isinstance(user_bundle, dict):
         user_bundle = {}
     if "user_memory_context" not in user_bundle:
@@ -315,16 +320,29 @@ _COGNITION_CONSCIOUSNESS_PROMPT = '''\
   "character_intent": "PROVIDE | BANTAR | REJECT | EVADE | CONFRONT | DISMISS | CLARIFY"
 }}
 '''
-_conscious_llm = get_llm(
-    temperature=0.3,
-    top_p=0.85,
-    model=COGNITION_LLM_MODEL,
-    base_url=COGNITION_LLM_BASE_URL,
-    api_key=COGNITION_LLM_API_KEY,
-)  # Conscious deliberation
+_conscious_llm: AsyncChatModel | None = None
+_conscious_llm_context: ContextVar[AsyncChatModel | None] = ContextVar(
+    "conscious_llm",
+    default=None,
+)
 
 
-async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
+def set_conscious_llm(
+    llm: AsyncChatModel | None,
+) -> Token[AsyncChatModel | None]:
+    """Bind the L2a model for the current run context."""
+
+    token = _conscious_llm_context.set(llm)
+    return token
+
+
+def reset_conscious_llm(token: Token[AsyncChatModel | None]) -> None:
+    """Restore the previous L2a model binding for this run context."""
+
+    _conscious_llm_context.reset(token)
+
+
+async def call_cognition_consciousness(state: dict[str, Any]) -> dict[str, Any]:
     affinity_block = build_affinity_block(state["user_profile"]["affinity"])
     current_user_bundle = _current_user_rag_bundle(state)
     user_memory_context = current_user_bundle["user_memory_context"]
@@ -382,7 +400,11 @@ async def call_cognition_consciousness(state: CognitionState) -> CognitionState:
         selection=selection,
     ))
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
-    response = await _conscious_llm.ainvoke([
+    llm = require_injected_llm(
+        _conscious_llm_context.get() or _conscious_llm,
+        "conscious_llm",
+    )
+    response = await llm.ainvoke([
         system_prompt,
         human_message,
     ])
@@ -500,14 +522,29 @@ _BOUNDARY_CORE_PROMPT = '''\
   "trajectory": "简体中文字符串；主语优先省略"
 }}
 '''
-_boundary_core_llm = get_llm(
-    temperature=0,
-    top_p=1.0,
-    model=BOUNDARY_CORE_LLM_MODEL,
-    base_url=BOUNDARY_CORE_LLM_BASE_URL,
-    api_key=BOUNDARY_CORE_LLM_API_KEY,
+_boundary_core_llm: AsyncChatModel | None = None
+_boundary_core_llm_context: ContextVar[AsyncChatModel | None] = ContextVar(
+    "boundary_core_llm",
+    default=None,
 )
-async def call_boundary_core_agent(state: CognitionState) -> CognitionState:
+
+
+def set_boundary_core_llm(
+    llm: AsyncChatModel | None,
+) -> Token[AsyncChatModel | None]:
+    """Bind the boundary model for the current run context."""
+
+    token = _boundary_core_llm_context.set(llm)
+    return token
+
+
+def reset_boundary_core_llm(token: Token[AsyncChatModel | None]) -> None:
+    """Restore the previous boundary model binding for this run context."""
+
+    _boundary_core_llm_context.reset(token)
+
+
+async def call_boundary_core_agent(state: dict[str, Any]) -> dict[str, Any]:
     # Get attributes
     character_profile = state["character_profile"]
     boundary_profile = character_profile["boundary_profile"]
@@ -573,7 +610,11 @@ async def call_boundary_core_agent(state: CognitionState) -> CognitionState:
         selection=selection,
     ))
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
-    response = await _boundary_core_llm.ainvoke([
+    llm = require_injected_llm(
+        _boundary_core_llm_context.get() or _boundary_core_llm,
+        "boundary_core_llm",
+    )
+    response = await llm.ainvoke([
         system_prompt,
         human_message,
     ])
@@ -690,14 +731,29 @@ _JUDGEMENT_CORE_PROMPT = '''\
   "judgment_note": "简体中文字符串，一句话说明裁决逻辑；主语优先省略；不要复制资料结构或元数据"
 }}
 '''
-_judgement_core_llm = get_llm(
-    temperature=0.1,
-    top_p=0.7,
-    model=COGNITION_LLM_MODEL,
-    base_url=COGNITION_LLM_BASE_URL,
-    api_key=COGNITION_LLM_API_KEY,
+_judgement_core_llm: AsyncChatModel | None = None
+_judgement_core_llm_context: ContextVar[AsyncChatModel | None] = ContextVar(
+    "judgement_core_llm",
+    default=None,
 )
-async def call_judgment_core_agent(state: CognitionState) -> CognitionState:
+
+
+def set_judgement_core_llm(
+    llm: AsyncChatModel | None,
+) -> Token[AsyncChatModel | None]:
+    """Bind the judgment model for the current run context."""
+
+    token = _judgement_core_llm_context.set(llm)
+    return token
+
+
+def reset_judgement_core_llm(token: Token[AsyncChatModel | None]) -> None:
+    """Restore the previous judgment model binding for this run context."""
+
+    _judgement_core_llm_context.reset(token)
+
+
+async def call_judgment_core_agent(state: dict[str, Any]) -> dict[str, Any]:
     episode = state["cognitive_episode"]
     selection = select_cognition_prompt_variant(
         episode=episode,
@@ -748,7 +804,11 @@ async def call_judgment_core_agent(state: CognitionState) -> CognitionState:
         selection=selection,
     ))
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
-    response = await _judgement_core_llm.ainvoke([
+    llm = require_injected_llm(
+        _judgement_core_llm_context.get() or _judgement_core_llm,
+        "judgement_core_llm",
+    )
+    response = await llm.ainvoke([
         system_prompt,
         human_message,
     ])

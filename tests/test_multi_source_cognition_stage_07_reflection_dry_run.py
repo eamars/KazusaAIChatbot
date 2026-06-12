@@ -12,12 +12,15 @@ import pytest
 
 from kazusa_ai_chatbot.cognition_episode import validate_cognitive_episode
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as cognition_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l1 as l1_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2 as l2_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2d as l2d_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2c2 as l2c2_module
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection import (
+from kazusa_ai_chatbot.cognition_chain_core.stages import l1 as l1_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l2 as l2_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l2d as l2d_module
+from kazusa_ai_chatbot.cognition_chain_core.action_selection_prompt import (
+    ACTION_ROUTER_PROMPT,
+)
+from kazusa_ai_chatbot.cognition_chain_core.stages import l3 as l3_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l2c2 as l2c2_module
+from kazusa_ai_chatbot.cognition_chain_core.prompt_selection import (
     CognitionPromptSelectionError,
     CognitionPromptStage,
     build_cognition_prompt_source_payload,
@@ -406,7 +409,7 @@ def _llm_output_payloads() -> dict[str, dict[str, Any]]:
             "character_intent": "PROVIDE",
             "judgment_note": "reflection dry run remains internal",
         },
-        "_action_initializer_llm": {
+        "_action_selection_llm": {
             "action_requests": [],
         },
         "_contextual_agent_llm": {
@@ -494,8 +497,8 @@ def _patch_cognition_llms(
     monkeypatch.setattr(l2_module, "_judgement_core_llm", llms["_judgement_core_llm"])
     monkeypatch.setattr(
         l2d_module,
-        "_action_initializer_llm",
-        llms["_action_initializer_llm"],
+        "_action_selection_llm",
+        llms["_action_selection_llm"],
     )
     monkeypatch.setattr(
         l2c2_module,
@@ -920,7 +923,7 @@ async def test_reflection_prompt_rendering_uses_only_artifact_payload(
         if "promoted_reflection_context" in prompt_payload:
             assert prompt_payload["promoted_reflection_context"] == {}
 
-    l2d_llm = llms["_action_initializer_llm"]
+    l2d_llm = llms["_action_selection_llm"]
     assert l2d_llm.messages
     l2d_context = l2d_llm.messages[1].content
     l2d_payload = json.loads(l2d_context)
@@ -937,7 +940,7 @@ async def test_reflection_prompt_rendering_uses_only_artifact_payload(
     invoked_llm_names = (
         *l1_l2_llm_names,
         "_contextual_agent_llm",
-        "_action_initializer_llm",
+        "_action_selection_llm",
     )
     for llm_name, fake_llm in llms.items():
         if llm_name not in invoked_llm_names:

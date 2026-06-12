@@ -12,7 +12,11 @@ import pytest
 from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as cognition_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l1 as l1_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l2 as l2_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l2c2 as l2c2_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l2d as l2d_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l3 as l3_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as persona_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface_module
 from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2
@@ -386,20 +390,20 @@ async def test_cognition_subgraph_runs_l2c2_before_l2d() -> None:
         assert state["vibe_check"] == "calm"
         assert state["relational_dynamic"] == "direct request"
         call_order.append("l2d")
-        return {"action_specs": []}
+        return {"semantic_action_requests": []}
 
     with (
-        patch.object(cognition_module, "call_cognition_subconscious", l1_agent),
-        patch.object(cognition_module, "call_cognition_consciousness", l2a_agent),
-        patch.object(cognition_module, "call_boundary_core_agent", l2b_agent),
-        patch.object(cognition_module, "call_judgment_core_agent", l2c1_agent),
+        patch.object(l1_module, "call_cognition_subconscious", l1_agent),
+        patch.object(l2_module, "call_cognition_consciousness", l2a_agent),
+        patch.object(l2_module, "call_boundary_core_agent", l2b_agent),
+        patch.object(l2_module, "call_judgment_core_agent", l2c1_agent),
         patch.object(
-            cognition_module,
+            l2c2_module,
             "call_social_context_appraisal",
             l2c2_agent,
             create=True,
         ),
-        patch.object(cognition_module, "call_action_initializer", l2d_agent),
+        patch.object(l2d_module, "select_semantic_actions", l2d_agent),
     ):
         result = await cognition_module.call_cognition_subgraph(_cognition_state())
 
@@ -461,17 +465,15 @@ async def test_cognition_subgraph_loads_group_engagement_before_l2d() -> None:
             "relational_dynamic": "no single target",
         }
 
-    async def engagement_loader(state: dict) -> dict:
-        assert state["channel_type"] == "group"
-        assert state["global_user_id"] == ""
+    async def engagement_loader(**kwargs: object) -> dict:
+        assert kwargs["channel_type"] == "group"
+        assert kwargs["platform_channel_id"] == "group-123"
         call_order.append("engagement")
         return {
-            "group_engagement_action_context": {
-                "engagement_guidelines": [
-                    "Stay with the current group topic.",
-                ],
-                "confidence": "medium",
-            }
+            "engagement_guidelines": [
+                "Stay with the current group topic.",
+            ],
+            "confidence": "medium",
         }
 
     async def l2d_agent(state: dict) -> dict:
@@ -482,7 +484,7 @@ async def test_cognition_subgraph_loads_group_engagement_before_l2d() -> None:
             "confidence": "medium",
         }
         call_order.append("l2d")
-        return {"action_specs": []}
+        return {"semantic_action_requests": []}
 
     state = _cognition_state()
     state.update({
@@ -509,30 +511,29 @@ async def test_cognition_subgraph_loads_group_engagement_before_l2d() -> None:
     state["cognitive_episode"] = episode
 
     with (
-        patch.object(cognition_module, "call_cognition_subconscious", l1_agent),
-        patch.object(cognition_module, "call_cognition_consciousness", l2a_agent),
-        patch.object(cognition_module, "call_boundary_core_agent", l2b_agent),
-        patch.object(cognition_module, "call_judgment_core_agent", l2c1_agent),
+        patch.object(l1_module, "call_cognition_subconscious", l1_agent),
+        patch.object(l2_module, "call_cognition_consciousness", l2a_agent),
+        patch.object(l2_module, "call_boundary_core_agent", l2b_agent),
+        patch.object(l2_module, "call_judgment_core_agent", l2c1_agent),
         patch.object(
-            cognition_module,
+            l2c2_module,
             "call_social_context_appraisal",
             l2c2_agent,
             create=True,
         ),
         patch.object(
             cognition_module,
-            "call_group_engagement_action_context_loader",
+            "build_group_engagement_action_context",
             engagement_loader,
             create=True,
         ),
-        patch.object(cognition_module, "call_action_initializer", l2d_agent),
+        patch.object(l2d_module, "select_semantic_actions", l2d_agent),
     ):
         result = await cognition_module.call_cognition_subgraph(state)
 
     assert result["action_specs"] == []
-    assert call_order.index("l2c1") < call_order.index("engagement")
-    assert call_order.index("l2c2") < call_order.index("engagement")
     assert call_order.index("engagement") < call_order.index("l2d")
+    assert call_order.index("l2c2") < call_order.index("l2d")
 
 
 @pytest.mark.asyncio
@@ -623,13 +624,13 @@ async def test_parent_graph_preserves_social_context_for_selected_l3() -> None:
             },
         ),
         patch.object(
-            l3_surface_module,
+            l3_module,
             "call_interaction_style_context_loader",
             new_callable=AsyncMock,
             return_value={"interaction_style_context": {}},
         ),
         patch.object(
-            l3_surface_module,
+            l3_module,
             "call_style_agent",
             new_callable=AsyncMock,
             return_value={
@@ -638,15 +639,15 @@ async def test_parent_graph_preserves_social_context_for_selected_l3() -> None:
                 "forbidden_phrases": [],
             },
         ),
-        patch.object(l3_surface_module, "call_content_plan_agent", content_plan),
+        patch.object(l3_module, "call_content_plan_agent", content_plan),
         patch.object(
-            l3_surface_module,
+            l3_module,
             "call_preference_adapter",
             new_callable=AsyncMock,
             return_value={"accepted_user_preferences": []},
         ),
         patch.object(
-            l3_surface_module,
+            l3_module,
             "call_visual_agent",
             new_callable=AsyncMock,
             return_value={
@@ -753,13 +754,13 @@ async def test_l3_text_surface_contract_excludes_retired_response_field() -> Non
             create=True,
         ),
         patch.object(
-            l3_surface,
+            l3_module,
             "call_interaction_style_context_loader",
             new_callable=AsyncMock,
             return_value={"interaction_style_context": {}},
         ),
         patch.object(
-            l3_surface,
+            l3_module,
             "call_style_agent",
             new_callable=AsyncMock,
             return_value={
@@ -769,7 +770,7 @@ async def test_l3_text_surface_contract_excludes_retired_response_field() -> Non
             },
         ),
         patch.object(
-            l3_surface,
+            l3_module,
             "call_content_plan_agent",
             new_callable=AsyncMock,
             return_value={
@@ -780,13 +781,13 @@ async def test_l3_text_surface_contract_excludes_retired_response_field() -> Non
             },
         ),
         patch.object(
-            l3_surface,
+            l3_module,
             "call_preference_adapter",
             new_callable=AsyncMock,
             return_value={"accepted_user_preferences": []},
         ),
         patch.object(
-            l3_surface,
+            l3_module,
             "call_visual_agent",
             new_callable=AsyncMock,
             return_value={
@@ -833,13 +834,13 @@ async def test_l3_content_plan_receives_selected_speak_intent_only() -> None:
 
     with (
         patch.object(
-            l3_surface,
+            l3_module,
             "call_interaction_style_context_loader",
             new_callable=AsyncMock,
             return_value={"interaction_style_context": {}},
         ),
         patch.object(
-            l3_surface,
+            l3_module,
             "call_style_agent",
             new_callable=AsyncMock,
             return_value={
@@ -849,18 +850,18 @@ async def test_l3_content_plan_receives_selected_speak_intent_only() -> None:
             },
         ),
         patch.object(
-            l3_surface,
+            l3_module,
             "call_content_plan_agent",
             content_plan,
         ),
         patch.object(
-            l3_surface,
+            l3_module,
             "call_preference_adapter",
             new_callable=AsyncMock,
             return_value={"accepted_user_preferences": []},
         ),
         patch.object(
-            l3_surface,
+            l3_module,
             "call_visual_agent",
             new_callable=AsyncMock,
             return_value={
@@ -1117,13 +1118,13 @@ async def test_l3_content_plan_receives_goal_progress_before_generation() -> Non
 
     with (
         patch.object(
-            l3_surface,
+            l3_module,
             "call_interaction_style_context_loader",
             new_callable=AsyncMock,
             return_value={"interaction_style_context": {}},
         ),
         patch.object(
-            l3_surface,
+            l3_module,
             "call_style_agent",
             new_callable=AsyncMock,
             return_value={
@@ -1133,18 +1134,18 @@ async def test_l3_content_plan_receives_goal_progress_before_generation() -> Non
             },
         ),
         patch.object(
-            l3_surface,
+            l3_module,
             "call_content_plan_agent",
             content_plan,
         ),
         patch.object(
-            l3_surface,
+            l3_module,
             "call_preference_adapter",
             new_callable=AsyncMock,
             return_value={"accepted_user_preferences": []},
         ),
         patch.object(
-            l3_surface,
+            l3_module,
             "call_visual_agent",
             new_callable=AsyncMock,
             return_value={

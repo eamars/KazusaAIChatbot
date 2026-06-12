@@ -9,8 +9,8 @@ import httpx
 import pytest
 
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l1 import call_cognition_subconscious
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2 import (
+from kazusa_ai_chatbot.cognition_chain_core.stages.l1 import call_cognition_subconscious
+from kazusa_ai_chatbot.cognition_chain_core.stages.l2 import (
     call_boundary_core_agent,
     call_cognition_consciousness,
     call_judgment_core_agent,

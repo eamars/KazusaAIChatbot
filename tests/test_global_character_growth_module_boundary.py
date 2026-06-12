@@ -65,7 +65,7 @@ def test_no_live_path_modules_import_global_character_growth() -> None:
         _ROOT / "src" / "kazusa_ai_chatbot" / "brain_service",
         _ROOT / "src" / "kazusa_ai_chatbot" / "rag",
         _ROOT / "src" / "kazusa_ai_chatbot" / "nodes" / "dialog_agent.py",
-        _ROOT / "src" / "kazusa_ai_chatbot" / "nodes" / "persona_supervisor2_cognition_l3.py",
+        _ROOT / "src" / "kazusa_ai_chatbot" / "cognition_chain_core" / "stages" / "l3.py",
     ]
 
     offenders: list[str] = []

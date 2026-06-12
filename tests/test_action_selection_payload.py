@@ -1,26 +1,20 @@
-"""Tests for the action-router prompt-safe JSON payload contract."""
+"""Tests for the action-selection prompt-safe JSON payload contract."""
 
 from __future__ import annotations
 
 import json
 
 
-def test_action_router_payload_is_prompt_safe_json() -> None:
-    """The action-router payload must be a JSON-serializable dict with only
+def test_action_selection_payload_is_prompt_safe_json() -> None:
+    """The action-selection payload must be a JSON-serializable dict with only
     prompt-safe semantic sections. No raw IDs, no prose string payload."""
 
-    from kazusa_ai_chatbot.action_router.payload import (
-        build_action_router_payload,
+    from kazusa_ai_chatbot.cognition_chain_core.action_selection import (
+        build_action_selection_payload,
     )
-
-    from kazusa_ai_chatbot.action_spec.registry import (
-        build_initial_action_capabilities,
-    )
-
-    capabilities = build_initial_action_capabilities()
 
     minimal_state = _minimal_cognition_state()
-    payload = build_action_router_payload(minimal_state, capabilities)
+    payload = build_action_selection_payload(minimal_state)
 
     assert isinstance(payload, dict), "payload must be a dict, not a prose string"
 
@@ -104,4 +98,23 @@ def _minimal_cognition_state() -> dict:
         "resolver_pending_resume": None,
         "resolver_previous_observations": [],
         "group_engagement_context": None,
+        "available_action_affordances": [
+            {
+                "capability": "speak",
+                "available": True,
+                "visibility": "public",
+                "semantic_input_summary": [
+                    "Use when the character wants a text surface to exist."
+                ],
+            },
+            {
+                "capability": "background_work_request",
+                "available": True,
+                "visibility": "private",
+                "semantic_input_summary": [
+                    "Use only for accepted bounded background text work."
+                ],
+            },
+        ],
+        "background_work_output_char_limit": 4000,
     }

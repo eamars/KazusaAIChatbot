@@ -56,7 +56,7 @@ stage_0_msg_decontexualizer
        first cycle may prewarm shared `memory` evidence before L2a
        each cycle runs L1 subconscious
        each cycle runs L2 consciousness + boundary + judgment + social context
-       each cycle runs L2d action initializer
+       each cycle runs L2d semantic action selection
        optional cognition-selected capabilities:
          RAG 2 evidence, web/current evidence, HIL blockers,
          approval blockers, private self-resolution
@@ -178,7 +178,7 @@ It lets the same cognition graph run over several source shapes without asking
 every prompt to rediscover transport details.
 
 Current supported cognition prompt variants are selected by
-`persona_supervisor2_cognition_prompt_selection.py`:
+`cognition_chain_core/prompt_selection.py`:
 
 | Trigger source | Input source | Output modes | Normal use |
 | --- | --- | --- | --- |
@@ -290,7 +290,7 @@ outside the public evidence fields and may appear only in trace/debug surfaces.
 
 ## L1: Subconscious
 
-File: `persona_supervisor2_cognition_l1.py`
+File: `cognition_chain_core/stages/l1.py`
 
 L1 is the fast affective layer. It receives the current stimulus plus the
 character's immediate mood, global vibe, relationship insight for the user,
@@ -348,7 +348,7 @@ L2.
 
 ## L2a: Consciousness
 
-File: `persona_supervisor2_cognition_l2.py`
+File: `cognition_chain_core/stages/l2.py`
 
 L2a is the rational interpretation layer. It reads L1, decontextualized input,
 RAG evidence, user memory context, current commitments, promoted reflection
@@ -438,7 +438,7 @@ question, use the retrieved fact, and respect the requested length.
 
 ## L2b: Boundary Core
 
-File: `persona_supervisor2_cognition_l2.py`
+File: `cognition_chain_core/stages/l2.py`
 
 L2b runs in parallel after L1 and before final judgment. It reads the
 decontextualized input, reason to respond, channel topic, indirect speech
@@ -514,7 +514,7 @@ new answer; it defines the safe envelope for the answer.
 
 ## L2c: Judgment Core
 
-File: `persona_supervisor2_cognition_l2.py`
+File: `cognition_chain_core/stages/l2.py`
 
 L2c merges the Consciousness candidate and Boundary Core assessment. It also
 reads referent-resolution status.
@@ -577,7 +577,7 @@ topic.
 
 ## L2c2: Social Context Appraisal
 
-File: `persona_supervisor2_cognition_l2c2.py`
+File: `cognition_chain_core/stages/l2c2.py`
 
 L2c2 is the social temperature layer. It keeps the existing contextual-agent
 responsibility and output fields, but it now runs before L2d so action
@@ -601,7 +601,7 @@ handlers consume the same fields later for expression packaging.
 
 ## L3: Expression Directives
 
-File: `persona_supervisor2_cognition_l3.py`
+File: `cognition_chain_core/stages/l3.py`
 
 L3 does not change the L2 decision or choose actions. It turns selected
 surface actions into presentation constraints for dialog or future surface
@@ -687,7 +687,7 @@ answer.
 
 ## L4: Collector
 
-File: `persona_supervisor2_cognition_l3.py`
+File: `cognition_chain_core/stages/l3.py`
 
 L4 collects L3 outputs into `action_directives`:
 
@@ -965,7 +965,7 @@ Keep these invariants when changing the node package:
 - L2c2 may shape social-context evidence, but it must not select actions or
   create visible output.
 - L3 may shape expression, but it must not change the L2 decision.
-- L2d is the only action initializer; L2a, L2b, L2c1, and L2c2 must not emit
+- L2d is the only semantic action selection; L2a, L2b, L2c1, and L2c2 must not emit
   action specs.
 - L3 text/image handlers run only for selected surface actions.
 - Dialog renders directives; it must not make policy, memory, or permission

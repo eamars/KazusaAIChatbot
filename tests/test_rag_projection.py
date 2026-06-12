@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 import logging
 
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2 import (
+from kazusa_ai_chatbot.cognition_chain_core.stages.l2 import (
     _cognition_rag_result as _l2_cognition_rag_result,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (
+from kazusa_ai_chatbot.cognition_chain_core.stages.l3 import (
     _cognition_rag_result as _l3_cognition_rag_result,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_projection import project_known_facts

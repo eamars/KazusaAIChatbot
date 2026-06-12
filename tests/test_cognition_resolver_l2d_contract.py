@@ -15,7 +15,10 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_PENDING_RESOLUTION_VERSION,
 )
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as cognition_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2d as l2d_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l1 as l1_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l2 as l2_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l2c2 as l2c2_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l2d as l2d_module
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 
@@ -143,14 +146,14 @@ def _persona_state() -> dict:
 
 
 @pytest.mark.asyncio
-async def test_action_initializer_returns_resolver_request(
+async def test_action_selection_returns_resolver_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """L2d should return resolver requests before terminal action specs."""
 
     fake_llm = _FakeLLM(json.dumps({
         "resolver_capability_requests": [_resolver_request()],
-        "action_requests": [
+        "semantic_action_requests": [
             {
                 "capability": "speak",
                 "decision": "visible_reply",
@@ -159,11 +162,11 @@ async def test_action_initializer_returns_resolver_request(
             }
         ],
     }, ensure_ascii=False))
-    monkeypatch.setattr(l2d_module, "_action_initializer_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
 
-    result = await l2d_module.call_action_initializer(_l2d_state())
+    result = await l2d_module.select_semantic_actions(_l2d_state())
 
-    assert result["action_specs"] == []
+    assert result["semantic_action_requests"] == []
     assert result["resolver_capability_requests"] == [_resolver_request()]
     prompt_payload = fake_llm.messages[1].content
     assert "resolver_state: status=running" in prompt_payload
@@ -214,23 +217,22 @@ async def test_cognition_subgraph_propagates_resolver_requests() -> None:
     async def l2d_agent(state: dict) -> dict:
         assert state["resolver_context"].startswith("resolver_state:")
         return {
-            "action_specs": [],
+            "semantic_action_requests": [],
             "resolver_capability_requests": [_resolver_request()],
             "resolver_pending_resolution": _pending_resolution(),
         }
 
     with (
-        patch.object(cognition_module, "call_cognition_subconscious", l1_agent),
-        patch.object(cognition_module, "call_cognition_consciousness", l2a_agent),
-        patch.object(cognition_module, "call_boundary_core_agent", l2b_agent),
-        patch.object(cognition_module, "call_judgment_core_agent", l2c1_agent),
+        patch.object(l1_module, "call_cognition_subconscious", l1_agent),
+        patch.object(l2_module, "call_cognition_consciousness", l2a_agent),
+        patch.object(l2_module, "call_boundary_core_agent", l2b_agent),
+        patch.object(l2_module, "call_judgment_core_agent", l2c1_agent),
         patch.object(
-            cognition_module,
+            l2c2_module,
             "call_social_context_appraisal",
             l2c2_agent,
-            create=True,
         ),
-        patch.object(cognition_module, "call_action_initializer", l2d_agent),
+        patch.object(l2d_module, "select_semantic_actions", l2d_agent),
     ):
         result = await cognition_module.call_cognition_subgraph(_persona_state())
 

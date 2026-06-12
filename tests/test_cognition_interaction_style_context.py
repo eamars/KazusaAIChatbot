@@ -11,7 +11,7 @@ from kazusa_ai_chatbot.cognition_episode import (
     build_text_chat_cognitive_episode,
 )
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as cognition_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l3 as l3_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as surface_module
 from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
 

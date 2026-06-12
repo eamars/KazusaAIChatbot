@@ -688,7 +688,7 @@ async def test_cognition_subgraph_passes_cognitive_episode_to_nodes(
         }
         return return_value
 
-    async def _capture_action_initializer(
+    async def _capture_action_selection(
         state: dict[str, Any],
     ) -> dict[str, list]:
         """Capture L2d input state and return no selected actions."""
@@ -721,8 +721,8 @@ async def test_cognition_subgraph_passes_cognitive_episode_to_nodes(
     )
     monkeypatch.setattr(
         cognition_module,
-        "call_action_initializer",
-        _capture_action_initializer,
+        "select_semantic_actions",
+        _capture_action_selection,
     )
 
     state = _base_cognition_state()

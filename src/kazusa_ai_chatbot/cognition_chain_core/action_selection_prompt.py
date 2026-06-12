@@ -1,4 +1,4 @@
-"""Prompt contract for route-only action initialization."""
+"""Prompt contract for route-only core action selection."""
 
 from __future__ import annotations
 

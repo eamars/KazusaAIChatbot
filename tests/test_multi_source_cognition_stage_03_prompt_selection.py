@@ -12,19 +12,19 @@ from kazusa_ai_chatbot.cognition_episode import (
     OutputMode,
     build_text_chat_cognitive_episode,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_output_contracts import (
+from kazusa_ai_chatbot.cognition_chain_core.output_contracts import (
     CognitionOutputContractError,
     validate_cognition_output_contract,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_prompt_selection import (
+from kazusa_ai_chatbot.cognition_chain_core.prompt_selection import (
     CognitionPromptSelectionError,
     CognitionPromptStage,
     select_cognition_prompt_variant,
 )
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l1 as l1_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2 as l2_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l2c2 as l2c2_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition_l3 as l3_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l1 as l1_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l2 as l2_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l2c2 as l2c2_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l3 as l3_module
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 
@@ -408,7 +408,7 @@ def test_output_contract_rejects_unknown_stage() -> None:
 def test_output_contract_rejects_action_specs_outside_l2d(
     stage: CognitionPromptStage,
 ) -> None:
-    """L2a and L2c must not become accidental action initializers."""
+    """L2a and L2c must not become accidental semantic action selections."""
 
     payload = dict(_VALID_OUTPUT_PAYLOADS[stage])
     payload["action_specs"] = []

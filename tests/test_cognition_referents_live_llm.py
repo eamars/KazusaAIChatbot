@@ -9,10 +9,10 @@ import httpx
 import pytest
 
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2 import (
+from kazusa_ai_chatbot.cognition_chain_core.stages.l2 import (
     call_judgment_core_agent,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (
+from kazusa_ai_chatbot.cognition_chain_core.stages.l3 import (
     call_content_plan_agent,
 )
 from tests.llm_trace import write_llm_trace

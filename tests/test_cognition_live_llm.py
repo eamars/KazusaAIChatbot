@@ -2,27 +2,59 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+from collections.abc import Callable
 import logging
+from typing import Any
 
 import httpx
 import pytest
 
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l1 import call_cognition_subconscious
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2 import (
+from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
+from kazusa_ai_chatbot.cognition_chain_core.stages.l1 import (
+    call_cognition_subconscious,
+    reset_subconscious_llm,
+    set_subconscious_llm,
+)
+from kazusa_ai_chatbot.cognition_chain_core.stages.l2 import (
     call_boundary_core_agent,
     call_cognition_consciousness,
     call_judgment_core_agent,
+    reset_boundary_core_llm,
+    reset_conscious_llm,
+    reset_judgement_core_llm,
+    set_boundary_core_llm,
+    set_conscious_llm,
+    set_judgement_core_llm,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l3 import (
+from kazusa_ai_chatbot.cognition_chain_core.stages.l3 import (
     call_surface_directive_collector,
     call_content_plan_agent,
     call_preference_adapter,
     call_style_agent,
     call_visual_agent,
+    reset_content_plan_agent_llm,
+    reset_preference_adapter_llm,
+    reset_style_agent_llm,
+    reset_visual_agent_llm,
+    set_content_plan_agent_llm,
+    set_preference_adapter_llm,
+    set_style_agent_llm,
+    set_visual_agent_llm,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_l2c2 import call_social_context_appraisal
+from kazusa_ai_chatbot.cognition_chain_core.stages.l2c2 import (
+    call_social_context_appraisal,
+    reset_contextual_agent_llm,
+    set_contextual_agent_llm,
+)
+from kazusa_ai_chatbot.cognition_chain_core.utils import (
+    reset_json_parser,
+    set_json_parser,
+)
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
+    build_cognition_chain_services,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import call_msg_decontexualizer
 from kazusa_ai_chatbot.utils import load_personality
 from tests.llm_trace import write_llm_trace
@@ -35,6 +67,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 _PERSONALITY_PATH = _ROOT / "personalities" / "kazusa.json"
 _ALLOWED_LOGICAL_STANCES = {"CONFIRM", "REFUSE", "TENTATIVE", "DIVERGE", "CHALLENGE"}
 _ALLOWED_CHARACTER_INTENTS = {"PROVIDE", "BANTAR", "REJECT", "EVADE", "CONFRONT", "DISMISS", "CLARIFY"}
+_ServiceBinding = tuple[Callable[[Any], None], Any]
 
 
 async def _skip_if_llm_unavailable() -> None:
@@ -168,13 +201,20 @@ def _rag_result(
 
 def _build_base_state() -> dict:
     user_input = "Please reply in natural English only. Briefly tell me what you think about rainy days."
+    storage_timestamp_utc = datetime.now(timezone.utc).isoformat()
+    local_time_context = {
+        "current_local_datetime": "2026-06-12 18:54",
+        "current_local_weekday": "Friday",
+    }
     chat_history_recent = [
         {"role": "assistant", "content": "Rain again? You always notice the gloomy weather first."},
         {"role": "user", "content": "Yeah, I do. So what do you think about rainy days?"},
     ]
     return {
         "character_profile": _build_character_profile(),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": storage_timestamp_utc,
+        "storage_timestamp_utc": storage_timestamp_utc,
+        "local_time_context": local_time_context,
         "user_input": user_input,
         "global_user_id": "live-cognition-user",
         "user_name": "LiveCognitionUser",
@@ -190,6 +230,36 @@ def _build_base_state() -> dict:
         "indirect_speech_context": "",
         "channel_topic": "weather talk",
         "decontexualized_input": user_input,
+        "referents": [],
+        "reply_context": {},
+        "prompt_message_context": {},
+        "conversation_progress": {},
+        "promoted_reflection_context": {},
+        "internal_monologue_residue_context": "",
+        "selected_text_surface_intent": "Briefly answer what rainy days feel like.",
+        "memory_lifecycle_context": {
+            "active_commitment_aliases": [],
+            "pending_memory_updates_summary": "",
+            "recent_memory_resolution_summary": "",
+        },
+        "cognitive_episode": build_text_chat_cognitive_episode(
+            episode_id="live-cognition-episode",
+            percept_id="live-cognition-percept",
+            storage_timestamp_utc=storage_timestamp_utc,
+            local_time_context=local_time_context,
+            user_input=user_input,
+            platform="debug",
+            platform_channel_id="live-channel",
+            channel_type="private",
+            platform_message_id="live-message",
+            platform_user_id="live-user",
+            global_user_id="live-cognition-user",
+            user_name="LiveCognitionUser",
+            active_turn_platform_message_ids=["live-message"],
+            active_turn_conversation_row_ids=[],
+            debug_modes={},
+            output_mode="visible_reply",
+        ),
         "rag_result": _rag_result(
             objective_facts="用户曾明确要求若被接受则优先使用自然英语回复。",
             user_image="对方说话直接，但没有越界。",
@@ -203,6 +273,42 @@ def _build_base_state() -> dict:
     }
 
 
+def _bind_live_stage_services() -> list[_ServiceBinding]:
+    """Bind connector-owned live services for direct stage smoke tests."""
+
+    services = build_cognition_chain_services()
+    service_bindings = [
+        (reset_json_parser, set_json_parser(services.parse_json)),
+        (reset_subconscious_llm, set_subconscious_llm(services.cognition_llm)),
+        (reset_conscious_llm, set_conscious_llm(services.cognition_llm)),
+        (reset_boundary_core_llm, set_boundary_core_llm(
+            services.boundary_core_llm,
+        )),
+        (reset_judgement_core_llm, set_judgement_core_llm(
+            services.cognition_llm,
+        )),
+        (reset_contextual_agent_llm, set_contextual_agent_llm(
+            services.cognition_llm,
+        )),
+        (reset_style_agent_llm, set_style_agent_llm(services.style_llm)),
+        (reset_content_plan_agent_llm, set_content_plan_agent_llm(
+            services.content_plan_llm,
+        )),
+        (reset_preference_adapter_llm, set_preference_adapter_llm(
+            services.preference_llm,
+        )),
+        (reset_visual_agent_llm, set_visual_agent_llm(services.visual_llm)),
+    ]
+    return service_bindings
+
+
+def _reset_live_stage_services(service_bindings: list[_ServiceBinding]) -> None:
+    """Restore live service bindings after direct stage smoke tests."""
+
+    for reset_binding, token in reversed(service_bindings):
+        reset_binding(token)
+
+
 async def _run_live_cognition_stack(state: dict) -> dict:
     """Run the full live cognition stack while logging each stage result.
 
@@ -212,47 +318,51 @@ async def _run_live_cognition_stack(state: dict) -> dict:
     Returns:
         The same state dict after being updated with all stage outputs.
     """
-    _debug_snapshot("cognition.input", state)
+    service_bindings = _bind_live_stage_services()
+    try:
+        _debug_snapshot("cognition.input", state)
 
-    l1 = await call_cognition_subconscious(state)
-    _debug_snapshot("cognition.l1", l1)
-    state.update(l1)
+        l1 = await call_cognition_subconscious(state)
+        _debug_snapshot("cognition.l1", l1)
+        state.update(l1)
 
-    l2a = await call_cognition_consciousness(state)
-    _debug_snapshot("cognition.l2a", l2a)
-    state.update(l2a)
+        l2a = await call_cognition_consciousness(state)
+        _debug_snapshot("cognition.l2a", l2a)
+        state.update(l2a)
 
-    l2b = await call_boundary_core_agent(state)
-    _debug_snapshot("cognition.l2b", l2b)
-    state.update(l2b)
+        l2b = await call_boundary_core_agent(state)
+        _debug_snapshot("cognition.l2b", l2b)
+        state.update(l2b)
 
-    l2c = await call_judgment_core_agent(state)
-    _debug_snapshot("cognition.l2c", l2c)
-    state.update(l2c)
+        l2c = await call_judgment_core_agent(state)
+        _debug_snapshot("cognition.l2c", l2c)
+        state.update(l2c)
 
-    l3a = await call_social_context_appraisal(state)
-    _debug_snapshot("cognition.l3a", l3a)
-    state.update(l3a)
+        l3a = await call_social_context_appraisal(state)
+        _debug_snapshot("cognition.l3a", l3a)
+        state.update(l3a)
 
-    l3b = await call_style_agent(state)
-    _debug_snapshot("cognition.l3b", l3b)
-    state.update(l3b)
+        l3b = await call_style_agent(state)
+        _debug_snapshot("cognition.l3b", l3b)
+        state.update(l3b)
 
-    l3b_plan = await call_content_plan_agent(state)
-    _debug_snapshot("cognition.l3b_plan", l3b_plan)
-    state.update(l3b_plan)
+        l3b_plan = await call_content_plan_agent(state)
+        _debug_snapshot("cognition.l3b_plan", l3b_plan)
+        state.update(l3b_plan)
 
-    l3b_pref = await call_preference_adapter(state)
-    _debug_snapshot("cognition.l3b_pref", l3b_pref)
-    state.update(l3b_pref)
+        l3b_pref = await call_preference_adapter(state)
+        _debug_snapshot("cognition.l3b_pref", l3b_pref)
+        state.update(l3b_pref)
 
-    l3c = await call_visual_agent(state)
-    _debug_snapshot("cognition.l3c", l3c)
-    state.update(l3c)
+        l3c = await call_visual_agent(state)
+        _debug_snapshot("cognition.l3c", l3c)
+        state.update(l3c)
 
-    l4 = await call_surface_directive_collector(state)
-    _debug_snapshot("cognition.l4", l4)
-    state.update(l4)
+        l4 = await call_surface_directive_collector(state)
+        _debug_snapshot("cognition.l4", l4)
+        state.update(l4)
+    finally:
+        _reset_live_stage_services(service_bindings)
     return state
 
 
