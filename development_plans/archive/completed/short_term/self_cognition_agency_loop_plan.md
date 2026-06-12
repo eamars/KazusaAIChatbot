@@ -34,9 +34,9 @@ follow-up stage integrates the module into the service runtime behind
 existing dispatcher and scheduler for outward delivery; deleting
 `experiments/*` must not break the module, worker, tests, smoke, or docs.
 
-Reference documents: `development_plans/reference/designs/self_cognition_reasoning_basis.md`,
-`development_plans/reference/designs/self_cognition_tracking_icd.md`, and
-`development_plans/reference/designs/self_cognition_loop_architecture.md`.
+Reference documents: `development_plans/archive/superseded/self_cognition_reasoning_basis.md`,
+`development_plans/archive/superseded/self_cognition_tracking_icd.md`, and
+`development_plans/archive/superseded/self_cognition_loop_architecture.md`.
 The reasoning basis holds research and examples; this plan is the execution
 contract.
 
@@ -542,7 +542,7 @@ state.
 - `tests/test_self_cognition_framing.py`
   - Keep or update framing tests so the source packet does not bias toward
     passive waiting.
-- `development_plans/reference/designs/self_cognition_tracking_icd.md`
+- `development_plans/archive/superseded/self_cognition_tracking_icd.md`
   - Convert it to a pointer or transition note after the module README owns
     the canonical ICD.
 
@@ -597,9 +597,9 @@ Exact tests:
 - `experiments/**`
   - Do not read, import, modify, or depend on this tree. It is planned for
     removal after this plan.
-- `development_plans/reference/designs/self_cognition_reasoning_basis.md`
+- `development_plans/archive/superseded/self_cognition_reasoning_basis.md`
   - Reference only unless execution discovers a factual correction.
-- `development_plans/reference/designs/self_cognition_loop_architecture.md`
+- `development_plans/archive/superseded/self_cognition_loop_architecture.md`
   - Historical reference only.
 
 ## Implementation Order
@@ -658,7 +658,7 @@ Exact tests:
    - Stop and report artifacts before any future workflow-integration plan.
 12. Move the canonical ICD content into
     `src/kazusa_ai_chatbot/self_cognition/README.md`.
-13. Update `development_plans/reference/designs/self_cognition_tracking_icd.md`
+13. Update `development_plans/archive/superseded/self_cognition_tracking_icd.md`
     so it points to the module README as canonical.
 14. Remove old artifact-name references from production module code, tests,
     script, and docs.
@@ -731,8 +731,8 @@ Exact tests:
 
 - [x] Stage 4 - Documentation and ICD relocation rule updated
   - Covers steps 12-14. Files: `src/kazusa_ai_chatbot/self_cognition/README.md`,
-    `development_plans/reference/designs/self_cognition_tracking_icd.md`.
-  - Verify: `rg -n "canonical ICD|SC-TRACKING-ICD-001|kazusa_ai_chatbot.self_cognition" src/kazusa_ai_chatbot/self_cognition/README.md development_plans/reference/designs/self_cognition_tracking_icd.md`.
+    `development_plans/archive/superseded/self_cognition_tracking_icd.md`.
+  - Verify: `rg -n "canonical ICD|SC-TRACKING-ICD-001|kazusa_ai_chatbot.self_cognition" src/kazusa_ai_chatbot/self_cognition/README.md development_plans/archive/superseded/self_cognition_tracking_icd.md`.
   - Verify: `rg -n "self_cognition_consolidation_candidate" src/kazusa_ai_chatbot/self_cognition src/scripts tests` returns no matches; exit code 1 is acceptable.
   - Verify: `rg -n "experiments" src/kazusa_ai_chatbot/self_cognition src/scripts tests/test_self_cognition*.py` returns no matches; exit code 1 is acceptable.
   - Evidence/sign-off: record grep output and doc paths.
@@ -791,7 +791,7 @@ Exact tests:
     dry-run CLI, handoff, worker, adapters, scheduler, and consolidation paths
     must not consume `final_dialog`.
 - Command:
-  `rg -n "canonical ICD|SC-TRACKING-ICD-001|kazusa_ai_chatbot.self_cognition" src/kazusa_ai_chatbot/self_cognition/README.md development_plans/reference/designs/self_cognition_tracking_icd.md`
+  `rg -n "canonical ICD|SC-TRACKING-ICD-001|kazusa_ai_chatbot.self_cognition" src/kazusa_ai_chatbot/self_cognition/README.md development_plans/archive/superseded/self_cognition_tracking_icd.md`
   - Expected: matches proving the module README owns the canonical ICD and the
     reference document points to it.
 - Command:
@@ -976,7 +976,7 @@ Record evidence here during implementation.
 - Stage 1 contract test baseline: 2026-05-13 ran `venv\Scripts\python -m pytest tests/test_config.py tests/test_self_cognition_framing.py tests/test_self_cognition_tracking.py tests/test_self_cognition_dry_run_cli.py -q`; exit code 1 during collection because `kazusa_ai_chatbot.self_cognition` does not exist yet. This is the expected pre-implementation failure surface for the new module.
 - Stage 2 tracking implementation tests: implemented `src/kazusa_ai_chatbot/self_cognition/`, `src/scripts/run_self_cognition_dry_run.py`, minimal `SELF_COGNITION_*` config, and focused tests. Initial post-implementation run passed `venv\Scripts\python -m pytest tests/test_config.py tests/test_self_cognition_framing.py tests/test_self_cognition_tracking.py tests/test_self_cognition_dry_run_cli.py -q` with 51 passed. After review fixes, focused runs passed: config 35 passed, framing 1 passed, tracking/CLI 17 passed. After the follow-up repeat-suppression fix, the combined focused command passed 55 tests.
 - Stage 3 real-data dry-run pause: exported real data into `test_artifacts/self_cognition_cases/exports/` and created case files `commitment_past_due_real_673225019.json`, `commitment_past_due_real_673225019_due_missed.json`, and `private_no_action_real_673225019.json`. Ran real dry-run outputs under `test_artifacts/self_cognition_dry_run/commitment_past_due_real_673225019_rerun/`, `test_artifacts/self_cognition_dry_run/private_no_action_real_673225019/`, `test_artifacts/self_cognition_dry_run/commitment_past_due_real_673225019_due_missed/`, and `test_artifacts/self_cognition_dry_run/commitment_past_due_real_673225019_due_missed_rerun/`. Verified the real promise and no-action reruns wrote local artifacts only; both final verified route effects were `audit_only` with `production_write=false`. One intermediate due-missed run produced outward-contact cognition anchors, which exposed the need for route classification to honor existing cognition intent/stance; that fix is implemented and covered by deterministic tests. User accepted the quality on 2026-05-13 and approved continuing into runtime integration.
-- Stage 4 documentation and ICD grep: moved canonical ICD content into `src/kazusa_ai_chatbot/self_cognition/README.md` and changed `development_plans/reference/designs/self_cognition_tracking_icd.md` into a pointer. `rg -n "canonical ICD|SC-TRACKING-ICD-001|kazusa_ai_chatbot.self_cognition" src/kazusa_ai_chatbot/self_cognition/README.md development_plans/reference/designs/self_cognition_tracking_icd.md` returned the expected module README and pointer matches.
+- Stage 4 documentation and ICD grep: moved canonical ICD content into `src/kazusa_ai_chatbot/self_cognition/README.md` and changed `development_plans/archive/superseded/self_cognition_tracking_icd.md` into a pointer. `rg -n "canonical ICD|SC-TRACKING-ICD-001|kazusa_ai_chatbot.self_cognition" src/kazusa_ai_chatbot/self_cognition/README.md development_plans/archive/superseded/self_cognition_tracking_icd.md` returned the expected module README and pointer matches.
 - Stage 5 verification commands: `venv\Scripts\python -m pytest tests/test_config.py -q` passed 35; `venv\Scripts\python -m pytest tests/test_self_cognition_framing.py -q` passed 1; `venv\Scripts\python -m pytest tests/test_self_cognition_tracking.py tests/test_self_cognition_dry_run_cli.py -q` passed 17 before the follow-up repeat-suppression fix. After that fix, `venv\Scripts\python -m pytest tests/test_config.py tests/test_self_cognition_framing.py tests/test_self_cognition_tracking.py tests/test_self_cognition_dry_run_cli.py -q` passed 55. Static greps for production writes/sends, normal user-message consolidation path, `experiments`, and obsolete artifact names returned no matches; the ICD grep returned expected matches.
 - Dry-run smoke status: real-data smoke was run one case at a time. The initial source packet was too technical and biased the model toward treating the input as system noise; framing was changed to a character-facing idle self-check and rerun. Final verified real-data runs selected `audit_only`/silence; this is recorded as behavioral observation, not a deterministic failure.
 - Stage 7 runtime integration: added opt-in service worker wiring behind

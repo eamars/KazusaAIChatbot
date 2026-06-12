@@ -8,9 +8,9 @@
   item below into `active/short_term/` or `active/bugfix/` before production
   work.
 - Related references:
-  - `development_plans/reference/designs/self_cognition_loop_architecture.md`
-  - `development_plans/reference/designs/self_cognition_reasoning_basis.md`
-  - `development_plans/reference/designs/self_cognition_tracking_icd.md`
+  - `development_plans/archive/superseded/self_cognition_loop_architecture.md`
+  - `development_plans/archive/superseded/self_cognition_reasoning_basis.md`
+  - `development_plans/archive/superseded/self_cognition_tracking_icd.md`
   - `development_plans/archive/completed/short_term/multi_source_cognition_architecture_plan.md`
   - `development_plans/archive/completed/short_term/global_character_growth_from_reflection_plan.md`
 - Scope: review the current character growth and cognition-core architecture

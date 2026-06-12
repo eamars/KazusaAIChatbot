@@ -533,9 +533,9 @@ Delivery target metadata is deterministic runtime data. It must never be project
 - `src/kazusa_ai_chatbot/self_cognition/README.md`: rewrite as canonical speak-means-delivery architecture.
 - `development_plans/reference/designs/cognition_contracts_design.md`: add selected self-cognition speech to the shared cognition/dialog/persistence/adapter contract.
 - `src/kazusa_ai_chatbot/proactive_output/README.md`: add scope note that this test transport does not govern selected self-cognition speech.
-- `development_plans/reference/designs/self_cognition_tracking_icd.md`: add superseded banner.
-- `development_plans/reference/designs/self_cognition_reasoning_basis.md`: add superseded banner for private-candidate/no-production-delivery claims.
-- `development_plans/reference/designs/self_cognition_loop_architecture.md`: add superseded banner for no-send/private-candidate production statements.
+- `development_plans/archive/superseded/self_cognition_tracking_icd.md`: add superseded banner.
+- `development_plans/archive/superseded/self_cognition_reasoning_basis.md`: add superseded banner for private-candidate/no-production-delivery claims.
+- `development_plans/archive/superseded/self_cognition_loop_architecture.md`: add superseded banner for no-send/private-candidate production statements.
 - `development_plans/reference/designs/cognition_core_evolution_progression.md`: update the specific self-cognition decommission statements that say production delivery was removed from this path.
 
 Do not edit archived completed plans. Do not edit `development_plans/reference/designs/action_spec_effector_expansion_architecture.md`; its delayed-contact language remains valid because it concerns prewritten delayed sends, not immediate selected self-cognition speech.

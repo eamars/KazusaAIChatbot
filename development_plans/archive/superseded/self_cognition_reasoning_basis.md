@@ -16,7 +16,7 @@
 - Related execution plan:
   `development_plans/archive/completed/short_term/self_cognition_agency_loop_plan.md`
 - Related ICD:
-  `development_plans/reference/designs/self_cognition_tracking_icd.md`
+  `development_plans/archive/superseded/self_cognition_tracking_icd.md`
 - Purpose: collect rationale, online research, code observations, and
   experiment results that justify the execution plan.
 - Execution rule: this document is not an implementation contract. Use the

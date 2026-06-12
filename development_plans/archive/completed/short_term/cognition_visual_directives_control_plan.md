@@ -42,7 +42,7 @@ inspection output.
 
 The self-cognition direction is represented by
 `development_plans/archive/completed/short_term/self_cognition_agency_loop_plan.md` and
-`development_plans/reference/designs/self_cognition_loop_architecture.md`.
+`development_plans/archive/superseded/self_cognition_loop_architecture.md`.
 Those documents are context only. The relevant current production-ish entry
 point is `src/kazusa_ai_chatbot/internal_thought_cognition.py`, which already
 builds internal-thought `CognitiveEpisode` objects and calls the shared

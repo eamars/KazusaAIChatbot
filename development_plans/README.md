@@ -62,9 +62,6 @@ long_term/todo.md
 | [kazusa_parallel_cognition_architecture.md](reference/designs/kazusa_parallel_cognition_architecture.md) | Architecture reference |
 | [rag_cache2_design.md](reference/designs/rag_cache2_design.md) | Design reference |
 | [rag_hybrid_search_architecture_decision.md](reference/designs/rag_hybrid_search_architecture_decision.md) | Design reference |
-| [self_cognition_loop_architecture.md](reference/designs/self_cognition_loop_architecture.md) | Architecture reference |
-| [self_cognition_reasoning_basis.md](reference/designs/self_cognition_reasoning_basis.md) | Reasoning basis |
-| [self_cognition_tracking_icd.md](reference/designs/self_cognition_tracking_icd.md) | Interface control document |
 | [cognition_prompt_chain_side_by_side_comparison_20260519.md](reference/evidence/cognition_prompt_chain_side_by_side_comparison_20260519.md) | Supporting evidence |
 | [cognition_prompt_chain_previous20_equivalence_check_20260519.md](reference/evidence/cognition_prompt_chain_previous20_equivalence_check_20260519.md) | Supporting evidence |
 | [cognition_prompt_chain_previous20_input_output_20260519.md](reference/evidence/cognition_prompt_chain_previous20_input_output_20260519.md) | Supporting evidence |
@@ -243,5 +240,8 @@ plans.
 | [cognition_preserving_goal_resolver_production_plan.md](archive/superseded/cognition_preserving_goal_resolver_production_plan.md) |
 | [graph_rag_recall_experiment_plan.md](archive/superseded/graph_rag_recall_experiment_plan.md) |
 | [goal_resolver_poc_plan.md](archive/superseded/goal_resolver_poc_plan.md) |
+| [self_cognition_loop_architecture.md](archive/superseded/self_cognition_loop_architecture.md) |
+| [self_cognition_reasoning_basis.md](archive/superseded/self_cognition_reasoning_basis.md) |
+| [self_cognition_tracking_icd.md](archive/superseded/self_cognition_tracking_icd.md) |
 | [rag_supervisor2_inner_loop_agents_plan.md](archive/superseded/rag_supervisor2_inner_loop_agents_plan.md) |
 | [short_circuit_early_stop_plan.md](archive/superseded/short_circuit_early_stop_plan.md) |
