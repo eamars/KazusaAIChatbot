@@ -51,7 +51,6 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
-| [self_cognition_group_digest_context_evidence_bugfix_plan.md](active/bugfix/self_cognition_group_digest_context_evidence_bugfix_plan.md) | Large self-cognition group digest and evidence bugfix plan | in_progress |
 
 ## Reference Documents
 
@@ -134,6 +133,7 @@ plans.
 | [reflection_global_promotion_replay_bugfix_plan.md](archive/completed/bugfix/reflection_global_promotion_replay_bugfix_plan.md) |
 | [resolver_image_only_empty_input_bugfix_plan.md](archive/completed/bugfix/resolver_image_only_empty_input_bugfix_plan.md) |
 | [self_cognition_background_context_budget_bugfix_plan.md](archive/completed/bugfix/self_cognition_background_context_budget_bugfix_plan.md) |
+| [self_cognition_group_digest_context_evidence_bugfix_plan.md](archive/completed/bugfix/self_cognition_group_digest_context_evidence_bugfix_plan.md) |
 | [self_cognition_character_global_id_config_bugfix_plan.md](archive/completed/bugfix/self_cognition_character_global_id_config_bugfix_plan.md) |
 | [self_cognition_dialog_state_contract_bugfix_plan.md](archive/completed/bugfix/self_cognition_dialog_state_contract_bugfix_plan.md) |
 | [self_cognition_group_speak_selection_bugfix_plan.md](archive/completed/bugfix/self_cognition_group_speak_selection_bugfix_plan.md) |
