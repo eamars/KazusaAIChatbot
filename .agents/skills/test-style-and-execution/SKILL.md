@@ -69,6 +69,33 @@ Real LLM tests should be loose by default. They are diagnostic and qualitative, 
 
 The pass criteria includes the agent's judgment, not only pytest status. After inspecting the logs, decide whether the behavior is acceptable for the contract under test. A test can have passing assertions while still needing attention if the model output is confused, brittle, off-contract, or only accidentally correct.
 
+Design pass criteria from the runtime contract and user-visible behavior, not
+from the current prompt text. A real LLM test should survive reasonable prompt
+rewrites and model-route changes when the underlying behavior remains correct.
+Do not assert that response text contains words or phrases merely because the
+prompt contains them.
+
+Use this hierarchy:
+
+1. **Harness gates** prove only that the test ran:
+   no exception, non-empty response, parseable structured output, required
+   top-level fields, and a durable trace artifact. These are necessary but not
+   sufficient for quality acceptance.
+2. **Contract gates** are legitimate hard assertions:
+   closed-vocabulary route/status/decision values, schema shape, required
+   source-grounded literals, refusal or unsupported markers for unsupported
+   cases, and absence of privacy leaks, raw ids, unauthorized facts, or
+   unavailable-action claims.
+3. **Behavioral criteria** judge whether the model did the job:
+   task completion, groundedness, context use, character judgment, tone,
+   clarification quality, and conversation continuity. Prefer manual review,
+   rubric notes, or calibrated LLM-as-judge for these instead of exact string
+   checks.
+4. **Regression criteria** may be stricter only when the risk is named:
+   privacy leakage, unsafe acceptance, wrong owner/target, wrong route for an
+   unambiguous classifier case, or loss of a required literal supplied by the
+   input.
+
 Good basic assertions:
 
 - No exception is raised.
@@ -78,6 +105,12 @@ Good basic assertions:
 - The selected route, status, or decision is one of the allowed values.
 - The model does not refuse an answerable case.
 - The model does refuse or mark unsupported cases when that is the expected contract.
+- Required user- or evidence-supplied literals survive when the contract
+  requires exact preservation, such as a date, id, quote, person name, URL, or
+  code symbol.
+- Forbidden leakage is absent, such as raw platform ids, private memory,
+  hidden prompt scaffolding, unsupported facts, or claims that unavailable
+  tools/actions were executed.
 
 Avoid by default:
 
@@ -85,8 +118,51 @@ Avoid by default:
 - Full JSON equality unless testing a deterministic wrapper.
 - Over-checking every inferred field.
 - Assertions that make harmless wording or ordering changes fail the test.
+- Keyword assertions tied to prompt wording rather than the user-visible
+  contract.
+- Exact counts or decomposition choices for generated content unless the
+  contract requires them.
+- Exact internal route, tool, or stage sequence when several paths can validly
+  satisfy the task.
+- Treating `trace_path.exists()` or schema validity as proof that the live LLM
+  behavior is acceptable.
 
 If the user asks for stricter quality gates, add them deliberately and explain what risk they guard.
+
+### Pass Criteria Template
+
+Before adding or tightening a real LLM test, write the intended criteria in or
+near the test fixture:
+
+```text
+case_id:
+component:
+behavior_contract:
+input_kind: synthetic | captured_failure | production_trace
+hard_gates:
+  - schema, parse, enum, safety, grounding, or literal-preservation checks
+behavior_rubric:
+  - pass/fail or 0/1/2 criteria grounded in the task, not the prompt wording
+acceptable_variation:
+  - allowed paraphrases, order changes, route alternatives, or style shifts
+forbidden_failure_modes:
+  - hallucination, privacy leak, wrong target, unsupported action, stale topic
+trace_required:
+  - input, model config, prompt version, raw output, parsed output, notes
+```
+
+Hard assertions should come from `hard_gates` and
+`forbidden_failure_modes`. The `behavior_rubric` belongs in the trace,
+manual-inspection notes, or a calibrated judge unless it can be checked without
+binding the test to one wording.
+
+When a keyword assertion seems necessary, ask what owns the keyword:
+
+- If the input, source evidence, schema, or product contract owns it, assertion
+  can be valid.
+- If only the current prompt owns it, do not assert it.
+- If it is one acceptable paraphrase among many, use a rubric or broader
+  semantic check instead.
 
 ## Required Logs For Real LLM Tests
 
