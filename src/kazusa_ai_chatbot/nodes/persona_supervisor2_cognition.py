@@ -629,13 +629,14 @@ def _model_visible_percepts_from_episode(value: object) -> list[dict[str, object
     for index, percept in enumerate(value, start=1):
         if not isinstance(percept, Mapping):
             continue
+        input_source = _text(percept.get("input_source"))
         content = _text(percept.get("content"))
-        if not content:
+        if not content and input_source != "dialog_text":
             continue
         percepts.append({
             "percept_id": _text(percept.get("percept_id"))
             or f"episode_percept_{index}",
-            "input_source": _text(percept.get("input_source")),
+            "input_source": input_source,
             "content": content,
             "metadata_summary": _metadata_summary(percept.get("metadata")),
         })

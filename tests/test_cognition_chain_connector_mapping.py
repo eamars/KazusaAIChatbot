@@ -174,6 +174,79 @@ def test_persona_connector_projects_media_observations_to_chain_input() -> None:
     assert "example.invalid" not in rendered
 
 
+def test_persona_connector_preserves_empty_dialog_text_for_image_only_prompt_selection() -> None:
+    from kazusa_ai_chatbot.cognition_chain_core.episode_projection import (
+        build_prompt_selection_episode,
+    )
+    from kazusa_ai_chatbot.cognition_chain_core.prompt_selection import (
+        select_cognition_prompt_variant,
+    )
+    from kazusa_ai_chatbot.cognition_episode import (
+        build_text_chat_cognitive_episode,
+    )
+    from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
+        build_cognition_chain_input_from_global_state,
+    )
+    from kazusa_ai_chatbot.time_boundary import build_turn_clock
+
+    image_summary = "一张浅绿色头发角色头像。"
+    turn_clock = build_turn_clock("2026-06-14 23:00:19")
+    state = _global_state()
+    state["storage_timestamp_utc"] = turn_clock["storage_timestamp_utc"]
+    state["local_time_context"] = turn_clock["local_time_context"]
+    state["user_input"] = ""
+    state["decontexualized_input"] = ""
+    state["prompt_message_context"] = {
+        "body_text": "",
+        "mentions": [],
+        "attachments": [{
+            "media_type": "image/png",
+            "description": image_summary,
+        }],
+        "addressed_to_global_user_ids": ["character-1"],
+        "broadcast": False,
+    }
+    state["cognitive_episode"] = build_text_chat_cognitive_episode(
+        episode_id="image-only-empty-dialog-episode",
+        percept_id="image-only-empty-dialog-percept",
+        storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
+        local_time_context=turn_clock["local_time_context"],
+        user_input="",
+        platform="debug",
+        platform_channel_id="channel-1",
+        channel_type="private",
+        platform_message_id="message-image-only",
+        platform_user_id="platform-user-1",
+        global_user_id="user-1",
+        user_name="User",
+        target_addressed_user_ids=["character-1"],
+        target_broadcast=False,
+        media_description_rows=[{
+            "content_type": "image/png",
+            "description": image_summary,
+        }],
+    )
+
+    chain_input = build_cognition_chain_input_from_global_state(state)
+    prompt_episode = build_prompt_selection_episode(chain_input)
+    selection = select_cognition_prompt_variant(
+        episode=prompt_episode,
+        stage="l1_subconscious",
+    )
+
+    percepts = chain_input["episode"]["model_visible_percepts"]
+    assert [percept["input_source"] for percept in percepts] == [
+        "dialog_text",
+        "image_observation",
+    ]
+    assert percepts[0]["content"] == ""
+    assert prompt_episode["input_sources"] == [
+        "dialog_text",
+        "image_observation",
+    ]
+    assert selection["variant"] == "text_chat_user_message_image_observation"
+
+
 def test_persona_connector_preserves_self_cognition_source_for_prompt_selection() -> None:
     from kazusa_ai_chatbot.cognition_chain_core.episode_projection import (
         build_prompt_selection_episode,
