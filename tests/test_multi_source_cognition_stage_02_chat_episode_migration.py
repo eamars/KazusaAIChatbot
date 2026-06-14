@@ -13,6 +13,10 @@ from kazusa_ai_chatbot import service as service_module
 from kazusa_ai_chatbot.chat_input_queue import QueuedChatItem
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as supervisor_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l1 as l1_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l2 as l2_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l2c2 as l2c2_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l2d as l2d_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as cognition_module
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
@@ -700,40 +704,54 @@ async def test_cognition_subgraph_passes_cognitive_episode_to_nodes(
         return return_value
 
     monkeypatch.setattr(
-        cognition_module,
+        l1_module,
         "call_cognition_subconscious",
         _capture_subconscious,
     )
     monkeypatch.setattr(
-        cognition_module,
+        l2_module,
         "call_cognition_consciousness",
         _capture_consciousness,
     )
     monkeypatch.setattr(
-        cognition_module,
+        l2_module,
         "call_boundary_core_agent",
         _capture_boundary,
     )
     monkeypatch.setattr(
-        cognition_module,
+        l2_module,
         "call_judgment_core_agent",
         _capture_judgment,
     )
     monkeypatch.setattr(
-        cognition_module,
+        l2d_module,
         "select_semantic_actions",
         _capture_action_selection,
     )
 
+    async def _fake_social_context(state: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "social_distance": "neutral",
+            "emotional_intensity": "calm",
+            "vibe_check": "daily",
+            "relational_dynamic": "stable",
+        }
+
+    monkeypatch.setattr(
+        l2c2_module,
+        "call_social_context_appraisal",
+        _fake_social_context,
+    )
+
     state = _base_cognition_state()
-    episode = state["cognitive_episode"]
     result = await cognition_module.call_cognition_subgraph(state)
 
-    assert captured["l1"]["cognitive_episode"] == episode
-    assert captured["l2a"]["cognitive_episode"] == episode
-    assert captured["l2b"]["cognitive_episode"] == episode
-    assert captured["l2c"]["cognitive_episode"] == episode
-    assert captured["l2d"]["cognitive_episode"] == episode
+    chain_episode = captured["l1"]["cognitive_episode"]
+    assert chain_episode["episode_id"] == state["cognitive_episode"]["episode_id"]
+    assert captured["l2a"]["cognitive_episode"] == chain_episode
+    assert captured["l2b"]["cognitive_episode"] == chain_episode
+    assert captured["l2c"]["cognitive_episode"] == chain_episode
+    assert captured["l2d"]["cognitive_episode"] == chain_episode
     assert result["internal_monologue"] == "answer"
     assert result["logical_stance"] == "CONFIRM"
     assert result["action_specs"] == []

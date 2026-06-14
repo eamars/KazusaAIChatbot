@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from kazusa_ai_chatbot.rag.prompt_projection import (
+    project_conversation_tool_result_for_llm,
     project_selector_input_for_llm,
     project_runtime_context_for_llm,
     project_tool_result_for_llm,
@@ -368,6 +369,54 @@ def test_tool_result_strips_conversation_row_id_from_nested_payloads() -> None:
     _assert_absent_key(projected, "conversation_row_id")
 
 
+def test_conversation_tool_result_projects_content_text_rows() -> None:
+    """Conversation worker judge payloads should not leak content-backed rows."""
+    result = [
+        {
+            "role": "user",
+            "display_name": "Tester",
+            "content": "content fallback text",
+            "timestamp": "2026-05-02T22:00:00+00:00",
+            "platform_message_id": "msg-1",
+        },
+        {
+            "role": "user",
+            "display_name": "Tester",
+            "text": "text fallback text",
+            "timestamp": "2026-05-02T22:01:00+00:00",
+            "platform_message_id": "msg-2",
+        },
+    ]
+
+    projected = project_conversation_tool_result_for_llm(result)
+
+    assert projected == [
+        "[2026-05-03 10:00] Tester: content fallback text",
+        "[2026-05-03 10:01] Tester: text fallback text",
+    ]
+    assert "platform_message_id" not in str(projected)
+
+
+def test_conversation_tool_result_projects_rows_without_role() -> None:
+    """Conversation worker judge payloads should not require role metadata."""
+    result = [
+        {
+            "display_name": "Tester",
+            "body_text": "body text without role",
+            "timestamp": "2026-05-02T22:00:00+00:00",
+            "platform_message_id": "msg-1",
+        }
+    ]
+
+    projected = project_conversation_tool_result_for_llm(result)
+
+    assert projected == [
+        "[2026-05-03 10:00] Tester: body text without role",
+    ]
+    assert "body_text" not in str(projected)
+    assert "platform_message_id" not in str(projected)
+
+
 def test_tool_result_strips_mongo_id_from_nested_payloads() -> None:
     """Raw Mongo IDs must not break prompt JSON serialization."""
     result = {
@@ -580,9 +629,9 @@ def test_compact_memory_unit_rows_timestamps_are_local() -> None:
 
 
 def test_message_row_text_uses_local_timestamp() -> None:
-    """_message_row_text should render timestamps in local format."""
-    from kazusa_ai_chatbot.rag.conversation_evidence.projection import (
-        _message_row_text,
+    """Central transcript projection should render timestamps in local format."""
+    from kazusa_ai_chatbot.conversation_history_prompt_projection import (
+        project_conversation_history_for_llm,
     )
 
     row = {
@@ -590,8 +639,9 @@ def test_message_row_text_uses_local_timestamp() -> None:
         "body_text": "hello",
         "timestamp": "2026-05-02T22:00:00+00:00",
     }
-    text = _message_row_text(row)
-    _assert_no_utc_leak(text, "$._message_row_text")
+    lines = project_conversation_history_for_llm([row])
+    text = lines[0]
+    _assert_no_utc_leak(text, "$.project_conversation_history_for_llm")
     assert "2026-05-03 10:00" in text
 
 
@@ -646,8 +696,11 @@ def test_cognition_helpers_project_rag_and_history_times() -> None:
     _assert_no_utc_leak(l2._cognition_rag_result(rag_result), "$.l2.rag")
     _assert_no_utc_leak(l3._current_user_rag_bundle(state), "$.l3.user_bundle")
     _assert_no_utc_leak(l3._cognition_rag_result(rag_result), "$.l3.rag")
+    from kazusa_ai_chatbot.conversation_history_prompt_projection import (
+        project_conversation_history_for_llm,
+    )
     _assert_no_utc_leak(
-        l2c2._surface_history_for_social_context(chat_history),
+        project_conversation_history_for_llm(chat_history),
         "$.l2c2.social_context_history",
     )
 

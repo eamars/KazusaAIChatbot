@@ -19,6 +19,7 @@ def test_group_scene_digest_payload_preserves_names_and_orders_rows() -> None:
     """Digest input should preserve visible names without exposing raw ids."""
 
     window = _duplicate_answer_window()
+    window.digest_participant_rows[1].pop("display_name", None)
 
     payload = group_scene_digest.build_group_scene_digest_prompt_payload(
         window,
@@ -30,22 +31,11 @@ def test_group_scene_digest_payload_preserves_names_and_orders_rows() -> None:
         "message_count": 3,
     }
     assert payload["activity_labels"]["assistant_presence"] == "present"
-    assert [
-        row["display_name"]
-        for row in payload["message_rows"]
-    ] == [
-        "user",
-        "assistant",
-        "user",
-    ]
-    assert [
-        row["content_activity"]
-        for row in payload["message_rows"]
-    ] == [
-        "text",
-        "text",
-        "empty_or_media_only",
-    ]
+    lines = payload["message_lines"]
+    assert len(lines) == 3
+    assert "user:" in lines[0]
+    assert "当前角色:" in lines[1]
+    assert "user:" in lines[2]
 
     payload_text = str(payload)
     assert "user-1" not in payload_text
@@ -65,12 +55,12 @@ def test_group_scene_digest_payload_preserves_display_names_for_cognition() -> N
         window,
     )
 
-    message_rows = payload["message_rows"]
+    message_lines = payload["message_lines"]
     rendered_payload = str(payload)
 
     assert [
-        row["display_name"]
-        for row in message_rows
+        line.split("] ")[1].split(":")[0] if "] " in line else line.split(":")[0]
+        for line in message_lines
     ] == [
         "蚝爹油",
         "杏山千纱",
@@ -90,10 +80,7 @@ def test_group_scene_digest_payload_truncates_oldest_rows_not_latest() -> None:
         window,
     )
 
-    visible_text = "\n".join(
-        row["text"]
-        for row in payload["message_rows"]
-    )
+    visible_text = "\n".join(payload["message_lines"])
 
     assert "old noisy row 01" not in visible_text
     assert "old noisy row 02" not in visible_text
@@ -180,7 +167,7 @@ def test_group_scene_digest_payload_uses_wide_digest_rows() -> None:
         row["body_text"]
         for row in selected_window.visible_context
     )
-    digest_text = "\n".join(row["text"] for row in payload["message_rows"])
+    digest_text = "\n".join(payload["message_lines"])
 
     assert "温格高艾菲波加查说刚才爬山没力气" not in visible_window_text
     assert "温格高艾菲波加查说刚才爬山没力气" in digest_text
@@ -199,9 +186,9 @@ def test_group_scene_digest_prompt_contract_is_first_person_only() -> None:
     assert "第一人称" in rendered
     assert "digest" in rendered
     assert "summary" in rendered
-    assert "display_name" in rendered
+    assert "说话人" in rendered
     assert '# 生成步骤' in rendered
-    assert 'assistant 行的 text 当作原文引用' in rendered
+    assert '当前角色自己的行当作原文引用' in rendered
     assert '引用里的 `你`、`我`、称呼和语气词保持原样' in rendered
     assert '先看 activity_labels.assistant_presence' in rendered
     assert 'assistant_presence="present"' in rendered

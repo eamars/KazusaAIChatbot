@@ -425,7 +425,7 @@ async def test_conversation_evidence_marks_partial_multi_target_result_unresolve
                 (
                     0.91,
                     {
-                        "body_text": "Speaker: Model Alpha was quoted at 1200.",
+                        "body_text": "Model Alpha was quoted at 1200.",
                         "display_name": "Speaker",
                         "platform": "qq",
                         "platform_channel_id": "chan-1",
@@ -794,13 +794,13 @@ async def test_conversation_evidence_matches_cjk_target_spacing_variants() -> No
             "resolved": True,
             "result": [
                 {
-                    "body_text": "Nyan: 闪铸的c5那边多少钱",
+                    "body_text": "闪铸的c5那边多少钱",
                     "display_name": "Nyan",
                     "platform": "qq",
                     "platform_channel_id": "905393941",
                 },
                 {
-                    "body_text": "蚝爹油: @Nyan 1800\nreply: 闪铸的c5那边多少钱",
+                    "body_text": "@Nyan 1800\nreply: 闪铸的c5那边多少钱",
                     "display_name": "蚝爹油",
                     "platform": "qq",
                     "platform_channel_id": "905393941",
@@ -837,13 +837,13 @@ async def test_conversation_price_evidence_requires_value_per_target() -> None:
             "resolved": True,
             "result": [
                 {
-                    "body_text": "Nyan: 闪铸的c5那边多少钱",
+                    "body_text": "闪铸的c5那边多少钱",
                     "display_name": "Nyan",
                     "platform": "qq",
                     "platform_channel_id": "905393941",
                 },
                 {
-                    "body_text": "蚝爹油: X2D 是 $649 起",
+                    "body_text": "X2D 是 $649 起",
                     "display_name": "蚝爹油",
                     "platform": "qq",
                     "platform_channel_id": "905393941",
@@ -883,7 +883,7 @@ async def test_conversation_continuation_carries_value_intent() -> None:
             "resolved": True,
             "result": [
                 {
-                    "body_text": "Nyan: 闪铸的c5那边多少钱",
+                    "body_text": "闪铸的c5那边多少钱",
                     "display_name": "Nyan",
                     "platform": "qq",
                     "platform_channel_id": "905393941",
@@ -1165,10 +1165,10 @@ async def test_conversation_evidence_exact_phrase_uses_hybrid_search_and_refs() 
     payload = result["result"]
     assert payload["primary_worker"] == "conversation_search_agent"
     assert payload["projection_payload"]["summaries"] == [
-        "Tester at 2026-05-02 11:00: 约定就是约定, and here is https://example.test/post"
+        "[2026-05-02 11:00] Tester: 约定就是约定, and here is https://example.test/post"
     ]
     assert payload["projection_payload"]["rows"][0]["summary"] == (
-        "Tester at 2026-05-02 11:00: "
+        "[2026-05-02 11:00] Tester: "
         "约定就是约定, and here is https://example.test/post"
     )
     assert {
@@ -1188,6 +1188,48 @@ async def test_conversation_evidence_exact_phrase_uses_hybrid_search_and_refs() 
         "ref_type": "url",
         "role": "posted_url",
         "url": "https://example.test/post",
+    } in payload["resolved_refs"]
+
+
+@pytest.mark.asyncio
+async def test_conversation_evidence_url_refs_use_rendered_message_text() -> None:
+    """URL refs should survive rows whose visible text is not in body_text."""
+    agent = ConversationEvidenceAgent()
+    search_worker = _FakeWorker(
+        {
+            "resolved": True,
+            "result": [
+                {
+                    "content": "backup text has https://example.test/content-url",
+                    "display_name": "Tester",
+                    "global_user_id": "user-1",
+                    "platform_message_id": "msg-1",
+                    "timestamp": "2026-05-01T23:00:00+00:00",
+                    "role": "user",
+                }
+            ],
+            "attempts": 1,
+            "cache": {"enabled": False, "hit": False, "reason": "open_range"},
+        }
+    )
+    keyword_worker = _FakeWorker({"resolved": True, "result": []})
+    agent.search_agent = search_worker
+    agent.keyword_agent = keyword_worker
+
+    result = await agent.run(
+        'Conversation-evidence: find who shared "content-url"',
+        _base_context(current_platform_message_id="msg-current"),
+    )
+
+    payload = result["result"]
+    assert payload["projection_payload"]["summaries"] == [
+        "[2026-05-02 11:00] Tester: "
+        "backup text has https://example.test/content-url"
+    ]
+    assert {
+        "ref_type": "url",
+        "role": "posted_url",
+        "url": "https://example.test/content-url",
     } in payload["resolved_refs"]
 
 
@@ -1272,7 +1314,7 @@ async def test_conversation_evidence_semantic_topic_uses_search() -> None:
     assert keyword_worker.calls == []
     assert result["result"]["primary_worker"] == "conversation_search_agent"
     assert result["result"]["projection_payload"]["summaries"] == [
-        "Tester at 2026-05-02 10:00: We talked about roller coaster plans."
+        "[2026-05-02 10:00] Tester: We talked about roller coaster plans."
     ]
     assert {
         "ref_type": "message",
@@ -1491,7 +1533,7 @@ async def test_conversation_evidence_logs_active_turn_exclusion_reason_counts(
 
     assert result["resolved"] is True
     assert result["result"]["projection_payload"]["summaries"] == [
-        "Tester at 2026-05-02 11:59: historical evidence"
+        "[2026-05-02 11:59] Tester: historical evidence"
     ]
     assert "excluded_active_turn_rows=2" in caplog.text
     assert "excluded_by_conversation_row_id=1" in caplog.text
@@ -1543,7 +1585,7 @@ async def test_conversation_evidence_excludes_collapsed_active_turn_rows() -> No
 
     assert result["resolved"] is True
     assert result["result"]["projection_payload"]["summaries"] == [
-        "Tester at 2026-05-02 11:59: same body"
+        "[2026-05-02 11:59] Tester: same body"
     ]
     assert {
         "ref_type": "message",
@@ -1582,7 +1624,7 @@ async def test_conversation_evidence_keeps_row_without_message_id() -> None:
 
     assert result["resolved"] is True
     assert result["result"]["projection_payload"]["summaries"] == [
-        "Tester at 2026-05-02 12:00: active question"
+        "[2026-05-02 12:00] Tester: active question"
     ]
     assert {
         "ref_type": "message",
@@ -1628,7 +1670,7 @@ async def test_conversation_evidence_does_not_match_empty_active_row_id() -> Non
 
     assert result["resolved"] is True
     assert result["result"]["projection_payload"]["summaries"] == [
-        "Tester at 2026-05-02 12:00: blank row id should stay"
+        "[2026-05-02 12:00] Tester: blank row id should stay"
     ]
 
 

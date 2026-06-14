@@ -17,6 +17,9 @@ from kazusa_ai_chatbot.reflection_cycle.models import (
     ReflectionLLMResult,
     ReflectionScopeInput,
 )
+from kazusa_ai_chatbot.conversation_history_prompt_projection import (
+    project_conversation_history_for_llm,
+)
 from kazusa_ai_chatbot.time_boundary import (
     format_storage_utc_for_llm,
     parse_storage_utc_datetime,
@@ -42,7 +45,10 @@ def build_hourly_reflection_payload(scope: ReflectionScopeInput) -> dict[str, An
         "scope_metadata": _scope_metadata_for_prompt(scope),
         "conversation": {
             "message_order": "chronological",
-            "messages": _project_messages_for_prompt(scope.messages),
+            "messages": project_conversation_history_for_llm(
+                scope.messages,
+                character_name="active_character",
+            ),
         },
         "review_questions": [
             "这个范围实际覆盖了哪些话题？",
@@ -274,41 +280,6 @@ def _hour_start_label(storage_timestamp_utc: str) -> str:
     return return_value
 
 
-def _project_messages_for_prompt(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Project raw conversation rows into bounded prompt messages."""
-
-    participant_refs = _build_participant_refs(messages)
-    total_messages = len(messages)
-    projected_messages: list[dict[str, Any]] = []
-    for index, message in enumerate(messages):
-        role = str(message.get("role", ""))
-        projected_message = {
-            "role": role,
-            "speaker_ref": _speaker_ref(message, participant_refs),
-            "time_position": _time_position_label(index, total_messages),
-            "text": _trim_text(str(message.get("body_text", ""))),
-        }
-        attachment_context = _attachment_context(message)
-        if attachment_context:
-            projected_message["attachment_context"] = attachment_context
-        projected_messages.append(projected_message)
-    return projected_messages
-
-
-def _build_participant_refs(messages: list[dict[str, Any]]) -> dict[str, str]:
-    """Build stable participant aliases for one prompt scope."""
-
-    refs: dict[str, str] = {}
-    for message in messages:
-        if message.get("role") != "user":
-            continue
-        key = _participant_key(message)
-        if key in refs:
-            continue
-        refs[key] = f"participant_{len(refs) + 1}"
-    return refs
-
-
 def _participant_key(message: dict[str, Any]) -> str:
     """Return a stable key for a user row without exposing it to the prompt."""
 
@@ -318,35 +289,6 @@ def _participant_key(message: dict[str, Any]) -> str:
             return_value = f"{field_name}:{value}"
             return return_value
     return_value = "anonymous_user"
-    return return_value
-
-
-def _speaker_ref(message: dict[str, Any], participant_refs: dict[str, str]) -> str:
-    """Return the prompt-facing speaker reference for one message."""
-
-    if message.get("role") == "assistant":
-        return_value = "active_character"
-        return return_value
-    key = _participant_key(message)
-    return_value = participant_refs.get(key, "participant_unknown")
-    return return_value
-
-
-def _attachment_context(message: dict[str, Any]) -> list[str]:
-    """Return bounded attachment descriptions from a conversation row."""
-
-    attachments = message.get("attachments")
-    if not isinstance(attachments, list):
-        return_value: list[str] = []
-        return return_value
-    descriptions: list[str] = []
-    for attachment in attachments:
-        if not isinstance(attachment, dict):
-            continue
-        description = str(attachment.get("description", "") or "").strip()
-        if description:
-            descriptions.append(_trim_text(description, max_chars=160))
-    return_value = descriptions[:3]
     return return_value
 
 
@@ -420,13 +362,14 @@ def _truncate_prompt_payload(
             del messages[0]
         prompt_chars = len(system_prompt) + len(_serialize_payload(truncated))
         if prompt_chars > max_prompt_chars:
-            for message in messages:
-                if not isinstance(message, dict):
-                    continue
-                message["text"] = _trim_text(
-                    str(message.get("text", "")),
-                    max_chars=120,
-                )
+            for idx, message in enumerate(messages):
+                if isinstance(message, str):
+                    messages[idx] = _trim_text(message, max_chars=120)
+                elif isinstance(message, dict):
+                    message["text"] = _trim_text(
+                        str(message.get("text", "")),
+                        max_chars=120,
+                    )
     return_value = truncated
     return return_value
 
@@ -508,26 +451,6 @@ def _window_span_label(*, first_timestamp: str, last_timestamp: str) -> str:
         return_value = "单次集中互动"
     else:
         return_value = "多轮时间窗口"
-    return return_value
-
-
-def _time_position_label(index: int, total_messages: int) -> str:
-    """Return a coarse chronological position label for one message."""
-
-    if total_messages <= 1:
-        return_value = "单条"
-    elif index == 0:
-        return_value = "开场"
-    elif index == total_messages - 1:
-        return_value = "收尾"
-    else:
-        ratio = index / max(1, total_messages - 1)
-        if ratio < 0.34:
-            return_value = "前段"
-        elif ratio < 0.67:
-            return_value = "中段"
-        else:
-            return_value = "后段"
     return return_value
 
 

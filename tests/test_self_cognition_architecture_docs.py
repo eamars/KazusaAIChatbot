@@ -14,9 +14,9 @@ _PROACTIVE_OUTPUT_README = (
     _ROOT / "src/kazusa_ai_chatbot/proactive_output/README.md"
 )
 _LEGACY_DOCS = [
-    _ROOT / "development_plans/reference/designs/self_cognition_tracking_icd.md",
-    _ROOT / "development_plans/reference/designs/self_cognition_reasoning_basis.md",
-    _ROOT / "development_plans/reference/designs/self_cognition_loop_architecture.md",
+    _ROOT / "development_plans/archive/superseded/self_cognition_tracking_icd.md",
+    _ROOT / "development_plans/archive/superseded/self_cognition_reasoning_basis.md",
+    _ROOT / "development_plans/archive/superseded/self_cognition_loop_architecture.md",
 ]
 
 

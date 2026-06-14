@@ -103,6 +103,75 @@ async def test_decontexualizer_prompt_requires_character_name_and_identity_safe_
     assert '`character_name`' not in system_prompt
     assert '当前助手/角色' not in system_prompt
     assert '当前角色说明白' not in system_prompt
+    assert '# 正向模式' not in system_prompt
+    assert 'user_input =' not in system_prompt
+    assert '例如' not in system_prompt
+    assert '可见参与者字面名称' in system_prompt
+    assert '怪词、术语或普通话题名' in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_decontextualizer_projects_chat_history_as_transcript_lines(
+    monkeypatch,
+) -> None:
+    """Decontextualizer should flatten only chat history before the LLM call."""
+
+    llm_payload = (
+        '{"output": "原句", "reasoning": "payload projection check", '
+        '"is_modified": false, "referents": []}'
+    )
+    fake_llm = _CapturingLLM(llm_payload)
+    monkeypatch.setattr(
+        "kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer."
+        "_msg_decontexualizer_llm",
+        fake_llm,
+    )
+    state = _base_state()
+    state['user_input'] = '@杏山千纱 那蚝爹油跟你啥关系'
+    state['prompt_message_context']['body_text'] = state['user_input']
+    state['message_envelope']['body_text'] = state['user_input']
+    state['message_envelope']['raw_wire_text'] = state['user_input']
+    state['scope_users'] = [
+        {
+            'display_name': '蚝爹油',
+            'platform_user_id': '673225019',
+            'global_user_id': '256e8a10-c406-47e9-ac8f-efd270d18160',
+            'aliases': [],
+        }
+    ]
+    state['chat_history_recent'] = [
+        {
+            'role': 'user',
+            'display_name': '蚝爹油',
+            'body_text': '捡垃圾不是乐趣么',
+            'timestamp': '2026-06-13 15:04',
+            'platform_user_id': '673225019',
+            'global_user_id': '256e8a10-c406-47e9-ac8f-efd270d18160',
+        },
+        {
+            'role': 'user',
+            'display_name': '1816',
+            'body_text': '@杏山千纱 那蚝爹油跟你啥关系',
+            'timestamp': '2026-06-13 15:14',
+            'reply_context': {
+                'reply_to_display_name': '杏山千纱',
+                'reply_to_platform_user_id': '3768713357',
+            },
+        },
+    ]
+
+    await call_msg_decontexualizer(state)
+
+    human_payload = json.loads(fake_llm.messages[1].content)
+    assert human_payload['chat_history'] == [
+        '[2026-06-13 15:04] 蚝爹油: 捡垃圾不是乐趣么',
+        '[2026-06-13 15:14] 1816 reply_to 杏山千纱: @杏山千纱 那蚝爹油跟你啥关系',
+    ]
+    assert human_payload['scope_users'] == state['scope_users']
+    assert human_payload['prompt_message_context'] == state['prompt_message_context']
+    assert 'platform_user_id' not in human_payload['chat_history'][0]
+    assert 'global_user_id' not in human_payload['chat_history'][0]
+    assert 'broadcast' not in human_payload['chat_history'][0]
 
 
 async def _skip_if_llm_unavailable() -> None:

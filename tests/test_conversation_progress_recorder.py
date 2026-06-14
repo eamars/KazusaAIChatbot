@@ -186,14 +186,10 @@ async def test_recorder_prompt_requires_character_name_and_prompt_safe_history_p
     assert '测试角色' in system_prompt
     assert '{character_name}' not in system_prompt
     assert '"character_name": "本轮人设名"' not in system_prompt
-    assert projected_history == [
-        {
-            "speaker_name": '测试角色',
-            "speaker_kind": "character",
-            "body_text": '别急，我已经听到了。',
-        }
-    ]
-    assert "role" not in projected_history[0]
+    assert len(projected_history) == 1
+    assert isinstance(projected_history[0], str)
+    assert '助手' in projected_history[0]
+    assert '别急，我已经听到了。' in projected_history[0]
 
 
 @pytest.mark.asyncio

@@ -280,12 +280,9 @@ class _HistoryAwareDecontextualizerLLM:
     async def ainvoke(self, messages: list) -> MagicMock:
         input_payload = json.loads(messages[1].content)
         self.payloads.append(input_payload)
-        body_texts = [
-            row['body_text']
-            for row in input_payload['chat_history']
-        ]
+        history_lines = input_payload['chat_history']
 
-        if any('真的不喜欢' in body_text for body_text in body_texts):
+        if any('真的不喜欢' in line for line in history_lines):
             content = {
                 'output': _RESOLVED_FAILURE_INPUT,
                 'reasoning': 'visible group exchange identifies speaker and target',
@@ -422,10 +419,9 @@ async def test_decontexualizer_filtered_history_recreates_group_referent_loss():
     ):
         result = await call_msg_decontexualizer(state)
 
-    assert [row['body_text'] for row in fake_llm.payloads[0]['chat_history']] == [
-        '反正现在有AI',
-        '你应付下就好了',
-    ]
+    history_lines = fake_llm.payloads[0]['chat_history']
+    assert any('反正现在有AI' in line for line in history_lines)
+    assert any('你应付下就好了' in line for line in history_lines)
     assert fake_llm.payloads[0]['prompt_message_context']['mentions'] == [
         {
             'platform_user_id': _TARGET_PLATFORM_USER_ID,
@@ -435,8 +431,8 @@ async def test_decontexualizer_filtered_history_recreates_group_referent_loss():
         },
     ]
     assert all(
-        '真的不喜欢' not in row['body_text']
-        for row in fake_llm.payloads[0]['chat_history']
+        '真的不喜欢' not in line
+        for line in fake_llm.payloads[0]['chat_history']
     )
     assert result == {
         'decontexualized_input': _FAILURE_INPUT,
@@ -457,12 +453,9 @@ async def test_decontexualizer_full_history_surfaces_group_referent_evidence():
     ):
         result = await call_msg_decontexualizer(state)
 
-    body_texts = [
-        row['body_text']
-        for row in fake_llm.payloads[0]['chat_history']
-    ]
-    assert '把对方解决掉也是解决问题的方式之一哦' in body_texts
-    assert any('真的不喜欢' in body_text for body_text in body_texts)
+    history_lines = fake_llm.payloads[0]['chat_history']
+    assert any('把对方解决掉也是解决问题的方式之一哦' in line for line in history_lines)
+    assert any('真的不喜欢' in line for line in history_lines)
     assert result == {
         'decontexualized_input': _RESOLVED_FAILURE_INPUT,
         'referents': [

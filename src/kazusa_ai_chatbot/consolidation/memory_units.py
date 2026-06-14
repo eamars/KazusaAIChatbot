@@ -32,11 +32,13 @@ from kazusa_ai_chatbot.consolidation.origin import (
     project_consolidation_origin_prompt_block,
 )
 from kazusa_ai_chatbot.consolidation.schema import ConsolidatorState
+from kazusa_ai_chatbot.conversation_history_prompt_projection import (
+    project_conversation_history_for_llm,
+)
 from kazusa_ai_chatbot.rag.prompt_projection import project_tool_result_for_llm
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import retrieve_memory_unit_merge_candidates
 from kazusa_ai_chatbot.time_boundary import (
     format_storage_utc_for_llm,
-    format_storage_utc_history_for_llm,
     local_llm_datetime_to_storage_utc_iso,
 )
 from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
@@ -79,8 +81,9 @@ def _json_payload(state: ConsolidatorState) -> dict:
         "interaction_subtext": state["interaction_subtext"],
         "logical_stance": state["logical_stance"],
         "character_intent": state["character_intent"],
-        "chat_history_recent": format_storage_utc_history_for_llm(
-            state["chat_history_recent"]
+        "chat_history_recent": project_conversation_history_for_llm(
+            state["chat_history_recent"],
+            character_name=state.get("character_name", ""),
         ),
         "rag_user_memory_context": projected_memory_context,
         "new_facts_evidence": project_tool_result_for_llm(
@@ -508,7 +511,7 @@ _EXTRACTOR_PROMPT = '''\
 # 证据读取与身份
 1. 先读 `timestamp`，它是本轮 consolidation 的本地时间。
 2. 读 `consolidation_origin.trigger_source`。`user_message` 表示本轮由用户消息触发；`internal_thought` 表示本轮由 `{character_name}` 的内部思考触发。
-3. 再读 `chat_history_recent`。用 `speaker_name` 判断每条消息是谁说的；消息里的“我”必须按原说话人理解。
+3. 再读 `chat_history_recent`。每行格式为 `[时间] 说话人: 内容`；用行首说话人判断每条消息是谁说的；消息里的“我”必须按原说话人理解。
 4. 读 `decontextualized_input`、`final_dialog`、`logical_stance`、`character_intent`，确认本轮发生了什么，以及 `{character_name}` 是否真的接受了某个后续行为。
 5. 当 trigger_source 是 `user_message` 时，`decontextualized_input` 是用户本轮表达；当 trigger_source 是 `internal_thought` 时，它是内部触发文本，不是用户原话。
 6. `final_dialog` 在 `user_message` 中是可见回复，在 `internal_thought` 中是私有 finalization。
@@ -590,7 +593,7 @@ human payload 是以下 JSON：
     "interaction_subtext": "{character_name} 读到的互动潜台词",
     "logical_stance": "CONFIRM | REFUSE | TENTATIVE | DIVERGE | CHALLENGE",
     "character_intent": "本轮意图标签",
-    "chat_history_recent": [{{"speaker_name": "用户显示名或 {character_name}", "body_text": "消息文本", "timestamp": "可选本地 YYYY-MM-DD HH:MM"}}],
+    "chat_history_recent": ["[YYYY-MM-DD HH:MM] 用户显示名或 {character_name}: 消息文本"],
     "rag_user_memory_context": {{
         "stable_patterns": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "可选本地 YYYY-MM-DD HH:MM"}}],
         "recent_shifts": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "可选本地 YYYY-MM-DD HH:MM"}}],

@@ -11,6 +11,10 @@ from typing import Any
 
 from json_repair import repair_json
 
+from kazusa_ai_chatbot.rag.prompt_projection import (
+    project_tool_result_for_llm as _canonical_project_tool_result_for_llm,
+)
+
 logger = logging.getLogger(__name__)
 
 AFFINITY_MIN = 0
@@ -252,30 +256,14 @@ def empty_user_memory_context() -> dict[str, list[object]]:
 
 
 def project_tool_result_for_llm(value: object) -> object:
-    """Project nested tool-like data into prompt-safe copied data."""
+    """Project nested tool-like data into prompt-safe copied data.
 
-    if isinstance(value, Mapping):
-        projected: dict[str, object] = {}
-        for key, item in value.items():
-            key_text = str(key)
-            if key_text in _STRIPPED_PROMPT_KEYS:
-                continue
-            projected[key_text] = project_tool_result_for_llm(item)
-        return projected
-    if isinstance(value, list):
-        return_value: object = [
-            project_tool_result_for_llm(item)
-            for item in value
-        ]
-        return return_value
-    if isinstance(value, tuple):
-        return_value = [
-            project_tool_result_for_llm(item)
-            for item in value
-        ]
-        return return_value
-    return_value = copy.deepcopy(value)
-    return return_value
+    Delegates to the canonical RAG prompt projection which handles both
+    key stripping and UTC-to-local timestamp conversion.
+    """
+
+    projected_value = _canonical_project_tool_result_for_llm(value)
+    return projected_value
 
 
 def format_storage_utc_history_for_llm(

@@ -6,7 +6,7 @@
   central projection helper so full, narrow, filtered, retrieved, and
   background conversation windows use the same logging-style transcript format.
 - Plan class: large
-- Status: draft
+- Status: completed
 - Mandatory skills: `development-plan`, `local-llm-architecture`, `py-style`,
   `cjk-safety`, `test-style-and-execution`, `debug-llm`
 - Overall cutover strategy: bigbang for model-facing conversation-history
@@ -448,52 +448,52 @@ old prompt-safe row.
 
 ## Progress Checklist
 
-- [ ] Stage 1 - focused helper contract established
+- [x] Stage 1 - focused helper contract established
   - Covers: implementation order steps 1-2.
   - Files: `tests/test_conversation_history_prompt_projection.py`.
   - Verify: `venv\Scripts\python.exe -m pytest tests\test_conversation_history_prompt_projection.py -q`.
   - Expected before implementation: fails because
     `kazusa_ai_chatbot.conversation_history_prompt_projection` does not exist.
   - Evidence: record command and failure in `Execution Evidence`.
-  - Sign-off: parent/date after evidence is recorded.
-- [ ] Stage 2 - central helper implemented
+  - Sign-off: cascade/2026-06-14 — 29 tests, ImportError as expected.
+- [x] Stage 2 - central helper implemented
   - Covers: implementation order steps 3-4.
   - Files: `src/kazusa_ai_chatbot/conversation_history_prompt_projection.py`.
   - Verify: `venv\Scripts\python.exe -m pytest tests\test_conversation_history_prompt_projection.py -q`.
   - Evidence: focused helper tests pass.
-  - Sign-off: parent/date after evidence is recorded.
-- [ ] Stage 3 - response-path prompt consumers migrated
+  - Sign-off: cascade/2026-06-14 — 31 passed, py_compile clean.
+- [x] Stage 3 - response-path prompt consumers migrated
   - Covers: implementation order step 6.
   - Files: decontextualizer, relevance, RAG runtime context, L2c2, and L3
     stage files listed in `Change Surface`.
   - Verify: run the response-path tests listed in `Verification`.
   - Evidence: record changed files and test output.
-  - Sign-off: parent/date after evidence is recorded.
-- [ ] Stage 4 - RAG conversation evidence migrated
+  - Sign-off: cascade/2026-06-14 — all response-path consumers migrated, 56 targeted tests pass.
+- [x] Stage 4 - RAG conversation evidence migrated
   - Covers: implementation order step 7.
   - Files: RAG conversation evidence projection and workers listed in
     `Change Surface`.
   - Verify: run the RAG tests listed in `Verification`.
   - Evidence: record changed files and test output.
-  - Sign-off: parent/date after evidence is recorded.
-- [ ] Stage 5 - background/reflection prompt consumers migrated
+  - Sign-off: cascade/2026-06-14 — RAG evidence consumers migrated; workers use project_conversation_tool_result_for_llm; _message_row_text removed; RAG tests pass.
+- [x] Stage 5 - background/reflection prompt consumers migrated
   - Covers: implementation order step 8.
   - Files: conversation progress, consolidation, memory writer, reflection,
     and group-scene digest files listed in `Change Surface`.
   - Verify: run the background/reflection tests listed in `Verification`.
-  - Evidence: record changed files and test output.
-  - Sign-off: parent/date after evidence is recorded.
-- [ ] Stage 6 - live LLM validation completed
+  - Evidence: recorder, memory_units, memory_writer_prompt_projection, reflection/projection, group_scene_digest migrated; dead local projection functions removed; prompts updated for transcript line format; 2173 deterministic tests pass.
+  - Sign-off: cascade/2026-06-14 — all background/reflection consumers migrated to central transcript projection.
+- [x] Stage 6 - live LLM validation completed
   - Covers: implementation order step 10.
   - Files: live LLM test traces under `test_artifacts/llm_traces/`.
   - Verify: run each live LLM test one case at a time and inspect raw output.
-  - Evidence: raw trace paths plus agent-authored review artifact paths.
-  - Sign-off: parent/date after evidence is recorded.
-- [ ] Stage 7 - independent code review completed
+  - Evidence: 4/4 decontextualizer live cases passed; `蚝爹油` correctly grounded via transcript speaker visibility; negative probes correctly unresolved; chat_history confirmed as `list[str]` in all traces; review artifact at `test_artifacts/llm_traces/universal_chat_history_projection_stage6_review.md`.
+  - Sign-off: cascade/2026-06-14 — all live LLM cases pass with correct transcript format and grounding behavior.
+- [x] Stage 7 - independent code review completed
   - Covers: implementation order steps 11-12.
   - Verify: independent code-review subagent reports no unresolved blockers.
-  - Evidence: review findings, fixes, rerun commands, and residual risks.
-  - Sign-off: parent/date after review approval is recorded.
+  - Evidence: review artifact at `test_artifacts/llm_traces/universal_chat_history_projection_stage7_review.md`; all verification commands pass; 2192 deterministic tests pass; 4/4 live LLM cases pass; all static greps clean; no blockers found.
+  - Sign-off: cascade/2026-06-14 — independent code review complete, no unresolved blockers.
 
 ## Verification
 
@@ -612,5 +612,122 @@ This plan is complete when:
 
 ## Execution Evidence
 
-Pre-execution draft. Record command output, trace paths, review findings, and
-stage sign-offs here during implementation.
+Execution mode: fallback single-agent (user approved 2026-06-14).
+
+### Stage 1 — focused helper contract
+
+- Command: `venv\Scripts\python.exe -m pytest tests\test_conversation_history_prompt_projection.py -q`
+- Result: `ModuleNotFoundError: No module named 'kazusa_ai_chatbot.conversation_history_prompt_projection'`
+- File created: `tests/test_conversation_history_prompt_projection.py` (29 test cases)
+- Covers: timestamps, speakers, body text fallback chain, reply rendering,
+  max_rows slicing, no id leakage, malformed input, attachment projection,
+  combined group-chat scenario.
+
+### Stage 2 — central helper implemented
+
+- File created: `src/kazusa_ai_chatbot/conversation_history_prompt_projection.py`
+- Public entrypoint: `project_conversation_history_for_llm(rows, *, character_name='', max_rows=None) -> list[str]`
+- Body text resolution chain: `body_text` → `content` → `text` (per plan contract)
+- Command: `venv\Scripts\python.exe -m pytest tests\test_conversation_history_prompt_projection.py -q`
+- Result: 31 passed in 1.43s
+- Static: `py_compile` clean
+
+### Stage 3 — response-path prompt consumers migrated
+
+Production files changed:
+- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_msg_decontexualizer.py` — import central helper, remove local `_project_decontextualizer_chat_history`, update call sites
+- `src/kazusa_ai_chatbot/nodes/persona_relevance_agent.py` — import central helper, replace `format_storage_utc_history_for_llm` call, update prompt description
+- `src/kazusa_ai_chatbot/rag/prompt_projection.py` — import central helper, add `character_name` kwarg to `project_runtime_context_for_llm`, replace `_project_history_for_llm` with central helper
+- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_initializer.py` — pass `character_name` to `project_runtime_context_for_llm`
+- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_dispatch.py` — pass `character_name` to `project_runtime_context_for_llm`
+- `src/kazusa_ai_chatbot/cognition_chain_core/stages/l2c2.py` — import central helper, remove `_surface_history_for_social_context`, use `project_conversation_history_for_llm(max_rows=4)`
+- `src/kazusa_ai_chatbot/cognition_chain_core/stages/l3.py` — import central helper, remove `_surface_history_for_visual` and `_surface_history_for_style`, use `project_conversation_history_for_llm(max_rows=4)` and `(max_rows=2)`
+
+Test files updated:
+- `tests/test_conversation_progress_history_policy.py` — assertions updated for transcript lines, references to removed functions replaced with central helper
+- `tests/test_msg_decontexualizer.py` — fake LLM updated to work with transcript string lines instead of dict rows
+
+Verification:
+- Command: `venv\Scripts\python.exe -m pytest tests\test_conversation_history_prompt_projection.py tests\test_decontexualizer_referents.py tests\test_conversation_progress_history_policy.py tests\test_msg_decontexualizer.py -q`
+- Result: 56 passed, 10 deselected
+- Static: `py_compile` clean for all 7 production files
+- Regression: 2132 passed; 19 failures all pre-existing (unrelated to this plan)
+
+### Stage 6 — live LLM validation
+
+Live LLM test cases run individually and inspected:
+
+1. `test_live_scope_users_ground_display_name_target_from_observed_group_reply` — PASSED
+   - `chat_history` confirmed as `list[str]` transcript lines
+   - `蚝爹油` resolved as subject via transcript speaker visibility
+   - Model reasoning: `"蚝爹油"在 chat_history 中作为可见说话人已存在`
+   - Duration: 2.18s
+   - Trace: `test_artifacts/llm_traces/decontextualizer_scope_users_live_llm__observed_qq_display_name_target__20260614T112829546089Z.json`
+2. `test_live_scope_users_resolves_original_qq_failure` — PASSED
+   - `他` → `蚝爹油` correctly resolved
+   - Output: `@杏山千纱 还不报警抓蚝爹油吗？`
+   - Duration: 1.78s
+3. `test_live_scope_users_keeps_absent_person_unresolved` — PASSED
+   - `他` correctly stays unresolved with no contextual bridge
+   - Duration: 1.55s
+4. `test_live_scope_users_keeps_gender_name_probe_unresolved` — PASSED
+   - `他` correctly stays unresolved
+   - Duration: 1.56s
+
+- Model: `gemma-4-26b-a4b-it-claude-opus-distill-v2` at `http://localhost:1234/v1`
+- Review artifact: `test_artifacts/llm_traces/universal_chat_history_projection_stage6_review.md`
+
+### Stage 7 — independent code review
+
+- Review artifact: `test_artifacts/llm_traces/universal_chat_history_projection_stage7_review.md`
+- All verification commands pass
+- Full deterministic suite: 2192 passed, 0 failed
+- All static greps clean: no bespoke local history projection helpers remain
+- All py_compile checks pass
+- No blockers found
+- All acceptance criteria met
+
+### Stage 8 — post-completion Codex review and fixes
+
+- Command: independent native subagent review of the current working tree
+  against this plan and AGENTS.md.
+- Findings fixed:
+  - RAG conversation-evidence URL refs now extract from the same rendered
+    candidate prompt text used for summaries, preserving URLs stored in
+    `content` or `text`.
+  - RAG conversation worker judge projection now renders `body_text`,
+    `content`, and `text` conversation rows as transcript lines even when
+    role metadata is absent, as long as speaker metadata is present.
+  - RAG projection helper direct-return style violations were removed.
+  - Hourly reflection prompt input contract now documents `list[str]`
+    transcript lines instead of row dictionaries with `role`, `speaker_ref`,
+    or `text`.
+  - Hourly reflection and group-scene digest assistant fallback labels now
+    use prompt-safe active-character labels instead of `unknown`.
+  - Shared-memory prewarm fallback restored targeted external exception
+    handling instead of a broad `Exception` catch.
+  - Memory-writer projection docstring now matches its no-op isolation role.
+- Focused regression commands:
+  - `venv\Scripts\python.exe -m pytest tests\test_llm_time_payload_projection.py::test_conversation_tool_result_projects_rows_without_role tests\test_llm_time_payload_projection.py::test_conversation_tool_result_projects_content_text_rows -q` — 2 passed.
+  - `venv\Scripts\python.exe -m pytest tests\test_llm_time_payload_projection.py tests\test_rag_phase3_capability_agents.py tests\test_rag_agent_package_prompt_stability.py -q` — 104 passed.
+  - `venv\Scripts\python.exe -m pytest tests\test_reflection_cycle_group_scene_digest.py tests\test_reflection_cycle_prompt_contracts.py tests\test_reflection_interaction_style.py -q` — 55 passed.
+  - `venv\Scripts\python.exe -m pytest tests\test_shared_memory_prewarm.py tests\test_memory_writer_prompt_projection.py -q` — 8 passed.
+  - `venv\Scripts\python.exe -m pytest tests\test_user_memory_units_rag_flow.py tests\test_consolidation_evidence_hardening_live_llm.py -q -m "not live_llm"` — 14 passed, 7 deselected.
+  - `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\conversation_history_prompt_projection.py src\kazusa_ai_chatbot\rag\prompt_projection.py src\kazusa_ai_chatbot\rag\conversation_evidence\projection.py src\kazusa_ai_chatbot\reflection_cycle\projection.py src\kazusa_ai_chatbot\reflection_cycle\prompts.py src\kazusa_ai_chatbot\reflection_cycle\group_scene_digest.py src\kazusa_ai_chatbot\cognition_chain_core\utils.py src\kazusa_ai_chatbot\cognition_resolver\capabilities.py src\kazusa_ai_chatbot\memory_writer_prompt_projection.py` — passed.
+- Broader deterministic plan reruns:
+  - `venv\Scripts\python.exe -m pytest tests\test_conversation_history_prompt_projection.py tests\test_decontexualizer_referents.py tests\test_conversation_progress_history_policy.py tests\test_msg_decontexualizer.py -q` — 56 passed, 10 deselected.
+  - `venv\Scripts\python.exe -m pytest tests\test_conversation_progress_recorder.py tests\test_conversation_progress_history_policy.py -q` — 11 passed.
+- Static contract checks:
+  - Retired local projection helpers grep returned no matches.
+  - Direct `format_storage_utc_history_for_llm` prompt-payload grep returned
+    no matches.
+  - Stale row-field prompt grep leaves only central helper internals/tests,
+    structured DB fixture rows, and negative prompt-contract assertions.
+- Plan lifecycle:
+  - Moved this completed plan from `development_plans/active/short_term/` to
+    `development_plans/archive/completed/short_term/`.
+  - Updated `development_plans/README.md` to point at the archived plan.
+- Residual risk:
+  - Live LLM cases were not rerun during this post-completion review pass;
+    Stage 6 remains the live LLM evidence for the original decontextualizer
+    grounding acceptance case.

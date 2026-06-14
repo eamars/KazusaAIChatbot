@@ -19,20 +19,12 @@ CHARACTER_NAME = "杏山千纱 (Kyōyama Kazusa)"
 
 
 def test_memory_unit_extractor_projects_speaker_metadata_without_text_changes() -> None:
-    """Chat text should remain raw while speaker metadata uses profile names."""
+    """Extractor projector should return an isolated deep copy of the payload."""
 
     payload = {
         "chat_history_recent": [
-            {
-                "role": "user",
-                "display_name": "测试用户",
-                "body_text": "我觉得你刚才有点冷淡。",
-            },
-            {
-                "role": "assistant",
-                "display_name": "旧的显示名",
-                "body_text": "我不是故意冷淡。",
-            },
+            "[2026-04-29 00:01] 测试用户: 我觉得你刚才有点冷淡。",
+            "[2026-04-29 00:01] 旧的显示名: 我不是故意冷淡。",
         ],
         "decontextualized_input": "我觉得你刚才有点冷淡。",
     }
@@ -45,16 +37,7 @@ def test_memory_unit_extractor_projects_speaker_metadata_without_text_changes() 
 
     assert payload == original_payload
     assert projected is not payload
-    user_row = projected["chat_history_recent"][0]
-    character_row = projected["chat_history_recent"][1]
-    assert user_row["speaker_name"] == "测试用户"
-    assert user_row["body_text"] == "我觉得你刚才有点冷淡。"
-    assert "role" not in user_row
-    assert "display_name" not in user_row
-    assert character_row["speaker_name"] == CHARACTER_NAME
-    assert character_row["body_text"] == "我不是故意冷淡。"
-    assert "role" not in character_row
-    assert "display_name" not in character_row
+    assert projected["chat_history_recent"] == original_payload["chat_history_recent"]
     assert "active_character" not in str(projected)
     assert "speaker_kind" not in str(projected)
 

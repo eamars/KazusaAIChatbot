@@ -43,8 +43,8 @@ from kazusa_ai_chatbot.rag.hybrid_retrieval import (
     select_neighbor_seed_candidates,
 )
 from kazusa_ai_chatbot.rag.prompt_projection import (
+    project_conversation_tool_result_for_llm,
     project_runtime_context_for_llm,
-    project_tool_result_for_llm,
 )
 from kazusa_ai_chatbot.rag.search_runtime import (
     apply_conversation_runtime_constraints,
@@ -693,7 +693,7 @@ async def _judge(
         Tuple of (resolved, feedback).
     """
     system_prompt = SystemMessage(content=_JUDGE_PROMPT)
-    llm_result = project_tool_result_for_llm(result)
+    llm_result = project_conversation_tool_result_for_llm(result)
     llm_context = project_runtime_context_for_llm(context or {})
     human_message = HumanMessage(
         content=json.dumps(

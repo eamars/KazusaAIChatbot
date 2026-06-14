@@ -9,7 +9,10 @@ from time import perf_counter
 import httpx
 import pytest
 
-from kazusa_ai_chatbot.config import MSG_DECONTEXTUALIZER_LLM_BASE_URL
+from kazusa_ai_chatbot.config import (
+    MSG_DECONTEXTUALIZER_LLM_BASE_URL,
+    MSG_DECONTEXTUALIZER_LLM_MODEL,
+)
 from kazusa_ai_chatbot.nodes import (
     persona_supervisor2_msg_decontexualizer as decontext,
 )
@@ -27,6 +30,9 @@ _CURRENT_GLOBAL_USER_ID = '745d7818-a9d3-4889-b7f3-8555078a2061'
 _CURRENT_PLATFORM_USER_ID = '67889018'
 _TARGET_GLOBAL_USER_ID = '256e8a10-c406-47e9-ac8f-efd270d18160'
 _TARGET_PLATFORM_USER_ID = '673225019'
+_OBSERVED_GROUP_PLATFORM_CHANNEL_ID = '227608960'
+_OBSERVED_CURRENT_GLOBAL_USER_ID = 'eaf9e90d-9caa-443a-8af5-715daa9d9917'
+_OBSERVED_CURRENT_PLATFORM_USER_ID = '925059922'
 _ORIGINAL_FAILURE_GLOBAL_USER_ID = '1f3cf327-b7ca-4d09-9dc7-62487236c809'
 _ORIGINAL_FAILURE_PLATFORM_USER_ID = '263991919'
 
@@ -269,6 +275,125 @@ def _original_failure_state() -> dict:
     return state
 
 
+def _observed_qq_display_name_target_state() -> dict:
+    """Build the observed QQ group turn where a display name was treated oddly."""
+
+    user_input = '@杏山千纱 那蚝爹油跟你啥关系'
+    state = _base_state(user_input)
+    state['user_name'] = '1816'
+    state['platform_user_id'] = _OBSERVED_CURRENT_PLATFORM_USER_ID
+    state['prompt_message_context']['mentions'][0]['entity_kind'] = 'bot'
+    state['message_envelope']['raw_wire_text'] = (
+        '[CQ:reply,id=638034781][CQ:at,qq=3768713357] '
+        '那蚝爹油跟你啥关系'
+    )
+    state['chat_history_recent'] = [
+        {
+            'role': 'user',
+            'platform_user_id': '2842870874',
+            'global_user_id': 'b19dded5-e71d-41a6-8b0f-3f986af70e19',
+            'display_name': '白冥',
+            'body_text': '三角洲不是已经黄了吗',
+            'timestamp': '2026-06-13 15:01',
+        },
+        {
+            'role': 'user',
+            'platform_user_id': '1237982614',
+            'global_user_id': '0dee2d1e-2022-460b-8db2-fbef37d22010',
+            'display_name': '凭虚御风',
+            'body_text': '我儿子玩',
+            'timestamp': '2026-06-13 15:01',
+        },
+        {
+            'role': 'user',
+            'platform_user_id': '2842870874',
+            'global_user_id': 'b19dded5-e71d-41a6-8b0f-3f986af70e19',
+            'display_name': '白冥',
+            'body_text': '什么三角洲捡垃圾的游戏',
+            'timestamp': '2026-06-13 15:03',
+        },
+        {
+            'role': 'user',
+            'platform_user_id': _TARGET_PLATFORM_USER_ID,
+            'global_user_id': _TARGET_GLOBAL_USER_ID,
+            'display_name': '蚝爹油',
+            'body_text': '捡垃圾不是乐趣么',
+            'timestamp': '2026-06-13 15:04',
+        },
+        {
+            'role': 'assistant',
+            'platform_user_id': _CHARACTER_PLATFORM_USER_ID,
+            'global_user_id': _CHARACTER_GLOBAL_USER_ID,
+            'display_name': _CHARACTER_NAME,
+            'body_text': (
+                '哈哈，蚝爹油这心态绝了！\n'
+                '白冥你快放弃那种‘审判游戏’的严肃感吧，'
+                '捡垃圾不就是为了等那个瞬间出金吗？'
+                '这种在痛苦里找快乐的感觉才最刺激啊！'
+            ),
+            'timestamp': '2026-06-13 15:06',
+            'broadcast': True,
+            'addressed_to_global_user_ids': [],
+        },
+        {
+            'role': 'user',
+            'platform_user_id': _OBSERVED_CURRENT_PLATFORM_USER_ID,
+            'global_user_id': _OBSERVED_CURRENT_GLOBAL_USER_ID,
+            'display_name': '1816',
+            'body_text': '笑死',
+            'timestamp': '2026-06-13 15:14',
+        },
+        {
+            'role': 'user',
+            'platform_user_id': _OBSERVED_CURRENT_PLATFORM_USER_ID,
+            'global_user_id': _OBSERVED_CURRENT_GLOBAL_USER_ID,
+            'display_name': '1816',
+            'body_text': user_input,
+            'timestamp': '2026-06-13 15:14',
+        },
+    ]
+    state['reply_context'] = {
+        'reply_to_message_id': '638034781',
+        'reply_to_platform_user_id': _CHARACTER_PLATFORM_USER_ID,
+        'reply_to_display_name': _CHARACTER_NAME,
+        'reply_excerpt': (
+            '哈哈，蚝爹油这心态绝了！\n'
+            '白冥你快放弃那种‘审判游戏’的严肃感吧，'
+            '捡垃圾不就是为了等那个瞬间出金吗？'
+            '这种在痛苦里找快乐的感觉才最刺激啊！'
+        ),
+    }
+    state['scope_users'] = [
+        _scope_user(
+            display_name='白冥',
+            platform_user_id='2842870874',
+            global_user_id='b19dded5-e71d-41a6-8b0f-3f986af70e19',
+        ),
+        _scope_user(
+            display_name='凭虚御风',
+            platform_user_id='1237982614',
+            global_user_id='0dee2d1e-2022-460b-8db2-fbef37d22010',
+        ),
+        _scope_user(
+            display_name='蚝爹油',
+            platform_user_id=_TARGET_PLATFORM_USER_ID,
+            global_user_id=_TARGET_GLOBAL_USER_ID,
+        ),
+        _scope_user(
+            display_name='1816',
+            platform_user_id=_OBSERVED_CURRENT_PLATFORM_USER_ID,
+            global_user_id=_OBSERVED_CURRENT_GLOBAL_USER_ID,
+        ),
+        _scope_user(
+            display_name=_CHARACTER_NAME,
+            platform_user_id=_CHARACTER_PLATFORM_USER_ID,
+            global_user_id=_CHARACTER_GLOBAL_USER_ID,
+        ),
+    ]
+    state['platform_channel_id'] = _OBSERVED_GROUP_PLATFORM_CHANNEL_ID
+    return state
+
+
 def _no_anchor_state(user_input: str) -> dict:
     """Build a negative probe where scoped users are visible but unbridged."""
 
@@ -316,6 +441,26 @@ def _has_referent(result: dict, phrase: str, status: str) -> bool:
     return False
 
 
+def _display_name_target_is_person_grounded(result: dict) -> bool:
+    """Return whether the output makes the display name a person reference."""
+
+    if _has_referent(result, '蚝爹油', 'resolved'):
+        return True
+
+    output = str(result['decontexualized_input'])
+    person_markers = [
+        '用户蚝爹油',
+        '群友蚝爹油',
+        '参与者蚝爹油',
+        '名叫蚝爹油',
+        '蚝爹油这个用户',
+        '蚝爹油这位用户',
+        '蚝爹油这名用户',
+    ]
+    is_grounded = any(marker in output for marker in person_markers)
+    return is_grounded
+
+
 async def _run_case(
     monkeypatch,
     case_id: str,
@@ -341,6 +486,10 @@ async def _run_case(
             'mentions_scope_users': 'scope_users' in system_prompt,
             'mentions_identity_table': '身份' in system_prompt,
             'mentions_candidate': '候选' in system_prompt,
+        },
+        'model_route': {
+            'base_url': MSG_DECONTEXTUALIZER_LLM_BASE_URL,
+            'model': MSG_DECONTEXTUALIZER_LLM_MODEL,
         },
         'duration_seconds': duration_seconds,
     }
@@ -371,6 +520,36 @@ async def test_live_scope_users_resolves_original_qq_failure(
     assert '蚝爹油' in output, trace_payload
     assert _has_referent(result, '他', 'resolved'), trace_payload
     assert not _has_referent(result, '他', 'unresolved'), trace_payload
+    assert trace_payload['duration_seconds'] < 30.0
+
+
+async def test_live_scope_users_ground_display_name_target_from_observed_group_reply(
+    ensure_live_llm,
+    monkeypatch,
+) -> None:
+    """The observed group reply should ground 蚝爹油 as a participant name."""
+
+    del ensure_live_llm
+    state = _observed_qq_display_name_target_state()
+    result, trace_payload = await _run_case(
+        monkeypatch,
+        'observed_qq_display_name_target',
+        state,
+    )
+
+    output = result['decontexualized_input']
+    chat_history = trace_payload['input_payload']['chat_history']
+    assert all(isinstance(row, str) for row in chat_history), trace_payload
+    assert any(
+        '蚝爹油: 捡垃圾不是乐趣么' in row
+        for row in chat_history
+    ), trace_payload
+    assert not any(
+        'platform_user_id' in row or 'global_user_id' in row
+        for row in chat_history
+    ), trace_payload
+    assert '蚝爹油' in output, trace_payload
+    assert _display_name_target_is_person_grounded(result), trace_payload
     assert trace_payload['duration_seconds'] < 30.0
 
 

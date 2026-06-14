@@ -24,6 +24,9 @@ from kazusa_ai_chatbot.nodes.boundary_profile import (
     get_relationship_priority_description,
     get_self_integrity_description,
 )
+from kazusa_ai_chatbot.conversation_history_prompt_projection import (
+    project_conversation_history_for_llm,
+)
 from kazusa_ai_chatbot.time_boundary import format_storage_utc_for_llm
 from kazusa_ai_chatbot.utils import get_llm, log_preview, parse_llm_json_output
 
@@ -124,7 +127,7 @@ _RECORDER_PROMPT = '''\
     }},
     "decontexualized_input": "用户本轮消息经去上下文化后的内容",
     "chat_history_recent": [
-        {{"speaker_name": "用户显示名或 {character_name}", "speaker_kind": "user | character | other", "body_text": "消息文本", "timestamp": "可选本地 YYYY-MM-DD HH:MM"}}
+        "[YYYY-MM-DD HH:MM] 用户显示名或 {character_name}: 消息文本"
     ],
     "content_plan": {{"semantic_content": "刚结束回复前的内容计划"}},
     "logical_stance": "CONFIRM | REFUSE | TENTATIVE | DIVERGE | CHALLENGE",
@@ -177,69 +180,6 @@ def _render_recorder_prompt(character_name: str) -> str:
     return rendered_prompt
 
 
-def _project_recorder_chat_history(
-    chat_history_recent: list[dict],
-    *,
-    character_name: str,
-) -> list[dict]:
-    """Build recorder-facing chat history without raw machine role labels."""
-
-    projected_rows: list[dict] = []
-    for row in chat_history_recent:
-        projected_rows.append(
-            _project_recorder_chat_history_row(
-                row,
-                character_name=character_name,
-            )
-        )
-    return projected_rows
-
-
-def _project_recorder_chat_history_row(
-    row: dict,
-    *,
-    character_name: str,
-) -> dict:
-    """Project one recorder history row while preserving message text."""
-
-    role = row.get("role")
-    display_name = row.get("display_name")
-    if role == "assistant":
-        speaker_name = character_name
-        speaker_kind = "character"
-    elif role == "user":
-        speaker_name = _prompt_speaker_name(display_name, default="user")
-        speaker_kind = "user"
-    else:
-        speaker_name = _prompt_speaker_name(display_name, default="other")
-        speaker_kind = "other"
-
-    body_text = row.get("body_text")
-    if body_text is None:
-        body_text = row.get("content")
-    if not isinstance(body_text, str):
-        raise ValueError("chat_history_recent body_text must be a string")
-
-    projected_row = {
-        "speaker_name": speaker_name,
-        "speaker_kind": speaker_kind,
-        "body_text": body_text,
-    }
-    timestamp_local = format_storage_utc_for_llm(row.get("timestamp"))
-    if timestamp_local:
-        projected_row["timestamp"] = timestamp_local
-    return projected_row
-
-
-def _prompt_speaker_name(value: Any, *, default: str) -> str:
-    """Return a compact speaker name for prompt-facing history."""
-
-    if isinstance(value, str) and value.strip():
-        speaker_name = value.strip()
-        return speaker_name
-    return default
-
-
 async def record_with_llm(record_input: ConversationProgressRecordInput) -> dict:
     """Call the recorder LLM for one completed turn.
 
@@ -273,7 +213,7 @@ async def record_with_llm(record_input: ConversationProgressRecordInput) -> dict
             record_input["prior_episode_state"],
         ),
         "decontexualized_input": record_input["decontexualized_input"],
-        "chat_history_recent": _project_recorder_chat_history(
+        "chat_history_recent": project_conversation_history_for_llm(
             record_input["chat_history_recent"],
             character_name=character_name,
         ),

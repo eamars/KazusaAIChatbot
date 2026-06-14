@@ -841,7 +841,7 @@ def test_extractor_payload_includes_recent_history() -> None:
 
     payload = memory_units_module._json_payload(state)
 
-    assert payload["chat_history_recent"][0]["timestamp"] == "2026-04-29 00:01"
+    assert "2026-04-29 00:01" in payload["chat_history_recent"][0]
     commitments = payload["rag_user_memory_context"]["active_commitments"]
     assert commitments[0]["updated_at"] == "2026-04-29 00:02"
 

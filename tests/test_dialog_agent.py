@@ -519,18 +519,15 @@ def test_dialog_rendered_voice_constraints_do_not_seed_literal_phrases() -> None
             ltp["self_deprecation"],
         ),
     )
-    voice_start = prompt.index("# 角色声纹约束")
-    voice_end = prompt.index("# 输入字段含义")
+    voice_start = prompt.index("# 角色表达依据")
+    voice_end = prompt.index("# 生成流程")
     voice_block = prompt[voice_start:voice_end]
 
-    assert "已定语义目标" in voice_block
+    assert "content_plan" in voice_block
     for forbidden_text in (
         "不然呢",
         "你觉得呢",
         "是吗",
-        "content_plan",
-        "内容计划",
-        "本轮计划",
         "「",
         "」",
     ):

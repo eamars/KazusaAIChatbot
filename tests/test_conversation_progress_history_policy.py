@@ -12,6 +12,9 @@ from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episod
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.cognition_chain_core.stages import l2c2 as l2c2_module
 from kazusa_ai_chatbot.cognition_chain_core.stages import l3 as l3_module
+from kazusa_ai_chatbot.conversation_history_prompt_projection import (
+    project_conversation_history_for_llm,
+)
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -195,7 +198,13 @@ async def test_contextual_agent_receives_at_most_four_history_messages(monkeypat
 
     human_payload = json.loads(fake_llm.messages[1].content)
     assert len(human_payload["chat_history"]) == 4
-    assert human_payload["chat_history"] == _history()[-4:]
+    expected_lines = [
+        "unknown: user message 4",
+        "Kazusa: assistant message 5",
+        "unknown: user message 6",
+        "Kazusa: assistant message 7",
+    ]
+    assert human_payload["chat_history"] == expected_lines
 
 
 @pytest.mark.asyncio
@@ -213,7 +222,11 @@ async def test_style_agent_receives_at_most_two_history_messages(monkeypatch) ->
 
     human_payload = json.loads(fake_llm.messages[1].content)
     assert len(human_payload["chat_history"]) == 2
-    assert human_payload["chat_history"] == _history()[-2:]
+    expected_lines = [
+        "unknown: user message 6",
+        "Kazusa: assistant message 7",
+    ]
+    assert human_payload["chat_history"] == expected_lines
 
 
 @pytest.mark.asyncio
@@ -332,11 +345,15 @@ def test_context_budget_workload_summary_records_payload_counts() -> None:
         "dialog_generator_tone_messages": len(history),
         "dialog_evaluator_last_user" "_message_only": True,
     }
+    contextual_history = project_conversation_history_for_llm(
+        history, character_name="Kazusa", max_rows=4,
+    )
+    style_history = project_conversation_history_for_llm(
+        history, character_name="Kazusa", max_rows=2,
+    )
     bounded_payload = {
-        "contextual_history_messages": len(
-            l2c2_module._surface_history_for_social_context(history)
-        ),
-        "style_history_messages": len(l3_module._surface_history_for_style(history)),
+        "contextual_history_messages": len(contextual_history),
+        "style_history_messages": len(style_history),
         "dialog_generator_tone_messages": 0,
         "dialog_generator_raw_history_messages": 0,
         "dialog_generator_internal_monologue": False,
@@ -357,10 +374,8 @@ def test_context_budget_workload_summary_records_payload_counts() -> None:
             "dialog_generator_tone" "_history": _payload_chars(history),
         },
         "bounded_dynamic_payload_chars": {
-            "contextual_history": _payload_chars(
-                l2c2_module._surface_history_for_social_context(history)
-            ),
-            "style_history": _payload_chars(l3_module._surface_history_for_style(history)),
+            "contextual_history": _payload_chars(contextual_history),
+            "style_history": _payload_chars(style_history),
             "dialog_generator_tone" "_history": 0,
             "dialog_generator_raw_history": 0,
             "dialog_generator_internal_monologue": 0,

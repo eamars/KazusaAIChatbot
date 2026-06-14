@@ -14,6 +14,9 @@ from kazusa_ai_chatbot.config import (
     CONSOLIDATION_LLM_MODEL,
     CONVERSATION_HISTORY_LIMIT,
 )
+from kazusa_ai_chatbot.conversation_history_prompt_projection import (
+    project_conversation_history_for_llm,
+)
 from kazusa_ai_chatbot.reflection_cycle.activity_windows import (
     GroupActivityWindow,
 )
@@ -54,30 +57,29 @@ GROUP_SCENE_DIGEST_SYSTEM_PROMPT = '''\
 你负责把一段已选中的群聊现场压缩成当前角色自己阅读的观察资料。
 
 # 输入含义
-- 信息来源限定为 human payload 里的 message_rows 和 activity_labels。
-- message_rows 按时间顺序排列；display_name 是该行的可见发言者名称。
-- message_rows 可能比当前 15 分钟窗口更宽，用来补足话题承接关系；不要把更早的行误认为当前窗口内的新发言。
+- 信息来源限定为 human payload 里的 message_lines 和 activity_labels。
+- message_lines 是按时间顺序排列的聊天记录行，每行格式为 `[时间] 说话人: 内容`。
+- message_lines 可能比当前 15 分钟窗口更宽，用来补足话题承接关系；不要把更早的行误认为当前窗口内的新发言。
 - activity_labels.assistant_presence 表示窗口里是否有当前角色自己的发言。
-- role="assistant" 的行是当前角色自己的可见发言；摘要中写成“我（display_name）”。
-- text 里的 @名称 属于该行可见文字，表示该行发言者艾特或提到了这个名称。
-- content_activity="empty_or_media_only" 表示该行没有可概括的可见文字。
+- 当前角色自己的发言行，摘要中写成"我（说话人）"。
+- 行内的 @名称 属于该行可见文字，表示该行发言者艾特或提到了这个名称。
 
 # 摘要视角
 - digest 用简体中文，写成第一人称观察资料。
-- 说明群聊里的可见先后关系、被概括的发言者 display_name、我是否已经在窗口中参与过、以及我最后发言后是否还有新的文字线索。
-- 再次提到发言者时继续使用 display_name，让后续 cognition 能直接看出谁在说话。
+- 说明群聊里的可见先后关系、被概括的发言者名称、我是否已经在窗口中参与过、以及我最后发言后是否还有新的文字线索。
+- 再次提到发言者时继续使用其名称，让后续 cognition 能直接看出谁在说话。
 - summary 用简体中文，写成很短的群聊话题概述，只描述主要参与者、话题和指向关系；不要写行动建议。
 
 # 生成步骤
-1. 按 message_rows 的顺序阅读，保持这个顺序。
-2. 对需要概括的 user 行，写 display_name 问、说或提到的可见内容；如果 text 里有 @名称，把 @名称 保留为该行文字的一部分。
-3. 把 assistant 行的 text 当作原文引用处理，优先写成：我（display_name）说：“text”。
-4. 引用内容只从该行 text 复制或轻微压缩；引用里的 `你`、`我`、称呼和语气词保持原样。
-5. display_name 放在引用外标记这行是谁说的；assistant 行的被回复者只来自 text 原文。
-6. 窗口里有 role="assistant" 行时，概括每条 assistant 行的可见文字内容。
-7. 最后补一句当前角色发言后的状态，先看 activity_labels.assistant_presence，再看 message_rows：
-   - assistant_presence="present" 且最后一条 assistant 后还有 user 行：写“我最后发言后，display_name 说/问/提到：...”。
-   - assistant_presence="present" 且最后一行是 assistant：写“我最后发言后没有新的文字线索”。
+1. 按 message_lines 的顺序阅读，保持这个顺序。
+2. 对需要概括的用户行，写说话人问、说或提到的可见内容；如果行内有 @名称，把 @名称 保留为该行文字的一部分。
+3. 把当前角色自己的行当作原文引用处理，优先写成：我（说话人）说："内容"。
+4. 引用内容只从该行复制或轻微压缩；引用里的 `你`、`我`、称呼和语气词保持原样。
+5. 说话人放在引用外标记这行是谁说的；当前角色行的被回复者只来自行内原文。
+6. 窗口里有当前角色自己的行时，概括每条的可见文字内容。
+7. 最后补一句当前角色发言后的状态，先看 activity_labels.assistant_presence，再看 message_lines：
+   - assistant_presence="present" 且最后一条角色行后还有用户行：写"我最后发言后，说话人 说/问/提到：..."。
+   - assistant_presence="present" 且最后一行是角色行：写"我最后发言后没有新的文字线索"。
    - assistant_presence 不是 "present"：写“我没有在这个窗口中发言”。
 
 # 输出格式
@@ -175,7 +177,7 @@ def build_group_scene_digest_prompt_payload(
             "message_count": window.message_count,
         },
         "activity_labels": dict(window.labels),
-        "message_rows": _digest_message_rows(window),
+        "message_lines": _digest_message_lines(window),
     }
     return payload
 
@@ -234,54 +236,25 @@ def normalize_group_scene_digest_output(
     return return_value
 
 
-def _digest_message_rows(
+def _digest_message_lines(
     window: GroupActivityWindow,
-) -> list[dict[str, str]]:
-    """Build explicit visible-name chronological rows for the digest prompt."""
+) -> list[str]:
+    """Build transcript lines for the digest prompt."""
 
     selected_rows = (
         window.digest_participant_rows[-_GROUP_SCENE_DIGEST_ROW_LIMIT:]
     )
-    message_rows: list[dict[str, str]] = []
-    for row in selected_rows:
-        role = text_or_empty(row.get("role")) or "unknown"
-        body_text = _bounded_text(
-            row.get("body_text"),
-            limit=_GROUP_SCENE_DIGEST_ROW_TEXT_LIMIT,
-        )
-        message_row = {
-            "timestamp": text_or_empty(row.get("timestamp")),
-            "role": role,
-            "display_name": _digest_display_name(row, role=role),
-            "content_activity": _content_activity(body_text),
-            "text": body_text,
-        }
-        message_rows.append(message_row)
-    return message_rows
-
-
-def _digest_display_name(row: dict[str, Any], *, role: str) -> str:
-    """Return the visible prompt-facing speaker name for one digest row."""
-
-    display_name = text_or_empty(row.get("display_name"))
-    if display_name:
-        return_value = display_name
-        return return_value
-    if role == "assistant":
-        return_value = "当前角色"
-        return return_value
-    return_value = "未知发言者"
-    return return_value
-
-
-def _content_activity(body_text: str) -> str:
-    """Label whether a prompt row has visible text or only non-text activity."""
-
-    if body_text:
-        return_value = "text"
-    else:
-        return_value = "empty_or_media_only"
-    return return_value
+    lines = project_conversation_history_for_llm(
+        selected_rows,
+        character_name='当前角色',
+    )
+    bounded_lines = [
+        line[:_GROUP_SCENE_DIGEST_ROW_TEXT_LIMIT].rstrip()
+        if len(line) > _GROUP_SCENE_DIGEST_ROW_TEXT_LIMIT
+        else line
+        for line in lines
+    ]
+    return bounded_lines
 
 
 def _bounded_text(value: object, *, limit: int) -> str:

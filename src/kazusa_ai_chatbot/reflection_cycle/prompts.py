@@ -43,7 +43,7 @@ HOURLY_REFLECTION_SYSTEM_PROMPT = '''\
 
 # 核心任务
 - `话题概括`: 只总结该范围实际发生的话题，不预测后续发展。
-- `参与者观察`: 只使用 `participant_1`、`participant_2` 或 `active_character` 这类抽象标识，不暴露真实身份。
+- `参与者观察`: 根据 transcript 行首说话人稳定分配 `participant_1`、`participant_2` 等抽象标识；能明确判断是当前角色自己的行时使用 `active_character`。不要在输出里暴露真实身份或可见显示名。
 - `回应质量反馈`: 评价角色未来如何更好地接住类似对话。
 - `隐私说明`: 标出任何会阻碍未来持久化的隐私或泄漏风险。
 
@@ -51,7 +51,7 @@ HOURLY_REFLECTION_SYSTEM_PROMPT = '''\
 1. 先阅读 `scope_metadata`，理解频道类型和活动标签。
 2. 按时间顺序阅读 `conversation.messages`，只把输入内容作为证据。
 3. 分开处理话题回顾、参与者观察、回应质量反馈和隐私说明。
-4. 参与者身份必须保持抽象；输出里的 `participant_ref` 只能使用输入中提供的 `speaker_ref` 值。
+4. 参与者身份必须保持抽象；输出里的 `participant_ref` 只能使用你从 transcript 行首说话人分配出的 `participant_1`、`participant_2` 等抽象标识，或明确属于当前角色时使用 `active_character`。
 5. 只返回输出 schema 定义的字段。
 
 # 输入格式
@@ -70,14 +70,7 @@ HOURLY_REFLECTION_SYSTEM_PROMPT = '''\
   },
   "conversation": {
     "message_order": "chronological",
-    "messages": [
-      {
-        "role": "user|assistant",
-        "speaker_ref": "participant_1|active_character",
-        "time_position": "开场|前段|中段|后段|收尾|单条",
-        "text": "受限长度的消息文本"
-      }
-    ]
+    "messages": ["[YYYY-MM-DD HH:MM] 说话人: 消息文本"]
   },
   "review_questions": ["评估问题"]
 }

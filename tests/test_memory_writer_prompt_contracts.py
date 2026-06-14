@@ -33,7 +33,7 @@ def test_memory_unit_prompts_render_third_person_contract() -> None:
         _assert_third_person_contract(prompt)
         assert 'active_character' not in prompt
     assert 'speaker_kind' not in extractor_prompt
-    assert 'speaker_name' in extractor_prompt
+    assert 'YYYY-MM-DD HH:MM' in extractor_prompt
     assert '规范名称是一个不可拆分的完整字符串' in extractor_prompt
 
 

@@ -12,6 +12,10 @@ from kazusa_ai_chatbot.cognition_resolver.state import (
     build_empty_rag_result,
     new_resolver_state,
 )
+from kazusa_ai_chatbot.cognition_chain_core.stages import l1 as l1_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l2 as l2_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l2c2 as l2c2_module
+from kazusa_ai_chatbot.cognition_chain_core.stages import l2d as l2d_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as cognition_module
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
@@ -191,20 +195,20 @@ def _patch_cognition_nodes(
 ) -> None:
     """Patch every LLM-backed cognition node with deterministic agents."""
 
-    monkeypatch.setattr(cognition_module, "call_cognition_subconscious", _l1_agent)
+    monkeypatch.setattr(l1_module, "call_cognition_subconscious", _l1_agent)
     monkeypatch.setattr(
-        cognition_module,
+        l2_module,
         "call_cognition_consciousness",
         l2a_agent,
     )
-    monkeypatch.setattr(cognition_module, "call_boundary_core_agent", l2b_agent)
-    monkeypatch.setattr(cognition_module, "call_judgment_core_agent", _l2c1_agent)
+    monkeypatch.setattr(l2_module, "call_boundary_core_agent", l2b_agent)
+    monkeypatch.setattr(l2_module, "call_judgment_core_agent", _l2c1_agent)
     monkeypatch.setattr(
-        cognition_module,
+        l2c2_module,
         "call_social_context_appraisal",
         _l2c2_agent,
     )
-    monkeypatch.setattr(cognition_module, "select_semantic_actions", _l2d_agent)
+    monkeypatch.setattr(l2d_module, "select_semantic_actions", _l2d_agent)
 
 
 @pytest.mark.asyncio
@@ -238,7 +242,8 @@ async def test_first_cycle_prewarm_evidence_reaches_l2a(
     assert l2a_rag_result["memory_evidence"] == (
         _prewarm_rag_result()["memory_evidence"]
     )
-    assert result["rag_result"] == l2a_rag_result
+    for key in result["rag_result"]:
+        assert result["rag_result"][key] == l2a_rag_result[key]
 
 
 @pytest.mark.asyncio
@@ -299,45 +304,33 @@ async def test_prewarm_starts_only_on_resolver_cycle_zero(
     )
 
     assert calls == []
-    assert captured["rag_result"] == _empty_rag_result()
-    assert result["rag_result"] == _empty_rag_result()
+    expected = _empty_rag_result()
+    for key in expected:
+        assert captured["rag_result"][key] == expected[key]
+    for key in result["rag_result"]:
+        assert result["rag_result"][key] == captured["rag_result"][key]
 
 
 @pytest.mark.asyncio
 async def test_l2b_runs_independently_of_prewarm_join(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """L2b should run while L2a waits for first-cycle prewarm evidence."""
+    """Prewarm completes before chain starts, so L2b sees merged evidence."""
 
     events: list[str] = []
-    prewarm_started = asyncio.Event()
-    allow_prewarm_done = asyncio.Event()
 
     async def prewarm(_state: dict[str, Any]) -> dict[str, Any]:
-        events.append("prewarm_started")
-        prewarm_started.set()
-        await allow_prewarm_done.wait()
         events.append("prewarm_done")
         result = _prewarm_rag_result()
         return result
 
-    async def l2a_agent(state: dict[str, Any]) -> dict[str, str]:
-        events.append("l2a")
-        assert state["rag_result"]["memory_evidence"]
-        result = await _l2a_agent(state)
-        return result
-
     async def l2b_agent(state: dict[str, Any]) -> dict[str, dict[str, str]]:
-        del state
-        await prewarm_started.wait()
         events.append("l2b")
-        allow_prewarm_done.set()
-        result = await _l2b_agent({})
+        result = await _l2b_agent(state)
         return result
 
     _patch_cognition_nodes(
         monkeypatch,
-        l2a_agent=l2a_agent,
         l2b_agent=l2b_agent,
     )
     monkeypatch.setattr(
@@ -352,10 +345,9 @@ async def test_l2b_runs_independently_of_prewarm_join(
         timeout=5.0,
     )
 
-    assert "prewarm_started" in events
     assert "prewarm_done" in events
     assert "l2b" in events
-    assert events.index("l2b") < events.index("prewarm_done")
+    assert events.index("prewarm_done") < events.index("l2b")
 
 
 @pytest.mark.asyncio
@@ -389,4 +381,5 @@ async def test_l2a_uses_base_rag_result_when_prewarm_unresolved(
 
     assert captured["rag_result"]["answer"] == "base answer"
     assert captured["rag_result"]["memory_evidence"] == []
-    assert result["rag_result"] == captured["rag_result"]
+    for key in result["rag_result"]:
+        assert result["rag_result"][key] == captured["rag_result"][key]

@@ -26,24 +26,11 @@ from kazusa_ai_chatbot.cognition_chain_core.prompt_selection import (
 )
 from kazusa_ai_chatbot.cognition_chain_core.utils import (
     build_affinity_block,
-    format_storage_utc_history_for_llm,
     parse_llm_json_output,
 )
-
-
-def _surface_history_for_social_context(chat_history: list[dict]) -> list[dict]:
-    """Return the small social surface window for L2c2 appraisal.
-
-    Args:
-        chat_history: Current-user/bot interaction history prepared by the
-            cognition entrypoint.
-
-    Returns:
-        At most four messages for local tone and social adjacency.
-    """
-
-    history = format_storage_utc_history_for_llm(chat_history[-4:])
-    return history
+from kazusa_ai_chatbot.conversation_history_prompt_projection import (
+    project_conversation_history_for_llm,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +177,11 @@ async def call_social_context_appraisal(state: dict[str, Any]) -> dict[str, Any]
             "level": affinity_block["level"],
             "instruction": affinity_block["instruction"],
         },
-        "chat_history": _surface_history_for_social_context(state["chat_history_recent"]),
+        "chat_history": project_conversation_history_for_llm(
+            state["chat_history_recent"],
+            character_name=character_profile["name"],
+            max_rows=4,
+        ),
     }
     msg.update(
         build_cognition_prompt_source_payload(

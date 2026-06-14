@@ -5,10 +5,10 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-from kazusa_ai_chatbot.time_boundary import (
-    format_storage_utc_fields_for_llm,
-    format_storage_utc_history_for_llm,
+from kazusa_ai_chatbot.conversation_history_prompt_projection import (
+    project_conversation_history_for_llm,
 )
+from kazusa_ai_chatbot.time_boundary import format_storage_utc_fields_for_llm
 
 _TIME_FIELDS = (
     "timestamp",
@@ -160,6 +160,80 @@ def project_tool_result_for_llm(value: object) -> object:
     return return_value
 
 
+def project_conversation_tool_result_for_llm(value: object) -> object:
+    """Project tool result with conversation rows rendered as transcript lines.
+
+    Applies ``project_tool_result_for_llm`` first, then replaces any
+    recognised conversation-message list (list of dicts with ``body_text``
+    and ``role``) with central transcript lines.  Tupled score+message
+    pairs (from semantic search) are also projected.
+
+    Args:
+        value: Raw tool result from a conversation retrieval tool.
+
+    Returns:
+        LLM-facing projection with conversation rows as transcript strings.
+    """
+
+    projected = project_tool_result_for_llm(value)
+    return_value = _project_messages_in_result(projected)
+    return return_value
+
+
+def _is_conversation_row(item: object) -> bool:
+    """Return True if *item* looks like a conversation-message dict."""
+    if not isinstance(item, dict):
+        return False
+
+    has_prompt_text = any(
+        isinstance(item.get(field), str)
+        for field in ("body_text", "content", "text")
+    )
+    has_speaker_metadata = any(
+        isinstance(item.get(field), str)
+        for field in ("role", "display_name", "name")
+    )
+    return_value = has_prompt_text and has_speaker_metadata
+    return return_value
+
+
+def _project_messages_in_result(value: object) -> object:
+    """Replace conversation-message lists with transcript lines."""
+
+    if isinstance(value, list):
+        if value and all(_is_conversation_row(item) for item in value):
+            return_value = project_conversation_history_for_llm(value)
+            return return_value
+
+        if value and all(
+            isinstance(item, list)
+            and len(item) == 2
+            and isinstance(item[0], (int, float))
+            and _is_conversation_row(item[1])
+            for item in value
+        ):
+            rows = [item[1] for item in value]
+            lines = project_conversation_history_for_llm(rows)
+            return_value = [
+                [item[0], line]
+                for item, line in zip(value, lines)
+            ]
+            return return_value
+
+        return_value = [_project_messages_in_result(item) for item in value]
+        return return_value
+
+    if isinstance(value, dict):
+        return_value = {
+            key: _project_messages_in_result(val)
+            for key, val in value.items()
+        }
+        return return_value
+
+    return_value = value
+    return return_value
+
+
 def project_known_facts_for_llm(known_facts: object) -> list[dict[str, object]]:
     """Project RAG known facts before another LLM sees them.
 
@@ -193,12 +267,18 @@ def project_known_facts_for_llm(known_facts: object) -> list[dict[str, object]]:
     return return_value
 
 
-def project_runtime_context_for_llm(context: dict[str, Any]) -> dict[str, Any]:
+def project_runtime_context_for_llm(
+    context: dict[str, Any],
+    *,
+    character_name: str = "",
+) -> dict[str, Any]:
     """Build the explicit LLM view of a RAG runtime context.
 
     Args:
         context: Internal RAG context. It may contain raw UTC clocks for
             deterministic tools.
+        character_name: Active character display name, used as speaker fallback
+            for assistant rows in conversation-history projection.
 
     Returns:
         A prompt-facing context. Root machine clocks are omitted; the model sees
@@ -226,7 +306,10 @@ def project_runtime_context_for_llm(context: dict[str, Any]) -> dict[str, Any]:
     for history_key in ("chat_history_recent", "chat_history_wide"):
         history_rows = context.get(history_key)
         if isinstance(history_rows, list):
-            projected[history_key] = _project_history_for_llm(history_rows)
+            projected[history_key] = project_conversation_history_for_llm(
+                history_rows,
+                character_name=character_name,
+            )
 
     known_facts = context.get("known_facts")
     if isinstance(known_facts, list):
@@ -278,27 +361,6 @@ def _project_dict_for_llm(row: dict[str, Any]) -> dict[str, Any]:
             projected[field] = project_tool_result_for_llm(value)
 
     return_value = projected
-    return return_value
-
-
-def _project_history_for_llm(rows: list[object]) -> list[object]:
-    """Project chat-history rows while preserving non-dict entries."""
-    dict_rows = [
-        row
-        for row in rows
-        if isinstance(row, dict)
-    ]
-    formatted_rows = format_storage_utc_history_for_llm(dict_rows)
-    formatted_iter = iter(formatted_rows)
-
-    projected_rows: list[object] = []
-    for row in rows:
-        if isinstance(row, dict):
-            projected_rows.append(next(formatted_iter))
-        else:
-            projected_rows.append(copy.deepcopy(row))
-
-    return_value = projected_rows
     return return_value
 
 

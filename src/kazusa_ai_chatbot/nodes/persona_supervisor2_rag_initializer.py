@@ -515,7 +515,10 @@ async def rag_initializer(state: ProgressiveRAGState) -> dict:
         return return_value
 
     system_prompt = SystemMessage(content=_INITIALIZER_PROMPT.format(character_name=character_name))
-    llm_context = project_runtime_context_for_llm(context)
+    llm_context = project_runtime_context_for_llm(
+        context,
+        character_name=character_name,
+    )
     user_input = {
         "original_query": state["original_query"],
         "context": llm_context,

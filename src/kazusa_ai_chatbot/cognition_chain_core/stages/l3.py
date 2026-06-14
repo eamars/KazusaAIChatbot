@@ -44,10 +44,12 @@ from kazusa_ai_chatbot.cognition_chain_core.referent_resolution import (
 )
 from kazusa_ai_chatbot.cognition_chain_core.utils import (
     empty_user_memory_context,
-    format_storage_utc_history_for_llm,
     log_preview,
     parse_llm_json_output,
     project_tool_result_for_llm,
+)
+from kazusa_ai_chatbot.conversation_history_prompt_projection import (
+    project_conversation_history_for_llm,
 )
 from kazusa_ai_chatbot.cognition_episode import CognitiveEpisodeValidationError
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
@@ -146,36 +148,6 @@ def _prompt_safe_supervisor_trace(supervisor_trace: dict[str, Any]) -> dict[str,
         prompt_trace["dispatched"] = prompt_dispatched
     return_value = prompt_trace
     return return_value
-
-
-def _surface_history_for_visual(chat_history: list[dict]) -> list[dict]:
-    """Return the small recent-message window for visual prompting.
-
-    Args:
-        chat_history: Current-user/bot interaction history prepared by the
-            cognition entrypoint.
-
-    Returns:
-        At most four messages for local tone and social adjacency.
-    """
-
-    history = format_storage_utc_history_for_llm(chat_history[-4:])
-    return history
-
-
-def _surface_history_for_style(chat_history: list[dict]) -> list[dict]:
-    """Return the tiny wording buffer for style analysis.
-
-    Args:
-        chat_history: Current-user/bot interaction history prepared by the
-            cognition entrypoint.
-
-    Returns:
-        At most two messages for phrase/cadence reference.
-    """
-
-    history = format_storage_utc_history_for_llm(chat_history[-2:])
-    return history
 
 
 def _visual_prompt_message_context(
@@ -528,7 +500,11 @@ async def call_style_agent(state: dict[str, Any]) -> dict[str, Any]:
                 str(state.get("channel_type", "private"))
             ),
         ),
-        "chat_history": _surface_history_for_style(state["chat_history_recent"]),
+        "chat_history": project_conversation_history_for_llm(
+            state["chat_history_recent"],
+            character_name=character_profile["name"],
+            max_rows=2,
+        ),
     }
     msg.update(build_cognition_prompt_source_payload(
         episode=episode,
@@ -1244,7 +1220,11 @@ async def call_visual_agent(state: dict[str, Any]) -> dict[str, Any]:
         "character_mood": character_profile['mood'],
         "emotional_appraisal": state["emotional_appraisal"],
         "boundary_core_assessment": state["boundary_core_assessment"],
-        "chat_history": _surface_history_for_visual(state.get("chat_history_recent", [])),
+        "chat_history": project_conversation_history_for_llm(
+            state.get("chat_history_recent", []),
+            character_name=character_profile["name"],
+            max_rows=4,
+        ),
         "reply_context": reply_context,
         "channel_topic": state.get("channel_topic", ""),
         "conversation_progress": state.get("conversation_progress"),

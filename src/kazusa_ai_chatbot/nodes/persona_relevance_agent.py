@@ -24,11 +24,11 @@ from kazusa_ai_chatbot.db import (
     DatabaseOperationError,
     build_user_engagement_relevance_context,
 )
-from kazusa_ai_chatbot.state import IMProcessState
-from kazusa_ai_chatbot.time_boundary import (
-    format_storage_utc_history_for_llm,
-    parse_storage_utc_datetime,
+from kazusa_ai_chatbot.conversation_history_prompt_projection import (
+    project_conversation_history_for_llm,
 )
+from kazusa_ai_chatbot.state import IMProcessState
+from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 from kazusa_ai_chatbot.utils import (
     build_affinity_block,
     get_llm,
@@ -292,7 +292,7 @@ _RELEVANCE_SYSTEM_PROMPT = """\
 - `current_run_context.affinity_level`、`affinity_instruction` 和 `last_relationship_insight` 是对当前发言者的关系判断；它们影响已合格消息的回应意愿，但不能替代指向证据。
 - `user_message.user_name` 与 `platform_user_id` 是当前发言者身份；`content` 是当前消息正文；`channel_name` 是会话名称，只用于理解场景和话题。
 - `user_message.directly_addressed` 与 `user_message.reply_context` 是结构化平台证据，优先级高于正文措辞。
-- `conversation_history` 是近期对话窗口，用来判断线性延续、第三方对话和上下文断层。
+- `conversation_history` 是近期对话窗口，格式是日志式文本行。每行包含可见发言人和可见消息文本，用来判断线性延续、第三方对话和上下文断层。
 
 # 响应决策逻辑 (Decision Logic)
 
@@ -652,8 +652,9 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
             "directly_addressed": directly_addressed,
             "reply_context": reply_context,
         },
-        "conversation_history": format_storage_utc_history_for_llm(
-            state.get("chat_history_wide") or []
+        "conversation_history": project_conversation_history_for_llm(
+            state.get("chat_history_wide") or [],
+            character_name=state["character_profile"]["name"],
         ),
     }
     if is_noisy_environment:

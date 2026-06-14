@@ -9,6 +9,9 @@ from kazusa_ai_chatbot.config import (
     RAG_CONVERSATION_EVIDENCE_TEXT_LIMIT,
     RAG_SEARCH_SELECTED_SUMMARY_LIMIT,
 )
+from kazusa_ai_chatbot.conversation_history_prompt_projection import (
+    project_conversation_history_for_llm,
+)
 from kazusa_ai_chatbot.rag.conversation_evidence.active_turn_filter import (
     _filter_active_turn_rows,
 )
@@ -51,6 +54,7 @@ _RELATION_LABELS = {
 }
 
 _MAX_PACKET_RELATIONS = 3
+
 
 def _coverage_fields(
     *,
@@ -302,14 +306,11 @@ def _plain_message_rows(value: object) -> list[dict[str, Any]]:
 
 def _message_projection(rows: list[dict[str, Any]]) -> _ConversationProjection:
     """Project typed conversation message rows into summaries and refs."""
+    transcript_lines = project_conversation_history_for_llm(rows)
     summaries: list[str] = []
     projected_rows: list[dict[str, Any]] = []
-    for row in rows:
-        summary = _clip_text(
-            _message_row_text(row),
-            limit=RAG_CONVERSATION_EVIDENCE_TEXT_LIMIT,
-        )
-        summary = _dedupe_speaker_prefix(summary, row)
+    for row, line in zip(rows, transcript_lines):
+        summary = _clip_text(line, limit=RAG_CONVERSATION_EVIDENCE_TEXT_LIMIT)
         if not summary:
             continue
         summaries.append(summary)
@@ -323,18 +324,6 @@ def _message_projection(rows: list[dict[str, Any]]) -> _ConversationProjection:
         "resolved_refs": resolved_refs,
     }
     return projection
-
-def _dedupe_speaker_prefix(summary: str, row: dict[str, Any]) -> str:
-    """Collapse repeated speaker prefixes in projected conversation text."""
-
-    display_name = text_or_empty(row.get("display_name"))
-    if not display_name:
-        return summary
-    doubled_prefix = f"{display_name}: {display_name}: "
-    if summary.startswith(doubled_prefix):
-        deduped = f"{display_name}: {summary[len(doubled_prefix):]}"
-        return deduped
-    return summary
 
 def _projection_row(row: dict[str, Any], summary: str) -> dict[str, Any]:
     """Build inspectable row provenance for one projected message."""
@@ -589,14 +578,6 @@ def _conversation_projection_source(row: dict[str, Any]) -> str:
     source = "conversation:unknown"
     return source
 
-def _message_row_text(row: dict[str, Any]) -> str:
-    """Extract prompt-facing text from one canonical message row."""
-    text = candidate_prompt_text(
-        row,
-        source="conversation",
-        text_limit=RAG_CONVERSATION_EVIDENCE_TEXT_LIMIT,
-    )
-    return text
 
 def _refs_from_message_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Extract structured speaker, message, and URL refs from message rows."""
@@ -627,9 +608,14 @@ def _refs_from_message_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 }
             )
 
-        text = _message_row_text(row)
-        refs.extend(_url_refs_from_text(text))
+        reference_text = candidate_prompt_text(
+            row,
+            source="conversation",
+            text_limit=RAG_CONVERSATION_EVIDENCE_TEXT_LIMIT,
+        )
+        refs.extend(_url_refs_from_text(reference_text))
     return refs
+
 
 def _aggregate_projection(value: object) -> _ConversationProjection:
     """Project aggregate worker payloads into canonical conversation evidence."""

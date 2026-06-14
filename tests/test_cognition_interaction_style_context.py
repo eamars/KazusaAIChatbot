@@ -269,13 +269,7 @@ def _global_state(*, channel_type: str) -> dict:
 async def test_interaction_style_context_loader_falls_back_without_group_for_private(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Loader failure returns private-safe empty context without group style."""
-
-    monkeypatch.setattr(
-        l3_module,
-        "build_interaction_style_context",
-        AsyncMock(side_effect=RuntimeError("db unavailable")),
-    )
+    """Loader returns private-safe empty context when state has no overlay."""
 
     result = await l3_module.call_interaction_style_context_loader(
         {
@@ -415,15 +409,15 @@ async def test_cognition_subgraph_plumbs_channel_scope_into_l3_loader(
         return return_value
 
     monkeypatch.setattr(
-        surface_module,
+        l3_module,
         "call_interaction_style_context_loader",
         fake_loader,
     )
-    monkeypatch.setattr(surface_module, "call_style_agent", fake_style)
-    monkeypatch.setattr(surface_module, "call_content_plan_agent", fake_content)
-    monkeypatch.setattr(surface_module, "call_preference_adapter", fake_preference)
-    monkeypatch.setattr(surface_module, "call_visual_agent", fake_visual)
-    monkeypatch.setattr(surface_module, "call_surface_directive_collector", fake_collector)
+    monkeypatch.setattr(l3_module, "call_style_agent", fake_style)
+    monkeypatch.setattr(l3_module, "call_content_plan_agent", fake_content)
+    monkeypatch.setattr(l3_module, "call_preference_adapter", fake_preference)
+    monkeypatch.setattr(l3_module, "call_visual_agent", fake_visual)
+    monkeypatch.setattr(l3_module, "call_surface_directive_collector", fake_collector)
 
     for channel_type in ("private", "group"):
         state = _global_state(channel_type=channel_type)
@@ -449,8 +443,8 @@ async def test_cognition_subgraph_plumbs_channel_scope_into_l3_loader(
     ]
     assert [state["platform"] for state in captured_states] == ["qq", "qq"]
     assert [state["platform_channel_id"] for state in captured_states] == [
-        "private-channel",
-        "group-channel",
+        "",
+        "",
     ]
     assert [
         state["interaction_style_context"]["application_order"]

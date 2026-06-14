@@ -469,7 +469,10 @@ async def rag_dispatcher(state: ProgressiveRAGState) -> dict:
             agent_name_union=_build_agent_name_union(),
         )
     )
-    llm_context = project_runtime_context_for_llm(state.get("context", {}))
+    llm_context = project_runtime_context_for_llm(
+        state.get("context", {}),
+        character_name=state.get("character_name", ""),
+    )
     user_input = {
         "current_slot": current_slot,
         "known_facts": _known_facts_llm_view(state.get("known_facts", [])),

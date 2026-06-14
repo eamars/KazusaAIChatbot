@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import inspect
 import json
+import logging
 from copy import deepcopy
 from typing import Any, get_args
 
@@ -104,8 +105,8 @@ _PROMPT_FINGERPRINTS = (
     (
         "ACTION_ROUTER_PROMPT",
         ACTION_ROUTER_PROMPT,
-        17886,
-        "fc8bec1ff152453e5b64bb88d0e1387f1ef955f3bddc54ffc09e524ca5bdfea8",
+        23173,
+        "71d43a9066182d82e21806a0923d24b325c31937583519faa970fca930b5ab59",
     ),
     (
         "_STYLE_AGENT_PROMPT",
@@ -184,6 +185,29 @@ class _CapturingAsyncLLM:
         content = json.dumps(self.payload, ensure_ascii=False)
         response = _DummyResponse(content)
         return response
+
+
+_COGNITION_LLM_DISPATCH_MAP = {
+    "的潜意识层": "_subconscious_llm",
+    "的意识层": "_conscious_llm",
+    "的裁决核心": "_judgement_core_llm",
+    "的社交观察脑": "_contextual_agent_llm",
+}
+
+
+class _DispatchingAsyncLLM:
+    """Fake LLM that dispatches to per-stage fakes based on system prompt."""
+
+    def __init__(self, stage_llms: dict[str, _CapturingAsyncLLM]) -> None:
+        self.stage_llms = stage_llms
+        self._model_key = ("fake", "dispatching")
+
+    async def ainvoke(self, messages: list[Any]) -> _DummyResponse:
+        system_text = messages[0].content if messages else ""
+        for marker, llm_name in _COGNITION_LLM_DISPATCH_MAP.items():
+            if marker in system_text:
+                return await self.stage_llms[llm_name].ainvoke(messages)
+        return await self.stage_llms["_subconscious_llm"].ainvoke(messages)
 
 
 def _time_context() -> dict[str, str]:
@@ -550,6 +574,33 @@ def _patch_cognition_llms(
         llms["_preference_adapter_llm"],
     )
     monkeypatch.setattr(l3_module, "_visual_agent_llm", llms["_visual_agent_llm"])
+    from kazusa_ai_chatbot.cognition_chain_core.contracts import (
+        CognitionChainServices,
+    )
+    from kazusa_ai_chatbot.utils import parse_llm_json_output
+
+    cognition_dispatch = _DispatchingAsyncLLM({
+        "_subconscious_llm": llms["_subconscious_llm"],
+        "_conscious_llm": llms["_conscious_llm"],
+        "_judgement_core_llm": llms["_judgement_core_llm"],
+        "_contextual_agent_llm": llms["_contextual_agent_llm"],
+    })
+    fake_services = CognitionChainServices(
+        cognition_llm=cognition_dispatch,
+        boundary_core_llm=llms["_boundary_core_llm"],
+        action_selection_llm=llms["_action_selection_llm"],
+        style_llm=llms["_style_agent_llm"],
+        content_plan_llm=llms["_content_plan_agent_llm"],
+        preference_llm=llms["_preference_adapter_llm"],
+        visual_llm=llms["_visual_agent_llm"],
+        parse_json=parse_llm_json_output,
+        logger=logging.getLogger(__name__),
+    )
+    monkeypatch.setattr(
+        cognition_module,
+        "build_cognition_chain_services",
+        lambda: fake_services,
+    )
     return llms
 
 
@@ -1423,7 +1474,7 @@ async def test_internal_thought_prompt_rendering_uses_only_residue_payload(
     llms = _patch_cognition_llms(monkeypatch)
     monkeypatch.setattr(
         l3_module,
-        "build_interaction_style_context",
+        "call_interaction_style_context_loader",
         _fake_build_interaction_style_context,
     )
 

@@ -59,9 +59,7 @@ def test_hourly_prompt_is_bounded_and_deidentified() -> None:
     assert prompt.prompt_chars <= READONLY_REFLECTION_HOURLY_PROMPT_MAX_CHARS
     assert "global-user-1" not in prompt.human_prompt
     assert "platform-user-1" not in prompt.human_prompt
-    assert "Alice Example" not in prompt.human_prompt
     assert "platform_channel_id" not in prompt.human_prompt
-    assert "participant_1" in prompt.human_prompt
     assert "evaluation_mode" in prompt.human_payload
     assert "scope_metadata" in prompt.human_payload
     assert "conversation" in prompt.human_payload
@@ -70,10 +68,38 @@ def test_hourly_prompt_is_bounded_and_deidentified() -> None:
     assert "评审问题" not in prompt.human_payload
     conversation = prompt.human_payload["conversation"]
     messages = conversation["messages"]
-    assert "text" in messages[0]
+    assert isinstance(messages[0], str)
     assert "lore_candidates" not in prompt.system_prompt
     assert "progress_projection" not in prompt.system_prompt
     assert "open_loops" not in prompt.system_prompt
+
+
+def test_hourly_prompt_describes_transcript_line_history() -> None:
+    """Hourly prompt should not describe conversation messages as row dicts."""
+
+    scope = _scope_with_long_messages("private")
+
+    prompt = build_hourly_reflection_prompt(scope)
+
+    assert '"messages": ["[YYYY-MM-DD HH:MM] 说话人: 消息文本"]' in (
+        prompt.system_prompt
+    )
+    assert '"speaker_ref"' not in prompt.system_prompt
+    assert '"role": "user|assistant"' not in prompt.system_prompt
+    assert '"text": "受限长度的消息文本"' not in prompt.system_prompt
+
+
+def test_hourly_payload_labels_missing_assistant_name_as_active_character() -> None:
+    """Assistant rows without display names should not become unknown speakers."""
+
+    scope = _scope_with_long_messages("private")
+    scope.messages[1].pop("display_name", None)
+
+    payload = build_hourly_reflection_payload(scope)
+
+    messages = payload["conversation"]["messages"]
+    assert "active_character:" in messages[1]
+    assert "unknown:" not in messages[1]
 
 
 def test_reflection_prompts_require_chinese_free_text() -> None:

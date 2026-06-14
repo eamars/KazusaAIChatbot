@@ -15,6 +15,9 @@ from kazusa_ai_chatbot.config import (
     VISION_DESCRIPTOR_LLM_BASE_URL,
     VISION_DESCRIPTOR_LLM_MODEL,
 )
+from kazusa_ai_chatbot.conversation_history_prompt_projection import (
+    project_conversation_history_for_llm,
+)
 from kazusa_ai_chatbot.cognition_episode import (
     build_reply_media_description_rows,
     build_text_chat_media_description_rows,
@@ -37,7 +40,11 @@ from kazusa_ai_chatbot.rag.cache2_policy import (
 )
 from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
 from kazusa_ai_chatbot.state import IMProcessState
-from kazusa_ai_chatbot.utils import get_llm, log_preview, parse_llm_json_output
+from kazusa_ai_chatbot.utils import (
+    get_llm,
+    log_preview,
+    parse_llm_json_output,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -388,7 +395,7 @@ _MSG_DECONTEXUALIZER_PROMPT = '''\
 - 保持原意、语气、问句/陈述句类型、事实关系、语序和复杂度。
 - 去语境化不是把对话一律改成三人称叙述；直接对话中清楚的一二人称应保留。
 - 字面名字、URL、文件名、引用文本和专有名词是锚点，按原文保留。
-- `referents` 只记录影响理解的原文指代短语；无此类指代时输出 `[]`。
+- `referents` 记录影响理解的原文指代短语，以及当前问题里必须按人理解的可见参与者字面名称；无此类内容时输出 `[]`。
 
 # 处理流程
 1. 先确定本轮地址关系：
@@ -400,6 +407,7 @@ _MSG_DECONTEXUALIZER_PROMPT = '''\
    - 转述内容：当前发言人说某个可见说话人说过、问过、发过的内容。
    - 省略短答：当前发言人只说「是的 / 对 / 不是 / 就这个 / 前者 / 后者」等。
    - 普通指代：他、她、它、他们、这个、这些、那个、那里、上面那个等。
+   - 可见参与者名称：当前输入中与 `chat_history` 说话人或已桥接 `scope_users.display_name` 相同的字面短语。
 3. 按证据强度读取上下文：
    - `prompt_message_context`：提及对象、显式地址对象、附件和回复元数据。
    - `reply_context`：被回复消息的说话人和可见正文。
@@ -409,6 +417,7 @@ _MSG_DECONTEXUALIZER_PROMPT = '''\
 4. 对每个指代文本片段选择动作：
    - 保持：原句已经清楚，或属于直接对话且没有群聊指向对象的一二人称。
    - 解析：`user_input`、`prompt_message_context`、`reply_context` 或 `chat_history` 已经提供文本桥接，能确定明确实体；`scope_users` 只能在桥接成立后帮助使用正确身份名。
+   - 参与者名称归位：字面短语已经是可见说话人名称时保持原文，但在 `referents` 里标为 `resolved`。
    - 标为缺失：确实缺少对象，且影响回答。
 5. 组合 `output`。只改写动作是解析的文本片段；其余文本片段保留原文。
 6. 做一致性检查：同一 `user_input` 里指向同一已解析实体的文本片段全部使用同一实体名；
@@ -421,30 +430,25 @@ _MSG_DECONTEXUALIZER_PROMPT = '''\
 - 当前用户直接表达里的自称「我 / 我的 / 我们 / 我们的」动作是保持，不写入 `referents`。
 - 转述内容里的「我 / 我的」属于被转述说话人。该说话人必须能从转述引导语、引号内容、reply_context 或 chat_history 明确确定；动作是解析。结构为「A 说 X，Y」时，X 是转述内容，Y 回到当前用户的直接表达，除非 Y 明确继续引用 A。当前用户自己的「我 / 我的」仍保持。
 - 转述片段里的「我的 + 名词」按被转述说话人的所有格处理，输出为「A 的 + 名词」；`user_name` 只用于当前用户直接表达片段，不用于转述片段 X。
-- `chat_history` 中每条消息的「我」属于该消息的 `display_name`；这只用于解释转述和第三人称，不把当前用户的直接自称改成名字。
+- `chat_history` 中每行冒号前的说话人就是该行消息里的「我」；这只用于解释转述和第三人称，不把当前用户的直接自称改成名字。
 - 第三人称代词只有在 `user_input`、`prompt_message_context`、`reply_context` 或 `chat_history` 给出最近明示先行词、回复对象、提及对象、被地址对象或可见说话人桥接时才解析；桥接成立后可用 `scope_users` 选择稳定 `display_name`。没有桥接时不要从 `scope_users` 猜人，若缺失对象影响回答则标为缺失。
+- 当前输入中的字面短语若与 `chat_history` 的可见说话人名称相同，或与 `scope_users.display_name` 相同且该名称也作为 `chat_history` 说话人出现，则把它视为已知可见参与者名，不要解释成怪词、术语或普通话题名。
 - 指示代词「这个 / 这些 / 那个」指向 `reply_context.reply_excerpt`、附件、或最近明示对象时动作是解析；没有对象且问题依赖该对象时动作是标为缺失。
 - 疑问代词「谁 / 什么 / 哪里 / 哪个 / 怎么」是问题内容，动作是保持。
 
 # 指代输出规则
 - 被改写进 `output` 的实体必须有 `status="resolved"` 的指代条目。
+- 可见参与者字面名称即使没有被改写，只要当前问题依赖其人物身份，也必须有 `status="resolved"` 条目。
 - `status="resolved"` 表示对象能从 `user_input`、`prompt_message_context`、`reply_context` 或 `chat_history` 的桥接证据确定；`scope_users` 只补充身份名，不单独构成确定证据。
 - `status="unresolved"` 只用于所有输入字段都没有可识别对象、且缺失对象影响回答的情况。
 - `referent_role` 只允许 `subject`、`object`、`time`。
-
-# 正向模式
-- 直接对话：`user_input = "我的目标很简单，你也不反对吧"` -> 保持原句，`referents = []`。
-- 群聊提及指向群成员：`user_input = "她说她不喜欢你，你自己心里有数"` -> 把「她」改成可见说话人名，把所有指向被提及群友的「你 / 你自己」改成该群友。
-- 转述可见说话人：最近 A 说「我的琴谱在柜子最上层」，`user_input = "A 刚才说我的琴谱在柜子最上层，我明天帮她拿"` -> `output = "A 刚才说 A 的琴谱在柜子最上层，我明天帮 A 拿"`。
-- 回复短答：`reply_context.reply_excerpt = "你是想让我说明白对你的看法吗？"` 且 `user_input = "是的"` -> `output = "是的，我是想让{character_name}说明白对我的看法"`。
-- 缺失对象：`user_input = "这些是什么意思？"` 且没有可见对象 -> 保持原句，并输出 `{{"phrase": "这些", "referent_role": "object", "status": "unresolved"}}`。
 
 # 本轮输入字段说明
 - `user_input` 是当前需要去语境化的原文，只能同义补全，不能回答问题或改写意图。
 - `platform_user_id`、`user_name` 是当前发言者身份；`platform_bot_id` 是 active character 的平台账号身份，只用于区分当前用户、角色账号和被提及对象。
 - `prompt_message_context.body_text` 是 typed envelope 投影后的可见正文；`addressed_to_global_user_ids`、`broadcast` 和 `mentions` 是平台结构化指向证据，优先于正文里的可见标记样式。
 - `prompt_message_context.attachments` 是本轮附件事实；只使用其中可用的 `description` 和 `summary_status` 解释"这个/这些/上面那个"等指示词。
-- `chat_history` 是最近可见频道历史；每行的 `display_name` 是该行说话人，`body_text` 是可见正文，只用于解析临近先行词、转述来源和短答对象。
+- `chat_history` 是最近可见频道历史，格式是日志式文本行。每一行冒号前是可见说话人，可选包含 `reply_to` 后面的显式回复对象；冒号后是可见正文。普通群聊行默认是频道可见，不需要额外 broadcast 标记。
 - `scope_users` 是本轮已知用户身份表，不含正文、时间、角色、证据角色、分数或原因。只有当 `user_input`、`prompt_message_context`、`reply_context` 或 `chat_history` 已经把指代桥接到某个可见身份时，才能读取它来使用稳定显示名；没有桥接时必须保持未解析规则。
 - `reply_context.reply_to_display_name` 与 `reply_context.reply_excerpt` 是当前消息回复的对象和可见摘录，是短答、确认、"这个/这些"解析的强证据。
 - `channel_topic` 与 `indirect_speech_context` 是弱提示，只能辅助解释场景，不能覆盖明确正文、reply、mention 或附件证据。
@@ -497,7 +501,10 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
         "user_name": user_name,
         "platform_bot_id": state["platform_bot_id"],
         "prompt_message_context": state["prompt_message_context"],
-        "chat_history": state["chat_history_recent"],
+        "chat_history": project_conversation_history_for_llm(
+            state["chat_history_recent"],
+            character_name=character_name,
+        ),
         "channel_topic": state["channel_topic"],
         "indirect_speech_context": state["indirect_speech_context"],
         "reply_context": state["reply_context"],
