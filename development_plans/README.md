@@ -38,7 +38,10 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [backend_control_console_development_plan.md](active/short_term/backend_control_console_development_plan.md) | Control plane web UI development plan | draft |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
+| [llm_interface_backend_abstraction_plan.md](active/short_term/llm_interface_backend_abstraction_plan.md) | High-risk LLM backend interface migration plan | draft |
+| [universal_chat_history_llm_projection_plan.md](active/short_term/universal_chat_history_llm_projection_plan.md) | Large prompt-contract migration plan | draft |
 
 ## Supporting Experiment Records
 
