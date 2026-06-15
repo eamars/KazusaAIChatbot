@@ -93,25 +93,10 @@ def _embedding_row() -> dict[str, str]:
 
     return {
         "route_name": "EMBEDDING",
-        "backend": "embedding",
         "model": cfg.EMBEDDING_MODEL,
         "normalized_base_url": cfg.EMBEDDING_BASE_URL.rstrip("/"),
-        "model_family": "embedding",
-        "thinking_strategy": "unsupported",
         "optional_feature": "-",
-        "required": "yes",
-        "fallback_backed": "no",
     }
-
-
-def _text(value: bool) -> str:
-    """Render booleans in a compact, stable table form."""
-
-    if value:
-        return_value = "yes"
-        return return_value
-    return_value = "no"
-    return return_value
 
 
 def _optional_feature_tags(diagnostic: RouteDiagnostic) -> str:
@@ -120,11 +105,6 @@ def _optional_feature_tags(diagnostic: RouteDiagnostic) -> str:
     tags: list[str] = []
     if diagnostic.thinking_strategy == "gemma4_enabled":
         tags.append("thinking_on")
-    elif diagnostic.thinking_strategy == "ignored_unsupported_model":
-        tags.append("thinking_ignored")
-
-    if diagnostic.fallback_backed:
-        tags.append("fallback_backed")
 
     if not tags:
         return_value = "-"
@@ -142,14 +122,9 @@ def _table_rows(
     rows = [
         {
             "route_name": diagnostic.route_name,
-            "backend": diagnostic.backend,
             "model": diagnostic.model,
             "normalized_base_url": diagnostic.normalized_base_url,
-            "model_family": diagnostic.model_family,
-            "thinking_strategy": diagnostic.thinking_strategy,
             "optional_feature": _optional_feature_tags(diagnostic),
-            "required": _text(diagnostic.required),
-            "fallback_backed": _text(diagnostic.fallback_backed),
         }
         for diagnostic in diagnostics
     ]
@@ -163,14 +138,9 @@ def render_llm_route_table() -> str:
     rows = _table_rows(configured_route_diagnostics())
     columns = (
         ("route_name", "Route"),
-        ("backend", "Backend"),
         ("model", "Model"),
         ("normalized_base_url", "Source"),
-        ("model_family", "Family"),
-        ("thinking_strategy", "Thinking"),
         ("optional_feature", "Optional Feature"),
-        ("required", "Required"),
-        ("fallback_backed", "Fallback"),
     )
     widths = {
         key: max(len(title), *(len(row[key]) for row in rows))

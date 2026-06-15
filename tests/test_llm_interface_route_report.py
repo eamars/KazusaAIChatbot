@@ -134,11 +134,11 @@ def test_llm_route_inventory_renders_optional_feature_tags() -> None:
     )
     assert (
         rows_by_route["UNSUPPORTED_THINKING_LLM"]["optional_feature"]
-        == "thinking_ignored"
+        == "-"
     )
     assert (
         rows_by_route["BACKGROUND_THINKING_LLM"]["optional_feature"]
-        == "thinking_on | fallback_backed"
+        == "thinking_on"
     )
     assert rows_by_route["PLAIN_LLM"]["optional_feature"] == "-"
     assert rows_by_route["EMBEDDING"]["optional_feature"] == "-"
@@ -159,6 +159,12 @@ def test_llm_route_table_omits_api_keys() -> None:
     assert "Model" in table
     assert "Source" in table
     assert "Optional Feature" in table
+    header = table.splitlines()[1]
+    assert "Backend" not in header
+    assert "Family" not in header
+    assert "Thinking" not in header
+    assert "Required" not in header
+    assert "Fallback" not in header
     for route_name in EXPECTED_ROUTE_TABLE_ROWS:
         assert route_name in table
 

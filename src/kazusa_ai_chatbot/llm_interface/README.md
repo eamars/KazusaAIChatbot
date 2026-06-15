@@ -377,6 +377,11 @@ include:
 - whether the route is required;
 - whether the route has fallback-backed configuration.
 
+The startup route report renders only operator-facing route identity:
+`Route`, `Model`, `Source`, and `Optional Feature`. Optional features are
+active, non-default capability tags such as `thinking_on`; disabled/default
+states are not printed as feature tags.
+
 Diagnostics and route reporting must not own route choice, prompt selection,
 generation policy, or stage behavior. They must not expose raw API keys.
 
