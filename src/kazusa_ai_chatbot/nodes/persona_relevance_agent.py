@@ -19,6 +19,8 @@ from kazusa_ai_chatbot.config import (
     RELEVANCE_AGENT_LLM_BASE_URL,
     RELEVANCE_AGENT_LLM_MODEL,
     RELEVANCE_USER_ENGAGEMENT_GUIDELINES_LIMIT,
+    RELEVANCE_AGENT_LLM_MAX_COMPLETION_TOKENS,
+    RELEVANCE_AGENT_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.db import (
     DatabaseOperationError,
@@ -31,12 +33,16 @@ from kazusa_ai_chatbot.state import IMProcessState
 from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 from kazusa_ai_chatbot.utils import (
     build_affinity_block,
-    get_llm,
     log_dict_subset,
     log_preview,
     parse_llm_json_output,
 )
 
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 logger = logging.getLogger(__name__)
 
 
@@ -492,12 +498,22 @@ _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
 }}
 """
 
-_relevance_agent_llm = get_llm(
-    temperature=0,
-    top_p=1.0,
-    model=RELEVANCE_AGENT_LLM_MODEL,
+_llm_interface = LLInterface()
+_relevance_agent_llm = LLInterface()
+_relevance_agent_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="RELEVANCE_AGENT_LLM",
     base_url=RELEVANCE_AGENT_LLM_BASE_URL,
     api_key=RELEVANCE_AGENT_LLM_API_KEY,
+    model=RELEVANCE_AGENT_LLM_MODEL,
+    temperature=0,
+    top_p=1.0,
+    top_k=None,
+    max_completion_tokens=RELEVANCE_AGENT_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=RELEVANCE_AGENT_LLM_THINKING_ENABLED,
+    ),
 )
 async def relevance_agent(state: IMProcessState) -> IMProcessState:
     # Calculate affinity context
@@ -676,7 +692,7 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
 
     human_message = HumanMessage(content=json.dumps(human_data, ensure_ascii=False))
 
-    response = await _relevance_agent_llm.ainvoke([system_prompt, human_message])
+    response = await _relevance_agent_llm.ainvoke([system_prompt, human_message], config=_relevance_agent_llm_config)
     result = parse_llm_json_output(response.content)
 
     # Read important data back

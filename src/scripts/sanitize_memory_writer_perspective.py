@@ -15,7 +15,9 @@ from scripts._db_export import load_project_env
 from kazusa_ai_chatbot.config import (
     CONSOLIDATION_LLM_API_KEY,
     CONSOLIDATION_LLM_BASE_URL,
+    CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
     CONSOLIDATION_LLM_MODEL,
+    CONSOLIDATION_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.db import (
     close_db,
@@ -35,7 +37,12 @@ from kazusa_ai_chatbot.db.script_operations import (
 from kazusa_ai_chatbot.memory_evolution import supersede_memory_unit
 from kazusa_ai_chatbot.memory_evolution.identity import deterministic_memory_unit_id
 from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
-from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output
+from kazusa_ai_chatbot.utils import parse_llm_json_output
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 
 
 MIGRATION_PROMPT_VERSION = 'memory_writer_perspective_migration_v6'
@@ -102,12 +109,21 @@ status 含义：
 - blocked：至少一个字段无法在不猜测主体的情况下安全改写。blocked 时 fields 必须返回输入原文。
 '''
 
-_migration_rewrite_llm = get_llm(
-    temperature=0.1,
-    top_p=0.8,
-    model=CONSOLIDATION_LLM_MODEL,
+_llm_interface = LLInterface()
+_migration_rewrite_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name='CONSOLIDATION_LLM',
     base_url=CONSOLIDATION_LLM_BASE_URL,
     api_key=CONSOLIDATION_LLM_API_KEY,
+    model=CONSOLIDATION_LLM_MODEL,
+    temperature=0.1,
+    top_p=0.8,
+    top_k=None,
+    max_completion_tokens=CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=CONSOLIDATION_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -335,10 +351,13 @@ async def run_migration_rewrite_llm(
         'document_id': record['document_id'],
         'fields': record['before'],
     }
-    response = await _migration_rewrite_llm.ainvoke([
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
-    ])
+    response = await _llm_interface.ainvoke(
+        [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
+        ],
+        config=_migration_rewrite_llm_config,
+    )
     parsed = parse_llm_json_output(str(response.content))
     if not isinstance(parsed, dict):
         return {'fields': record['before'], 'notes': ['non-object output']}

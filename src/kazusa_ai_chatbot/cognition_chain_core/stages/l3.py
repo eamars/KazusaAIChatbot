@@ -16,8 +16,8 @@ from kazusa_ai_chatbot.cognition_chain_core.boundary_profile import (
     get_relationship_priority_description,
 )
 from kazusa_ai_chatbot.cognition_chain_core.contracts import (
-    AsyncChatModel,
-    require_injected_llm,
+    LLMStageBinding,
+    require_llm_binding,
 )
 from kazusa_ai_chatbot.cognition_chain_core.linguistic_texture import (
     get_abstraction_reframing_description,
@@ -427,23 +427,23 @@ _STYLE_AGENT_PROMPT = '''\
     "forbidden_phrases": ["禁止出现的违和词汇", ...]
 }}
 '''
-_style_agent_llm: AsyncChatModel | None = None
-_style_agent_llm_context: ContextVar[AsyncChatModel | None] = ContextVar(
+_style_agent_llm: LLMStageBinding | None = None
+_style_agent_llm_context: ContextVar[LLMStageBinding | None] = ContextVar(
     "style_agent_llm",
     default=None,
 )
 
 
 def set_style_agent_llm(
-    llm: AsyncChatModel | None,
-) -> Token[AsyncChatModel | None]:
+    llm: LLMStageBinding | None,
+) -> Token[LLMStageBinding | None]:
     """Bind the style model for the current run context."""
 
     token = _style_agent_llm_context.set(llm)
     return token
 
 
-def reset_style_agent_llm(token: Token[AsyncChatModel | None]) -> None:
+def reset_style_agent_llm(token: Token[LLMStageBinding | None]) -> None:
     """Restore the previous style model binding for this run context."""
 
     _style_agent_llm_context.reset(token)
@@ -511,14 +511,17 @@ async def call_style_agent(state: dict[str, Any]) -> dict[str, Any]:
         selection=selection,
     ))
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
-    llm = require_injected_llm(
+    llm = require_llm_binding(
         _style_agent_llm_context.get() or _style_agent_llm,
         "style_agent_llm",
     )
-    response = await llm.ainvoke([
-        system_prompt,
-        human_message,
-    ])
+    response = await llm.llm.ainvoke(
+        [
+            system_prompt,
+            human_message,
+        ],
+        config=llm.config,
+    )
     result = parse_llm_json_output(response.content)
 
     # logger.debug(
@@ -625,23 +628,23 @@ _CONTENT_PLAN_AGENT_PROMPT = '''\
 - 普通字符串尽量紧凑；只有代码、JSON、配置、日志、命令、补丁或表格等固定格式内容可以在单个字符串中保留换行。
 - `semantic_content` 是下游可见事实和结论的首要来源。需要说出的事实、问题、代码、例子、边界或下一步必须已经写在计划值里。
 '''
-_content_plan_agent_llm: AsyncChatModel | None = None
-_content_plan_agent_llm_context: ContextVar[AsyncChatModel | None] = ContextVar(
+_content_plan_agent_llm: LLMStageBinding | None = None
+_content_plan_agent_llm_context: ContextVar[LLMStageBinding | None] = ContextVar(
     "content_plan_agent_llm",
     default=None,
 )
 
 
 def set_content_plan_agent_llm(
-    llm: AsyncChatModel | None,
-) -> Token[AsyncChatModel | None]:
+    llm: LLMStageBinding | None,
+) -> Token[LLMStageBinding | None]:
     """Bind the content-plan model for the current run context."""
 
     token = _content_plan_agent_llm_context.set(llm)
     return token
 
 
-def reset_content_plan_agent_llm(token: Token[AsyncChatModel | None]) -> None:
+def reset_content_plan_agent_llm(token: Token[LLMStageBinding | None]) -> None:
     """Restore the previous content-plan model binding for this run context."""
 
     _content_plan_agent_llm_context.reset(token)
@@ -819,14 +822,17 @@ async def call_content_plan_agent(state: dict[str, Any]) -> dict[str, Any]:
         selection=selection,
     ))
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
-    llm = require_injected_llm(
+    llm = require_llm_binding(
         _content_plan_agent_llm_context.get() or _content_plan_agent_llm,
         "content_plan_agent_llm",
     )
-    response = await llm.ainvoke([
-        system_prompt,
-        human_message,
-    ])
+    response = await llm.llm.ainvoke(
+        [
+            system_prompt,
+            human_message,
+        ],
+        config=llm.config,
+    )
     result = parse_llm_json_output(response.content)
 
     content_plan = _normalize_content_plan(result.get("content_plan"))
@@ -904,23 +910,23 @@ _PREFERENCE_ADAPTER_PROMPT = '''\
     "accepted_user_preferences": ["下游可直接执行的软约束", ...]
 }}
 '''
-_preference_adapter_llm: AsyncChatModel | None = None
-_preference_adapter_llm_context: ContextVar[AsyncChatModel | None] = ContextVar(
+_preference_adapter_llm: LLMStageBinding | None = None
+_preference_adapter_llm_context: ContextVar[LLMStageBinding | None] = ContextVar(
     "preference_adapter_llm",
     default=None,
 )
 
 
 def set_preference_adapter_llm(
-    llm: AsyncChatModel | None,
-) -> Token[AsyncChatModel | None]:
+    llm: LLMStageBinding | None,
+) -> Token[LLMStageBinding | None]:
     """Bind the preference model for the current run context."""
 
     token = _preference_adapter_llm_context.set(llm)
     return token
 
 
-def reset_preference_adapter_llm(token: Token[AsyncChatModel | None]) -> None:
+def reset_preference_adapter_llm(token: Token[LLMStageBinding | None]) -> None:
     """Restore the previous preference model binding for this run context."""
 
     _preference_adapter_llm_context.reset(token)
@@ -974,14 +980,17 @@ async def call_preference_adapter(state: dict[str, Any]) -> dict[str, Any]:
         selection=selection,
     ))
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
-    llm = require_injected_llm(
+    llm = require_llm_binding(
         _preference_adapter_llm_context.get() or _preference_adapter_llm,
         "preference_adapter_llm",
     )
-    response = await llm.ainvoke([
-        system_prompt,
-        human_message,
-    ])
+    response = await llm.llm.ainvoke(
+        [
+            system_prompt,
+            human_message,
+        ],
+        config=llm.config,
+    )
     result = parse_llm_json_output(response.content)
 
     # logger.debug(
@@ -1122,23 +1131,23 @@ _VISUAL_AGENT_PROMPT = '''\
     "visual_vibe": ["场景、构图、人物占位、镜头距离、背景物、光线、色温、空气感与整体静态氛围", ...]
 }}
 '''
-_visual_agent_llm: AsyncChatModel | None = None
-_visual_agent_llm_context: ContextVar[AsyncChatModel | None] = ContextVar(
+_visual_agent_llm: LLMStageBinding | None = None
+_visual_agent_llm_context: ContextVar[LLMStageBinding | None] = ContextVar(
     "visual_agent_llm",
     default=None,
 )
 
 
 def set_visual_agent_llm(
-    llm: AsyncChatModel | None,
-) -> Token[AsyncChatModel | None]:
+    llm: LLMStageBinding | None,
+) -> Token[LLMStageBinding | None]:
     """Bind the visual model for the current run context."""
 
     token = _visual_agent_llm_context.set(llm)
     return token
 
 
-def reset_visual_agent_llm(token: Token[AsyncChatModel | None]) -> None:
+def reset_visual_agent_llm(token: Token[LLMStageBinding | None]) -> None:
     """Restore the previous visual model binding for this run context."""
 
     _visual_agent_llm_context.reset(token)
@@ -1234,14 +1243,17 @@ async def call_visual_agent(state: dict[str, Any]) -> dict[str, Any]:
         selection=selection,
     ))
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
-    llm = require_injected_llm(
+    llm = require_llm_binding(
         _visual_agent_llm_context.get() or _visual_agent_llm,
         "visual_agent_llm",
     )
-    response = await llm.ainvoke([
-        system_prompt,
-        human_message,
-    ])
+    response = await llm.llm.ainvoke(
+        [
+            system_prompt,
+            human_message,
+        ],
+        config=llm.config,
+    )
     result = parse_llm_json_output(response.content)
 
     # logger.debug(

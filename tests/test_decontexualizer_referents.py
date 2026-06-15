@@ -27,7 +27,7 @@ class _CapturingLLM:
         self.payload = payload
         self.messages = []
 
-    async def ainvoke(self, messages):
+    async def ainvoke(self, messages, *, config=None):
         self.messages = messages
         response = MagicMock()
         response.content = self.payload

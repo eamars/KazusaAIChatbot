@@ -20,6 +20,7 @@ from kazusa_ai_chatbot.cognition_chain_core.stages import l2 as l2_module
 from kazusa_ai_chatbot.cognition_chain_core.stages import l2c2 as l2c2_module
 from kazusa_ai_chatbot.cognition_chain_core.stages import l2d as l2d_module
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
+from llm_test_helpers import bind_test_llm
 
 
 class _FakeLLM:
@@ -29,7 +30,7 @@ class _FakeLLM:
         self.content = content
         self.messages: list[Any] = []
 
-    async def ainvoke(self, messages: list[Any]) -> SimpleNamespace:
+    async def ainvoke(self, messages: list[Any], *, config=None) -> SimpleNamespace:
         self.messages = messages
         response = SimpleNamespace(content=self.content)
         return response
@@ -162,7 +163,7 @@ async def test_action_selection_returns_resolver_request(
             }
         ],
     }, ensure_ascii=False))
-    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", bind_test_llm(fake_llm, "action_selection_llm"))
 
     result = await l2d_module.select_semantic_actions(_l2d_state())
 

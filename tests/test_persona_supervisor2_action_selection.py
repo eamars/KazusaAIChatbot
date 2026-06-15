@@ -22,6 +22,7 @@ from kazusa_ai_chatbot.nodes import (
 from kazusa_ai_chatbot.self_cognition import models as self_cognition_models
 from kazusa_ai_chatbot.self_cognition import runner as self_cognition_runner
 from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
+from llm_test_helpers import bind_test_llm
 
 
 class _FakeLLM:
@@ -31,7 +32,7 @@ class _FakeLLM:
         self.content = content
         self.messages: list[Any] = []
 
-    async def ainvoke(self, messages: list[Any]) -> SimpleNamespace:
+    async def ainvoke(self, messages: list[Any], *, config=None) -> SimpleNamespace:
         self.messages = messages
         response = SimpleNamespace(content=self.content)
         return response
@@ -487,7 +488,7 @@ async def test_action_selection_ignores_lifecycle_target_fields_from_llm(
             },
         ],
     }))
-    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", bind_test_llm(fake_llm, "action_selection_llm"))
 
     result = await _select_and_materialize(state)
 
@@ -531,7 +532,7 @@ async def test_future_cognition_materialization_binds_trusted_source_scope(
     fake_llm = _FakeLLM(json.dumps({
         "action_requests": [_future_cognition_request()],
     }))
-    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", bind_test_llm(fake_llm, "action_selection_llm"))
 
     result = await _select_and_materialize(state)
 
@@ -579,7 +580,7 @@ async def test_future_cognition_uses_own_detail_as_objective(
     fake_llm = _FakeLLM(json.dumps({
         "action_requests": [speak_request, future_request],
     }, ensure_ascii=False))
-    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", bind_test_llm(fake_llm, "action_selection_llm"))
 
     result = await _select_and_materialize(_state())
 
@@ -612,7 +613,7 @@ async def test_scheduled_future_cognition_cannot_chain_another_future_slot(
     fake_llm = _FakeLLM(json.dumps({
         "action_requests": [_future_cognition_request()],
     }))
-    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", bind_test_llm(fake_llm, "action_selection_llm"))
 
     result = await _select_and_materialize(state)
 
@@ -632,7 +633,7 @@ async def test_action_selection_accepts_multiple_valid_action_specs(
             _future_cognition_request(),
         ],
     }))
-    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", bind_test_llm(fake_llm, "action_selection_llm"))
 
     result = await _select_and_materialize(_state())
 
@@ -671,7 +672,7 @@ async def test_action_selection_drops_misplaced_resolver_request(
             },
         ],
     }, ensure_ascii=False))
-    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", bind_test_llm(fake_llm, "action_selection_llm"))
 
     result = await _select_and_materialize(_state())
 
@@ -697,7 +698,7 @@ async def test_action_selection_drops_misplaced_terminal_action(
         ],
         "action_requests": [],
     }, ensure_ascii=False))
-    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", bind_test_llm(fake_llm, "action_selection_llm"))
 
     result = await _select_and_materialize(_state())
 
@@ -749,7 +750,7 @@ async def test_action_selection_returns_valid_goal_progress(
         },
         "action_requests": [],
     }, ensure_ascii=False))
-    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", bind_test_llm(fake_llm, "action_selection_llm"))
 
     result = await _select_and_materialize(_state())
 
@@ -798,7 +799,7 @@ async def test_action_selection_derives_visible_requirements_from_open_goal(
             _speak_request("基于现有证据给用户可见计划。"),
         ],
     }, ensure_ascii=False))
-    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", bind_test_llm(fake_llm, "action_selection_llm"))
 
     result = await _select_and_materialize(_state())
 
@@ -849,7 +850,7 @@ async def test_action_selection_completes_partial_visible_requirements(
             _speak_request("基于现有证据给用户可见计划。"),
         ],
     }, ensure_ascii=False))
-    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", bind_test_llm(fake_llm, "action_selection_llm"))
 
     result = await _select_and_materialize(_state())
 
@@ -876,7 +877,7 @@ async def test_action_selection_binds_pending_resolution_to_active_row(
             _speak_request("继续完成原始目标。"),
         ],
     }, ensure_ascii=False))
-    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", bind_test_llm(fake_llm, "action_selection_llm"))
     state = _state()
     state["pending_resolver_resume"] = {
         "schema_version": "resolver_pending_resume.v1",
@@ -930,7 +931,7 @@ async def test_action_selection_ignores_model_supplied_pending_id(
             _speak_request("说明审批后的结果。"),
         ],
     }, ensure_ascii=False))
-    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", bind_test_llm(fake_llm, "action_selection_llm"))
     state = _state()
     state["pending_resolver_resume"] = {
         "schema_version": "resolver_pending_resume.v1",
@@ -980,7 +981,7 @@ async def test_action_selection_keeps_action_when_pending_request_repeats(
             _speak_request("explain the approval preview"),
         ],
     }, ensure_ascii=False))
-    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", bind_test_llm(fake_llm, "action_selection_llm"))
     state = _state()
     state["pending_resolver_resume"] = {
         "schema_version": "resolver_pending_resume.v1",
@@ -1030,7 +1031,7 @@ async def test_action_selection_recovers_pending_capability_action(
             },
         ],
     }))
-    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", bind_test_llm(fake_llm, "action_selection_llm"))
     state = _state()
     state["pending_resolver_resume"] = {
         "schema_version": "resolver_pending_resume.v1",
@@ -1079,7 +1080,7 @@ async def test_action_selection_surfaces_repeated_pending_without_action(
         ],
         "action_requests": [],
     }))
-    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", bind_test_llm(fake_llm, "action_selection_llm"))
     state = _state()
     state["pending_resolver_resume"] = {
         "schema_version": "resolver_pending_resume.v1",
@@ -1126,7 +1127,7 @@ async def test_action_selection_drops_invalid_specs_and_caps_valid_specs(
             _speak_request("fourth"),
         ],
     }))
-    monkeypatch.setattr(l2d_module, "_action_selection_llm", fake_llm)
+    monkeypatch.setattr(l2d_module, "_action_selection_llm", bind_test_llm(fake_llm, "action_selection_llm"))
 
     result = await _select_and_materialize(_state())
 

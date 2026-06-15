@@ -59,7 +59,7 @@ class _CapturingLLM:
         )
         self.calls: list[list[dict[str, Any]]] = []
 
-    async def ainvoke(self, messages: list[object]) -> SimpleNamespace:
+    async def ainvoke(self, messages: list[object], *, config=None) -> SimpleNamespace:
         """Record one LLM call and return the configured response."""
         self.calls.append([_message_record(message) for message in messages])
         return_value = self.response

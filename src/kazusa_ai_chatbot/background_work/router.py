@@ -13,9 +13,16 @@ from kazusa_ai_chatbot.config import (
     BACKGROUND_WORK_LLM_API_KEY,
     BACKGROUND_WORK_LLM_BASE_URL,
     BACKGROUND_WORK_LLM_MODEL,
+    BACKGROUND_WORK_LLM_MAX_COMPLETION_TOKENS,
+    BACKGROUND_WORK_LLM_THINKING_ENABLED,
 )
-from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output
+from kazusa_ai_chatbot.utils import parse_llm_json_output
 
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 BACKGROUND_WORK_ROUTER_PROMPT = '''\
 You route queued background work to one enabled worker.
 Choose only whether the task can execute and which worker owns it.
@@ -39,12 +46,22 @@ Return strict JSON with exactly these semantic fields:
 }
 '''
 
-_background_work_router_llm = get_llm(
-    temperature=0.1,
-    top_p=0.7,
-    model=BACKGROUND_WORK_LLM_MODEL,
+_llm_interface = LLInterface()
+_background_work_router_llm = LLInterface()
+_background_work_router_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="BACKGROUND_WORK_LLM",
     base_url=BACKGROUND_WORK_LLM_BASE_URL,
     api_key=BACKGROUND_WORK_LLM_API_KEY,
+    model=BACKGROUND_WORK_LLM_MODEL,
+    temperature=0.1,
+    top_p=0.7,
+    top_k=None,
+    max_completion_tokens=BACKGROUND_WORK_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=BACKGROUND_WORK_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -66,7 +83,7 @@ async def route_background_work(
     response = await _background_work_router_llm.ainvoke([
         SystemMessage(content=BACKGROUND_WORK_ROUTER_PROMPT),
         HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
-    ])
+    ], config=_background_work_router_llm_config)
     parsed = parse_llm_json_output(response.content)
     decision = normalize_background_work_router_output(parsed)
     return decision

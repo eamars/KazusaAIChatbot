@@ -42,7 +42,7 @@ class _FakeJudgeLLM:
     def __init__(self) -> None:
         self.messages: list[object] = []
 
-    async def ainvoke(self, messages: list[object]) -> _FakeResponse:
+    async def ainvoke(self, messages: list[object], *, config=None) -> _FakeResponse:
         self.messages = list(messages)
         response = _FakeResponse('{"resolved": true, "feedback": ""}')
         return response

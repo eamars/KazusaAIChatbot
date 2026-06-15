@@ -6,6 +6,7 @@ import re
 import pytest
 
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_dispatch as dispatch_module
+from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_initializer as initializer_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_supervisor2 as supervisor2_module
 from kazusa_ai_chatbot.message_envelope import project_prompt_message_context
 from kazusa_ai_chatbot.rag import cache2_policy
@@ -43,7 +44,7 @@ class _CountingAsyncLLM:
         self.payload = payload
         self.messages: list[list] = []
 
-    async def ainvoke(self, _messages: list) -> _DummyResponse:
+    async def ainvoke(self, _messages: list, *, config=None) -> _DummyResponse:
         """Return the configured payload and increment the call count.
 
         Args:
@@ -60,7 +61,7 @@ class _CountingAsyncLLM:
 class _FailingAsyncLLM:
     """Async LLM fake that fails if deterministic dispatch is bypassed."""
 
-    async def ainvoke(self, _messages: list) -> _DummyResponse:
+    async def ainvoke(self, _messages: list, *, config=None) -> _DummyResponse:
         """Raise if a test unexpectedly reaches the dispatcher LLM."""
         raise AssertionError("dispatcher LLM should not run for known prefixes")
 
@@ -493,7 +494,7 @@ def test_normalize_dispatch_accepts_valid_payload() -> None:
 @pytest.mark.asyncio
 async def test_rag_dispatcher_uses_deterministic_new_prefix(monkeypatch) -> None:
     """New top-level prefixes should dispatch without an LLM call."""
-    monkeypatch.setattr(supervisor2_module, "_dispatcher_llm", _FailingAsyncLLM())
+    monkeypatch.setattr(dispatch_module, "_dispatcher_llm", _FailingAsyncLLM())
 
     result = await supervisor2_module.rag_dispatcher(
         {
@@ -518,7 +519,7 @@ async def test_rag_dispatcher_uses_deterministic_new_prefix(monkeypatch) -> None
 @pytest.mark.asyncio
 async def test_rag_dispatcher_remaps_legacy_prefix_alias(monkeypatch) -> None:
     """Old worker prefixes should route through top-level capabilities."""
-    monkeypatch.setattr(supervisor2_module, "_dispatcher_llm", _FailingAsyncLLM())
+    monkeypatch.setattr(dispatch_module, "_dispatcher_llm", _FailingAsyncLLM())
 
     result = await supervisor2_module.rag_dispatcher(
         {
@@ -566,7 +567,7 @@ def test_normalize_dispatch_remaps_low_level_keyword_agents() -> None:
 @pytest.mark.asyncio
 async def test_rag_dispatcher_logs_route_source_at_info(monkeypatch, caplog) -> None:
     """Dispatcher INFO logs should include the selected route source."""
-    monkeypatch.setattr(supervisor2_module, "_dispatcher_llm", _FailingAsyncLLM())
+    monkeypatch.setattr(dispatch_module, "_dispatcher_llm", _FailingAsyncLLM())
 
     with caplog.at_level("DEBUG", logger=dispatch_module.__name__):
         with caplog.at_level("DEBUG", logger=supervisor2_module.__name__):
@@ -622,7 +623,7 @@ async def test_rag_initializer_serves_second_identical_call_from_cache(monkeypat
         ]
     })
     monkeypatch.setattr(supervisor2_module, "get_rag_cache2_runtime", lambda: runtime)
-    monkeypatch.setattr(supervisor2_module, "_initializer_llm", llm)
+    monkeypatch.setattr(initializer_module, "_initializer_llm", llm)
     monkeypatch.setattr(
         supervisor2_module.asyncio,
         "create_task",
@@ -680,7 +681,7 @@ async def test_rag_initializer_hit_schedules_persistent_hit(monkeypatch) -> None
         metadata={"stage": "rag_initializer"},
     )
     monkeypatch.setattr(supervisor2_module, "get_rag_cache2_runtime", lambda: runtime)
-    monkeypatch.setattr(supervisor2_module, "_initializer_llm", llm)
+    monkeypatch.setattr(initializer_module, "_initializer_llm", llm)
     monkeypatch.setattr(
         supervisor2_module.asyncio,
         "create_task",
@@ -702,7 +703,7 @@ async def test_rag_initializer_miss_schedules_persistent_upsert(monkeypatch) -> 
     created_tasks: list = []
     llm = _CountingAsyncLLM({"unknown_slots": ["fresh slot"]})
     monkeypatch.setattr(supervisor2_module, "get_rag_cache2_runtime", lambda: runtime)
-    monkeypatch.setattr(supervisor2_module, "_initializer_llm", llm)
+    monkeypatch.setattr(initializer_module, "_initializer_llm", llm)
     monkeypatch.setattr(
         supervisor2_module.asyncio,
         "create_task",
@@ -770,7 +771,7 @@ async def test_rag_initializer_payload_uses_prompt_context_for_large_image(
         },
     }
     monkeypatch.setattr(supervisor2_module, "get_rag_cache2_runtime", lambda: runtime)
-    monkeypatch.setattr(supervisor2_module, "_initializer_llm", llm)
+    monkeypatch.setattr(initializer_module, "_initializer_llm", llm)
     monkeypatch.setattr(
         supervisor2_module.asyncio,
         "create_task",
@@ -815,7 +816,7 @@ async def test_rag_initializer_payload_projects_runtime_context(monkeypatch) -> 
         },
     }
     monkeypatch.setattr(supervisor2_module, "get_rag_cache2_runtime", lambda: runtime)
-    monkeypatch.setattr(supervisor2_module, "_initializer_llm", llm)
+    monkeypatch.setattr(initializer_module, "_initializer_llm", llm)
     monkeypatch.setattr(
         supervisor2_module.asyncio,
         "create_task",

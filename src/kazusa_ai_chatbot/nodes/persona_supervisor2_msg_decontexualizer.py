@@ -8,12 +8,17 @@ import logging
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.config import (
+
     MSG_DECONTEXTUALIZER_LLM_API_KEY,
     MSG_DECONTEXTUALIZER_LLM_BASE_URL,
     MSG_DECONTEXTUALIZER_LLM_MODEL,
     VISION_DESCRIPTOR_LLM_API_KEY,
     VISION_DESCRIPTOR_LLM_BASE_URL,
     VISION_DESCRIPTOR_LLM_MODEL,
+    MSG_DECONTEXTUALIZER_LLM_MAX_COMPLETION_TOKENS,
+    MSG_DECONTEXTUALIZER_LLM_THINKING_ENABLED,
+    VISION_DESCRIPTOR_LLM_MAX_COMPLETION_TOKENS,
+    VISION_DESCRIPTOR_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.conversation_history_prompt_projection import (
     project_conversation_history_for_llm,
@@ -41,11 +46,15 @@ from kazusa_ai_chatbot.rag.cache2_policy import (
 from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
 from kazusa_ai_chatbot.state import IMProcessState
 from kazusa_ai_chatbot.utils import (
-    get_llm,
     log_preview,
     parse_llm_json_output,
 )
 
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 logger = logging.getLogger(__name__)
 
 
@@ -88,12 +97,23 @@ _VISION_DESCRIPTOR_PROMPT = '''\
     "uncertainty": ["不确定或模糊之处"]
 }}
 '''
-_vision_descriptor_llm = get_llm(
-    temperature=0,
-    top_p=1.0,
-    model=VISION_DESCRIPTOR_LLM_MODEL,
+_llm_interface = LLInterface()
+_vision_descriptor_llm = LLInterface()
+_msg_decontexualizer_llm = LLInterface()
+_vision_descriptor_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="VISION_DESCRIPTOR_LLM",
     base_url=VISION_DESCRIPTOR_LLM_BASE_URL,
     api_key=VISION_DESCRIPTOR_LLM_API_KEY,
+    model=VISION_DESCRIPTOR_LLM_MODEL,
+    temperature=0,
+    top_p=1.0,
+    top_k=None,
+    max_completion_tokens=VISION_DESCRIPTOR_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=VISION_DESCRIPTOR_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -268,7 +288,7 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
                     response = await _vision_descriptor_llm.ainvoke([
                         system_prompt,
                         human_message,
-                    ])
+                    ], config=_vision_descriptor_llm_config)
                 except Exception as exc:
                     logger.warning(
                         f"Image descriptor fallback after LLM exception: {exc} "
@@ -373,12 +393,20 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
     return return_value
 
 
-_msg_decontexualizer_llm = get_llm(
-    temperature=0.1,
-    top_p=0.8,
-    model=MSG_DECONTEXTUALIZER_LLM_MODEL,
+_msg_decontexualizer_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="MSG_DECONTEXTUALIZER_LLM",
     base_url=MSG_DECONTEXTUALIZER_LLM_BASE_URL,
     api_key=MSG_DECONTEXTUALIZER_LLM_API_KEY,
+    model=MSG_DECONTEXTUALIZER_LLM_MODEL,
+    temperature=0.1,
+    top_p=0.8,
+    top_k=None,
+    max_completion_tokens=MSG_DECONTEXTUALIZER_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=MSG_DECONTEXTUALIZER_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -528,7 +556,7 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
         llm_response = await _msg_decontexualizer_llm.ainvoke([
             system_prompt, 
             human_message,
-        ])
+        ], config=_msg_decontexualizer_llm_config)
     except Exception as exc:
         logger.warning(
             f"Decontextualizer fallback after LLM exception: {exc} "

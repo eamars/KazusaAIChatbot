@@ -418,9 +418,10 @@ async def test_live_reflection_promotion_perspective_false_negative() -> None:
     )
 
     parsed, raw_output = await _invoke_messages_json(
-        promotion_module._global_promotion_llm,
+        promotion_module._llm_interface,
         prompt.system_prompt,
         prompt.human_prompt,
+        config=promotion_module._global_promotion_llm_config,
     )
     trace_path = _write_case_trace(
         'reflection_promotion_perspective_false_negative',
@@ -452,9 +453,10 @@ async def test_live_reflection_promotion_perspective_false_positive() -> None:
     )
 
     parsed, raw_output = await _invoke_messages_json(
-        promotion_module._global_promotion_llm,
+        promotion_module._llm_interface,
         prompt.system_prompt,
         prompt.human_prompt,
+        config=promotion_module._global_promotion_llm_config,
     )
     trace_path = _write_case_trace(
         'reflection_promotion_perspective_false_positive',
@@ -556,13 +558,19 @@ async def _invoke_messages_json(
     llm: Any,
     system_prompt: str,
     human_prompt: str,
+    *,
+    config: Any | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Invoke one real LLM with pre-rendered messages."""
 
-    response = await llm.ainvoke([
+    messages = [
         SystemMessage(content=system_prompt),
         HumanMessage(content=human_prompt),
-    ])
+    ]
+    if config is None:
+        response = await llm.ainvoke(messages)
+    else:
+        response = await llm.ainvoke(messages, config=config)
     raw_output = str(response.content)
     parsed = parse_llm_json_output(raw_output)
     assert isinstance(parsed, dict)

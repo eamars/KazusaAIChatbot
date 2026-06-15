@@ -8,10 +8,13 @@ import logging
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.config import (
+
     AFFINITY_DEFAULT,
     CONSOLIDATION_LLM_API_KEY,
     CONSOLIDATION_LLM_BASE_URL,
     CONSOLIDATION_LLM_MODEL,
+    CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    CONSOLIDATION_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.memory_writer_prompt_projection import (
     project_relationship_prompt_payload,
@@ -26,12 +29,16 @@ from kazusa_ai_chatbot.consolidation.schema import (
 )
 from kazusa_ai_chatbot.utils import (
     build_affinity_block,
-    get_llm,
     log_list_preview,
     log_preview,
     parse_llm_json_output,
 )
 
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 logger = logging.getLogger(__name__)
 
 
@@ -125,12 +132,23 @@ _GLOBAL_STATE_UPDATER_PROMPT = """\
     "reflection_summary": "第三人称复盘总结"
 }}
 """
-_global_state_updater_llm = get_llm(
-    temperature=0.4,
-    top_p=0.8,
-    model=CONSOLIDATION_LLM_MODEL,
+_llm_interface = LLInterface()
+_global_state_updater_llm = LLInterface()
+_relationship_recorder_llm = LLInterface()
+_global_state_updater_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="CONSOLIDATION_LLM",
     base_url=CONSOLIDATION_LLM_BASE_URL,
     api_key=CONSOLIDATION_LLM_API_KEY,
+    model=CONSOLIDATION_LLM_MODEL,
+    temperature=0.4,
+    top_p=0.8,
+    top_k=None,
+    max_completion_tokens=CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=CONSOLIDATION_LLM_THINKING_ENABLED,
+    ),
 )
 async def global_state_updater(state: ConsolidatorState) -> dict:
     character_name = state["character_profile"]["name"]
@@ -153,7 +171,7 @@ async def global_state_updater(state: ConsolidatorState) -> dict:
 
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
 
-    response = await _global_state_updater_llm.ainvoke([system_prompt, human_message])
+    response = await _global_state_updater_llm.ainvoke([system_prompt, human_message], config=_global_state_updater_llm_config)
 
     result = parse_llm_json_output(response.content)
 
@@ -266,12 +284,20 @@ _RELATIONSHIP_RECORDER_PROMPT = """\
     "last_relationship_insight": "此时此刻对他/她最核心的一个标签或看法"
 }}
 """
-_relationship_recorder_llm = get_llm(
-    temperature=0.4,
-    top_p=0.9,
-    model=CONSOLIDATION_LLM_MODEL,
+_relationship_recorder_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="CONSOLIDATION_LLM",
     base_url=CONSOLIDATION_LLM_BASE_URL,
     api_key=CONSOLIDATION_LLM_API_KEY,
+    model=CONSOLIDATION_LLM_MODEL,
+    temperature=0.4,
+    top_p=0.9,
+    top_k=None,
+    max_completion_tokens=CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=CONSOLIDATION_LLM_THINKING_ENABLED,
+    ),
 )
 async def relationship_recorder(state: ConsolidatorState) -> dict:
     character_name = state["character_profile"]["name"]
@@ -307,7 +333,7 @@ async def relationship_recorder(state: ConsolidatorState) -> dict:
 
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
 
-    response = await _relationship_recorder_llm.ainvoke([system_prompt, human_message])
+    response = await _relationship_recorder_llm.ainvoke([system_prompt, human_message], config=_relationship_recorder_llm_config)
 
     result = parse_llm_json_output(response.content)
 

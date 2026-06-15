@@ -19,6 +19,7 @@ from kazusa_ai_chatbot.cognition_chain_core.action_selection_prompt import (
     ACTION_ROUTER_PROMPT,
 )
 from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
+from llm_test_helpers import bind_test_llm
 
 
 _AFFECTED_PROMPTS = (
@@ -375,7 +376,7 @@ async def test_l1_subconscious_payload_passes_character_state_in_human_json(
             ),
         ),
     )
-    monkeypatch.setattr(l1_module, '_subconscious_llm', fake_llm)
+    monkeypatch.setattr(l1_module, '_subconscious_llm', bind_test_llm(fake_llm, "subconscious_llm"))
     state = {
         'character_profile': {
             'name': 'Kazusa',

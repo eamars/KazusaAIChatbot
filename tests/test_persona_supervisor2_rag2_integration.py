@@ -10,6 +10,8 @@ import pytest
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as supervisor_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_supervisor2 as rag2_module
+from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_initializer as rag_initializer_module
+from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_evaluator as rag_evaluator_module
 from kazusa_ai_chatbot.rag.cache2_runtime import RAGCache2Runtime
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
@@ -41,7 +43,7 @@ class _DummyResponse:
 class _InitializerLLM:
     """Static RAG initializer fake."""
 
-    async def ainvoke(self, _messages: list) -> _DummyResponse:
+    async def ainvoke(self, _messages: list, *, config=None) -> _DummyResponse:
         """Return one memory-evidence slot."""
         payload = {
             "unknown_slots": [
@@ -59,7 +61,7 @@ class _MultiSlotInitializerLLM:
         """Store the slot queue emitted by this fake."""
         self.slots = slots
 
-    async def ainvoke(self, _messages: list) -> _DummyResponse:
+    async def ainvoke(self, _messages: list, *, config=None) -> _DummyResponse:
         """Return the configured slot queue."""
         payload = {"unknown_slots": self.slots}
         response = _DummyResponse(json.dumps(payload))
@@ -158,7 +160,7 @@ class _ContinuationLLM:
         self.decision = decision
         self.calls: list[list] = []
 
-    async def ainvoke(self, messages: list) -> _DummyResponse:
+    async def ainvoke(self, messages: list, *, config=None) -> _DummyResponse:
         """Return the configured continuation decision."""
         self.calls.append(messages)
         response = _DummyResponse(json.dumps(self.decision))
@@ -168,7 +170,7 @@ class _ContinuationLLM:
 class _SummaryLLM:
     """Evaluator summary fake."""
 
-    async def ainvoke(self, messages: list) -> _DummyResponse:
+    async def ainvoke(self, messages: list, *, config=None) -> _DummyResponse:
         """Echo selected summary from capability payloads."""
         payload = json.loads(messages[1].content)
         raw_result = payload["raw_result"]
@@ -182,7 +184,7 @@ class _SummaryLLM:
 class _FinalizerLLM:
     """Finalizer fake for public-shape tests."""
 
-    async def ainvoke(self, _messages: list) -> _DummyResponse:
+    async def ainvoke(self, _messages: list, *, config=None) -> _DummyResponse:
         """Return a stable final answer."""
         response = _DummyResponse("final")
         return response
@@ -408,10 +410,10 @@ async def _run_patched_rag2_public_shape_case(
         live_entry,
     )
     monkeypatch.setattr(rag2_module, "get_rag_cache2_runtime", lambda: runtime)
-    monkeypatch.setattr(rag2_module, "_initializer_llm", _InitializerLLM())
-    monkeypatch.setattr(rag2_module, "_continuation_assessor_llm", _ContinuationLLM(decision))
-    monkeypatch.setattr(rag2_module, "_evaluator_summarizer_llm", _SummaryLLM())
-    monkeypatch.setattr(rag2_module, "_finalizer_llm", _FinalizerLLM())
+    monkeypatch.setattr(rag_initializer_module, "_initializer_llm", _InitializerLLM())
+    monkeypatch.setattr(rag_evaluator_module, "_continuation_assessor_llm", _ContinuationLLM(decision))
+    monkeypatch.setattr(rag_evaluator_module, "_evaluator_summarizer_llm", _SummaryLLM())
+    monkeypatch.setattr(rag_evaluator_module, "_finalizer_llm", _FinalizerLLM())
     monkeypatch.setattr(rag2_module, "upsert_initializer_entry", _noop_async)
     monkeypatch.setattr(rag2_module, "record_initializer_hit", _noop_async)
 
@@ -487,7 +489,7 @@ async def test_assess_continuation_waits_for_pending_evidence_slot(
         }
     )
     monkeypatch.setattr(
-        rag2_module,
+        rag_evaluator_module,
         "_continuation_assessor_llm",
         continuation_llm,
     )
@@ -538,7 +540,7 @@ async def test_assess_continuation_waits_for_pending_evidence_slot_after_memory(
         }
     )
     monkeypatch.setattr(
-        rag2_module,
+        rag_evaluator_module,
         "_continuation_assessor_llm",
         continuation_llm,
     )
@@ -589,7 +591,7 @@ async def test_assess_continuation_finalizes_memory_miss_after_recall(
         }
     )
     monkeypatch.setattr(
-        rag2_module,
+        rag_evaluator_module,
         "_continuation_assessor_llm",
         continuation_llm,
     )
@@ -699,7 +701,7 @@ async def test_call_rag_supervisor_does_not_expand_after_resolved_evidence(
     )
     monkeypatch.setattr(rag2_module, "get_rag_cache2_runtime", lambda: runtime)
     monkeypatch.setattr(
-        rag2_module,
+        rag_initializer_module,
         "_initializer_llm",
         _MultiSlotInitializerLLM(
             [
@@ -709,12 +711,12 @@ async def test_call_rag_supervisor_does_not_expand_after_resolved_evidence(
         ),
     )
     monkeypatch.setattr(
-        rag2_module,
+        rag_evaluator_module,
         "_continuation_assessor_llm",
         continuation_llm,
     )
-    monkeypatch.setattr(rag2_module, "_evaluator_summarizer_llm", _SummaryLLM())
-    monkeypatch.setattr(rag2_module, "_finalizer_llm", _FinalizerLLM())
+    monkeypatch.setattr(rag_evaluator_module, "_evaluator_summarizer_llm", _SummaryLLM())
+    monkeypatch.setattr(rag_evaluator_module, "_finalizer_llm", _FinalizerLLM())
     monkeypatch.setattr(rag2_module, "upsert_initializer_entry", _noop_async)
     monkeypatch.setattr(rag2_module, "record_initializer_hit", _noop_async)
 
@@ -807,7 +809,7 @@ async def test_call_rag_supervisor_continues_remaining_slots_after_unresolved_st
     )
     monkeypatch.setattr(rag2_module, "get_rag_cache2_runtime", lambda: runtime)
     monkeypatch.setattr(
-        rag2_module,
+        rag_initializer_module,
         "_initializer_llm",
         _MultiSlotInitializerLLM(
             [
@@ -817,7 +819,7 @@ async def test_call_rag_supervisor_continues_remaining_slots_after_unresolved_st
         ),
     )
     monkeypatch.setattr(
-        rag2_module,
+        rag_evaluator_module,
         "_continuation_assessor_llm",
         _ContinuationLLM(
             {
@@ -827,8 +829,8 @@ async def test_call_rag_supervisor_continues_remaining_slots_after_unresolved_st
             }
         ),
     )
-    monkeypatch.setattr(rag2_module, "_evaluator_summarizer_llm", _SummaryLLM())
-    monkeypatch.setattr(rag2_module, "_finalizer_llm", _FinalizerLLM())
+    monkeypatch.setattr(rag_evaluator_module, "_evaluator_summarizer_llm", _SummaryLLM())
+    monkeypatch.setattr(rag_evaluator_module, "_finalizer_llm", _FinalizerLLM())
     monkeypatch.setattr(rag2_module, "upsert_initializer_entry", _noop_async)
     monkeypatch.setattr(rag2_module, "record_initializer_hit", _noop_async)
 

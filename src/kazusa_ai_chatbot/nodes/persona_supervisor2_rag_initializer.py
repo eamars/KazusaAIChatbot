@@ -11,9 +11,12 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.config import (
+
     RAG_PLANNER_LLM_API_KEY,
     RAG_PLANNER_LLM_BASE_URL,
     RAG_PLANNER_LLM_MODEL,
+    RAG_PLANNER_LLM_MAX_COMPLETION_TOKENS,
+    RAG_PLANNER_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.db.rag_cache2_persistent import (
     record_initializer_hit,
@@ -35,12 +38,16 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_types import (
     ProgressiveRAGState,
 )
 from kazusa_ai_chatbot.utils import (
-    get_llm,
     log_list_preview,
     log_preview,
     parse_llm_json_output,
 )
 
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 logger = logging.getLogger(__name__)
 
 _PERSON_SLOT_REFERENCE_RE = re.compile(
@@ -292,12 +299,22 @@ Query: "你家的官方地址是什么？"
 }}
 不要输出 "slot 1"、"slot 2" 这类占位文本；每一项都必须是带允许前缀的真实检索槽位。
 '''
-_initializer_llm = get_llm(
-    temperature=0.0,
-    top_p=1.0,
-    model=RAG_PLANNER_LLM_MODEL,
+_llm_interface = LLInterface()
+_initializer_llm = LLInterface()
+_initializer_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="RAG_PLANNER_LLM",
     base_url=RAG_PLANNER_LLM_BASE_URL,
     api_key=RAG_PLANNER_LLM_API_KEY,
+    model=RAG_PLANNER_LLM_MODEL,
+    temperature=0.0,
+    top_p=1.0,
+    top_k=None,
+    max_completion_tokens=RAG_PLANNER_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=RAG_PLANNER_LLM_THINKING_ENABLED,
+    ),
 )
 _MIN_INITIALIZER_CACHE_CONFIDENCE = 0.5
 
@@ -525,7 +542,7 @@ async def rag_initializer(state: ProgressiveRAGState) -> dict:
     }
     human_message = HumanMessage(content=json.dumps(user_input, ensure_ascii=False))
 
-    response = await _initializer_llm.ainvoke([system_prompt, human_message])
+    response = await _initializer_llm.ainvoke([system_prompt, human_message], config=_initializer_llm_config)
     result = parse_llm_json_output(response.content)
 
     cacheable_result = isinstance(result, dict) and isinstance(

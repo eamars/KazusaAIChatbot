@@ -19,6 +19,7 @@ EXPECTED_ROUTE_TABLE_ROWS = (
     "CONSOLIDATION_LLM",
     "JSON_REPAIR_LLM",
     "BACKGROUND_ARTIFACT_LLM",
+    "BACKGROUND_WORK_LLM",
     "EMBEDDING",
 )
 
@@ -26,9 +27,15 @@ EXPECTED_ROUTE_TABLE_ROWS = (
 def test_llm_route_inventory_contains_all_routes_once() -> None:
     """Route inventory contains each startup table route exactly once."""
 
-    from kazusa_ai_chatbot.llm_route_report import LLM_ROUTE_CONFIGS
+    from kazusa_ai_chatbot.llm_route_report import (
+        _table_rows,
+        configured_route_diagnostics,
+    )
 
-    route_names = [row["route"] for row in LLM_ROUTE_CONFIGS]
+    route_names = [
+        row["route_name"]
+        for row in _table_rows(configured_route_diagnostics())
+    ]
 
     assert tuple(route_names) == EXPECTED_ROUTE_TABLE_ROWS
     assert len(route_names) == len(set(route_names))
@@ -38,21 +45,30 @@ def test_llm_route_inventory_uses_configured_models_and_sources() -> None:
     """Route inventory reads model and source values from config constants."""
 
     import kazusa_ai_chatbot.config as config
-    from kazusa_ai_chatbot.llm_route_report import LLM_ROUTE_CONFIGS
+    from kazusa_ai_chatbot.llm_route_report import (
+        _table_rows,
+        configured_route_diagnostics,
+    )
 
     rows_by_route = {
-        row["route"]: row
-        for row in LLM_ROUTE_CONFIGS
+        row["route_name"]: row
+        for row in _table_rows(configured_route_diagnostics())
     }
 
     for route_name in EXPECTED_ROUTE_TABLE_ROWS:
         if route_name == "EMBEDDING":
             assert rows_by_route[route_name]["model"] == config.EMBEDDING_MODEL
-            assert rows_by_route[route_name]["source_url"] == config.EMBEDDING_BASE_URL
+            assert (
+                rows_by_route[route_name]["normalized_base_url"]
+                == config.EMBEDDING_BASE_URL
+            )
             continue
 
         assert rows_by_route[route_name]["model"] == getattr(config, f"{route_name}_MODEL")
-        assert rows_by_route[route_name]["source_url"] == getattr(config, f"{route_name}_BASE_URL")
+        assert (
+            rows_by_route[route_name]["normalized_base_url"]
+            == getattr(config, f"{route_name}_BASE_URL").rstrip("/")
+        )
 
 
 def test_llm_route_table_omits_api_keys() -> None:
@@ -84,6 +100,7 @@ def test_llm_route_table_omits_api_keys() -> None:
         config.CONSOLIDATION_LLM_API_KEY,
         config.JSON_REPAIR_LLM_API_KEY,
         config.BACKGROUND_ARTIFACT_LLM_API_KEY,
+        config.BACKGROUND_WORK_LLM_API_KEY,
         config.EMBEDDING_API_KEY,
     )
     for api_key in api_keys:
@@ -105,13 +122,14 @@ def test_boundary_core_node_uses_boundary_route(tmp_path) -> None:
     result = subprocess.run(
         [
             sys.executable,
-            "-c",
-            (
-                "from kazusa_ai_chatbot.nodes "
-                "import persona_supervisor2_cognition as c; "
-                "print('|'.join(c._boundary_core_llm._model_key))"
-            ),
-        ],
+                "-c",
+                (
+                    "from kazusa_ai_chatbot.nodes "
+                    "import persona_supervisor2_cognition as c; "
+                    "config = c._boundary_core_llm_config; "
+                    "print('|'.join((config.base_url.rstrip('/'), config.model)))"
+                ),
+            ],
         cwd=tmp_path,
         env=env,
         capture_output=True,

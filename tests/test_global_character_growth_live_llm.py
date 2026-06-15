@@ -15,7 +15,8 @@ from kazusa_ai_chatbot.config import (
     CONSOLIDATION_LLM_MODEL,
 )
 from kazusa_ai_chatbot.global_character_growth.llm import (
-    _global_growth_candidate_llm,
+    _global_growth_candidate_llm_config,
+    _llm_interface,
     build_candidate_generation_prompt,
 )
 from kazusa_ai_chatbot.global_character_growth.projection import (
@@ -138,10 +139,13 @@ async def _run_live_candidate_case(
         payload=payload,
         character_name="当前主体",
     )
-    response = await _global_growth_candidate_llm.ainvoke([
-        SystemMessage(content=prompt.system_prompt),
-        HumanMessage(content=prompt.human_prompt),
-    ])
+    response = await _llm_interface.ainvoke(
+        [
+            SystemMessage(content=prompt.system_prompt),
+            HumanMessage(content=prompt.human_prompt),
+        ],
+        config=_global_growth_candidate_llm_config,
+    )
     raw_output = str(response.content)
     strict_parsed = json.loads(raw_output)
     assert isinstance(strict_parsed, dict)

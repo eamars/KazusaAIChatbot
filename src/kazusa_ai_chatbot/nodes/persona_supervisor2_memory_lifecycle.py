@@ -23,10 +23,17 @@ from kazusa_ai_chatbot.config import (
     COGNITION_LLM_API_KEY,
     COGNITION_LLM_BASE_URL,
     COGNITION_LLM_MODEL,
+    COGNITION_LLM_MAX_COMPLETION_TOKENS,
+    COGNITION_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
-from kazusa_ai_chatbot.utils import get_llm, log_preview, parse_llm_json_output
+from kazusa_ai_chatbot.utils import log_preview, parse_llm_json_output
 
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 logger = logging.getLogger(__name__)
 
 ACTIVE_COMMITMENT_ALIAS_LIMIT = 12
@@ -82,12 +89,22 @@ _MEMORY_LIFECYCLE_SPECIALIST_PROMPT = '''\
 如果没有生命周期变化，返回：
 {"decision": "no_lifecycle_change", "lifecycle_decisions": [], "content_plan_roles": []}
 '''
-_memory_lifecycle_specialist_llm = get_llm(
-    temperature=0.1,
-    top_p=0.7,
-    model=COGNITION_LLM_MODEL,
+_llm_interface = LLInterface()
+_memory_lifecycle_specialist_llm = LLInterface()
+_memory_lifecycle_specialist_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="COGNITION_LLM",
     base_url=COGNITION_LLM_BASE_URL,
     api_key=COGNITION_LLM_API_KEY,
+    model=COGNITION_LLM_MODEL,
+    temperature=0.1,
+    top_p=0.7,
+    top_k=None,
+    max_completion_tokens=COGNITION_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=COGNITION_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -362,7 +379,7 @@ async def _invoke_memory_lifecycle_specialist(
     response = await _memory_lifecycle_specialist_llm.ainvoke([
         system_prompt,
         human_message,
-    ])
+    ], config=_memory_lifecycle_specialist_llm_config)
     parsed = parse_llm_json_output(response.content)
     normalized = normalize_memory_lifecycle_output(parsed, alias_bindings)
     materialized = materialize_memory_lifecycle_actions(

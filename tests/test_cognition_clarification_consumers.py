@@ -11,6 +11,7 @@ from kazusa_ai_chatbot.cognition_episode import (
 from kazusa_ai_chatbot.cognition_chain_core.stages import l2 as l2_module
 from kazusa_ai_chatbot.cognition_chain_core.stages import l3 as l3_module
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
+from llm_test_helpers import bind_test_llm
 
 
 _TURN_CLOCK = build_turn_clock("2026-05-09 19:30:00")
@@ -40,7 +41,7 @@ class _CapturingAsyncLLM:
         self.payload = payload
         self.messages: list = []
 
-    async def ainvoke(self, messages: list) -> _DummyResponse:
+    async def ainvoke(self, messages: list, *, config=None) -> _DummyResponse:
         """Record prompt messages and return the configured payload.
 
         Args:
@@ -146,7 +147,7 @@ async def test_judgment_core_consumes_unresolved_referents(monkeypatch) -> None:
         "character_intent": "PROVIDE",
         "judgment_note": "would otherwise answer",
     })
-    monkeypatch.setattr(l2_module, "_judgement_core_llm", fake_llm)
+    monkeypatch.setattr(l2_module, "_judgement_core_llm", bind_test_llm(fake_llm, "judgement_core_llm"))
 
     result = await l2_module.call_judgment_core_agent(_judgment_state())
 
@@ -168,7 +169,7 @@ async def test_judgment_core_requires_referents(monkeypatch) -> None:
         "character_intent": "PROVIDE",
         "judgment_note": "would otherwise answer",
     })
-    monkeypatch.setattr(l2_module, "_judgement_core_llm", fake_llm)
+    monkeypatch.setattr(l2_module, "_judgement_core_llm", bind_test_llm(fake_llm, "judgement_core_llm"))
 
     state = _judgment_state()
     state.pop("referents")
@@ -187,7 +188,7 @@ async def test_content_plan_agent_receives_referent_signal(monkeypatch) -> None:
             "rendering": "简短追问即可。",
         }
     })
-    monkeypatch.setattr(l3_module, "_content_plan_agent_llm", fake_llm)
+    monkeypatch.setattr(l3_module, "_content_plan_agent_llm", bind_test_llm(fake_llm, "content_plan_agent_llm"))
 
     result = await l3_module.call_content_plan_agent(_content_plan_state())
 
@@ -208,7 +209,7 @@ async def test_content_plan_agent_requires_referents(monkeypatch) -> None:
             "rendering": "简短追问即可。",
         }
     })
-    monkeypatch.setattr(l3_module, "_content_plan_agent_llm", fake_llm)
+    monkeypatch.setattr(l3_module, "_content_plan_agent_llm", bind_test_llm(fake_llm, "content_plan_agent_llm"))
 
     state = _content_plan_state()
     state.pop("referents")

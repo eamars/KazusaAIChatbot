@@ -10,11 +10,14 @@ from typing import Any, Literal, TypedDict
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.config import (
+
     CONSOLIDATION_LLM_API_KEY,
     CONSOLIDATION_LLM_BASE_URL,
     CONSOLIDATION_LLM_MODEL,
     REFLECTION_LORE_PROMOTION_ENABLED,
     REFLECTION_SELF_GUIDANCE_PROMOTION_ENABLED,
+    CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    CONSOLIDATION_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.db import get_character_profile
 from kazusa_ai_chatbot.db.schemas import CharacterReflectionRunDoc
@@ -48,9 +51,13 @@ from kazusa_ai_chatbot.reflection_cycle.projection import build_prompt_result
 from kazusa_ai_chatbot.time_boundary import format_storage_utc_for_llm
 import kazusa_ai_chatbot.reflection_cycle.repository as repository
 from kazusa_ai_chatbot.utils import parse_llm_json_output
-from kazusa_ai_chatbot.utils import get_llm
 
 
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 logger = logging.getLogger(__name__)
 
 GLOBAL_PROMOTION_PROMPT_VERSION = "reflection_global_promotion_v1"
@@ -256,12 +263,22 @@ ReflectionPromotionDecision 字段：
 不要编造证据。不要从用户发言改写成 `{character_name}` 的长期规则。不要把 reject/no_action 改成 promote。
 不要输出 source_global_user_id、Mongo 查询字段、embedding、原始 transcript、用户身份、用户承诺、健康细节或私密关系事实。
 '''
-_global_promotion_llm = get_llm(
-    temperature=0.2,
-    top_p=0.8,
-    model=CONSOLIDATION_LLM_MODEL,
+_llm_interface = LLInterface()
+_global_promotion_llm = LLInterface()
+_global_promotion_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="CONSOLIDATION_LLM",
     base_url=CONSOLIDATION_LLM_BASE_URL,
     api_key=CONSOLIDATION_LLM_API_KEY,
+    model=CONSOLIDATION_LLM_MODEL,
+    temperature=0.2,
+    top_p=0.8,
+    top_k=None,
+    max_completion_tokens=CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=CONSOLIDATION_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -274,7 +291,7 @@ async def run_global_promotion_llm(
     response = await _global_promotion_llm.ainvoke([
         SystemMessage(content=prompt.system_prompt),
         HumanMessage(content=prompt.human_prompt),
-    ])
+    ], config=_global_promotion_llm_config)
     raw_output = str(response.content)
     parsed = parse_llm_json_output(raw_output)
     if not isinstance(parsed, dict):

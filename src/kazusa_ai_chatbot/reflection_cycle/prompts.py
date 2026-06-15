@@ -5,9 +5,12 @@ from __future__ import annotations
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.config import (
+
     CONSOLIDATION_LLM_API_KEY,
     CONSOLIDATION_LLM_BASE_URL,
     CONSOLIDATION_LLM_MODEL,
+    CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    CONSOLIDATION_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.reflection_cycle.models import (
     DailySynthesisResult,
@@ -25,9 +28,14 @@ from kazusa_ai_chatbot.reflection_cycle.projection import (
     validate_daily_synthesis_output,
     validate_hourly_reflection_output,
 )
-from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output
+from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 HOURLY_REFLECTION_SYSTEM_PROMPT = '''\
 你负责为虚构聊天角色执行只读小时反思评估。
 
@@ -95,12 +103,23 @@ HOURLY_REFLECTION_SYSTEM_PROMPT = '''\
   "confidence": "证据充分但范围有限"
 }
 '''
-_hourly_reflection_llm = get_llm(
-    temperature=0.2,
-    top_p=0.8,
-    model=CONSOLIDATION_LLM_MODEL,
+_llm_interface = LLInterface()
+_hourly_reflection_llm = LLInterface()
+_daily_synthesis_llm = LLInterface()
+_hourly_reflection_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="CONSOLIDATION_LLM",
     base_url=CONSOLIDATION_LLM_BASE_URL,
     api_key=CONSOLIDATION_LLM_API_KEY,
+    model=CONSOLIDATION_LLM_MODEL,
+    temperature=0.2,
+    top_p=0.8,
+    top_k=None,
+    max_completion_tokens=CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=CONSOLIDATION_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -122,7 +141,7 @@ async def run_hourly_reflection_llm(
     response = await _hourly_reflection_llm.ainvoke([
         SystemMessage(content=prompt.system_prompt),
         HumanMessage(content=prompt.human_prompt),
-    ])
+    ], config=_hourly_reflection_llm_config)
     raw_output = str(response.content)
     parsed_output = _parse_reflection_json(raw_output)
     validation_warnings = list(prompt.validation_warnings)
@@ -241,12 +260,20 @@ DAILY_SYNTHESIS_SYSTEM_PROMPT = '''\
   "confidence": "low|medium|high"
 }
 '''
-_daily_synthesis_llm = get_llm(
-    temperature=0.2,
-    top_p=0.8,
-    model=CONSOLIDATION_LLM_MODEL,
+_daily_synthesis_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="CONSOLIDATION_LLM",
     base_url=CONSOLIDATION_LLM_BASE_URL,
     api_key=CONSOLIDATION_LLM_API_KEY,
+    model=CONSOLIDATION_LLM_MODEL,
+    temperature=0.2,
+    top_p=0.8,
+    top_k=None,
+    max_completion_tokens=CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=CONSOLIDATION_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -266,7 +293,7 @@ async def run_daily_synthesis_llm(
     response = await _daily_synthesis_llm.ainvoke([
         SystemMessage(content=prompt.system_prompt),
         HumanMessage(content=prompt.human_prompt),
-    ])
+    ], config=_daily_synthesis_llm_config)
     raw_output = str(response.content)
     parsed_output = _parse_reflection_json(raw_output)
     validation_warnings = list(prompt.validation_warnings)

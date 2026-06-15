@@ -1,4 +1,4 @@
-"""Monitor LM Studio unload recovery for shared chat model clients."""
+"""LM Studio unload recovery for chat model clients."""
 
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from openai import BadRequestError
+
+from kazusa_ai_chatbot.llm_interface.detection import normalize_base_url
 
 ModelKey = tuple[str, str]
 
@@ -28,22 +30,14 @@ _active_reloads: dict[ModelKey, _ReloadState] = {}
 
 
 def is_lm_studio_model_unload_error(exc: BaseException) -> bool:
-    """Return whether an exception contains the confirmed LM Studio unload text.
-
-    Args:
-        exc: Exception raised by an OpenAI-compatible chat client.
-
-    Returns:
-        Whether the exception text contains the exact confirmed unload
-        signature and should receive the one-shot reload retry.
-    """
+    """Return whether an exception has the confirmed LM Studio unload text."""
 
     return_value = _LM_STUDIO_MODEL_UNLOAD_SIGNATURE in str(exc)
     return return_value
 
 
 def _active_reload_state(model_key: ModelKey) -> _ReloadState | None:
-    """Return the current reload owner state for a model key, if one exists."""
+    """Return the current reload owner state for a model key."""
 
     with _reload_lock:
         reload_state = _active_reloads.get(model_key)
@@ -51,14 +45,7 @@ def _active_reload_state(model_key: ModelKey) -> _ReloadState | None:
 
 
 def _claim_reload_owner(model_key: ModelKey) -> tuple[_ReloadState, bool]:
-    """Create or return the active reload owner for a model key.
-
-    Args:
-        model_key: Normalized OpenAI-compatible endpoint and model name.
-
-    Returns:
-        The active reload state and whether the caller owns the reload retry.
-    """
+    """Create or return the active reload owner for a model key."""
 
     with _reload_lock:
         reload_state = _active_reloads.get(model_key)
@@ -118,14 +105,8 @@ async def _wait_for_no_active_reload_async(model_key: ModelKey) -> None:
         await _wait_for_reload_state_async(reload_state)
 
 
-class MonitoredChatModel:
-    """Wrap a chat model with one retry for confirmed LM Studio unloads.
-
-    Args:
-        inner_llm: Chat client exposing ``ainvoke`` and ``invoke``.
-        base_url: OpenAI-compatible endpoint used for model-key scoping.
-        model: Configured model name used for model-key scoping.
-    """
+class ReloadingChatModel:
+    """Wrap a chat model with one retry for confirmed LM Studio unloads."""
 
     def __init__(
         self,
@@ -135,7 +116,7 @@ class MonitoredChatModel:
         model: str,
     ) -> None:
         self._inner_llm = inner_llm
-        self._model_key: ModelKey = (base_url.rstrip("/"), model)
+        self._model_key: ModelKey = (normalize_base_url(base_url), model)
 
     def __getattr__(self, name: str) -> Any:
         """Delegate attributes to the wrapped chat model."""
@@ -208,29 +189,3 @@ class MonitoredChatModel:
             _release_reload_owner(self._model_key, reload_state)
 
         return response
-
-
-def monitored_chat_model(
-    inner_llm: object,
-    *,
-    base_url: str,
-    model: str,
-) -> MonitoredChatModel:
-    """Wrap a chat model with shared unload monitoring.
-
-    Args:
-        inner_llm: Chat client to invoke after same-model recovery pauses.
-        base_url: OpenAI-compatible endpoint used for model-key scoping.
-        model: Configured model name used for model-key scoping.
-
-    Returns:
-        A chat-model wrapper exposing ``ainvoke``, ``invoke``, and delegated
-        attributes from the wrapped model.
-    """
-
-    monitored_model = MonitoredChatModel(
-        inner_llm,
-        base_url=base_url,
-        model=model,
-    )
-    return monitored_model

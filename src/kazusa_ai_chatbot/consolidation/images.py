@@ -7,9 +7,12 @@ import json
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.config import (
+
     CONSOLIDATION_LLM_API_KEY,
     CONSOLIDATION_LLM_BASE_URL,
     CONSOLIDATION_LLM_MODEL,
+    CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    CONSOLIDATION_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.memory_writer_prompt_projection import (
     project_character_image_prompt_payload,
@@ -17,9 +20,14 @@ from kazusa_ai_chatbot.memory_writer_prompt_projection import (
 from kazusa_ai_chatbot.consolidation.schema import (
     ConsolidatorState,
 )
-from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output
+from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 # ── Image bookkeeping constants ──────────────────────────────────────
 _CHARACTER_IMAGE_MAX_RECENT_WINDOW = 6
 _CHARACTER_IMAGE_HISTORICAL_MAX_CHARS = 1500
@@ -69,12 +77,23 @@ _CHARACTER_IMAGE_SESSION_SUMMARY_PROMPT = """\
     "session_summary": "一段简洁的第三人称描述（≤80字），反映 {character_name} 本轮对话后的自我认知变化"
 }}
 """
-_character_image_session_summary_llm = get_llm(
-    temperature=0.3,
-    top_p=0.9,
-    model=CONSOLIDATION_LLM_MODEL,
+_llm_interface = LLInterface()
+_character_image_session_summary_llm = LLInterface()
+_character_image_compress_llm = LLInterface()
+_character_image_session_summary_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="CONSOLIDATION_LLM",
     base_url=CONSOLIDATION_LLM_BASE_URL,
     api_key=CONSOLIDATION_LLM_API_KEY,
+    model=CONSOLIDATION_LLM_MODEL,
+    temperature=0.3,
+    top_p=0.9,
+    top_k=None,
+    max_completion_tokens=CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=CONSOLIDATION_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -121,12 +140,20 @@ _CHARACTER_IMAGE_COMPRESS_PROMPT = """\
     "compressed_summary": "压缩后的历史摘要（≤500字）"
 }}
 """
-_character_image_compress_llm = get_llm(
-    temperature=0.2,
-    top_p=0.9,
-    model=CONSOLIDATION_LLM_MODEL,
+_character_image_compress_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="CONSOLIDATION_LLM",
     base_url=CONSOLIDATION_LLM_BASE_URL,
     api_key=CONSOLIDATION_LLM_API_KEY,
+    model=CONSOLIDATION_LLM_MODEL,
+    temperature=0.2,
+    top_p=0.9,
+    top_k=None,
+    max_completion_tokens=CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=CONSOLIDATION_LLM_THINKING_ENABLED,
+    ),
 )
 
 async def _update_character_image(
@@ -172,7 +199,7 @@ async def _update_character_image(
         session_payload,
         ensure_ascii=False,
     ))
-    response = await _character_image_session_summary_llm.ainvoke([system_prompt, user_prompt])
+    response = await _character_image_session_summary_llm.ainvoke([system_prompt, user_prompt], config=_character_image_session_summary_llm_config)
     result = parse_llm_json_output(response.content)
     session_summary = result.get("session_summary", "")
 
@@ -204,7 +231,7 @@ async def _update_character_image(
                     compress_payload,
                     ensure_ascii=False,
                 ))
-                compress_response = await _character_image_compress_llm.ainvoke([sys_p, usr_p])
+                compress_response = await _character_image_compress_llm.ainvoke([sys_p, usr_p], config=_character_image_compress_llm_config)
                 compress_result = parse_llm_json_output(compress_response.content)
                 historical_summary = compress_result.get("compressed_summary", historical_summary)
 

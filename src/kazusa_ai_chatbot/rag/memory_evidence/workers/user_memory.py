@@ -11,9 +11,12 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from openai import OpenAIError
 
 from kazusa_ai_chatbot.config import (
+
     RAG_SUBAGENT_LLM_API_KEY,
     RAG_SUBAGENT_LLM_BASE_URL,
     RAG_SUBAGENT_LLM_MODEL,
+    RAG_SUBAGENT_LLM_MAX_COMPLETION_TOKENS,
+    RAG_SUBAGENT_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.db import (
     get_query_text_embedding,
@@ -23,8 +26,13 @@ from kazusa_ai_chatbot.db import (
 )
 from kazusa_ai_chatbot.db.schemas import UserMemoryUnitStatus
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
-from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
+from kazusa_ai_chatbot.utils import parse_llm_json_output, text_or_empty
 
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 logger = logging.getLogger(__name__)
 
 _AGENT_NAME = "user_memory_evidence_agent"
@@ -409,12 +417,22 @@ _REVIEW_PROMPT = '''\
   "uncertainty": "简短不确定性说明，或空字符串"
 }
 '''
-_review_llm = get_llm(
-    temperature=0.0,
-    top_p=1.0,
-    model=RAG_SUBAGENT_LLM_MODEL,
+_llm_interface = LLInterface()
+_review_llm = LLInterface()
+_review_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="RAG_SUBAGENT_LLM",
     base_url=RAG_SUBAGENT_LLM_BASE_URL,
     api_key=RAG_SUBAGENT_LLM_API_KEY,
+    model=RAG_SUBAGENT_LLM_MODEL,
+    temperature=0.0,
+    top_p=1.0,
+    top_k=None,
+    max_completion_tokens=RAG_SUBAGENT_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=RAG_SUBAGENT_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -441,7 +459,7 @@ async def _review_user_memory_rows(
     human_message = HumanMessage(
         content=json.dumps(payload, ensure_ascii=False, default=str)
     )
-    response = await _review_llm.ainvoke([system_prompt, human_message])
+    response = await _review_llm.ainvoke([system_prompt, human_message], config=_review_llm_config)
     raw_review = parse_llm_json_output(response.content)
     review = _normalize_review_payload(raw_review, candidates)
     return review

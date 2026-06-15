@@ -11,6 +11,7 @@ from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episod
 from kazusa_ai_chatbot.cognition_chain_core.stages import l2 as l2_module
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import empty_user_memory_context
 from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
+from llm_test_helpers import bind_test_llm
 
 
 @pytest.mark.asyncio
@@ -26,7 +27,7 @@ async def test_l2_receives_promoted_global_growth_for_user_message(
     }))
     conscious_llm = AsyncMock()
     conscious_llm.ainvoke = AsyncMock(return_value=response)
-    monkeypatch.setattr(l2_module, "_conscious_llm", conscious_llm)
+    monkeypatch.setattr(l2_module, "_conscious_llm", bind_test_llm(conscious_llm, "conscious_llm"))
 
     await l2_module.call_cognition_consciousness(_state(
         promoted_reflection_context={
@@ -67,7 +68,7 @@ async def test_l2_keeps_global_growth_absent_when_not_projected(
     }))
     conscious_llm = AsyncMock()
     conscious_llm.ainvoke = AsyncMock(return_value=response)
-    monkeypatch.setattr(l2_module, "_conscious_llm", conscious_llm)
+    monkeypatch.setattr(l2_module, "_conscious_llm", bind_test_llm(conscious_llm, "conscious_llm"))
 
     await l2_module.call_cognition_consciousness(_state(promoted_reflection_context={}))
 

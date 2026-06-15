@@ -9,9 +9,12 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.config import (
+
     CONSOLIDATION_LLM_API_KEY,
     CONSOLIDATION_LLM_BASE_URL,
     CONSOLIDATION_LLM_MODEL,
+    CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    CONSOLIDATION_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.conversation_progress.models import ConversationProgressRecordInput
 from kazusa_ai_chatbot.conversation_progress.policy import (
@@ -28,8 +31,13 @@ from kazusa_ai_chatbot.conversation_history_prompt_projection import (
     project_conversation_history_for_llm,
 )
 from kazusa_ai_chatbot.time_boundary import format_storage_utc_for_llm
-from kazusa_ai_chatbot.utils import get_llm, log_preview, parse_llm_json_output
+from kazusa_ai_chatbot.utils import log_preview, parse_llm_json_output
 
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 logger = logging.getLogger(__name__)
 
 _RECORDER_PROMPT = '''\
@@ -164,12 +172,22 @@ _RECORDER_PROMPT = '''\
 }}
 '''
 
-_recorder_llm = get_llm(
-    temperature=0.2,
-    top_p=0.75,
-    model=CONSOLIDATION_LLM_MODEL,
+_llm_interface = LLInterface()
+_recorder_llm = LLInterface()
+_recorder_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="CONSOLIDATION_LLM",
     base_url=CONSOLIDATION_LLM_BASE_URL,
     api_key=CONSOLIDATION_LLM_API_KEY,
+    model=CONSOLIDATION_LLM_MODEL,
+    temperature=0.2,
+    top_p=0.75,
+    top_k=None,
+    max_completion_tokens=CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=CONSOLIDATION_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -241,7 +259,7 @@ async def record_with_llm(record_input: ConversationProgressRecordInput) -> dict
     human_message = HumanMessage(
         content=json.dumps(human_payload, ensure_ascii=False),
     )
-    response = await _recorder_llm.ainvoke([system_prompt, human_message])
+    response = await _recorder_llm.ainvoke([system_prompt, human_message], config=_recorder_llm_config)
     parsed = parse_llm_json_output(response.content)
     validated = validate_recorder_output(parsed)
     logger.info(

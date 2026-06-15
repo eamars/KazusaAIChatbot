@@ -22,10 +22,13 @@ from kazusa_ai_chatbot.config import (
     DIALOG_GENERATOR_LLM_BASE_URL,
     DIALOG_GENERATOR_LLM_MODEL,
     MAX_DIALOG_AGENT_RETRY,
+    DIALOG_EVALUATOR_LLM_MAX_COMPLETION_TOKENS,
+    DIALOG_EVALUATOR_LLM_THINKING_ENABLED,
+    DIALOG_GENERATOR_LLM_MAX_COMPLETION_TOKENS,
+    DIALOG_GENERATOR_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.utils import (
     parse_llm_json_output,
-    get_llm,
     log_list_preview,
     log_preview,
 )
@@ -49,6 +52,11 @@ import logging
 import json
 
 
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 logger = logging.getLogger(__name__)
 
 MILLISECONDS_PER_SECOND = 1000
@@ -417,13 +425,23 @@ _DIALOG_GENERATOR_PROMPT = '''\
 }}
 即使 `final_dialog` 里的某个字符串是 fenced code block、JSON 示例或配置片段，最外层也只能返回上面这个 JSON 对象。
 '''
-_dialog_generator_llm = get_llm(
-    temperature=0.65,
-    top_p=0.8,
-    model=DIALOG_GENERATOR_LLM_MODEL,
+_llm_interface = LLInterface()
+_dialog_generator_llm = LLInterface()
+_dialog_evaluator_llm = LLInterface()
+_dialog_generator_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="DIALOG_GENERATOR_LLM",
     base_url=DIALOG_GENERATOR_LLM_BASE_URL,
     api_key=DIALOG_GENERATOR_LLM_API_KEY,
+    model=DIALOG_GENERATOR_LLM_MODEL,
+    temperature=0.65,
+    top_p=0.8,
+    top_k=None,
+    max_completion_tokens=DIALOG_GENERATOR_LLM_MAX_COMPLETION_TOKENS,
     presence_penalty=0.25,
+    thinking=LLMThinkingConfig(
+        enabled=DIALOG_GENERATOR_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -470,7 +488,7 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
     
 
     started_at = time.perf_counter()
-    response = await _dialog_generator_llm.ainvoke([system_prompt, human_message] + recent_messages)
+    response = await _dialog_generator_llm.ainvoke([system_prompt, human_message] + recent_messages, config=_dialog_generator_llm_config)
 
     result = parse_llm_json_output(response.content)
     invalid_fields: list[str] = []
@@ -701,12 +719,20 @@ _DIALOG_EVALUATOR_PROMPT = '''\
 }}
 语义：`should_stop=true` 表示可以结束本轮生成；`should_stop=false` 表示必须把 `feedback` 交回生成器重试。
 '''
-_dialog_evaluator_llm = get_llm(
-    temperature=0.1,
-    top_p=0.7,
-    model=DIALOG_EVALUATOR_LLM_MODEL,
+_dialog_evaluator_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="DIALOG_EVALUATOR_LLM",
     base_url=DIALOG_EVALUATOR_LLM_BASE_URL,
     api_key=DIALOG_EVALUATOR_LLM_API_KEY,
+    model=DIALOG_EVALUATOR_LLM_MODEL,
+    temperature=0.1,
+    top_p=0.7,
+    top_k=None,
+    max_completion_tokens=DIALOG_EVALUATOR_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=DIALOG_EVALUATOR_LLM_THINKING_ENABLED,
+    ),
 )
 async def dialog_evaluator(state: DialogAgentState) -> DialogAgentState:
     usage_mode = state["dialog_usage_mode"]
@@ -735,7 +761,7 @@ async def dialog_evaluator(state: DialogAgentState) -> DialogAgentState:
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
 
     started_at = time.perf_counter()
-    response = await _dialog_evaluator_llm.ainvoke([system_prompt, human_message])
+    response = await _dialog_evaluator_llm.ainvoke([system_prompt, human_message], config=_dialog_evaluator_llm_config)
 
     result = parse_llm_json_output(response.content)
     missing_fields: list[str] = []

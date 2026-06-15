@@ -12,6 +12,7 @@ from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.cognition_chain_core.stages import l3 as l3_module
 from kazusa_ai_chatbot.cognition_chain_core.stages import l2c2 as l2c2_module
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
+from llm_test_helpers import bind_test_llm
 
 
 class _FakeResponse:
@@ -28,7 +29,7 @@ class _CapturingLLM:
         self.payload = payload
         self.messages = []
 
-    async def ainvoke(self, messages):
+    async def ainvoke(self, messages, *, config=None):
         self.messages = messages
         return _FakeResponse(self.payload)
 
@@ -39,7 +40,7 @@ class _FailingLLM:
     def __init__(self):
         self.calls = 0
 
-    async def ainvoke(self, messages):
+    async def ainvoke(self, messages, *, config=None):
         self.calls += 1
         raise AssertionError("visual agent LLM should not be called")
 
@@ -79,7 +80,7 @@ async def test_visual_agent_skip_returns_empty_directives_without_llm(
         "no_visual_directives": True,
     }
     fake_llm = _FailingLLM()
-    monkeypatch.setattr(l3_module, "_visual_agent_llm", fake_llm)
+    monkeypatch.setattr(l3_module, "_visual_agent_llm", bind_test_llm(fake_llm, "visual_agent_llm"))
 
     result = await l3_module.call_visual_agent({
         "cognitive_episode": episode,
@@ -106,7 +107,7 @@ async def test_content_plan_agent_receives_conversation_progress(monkeypatch) ->
             "rendering": "One visible chat bubble; concise.",
         },
     })
-    monkeypatch.setattr(l3_module, "_content_plan_agent_llm", fake_llm)
+    monkeypatch.setattr(l3_module, "_content_plan_agent_llm", bind_test_llm(fake_llm, "content_plan_agent_llm"))
 
     result = await l3_module.call_content_plan_agent({
         "cognitive_episode": _minimal_text_chat_episode(),
@@ -264,7 +265,7 @@ async def test_contextual_agent_receives_boundary_profile_contract(monkeypatch) 
         "vibe_check": "普通闲聊",
         "relational_dynamic": "自然接住轻松话题",
     })
-    monkeypatch.setattr(l2c2_module, "_contextual_agent_llm", fake_llm)
+    monkeypatch.setattr(l2c2_module, "_contextual_agent_llm", bind_test_llm(fake_llm, "contextual_agent_llm"))
 
     result = await l2c2_module.call_social_context_appraisal(_profile_conformance_state())
 
@@ -293,7 +294,7 @@ async def test_visual_agent_receives_boundary_profile_contract(monkeypatch) -> N
         "gaze_direction": ["看向话题本身"],
         "visual_vibe": ["轻松的日常氛围"],
     })
-    monkeypatch.setattr(l3_module, "_visual_agent_llm", fake_llm)
+    monkeypatch.setattr(l3_module, "_visual_agent_llm", bind_test_llm(fake_llm, "visual_agent_llm"))
 
     result = await l3_module.call_visual_agent(_profile_conformance_state())
 
@@ -328,7 +329,7 @@ async def test_visual_agent_prompt_omits_raw_runtime_ids(monkeypatch) -> None:
         "gaze_direction": [],
         "visual_vibe": [],
     })
-    monkeypatch.setattr(l3_module, "_visual_agent_llm", fake_llm)
+    monkeypatch.setattr(l3_module, "_visual_agent_llm", bind_test_llm(fake_llm, "visual_agent_llm"))
     state = _profile_conformance_state()
     state["prompt_message_context"] = {
         "body_text": "看这张图。",

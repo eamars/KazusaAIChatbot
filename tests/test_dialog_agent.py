@@ -632,7 +632,7 @@ async def test_dialog_agent_returns_final_dialog():
 
     call_count = 0
 
-    async def mock_ainvoke(messages):
+    async def mock_ainvoke(messages, *, config=None):
         nonlocal call_count
         call_count += 1
         if call_count % 2 == 1:
@@ -689,7 +689,7 @@ async def test_dialog_agent_handles_empty_dialog():
 
     call_count = 0
 
-    async def mock_ainvoke(messages):
+    async def mock_ainvoke(messages, *, config=None):
         nonlocal call_count
         call_count += 1
         if call_count % 2 == 1:
@@ -724,7 +724,7 @@ async def test_dialog_agent_logs_explicit_usage_mode(caplog):
 
     call_count = 0
 
-    async def mock_ainvoke(messages):
+    async def mock_ainvoke(messages, *, config=None):
         nonlocal call_count
         call_count += 1
         if call_count % 2 == 1:

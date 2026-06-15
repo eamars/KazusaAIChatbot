@@ -3,7 +3,7 @@
 The domain implementation is split by responsibility:
 initializer/cache, dispatch/execution, prompt-facing compact views, and
 evaluation/finalization. This module keeps the public graph entrypoint and
-compatibility shims used by focused tests.
+test hook synchronization.
 """
 
 from __future__ import annotations
@@ -47,11 +47,16 @@ _CONTINUATION_ASSESSOR_PROMPT = _evaluator_domain._CONTINUATION_ASSESSOR_PROMPT
 _FINALIZER_PROMPT = _evaluator_domain._FINALIZER_PROMPT
 
 _RAG_SUPERVISOR_AGENT_REGISTRY = _dispatch_domain._RAG_SUPERVISOR_AGENT_REGISTRY
-_initializer_llm = _initializer_domain._initializer_llm
-_dispatcher_llm = _dispatch_domain._dispatcher_llm
-_evaluator_summarizer_llm = _evaluator_domain._evaluator_summarizer_llm
-_continuation_assessor_llm = _evaluator_domain._continuation_assessor_llm
-_finalizer_llm = _evaluator_domain._finalizer_llm
+_llm_interface = _initializer_domain._llm_interface
+_initializer_llm_config = _initializer_domain._initializer_llm_config
+_dispatcher_llm_config = _dispatch_domain._dispatcher_llm_config
+_evaluator_summarizer_llm_config = (
+    _evaluator_domain._evaluator_summarizer_llm_config
+)
+_continuation_assessor_llm_config = (
+    _evaluator_domain._continuation_assessor_llm_config
+)
+_finalizer_llm_config = _evaluator_domain._finalizer_llm_config
 
 get_rag_cache2_runtime = _initializer_domain.get_rag_cache2_runtime
 record_initializer_hit = _initializer_domain.record_initializer_hit
@@ -105,7 +110,8 @@ def _state_correlation_id(state: ProgressiveRAGState) -> str:
 
 def _sync_initializer_domain() -> None:
     """Apply monkeypatched initializer dependencies to the domain module."""
-    _initializer_domain._initializer_llm = _initializer_llm
+    _initializer_domain._llm_interface = _llm_interface
+    _initializer_domain._initializer_llm_config = _initializer_llm_config
     _initializer_domain.get_rag_cache2_runtime = get_rag_cache2_runtime
     _initializer_domain.record_initializer_hit = record_initializer_hit
     _initializer_domain.upsert_initializer_entry = upsert_initializer_entry
@@ -113,7 +119,8 @@ def _sync_initializer_domain() -> None:
 
 def _sync_dispatch_domain() -> None:
     """Apply monkeypatched dispatcher dependencies to the domain module."""
-    _dispatch_domain._dispatcher_llm = _dispatcher_llm
+    _dispatch_domain._llm_interface = _llm_interface
+    _dispatch_domain._dispatcher_llm_config = _dispatcher_llm_config
     _dispatch_domain._RAG_SUPERVISOR_AGENT_REGISTRY = (
         _RAG_SUPERVISOR_AGENT_REGISTRY
     )
@@ -122,9 +129,14 @@ def _sync_dispatch_domain() -> None:
 def _sync_evaluator_domain() -> None:
     """Apply monkeypatched evaluator dependencies to the domain module."""
     _sync_initializer_domain()
-    _evaluator_domain._evaluator_summarizer_llm = _evaluator_summarizer_llm
-    _evaluator_domain._continuation_assessor_llm = _continuation_assessor_llm
-    _evaluator_domain._finalizer_llm = _finalizer_llm
+    _evaluator_domain._llm_interface = _llm_interface
+    _evaluator_domain._evaluator_summarizer_llm_config = (
+        _evaluator_summarizer_llm_config
+    )
+    _evaluator_domain._continuation_assessor_llm_config = (
+        _continuation_assessor_llm_config
+    )
+    _evaluator_domain._finalizer_llm_config = _finalizer_llm_config
 
 
 def build_rag_fact_source_map() -> dict[str, dict[str, Any]]:

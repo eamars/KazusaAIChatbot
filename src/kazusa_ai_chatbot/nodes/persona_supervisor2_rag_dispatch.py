@@ -11,9 +11,12 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.config import (
+
     RAG_PLANNER_LLM_API_KEY,
     RAG_PLANNER_LLM_BASE_URL,
     RAG_PLANNER_LLM_MODEL,
+    RAG_PLANNER_LLM_MAX_COMPLETION_TOKENS,
+    RAG_PLANNER_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.rag.conversation_evidence import ConversationEvidenceAgent
 from kazusa_ai_chatbot.rag.conversation_evidence.workers import (
@@ -46,11 +49,15 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_types import (
     RAGAgentRegistryEntry,
 )
 from kazusa_ai_chatbot.utils import (
-    get_llm,
     log_preview,
     parse_llm_json_output,
 )
 
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 logger = logging.getLogger(__name__)
 
 MILLISECONDS_PER_SECOND = 1000
@@ -374,12 +381,22 @@ initializer 生成的槽位以可直接映射到 agent 的前缀开头。
     "max_attempts": 3
 }}
 '''
-_dispatcher_llm = get_llm(
-    temperature=0.0,
-    top_p=1.0,
-    model=RAG_PLANNER_LLM_MODEL,
+_llm_interface = LLInterface()
+_dispatcher_llm = LLInterface()
+_dispatcher_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="RAG_PLANNER_LLM",
     base_url=RAG_PLANNER_LLM_BASE_URL,
     api_key=RAG_PLANNER_LLM_API_KEY,
+    model=RAG_PLANNER_LLM_MODEL,
+    temperature=0.0,
+    top_p=1.0,
+    top_k=None,
+    max_completion_tokens=RAG_PLANNER_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=RAG_PLANNER_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -485,7 +502,7 @@ async def rag_dispatcher(state: ProgressiveRAGState) -> dict:
     recent_messages = state["messages"][-2:] if len(state["messages"]) >= 2 else state["messages"]
 
     started_at = time.perf_counter()
-    response = await _dispatcher_llm.ainvoke([system_prompt, human_message] + recent_messages)
+    response = await _dispatcher_llm.ainvoke([system_prompt, human_message] + recent_messages, config=_dispatcher_llm_config)
     raw_dispatch = parse_llm_json_output(response.content)
     parse_status = "succeeded" if isinstance(raw_dispatch, dict) else "failed"
     if not isinstance(raw_dispatch, dict):

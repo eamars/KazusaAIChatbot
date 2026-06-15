@@ -15,7 +15,14 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from kazusa_ai_chatbot.config import (
     COGNITION_LLM_API_KEY,
     COGNITION_LLM_BASE_URL,
+    COGNITION_LLM_MAX_COMPLETION_TOKENS,
     COGNITION_LLM_MODEL,
+    COGNITION_LLM_THINKING_ENABLED,
+)
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
 )
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
 from kazusa_ai_chatbot.cognition_chain_core.stages.l1 import call_cognition_subconscious
@@ -36,7 +43,7 @@ from kazusa_ai_chatbot.time_boundary import (
     build_turn_clock_from_storage_utc,
     storage_utc_now_iso,
 )
-from kazusa_ai_chatbot.utils import get_llm, load_personality, parse_llm_json_output
+from kazusa_ai_chatbot.utils import load_personality, parse_llm_json_output
 from tests.llm_trace import write_llm_trace
 
 
@@ -66,12 +73,19 @@ Definitions:
 - treats_prior_disclosure_as_new: true when the response asks for or reacts to a prior disclosed fact as if it had not already been disclosed.
 - progression_sufficient: true when the response acknowledges continuity and advances the episode beyond the repeated move.
 """
-_progression_judge_llm = get_llm(
-    temperature=0.0,
-    top_p=1.0,
-    model=COGNITION_LLM_MODEL,
+_llm_interface = LLInterface()
+_progression_judge_llm_config = LLMCallConfig(
+    stage_name="tests.conversation_progression.judge",
+    route_name="COGNITION_LLM",
     base_url=COGNITION_LLM_BASE_URL,
     api_key=COGNITION_LLM_API_KEY,
+    model=COGNITION_LLM_MODEL,
+    temperature=0.0,
+    top_p=1.0,
+    top_k=None,
+    max_completion_tokens=COGNITION_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(enabled=COGNITION_LLM_THINKING_ENABLED),
 )
 
 
@@ -599,11 +613,12 @@ async def _judge_progression(
         "content_plan": cognition_state.get("content_plan", []),
         "final_dialog": dialog.get("final_dialog", []),
     }
-    response = await _progression_judge_llm.ainvoke(
+    response = await _llm_interface.ainvoke(
         [
             SystemMessage(content=_PROGRESSION_JUDGE_PROMPT),
             HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
-        ]
+        ],
+        config=_progression_judge_llm_config,
     )
     judgment = parse_llm_json_output(response.content)
     required_keys = {

@@ -8,9 +8,12 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.config import (
+
     RAG_SUBAGENT_LLM_API_KEY,
     RAG_SUBAGENT_LLM_BASE_URL,
     RAG_SUBAGENT_LLM_MODEL,
+    RAG_SUBAGENT_LLM_MAX_COMPLETION_TOKENS,
+    RAG_SUBAGENT_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.rag.live_context.target_resolution import (
     _clean_target,
@@ -18,8 +21,13 @@ from kazusa_ai_chatbot.rag.live_context.target_resolution import (
 )
 from kazusa_ai_chatbot.rag.live_context.runtime_facts import _RUNTIME_FACT_TYPES
 from kazusa_ai_chatbot.rag.prompt_projection import project_selector_input_for_llm
-from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
+from kazusa_ai_chatbot.utils import parse_llm_json_output, text_or_empty
 
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 _KNOWN_FACT_TYPES = {
     "current_time",
     "current_date",
@@ -269,12 +277,22 @@ memory 或近期聊天只能用于解析 target/scope，例如稳定的角色位
 }
 '''
 
-_external_live_selector_llm = get_llm(
-    temperature=0.0,
-    top_p=1.0,
-    model=RAG_SUBAGENT_LLM_MODEL,
+_llm_interface = LLInterface()
+_external_live_selector_llm = LLInterface()
+_external_live_selector_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="RAG_SUBAGENT_LLM",
     base_url=RAG_SUBAGENT_LLM_BASE_URL,
     api_key=RAG_SUBAGENT_LLM_API_KEY,
+    model=RAG_SUBAGENT_LLM_MODEL,
+    temperature=0.0,
+    top_p=1.0,
+    top_k=None,
+    max_completion_tokens=RAG_SUBAGENT_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=RAG_SUBAGENT_LLM_THINKING_ENABLED,
+    ),
 )
 
 async def _select_external_live_plan(
@@ -298,7 +316,7 @@ async def _select_external_live_plan(
     )
     response = await _external_live_selector_llm.ainvoke(
         [system_prompt, human_message]
-    )
+    , config=_external_live_selector_llm_config)
     raw_plan = parse_llm_json_output(response.content)
     if not isinstance(raw_plan, dict):
         raw_plan = {}

@@ -7,6 +7,8 @@ import json
 import pytest
 
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_supervisor2 as supervisor2_module
+from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_initializer as initializer_module
+from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_evaluator as evaluator_module
 from kazusa_ai_chatbot.rag.cache2_runtime import RAGCache2Runtime
 from kazusa_ai_chatbot.rag.live_context import LiveContextAgent
 
@@ -28,7 +30,7 @@ class _InitializerLLM:
         """Store the slot returned by the fake initializer."""
         self.slot = slot
 
-    async def ainvoke(self, _messages: list) -> _DummyResponse:
+    async def ainvoke(self, _messages: list, *, config=None) -> _DummyResponse:
         """Return one JSON initializer payload."""
         payload = {"unknown_slots": [self.slot]}
         response = _DummyResponse(json.dumps(payload))
@@ -43,7 +45,7 @@ class _SequencedInitializerLLM:
         self.slot_batches = slot_batches
         self.payloads: list[dict] = []
 
-    async def ainvoke(self, messages: list) -> _DummyResponse:
+    async def ainvoke(self, messages: list, *, config=None) -> _DummyResponse:
         """Capture the initializer payload and return the next slot batch."""
         payload = json.loads(messages[1].content)
         self.payloads.append(payload)
@@ -59,7 +61,7 @@ class _SequencedInitializerLLM:
 class _SummaryLLM:
     """Evaluator summarizer fake that preserves selected capability evidence."""
 
-    async def ainvoke(self, messages: list) -> _DummyResponse:
+    async def ainvoke(self, messages: list, *, config=None) -> _DummyResponse:
         """Extract selected_summary from the evaluator payload."""
         payload = json.loads(messages[1].content)
         raw_result = payload["raw_result"]
@@ -74,7 +76,7 @@ class _SummaryLLM:
 class _FinalizerLLM:
     """Finalizer fake that echoes the first known-fact summary."""
 
-    async def ainvoke(self, messages: list) -> _DummyResponse:
+    async def ainvoke(self, messages: list, *, config=None) -> _DummyResponse:
         """Return a compact final answer from known facts."""
         payload = json.loads(messages[1].content)
         known_facts = payload["known_facts"]
@@ -88,7 +90,7 @@ class _FinalizerLLM:
 class _LastResolvedFinalizerLLM:
     """Finalizer fake that echoes the latest resolved known-fact summary."""
 
-    async def ainvoke(self, messages: list) -> _DummyResponse:
+    async def ainvoke(self, messages: list, *, config=None) -> _DummyResponse:
         """Return a compact final answer from the latest resolved fact."""
         payload = json.loads(messages[1].content)
         known_facts = payload["known_facts"]
@@ -108,7 +110,7 @@ class _ContinuationLLM:
         self.decision = decision
         self.payloads: list[dict] = []
 
-    async def ainvoke(self, messages: list) -> _DummyResponse:
+    async def ainvoke(self, messages: list, *, config=None) -> _DummyResponse:
         """Capture the assessor payload and return the configured decision."""
         payload = json.loads(messages[1].content)
         self.payloads.append(payload)
@@ -201,9 +203,9 @@ async def _run_patched_live_context_case(
         registry_entry,
     )
     monkeypatch.setattr(supervisor2_module, "get_rag_cache2_runtime", lambda: runtime)
-    monkeypatch.setattr(supervisor2_module, "_initializer_llm", _InitializerLLM(slot))
-    monkeypatch.setattr(supervisor2_module, "_evaluator_summarizer_llm", _SummaryLLM())
-    monkeypatch.setattr(supervisor2_module, "_finalizer_llm", _FinalizerLLM())
+    monkeypatch.setattr(initializer_module, "_initializer_llm", _InitializerLLM(slot))
+    monkeypatch.setattr(evaluator_module, "_evaluator_summarizer_llm", _SummaryLLM())
+    monkeypatch.setattr(evaluator_module, "_finalizer_llm", _FinalizerLLM())
     monkeypatch.setattr(supervisor2_module, "upsert_initializer_entry", _noop_async)
     monkeypatch.setattr(supervisor2_module, "record_initializer_hit", _noop_async)
 
@@ -336,10 +338,10 @@ async def _run_patched_continuation_case(
         live_entry,
     )
     monkeypatch.setattr(supervisor2_module, "get_rag_cache2_runtime", lambda: runtime)
-    monkeypatch.setattr(supervisor2_module, "_initializer_llm", initializer_llm)
-    monkeypatch.setattr(supervisor2_module, "_evaluator_summarizer_llm", _SummaryLLM())
-    monkeypatch.setattr(supervisor2_module, "_finalizer_llm", _LastResolvedFinalizerLLM())
-    monkeypatch.setattr(supervisor2_module, "_continuation_assessor_llm", continuation_llm)
+    monkeypatch.setattr(initializer_module, "_initializer_llm", initializer_llm)
+    monkeypatch.setattr(evaluator_module, "_evaluator_summarizer_llm", _SummaryLLM())
+    monkeypatch.setattr(evaluator_module, "_finalizer_llm", _LastResolvedFinalizerLLM())
+    monkeypatch.setattr(evaluator_module, "_continuation_assessor_llm", continuation_llm)
     monkeypatch.setattr(supervisor2_module, "upsert_initializer_entry", _noop_async)
     monkeypatch.setattr(supervisor2_module, "record_initializer_hit", _noop_async)
 
@@ -530,7 +532,7 @@ async def test_evaluator_summary_prompt_uses_compact_capability_payload(
             """Initialize without captured payload."""
             self.payload: dict = {}
 
-        async def ainvoke(self, messages: list) -> _DummyResponse:
+        async def ainvoke(self, messages: list, *, config=None) -> _DummyResponse:
             """Store the user payload sent to the summarizer LLM."""
             self.payload = json.loads(messages[1].content)
             response = _DummyResponse("compact summary")
@@ -604,7 +606,7 @@ async def test_evaluator_summary_prompt_uses_compact_capability_payload(
     ]
     capture_llm = _CaptureLLM()
     monkeypatch.setattr(
-        supervisor2_module,
+        evaluator_module,
         "_evaluator_summarizer_llm",
         capture_llm,
     )

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, NotRequired, Protocol, TypedDict, cast
 
-from langchain_core.messages import BaseMessage
+from kazusa_ai_chatbot.llm_interface import LLMCallConfig, LLMInvoker
 
 
 class CognitionChainContractError(ValueError):
@@ -324,11 +324,6 @@ class CognitionTextSurfaceOutputV1(TypedDict):
     action_directives: ActionDirectivesV1
 
 
-class AsyncChatModel(Protocol):
-    async def ainvoke(self, messages: Sequence[BaseMessage]) -> BaseMessage:
-        """Return one model response for the supplied messages."""
-
-
 class JsonParser(Protocol):
     def __call__(self, content: str) -> Mapping[str, Any] | list[Any]:
         """Parse one JSON-like LLM response string."""
@@ -349,27 +344,34 @@ class CognitionLogger(Protocol):
 
 
 @dataclass(frozen=True)
+class LLMStageBinding:
+    llm: LLMInvoker
+    config: LLMCallConfig
+
+
+@dataclass(frozen=True)
 class CognitionChainServices:
-    cognition_llm: AsyncChatModel
-    boundary_core_llm: AsyncChatModel
-    action_selection_llm: AsyncChatModel
-    style_llm: AsyncChatModel
-    content_plan_llm: AsyncChatModel
-    preference_llm: AsyncChatModel
-    visual_llm: AsyncChatModel
+    llm: LLMInvoker
+    cognition_config: LLMCallConfig
+    boundary_core_config: LLMCallConfig
+    action_selection_config: LLMCallConfig
+    style_config: LLMCallConfig
+    content_plan_config: LLMCallConfig
+    preference_config: LLMCallConfig
+    visual_config: LLMCallConfig
     parse_json: JsonParser
     logger: CognitionLogger
 
 
-def require_injected_llm(
-    llm: AsyncChatModel | None,
+def require_llm_binding(
+    binding: LLMStageBinding | None,
     service_name: str,
-) -> AsyncChatModel:
-    """Return an injected LLM service or fail before a stage call."""
+) -> LLMStageBinding:
+    """Return an injected LLM binding or fail before a stage call."""
 
-    if llm is None:
+    if binding is None:
         raise RuntimeError(f"{service_name} service was not injected")
-    return_value = llm
+    return_value = binding
     return return_value
 
 

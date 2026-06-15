@@ -123,7 +123,7 @@ class _FakeAsyncLLM:
         self.payload = payload
         self.messages: list[object] = []
 
-    async def ainvoke(self, messages: list[object]) -> SimpleNamespace:
+    async def ainvoke(self, messages: list[object], *, config=None) -> SimpleNamespace:
         self.messages = messages
         content = json.dumps(self.payload, ensure_ascii=False)
         return SimpleNamespace(content=content)

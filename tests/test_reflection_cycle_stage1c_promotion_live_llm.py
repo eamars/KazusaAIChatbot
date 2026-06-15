@@ -14,7 +14,8 @@ from kazusa_ai_chatbot.config import (
     CONSOLIDATION_LLM_MODEL,
 )
 from kazusa_ai_chatbot.reflection_cycle.promotion import (
-    _global_promotion_llm,
+    _global_promotion_llm_config,
+    _llm_interface,
     build_global_promotion_prompt,
     validate_promotion_decisions,
 )
@@ -153,10 +154,13 @@ async def _run_case(case_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         payload,
         character_name="杏山千纱 (Kyōyama Kazusa)",
     )
-    response = await _global_promotion_llm.ainvoke([
-        SystemMessage(content=prompt.system_prompt),
-        HumanMessage(content=prompt.human_prompt),
-    ])
+    response = await _llm_interface.ainvoke(
+        [
+            SystemMessage(content=prompt.system_prompt),
+            HumanMessage(content=prompt.human_prompt),
+        ],
+        config=_global_promotion_llm_config,
+    )
     raw_output = str(response.content)
     parsed = parse_llm_json_output(raw_output)
     assert isinstance(parsed, dict)

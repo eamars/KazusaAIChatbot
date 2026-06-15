@@ -2,132 +2,166 @@
 
 from __future__ import annotations
 
-from kazusa_ai_chatbot.config import (
-    BACKGROUND_ARTIFACT_LLM_BASE_URL,
-    BACKGROUND_ARTIFACT_LLM_MODEL,
-    BOUNDARY_CORE_LLM_BASE_URL,
-    BOUNDARY_CORE_LLM_MODEL,
-    COGNITION_LLM_BASE_URL,
-    COGNITION_LLM_MODEL,
-    CONSOLIDATION_LLM_BASE_URL,
-    CONSOLIDATION_LLM_MODEL,
-    DIALOG_EVALUATOR_LLM_BASE_URL,
-    DIALOG_EVALUATOR_LLM_MODEL,
-    DIALOG_GENERATOR_LLM_BASE_URL,
-    DIALOG_GENERATOR_LLM_MODEL,
-    EMBEDDING_BASE_URL,
-    EMBEDDING_MODEL,
-    JSON_REPAIR_LLM_BASE_URL,
-    JSON_REPAIR_LLM_MODEL,
-    MSG_DECONTEXTUALIZER_LLM_BASE_URL,
-    MSG_DECONTEXTUALIZER_LLM_MODEL,
-    RAG_PLANNER_LLM_BASE_URL,
-    RAG_PLANNER_LLM_MODEL,
-    RAG_SUBAGENT_LLM_BASE_URL,
-    RAG_SUBAGENT_LLM_MODEL,
-    RELEVANCE_AGENT_LLM_BASE_URL,
-    RELEVANCE_AGENT_LLM_MODEL,
-    VISION_DESCRIPTOR_LLM_BASE_URL,
-    VISION_DESCRIPTOR_LLM_MODEL,
-    WEB_SEARCH_LLM_BASE_URL,
-    WEB_SEARCH_LLM_MODEL,
+from collections.abc import Iterable
+
+from kazusa_ai_chatbot import config as cfg
+from kazusa_ai_chatbot.llm_interface import LLMCallConfig, LLMThinkingConfig
+from kazusa_ai_chatbot.llm_interface.diagnostics import (
+    RouteDiagnostic,
+    build_route_diagnostics,
 )
 
-LLM_ROUTE_CONFIGS: tuple[dict[str, str], ...] = (
-    {
-        "route": "RELEVANCE_AGENT_LLM",
-        "model": RELEVANCE_AGENT_LLM_MODEL,
-        "source_url": RELEVANCE_AGENT_LLM_BASE_URL,
-    },
-    {
-        "route": "VISION_DESCRIPTOR_LLM",
-        "model": VISION_DESCRIPTOR_LLM_MODEL,
-        "source_url": VISION_DESCRIPTOR_LLM_BASE_URL,
-    },
-    {
-        "route": "MSG_DECONTEXTUALIZER_LLM",
-        "model": MSG_DECONTEXTUALIZER_LLM_MODEL,
-        "source_url": MSG_DECONTEXTUALIZER_LLM_BASE_URL,
-    },
-    {
-        "route": "RAG_PLANNER_LLM",
-        "model": RAG_PLANNER_LLM_MODEL,
-        "source_url": RAG_PLANNER_LLM_BASE_URL,
-    },
-    {
-        "route": "RAG_SUBAGENT_LLM",
-        "model": RAG_SUBAGENT_LLM_MODEL,
-        "source_url": RAG_SUBAGENT_LLM_BASE_URL,
-    },
-    {
-        "route": "WEB_SEARCH_LLM",
-        "model": WEB_SEARCH_LLM_MODEL,
-        "source_url": WEB_SEARCH_LLM_BASE_URL,
-    },
-    {
-        "route": "COGNITION_LLM",
-        "model": COGNITION_LLM_MODEL,
-        "source_url": COGNITION_LLM_BASE_URL,
-    },
-    {
-        "route": "BOUNDARY_CORE_LLM",
-        "model": BOUNDARY_CORE_LLM_MODEL,
-        "source_url": BOUNDARY_CORE_LLM_BASE_URL,
-    },
-    {
-        "route": "DIALOG_GENERATOR_LLM",
-        "model": DIALOG_GENERATOR_LLM_MODEL,
-        "source_url": DIALOG_GENERATOR_LLM_BASE_URL,
-    },
-    {
-        "route": "DIALOG_EVALUATOR_LLM",
-        "model": DIALOG_EVALUATOR_LLM_MODEL,
-        "source_url": DIALOG_EVALUATOR_LLM_BASE_URL,
-    },
-    {
-        "route": "CONSOLIDATION_LLM",
-        "model": CONSOLIDATION_LLM_MODEL,
-        "source_url": CONSOLIDATION_LLM_BASE_URL,
-    },
-    {
-        "route": "JSON_REPAIR_LLM",
-        "model": JSON_REPAIR_LLM_MODEL,
-        "source_url": JSON_REPAIR_LLM_BASE_URL,
-    },
-    {
-        "route": "BACKGROUND_ARTIFACT_LLM",
-        "model": BACKGROUND_ARTIFACT_LLM_MODEL,
-        "source_url": BACKGROUND_ARTIFACT_LLM_BASE_URL,
-    },
-    {
-        "route": "EMBEDDING",
-        "model": EMBEDDING_MODEL,
-        "source_url": EMBEDDING_BASE_URL,
-    },
-)
+_REQUIRED_ROUTES = frozenset((
+    "RELEVANCE_AGENT_LLM",
+    "VISION_DESCRIPTOR_LLM",
+    "MSG_DECONTEXTUALIZER_LLM",
+    "RAG_PLANNER_LLM",
+    "RAG_SUBAGENT_LLM",
+    "WEB_SEARCH_LLM",
+    "COGNITION_LLM",
+    "BOUNDARY_CORE_LLM",
+    "DIALOG_GENERATOR_LLM",
+    "DIALOG_EVALUATOR_LLM",
+    "CONSOLIDATION_LLM",
+    "JSON_REPAIR_LLM",
+))
+_FALLBACK_BACKED_ROUTES = frozenset((
+    "BACKGROUND_ARTIFACT_LLM",
+    "BACKGROUND_WORK_LLM",
+))
+
+
+def _route_config(route_name: str) -> LLMCallConfig:
+    """Build one sanitized diagnostic config from public route constants."""
+
+    return LLMCallConfig(
+        stage_name="llm_route_report",
+        route_name=route_name,
+        base_url=getattr(cfg, f"{route_name}_BASE_URL"),
+        api_key=getattr(cfg, f"{route_name}_API_KEY"),
+        model=getattr(cfg, f"{route_name}_MODEL"),
+        temperature=0.0,
+        top_p=1.0,
+        top_k=None,
+        max_completion_tokens=getattr(
+            cfg,
+            f"{route_name}_MAX_COMPLETION_TOKENS",
+        ),
+        presence_penalty=None,
+        thinking=LLMThinkingConfig(
+            enabled=getattr(cfg, f"{route_name}_THINKING_ENABLED"),
+        ),
+    )
+
+
+def _configured_chat_routes() -> tuple[LLMCallConfig, ...]:
+    """Return all chat routes shown in startup diagnostics."""
+
+    route_names = (
+        "RELEVANCE_AGENT_LLM",
+        "VISION_DESCRIPTOR_LLM",
+        "MSG_DECONTEXTUALIZER_LLM",
+        "RAG_PLANNER_LLM",
+        "RAG_SUBAGENT_LLM",
+        "WEB_SEARCH_LLM",
+        "COGNITION_LLM",
+        "BOUNDARY_CORE_LLM",
+        "DIALOG_GENERATOR_LLM",
+        "DIALOG_EVALUATOR_LLM",
+        "CONSOLIDATION_LLM",
+        "JSON_REPAIR_LLM",
+        "BACKGROUND_ARTIFACT_LLM",
+        "BACKGROUND_WORK_LLM",
+    )
+    routes = tuple(_route_config(route_name) for route_name in route_names)
+    return routes
+
+
+def configured_route_diagnostics() -> tuple[RouteDiagnostic, ...]:
+    """Return sanitized backend diagnostics for configured chat routes."""
+
+    diagnostics = build_route_diagnostics(
+        _configured_chat_routes(),
+        required_routes=set(_REQUIRED_ROUTES),
+        fallback_backed_routes=set(_FALLBACK_BACKED_ROUTES),
+    )
+    return diagnostics
+
+
+def _embedding_row() -> dict[str, str]:
+    """Return non-chat embedding route details for the legacy route report."""
+
+    return {
+        "route_name": "EMBEDDING",
+        "backend": "embedding",
+        "model": cfg.EMBEDDING_MODEL,
+        "normalized_base_url": cfg.EMBEDDING_BASE_URL.rstrip("/"),
+        "model_family": "embedding",
+        "thinking_strategy": "unsupported",
+        "required": "yes",
+        "fallback_backed": "no",
+    }
+
+
+def _text(value: bool) -> str:
+    """Render booleans in a compact, stable table form."""
+
+    if value:
+        return_value = "yes"
+        return return_value
+    return_value = "no"
+    return return_value
+
+
+def _table_rows(
+    diagnostics: Iterable[RouteDiagnostic],
+) -> tuple[dict[str, str], ...]:
+    """Project diagnostics into render-only row dictionaries."""
+
+    rows = [
+        {
+            "route_name": diagnostic.route_name,
+            "backend": diagnostic.backend,
+            "model": diagnostic.model,
+            "normalized_base_url": diagnostic.normalized_base_url,
+            "model_family": diagnostic.model_family,
+            "thinking_strategy": diagnostic.thinking_strategy,
+            "required": _text(diagnostic.required),
+            "fallback_backed": _text(diagnostic.fallback_backed),
+        }
+        for diagnostic in diagnostics
+    ]
+    rows.append(_embedding_row())
+    return tuple(rows)
 
 
 def render_llm_route_table() -> str:
-    """Render configured LLM routes for startup logs.
+    """Render sanitized LLM route diagnostics for startup logs."""
 
-    Returns:
-        A fixed-width table containing route name, model, and source URL.
-        API keys are intentionally excluded.
-    """
-
-    route_width = max(len("Route"), *(len(row["route"]) for row in LLM_ROUTE_CONFIGS))
-    model_width = max(len("Model"), *(len(row["model"]) for row in LLM_ROUTE_CONFIGS))
-    source_width = max(len("Source"), *(len(row["source_url"]) for row in LLM_ROUTE_CONFIGS))
-    lines = [
-        "Configured model routes:",
-        f'{"Route":<{route_width}}  {"Model":<{model_width}}  {"Source":<{source_width}}',
-    ]
-    for row in LLM_ROUTE_CONFIGS:
-        line = (
-            f'{row["route"]:<{route_width}}  '
-            f'{row["model"]:<{model_width}}  '
-            f'{row["source_url"]:<{source_width}}'
-        )
-        lines.append(line)
+    rows = _table_rows(configured_route_diagnostics())
+    columns = (
+        ("route_name", "Route"),
+        ("backend", "Backend"),
+        ("model", "Model"),
+        ("normalized_base_url", "Source"),
+        ("model_family", "Family"),
+        ("thinking_strategy", "Thinking"),
+        ("required", "Required"),
+        ("fallback_backed", "Fallback"),
+    )
+    widths = {
+        key: max(len(title), *(len(row[key]) for row in rows))
+        for key, title in columns
+    }
+    header = "  ".join(
+        f"{title:<{widths[key]}}"
+        for key, title in columns
+    )
+    lines = ["Configured model routes:", header]
+    for row in rows:
+        lines.append("  ".join(
+            f"{row[key]:<{widths[key]}}"
+            for key, _title in columns
+        ))
     table = "\n".join(lines)
     return table

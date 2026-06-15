@@ -17,7 +17,7 @@ class _FakeFinalizerLLM:
         self.calls = 0
         self.content = content
 
-    async def ainvoke(self, messages: list[object]) -> object:
+    async def ainvoke(self, messages: list[object], *, config=None) -> object:
         self.calls += 1
         human_message = messages[-1]
         self.payload = json.loads(human_message.content)

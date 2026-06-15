@@ -14,6 +14,26 @@ from kazusa_ai_chatbot.nodes.dialog_agent import (
     StateContractError,
     validate_dialog_action_directives,
 )
+from llm_test_helpers import bind_test_llm
+
+
+class _StaticContentPlanLLM:
+    """Return a fixed content-plan payload."""
+
+    def __init__(self, payload: dict) -> None:
+        self._payload = payload
+
+    async def ainvoke(
+        self,
+        _messages: list[object],
+        *,
+        config,
+    ) -> SimpleNamespace:
+        del config
+        response = SimpleNamespace(
+            content=json.dumps(self._payload, ensure_ascii=False),
+        )
+        return response
 
 
 def _dialog_state_with_linguistic(linguistic_directives: dict) -> dict:
@@ -148,19 +168,20 @@ def test_dialog_validation_normalizes_freeform_content_plan_keys() -> None:
 async def test_content_plan_agent_returns_native_dict_with_string_values() -> None:
     """L3 content-plan agent should output a native dict, not old anchors."""
 
-    llm = AsyncMock()
-    llm.ainvoke.return_value = SimpleNamespace(
-        content=json.dumps({
+    llm = _StaticContentPlanLLM({
             'content_plan': {
                 ' visible_goal ': '接住轻松调侃。',
                 'semantic_content': '被对方逗乐了，这种相处方式很舒服。',
                 'voice': '轻快随和。',
                 'rendering': '约35字；单个聊天气泡；2-3个自然短句。',
             },
-        }, ensure_ascii=False),
-    )
+    })
 
-    with patch.object(l3_module, '_content_plan_agent_llm', llm):
+    with patch.object(
+        l3_module,
+        '_content_plan_agent_llm',
+        bind_test_llm(llm, 'content_plan_agent'),
+    ):
         result = await l3_module.call_content_plan_agent(_content_plan_state())
 
     assert result == {

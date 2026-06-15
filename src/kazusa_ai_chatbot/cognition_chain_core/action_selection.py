@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Mapping, Sequence
-from typing import Any, Protocol
+from typing import Any
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
@@ -19,6 +19,7 @@ from kazusa_ai_chatbot.cognition_chain_core.action_selection_prompt import (
     ACTION_ROUTER_PROMPT,
 )
 from kazusa_ai_chatbot.cognition_chain_core.utils import parse_llm_json_output
+from kazusa_ai_chatbot.llm_interface import LLMCallConfig, LLMInvoker
 
 logger = logging.getLogger(__name__)
 
@@ -69,13 +70,6 @@ _RESOLVER_AFFORDANCE_DESCRIPTIONS = {
         "Retrieve current public or external factual evidence."
     ),
 }
-
-
-class ActionSelectionLLM(Protocol):
-    """Minimal async LLM interface required by action selection."""
-
-    async def ainvoke(self, messages: Sequence[BaseMessage]) -> object:
-        """Return one model response for the supplied prompt messages."""
 
 
 def build_action_selection_payload(
@@ -133,14 +127,16 @@ def build_action_selection_messages(
 
 
 async def route_action_requests(
-    llm: ActionSelectionLLM,
+    llm: LLMInvoker,
     state: Mapping[str, object],
+    *,
+    config: LLMCallConfig,
     capabilities: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Call the route-selection LLM and normalize its semantic output."""
 
     messages = build_action_selection_messages(state, capabilities)
-    response = await llm.ainvoke(messages)
+    response = await llm.ainvoke(messages, config=config)
     raw_content = getattr(response, "content", None)
     if not isinstance(raw_content, str):
         raise TypeError("Action selection LLM response content must be text")

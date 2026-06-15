@@ -16,6 +16,7 @@ from kazusa_ai_chatbot.conversation_history_prompt_projection import (
     project_conversation_history_for_llm,
 )
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
+from llm_test_helpers import bind_test_llm
 
 _ROOT = Path(__file__).resolve().parents[1]
 _LAST_USER_MESSAGE_KEY = "last_user" "_message"
@@ -36,7 +37,7 @@ class _CapturingLLM:
         self.payload = payload
         self.messages = []
 
-    async def ainvoke(self, messages):
+    async def ainvoke(self, messages, *, config=None):
         self.messages = messages
         return _FakeResponse(self.payload)
 
@@ -192,7 +193,7 @@ async def test_contextual_agent_receives_at_most_four_history_messages(monkeypat
         "vibe_check": "calm",
         "relational_dynamic": "cooperative",
     })
-    monkeypatch.setattr(l2c2_module, "_contextual_agent_llm", fake_llm)
+    monkeypatch.setattr(l2c2_module, "_contextual_agent_llm", bind_test_llm(fake_llm, "contextual_agent_llm"))
 
     await l2c2_module.call_social_context_appraisal(_base_l3_state())
 
@@ -216,7 +217,7 @@ async def test_style_agent_receives_at_most_two_history_messages(monkeypatch) ->
         "linguistic_style": "short sentences",
         "forbidden_phrases": [],
     })
-    monkeypatch.setattr(l3_module, "_style_agent_llm", fake_llm)
+    monkeypatch.setattr(l3_module, "_style_agent_llm", bind_test_llm(fake_llm, "style_agent_llm"))
 
     await l3_module.call_style_agent(_base_l3_state())
 

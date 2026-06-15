@@ -92,7 +92,7 @@ async def test_record_completed_episode_retries_wrong_schema_output(
                 '{"residue_text": "我还记得 Tobacco 用提拉米苏逗我。"}',
             ]
 
-        async def ainvoke(self, _messages):
+        async def ainvoke(self, _messages, *, config=None):
             output = self.outputs[self.calls]
             self.calls += 1
             response = SimpleNamespace(content=output)

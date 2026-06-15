@@ -65,7 +65,7 @@ class _CapturingAsyncLLM:
         self._wrapped_llm = wrapped_llm
         self.calls: list[dict[str, object]] = []
 
-    async def ainvoke(self, messages):
+    async def ainvoke(self, messages, *, config=None):
         """Invoke the wrapped LLM and store raw prompt/response text."""
         response = await self._wrapped_llm.ainvoke(messages)
         prompt_parts = []
@@ -93,7 +93,7 @@ class _SequencedInitializerLLM:
         self.slot_batches = slot_batches
         self.payloads: list[dict] = []
 
-    async def ainvoke(self, messages: list) -> _DummyResponse:
+    async def ainvoke(self, messages: list, *, config=None) -> _DummyResponse:
         """Capture initializer payloads and return the next slot batch."""
         payload = json.loads(messages[1].content)
         self.payloads.append(payload)
@@ -109,7 +109,7 @@ class _SequencedInitializerLLM:
 class _SummaryLLM:
     """Evaluator summarizer fake that preserves selected summaries."""
 
-    async def ainvoke(self, messages: list) -> _DummyResponse:
+    async def ainvoke(self, messages: list, *, config=None) -> _DummyResponse:
         """Extract selected_summary from the evaluator payload."""
         payload = json.loads(messages[1].content)
         raw_result = payload["raw_result"]
@@ -123,7 +123,7 @@ class _SummaryLLM:
 class _FinalizerLLM:
     """Finalizer fake that echoes the latest resolved summary."""
 
-    async def ainvoke(self, messages: list) -> _DummyResponse:
+    async def ainvoke(self, messages: list, *, config=None) -> _DummyResponse:
         """Return a compact final answer from resolved facts."""
         payload = json.loads(messages[1].content)
         summary = ""

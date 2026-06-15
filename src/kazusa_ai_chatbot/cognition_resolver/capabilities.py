@@ -9,7 +9,6 @@ from typing import Any
 from uuid import uuid4
 
 from openai import OpenAIError
-from pymongo.errors import PyMongoError
 
 from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
@@ -20,6 +19,7 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     validate_resolver_capability_request,
     validate_resolver_observation,
 )
+from kazusa_ai_chatbot.db.errors import DatabaseBackendError
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_projection import (
     project_known_facts,
 )
@@ -225,7 +225,7 @@ async def run_first_cycle_shared_memory_prewarm(
             context=rag_request["context"],
             max_attempts=1,
         )
-    except (OpenAIError, PyMongoError, TimeoutError) as exc:
+    except (OpenAIError, DatabaseBackendError, TimeoutError) as exc:
         logger.warning(f"Shared memory prewarm worker failed: {exc}")
         return_value = empty_rag_result
         return return_value

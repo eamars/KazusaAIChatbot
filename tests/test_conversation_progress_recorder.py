@@ -18,7 +18,7 @@ from kazusa_ai_chatbot.nodes.boundary_profile import (
     get_relationship_priority_description,
     get_self_integrity_description,
 )
-from kazusa_ai_chatbot.utils import DEFAULT_LLM_MAX_COMPLETION_TOKENS
+from kazusa_ai_chatbot.config import DEFAULT_LLM_MAX_COMPLETION_TOKENS
 
 
 _BOUNDARY_PROFILE = {
@@ -67,7 +67,8 @@ class _CapturingLLM:
         self.payload = payload
         self.messages = []
 
-    async def ainvoke(self, messages):
+    async def ainvoke(self, messages, *, config):
+        del config
         self.messages = messages
         response = _FakeResponse(self.payload)
         return response
@@ -123,8 +124,7 @@ def test_render_recorder_prompt_requires_absolute_or_omit_temporal_state() -> No
 def test_recorder_llm_uses_shared_completion_token_budget() -> None:
     """Recorder calls should inherit the shared output cap."""
 
-    assert recorder._recorder_llm.max_tokens == DEFAULT_LLM_MAX_COMPLETION_TOKENS
-    assert recorder._recorder_llm._default_params["max_completion_tokens"] == (
+    assert recorder._recorder_llm_config.max_completion_tokens == (
         DEFAULT_LLM_MAX_COMPLETION_TOKENS
     )
 

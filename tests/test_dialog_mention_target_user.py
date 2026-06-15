@@ -17,7 +17,7 @@ class _CapturingLLM:
         self.payload = payload
         self.messages = []
 
-    async def ainvoke(self, messages):
+    async def ainvoke(self, messages, *, config=None):
         self.messages = messages
         response = AIMessage(content=json.dumps(self.payload))
         return response

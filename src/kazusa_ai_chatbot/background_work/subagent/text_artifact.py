@@ -16,9 +16,16 @@ from kazusa_ai_chatbot.config import (
     BACKGROUND_WORK_LLM_BASE_URL,
     BACKGROUND_WORK_LLM_MODEL,
     BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
+    BACKGROUND_WORK_LLM_MAX_COMPLETION_TOKENS,
+    BACKGROUND_WORK_LLM_THINKING_ENABLED,
 )
-from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output
+from kazusa_ai_chatbot.utils import parse_llm_json_output
 
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 WORKER = "text_artifact"
 DESCRIPTION = (
     "Bounded text artifacts including compact code snippets, text rewrites, "
@@ -72,12 +79,23 @@ Return strict JSON:
 }
 '''
 
-_text_artifact_task_router_llm = get_llm(
-    temperature=0.1,
-    top_p=0.7,
-    model=BACKGROUND_WORK_LLM_MODEL,
+_llm_interface = LLInterface()
+_text_artifact_task_router_llm = LLInterface()
+_text_artifact_generator_llm = LLInterface()
+_text_artifact_task_router_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="BACKGROUND_WORK_LLM",
     base_url=BACKGROUND_WORK_LLM_BASE_URL,
     api_key=BACKGROUND_WORK_LLM_API_KEY,
+    model=BACKGROUND_WORK_LLM_MODEL,
+    temperature=0.1,
+    top_p=0.7,
+    top_k=None,
+    max_completion_tokens=BACKGROUND_WORK_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=BACKGROUND_WORK_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -97,7 +115,7 @@ async def _route_text_artifact_task(
     response = await _text_artifact_task_router_llm.ainvoke([
         SystemMessage(content=TEXT_ARTIFACT_TASK_ROUTER_PROMPT),
         HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
-    ])
+    ], config=_text_artifact_task_router_llm_config)
     parsed = parse_llm_json_output(response.content)
     decision = normalize_text_artifact_task_router_output(parsed)
     return decision
@@ -174,12 +192,20 @@ Return strict JSON:
 }
 '''
 
-_text_artifact_generator_llm = get_llm(
-    temperature=0.2,
-    top_p=0.8,
-    model=BACKGROUND_WORK_LLM_MODEL,
+_text_artifact_generator_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="BACKGROUND_WORK_LLM",
     base_url=BACKGROUND_WORK_LLM_BASE_URL,
     api_key=BACKGROUND_WORK_LLM_API_KEY,
+    model=BACKGROUND_WORK_LLM_MODEL,
+    temperature=0.2,
+    top_p=0.8,
+    top_k=None,
+    max_completion_tokens=BACKGROUND_WORK_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=BACKGROUND_WORK_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -200,7 +226,7 @@ async def _generate_text_artifact(
     response = await _text_artifact_generator_llm.ainvoke([
         SystemMessage(content=TEXT_ARTIFACT_GENERATOR_PROMPT),
         HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
-    ])
+    ], config=_text_artifact_generator_llm_config)
     parsed = parse_llm_json_output(response.content)
     result = normalize_text_artifact_generator_output(
         parsed,

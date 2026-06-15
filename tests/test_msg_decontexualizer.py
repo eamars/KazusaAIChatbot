@@ -277,7 +277,7 @@ class _HistoryAwareDecontextualizerLLM:
     def __init__(self) -> None:
         self.payloads: list[dict] = []
 
-    async def ainvoke(self, messages: list) -> MagicMock:
+    async def ainvoke(self, messages: list, *, config=None) -> MagicMock:
         input_payload = json.loads(messages[1].content)
         self.payloads.append(input_payload)
         history_lines = input_payload['chat_history']

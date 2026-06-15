@@ -8,6 +8,7 @@ import pytest
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.cognition_chain_core.stages.l3 import call_preference_adapter
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
+from llm_test_helpers import bind_test_llm
 
 
 class _FakePreferenceAdapterLlm:
@@ -16,7 +17,7 @@ class _FakePreferenceAdapterLlm:
     def __init__(self, content: str) -> None:
         self._content = content
 
-    async def ainvoke(self, _messages: list) -> SimpleNamespace:
+    async def ainvoke(self, _messages: list, *, config=None) -> SimpleNamespace:
         return SimpleNamespace(content=self._content)
 
 
@@ -29,7 +30,7 @@ class _CapturingPreferenceAdapterLlm:
         self._content = content
         self.payload: dict | None = None
 
-    async def ainvoke(self, messages: list) -> SimpleNamespace:
+    async def ainvoke(self, messages: list, *, config=None) -> SimpleNamespace:
         """Capture the human JSON payload and return the configured content."""
 
         self.payload = json.loads(messages[1].content)
@@ -101,7 +102,12 @@ async def test_preference_adapter_accepts_string_preferences(
 
     monkeypatch.setattr(
         "kazusa_ai_chatbot.cognition_chain_core.stages.l3._preference_adapter_llm",
-        _FakePreferenceAdapterLlm('{"accepted_user_preferences":[" concise replies ", "soft tone"]}'),
+        bind_test_llm(
+            _FakePreferenceAdapterLlm(
+                '{"accepted_user_preferences":[" concise replies ", "soft tone"]}',
+            ),
+            "preference_adapter",
+        ),
     )
 
     result = await call_preference_adapter(_preference_state())
@@ -117,8 +123,11 @@ async def test_preference_adapter_does_not_stringify_container_items(
 
     monkeypatch.setattr(
         "kazusa_ai_chatbot.cognition_chain_core.stages.l3._preference_adapter_llm",
-        _FakePreferenceAdapterLlm(
-            '{"accepted_user_preferences":[{"text":"do not stringify"},["bad"]," keep me "]}'
+        bind_test_llm(
+            _FakePreferenceAdapterLlm(
+                '{"accepted_user_preferences":[{"text":"do not stringify"},["bad"]," keep me "]}',
+            ),
+            "preference_adapter",
         ),
     )
 
@@ -138,7 +147,7 @@ async def test_preference_adapter_preserves_commitment_over_style_overlay(
     )
     monkeypatch.setattr(
         "kazusa_ai_chatbot.cognition_chain_core.stages.l3._preference_adapter_llm",
-        fake_llm,
+        bind_test_llm(fake_llm, "preference_adapter"),
     )
     state = _preference_state()
     active_commitment = {
