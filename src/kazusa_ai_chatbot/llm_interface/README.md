@@ -237,6 +237,47 @@ interface records an `ignored_unsupported_model` strategy and omits
 thinking-specific request fields and prompt triggers. It must not rewrite
 ordinary prompt content to simulate thinking for unsupported models.
 
+## Thinking Enablement Criteria
+
+Thinking is a latency-expensive backend capability. Future agents should enable
+it only when the stage benefits from hidden deliberation that is not already
+captured by the stage's explicit prompt procedure or output contract.
+
+Default to disabled when any of these are true:
+
+- The prompt already externalizes the reasoning path as explicit staged output,
+  audit steps, generation steps, or schema fields.
+- The stage is on the live response path and runs for most user messages.
+- The stage is a classifier, router, selector, extractor, validator, JSON
+  repair call, or other bounded structured-output step.
+- Deterministic code already owns the critical decision, such as permissions,
+  persistence, limits, retry, cache invalidation, adapter delivery, or tool
+  execution.
+- The output is itself the inspectable reasoning artifact, such as cognition
+  layer fields, boundary assessment, action selection, or evaluator feedback.
+
+Consider enabling thinking when all of these are true:
+
+- The stage is offline, background, operator-triggered, or otherwise outside
+  the latency-critical live reply path.
+- The stage performs open-ended synthesis, long-context comparison, difficult
+  evidence reconciliation, or artifact generation where the prompt does not
+  already expose the full reasoning path.
+- The caller can tolerate higher completion latency and larger provider output.
+- A real LLM comparison shows quality improvement that outweighs latency and
+  token cost.
+- The normalized output remains structurally valid after provider thinking
+  output is stripped or separated.
+
+For Kazusa's current architecture, the strongest "off" signal is an explicit
+cognition chain or audit checklist. L1/L2/L2d/L3 cognition, boundary core,
+dialog evaluation, RAG routing/extraction, relevance, decontextualization, and
+JSON repair already have explicit contracts and should normally keep thinking
+disabled. Better candidates are background text artifact generation, difficult
+web evidence finalization, reflection synthesis, or global character-growth
+candidate generation, and even those should be validated by live comparison
+before changing defaults.
+
 ## Provider Adapter Contract
 
 Provider adapters implement:
