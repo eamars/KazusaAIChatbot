@@ -77,7 +77,7 @@ from kazusa_ai_chatbot.internal_monologue_residue import (
     load_residue_context,
     record_completed_episode_residue,
 )
-from kazusa_ai_chatbot.llm_route_report import render_llm_route_table
+from kazusa_ai_chatbot.llm_interface.route_report import render_llm_route_table
 from kazusa_ai_chatbot.reflection_cycle.phase_scheduler import (
     REFLECTION_PHASE_GROUPS_PER_SLOT,
 )

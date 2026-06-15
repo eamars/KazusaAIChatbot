@@ -5,6 +5,8 @@ from __future__ import annotations
 import subprocess
 import sys
 
+from kazusa_ai_chatbot.llm_interface.diagnostics import RouteDiagnostic
+
 EXPECTED_ROUTE_TABLE_ROWS = (
     "RELEVANCE_AGENT_LLM",
     "VISION_DESCRIPTOR_LLM",
@@ -27,7 +29,7 @@ EXPECTED_ROUTE_TABLE_ROWS = (
 def test_llm_route_inventory_contains_all_routes_once() -> None:
     """Route inventory contains each startup table route exactly once."""
 
-    from kazusa_ai_chatbot.llm_route_report import (
+    from kazusa_ai_chatbot.llm_interface.route_report import (
         _table_rows,
         configured_route_diagnostics,
     )
@@ -45,7 +47,7 @@ def test_llm_route_inventory_uses_configured_models_and_sources() -> None:
     """Route inventory reads model and source values from config constants."""
 
     import kazusa_ai_chatbot.config as config
-    from kazusa_ai_chatbot.llm_route_report import (
+    from kazusa_ai_chatbot.llm_interface.route_report import (
         _table_rows,
         configured_route_diagnostics,
     )
@@ -64,18 +66,91 @@ def test_llm_route_inventory_uses_configured_models_and_sources() -> None:
             )
             continue
 
-        assert rows_by_route[route_name]["model"] == getattr(config, f"{route_name}_MODEL")
+        assert (
+            rows_by_route[route_name]["model"]
+            == getattr(config, f"{route_name}_MODEL")
+        )
         assert (
             rows_by_route[route_name]["normalized_base_url"]
             == getattr(config, f"{route_name}_BASE_URL").rstrip("/")
         )
 
 
+def test_llm_route_inventory_renders_optional_feature_tags() -> None:
+    """Route inventory shows compact optional feature tags."""
+
+    from kazusa_ai_chatbot.llm_interface.route_report import _table_rows
+
+    diagnostics = (
+        RouteDiagnostic(
+            route_name="GEMMA_THINKING_LLM",
+            backend="openai_compatible",
+            model="gemma-4-27b-it",
+            normalized_base_url="http://localhost:1234/v1",
+            model_family="gemma4",
+            thinking_strategy="gemma4_enabled",
+            required=True,
+            fallback_backed=False,
+        ),
+        RouteDiagnostic(
+            route_name="UNSUPPORTED_THINKING_LLM",
+            backend="openai_compatible",
+            model="qwen3",
+            normalized_base_url="http://localhost:1234/v1",
+            model_family="qwen",
+            thinking_strategy="ignored_unsupported_model",
+            required=True,
+            fallback_backed=False,
+        ),
+        RouteDiagnostic(
+            route_name="BACKGROUND_THINKING_LLM",
+            backend="openai_compatible",
+            model="gemma-4-27b-it",
+            normalized_base_url="http://localhost:1234/v1",
+            model_family="gemma4",
+            thinking_strategy="gemma4_enabled",
+            required=False,
+            fallback_backed=True,
+        ),
+        RouteDiagnostic(
+            route_name="PLAIN_LLM",
+            backend="openai_compatible",
+            model="plain-model",
+            normalized_base_url="http://localhost:1234/v1",
+            model_family="unknown",
+            thinking_strategy="disabled",
+            required=True,
+            fallback_backed=False,
+        ),
+    )
+    rows_by_route = {
+        row["route_name"]: row
+        for row in _table_rows(diagnostics)
+    }
+
+    assert (
+        rows_by_route["GEMMA_THINKING_LLM"]["optional_feature"]
+        == "thinking_on"
+    )
+    assert (
+        rows_by_route["UNSUPPORTED_THINKING_LLM"]["optional_feature"]
+        == "thinking_ignored"
+    )
+    assert (
+        rows_by_route["BACKGROUND_THINKING_LLM"]["optional_feature"]
+        == "thinking_on | fallback_backed"
+    )
+    assert rows_by_route["PLAIN_LLM"]["optional_feature"] == "-"
+    assert rows_by_route["EMBEDDING"]["optional_feature"] == "-"
+
+
 def test_llm_route_table_omits_api_keys() -> None:
     """Rendered startup table includes route values but excludes API keys."""
 
     import kazusa_ai_chatbot.config as config
-    from kazusa_ai_chatbot.llm_route_report import render_llm_route_table
+    from kazusa_ai_chatbot.llm_interface.route_report import (
+        render_llm_route_table,
+    )
 
     table = render_llm_route_table()
 
@@ -83,6 +158,7 @@ def test_llm_route_table_omits_api_keys() -> None:
     assert "Route" in table
     assert "Model" in table
     assert "Source" in table
+    assert "Optional Feature" in table
     for route_name in EXPECTED_ROUTE_TABLE_ROWS:
         assert route_name in table
 

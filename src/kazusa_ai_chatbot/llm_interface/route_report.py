@@ -35,7 +35,7 @@ def _route_config(route_name: str) -> LLMCallConfig:
     """Build one sanitized diagnostic config from public route constants."""
 
     return LLMCallConfig(
-        stage_name="llm_route_report",
+        stage_name="llm_interface.route_report",
         route_name=route_name,
         base_url=getattr(cfg, f"{route_name}_BASE_URL"),
         api_key=getattr(cfg, f"{route_name}_API_KEY"),
@@ -89,7 +89,7 @@ def configured_route_diagnostics() -> tuple[RouteDiagnostic, ...]:
 
 
 def _embedding_row() -> dict[str, str]:
-    """Return non-chat embedding route details for the legacy route report."""
+    """Return non-chat embedding route details for startup reporting."""
 
     return {
         "route_name": "EMBEDDING",
@@ -98,6 +98,7 @@ def _embedding_row() -> dict[str, str]:
         "normalized_base_url": cfg.EMBEDDING_BASE_URL.rstrip("/"),
         "model_family": "embedding",
         "thinking_strategy": "unsupported",
+        "optional_feature": "-",
         "required": "yes",
         "fallback_backed": "no",
     }
@@ -110,6 +111,26 @@ def _text(value: bool) -> str:
         return_value = "yes"
         return return_value
     return_value = "no"
+    return return_value
+
+
+def _optional_feature_tags(diagnostic: RouteDiagnostic) -> str:
+    """Render effective optional backend features as compact route tags."""
+
+    tags: list[str] = []
+    if diagnostic.thinking_strategy == "gemma4_enabled":
+        tags.append("thinking_on")
+    elif diagnostic.thinking_strategy == "ignored_unsupported_model":
+        tags.append("thinking_ignored")
+
+    if diagnostic.fallback_backed:
+        tags.append("fallback_backed")
+
+    if not tags:
+        return_value = "-"
+        return return_value
+
+    return_value = " | ".join(tags)
     return return_value
 
 
@@ -126,6 +147,7 @@ def _table_rows(
             "normalized_base_url": diagnostic.normalized_base_url,
             "model_family": diagnostic.model_family,
             "thinking_strategy": diagnostic.thinking_strategy,
+            "optional_feature": _optional_feature_tags(diagnostic),
             "required": _text(diagnostic.required),
             "fallback_backed": _text(diagnostic.fallback_backed),
         }
@@ -146,6 +168,7 @@ def render_llm_route_table() -> str:
         ("normalized_base_url", "Source"),
         ("model_family", "Family"),
         ("thinking_strategy", "Thinking"),
+        ("optional_feature", "Optional Feature"),
         ("required", "Required"),
         ("fallback_backed", "Fallback"),
     )

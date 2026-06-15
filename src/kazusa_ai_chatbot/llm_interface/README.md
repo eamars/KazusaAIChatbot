@@ -364,8 +364,9 @@ Other bad requests and non-unload errors are not retried by this path.
 
 ## Route Diagnostics
 
-`llm_interface.diagnostics` exposes data-only route diagnostics used by route
-reporting. Diagnostic rows include:
+`llm_interface.diagnostics` exposes data-only route diagnostics used by
+`llm_interface.route_report` for startup route reporting. Diagnostic rows
+include:
 
 - route name;
 - backend kind;
@@ -376,8 +377,8 @@ reporting. Diagnostic rows include:
 - whether the route is required;
 - whether the route has fallback-backed configuration.
 
-Diagnostics must not own route choice, prompt selection, generation policy, or
-stage behavior. They must not expose raw API keys.
+Diagnostics and route reporting must not own route choice, prompt selection,
+generation policy, or stage behavior. They must not expose raw API keys.
 
 ## Ownership Rules
 
