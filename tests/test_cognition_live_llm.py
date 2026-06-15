@@ -238,6 +238,8 @@ def _build_base_state() -> dict:
         "promoted_reflection_context": {},
         "internal_monologue_residue_context": "",
         "selected_text_surface_intent": "Briefly answer what rainy days feel like.",
+        "debug_modes": {},
+        "should_respond": True,
         "memory_lifecycle_context": {
             "active_commitment_aliases": [],
             "pending_memory_updates_summary": "",

@@ -35,7 +35,7 @@ class _CapturingAsyncLLM:
         self._calls = calls
 
     async def ainvoke(self, messages, *, config=None):
-        response = await self._wrapped_llm.ainvoke(messages)
+        response = await self._wrapped_llm.ainvoke(messages, config=config)
         payload = json.loads(messages[1].content)
         parsed_response = parse_llm_json_output(response.content)
         self._calls.append({

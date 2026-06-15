@@ -89,7 +89,7 @@ class _CapturingLiveLLM:
         self._calls = calls
 
     async def ainvoke(self, messages, *, config=None):
-        response = await self._wrapped_llm.ainvoke(messages)
+        response = await self._wrapped_llm.ainvoke(messages, config=config)
         human_payload = json.loads(messages[1].content)
         extra_messages = [
             {

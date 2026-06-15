@@ -67,7 +67,7 @@ class _CapturingAsyncLLM:
 
     async def ainvoke(self, messages, *, config=None):
         """Invoke the wrapped LLM and store raw prompt/response text."""
-        response = await self._wrapped_llm.ainvoke(messages)
+        response = await self._wrapped_llm.ainvoke(messages, config=config)
         prompt_parts = []
         for message in messages:
             prompt_parts.append(

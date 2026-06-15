@@ -45,7 +45,7 @@ from kazusa_ai_chatbot.nodes.linguistic_texture import (
     get_self_deprecation_description,
 )
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 import logging
@@ -573,7 +573,7 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
     return_value = {
         "final_dialog": generated_dialog,
         "mention_target_user": mention_target_user,
-        "messages": [response]
+        "messages": [AIMessage(content=response.content)]
     }
     return return_value
 

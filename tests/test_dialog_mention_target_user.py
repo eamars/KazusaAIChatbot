@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 
 import pytest
-from langchain_core.messages import AIMessage
 
+from kazusa_ai_chatbot.llm_interface.contracts import BackendDescriptor, LLMResponse
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 
 
@@ -19,7 +19,22 @@ class _CapturingLLM:
 
     async def ainvoke(self, messages, *, config=None):
         self.messages = messages
-        response = AIMessage(content=json.dumps(self.payload))
+        backend = BackendDescriptor(
+            route_name="test",
+            backend_kind="test",
+            model_family="test",
+            model="test",
+            normalized_base_url="test",
+            thinking_strategy="unsupported",
+            confidence="high",
+            generation=1,
+        )
+        response = LLMResponse(
+            content=json.dumps(self.payload),
+            backend=backend,
+            raw_response=None,
+            usage={},
+        )
         return response
 
 

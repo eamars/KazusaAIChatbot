@@ -96,7 +96,7 @@ class _CapturingAsyncLLM:
             The original live model response.
         """
 
-        response = await self._wrapped_llm.ainvoke(messages)
+        response = await self._wrapped_llm.ainvoke(messages, config=config)
         prompt_parts = []
         for message in messages:
             prompt_parts.append(
