@@ -194,3 +194,48 @@ def test_llm_response_wraps_content_backend_raw_response_and_usage() -> None:
     assert response.backend == backend
     assert response.raw_response is raw_response
     assert response.usage == {"completion_tokens": 3}
+
+
+def test_llm_response_strips_complete_gemma4_thought_channel() -> None:
+    """Gemma 4 thinking content is removed from caller-facing text."""
+
+    backend = BackendDescriptor(
+        route_name="COGNITION_LLM",
+        backend_kind="openai_compatible",
+        model_family="gemma4",
+        model="gemma-4-27b-it",
+        normalized_base_url="http://localhost:1234/v1",
+        thinking_strategy="gemma4_enabled",
+        confidence="model_name_inferred",
+        generation=1,
+    )
+    raw_response = AIMessage(
+        content="<|channel>thought\nprivate reasoning<channel|>{\"ok\": true}",
+    )
+
+    response = LLMResponse.from_raw(raw_response, backend=backend)
+
+    assert response.content == '{"ok": true}'
+    assert raw_response.content.startswith("<|channel>thought")
+
+
+def test_llm_response_strips_truncated_gemma4_thought_channel() -> None:
+    """Unclosed Gemma 4 thinking content does not leak to callers."""
+
+    backend = BackendDescriptor(
+        route_name="COGNITION_LLM",
+        backend_kind="openai_compatible",
+        model_family="gemma4",
+        model="gemma-4-27b-it",
+        normalized_base_url="http://localhost:1234/v1",
+        thinking_strategy="gemma4_enabled",
+        confidence="model_name_inferred",
+        generation=1,
+    )
+    raw_response = AIMessage(
+        content="visible prefix\n<|channel>thought\nprivate reasoning",
+    )
+
+    response = LLMResponse.from_raw(raw_response, backend=backend)
+
+    assert response.content == "visible prefix"

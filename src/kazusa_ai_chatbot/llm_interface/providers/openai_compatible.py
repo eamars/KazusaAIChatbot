@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from typing import Callable, Sequence
 
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from kazusa_ai_chatbot.llm_interface.contracts import (
@@ -17,6 +17,7 @@ from kazusa_ai_chatbot.llm_interface.reload import ReloadingChatModel
 
 ChatModelFactory = Callable[..., object]
 ChatModelCacheKey = tuple[object, ...]
+GEMMA4_THINKING_TRIGGER = "/think"
 
 
 class OpenAICompatibleProvider:
@@ -40,7 +41,11 @@ class OpenAICompatibleProvider:
         """Invoke an OpenAI-compatible chat model asynchronously."""
 
         chat_model = self._build_chat_model(config=config, backend=backend)
-        raw_response = await chat_model.ainvoke(messages)
+        provider_messages = _provider_messages(
+            messages,
+            backend=backend,
+        )
+        raw_response = await chat_model.ainvoke(provider_messages)
         response = LLMResponse.from_raw(raw_response, backend=backend)
         return response
 
@@ -54,7 +59,11 @@ class OpenAICompatibleProvider:
         """Invoke an OpenAI-compatible chat model synchronously."""
 
         chat_model = self._build_chat_model(config=config, backend=backend)
-        raw_response = chat_model.invoke(messages)
+        provider_messages = _provider_messages(
+            messages,
+            backend=backend,
+        )
+        raw_response = chat_model.invoke(provider_messages)
         response = LLMResponse.from_raw(raw_response, backend=backend)
         return response
 
@@ -109,6 +118,56 @@ def _api_key_hash(api_key: str) -> str:
 
     digest = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
     return digest
+
+
+def _provider_messages(
+    messages: Sequence[BaseMessage],
+    *,
+    backend: BackendDescriptor,
+) -> Sequence[BaseMessage]:
+    """Return backend-ready messages for one provider invocation."""
+
+    if backend.thinking_strategy != "gemma4_enabled":
+        return messages
+
+    provider_messages = _gemma4_thinking_messages(messages)
+    return provider_messages
+
+
+def _gemma4_thinking_messages(
+    messages: Sequence[BaseMessage],
+) -> list[BaseMessage]:
+    """Inject Gemma 4's prompt-level thinking trigger without mutating input."""
+
+    if not messages:
+        provider_messages: list[BaseMessage] = [
+            SystemMessage(content=GEMMA4_THINKING_TRIGGER),
+        ]
+        return provider_messages
+
+    first_message = messages[0]
+    if isinstance(first_message, SystemMessage):
+        content = first_message.content
+        if (
+            isinstance(content, str)
+            and content.lstrip().startswith(GEMMA4_THINKING_TRIGGER)
+        ):
+            provider_messages = list(messages)
+            return provider_messages
+        if isinstance(content, str):
+            updated_first_message = first_message.model_copy(
+                update={
+                    "content": f"{GEMMA4_THINKING_TRIGGER}\n{content}",
+                }
+            )
+            provider_messages = [updated_first_message, *messages[1:]]
+            return provider_messages
+
+    provider_messages = [
+        SystemMessage(content=GEMMA4_THINKING_TRIGGER),
+        *messages,
+    ]
+    return provider_messages
 
 
 def _chat_model_cache_key(

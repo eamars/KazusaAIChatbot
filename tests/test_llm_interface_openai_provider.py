@@ -135,7 +135,7 @@ async def test_provider_async_path_preserves_message_objects() -> None:
 
 
 def test_provider_adds_gemma4_thinking_payload_only_when_enabled() -> None:
-    """Gemma 4 thinking maps to provider payload without touching messages."""
+    """Gemma 4 thinking maps provider kwargs and prompt trigger."""
 
     created_models: list[_FakeChatModel] = []
 
@@ -146,14 +146,47 @@ def test_provider_adds_gemma4_thinking_payload_only_when_enabled() -> None:
 
     provider = OpenAICompatibleProvider(chat_model_factory=_factory)
 
+    messages = [SystemMessage(content="system"), HumanMessage(content="hello")]
+
     provider.invoke(
-        [HumanMessage(content="hello")],
+        messages,
         config=_config(thinking_enabled=True),
         backend=_backend(thinking_strategy="gemma4_enabled"),
     )
 
     extra_body = created_models[0].constructor_kwargs["extra_body"]
     assert extra_body == {"chat_template_kwargs": {"enable_thinking": True}}
+    sent_messages = created_models[0].sync_calls[0]
+    assert sent_messages is not messages
+    assert sent_messages[0].content == "/think\nsystem"
+    assert messages[0].content == "system"
+    assert sent_messages[1] is messages[1]
+
+
+def test_provider_does_not_duplicate_existing_gemma4_thinking_trigger() -> None:
+    """Gemma 4 thinking keeps an explicit existing trigger stable."""
+
+    created_models: list[_FakeChatModel] = []
+
+    def _factory(**kwargs: object) -> _FakeChatModel:
+        model = _FakeChatModel(**kwargs)
+        created_models.append(model)
+        return model
+
+    provider = OpenAICompatibleProvider(chat_model_factory=_factory)
+    messages = [
+        SystemMessage(content="/think\nsystem"),
+        HumanMessage(content="hello"),
+    ]
+
+    provider.invoke(
+        messages,
+        config=_config(thinking_enabled=True),
+        backend=_backend(thinking_strategy="gemma4_enabled"),
+    )
+
+    sent_messages = created_models[0].sync_calls[0]
+    assert sent_messages[0].content == "/think\nsystem"
 
 
 def test_provider_omits_thinking_payload_for_unsupported_or_disabled() -> None:

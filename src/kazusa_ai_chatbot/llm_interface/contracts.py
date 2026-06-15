@@ -7,6 +7,9 @@ from typing import Mapping, Protocol, Sequence
 
 from langchain_core.messages import BaseMessage
 
+GEMMA4_THOUGHT_CHANNEL_START = "<|channel>thought"
+GEMMA4_THOUGHT_CHANNEL_END = "<channel|>"
+
 
 @dataclass(frozen=True)
 class LLMThinkingConfig:
@@ -66,7 +69,10 @@ class LLMResponse:
 
         raw_content = getattr(raw_response, "content", "")
         if isinstance(raw_content, str):
-            content = raw_content
+            content = _normalize_response_content(
+                raw_content,
+                backend=backend,
+            )
         else:
             content = str(raw_content)
 
@@ -146,3 +152,38 @@ def _extract_usage(raw_response: object) -> Mapping[str, object]:
 
     return_value: Mapping[str, object] = {}
     return return_value
+
+
+def _normalize_response_content(
+    raw_content: str,
+    *,
+    backend: BackendDescriptor,
+) -> str:
+    """Return caller-facing content with provider thought channels removed."""
+
+    if backend.model_family != "gemma4":
+        return raw_content
+
+    content = _strip_gemma4_thought_channels(raw_content)
+    return content
+
+
+def _strip_gemma4_thought_channels(raw_content: str) -> str:
+    """Remove Gemma 4 thought-channel spans from visible response content."""
+
+    content = raw_content
+    while True:
+        start_index = content.find(GEMMA4_THOUGHT_CHANNEL_START)
+        if start_index == -1:
+            return content
+
+        end_index = content.find(
+            GEMMA4_THOUGHT_CHANNEL_END,
+            start_index + len(GEMMA4_THOUGHT_CHANNEL_START),
+        )
+        if end_index == -1:
+            stripped_content = content[:start_index].rstrip()
+            return stripped_content
+
+        after_end_index = end_index + len(GEMMA4_THOUGHT_CHANNEL_END)
+        content = content[:start_index] + content[after_end_index:]

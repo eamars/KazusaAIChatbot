@@ -74,9 +74,12 @@ runtime module
   -> LLMResponse(content, backend, raw_response, usage)
 ```
 
-Runtime modules own message content. The interface must pass ordered
+Runtime modules own ordinary message content. The interface passes ordered
 `BaseMessage` objects through without rewriting prompts, payloads, or message
-order.
+order except when an enabled provider compatibility feature requires a
+backend-specific control token. The current exception is Gemma 4 thinking,
+where the OpenAI-compatible provider injects the Gemma thinking trigger on a
+copied system message so caller-owned message objects are not mutated.
 
 Provider-specific fields terminate inside provider adapters. Stage modules must
 not construct `extra_body`, provider-native clients, backend-kind constants, or
@@ -173,6 +176,11 @@ is retained for diagnostics or targeted tests, but production stage logic
 should prefer the normalized fields unless it has a specific provider-aware
 reason approved by this ICD.
 
+For Gemma 4 thinking responses, normalized content removes raw
+`<|channel>thought ... <channel|>` thought-channel spans when LM Studio exposes
+them in the visible message content. The original provider response remains
+available through `raw_response` for diagnostics.
+
 ## Backend Detection
 
 Backend and model-family identity are detected by `LLInterface` from the
@@ -209,7 +217,8 @@ payloads must not contain thinking-specific fields.
 
 Initial provider-side thinking support is limited to Gemma 4. When thinking is
 enabled and the detected model family is `gemma4`, the OpenAI-compatible
-provider maps it to:
+provider maps it to both the request-level chat-template hint and Gemma's
+prompt-level thinking trigger:
 
 ```python
 extra_body = {
@@ -217,10 +226,16 @@ extra_body = {
 }
 ```
 
+The provider also prefixes the first system message copy with `/think` when it
+is not already present. If no system message is supplied, it inserts a new
+leading system message containing `/think`. This is a backend compatibility
+step for LM Studio/Gemma setups where `chat_template_kwargs.enable_thinking`
+may be accepted but not enough to activate thinking.
+
 When thinking is enabled for unsupported or unknown model families, the
 interface records an `ignored_unsupported_model` strategy and omits
-thinking-specific request fields. It must not rewrite prompts to simulate
-thinking.
+thinking-specific request fields and prompt triggers. It must not rewrite
+ordinary prompt content to simulate thinking for unsupported models.
 
 ## Provider Adapter Contract
 
@@ -260,7 +275,9 @@ Provider adapters own:
 - conversion from provider-native responses to `LLMResponse`;
 - provider-local chat-model cache identity.
 
-Provider adapters must not change message content or ordering.
+Provider adapters must not change message content or ordering except for
+documented backend compatibility controls such as the copied Gemma 4 thinking
+trigger. Caller-owned message objects must not be mutated.
 
 ## Session And Cache Contract
 
@@ -340,6 +357,7 @@ Runtime modules own:
 - provider-native client construction;
 - provider request-field mapping;
 - thinking payload mapping;
+- documented provider-specific thinking triggers;
 - response normalization;
 - per-interface cache and invalidation;
 - LM Studio unload retry coordination;
@@ -392,6 +410,7 @@ Required deterministic coverage includes:
 - `LLMCallConfig` uses `max_completion_tokens` and redacts `api_key`;
 - backend/model-family detection;
 - Gemma 4 thinking payload mapping;
+- Gemma 4 thinking prompt-trigger mapping without caller message mutation;
 - unsupported-model thinking ignore behavior;
 - provider request mapping and message pass-through;
 - per-interface descriptor caching and route invalidation;
