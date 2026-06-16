@@ -12,6 +12,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
 
 from kazusa_ai_chatbot.config import (
+
     CHARACTER_GLOBAL_USER_ID,
     RAG_HYBRID_LITERAL_ANCHOR_LIMIT,
     RAG_HYBRID_SEMANTIC_ONLY_SCORE_FLOOR,
@@ -21,6 +22,8 @@ from kazusa_ai_chatbot.config import (
     RAG_SUBAGENT_LLM_API_KEY,
     RAG_SUBAGENT_LLM_BASE_URL,
     RAG_SUBAGENT_LLM_MODEL,
+    RAG_SUBAGENT_LLM_MAX_COMPLETION_TOKENS,
+    RAG_SUBAGENT_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.rag.memory_retrieval_tools import search_persistent_memory
 from kazusa_ai_chatbot.rag.memory_retrieval_tools import (
@@ -44,8 +47,13 @@ from kazusa_ai_chatbot.rag.search_runtime import (
     apply_source_memory_runtime_constraints,
     literal_anchors_from_text,
 )
-from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
+from kazusa_ai_chatbot.utils import parse_llm_json_output, text_or_empty
 
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 logger = logging.getLogger(__name__)
 
 _GENERATOR_PROMPT = Template('''\
@@ -99,12 +107,23 @@ _GENERATOR_PROMPT = Template('''\
   "source_global_user_id": "UUID string or omitted"
 }
 ''').substitute(default_top_k=RAG_SEARCH_DEFAULT_TOP_K)
-_generator_llm = get_llm(
-    temperature=0.0,
-    top_p=1.0,
-    model=RAG_SUBAGENT_LLM_MODEL,
+_llm_interface = LLInterface()
+_generator_llm = LLInterface()
+_judge_llm = LLInterface()
+_generator_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="RAG_SUBAGENT_LLM",
     base_url=RAG_SUBAGENT_LLM_BASE_URL,
     api_key=RAG_SUBAGENT_LLM_API_KEY,
+    model=RAG_SUBAGENT_LLM_MODEL,
+    temperature=0.0,
+    top_p=1.0,
+    top_k=None,
+    max_completion_tokens=RAG_SUBAGENT_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=RAG_SUBAGENT_LLM_THINKING_ENABLED,
+    ),
 )
 
 _JUDGE_PROMPT = '''\
@@ -140,12 +159,20 @@ _JUDGE_PROMPT = '''\
   "feedback": "string"
 }
 '''
-_judge_llm = get_llm(
-    temperature=0.0,
-    top_p=1.0,
-    model=RAG_SUBAGENT_LLM_MODEL,
+_judge_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="RAG_SUBAGENT_LLM",
     base_url=RAG_SUBAGENT_LLM_BASE_URL,
     api_key=RAG_SUBAGENT_LLM_API_KEY,
+    model=RAG_SUBAGENT_LLM_MODEL,
+    temperature=0.0,
+    top_p=1.0,
+    top_k=None,
+    max_completion_tokens=RAG_SUBAGENT_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=RAG_SUBAGENT_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -342,7 +369,7 @@ async def _generator(task: str, context: dict[str, Any], feedback: str) -> dict[
             default=str,
         )
     )
-    response = await _generator_llm.ainvoke([system_prompt, human_message])
+    response = await _generator_llm.ainvoke([system_prompt, human_message], config=_generator_llm_config)
     result = parse_llm_json_output(response.content)
     if not isinstance(result, dict):
         return_value = {}
@@ -507,7 +534,7 @@ async def _judge(task: str, result: object) -> tuple[bool, str]:
     human_message = HumanMessage(
         content=json.dumps({"task": task, "result": llm_result}, ensure_ascii=False)
     )
-    response = await _judge_llm.ainvoke([system_prompt, human_message])
+    response = await _judge_llm.ainvoke([system_prompt, human_message], config=_judge_llm_config)
     verdict = parse_llm_json_output(response.content)
     if not isinstance(verdict, dict):
         return_value = False, "judge 输出无效；把 memory query 写得更具体。"

@@ -8,14 +8,22 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.config import (
+
     RAG_SUBAGENT_LLM_API_KEY,
     RAG_SUBAGENT_LLM_BASE_URL,
     RAG_SUBAGENT_LLM_MODEL,
+    RAG_SUBAGENT_LLM_MAX_COMPLETION_TOKENS,
+    RAG_SUBAGENT_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.rag.evidence_coverage import has_explicit_multi_target_request
 from kazusa_ai_chatbot.rag.prompt_projection import project_selector_input_for_llm
-from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
+from kazusa_ai_chatbot.utils import parse_llm_json_output, text_or_empty
 
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 _KNOWN_WORKERS = {
     "persistent_memory_search_agent",
     "user_memory_evidence_agent",
@@ -294,12 +302,22 @@ _SELECTOR_PROMPT = '''\
 }
 '''
 
-_selector_llm = get_llm(
-    temperature=0.0,
-    top_p=1.0,
-    model=RAG_SUBAGENT_LLM_MODEL,
+_llm_interface = LLInterface()
+_selector_llm = LLInterface()
+_selector_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="RAG_SUBAGENT_LLM",
     base_url=RAG_SUBAGENT_LLM_BASE_URL,
     api_key=RAG_SUBAGENT_LLM_API_KEY,
+    model=RAG_SUBAGENT_LLM_MODEL,
+    temperature=0.0,
+    top_p=1.0,
+    top_k=None,
+    max_completion_tokens=RAG_SUBAGENT_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=RAG_SUBAGENT_LLM_THINKING_ENABLED,
+    ),
 )
 
 async def _select_plan(task: str, context: dict[str, Any]) -> dict[str, Any]:
@@ -313,7 +331,7 @@ async def _select_plan(task: str, context: dict[str, Any]) -> dict[str, Any]:
     human_message = HumanMessage(
         content=json.dumps(llm_input, ensure_ascii=False, default=str)
     )
-    response = await _selector_llm.ainvoke([system_prompt, human_message])
+    response = await _selector_llm.ainvoke([system_prompt, human_message], config=_selector_llm_config)
     raw_plan = parse_llm_json_output(response.content)
     if not isinstance(raw_plan, dict):
         raw_plan = {}

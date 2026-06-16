@@ -61,7 +61,7 @@ class _FakeStyleExtractorLlm:
 
         self.payload: dict | None = None
 
-    async def ainvoke(self, messages: list) -> SimpleNamespace:
+    async def ainvoke(self, messages: list, *, config=None) -> SimpleNamespace:
         """Capture the human JSON payload and return a valid overlay."""
 
         self.payload = json.loads(messages[1].content)

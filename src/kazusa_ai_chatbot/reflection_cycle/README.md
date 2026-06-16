@@ -165,7 +165,7 @@ Global promotion lives in `promotion.py` as a separate LLM block:
 ```text
 GLOBAL_PROMOTION_PROMPT_VERSION
 GLOBAL_PROMOTION_SYSTEM_PROMPT
-_global_promotion_llm
+_global_promotion_llm_config
 run_global_promotion_llm
 ```
 

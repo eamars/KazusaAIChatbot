@@ -20,6 +20,8 @@ from kazusa_ai_chatbot.config import (
     BACKGROUND_ARTIFACT_WORKER_CLAIM_LIMIT,
     BACKGROUND_ARTIFACT_WORKER_LEASE_SECONDS,
     BACKGROUND_ARTIFACT_WORKER_MAX_ATTEMPTS,
+    BACKGROUND_ARTIFACT_LLM_MAX_COMPLETION_TOKENS,
+    BACKGROUND_ARTIFACT_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.db import (
     claim_background_artifact_job,
@@ -27,16 +29,31 @@ from kazusa_ai_chatbot.db import (
     fail_background_artifact_job,
 )
 from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
-from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output
+from kazusa_ai_chatbot.utils import parse_llm_json_output
 
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 BACKGROUND_ARTIFACT_WORKER_COMPONENT = "background_artifact.worker"
 
-_background_artifact_llm = get_llm(
-    temperature=0.2,
-    top_p=0.8,
-    model=BACKGROUND_ARTIFACT_LLM_MODEL,
+_llm_interface = LLInterface()
+_background_artifact_llm = LLInterface()
+_background_artifact_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="BACKGROUND_ARTIFACT_LLM",
     base_url=BACKGROUND_ARTIFACT_LLM_BASE_URL,
     api_key=BACKGROUND_ARTIFACT_LLM_API_KEY,
+    model=BACKGROUND_ARTIFACT_LLM_MODEL,
+    temperature=0.2,
+    top_p=0.8,
+    top_k=None,
+    max_completion_tokens=BACKGROUND_ARTIFACT_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=BACKGROUND_ARTIFACT_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -104,7 +121,7 @@ async def _run_job(job: dict[str, Any]) -> dict[str, str]:
     response = await _background_artifact_llm.ainvoke([
         SystemMessage(content=BACKGROUND_ARTIFACT_WORKER_PROMPT),
         HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
-    ])
+    ], config=_background_artifact_llm_config)
     parsed = parse_llm_json_output(response.content)
     result = _normalize_worker_result(
         parsed,

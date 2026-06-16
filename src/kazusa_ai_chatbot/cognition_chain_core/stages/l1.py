@@ -8,8 +8,8 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.cognition_chain_core.contracts import (
-    AsyncChatModel,
-    require_injected_llm,
+    LLMStageBinding,
+    require_llm_binding,
 )
 from kazusa_ai_chatbot.cognition_chain_core.output_contracts import (
     validate_cognition_output_contract,
@@ -97,23 +97,23 @@ _COGNITION_SUBCONSCIOUS_PROMPT = '''\
   "interaction_subtext": "简体中文字符串，捕捉潜台词，不写最终立场"
 }}
 '''
-_subconscious_llm: AsyncChatModel | None = None
-_subconscious_llm_context: ContextVar[AsyncChatModel | None] = ContextVar(
+_subconscious_llm: LLMStageBinding | None = None
+_subconscious_llm_context: ContextVar[LLMStageBinding | None] = ContextVar(
     "subconscious_llm",
     default=None,
 )
 
 
 def set_subconscious_llm(
-    llm: AsyncChatModel | None,
-) -> Token[AsyncChatModel | None]:
+    llm: LLMStageBinding | None,
+) -> Token[LLMStageBinding | None]:
     """Bind the L1 model for the current run context."""
 
     token = _subconscious_llm_context.set(llm)
     return token
 
 
-def reset_subconscious_llm(token: Token[AsyncChatModel | None]) -> None:
+def reset_subconscious_llm(token: Token[LLMStageBinding | None]) -> None:
     """Restore the previous L1 model binding for this run context."""
 
     _subconscious_llm_context.reset(token)
@@ -161,14 +161,17 @@ async def call_cognition_subconscious(state: dict[str, Any]) -> dict[str, Any]:
         selection=selection,
     ))
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
-    llm = require_injected_llm(
+    llm = require_llm_binding(
         _subconscious_llm_context.get() or _subconscious_llm,
         "subconscious_llm",
     )
-    response = await llm.ainvoke([
-        system_prompt,
-        human_message,
-    ])
+    response = await llm.llm.ainvoke(
+        [
+            system_prompt,
+            human_message,
+        ],
+        config=llm.config,
+    )
     result = parse_llm_json_output(response.content)
 
     # logger.debug(

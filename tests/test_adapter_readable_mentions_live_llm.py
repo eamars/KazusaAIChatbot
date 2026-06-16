@@ -14,6 +14,7 @@ from kazusa_ai_chatbot.config import (
     RAG_PLANNER_LLM_BASE_URL,
 )
 from kazusa_ai_chatbot.nodes import persona_supervisor2_msg_decontexualizer as decontext
+from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_initializer as rag_initializer
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_supervisor2 as rag_supervisor
 from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
 from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
@@ -37,11 +38,11 @@ class _CapturingLiveLLM:
         self.messages = []
         self.raw_content = ''
 
-    async def ainvoke(self, messages):
+    async def ainvoke(self, messages, *, config=None):
         """Invoke the wrapped live model and keep its prompt and output."""
 
         self.messages = messages
-        response = await self.inner_llm.ainvoke(messages)
+        response = await self.inner_llm.ainvoke(messages, config=config)
         self.raw_content = str(response.content)
         return response
 
@@ -210,9 +211,9 @@ async def test_live_adapter_readable_mentions_drive_person_context(
 
     del ensure_live_llm
     decontext_llm = _CapturingLiveLLM(decontext._msg_decontexualizer_llm)
-    initializer_llm = _CapturingLiveLLM(rag_supervisor._initializer_llm)
+    initializer_llm = _CapturingLiveLLM(rag_initializer._initializer_llm)
     monkeypatch.setattr(decontext, '_msg_decontexualizer_llm', decontext_llm)
-    monkeypatch.setattr(rag_supervisor, '_initializer_llm', initializer_llm)
+    monkeypatch.setattr(rag_initializer, '_initializer_llm', initializer_llm)
     monkeypatch.setattr(rag_supervisor, 'upsert_initializer_entry', _noop_async)
     monkeypatch.setattr(rag_supervisor, 'record_initializer_hit', _noop_async)
     await get_rag_cache2_runtime().clear()

@@ -10,10 +10,13 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.config import (
+
     CHARACTER_GLOBAL_USER_ID,
     CONSOLIDATION_LLM_API_KEY,
     CONSOLIDATION_LLM_BASE_URL,
     CONSOLIDATION_LLM_MODEL,
+    CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    CONSOLIDATION_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.db import (
     CharacterReflectionRunDoc,
@@ -39,9 +42,14 @@ from kazusa_ai_chatbot.reflection_cycle.models import (
     REFLECTION_STATUS_SUCCEEDED,
     ReflectionWorkerResult,
 )
-from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
+from kazusa_ai_chatbot.utils import parse_llm_json_output, text_or_empty
 
 
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 logger = logging.getLogger(__name__)
 
 REFLECTION_RUN_KIND_DAILY_INTERACTION_STYLE_UPDATE = "daily_interaction_style_update"
@@ -122,12 +130,22 @@ Return only a valid JSON object:
   }
 }
 '''
-_interaction_style_extractor_llm = get_llm(
-    temperature=0.15,
-    top_p=0.8,
-    model=CONSOLIDATION_LLM_MODEL,
+_llm_interface = LLInterface()
+_interaction_style_extractor_llm = LLInterface()
+_interaction_style_extractor_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="CONSOLIDATION_LLM",
     base_url=CONSOLIDATION_LLM_BASE_URL,
     api_key=CONSOLIDATION_LLM_API_KEY,
+    model=CONSOLIDATION_LLM_MODEL,
+    temperature=0.15,
+    top_p=0.8,
+    top_k=None,
+    max_completion_tokens=CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=CONSOLIDATION_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -220,7 +238,7 @@ async def _run_interaction_style_extractor(payload: dict) -> dict:
     )
     response = await _interaction_style_extractor_llm.ainvoke(
         [system_prompt, human_message]
-    )
+    , config=_interaction_style_extractor_llm_config)
     parsed = parse_llm_json_output(str(response.content))
     raw_overlay = parsed.get("overlay")
     if not isinstance(raw_overlay, dict):

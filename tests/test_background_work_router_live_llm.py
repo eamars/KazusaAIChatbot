@@ -12,7 +12,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.background_work.router import (
     BACKGROUND_WORK_ROUTER_PROMPT,
-    _background_work_router_llm,
+    _background_work_router_llm_config,
+    _llm_interface,
     build_background_work_router_payload,
     normalize_background_work_router_output,
 )
@@ -49,10 +50,13 @@ async def test_background_work_router_live_case() -> None:
         worker_descriptions={"text_artifact": TEXT_ARTIFACT_DESCRIPTION},
         max_output_chars=3000,
     )
-    response = await _background_work_router_llm.ainvoke([
-        SystemMessage(content=BACKGROUND_WORK_ROUTER_PROMPT),
-        HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
-    ])
+    response = await _llm_interface.ainvoke(
+        [
+            SystemMessage(content=BACKGROUND_WORK_ROUTER_PROMPT),
+            HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
+        ],
+        config=_background_work_router_llm_config,
+    )
     raw_output = str(response.content)
     parsed = parse_llm_json_output(raw_output)
     decision = normalize_background_work_router_output(parsed)

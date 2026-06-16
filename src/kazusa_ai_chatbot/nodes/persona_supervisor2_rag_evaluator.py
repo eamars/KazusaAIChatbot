@@ -12,9 +12,12 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.config import (
+
     RAG_SUBAGENT_LLM_API_KEY,
     RAG_SUBAGENT_LLM_BASE_URL,
     RAG_SUBAGENT_LLM_MODEL,
+    RAG_SUBAGENT_LLM_MAX_COMPLETION_TOKENS,
+    RAG_SUBAGENT_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.rag.continuation import (
     MAX_CONTINUATION_DECISIONS_PER_RAG_RUN,
@@ -39,12 +42,16 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_types import (
     ProgressiveRAGState,
 )
 from kazusa_ai_chatbot.utils import (
-    get_llm,
     log_list_preview,
     log_preview,
     parse_llm_json_output,
 )
 
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 logger = logging.getLogger(__name__)
 
 MILLISECONDS_PER_SECOND = 1000
@@ -174,12 +181,24 @@ human payload 是 JSON：
 - 控制在 220 个中文字符或 140 个英文词以内。
 '''
 
-_evaluator_summarizer_llm = get_llm(
-    temperature=0.0,
-    top_p=1.0,
-    model=RAG_SUBAGENT_LLM_MODEL,
+_llm_interface = LLInterface()
+_evaluator_summarizer_llm = LLInterface()
+_continuation_assessor_llm = LLInterface()
+_finalizer_llm = LLInterface()
+_evaluator_summarizer_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="RAG_SUBAGENT_LLM",
     base_url=RAG_SUBAGENT_LLM_BASE_URL,
     api_key=RAG_SUBAGENT_LLM_API_KEY,
+    model=RAG_SUBAGENT_LLM_MODEL,
+    temperature=0.0,
+    top_p=1.0,
+    top_k=None,
+    max_completion_tokens=RAG_SUBAGENT_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=RAG_SUBAGENT_LLM_THINKING_ENABLED,
+    ),
 )
 
 async def _summarize_agent_result(
@@ -226,7 +245,7 @@ async def _summarize_agent_result(
         )
     )
     started_at = time.perf_counter()
-    response = await _evaluator_summarizer_llm.ainvoke([system_prompt, human_message])
+    response = await _evaluator_summarizer_llm.ainvoke([system_prompt, human_message], config=_evaluator_summarizer_llm_config)
     await event_logging.record_llm_stage_event(
         component=RAG_EVALUATOR_COMPONENT,
         stage_name="rag_result_summarizer",
@@ -614,12 +633,20 @@ _CONTINUATION_ASSESSOR_PROMPT = '''\
   "reason": "中文短诊断，仅用于日志和 trace"
 }
 '''
-_continuation_assessor_llm = get_llm(
-    temperature=0.0,
-    top_p=1.0,
-    model=RAG_SUBAGENT_LLM_MODEL,
+_continuation_assessor_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="RAG_SUBAGENT_LLM",
     base_url=RAG_SUBAGENT_LLM_BASE_URL,
     api_key=RAG_SUBAGENT_LLM_API_KEY,
+    model=RAG_SUBAGENT_LLM_MODEL,
+    temperature=0.0,
+    top_p=1.0,
+    top_k=None,
+    max_completion_tokens=RAG_SUBAGENT_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=RAG_SUBAGENT_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -684,6 +711,7 @@ async def _assess_continuation(
     started_at = time.perf_counter()
     response = await _continuation_assessor_llm.ainvoke(
         [system_prompt, human_message],
+        config=_continuation_assessor_llm_config,
     )
     raw_decision = parse_llm_json_output(response.content)
     parse_status = "succeeded" if isinstance(raw_decision, dict) else "failed"
@@ -1107,12 +1135,20 @@ _FINALIZER_PROMPT = '''\
 - 生成的状态说明使用中文
 - 不要超出简短抽取式摘要做宽泛解释
 '''
-_finalizer_llm = get_llm(
-    temperature=0.2,
-    top_p=0.9,
-    model=RAG_SUBAGENT_LLM_MODEL,
+_finalizer_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="RAG_SUBAGENT_LLM",
     base_url=RAG_SUBAGENT_LLM_BASE_URL,
     api_key=RAG_SUBAGENT_LLM_API_KEY,
+    model=RAG_SUBAGENT_LLM_MODEL,
+    temperature=0.2,
+    top_p=0.9,
+    top_k=None,
+    max_completion_tokens=RAG_SUBAGENT_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=RAG_SUBAGENT_LLM_THINKING_ENABLED,
+    ),
 )
 _FINALIZER_UNRESOLVED_STATUS_LIMIT = 4
 _FINALIZER_UNRESOLVED_CANDIDATE_LIMIT = 6
@@ -1383,7 +1419,7 @@ async def rag_finalizer(state: ProgressiveRAGState) -> dict:
     human_message = HumanMessage(content=json.dumps(finalizer_input, ensure_ascii=False, default=str))
 
     started_at = time.perf_counter()
-    response = await _finalizer_llm.ainvoke([system_prompt, human_message])
+    response = await _finalizer_llm.ainvoke([system_prompt, human_message], config=_finalizer_llm_config)
     logger.info(f"RAG2 finalizer output: answer={log_preview(response.content)}")
     logger.debug(
         f'RAG2 finalizer metadata: query={log_preview(state["original_query"])} '

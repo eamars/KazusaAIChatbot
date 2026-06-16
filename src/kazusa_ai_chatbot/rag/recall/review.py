@@ -9,9 +9,12 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.config import (
+
     RAG_SUBAGENT_LLM_API_KEY,
     RAG_SUBAGENT_LLM_BASE_URL,
     RAG_SUBAGENT_LLM_MODEL,
+    RAG_SUBAGENT_LLM_MAX_COMPLETION_TOKENS,
+    RAG_SUBAGENT_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.rag.recall.contracts import (
     _ACTIVE_MODES,
@@ -21,8 +24,13 @@ from kazusa_ai_chatbot.rag.recall.contracts import (
     _SOURCE_ORDERS,
     _clip_text,
 )
-from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
+from kazusa_ai_chatbot.utils import parse_llm_json_output, text_or_empty
 
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 logger = logging.getLogger(__name__)
 
 def _has_source_conflict(candidates: list[dict[str, str]]) -> bool:
@@ -325,12 +333,22 @@ episode-position 槽位。判断是否有候选项直接回答该槽位。不要
 }
 '''
 
-_recall_review_llm = get_llm(
-    temperature=0.0,
-    top_p=1.0,
-    model=RAG_SUBAGENT_LLM_MODEL,
+_llm_interface = LLInterface()
+_recall_review_llm = LLInterface()
+_recall_review_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="RAG_SUBAGENT_LLM",
     base_url=RAG_SUBAGENT_LLM_BASE_URL,
     api_key=RAG_SUBAGENT_LLM_API_KEY,
+    model=RAG_SUBAGENT_LLM_MODEL,
+    temperature=0.0,
+    top_p=1.0,
+    top_k=None,
+    max_completion_tokens=RAG_SUBAGENT_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=RAG_SUBAGENT_LLM_THINKING_ENABLED,
+    ),
 )
 
 async def _review_recall_candidates(
@@ -360,7 +378,7 @@ async def _review_recall_candidates(
     human_message = HumanMessage(
         content=json.dumps(payload, ensure_ascii=False, default=str)
     )
-    response = await _recall_review_llm.ainvoke([system_prompt, human_message])
+    response = await _recall_review_llm.ainvoke([system_prompt, human_message], config=_recall_review_llm_config)
     raw_review = parse_llm_json_output(response.content)
     review = _normalize_recall_review(raw_review, len(candidates))
     logger.info(

@@ -86,7 +86,7 @@ class _CapturingAsyncLLM:
         self._wrapped_llm = wrapped_llm
         self.calls: list[dict[str, object]] = []
 
-    async def ainvoke(self, messages: list[Any]) -> Any:
+    async def ainvoke(self, messages: list[Any], *, config=None) -> Any:
         """Invoke the wrapped LLM and save prompt/output text for traces.
 
         Args:
@@ -96,7 +96,7 @@ class _CapturingAsyncLLM:
             The original live model response.
         """
 
-        response = await self._wrapped_llm.ainvoke(messages)
+        response = await self._wrapped_llm.ainvoke(messages, config=config)
         prompt_parts = []
         for message in messages:
             prompt_parts.append(

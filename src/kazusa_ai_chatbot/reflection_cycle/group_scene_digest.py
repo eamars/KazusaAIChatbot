@@ -9,10 +9,13 @@ from typing import Any
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.config import (
+
     CONSOLIDATION_LLM_API_KEY,
     CONSOLIDATION_LLM_BASE_URL,
     CONSOLIDATION_LLM_MODEL,
     CONVERSATION_HISTORY_LIMIT,
+    CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    CONSOLIDATION_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.conversation_history_prompt_projection import (
     project_conversation_history_for_llm,
@@ -22,11 +25,15 @@ from kazusa_ai_chatbot.reflection_cycle.activity_windows import (
 )
 from kazusa_ai_chatbot.time_boundary import normalize_storage_utc_iso
 from kazusa_ai_chatbot.utils import (
-    get_llm,
     parse_llm_json_output,
     text_or_empty,
 )
 
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 logger = logging.getLogger(__name__)
 
 GROUP_SCENE_DIGEST_MAX_CHARS = 500
@@ -89,12 +96,22 @@ GROUP_SCENE_DIGEST_SYSTEM_PROMPT = '''\
   "summary": "一句很短的群聊话题概述"
 }
 '''
-_group_scene_digest_llm = get_llm(
-    temperature=0.2,
-    top_p=0.8,
-    model=CONSOLIDATION_LLM_MODEL,
+_llm_interface = LLInterface()
+_group_scene_digest_llm = LLInterface()
+_group_scene_digest_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="CONSOLIDATION_LLM",
     base_url=CONSOLIDATION_LLM_BASE_URL,
     api_key=CONSOLIDATION_LLM_API_KEY,
+    model=CONSOLIDATION_LLM_MODEL,
+    temperature=0.2,
+    top_p=0.8,
+    top_k=None,
+    max_completion_tokens=CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=CONSOLIDATION_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -115,7 +132,7 @@ async def build_group_scene_digest(
 
     messages = build_group_scene_digest_messages(window)
     try:
-        response = await _group_scene_digest_llm.ainvoke(messages)
+        response = await _group_scene_digest_llm.ainvoke(messages, config=_group_scene_digest_llm_config)
     except Exception as exc:
         logger.exception(f"Group scene digest LLM call failed: {exc}")
         return_value = None

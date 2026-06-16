@@ -13,8 +13,9 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from kazusa_ai_chatbot.background_work.subagent.text_artifact import (
     TEXT_ARTIFACT_GENERATOR_PROMPT,
     TEXT_ARTIFACT_TASK_ROUTER_PROMPT,
-    _text_artifact_generator_llm,
-    _text_artifact_task_router_llm,
+    _llm_interface,
+    _text_artifact_generator_llm_config,
+    _text_artifact_task_router_llm_config,
     build_text_artifact_generator_payload,
     build_text_artifact_task_router_payload,
     normalize_text_artifact_generator_output,
@@ -51,10 +52,13 @@ async def test_background_work_text_artifact_live_case() -> None:
         source_summary=source_summary,
         max_output_chars=max_output_chars,
     )
-    task_response = await _text_artifact_task_router_llm.ainvoke([
-        SystemMessage(content=TEXT_ARTIFACT_TASK_ROUTER_PROMPT),
-        HumanMessage(content=json.dumps(task_payload, ensure_ascii=False)),
-    ])
+    task_response = await _llm_interface.ainvoke(
+        [
+            SystemMessage(content=TEXT_ARTIFACT_TASK_ROUTER_PROMPT),
+            HumanMessage(content=json.dumps(task_payload, ensure_ascii=False)),
+        ],
+        config=_text_artifact_task_router_llm_config,
+    )
     raw_task_output = str(task_response.content)
     parsed_task_output = parse_llm_json_output(raw_task_output)
     task_decision = normalize_text_artifact_task_router_output(
@@ -67,10 +71,13 @@ async def test_background_work_text_artifact_live_case() -> None:
         source_summary=source_summary,
         max_output_chars=max_output_chars,
     )
-    generator_response = await _text_artifact_generator_llm.ainvoke([
-        SystemMessage(content=TEXT_ARTIFACT_GENERATOR_PROMPT),
-        HumanMessage(content=json.dumps(generator_payload, ensure_ascii=False)),
-    ])
+    generator_response = await _llm_interface.ainvoke(
+        [
+            SystemMessage(content=TEXT_ARTIFACT_GENERATOR_PROMPT),
+            HumanMessage(content=json.dumps(generator_payload, ensure_ascii=False)),
+        ],
+        config=_text_artifact_generator_llm_config,
+    )
     raw_generator_output = str(generator_response.content)
     parsed_generator_output = parse_llm_json_output(raw_generator_output)
     generator_result = normalize_text_artifact_generator_output(

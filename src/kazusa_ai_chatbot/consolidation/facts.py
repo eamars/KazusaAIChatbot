@@ -8,9 +8,12 @@ import logging
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.config import (
+
     CONSOLIDATION_LLM_API_KEY,
     CONSOLIDATION_LLM_BASE_URL,
     CONSOLIDATION_LLM_MODEL,
+    CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    CONSOLIDATION_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.config import MAX_FACT_HARVESTER_RETRY
 from kazusa_ai_chatbot.consolidation.origin import (
@@ -21,8 +24,13 @@ from kazusa_ai_chatbot.consolidation.schema import (
     content_plan_from_action_directives,
 )
 from kazusa_ai_chatbot.rag.prompt_projection import project_tool_result_for_llm
-from kazusa_ai_chatbot.utils import get_llm, log_list_preview, log_preview, parse_llm_json_output
+from kazusa_ai_chatbot.utils import log_list_preview, log_preview, parse_llm_json_output
 
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 logger = logging.getLogger(__name__)
 
 
@@ -291,12 +299,23 @@ human payload 是以下 JSON：
     ]
 }}
 '''
-_facts_harvester_llm = get_llm(
-    temperature=0.0,
-    top_p=1.0,
-    model=CONSOLIDATION_LLM_MODEL,
+_llm_interface = LLInterface()
+_facts_harvester_llm = LLInterface()
+_fact_harvester_evaluator_llm = LLInterface()
+_facts_harvester_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="CONSOLIDATION_LLM",
     base_url=CONSOLIDATION_LLM_BASE_URL,
     api_key=CONSOLIDATION_LLM_API_KEY,
+    model=CONSOLIDATION_LLM_MODEL,
+    temperature=0.0,
+    top_p=1.0,
+    top_k=None,
+    max_completion_tokens=CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=CONSOLIDATION_LLM_THINKING_ENABLED,
+    ),
 )
 async def facts_harvester(state: ConsolidatorState) -> dict:
     system_prompt = SystemMessage(content=_FACTS_HARVESTER_PROMPT.format(
@@ -333,7 +352,7 @@ async def facts_harvester(state: ConsolidatorState) -> dict:
     else:
         recent_messages = feedback
 
-    response = await _facts_harvester_llm.ainvoke([system_prompt, human_message] + recent_messages)
+    response = await _facts_harvester_llm.ainvoke([system_prompt, human_message] + recent_messages, config=_facts_harvester_llm_config)
 
     result = parse_llm_json_output(response.content)
 
@@ -477,12 +496,20 @@ human payload 是以下 JSON：
     "contradiction_flags": "可选字符串列表，列举与 rag_result 直接冲突的条目 id 或描述；无冲突则返回 []"
 }}
 '''
-_fact_harvester_evaluator_llm = get_llm(
-    temperature=0.1,
-    top_p=0.5,
-    model=CONSOLIDATION_LLM_MODEL,
+_fact_harvester_evaluator_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="CONSOLIDATION_LLM",
     base_url=CONSOLIDATION_LLM_BASE_URL,
     api_key=CONSOLIDATION_LLM_API_KEY,
+    model=CONSOLIDATION_LLM_MODEL,
+    temperature=0.1,
+    top_p=0.5,
+    top_k=None,
+    max_completion_tokens=CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=CONSOLIDATION_LLM_THINKING_ENABLED,
+    ),
 )
 async def fact_harvester_evaluator(state: ConsolidatorState) -> dict:
     system_prompt = SystemMessage(content=_FACT_HARVESTER_EVALUATOR_PROMPT.format(
@@ -514,7 +541,7 @@ async def fact_harvester_evaluator(state: ConsolidatorState) -> dict:
 
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
 
-    response = await _fact_harvester_evaluator_llm.ainvoke([system_prompt, human_message])
+    response = await _fact_harvester_evaluator_llm.ainvoke([system_prompt, human_message], config=_fact_harvester_evaluator_llm_config)
 
     result = parse_llm_json_output(response.content)
 

@@ -12,6 +12,7 @@ import pytest
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
+from kazusa_ai_chatbot.cognition_chain_core.contracts import LLMStageBinding
 from kazusa_ai_chatbot.cognition_chain_core.stages.l1 import (
     call_cognition_subconscious,
     reset_subconscious_llm,
@@ -237,6 +238,8 @@ def _build_base_state() -> dict:
         "promoted_reflection_context": {},
         "internal_monologue_residue_context": "",
         "selected_text_surface_intent": "Briefly answer what rainy days feel like.",
+        "debug_modes": {},
+        "should_respond": True,
         "memory_lifecycle_context": {
             "active_commitment_aliases": [],
             "pending_memory_updates_summary": "",
@@ -279,25 +282,45 @@ def _bind_live_stage_services() -> list[_ServiceBinding]:
     services = build_cognition_chain_services()
     service_bindings = [
         (reset_json_parser, set_json_parser(services.parse_json)),
-        (reset_subconscious_llm, set_subconscious_llm(services.cognition_llm)),
-        (reset_conscious_llm, set_conscious_llm(services.cognition_llm)),
+        (
+            reset_subconscious_llm,
+            set_subconscious_llm(
+                LLMStageBinding(services.llm, services.cognition_config)
+            ),
+        ),
+        (
+            reset_conscious_llm,
+            set_conscious_llm(
+                LLMStageBinding(services.llm, services.cognition_config)
+            ),
+        ),
         (reset_boundary_core_llm, set_boundary_core_llm(
-            services.boundary_core_llm,
+            LLMStageBinding(services.llm, services.boundary_core_config),
         )),
         (reset_judgement_core_llm, set_judgement_core_llm(
-            services.cognition_llm,
+            LLMStageBinding(services.llm, services.cognition_config),
         )),
         (reset_contextual_agent_llm, set_contextual_agent_llm(
-            services.cognition_llm,
+            LLMStageBinding(services.llm, services.cognition_config),
         )),
-        (reset_style_agent_llm, set_style_agent_llm(services.style_llm)),
+        (
+            reset_style_agent_llm,
+            set_style_agent_llm(
+                LLMStageBinding(services.llm, services.style_config)
+            ),
+        ),
         (reset_content_plan_agent_llm, set_content_plan_agent_llm(
-            services.content_plan_llm,
+            LLMStageBinding(services.llm, services.content_plan_config),
         )),
         (reset_preference_adapter_llm, set_preference_adapter_llm(
-            services.preference_llm,
+            LLMStageBinding(services.llm, services.preference_config),
         )),
-        (reset_visual_agent_llm, set_visual_agent_llm(services.visual_llm)),
+        (
+            reset_visual_agent_llm,
+            set_visual_agent_llm(
+                LLMStageBinding(services.llm, services.visual_config)
+            ),
+        ),
     ]
     return service_bindings
 
@@ -368,16 +391,25 @@ async def _run_live_cognition_stack(state: dict) -> dict:
 
 async def test_live_msg_decontexualizer_returns_non_empty_output(ensure_live_llm) -> None:
     state = {
+        "character_profile": {"name": "Kazusa"},
         "user_input": "他今天是不是又在躲雨？",
         "user_name": "LiveDecontextUser",
         "platform_user_id": "live-user",
         "platform_bot_id": "live-bot",
+        "prompt_message_context": {
+            "body_text": "他今天是不是又在躲雨？",
+            "mentions": [],
+            "attachments": [],
+            "addressed_to_global_user_ids": [],
+            "broadcast": False,
+        },
         "chat_history_recent": [
             {"role": "assistant", "content": "你说的是哪一位？"},
             {"role": "user", "content": "就是昨天在天台看书的那个同学。"},
         ],
         "channel_topic": "放学后的闲聊",
         "indirect_speech_context": "",
+        "reply_context": {},
     }
     _debug_snapshot("decontext.input", state)
     result = await call_msg_decontexualizer(state)

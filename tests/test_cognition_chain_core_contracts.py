@@ -5,6 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from llm_test_helpers import make_llm_call_config
+
 
 def _chain_input() -> dict:
     return {
@@ -295,27 +297,14 @@ async def test_public_text_surface_entrypoint_runs_without_legacy_rag_shape() ->
         },
     }
     services = CognitionChainServices(
-        cognition_llm=_FakeLLM([]),
-        boundary_core_llm=_FakeLLM([]),
-        action_selection_llm=_FakeLLM([]),
-        style_llm=_FakeLLM([{
-            "rhetorical_strategy": "direct",
-            "linguistic_style": "plain",
-            "forbidden_phrases": [],
-        }]),
-        content_plan_llm=_FakeLLM([{
-            "content_plan": {
-                "semantic_content": "answer directly",
-                "rendering": "short visible reply",
-            },
-        }]),
-        preference_llm=_FakeLLM([{"accepted_user_preferences": []}]),
-        visual_llm=_FakeLLM([{
-            "facial_expression": [],
-            "body_language": [],
-            "gaze_direction": [],
-            "visual_vibe": [],
-        }]),
+        llm=_surface_fake_llm(),
+        cognition_config=make_llm_call_config("cognition"),
+        boundary_core_config=make_llm_call_config("boundary_core"),
+        action_selection_config=make_llm_call_config("action_selection"),
+        style_config=make_llm_call_config("style_agent"),
+        content_plan_config=make_llm_call_config("content_plan_agent"),
+        preference_config=make_llm_call_config("preference_adapter"),
+        visual_config=make_llm_call_config("visual_agent"),
         parse_json=json.loads,
         logger=_Logger(),
     )
@@ -345,27 +334,14 @@ async def test_public_text_surface_entrypoint_resets_injected_parser() -> None:
 
     payload = _text_surface_input()
     services = CognitionChainServices(
-        cognition_llm=_FakeLLM([]),
-        boundary_core_llm=_FakeLLM([]),
-        action_selection_llm=_FakeLLM([]),
-        style_llm=_FakeLLM([{
-            "rhetorical_strategy": "direct",
-            "linguistic_style": "plain",
-            "forbidden_phrases": [],
-        }]),
-        content_plan_llm=_FakeLLM([{
-            "content_plan": {
-                "semantic_content": "answer directly",
-                "rendering": "short visible reply",
-            },
-        }]),
-        preference_llm=_FakeLLM([{"accepted_user_preferences": []}]),
-        visual_llm=_FakeLLM([{
-            "facial_expression": [],
-            "body_language": [],
-            "gaze_direction": [],
-            "visual_vibe": [],
-        }]),
+        llm=_surface_fake_llm(),
+        cognition_config=make_llm_call_config("cognition"),
+        boundary_core_config=make_llm_call_config("boundary_core"),
+        action_selection_config=make_llm_call_config("action_selection"),
+        style_config=make_llm_call_config("style_agent"),
+        content_plan_config=make_llm_call_config("content_plan_agent"),
+        preference_config=make_llm_call_config("preference_adapter"),
+        visual_config=make_llm_call_config("visual_agent"),
         parse_json=parse_json,
         logger=_Logger(),
     )
@@ -380,16 +356,52 @@ async def test_public_text_surface_entrypoint_resets_injected_parser() -> None:
 class _FakeLLM:
     """Return configured JSON responses from async LLM calls."""
 
-    def __init__(self, responses: list[dict]) -> None:
-        self._responses = list(responses)
+    def __init__(self, responses_by_stage: dict[str, dict]) -> None:
+        self._responses_by_stage = dict(responses_by_stage)
 
-    async def ainvoke(self, messages: list[object]) -> SimpleNamespace:
-        if not self._responses:
-            raise AssertionError("unexpected LLM call")
+    async def ainvoke(
+        self,
+        messages: list[object],
+        *,
+        config,
+    ) -> SimpleNamespace:
+        del messages
+        stage_name = config.stage_name
+        if stage_name not in self._responses_by_stage:
+            raise AssertionError(f"unexpected LLM call: {stage_name}")
         response = SimpleNamespace(
-            content=json.dumps(self._responses.pop(0), ensure_ascii=False),
+            content=json.dumps(
+                self._responses_by_stage.pop(stage_name),
+                ensure_ascii=False,
+            ),
         )
         return response
+
+
+def _surface_fake_llm() -> _FakeLLM:
+    """Build the scripted fake backend for text-surface stages."""
+
+    fake_llm = _FakeLLM({
+        "style_agent": {
+            "rhetorical_strategy": "direct",
+            "linguistic_style": "plain",
+            "forbidden_phrases": [],
+        },
+        "content_plan_agent": {
+            "content_plan": {
+                "semantic_content": "answer directly",
+                "rendering": "short visible reply",
+            },
+        },
+        "preference_adapter": {"accepted_user_preferences": []},
+        "visual_agent": {
+            "facial_expression": [],
+            "body_language": [],
+            "gaze_direction": [],
+            "visual_vibe": [],
+        },
+    })
+    return fake_llm
 
 
 class _Logger:

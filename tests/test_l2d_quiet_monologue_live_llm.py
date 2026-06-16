@@ -27,6 +27,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
 )
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 from tests.llm_trace import write_llm_trace
+from llm_test_helpers import bind_test_llm
 
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
@@ -54,7 +55,7 @@ async def test_l2d_live_quiet_group_monologue_does_not_select_speak(
 
     action_selection_llm = build_cognition_chain_services().action_selection_llm
     capturing_llm = _CapturingLLM(action_selection_llm)
-    monkeypatch.setattr(l2d_module, '_action_selection_llm', capturing_llm)
+    monkeypatch.setattr(l2d_module, '_action_selection_llm', bind_test_llm(capturing_llm, "action_selection_llm"))
 
     result = await select_semantic_actions(frozen_state)
     raw_output = capturing_llm.raw_output
@@ -275,9 +276,9 @@ class _CapturingLLM:
         self._inner_llm = inner_llm
         self.raw_output = ''
 
-    async def ainvoke(self, messages: object) -> object:
+    async def ainvoke(self, messages: object, *, config=None) -> object:
         """Call the wrapped LLM and store the raw message content."""
 
-        response = await self._inner_llm.ainvoke(messages)
+        response = await self._inner_llm.ainvoke(messages, config=config)
         self.raw_output = str(response.content)
         return response

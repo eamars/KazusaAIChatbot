@@ -56,6 +56,9 @@ BOUNDARY_CORE_LLM_MODEL=your-chat-model
 BACKGROUND_ARTIFACT_LLM_BASE_URL=http://localhost:1234/v1
 BACKGROUND_ARTIFACT_LLM_API_KEY=lm-studio
 BACKGROUND_ARTIFACT_LLM_MODEL=your-chat-model
+BACKGROUND_WORK_LLM_BASE_URL=http://localhost:1234/v1
+BACKGROUND_WORK_LLM_API_KEY=lm-studio
+BACKGROUND_WORK_LLM_MODEL=your-chat-model
 DIALOG_GENERATOR_LLM_BASE_URL=http://localhost:1234/v1
 DIALOG_GENERATOR_LLM_API_KEY=lm-studio
 DIALOG_GENERATOR_LLM_MODEL=your-chat-model
@@ -167,10 +170,16 @@ NAPCAT_RUNTIME_PORT=8011
 ```
 
 All route-specific chat model variables are required except the background
-artifact route, which falls back to the cognition route when omitted.
+artifact and background-work routes. The background artifact route falls back
+to the cognition route when omitted; the background-work route falls back to
+the background artifact route when omitted.
 Route-specific variables replace the retired generic `LLM_BASE_URL`,
 `LLM_API_KEY`, and `LLM_MODEL` settings. Missing required route variables stop
-config loading.
+config loading. Chat routes also accept route-specific
+`*_MAX_COMPLETION_TOKENS` and `*_THINKING_ENABLED` values, with
+`DEFAULT_LLM_MAX_COMPLETION_TOKENS` as the shared completion budget default.
+Thinking is a boolean route toggle, defaults to disabled, and only adds the
+Gemma 4 thinking request payload when the normalized model name supports it.
 
 `CHARACTER_GLOBAL_USER_ID` defaults to
 `00000000-0000-4000-8000-000000000001`. Set it explicitly in production so the
@@ -189,7 +198,7 @@ available for unrelated generic MCP tools.
 
 When LM Studio reports
 `The model has crashed without additional information.`, chat model calls made
-through the shared LLM factory retry the same request once. Calls for the same
+through `LLInterface` retry the same request once. Calls for the same
 `base_url` and model wait while that retry reloads the model; calls for other
 models continue normally. Other 400 responses and non-unload errors are not
 retried by this recovery path.

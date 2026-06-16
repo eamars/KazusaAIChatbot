@@ -40,7 +40,6 @@ long_term/todo.md
 |---|---|---|
 | [backend_control_console_development_plan.md](active/short_term/backend_control_console_development_plan.md) | Control plane web UI development plan | draft |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
-| [llm_interface_backend_abstraction_plan.md](active/short_term/llm_interface_backend_abstraction_plan.md) | High-risk LLM backend interface migration plan | draft |
 
 ## Supporting Experiment Records
 
@@ -175,6 +174,7 @@ plans.
 | [interaction_style_image_plan.md](archive/completed/short_term/interaction_style_image_plan.md) |
 | [live_context_runtime_facts_plan.md](archive/completed/short_term/live_context_runtime_facts_plan.md) |
 | [llm_routing_migration_plan.md](archive/completed/short_term/llm_routing_migration_plan.md) |
+| [llm_interface_backend_abstraction_plan.md](archive/completed/short_term/llm_interface_backend_abstraction_plan.md) |
 | [l2d_action_router_prompt_separation_plan.md](archive/completed/short_term/l2d_action_router_prompt_separation_plan.md) |
 | [l2d_l3_surface_handoff_plan.md](archive/completed/short_term/l2d_l3_surface_handoff_plan.md) |
 | [l2d_router_split_and_background_ack_plan.md](archive/completed/short_term/l2d_router_split_and_background_ack_plan.md) |

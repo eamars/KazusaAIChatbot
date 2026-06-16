@@ -23,7 +23,7 @@ class _CapturingAsyncLLM:
         self.messages = []
         self._response_payload = response_payload
 
-    async def ainvoke(self, messages):
+    async def ainvoke(self, messages, *, config=None):
         self.messages = messages
         response = _DummyResponse(
             json.dumps(self._response_payload, ensure_ascii=False),

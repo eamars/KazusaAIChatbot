@@ -6,6 +6,7 @@ from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episod
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as supervisor_module
 from kazusa_ai_chatbot.cognition_chain_core.stages import l3 as l3_module
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
+from llm_test_helpers import bind_test_llm
 
 
 class _DummyResponse:
@@ -23,7 +24,7 @@ class _DummyResponse:
 class _StaticAsyncLLM:
     """Async LLM fake returning a fixed content-plan payload."""
 
-    async def ainvoke(self, _messages: list) -> _DummyResponse:
+    async def ainvoke(self, _messages: list, *, config=None) -> _DummyResponse:
         """Return a minimal content-plan response.
 
         Args:
@@ -155,7 +156,11 @@ async def test_skip_branch_does_not_call_adapter(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_content_plan_accepts_skipped_rag_result_shape(monkeypatch) -> None:
     """Content-plan agent should not raise on skipped-RAG projection shape."""
-    monkeypatch.setattr(l3_module, "_content_plan_agent_llm", _StaticAsyncLLM())
+    monkeypatch.setattr(
+        l3_module,
+        "_content_plan_agent_llm",
+        bind_test_llm(_StaticAsyncLLM(), "content_plan_agent"),
+    )
     rag_result = await supervisor_module.run_rag_evidence_for_persona_state(
         _clarification_state(),
         agent_name="resolver_rag_evidence",

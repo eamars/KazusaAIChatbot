@@ -17,8 +17,8 @@ from kazusa_ai_chatbot.cognition_chain_core.boundary_profile import (
     get_self_integrity_description,
 )
 from kazusa_ai_chatbot.cognition_chain_core.contracts import (
-    AsyncChatModel,
-    require_injected_llm,
+    LLMStageBinding,
+    require_llm_binding,
 )
 from kazusa_ai_chatbot.cognition_chain_core.output_contracts import (
     validate_cognition_output_contract,
@@ -320,23 +320,23 @@ _COGNITION_CONSCIOUSNESS_PROMPT = '''\
   "character_intent": "PROVIDE | BANTAR | REJECT | EVADE | CONFRONT | DISMISS | CLARIFY"
 }}
 '''
-_conscious_llm: AsyncChatModel | None = None
-_conscious_llm_context: ContextVar[AsyncChatModel | None] = ContextVar(
+_conscious_llm: LLMStageBinding | None = None
+_conscious_llm_context: ContextVar[LLMStageBinding | None] = ContextVar(
     "conscious_llm",
     default=None,
 )
 
 
 def set_conscious_llm(
-    llm: AsyncChatModel | None,
-) -> Token[AsyncChatModel | None]:
+    llm: LLMStageBinding | None,
+) -> Token[LLMStageBinding | None]:
     """Bind the L2a model for the current run context."""
 
     token = _conscious_llm_context.set(llm)
     return token
 
 
-def reset_conscious_llm(token: Token[AsyncChatModel | None]) -> None:
+def reset_conscious_llm(token: Token[LLMStageBinding | None]) -> None:
     """Restore the previous L2a model binding for this run context."""
 
     _conscious_llm_context.reset(token)
@@ -400,14 +400,17 @@ async def call_cognition_consciousness(state: dict[str, Any]) -> dict[str, Any]:
         selection=selection,
     ))
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
-    llm = require_injected_llm(
+    llm = require_llm_binding(
         _conscious_llm_context.get() or _conscious_llm,
         "conscious_llm",
     )
-    response = await llm.ainvoke([
-        system_prompt,
-        human_message,
-    ])
+    response = await llm.llm.ainvoke(
+        [
+            system_prompt,
+            human_message,
+        ],
+        config=llm.config,
+    )
     result = parse_llm_json_output(response.content)
 
     # logger.debug(
@@ -522,23 +525,23 @@ _BOUNDARY_CORE_PROMPT = '''\
   "trajectory": "简体中文字符串；主语优先省略"
 }}
 '''
-_boundary_core_llm: AsyncChatModel | None = None
-_boundary_core_llm_context: ContextVar[AsyncChatModel | None] = ContextVar(
+_boundary_core_llm: LLMStageBinding | None = None
+_boundary_core_llm_context: ContextVar[LLMStageBinding | None] = ContextVar(
     "boundary_core_llm",
     default=None,
 )
 
 
 def set_boundary_core_llm(
-    llm: AsyncChatModel | None,
-) -> Token[AsyncChatModel | None]:
+    llm: LLMStageBinding | None,
+) -> Token[LLMStageBinding | None]:
     """Bind the boundary model for the current run context."""
 
     token = _boundary_core_llm_context.set(llm)
     return token
 
 
-def reset_boundary_core_llm(token: Token[AsyncChatModel | None]) -> None:
+def reset_boundary_core_llm(token: Token[LLMStageBinding | None]) -> None:
     """Restore the previous boundary model binding for this run context."""
 
     _boundary_core_llm_context.reset(token)
@@ -610,14 +613,17 @@ async def call_boundary_core_agent(state: dict[str, Any]) -> dict[str, Any]:
         selection=selection,
     ))
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
-    llm = require_injected_llm(
+    llm = require_llm_binding(
         _boundary_core_llm_context.get() or _boundary_core_llm,
         "boundary_core_llm",
     )
-    response = await llm.ainvoke([
-        system_prompt,
-        human_message,
-    ])
+    response = await llm.llm.ainvoke(
+        [
+            system_prompt,
+            human_message,
+        ],
+        config=llm.config,
+    )
 
     result = parse_llm_json_output(response.content)
 
@@ -731,23 +737,23 @@ _JUDGEMENT_CORE_PROMPT = '''\
   "judgment_note": "简体中文字符串，一句话说明裁决逻辑；主语优先省略；不要复制资料结构或元数据"
 }}
 '''
-_judgement_core_llm: AsyncChatModel | None = None
-_judgement_core_llm_context: ContextVar[AsyncChatModel | None] = ContextVar(
+_judgement_core_llm: LLMStageBinding | None = None
+_judgement_core_llm_context: ContextVar[LLMStageBinding | None] = ContextVar(
     "judgement_core_llm",
     default=None,
 )
 
 
 def set_judgement_core_llm(
-    llm: AsyncChatModel | None,
-) -> Token[AsyncChatModel | None]:
+    llm: LLMStageBinding | None,
+) -> Token[LLMStageBinding | None]:
     """Bind the judgment model for the current run context."""
 
     token = _judgement_core_llm_context.set(llm)
     return token
 
 
-def reset_judgement_core_llm(token: Token[AsyncChatModel | None]) -> None:
+def reset_judgement_core_llm(token: Token[LLMStageBinding | None]) -> None:
     """Restore the previous judgment model binding for this run context."""
 
     _judgement_core_llm_context.reset(token)
@@ -804,14 +810,17 @@ async def call_judgment_core_agent(state: dict[str, Any]) -> dict[str, Any]:
         selection=selection,
     ))
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
-    llm = require_injected_llm(
+    llm = require_llm_binding(
         _judgement_core_llm_context.get() or _judgement_core_llm,
         "judgement_core_llm",
     )
-    response = await llm.ainvoke([
-        system_prompt,
-        human_message,
-    ])
+    response = await llm.llm.ainvoke(
+        [
+            system_prompt,
+            human_message,
+        ],
+        config=llm.config,
+    )
     result = parse_llm_json_output(response.content)
 
     logger.debug(f'Judgment core: stance={result.get("logical_stance", "")} intent={result.get("character_intent", "")} note={log_preview(result.get("judgment_note", ""))}')

@@ -26,7 +26,7 @@ class _StaticLLM:
         self.content = content
         self.messages: list[Any] = []
 
-    async def ainvoke(self, messages: list[Any]) -> AIMessage:
+    async def ainvoke(self, messages: list[Any], *, config=None) -> AIMessage:
         """Return the configured content and keep the prompt for inspection."""
 
         self.messages = list(messages)

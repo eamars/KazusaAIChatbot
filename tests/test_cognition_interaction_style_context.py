@@ -14,6 +14,7 @@ from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as cognition_m
 from kazusa_ai_chatbot.cognition_chain_core.stages import l3 as l3_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as surface_module
 from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
+from llm_test_helpers import bind_test_llm
 
 
 _TURN_CLOCK = build_turn_clock_from_storage_utc(
@@ -29,7 +30,7 @@ class _FakeStyleLlm:
 
         self.payload: dict | None = None
 
-    async def ainvoke(self, messages: list) -> SimpleNamespace:
+    async def ainvoke(self, messages: list, *, config=None) -> SimpleNamespace:
         """Capture the human message payload.
 
         Args:
@@ -61,7 +62,7 @@ class _FakeContentPlanLlm:
         self.payload: dict | None = None
         self.system_prompt = ""
 
-    async def ainvoke(self, messages: list) -> SimpleNamespace:
+    async def ainvoke(self, messages: list, *, config=None) -> SimpleNamespace:
         """Capture prompt messages and return a valid content-plan result.
 
         Args:
@@ -292,7 +293,7 @@ async def test_style_agent_receives_private_interaction_style_without_group(
     """Style agent prompt payload receives sanitized private style context."""
 
     fake_llm = _FakeStyleLlm()
-    monkeypatch.setattr(l3_module, "_style_agent_llm", fake_llm)
+    monkeypatch.setattr(l3_module, "_style_agent_llm", bind_test_llm(fake_llm, "style_agent_llm"))
 
     result = await l3_module.call_style_agent(_style_state())
 
@@ -316,7 +317,7 @@ async def test_content_plan_agent_receives_interaction_style_context(
     """Content-plan prompt payload should receive sanitized style context."""
 
     fake_llm = _FakeContentPlanLlm()
-    monkeypatch.setattr(l3_module, "_content_plan_agent_llm", fake_llm)
+    monkeypatch.setattr(l3_module, "_content_plan_agent_llm", bind_test_llm(fake_llm, "content_plan_agent_llm"))
 
     result = await l3_module.call_content_plan_agent(_content_plan_state())
 

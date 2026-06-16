@@ -10,71 +10,29 @@ from typing import Any
 
 from json_repair import repair_json
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
 
 from kazusa_ai_chatbot.config import (
     AFFINITY_MAX,
     AFFINITY_MIN,
+    DEFAULT_LLM_MAX_COMPLETION_TOKENS,
     JSON_REPAIR_LLM_API_KEY,
     JSON_REPAIR_LLM_BASE_URL,
     JSON_REPAIR_LLM_MODEL,
-)
-from kazusa_ai_chatbot.llm_reload_monitor import (
-    MonitoredChatModel,
-    monitored_chat_model,
+    JSON_REPAIR_LLM_MAX_COMPLETION_TOKENS,
+    JSON_REPAIR_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.message_envelope import (
     MAX_PROMPT_ATTACHMENT_DESCRIPTION_CHARS,
 )
 
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 logger = logging.getLogger(__name__)
 
-DEFAULT_LLM_MAX_COMPLETION_TOKENS = 8192
-
 _IMAGE_DESCRIPTION_ELLIPSIS = "..."
-
-
-def get_llm(
-    *,
-    temperature: float = 0.7,
-    top_p: float = 1.0,
-    model: str,
-    base_url: str,
-    api_key: str,
-    **kwargs,
-) -> MonitoredChatModel:
-    """Create a chat LLM client for an explicit configured route.
-
-    Args:
-        temperature: Sampling temperature for the model call.
-        top_p: Nucleus sampling value for the model call.
-        model: Route-specific model name.
-        base_url: Route-specific OpenAI-compatible base URL.
-        api_key: Route-specific API key.
-        **kwargs: Additional ChatOpenAI options. When no completion-token
-            budget is supplied, the shared default is applied so local
-            OpenAI-compatible endpoints do not inherit unsafe provider caps.
-
-    Returns:
-        Configured monitored chat model client.
-    """
-    if "max_tokens" not in kwargs and "max_completion_tokens" not in kwargs:
-        kwargs["max_tokens"] = DEFAULT_LLM_MAX_COMPLETION_TOKENS
-
-    _llm = ChatOpenAI(
-        model=model,
-        temperature=temperature,
-        top_p=top_p,
-        base_url=base_url,
-        api_key=api_key,
-        **kwargs,
-    )
-    monitored_llm = monitored_chat_model(
-        _llm,
-        base_url=base_url,
-        model=model,
-    )
-    return monitored_llm
 
 
 def _is_image_attachment(attachment: dict) -> bool:
@@ -438,12 +396,22 @@ _PARSE_JSON_WITH_LLM_EXPECTED_FORMAT_PROMPT = (
     _PARSE_JSON_WITH_LLM_PROMPT
     + "\nExpected output format from the original prompt:\n"
 )
-_parse_json_with_llm = get_llm(
-    temperature=0,
-    top_p=1.0,
-    model=JSON_REPAIR_LLM_MODEL,
+_llm_interface = LLInterface()
+_parse_json_with_llm = LLInterface()
+_parse_json_with_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="JSON_REPAIR_LLM",
     base_url=JSON_REPAIR_LLM_BASE_URL,
     api_key=JSON_REPAIR_LLM_API_KEY,
+    model=JSON_REPAIR_LLM_MODEL,
+    temperature=0,
+    top_p=1.0,
+    top_k=None,
+    max_completion_tokens=JSON_REPAIR_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=JSON_REPAIR_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -501,7 +469,7 @@ def parse_json_with_llm(
             ensure_ascii=False,
         )
     )
-    response = _parse_json_with_llm.invoke([system_prompt, human_message])
+    response = _parse_json_with_llm.invoke([system_prompt, human_message], config=_parse_json_with_llm_config)
 
     # Strip the markdown fence just in case
     json_string = response.content.strip().strip("```").strip("json")

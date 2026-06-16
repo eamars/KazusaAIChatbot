@@ -16,6 +16,7 @@ from pymongo.errors import PyMongoError
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
 from kazusa_ai_chatbot.db import close_db, get_character_profile
 from kazusa_ai_chatbot.cognition_chain_core.stages import l2d as l2d
+from kazusa_ai_chatbot.cognition_chain_core.contracts import LLMStageBinding
 from kazusa_ai_chatbot.cognition_chain_core.stages.l2d import (
     build_action_selection_payload_text,
     select_semantic_actions,
@@ -79,9 +80,13 @@ async def test_l2d_live_case_against_frozen_upstream(
     frozen_state = case["frozen_l2d_state"]
     prompt_payload = build_action_selection_payload_text(frozen_state)
 
-    action_selection_llm = build_cognition_chain_services().action_selection_llm
-    capturing_llm = _CapturingLLM(action_selection_llm)
-    monkeypatch.setattr(l2d, "_action_selection_llm", capturing_llm)
+    services = build_cognition_chain_services()
+    capturing_llm = _CapturingLLM(services.llm)
+    monkeypatch.setattr(
+        l2d,
+        "_action_selection_llm",
+        LLMStageBinding(capturing_llm, services.action_selection_config),
+    )
     result = await select_semantic_actions(frozen_state)
     raw_output = capturing_llm.raw_output
     raw_parsed_output = parse_llm_json_output(raw_output)
@@ -322,10 +327,10 @@ class _CapturingLLM:
         self._inner_llm = inner_llm
         self.raw_output = ""
 
-    async def ainvoke(self, messages: object) -> object:
+    async def ainvoke(self, messages: object, *, config=None) -> object:
         """Call the wrapped LLM and store the raw message content."""
 
-        response = await self._inner_llm.ainvoke(messages)
+        response = await self._inner_llm.ainvoke(messages, config=config)
         self.raw_output = str(response.content)
         return_value = response
         return return_value

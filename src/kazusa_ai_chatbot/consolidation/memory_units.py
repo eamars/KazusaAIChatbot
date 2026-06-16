@@ -9,9 +9,12 @@ from uuid import uuid4
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.config import (
+
     CONSOLIDATION_LLM_API_KEY,
     CONSOLIDATION_LLM_BASE_URL,
     CONSOLIDATION_LLM_MODEL,
+    CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    CONSOLIDATION_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.calendar_scheduler import repository as calendar_repository
 from kazusa_ai_chatbot.calendar_scheduler.handlers import (
@@ -41,9 +44,14 @@ from kazusa_ai_chatbot.time_boundary import (
     format_storage_utc_for_llm,
     local_llm_datetime_to_storage_utc_iso,
 )
-from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output, text_or_empty
+from kazusa_ai_chatbot.utils import parse_llm_json_output, text_or_empty
 
 
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 MAX_MEMORY_UNIT_CANDIDATES_PER_TURN = 3
 MAX_MEMORY_UNIT_MERGE_CANDIDATES = 6
 
@@ -621,12 +629,25 @@ human payload 是以下 JSON：
     ]
 }}
 '''
-_extractor_llm = get_llm(
-    temperature=0.2,
-    top_p=0.9,
-    model=CONSOLIDATION_LLM_MODEL,
+_llm_interface = LLInterface()
+_extractor_llm = LLInterface()
+_merge_judge_llm = LLInterface()
+_rewrite_llm = LLInterface()
+_stability_llm = LLInterface()
+_extractor_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="CONSOLIDATION_LLM",
     base_url=CONSOLIDATION_LLM_BASE_URL,
     api_key=CONSOLIDATION_LLM_API_KEY,
+    model=CONSOLIDATION_LLM_MODEL,
+    temperature=0.2,
+    top_p=0.9,
+    top_k=None,
+    max_completion_tokens=CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=CONSOLIDATION_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -654,7 +675,7 @@ async def extract_memory_unit_candidates(state: ConsolidatorState) -> list[dict]
     response = await _extractor_llm.ainvoke([
         system_prompt,
         human_message,
-    ])
+    ], config=_extractor_llm_config)
     result = parse_llm_json_output(response.content)
     candidates = _valid_candidates(result)
     return candidates
@@ -722,12 +743,20 @@ Return only valid JSON:
     "reason": "short semantic reason"
 }
 """
-_merge_judge_llm = get_llm(
-    temperature=0.2,
-    top_p=0.9,
-    model=CONSOLIDATION_LLM_MODEL,
+_merge_judge_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="CONSOLIDATION_LLM",
     base_url=CONSOLIDATION_LLM_BASE_URL,
     api_key=CONSOLIDATION_LLM_API_KEY,
+    model=CONSOLIDATION_LLM_MODEL,
+    temperature=0.2,
+    top_p=0.9,
+    top_k=None,
+    max_completion_tokens=CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=CONSOLIDATION_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -753,7 +782,7 @@ async def _judge_memory_unit_merge(candidate: dict, candidate_clusters: list[dic
     response = await _merge_judge_llm.ainvoke([
         system_prompt,
         human_message,
-    ])
+    ], config=_merge_judge_llm_config)
     result = parse_llm_json_output(response.content)
     merge_result = _validate_merge_result(result, candidate, candidate_clusters)
     return merge_result
@@ -832,12 +861,20 @@ Return only valid JSON:
     "relationship_signal": "updated future interaction signal"
 }}
 """
-_rewrite_llm = get_llm(
-    temperature=0.2,
-    top_p=0.9,
-    model=CONSOLIDATION_LLM_MODEL,
+_rewrite_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="CONSOLIDATION_LLM",
     base_url=CONSOLIDATION_LLM_BASE_URL,
     api_key=CONSOLIDATION_LLM_API_KEY,
+    model=CONSOLIDATION_LLM_MODEL,
+    temperature=0.2,
+    top_p=0.9,
+    top_k=None,
+    max_completion_tokens=CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=CONSOLIDATION_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -874,7 +911,7 @@ async def _rewrite_memory_unit(
     response = await _rewrite_llm.ainvoke([
         system_prompt,
         human_message,
-    ])
+    ], config=_rewrite_llm_config)
     result = parse_llm_json_output(response.content)
     rewrite_result = _validate_rewrite_result(result)
     return rewrite_result
@@ -951,12 +988,20 @@ Return only valid JSON:
     "reason": "short semantic reason"
 }
 """
-_stability_llm = get_llm(
-    temperature=0.2,
-    top_p=0.9,
-    model=CONSOLIDATION_LLM_MODEL,
+_stability_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="CONSOLIDATION_LLM",
     base_url=CONSOLIDATION_LLM_BASE_URL,
     api_key=CONSOLIDATION_LLM_API_KEY,
+    model=CONSOLIDATION_LLM_MODEL,
+    temperature=0.2,
+    top_p=0.9,
+    top_k=None,
+    max_completion_tokens=CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=CONSOLIDATION_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -993,7 +1038,7 @@ async def _judge_memory_unit_stability(
     response = await _stability_llm.ainvoke([
         system_prompt,
         human_message,
-    ])
+    ], config=_stability_llm_config)
     result = parse_llm_json_output(response.content)
     stability_result = _validate_stability_result(result, unit_id)
     return stability_result

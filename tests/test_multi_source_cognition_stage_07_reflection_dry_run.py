@@ -33,6 +33,7 @@ from kazusa_ai_chatbot.reflection_cycle.cognition_dry_run import (
     run_reflection_cognition_dry_run,
 )
 from kazusa_ai_chatbot.reflection_cycle import cognition_dry_run as dry_run_module
+from llm_test_helpers import bind_test_llm, make_llm_call_config
 
 
 _APPROVED_STAGES: tuple[CognitionPromptStage, ...] = (
@@ -145,7 +146,7 @@ class _CapturingAsyncLLM:
         self.payload = payload
         self.messages: list[Any] = []
 
-    async def ainvoke(self, messages: list[Any]) -> _DummyResponse:
+    async def ainvoke(self, messages: list[Any], *, config=None) -> _DummyResponse:
         """Record prompt messages and return the configured payload.
 
         Args:
@@ -163,8 +164,10 @@ class _CapturingAsyncLLM:
 _COGNITION_LLM_DISPATCH_MAP = {
     "的潜意识层": "_subconscious_llm",
     "的意识层": "_conscious_llm",
+    "边界感知层": "_boundary_core_llm",
     "的裁决核心": "_judgement_core_llm",
     "的社交观察脑": "_contextual_agent_llm",
+    "语义行动路由层": "_action_selection_llm",
 }
 
 
@@ -175,7 +178,7 @@ class _DispatchingAsyncLLM:
         self.stage_llms = stage_llms
         self._model_key = ("fake", "dispatching")
 
-    async def ainvoke(self, messages: list[Any]) -> _DummyResponse:
+    async def ainvoke(self, messages: list[Any], *, config=None) -> _DummyResponse:
         system_text = messages[0].content if messages else ""
         for marker, llm_name in _COGNITION_LLM_DISPATCH_MAP.items():
             if marker in system_text:
@@ -515,32 +518,32 @@ def _patch_cognition_llms(
         llm_name: _CapturingAsyncLLM(payload)
         for llm_name, payload in payloads.items()
     }
-    monkeypatch.setattr(l1_module, "_subconscious_llm", llms["_subconscious_llm"])
-    monkeypatch.setattr(l2_module, "_conscious_llm", llms["_conscious_llm"])
-    monkeypatch.setattr(l2_module, "_boundary_core_llm", llms["_boundary_core_llm"])
-    monkeypatch.setattr(l2_module, "_judgement_core_llm", llms["_judgement_core_llm"])
+    monkeypatch.setattr(l1_module, "_subconscious_llm", bind_test_llm(llms["_subconscious_llm"], "subconscious_llm"))
+    monkeypatch.setattr(l2_module, "_conscious_llm", bind_test_llm(llms["_conscious_llm"], "conscious_llm"))
+    monkeypatch.setattr(l2_module, "_boundary_core_llm", bind_test_llm(llms["_boundary_core_llm"], "boundary_core_llm"))
+    monkeypatch.setattr(l2_module, "_judgement_core_llm", bind_test_llm(llms["_judgement_core_llm"], "judgement_core_llm"))
     monkeypatch.setattr(
         l2d_module,
         "_action_selection_llm",
-        llms["_action_selection_llm"],
+        bind_test_llm(llms["_action_selection_llm"], "action_selection_llm"),
     )
     monkeypatch.setattr(
         l2c2_module,
         "_contextual_agent_llm",
-        llms["_contextual_agent_llm"],
+        bind_test_llm(llms["_contextual_agent_llm"], "contextual_agent_llm"),
     )
-    monkeypatch.setattr(l3_module, "_style_agent_llm", llms["_style_agent_llm"])
+    monkeypatch.setattr(l3_module, "_style_agent_llm", bind_test_llm(llms["_style_agent_llm"], "style_agent_llm"))
     monkeypatch.setattr(
         l3_module,
         "_content_plan_agent_llm",
-        llms["_content_plan_agent_llm"],
+        bind_test_llm(llms["_content_plan_agent_llm"], "content_plan_agent_llm"),
     )
     monkeypatch.setattr(
         l3_module,
         "_preference_adapter_llm",
-        llms["_preference_adapter_llm"],
+        bind_test_llm(llms["_preference_adapter_llm"], "preference_adapter_llm"),
     )
-    monkeypatch.setattr(l3_module, "_visual_agent_llm", llms["_visual_agent_llm"])
+    monkeypatch.setattr(l3_module, "_visual_agent_llm", bind_test_llm(llms["_visual_agent_llm"], "visual_agent_llm"))
 
     from kazusa_ai_chatbot.cognition_chain_core.contracts import (
         CognitionChainServices,
@@ -550,17 +553,20 @@ def _patch_cognition_llms(
     cognition_dispatch = _DispatchingAsyncLLM({
         "_subconscious_llm": llms["_subconscious_llm"],
         "_conscious_llm": llms["_conscious_llm"],
+        "_boundary_core_llm": llms["_boundary_core_llm"],
         "_judgement_core_llm": llms["_judgement_core_llm"],
+        "_action_selection_llm": llms["_action_selection_llm"],
         "_contextual_agent_llm": llms["_contextual_agent_llm"],
     })
     fake_services = CognitionChainServices(
-        cognition_llm=cognition_dispatch,
-        boundary_core_llm=llms["_boundary_core_llm"],
-        action_selection_llm=llms["_action_selection_llm"],
-        style_llm=llms["_style_agent_llm"],
-        content_plan_llm=llms["_content_plan_agent_llm"],
-        preference_llm=llms["_preference_adapter_llm"],
-        visual_llm=llms["_visual_agent_llm"],
+        llm=cognition_dispatch,
+        cognition_config=make_llm_call_config("cognition"),
+        boundary_core_config=make_llm_call_config("boundary_core"),
+        action_selection_config=make_llm_call_config("action_selection"),
+        style_config=make_llm_call_config("style_agent"),
+        content_plan_config=make_llm_call_config("content_plan_agent"),
+        preference_config=make_llm_call_config("preference_adapter"),
+        visual_config=make_llm_call_config("visual_agent"),
         parse_json=parse_llm_json_output,
         logger=logging.getLogger(__name__),
     )

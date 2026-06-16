@@ -382,7 +382,7 @@ async def test_memory_evidence_selector_uses_current_user_scope_from_query(
     selector_calls: list[list[object]] = []
 
     class _SelectorLLM:
-        async def ainvoke(self, messages: list[object]) -> SimpleNamespace:
+        async def ainvoke(self, messages: list[object], *, config=None) -> SimpleNamespace:
             selector_calls.append(messages)
             response = SimpleNamespace(
                 content=(
@@ -1732,7 +1732,7 @@ async def test_conversation_evidence_current_user_scope_ignores_selector_person_
     class _FakeSelectorLLM:
         """Selector test double that returns the observed bad dependency flag."""
 
-        async def ainvoke(self, _messages: list) -> SimpleNamespace:
+        async def ainvoke(self, _messages: list, *, config=None) -> SimpleNamespace:
             """Return a valid selector payload with a bad person-ref requirement."""
             return_value = SimpleNamespace(
                 content=(
@@ -2667,7 +2667,7 @@ async def test_memory_evidence_selector_can_route_user_preference_slot(
     selector_calls: list[list[object]] = []
 
     class _SelectorLLM:
-        async def ainvoke(self, messages: list[object]) -> SimpleNamespace:
+        async def ainvoke(self, messages: list[object], *, config=None) -> SimpleNamespace:
             selector_calls.append(messages)
             response = SimpleNamespace(
                 content=(
@@ -2734,7 +2734,7 @@ async def test_memory_evidence_selector_can_route_user_promise_slot(
     selector_calls: list[list[object]] = []
 
     class _SelectorLLM:
-        async def ainvoke(self, messages: list[object]) -> SimpleNamespace:
+        async def ainvoke(self, messages: list[object], *, config=None) -> SimpleNamespace:
             selector_calls.append(messages)
             response = SimpleNamespace(
                 content=(
@@ -2800,7 +2800,7 @@ async def test_memory_evidence_selector_can_route_user_consideration_slot(
     selector_calls: list[list[object]] = []
 
     class _SelectorLLM:
-        async def ainvoke(self, messages: list[object]) -> SimpleNamespace:
+        async def ainvoke(self, messages: list[object], *, config=None) -> SimpleNamespace:
             selector_calls.append(messages)
             response = SimpleNamespace(
                 content=(
@@ -2866,7 +2866,7 @@ async def test_memory_evidence_unclear_slot_with_query_uses_selector(
     selector_calls: list[list[object]] = []
 
     class _SelectorLLM:
-        async def ainvoke(self, messages: list[object]) -> SimpleNamespace:
+        async def ainvoke(self, messages: list[object], *, config=None) -> SimpleNamespace:
             selector_calls.append(messages)
             response = SimpleNamespace(
                 content=(
@@ -3128,7 +3128,7 @@ async def test_memory_evidence_old_setting_slot_uses_selector_context(
     selector_calls: list[list[object]] = []
 
     class _SelectorLLM:
-        async def ainvoke(self, messages: list[object]) -> SimpleNamespace:
+        async def ainvoke(self, messages: list[object], *, config=None) -> SimpleNamespace:
             selector_calls.append(messages)
             response = SimpleNamespace(
                 content=(

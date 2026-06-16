@@ -9,14 +9,22 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.config import (
+
     CONSOLIDATION_LLM_API_KEY,
     CONSOLIDATION_LLM_BASE_URL,
     CONSOLIDATION_LLM_MODEL,
+    CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    CONSOLIDATION_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.global_character_growth.models import CandidatePromptPayload
-from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output
+from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 GLOBAL_CHARACTER_GROWTH_CANDIDATE_PROMPT = '''\
 你现在负责评估 {character_name} 的长期全局人格成长。你不扮演任何人、不替用户说话、不生成聊天回复。你的任务是在已经晋升的反思记忆中，识别真正可长期影响互动姿态的稳定成长候选。
 
@@ -116,12 +124,22 @@ class CandidatePromptBuildResult:
     human_prompt: str
 
 
-_global_growth_candidate_llm = get_llm(
-    temperature=0.2,
-    top_p=0.8,
-    model=CONSOLIDATION_LLM_MODEL,
+_llm_interface = LLInterface()
+_global_growth_candidate_llm = LLInterface()
+_global_growth_candidate_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="CONSOLIDATION_LLM",
     base_url=CONSOLIDATION_LLM_BASE_URL,
     api_key=CONSOLIDATION_LLM_API_KEY,
+    model=CONSOLIDATION_LLM_MODEL,
+    temperature=0.2,
+    top_p=0.8,
+    top_k=None,
+    max_completion_tokens=CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=CONSOLIDATION_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -179,7 +197,7 @@ async def generate_growth_candidates(
     response = await _global_growth_candidate_llm.ainvoke([
         SystemMessage(content=prompt.system_prompt),
         HumanMessage(content=prompt.human_prompt),
-    ])
+    ], config=_global_growth_candidate_llm_config)
     raw_output = str(response.content)
     parsed = parse_llm_json_output(raw_output)
     if not isinstance(parsed, dict):

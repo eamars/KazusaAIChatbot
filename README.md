@@ -86,6 +86,7 @@ HOWTO. One working-style configuration looks like this:
 | `COGNITION_LLM`            | `local-model`                            | `http://localhost:1234/v1` |
 | `BOUNDARY_CORE_LLM`        | `local-model`                            | `http://localhost:1234/v1` |
 | `BACKGROUND_ARTIFACT_LLM`  | `local-model`                            | `http://localhost:1234/v1` |
+| `BACKGROUND_WORK_LLM`      | `local-model`                            | `http://localhost:1234/v1` |
 | `DIALOG_GENERATOR_LLM`     | `deepseek-v4-flash`                      | `https://api.deepseek.com` |
 | `DIALOG_EVALUATOR_LLM`     | `local-model`                            | `http://localhost:1234/v1` |
 | `CONSOLIDATION_LLM`        | `local-model`                            | `http://localhost:1234/v1` |
@@ -95,6 +96,15 @@ HOWTO. One working-style configuration looks like this:
 The table is an example, not a fixed requirement. Any route can point to any
 OpenAI-compatible endpoint that can satisfy that stage's latency and quality
 needs.
+
+Chat LLM calls are routed through `LLInterface`. Each module owns its route,
+model, generation budget, and thinking toggle via `LLMCallConfig`; the
+interface owns backend detection, provider sessions, request mapping, response
+normalization, and reload retry. Public token budget config uses
+`max_completion_tokens`. Thinking is disabled by default and only emits a
+Gemma 4 thinking payload when the normalized model name supports it. The
+runtime contract is documented in the
+[LLM Interface ICD](src/kazusa_ai_chatbot/llm_interface/README.md).
 
 Tested chat model families:
 
@@ -253,6 +263,7 @@ cognition, and calendar scheduling remain in the platform-neutral core.
 | Adapters                 | Discord, NapCat QQ, debug UI transport and platform rendering                           | [HOWTO](docs/HOWTO.md)                                                                 |
 | Brain service            | HTTP API, queue, graph startup, health, delivery receipts, runtime adapter registration | [Brain Service ICD](src/kazusa_ai_chatbot/brain_service/README.md)                     |
 | Message envelope         | Typed inbound content, mentions, replies, attachments, addressees, broadcast state      | [Message Envelope ICD](src/kazusa_ai_chatbot/message_envelope/README.md)               |
+| LLM interface            | Backend-compatible chat LLM invocation, provider sessions, diagnostics, and reload retry | [LLM Interface ICD](src/kazusa_ai_chatbot/llm_interface/README.md)                    |
 | Conversation progress    | Short-term episode state used by cognition to avoid loops and stale reopenings          | [Conversation Progress](src/kazusa_ai_chatbot/conversation_progress/README.md)         |
 | Internal monologue residue | Short-lived private first-person residue loaded only into L2a cognition               | [Internal Monologue Residue ICD](src/kazusa_ai_chatbot/internal_monologue_residue/README.md) |
 | Cognition resolver       | Bounded recurrence state, capability observations, HIL/pending resume, and cycle traces | [Cognition Resolver ICD](src/kazusa_ai_chatbot/cognition_resolver/README.md)            |
@@ -318,6 +329,7 @@ src/
   kazusa_ai_chatbot/
     brain_service/             Service API, graph, intake, health, post-turn glue
     message_envelope/          Typed adapter-to-brain message contract
+    llm_interface/             Chat LLM invocation compatibility layer and ICD
     cognition_resolver/        Bounded resolver loop, capability observations, HIL state
     nodes/                     Persona, cognition, and dialog stages
     action_spec/               Modality-neutral action contracts, registry, results
@@ -373,6 +385,7 @@ permissioned preview contracts rather than production sends.
 | [docs/HOWTO.md](docs/HOWTO.md)                                           | Local setup, environment variables, run commands, adapters, tests |
 | [Brain Service ICD](src/kazusa_ai_chatbot/brain_service/README.md)       | HTTP endpoint contracts and adapter obligations                   |
 | [Message Envelope ICD](src/kazusa_ai_chatbot/message_envelope/README.md) | Typed inbound message contract                                    |
+| [LLM Interface ICD](src/kazusa_ai_chatbot/llm_interface/README.md)       | Chat model invocation, provider compatibility, and route diagnostics |
 | [Database ICD](src/kazusa_ai_chatbot/db/README.md)                       | Persistence ownership and collection contracts                    |
 | [Internal Monologue Residue ICD](src/kazusa_ai_chatbot/internal_monologue_residue/README.md) | Short-lived private residue lifecycle and L2a-only contract |
 | [Action Spec](src/kazusa_ai_chatbot/action_spec/README.md)               | Modality-neutral action contracts and trace handoff               |

@@ -35,7 +35,7 @@ class _CaptureLLM:
         self.payload = payload
         self.messages: list[Any] = []
 
-    async def ainvoke(self, messages: list[Any]) -> SimpleNamespace:
+    async def ainvoke(self, messages: list[Any], *, config=None) -> SimpleNamespace:
         """Capture messages and return the configured response.
 
         Args:

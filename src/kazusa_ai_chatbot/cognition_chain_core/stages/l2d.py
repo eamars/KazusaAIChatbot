@@ -8,8 +8,8 @@ from contextvars import ContextVar, Token
 from typing import Any
 
 from kazusa_ai_chatbot.cognition_chain_core.contracts import (
-    AsyncChatModel,
-    require_injected_llm,
+    LLMStageBinding,
+    require_llm_binding,
 )
 from kazusa_ai_chatbot.cognition_chain_core.action_selection import (
     ACTION_REQUEST_CAP,
@@ -34,23 +34,23 @@ logger = logging.getLogger(__name__)
 
 SPEAK_CAPABILITY = "speak"
 
-_action_selection_llm: AsyncChatModel | None = None
-_action_selection_llm_context: ContextVar[AsyncChatModel | None] = ContextVar(
+_action_selection_llm: LLMStageBinding | None = None
+_action_selection_llm_context: ContextVar[LLMStageBinding | None] = ContextVar(
     "action_selection_llm",
     default=None,
 )
 
 
 def set_action_selection_llm(
-    llm: AsyncChatModel | None,
-) -> Token[AsyncChatModel | None]:
+    llm: LLMStageBinding | None,
+) -> Token[LLMStageBinding | None]:
     """Bind the action-selection model for the current run context."""
 
     token = _action_selection_llm_context.set(llm)
     return token
 
 
-def reset_action_selection_llm(token: Token[AsyncChatModel | None]) -> None:
+def reset_action_selection_llm(token: Token[LLMStageBinding | None]) -> None:
     """Restore the previous action-selection model binding for this context."""
 
     _action_selection_llm_context.reset(token)
@@ -59,11 +59,15 @@ def reset_action_selection_llm(token: Token[AsyncChatModel | None]) -> None:
 async def select_semantic_actions(state: dict[str, Any]) -> dict[str, Any]:
     """Run L2d and return semantic route requests without materialization."""
 
-    llm = require_injected_llm(
+    llm = require_llm_binding(
         _action_selection_llm_context.get() or _action_selection_llm,
         "action_selection_llm",
     )
-    parsed = await route_action_requests(llm, state)
+    parsed = await route_action_requests(
+        llm.llm,
+        state,
+        config=llm.config,
+    )
     resolver_capability_requests = _normalize_resolver_capability_requests(
         parsed,
         state,

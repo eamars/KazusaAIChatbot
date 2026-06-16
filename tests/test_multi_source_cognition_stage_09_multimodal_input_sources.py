@@ -40,6 +40,7 @@ from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
     empty_user_memory_context,
 )
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
+from llm_test_helpers import bind_test_llm
 
 
 _APPROVED_STAGES: tuple[CognitionPromptStage, ...] = (
@@ -799,7 +800,7 @@ async def test_l2a_multimodal_user_turn_keeps_promoted_reflection_context(
     }))
     conscious_llm = AsyncMock()
     conscious_llm.ainvoke = AsyncMock(return_value=response)
-    monkeypatch.setattr(l2_module, "_conscious_llm", conscious_llm)
+    monkeypatch.setattr(l2_module, "_conscious_llm", bind_test_llm(conscious_llm, "conscious_llm"))
 
     await l2_module.call_cognition_consciousness(state)
 

@@ -45,9 +45,9 @@ class _CapturingLiveLLM:
         self.messages = []
         self.raw_content = ''
 
-    async def ainvoke(self, messages):
+    async def ainvoke(self, messages, *, config=None):
         self.messages = messages
-        response = await self.inner_llm.ainvoke(messages)
+        response = await self.inner_llm.ainvoke(messages, config=config)
         self.raw_content = str(response.content)
         return response
 

@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from kazusa_ai_chatbot.config import (
+
     BOUNDARY_CORE_LLM_API_KEY,
     BOUNDARY_CORE_LLM_BASE_URL,
     BOUNDARY_CORE_LLM_MODEL,
@@ -15,6 +16,10 @@ from kazusa_ai_chatbot.config import (
     COGNITION_LLM_API_KEY,
     COGNITION_LLM_BASE_URL,
     COGNITION_LLM_MODEL,
+    BOUNDARY_CORE_LLM_MAX_COMPLETION_TOKENS,
+    BOUNDARY_CORE_LLM_THINKING_ENABLED,
+    COGNITION_LLM_MAX_COMPLETION_TOKENS,
+    COGNITION_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.action_spec.registry import (
     BACKGROUND_WORK_REQUEST_CAPABILITY,
@@ -54,11 +59,15 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import (
 )
 from kazusa_ai_chatbot.utils import (
     build_interaction_history_recent,
-    get_llm,
     log_preview,
     parse_llm_json_output,
 )
 
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 logger = logging.getLogger(__name__)
 
 _CORE_FORBIDDEN_FIELD_NAMES = frozenset((
@@ -81,19 +90,36 @@ _CORE_FORBIDDEN_FIELD_NAMES = frozenset((
     "worker",
 ))
 
-_cognition_llm = get_llm(
-    temperature=0.1,
-    top_p=0.7,
-    model=COGNITION_LLM_MODEL,
+_llm_interface = LLInterface()
+_cognition_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="COGNITION_LLM",
     base_url=COGNITION_LLM_BASE_URL,
     api_key=COGNITION_LLM_API_KEY,
-)
-_boundary_core_llm = get_llm(
+    model=COGNITION_LLM_MODEL,
     temperature=0.1,
     top_p=0.7,
-    model=BOUNDARY_CORE_LLM_MODEL,
+    top_k=None,
+    max_completion_tokens=COGNITION_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=COGNITION_LLM_THINKING_ENABLED,
+    ),
+)
+_boundary_core_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="BOUNDARY_CORE_LLM",
     base_url=BOUNDARY_CORE_LLM_BASE_URL,
     api_key=BOUNDARY_CORE_LLM_API_KEY,
+    model=BOUNDARY_CORE_LLM_MODEL,
+    temperature=0.1,
+    top_p=0.7,
+    top_k=None,
+    max_completion_tokens=BOUNDARY_CORE_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=BOUNDARY_CORE_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -345,17 +371,39 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
     return update
 
 
+async def call_group_engagement_action_context_loader(
+    state: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Load prompt-safe group engagement context for group self-cognition."""
+
+    if not _is_group_self_cognition_state(state):
+        return {}
+
+    group_engagement_context = await build_group_engagement_action_context(
+        channel_type=state["channel_type"],
+        platform=state["platform"],
+        platform_channel_id=state["platform_channel_id"],
+    )
+    output = {
+        "group_engagement_action_context": _prompt_safe_mapping(
+            group_engagement_context
+        ),
+    }
+    return output
+
+
 def build_cognition_chain_services() -> CognitionChainServices:
     """Build injected services for the reusable core."""
 
     services = CognitionChainServices(
-        cognition_llm=_cognition_llm,
-        boundary_core_llm=_boundary_core_llm,
-        action_selection_llm=_cognition_llm,
-        style_llm=_cognition_llm,
-        content_plan_llm=_cognition_llm,
-        preference_llm=_cognition_llm,
-        visual_llm=_cognition_llm,
+        llm=_llm_interface,
+        cognition_config=_cognition_llm_config,
+        boundary_core_config=_boundary_core_llm_config,
+        action_selection_config=_cognition_llm_config,
+        style_config=_cognition_llm_config,
+        content_plan_config=_cognition_llm_config,
+        preference_config=_cognition_llm_config,
+        visual_config=_cognition_llm_config,
         parse_json=parse_llm_json_output,
         logger=logger,
     )

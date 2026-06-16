@@ -15,10 +15,19 @@ from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episod
 from kazusa_ai_chatbot.config import (
     COGNITION_LLM_API_KEY,
     COGNITION_LLM_BASE_URL,
+    COGNITION_LLM_MAX_COMPLETION_TOKENS,
     COGNITION_LLM_MODEL,
+    COGNITION_LLM_THINKING_ENABLED,
     VISION_DESCRIPTOR_LLM_API_KEY,
     VISION_DESCRIPTOR_LLM_BASE_URL,
+    VISION_DESCRIPTOR_LLM_MAX_COMPLETION_TOKENS,
     VISION_DESCRIPTOR_LLM_MODEL,
+    VISION_DESCRIPTOR_LLM_THINKING_ENABLED,
+)
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
 )
 from kazusa_ai_chatbot.cognition_chain_core.stages.l1 import (
     _COGNITION_SUBCONSCIOUS_PROMPT,
@@ -44,7 +53,6 @@ from kazusa_ai_chatbot.nodes.referent_resolution import normalize_referents
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 from kazusa_ai_chatbot.utils import (
     build_affinity_block,
-    get_llm,
     load_personality,
     parse_llm_json_output,
 )
@@ -66,6 +74,51 @@ _REQUIRED_FIELDS = (
     "visual_facts_used",
     "answer",
     "drift_risk",
+)
+
+_llm_interface = LLInterface()
+
+
+def _live_llm_config(
+    *,
+    stage_name: str,
+    route_name: str,
+    base_url: str,
+    api_key: str,
+    model: str,
+    max_completion_tokens: int,
+    thinking_enabled: bool,
+    temperature: float = 0.0,
+    top_p: float = 1.0,
+) -> LLMCallConfig:
+    """Build explicit live-test LLM config for one route."""
+
+    config = LLMCallConfig(
+        stage_name=stage_name,
+        route_name=route_name,
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        temperature=temperature,
+        top_p=top_p,
+        top_k=None,
+        max_completion_tokens=max_completion_tokens,
+        presence_penalty=None,
+        thinking=LLMThinkingConfig(enabled=thinking_enabled),
+    )
+    return config
+
+
+_DIRECT_LAYER_LLM_CONFIG = _live_llm_config(
+    stage_name="tests.image_cognition.direct_layer",
+    route_name="COGNITION_LLM",
+    base_url=COGNITION_LLM_BASE_URL,
+    api_key=COGNITION_LLM_API_KEY,
+    model=COGNITION_LLM_MODEL,
+    max_completion_tokens=COGNITION_LLM_MAX_COMPLETION_TOKENS,
+    thinking_enabled=COGNITION_LLM_THINKING_ENABLED,
+    temperature=0.3,
+    top_p=0.85,
 )
 _CASES = {
     "desk_pointing": {
@@ -459,22 +512,27 @@ async def _run_structured_descriptor(image_path: Path) -> dict[str, Any]:
         Descriptor object and raw model response.
     """
 
-    descriptor_llm = get_llm(
-        temperature=0,
-        top_p=1.0,
-        model=VISION_DESCRIPTOR_LLM_MODEL,
+    descriptor_config = _live_llm_config(
+        stage_name="tests.image_cognition.structured_descriptor",
+        route_name="VISION_DESCRIPTOR_LLM",
         base_url=VISION_DESCRIPTOR_LLM_BASE_URL,
         api_key=VISION_DESCRIPTOR_LLM_API_KEY,
+        model=VISION_DESCRIPTOR_LLM_MODEL,
+        max_completion_tokens=VISION_DESCRIPTOR_LLM_MAX_COMPLETION_TOKENS,
+        thinking_enabled=VISION_DESCRIPTOR_LLM_THINKING_ENABLED,
     )
-    descriptor_response = await descriptor_llm.ainvoke([
-        SystemMessage(content=_STRUCTURED_DESCRIPTOR_PROMPT),
-        HumanMessage(content=[
-            {
-                "type": "image_url",
-                "image_url": {"url": _image_data_uri(image_path)},
-            },
-        ]),
-    ])
+    descriptor_response = await _llm_interface.ainvoke(
+        [
+            SystemMessage(content=_STRUCTURED_DESCRIPTOR_PROMPT),
+            HumanMessage(content=[
+                {
+                    "type": "image_url",
+                    "image_url": {"url": _image_data_uri(image_path)},
+                },
+            ]),
+        ],
+        config=descriptor_config,
+    )
     descriptor = _parse_json_response(str(descriptor_response.content))
     result = {
         "descriptor": descriptor,
@@ -501,21 +559,26 @@ async def _run_option_b(
     descriptor_result = await _run_structured_descriptor(image_path)
     descriptor = descriptor_result["descriptor"]
 
-    cognition_llm = get_llm(
-        temperature=0,
-        top_p=1.0,
-        model=COGNITION_LLM_MODEL,
+    cognition_config = _live_llm_config(
+        stage_name="tests.image_cognition.option_b",
+        route_name="COGNITION_LLM",
         base_url=COGNITION_LLM_BASE_URL,
         api_key=COGNITION_LLM_API_KEY,
+        model=COGNITION_LLM_MODEL,
+        max_completion_tokens=COGNITION_LLM_MAX_COMPLETION_TOKENS,
+        thinking_enabled=COGNITION_LLM_THINKING_ENABLED,
     )
     cognition_input = {
         "user_message": user_message,
         "image_observation": descriptor,
     }
-    cognition_response = await cognition_llm.ainvoke([
-        SystemMessage(content=_TEXT_COGNITION_PROMPT),
-        HumanMessage(content=json.dumps(cognition_input, ensure_ascii=False)),
-    ])
+    cognition_response = await _llm_interface.ainvoke(
+        [
+            SystemMessage(content=_TEXT_COGNITION_PROMPT),
+            HumanMessage(content=json.dumps(cognition_input, ensure_ascii=False)),
+        ],
+        config=cognition_config,
+    )
     cognition = _parse_json_response(str(cognition_response.content))
     result = {
         "descriptor": descriptor,
@@ -541,26 +604,31 @@ async def _run_option_d(
         Parsed cognition output and raw response.
     """
 
-    cognition_llm = get_llm(
-        temperature=0,
-        top_p=1.0,
-        model=COGNITION_LLM_MODEL,
+    cognition_config = _live_llm_config(
+        stage_name="tests.image_cognition.option_d",
+        route_name="COGNITION_LLM",
         base_url=COGNITION_LLM_BASE_URL,
         api_key=COGNITION_LLM_API_KEY,
+        model=COGNITION_LLM_MODEL,
+        max_completion_tokens=COGNITION_LLM_MAX_COMPLETION_TOKENS,
+        thinking_enabled=COGNITION_LLM_THINKING_ENABLED,
     )
-    cognition_response = await cognition_llm.ainvoke([
-        SystemMessage(content=_DIRECT_IMAGE_COGNITION_PROMPT),
-        HumanMessage(content=[
-            {
-                "type": "text",
-                "text": user_message,
-            },
-            {
-                "type": "image_url",
-                "image_url": {"url": _image_data_uri(image_path)},
-            },
-        ]),
-    ])
+    cognition_response = await _llm_interface.ainvoke(
+        [
+            SystemMessage(content=_DIRECT_IMAGE_COGNITION_PROMPT),
+            HumanMessage(content=[
+                {
+                    "type": "text",
+                    "text": user_message,
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {"url": _image_data_uri(image_path)},
+                },
+            ]),
+        ],
+        config=cognition_config,
+    )
     cognition = _parse_json_response(str(cognition_response.content))
     result = {
         "cognition": cognition,
@@ -812,15 +880,6 @@ async def _run_production_layers_with_descriptor(
     return result
 
 
-_DIRECT_LAYER_LLM = get_llm(
-    temperature=0.3,
-    top_p=0.85,
-    model=COGNITION_LLM_MODEL,
-    base_url=COGNITION_LLM_BASE_URL,
-    api_key=COGNITION_LLM_API_KEY,
-)
-
-
 async def _direct_layer_invoke(
     *,
     system_prompt: str,
@@ -838,19 +897,22 @@ async def _direct_layer_invoke(
         Parsed JSON object returned by the cognition model.
     """
 
-    response = await _DIRECT_LAYER_LLM.ainvoke([
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=[
-            {
-                "type": "text",
-                "text": json.dumps(payload, ensure_ascii=False),
-            },
-            {
-                "type": "image_url",
-                "image_url": {"url": _image_data_uri(image_path)},
-            },
-        ]),
-    ])
+    response = await _llm_interface.ainvoke(
+        [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=[
+                {
+                    "type": "text",
+                    "text": json.dumps(payload, ensure_ascii=False),
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {"url": _image_data_uri(image_path)},
+                },
+            ]),
+        ],
+        config=_DIRECT_LAYER_LLM_CONFIG,
+    )
     parsed = _parse_json_response(str(response.content))
     return parsed
 
@@ -1009,12 +1071,14 @@ async def _judge_layer_outputs(
         Parsed judge output.
     """
 
-    judge_llm = get_llm(
-        temperature=0,
-        top_p=1.0,
-        model=COGNITION_LLM_MODEL,
+    judge_config = _live_llm_config(
+        stage_name="tests.image_cognition.layer_judge",
+        route_name="COGNITION_LLM",
         base_url=COGNITION_LLM_BASE_URL,
         api_key=COGNITION_LLM_API_KEY,
+        model=COGNITION_LLM_MODEL,
+        max_completion_tokens=COGNITION_LLM_MAX_COMPLETION_TOKENS,
+        thinking_enabled=COGNITION_LLM_THINKING_ENABLED,
     )
     judge_payload = {
         "case_id": case_id,
@@ -1022,10 +1086,13 @@ async def _judge_layer_outputs(
         "option_b": option_b,
         "option_d": option_d,
     }
-    response = await judge_llm.ainvoke([
-        SystemMessage(content=_COGNITION_LAYER_JUDGE_PROMPT),
-        HumanMessage(content=json.dumps(judge_payload, ensure_ascii=False)),
-    ])
+    response = await _llm_interface.ainvoke(
+        [
+            SystemMessage(content=_COGNITION_LAYER_JUDGE_PROMPT),
+            HumanMessage(content=json.dumps(judge_payload, ensure_ascii=False)),
+        ],
+        config=judge_config,
+    )
     judge = _parse_json_response(str(response.content))
     return judge
 
@@ -1053,12 +1120,14 @@ async def _judge_text_image_outputs(
         Parsed judge output.
     """
 
-    judge_llm = get_llm(
-        temperature=0,
-        top_p=1.0,
-        model=COGNITION_LLM_MODEL,
+    judge_config = _live_llm_config(
+        stage_name="tests.image_cognition.text_image_judge",
+        route_name="COGNITION_LLM",
         base_url=COGNITION_LLM_BASE_URL,
         api_key=COGNITION_LLM_API_KEY,
+        model=COGNITION_LLM_MODEL,
+        max_completion_tokens=COGNITION_LLM_MAX_COMPLETION_TOKENS,
+        thinking_enabled=COGNITION_LLM_THINKING_ENABLED,
     )
     judge_payload = {
         "case_id": case_id,
@@ -1068,10 +1137,13 @@ async def _judge_text_image_outputs(
         "option_b": option_b,
         "option_d": option_d,
     }
-    response = await judge_llm.ainvoke([
-        SystemMessage(content=_TEXT_IMAGE_LAYER_JUDGE_PROMPT),
-        HumanMessage(content=json.dumps(judge_payload, ensure_ascii=False)),
-    ])
+    response = await _llm_interface.ainvoke(
+        [
+            SystemMessage(content=_TEXT_IMAGE_LAYER_JUDGE_PROMPT),
+            HumanMessage(content=json.dumps(judge_payload, ensure_ascii=False)),
+        ],
+        config=judge_config,
+    )
     judge = _parse_json_response(str(response.content))
     return judge
 

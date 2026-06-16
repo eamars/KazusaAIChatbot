@@ -20,6 +20,8 @@ from kazusa_ai_chatbot.config import (
     WEB_SEARCH_LLM_API_KEY,
     WEB_SEARCH_LLM_BASE_URL,
     WEB_SEARCH_LLM_MODEL,
+    WEB_SEARCH_LLM_MAX_COMPLETION_TOKENS,
+    WEB_SEARCH_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.rag.helper_agent import BaseRAGHelperAgent
 from kazusa_ai_chatbot.rag.web_agent3.contracts import (
@@ -38,8 +40,13 @@ from kazusa_ai_chatbot.rag.web_agent3.subagent import (
     _SUBAGENT_DESCRIPTIONS,
     _SUBAGENT_NAMES,
 )
-from kazusa_ai_chatbot.utils import get_llm, parse_llm_json_output
+from kazusa_ai_chatbot.utils import parse_llm_json_output
 
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 logger = logging.getLogger(__name__)
 
 def _prompt_timestamp_for_llm(
@@ -205,12 +212,24 @@ _WEB_AGENT3_GENERATOR_PROMPT = '''\
     "query": "string"
 }}
 '''.format(source_tools=_WEB_AGENT3_SOURCE_TOOLS_TEXT)
-_generator_llm = get_llm(
-    temperature=0.3,
-    top_p=0.9,
-    model=WEB_SEARCH_LLM_MODEL,
+_llm_interface = LLInterface()
+_generator_llm = LLInterface()
+_evaluator_llm = LLInterface()
+_finalizer_llm = LLInterface()
+_generator_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="WEB_SEARCH_LLM",
     base_url=WEB_SEARCH_LLM_BASE_URL,
     api_key=WEB_SEARCH_LLM_API_KEY,
+    model=WEB_SEARCH_LLM_MODEL,
+    temperature=0.3,
+    top_p=0.9,
+    top_k=None,
+    max_completion_tokens=WEB_SEARCH_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=WEB_SEARCH_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -234,7 +253,7 @@ async def _tool_call_generator(state: WebAgent3State) -> dict[str, Any]:
     human_message = HumanMessage(
         content=json.dumps(router_input, ensure_ascii=False, default=str)
     )
-    response = await _generator_llm.ainvoke([system_prompt, human_message])
+    response = await _generator_llm.ainvoke([system_prompt, human_message], config=_generator_llm_config)
     raw_decision = parse_llm_json_output(response.content)
     decision = _normalize_router_decision(
         raw_decision,
@@ -315,12 +334,20 @@ _WEB_AGENT3_EVALUATOR_PROMPT = '''\
     "should_stop": true or false
 }
 '''
-_evaluator_llm = get_llm(
-    temperature=0.0,
-    top_p=1.0,
-    model=WEB_SEARCH_LLM_MODEL,
+_evaluator_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="WEB_SEARCH_LLM",
     base_url=WEB_SEARCH_LLM_BASE_URL,
     api_key=WEB_SEARCH_LLM_API_KEY,
+    model=WEB_SEARCH_LLM_MODEL,
+    temperature=0.0,
+    top_p=1.0,
+    top_k=None,
+    max_completion_tokens=WEB_SEARCH_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=WEB_SEARCH_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -343,7 +370,7 @@ async def _tool_call_evaluator(state: WebAgent3State) -> dict[str, Any]:
     response = await _evaluator_llm.ainvoke([
         SystemMessage(content=_WEB_AGENT3_EVALUATOR_PROMPT),
         HumanMessage(content=json.dumps(evaluation_input, ensure_ascii=False)),
-    ])
+    ], config=_evaluator_llm_config)
     result = parse_llm_json_output(response.content)
     should_stop = bool(result.get("should_stop", False))
     feedback = str(result.get("feedback", "")).strip()
@@ -402,12 +429,20 @@ _WEB_AGENT3_FINALIZER_PROMPT = '''\
     "is_empty_result": true or false
 }
 '''
-_finalizer_llm = get_llm(
-    temperature=0.0,
-    top_p=1.0,
-    model=WEB_SEARCH_LLM_MODEL,
+_finalizer_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="WEB_SEARCH_LLM",
     base_url=WEB_SEARCH_LLM_BASE_URL,
     api_key=WEB_SEARCH_LLM_API_KEY,
+    model=WEB_SEARCH_LLM_MODEL,
+    temperature=0.0,
+    top_p=1.0,
+    top_k=None,
+    max_completion_tokens=WEB_SEARCH_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=WEB_SEARCH_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -439,7 +474,7 @@ async def _tool_call_finalizer(state: WebAgent3State) -> dict[str, Any]:
     response = await _finalizer_llm.ainvoke([
         SystemMessage(content=_WEB_AGENT3_FINALIZER_PROMPT),
         HumanMessage(content=json.dumps(finalizer_input, ensure_ascii=False)),
-    ])
+    ], config=_finalizer_llm_config)
     result = parse_llm_json_output(response.content)
 
     raw_score = result.get("score", 0)

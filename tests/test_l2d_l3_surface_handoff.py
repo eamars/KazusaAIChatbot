@@ -21,8 +21,28 @@ from kazusa_ai_chatbot.nodes import persona_supervisor2 as persona_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface_module
 from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
+from llm_test_helpers import bind_test_llm
 
 RETIRED_L3_FIELD = "expression" + "_willingness"
+
+
+class _StaticContentPlanLLM:
+    """Return a fixed content-plan payload."""
+
+    def __init__(self, payload: dict) -> None:
+        self._payload = payload
+
+    async def ainvoke(
+        self,
+        _messages: list[object],
+        *,
+        config,
+    ) -> SimpleNamespace:
+        del config
+        response = SimpleNamespace(
+            content=json.dumps(self._payload, ensure_ascii=False),
+        )
+        return response
 
 
 def _time_context() -> dict:
@@ -1180,17 +1200,18 @@ async def test_l3_content_plan_receives_goal_progress_before_generation() -> Non
 async def test_l3_content_plan_logs_output(caplog) -> None:
     """Content-plan output should be visible in normal runtime logs."""
 
-    llm = AsyncMock()
-    llm.ainvoke.return_value = SimpleNamespace(
-        content=json.dumps({
+    llm = _StaticContentPlanLLM({
             "content_plan": {
                 "semantic_content": "Answer directly.",
                 "rendering": "One visible chat bubble; short.",
             },
-        }),
-    )
+    })
 
-    with patch.object(l3_module, "_content_plan_agent_llm", llm):
+    with patch.object(
+        l3_module,
+        "_content_plan_agent_llm",
+        bind_test_llm(llm, "content_plan_agent"),
+    ):
         caplog.set_level(logging.INFO, logger=l3_module.__name__)
         result = await l3_module.call_content_plan_agent(_cognition_state())
 

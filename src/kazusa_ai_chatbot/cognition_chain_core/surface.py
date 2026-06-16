@@ -11,6 +11,7 @@ from kazusa_ai_chatbot.cognition_chain_core.contracts import (
     CognitionChainServices,
     CognitionTextSurfaceInputV1,
     CognitionTextSurfaceOutputV1,
+    LLMStageBinding,
     validate_text_surface_input,
     validate_text_surface_output,
 )
@@ -107,14 +108,18 @@ def _inject_surface_services(
 
     service_bindings = [
         (reset_json_parser, set_json_parser(services.parse_json)),
-        (l3.reset_style_agent_llm, l3.set_style_agent_llm(services.style_llm)),
+        (l3.reset_style_agent_llm, l3.set_style_agent_llm(
+            LLMStageBinding(services.llm, services.style_config),
+        )),
         (l3.reset_content_plan_agent_llm, l3.set_content_plan_agent_llm(
-            services.content_plan_llm,
+            LLMStageBinding(services.llm, services.content_plan_config),
         )),
         (l3.reset_preference_adapter_llm, l3.set_preference_adapter_llm(
-            services.preference_llm,
+            LLMStageBinding(services.llm, services.preference_config),
         )),
-        (l3.reset_visual_agent_llm, l3.set_visual_agent_llm(services.visual_llm)),
+        (l3.reset_visual_agent_llm, l3.set_visual_agent_llm(
+            LLMStageBinding(services.llm, services.visual_config),
+        )),
     ]
     return service_bindings
 

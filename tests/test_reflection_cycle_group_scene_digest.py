@@ -293,7 +293,7 @@ async def test_build_group_scene_digest_invokes_llm_once(
     captured_messages: list[Any] = []
 
     class FakeDigestLLM:
-        async def ainvoke(self, messages: list[Any]) -> SimpleNamespace:
+        async def ainvoke(self, messages: list[Any], *, config=None) -> SimpleNamespace:
             captured_messages.extend(messages)
             response = SimpleNamespace(
                 content=(

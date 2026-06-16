@@ -13,11 +13,14 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot import db, event_logging
 from kazusa_ai_chatbot.config import (
+
     CHARACTER_GLOBAL_USER_ID,
     COGNITION_LLM_API_KEY,
     COGNITION_LLM_BASE_URL,
     COGNITION_LLM_MODEL,
     INTERNAL_MONOLOGUE_RESIDUE_ROW_CHAR_LIMIT,
+    COGNITION_LLM_MAX_COMPLETION_TOKENS,
+    COGNITION_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.db import DatabaseOperationError
 from kazusa_ai_chatbot.internal_monologue_residue.loader import (
@@ -33,8 +36,12 @@ from kazusa_ai_chatbot.internal_monologue_residue.models import (
     ResidueScopeKind,
     ResidueSourceKind,
 )
-from kazusa_ai_chatbot.utils import get_llm
 
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
 logger = logging.getLogger(__name__)
 
 MILLISECONDS_PER_SECOND = 1000
@@ -111,12 +118,22 @@ human payload 是以下 JSON：
   "residue_text": "第一人称简体中文短句；没有值得保留的内容时为空字符串"
 }}
 '''
-_recorder_llm = get_llm(
-    temperature=0.25,
-    top_p=0.8,
-    model=COGNITION_LLM_MODEL,
+_llm_interface = LLInterface()
+_recorder_llm = LLInterface()
+_recorder_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="COGNITION_LLM",
     base_url=COGNITION_LLM_BASE_URL,
     api_key=COGNITION_LLM_API_KEY,
+    model=COGNITION_LLM_MODEL,
+    temperature=0.25,
+    top_p=0.8,
+    top_k=None,
+    max_completion_tokens=COGNITION_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=COGNITION_LLM_THINKING_ENABLED,
+    ),
 )
 
 
@@ -373,7 +390,7 @@ async def _call_recorder(
     response = await _recorder_llm.ainvoke([
         SystemMessage(content=system_content),
         HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
-    ])
+    ], config=_recorder_llm_config)
     parsed = _parse_recorder_json(str(response.content))
     latency_ms = int(
         (time.perf_counter() - started_at) * MILLISECONDS_PER_SECOND

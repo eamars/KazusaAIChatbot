@@ -50,8 +50,8 @@ class _CapturingLiveLLM:
         self._wrapped_llm = wrapped_llm
         self._calls = calls
 
-    async def ainvoke(self, messages):
-        response = await self._wrapped_llm.ainvoke(messages)
+    async def ainvoke(self, messages, *, config=None):
+        response = await self._wrapped_llm.ainvoke(messages, config=config)
         self._calls.append({
             'stage': self._stage_name,
             'system_prompt_chars': len(messages[0].content),

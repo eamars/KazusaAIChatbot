@@ -31,6 +31,7 @@ from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
     empty_user_memory_context,
 )
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
+from llm_test_helpers import bind_test_llm
 
 
 FIXTURE_PATH = (
@@ -66,7 +67,7 @@ class _CaptureLLM:
         self.payload = payload
         self.messages: list[Any] = []
 
-    async def ainvoke(self, messages: list[Any]) -> _DummyResponse:
+    async def ainvoke(self, messages: list[Any], *, config=None) -> _DummyResponse:
         """Capture the prompt messages and return the configured payload.
 
         Args:
@@ -1311,7 +1312,7 @@ async def test_existing_cognition_and_dialog_prompts_render_with_mocked_llms(
         "emotional_appraisal": "steady",
         "interaction_subtext": "routine",
     })
-    monkeypatch.setattr(l1_module, "_subconscious_llm", subconscious_llm)
+    monkeypatch.setattr(l1_module, "_subconscious_llm", bind_test_llm(subconscious_llm, "subconscious_llm"))
     subconscious_result = await l1_module.call_cognition_subconscious(state)
     assert subconscious_result["emotional_appraisal"] == "steady"
     _assert_prompt_messages(
@@ -1324,7 +1325,7 @@ async def test_existing_cognition_and_dialog_prompts_render_with_mocked_llms(
         "logical_stance": "CONFIRM",
         "character_intent": "PROVIDE",
     })
-    monkeypatch.setattr(l2_module, "_conscious_llm", conscious_llm)
+    monkeypatch.setattr(l2_module, "_conscious_llm", bind_test_llm(conscious_llm, "conscious_llm"))
     consciousness_result = await l2_module.call_cognition_consciousness(state)
     assert consciousness_result["logical_stance"] == "CONFIRM"
     _assert_prompt_messages(
@@ -1348,7 +1349,7 @@ async def test_existing_cognition_and_dialog_prompts_render_with_mocked_llms(
         "pressure_policy": "absorb",
         "trajectory": "stable",
     })
-    monkeypatch.setattr(l2_module, "_boundary_core_llm", boundary_llm)
+    monkeypatch.setattr(l2_module, "_boundary_core_llm", bind_test_llm(boundary_llm, "boundary_core_llm"))
     boundary_result = await l2_module.call_boundary_core_agent(state)
     assert boundary_result["boundary_core_assessment"]["acceptance"] == "allow"
     _assert_prompt_messages(
@@ -1361,7 +1362,7 @@ async def test_existing_cognition_and_dialog_prompts_render_with_mocked_llms(
         "character_intent": "PROVIDE",
         "judgment_note": "stable",
     })
-    monkeypatch.setattr(l2_module, "_judgement_core_llm", judgment_llm)
+    monkeypatch.setattr(l2_module, "_judgement_core_llm", bind_test_llm(judgment_llm, "judgement_core_llm"))
     judgment_result = await l2_module.call_judgment_core_agent(state)
     assert judgment_result["character_intent"] == "PROVIDE"
     _assert_prompt_messages(
@@ -1379,7 +1380,7 @@ async def test_existing_cognition_and_dialog_prompts_render_with_mocked_llms(
         "vibe_check": "routine",
         "relational_dynamic": "stable",
     })
-    monkeypatch.setattr(l2c2_module, "_contextual_agent_llm", contextual_llm)
+    monkeypatch.setattr(l2c2_module, "_contextual_agent_llm", bind_test_llm(contextual_llm, "contextual_agent_llm"))
     contextual_result = await l2c2_module.call_social_context_appraisal(state)
     assert contextual_result["social_distance"] == "neutral"
     _assert_prompt_messages(
@@ -1392,7 +1393,7 @@ async def test_existing_cognition_and_dialog_prompts_render_with_mocked_llms(
         "linguistic_style": "plain",
         "forbidden_phrases": [],
     })
-    monkeypatch.setattr(l3_module, "_style_agent_llm", style_llm)
+    monkeypatch.setattr(l3_module, "_style_agent_llm", bind_test_llm(style_llm, "style_agent_llm"))
     style_result = await l3_module.call_style_agent(state)
     assert style_result["rhetorical_strategy"] == "answer briefly"
     _assert_prompt_messages(
@@ -1407,7 +1408,7 @@ async def test_existing_cognition_and_dialog_prompts_render_with_mocked_llms(
             "rendering": "short",
         },
     })
-    monkeypatch.setattr(l3_module, "_content_plan_agent_llm", plan_llm)
+    monkeypatch.setattr(l3_module, "_content_plan_agent_llm", bind_test_llm(plan_llm, "content_plan_agent_llm"))
     plan_result = await l3_module.call_content_plan_agent(state)
     assert plan_result["content_plan"]["semantic_content"] == "keep it short"
     _assert_prompt_messages(
@@ -1416,7 +1417,7 @@ async def test_existing_cognition_and_dialog_prompts_render_with_mocked_llms(
     )
 
     preference_llm = _CaptureLLM({"accepted_user_preferences": []})
-    monkeypatch.setattr(l3_module, "_preference_adapter_llm", preference_llm)
+    monkeypatch.setattr(l3_module, "_preference_adapter_llm", bind_test_llm(preference_llm, "preference_adapter_llm"))
     preference_result = await l3_module.call_preference_adapter(state)
     assert preference_result["accepted_user_preferences"] == []
     _assert_prompt_messages(
@@ -1434,7 +1435,7 @@ async def test_existing_cognition_and_dialog_prompts_render_with_mocked_llms(
         "gaze_direction": ["forward"],
         "visual_vibe": ["plain"],
     })
-    monkeypatch.setattr(l3_module, "_visual_agent_llm", visual_llm)
+    monkeypatch.setattr(l3_module, "_visual_agent_llm", bind_test_llm(visual_llm, "visual_agent_llm"))
     visual_result = await l3_module.call_visual_agent(state)
     assert visual_result["visual_vibe"] == ["plain"]
     _assert_prompt_messages(
@@ -1557,7 +1558,7 @@ async def test_l2_consciousness_receives_local_time_for_same_day_commitment(
         "logical_stance": "CONFIRM",
         "character_intent": "BANTAR",
     })
-    monkeypatch.setattr(l2_module, "_conscious_llm", conscious_llm)
+    monkeypatch.setattr(l2_module, "_conscious_llm", bind_test_llm(conscious_llm, "conscious_llm"))
 
     result = await l2_module.call_cognition_consciousness(state)
 

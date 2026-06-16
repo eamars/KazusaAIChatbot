@@ -11,6 +11,7 @@ from kazusa_ai_chatbot.cognition_chain_core.contracts import (
     CognitionChainInputV1,
     CognitionChainOutputV1,
     CognitionChainServices,
+    LLMStageBinding,
     validate_cognition_chain_input,
     validate_cognition_chain_output,
 )
@@ -108,22 +109,22 @@ def _inject_services(services: CognitionChainServices) -> list[ServiceBinding]:
     service_bindings = [
         (reset_json_parser, set_json_parser(services.parse_json)),
         (l1.reset_subconscious_llm, l1.set_subconscious_llm(
-            services.cognition_llm,
+            LLMStageBinding(services.llm, services.cognition_config),
         )),
         (l2.reset_conscious_llm, l2.set_conscious_llm(
-            services.cognition_llm,
+            LLMStageBinding(services.llm, services.cognition_config),
         )),
         (l2.reset_boundary_core_llm, l2.set_boundary_core_llm(
-            services.boundary_core_llm,
+            LLMStageBinding(services.llm, services.boundary_core_config),
         )),
         (l2.reset_judgement_core_llm, l2.set_judgement_core_llm(
-            services.cognition_llm,
+            LLMStageBinding(services.llm, services.cognition_config),
         )),
         (l2c2.reset_contextual_agent_llm, l2c2.set_contextual_agent_llm(
-            services.cognition_llm,
+            LLMStageBinding(services.llm, services.cognition_config),
         )),
         (l2d.reset_action_selection_llm, l2d.set_action_selection_llm(
-            services.action_selection_llm,
+            LLMStageBinding(services.llm, services.action_selection_config),
         )),
     ]
     return service_bindings
