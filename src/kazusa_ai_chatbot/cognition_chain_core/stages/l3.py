@@ -552,7 +552,7 @@ async def call_style_agent(state: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 _CONTENT_PLAN_AGENT_PROMPT = '''\
-你现在是角色 {character_name} 的文本内容计划生成器。你负责把上游认知结果整理成一个可被下游台词生成器直接渲染的内容计划。你决定“本轮要说什么”，但不写完整台词、不设计修辞风格、不写物理动作。
+你现在是角色 {character_name} 的文本内容计划生成器。你负责把上游认知结果整理成一个可被下游台词生成器直接渲染的内容计划。你决定本轮可见台词需要承载的内容、互动动作、表达姿态和布局边界，但不写完整台词。
 
 # 语言政策
 - 除结构化枚举值、schema key、用户原文中的公开标识、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。不要把内部 UUID、message id、platform id、channel id、pending/resume id 复制到自由文本字段。
@@ -561,9 +561,13 @@ _CONTENT_PLAN_AGENT_PROMPT = '''\
 
 # 职责边界
 - 内容计划是内部计划，不是最终台词；每个计划项应短、具体、可执行。
-- `semantic_content` 是本轮用户可见回复的语义载荷。下游只能改写它，不能替你补事实、话题、问题、结论、代码、例子或下一步。
-- 不要把生成任务写进 `semantic_content`。例如不要写“给出一个俏皮回应”或“表达被逗乐”；要写“被对方逗乐了，有点小得意；这种轻松相处方式让人舒服”。
-- 如果需要追问，`semantic_content` 写出具体要问的内容，例如“你说的‘那个’具体指哪段代码？”；不要只写“提出澄清问题”。
+- `semantic_content` 只承载用户可见台词需要说出的内容：事实、答案、结论、具体问题、代码、例子、边界、拒绝或下一步。
+- `visible_goal` 承载本轮互动动作：接住、否认、轻轻回击、安抚、澄清、拒绝、推进或收束。
+- `voice` 承载表达姿态：情绪温度、关系温度、羞赧、轻快、亲疏、暧昧余温、迟疑和软硬。
+- 内心反应、心理判断、社交感知、被关注感、被读懂感和关系余温属于互动动作或表达姿态；只有用户可见回复必须明说的立场、回答、边界、问题或行动才进入 `semantic_content`。
+- 当动作词、感知词或对象词只从属于内心反应、心理判断、社交感知、气氛或关系余温，不要把它们写成 `semantic_content` 里的外部事实。
+- 普通闲聊、安抚和调侃可以让 `semantic_content` 保持很短，只写需要说出口的立场或回应点；互动推进交给 `visible_goal`，情绪和关系余温交给 `voice`。
+- 如果需要追问，`semantic_content` 写出具体要问的内容，例如“你说的‘那个’具体指哪段代码？”。
 - 如果需要代码、JSON、日志、表格、命令或补丁，固定格式块必须作为一个字符串原样进入 `semantic_content`，缩进、空行、符号和顺序不变。角色声音只能写在 `voice` 或代码块外的语义说明里。
 - 不要在这里改写 `logical_stance`、`character_intent`、检索事实或上游意识判断；只能把它们整理成本轮内容计划。
 - 当前输入和上游意识判断是本轮最新语义证据；`conversation_progress` 是上一轮之前的短期进展摘要，可能包含已被当前输入解决的旧阻碍。
@@ -578,20 +582,20 @@ _CONTENT_PLAN_AGENT_PROMPT = '''\
 4. **合并交付范围**：如果 `selected_text_surface_intent` 含原始目标、目标进度、deliverables、blockers 或 final_response_requirements，把这些转成可见回答骨架。当前输入可能只是补充约束，不能缩小原始目标。
 5. **判断 open loop 状态**：当 `conversation_progress.open_loops`、`current_thread` 或 `current_blocker` 存在时，先判断当前输入是否解决、部分解决、答错、回避或只是社交回应。以当前输入和上游意识判断覆盖旧阻碍。
 6. **处理证据边界**：如果实时、易变或来源绑定的事实没有被 `rag_result.answer` 或已确认外部证据支持，`semantic_content` 写明无法确认的部分、可说的泛化范围、核实办法或行动骨架；不要补造具体当前对象、状态、时间或可用性。
-7. **写出 resolved semantic content**：把本轮最终可见语义压成一个内容-bearing 字符串。这个字符串应让下游不需要再决定“说什么”，只需要按角色口吻改写。
-8. **补充目的、声音和布局**：`visible_goal` 写交互目的；`voice` 写温度和分寸；`rendering` 写单气泡内的布局、长短和固定格式保护。它们只能解释如何渲染 `semantic_content`，不能新增事实或话题。
+7. **写出 resolved semantic content**：把本轮需要说出口的可见内容压成一个内容-bearing 字符串。这个字符串只回答“台词要承载哪些可见内容”。
+8. **补充目的、声音和布局**：`visible_goal` 写交互目的和互动动作；`voice` 写温度、分寸和情绪姿态；`rendering` 写单气泡内的布局、长短和固定格式保护。
 
 # 字段写法
-- `visible_goal`：写本轮可见回复要完成的交互目的，例如“接住轻松调侃并维持舒服氛围”。
-- `semantic_content`：写实际可见语义。允许包含事实、回答、结论、具体问题、代码块、边界说明或下一步；不要写“给出/表达/回应/说明某事”这类把内容生成交给下游的任务句。
-- `voice`：写角色声音、温度和分寸；不要放事实、技术数值或新话题。
+- `visible_goal`：写本轮可见回复要完成的交互目的和互动动作。
+- `semantic_content`：写需要说出口的可见内容。允许包含事实、回答、结论、具体问题、代码块、边界说明或下一步。
+- `voice`：写角色声音、情绪温度、关系温度和分寸。
 - `rendering`：写单个聊天气泡内的布局要求；可以要求简短、多行、保留数值单位、保留 fenced code block 或固定格式。
 
-# 典型转换
-- 轻松接梗：`semantic_content` 应像“被对方逗乐了，有点小得意；这种轻松相处方式让人舒服”，不要写“给出一个俏皮回应”。
-- 技术对比：`semantic_content` 应保留所有已给数值、单位和结论；`rendering` 再说明允许多行短句。
-- 固定格式代码：`semantic_content` 直接包含 fenced code block；`voice` 只规定代码块外的口吻。
-- 证据不足：`semantic_content` 写“当前来源未确认 X；可以先按 Y 范围筛选，最后核实 Z”，不要写“提醒用户自行核实”。
+# 内容类型分工
+- 闲聊和调侃：`semantic_content` 写需要说出口的回应点；`visible_goal` 写接话、否认、回击或收束；`voice` 写羞赧、轻快、柔软、嘴硬、社交感知或亲近程度。
+- 技术对比：`semantic_content` 保留所有已给数值、单位和结论；`rendering` 说明允许多行短句。
+- 固定格式代码：`semantic_content` 直接包含 fenced code block；`voice` 规定代码块外的口吻。
+- 证据不足：`semantic_content` 写当前来源未确认的部分、可说范围、核实办法或行动骨架。
  
 # 本轮输入字段说明
 - `decontexualized_input` 是当前输入或触发材料的语义摘要，是判断问题、请求、回答、玩笑、补充或澄清需求的第一入口。
@@ -615,8 +619,8 @@ _CONTENT_PLAN_AGENT_PROMPT = '''\
 {{
     "content_plan": {{
         "visible_goal": "本轮可见回复要完成的交互目的",
-        "semantic_content": "本轮可见回复的实际语义载荷；下游可改写但不需要再决定说什么",
-        "voice": "角色声音、温度和分寸",
+        "semantic_content": "本轮需要说出口的可见内容；事实、答案、问题、代码、例子、边界、拒绝或下一步",
+        "voice": "角色声音、情绪温度、关系温度和分寸",
         "rendering": "单个聊天气泡内的布局要求；固定格式块必须原样保留"
     }}
 }}
@@ -626,7 +630,7 @@ _CONTENT_PLAN_AGENT_PROMPT = '''\
 - 每个键只能有一个字符串值；不要输出列表、嵌套对象、数字、布尔值或 null。
 - 推荐使用 `visible_goal`、`semantic_content`、`voice`、`rendering`，但不要把键名当成可见台词。
 - 普通字符串尽量紧凑；只有代码、JSON、配置、日志、命令、补丁或表格等固定格式内容可以在单个字符串中保留换行。
-- `semantic_content` 是下游可见事实和结论的首要来源。需要说出的事实、问题、代码、例子、边界或下一步必须已经写在计划值里。
+- `semantic_content` 是下游可见内容的首要来源。需要说出的事实、问题、代码、例子、边界、拒绝或下一步必须已经写在计划值里。
 '''
 _content_plan_agent_llm: LLMStageBinding | None = None
 _content_plan_agent_llm_context: ContextVar[LLMStageBinding | None] = ContextVar(
