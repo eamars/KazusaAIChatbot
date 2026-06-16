@@ -88,7 +88,6 @@ HOWTO. One working-style configuration looks like this:
 | `BACKGROUND_ARTIFACT_LLM`  | `local-model`                            | `http://localhost:1234/v1` |
 | `BACKGROUND_WORK_LLM`      | `local-model`                            | `http://localhost:1234/v1` |
 | `DIALOG_GENERATOR_LLM`     | `deepseek-v4-flash`                      | `https://api.deepseek.com` |
-| `DIALOG_EVALUATOR_LLM`     | `local-model`                            | `http://localhost:1234/v1` |
 | `CONSOLIDATION_LLM`        | `local-model`                            | `http://localhost:1234/v1` |
 | `JSON_REPAIR_LLM`          | `local-model`                            | `http://localhost:1234/v1` |
 | `EMBEDDING`                | `text-embedding-nomic-embed-text-v2-moe` | `http://localhost:1234/v1` |

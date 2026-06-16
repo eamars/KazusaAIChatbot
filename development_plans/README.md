@@ -106,6 +106,7 @@ plans.
 | [cross_thread_image_contamination_bugfix_plan.md](archive/completed/bugfix/cross_thread_image_contamination_bugfix_plan.md) |
 | [decontextualizer_scope_users_referent_bugfix_plan.md](archive/completed/bugfix/decontextualizer_scope_users_referent_bugfix_plan.md) |
 | [dialog_anchor_authority_stale_history_bugfix_plan.md](archive/completed/bugfix/dialog_anchor_authority_stale_history_bugfix_plan.md) |
+| [dialog_evaluator_decommission_plan.md](archive/completed/bugfix/dialog_evaluator_decommission_plan.md) |
 | [dialog_evaluator_guess_owner_boundary_bugfix_plan.md](archive/completed/bugfix/dialog_evaluator_guess_owner_boundary_bugfix_plan.md) |
 | [dialog_one_bubble_layout_contract_bugfix_plan.md](archive/completed/bugfix/dialog_one_bubble_layout_contract_bugfix_plan.md) |
 | [generic_cognition_prompt_migration_plan.md](archive/completed/bugfix/generic_cognition_prompt_migration_plan.md) |

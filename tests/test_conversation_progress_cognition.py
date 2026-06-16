@@ -437,14 +437,6 @@ def test_projection_preserves_relative_age_for_prior_disclosure() -> None:
     assert prompt_doc["user_state_updates"][0]["age_hint"] == "~3h ago"
 
 
-def test_dialog_evaluator_prompt_uses_existing_feedback_for_avoid_repeat() -> None:
-    """Evaluator prompt includes the move-level repeat backstop."""
-
-    assert "推进方向" in dialog_module._DIALOG_EVALUATOR_PROMPT
-    assert "计划忠实" in dialog_module._DIALOG_EVALUATOR_PROMPT
-    assert "feedback" in dialog_module._DIALOG_EVALUATOR_PROMPT
-
-
 def test_content_plan_prompt_owns_topic_admission_decision() -> None:
     """Topic-admission decisions belong to L3 content plan, not dialog."""
 

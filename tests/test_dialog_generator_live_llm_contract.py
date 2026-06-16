@@ -272,17 +272,10 @@ async def test_live_dialog_generator_node_accepts_deepseek_output() -> None:
         'user_name': '测试用户',
         'user_profile': {'affinity': 500},
         'character_profile': character_profile,
-        'messages': [],
-        'should_stop': False,
-        'retry': 0,
         'dialog_usage_mode': 'live_visible_reply',
     }
 
     result = await dialog_module.dialog_generator(state)
-    raw_outputs = [
-        getattr(message, 'content', '')
-        for message in result.get('messages', [])
-    ]
     trace_path = write_llm_trace(
         'dialog_generator_live_llm_contract',
         'node_deepseek_output',
@@ -291,7 +284,6 @@ async def test_live_dialog_generator_node_accepts_deepseek_output() -> None:
             'route_base_url': DIALOG_GENERATOR_LLM_BASE_URL,
             'input': state,
             'output': result,
-            'raw_outputs': raw_outputs,
         },
     )
     assert trace_path.exists()

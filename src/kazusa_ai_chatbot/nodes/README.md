@@ -33,7 +33,7 @@ The package currently contains five major node groups:
 | Relevance and perception | `persona_relevance_agent.py`, `persona_supervisor2_msg_decontexualizer.py` | Whether to answer, current media observation, current-message rewrite, referent status. |
 | Persona orchestration | `persona_supervisor2.py` | Live turn graph: decontextualization, cognition resolver, memory lifecycle, selected action/surface or no-response routing. |
 | Cognition and action initialization | `persona_supervisor2_cognition*.py`, `boundary_profile.py`, `linguistic_texture.py` | Layered internal appraisal, stance, boundary judgment, L2d action initialization, and selected L3 surface directives. |
-| Dialog | `dialog_agent.py` | Final text generation and evaluator retry loop. |
+| Dialog | `dialog_agent.py` | Final text rendering from selected L3 surface directives. |
 | Consolidation handoff | `persona_supervisor2.py` | Completed persona state is handed to `kazusa_ai_chatbot.consolidation`, which owns extraction helpers, origin projection, target validation, and durable write routing. |
 
 The nodes consume platform-neutral state. Platform wire syntax must already be
@@ -825,8 +825,6 @@ The implemented flow is:
 8. Dialog or selected surface generation
    Dialog generator writes `final_dialog` from `internal_monologue` and
    `action_directives`.
-   Dialog evaluator checks plan fidelity, unauthorized facts, physical/action
-   pollution, forbidden phrases, and style constraints.
 
 9. Episode trace and post-turn consolidation
    Background nodes use the completed episode trace to update durable memory,
@@ -849,10 +847,10 @@ and L3 directive contracts before visible text is generated.
 
 File: `dialog_agent.py`
 
-Dialog has two nodes:
+Dialog has one node:
 
 ```text
-generator -> evaluator -> generator retry if needed -> final_dialog
+generator -> final_dialog
 ```
 
 The generator receives:
@@ -860,14 +858,8 @@ The generator receives:
 - `internal_monologue`,
 - `action_directives.linguistic_directives`,
 - `action_directives.contextual_directives`,
-- tiny tone history,
 - user display name,
 - immutable character voice constraints from `linguistic_texture_profile`.
-
-The evaluator checks whether generated dialog faithfully executes
-`content_plan` and stays inside expression rules. It does not decide whether
-the character should answer. It checks whether the text obeys the cognition
-decision already made.
 
 The dialog layer must not:
 

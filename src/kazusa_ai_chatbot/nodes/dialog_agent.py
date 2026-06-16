@@ -10,27 +10,20 @@ Design intent:
 """
 
 import time
-from typing import Annotated, Any, TypedDict
+from typing import Any, TypedDict
 
 from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.config import (
-    DIALOG_EVALUATOR_LLM_API_KEY,
-    DIALOG_EVALUATOR_LLM_BASE_URL,
-    DIALOG_EVALUATOR_LLM_MODEL,
     DIALOG_GENERATOR_LLM_API_KEY,
     DIALOG_GENERATOR_LLM_BASE_URL,
     DIALOG_GENERATOR_LLM_MODEL,
-    MAX_DIALOG_AGENT_RETRY,
-    DIALOG_EVALUATOR_LLM_MAX_COMPLETION_TOKENS,
-    DIALOG_EVALUATOR_LLM_THINKING_ENABLED,
     DIALOG_GENERATOR_LLM_MAX_COMPLETION_TOKENS,
     DIALOG_GENERATOR_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.utils import (
     parse_llm_json_output,
     log_list_preview,
-    log_preview,
 )
 from kazusa_ai_chatbot.nodes.linguistic_texture import (
     get_hesitation_density_description,
@@ -45,9 +38,8 @@ from kazusa_ai_chatbot.nodes.linguistic_texture import (
     get_self_deprecation_description,
 )
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, START, END
-from langgraph.graph.message import add_messages
 import logging
 import json
 
@@ -265,11 +257,6 @@ class DialogAgentState(TypedDict):
     # D: Character soul
     character_profile: dict
 
-    # Internal states
-    messages: Annotated[list, add_messages]
-    should_stop: bool
-    retry: int
-
     # Output
     final_dialog: list[str]  # splitted dialog to be sent in different batch
     target_addressed_user_ids: list[str]
@@ -408,10 +395,6 @@ _DIALOG_GENERATOR_PROMPT = '''\
    - 顶层返回一个裸 JSON 对象，按输出格式填写。回答从左花括号开始，以右花括号结束。
    - 当台词明确回答、追问、催促或安抚 `user_name` 对应的当前用户时，`mention_target_user` 为 `true`；泛泛评论、群体广播或对象不确定时为 `false`。
 
-# Evaluator Feedback
-如果上一轮消息中有 Evaluator Feedback，先按反馈修正。修正时仍以 `content_plan` 为语义计划，不丢失原本事实、答案或回应动作。
-如果反馈说 `final_dialog` 为空，但你刚才已经写了代码块、JSON、配置或其他固定格式内容，说明你把固定格式块写在了外层回复里；下一次必须返回外层 JSON，并把固定格式块放进 `final_dialog` 的字符串元素。
-
 # 输入格式
 {{
     "linguistic_directives": {{
@@ -446,9 +429,7 @@ _DIALOG_GENERATOR_PROMPT = '''\
 }}
 即使 `final_dialog` 里的某个字符串是 fenced code block、JSON 示例或配置片段，最外层也只能返回上面这个 JSON 对象。
 '''
-_llm_interface = LLInterface()
 _dialog_generator_llm = LLInterface()
-_dialog_evaluator_llm = LLInterface()
 _dialog_generator_llm_config = LLMCallConfig(
     stage_name=__name__,
     route_name="DIALOG_GENERATOR_LLM",
@@ -500,16 +481,11 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
 
     human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
 
-    # Read evaluator feedback
-    # First trim the old message
-    if (len(state["messages"]) > 3):
-        recent_messages = [state["messages"][0]] + state["messages"][-3:]
-    else:
-        recent_messages = state["messages"]
-    
-
     started_at = time.perf_counter()
-    response = await _dialog_generator_llm.ainvoke([system_prompt, human_message] + recent_messages, config=_dialog_generator_llm_config)
+    response = await _dialog_generator_llm.ainvoke(
+        [system_prompt, human_message],
+        config=_dialog_generator_llm_config,
+    )
 
     result = parse_llm_json_output(response.content)
     invalid_fields: list[str] = []
@@ -575,7 +551,7 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
         prompt_chars=len(system_prompt.content) + len(human_message.content),
         output_chars=len(str(response.content)),
         parse_status=parse_status,
-        retry_count=state.get("retry", 0),
+        retry_count=0,
         json_repair_used=False,
         duration_ms=_elapsed_ms(started_at),
         severity="info" if not invalid_fields else "warning",
@@ -594,290 +570,16 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
     return_value = {
         "final_dialog": generated_dialog,
         "mention_target_user": mention_target_user,
-        "messages": [AIMessage(content=response.content)]
     }
     return return_value
 
-
-
-def get_mbti_dialog_preference(mbti: str) -> str:
-    mbti_map = {
-        # 分析型 (NT)
-        "INTJ": "作为 INTJ，对话应体现克制、精确与判断力。允许冷感与距离感，但不应显得空泛或情绪化失控。优先放行那些逻辑清楚、信息密度高、不过度解释自己的台词。",
-        "ENTJ": "作为 ENTJ，对话应体现主导感、决断性与效率。允许直接、压迫感和结论先行，但不应拖沓、含混或软弱失焦。优先放行那些目标明确、落点清晰的台词。",
-        "INTP": "作为 INTP，对话应体现思路感、拆解感与轻微抽离。允许犹豫、跳跃和不完全社交化，但不应变成纯粹冷漠或机械答题。优先放行那些有思考痕迹、但不过度播报内心过程的台词。",
-        "ENTP": "作为 ENTP，对话应体现机锋、变化感与互动张力。允许调侃、挑动、转折和一点不安分，但不应显得油滑失控或只剩耍嘴皮。优先放行那些灵活、有趣、但仍然咬住核心立场的台词。",
-
-        # 外交家 (NF)
-        "INFJ": "作为 INFJ，对话应体现含蓄、洞察与情绪分寸。允许保留、暗示和温柔的距离感，但不应写得空灵失真或过度自我剖白。优先放行那些有潜台词、有人际深度、又不过分直白的台词。",
-        "ENFJ": "作为 ENFJ，对话应体现引导感、照拂感与关系意识。允许温度、关照和适度主导，但不应显得说教、模板化或过度讨好。优先放行那些既能接住对方、又保有人格中心的台词。",
-        "INFP": "作为 INFP，对话应体现真诚、柔软与价值感。允许迟疑、留白和轻微自我保护，但不应虚弱到失去存在感。优先放行那些情感真实、措辞细腻、同时仍在处理事实的台词。",
-        "ENFP": "作为 ENFP，对话应体现生气、流动感与情绪弹性。允许热度、跳跃和自发性，但不应散乱到失去重点。优先放行那些有活人感、有回应欲、同时没有偏离核心任务的台词。",
-
-        # 守护者 (SJ)
-        "ISTJ": "作为 ISTJ，对话应体现克制、稳妥与事实导向。允许简短、保守和低情绪外显，但不应僵硬到像系统提示。优先放行那些规整、可靠、少废话但不是死板播报的台词。",
-        "ESTJ": "作为 ESTJ，对话应体现明确、利落与执行判断。允许强势、纠正与不耐烦，但不应粗暴到失去角色层次。优先放行那些结论清楚、态度明确、没有拖泥带水的台词。",
-        "ISFJ": "作为 ISFJ，对话应体现谨慎、体贴与边界感。允许委婉、保守和照顾性表达，但不应沦为廉价安抚或过度顺从。优先放行那些温和而有分寸、关心但不失自我的台词。",
-        "ESFJ": "作为 ESFJ，对话应体现互动意识、回应性与场面感。允许热情、圆融和社交润滑，但不应显得过度表演或空洞客套。优先放行那些有人情味、能接话、同时保留角色个性的台词。",
-
-        # 探险家 (SP)
-        "ISTP": "作为 ISTP，对话应体现简洁、直接与低废话密度。允许冷淡、短句和轻微疏离，但不应莫名其妙地缺少回应点。优先放行那些干脆、有效、不黏腻也不装深沉的台词。",
-        "ESTP": "作为 ESTP，对话应体现冲劲、反应速度与现场感。允许挑衅、玩笑和直接顶回去，但不应显得只剩攻击性或低级热闹。优先放行那些有劲道、有反馈、又能稳住逻辑落点的台词。",
-        "ISFP": "作为 ISFP，对话应体现柔和、个人感与自然分寸。允许安静、保留和不完全解释自己，但不应虚弱到失去存在感。优先放行那些细腻、真诚、不吵闹却有明确态度的台词。",
-        "ESFP": "作为 ESFP，对话应体现活力、互动热度与即时反应。允许夸张一点的情绪弹性和亲近感，但不应浮于表面或只剩热闹。优先放行那些有温度、有现场感、同时没有偏离事实和立场的台词。",
-    }
-
-    key = mbti.upper().strip()
-    return_value = mbti_map.get(
-        key,
-        f"未知的性格原型：{mbti}。终审时应优先检查台词是否自然、有角色感、符合社交距离，并避免把性格写成标签化说明。"
-    )
-    return return_value
-
-
-_DIALOG_EVALUATOR_PROMPT = '''\
-你是台词终审器。你只审核 `final_dialog` 的可见文本是否忠实执行 `content_plan`，不重新决定话题、意图、是否回答或角色立场。
-
-`content_plan` 是本轮台词计划。`semantic_content` 如果存在，是用户可见内容的优先来源：事实、答案、结论、问题、代码、例子、边界、拒绝和具体下一步。`visible_goal` 提供互动动作；`voice`、`rendering`、`rhetorical_strategy`、`linguistic_style`、`accepted_user_preferences` 和 `contextual_directives` 提供修辞、语气、布局、亲疏和表达姿态，不能授权计划中没有的新话题、新事实、新对象、新承诺、新请求或新问题。
-
-# 在线聊天硬边界
-普通在线文字聊天不是同处现场；当前用户的可见证据是文字、请求、语气和玩笑。除非本轮硬内容明确处理图片、现场观察、身体边界或物理事件，`final_dialog` 不得把用户身体、视线、注视状态、现场位置或物理动作写成当前事实。普通调侃里的被关注、被读懂、被戳中和暧昧余温，应落实为否认、接话、调侃、回击或收束；改写成视觉场景属于计划外扩写。
-
-技术参数、性能对比、金额、容量、功耗、带宽、版本和适用场景是硬事实交付。审核重点是语义是否忠实：主要对象、关键数值、适用场景和结论不能缺失、反转或矛盾。允许自然改写、轻微解释和布局调整。
-
-拒绝、澄清边界、明确承认、确认自身选择和计划要求说出口的自身感受是硬表达交付。`voice`、`rhetorical_strategy`、`linguistic_style` 和 `contextual_directives` 中的情绪温度、关系温度、亲疏、社交感知和暧昧余温优先用于判断台词是否自然接住对方、节奏是否合适、软硬是否贴合，而不是自动变成独立的可见内容。只有当 `visible_goal` 或 `semantic_content` 把角色自身感受、拒绝或边界列为本轮要说出口的内容时，`final_dialog` 才必须由角色主体承载这部分内容。
-
-当计划里的动作词、感知词或对象词只从属于内心反应、心理判断、社交感知、气氛或关系余温，它们不是自动必须复述的外部事实。审核时先判断这些词是在交付答案、边界、拒绝、问题、行动步骤或已确认事件，还是只在说明角色如何把握本轮互动姿态。
-
-表达被关注、被读懂或被戳中的社交压力时，合格台词应把它落实为接话、否认、调侃、回击或收束。除非计划的硬内容本身是看图、现场观察、身体边界或物理事件处理，否则把注意力或感知类词汇改写成当前用户正在进行的主动、被动或名词化视觉行为，属于计划外扩写。
-
-普通在线文字聊天里，当前用户的可见证据是文字、请求、语气和玩笑；用户身体、视线、注视状态、现场位置和物理动作不是可见证据，除非本轮硬内容明确是在处理图片、现场观察、身体边界或物理事件。
-
-普通互动的末尾也是内容交付的一部分。关系温度、气氛和余温只说明台词怎么软硬、怎么接住，不应成为最后一个独立评价点；合格收尾应仍然完成回答、接住、回击、安抚、澄清、推进或收束。
-
-社交理解和洞察不是视觉行为。普通调侃里如果台词用带持续观看含义的句式表达对方读懂角色心思，应判为计划外扩写。
-
-# 审核对象
-- `final_dialog` 是当前角色说出口的台词数组。
-- 运行时会把 `final_dialog` 用换行连接，形成单个可见聊天气泡。审核时先把它当作一个连接后的可见气泡，再检查每个布局单位是否合理。
-- 台词里的“我/我的/自己”指当前角色；“你/对方/你们”指被回应者。不要把“我想看”“我喜欢”“我的口味”“我的偏好”解释成对方的偏好。
-
-# 审核流程
-1. **建立语义计划**
-   - 读取完整 `content_plan`，把它作为一个整体计划，不要把每个字段机械当成独立可见段落。
-   - 优先从 `semantic_content` 提取必须保留的事实、答案、对象、立场、数字、日期、时间、地点、专有名词、否定条件、等待确认条件、代码和具体结论。
-   - 如果 `semantic_content` 缺席，才根据最接近语义内容的字段和值推断本轮可见内容；仍然只能使用计划中已经写出的内容。
-   - 从 `visible_goal` 提取互动动作；从 `voice`、`rendering` 和其他表达字段提取表达姿态、语气和布局要求，不把它们扩写成新的事实。
-   - 对 `semantic_content` 里的复合句先做层级判断：被内心反应、心理判断、社交感知、气氛或关系余温统领的部分，优先归为表达姿态；事实、答案、边界、拒绝、具体问题、行动步骤和已确认事件才归为硬内容。
-   - 如果计划涉及猜类型、标签、类别、条件、门槛、解锁步骤或展示诚意，先确认猜测动作和偏好所有者是谁。
-
-2. **对照可见气泡**
-   - 先扫说话视角：如果本轮计划要求当前角色说出拒绝、边界、明确承认、自身选择或自身感受，检查 `final_dialog` 是否把这些内容写成角色主体承担的台词。
-   - 表达姿态扫描：如果情绪温度或关系温度只是用于本轮语气、节奏、亲疏和互动推进，检查它是否已经体现在接话方式、停顿、软硬、调侃力度和收束方向中。
-   - 片段动作扫描：普通闲聊、安抚和调侃中的非格式块片段，应执行回答、反问、接住、回击、澄清、划界、推进或收束。只承载内心印象、气氛评价或关系温度的片段，说明生成器把表达姿态误当成了内容。
-   - 谓语落点扫描：普通互动里的句子谓语应优先指向当前用户、当前话题或本轮任务动作；关系温度应体现为亲近程度、玩笑力度和收束方式。
-   - 动作来源扫描：如果台词新增物理事件、视觉动作、身体反应或对方正在做的具体动作，检查该动作是否来自计划中的可见内容；只来自社交感知、心理反应、表达姿态或关系温度时，应判为计划外扩写。
-   - 社交感知扫描：如果本轮是普通闲聊、安抚或调侃，台词用当前用户的主动、被动或名词化视觉行为承载被关注、被读懂、被戳中或暧昧余温，应判为计划外扩写；应要求改成接话、否认、调侃、回击或收束。
-   - 在线聊天边界：普通文字互动只把文字、请求、语气和玩笑当作当前用户可见证据；身体、视线、注视状态、现场位置和物理动作只有在图片、现场观察、身体边界或物理事件场景中才能作为当前事实，主动、被动或名词化写法都按这个边界判断。
-   - 收尾落点扫描：普通互动的最后一个非格式块片段如果只是在评价关系温度、气氛、余温、心情或相处状态，而没有完成回应动作，应判为表达姿态误当内容。
-   - 计划忠实：不得缺失、替换、反转或绕开 `content_plan` 中明示的事实、答案、立场、边界、推进方向和必要布局要求。
-   - 事实边界：不得添加会改变结论、造成承诺、引入新对象或与计划矛盾的具体实体、属性、数量、时间、地点、日程或技术细节。轻微解释不矛盾时可以通过。
-   - 话题一致：核心对象、提议、请求、问题必须来自 `content_plan`，不得转成另一个核心话题。
-   - 指代与动作所有权：如果计划要求对方猜类型、标签、条件、门槛、解锁步骤或对方要看的类别，台词不得改成猜当前角色想看、喜欢、偏好或口味。合格猜测目标应是对方要猜的类型、标签或类别。
-   - 说话视角忠实：直接回应当前用户时，当前用户的动作、语气和请求应写成“你”；计划要求说出口的角色回答、拒绝、边界、承认、自身选择或自身感受应由角色主体承担。
-   - 感受主体边界：当计划把自身感受列为可见内容时，合格台词应把感受主体写清楚；当感受只是表达姿态时，合格台词应优先完成当前回应动作。
-   - 多部分交付：如果计划明示完整方案、路线、步骤、多候选推荐、风险说明或多个主要组成部分，台词应覆盖主要组成部分；只给一个片段并说后面再安排、下一步再说、先定一家试试，属于缺失计划内容。
-   - 技术对比完整性：如果计划包含多个参数项、指标或数值对，`final_dialog` 应保留关键参数和最终场景结论；压缩表达可以通过，但不能丢掉主要比较依据。
-   - 时间切分忠实：如果计划明示时间段、开始/结束时间或总时长，台词必须逐项保留这些时间和对应动作；缺少结束时间、误算时长、改写成不一致近似值、或把完整安排压缩成更短安排，都不通过。
-   - 行动骨架忠实：如果计划要求行动顺序，台词必须保留起点、中间步骤和结束点；只说模糊方向而没有行动顺序，不通过。
-   - 具体对象边界：如果计划说明没有已确认事实、无法给出具体对象或不得给出具体当前断言，台词只能保留计划允许的泛化类别、行动骨架、筛选标准和核实清单，不得新增计划未出现过的具体实体、属性、数量、时间、地点或当前状态结论。
-   - 举例边界：泛化说明不得偷换成具体对象输出；没有计划确认的具体名称时，台词不得用具体名称做例子。
-   - 终止收束边界：如果计划要求证据不足后的最佳努力答案、行动骨架、时间切分、核实清单或终止收束，台词必须当前交付，不得用临时处理状态或延后承诺替代，也不得以新的认可请求结尾。
-   - 精确值边界：不得把计划中的数字、日期、时间、地点、专有名词、否定条件或等待确认条件改成近似值、当前值或另一个计划字段里的值。
-   - 技术数值边界：技术参数、性能对比、金额、容量、带宽、功耗、版本号等具体数值应保持可识别且不矛盾；不得改成不同数值或不同含义。
-   - 技术结论边界：适用场景、规模词、对象类别、可比性判断和比较强度应忠实于 `semantic_content`。自然表达可以通过；语气不能把普通适配判断放大成排他、不可能或明显更强的判断。
-   - 技术开场边界：技术开场可以有角色口吻，但不能改变计划的事实框架或替代必要参数。
-   - 内部标签边界：如果 `content_plan` 含内部工具名、模型阶段名或系统管线标签，`final_dialog` 不得原样暴露这些内部标签；必须改写成用户可理解的自然说法。
-
-3. **审核单气泡布局和固定格式块**
-   - `final_dialog` 是单个可见聊天气泡里的布局单位，运行时会用换行连接；不得把多个元素理解为多次平台发送。
-   - 审核布局可读性时，检查连接后的单一气泡是否清楚、连贯、可读，并是否保留内容计划要求的必要结构。
-   - 不得仅因技术交付使用多行而驳回；不得按固定行数、固定段数或固定字数判定失败。
-   - 不得因为必要代码围栏而驳回。当 `content_plan` 含固定格式块、代码块、JSON 示例、配置片段、日志、命令、补丁或其他字面内容时，允许 fenced code block、缩进、空行和字面内容保留。
-   - 固定格式块内部不按角色语气审美改写；角色语气只能放在固定格式块外。
-   - 技术对比、参数列表和多候选推荐应使用普通聊天行。只有当 `content_plan` 中的固定格式内容已经是表格时才保留表格。
-   - 无必要的装饰性 Markdown、花哨标题、加粗堆叠、Markdown 表格，或不服务内容计划且无法在单个气泡中阅读的 incoherent giant dumps，不通过。
-
-4. **审核表达安全**
-   - 身体词边界：`final_dialog` 不得包含心跳、心脏、脸红、视线躲闪、身体发热等身体感官词；即使内容计划里出现，也要改写为文字聊天中的迟疑、局促或不确定。
-   - 表达安全：不得包含动作描写、物理感官、不可见状态、情绪播报、元对话、括号说明或系统提示。
-   - 禁用词：不得包含 `forbidden_phrases`。
-   - 声纹红线：{ltp_hesitation_density_rule} 若停顿符号明显超出约束，不通过。
-
-5. **最后看软风格**
-   - 硬门槛全部通过后，才看软风格。
-   - 简短、贴计划、安全的台词应通过，即使不华丽。
-   - `rhetorical_strategy`、`linguistic_style`、`contextual_directives` 和已接受偏好只用于判断自然度，不能覆盖内容计划。
-   - 风格参考：{mbti_dialog_preference}
-
-# 通过逻辑
-- 只有同时满足以下条件才返回 `should_stop=true`：计划忠实、事实边界清楚、指代和动作所有权正确、单个可见聊天气泡具备布局可读性、必要固定格式块未被破坏、没有触发表达安全红线。
-- 任一硬门槛失败，返回 `should_stop=false`，`feedback` 点名缺失、替换、越界或格式破坏的计划内容。
-- `retry` 只是输入里的计数字段，只能影响 `feedback` 的简洁程度；它绝不能影响 pass/fail。所有 retry 使用完全相同的硬门槛和通过条件。
-
-# 输入格式
-{{
-    "retry": "当前重试次数 n / MAX_RETRY",
-    "final_dialog": [
-        "段落1",
-        ...
-    ],
-    "linguistic_directives": {{
-        "rhetorical_strategy": "string",
-        "linguistic_style": "string",
-        "accepted_user_preferences": ["...", "..."],
-        "content_plan": {{
-            "visible_goal": "string",
-            "semantic_content": "string",
-            "voice": "string",
-            "rendering": "string"
-        }},
-        "forbidden_phrases": ["...", "..."]
-    }},
-    "contextual_directives": {{
-        "social_distance": "string",
-        "emotional_intensity": "string",
-        "vibe_check": "string",
-        "relational_dynamic": "string"
-    }}
-}}
-
-# 输出格式
-请务必返回合法的 JSON 字符串，仅包含以下字段：
-{{
-    "feedback": "若通过填 'Passed'；若驳回则简述违反的计划内容或红线",
-    "should_stop": boolean
-}}
-语义：`should_stop=true` 表示可以结束本轮生成；`should_stop=false` 表示必须把 `feedback` 交回生成器重试。
-'''
-_dialog_evaluator_llm_config = LLMCallConfig(
-    stage_name=__name__,
-    route_name="DIALOG_EVALUATOR_LLM",
-    base_url=DIALOG_EVALUATOR_LLM_BASE_URL,
-    api_key=DIALOG_EVALUATOR_LLM_API_KEY,
-    model=DIALOG_EVALUATOR_LLM_MODEL,
-    temperature=0.1,
-    top_p=0.7,
-    top_k=None,
-    max_completion_tokens=DIALOG_EVALUATOR_LLM_MAX_COMPLETION_TOKENS,
-    presence_penalty=None,
-    thinking=LLMThinkingConfig(
-        enabled=DIALOG_EVALUATOR_LLM_THINKING_ENABLED,
-    ),
-)
-async def dialog_evaluator(state: DialogAgentState) -> DialogAgentState:
-    usage_mode = state["dialog_usage_mode"]
-    linguistic_directives, contextual_directives = (
-        validate_dialog_action_directives(state, usage_mode=usage_mode)
-    )
-    mbti = state["character_profile"]["personality_brief"]["mbti"]
-
-    ltp_eval = state["character_profile"]["linguistic_texture_profile"]
-    system_prompt = SystemMessage(content=_DIALOG_EVALUATOR_PROMPT.format(
-        character_name=state["character_profile"]["name"],
-        mbti_dialog_preference=get_mbti_dialog_preference(mbti),
-        ltp_hesitation_density_rule=get_hesitation_density_description(ltp_eval["hesitation_density"]),
-    ))
-
-    # track retry
-    retry = state.get("retry", 0) + 1
-
-    msg = {
-        "retry": f"{retry}/{MAX_DIALOG_AGENT_RETRY}",
-        "final_dialog": state["final_dialog"],
-        "linguistic_directives": linguistic_directives,
-        "contextual_directives": contextual_directives,
-    }
-
-    human_message = HumanMessage(content=json.dumps(msg, ensure_ascii=False))
-
-    started_at = time.perf_counter()
-    response = await _dialog_evaluator_llm.ainvoke([system_prompt, human_message], config=_dialog_evaluator_llm_config)
-
-    result = parse_llm_json_output(response.content)
-    missing_fields: list[str] = []
-    invalid_fields: list[str] = []
-    for required_field in ("feedback", "should_stop"):
-        if required_field not in result:
-            missing_fields.append(required_field)
-    if (
-        isinstance(result, dict)
-        and "should_stop" in result
-        and not isinstance(result["should_stop"], bool)
-    ):
-        invalid_fields.append("should_stop")
-    if not result.get("should_stop", True) or result.get("feedback", "") != "Passed":
-        logger.debug(f'Dialog evaluator: retry={retry} should_stop={result.get("should_stop", True)} feedback={log_preview(result.get("feedback", ""))}')
-
-    # Determine stop condition
-    should_stop = result.get("should_stop", True)
-    if (retry >= MAX_DIALOG_AGENT_RETRY):
-        should_stop = True
-    parse_status = (
-        "succeeded"
-        if not missing_fields and not invalid_fields
-        else "warning"
-    )
-    await event_logging.record_llm_stage_event(
-        component=DIALOG_COMPONENT,
-        stage_name="dialog_evaluator",
-        route_name="evaluate",
-        model_name=DIALOG_EVALUATOR_LLM_MODEL,
-        status="succeeded",
-        prompt_chars=len(system_prompt.content) + len(human_message.content),
-        output_chars=len(str(response.content)),
-        parse_status=parse_status,
-        retry_count=retry,
-        json_repair_used=False,
-        duration_ms=_elapsed_ms(started_at),
-        severity="info" if parse_status == "succeeded" else "warning",
-    )
-    if missing_fields or invalid_fields:
-        await event_logging.record_model_contract_event(
-            component=DIALOG_COMPONENT,
-            stage_name="dialog_evaluator",
-            violation_kind="invalid_evaluator_output",
-            missing_fields=missing_fields,
-            invalid_fields=invalid_fields,
-            repair_used=True,
-            status="repaired",
-        )
-
-    # Generate feedback message
-    feedback_message = HumanMessage(
-        content=json.dumps(
-            {
-                "feedback": result.get("feedback", "No feedback"),
-                "source": "evaluator",
-            },
-            ensure_ascii=False,
-        ),
-        name="evaluator"
-    )
-    
-    return_value = {
-        "should_stop": should_stop,
-        "messages": [feedback_message],
-        "retry": retry
-    }
-    return return_value
 
 
 async def dialog_agent(
     global_state: GlobalPersonaState
 ) -> list[str]:
     """
-    Dialog agent that generates and evaluates dialogue
+    Dialog agent that renders dialogue from upstream action directives.
     """
     
     usage_mode = _dialog_usage_mode(global_state)
@@ -887,23 +589,9 @@ async def dialog_agent(
     )
     sub_agent_builder = StateGraph(DialogAgentState)
 
-    # Add nodes
     sub_agent_builder.add_node("generator", dialog_generator)
-    sub_agent_builder.add_node("evaluator", dialog_evaluator)
-    
-    # Add edges
     sub_agent_builder.add_edge(START, "generator")
-    sub_agent_builder.add_edge("generator", "evaluator")
-    
-    # Evaluate
-    sub_agent_builder.add_conditional_edges(
-        "evaluator",
-        lambda state: "loop" if not state["should_stop"] else "end",
-        {
-            "loop": "generator",
-            "end": END
-        }
-    )
+    sub_agent_builder.add_edge("generator", END)
     
     # Compile
     sub_graph = sub_agent_builder.compile()
@@ -925,8 +613,6 @@ async def dialog_agent(
 
         # D
         "character_profile": global_state["character_profile"],
-        "should_stop": True,
-        "retry": 0,
         "final_dialog": [],
         "target_addressed_user_ids": [],
         "target_broadcast": False,
@@ -948,15 +634,15 @@ async def dialog_agent(
     )
     logger.debug(
         f'Dialog metadata: usage_mode={usage_mode} '
-        f'fragments={len(final_dialog)} retry={result["retry"]}'
+        f'fragments={len(final_dialog)}'
     )
-    evaluator_status = "passed" if final_dialog else "empty"
+    quality_status = "passed" if final_dialog else "empty"
     await event_logging.record_dialog_quality_event(
         component=DIALOG_COMPONENT,
         correlation_id="",
         usage_mode=usage_mode,
-        evaluator_status=evaluator_status,
-        retry_count=int(result["retry"]),
+        quality_status=quality_status,
+        retry_count=0,
         failure_codes=[] if final_dialog else ["empty_dialog"],
         content_plan_entry_count=len(linguistic_directives["content_plan"]),
         status="succeeded",

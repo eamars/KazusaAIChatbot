@@ -82,8 +82,9 @@ unbounded simulation loop.
   relationship ranking evidence, and scoped user-memory triples provide the
   current relationship model.
 - [x] **Dynamic Boundary Baseline:** Boundary profile, boundary core, judgment
-  core, logical stance, and dialog evaluator already prevent simple "yes-man"
-  behavior and preserve character boundaries.
+  core, logical stance, and selected-surface routing already prevent simple
+  "yes-man" behavior and preserve character boundaries; dialog renders the
+  selected plan without owning boundary decisions.
 - [ ] **Long-Horizon Relationship Model:** Future work should summarize stable
   relationship dynamics from user-memory units and reflection outputs, not add
   another live-response prompt that competes with cognition.

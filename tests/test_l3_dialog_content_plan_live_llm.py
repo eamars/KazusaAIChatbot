@@ -13,8 +13,6 @@ import pytest
 from kazusa_ai_chatbot.config import (
     COGNITION_LLM_BASE_URL,
     COGNITION_LLM_MODEL,
-    DIALOG_EVALUATOR_LLM_BASE_URL,
-    DIALOG_EVALUATOR_LLM_MODEL,
     DIALOG_GENERATOR_LLM_BASE_URL,
     DIALOG_GENERATOR_LLM_MODEL,
 )
@@ -86,15 +84,11 @@ async def ensure_live_cognition_llm() -> None:
 
 @pytest.fixture()
 async def ensure_live_dialog_llms() -> None:
-    """Ensure both live dialog routes are available before one dialog case."""
+    """Ensure the live dialog generator route is available before one case."""
 
     await _skip_if_endpoint_unavailable(
         'dialog generator',
         DIALOG_GENERATOR_LLM_BASE_URL,
-    )
-    await _skip_if_endpoint_unavailable(
-        'dialog evaluator',
-        DIALOG_EVALUATOR_LLM_BASE_URL,
     )
 
 
@@ -318,13 +312,7 @@ async def _run_dialog_case(case: dict, monkeypatch) -> dict:
         dialog_module._dialog_generator_llm,
         calls,
     )
-    evaluator_llm = _CapturingLiveLLM(
-        'dialog_evaluator',
-        dialog_module._dialog_evaluator_llm,
-        calls,
-    )
     monkeypatch.setattr(dialog_module, '_dialog_generator_llm', generator_llm)
-    monkeypatch.setattr(dialog_module, '_dialog_evaluator_llm', evaluator_llm)
 
     state = _dialog_state(case)
     result = await dialog_agent(state)
@@ -338,8 +326,6 @@ async def _run_dialog_case(case: dict, monkeypatch) -> dict:
         'case_id': case['case_id'],
         'generator_model': DIALOG_GENERATOR_LLM_MODEL,
         'generator_base_url': DIALOG_GENERATOR_LLM_BASE_URL,
-        'evaluator_model': DIALOG_EVALUATOR_LLM_MODEL,
-        'evaluator_base_url': DIALOG_EVALUATOR_LLM_BASE_URL,
         'input': state,
         'model_calls': calls,
         'raw_result': result,

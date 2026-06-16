@@ -385,7 +385,7 @@ async def _empty_action_attempt_rows(*, limit: int) -> list[dict[str, Any]]:
 
 
 async def _default_dialog_client(state: dict[str, Any]) -> dict[str, Any]:
-    """Call the existing dialog generator/evaluator graph.
+    """Call the existing dialog renderer graph.
 
     Args:
         state: Global persona state merged with shared cognition output.

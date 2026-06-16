@@ -15,8 +15,6 @@ import httpx
 import pytest
 
 from kazusa_ai_chatbot.config import (
-    DIALOG_EVALUATOR_LLM_BASE_URL,
-    DIALOG_EVALUATOR_LLM_MODEL,
     DIALOG_GENERATOR_LLM_BASE_URL,
     DIALOG_GENERATOR_LLM_MODEL,
 )
@@ -115,15 +113,11 @@ async def _skip_if_endpoint_unavailable(
 
 @pytest.fixture()
 async def ensure_live_dialog_llms() -> None:
-    """Ensure both dialog LLM routes are reachable before one live case."""
+    """Ensure the dialog generator LLM route is reachable before one live case."""
 
     await _skip_if_endpoint_unavailable(
         route_name='DIALOG_GENERATOR_LLM',
         base_url=DIALOG_GENERATOR_LLM_BASE_URL,
-    )
-    await _skip_if_endpoint_unavailable(
-        route_name='DIALOG_EVALUATOR_LLM',
-        base_url=DIALOG_EVALUATOR_LLM_BASE_URL,
     )
 
 
@@ -440,19 +434,10 @@ async def _run_case(
         dialog_module._dialog_generator_llm_config,
         thinking=LLMThinkingConfig(enabled=thinking_enabled),
     )
-    evaluator_config = replace(
-        dialog_module._dialog_evaluator_llm_config,
-        thinking=LLMThinkingConfig(enabled=thinking_enabled),
-    )
     monkeypatch.setattr(
         dialog_module,
         '_dialog_generator_llm_config',
         generator_config,
-    )
-    monkeypatch.setattr(
-        dialog_module,
-        '_dialog_evaluator_llm_config',
-        evaluator_config,
     )
 
     calls: list[dict[str, Any]] = []
@@ -462,15 +447,6 @@ async def _run_case(
         _CapturingLiveLLM(
             'dialog_generator',
             dialog_module._dialog_generator_llm,
-            calls,
-        ),
-    )
-    monkeypatch.setattr(
-        dialog_module,
-        '_dialog_evaluator_llm',
-        _CapturingLiveLLM(
-            'dialog_evaluator',
-            dialog_module._dialog_evaluator_llm,
             calls,
         ),
     )
@@ -495,16 +471,10 @@ async def _run_case(
             'topic_type': case['topic_type'],
             'generator_model': DIALOG_GENERATOR_LLM_MODEL,
             'generator_base_url': DIALOG_GENERATOR_LLM_BASE_URL,
-            'evaluator_model': DIALOG_EVALUATOR_LLM_MODEL,
             'thinking_enabled_requested': thinking_enabled,
             'generator_backend_descriptor': (
                 dialog_module._dialog_generator_llm.describe_backend(
                     config=generator_config,
-                )
-            ),
-            'evaluator_backend_descriptor': (
-                dialog_module._dialog_evaluator_llm.describe_backend(
-                    config=evaluator_config,
                 )
             ),
             'input': state,

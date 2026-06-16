@@ -253,8 +253,8 @@ Default to disabled when any of these are true:
 - Deterministic code already owns the critical decision, such as permissions,
   persistence, limits, retry, cache invalidation, adapter delivery, or tool
   execution.
-- The output is itself the inspectable reasoning artifact, such as cognition
-  layer fields, boundary assessment, action selection, or evaluator feedback.
+- The output is itself an inspectable reasoning or decision artifact, such as
+  cognition layer fields, boundary assessment, or action selection.
 
 Consider enabling thinking when all of these are true:
 
@@ -271,7 +271,7 @@ Consider enabling thinking when all of these are true:
 
 For Kazusa's current architecture, the strongest "off" signal is an explicit
 cognition chain or audit checklist. L1/L2/L2d/L3 cognition, boundary core,
-dialog evaluation, RAG routing/extraction, relevance, decontextualization, and
+dialog rendering, RAG routing/extraction, relevance, decontextualization, and
 JSON repair already have explicit contracts and should normally keep thinking
 disabled. Better candidates are background text artifact generation, difficult
 web evidence finalization, reflection synthesis, or global character-growth

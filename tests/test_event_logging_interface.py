@@ -297,7 +297,7 @@ async def test_dialog_quality_event_persists_usage_mode(monkeypatch) -> None:
         component="nodes.dialog_agent",
         correlation_id="corr-dialog",
         usage_mode="self_cognition_private_finalization",
-        evaluator_status="passed",
+        quality_status="passed",
         retry_count=1,
         failure_codes=[],
         content_plan_entry_count=3,

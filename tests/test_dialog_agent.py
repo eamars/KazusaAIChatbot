@@ -1,4 +1,4 @@
-"""Tests for dialog_agent.py — generator/evaluator dialog loop."""
+"""Tests for dialog_agent.py generator-only dialog rendering."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ import pytest
 
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes.dialog_agent import (
-    _DIALOG_EVALUATOR_PROMPT,
     _DIALOG_GENERATOR_PROMPT,
     dialog_agent,
     DialogAgentState,
@@ -173,32 +172,10 @@ class TestDialogAgentState:
             assert field in hints, f"Missing field: {field}"
 
 
-def test_dialog_evaluator_prompt_preserves_concise_safe_dialog() -> None:
-    """Evaluator prompt should not force rewrites of short safe on-topic dialog."""
-
-    assert "简短、贴计划、安全的台词应通过" in _DIALOG_EVALUATOR_PROMPT
-    assert "硬门槛全部通过后，才看软风格" in _DIALOG_EVALUATOR_PROMPT
-    assert "动作描写、物理感官、不可见状态" in _DIALOG_EVALUATOR_PROMPT
-
-
-def test_dialog_evaluator_prompt_checks_content_plan_fidelity() -> None:
-    """Evaluator prompt should judge dialog against one content plan."""
-
-    prompt = _DIALOG_EVALUATOR_PROMPT
-    assert '`content_plan` 是本轮可见回复的语义计划' in prompt
-    assert '`semantic_content` 如果存在' in prompt
-    assert '计划忠实：不得缺失、替换、反转或绕开' in prompt
-    assert '不要把每个字段机械当成独立可见段落' in prompt
-    assert '[DECISION]' not in prompt
-    assert '[ANSWER]' not in prompt
-    assert '[SCOPE]' not in prompt
-
-
 def test_dialog_prompts_preserve_multi_part_deliverables() -> None:
-    """Dialog prompts should preserve L3 content without literal overfitting."""
+    """Dialog generator should preserve L3 content without literal overfitting."""
 
     generator_prompt = _DIALOG_GENERATOR_PROMPT
-    evaluator_prompt = _DIALOG_EVALUATOR_PROMPT
 
     for required_text in (
         '# 生成流程',
@@ -208,7 +185,7 @@ def test_dialog_prompts_preserve_multi_part_deliverables() -> None:
         '性格底色怎样影响台词',
         '声纹质感怎样影响台词',
         '最终文字采用当前角色对当前用户说话的视角',
-        '先把叙述句、分析句和泛称感受句转成角色台词',
+        '叙述句和分析句先转成角色当场聊天的互动骨架',
         '角色表达依据只能作用在已经重锚定好的台词上',
         '建立内容骨架',
         '重锚定说话视角',
@@ -232,30 +209,11 @@ def test_dialog_prompts_preserve_multi_part_deliverables() -> None:
         '**hesitation_density:**',
         '**fragmentation:**',
         '**direct_assertion:**',
+        "Evaluator" " Feedback",
         'GB300',
         'Pro6000',
     ):
         assert forbidden_text not in generator_prompt
-
-    for required_text in (
-        '# 审核流程',
-        '建立语义计划',
-        '对照可见气泡',
-        '审核单气泡布局和固定格式块',
-        '审核表达安全',
-        '最后看软风格',
-        '语义是否忠实',
-        '允许自然改写、轻微解释和布局调整',
-        '轻微解释不矛盾时可以通过',
-        '压缩表达可以通过',
-        '自然表达可以通过',
-        '说话视角忠实',
-        '先扫说话视角',
-        '泛称感受扫描',
-        '只有同时满足以下条件才返回 `should_stop=true`',
-        'should_stop=false',
-    ):
-        assert required_text in evaluator_prompt
 
 
 def test_dialog_generator_prompt_describes_one_bubble_layout_contract() -> None:
@@ -277,10 +235,9 @@ def test_dialog_generator_prompt_describes_one_bubble_layout_contract() -> None:
 
 
 def test_dialog_prompts_preserve_fixed_format_blocks() -> None:
-    """Dialog prompts should preserve code and fixed-format block layout."""
+    """Dialog generator should preserve code and fixed-format block layout."""
 
     generator_prompt = _DIALOG_GENERATOR_PROMPT
-    evaluator_prompt = _DIALOG_EVALUATOR_PROMPT
 
     for required_text in (
         '固定格式块',
@@ -296,35 +253,12 @@ def test_dialog_prompts_preserve_fixed_format_blocks() -> None:
     ):
         assert required_text in generator_prompt
 
-    for required_text in (
-        '固定格式块',
-        '代码块',
-        'JSON 示例',
-        '缩进',
-        'fenced code block',
-        '不得因为必要代码围栏而驳回',
-    ):
-        assert required_text in evaluator_prompt
-
-
-def test_dialog_evaluator_prompt_audits_layout_without_line_budget() -> None:
-    """Evaluator should audit one-bubble layout without line-count caps."""
-
-    prompt = _DIALOG_EVALUATOR_PROMPT
-
-    assert '单个可见聊天气泡' in prompt
-    assert '布局可读性' in prompt
-    assert '技术对比、参数列表和多候选推荐应使用普通聊天行' in prompt
-    assert '只有当 `content_plan` 中的固定格式内容已经是表格时才保留表格' in prompt
-    assert '不得仅因技术交付使用多行而驳回' in prompt
-    assert '不得按固定行数、固定段数或固定字数判定失败' in prompt
-
 
 @pytest.mark.asyncio
-async def test_dialog_agent_preserves_evaluator_accepted_fragment_text(
+async def test_dialog_agent_preserves_generator_fragment_text(
     monkeypatch,
 ) -> None:
-    """Dialog should not rewrite string fragments after evaluator acceptance."""
+    """Dialog should not rewrite string fragments after generation."""
 
     state = _base_global_state()
     generator_llm = MagicMock()
@@ -334,72 +268,11 @@ async def test_dialog_agent_preserves_evaluator_accepted_fragment_text(
             '"mention_target_user": false}'
         )
     ))
-    evaluator_llm = MagicMock()
-    evaluator_llm.ainvoke = AsyncMock(return_value=AIMessage(
-        content='{"feedback": "Passed", "should_stop": true}'
-    ))
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
-    monkeypatch.setattr(dialog_module, "_dialog_evaluator_llm", evaluator_llm)
 
     result = await dialog_agent(state)
 
     assert result["final_dialog"] == ["raw<br>fragment"]
-
-
-def test_dialog_evaluator_prompt_orders_hard_gates_before_style() -> None:
-    """Evaluator prompt should read as an ordered weak-model audit."""
-
-    prompt = _DIALOG_EVALUATOR_PROMPT
-    assert '不重新决定话题、意图、是否回答或角色立场' in prompt
-    assert prompt.index('1. **建立语义计划**') < prompt.index(
-        '2. **对照可见气泡**',
-    )
-    assert prompt.index('2. **对照可见气泡**') < prompt.index(
-        '3. **审核单气泡布局和固定格式块**',
-    )
-    assert prompt.index('3. **审核单气泡布局和固定格式块**') < prompt.index(
-        '4. **审核表达安全**',
-    )
-    assert prompt.index('4. **审核表达安全**') < prompt.index(
-        '5. **最后看软风格**',
-    )
-    assert prompt.index('5. **最后看软风格**') < prompt.index('# 通过逻辑')
-    assert '"should_stop": boolean' in prompt
-    assert 'should_stop=false` 表示必须把 `feedback` 交回生成器重试' in prompt
-
-
-def test_dialog_evaluator_prompt_rejects_unsupported_concrete_content() -> None:
-    """Evaluator prompt should reject concrete claims not backed by the plan."""
-
-    prompt = _DIALOG_EVALUATOR_PROMPT
-    rule_start = prompt.index('事实边界：不得添加会改变结论')
-    unsupported_rule = prompt[rule_start:rule_start + 500]
-
-    assert '具体实体' in unsupported_rule
-    assert '属性' in unsupported_rule
-    assert '数量' in unsupported_rule
-    assert '时间' in unsupported_rule
-    assert '地点' in unsupported_rule
-    assert '承诺' in unsupported_rule
-    assert '轻微解释不矛盾时可以通过' in unsupported_rule
-    assert '具体对象边界' in prompt
-    assert '只能保留计划允许的泛化类别、行动骨架、筛选标准和核实清单' in prompt
-
-
-def test_dialog_evaluator_prompt_rejects_guess_owner_flip() -> None:
-    """Evaluator prompt should reject changed owner for guessing gates."""
-
-    prompt = _DIALOG_EVALUATOR_PROMPT
-    assert '指代与动作所有权' in prompt
-    assert '审核对象' in prompt
-    assert '先确认猜测动作和偏好所有者是谁' in prompt
-    assert '我/我的/自己' in prompt
-    assert '你/对方/你们' in prompt
-    assert '猜测动作' in prompt
-    assert '当前角色' in prompt
-    assert '偏好' in prompt
-    assert '我想看' in prompt
-    assert '台词不得改成猜当前角色想看' in prompt
 
 
 def test_dialog_generator_prompt_has_no_decision_ownership() -> None:
@@ -415,18 +288,17 @@ def test_dialog_generator_prompt_has_no_decision_ownership() -> None:
 
 
 def test_dialog_prompts_use_content_plan_as_semantic_authority() -> None:
-    """Generator and evaluator prompts should use content_plan authority."""
+    """Generator prompt should use content_plan authority."""
 
     generator_prompt = _DIALOG_GENERATOR_PROMPT
-    evaluator_prompt = _DIALOG_EVALUATOR_PROMPT
 
     for required_text in (
-        'content_plan` 是本轮已经决定好的可见语义计划',
+        'content_plan` 是本轮已经决定好的台词计划',
         '# 角色表达依据',
         '这些字段只决定“怎么说”',
         '性格底色怎样影响台词',
         '声纹质感怎样影响台词',
-        '先把叙述句、分析句和泛称感受句转成角色台词',
+        '叙述句和分析句先转成角色当场聊天的互动骨架',
         '角色表达依据只能作用在已经重锚定好的台词上',
         '保持同义且不矛盾',
         '不丢失主要信息、不制造计划外结论',
@@ -442,30 +314,14 @@ def test_dialog_prompts_use_content_plan_as_semantic_authority() -> None:
         '**hesitation_density:**',
         '**fragmentation:**',
         '**direct_assertion:**',
+        "Evaluator" " Feedback",
         'GB300',
         'Pro6000',
     ):
         assert forbidden_text not in generator_prompt
 
-    for required_text in (
-        '`content_plan` 是本轮可见回复的语义计划',
-        '语义是否忠实',
-        '允许自然改写、轻微解释和布局调整',
-        '轻微解释不矛盾时可以通过',
-        '压缩表达可以通过',
-        '自然表达可以通过',
-        '说话视角忠实',
-        '先扫说话视角',
-        '泛称感受扫描',
-        '只有同时满足以下条件才返回 `should_stop=true`',
-    ):
-        assert required_text in evaluator_prompt
-
-    assert 'last_user' '_message' not in evaluator_prompt
-    assert 'internal_monologue' not in evaluator_prompt
     assert 'internal_monologue' not in generator_prompt
     assert 'tone' '_history' not in generator_prompt
-    assert '强制 `should_stop: true`' not in evaluator_prompt
 
 def test_dialog_rendered_voice_constraints_do_not_seed_literal_phrases() -> None:
     """Rendered voice constraints should not invite catchphrase copying."""
@@ -627,22 +483,13 @@ async def test_dialog_agent_returns_final_dialog():
     from langchain_core.messages import AIMessage
     generator_response = AIMessage(content='{"final_dialog": ["Hello there!", "How are you?"]}')
 
-    # Mock the evaluator LLM to approve immediately
-    evaluator_response = AIMessage(content='{"fatal_errors": [], "guideline_violations": [], "score": 90, "should_stop": true, "feedback": "good"}')
-
-    call_count = 0
-
     async def mock_ainvoke(messages, *, config=None):
-        nonlocal call_count
-        call_count += 1
-        if call_count % 2 == 1:
-            return generator_response
-        return evaluator_response
+        return generator_response
 
-    with patch("kazusa_ai_chatbot.nodes.dialog_agent._dialog_generator_llm") as mock_generator, \
-         patch("kazusa_ai_chatbot.nodes.dialog_agent._dialog_evaluator_llm") as mock_evaluator:
+    with patch(
+        "kazusa_ai_chatbot.nodes.dialog_agent._dialog_generator_llm"
+    ) as mock_generator:
         mock_generator.ainvoke = mock_ainvoke
-        mock_evaluator.ainvoke = mock_ainvoke
 
         result = await dialog_agent(state)
 
@@ -662,10 +509,7 @@ async def test_dialog_agent_validates_action_directives_before_llm_call(
     state["action_directives"].pop("linguistic_directives")
     generator_llm = MagicMock()
     generator_llm.ainvoke = AsyncMock()
-    evaluator_llm = MagicMock()
-    evaluator_llm.ainvoke = AsyncMock()
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
-    monkeypatch.setattr(dialog_module, "_dialog_evaluator_llm", evaluator_llm)
 
     with pytest.raises(
         StateContractError,
@@ -674,7 +518,6 @@ async def test_dialog_agent_validates_action_directives_before_llm_call(
         await dialog_agent(state)
 
     generator_llm.ainvoke.assert_not_awaited()
-    evaluator_llm.ainvoke.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -685,21 +528,13 @@ async def test_dialog_agent_handles_empty_dialog():
     from langchain_core.messages import AIMessage
     generator_response = AIMessage(content='{"final_dialog": []}')
 
-    evaluator_response = AIMessage(content='{"fatal_errors": [], "guideline_violations": [], "score": 90, "should_stop": true, "feedback": "ok"}')
-
-    call_count = 0
-
     async def mock_ainvoke(messages, *, config=None):
-        nonlocal call_count
-        call_count += 1
-        if call_count % 2 == 1:
-            return generator_response
-        return evaluator_response
+        return generator_response
 
-    with patch("kazusa_ai_chatbot.nodes.dialog_agent._dialog_generator_llm") as mock_generator, \
-         patch("kazusa_ai_chatbot.nodes.dialog_agent._dialog_evaluator_llm") as mock_evaluator:
+    with patch(
+        "kazusa_ai_chatbot.nodes.dialog_agent._dialog_generator_llm"
+    ) as mock_generator:
         mock_generator.ainvoke = mock_ainvoke
-        mock_evaluator.ainvoke = mock_ainvoke
 
         result = await dialog_agent(state)
 
@@ -715,32 +550,13 @@ async def test_dialog_agent_logs_explicit_usage_mode(caplog):
 
     from langchain_core.messages import AIMessage
     generator_response = AIMessage(content='{"final_dialog": ["Internal only."]}')
-    evaluator_response = AIMessage(
-        content=(
-            '{"fatal_errors": [], "guideline_violations": [], "score": 90, '
-            '"should_stop": true, "feedback": "Passed"}'
-        )
-    )
-
-    call_count = 0
-
     async def mock_ainvoke(messages, *, config=None):
-        nonlocal call_count
-        call_count += 1
-        if call_count % 2 == 1:
-            return generator_response
-        return evaluator_response
+        return generator_response
 
-    with (
-        patch(
-            "kazusa_ai_chatbot.nodes.dialog_agent._dialog_generator_llm"
-        ) as mock_generator,
-        patch(
-            "kazusa_ai_chatbot.nodes.dialog_agent._dialog_evaluator_llm"
-        ) as mock_evaluator,
-    ):
+    with patch(
+        "kazusa_ai_chatbot.nodes.dialog_agent._dialog_generator_llm"
+    ) as mock_generator:
         mock_generator.ainvoke = mock_ainvoke
-        mock_evaluator.ainvoke = mock_ainvoke
 
         with caplog.at_level(logging.INFO, logger=dialog_module.__name__):
             await dialog_agent(state)
@@ -775,12 +591,7 @@ async def test_dialog_agent_ignores_retired_response_field(monkeypatch):
     generator_llm.ainvoke = AsyncMock(return_value=AIMessage(
         content='{"final_dialog": ["Still answering."], "mention_target_user": false}'
     ))
-    evaluator_llm = MagicMock()
-    evaluator_llm.ainvoke = AsyncMock(return_value=AIMessage(
-        content='{"feedback": "Passed", "should_stop": true}'
-    ))
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
-    monkeypatch.setattr(dialog_module, "_dialog_evaluator_llm", evaluator_llm)
 
     result = await dialog_agent(state)
 
@@ -788,5 +599,4 @@ async def test_dialog_agent_ignores_retired_response_field(monkeypatch):
     assert result["target_addressed_user_ids"] == ["global-user-123"]
     assert result["target_broadcast"] is False
     generator_llm.ainvoke.assert_awaited_once()
-    evaluator_llm.ainvoke.assert_awaited_once()
 

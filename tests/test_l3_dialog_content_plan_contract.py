@@ -259,12 +259,9 @@ def test_dialog_prompts_use_content_plan_as_semantic_authority() -> None:
     """Prompt text should describe the new content-plan contract."""
 
     generator_prompt = dialog_module._DIALOG_GENERATOR_PROMPT
-    evaluator_prompt = dialog_module._DIALOG_EVALUATOR_PROMPT
-
-    for prompt in (generator_prompt, evaluator_prompt):
-        assert 'content_plan' in prompt
-        assert 'semantic_content' in prompt
-        assert 'content_anchors' not in prompt
-        assert '[DECISION]' not in prompt
-        assert '[ANSWER]' not in prompt
-        assert '[SCOPE]' not in prompt
+    assert 'content_plan' in generator_prompt
+    assert 'semantic_content' in generator_prompt
+    assert 'content_anchors' not in generator_prompt
+    assert '[DECISION]' not in generator_prompt
+    assert '[ANSWER]' not in generator_prompt
+    assert '[SCOPE]' not in generator_prompt

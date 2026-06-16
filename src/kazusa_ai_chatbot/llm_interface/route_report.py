@@ -21,7 +21,6 @@ _REQUIRED_ROUTES = frozenset((
     "COGNITION_LLM",
     "BOUNDARY_CORE_LLM",
     "DIALOG_GENERATOR_LLM",
-    "DIALOG_EVALUATOR_LLM",
     "CONSOLIDATION_LLM",
     "JSON_REPAIR_LLM",
 ))
@@ -67,7 +66,6 @@ def _configured_chat_routes() -> tuple[LLMCallConfig, ...]:
         "COGNITION_LLM",
         "BOUNDARY_CORE_LLM",
         "DIALOG_GENERATOR_LLM",
-        "DIALOG_EVALUATOR_LLM",
         "CONSOLIDATION_LLM",
         "JSON_REPAIR_LLM",
         "BACKGROUND_ARTIFACT_LLM",

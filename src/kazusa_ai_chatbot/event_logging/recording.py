@@ -515,7 +515,7 @@ async def record_dialog_quality_event(
     component: str,
     correlation_id: str,
     usage_mode: str,
-    evaluator_status: str,
+    quality_status: str,
     retry_count: int,
     failure_codes: Sequence[str],
     content_plan_entry_count: int,
@@ -524,11 +524,11 @@ async def record_dialog_quality_event(
     severity: EventSeverity = "info",
     occurred_at: datetime | None = None,
 ) -> EventLogWriteResult:
-    """Record dialog evaluator quality metadata."""
+    """Record dialog output quality metadata."""
 
     payload = {
         "usage_mode": sanitize_short_text(usage_mode, limit=120),
-        "evaluator_status": sanitize_short_text(evaluator_status, limit=100),
+        "quality_status": sanitize_short_text(quality_status, limit=100),
         "retry_count": retry_count,
         "failure_codes": sanitize_string_list(failure_codes),
         "content_plan_entry_count": content_plan_entry_count,

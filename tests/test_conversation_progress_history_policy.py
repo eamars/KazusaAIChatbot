@@ -283,59 +283,6 @@ async def test_dialog_generator_payload_excludes_raw_history_and_monologue(monke
     assert "chat_history_recent" not in human_payload
 
 
-@pytest.mark.asyncio
-async def test_dialog_evaluator_payload_excludes_history_message_and_monologue(monkeypatch) -> None:
-    """Dialog Evaluator audits only final dialog against current directives."""
-
-    fake_llm = _CapturingLLM({"feedback": "Passed", "should_stop": True})
-    monkeypatch.setattr(dialog_module, "_dialog_evaluator_llm", fake_llm)
-
-    await dialog_module.dialog_evaluator({
-        "internal_monologue": "answer",
-        "final_dialog": ["answer"],
-        "action_directives": {
-            "linguistic_directives": {
-                "rhetorical_strategy": "direct",
-                "linguistic_style": "brief",
-                "accepted_user_preferences": [],
-                "content_plan": {
-                    "semantic_content": "answer",
-                    "rendering": "short",
-                },
-                "forbidden_phrases": [],
-            },
-            "contextual_directives": {
-                "social_distance": "friendly",
-                "emotional_intensity": "low",
-                "vibe_check": "calm",
-                "relational_dynamic": "cooperative",
-            },
-        },
-        "chat_history_wide": _history(),
-        "chat_history_recent": _history(),
-        "dialog_usage_mode": "live_visible_reply",
-        "platform_user_id": "user-1",
-        "platform_bot_id": "bot-1",
-        "global_user_id": "global-user-1",
-        "character_profile": _character_profile(),
-        "messages": [],
-        "retry": 0,
-    })
-
-    human_payload = json.loads(fake_llm.messages[1].content)
-    assert set(human_payload) == {
-        "retry",
-        "final_dialog",
-        "linguistic_directives",
-        "contextual_directives",
-    }
-    assert "internal_monologue" not in human_payload
-    assert _LAST_USER_MESSAGE_KEY not in human_payload
-    assert _TONE_HISTORY_KEY not in human_payload
-    assert "chat_history_wide" not in human_payload
-    assert "chat_history_recent" not in human_payload
-
-
 def test_context_budget_workload_summary_records_payload_counts() -> None:
     """Record affected LLM payload counts for the context budget."""
 
@@ -344,7 +291,6 @@ def test_context_budget_workload_summary_records_payload_counts() -> None:
         "contextual_history_messages": len(history),
         "style_history_messages": len(history),
         "dialog_generator_tone_messages": len(history),
-        "dialog_evaluator_last_user" "_message_only": True,
     }
     contextual_history = project_conversation_history_for_llm(
         history, character_name="Kazusa", max_rows=4,
@@ -360,9 +306,6 @@ def test_context_budget_workload_summary_records_payload_counts() -> None:
         "dialog_generator_internal_monologue": False,
         "content_plan_progress_cap_chars": 5000,
         "content_plan_raw_history_messages": 0,
-        "dialog_evaluator_raw_history_messages": 0,
-        "dialog_evaluator_last_user" "_message_only": False,
-        "dialog_evaluator_internal_monologue": False,
         "recorder_response_path_calls": 0,
         "recorder_runs_in_background": True,
         "new_response_path_llm_calls": 0,
@@ -381,9 +324,6 @@ def test_context_budget_workload_summary_records_payload_counts() -> None:
             "dialog_generator_raw_history": 0,
             "dialog_generator_internal_monologue": 0,
             "content_plan_conversation_progress_cap": 5000,
-            "dialog_evaluator_raw_history": 0,
-            "dialog_evaluator_last_user" "_message": 0,
-            "dialog_evaluator_internal_monologue": 0,
             "recorder_response_path_payload": 0,
         },
         "previous_payload": previous_payload,
@@ -400,7 +340,4 @@ def test_context_budget_workload_summary_records_payload_counts() -> None:
     assert bounded_payload["dialog_generator_raw_history_messages"] == 0
     assert bounded_payload["dialog_generator_internal_monologue"] is False
     assert bounded_payload["content_plan_raw_history_messages"] == 0
-    assert bounded_payload["dialog_evaluator_raw_history_messages"] == 0
-    assert bounded_payload["dialog_evaluator_last_user" "_message_only"] is False
-    assert bounded_payload["dialog_evaluator_internal_monologue"] is False
     assert bounded_payload["recorder_response_path_calls"] == 0

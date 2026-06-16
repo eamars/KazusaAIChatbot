@@ -11,8 +11,6 @@ import httpx
 import pytest
 
 from kazusa_ai_chatbot.config import (
-    DIALOG_EVALUATOR_LLM_BASE_URL,
-    DIALOG_EVALUATOR_LLM_MODEL,
     DIALOG_GENERATOR_LLM_BASE_URL,
     DIALOG_GENERATOR_LLM_MODEL,
 )
@@ -95,15 +93,11 @@ async def _skip_if_endpoint_unavailable(name: str, base_url: str) -> None:
 
 @pytest.fixture()
 async def ensure_live_dialog_llms() -> None:
-    """Ensure both live dialog LLM routes are reachable."""
+    """Ensure the live dialog generator LLM route is reachable."""
 
     await _skip_if_endpoint_unavailable(
         'dialog generator',
         DIALOG_GENERATOR_LLM_BASE_URL,
-    )
-    await _skip_if_endpoint_unavailable(
-        'dialog evaluator',
-        DIALOG_EVALUATOR_LLM_BASE_URL,
     )
 
 
@@ -192,7 +186,7 @@ def _incident_dialog_state() -> dict:
         'global_user_id': '256e8a10-c406-47e9-ac8f-efd270d18160',
         'user_name': '蚝爹油',
         'user_profile': {'affinity': 501},
-        'dialog_usage_mode': 'live_evaluator_contract',
+        'dialog_usage_mode': 'live_generator_contract',
         'debug_modes': {},
         'should_respond': True,
     }
@@ -216,15 +210,6 @@ async def test_live_dialog_agent_keeps_content_plan_over_stale_history(
             llm_calls,
         ),
     )
-    monkeypatch.setattr(
-        dialog_module,
-        '_dialog_evaluator_llm',
-        _CapturingLiveLLM(
-            'dialog_evaluator',
-            dialog_module._dialog_evaluator_llm,
-            llm_calls,
-        ),
-    )
     for recorder_name in (
         'record_llm_stage_event',
         'record_model_contract_event',
@@ -245,8 +230,6 @@ async def test_live_dialog_agent_keeps_content_plan_over_stale_history(
         {
             'generator_model': DIALOG_GENERATOR_LLM_MODEL,
             'generator_base_url': DIALOG_GENERATOR_LLM_BASE_URL,
-            'evaluator_model': DIALOG_EVALUATOR_LLM_MODEL,
-            'evaluator_base_url': DIALOG_EVALUATOR_LLM_BASE_URL,
             'current_user_input': (
                 '今天的魔术表演是大变活人。刚刚屋里还没人呢现在就有一个活生生的大美女在这里了'
             ),
@@ -274,81 +257,4 @@ async def test_live_dialog_agent_keeps_content_plan_over_stale_history(
     assert any(token in dialog_text for token in current_anchor_tokens), (
         'Dialog did not visibly execute the current content plan; '
         f'trace={trace_path}; dialog={dialog_text!r}'
-    )
-
-
-async def test_live_dialog_evaluator_rejects_stale_topic_dialog(
-    ensure_live_dialog_llms,
-    monkeypatch,
-) -> None:
-    """Evaluator must reject stale-topic dialog from content plan alone."""
-
-    del ensure_live_dialog_llms
-    llm_calls: list[dict] = []
-    monkeypatch.setattr(
-        dialog_module,
-        '_dialog_evaluator_llm',
-        _CapturingLiveLLM(
-            'dialog_evaluator',
-            dialog_module._dialog_evaluator_llm,
-            llm_calls,
-        ),
-    )
-    for recorder_name in (
-        'record_llm_stage_event',
-        'record_model_contract_event',
-    ):
-        monkeypatch.setattr(
-            dialog_module.event_logging,
-            recorder_name,
-            AsyncMock(),
-        )
-
-    state = _incident_dialog_state()
-    state.update({
-        'final_dialog': [
-            '诶？',
-            '手打奶茶……可以嘛？🤔',
-            '这个提议听起来相当不错哎！✨',
-            '不过，你现在是在认真请客吗呀～😏',
-        ],
-        'retry': 1,
-        'messages': [],
-    })
-    result = await dialog_module.dialog_evaluator(state)
-    feedback_payload = json.loads(result['messages'][0].content)
-    trace_path = write_llm_trace(
-        'dialog_anchor_boundary_live_llm',
-        'evaluator_accepts_stale_milk_tea_dialog',
-        {
-            'evaluator_model': DIALOG_EVALUATOR_LLM_MODEL,
-            'evaluator_base_url': DIALOG_EVALUATOR_LLM_BASE_URL,
-            'current_user_input': (
-                '今天的魔术表演是大变活人。刚刚屋里还没人呢现在就有一个活生生的大美女在这里了'
-            ),
-            'state': state,
-            'llm_calls': llm_calls,
-            'result': {
-                'should_stop': result['should_stop'],
-                'retry': result['retry'],
-                'feedback_payload': feedback_payload,
-            },
-            'judgment': (
-                'Pass only if the evaluator rejects the milk-tea dialog as '
-                'topic drift against the magic/beauty content plan.'
-            ),
-        },
-    )
-
-    print(f'trace_path={trace_path}')
-    print(f'feedback_payload={json.dumps(feedback_payload, ensure_ascii=False)}')
-    assert 'last_user' '_message' not in llm_calls[0]['human_payload']
-    assert 'internal_monologue' not in llm_calls[0]['human_payload']
-    assert feedback_payload['feedback'] != 'Passed', (
-        'Evaluator passed stale-topic dialog against current content plan; '
-        f'trace={trace_path}'
-    )
-    assert result['should_stop'] is False, (
-        'Evaluator stopped the retry loop after stale-topic dialog; '
-        f'trace={trace_path}'
     )

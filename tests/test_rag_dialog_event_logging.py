@@ -210,9 +210,6 @@ def _dialog_node_state() -> dict[str, object]:
     state = _dialog_global_state()
     state.update(
         {
-            "messages": [],
-            "should_stop": False,
-            "retry": 0,
             "final_dialog": ["private generated dialog"],
             "target_addressed_user_ids": [],
             "target_broadcast": False,
@@ -503,41 +500,6 @@ async def test_dialog_generator_records_llm_metadata_without_generated_text(
 
 
 @pytest.mark.asyncio
-async def test_dialog_evaluator_records_contract_drift_without_dialog_text(
-    monkeypatch,
-) -> None:
-    """Evaluator contract telemetry should describe fields, not dialog text."""
-
-    record_llm_stage_event = AsyncMock()
-    record_model_contract_event = AsyncMock()
-    monkeypatch.setattr(
-        dialog_module,
-        "_dialog_evaluator_llm",
-        _StaticLLM('{"feedback": "Needs work"}'),
-    )
-    monkeypatch.setattr(
-        dialog_module.event_logging,
-        "record_llm_stage_event",
-        record_llm_stage_event,
-    )
-    monkeypatch.setattr(
-        dialog_module.event_logging,
-        "record_model_contract_event",
-        record_model_contract_event,
-    )
-
-    state = _dialog_node_state()
-    result = await dialog_module.dialog_evaluator(state)
-
-    assert result["should_stop"] is True
-    record_llm_stage_event.assert_awaited_once()
-    record_model_contract_event.assert_awaited_once()
-    contract_kwargs = record_model_contract_event.await_args.kwargs
-    assert contract_kwargs["missing_fields"] == ["should_stop"]
-    assert "secret generated dialog" not in _serialized(contract_kwargs)
-
-
-@pytest.mark.asyncio
 async def test_dialog_agent_records_quality_without_dialog_text(monkeypatch) -> None:
     """Full dialog graph should record quality metadata after normal output."""
 
@@ -551,11 +513,6 @@ async def test_dialog_agent_records_quality_without_dialog_text(monkeypatch) -> 
             '{"final_dialog": ["secret full graph reply"], '
             '"mention_target_user": false}'
         ),
-    )
-    monkeypatch.setattr(
-        dialog_module,
-        "_dialog_evaluator_llm",
-        _StaticLLM('{"feedback": "Passed", "should_stop": true}'),
     )
     monkeypatch.setattr(
         dialog_module.event_logging,
@@ -579,7 +536,7 @@ async def test_dialog_agent_records_quality_without_dialog_text(monkeypatch) -> 
     record_dialog_quality_event.assert_awaited_once()
     kwargs = record_dialog_quality_event.await_args.kwargs
     assert kwargs["usage_mode"] == "live_visible_reply"
-    assert kwargs["evaluator_status"] == "passed"
-    assert kwargs["retry_count"] == 1
+    assert kwargs["quality_status"] == "passed"
+    assert kwargs["retry_count"] == 0
     assert kwargs["content_plan_entry_count"] == 1
     assert "secret full graph reply" not in _serialized(kwargs)

@@ -508,7 +508,7 @@ def _resolver_update(
 
 
 def _dialog_state() -> dict[str, Any]:
-    """Build a dialog-agent state for generator and evaluator render checks."""
+    """Build a dialog-agent state for generator render checks."""
     cognition_state = _cognition_state()
     return_value = {
         "internal_monologue": cognition_state["internal_monologue"],
@@ -535,9 +535,6 @@ def _dialog_state() -> dict[str, Any]:
         "user_name": cognition_state["user_name"],
         "user_profile": cognition_state["user_profile"],
         "character_profile": cognition_state["character_profile"],
-        "messages": [],
-        "should_stop": False,
-        "retry": 0,
         "dialog_usage_mode": "live_visible_reply",
         "final_dialog": ["ok"],
         "target_addressed_user_ids": [],
@@ -1495,18 +1492,6 @@ async def test_existing_cognition_and_dialog_prompts_render_with_mocked_llms(
         "contextual_directives",
         "user_name",
     }
-
-    evaluator_llm = _CaptureLLM({"feedback": "Passed", "should_stop": True})
-    monkeypatch.setattr(dialog_module, "_dialog_evaluator_llm", evaluator_llm)
-    evaluator_result = await dialog_module.dialog_evaluator(dialog_state)
-    assert evaluator_result["should_stop"] is True
-    evaluator_payload = _assert_prompt_messages(
-        evaluator_llm,
-        {"retry", "final_dialog", "linguistic_directives", "contextual_directives"},
-    )
-    assert "internal_monologue" not in evaluator_payload
-    assert "last_user" "_message" not in evaluator_payload
-
 
 @pytest.mark.asyncio
 async def test_l2_consciousness_receives_local_time_for_same_day_commitment(

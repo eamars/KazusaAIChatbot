@@ -164,12 +164,7 @@ async def test_dialog_agent_returns_false_mention_when_dialog_empty(
         "final_dialog": [],
         "mention_target_user": True,
     })
-    fake_evaluator = _CapturingLLM({
-        "feedback": "Passed",
-        "should_stop": True,
-    })
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", fake_generator)
-    monkeypatch.setattr(dialog_module, "_dialog_evaluator_llm", fake_evaluator)
 
     result = await dialog_module.dialog_agent(_dialog_state())
 
