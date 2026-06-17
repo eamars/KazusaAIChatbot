@@ -583,6 +583,21 @@ async def test_chat_response_tracks_deliverable_assistant_row(monkeypatch):
 
     assert response.messages == ["ok"]
     assert response.delivery_tracking_id
+    assert response.cognition_graph is not None
+    graph = response.cognition_graph
+    assert graph["run_id"] == response.delivery_tracking_id
+    assert graph["status"] == "completed"
+    node_ids = {node["id"] for node in graph["nodes"]}
+    assert {"l2.reasoning", "l2.memory", "l2.actions"} <= node_ids
+    edge_kinds = {edge["kind"] for edge in graph["edges"]}
+    assert {"fork", "join"} <= edge_kinds
+    graph_text = repr(graph)
+    assert "test" in graph_text
+    assert "PROVIDE" in graph_text
+    assert "CONFIRM" in graph_text
+    detail_text = repr([node["detail"] for node in graph["nodes"]])
+    assert "prompt" not in detail_text
+    assert "embedding" not in detail_text
     save_assistant_message.assert_awaited_once()
     saved_result = save_assistant_message.await_args.args[0]
     assert saved_result["delivery_tracking_id"] == response.delivery_tracking_id

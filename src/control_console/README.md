@@ -73,12 +73,11 @@ bounded cognition-run graph snapshot contract:
 - `redaction`: an explicit policy summary for excluded prompts, embeddings,
   raw messages, and message envelopes.
 
-The current brain `/chat` response does not expose live cognition internals.
-Until a bounded brain-side telemetry contract is approved, normal live chat
-responses return `status: not_reported` rather than fabricated graph nodes.
-If a debug/test payload already includes a bounded `cognition_graph` or
-`cognition_snapshot`, the console projects it through this same redacted
-contract.
+The brain `/chat` response may include a bounded `cognition_graph` snapshot
+derived from the actual graph result and consolidation state. The console
+projects that snapshot through this same redacted contract. If the brain is
+unavailable or a response does not include graph telemetry, the console returns
+`status: not_reported` rather than fabricating graph nodes.
 
 ## Page Capability Status
 

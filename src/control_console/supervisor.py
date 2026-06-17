@@ -8,7 +8,7 @@ import hashlib
 import os
 from pathlib import Path
 import socket
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 import uuid
 
@@ -46,6 +46,7 @@ class ProcessSupervisor:
         self._log_store = log_store
         self._audit_writer = audit_writer
         self._processes: dict[str, asyncio.subprocess.Process] = {}
+        self._log_tasks: dict[str, set[asyncio.Task[None]]] = {}
 
     def service_version(self, service_id: str) -> int:
         """Return the current service state version."""
@@ -111,6 +112,7 @@ class ProcessSupervisor:
             stderr=asyncio.subprocess.PIPE,
         )
         self._processes[service_id] = process
+        self._start_log_readers(service_id=service_id, process=process)
         generation = f"generation-{uuid.uuid4().hex}"
         fingerprint = _command_fingerprint(spec.command)
         self._store.record_process_owner(
@@ -184,6 +186,7 @@ class ProcessSupervisor:
             await process.wait()
         if process is not None:
             self._processes.pop(service_id, None)
+        self._cancel_log_tasks(service_id)
         self._store.update_service(
             service_id,
             {
@@ -406,6 +409,89 @@ class ProcessSupervisor:
             target={"service_id": service_id},
             new_state={"actual_state": "crashed", "exit_code": exit_code},
         )
+
+    def _start_log_readers(
+        self,
+        *,
+        service_id: str,
+        process: asyncio.subprocess.Process,
+    ) -> None:
+        """Start bounded stdout/stderr drain tasks for one child process."""
+
+        self._cancel_log_tasks(service_id)
+        tasks: set[asyncio.Task[None]] = set()
+        for stream_name in ("stdout", "stderr"):
+            stream = getattr(process, stream_name, None)
+            if stream is None:
+                continue
+            task = asyncio.create_task(
+                self._drain_process_stream(
+                    service_id=service_id,
+                    stream_name=stream_name,
+                    stream=stream,
+                ),
+            )
+            task.add_done_callback(
+                lambda completed, current_id=service_id: self._discard_log_task(
+                    current_id,
+                    completed,
+                ),
+            )
+            tasks.add(task)
+        if tasks:
+            self._log_tasks[service_id] = tasks
+
+    async def _drain_process_stream(
+        self,
+        *,
+        service_id: str,
+        stream_name: Literal["stdout", "stderr"],
+        stream: asyncio.StreamReader,
+    ) -> None:
+        """Drain a child pipe into the redacted process-log store."""
+
+        try:
+            while True:
+                raw_line = await stream.readline()
+                if not raw_line:
+                    return
+                line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
+                if line:
+                    self._log_store.append_line(
+                        service_id=service_id,
+                        stream=stream_name,
+                        line=line,
+                    )
+        except asyncio.CancelledError:
+            raise
+        except (OSError, ValueError) as exc:
+            self._log_store.append_line(
+                service_id=service_id,
+                stream="supervisor",
+                line=f"{stream_name} log drain stopped: {exc}",
+            )
+
+    def _discard_log_task(
+        self,
+        service_id: str,
+        task: asyncio.Task[None],
+    ) -> None:
+        """Forget one completed log-drain task."""
+
+        tasks = self._log_tasks.get(service_id)
+        if tasks is None:
+            return
+        tasks.discard(task)
+        if not tasks:
+            self._log_tasks.pop(service_id, None)
+
+    def _cancel_log_tasks(self, service_id: str) -> None:
+        """Cancel stale log-drain tasks for one service."""
+
+        tasks = self._log_tasks.pop(service_id, set())
+        for task in tasks:
+            if not task.done():
+                task.cancel()
 
 
 def _dependency_is_available(state: ServiceRuntimeState) -> bool:

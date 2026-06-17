@@ -1491,6 +1491,192 @@ async def _persist_collapsed_queued_chat_item(
     return return_value
 
 
+def _build_response_cognition_graph(
+    *,
+    graph_result: Mapping[str, Any],
+    consolidation_state: Mapping[str, Any] | None,
+    run_id: str,
+) -> dict[str, Any]:
+    """Build a bounded cognition graph snapshot for operator inspection."""
+
+    state = consolidation_state or {}
+    should_respond = graph_result.get("should_respond")
+    final_dialog = graph_result.get("final_dialog")
+    final_dialog_count = len(final_dialog) if isinstance(final_dialog, list) else 0
+    future_promises = graph_result.get("future_promises")
+    future_promise_count = (
+        len(future_promises) if isinstance(future_promises, list) else 0
+    )
+    action_spec_count = _safe_sequence_count(state.get("action_specs"))
+    action_result_count = _safe_sequence_count(state.get("action_results"))
+    memory_status = "completed" if state.get("rag_result") else "skipped"
+    action_status = (
+        "completed"
+        if action_spec_count or action_result_count or future_promise_count
+        else "skipped"
+    )
+    reasoning_status = (
+        "completed"
+        if any(
+            state.get(key)
+            for key in (
+                "internal_monologue",
+                "logical_stance",
+                "character_intent",
+                "judgment_note",
+            )
+        )
+        else "skipped"
+    )
+
+    nodes = [
+        {
+            "id": "intake",
+            "label": "Queued turn",
+            "stage": "L1",
+            "lane": "input",
+            "column": 1,
+            "branch": "input",
+            "status": "completed",
+            "detail": {
+                "summary": "Accepted by the brain input queue.",
+                "status": _safe_graph_text(state.get("platform", "")),
+            },
+        },
+        {
+            "id": "l1.relevance",
+            "label": "Response decision",
+            "stage": "L1",
+            "lane": "gate",
+            "column": 2,
+            "branch": "decision",
+            "status": "completed",
+            "detail": {
+                "decision": _safe_graph_text(should_respond),
+                "reasoning": _safe_graph_text(graph_result.get("reason_to_respond")),
+            },
+        },
+        {
+            "id": "l2.reasoning",
+            "label": "Reasoning",
+            "stage": "L2",
+            "lane": "cognition",
+            "column": 3,
+            "branch": "reasoning",
+            "status": reasoning_status,
+            "detail": {
+                "internal_monologue": _safe_graph_text(
+                    state.get("internal_monologue"),
+                ),
+                "logical_stance": _safe_graph_text(state.get("logical_stance")),
+                "character_intent": _safe_graph_text(state.get("character_intent")),
+                "judgment_note": _safe_graph_text(state.get("judgment_note")),
+            },
+        },
+        {
+            "id": "l2.memory",
+            "label": "Memory and evidence",
+            "stage": "L2",
+            "lane": "memory",
+            "column": 3,
+            "branch": "memory",
+            "status": memory_status,
+            "detail": {
+                "summary": _memory_graph_summary(state.get("rag_result")),
+                "status": memory_status,
+            },
+        },
+        {
+            "id": "l2.actions",
+            "label": "Actions",
+            "stage": "L2",
+            "lane": "action",
+            "column": 3,
+            "branch": "action",
+            "status": action_status,
+            "detail": {
+                "summary": (
+                    f"{action_spec_count} action spec(s), "
+                    f"{action_result_count} action result(s), "
+                    f"{future_promise_count} follow-up(s)."
+                ),
+            },
+        },
+        {
+            "id": "l3.surface",
+            "label": "Visible surface",
+            "stage": "L3",
+            "lane": "surface",
+            "column": 4,
+            "branch": "dialog",
+            "status": "completed" if final_dialog_count else "skipped",
+            "detail": {
+                "summary": f"{final_dialog_count} visible message(s) returned.",
+            },
+        },
+    ]
+    edges = [
+        {"source": "intake", "target": "l1.relevance", "kind": "sequence"},
+        {"source": "l1.relevance", "target": "l2.reasoning", "kind": "fork"},
+        {"source": "l1.relevance", "target": "l2.memory", "kind": "fork"},
+        {"source": "l1.relevance", "target": "l2.actions", "kind": "fork"},
+        {"source": "l2.reasoning", "target": "l3.surface", "kind": "join"},
+        {"source": "l2.memory", "target": "l3.surface", "kind": "join"},
+        {"source": "l2.actions", "target": "l3.surface", "kind": "join"},
+    ]
+    snapshot = {
+        "run_id": run_id,
+        "status": "completed",
+        "nodes": nodes,
+        "edges": edges,
+        "redaction": {
+            "detail": "bounded graph-result and consolidation-state fields only",
+            "excluded": [
+                "prompts",
+                "embeddings",
+                "raw messages",
+                "message envelopes",
+                "raw user input",
+            ],
+        },
+    }
+    return snapshot
+
+
+def _safe_sequence_count(value: Any) -> int:
+    """Return a sequence count for graph metadata, or zero."""
+
+    if isinstance(value, list):
+        return len(value)
+    return 0
+
+
+def _safe_graph_text(value: Any, *, max_chars: int = 240) -> str:
+    """Return a bounded scalar value for operator graph details."""
+
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if not isinstance(value, str):
+        return ""
+    text = value.strip()
+    if len(text) > max_chars:
+        text = f"{text[:max_chars]}..."
+    return text
+
+
+def _memory_graph_summary(value: Any) -> str:
+    """Summarize memory/RAG activity without exposing retrieved content."""
+
+    if not isinstance(value, Mapping) or not value:
+        return "No retrieved evidence reported."
+    keys = sorted(str(key) for key in value.keys())[:6]
+    return f"RAG data reported: {', '.join(keys)}."
+
+
 async def _process_queued_chat_item(item: QueuedChatItem) -> None:
     """Run one queued item through the existing chat graph and post-writes.
 
@@ -1927,6 +2113,11 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             delivery_tracking_id = uuid4().hex
             result["delivery_tracking_id"] = delivery_tracking_id
 
+        cognition_graph = _build_response_cognition_graph(
+            graph_result=result,
+            consolidation_state=consolidation_state_dict,
+            run_id=delivery_tracking_id or correlation_id,
+        )
         response = ChatResponse(
             messages=response_dialog,
             content_type="text",
@@ -1935,6 +2126,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             delivery_mentions=delivery_mentions if response_dialog else [],
             scheduled_followups=0,
             delivery_tracking_id=delivery_tracking_id,
+            cognition_graph=cognition_graph,
         )
 
         if should_save_assistant_message:

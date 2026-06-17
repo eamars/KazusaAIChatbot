@@ -101,7 +101,7 @@ platform event
   -> POST /chat
   -> brain queue and persona graph
   -> selected text surface outputs
-  -> ChatResponse(messages, use_reply_feature, delivery_mentions, delivery_tracking_id)
+  -> ChatResponse(messages, use_reply_feature, delivery_mentions, delivery_tracking_id, cognition_graph?)
   -> adapter platform send
   -> platform returns outbound message id
   -> POST /delivery_receipt
@@ -129,6 +129,12 @@ optional `delivery_mentions` metadata. This is adapter-owned rendering
 metadata: the brain keeps outbound text platform-neutral, and the adapter
 renders a native prefix user mention only when feasible. Missing, empty, or
 unrenderable mention metadata must not block text delivery.
+
+Normal `/chat` responses may also include optional `cognition_graph` telemetry
+for local operator inspection. It is a bounded graph snapshot derived from the
+current graph result and consolidation state. It must not include prompts,
+embeddings, raw messages, message envelopes, raw user input, secrets, or
+unbounded memory content. Adapters may ignore this field.
 
 Visible `/chat` delivery follows selected `SurfaceOutputV1` text surfaces.
 Private action results, private finalization, calendar-triggered action

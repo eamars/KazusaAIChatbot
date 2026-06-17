@@ -19,6 +19,8 @@ class _FakeProcess:
         self.returncode = None
         self.terminated = False
         self.killed = False
+        self.stdout = None
+        self.stderr = None
 
     def terminate(self) -> None:
         """Record graceful termination."""
@@ -37,6 +39,34 @@ class _FakeProcess:
 
         return_code = self.returncode if self.returncode is not None else 0
         return return_code
+
+
+class _FakeStream:
+    """Async readline stream for subprocess log-drain tests."""
+
+    def __init__(self, lines: list[str]) -> None:
+        """Create a finite stream from text lines."""
+
+        self._lines = [f"{line}\n".encode("utf-8") for line in lines]
+
+    async def readline(self) -> bytes:
+        """Return one encoded line, then EOF."""
+
+        await asyncio.sleep(0)
+        if self._lines:
+            return self._lines.pop(0)
+        return b""
+
+
+class _FakeProcessWithStreams(_FakeProcess):
+    """Fake process with stdout and stderr pipes."""
+
+    def __init__(self) -> None:
+        """Create a fake process that emits two bounded log lines."""
+
+        super().__init__()
+        self.stdout = _FakeStream(["adapter connected"])
+        self.stderr = _FakeStream(["prompt=secret should redact"])
 
 
 def _service_spec(service_id: str, tmp_path, *, dependencies=None):
@@ -248,6 +278,50 @@ async def test_start_clears_previous_exit_code_and_error_preview(
     assert state.actual_state == "running"
     assert state.exit_code is None
     assert state.last_error_preview is None
+
+
+@pytest.mark.asyncio
+async def test_start_drains_child_stdout_stderr_to_redacted_process_logs(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Child process logs must be visible without leaking sensitive text."""
+
+    from control_console.audit import LocalAuditWriter
+    from control_console.log_store import ProcessLogStore
+    from control_console.process_store import ProcessStore
+    from control_console.supervisor import ProcessSupervisor
+
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        _ = args
+        _ = kwargs
+        return _FakeProcessWithStreams()
+
+    monkeypatch.setattr(
+        asyncio,
+        "create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+    log_store = ProcessLogStore(tmp_path / "logs")
+    supervisor = ProcessSupervisor(
+        services={"brain": _service_spec("brain", tmp_path)},
+        store=ProcessStore(tmp_path / "state"),
+        log_store=log_store,
+        audit_writer=LocalAuditWriter(tmp_path / "audit.jsonl"),
+    )
+
+    await supervisor.start_service(
+        service_id="brain",
+        operator_id="operator",
+        reason="capture child logs",
+    )
+    await asyncio.sleep(0.05)
+
+    lines = log_store.tail(service_id="brain", limit=10)
+    streams = {(line.stream, line.line) for line in lines}
+    assert ("stdout", "adapter connected") in streams
+    assert any(line.stream == "stderr" and "[redacted]" in line.line for line in lines)
+    assert all("secret" not in line.line for line in lines)
 
 
 @pytest.mark.asyncio
