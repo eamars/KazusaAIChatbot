@@ -460,3 +460,115 @@ async def test_repository_projects_due_calendar_runs_safely() -> None:
     assert "global_user_id" not in rendered
     assert "source_channel_id" not in rendered
     assert "must-not-leak" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_repository_fallback_and_empty_branches_are_explicit() -> None:
+    """Repository fallback branches should return explicit product states."""
+
+    from control_console.repository import ControlConsoleRepository
+
+    async def invalid_character_profile():
+        return ["invalid"]
+
+    async def blank_character_profile():
+        return {"name": "   "}
+
+    async def empty_character_runtime_state():
+        return {}
+
+    async def empty_growth_traits(*, limit: int):
+        assert limit == 12
+        return []
+
+    async def memory_import_failure(*args, **kwargs):
+        del args, kwargs
+        raise ImportError("memory helper missing")
+
+    async def calendar_failure(**kwargs):
+        del kwargs
+        raise ValueError("calendar helper invalid")
+
+    async def style_failure(**kwargs):
+        del kwargs
+        raise KeyError("style helper unavailable")
+
+    invalid_identity = await ControlConsoleRepository(
+        get_character_profile=invalid_character_profile,
+    ).application_identity()
+    blank_identity = await ControlConsoleRepository(
+        get_character_profile=blank_character_profile,
+    ).application_identity()
+    empty_character = await ControlConsoleRepository(
+        get_character_runtime_state=empty_character_runtime_state,
+    ).latest_character_status()
+    empty_growth = await ControlConsoleRepository(
+        list_growth_traits=empty_growth_traits,
+    ).global_growth_summary()
+    memory_page = await ControlConsoleRepository(
+        query_user_memory_units=memory_import_failure,
+        search_user_memory_units_by_keyword=memory_import_failure,
+    ).lookup_memory(global_user_id="user-1", query="keyword", limit=5)
+    calendar_page = await ControlConsoleRepository(
+        list_due_calendar_runs=calendar_failure,
+    ).lookup_due_calendar_runs(
+        current_timestamp_utc="2026-06-17T00:00:00+00:00",
+        limit=5,
+    )
+    style_missing_platform = await ControlConsoleRepository().lookup_interaction_style(
+        global_user_id="",
+        platform="",
+        platform_channel_id="group-1",
+    )
+    style_unavailable = await ControlConsoleRepository(
+        build_interaction_style_context=style_failure,
+    ).lookup_interaction_style(
+        global_user_id="user-1",
+        platform="debug",
+        platform_channel_id="",
+    )
+
+    assert invalid_identity["status"] == "unavailable"
+    assert "invalid data" in invalid_identity["reason"]
+    assert blank_identity["status"] == "empty"
+    assert empty_character["status"] == "empty"
+    assert empty_growth["status"] == "empty"
+    assert memory_page["status"] == "unavailable"
+    assert "memory helper missing" in memory_page["reason"]
+    assert calendar_page["status"] == "unavailable"
+    assert "calendar helper invalid" in calendar_page["reason"]
+    assert style_missing_platform["status"] == "needs_input"
+    assert "platform is required" in style_missing_platform["reason"]
+    assert style_unavailable["status"] == "unavailable"
+    assert "style helper unavailable" in style_unavailable["reason"]
+
+
+def test_repository_style_projection_skips_invalid_entries_and_limits_rows() -> None:
+    """Style projection should skip malformed overlays and stop at the limit."""
+
+    from control_console.repository import _project_interaction_style_context
+
+    rows = _project_interaction_style_context(
+        {
+            "application_order": [
+                123,
+                "missing",
+                "bad_overlay",
+                "valid",
+            ],
+            "bad_overlay": ["not a dict"],
+            "valid": {
+                "speech_guidelines": ["one", "two"],
+                "social_guidelines": ["three"],
+                "confidence": "high",
+            },
+        },
+        limit=1,
+    )
+
+    assert rows == [{
+        "scope": "valid",
+        "field": "speech_guidelines",
+        "guidelines": ["one"],
+        "confidence": "high",
+    }]

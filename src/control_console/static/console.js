@@ -162,8 +162,8 @@ async function api(path, options = {}) {
     try {
       const payload = await response.json();
       const detail = payload.detail;
-      if (typeof detail === "string") message = detail;
-      else if (detail && typeof detail.message === "string") message = detail.message;
+      if (typeof detail === "string") message = `${response.status} ${detail}`;
+      else if (detail && typeof detail.message === "string") message = `${response.status} ${detail.message}`;
     } catch {
       // Keep the HTTP status when the response body is not JSON.
     }
@@ -469,7 +469,7 @@ function renderServices() {
     const stopButton = serviceActionButton(service, "stop", "Stop", "danger");
     const serviceError = service.last_error_preview ? `<div class="service-error">${escapeHtml(service.last_error_preview)}</div>` : "";
     grid.insertAdjacentHTML("beforeend", `
-      <article class="service-card" data-component="Card">
+      <article class="service-card" data-component="Card" data-service-card="${escapeHtml(service.id)}">
         <div class="service-card-header">
           <div><strong>${escapeHtml(service.display_name)}</strong><br><code>${escapeHtml(service.id)}</code></div>
           <span class="${badgeClass(service.actual_state)}">${escapeHtml(service.actual_state)}</span>

@@ -539,3 +539,117 @@ async def test_stop_refuses_stale_or_unowned_process_metadata(
         )
 
     assert supervisor.service_state("brain").actual_state == "conflict"
+
+
+@pytest.mark.asyncio
+async def test_shutdown_and_crash_refresh_cover_owned_process_edges(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Supervisor should stop owned services and mark crashed children."""
+
+    from control_console.audit import LocalAuditWriter
+    from control_console.log_store import ProcessLogStore
+    from control_console.process_store import ProcessStore
+    from control_console.supervisor import ProcessSupervisor
+
+    processes: list[_FakeProcess] = []
+
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        del args, kwargs
+        process = _FakeProcess()
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(
+        asyncio,
+        "create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    store = ProcessStore(tmp_path / "state")
+    supervisor = ProcessSupervisor(
+        services={"brain": _service_spec("brain", tmp_path)},
+        store=store,
+        log_store=ProcessLogStore(tmp_path / "logs"),
+        audit_writer=LocalAuditWriter(tmp_path / "audit.jsonl"),
+    )
+
+    assert supervisor.service_version("brain") == 0
+    await supervisor.start_service(
+        service_id="brain",
+        operator_id="operator",
+        reason="start for shutdown",
+    )
+    await supervisor.shutdown_owned_services(
+        operator_id="operator",
+        reason="test shutdown",
+    )
+    assert processes[0].terminated is True
+    assert supervisor.service_state("brain").actual_state == "stopped"
+
+    await supervisor.start_service(
+        service_id="brain",
+        operator_id="operator",
+        reason="start for crash",
+    )
+    processes[1].returncode = 9
+    state = supervisor.service_state("brain")
+
+    assert state.actual_state == "crashed"
+    assert state.exit_code == 9
+
+
+@pytest.mark.asyncio
+async def test_log_drain_and_task_cleanup_edge_paths(tmp_path) -> None:
+    """Private log-drain helpers should handle stream errors and cleanup."""
+
+    from control_console.audit import LocalAuditWriter
+    from control_console.log_store import ProcessLogStore
+    from control_console.process_store import ProcessStore
+    from control_console.supervisor import ProcessSupervisor
+
+    class BrokenStream:
+        async def readline(self):
+            raise ValueError("stream closed")
+
+    supervisor = ProcessSupervisor(
+        services={"brain": _service_spec("brain", tmp_path)},
+        store=ProcessStore(tmp_path / "state"),
+        log_store=ProcessLogStore(tmp_path / "logs"),
+        audit_writer=LocalAuditWriter(tmp_path / "audit.jsonl"),
+    )
+
+    await supervisor._drain_process_stream(
+        service_id="brain",
+        stream_name="stdout",
+        stream=BrokenStream(),
+    )
+    assert "log drain stopped" in supervisor._log_store.tail(
+        service_id="brain",
+        limit=1,
+    )[0].line
+
+    supervisor._discard_log_task("brain", asyncio.create_task(asyncio.sleep(0)))
+    pending_task = asyncio.create_task(asyncio.sleep(10))
+    supervisor._log_tasks["brain"] = {pending_task}
+    supervisor._cancel_log_tasks("brain")
+
+    assert pending_task.cancelled() or pending_task.cancelling()
+
+
+def test_supervisor_small_helper_edges() -> None:
+    """Small helper branches should stay explicit and covered."""
+
+    from control_console.supervisor import (
+        _endpoint_is_listening,
+        _endpoint_port,
+        _resolve_cwd,
+    )
+
+    assert _resolve_cwd(None) is None
+    assert _endpoint_port("https", None) == 443
+    assert _endpoint_port("http", None) == 80
+    with pytest.raises(ValueError):
+        _endpoint_port("ftp", None)
+    assert _endpoint_is_listening("http:///missing-host") is False

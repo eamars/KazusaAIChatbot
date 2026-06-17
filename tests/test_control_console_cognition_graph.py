@@ -105,6 +105,62 @@ def test_cognition_graph_snapshot_reports_absent_telemetry_without_dummy_nodes()
     assert graph.redaction["reason"] == "brain response did not report cognition graph telemetry"
 
 
+def test_cognition_graph_projection_handles_invalid_and_inferred_payloads() -> None:
+    """Graph projection should fail closed and infer safe nodes when possible."""
+
+    from control_console.kazusa_client import project_cognition_graph_snapshot
+
+    invalid = project_cognition_graph_snapshot(
+        source="overview_latest",
+        payload={
+            "delivery_tracking_id": "x" * 200,
+            "cognition_graph": {
+                "status": "invalid",
+                "run_id": "bad-run",
+                "nodes": [
+                    "not a node",
+                    {
+                        "id": "INVALID ID",
+                        "label": "",
+                        "stage": "",
+                        "lane": "",
+                        "column": 0,
+                        "detail": "bad detail",
+                    },
+                ],
+                "edges": [
+                    "not an edge",
+                    {
+                        "source": "INVALID",
+                        "target": "",
+                        "kind": "bad",
+                    },
+                ],
+            },
+        },
+    )
+    inferred = project_cognition_graph_snapshot(
+        source="debug_latest",
+        payload={
+            "delivery_tracking_id": "debug-run",
+            "internal_monologue": "bounded reasoning",
+            "logical_stance": "grounded",
+            "decision": "reply",
+            "messages": [{"text": "visible"}],
+        },
+    )
+
+    assert invalid.status == "not_reported"
+    assert invalid.run_id == "bad-run"
+    assert inferred.status == "partial"
+    assert [node.id for node in inferred.nodes] == [
+        "l2.reasoning",
+        "l2.decision",
+        "l3.surface",
+    ]
+    assert [edge.kind for edge in inferred.edges] == ["sequence", "sequence"]
+
+
 def test_bootstrap_and_debug_unavailable_return_graph_contract(tmp_path) -> None:
     """Overview and debug routes should expose the reusable graph contract."""
 

@@ -108,7 +108,7 @@ def create_app(
     )
     stream_buffer = SSEEventBuffer(max_events=100)
     stream_shutdown_event = asyncio.Event()
-    latest_cognition_graph_run_id: str | None = None
+    latest_cognition_graph_state: dict[str, str | None] = {"run_id": None}
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -219,8 +219,6 @@ def create_app(
     ) -> dict[str, Any]:
         """Return the initial UI snapshot."""
 
-        nonlocal latest_cognition_graph_run_id
-
         states = _all_service_states(app_supervisor, services)
         brain_state = _service_actual_state(states, service_id="brain")
         brain_http_available = _brain_http_available(brain_state)
@@ -261,7 +259,7 @@ def create_app(
                     source="overview_latest",
                     reason=f"brain latest cognition graph unavailable: {exc}",
                 )
-        latest_cognition_graph_run_id = latest_cognition_graph.run_id
+        latest_cognition_graph_state["run_id"] = latest_cognition_graph.run_id
         overview = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "service_count": len(states),
@@ -724,48 +722,76 @@ def create_app(
     ) -> StreamingResponse:
         """Open the read-only compact SSE stream."""
 
-        last_event_id = request.headers.get("last-event-id")
-
-        async def event_iterator() -> AsyncIterator[str]:
-            nonlocal latest_cognition_graph_run_id
-
-            replay_events = stream_buffer.replay_after(last_event_id)
-            for event in replay_events:
-                yield encode_sse_event(event)
-            while not stream_shutdown_event.is_set():
-                if await request.is_disconnected():
-                    break
-                current_states = _all_service_states(app_supervisor, services)
-                current_brain_state = _service_actual_state(
-                    current_states,
-                    service_id="brain",
-                )
-                if _brain_http_available(current_brain_state):
-                    latest_cognition_graph_run_id = await (
-                        _append_cognition_graph_invalidation_if_changed(
-                            kazusa_client=kazusa_client,
-                            stream_buffer=stream_buffer,
-                            previous_run_id=latest_cognition_graph_run_id,
-                        )
-                    )
-                heartbeat_id = stream_buffer.append(
-                    "control.heartbeat",
-                    {"generated_at": datetime.now(timezone.utc).isoformat()},
-                )
-                heartbeat = stream_buffer.replay_after(str(int(heartbeat_id) - 1))
-                for event in heartbeat:
-                    yield encode_sse_event(event)
-                should_stop = await _wait_for_stream_tick(
-                    shutdown_event=stream_shutdown_event,
-                    interval_seconds=app_settings.sse_interval_seconds,
-                )
-                if should_stop:
-                    break
-
-        response = StreamingResponse(event_iterator(), media_type="text/event-stream")
+        response = StreamingResponse(
+            _stream_console_events(
+                request=request,
+                stream_buffer=stream_buffer,
+                shutdown_event=stream_shutdown_event,
+                supervisor=app_supervisor,
+                services=services,
+                kazusa_client=kazusa_client,
+                latest_cognition_graph_state=latest_cognition_graph_state,
+                interval_seconds=app_settings.sse_interval_seconds,
+            ),
+            media_type="text/event-stream",
+        )
         return response
 
     return app
+
+
+async def _stream_console_events(
+    *,
+    request: Request,
+    stream_buffer: SSEEventBuffer,
+    shutdown_event: asyncio.Event,
+    supervisor: Any,
+    services: dict[str, Any],
+    kazusa_client: Any,
+    latest_cognition_graph_state: dict[str, str | None],
+    interval_seconds: float,
+) -> AsyncIterator[str]:
+    """Yield compact console SSE events until disconnect or shutdown."""
+
+    last_event_id = request.headers.get("last-event-id")
+    replay_events = stream_buffer.replay_after(last_event_id)
+    for event in replay_events:
+        yield encode_sse_event(event)
+    last_stream_event_id = (
+        replay_events[-1].event_id
+        if replay_events
+        else last_event_id
+    )
+    while not shutdown_event.is_set():
+        if await request.is_disconnected():
+            break
+        current_states = _all_service_states(supervisor, services)
+        current_brain_state = _service_actual_state(
+            current_states,
+            service_id="brain",
+        )
+        if _brain_http_available(current_brain_state):
+            latest_cognition_graph_state["run_id"] = await (
+                _append_cognition_graph_invalidation_if_changed(
+                    kazusa_client=kazusa_client,
+                    stream_buffer=stream_buffer,
+                    previous_run_id=latest_cognition_graph_state.get("run_id"),
+                )
+            )
+        stream_buffer.append(
+            "control.heartbeat",
+            {"generated_at": datetime.now(timezone.utc).isoformat()},
+        )
+        pending_events = stream_buffer.replay_after(last_stream_event_id)
+        for event in pending_events:
+            yield encode_sse_event(event)
+            last_stream_event_id = event.event_id
+        should_stop = await _wait_for_stream_tick(
+            shutdown_event=shutdown_event,
+            interval_seconds=interval_seconds,
+        )
+        if should_stop:
+            break
 
 
 async def _wait_for_stream_tick(

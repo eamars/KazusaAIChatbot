@@ -143,3 +143,114 @@ async def test_stream_poll_appends_graph_invalidation_for_new_latest_run() -> No
     assert latest_run_id == "self_cognition_run:future-123"
     assert replay[-1].event_type == "control.cognition_graph_invalidated"
     assert replay[-1].data["run_id"] == "self_cognition_run:future-123"
+
+
+async def test_stream_poll_ignores_missing_run_id_and_client_errors() -> None:
+    """SSE graph polling should keep the previous cursor on non-actionable reads."""
+
+    import httpx
+
+    from control_console.app import _append_cognition_graph_invalidation_if_changed
+    from control_console.kazusa_client import not_reported_cognition_graph
+    from control_console.stream import SSEEventBuffer
+
+    class MissingRunClient:
+        async def get_latest_cognition_graph(self):
+            return not_reported_cognition_graph(source="overview_latest")
+
+    class ErrorClient:
+        async def get_latest_cognition_graph(self):
+            raise httpx.ConnectError("brain down")
+
+    buffer = SSEEventBuffer(max_events=5)
+    missing_result = await _append_cognition_graph_invalidation_if_changed(
+        kazusa_client=MissingRunClient(),
+        stream_buffer=buffer,
+        previous_run_id="old-run",
+    )
+    error_result = await _append_cognition_graph_invalidation_if_changed(
+        kazusa_client=ErrorClient(),
+        stream_buffer=buffer,
+        previous_run_id="old-run",
+    )
+
+    assert missing_result == "old-run"
+    assert error_result == "old-run"
+    assert buffer.replay_after(None) == []
+
+
+async def test_stream_iterator_emits_graph_invalidation_and_heartbeat() -> None:
+    """The SSE iterator should yield graph invalidations added in its loop."""
+
+    import pytest
+
+    from control_console.app import _stream_console_events
+    from control_console.contracts import ServiceRuntimeState
+    from control_console.kazusa_client import project_cognition_graph_snapshot
+    from control_console.stream import SSEEventBuffer
+
+    class FakeRequest:
+        headers: dict[str, str] = {}
+
+        async def is_disconnected(self) -> bool:
+            return False
+
+    class RunningSupervisor:
+        def all_service_states(self):
+            return [
+                ServiceRuntimeState(
+                    id="brain",
+                    display_name="Brain service",
+                    kind="backend",
+                    actual_state="running",
+                ),
+            ]
+
+        def service_state(self, service_id: str):
+            assert service_id == "brain"
+            return self.all_service_states()[0]
+
+    class FakeKazusaClient:
+        async def get_health(self):
+            return {"status": "healthy"}
+
+        async def get_runtime_status(self):
+            return {"status": "running"}
+
+        async def get_latest_cognition_graph(self):
+            return project_cognition_graph_snapshot(
+                source="overview_latest",
+                payload={
+                    "cognition_graph": {
+                        "run_id": "stream-run",
+                        "status": "completed",
+                        "nodes": [],
+                        "edges": [],
+                    },
+                },
+            )
+
+    stream_buffer = SSEEventBuffer(max_events=10)
+    stream_buffer.append("control.heartbeat", {"generated_at": "startup"})
+    shutdown_event = asyncio.Event()
+    iterator = _stream_console_events(
+        request=FakeRequest(),
+        stream_buffer=stream_buffer,
+        shutdown_event=shutdown_event,
+        supervisor=RunningSupervisor(),
+        services={"brain": object()},
+        kazusa_client=FakeKazusaClient(),
+        latest_cognition_graph_state={"run_id": "old-run"},
+        interval_seconds=0.01,
+    )
+
+    first = await iterator.__anext__()
+    second = await iterator.__anext__()
+    third = await iterator.__anext__()
+    shutdown_event.set()
+    with pytest.raises(StopAsyncIteration):
+        await iterator.__anext__()
+
+    body = "\n".join([first, second, third])
+    assert "event: control.heartbeat" in body
+    assert "event: control.cognition_graph_invalidated" in body

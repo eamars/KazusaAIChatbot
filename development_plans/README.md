@@ -52,6 +52,7 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [control_console_functional_remediation_plan.md](active/bugfix/control_console_functional_remediation_plan.md) | Control-console functional remediation plan | in_progress |
+| [control_console_ui_e2e_acceptance_test_plan.md](active/bugfix/control_console_ui_e2e_acceptance_test_plan.md) | Control-console UI E2E acceptance test plan | in_progress |
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
 
 ## Reference Documents

@@ -258,7 +258,7 @@ def project_cognition_graph_snapshot(
     except ValidationError:
         snapshot = not_reported_cognition_graph(
             source=source,
-            run_id=inferred_run_id,
+            run_id=normalized["run_id"] or inferred_run_id,
             reason="brain cognition graph telemetry failed console validation",
         )
     return snapshot

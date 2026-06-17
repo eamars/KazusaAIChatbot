@@ -43,6 +43,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "playwright",
     "pytest",
     "pytest-asyncio",
 ]
