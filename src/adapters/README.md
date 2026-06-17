@@ -25,6 +25,11 @@ Each runtime adapter is responsible for a clear startup and shutdown lifecycle:
 - Deliver returned `ChatResponse.messages` to the platform when allowed.
 - Close platform clients, HTTP clients, runtime servers, and background tasks.
 
+In normal local operation, `kazusa-control-console` starts and stops registered
+adapter processes as child services. Direct `python -m adapters...` commands
+remain development fallback paths, and the adapter-to-brain HTTP contract is
+unchanged.
+
 ## Optional Runtime Send Interface
 
 Adapters that support dispatcher or scheduled callback delivery expose a narrow

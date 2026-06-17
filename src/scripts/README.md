@@ -4,6 +4,10 @@ Generated from active entry points, runtime docs, and tests on `2026-05-17`.
 
 ## Active scripts
 
+Normal operator startup is `kazusa-control-console`, then service lifecycle
+from the console. The direct scripts and entry points below remain fallback,
+diagnostic, and maintenance commands.
+
 | File | Invocation | Purpose |
 |---|---|---|
 | `_db_export.py` | Shared module only | Internal helper utilities for export scripts (`load_project_env`, JSON writers, env setup). |

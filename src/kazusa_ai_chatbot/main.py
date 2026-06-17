@@ -41,3 +41,7 @@ def main() -> None:
         port=args.port,
         reload=args.reload,
     )
+
+
+if __name__ == "__main__":
+    main()

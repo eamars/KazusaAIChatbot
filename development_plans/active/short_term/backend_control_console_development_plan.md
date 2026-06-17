@@ -1,18 +1,18 @@
-# backend_control_console_top_level_plan.md
+# backend_control_console_development_plan.md
 
 ## Summary
-- Goal: Add a top-level `control_console` management service that sits beside the brain service and adapters, starts/stops/restarts the brain and adapter processes, manages future registered services, runs a debug chat console, and monitors event logs plus character, memory, image/style, calendar, background-work, and health/cache state.
-- Plan class: large
-- Status: draft
+- Goal: Add a top-level `control_console` management service that sits beside the brain service and adapters, starts/stops/restarts the local configured Kazusa application services, runs a debug chat console, and monitors event logs plus character, memory, image/style, calendar, background-work, and health/cache state.
+- Plan class: high_risk_migration
+- Status: in_progress
 - Mandatory skills: `development-plan`, `py-style`, `test-style-and-execution`, `local-llm-architecture`, `database-data-pull`
-- Overall cutover strategy: Replace the embedded-brain-console design with a separate `kazusa-control-console` entrypoint and top-level `src/control_console` package; preserve the existing brain `/chat`, `/health`, `/ops/*`, adapter registration, cognition, RAG, persistence, and worker contracts while moving service lifecycle ownership to the console's deterministic process supervisor.
+- Overall cutover strategy: Replace the embedded-brain-console design with a separate `kazusa-control-console` entrypoint and top-level `src/control_console` package; preserve the existing brain `/chat`, `/health`, `/ops/*`, adapter registration, cognition, RAG, persistence, and worker contracts while moving local application service lifecycle ownership to the console's deterministic child-process supervisor.
 - Highest-risk areas: local process supervision, accidental arbitrary command execution, stopping the wrong process, leaking per-user data or secrets through logs/lookups, stale status when a child process crashes, keeping the console useful while the brain is stopped, and preserving cognition/adapter semantics.
-- Acceptance criteria: Operators can start, stop, restart, inspect, and tail logs for the brain and registered adapters from the top-level console; all 11 original inspection capabilities still exist; event logs are searchable; future services can be added through the service registry; no prompts/secrets/embeddings leak; deterministic tests and the independent code-review gate pass.
+- Acceptance criteria: Operators can start, stop, restart, inspect, and tail logs for the brain, adapters, and future local application services from the top-level console; all 11 original inspection capabilities still exist; event logs are searchable; future local services can be added through the service registry; no prompts/secrets/embeddings leak; deterministic tests and the independent code-review gate pass.
 
 ## Context
 KazusaAIChatbot is a self-evolving character cognition runtime with a platform-neutral FastAPI brain service, thin adapters, typed message envelopes, MongoDB persistence, Cache2, calendar scheduling, background work, reflection, self-cognition, global character growth, and sanitized operational event logging. The brain service already exposes runtime endpoints such as `/chat`, `/health`, `/ops/runtime-status`, reflection stats, self-cognition stats, delivery receipts, and adapter registration/heartbeat routes. Adapters remain transport edges that normalize platform traffic into the brain service contract.
 
-The previous plan placed the console inside the brain service and treated enable/disable as a soft intake or adapter gate. That design cannot satisfy the new product direction because an embedded console cannot reliably stop or restart its own host process and still remain available to turn it back on. This superseding plan treats `control_console` as the always-top management process. The operator starts `kazusa-control-console`; the console starts and stops the brain and adapters through a local process supervisor.
+The previous plan placed the console inside the brain service and treated enable/disable as a soft intake or adapter gate. That design cannot satisfy the new product direction because an embedded console cannot reliably stop or restart its own host process and still remain available to turn it back on. This superseding plan treats `control_console` as the local parent process for one configured Kazusa application instance. The operator starts `kazusa-control-console`; the console starts and stops the brain, adapters, and future local frontend/backend/worker services through a local child-process supervisor.
 
 Target architecture:
 
@@ -23,7 +23,7 @@ Operator browser
           -> brain service process
           -> adapter process: Discord
           -> adapter process: debug
-          -> future registered service processes
+          -> future local app service processes
       -> HTTP health/debug client
           -> brain /health, /ops/runtime-status, /chat, adapter-facing status when available
       -> repository/read helpers
@@ -36,14 +36,19 @@ Fixed operating inputs:
 - `control_console` is a top-level package under `src/control_console`, at the same source-tree level as `src/adapters` and `src/kazusa_ai_chatbot`.
 - The operator-facing entrypoint is `kazusa-control-console`; operators no longer need to run separate brain and adapter start commands during normal local operation.
 - Existing direct start commands remain available for development fallback and are also the commands the console launches through its registry.
-- Service lifecycle control means deterministic local process lifecycle: start, stop, restart, health probe, stdout/stderr tail, crash detection, and audit.
-- The console manages only services declared in a local registry. It never accepts arbitrary shell commands from the browser or API.
-- Services started by the console are tracked through a local state directory. Processes not started or adopted by the console are shown as externally running or unknown and are not killed by v1 lifecycle actions.
-- v1 uses Python `asyncio` subprocess management with argv lists and no shell execution. Docker, systemd, Windows service control, Kubernetes, and remote host management are not implemented in this plan.
+- The console loads the same configured local application environment as the command-line path, including process environment values, project `.env` loading through the existing application configuration behavior, and explicit `KAZUSA_CONTROL_*` settings.
+- The console has only the operating-system permissions of the user account that launched `kazusa-control-console`.
+- Service lifecycle control means deterministic local child-process lifecycle: start, stop, restart, health probe, stdout/stderr tail, crash detection, and audit.
+- The console manages only services declared in the local registry for this configured application instance. It never accepts arbitrary shell commands from the browser or API.
+- Services started by the console are tracked through a local state directory. Processes not started by this console are shown as unmanaged conflicts or unavailable and are never stopped, restarted, adopted, or controlled by this plan.
+- v1 uses Python `asyncio` subprocess management with argv lists and no shell execution. Docker, Docker Compose, systemd, Windows service control, Kubernetes, remote host management, and external instance adoption are not implemented in this plan.
+- If a configured port, callback URL, or state directory appears to belong to an unrelated running process, the console reports a conflict and refuses lifecycle actions for that service until the conflict is resolved outside the console.
 - The console is local/operator-scoped, binds to loopback by default, requires authentication, and is not exposed to the public internet.
+- Closing the browser tab does not affect service state. Stopping the `kazusa-control-console` process gracefully stops console-owned child services by default before the console exits.
 - The console can remain available when the brain is stopped. Runtime-only brain data degrades to unavailable, while DB-backed historical/lookup pages and local process logs remain usable when their dependencies are available.
 - The console is not a cognition layer. It does not change prompts, graph routing, RAG, memory promotion, reflection, self-cognition, calendar semantics, background-work generation, or adapter transport semantics.
 - The static UI remains buildless: plain HTML, CSS, and JavaScript served by the control-console FastAPI app.
+- The approved UI arrangement and color reference is `development_plans/reference/designs/backend_control_console_mockup.html`. During implementation and final review, agents must inspect the running console UI against this mockup for sidebar page arrangement, component selection, density, color scheme, and populated operator workflows.
 
 ## Mandatory Skills
 - `development-plan`: load before moving this file into `development_plans/active/short_term/`, changing plan status, executing the plan, reviewing the plan, or reporting completion.
@@ -56,10 +61,11 @@ Fixed operating inputs:
 - Keep `control_console` out of the brain service. Do not mount `/console` or `/console/api` in the brain FastAPI app.
 - Keep adapters as transport edges. Do not move character judgment, RAG, cognition, memory ownership, calendar semantics, or persistence decisions into adapters.
 - Keep console control deterministic. Do not ask an LLM to decide service lifecycle, enablement, permissions, health state, cache state, retry behavior, process ownership, or data redaction.
-- Manage only registry-declared services. Do not allow operators to submit arbitrary commands, shell fragments, environment-variable names containing secrets, working directories, or process IDs through the UI/API.
+- Manage only registry-declared child services for the current configured local application instance. Do not allow operators to submit arbitrary commands, shell fragments, environment-variable names containing secrets, working directories, process IDs, hostnames, container names, system service names, or external instance identifiers through the UI/API.
 - Start processes with argv lists and `shell=False`. Do not use `shell=True`, `os.system`, command-string concatenation, or platform shell parsing.
-- Stop only console-owned or registry-adopted processes. Do not scan the OS process table and kill name-matched processes.
+- Stop only console-owned child processes with matching PID, generation, and command fingerprint. Do not adopt externally started processes. Do not scan the OS process table and kill name-matched processes.
 - Stop order is dependency-aware: stop adapters and dependent services before stopping the brain; start the brain before dependent adapters unless a service spec explicitly has no dependency.
+- On console shutdown, gracefully stop console-owned child services by default using the same dependency-aware order. Leaving child services running after console exit is deferred unless a future approved plan adds an explicit orphaning policy.
 - Every start, stop, restart, crash detection, auth failure, debug chat, lookup, and privileged log access writes a sanitized audit event with operator id, reason where applicable, target, previous state, new state, timestamp, and request id.
 - Console API authentication protects every `/api/*` endpoint except the minimal unauthenticated login/challenge route and static assets required to render the login page.
 - Use CSRF protection or an equivalent same-origin token for state-changing browser requests.
@@ -69,6 +75,10 @@ Fixed operating inputs:
 - Route code must call domain helpers, repository adapters, or DB-owned helper functions. Do not import raw MongoDB clients directly in route handlers.
 - Console-owned local state is written through a small state-store module with atomic writes and tests. MongoDB audit mirrors are written through named DB helper functions.
 - Keep realtime summary events bounded. Do not stream full conversations, full memory bodies, full image metadata, embeddings, unbounded worker logs, or complete process logs.
+- Use a snapshot plus event-stream frontend data model. The page loads once, fetches `/api/bootstrap` for initial state, opens one authenticated same-origin SSE stream, updates a browser-local state store from compact events, and patches only affected UI regions.
+- Do not use full-page auto refresh, broad timer polling, WebSocket, or multiple independent live streams in v1. Use bounded detail `GET` requests only when a panel is opened, filtered, paged, or invalidated by an SSE event.
+- Production UI elements MUST be taken from shadcn UI component families and follow shadcn component anatomy and behavior for standard widgets. Use shadcn component families such as Sidebar, Button, Card, Badge, Table, Input, Select, Textarea, Separator, ScrollArea, Sheet/Dialog/Drawer where needed, and Field/Form-style control grouping. The agent is not allowed to make its own widget when a shadcn component pattern exists. Custom CSS is allowed only for layout glue, theme tokens, and adapting the approved buildless static delivery model; it must not create a parallel design system.
+- The production console must remain Python/FastAPI served and buildless; everything in the fundamental application stack must be based on Python. Do not introduce Node.js, npm, pnpm, yarn, React, Vue, Vite, Webpack, Tailwind build tooling, a frontend package manager workflow, or any frontend build/runtime as a fundamental software stack. Any shadcn alignment must be implemented through static HTML/CSS/JavaScript assets served by the Python console process, not through a Node-based application.
 - Keep the ordinary brain `/chat` response path unchanged. The console must not add extra LLM calls, broad DB scans, or lifecycle checks inside normal chat processing.
 - Use deterministic tests for auth, service registry validation, process lifecycle state transitions, redaction, route contracts, event/log query limits, lookup limits, and SSE event shapes.
 - Use patched LLM tests only if debug-console plumbing must prove `/chat` handoff without live model variance.
@@ -80,9 +90,10 @@ Fixed operating inputs:
 
 ## Must Do
 - Create a top-level `src/control_console` package with settings, contracts, auth, CSRF/session handling, service registry, process supervisor, local state store, HTTP client, log/event monitor, repository adapters, redaction, routes, SSE streaming, static assets, and audit helpers.
+- Add `src/control_console/README.md` as an ICD-style module README that explains the control-console interface boundary, intended operator use cases, package ownership, public CLI/API/UI/SSE contracts, auth/CSRF/local-only security model, service registry and supervisor ownership, static UI constraints, forbidden behavior, and testing expectations.
 - Add a `kazusa-control-console` project script and update package discovery so the new top-level package is installed alongside `kazusa_ai_chatbot` and `adapters`.
-- Add a default service registry for the built-in project services: `brain`, `adapter.discord`, and `adapter.debug`. The registry must support future service specs without UI code changes.
-- Add a local registry override file loaded from `KAZUSA_CONTROL_SERVICE_REGISTRY`. The override must validate against a strict `ServiceSpec` schema and reject unknown fields, shell strings, missing ids, duplicate ids, unsafe environment overrides, and unbounded values.
+- Add a default service registry for the built-in local application services: `brain`, `adapter.discord`, `adapter.napcat`, and `adapter.debug`. The registry must support future local frontend, backend, adapter, worker, and support service specs for this application instance without UI code changes.
+- Add a local registry override file loaded from `KAZUSA_CONTROL_SERVICE_REGISTRY`. The override must validate against a strict `ServiceSpec` schema and reject unknown fields, shell strings, missing ids, duplicate ids, unsafe environment overrides, external host/process/container/service identifiers, and unbounded values.
 - Implement a process supervisor that starts services, tracks PID/generation/desired state/actual state, probes health, detects crash exits, stops gracefully, escalates after timeout, restarts services, records lifecycle events, and writes bounded stdout/stderr logs.
 - Implement dependency-aware lifecycle actions so adapters are not started before the brain and the brain is not stopped before managed dependent adapters are stopped.
 - Add console authentication using a configured operator token hash or an equivalent existing local secret mechanism. Reject API calls when authentication fails.
@@ -91,9 +102,12 @@ Fixed operating inputs:
 - Add event-log monitoring routes that read sanitized Kazusa operational events, console audit events, console errors, and service process logs through bounded queries with filters for service id, event type, level, request id, tracking id, and time window.
 - Add a debug console endpoint in `control_console` that builds a valid debug `ChatRequest` and sends it to the running brain service over HTTP using the same `/chat` contract. It must return a clear brain-not-running response when the brain service is stopped or unhealthy.
 - Add read-only console endpoints for latest character status, global character growth progression, user image/style lookup with episode references, group style image lookup, memory lookup, calendar schedules/runs, background-work jobs, health/cache summaries, and audit events.
-- Add an overview endpoint and one bounded SSE stream under the control-console API for compact realtime status: managed service states, brain health, adapter runtime status, Cache2 summary, latest character snapshot timestamp, pending calendar count, active background jobs, recent audit/control events, and recent log/error counters.
+- Add `/api/bootstrap` for the initial full UI snapshot: operator session, CSRF metadata, service registry summary, current service states, overview health/cache summary, latest audit/event counters, and UI capability flags.
+- Add detail REST endpoints for service state, bounded log tails, event monitor queries, debug chat, and paginated domain lookups. Commands and debug sends remain authenticated `POST` requests with CSRF and audit reasons.
+- Add one bounded SSE stream under the control-console API for compact realtime status and invalidation: managed service states, brain health, adapter runtime status, Cache2 summary, latest character snapshot timestamp, pending calendar count, active background jobs, recent audit/control events, recent log/error counters, and cursors for detail refetch.
 - Add query limits, pagination, redaction, and stable Pydantic response contracts for every lookup and log endpoint.
-- Add a static HTML console served by the control-console process. The UI must use a simple light dashboard layout with a left navigation rail, top status strip, service lifecycle cards, detail tables, event-log monitor, debug chat workspace, lookup pages, health/cache panels, and audit list.
+- Add a static HTML console served by the control-console process. The UI must follow the approved mockup at `development_plans/reference/designs/backend_control_console_mockup.html`: shadcn-style Sidebar plus inset content, sidebar-controlled subpages instead of one long scroll page, populated overview cards, service lifecycle cards, detail tables, event-log monitor, debug chat history and composer, lookup pages, health/cache panels, audit list, and Bright/Dark theme controls.
+- Implement standard UI controls from shadcn component patterns only. If a standard dashboard element is needed, map it to the nearest shadcn component family before writing markup or CSS. Do not create bespoke button, card, table, input, select, textarea, sidebar, badge, dialog/sheet/drawer, tab, or form-field widgets outside shadcn-style component anatomy; the production UI is not allowed to make its own widget for common controls.
 - Preserve the existing brain and adapter public contracts. The brain service must not import `control_console`, and adapters must not gain cognition or persistence responsibilities.
 - Add focused tests named in this plan before production implementation starts, record their expected pre-implementation failures, and rerun them after implementation.
 - Update relevant docs: root README/HOWTO, brain service README, adapters README, DB README collection list, script registry notes, and local operation docs. The docs must state that normal operator startup is `kazusa-control-console`, then service lifecycle from the console.
@@ -103,13 +117,14 @@ Fixed operating inputs:
 - Do not implement a brain-side self-shutdown endpoint.
 - Do not expose the console to the public internet.
 - Do not add role-based multi-user administration beyond the single local operator identity required by this plan.
-- Do not implement Docker Compose control, systemd control, Windows service control, Kubernetes control, remote host agents, or cloud orchestration.
+- Do not implement Docker Compose control, Docker Engine control, systemd control, Windows service control, Kubernetes control, remote host agents, cloud orchestration, or external instance adoption.
 - Do not add arbitrary command execution, web-editable service commands, web-editable environment variables, or arbitrary PID killing.
-- Do not stop externally started processes that are not owned or explicitly adopted by the control console.
+- Do not stop, restart, inspect privileged internals of, or adopt externally started processes that are not child processes of the current console run.
+- Do not manage other Kazusa instances, other local projects, other users' processes, host-level infrastructure, containers, operating-system services, or remote services.
 - Do not redesign `/ops/*` into the console API. Keep existing `/ops/*` compatibility intact.
 - Do not change Kazusa prompts, persona voice, cognition graph routing, RAG routing, memory promotion semantics, reflection semantics, self-cognition semantics, calendar trigger semantics, or background-work generation behavior.
 - Do not add new LLM calls for console rendering, log summaries, lookup ranking, or control decisions.
-- Do not add a frontend build pipeline, React, Vue, Vite, Webpack, Node, Tailwind build tooling, telemetry vendor, or dashboard template dependency.
+- Do not add a frontend build pipeline, React, Vue, Vite, Webpack, Node.js, npm, pnpm, yarn, Tailwind build tooling, telemetry vendor, dashboard template dependency, or any other non-Python fundamental application stack.
 - Do not add write/edit/delete actions for memories, image/style records, schedules, character growth traits, background jobs, or event-log records. This console iteration reads those domains only.
 - Do not migrate historical conversation, memory, image, calendar, background-work, growth, or event-log documents.
 
@@ -119,9 +134,12 @@ Fixed operating inputs:
 - Keep existing brain and adapter behavior unchanged when the control console is not running.
 - Do not add `KAZUSA_CONSOLE_ENABLED` brain-service route gating. The console exists only as its own process.
 - Bind the control console to `127.0.0.1` by default and require an operator token before any API data or lifecycle action is available.
+- Load configuration for managed child services from the same local environment model used by direct command startup. `KAZUSA_CONTROL_*` variables configure only the console; existing Kazusa environment variables continue to configure the brain and adapters.
 - Store supervisor PID/state/log files under `KAZUSA_CONTROL_STATE_DIR`, defaulting to a project-local ignored runtime directory such as `.kazusa_control/`.
 - Default desired state after a fresh install is stopped for all services unless the registry marks a service as `autostart=true`. The built-in default registry sets `autostart=false` for adapters and may set `autostart=false` for the brain to avoid surprising startup during tests.
 - On control-console restart, recover prior desired state and restart services whose desired state is `running` and whose previous console-owned process is no longer alive.
+- If the configured service endpoint is occupied by an unmanaged process, report `conflict` and refuse start/stop/restart for that service. The operator resolves the conflict outside the console.
+- On normal console shutdown, stop console-owned child services in dependency-aware order and write audit events for each stop attempt.
 - Use idempotent index creation for console audit mirrors in MongoDB when MongoDB is available.
 - Roll out in this order: contracts/tests, settings/auth, registry/state store, process supervisor, lifecycle routes, HTTP health/debug client, event/log monitor, DB-backed lookup endpoints, SSE stream, static UI, docs, verification, independent review.
 
@@ -132,7 +150,7 @@ Operators run:
 kazusa-control-console
 ```
 
-Then they open the local console URL, authenticate, and manage the whole Kazusa local runtime from the top-level console. The console shows a live service table with `brain`, `adapter.discord`, `adapter.debug`, and future registry services. Each service has desired state, actual process state, PID, uptime, health, last exit code, restart count, recent logs, recent lifecycle events, and start/stop/restart controls.
+Then they open the local console URL, authenticate, and manage the current configured Kazusa local application instance from the top-level console. The console shows a live service table with `brain`, `adapter.discord`, `adapter.napcat`, `adapter.debug`, and future local registry services for this application. Each service has desired state, actual process state, PID, uptime, health, last exit code, restart count, recent logs, recent lifecycle events, and start/stop/restart controls.
 
 Completed behavior by requested capability:
 1. Brain service enable/disable: the console starts, stops, restarts, monitors, and tails logs for the brain process. The debug chat and runtime health panes clearly show unavailable state when the brain is stopped.
@@ -147,17 +165,21 @@ Completed behavior by requested capability:
 10. Background works: operators inspect queued, in-progress, completed, failed, delivery-in-progress, delivered, and delivery-failed background-work jobs with task brief preview, worker, timestamps, delivery state, and failure summary.
 11. Cache hit status and health page coverage: operators see `/health`, Cache2 per-agent stats, DB health, service graph readiness, worker liveness from `/ops/runtime-status` when the brain is running, reflection/self-cognition stats links, event logging status, and recent resource-health events.
 12. Event logs: operators search and tail sanitized operational events, lifecycle events, process logs, console audit events, and console errors from one event-monitor workspace.
-13. Future services: new services are added through the registry schema and automatically appear in the service table, lifecycle API, logs, events, health probes, and overview stream.
+13. Future local services: new frontend, backend, adapter, worker, or support services for this configured application are added through the registry schema and automatically appear in the service table, lifecycle API, logs, events, health probes, and overview stream.
 
 ## Design Decisions
 | Topic | Decision | Rationale |
 |---|---|---|
 | Console placement | Implement `control_console` as a top-level service package and CLI entrypoint outside the brain service. | The console must remain available while starting, stopping, or restarting the brain. |
-| Normal startup path | Operators start `kazusa-control-console`; the console starts and stops the brain/adapters. | This makes the console the management root while retaining existing commands as implementation targets and fallback. |
+| Normal startup path | Operators start `kazusa-control-console`; the console starts and stops the brain/adapters/local app services. | This makes the console the local application management root while retaining existing commands as implementation targets and fallback. |
+| Permission model | The console has only the operating-system permissions of the user that launched `kazusa-control-console`. | This keeps console authority understandable and avoids hidden elevation or host-level administration. |
+| Instance boundary | The console manages exactly one configured local application instance using the shared local environment and `KAZUSA_CONTROL_*` settings. | The user explicitly does not want this console managing other instances or host-level infrastructure. |
 | Process management | Use Python `asyncio.create_subprocess_exec` with argv lists, captured stdout/stderr, PID tracking, health probes, and graceful termination. | This matches the Python/FastAPI stack, avoids new orchestration dependencies, and supports local development. |
-| Service registry | Use strict Pydantic `ServiceSpec` defaults plus a JSON override file. | Future services can be added without code changes while preventing arbitrary web commands. |
+| Service registry | Use strict Pydantic `ServiceSpec` defaults plus a JSON override file for the configured local application. | Future local app services can be added without code changes while preventing arbitrary web commands. |
 | Command safety | Registry commands are argv arrays and never shell strings. UI/API cannot edit command lines. | Prevents command injection and accidental secret exposure. |
-| Process ownership | Stop/restart only console-owned or registry-adopted processes with matching generation state. | Prevents killing unrelated user processes. |
+| Process ownership | Stop/restart only console-owned child processes with matching PID, generation state, and command fingerprint. | Prevents killing unrelated user processes and enforces the no-external-instance boundary. |
+| External conflicts | Report configured ports or endpoints occupied by unmanaged processes as conflicts. | The console should help diagnose conflicts without adopting or managing other processes. |
+| Console shutdown | Gracefully stop console-owned child services by default in dependency-aware order. | This avoids orphaning services that were started only through the console. |
 | Dependency order | Start dependencies before dependents and stop dependents before dependencies. | Adapters depend on the brain; stopping the brain first causes noisier adapter failures. |
 | Brain control semantics | Start/stop/restart the brain process instead of implementing a soft `/chat` intake gate. | User intent is service management, not only traffic pausing. |
 | Adapter control semantics | Start/stop/restart adapter processes instead of adding adapter soft gates in v1. | Adapters are independent processes and should be lifecycle-managed by the top-level console. |
@@ -166,19 +188,25 @@ Completed behavior by requested capability:
 | Historical/domain lookups | Use existing domain/database helpers from the console process. | Lookups remain available when the brain is stopped and avoid adding privileged brain endpoints. |
 | Event log monitor | Merge bounded views of console lifecycle/audit events, process logs, and Kazusa operational events. | Operators need one place to correlate failures across service lifecycle and cognition/runtime logs. |
 | Audit storage | Write local JSONL audit first and mirror to MongoDB when available through DB-owned helper functions. | Lifecycle audit survives MongoDB outages and can still be queried centrally when DB is healthy. |
-| Realtime transport | Use one SSE endpoint from the control console for compact status and recent-event deltas. | FastAPI can serve one-way status updates without WebSocket complexity. |
-| UI layout | Use a simple light dashboard with left rail, top strip, cards, tables, filters, and detail drawers. | The requested content is too broad for one page and needs modern, readable workspaces. |
-| Frontend dependencies | Use buildless HTML/CSS/JavaScript only. | Keeps deployment simple and avoids Node/tooling risk. |
+| Frontend data flow | Use REST snapshots/actions/detail queries plus one SSE stream. | The page stays loaded, initial state is explicit, commands remain auditable `POST` requests, and backend changes reach the UI without full-page refresh. |
+| Initial snapshot | Serve `/api/bootstrap` as the first UI data fetch after authentication. | The browser receives a coherent baseline before applying incremental stream updates. |
+| Realtime transport | Use one authenticated same-origin SSE endpoint from the control console for compact status, invalidation, and recent-event deltas. | Console updates are mostly backend-to-browser; SSE fits this better than WebSocket and is simpler to secure with same-origin session cookies. |
+| Detail refresh | Stream compact cursors or invalidation events, then let active panes fetch bounded detail over REST. | Prevents full logs, lookup pages, message bodies, and large tables from becoming an unbounded stream. |
+| WebSocket and polling | Defer WebSocket and broad timer polling. | V1 does not need continuous bidirectional transport, and page auto-refresh or global polling would be noisy and less precise. |
+| UI layout | Use the approved mockup `development_plans/reference/designs/backend_control_console_mockup.html` as the production UI arrangement reference: shadcn-style sidebar, inset content, sidebar-controlled subpages, card/table/form composition, populated overview, debug chat history, lookup pages, health/cache, audit, and style comparison. | The requested content is too broad for one scroll page and needs modern, readable workspaces that can be checked against a concrete artifact. |
+| UI component source | Use shadcn UI component families and anatomy for every standard control and surface. Do not invent bespoke widgets for buttons, cards, tables, inputs, selects, textareas, badges, sidebar navigation, dialogs/sheets/drawers, tabs, or form fields. | Keeps the production UI aligned with the requested shadcn design language and avoids a private, inconsistent component framework. |
+| Frontend dependencies | Use buildless HTML/CSS/JavaScript served by Python/FastAPI only. Do not add Node.js, package-manager workflows, React/Vue, Vite/Webpack, Tailwind build tooling, or any frontend runtime/build stack. | Keeps deployment simple, Python-based, and avoids introducing a foreign fundamental stack. |
 | Security boundary | Bind locally by default, require token auth, use CSRF for state-changing browser calls, and redact sensitive data. | Lifecycle control and per-user lookup data are high-sensitivity surfaces. |
-| Future services | Treat every manageable process as a `ServiceSpec` with kind, command, dependencies, health probe, log policy, and autostart flag. | The console can manage later services without redesigning the service table or lifecycle API. |
+| Future local services | Treat every manageable local application child process as a `ServiceSpec` with kind, command, dependencies, health probe, log policy, and autostart flag. | The console can manage later frontend/backend/worker services for this app without redesigning the service table or lifecycle API. |
 
 ## Change Surface
 ### New top-level package
 - `src/control_console/__init__.py`: package marker and public version.
+- `src/control_console/README.md`: ICD-style module contract covering document control, purpose, intended use cases, interface boundary, public entrypoints, API/UI/SSE contracts, security model, service lifecycle ownership, data/redaction constraints, shadcn/Python buildless UI constraints, forbidden behavior, and testing expectations.
 - `src/control_console/main.py`: CLI entrypoint for `kazusa-control-console`.
 - `src/control_console/app.py`: FastAPI app factory, static asset mounting, router registration, lifecycle startup/shutdown hooks.
-- `src/control_console/settings.py`: environment-backed settings, state directory paths, host/port, auth, registry path, brain base URL, timeouts, limits.
-- `src/control_console/contracts.py`: Pydantic request/response contracts for services, lifecycle actions, logs, events, overview, debug chat, lookups, auth, and SSE projections.
+- `src/control_console/settings.py`: environment-backed settings, shared local app environment loading, state directory paths, host/port, auth, registry path, brain base URL, timeouts, limits.
+- `src/control_console/contracts.py`: Pydantic request/response contracts for bootstrap, services, lifecycle actions, logs, events, overview, debug chat, lookups, auth, and SSE projections.
 - `src/control_console/auth.py`: operator token validation, session cookie handling, CSRF helpers, local-only request validation.
 - `src/control_console/redaction.py`: deterministic redaction for logs, events, env summaries, prompts, secrets, embeddings, and long text.
 - `src/control_console/service_registry.py`: default service specs, JSON override loading, strict schema validation, dependency graph validation.
@@ -189,14 +217,14 @@ Completed behavior by requested capability:
 - `src/control_console/event_monitor.py`: merged event/log query service for console audit, process logs, console errors, and Kazusa operational events.
 - `src/control_console/kazusa_client.py`: bounded HTTP client for brain `/health`, `/ops/runtime-status`, `/chat`, and related read-only runtime endpoints.
 - `src/control_console/repository.py`: read-only repository adapters for character, growth, image/style, memory, calendar, background-work, cache, and event summaries.
-- `src/control_console/routes.py`: authenticated API routes and static index route.
+- `src/control_console/routes.py`: authenticated bootstrap, REST API routes, SSE route, and static index route.
 - `src/control_console/stream.py`: compact SSE stream assembler.
 - `src/control_console/static/index.html`: buildless UI shell.
 - `src/control_console/static/console.css`: light dashboard styling.
-- `src/control_console/static/console.js`: API client, navigation, service actions, tables, filters, debug chat, SSE updates.
+- `src/control_console/static/console.js`: API client, browser-local state store, navigation, service actions, tables, filters, debug chat, SSE updates, invalidation handling, and bounded detail refetch.
 
 ### Existing project metadata
-- `pyproject.toml`: add `kazusa-control-console = "control_console.main:main"` and include `control_console*` in package discovery.
+- `pyproject.toml`: add `kazusa-control-console = "control_console.main:main"`, include `control_console*` in package discovery, and package static assets under `src/control_console/static/`.
 - `.gitignore`: ignore `.kazusa_control/`, local process logs, local PID/state files, and local audit JSONL files.
 
 ### Existing brain service files
@@ -247,7 +275,7 @@ Completed behavior by requested capability:
 - `README.md`: add the control-console-first local operation path.
 - `docs/HOWTO.md`: add setup, env vars, local-only warning, auth, state directory, service registry, lifecycle operations, and smoke-test steps.
 - `src/scripts/README.md`: reference existing commands/scripts that remain fallback and export utilities.
-- `docker-compose.yml`: document control-console environment variables in comments only; do not expose a new public port in this plan.
+- `docker-compose.yml`: document control-console environment variables in comments only; do not expose a new public port or container-management flow in this plan.
 
 ## Data Migration
 - Add local state directory `KAZUSA_CONTROL_STATE_DIR`, default `.kazusa_control/`:
@@ -283,6 +311,7 @@ class ControlConsoleSettings(BaseModel):
     require_auth: bool = True
     operator_token_hash: str
     local_only: bool = True
+    app_instance_id: str = "local"
     session_cookie_name: str = "kazusa_control_session"
     csrf_header_name: str = "x-kazusa-control-csrf"
     state_dir: Path
@@ -301,7 +330,7 @@ class ControlConsoleSettings(BaseModel):
 class ServiceSpec(BaseModel):
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9_.-]{0,63}$")
     display_name: str = Field(min_length=1, max_length=80)
-    kind: Literal["brain", "adapter", "worker", "support"]
+    kind: Literal["backend", "frontend", "adapter", "worker", "support"]
     command: list[str] = Field(min_length=1, max_length=32)
     cwd: str | None = None
     env: dict[str, str] = Field(default_factory=dict)
@@ -316,16 +345,18 @@ class ServiceSpec(BaseModel):
 
 Validation rules:
 - `command` is an argv list. It cannot contain shell metacharacter-only entries, empty strings, or a single command string with spaces.
-- `env` values are write-only process inputs. API responses may show only redacted env key names.
+- `env` values are write-only process inputs layered on top of the shared local application environment. API responses may show only redacted env key names.
+- `ServiceSpec` cannot contain host-management identifiers such as process ids, container ids, system service names, Kubernetes object names, remote hosts, SSH targets, or Docker Compose project names.
+- `cwd`, when present, must resolve inside the repository or an explicitly configured local application path. Registry entries cannot point lifecycle actions at arbitrary host directories.
 - `dependencies` must reference existing service ids and must form an acyclic graph.
-- Built-in specs include `brain`, `adapter.discord`, and `adapter.debug` using existing project script commands.
+- Built-in specs include `brain`, `adapter.discord`, `adapter.napcat`, and `adapter.debug` using existing project script commands. The built-in `brain` service uses `kind="backend"`.
 
 ### Runtime service state
 ```python
 class ServiceRuntimeState(BaseModel):
     id: str
     display_name: str
-    kind: Literal["brain", "adapter", "worker", "support"]
+    kind: Literal["backend", "frontend", "adapter", "worker", "support"]
     desired_state: Literal["running", "stopped"]
     actual_state: Literal[
         "unknown",
@@ -335,10 +366,12 @@ class ServiceRuntimeState(BaseModel):
         "stopping",
         "unhealthy",
         "crashed",
-        "externally_running",
+        "conflict",
+        "unavailable",
     ]
     pid: int | None = None
     generation: str | None = None
+    command_fingerprint: str | None = None
     started_at: datetime | None = None
     stopped_at: datetime | None = None
     uptime_seconds: float | None = None
@@ -370,7 +403,8 @@ Failure conditions:
 - Missing or invalid operator session returns `401`.
 - Missing CSRF token on browser state-changing requests returns `403`.
 - Version mismatch returns `409` with current state.
-- Attempting to stop an externally running unowned process returns `409` with `actual_state="externally_running"`.
+- Attempting to stop or restart a service whose endpoint is occupied by an unmanaged process returns `409` with `actual_state="conflict"`.
+- Attempting to start a service whose configured port, callback URL, state file, or command fingerprint conflicts with an unmanaged local process returns `409` with `actual_state="conflict"`.
 - Dependency violation returns `409` with the blocking services listed.
 - Start command validation failure returns `500` and emits `console_error`; invalid registry must fail console startup before serving lifecycle controls.
 
@@ -481,9 +515,28 @@ class ConsoleLookupPage(BaseModel):
     redaction: dict[str, Any]
 ```
 
+### Bootstrap contract
+```python
+class ControlConsoleBootstrapResponse(BaseModel):
+    generated_at: datetime
+    operator: dict[str, Any]
+    csrf_header_name: str
+    services: list[ServiceRuntimeState]
+    overview: dict[str, Any]
+    recent_audit_events: list[dict[str, Any]]
+    event_counters: dict[str, int]
+    ui_capabilities: dict[str, bool]
+    stream_url: str = "/api/stream"
+```
+
+The browser must fetch this snapshot once after authentication and before
+opening the SSE stream. If the SSE stream reports a gap or reconnects after the
+server can no longer replay recent events, the browser refetches
+`/api/bootstrap` and replaces its local state baseline.
+
 ### SSE events
 ```text
-event: control.summary
+event: control.overview
 data: compact ControlConsoleOverviewResponse projection
 
 event: control.service
@@ -493,11 +546,31 @@ event: control.audit
 data: latest sanitized ControlAuditEvent
 
 event: control.log
-data: latest bounded process/error counter projection, not full log lines
+data: service id plus log cursor and bounded process/error counter projection,
+      not full log lines
+
+event: control.lookup_invalidated
+data: lookup namespace, affected filters or ids, and refresh cursor
 
 event: control.error
 data: bounded error code and request id
+
+event: control.gap
+data: reason and latest available event id; browser must refetch bootstrap
+
+event: control.heartbeat
+data: generated_at and latest event id
 ```
+
+SSE messages must include monotonically increasing event ids when practical so
+the browser can resume with `Last-Event-ID`. The server may replay only a
+bounded recent window. When replay is not possible, it sends `control.gap`
+instead of attempting an unbounded catch-up stream.
+
+The SSE stream is read-only. Lifecycle actions, debug chat sends, filter
+changes, pagination, and detail refreshes use authenticated REST requests.
+Native `EventSource` uses same-origin session cookies; state-changing REST
+requests still require CSRF validation.
 
 All response models use Pydantic validation, bounded strings, pagination, stable cursors, `extra="forbid"` where practical, and explicit redaction before returning data.
 
@@ -512,9 +585,10 @@ All response models use Pydantic validation, bounded strings, pagination, stable
 
 ## Overdesign Guardrail
 - Actual problem: Operators need one top-level local management console that can start/stop/restart Kazusa services, inspect runtime/domain state, run debug chat, and monitor logs/events.
-- Minimal change: Add one separate FastAPI package and CLI entrypoint with a strict service registry, local subprocess supervisor, bounded logs/events, authenticated API, static UI, and existing helper-based lookups.
+- Minimal change: Add one separate FastAPI package and CLI entrypoint with a strict local-app service registry, local child-process supervisor, bounded logs/events, authenticated API, static UI, and existing helper-based lookups.
 - Ownership boundaries: `control_console` owns UI, auth, lifecycle, process logs, audit, event monitor, HTTP probes, and orchestration. The brain owns cognition and `/chat`. Adapters own platform transport. DB/domain packages own persistence semantics and helper functions.
-- Rejected complexity: No embedded brain console, no arbitrary process control, no public internet admin, no Docker/systemd/k8s manager, no remote agents, no role matrix, no domain write/edit/delete workflows, no telemetry vendor, no new LLM summaries, no prompt rewrites, and no broad observability platform.
+- Rejected complexity: No embedded brain console, no arbitrary process control, no public internet admin, no Docker/systemd/k8s manager, no remote agents, no external instance management, no process adoption, no role matrix, no domain write/edit/delete workflows, no telemetry vendor, no new LLM summaries, no prompt rewrites, and no broad observability platform.
+- Frontend rejected complexity: No full-page auto refresh, broad timer polling, WebSocket, GraphQL subscription layer, frontend build framework, client-side persistence database, or unbounded live log table in v1.
 - Evidence threshold: Add a field, endpoint, state file, audit event, route, index, or UI panel only when it maps directly to service lifecycle, event/log monitoring, one of the 11 inspection capabilities, security/audit, or a required test contract in this plan.
 
 ## Agent Autonomy Boundaries
@@ -529,34 +603,44 @@ All response models use Pydantic validation, bounded strings, pagination, stable
 - If a required instruction is impossible, the responsible agent must stop and report the blocker instead of inventing a substitute.
 
 ## Implementation Order
-1. Parent creates or moves this plan to `development_plans/active/short_term/backend_control_console_top_level_plan.md` with status `draft`. Execution starts only after status is changed to `approved`.
+1. Parent confirms this plan is located at `development_plans/active/short_term/backend_control_console_development_plan.md` with status `draft`. Execution starts only after status is changed to `approved`.
 2. Parent loads mandatory skills and rereads brain service, adapter, DB, event logging, calendar, background-work, global-growth, memory, RAG/interface docs, and the current command entrypoints.
 3. Parent writes focused deterministic tests first:
    - `tests/test_control_console_contracts.py::test_service_contracts_reject_extra_fields_and_unbounded_strings`
-   - `tests/test_control_console_service_registry.py::test_registry_rejects_shell_strings_duplicate_ids_and_dependency_cycles`
+   - `tests/test_control_console_service_registry.py::test_registry_rejects_shell_strings_external_identifiers_duplicate_ids_and_dependency_cycles`
    - `tests/test_control_console_process_store.py::test_state_store_recovers_desired_state_and_generation_atomically`
    - `tests/test_control_console_supervisor.py::test_start_stop_restart_uses_argv_no_shell_and_records_audit`
    - `tests/test_control_console_lifecycle_routes.py::test_lifecycle_routes_require_auth_csrf_reason_and_version`
    - `tests/test_control_console_event_monitor.py::test_event_monitor_merges_and_redacts_bounded_sources`
    - `tests/test_control_console_redaction.py::test_responses_exclude_secrets_prompts_embeddings_env_values_and_raw_messages`
-   - `tests/test_control_console_stream.py::test_summary_stream_emits_bounded_service_and_event_payload`
+   - `tests/test_control_console_bootstrap.py::test_bootstrap_returns_initial_state_session_csrf_services_and_stream_url`
+   - `tests/test_control_console_stream.py::test_summary_stream_emits_bounded_service_event_cursor_and_gap_payload`
 4. Parent runs the new focused tests and records expected failures from missing modules.
 5. Parent starts the production-code subagent with this approved plan, mandatory skills, target files, focused tests, and production-code ownership boundary.
 6. Production-code subagent implements `control_console.contracts`, `settings`, `redaction`, `auth`, and static app skeleton.
 7. Production-code subagent implements `service_registry`, default built-in service specs, registry override loading, and dependency validation.
 8. Production-code subagent implements `process_store`, `log_store`, `audit`, and DB audit mirror helpers.
 9. Production-code subagent implements `supervisor` start/stop/restart, health polling, crash detection, dependency order, log capture, and recovery.
-10. Parent adds integration tests for route mounting, auth, CSRF, lifecycle actions, version mismatch, dependency ordering, crash state, debug chat unavailable state, lookup limits, and SSE event shape while the production-code subagent continues production changes.
-11. Production-code subagent implements API routes for service state, lifecycle actions, log tails, event monitor, overview, debug chat, and lookup pages.
+10. Parent adds integration tests while the production-code subagent continues production changes:
+    - `tests/test_control_console_auth.py::test_login_sets_session_and_csrf_and_rejects_bad_tokens`
+    - `tests/test_control_console_lifecycle_routes.py::test_lifecycle_routes_reject_version_mismatch_and_apply_dependency_order`
+    - `tests/test_control_console_lifecycle_routes.py::test_unmanaged_port_conflict_returns_409_without_adoption`
+    - `tests/test_control_console_supervisor.py::test_crash_detection_marks_service_crashed_and_preserves_logs`
+    - `tests/test_console_debug_chat.py::test_debug_chat_returns_brain_unavailable_without_cognition_when_stopped`
+    - `tests/test_console_lookup_limits.py::test_lookup_routes_enforce_pagination_redaction_and_no_embeddings`
+    - `tests/test_control_console_stream.py::test_stream_gap_forces_bootstrap_refetch`
+11. Production-code subagent implements API routes for bootstrap, service state, lifecycle actions, log tails, event monitor, overview, debug chat, and lookup pages.
 12. Production-code subagent implements `kazusa_client` for brain health, runtime status, and debug `/chat` calls.
 13. Production-code subagent implements read-only repository adapters for character status, global growth, user image/style, group style image, memory, calendar, background work, health/cache, and operational events.
-14. Production-code subagent implements `/api/stream` with compact SSE status updates and bounded exception events.
-15. Production-code subagent adds static UI assets with service lifecycle dashboard, event monitor, debug console, lookup pages, health/cache panels, and audit list.
-16. Parent updates docs, script registry notes, and local-operation HOWTO.
-17. Parent runs focused tests, then relevant existing regression tests for brain service, adapters, DB bootstrap, event logging, calendar, background-work, character state, global growth, and Cache2.
-18. Parent runs the independent code review gate after planned implementation verification passes.
-19. Parent remediates review findings with focused tests and reruns affected verification.
-20. Parent records execution evidence, updates plan checklist/status, and prepares final handoff.
+14. Production-code subagent implements `/api/stream` with compact SSE status updates, invalidation events, event ids, bounded replay or gap handling, and bounded exception events.
+15. Production-code subagent adds static UI assets aligned to `development_plans/reference/designs/backend_control_console_mockup.html`, using shadcn-style component anatomy for standard UI elements, with service lifecycle dashboard, event monitor, debug console with history, lookup pages, health/cache panels, audit list, one-time bootstrap loading, browser-local state updates, and EventSource reconnect handling.
+16. Production-code subagent adds `src/control_console/README.md` in ICD style, aligned with existing subsystem README documents, covering interface boundary, intended use cases, public entrypoints, REST/SSE/static UI contracts, security, forbidden behavior, and testing expectations.
+17. Parent updates root docs, script registry notes, and local-operation HOWTO.
+18. Parent runs focused tests, then relevant existing regression tests for brain service, adapters, DB bootstrap, event logging, calendar, background-work, character state, global growth, and Cache2.
+19. Parent manually inspects the running UI against the approved mockup and records mismatches for arrangement, shadcn component anatomy, density, colors, page population, and debug chat history.
+20. Parent runs the independent code review gate after planned implementation verification passes and after the mockup alignment inspection is recorded.
+21. Parent remediates review findings with focused tests and reruns affected verification.
+22. Parent records execution evidence, updates plan checklist/status, and prepares final handoff.
 
 ## Execution Model
 Execution is parent-led and uses native subagent capability.
@@ -581,125 +665,202 @@ Independent code-review subagent responsibilities:
 If native subagent capability is unavailable, execution stops before production implementation and the blocker is reported.
 
 ## Progress Checklist
-- [ ] Plan located at `development_plans/active/short_term/backend_control_console_top_level_plan.md` with status `approved` before execution.
-- [ ] Mandatory skills loaded and this plan reread.
-- [ ] Focused deterministic tests added.
-- [ ] Pre-implementation expected failures recorded.
-- [ ] Top-level `control_console` package skeleton implemented.
-- [ ] `kazusa-control-console` script and package discovery implemented.
-- [ ] Console settings implemented.
-- [ ] Console auth and CSRF implemented.
-- [ ] Console redaction implemented.
-- [ ] Service registry and default built-in specs implemented.
-- [ ] Registry override validation implemented.
-- [ ] Local state store implemented.
-- [ ] Local log store implemented.
+Each checkbox below is a checkpoint. Before ticking any item, the active agent
+must record the changed files, exact verification command or manual check,
+result, next unchecked checkpoint, and `<agent/date>` sign-off in `Execution
+Evidence`. The checkpoint inherits its detailed target from the matching
+`Implementation Order`, `Verification`, `Manual browser checks`, or
+`Independent Code Review` item; if that mapping is unclear, leave the checkbox
+unchecked and update the plan before proceeding.
+
+- [x] Plan located at `development_plans/active/short_term/backend_control_console_development_plan.md` with status `approved` before execution.
+- [x] Mandatory skills loaded and this plan reread.
+- [x] Focused deterministic tests added.
+- [x] Pre-implementation expected failures recorded.
+- [x] Top-level `control_console` package skeleton implemented.
+- [x] `src/control_console/README.md` ICD added and reviewed against the control-console interface boundary and intended operator use cases.
+- [x] `kazusa-control-console` script and package discovery implemented.
+- [x] Console settings implemented.
+- [x] Console auth and CSRF implemented.
+- [x] Console redaction implemented.
+- [x] Service registry and default built-in specs implemented.
+- [x] Registry override validation implemented.
+- [x] Local state store implemented.
+- [x] Local log store implemented.
 - [ ] Local audit writer and Mongo audit mirror implemented.
-- [ ] Process supervisor implemented.
-- [ ] Dependency-aware lifecycle ordering implemented.
-- [ ] Lifecycle routes implemented and tested.
+- [x] Process supervisor implemented.
+- [x] Dependency-aware lifecycle ordering implemented.
+- [x] Lifecycle routes implemented and tested.
 - [ ] Service monitor routes implemented and tested.
+- [x] Bootstrap route implemented and tested.
 - [ ] Event-log monitor implemented and tested.
-- [ ] Kazusa HTTP client implemented and tested.
-- [ ] Debug console endpoint implemented and tested.
-- [ ] Character status endpoint implemented and tested.
-- [ ] Character growth endpoint implemented and tested.
+- [x] Kazusa HTTP client implemented and tested.
+- [x] Debug console endpoint implemented and tested.
+- [x] Character status endpoint implemented and tested.
+- [x] Character growth endpoint implemented and tested.
 - [ ] User image/style lookup implemented and tested.
 - [ ] Group style image lookup implemented and tested.
-- [ ] Memory lookup implemented and tested.
+- [x] Memory lookup implemented and tested.
 - [ ] Calendar schedule/run lookup implemented and tested.
 - [ ] Background-work lookup implemented and tested.
 - [ ] Health/cache overview implemented and tested.
-- [ ] SSE summary stream implemented and tested.
-- [ ] Static console UI implemented.
-- [ ] Docs updated.
-- [ ] Focused verification passed.
-- [ ] Relevant regression verification passed.
-- [ ] Manual browser smoke checks completed.
-- [ ] Independent code review completed.
+- [x] SSE summary stream implemented and tested.
+- [x] Static UI bootstrap, local state store, EventSource updates, and bounded detail refetch implemented.
+- [x] Static console UI implemented with shadcn-style component anatomy and no bespoke standard widgets.
+- [x] Running console UI inspected against `development_plans/reference/designs/backend_control_console_mockup.html` and mismatches resolved or recorded.
+- [x] Python/FastAPI buildless frontend constraint verified with no Node.js, npm, pnpm, yarn, React, Vue, Vite, Webpack, Tailwind build tooling, or frontend build/runtime stack added.
+- [x] Docs updated.
+- [x] Focused verification passed.
+- [x] Relevant regression verification passed.
+- [x] Manual browser smoke checks completed.
+- [x] Independent code review completed.
 - [ ] Review findings resolved and affected tests rerun.
-- [ ] Execution evidence recorded.
+- [x] Execution evidence recorded.
 
 ## Verification
 Run these commands from the repository root using the project virtual environment.
 
 Focused deterministic tests:
 ```powershell
-pytest tests/test_control_console_contracts.py -q
-pytest tests/test_control_console_auth.py -q
-pytest tests/test_control_console_service_registry.py -q
-pytest tests/test_control_console_process_store.py -q
-pytest tests/test_control_console_supervisor.py -q
-pytest tests/test_control_console_lifecycle_routes.py -q
-pytest tests/test_control_console_kazusa_client.py -q
-pytest tests/test_control_console_event_monitor.py -q
-pytest tests/test_control_console_log_store.py -q
-pytest tests/test_control_console_redaction.py -q
-pytest tests/test_control_console_repository.py -q
-pytest tests/test_control_console_stream.py -q
-pytest tests/test_console_debug_chat.py -q
-pytest tests/test_console_lookup_limits.py -q
+venv\Scripts\python -m pytest tests/test_control_console_contracts.py -q
+venv\Scripts\python -m pytest tests/test_control_console_auth.py -q
+venv\Scripts\python -m pytest tests/test_control_console_service_registry.py -q
+venv\Scripts\python -m pytest tests/test_control_console_process_store.py -q
+venv\Scripts\python -m pytest tests/test_control_console_supervisor.py -q
+venv\Scripts\python -m pytest tests/test_control_console_lifecycle_routes.py -q
+venv\Scripts\python -m pytest tests/test_control_console_kazusa_client.py -q
+venv\Scripts\python -m pytest tests/test_control_console_bootstrap.py -q
+venv\Scripts\python -m pytest tests/test_control_console_event_monitor.py -q
+venv\Scripts\python -m pytest tests/test_control_console_log_store.py -q
+venv\Scripts\python -m pytest tests/test_control_console_redaction.py -q
+venv\Scripts\python -m pytest tests/test_control_console_repository.py -q
+venv\Scripts\python -m pytest tests/test_control_console_stream.py -q
+venv\Scripts\python -m pytest tests/test_console_debug_chat.py -q
+venv\Scripts\python -m pytest tests/test_console_lookup_limits.py -q
 ```
 
 Relevant regression tests:
 ```powershell
-pytest tests/test_brain_service*.py -q
-pytest tests/test_service*.py -q
-pytest tests/test_runtime_adapter*.py -q
-pytest tests/test_event_logging*.py -q
-pytest tests/test_calendar*.py -q
-pytest tests/test_background_work*.py -q
-pytest tests/test_character_state*.py -q
-pytest tests/test_global_character_growth*.py -q
-pytest tests/test_cache2*.py -q
+venv\Scripts\python -m pytest tests/test_brain_service*.py -q
+venv\Scripts\python -m pytest tests/test_service*.py -q
+venv\Scripts\python -m pytest tests/test_runtime_adapter*.py -q
+venv\Scripts\python -m pytest tests/test_event_logging*.py -q
+venv\Scripts\python -m pytest tests/test_calendar*.py -q
+venv\Scripts\python -m pytest tests/test_background_work*.py -q
+venv\Scripts\python -m pytest tests/test_character_state*.py -q
+venv\Scripts\python -m pytest tests/test_global_character_growth*.py -q
+venv\Scripts\python -m pytest tests/test_cache2*.py -q
 ```
 
 Static and import checks:
 ```powershell
-python -m compileall src/control_console src/kazusa_ai_chatbot src/adapters tests
-python -c "import control_console; import kazusa_ai_chatbot; import adapters"
+venv\Scripts\python -m compileall src/control_console src/kazusa_ai_chatbot src/adapters tests
+venv\Scripts\python -c "import control_console; import kazusa_ai_chatbot; import adapters"
+```
+
+Documentation contract checks:
+```powershell
+$doc = Get-Content -LiteralPath 'src/control_console/README.md' -Raw
+$required = @(
+  'Control Console Interface Control Document',
+  'Interface boundary',
+  'Intended Use Cases',
+  'Public Interfaces',
+  'Security Model',
+  'Forbidden Behavior',
+  'Testing Expectations',
+  'shadcn',
+  'Python/FastAPI'
+)
+foreach ($term in $required) {
+  if (-not $doc.Contains($term)) {
+    throw "missing required control-console README section or term: $term"
+  }
+}
 ```
 
 Operator smoke checks against a local development environment:
 ```powershell
-kazusa-control-console --help
-kazusa-brain --help
-kazusa-discord-adapter --help
-kazusa-debug-adapter --help
-python -m scripts.fetch_ops_status
-python -m scripts.character_state_snapshot
-python -m scripts.identify_user_image --help
-python -m scripts.identify_group_image --help
+venv\Scripts\kazusa-control-console.exe --help
+venv\Scripts\kazusa-brain.exe --help
+venv\Scripts\kazusa-discord-adapter.exe --help
+venv\Scripts\kazusa-debug-adapter.exe --help
+venv\Scripts\python -m scripts.fetch_ops_status
+venv\Scripts\python -m scripts.character_state_snapshot
+venv\Scripts\python -m scripts.identify_user_image --help
+venv\Scripts\python -m scripts.identify_group_image --help
 ```
 
 Manual browser checks:
 - Start only `kazusa-control-console`; verify the console UI loads on loopback and requires authentication.
+- Compare the running console UI against `development_plans/reference/designs/backend_control_console_mockup.html`; verify sidebar page arrangement, page density, populated cards/tables/forms, debug chat history, Bright/Dark theme controls, and no empty or compressed side pages.
+- Verify standard UI elements use shadcn-style component anatomy: Sidebar, Button, Card, Badge, Table, Input, Select, Textarea, Field/Form-style grouping, Separator/ScrollArea, and Sheet/Dialog/Drawer or Tabs only where those patterns are needed.
+- Verify the served UI remains static and Python/FastAPI based; no Node.js process, frontend package manager, frontend dev server, or frontend build artifact is required to run the console.
 - Verify `/api/*` rejects unauthenticated requests and state-changing requests without CSRF token.
+- After login, verify the UI fetches `/api/bootstrap` once, opens one EventSource connection to `/api/stream`, and does not full-page refresh or run broad timer polling while idle.
 - Start the brain from the console; verify process state transitions through `starting` to `running`, PID is recorded, health becomes healthy, and audit/log events are written.
 - Stop the brain from the console; verify dependent managed adapters are stopped first, brain receives graceful termination, health becomes unavailable, and audit/log events are written.
 - Restart the brain from the console; verify generation id changes and prior logs remain queryable.
 - Start one adapter from the console; verify dependency checks require the brain to be running and adapter status appears in service monitor.
 - Kill a console-owned child process outside the console; verify crash detection marks it `crashed`, records exit code, writes lifecycle event, and does not hide the failure.
-- Attempt to stop an externally started process; verify the console refuses with `409` and does not kill the process.
+- Start an unmanaged process on a configured service port; verify the console marks the service `conflict`, refuses start/stop/restart with `409`, and does not kill or adopt the process.
+- Stop `kazusa-control-console`; verify console-owned child services are stopped in dependency-aware order and unmanaged conflicting processes are untouched.
 - Send a debug-console message while the brain is running; verify response rendering, tracking id, latency, debug mode handling, and audit event.
 - Send a debug-console message while the brain is stopped; verify a clear brain-not-running response and no cognition/persistence work starts.
 - Run user image/style, group style, memory, calendar, background-work, health/cache, and event-log lookups; verify pagination, redaction, no embeddings, no prompts, no secrets, and no unbounded message dumps.
 - Open the event monitor; verify filters by service id, event type, level, request id, tracking id, and time window.
-- Leave the overview open; verify SSE summary updates service state, health, cache/event counters, and recent audit events without streaming full logs or full lookup tables.
+- Leave the overview open; verify SSE updates service state, health, cache/event counters, and recent audit events without streaming full logs or full lookup tables.
+- Tail logs in an active service panel; verify SSE sends only log cursors/counters and the panel performs bounded REST detail fetches for visible log lines.
+- Force an SSE reconnect after the replay window is unavailable; verify the server sends `control.gap` and the browser refetches `/api/bootstrap`.
+
+## Independent Plan Review
+Run this gate before changing status to `approved`, execution, or handoff. If
+no separate reviewer is used, the parent agent must perform the review directly
+from a fresh-review posture and state that no subagent was used.
+
+Review scope:
+- Required top matter is present.
+- Mandatory sections are present in the required order.
+- Mandatory skills and mandatory rules are explicit.
+- No unresolved implementation decisions remain.
+- Must Do and Deferred boundaries are clear.
+- Contracts and data shapes are concrete.
+- Execution model uses parent-led native subagent execution.
+- Independent code review gate is present.
+- Verification commands are specific and use the project virtual environment.
+- The new `src/control_console/README.md` ICD requirement is explicit and checked.
+- The embedded-brain-console design is fully superseded by the top-level management-console design.
+- The approved mockup is named and the running production UI must be inspected against it.
+- Standard UI elements must come from shadcn component families and may not become bespoke common widgets.
+- The frontend stack remains Python/FastAPI served and buildless with no Node.js or frontend build/runtime stack.
+
+Direct review result, 2026-06-17:
+- Reviewer: parent agent direct review; no subagent used by user instruction.
+- Inputs inspected: repository status, `README.md`, `docs/HOWTO.md`, `development_plans/README.md`, this plan, development-plan skill references, relevant subsystem README contracts, `pyproject.toml`, and current source/test path inventory.
+- Findings addressed in this draft: plan class corrected to `high_risk_migration`; venv-based verification commands added; integration test targets made explicit; progress-checklist evidence/sign-off rule added; static asset packaging called out; `src/control_console/README.md` ICD requirement added; this plan-review gate moved before acceptance/sign-off.
+- Remaining blockers: none known other than explicit user approval and changing status from `draft` to `approved`.
+- Approval status: ready for user approval; do not execute until the status line and registry are updated to `approved`.
 
 ## Independent Code Review
 Run this gate after focused and regression verification passes.
 
 Review scope:
 - Confirm the console is a top-level `src/control_console` package and is not mounted or imported by the brain service.
+- Confirm `src/control_console/README.md` exists and follows the repository ICD style, including purpose, intended use cases, interface boundary, public interfaces, security model, forbidden behavior, testing expectations, and UI stack constraints.
 - Confirm `kazusa-control-console` is the new normal operator entrypoint and existing brain/adapter commands remain available.
 - Confirm all lifecycle actions operate only on registry-declared services and never execute shell strings or arbitrary browser-provided commands.
-- Confirm stop/restart cannot kill unowned external processes.
+- Confirm stop/restart can target only console-owned child processes with matching PID, generation, and command fingerprint.
+- Confirm unmanaged port/process conflicts are reported as `conflict` and are not adopted, stopped, restarted, or inspected as managed services.
 - Confirm start/stop/restart actions write sanitized audit events with operator id, reason, target, previous state, new state, timestamp, and request id.
 - Confirm dependency order starts brain before adapters and stops adapters before brain.
 - Confirm debug chat uses the existing brain `/chat` contract over HTTP and returns a safe unavailable state when the brain is stopped.
 - Confirm all 11 original operator inspection capabilities are implemented under the top-level console API/UI.
 - Confirm event-log monitoring covers console lifecycle/audit, process logs, console errors, and Kazusa operational events through bounded queries.
+- Confirm the frontend data path is `/api/bootstrap` initial snapshot, authenticated REST commands/detail queries, and one read-only `/api/stream` SSE connection.
+- Confirm no WebSocket, full-page auto refresh, broad timer polling, or unbounded live log/detail stream was added.
+- Confirm the production UI was inspected against `development_plans/reference/designs/backend_control_console_mockup.html`, and that any visual or arrangement mismatch was either remediated or explicitly recorded in `Execution Evidence`.
+- Confirm standard UI elements follow shadcn UI component families and anatomy rather than custom bespoke widgets.
+- Confirm no Node.js, npm, pnpm, yarn, React, Vue, Vite, Webpack, Tailwind build tooling, frontend dev server, frontend package manager workflow, or frontend build/runtime stack was added.
 - Confirm console auth protects every `/api/*` endpoint except login/static assets and state-changing routes enforce CSRF or equivalent same-origin protection.
 - Confirm redaction removes secrets, prompts, embeddings, env values, raw callback secrets, raw tokens, raw message bodies in aggregate views, and unbounded text.
 - Confirm domain lookup endpoints use existing public helper boundaries or new DB-owned helper functions.
@@ -711,16 +872,25 @@ The parent records review findings, remediation commits, rerun commands, and fin
 
 ## Acceptance Criteria
 - `kazusa-control-console` starts a top-level local FastAPI management console outside the brain service.
+- `src/control_console/README.md` documents the module in ICD style, including interface boundary, intended operator use cases, public CLI/API/UI/SSE contracts, security model, forbidden behavior, testing expectations, shadcn UI constraint, and Python/FastAPI buildless frontend constraint.
 - The brain service does not mount or import console routes.
+- The console manages exactly one configured local application instance and has only the OS permissions of the user that launched it.
 - Operators can start, stop, and restart the brain process from the console.
 - Operators can start, stop, and restart registered adapter processes from the console.
 - Dependency order prevents adapters from starting without the brain and prevents the brain from stopping before managed adapters stop.
-- Future services can be added through a validated registry spec and appear in lifecycle controls, status, logs, events, and overview without UI code changes.
+- Future local frontend, backend, adapter, worker, and support services for this application can be added through a validated registry spec and appear in lifecycle controls, status, logs, events, and overview without UI code changes.
 - Lifecycle actions use argv arrays with no shell execution and cannot execute browser-provided commands.
-- The console refuses to kill unowned external processes.
+- The console refuses to adopt, stop, restart, or kill unmanaged external processes and reports configured endpoint conflicts as `conflict`.
+- Stopping `kazusa-control-console` gracefully stops console-owned child services by default and leaves unmanaged conflicting processes untouched.
 - Every privileged lifecycle, debug, lookup, log-view, auth-failure, crash, and console-error event is audited locally and mirrored to MongoDB when available.
 - The service monitor shows desired state, actual state, PID, uptime, health, exit code, restart count, dependencies, recent events, and recent logs.
 - Event-log monitoring supports bounded filters across console audit, process logs, console errors, and Kazusa operational events.
+- Production UI layout and colors align with `development_plans/reference/designs/backend_control_console_mockup.html`, including shadcn-style sidebar/inset arrangement, sidebar-controlled subpages, populated overview, debug chat history, lookup pages, health/cache, audit, and Bright/Dark color treatments.
+- Standard UI elements are implemented from shadcn component families/anatomy and do not introduce bespoke widgets for common controls or surfaces.
+- The frontend remains static, buildless, and Python/FastAPI served, with no Node.js, npm, pnpm, yarn, React, Vue, Vite, Webpack, Tailwind build tooling, frontend dev server, frontend package manager workflow, or frontend build/runtime stack.
+- The frontend loads a bootstrap snapshot once after authentication, then receives compact realtime updates through one read-only SSE stream.
+- State-changing actions and detail refreshes use authenticated REST routes with CSRF for mutations.
+- The console does not use full-page auto refresh, broad polling, WebSocket, multiple live streams, or unbounded streamed detail tables in v1.
 - Debug console sends and receives through the existing typed brain chat contract when the brain is running and returns a clear unavailable state when stopped.
 - Latest character status updates through the overview stream or DB-backed refresh.
 - Character growth progression/status is readable through a bounded endpoint and rendered in the UI.
@@ -733,36 +903,55 @@ The parent records review findings, remediation commits, rerun commands, and fin
 - SSE summary events are compact and do not stream full lookup tables, full process logs, prompts, embeddings, secrets, or sensitive bodies.
 - All planned focused tests pass.
 - Relevant regression tests pass or unrelated failures are documented with evidence.
-- Docs explain setup, local-only warning, auth, service registry, lifecycle controls, event monitoring, and smoke checks.
-
-## Independent Plan Review
-Before changing status to `approved`, review this plan against the repository plan contract:
-- Required top matter is present.
-- Mandatory sections are present in the required order.
-- Mandatory skills and mandatory rules are explicit.
-- No unresolved implementation decisions remain.
-- Must Do and Deferred boundaries are clear.
-- Contracts and data shapes are concrete.
-- Execution model uses parent-led native subagent execution.
-- Independent code review gate is present.
-- Verification commands are specific.
-- The embedded-brain-console design is fully superseded by the top-level management-console design.
+- Docs explain setup, local-only warning, OS-user permission model, shared local environment configuration, auth, service registry, lifecycle controls, event monitoring, and smoke checks.
 
 ## Execution Evidence
-No execution evidence is recorded because implementation has not started. During execution, record:
-- Pre-implementation focused test failures.
-- Production-code subagent changed files and command output.
-- Integration and regression test command output.
-- Manual browser smoke-check results.
-- Independent code review findings.
-- Remediation changes and rerun evidence.
-- Final status change and handoff summary.
+- 2026-06-17 parent: plan status changed from `draft` to `approved` after user approval, then to `in_progress` after focused-test baseline was recorded. Registry row updated to match. Sign-off: parent/2026-06-17. Next checkpoint: production-code subagent.
+- 2026-06-17 parent: mandatory skills loaded and plan reread after context compaction. Loaded `development-plan`, `py-style`, `test-style-and-execution`, `local-llm-architecture`, `build-web-apps:shadcn`, and `build-web-apps:frontend-app-builder` guidance relevant to the static UI constraints. Sign-off: parent/2026-06-17. Next checkpoint: production-code subagent.
+- 2026-06-17 parent: focused deterministic tests added:
+  `tests/test_control_console_contracts.py`,
+  `tests/test_control_console_service_registry.py`,
+  `tests/test_control_console_process_store.py`,
+  `tests/test_control_console_supervisor.py`,
+  `tests/test_control_console_lifecycle_routes.py`,
+  `tests/test_control_console_event_monitor.py`,
+  `tests/test_control_console_redaction.py`,
+  `tests/test_control_console_bootstrap.py`,
+  and `tests/test_control_console_stream.py`. Sign-off: parent/2026-06-17. Next checkpoint: pre-implementation failure baseline.
+- 2026-06-17 parent: pre-implementation focused-test command
+  `venv\Scripts\python -m pytest tests/test_control_console_contracts.py tests/test_control_console_service_registry.py tests/test_control_console_process_store.py tests/test_control_console_supervisor.py tests/test_control_console_lifecycle_routes.py tests/test_control_console_event_monitor.py tests/test_control_console_redaction.py tests/test_control_console_bootstrap.py tests/test_control_console_stream.py -q`
+  failed as expected with 9 failures, each `ModuleNotFoundError: No module named 'control_console'`. This confirms the focused contract is failing only because the planned top-level module is not implemented yet. Sign-off: parent/2026-06-17. Next checkpoint: production-code subagent.
+- 2026-06-17 production-code subagent: one `gpt-5.5 high` implementation agent completed the first production pass. Changed files included the new top-level `src/control_console` package, static UI assets, focused tests, package metadata, and docs. Parent independently reran the focused control-console batch after the subagent returned; initial result before review remediation was 17 passing tests. Sign-off: parent/2026-06-17. Next checkpoint: parent verification and browser inspection.
+- 2026-06-17 parent: post-subagent verification before independent review passed focused control-console tests, `compileall`, import checks, README ICD term check, no brain/adapters Python imports of `control_console`, no frontend package/build stack files, `kazusa-control-console --help`, and browser smoke through local Chrome. Browser inspection found sparse side pages; parent enriched the static UI with populated shadcn-style Card/Table/Badge surfaces, avatar favicon, theme toggle, and sidebar-controlled pages. Sign-off: parent/2026-06-17. Next checkpoint: independent code review.
+- 2026-06-17 independent code review: one `gpt-5.5 xhigh` read-only reviewer reported blocking findings: lifecycle safety incomplete; shell-interpreter argv still accepted; inspection capabilities were placeholders; debug-chat request body leaked and privileged reads were under-audited; `/api/stream` was one-shot rather than persistent; tests proved scaffold behavior more than the approved contract. Sign-off: reviewer/2026-06-17. Next checkpoint: parent remediation.
+- 2026-06-17 parent remediation: added focused tests for shell-interpreter rejection, dependency-aware lifecycle order, stale ownership conflict refusal, debug-chat redaction/audit, numeric SSE replay gaps, repository projection helpers, and character/growth routes. Production fixes included stricter registry command validation, supervisor dependency checks and dependent-stop ordering, PID/fingerprint ownership verification, conflict marking, crash detection, console shutdown cleanup hook, redaction of `message_text`/`body_text`/`raw_wire_text`, authenticated `/api/audit`, persistent SSE heartbeat loop, local audit/process event monitor readers, and authenticated character status/growth endpoints using DB-owned helper boundaries with safe unavailable fallback. Focused command:
+  `venv\Scripts\python -m pytest tests/test_control_console_contracts.py tests/test_control_console_auth.py tests/test_control_console_service_registry.py tests/test_control_console_process_store.py tests/test_control_console_supervisor.py tests/test_control_console_lifecycle_routes.py tests/test_control_console_kazusa_client.py tests/test_control_console_bootstrap.py tests/test_control_console_event_monitor.py tests/test_control_console_log_store.py tests/test_control_console_redaction.py tests/test_control_console_repository.py tests/test_control_console_stream.py tests/test_console_debug_chat.py tests/test_console_lookup_limits.py -q`
+  passed with 21 tests. Static/import checks also passed: `compileall`, `python -c "import control_console; import kazusa_ai_chatbot; import adapters"`, `git diff --check` with CRLF warnings only, and no `control_console` imports from brain/adapters. Sign-off: parent/2026-06-17. Next checkpoint: remaining domain adapters and Mongo audit mirror.
+- 2026-06-17 parent browser inspection after remediation: temporary `kazusa-control-console` on `127.0.0.1:8765` with throwaway state/token loaded successfully in local Chrome. Login worked; exactly one EventSource request stayed open; Debug chat returned `brain_unavailable`; Audit page refreshed via `/api/audit` and showed `debug_chat_unavailable` without leaking the raw message; Event monitor saw local audit rows; Memory lookup used bounded `/api/lookups/memory`; theme toggle changed CSS tokens; sidebar pages remained populated. Temporary server and state directory were removed after inspection. Sign-off: parent/2026-06-17. Next checkpoint: remaining domain adapters and Mongo audit mirror.
+- 2026-06-17 parent regression verification: matching regression groups passed: event logging 20 passed; calendar scheduler 59 passed; background work 24 passed, 2 deselected; Cache2 2 passed; character state 4 passed; global character growth 56 passed, 2 deselected; service tests 69 passed; runtime adapter tests 55 passed. No `test_brain_service*.py` files matched. Some groups connected to the configured MongoDB through normal project test paths; `.env` was not read by the agent. Sign-off: parent/2026-06-17. Next checkpoint: remaining domain adapters and Mongo audit mirror.
+- 2026-06-17 parent regression fix after operator feedback: reproduced that the built-in registry omitted `adapter.napcat` and that `adapter.debug` activation returned HTTP 500 after `brain` was shown as running. Root cause was twofold: the registry brain command used `python -m kazusa_ai_chatbot.main`, but that module did not invoke `main()` when run with `-m`, so the child exited without serving the brain; lifecycle `ServiceLifecycleError` was not translated to an API conflict response. Fixes added `adapter.napcat`, made the brain module command executable, returned HTTP 409 with error detail for lifecycle conflicts, surfaced `last_error_preview` in service state, refreshed the UI after failed service actions, and showed service-card error text. Focused tests first failed for the missing behavior, then passed. Rendered Chrome/CDP validation used the actual Services page to log in, verify NapCat, stop brain/debug, confirm adapter Start buttons were disabled while brain was stopped, start brain, start debug adapter, toggle Bright/Dark themes, and check no horizontal overflow or alerts. Cleanup stopped the temporary console-owned brain/debug child processes and verified ports `8000`, `8080`, and `8767` were closed. Sign-off: parent/2026-06-17. Next checkpoint: remaining domain adapters and Mongo audit mirror.
+- 2026-06-17 parent comprehensive web test pass: added `development_plans/active/short_term/backend_control_console_web_test_plan.md` and executed it. Deterministic coverage command passed 31 tests with 91% `control_console` statement coverage. Rendered Chrome/CDP validation on temporary `127.0.0.1:8768` exercised login, all sidebar pages, Bright/Dark themes, event source selector options, request/tracking text input presence, memory refresh, debug form output, audit refresh, and Start/Restart/Stop for `brain`, `adapter.discord`, `adapter.napcat`, and `adapter.debug` using safe registry override child services. Found and fixed `GET /api/lookups/{namespace}` HTTP 500 caused by unreachable `ControlConsoleRepository.empty_lookup()`. Cleanup verified temporary port `8768` closed and temporary state was removed. Remaining limitation: event request-id/tracking-id inputs are rendered but not wired into `refreshEvents()`, so functional filtering for those fields is not claimed. Sign-off: parent/2026-06-17. Next checkpoint: remaining domain adapters and Mongo audit mirror.
+- 2026-06-17 parent live-service web verification: reran the comprehensive pass against the real built-in registry rather than a credential-free override. `.env` was not inspected by the agent; the normal runtime loaded its own configuration while starting services. Root causes found and fixed with failing-first tests: built-in registry used bare `python` and resolved outside the venv on Windows, causing live brain timezone dependency failures; control-console debug chat sent UTC ISO `local_timestamp` while the brain requires configured-local wall-clock text; the console brain client used a 5-second timeout while live local LLM turns exceed that and the existing debug adapter uses 120 seconds; successful service start retained stale `exit_code` and `last_error_preview`; Event Monitor request-id/tracking-id inputs rendered but were not wired. Fixes used `sys.executable` for built-in service commands, `build_turn_clock()["local_timestamp"]` for debug-chat payloads, a 120-second debug-chat timeout, start-time clearing of stale failure metadata, and wired event filter IDs through `refreshEvents()` and `/api/events`. Deterministic coverage command passed 33 tests with 92% `control_console` statement coverage. Final headless Chrome validation on isolated temporary `127.0.0.1:8769` logged in, opened every sidebar page, toggled Bright/Dark themes, exercised request-id/tracking-id event filters, started brain/debug/Discord/NapCat through the Services page, submitted the browser debug form after `/health`, verified history output, stopped all services, confirmed mutually exclusive service buttons, checked no horizontal overflow or card/table scrollbar anomaly, and captured no alerts/page errors/warning logs. Cleanup verified ports `8000`, `8011`, `8012`, `8080`, and `8769` were closed and no console-owned brain/adapter child process remained. Sign-off: parent/2026-06-17. Next checkpoint: remaining domain adapters and Mongo audit mirror.
+- Remaining in-progress scope after review remediation:
+  Mongo audit mirroring is not implemented; only local JSONL audit is complete.
+  Kazusa operational event source integration in the console event monitor is not implemented; local audit and process logs are implemented.
+  User image/style, group style image, calendar schedule/run, background-work, and full health/cache DB/API adapters remain incomplete beyond static UI surfaces or safe unavailable summaries.
+  Unmanaged port/process conflict detection is represented through ownership metadata conflicts, but port-level external-process detection is not complete.
+  Because these items remain open, this plan stays `in_progress` and must not be archived or marked complete.
+- 2026-06-17 parent corrective follow-up: user review identified that several
+  visible sidebar pages looked functional while still being placeholder,
+  static, or safe-unavailable surfaces, and that Health/cache could report
+  incorrect brain availability. Follow-up execution is tracked in
+  `development_plans/active/bugfix/control_console_functional_remediation_plan.md`.
+  This parent plan remains blocked from completion until that remediation
+  either completes or records an explicit handoff for every remaining dummy or
+  partial page. Sign-off: parent/2026-06-17.
 
 ## Risks
 | Risk | Mitigation | Verification |
 |---|---|---|
 | Command injection through service management | Registry-only argv lists, no shell execution, no browser-editable commands | Registry validation tests and code review for `shell=False` |
-| Wrong process killed | Track console-owned PID/generation, refuse unowned external processes | Supervisor tests for external process refusal |
+| Wrong process killed | Track console-owned PID/generation/command fingerprint, refuse unmanaged conflicts, and never adopt external processes | Supervisor tests for conflict refusal |
 | Console unavailable after stopping brain | Console runs as separate top-level process | Manual smoke test stops brain while console remains available |
 | Adapter failures during brain stop | Dependency-aware stop order stops adapters before brain | Lifecycle route and supervisor dependency tests |
 | Stale service state after crash | Supervisor watches child exits and health probes | Crash detection test and manual kill smoke test |

@@ -68,10 +68,12 @@ kazusa-ai-chatbot = "kazusa_ai_chatbot.main:main"
 kazusa-brain = "kazusa_ai_chatbot.main:main"
 kazusa-discord-adapter = "adapters.discord_adapter:main"
 kazusa-debug-adapter = "adapters.debug_adapter:main"
+kazusa-control-console = "control_console.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["kazusa_ai_chatbot*", "scripts*", "adapters*"]
+include = ["kazusa_ai_chatbot*", "scripts*", "adapters*", "control_console*"]
 
 [tool.setuptools.package-data]
 src = ["*.py"]
+control_console = ["static/*"]

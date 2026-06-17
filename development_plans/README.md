@@ -38,7 +38,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [backend_control_console_development_plan.md](active/short_term/backend_control_console_development_plan.md) | Control plane web UI development plan | draft |
+| [backend_control_console_development_plan.md](active/short_term/backend_control_console_development_plan.md) | Local application control console development plan | in_progress |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 
 ## Supporting Experiment Records
@@ -51,6 +51,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [control_console_functional_remediation_plan.md](active/bugfix/control_console_functional_remediation_plan.md) | Control-console functional remediation plan | in_progress |
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
 
 ## Reference Documents

@@ -41,6 +41,10 @@ both inbound and outbound state:
 - background-work worker lifecycle is started, stopped, and reported by the
   service runtime while result delivery still returns through cognition/dialog.
 
+Local process lifecycle management is owned by the separate top-level
+`control_console` package and `kazusa-control-console` command. The brain
+service does not mount, import, or control console routes.
+
 ## Scope
 
 This ICD covers:

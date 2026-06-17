@@ -454,6 +454,13 @@ agent review. Snapshot documents contain bounded source counts, semantic
 descriptors, findings, and source event refs. They are generated without LLM
 calls and must remain prompt-safe.
 
+### `control_console_audit_events`
+
+Reserved MongoDB mirror for sanitized control-console audit events when the
+local console is configured with DB-backed mirroring. The local JSONL audit file
+under `.kazusa_control/` is the v1 source of truth; route handlers must not
+import raw MongoDB clients to write this collection.
+
 Retention and archival for event-log collections are intentionally deferred.
 Any pruning, compaction, or archival policy requires a separate approved plan.
 

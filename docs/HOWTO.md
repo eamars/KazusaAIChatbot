@@ -291,6 +291,57 @@ At minimum, a working profile should include:
 
 ## Run The Brain Service
 
+Normal local operation starts the control console first. The console binds to
+loopback by default, serves a static buildless HTML/CSS/JS UI, authenticates
+the local operator, and starts registry-declared child services with argv
+subprocesses only.
+
+For a stable local login token, generate a local operator token hash before
+startup. The plaintext token is what you type into the browser login field;
+only the hash belongs in the environment.
+
+```powershell
+$env:KAZUSA_CONTROL_OPERATOR_TOKEN_HASH = venv\Scripts\python -c "from getpass import getpass; from control_console.auth import hash_operator_token; print(hash_operator_token(getpass('Operator token: ')))"
+```
+
+The hash format is `pbkdf2_sha256$<iterations>$<salt>$<digest>`. Hashes are
+salted, so running the command twice for the same plaintext token produces
+different environment values. The login endpoint verifies the plaintext token
+against this hash, then issues an HTTP-only local session cookie and a CSRF
+token used by state-changing console requests.
+
+If `KAZUSA_CONTROL_OPERATOR_TOKEN_HASH` is not set, the console generates a
+random ephemeral operator token during startup, hashes it in memory, and prints
+the plaintext token once in the server log:
+
+```text
+Control console access token: <random-token>
+```
+
+That fallback token is valid only for the current console process. Restarting
+the console generates a new token. This is convenient for local development,
+but operators should still set `KAZUSA_CONTROL_OPERATOR_TOKEN_HASH` for a
+stable runbook or shared workstation setup.
+
+```bash
+kazusa-control-console --host 127.0.0.1 --port 8765
+```
+
+Useful control-console environment variables:
+
+```env
+KAZUSA_CONTROL_OPERATOR_TOKEN_HASH=<pbkdf2 hash generated from the local operator token>
+KAZUSA_CONTROL_STATE_DIR=.kazusa_control
+KAZUSA_CONTROL_SERVICE_REGISTRY=
+KAZUSA_CONTROL_BRAIN_BASE_URL=http://127.0.0.1:8000
+```
+
+The console manages only services declared in its registry. Built-in services
+are `brain`, `adapter.discord`, `adapter.napcat`, and `adapter.debug`. It does
+not adopt, inspect, or stop externally started processes.
+
+Direct service startup remains available for development fallback:
+
 ```bash
 uvicorn kazusa_ai_chatbot.service:app --host 0.0.0.0 --port 8000
 ```
