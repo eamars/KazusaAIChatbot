@@ -59,6 +59,27 @@ the configured CSRF header.
 - `csrf_token`: the current session CSRF token, returned only after the
   HTTP-only session cookie has authenticated the browser.
 
+`GET /api/bootstrap` also returns `latest_cognition_graph` and mirrors it
+under `overview.latest_cognition_graph`. `POST /api/debug-chat` returns
+`cognition_graph` for the most recent debug turn. These fields use the same
+bounded cognition-run graph snapshot contract:
+
+- `source`: `overview_latest`, `debug_latest`, or future `historical`.
+- `status`: `not_reported`, `running`, `completed`, `failed`, or `partial`.
+- `nodes`: up to 64 stage nodes with lane, column, optional branch, status,
+  and redacted hover/focus detail.
+- `edges`: up to 96 directed links with `sequence`, `fork`, `join`, or
+  `reference` kind.
+- `redaction`: an explicit policy summary for excluded prompts, embeddings,
+  raw messages, and message envelopes.
+
+The current brain `/chat` response does not expose live cognition internals.
+Until a bounded brain-side telemetry contract is approved, normal live chat
+responses return `status: not_reported` rather than fabricated graph nodes.
+If a debug/test payload already includes a bounded `cognition_graph` or
+`cognition_snapshot`, the console projects it through this same redacted
+contract.
+
 ## Page Capability Status
 
 `GET /api/bootstrap` returns `page_capabilities` so the browser can distinguish
@@ -159,6 +180,12 @@ boundaries.
 ## Static UI Contract
 
 The UI is buildless static HTML, CSS, and JavaScript served by Python/FastAPI. It follows shadcn component family anatomy for common surfaces: Sidebar, Button, Card, Badge, Table, Input, Select, Textarea, Separator, ScrollArea, Field/Form grouping, and dialog/sheet-style detail surfaces where needed.
+
+The cognition-run graph is a reusable static UI gadget, not a page-specific
+mockup. Overview uses it for the latest reported run; Debug chat uses it for
+the most recent debug turn; a future historical-run inspector must reuse the
+same graph contract and renderer instead of adding a second diagram widget.
+Nodes expose bounded reasoning detail through hover and keyboard focus.
 
 No Node.js, npm, pnpm, yarn, React, Vue, Vite, Webpack, Tailwind build tooling, frontend dev server, frontend package manager workflow, or frontend build/runtime stack is required.
 

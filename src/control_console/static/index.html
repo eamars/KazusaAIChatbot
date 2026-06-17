@@ -61,6 +61,14 @@
           <span class="badge" id="session-state" data-component="Badge">signed out</span>
         </div>
         <div class="overview-grid" id="overview-grid"></div>
+        <article class="card cognition-card" data-component="Card">
+          <div class="card-header"><h3>Latest cognition run</h3><span class="badge" id="overview-cognition-status">not reported</span></div>
+          <div class="card-content">
+            <div class="cognition-graph" id="overview-cognition-graph" data-cognition-graph="overview_latest">
+              <p class="graph-empty">Cognition run telemetry appears here when the brain reports a bounded snapshot.</p>
+            </div>
+          </div>
+        </article>
         <div class="content-grid two">
           <article class="card" data-component="Card">
             <div class="card-header"><h3>Runtime Summary</h3><span class="badge">bounded</span></div>
@@ -140,6 +148,14 @@
             </div>
           </form>
         </div>
+        <article class="card cognition-card" data-component="Card">
+          <div class="card-header"><h3>Debug cognition run</h3><span class="badge" id="debug-cognition-status">not reported</span></div>
+          <div class="card-content">
+            <div class="cognition-graph" id="debug-cognition-graph" data-cognition-graph="debug_latest">
+              <p class="graph-empty">Send a debug message to inspect reported cognition telemetry.</p>
+            </div>
+          </div>
+        </article>
         <div class="content-grid two">
           <article class="card" data-component="Card">
             <div class="card-header"><h3>Request Contract</h3><span class="badge">/chat</span></div>

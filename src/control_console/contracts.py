@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 SERVICE_ID_PATTERN = r"^[a-z0-9][a-z0-9_.-]{0,63}$"
+COGNITION_GRAPH_NODE_ID_PATTERN = r"^[a-z0-9][a-z0-9_.:-]{0,79}$"
 SHELL_META_CHARS = frozenset({"&&", "||", ";", "|", ">", "<", "&"})
 DENIED_COMMAND_EXECUTABLES = frozenset({
     "bash",
@@ -138,6 +139,53 @@ class ServiceRuntimeState(StrictModel):
     version: int = 0
 
 
+class CognitionRunGraphNode(StrictModel):
+    """One bounded node in a cognition-run graph snapshot."""
+
+    id: str = Field(pattern=COGNITION_GRAPH_NODE_ID_PATTERN)
+    label: str = Field(min_length=1, max_length=80)
+    stage: str = Field(min_length=1, max_length=40)
+    lane: str = Field(min_length=1, max_length=40)
+    column: int = Field(ge=1, le=24)
+    branch: str = Field(default="", max_length=40)
+    status: Literal[
+        "pending",
+        "running",
+        "completed",
+        "skipped",
+        "failed",
+        "not_reported",
+    ] = "not_reported"
+    detail: dict[str, Any] = Field(default_factory=dict)
+
+
+class CognitionRunGraphEdge(StrictModel):
+    """One directed edge in a cognition-run graph snapshot."""
+
+    source: str = Field(pattern=COGNITION_GRAPH_NODE_ID_PATTERN)
+    target: str = Field(pattern=COGNITION_GRAPH_NODE_ID_PATTERN)
+    kind: Literal["sequence", "fork", "join", "reference"] = "sequence"
+    label: str = Field(default="", max_length=80)
+
+
+class CognitionRunGraphSnapshot(StrictModel):
+    """Reusable graph projection for live or stored cognition runs."""
+
+    source: Literal["overview_latest", "debug_latest", "historical"]
+    status: Literal[
+        "not_reported",
+        "running",
+        "completed",
+        "failed",
+        "partial",
+    ] = "not_reported"
+    run_id: str | None = Field(default=None, max_length=120)
+    generated_at: datetime
+    nodes: list[CognitionRunGraphNode] = Field(default_factory=list, max_length=64)
+    edges: list[CognitionRunGraphEdge] = Field(default_factory=list, max_length=96)
+    redaction: dict[str, Any] = Field(default_factory=dict)
+
+
 class ServiceActionRequest(StrictModel):
     """Operator request for one state-changing service action."""
 
@@ -234,6 +282,7 @@ class ControlConsoleOverviewResponse(StrictModel):
     event_summary: dict[str, int] = Field(default_factory=dict)
     recent_audit_events: list[ControlAuditEvent] = Field(default_factory=list)
     recent_process_errors: list[ProcessLogLine] = Field(default_factory=list)
+    latest_cognition_graph: CognitionRunGraphSnapshot | None = None
 
 
 class ConsoleDebugChatRequest(StrictModel):
@@ -261,6 +310,7 @@ class ConsoleDebugChatResponse(StrictModel):
     latency_ms: int | None
     sent_at: datetime
     error: dict[str, Any] | None = None
+    cognition_graph: CognitionRunGraphSnapshot | None = None
 
 
 class ConsoleLookupQuery(StrictModel):
@@ -297,6 +347,7 @@ class ControlConsoleBootstrapResponse(StrictModel):
     application_identity: dict[str, Any]
     services: list[ServiceRuntimeState]
     overview: dict[str, Any]
+    latest_cognition_graph: CognitionRunGraphSnapshot | None = None
     recent_audit_events: list[dict[str, Any]]
     event_counters: dict[str, int]
     ui_capabilities: dict[str, bool]

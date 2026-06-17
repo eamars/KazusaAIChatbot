@@ -146,6 +146,8 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert '<span class="status-dot" data-state="locked"' in index.text
     assert 'id="debug-brain-status"' in index.text
     assert 'id="debug-send"' in index.text
+    assert 'id="debug-cognition-graph"' in index.text
+    assert 'data-cognition-graph="debug_latest"' in index.text
     assert 'data-debug-input' in index.text
     assert 'data-component="FieldSet"' in index.text
     assert 'name="debug_mode" value="visible_reply" checked' in index.text
@@ -155,6 +157,8 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert '<option value="kazusa">application event log</option>' in index.text
     assert 'id="overview-capability-table"' in index.text
     assert 'id="overview-unavailable-table"' in index.text
+    assert 'id="overview-cognition-graph"' in index.text
+    assert 'data-cognition-graph="overview_latest"' in index.text
     assert 'id="event-request-id"' in index.text
     assert 'id="event-tracking-id"' in index.text
     assert "Pending work" not in index.text
@@ -216,11 +220,17 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert "/api/character/growth" in script.text
     assert "#health-brain-status" in script.text
     assert "debugResponseBody(result)" in script.text
+    assert "function renderCognitionGraph" in script.text
+    assert "function renderOverviewCognitionGraph" in script.text
+    assert "function renderDebugCognitionGraph" in script.text
+    assert "control.cognition_graph_invalidated" in script.text
     assert "JSON.stringify(result.response)" not in script.text
 
     stylesheet = client.get("/static/console.css")
     assert stylesheet.status_code == 200
     assert '.status-dot[data-state="conflict"]' in stylesheet.text
+    assert ".cognition-graph" in stylesheet.text
+    assert ".graph-node:focus-within .node-detail" in stylesheet.text
     assert 'body[data-auth-state="authenticated"] #login-form' in stylesheet.text
 
     bootstrap = client.get("/api/bootstrap")

@@ -41,7 +41,7 @@ from control_console.contracts import (
     ServiceActionRequest,
 )
 from control_console.event_monitor import EventMonitor
-from control_console.kazusa_client import KazusaClient
+from control_console.kazusa_client import KazusaClient, not_reported_cognition_graph
 from control_console.log_store import ProcessLogStore
 from control_console.process_store import ProcessStore
 from control_console.redaction import redact_mapping
@@ -245,12 +245,18 @@ def create_app(
 
         raw_cache2 = brain_health.get("cache2", {})
         cache2 = raw_cache2 if isinstance(raw_cache2, dict) else {}
+        latest_cognition_graph = not_reported_cognition_graph(
+            source="overview_latest",
+        )
         overview = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "service_count": len(states),
             "brain_health": redact_mapping(brain_health),
             "runtime_status": redact_mapping(runtime_status),
             "cache2": redact_mapping(cache2),
+            "latest_cognition_graph": latest_cognition_graph.model_dump(
+                mode="json",
+            ),
         }
         recent_audit = [
             event.model_dump(mode="json")
@@ -269,6 +275,7 @@ def create_app(
             application_identity=application_identity,
             services=states,
             overview=overview,
+            latest_cognition_graph=latest_cognition_graph,
             recent_audit_events=recent_audit,
             event_counters={"audit": len(recent_audit), "services": len(states)},
             ui_capabilities={
@@ -472,11 +479,23 @@ def create_app(
                     "code": "brain_unavailable",
                     "message": "Brain HTTP endpoint is not available.",
                 },
+                "cognition_graph": not_reported_cognition_graph(
+                    source="debug_latest",
+                    run_id=request_id,
+                    reason="debug chat did not start because brain is unavailable",
+                ).model_dump(mode="json"),
             }
             return payload
 
         try:
             payload = await kazusa_client.send_debug_chat(request)
+            stream_buffer.append(
+                "control.cognition_graph_invalidated",
+                {
+                    "source": "debug_latest",
+                    "run_id": payload.get("tracking_id") or payload.get("request_id"),
+                },
+            )
         except httpx.HTTPError as exc:
             audit_writer.write_event(
                 event_type="debug_chat_unavailable",
@@ -497,6 +516,11 @@ def create_app(
                 "latency_ms": None,
                 "sent_at": datetime.now(timezone.utc).isoformat(),
                 "error": {"code": "brain_unavailable", "message": str(exc)},
+                "cognition_graph": not_reported_cognition_graph(
+                    source="debug_latest",
+                    run_id=request_id,
+                    reason="debug chat failed before cognition telemetry was reported",
+                ).model_dump(mode="json"),
             }
         return payload
 

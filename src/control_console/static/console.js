@@ -4,6 +4,8 @@ const state = {
   services: [],
   pageCapabilities: {},
   applicationIdentity: {},
+  latestCognitionGraph: null,
+  debugCognitionGraph: null,
   eventSource: null,
   isAuthenticated: false,
 };
@@ -188,6 +190,7 @@ async function bootstrap() {
   state.services = payload.services;
   state.pageCapabilities = payload.page_capabilities || {};
   state.applicationIdentity = payload.application_identity || {};
+  state.latestCognitionGraph = payload.latest_cognition_graph || payload.overview?.latest_cognition_graph || null;
   setAuthState(true);
   qs("#session-state").textContent = payload.operator ? payload.operator.operator_id : "signed in";
   renderBrand(payload.application_identity || {});
@@ -206,6 +209,8 @@ function lockSession() {
   state.csrfToken = "";
   state.services = [];
   state.pageCapabilities = {};
+  state.latestCognitionGraph = null;
+  state.debugCognitionGraph = null;
   setAuthState(false);
   qs("#session-state").textContent = "signed out";
   renderBrand({status: "unavailable", character_name: "not connected"});
@@ -249,6 +254,137 @@ function renderOverview(payload) {
   ].map(([key, value]) => `<tr><td>${escapeHtml(key)}</td><td>${escapeHtml(value)}</td></tr>`).join("");
   qs("#overview-audit-table").innerHTML = auditRows(payload.recent_audit_events);
   renderCapabilitySummary();
+  renderOverviewCognitionGraph(state.latestCognitionGraph);
+}
+
+function renderOverviewCognitionGraph(snapshot) {
+  renderCognitionGraph({
+    containerSelector: "#overview-cognition-graph",
+    statusSelector: "#overview-cognition-status",
+    snapshot,
+    emptyMessage: "No latest cognition graph has been reported by the brain.",
+  });
+}
+
+function renderDebugCognitionGraph(snapshot) {
+  renderCognitionGraph({
+    containerSelector: "#debug-cognition-graph",
+    statusSelector: "#debug-cognition-status",
+    snapshot,
+    emptyMessage: "No debug cognition graph has been reported for this turn.",
+  });
+}
+
+function renderCognitionGraph({containerSelector, statusSelector, snapshot, emptyMessage}) {
+  const container = qs(containerSelector);
+  const status = qs(statusSelector);
+  if (!container || !status) return;
+
+  const graph = snapshot || {};
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+  const edges = Array.isArray(graph.edges) ? graph.edges : [];
+  const graphStatus = graph.status || "not_reported";
+  status.textContent = graphStatus.replaceAll("_", " ");
+  status.className = graphStatus === "completed" || graphStatus === "running"
+    ? "badge success"
+    : "badge";
+
+  if (!nodes.length) {
+    container.innerHTML = `<p class="graph-empty">${escapeHtml(emptyMessage)}</p>`;
+    return;
+  }
+
+  const lanes = cognitionGraphLanes(nodes);
+  const maxColumn = nodes.reduce((maximum, node) => Math.max(maximum, Number(node.column) || 1), 1);
+  const nodeMarkup = nodes.map((node) => cognitionGraphNodeMarkup(node, lanes)).join("");
+  container.innerHTML = `
+    <div class="cognition-graph-stage" style="--graph-columns: ${maxColumn}; --graph-lanes: ${lanes.length};">
+      <svg class="graph-edge-layer" aria-hidden="true"></svg>
+      ${nodeMarkup}
+    </div>
+    <div class="graph-legend">${escapeHtml(graph.run_id || "run id not reported")}</div>
+  `;
+  window.requestAnimationFrame(() => drawCognitionGraphEdges(container, edges));
+}
+
+function cognitionGraphLanes(nodes) {
+  const preferred = ["input", "cognition", "memory", "decision", "surface"];
+  const seen = new Set();
+  const lanes = [];
+  preferred.forEach((lane) => {
+    if (nodes.some((node) => node.lane === lane)) {
+      seen.add(lane);
+      lanes.push(lane);
+    }
+  });
+  nodes.forEach((node) => {
+    const lane = node.lane || "cognition";
+    if (!seen.has(lane)) {
+      seen.add(lane);
+      lanes.push(lane);
+    }
+  });
+  return lanes.length ? lanes : ["cognition"];
+}
+
+function cognitionGraphNodeMarkup(node, lanes) {
+  const column = Math.max(1, Number(node.column) || 1);
+  const lane = node.lane || "cognition";
+  const row = Math.max(1, lanes.indexOf(lane) + 1);
+  const detail = cognitionGraphDetail(node.detail || {});
+  const branch = node.branch ? `<span>${escapeHtml(node.branch)}</span>` : "";
+  const status = node.status || "not_reported";
+  return `
+    <button class="graph-node status-${escapeHtml(status)}" type="button" data-node-id="${escapeHtml(node.id)}" style="grid-column: ${column}; grid-row: ${row};">
+      <span class="node-stage">${escapeHtml(node.stage || "stage")}</span>
+      <strong>${escapeHtml(node.label || node.id)}</strong>
+      <span class="node-meta">${escapeHtml(lane)}${branch}</span>
+      <span class="node-detail">${detail}</span>
+    </button>
+  `;
+}
+
+function cognitionGraphDetail(detail) {
+  const rows = Object.entries(detail)
+    .filter(([, value]) => value !== null && value !== undefined && value !== "")
+    .slice(0, 6)
+    .map(([key, value]) => `<span><strong>${escapeHtml(key)}</strong>${escapeHtml(cognitionGraphValue(value))}</span>`);
+  return rows.length ? rows.join("") : "<span>No reasoning detail reported.</span>";
+}
+
+function cognitionGraphValue(value) {
+  if (Array.isArray(value)) return value.join(", ");
+  if (value && typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function drawCognitionGraphEdges(container, edges) {
+  const stage = container.querySelector(".cognition-graph-stage");
+  const svg = container.querySelector(".graph-edge-layer");
+  if (!stage || !svg) return;
+
+  const bounds = stage.getBoundingClientRect();
+  svg.setAttribute("viewBox", `0 0 ${bounds.width} ${bounds.height}`);
+  svg.innerHTML = "";
+  edges.forEach((edge) => {
+    const source = stage.querySelector(`[data-node-id="${CSS.escape(edge.source)}"]`);
+    const target = stage.querySelector(`[data-node-id="${CSS.escape(edge.target)}"]`);
+    if (!source || !target) return;
+
+    const sourceBounds = source.getBoundingClientRect();
+    const targetBounds = target.getBoundingClientRect();
+    const x1 = sourceBounds.left - bounds.left + sourceBounds.width;
+    const y1 = sourceBounds.top - bounds.top + sourceBounds.height / 2;
+    const x2 = targetBounds.left - bounds.left;
+    const y2 = targetBounds.top - bounds.top + targetBounds.height / 2;
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    line.setAttribute("x1", x1);
+    line.setAttribute("y1", y1);
+    line.setAttribute("x2", x2);
+    line.setAttribute("y2", y2);
+    line.setAttribute("class", `graph-edge edge-${edge.kind || "sequence"}`);
+    svg.appendChild(line);
+  });
 }
 
 function renderCapabilitySummary() {
@@ -405,10 +541,12 @@ async function sendDebug(event) {
   payload.debug_modes = debugModes;
   delete payload.debug_mode;
   const result = await api("/api/debug-chat", {method: "POST", csrf: true, body: JSON.stringify(payload)});
+  state.debugCognitionGraph = result.cognition_graph || null;
   const label = result.brain_available ? "brain" : "unavailable";
   const body = debugResponseBody(result);
   const meta = debugResponseMeta(result);
   qs("#chat-history").insertAdjacentHTML("beforeend", `<article class="message"><div class="meta">${escapeHtml(label)}</div><p>${escapeHtml(body)}</p><div class="meta">${escapeHtml(meta)}</div></article>`);
+  renderDebugCognitionGraph(state.debugCognitionGraph);
 }
 
 function debugResponseBody(result) {
@@ -591,6 +729,7 @@ function openStream(url) {
   if (state.eventSource) state.eventSource.close();
   state.eventSource = new EventSource(url);
   state.eventSource.addEventListener("control.gap", () => bootstrap());
+  state.eventSource.addEventListener("control.cognition_graph_invalidated", () => bootstrap());
 }
 
 initializeTheme();
@@ -607,4 +746,8 @@ qs("#refresh-memory").addEventListener("click", () => refreshMemory().catch((err
 qs("#refresh-style").addEventListener("click", () => refreshStyle().catch((error) => alert(error.message)));
 qs("#refresh-calendar").addEventListener("click", () => refreshCalendar().catch((error) => alert(error.message)));
 qs("#refresh-background").addEventListener("click", () => refreshBackground().catch((error) => alert(error.message)));
+window.addEventListener("resize", () => {
+  renderOverviewCognitionGraph(state.latestCognitionGraph);
+  renderDebugCognitionGraph(state.debugCognitionGraph);
+});
 resumeSession();
