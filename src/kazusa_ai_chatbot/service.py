@@ -7,6 +7,7 @@ Start with:
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import hashlib
 import logging
 import os
@@ -146,6 +147,7 @@ from kazusa_ai_chatbot.brain_service.contracts import (
     HealthResponse,
     MentionIn,
     MessageEnvelopeIn,
+    OpsLatestCognitionGraphResponse,
     OpsRuntimeStatusResponse,
     OpsSelfCognitionStatsResponse,
     OpsStatsResponse,
@@ -178,6 +180,7 @@ from kazusa_ai_chatbot.self_cognition import (
     start_self_cognition_worker,
     stop_self_cognition_worker,
 )
+from kazusa_ai_chatbot.self_cognition import models as self_cognition_models
 from kazusa_ai_chatbot.background_work import (
     BackgroundWorkRuntimeHandle,
     start_background_work_runtime,
@@ -544,6 +547,34 @@ _reflection_worker_handle: ReflectionWorkerHandle | None = None
 _self_cognition_worker_handle: SelfCognitionWorkerHandle | None = None
 _background_work_worker_handle: BackgroundWorkRuntimeHandle | None = None
 _primary_interaction_active_count = 0
+_latest_cognition_graph: dict[str, Any] | None = None
+
+
+def _clear_latest_cognition_graph() -> None:
+    """Clear the process-local latest cognition graph snapshot."""
+
+    global _latest_cognition_graph
+
+    _latest_cognition_graph = None
+
+
+def _record_latest_cognition_graph(cognition_graph: dict[str, Any] | None) -> None:
+    """Store a bounded copy of the latest cognition graph snapshot."""
+
+    global _latest_cognition_graph
+
+    if cognition_graph is None:
+        return
+    _latest_cognition_graph = deepcopy(cognition_graph)
+
+
+def _latest_cognition_graph_response() -> OpsLatestCognitionGraphResponse:
+    """Build the read-only latest cognition graph API response."""
+
+    response = OpsLatestCognitionGraphResponse(
+        cognition_graph=deepcopy(_latest_cognition_graph),
+    )
+    return response
 
 
 def _worker_task_alive(handle: object | None) -> bool:
@@ -1643,6 +1674,178 @@ def _build_response_cognition_graph(
     return snapshot
 
 
+async def _publish_self_cognition_latest_graph(
+    artifact_payloads: dict[str, Any],
+) -> None:
+    """Record a completed self-cognition run as the latest graph snapshot."""
+
+    cognition_graph = _build_self_cognition_cognition_graph(artifact_payloads)
+    if cognition_graph is None:
+        return
+    _record_latest_cognition_graph(cognition_graph)
+
+
+def _build_self_cognition_cognition_graph(
+    artifact_payloads: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Build a bounded graph snapshot from self-cognition artifacts."""
+
+    run_record = artifact_payloads.get(self_cognition_models.ARTIFACT_RUN_RECORD)
+    if not isinstance(run_record, Mapping):
+        return None
+    cognition_output = artifact_payloads.get(
+        self_cognition_models.ARTIFACT_COGNITION_OUTPUT,
+    )
+    if not isinstance(cognition_output, Mapping):
+        cognition_output = {}
+    route_effect = artifact_payloads.get(
+        self_cognition_models.ARTIFACT_ROUTE_EFFECT,
+    )
+    if not isinstance(route_effect, Mapping):
+        route_effect = {}
+    action_attempt = artifact_payloads.get(
+        self_cognition_models.ARTIFACT_ACTION_ATTEMPT,
+    )
+    if not isinstance(action_attempt, Mapping):
+        action_attempt = {}
+    consolidation_outcome = artifact_payloads.get(
+        self_cognition_models.ARTIFACT_CONSOLIDATION_OUTCOME,
+    )
+    if not isinstance(consolidation_outcome, Mapping):
+        consolidation_outcome = {}
+
+    selected_route = _safe_graph_text(run_record.get("selected_route"))
+    output_mode = _safe_graph_text(run_record.get("output_mode"))
+    run_status = _graph_status(run_record.get("status"))
+    has_dialog = bool(route_effect.get("visible_dialog"))
+    has_action = bool(action_attempt)
+    has_consolidation = bool(consolidation_outcome)
+    nodes = [
+        {
+            "id": "self.source",
+            "label": "Source case",
+            "stage": "L1",
+            "lane": "input",
+            "column": 1,
+            "branch": "source",
+            "status": "completed",
+            "detail": {
+                "summary": "Accepted by the self-cognition worker.",
+                "status": _safe_graph_text(run_record.get("trigger_kind")),
+            },
+        },
+        {
+            "id": "self.reasoning",
+            "label": "Reasoning",
+            "stage": "L2",
+            "lane": "cognition",
+            "column": 2,
+            "branch": "reasoning",
+            "status": run_status,
+            "detail": {
+                "internal_monologue": _safe_graph_text(
+                    cognition_output.get("internal_monologue"),
+                ),
+                "logical_stance": _safe_graph_text(
+                    cognition_output.get("logical_stance"),
+                ),
+                "character_intent": _safe_graph_text(
+                    cognition_output.get("character_intent"),
+                ),
+            },
+        },
+        {
+            "id": "self.route",
+            "label": "Route decision",
+            "stage": "L2",
+            "lane": "decision",
+            "column": 3,
+            "branch": "route",
+            "status": run_status,
+            "detail": {
+                "decision": selected_route,
+                "status": output_mode,
+            },
+        },
+        {
+            "id": "self.action",
+            "label": "Action output",
+            "stage": "L3",
+            "lane": "action",
+            "column": 4,
+            "branch": "action",
+            "status": "completed" if has_action else "skipped",
+            "detail": {
+                "summary": "Action candidate recorded."
+                if has_action
+                else "No action candidate recorded.",
+            },
+        },
+        {
+            "id": "self.surface",
+            "label": "Visible surface",
+            "stage": "L3",
+            "lane": "surface",
+            "column": 4,
+            "branch": "dialog",
+            "status": "completed" if has_dialog else "skipped",
+            "detail": {
+                "summary": "Visible self-cognition output selected."
+                if has_dialog
+                else "No visible output selected.",
+            },
+        },
+        {
+            "id": "self.consolidation",
+            "label": "Consolidation",
+            "stage": "L4",
+            "lane": "memory",
+            "column": 5,
+            "branch": "memory",
+            "status": "completed" if has_consolidation else "skipped",
+            "detail": {
+                "summary": "Completed episode consolidation reported."
+                if has_consolidation
+                else "No consolidation outcome reported.",
+            },
+        },
+    ]
+    edges = [
+        {"source": "self.source", "target": "self.reasoning", "kind": "sequence"},
+        {"source": "self.reasoning", "target": "self.route", "kind": "sequence"},
+        {"source": "self.route", "target": "self.action", "kind": "fork"},
+        {"source": "self.route", "target": "self.surface", "kind": "fork"},
+        {"source": "self.action", "target": "self.consolidation", "kind": "join"},
+        {"source": "self.surface", "target": "self.consolidation", "kind": "join"},
+    ]
+    snapshot = {
+        "run_id": _safe_graph_text(run_record.get("run_id"), max_chars=120),
+        "status": run_status if run_status in {"completed", "failed"} else "partial",
+        "nodes": nodes,
+        "edges": edges,
+        "redaction": {
+            "detail": "bounded self-cognition artifact fields only",
+            "excluded": [
+                "prompts",
+                "embeddings",
+                "raw messages",
+                "message envelopes",
+                "raw source packet",
+            ],
+        },
+    }
+    return snapshot
+
+
+def _graph_status(value: Any) -> str:
+    """Return a graph-safe status value."""
+
+    text = _safe_graph_text(value)
+    if text in {"pending", "running", "completed", "skipped", "failed"}:
+        return text
+    return "completed" if text else "not_reported"
+
+
 def _safe_sequence_count(value: Any) -> int:
     """Return a sequence count for graph metadata, or zero."""
 
@@ -2118,6 +2321,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             consolidation_state=consolidation_state_dict,
             run_id=delivery_tracking_id or correlation_id,
         )
+        _record_latest_cognition_graph(cognition_graph)
         response = ChatResponse(
             messages=response_dialog,
             content_type="text",
@@ -2613,6 +2817,9 @@ async def lifespan(app: FastAPI):
                 is_primary_interaction_busy=_primary_interaction_busy,
                 character_profile_provider=_current_character_profile_snapshot,
                 adapter_registry_provider=lambda: _adapter_registry,
+                latest_cognition_graph_publisher=(
+                    _publish_self_cognition_latest_graph
+                ),
             )
         else:
             logger.info(
@@ -2774,6 +2981,17 @@ async def ops_runtime_status(
     )
     payload = _ops_runtime_status_payload(base_status)
     response = OpsRuntimeStatusResponse.model_validate(payload)
+    return response
+
+
+@app.get(
+    "/ops/latest-cognition-graph",
+    response_model=OpsLatestCognitionGraphResponse,
+)
+async def ops_latest_cognition_graph() -> OpsLatestCognitionGraphResponse:
+    """Return the latest bounded cognition graph snapshot for operators."""
+
+    response = _latest_cognition_graph_response()
     return response
 
 

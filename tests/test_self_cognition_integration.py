@@ -1285,6 +1285,7 @@ async def test_worker_tick_marks_future_cognition_run_completed(
     del tmp_path
     claimed_run_ids: list[str] = []
     completed_run_ids: list[str] = []
+    published_artifacts: list[dict[str, Any]] = []
 
     async def collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
         del kwargs
@@ -1292,7 +1293,32 @@ async def test_worker_tick_marks_future_cognition_run_completed(
 
     async def run_case(case: dict[str, Any]) -> dict[str, Any]:
         assert case["trigger_kind"] == models.TRIGGER_SCHEDULED_FUTURE_COGNITION
-        return {}
+        return {
+            models.ARTIFACT_TRIGGER_RECORD: {
+                "trigger_id": "self_cognition_trigger:future-123",
+                "trigger_kind": models.TRIGGER_SCHEDULED_FUTURE_COGNITION,
+            },
+            models.ARTIFACT_RUN_RECORD: {
+                "run_id": "self_cognition_run:future-123",
+                "selected_route": models.ROUTE_AUDIT_ONLY,
+                "output_mode": "audit_only",
+                "status": "completed",
+                "budget": {
+                    "rag_calls": 0,
+                    "cognition_calls": 1,
+                    "dialog_calls": 0,
+                    "topic_limit": 3,
+                },
+            },
+            models.ARTIFACT_COGNITION_OUTPUT: {
+                "internal_monologue": "bounded self-cognition reason",
+                "logical_stance": "inspect due promise",
+                "character_intent": "decide whether to act",
+            },
+        }
+
+    async def publish_latest_graph(artifact_payloads: dict[str, Any]) -> None:
+        published_artifacts.append(artifact_payloads)
 
     async def claim_run(run_id: str, **kwargs: Any) -> bool:
         claimed_run_ids.append(run_id)
@@ -1314,12 +1340,18 @@ async def test_worker_tick_marks_future_cognition_run_completed(
         record_attempt_func=lambda attempt: None,
         claim_calendar_run_func=claim_run,
         complete_calendar_run_func=mark_completed,
+        latest_cognition_graph_publisher=publish_latest_graph,
         max_cases=3,
     )
 
     assert result.processed_count == 1
     assert claimed_run_ids == ["calendar_run_future_123"]
     assert completed_run_ids == ["calendar_run_future_123"]
+    assert published_artifacts
+    assert (
+        published_artifacts[0][models.ARTIFACT_RUN_RECORD]["run_id"]
+        == "self_cognition_run:future-123"
+    )
 
 
 @pytest.mark.asyncio

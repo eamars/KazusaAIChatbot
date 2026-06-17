@@ -108,6 +108,7 @@ def create_app(
     )
     stream_buffer = SSEEventBuffer(max_events=100)
     stream_shutdown_event = asyncio.Event()
+    latest_cognition_graph_run_id: str | None = None
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -218,6 +219,8 @@ def create_app(
     ) -> dict[str, Any]:
         """Return the initial UI snapshot."""
 
+        nonlocal latest_cognition_graph_run_id
+
         states = _all_service_states(app_supervisor, services)
         brain_state = _service_actual_state(states, service_id="brain")
         brain_http_available = _brain_http_available(brain_state)
@@ -248,6 +251,17 @@ def create_app(
         latest_cognition_graph = not_reported_cognition_graph(
             source="overview_latest",
         )
+        if brain_http_available:
+            try:
+                latest_cognition_graph = await (
+                    kazusa_client.get_latest_cognition_graph()
+                )
+            except (AttributeError, httpx.HTTPError) as exc:
+                latest_cognition_graph = not_reported_cognition_graph(
+                    source="overview_latest",
+                    reason=f"brain latest cognition graph unavailable: {exc}",
+                )
+        latest_cognition_graph_run_id = latest_cognition_graph.run_id
         overview = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "service_count": len(states),
@@ -713,12 +727,27 @@ def create_app(
         last_event_id = request.headers.get("last-event-id")
 
         async def event_iterator() -> AsyncIterator[str]:
+            nonlocal latest_cognition_graph_run_id
+
             replay_events = stream_buffer.replay_after(last_event_id)
             for event in replay_events:
                 yield encode_sse_event(event)
             while not stream_shutdown_event.is_set():
                 if await request.is_disconnected():
                     break
+                current_states = _all_service_states(app_supervisor, services)
+                current_brain_state = _service_actual_state(
+                    current_states,
+                    service_id="brain",
+                )
+                if _brain_http_available(current_brain_state):
+                    latest_cognition_graph_run_id = await (
+                        _append_cognition_graph_invalidation_if_changed(
+                            kazusa_client=kazusa_client,
+                            stream_buffer=stream_buffer,
+                            previous_run_id=latest_cognition_graph_run_id,
+                        )
+                    )
                 heartbeat_id = stream_buffer.append(
                     "control.heartbeat",
                     {"generated_at": datetime.now(timezone.utc).isoformat()},
@@ -755,6 +784,33 @@ async def _wait_for_stream_tick(
         return False
 
     return True
+
+
+async def _append_cognition_graph_invalidation_if_changed(
+    *,
+    kazusa_client: Any,
+    stream_buffer: SSEEventBuffer,
+    previous_run_id: str | None,
+) -> str | None:
+    """Append a graph invalidation event when the brain latest run changes."""
+
+    try:
+        latest_graph = await kazusa_client.get_latest_cognition_graph()
+    except (AttributeError, httpx.HTTPError):
+        return previous_run_id
+
+    latest_run_id = latest_graph.run_id
+    if not latest_run_id:
+        return previous_run_id
+    if latest_run_id and latest_run_id != previous_run_id:
+        stream_buffer.append(
+            "control.cognition_graph_invalidated",
+            {
+                "run_id": latest_run_id,
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+    return latest_run_id
 
 
 async def _read_no_events(_: OperationalEventQuery) -> list[dict[str, Any]]:

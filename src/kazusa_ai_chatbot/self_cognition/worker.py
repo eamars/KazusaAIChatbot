@@ -69,6 +69,7 @@ def start_self_cognition_worker(
     is_primary_interaction_busy: Callable[[], bool],
     character_profile_provider: Callable[[], dict[str, Any]],
     adapter_registry_provider: Callable[[], AdapterRegistry | None] | None = None,
+    latest_cognition_graph_publisher: Callable[[dict[str, Any]], Any] | None = None,
 ) -> SelfCognitionWorkerHandle:
     """Start the process-local self-cognition worker loop.
 
@@ -76,6 +77,8 @@ def start_self_cognition_worker(
         is_primary_interaction_busy: Service load probe.
         character_profile_provider: Callable returning current character state.
         adapter_registry_provider: Callable returning the live adapter registry.
+        latest_cognition_graph_publisher: Optional telemetry publisher for
+            the most recent self-cognition graph snapshot.
 
     Returns:
         Worker handle used for shutdown.
@@ -88,6 +91,7 @@ def start_self_cognition_worker(
             is_primary_interaction_busy=is_primary_interaction_busy,
             character_profile_provider=character_profile_provider,
             adapter_registry_provider=adapter_registry_provider,
+            latest_cognition_graph_publisher=latest_cognition_graph_publisher,
         )
     )
     handle = SelfCognitionWorkerHandle(task=task, stop_event=stop_event)
@@ -125,6 +129,7 @@ async def run_self_cognition_worker_tick(
     fail_calendar_run_func: Callable[..., Any] | None = None,
     skip_calendar_run_func: Callable[..., Any] | None = None,
     adapter_registry_provider: Callable[[], AdapterRegistry | None] | None = None,
+    latest_cognition_graph_publisher: Callable[[dict[str, Any]], Any] | None = None,
     max_cases: int = SELF_COGNITION_MAX_CASES_PER_TICK,
 ) -> SelfCognitionWorkerResult:
     """Run one bounded self-cognition worker tick.
@@ -146,6 +151,8 @@ async def run_self_cognition_worker_tick(
         skip_calendar_run_func: Optional test seam for terminal source run
             skips.
         adapter_registry_provider: Optional live adapter registry provider.
+        latest_cognition_graph_publisher: Optional telemetry publisher for
+            successful self-cognition artifacts.
         max_cases: Maximum cases to process in this tick.
 
     Returns:
@@ -265,6 +272,10 @@ async def run_self_cognition_worker_tick(
                 artifact_payloads=artifact_payloads,
                 dispatch_status=dispatch_status,
             )
+            await _publish_latest_cognition_graph(
+                artifact_payloads,
+                publisher=latest_cognition_graph_publisher,
+            )
             await _complete_source_calendar_run(
                 case_for_run,
                 now=now,
@@ -322,6 +333,7 @@ async def _self_cognition_worker_loop(
     is_primary_interaction_busy: Callable[[], bool],
     character_profile_provider: Callable[[], dict[str, Any]],
     adapter_registry_provider: Callable[[], AdapterRegistry | None] | None,
+    latest_cognition_graph_publisher: Callable[[dict[str, Any]], Any] | None,
 ) -> None:
     """Run self-cognition scheduling ticks until stopped."""
 
@@ -333,6 +345,9 @@ async def _self_cognition_worker_loop(
                 is_primary_interaction_busy=is_primary_interaction_busy,
                 character_profile=character_profile,
                 adapter_registry_provider=adapter_registry_provider,
+                latest_cognition_graph_publisher=(
+                    latest_cognition_graph_publisher
+                ),
             )
         except Exception as exc:
             logger.exception(f"Self-cognition worker tick failed: {exc}")
@@ -825,6 +840,31 @@ async def _record_self_cognition_event_from_artifacts(
         attempt_id=str(action_attempt.get("attempt_id") or ""),
         consolidation_outcome=consolidation_outcome,
     )
+
+
+async def _publish_latest_cognition_graph(
+    artifact_payloads: dict[str, Any],
+    *,
+    publisher: Callable[[dict[str, Any]], Any] | None,
+) -> None:
+    """Publish self-cognition telemetry without changing run outcome."""
+
+    if publisher is None:
+        return
+    try:
+        await _call_maybe_async(publisher, artifact_payloads)
+    except Exception as exc:
+        logger.exception(
+            f"Self-cognition latest graph publication failed: {exc}"
+        )
+        await event_logging.record_runtime_error_event(
+            component="self_cognition.worker",
+            error_class=type(exc).__name__,
+            error_preview=str(exc),
+            stack_fingerprint="self_cognition_latest_graph_publication",
+            top_frame_module=__name__,
+            recovered=True,
+        )
 
 
 def _case_with_prior_attempts(

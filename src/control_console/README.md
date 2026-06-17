@@ -60,9 +60,12 @@ the configured CSRF header.
   HTTP-only session cookie has authenticated the browser.
 
 `GET /api/bootstrap` also returns `latest_cognition_graph` and mirrors it
-under `overview.latest_cognition_graph`. `POST /api/debug-chat` returns
-`cognition_graph` for the most recent debug turn. These fields use the same
-bounded cognition-run graph snapshot contract:
+under `overview.latest_cognition_graph`. When the brain HTTP endpoint is
+available, the console reads this value from the brain
+`GET /ops/latest-cognition-graph` endpoint; otherwise it returns
+`status: not_reported`. `POST /api/debug-chat` returns `cognition_graph` for
+the most recent debug turn. These fields use the same bounded cognition-run
+graph snapshot contract:
 
 - `source`: `overview_latest`, `debug_latest`, or future `historical`.
 - `status`: `not_reported`, `running`, `completed`, `failed`, or `partial`.
@@ -78,6 +81,11 @@ derived from the actual graph result and consolidation state. The console
 projects that snapshot through this same redacted contract. If the brain is
 unavailable or a response does not include graph telemetry, the console returns
 `status: not_reported` rather than fabricating graph nodes.
+
+The authenticated SSE stream emits `control.cognition_graph_invalidated` when
+the brain reports a different latest cognition run id. The browser responds by
+refetching bootstrap data, so self-cognition completion can update the Overview
+graph without the Overview page itself triggering cognition.
 
 ## Page Capability Status
 

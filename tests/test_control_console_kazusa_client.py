@@ -10,7 +10,7 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_kazusa_client_reads_health_and_posts_debug_chat() -> None:
-    """The console client should call existing brain endpoints only."""
+    """The console client should call bounded brain endpoints only."""
 
     from control_console.contracts import ConsoleDebugChatRequest
     from control_console.kazusa_client import KazusaClient
@@ -22,6 +22,31 @@ async def test_kazusa_client_reads_health_and_posts_debug_chat() -> None:
         requests.append((request.method, request.url.path))
         if request.url.path == "/health":
             return httpx.Response(200, json={"status": "healthy"})
+        if request.url.path == "/ops/latest-cognition-graph":
+            return httpx.Response(
+                200,
+                json={
+                    "cognition_graph": {
+                        "run_id": "turn-1",
+                        "status": "completed",
+                        "nodes": [
+                            {
+                                "id": "l2.reasoning",
+                                "label": "Reasoning",
+                                "stage": "L2",
+                                "lane": "cognition",
+                                "column": 2,
+                                "branch": "reasoning",
+                                "status": "completed",
+                                "detail": {
+                                    "internal_monologue": "bounded reason",
+                                },
+                            },
+                        ],
+                        "edges": [],
+                    },
+                },
+            )
         if request.url.path == "/chat":
             body = json.loads(request.read().decode("utf-8"))
             assert body["message_envelope"]["body_text"] == "hello"
@@ -52,6 +77,7 @@ async def test_kazusa_client_reads_health_and_posts_debug_chat() -> None:
     )
 
     health = await client.get_health()
+    latest_graph = await client.get_latest_cognition_graph()
     chat = await client.send_debug_chat(
         ConsoleDebugChatRequest.model_validate({
             "channel_id": "debug",
@@ -62,6 +88,9 @@ async def test_kazusa_client_reads_health_and_posts_debug_chat() -> None:
     )
 
     assert health == {"status": "healthy"}
+    assert latest_graph.run_id == "turn-1"
+    assert latest_graph.source == "overview_latest"
+    assert latest_graph.nodes[0].id == "l2.reasoning"
     assert chat["response"]["messages"] == ["hi"]
     assert chat["response"]["content_type"] == "text"
     assert chat["response"]["attachment_count"] == 1
@@ -70,4 +99,8 @@ async def test_kazusa_client_reads_health_and_posts_debug_chat() -> None:
     assert "global-user-secret" not in repr(chat)
     assert "platform-user-secret" not in repr(chat)
     assert chat["tracking_id"] == "tracking-1"
-    assert requests == [("GET", "/health"), ("POST", "/chat")]
+    assert requests == [
+        ("GET", "/health"),
+        ("GET", "/ops/latest-cognition-graph"),
+        ("POST", "/chat"),
+    ]

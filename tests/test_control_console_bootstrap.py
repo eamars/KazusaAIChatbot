@@ -131,6 +131,34 @@ def test_bootstrap_reports_live_brain_health_when_brain_is_running(
                 "workers": {"calendar": "running"},
             }
 
+        async def get_latest_cognition_graph(self):
+            from control_console.kazusa_client import project_cognition_graph_snapshot
+
+            return project_cognition_graph_snapshot(
+                source="overview_latest",
+                payload={
+                    "cognition_graph": {
+                        "run_id": "turn-123",
+                        "status": "completed",
+                        "nodes": [
+                            {
+                                "id": "l2.reasoning",
+                                "label": "Reasoning",
+                                "stage": "L2",
+                                "lane": "cognition",
+                                "column": 3,
+                                "branch": "reasoning",
+                                "status": "completed",
+                                "detail": {
+                                    "internal_monologue": "bounded reason",
+                                },
+                            },
+                        ],
+                        "edges": [],
+                    },
+                },
+            )
+
     monkeypatch.setattr(app_module, "KazusaClient", FakeKazusaClient)
     monkeypatch.setattr(
         repository_module.ControlConsoleRepository,
@@ -158,6 +186,9 @@ def test_bootstrap_reports_live_brain_health_when_brain_is_running(
     assert overview["brain_health"]["db"] is True
     assert overview["cache2"]["agents"][0]["agent_name"] == "memory_agent"
     assert overview["runtime_status"]["worker_error_level"] == "ok"
+    assert overview["latest_cognition_graph"]["run_id"] == "turn-123"
+    assert overview["latest_cognition_graph"]["nodes"][0]["id"] == "l2.reasoning"
+    assert bootstrap.json()["latest_cognition_graph"]["run_id"] == "turn-123"
 
 
 def test_bootstrap_reports_live_brain_health_when_brain_is_unmanaged(
@@ -205,6 +236,11 @@ def test_bootstrap_reports_live_brain_health_when_brain_is_unmanaged(
 
         async def get_runtime_status(self) -> dict:
             return {"worker_error_level": "ok"}
+
+        async def get_latest_cognition_graph(self):
+            from control_console.kazusa_client import not_reported_cognition_graph
+
+            return not_reported_cognition_graph(source="overview_latest")
 
     monkeypatch.setattr(app_module, "KazusaClient", FakeKazusaClient)
     monkeypatch.setattr(

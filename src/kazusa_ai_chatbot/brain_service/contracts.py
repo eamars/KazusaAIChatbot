@@ -92,6 +92,10 @@ class ChatResponse(BaseModel):
     cognition_graph: dict[str, Any] | None = None
 
 
+class OpsLatestCognitionGraphResponse(BaseModel):
+    cognition_graph: dict[str, Any] | None = None
+
+
 class DeliveryReceiptRequest(BaseModel):
     platform: str = Field(min_length=1)
     platform_channel_id: str = ""

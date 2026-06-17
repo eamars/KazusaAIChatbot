@@ -67,6 +67,19 @@ class KazusaClient:
         payload = response.json()
         return payload
 
+    async def get_latest_cognition_graph(self) -> CognitionRunGraphSnapshot:
+        """Read and project the brain latest cognition graph endpoint."""
+
+        async with self._client() as client:
+            response = await client.get("/ops/latest-cognition-graph")
+        response.raise_for_status()
+        payload = response.json()
+        graph = project_cognition_graph_snapshot(
+            source="overview_latest",
+            payload=payload if isinstance(payload, dict) else {},
+        )
+        return graph
+
     async def send_debug_chat(
         self,
         request: ConsoleDebugChatRequest,

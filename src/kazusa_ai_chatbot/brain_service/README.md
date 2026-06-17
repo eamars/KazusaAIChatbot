@@ -136,6 +136,12 @@ current graph result and consolidation state. It must not include prompts,
 embeddings, raw messages, message envelopes, raw user input, secrets, or
 unbounded memory content. Adapters may ignore this field.
 
+The service also keeps a process-local latest cognition graph snapshot for
+trusted local operator inspection. Normal chat/debug turns update it from the
+`/chat` response graph. Completed self-cognition cases update it from bounded
+self-cognition artifacts. Reading this snapshot is observational only and must
+not trigger cognition.
+
 Visible `/chat` delivery follows selected `SurfaceOutputV1` text surfaces.
 Private action results, private finalization, calendar-triggered action
 results, and no-visible-output decisions may still make an episode
@@ -161,6 +167,22 @@ The response field named `scheduler` is a legacy readiness field in
 `HealthResponse`; it is not the calendar scheduler liveness contract. Trusted
 operators use `/ops/runtime-status` for calendar scheduler enablement,
 configuration, and task liveness.
+
+### `GET /ops/latest-cognition-graph`
+
+Response model: `OpsLatestCognitionGraphResponse`.
+
+Purpose:
+
+- Return the latest bounded cognition graph snapshot reported by live chat,
+  debug chat, or self-cognition.
+- Support the local control-console Overview graph without running cognition.
+- Return `cognition_graph: null` when no completed run has published telemetry
+  since service startup.
+
+The endpoint is process-local and read-only. It must not expose prompts,
+embeddings, raw messages, message envelopes, raw source packets, secrets, or
+unbounded memory content.
 
 ### `GET /ops/runtime-status`
 

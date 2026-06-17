@@ -558,6 +558,7 @@ async def test_chat_response_tracks_deliverable_assistant_row(monkeypatch):
     """Non-empty chat responses should carry the assistant row tracking ID."""
 
     await _reset_queue_state()
+    service_module._clear_latest_cognition_graph()
     save_assistant_message = AsyncMock()
     monkeypatch.setattr(
         service_module,
@@ -601,6 +602,11 @@ async def test_chat_response_tracks_deliverable_assistant_row(monkeypatch):
     save_assistant_message.assert_awaited_once()
     saved_result = save_assistant_message.await_args.args[0]
     assert saved_result["delivery_tracking_id"] == response.delivery_tracking_id
+
+    latest = await service_module.ops_latest_cognition_graph()
+    assert latest.cognition_graph is not None
+    assert latest.cognition_graph["run_id"] == response.delivery_tracking_id
+    assert latest.cognition_graph["nodes"] == graph["nodes"]
     await _reset_queue_state()
 
 

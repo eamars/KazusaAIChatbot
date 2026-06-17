@@ -95,3 +95,51 @@ def test_numeric_cursor_before_replay_window_returns_gap() -> None:
     assert len(gap) == 1
     assert gap[0].event_type == "control.gap"
     assert gap[0].data["latest_event_id"] == latest_id
+
+
+async def test_stream_poll_appends_graph_invalidation_for_new_latest_run() -> None:
+    """SSE should notify the UI when the brain latest cognition graph changes."""
+
+    from control_console.app import _append_cognition_graph_invalidation_if_changed
+    from control_console.kazusa_client import project_cognition_graph_snapshot
+    from control_console.stream import SSEEventBuffer
+
+    class FakeKazusaClient:
+        async def get_latest_cognition_graph(self):
+            return project_cognition_graph_snapshot(
+                source="overview_latest",
+                payload={
+                    "cognition_graph": {
+                        "run_id": "self_cognition_run:future-123",
+                        "status": "completed",
+                        "nodes": [
+                            {
+                                "id": "self.reasoning",
+                                "label": "Reasoning",
+                                "stage": "L2",
+                                "lane": "cognition",
+                                "column": 2,
+                                "branch": "reasoning",
+                                "status": "completed",
+                                "detail": {
+                                    "internal_monologue": "bounded reason",
+                                },
+                            },
+                        ],
+                        "edges": [],
+                    },
+                },
+            )
+
+    buffer = SSEEventBuffer(max_events=5)
+
+    latest_run_id = await _append_cognition_graph_invalidation_if_changed(
+        kazusa_client=FakeKazusaClient(),
+        stream_buffer=buffer,
+        previous_run_id="debug_turn_1",
+    )
+
+    replay = buffer.replay_after(None)
+    assert latest_run_id == "self_cognition_run:future-123"
+    assert replay[-1].event_type == "control.cognition_graph_invalidated"
+    assert replay[-1].data["run_id"] == "self_cognition_run:future-123"
