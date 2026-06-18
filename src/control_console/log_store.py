@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timezone
+import json
+import logging
 from pathlib import Path
 from typing import Literal
-import json
 import uuid
 
 from pydantic import ValidationError
@@ -15,15 +17,25 @@ from control_console.redaction import redact_text
 
 
 MAX_LOG_FILE_LINES = 2000
+logger = logging.getLogger(__name__)
+
+
+LogPublisher = Callable[[ProcessLogLine], object]
 
 
 class ProcessLogStore:
     """Append and tail bounded local process logs."""
 
-    def __init__(self, log_dir: Path) -> None:
+    def __init__(
+        self,
+        log_dir: Path,
+        *,
+        log_publisher: LogPublisher | None = None,
+    ) -> None:
         """Create a process log store."""
 
         self._log_dir = log_dir
+        self._log_publisher = log_publisher
         self._log_dir.mkdir(parents=True, exist_ok=True)
 
     def append_line(
@@ -44,12 +56,20 @@ class ProcessLogStore:
         )
         path = self._path_for(service_id)
         try:
-            existing = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+            if path.exists():
+                existing = path.read_text(encoding="utf-8").splitlines()
+            else:
+                existing = []
             existing.append(log_line.model_dump_json())
             bounded = existing[-MAX_LOG_FILE_LINES:]
             path.write_text("\n".join(bounded) + "\n", encoding="utf-8")
         except OSError as exc:
             raise RuntimeError(f"cannot write process log: {exc}") from exc
+        if self._log_publisher is not None:
+            try:
+                self._log_publisher(log_line)
+            except Exception as exc:
+                logger.warning(f"process log publisher failed: {exc}")
         return log_line
 
     def tail(self, *, service_id: str, limit: int) -> list[ProcessLogLine]:

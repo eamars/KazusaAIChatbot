@@ -39,6 +39,7 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [backend_control_console_development_plan.md](active/short_term/backend_control_console_development_plan.md) | Local application control console development plan | in_progress |
+| [control_console_live_logs_plan.md](active/short_term/control_console_live_logs_plan.md) | Control-console live logs stream and UI plan | completed |
 | [control_console_runtime_service_config_plan.md](active/short_term/control_console_runtime_service_config_plan.md) | Control-console runtime service configuration plan | completed |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 

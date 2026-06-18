@@ -11,10 +11,18 @@ const state = {
   debugRequestInFlight: false,
   eventSource: null,
   streamUrl: "",
+  logEventSource: null,
+  logStreamUrl: "",
+  logRows: [],
+  pendingLogRows: null,
+  logStreamRevision: 0,
+  logPaused: false,
+  logDroppedLocal: 0,
   isAuthenticated: false,
 };
 
 const THEME_STORAGE_KEY = "kazusa-control-theme";
+const LOG_ROW_LIMIT = 500;
 const ENDPOINT_CONFLICT_MESSAGE = "configured endpoint is already in use by an unmanaged process";
 const LEGACY_THEME_NAMES = {
   expo: "dark",
@@ -44,6 +52,12 @@ function setPage(name) {
   if (targetLink && targetLink.disabled) return;
   qsa("[data-page]").forEach((page) => page.classList.toggle("active", page.dataset.page === name));
   qsa("[data-page-link]").forEach((link) => link.classList.toggle("active", link.dataset.pageLink === name));
+  if (name === "logs" && state.csrfHeaderName) {
+    renderLogControls();
+    openLogStream();
+  } else {
+    closeLogStream();
+  }
   if (name === "audit" && state.csrfHeaderName) refreshAudit().catch(reportActionError);
   if (name === "character" && state.csrfHeaderName) refreshCharacter().catch(reportActionError);
   if (name === "memory" && state.csrfHeaderName) refreshMemory(false).catch(reportActionError);
@@ -255,6 +269,7 @@ async function bootstrap(options = {}) {
   renderOverview(payload);
   renderHealth(payload.overview || {});
   renderServices();
+  renderLogControls();
   renderAudit(payload.recent_audit_events || []);
   if (reconnectStream) openStream(payload.stream_url);
 }
@@ -269,6 +284,7 @@ function lockSession() {
   state.latestCognitionGraph = null;
   state.debugCognitionGraph = null;
   if (state.eventSource) state.eventSource.close();
+  closeLogStream();
   state.eventSource = null;
   state.streamUrl = "";
   setAuthState(false);
@@ -452,6 +468,7 @@ function renderCapabilitySummary() {
   const labels = {
     overview: "Overview",
     services: "Services",
+    logs: "Live logs",
     debug: "Debug chat",
     events: "Event monitor",
     character: "Character",
@@ -535,6 +552,10 @@ function serviceConfigButton(service) {
   return `<button class="btn" data-config-service="${escapeHtml(service.id)}" type="button">Configure</button>`;
 }
 
+function serviceLogsButton(service) {
+  return `<button class="btn" data-log-service="${escapeHtml(service.id)}" type="button">Logs</button>`;
+}
+
 function serviceConfigBadge(service) {
   const summary = state.serviceConfigSummaries[service.id] || {};
   if (!summary.configurable) return "";
@@ -551,6 +572,7 @@ function renderServices() {
     const restartButton = serviceActionButton(service, "restart", "Restart");
     const stopButton = serviceActionButton(service, "stop", "Stop", "danger");
     const configButton = serviceConfigButton(service);
+    const logsButton = serviceLogsButton(service);
     const configBadge = serviceConfigBadge(service);
     const serviceError = service.last_error_preview ? `<div class="service-error">${escapeHtml(service.last_error_preview)}</div>` : "";
     grid.insertAdjacentHTML("beforeend", `
@@ -573,6 +595,7 @@ function renderServices() {
           ${startButton}
           ${restartButton}
           ${stopButton}
+          ${logsButton}
           ${configButton}
         </div>
       </article>
@@ -626,12 +649,23 @@ async function serviceAction(event) {
 }
 
 function handleServiceGridClick(event) {
+  const logButton = event.target.closest("[data-log-service]");
+  if (logButton) {
+    openServiceLogs(logButton.dataset.logService);
+    return;
+  }
   const configButton = event.target.closest("[data-config-service]");
   if (configButton) {
     openServiceConfig(configButton.dataset.configService).catch(reportActionError);
     return;
   }
   serviceAction(event).catch(reportActionError);
+}
+
+function openServiceLogs(serviceId) {
+  const serviceFilter = qs("#log-service-filter");
+  if (serviceFilter) serviceFilter.value = serviceId;
+  setPage("logs");
 }
 
 function lifecycleActionLabel(action) {
@@ -1103,6 +1137,202 @@ async function refreshEvents() {
   `).join("");
 }
 
+function renderLogControls() {
+  const serviceFilter = qs("#log-service-filter");
+  if (!serviceFilter) return;
+  const selected = serviceFilter.value || "all";
+  const options = ['<option value="all">all services</option>'].concat(
+    state.services.map((service) => `<option value="${escapeHtml(service.id)}">${escapeHtml(service.display_name || service.id)}</option>`),
+  );
+  serviceFilter.innerHTML = options.join("");
+  serviceFilter.value = state.services.some((service) => service.id === selected) ? selected : "all";
+  updateLogBufferStatus();
+}
+
+function logStreamUrl() {
+  const params = new URLSearchParams({
+    service_id: qs("#log-service-filter").value || "all",
+    streams: qs("#log-stream-filter").value || "stdout,stderr,supervisor",
+    tail: "100",
+  });
+  return `/api/logs/stream?${params.toString()}`;
+}
+
+function openLogStream(options = {}) {
+  if (!state.isAuthenticated) return;
+  const url = logStreamUrl();
+  if (state.logEventSource && state.logStreamUrl === url && !options.replaceOnReady) return;
+  closeLogStream();
+  if (options.replaceOnReady) {
+    state.pendingLogRows = [];
+  } else {
+    state.pendingLogRows = null;
+  }
+  state.logStreamRevision += 1;
+  const revision = state.logStreamRevision;
+  state.logStreamUrl = url;
+  setLogStreamStatus(options.replaceOnReady ? "updating" : "connecting", "badge warn");
+  state.logEventSource = new EventSource(url);
+  ["log.snapshot", "log.line"].forEach((eventName) => {
+    state.logEventSource.addEventListener(eventName, (event) => {
+      if (revision !== state.logStreamRevision) return;
+      appendLogRow(JSON.parse(event.data), {retained: eventName === "log.snapshot"});
+    });
+  });
+  state.logEventSource.addEventListener("log.ready", () => {
+    if (revision !== state.logStreamRevision) return;
+    if (state.pendingLogRows) {
+      state.logRows = state.pendingLogRows;
+      state.pendingLogRows = null;
+    }
+    renderBufferedLogRows();
+    setLogStreamStatus("live", "badge success");
+  });
+  state.logEventSource.addEventListener("log.gap", (event) => {
+    if (revision !== state.logStreamRevision) return;
+    const payload = JSON.parse(event.data);
+    appendLogStatus(`gap: ${payload.reason || "replay unavailable"}`);
+    setLogStreamStatus("gap", "badge warn");
+  });
+  state.logEventSource.addEventListener("log.status", (event) => {
+    if (revision !== state.logStreamRevision) return;
+    const payload = JSON.parse(event.data);
+    appendLogStatus(payload.message || payload.status || "log status changed");
+  });
+  state.logEventSource.addEventListener("error", () => {
+    if (revision !== state.logStreamRevision) return;
+    setLogStreamStatus("reconnecting", "badge warn");
+  });
+}
+
+function closeLogStream() {
+  state.logStreamRevision += 1;
+  if (state.logEventSource) state.logEventSource.close();
+  state.logEventSource = null;
+  state.logStreamUrl = "";
+  state.pendingLogRows = null;
+}
+
+function setLogStreamStatus(text, className = "badge") {
+  const badge = qs("#log-stream-status");
+  if (!badge) return;
+  badge.textContent = state.logPaused ? "paused locally" : text;
+  badge.className = className;
+}
+
+function appendLogStatus(message) {
+  appendLogRow({
+    service_id: "console",
+    stream: "supervisor",
+    created_at: new Date().toISOString(),
+    line: message,
+  }, {retained: true});
+}
+
+function appendLogRow(row, options = {}) {
+  if (state.logPaused && !options.retained && !state.pendingLogRows) {
+    state.logDroppedLocal += 1;
+    updateLogBufferStatus();
+    return;
+  }
+  const targetRows = state.pendingLogRows || state.logRows;
+  targetRows.push(row);
+  while (targetRows.length > LOG_ROW_LIMIT) targetRows.shift();
+  if (state.pendingLogRows) return;
+  renderBufferedLogRows();
+}
+
+function renderBufferedLogRows() {
+  const table = qs("#log-table");
+  const rows = state.logRows.filter(logRowMatches);
+  if (!rows.length) {
+    renderLogPlaceholder(emptyLogMessage());
+    return;
+  }
+  table.innerHTML = rows.map(renderLogRow).join("");
+  if (qs("#log-autoscroll").checked) qs("#log-viewport").scrollTop = qs("#log-viewport").scrollHeight;
+  updateLogBufferStatus();
+}
+
+function emptyLogMessage() {
+  const filter = qs("#log-text-filter").value.trim();
+  if (filter) return "No retained rows match this filter. Watching live logs...";
+  return "No retained rows for this selection. Watching live logs...";
+}
+
+function logRowMatches(row) {
+  const filter = qs("#log-text-filter").value.trim().toLowerCase();
+  const line = String(row.line || "");
+  const matches = !filter || line.toLowerCase().includes(filter);
+  return matches;
+}
+
+function renderLogRow(row) {
+  const wrap = qs("#log-wrap-lines").checked ? " wrap" : "";
+  const timestamp = row.created_at || new Date().toISOString();
+  const label = `${row.service_id || "-"} ${row.stream || "-"}`;
+  const line = String(row.line || "");
+  const renderedRow = `
+    <tr class="log-row${wrap}">
+      <td><code>${escapeHtml(timestamp)}</code><br>${escapeHtml(label)}</td>
+      <td>${highlightLogLine(line)}</td>
+      <td><button class="btn" data-copy-log="${escapeHtml(line)}" type="button">Copy</button></td>
+    </tr>
+  `;
+  return renderedRow;
+}
+
+function renderLogPlaceholder(message) {
+  const table = qs("#log-table");
+  table.innerHTML = `<tr class="log-row log-placeholder wrap"><td>Status</td><td>${escapeHtml(message)}</td></tr>`;
+  updateLogBufferStatus();
+}
+
+function highlightLogLine(line) {
+  const highlight = qs("#log-highlight-filter").value.trim();
+  const escapedLine = escapeHtml(line);
+  if (!highlight) return escapedLine;
+  const escapedHighlight = escapeHtml(highlight);
+  return escapedLine.replaceAll(escapedHighlight, `<mark>${escapedHighlight}</mark>`);
+}
+
+function updateLogBufferStatus() {
+  const table = qs("#log-table");
+  const badge = qs("#log-buffer-status");
+  if (!table || !badge) return;
+  const count = table.querySelectorAll(".log-row:not(.log-placeholder)").length;
+  const suffix = state.logDroppedLocal ? `; ${state.logDroppedLocal} paused` : "";
+  badge.textContent = `${count} rows${suffix}`;
+}
+
+function toggleLogPause() {
+  state.logPaused = !state.logPaused;
+  qs("#log-pause").textContent = state.logPaused ? "Resume" : "Pause";
+  setLogStreamStatus(
+    state.logPaused ? "paused locally" : "live",
+    state.logPaused ? "badge warn" : "badge success",
+  );
+}
+
+function clearLogRows() {
+  state.logRows = [];
+  state.pendingLogRows = null;
+  renderLogPlaceholder("Log view cleared locally. New matching lines will appear here.");
+  state.logDroppedLocal = 0;
+  updateLogBufferStatus();
+}
+
+function refreshLogStream() {
+  openLogStream({replaceOnReady: true});
+}
+
+function copyLogRow(event) {
+  const button = event.target.closest("[data-copy-log]");
+  if (!button) return;
+  if (!navigator.clipboard) return;
+  navigator.clipboard.writeText(button.dataset.copyLog || "").catch(() => {});
+}
+
 function openStream(url) {
   if (state.eventSource && state.streamUrl === url) return;
   if (state.eventSource) state.eventSource.close();
@@ -1127,6 +1357,16 @@ qs("#token").addEventListener("keydown", (event) => {
   }
 });
 qs("#service-grid").addEventListener("click", handleServiceGridClick);
+qs("#log-service-filter").addEventListener("change", refreshLogStream);
+qs("#log-stream-filter").addEventListener("change", refreshLogStream);
+qs("#log-text-filter").addEventListener("input", renderBufferedLogRows);
+qs("#log-highlight-filter").addEventListener("input", renderBufferedLogRows);
+qs("#log-pause").addEventListener("click", toggleLogPause);
+qs("#log-clear").addEventListener("click", clearLogRows);
+qs("#log-wrap-lines").addEventListener("change", () => {
+  qsa(".log-row").forEach((row) => row.classList.toggle("wrap", qs("#log-wrap-lines").checked));
+});
+qs("#log-table").addEventListener("click", copyLogRow);
 qs("#service-config-close").addEventListener("click", closeServiceConfig);
 qs("#service-config-apply").addEventListener("click", () => runButtonAction(
   qs("#service-config-apply"),

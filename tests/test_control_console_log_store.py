@@ -62,3 +62,28 @@ def test_log_store_reports_missing_and_read_write_failures(
     monkeypatch.setattr(Path, "write_text", fail_write_text)
     with pytest.raises(RuntimeError, match="cannot write"):
         store.append_line(service_id="brain", stream="stdout", line="hello")
+
+
+def test_log_store_publisher_failure_does_not_break_append(
+    tmp_path,
+    caplog,
+) -> None:
+    """Live-stream fanout failures should not break persisted log writes."""
+
+    from control_console.log_store import ProcessLogStore
+
+    def fail_publish(_log_line):
+        raise RuntimeError("publisher boom")
+
+    caplog.set_level("WARNING")
+    store = ProcessLogStore(tmp_path, log_publisher=fail_publish)
+
+    line = store.append_line(
+        service_id="brain",
+        stream="stdout",
+        line="persist this",
+    )
+
+    assert line.line == "persist this"
+    assert store.tail(service_id="brain", limit=10)[0].line == "persist this"
+    assert "process log publisher failed: publisher boom" in caplog.text

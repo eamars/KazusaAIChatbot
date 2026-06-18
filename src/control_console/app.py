@@ -61,6 +61,12 @@ from control_console.service_config import (
 )
 from control_console.settings import ControlConsoleSettings
 from control_console.stream import SSEEventBuffer, encode_sse_event
+from control_console.stream import LogStreamHub
+from control_console.stream import log_keepalive_event
+from control_console.stream import log_ready_event
+from control_console.stream import log_snapshot_event
+from control_console.stream import log_status_event
+from control_console.stream import parse_log_streams
 from control_console.supervisor import (
     ENDPOINT_CONFLICT_MESSAGE,
     ProcessSupervisor,
@@ -129,7 +135,11 @@ def create_app(
         return rendered_command
 
     audit_writer = LocalAuditWriter(app_settings.audit_path)
-    log_store = ProcessLogStore(app_settings.log_dir)
+    log_stream_hub = LogStreamHub()
+    log_store = ProcessLogStore(
+        app_settings.log_dir,
+        log_publisher=log_stream_hub.publish_log_line,
+    )
     process_store = ProcessStore(app_settings.process_state_dir)
     app_supervisor = supervisor or ProcessSupervisor(
         services=services,
@@ -501,6 +511,46 @@ def create_app(
             {"service_id": service_id, "action": "config"},
         )
         return response_payload
+
+    @app.get("/api/logs/stream")
+    async def process_log_stream(
+        request: Request,
+        service_id: str = Query(default="all", max_length=80),
+        streams: str = Query(default="stdout,stderr,supervisor", max_length=80),
+        tail: int = Query(default=100, ge=0, le=500),
+        cursor: str | None = Query(default=None, max_length=120),
+        _: ControlConsoleOperator = Depends(current_operator),
+    ) -> StreamingResponse:
+        """Open the authenticated live process-log SSE stream."""
+
+        if service_id != "all" and service_id not in services:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        try:
+            stream_filter = parse_log_streams(streams)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
+        effective_cursor = cursor
+        if effective_cursor is None:
+            effective_cursor = request.headers.get("last-event-id")
+        response = StreamingResponse(
+            _stream_process_logs(
+                request=request,
+                hub=log_stream_hub,
+                log_store=log_store,
+                supervisor=app_supervisor,
+                services=services,
+                service_id=service_id,
+                streams=stream_filter,
+                tail=tail,
+                cursor=effective_cursor,
+                keepalive_seconds=app_settings.sse_interval_seconds,
+            ),
+            media_type="text/event-stream",
+        )
+        return response
 
     @app.get("/api/logs/{service_id}")
     async def process_logs(
@@ -929,6 +979,132 @@ async def _stream_console_events(
         )
         if should_stop:
             break
+
+
+async def _stream_process_logs(
+    *,
+    request: Request,
+    hub: LogStreamHub,
+    service_id: str,
+    streams: set[str],
+    tail: int,
+    cursor: str | None,
+    keepalive_seconds: float,
+    log_store: ProcessLogStore | None = None,
+    supervisor: Any | None = None,
+    services: dict[str, Any] | None = None,
+) -> AsyncIterator[str]:
+    """Yield live process-log SSE events until the browser disconnects."""
+
+    has_persisted_snapshot = (
+        cursor is None
+        and log_store is not None
+        and services is not None
+    )
+    if has_persisted_snapshot:
+        for event in _initial_log_snapshot_events(
+            log_store=log_store,
+            services=services,
+            service_id=service_id,
+            streams=streams,
+            tail=tail,
+        ):
+            yield encode_sse_event(event)
+
+    if supervisor is not None and services is not None:
+        for event in _log_status_events(
+            supervisor=supervisor,
+            services=services,
+            service_id=service_id,
+        ):
+            yield encode_sse_event(event)
+
+    if not has_persisted_snapshot:
+        for event in hub.replay_after(
+            cursor=cursor,
+            service_id=service_id,
+            streams=streams,
+            tail=tail,
+        ):
+            yield encode_sse_event(event)
+
+    subscription = hub.subscribe(service_id=service_id, streams=streams)
+    try:
+        yield encode_sse_event(log_ready_event())
+        while True:
+            if await request.is_disconnected():
+                break
+            try:
+                event = await asyncio.wait_for(
+                    subscription.queue.get(),
+                    timeout=keepalive_seconds,
+                )
+            except TimeoutError:
+                yield encode_sse_event(log_keepalive_event())
+                continue
+            yield encode_sse_event(event)
+    finally:
+        hub.unsubscribe(subscription)
+
+
+def _initial_log_snapshot_events(
+    *,
+    log_store: ProcessLogStore,
+    services: dict[str, Any],
+    service_id: str,
+    streams: set[str],
+    tail: int,
+) -> list[Any]:
+    """Return bounded retained log rows for the live-log stream."""
+
+    if tail <= 0:
+        events: list[Any] = []
+        return events
+
+    service_ids = _log_service_ids(service_id=service_id, services=services)
+    selected_events = []
+    for current_service_id in service_ids:
+        lines = log_store.tail(service_id=current_service_id, limit=tail)
+        for line in lines:
+            if line.stream in streams:
+                selected_events.append(log_snapshot_event(line))
+    events = selected_events[-tail:]
+    return events
+
+
+def _log_status_events(
+    *,
+    supervisor: Any,
+    services: dict[str, Any],
+    service_id: str,
+) -> list[Any]:
+    """Return service availability status rows for the live-log stream."""
+
+    states = _all_service_states(supervisor, services)
+    service_ids = _log_service_ids(service_id=service_id, services=services)
+    events = []
+    for current_service_id in service_ids:
+        state = _service_state_record(states, service_id=current_service_id)
+        actual_state = _service_actual_state(state)
+        last_error_preview = _service_last_error_preview(state)
+        if actual_state == "conflict" and last_error_preview == ENDPOINT_CONFLICT_MESSAGE:
+            events.append(
+                log_status_event(
+                    service_id=current_service_id,
+                    status="unavailable",
+                    message="logs unavailable from this console run",
+                ),
+            )
+    return events
+
+
+def _log_service_ids(*, service_id: str, services: dict[str, Any]) -> list[str]:
+    """Return registry service ids visible to one log-stream request."""
+
+    if service_id == "all":
+        service_ids = list(services)
+        return service_ids
+    return [service_id]
 
 
 async def _wait_for_stream_tick(
@@ -1594,6 +1770,11 @@ def _page_capabilities() -> dict[str, dict[str, Any]]:
             "status": "ready",
             "label": "lifecycle",
             "reason": "Registry lifecycle controls are available.",
+        },
+        "logs": {
+            "status": "ready",
+            "label": "live tail",
+            "reason": "Console-owned process logs are available through a bounded live stream.",
         },
         "debug": {
             "status": "ready",

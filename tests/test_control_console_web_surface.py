@@ -276,6 +276,14 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert ".graph-node:focus-within .node-detail" in stylesheet.text
     assert ".notice[data-tone=\"danger\"]" in stylesheet.text
     assert 'body[data-auth-state="authenticated"] #login-form' in stylesheet.text
+    assert "--nav-active-bg:" in stylesheet.text
+    assert "--nav-active-border:" in stylesheet.text
+    assert "--nav-active-indicator:" in stylesheet.text
+    assert ".nav-link.active::before" in stylesheet.text
+    assert "border-color: var(--nav-active-border)" in stylesheet.text
+    assert "box-shadow: inset 0 0 0 1px var(--nav-active-border)" in (
+        stylesheet.text
+    )
     assert ".dialog-panel" in stylesheet.text
     assert "background: var(--panel)" in stylesheet.text
     assert "color: var(--ink)" in stylesheet.text
@@ -328,6 +336,76 @@ def test_event_stream_refresh_does_not_reconnect_stream(tmp_path) -> None:
     assert "bootstrap({reconnectStream: false})" in script.text
     assert "state.streamUrl === url" in script.text
     assert "return;" in script.text
+
+
+def test_live_logs_static_surface_and_controls(tmp_path) -> None:
+    """The shell should expose a focused shadcn-style live-log workspace."""
+
+    client, _ = _client_with_login(tmp_path, supervisor=_StaticStoppedSupervisor())
+
+    index = client.get("/")
+    assert index.status_code == 200
+    assert 'data-page-link="logs"' in index.text
+    assert 'data-page="logs"' in index.text
+    assert 'id="log-service-filter"' in index.text
+    assert 'id="log-stream-filter"' in index.text
+    assert 'id="log-text-filter"' in index.text
+    assert 'id="log-highlight-filter"' in index.text
+    assert 'id="log-pause"' in index.text
+    assert 'id="log-clear"' in index.text
+    assert 'id="log-autoscroll"' in index.text
+    assert 'id="log-wrap-lines"' in index.text
+    assert 'id="log-viewport"' in index.text
+    assert 'id="log-table"' in index.text
+    assert "log-placeholder" in index.text
+    assert 'data-component="ScrollArea"' in index.text
+    assert "Live logs" in index.text
+    assert "Event monitor" in index.text
+
+    script = client.get("/static/console.js")
+    assert script.status_code == 200
+    assert "LOG_ROW_LIMIT" in script.text
+    assert "/api/logs/stream" in script.text
+    assert "openLogStream" in script.text
+    assert "renderLogControls" in script.text
+    assert "appendLogRow" in script.text
+    assert "state.logRows" in script.text
+    assert "renderBufferedLogRows" in script.text
+    assert "No retained rows match this filter. Watching live logs." in script.text
+    assert "No retained rows for this selection. Watching live logs." in script.text
+    assert '{retained: eventName === "log.snapshot"}' in script.text
+    assert "state.logPaused && !options.retained && !state.pendingLogRows" in (
+        script.text
+    )
+    assert "data-log-service" in script.text
+    assert "setPage(\"logs\")" in script.text
+    assert "function refreshLogStream()" in script.text
+    assert 'qs("#log-service-filter").addEventListener("change", refreshLogStream)' in (
+        script.text
+    )
+    assert 'qs("#log-stream-filter").addEventListener("change", refreshLogStream)' in (
+        script.text
+    )
+    assert (
+        'qs("#log-text-filter").addEventListener("input", renderBufferedLogRows)'
+        in script.text
+    )
+    assert (
+        'qs("#log-highlight-filter").addEventListener("input", renderBufferedLogRows)'
+        in script.text
+    )
+    assert ".log-row:not(.log-placeholder)" in script.text
+    assert "log.gap" in script.text
+    assert "log.status" in script.text
+    assert "log.ready" in script.text
+
+    stylesheet = client.get("/static/console.css")
+    assert stylesheet.status_code == 200
+    assert ".log-toolbar" in stylesheet.text
+    assert ".log-viewport" in stylesheet.text
+    assert ".log-row" in stylesheet.text
+    assert ".log-row.wrap" in stylesheet.text
+    assert "max-height: min(58vh, 640px)" in stylesheet.text
 
 
 def test_web_api_outputs_for_logs_events_audit_character_and_debug_error(

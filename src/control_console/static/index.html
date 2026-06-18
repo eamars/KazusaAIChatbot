@@ -20,6 +20,7 @@
       <nav class="nav-group" aria-label="Console pages" data-auth-required="true">
         <button class="nav-link active" data-page-link="overview" disabled aria-disabled="true">Overview</button>
         <button class="nav-link" data-page-link="services" disabled aria-disabled="true">Services</button>
+        <button class="nav-link" data-page-link="logs" disabled aria-disabled="true">Live logs</button>
         <button class="nav-link" data-page-link="debug" disabled aria-disabled="true">Debug chat</button>
         <button class="nav-link" data-page-link="events" disabled aria-disabled="true">Event monitor</button>
         <button class="nav-link" data-page-link="character" disabled aria-disabled="true">Character</button>
@@ -95,7 +96,7 @@
           </article>
           <article class="card" data-component="Card">
             <div class="card-header"><h3>Data Safety</h3><span class="badge">redacted</span></div>
-            <div class="table-wrap flush"><table><tbody><tr><td>Excluded</td><td>secrets, prompts, embeddings</td></tr><tr><td>Live path</td><td>one compact EventSource stream</td></tr><tr><td>Details</td><td>bounded REST fetch on demand</td></tr></tbody></table></div>
+            <div class="table-wrap flush"><table><tbody><tr><td>Excluded</td><td>secrets, prompts, embeddings</td></tr><tr><td>Live path</td><td>compact status stream plus bounded log stream</td></tr><tr><td>Details</td><td>bounded REST fetch on demand</td></tr></tbody></table></div>
           </article>
         </div>
       </section>
@@ -109,6 +110,35 @@
           <span class="badge">managed local</span>
         </div>
         <div class="service-grid" id="service-grid"></div>
+      </section>
+
+      <section class="page" data-page="logs">
+        <div class="page-intro">
+          <div>
+            <h2>Live logs</h2>
+            <p>Console-owned service stdout, stderr, and supervisor lines stream here while the page is open.</p>
+          </div>
+          <span class="badge" id="log-stream-status" data-component="Badge">signed out</span>
+        </div>
+        <article class="card" data-component="Card">
+          <div class="card-header"><h3>Stream Controls</h3><span class="badge" id="log-buffer-status">0 rows</span></div>
+          <div class="card-content log-toolbar" data-component="FieldGroup">
+            <label class="field">Service<select class="input" id="log-service-filter"><option value="all">all services</option></select></label>
+            <label class="field">Stream<select class="input" id="log-stream-filter"><option value="stdout,stderr,supervisor">all streams</option><option value="stdout">stdout</option><option value="stderr">stderr</option><option value="supervisor">supervisor</option></select></label>
+            <label class="field">Filter<input class="input" id="log-text-filter" placeholder="plain text contains" maxlength="120" /></label>
+            <label class="field">Highlight<input class="input" id="log-highlight-filter" placeholder="highlight text" maxlength="120" /></label>
+            <label class="check-field"><input type="checkbox" id="log-autoscroll" checked />Autoscroll</label>
+            <label class="check-field"><input type="checkbox" id="log-wrap-lines" checked />Wrap lines</label>
+            <button class="btn" id="log-pause" type="button">Pause</button>
+            <button class="btn" id="log-clear" type="button">Clear</button>
+          </div>
+        </article>
+        <article class="card log-card" data-component="Card">
+          <div class="card-header"><h3>Process Output</h3><span class="badge">redacted</span></div>
+          <div class="card-content log-viewport" id="log-viewport" data-component="ScrollArea">
+            <table class="log-table"><tbody id="log-table"><tr class="log-row log-placeholder wrap"><td>Status</td><td>Open this page after login to start the live log stream.</td></tr></tbody></table>
+          </div>
+        </article>
       </section>
 
       <section class="page" data-page="debug">

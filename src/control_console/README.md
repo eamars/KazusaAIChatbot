@@ -16,7 +16,7 @@ The console is not mounted by the brain service and must not change `/chat`, cog
 ## Intended Use Cases
 
 - Start the brain and local adapters from one operator page.
-- Inspect current service state, process logs, lifecycle audit records, health summaries, and event summaries.
+- Inspect current service state, live process logs, lifecycle audit records, health summaries, and event summaries.
 - Send debug-chat messages through the existing brain `/chat` contract when the brain is running, with operator-selectable visible-reply, think-only, listen-only, and no-remember debug modes.
 - Browse bounded read-only character, memory, interaction-style, calendar, background-work, health/cache, event, and audit summaries.
 - Inspect due calendar runs and sanitized background-worker telemetry as partial read-only workflows; schedule editing and job payload browsing are not implemented.
@@ -45,7 +45,10 @@ The brain owns cognition and persistence coordination for chat turns. Adapters o
   `GET /api/services/{service_id}/config`,
   `PUT /api/services/{service_id}/config`,
   `POST /api/services/{service_id}/config/reset`
-- Logs and events: `GET /api/logs/{service_id}`, `GET /api/events`
+- Logs and events:
+  `GET /api/logs/{service_id}`,
+  `GET /api/logs/stream`,
+  `GET /api/events`
 - Debug chat: `POST /api/debug-chat`
 - Lookups: `GET /api/lookups/{namespace}`
 - SSE: `GET /api/stream`
@@ -96,6 +99,30 @@ The authenticated SSE stream emits `control.cognition_graph_invalidated` when
 the brain reports a different latest cognition run id. The browser responds by
 refetching bootstrap data, so self-cognition completion can update the Overview
 graph without the Overview page itself triggering cognition.
+
+`GET /api/logs/stream` is a separate authenticated SSE stream for high-volume
+process-log traffic. It is intentionally not merged into the compact status
+stream. Query parameters are:
+
+- `service_id`: `all` or a registry service id.
+- `streams`: comma-separated `stdout`, `stderr`, and/or `supervisor`.
+- `tail`: initial retained line count, bounded by the server.
+- `cursor`: optional replay cursor from a previous log event.
+
+The stream emits:
+
+- `log.snapshot`: retained file-backed tail rows emitted when the stream opens.
+- `log.ready`: marker that the initial snapshot is complete and live events are attached.
+- `log.line`: new stdout, stderr, or supervisor rows appended by the console.
+- `log.gap`: explicit notification that rows were dropped or replay is unavailable.
+- `log.status`: service log availability, including unmanaged endpoint conflicts.
+- `log.keepalive`: idle heartbeat.
+
+The Live logs page is the intended operator workflow for raw process output.
+Event monitor remains the structured audit and application-event search page.
+Service cards include a `Logs` action that opens Live logs filtered to that
+service. The browser keeps only a bounded local row set and supports local
+pause, clear, autoscroll, wrapping, text filtering, highlighting, and row copy.
 
 ## Page Capability Status
 
