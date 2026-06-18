@@ -197,6 +197,7 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert 'id="service-config-reset"' in index.text
     assert 'id="service-config-close"' in index.text
     assert 'Apply and restart' in index.text
+    assert 'class="dialog-panel service-config-panel card"' in index.text
     assert "hot apply" not in index.text.lower()
     assert "zero downtime" not in index.text.lower()
     assert "adapter.napcat" not in index.text
@@ -275,6 +276,26 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert ".graph-node:focus-within .node-detail" in stylesheet.text
     assert ".notice[data-tone=\"danger\"]" in stylesheet.text
     assert 'body[data-auth-state="authenticated"] #login-form' in stylesheet.text
+    assert ".dialog-panel" in stylesheet.text
+    assert "background: var(--panel)" in stylesheet.text
+    assert "color: var(--ink)" in stylesheet.text
+    assert "overflow: hidden" in stylesheet.text
+    assert "isolation: isolate" in stylesheet.text
+    assert "--shell-gutter: clamp(" in stylesheet.text
+    assert "--sidebar-width: clamp(" in stylesheet.text
+    assert (
+        "grid-template-columns: var(--sidebar-width) minmax(0, 1fr)"
+        in stylesheet.text
+    )
+    assert "repeat(auto-fit, minmax(min(280px, 100%), 1fr))" in (
+        stylesheet.text
+    )
+    assert "repeat(auto-fit, minmax(min(320px, 100%), 1fr))" in (
+        stylesheet.text
+    )
+    assert ".table-wrap { overflow: auto;" in stylesheet.text
+    assert ".nav-group { display: flex;" in stylesheet.text
+    assert "@media (max-width: 640px)" in stylesheet.text
 
     bootstrap = client.get("/api/bootstrap")
     assert bootstrap.status_code == 200
