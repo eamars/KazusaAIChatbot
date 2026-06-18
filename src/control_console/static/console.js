@@ -8,6 +8,7 @@ const state = {
   debugCognitionGraph: null,
   debugRequestInFlight: false,
   eventSource: null,
+  streamUrl: "",
   isAuthenticated: false,
 };
 
@@ -232,8 +233,9 @@ async function login() {
   showNotice("Signed in.", "success");
 }
 
-async function bootstrap() {
+async function bootstrap(options = {}) {
   clearNotice();
+  const reconnectStream = options.reconnectStream !== false;
   const payload = await api("/api/bootstrap");
   state.csrfHeaderName = payload.csrf_header_name || "";
   state.csrfToken = payload.csrf_token || "";
@@ -251,7 +253,7 @@ async function bootstrap() {
   renderHealth(payload.overview || {});
   renderServices();
   renderAudit(payload.recent_audit_events || []);
-  openStream(payload.stream_url);
+  if (reconnectStream) openStream(payload.stream_url);
 }
 
 function lockSession() {
@@ -261,6 +263,9 @@ function lockSession() {
   state.pageCapabilities = {};
   state.latestCognitionGraph = null;
   state.debugCognitionGraph = null;
+  if (state.eventSource) state.eventSource.close();
+  state.eventSource = null;
+  state.streamUrl = "";
   setAuthState(false);
   qs("#session-state").textContent = "signed out";
   renderBrand({status: "unavailable", character_name: "not connected"});
@@ -887,10 +892,12 @@ async function refreshEvents() {
 }
 
 function openStream(url) {
+  if (state.eventSource && state.streamUrl === url) return;
   if (state.eventSource) state.eventSource.close();
+  state.streamUrl = url;
   state.eventSource = new EventSource(url);
-  state.eventSource.addEventListener("control.gap", () => bootstrap());
-  state.eventSource.addEventListener("control.cognition_graph_invalidated", () => bootstrap());
+  state.eventSource.addEventListener("control.gap", () => bootstrap({reconnectStream: false}));
+  state.eventSource.addEventListener("control.cognition_graph_invalidated", () => bootstrap({reconnectStream: false}));
 }
 
 initializeTheme();

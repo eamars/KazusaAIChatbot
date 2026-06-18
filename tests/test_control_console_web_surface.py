@@ -266,6 +266,19 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert payload["redaction"]["model_inputs"] == "excluded"
 
 
+def test_event_stream_refresh_does_not_reconnect_stream(tmp_path) -> None:
+    """Stream-triggered UI refreshes should not churn the SSE socket."""
+
+    client, _ = _client_with_login(tmp_path, supervisor=_StaticStoppedSupervisor())
+
+    script = client.get("/static/console.js")
+
+    assert script.status_code == 200
+    assert "bootstrap({reconnectStream: false})" in script.text
+    assert "state.streamUrl === url" in script.text
+    assert "return;" in script.text
+
+
 def test_web_api_outputs_for_logs_events_audit_character_and_debug_error(
     monkeypatch,
     tmp_path,
