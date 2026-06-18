@@ -405,6 +405,9 @@ def test_live_logs_static_surface_and_controls(tmp_path) -> None:
     assert ".log-viewport" in stylesheet.text
     assert ".log-row" in stylesheet.text
     assert ".log-row.wrap" in stylesheet.text
+    assert "--log-font" in stylesheet.text
+    assert '"Microsoft YaHei UI"' in stylesheet.text
+    assert '"Noto Sans CJK SC"' in stylesheet.text
     assert "max-height: min(58vh, 640px)" in stylesheet.text
 
 

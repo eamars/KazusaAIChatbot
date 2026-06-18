@@ -26,6 +26,7 @@ NO_PROCESS_HANDLE_MESSAGE = "no console-owned process handle"
 PROCESS_METADATA_MISMATCH_MESSAGE = "process ownership metadata mismatch"
 DEAD_PROCESS_MESSAGE = "previous console-owned process is no longer alive"
 DEFAULT_SHUTDOWN_TIMEOUT_SECONDS = 15.0
+PROCESS_LOG_TEXT_ENCODINGS = ("utf-8", "gb18030")
 STALE_UNOWNED_CONFLICT_MESSAGES = frozenset({
     NO_PROCESS_HANDLE_MESSAGE,
     PROCESS_METADATA_MISMATCH_MESSAGE,
@@ -117,6 +118,8 @@ class ProcessSupervisor:
         self._store.set_desired_state(service_id, "running")
         cwd = _resolve_cwd(spec.cwd)
         env = os.environ.copy()
+        env.setdefault("PYTHONIOENCODING", "utf-8")
+        env.setdefault("PYTHONUTF8", "1")
         env.update(spec.env)
         start_command = self._start_command(service_id)
         process = await asyncio.create_subprocess_exec(
@@ -544,7 +547,7 @@ class ProcessSupervisor:
                 raw_line = await stream.readline()
                 if not raw_line:
                     return
-                line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
+                line = _decode_process_log_line(raw_line).rstrip("\r\n")
                 if line:
                     self._log_store.append_line(
                         service_id=service_id,
@@ -730,6 +733,20 @@ def _resolve_cwd(cwd: str | None) -> Path | None:
         return None
     path = Path(cwd).resolve()
     return path
+
+
+def _decode_process_log_line(raw_line: bytes) -> str:
+    """Decode child-process text while preserving UTF-8 and Chinese logs."""
+
+    for encoding in PROCESS_LOG_TEXT_ENCODINGS:
+        try:
+            decoded_line = raw_line.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+        return decoded_line
+
+    decoded_line = raw_line.decode("utf-8", errors="replace")
+    return decoded_line
 
 
 def _command_fingerprint(command: list[str]) -> str:

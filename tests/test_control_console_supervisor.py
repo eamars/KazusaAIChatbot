@@ -955,6 +955,35 @@ async def test_log_drain_and_task_cleanup_edge_paths(tmp_path) -> None:
     assert pending_task.cancelled() or pending_task.cancelling()
 
 
+@pytest.mark.asyncio
+async def test_log_drain_preserves_chinese_from_windows_code_page(tmp_path) -> None:
+    """Child-process Chinese output should not be corrupted before UI rendering."""
+
+    from control_console.audit import LocalAuditWriter
+    from control_console.log_store import ProcessLogStore
+    from control_console.process_store import ProcessStore
+    from control_console.supervisor import ProcessSupervisor
+
+    supervisor = ProcessSupervisor(
+        services={"brain": _service_spec("brain", tmp_path)},
+        store=ProcessStore(tmp_path / "state"),
+        log_store=ProcessLogStore(tmp_path / "logs"),
+        audit_writer=LocalAuditWriter(tmp_path / "audit.jsonl"),
+    )
+    reader = asyncio.StreamReader()
+    reader.feed_data("中文日志正常显示\n".encode("gb18030"))
+    reader.feed_eof()
+
+    await supervisor._drain_process_stream(
+        service_id="brain",
+        stream_name="stdout",
+        stream=reader,
+    )
+    lines = supervisor._log_store.tail(service_id="brain", limit=1)
+
+    assert lines[0].line == "中文日志正常显示"
+
+
 def test_supervisor_small_helper_edges(monkeypatch) -> None:
     """Small helper branches should stay explicit and covered."""
 
