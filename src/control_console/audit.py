@@ -8,6 +8,8 @@ from typing import Any
 import json
 import uuid
 
+from pydantic import ValidationError
+
 from control_console.contracts import ControlAuditEvent
 from control_console.redaction import redact_mapping
 
@@ -68,9 +70,14 @@ class LocalAuditWriter:
             raise RuntimeError(f"cannot read control audit events: {exc}") from exc
 
         selected_lines = lines[-limit:]
-        events = [
-            ControlAuditEvent.model_validate(json.loads(line))
-            for line in reversed(selected_lines)
-            if line.strip()
-        ]
+        events: list[ControlAuditEvent] = []
+        for line in reversed(selected_lines):
+            if not line.strip():
+                continue
+            try:
+                payload = json.loads(line)
+                event = ControlAuditEvent.model_validate(payload)
+            except (json.JSONDecodeError, ValidationError):
+                continue
+            events.append(event)
         return events

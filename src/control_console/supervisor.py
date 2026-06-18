@@ -22,6 +22,14 @@ ENDPOINT_CONFLICT_TIMEOUT_SECONDS = 0.2
 ENDPOINT_CONFLICT_MESSAGE = (
     "configured endpoint is already in use by an unmanaged process"
 )
+NO_PROCESS_HANDLE_MESSAGE = "no console-owned process handle"
+PROCESS_METADATA_MISMATCH_MESSAGE = "process ownership metadata mismatch"
+DEAD_PROCESS_MESSAGE = "previous console-owned process is no longer alive"
+DEFAULT_SHUTDOWN_TIMEOUT_SECONDS = 15.0
+STALE_UNOWNED_CONFLICT_MESSAGES = frozenset({
+    NO_PROCESS_HANDLE_MESSAGE,
+    PROCESS_METADATA_MISMATCH_MESSAGE,
+})
 
 
 class ServiceLifecycleError(RuntimeError):
@@ -58,6 +66,7 @@ class ProcessSupervisor:
         """Return one service state projected from local state."""
 
         self._refresh_process_exit(service_id)
+        self._refresh_persisted_process_record(service_id)
         self._refresh_endpoint_conflict(service_id)
         spec = self._services[service_id]
         snapshot = self._store.load_snapshot()
@@ -77,6 +86,7 @@ class ProcessSupervisor:
 
         for service_id in list(self._services):
             self._refresh_process_exit(service_id)
+            self._refresh_persisted_process_record(service_id)
             self._refresh_endpoint_conflict(service_id)
 
     async def start_service(
@@ -183,7 +193,14 @@ class ProcessSupervisor:
         self._verify_owned_process(service_id=service_id, process=process)
         if process is not None and process.returncode is None:
             process.terminate()
-            await process.wait()
+            try:
+                await asyncio.wait_for(
+                    process.wait(),
+                    timeout=_shutdown_timeout_seconds(self._services[service_id]),
+                )
+            except TimeoutError:
+                process.kill()
+                await process.wait()
         if process is not None:
             self._processes.pop(service_id, None)
         self._cancel_log_tasks(service_id)
@@ -353,11 +370,11 @@ class ProcessSupervisor:
         if state.pid is None and process is None:
             return
         if process is None:
-            self._mark_conflict(service_id, "no console-owned process handle")
+            self._mark_conflict(service_id, NO_PROCESS_HANDLE_MESSAGE)
             raise ServiceLifecycleError(f"service {service_id} is not console-owned")
         expected_fingerprint = _command_fingerprint(self._services[service_id].command)
         if state.pid != process.pid or state.command_fingerprint != expected_fingerprint:
-            self._mark_conflict(service_id, "process ownership metadata mismatch")
+            self._mark_conflict(service_id, PROCESS_METADATA_MISMATCH_MESSAGE)
             raise ServiceLifecycleError(
                 f"service {service_id} ownership metadata mismatch"
             )
@@ -409,6 +426,55 @@ class ProcessSupervisor:
             target={"service_id": service_id},
             new_state={"actual_state": "crashed", "exit_code": exit_code},
         )
+
+    def _refresh_persisted_process_record(self, service_id: str) -> None:
+        """Reconcile persisted process state that has no live child handle."""
+
+        if service_id in self._processes:
+            return
+
+        snapshot = self._store.load_snapshot()
+        raw_service = snapshot["services"].get(service_id, {})
+        pid = _pid_or_none(raw_service.get("pid"))
+        if pid is None:
+            return
+        if _pid_exists(pid):
+            return
+
+        actual_state = raw_service.get("actual_state", "stopped")
+        last_error_preview = raw_service.get("last_error_preview")
+        desired_state = raw_service.get("desired_state", "stopped")
+        if actual_state == "running":
+            self._store.update_service(
+                service_id,
+                {
+                    "actual_state": "crashed",
+                    "pid": None,
+                    "stopped_at": datetime.now(timezone.utc).isoformat(),
+                    "last_error_preview": DEAD_PROCESS_MESSAGE,
+                },
+            )
+            self._log_store.append_line(
+                service_id=service_id,
+                stream="supervisor",
+                line=DEAD_PROCESS_MESSAGE,
+            )
+            return
+
+        if (
+            actual_state == "conflict"
+            and last_error_preview in STALE_UNOWNED_CONFLICT_MESSAGES
+        ):
+            next_state = "stopped" if desired_state == "stopped" else "crashed"
+            next_error = None if next_state == "stopped" else DEAD_PROCESS_MESSAGE
+            self._store.update_service(
+                service_id,
+                {
+                    "actual_state": next_state,
+                    "pid": None,
+                    "last_error_preview": next_error,
+                },
+            )
 
     def _start_log_readers(
         self,
@@ -518,17 +584,120 @@ def _runtime_state_from_snapshot(
         id=spec.id,
         display_name=spec.display_name,
         kind=spec.kind,
-        desired_state=raw_service.get("desired_state", "stopped"),
-        actual_state=raw_service.get("actual_state", "stopped"),
-        pid=raw_service.get("pid"),
-        generation=raw_service.get("generation"),
-        command_fingerprint=raw_service.get("command_fingerprint"),
-        exit_code=raw_service.get("exit_code"),
+        desired_state=_desired_state(raw_service.get("desired_state", "stopped")),
+        actual_state=_actual_state(raw_service.get("actual_state", "stopped")),
+        pid=_pid_or_none(raw_service.get("pid")),
+        generation=_str_or_none(raw_service.get("generation")),
+        command_fingerprint=_str_or_none(raw_service.get("command_fingerprint")),
+        exit_code=_optional_int(raw_service.get("exit_code")),
         dependencies=list(spec.dependencies),
-        last_error_preview=raw_service.get("last_error_preview"),
-        version=int(raw_service.get("version", 0)),
+        last_error_preview=_str_or_none(raw_service.get("last_error_preview")),
+        version=_non_negative_int(raw_service.get("version")),
     )
     return state
+
+
+def _desired_state(value: Any) -> Literal["running", "stopped"]:
+    """Normalize persisted desired state into the public contract."""
+
+    if value == "running":
+        return "running"
+    return "stopped"
+
+
+def _actual_state(
+    value: Any,
+) -> Literal[
+    "unknown",
+    "stopped",
+    "starting",
+    "running",
+    "stopping",
+    "unhealthy",
+    "crashed",
+    "conflict",
+    "unavailable",
+]:
+    """Normalize persisted actual state into the public contract."""
+
+    if value == "stopped":
+        return "stopped"
+    if value == "starting":
+        return "starting"
+    if value == "running":
+        return "running"
+    if value == "stopping":
+        return "stopping"
+    if value == "unhealthy":
+        return "unhealthy"
+    if value == "crashed":
+        return "crashed"
+    if value == "conflict":
+        return "conflict"
+    if value == "unavailable":
+        return "unavailable"
+    return "unknown"
+
+
+def _pid_or_none(value: Any) -> int | None:
+    """Return a valid PID from local JSON data."""
+
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) and value > 0:
+        return value
+    return None
+
+
+def _optional_int(value: Any) -> int | None:
+    """Return an integer field from local JSON data."""
+
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    return None
+
+
+def _non_negative_int(value: Any) -> int:
+    """Return a non-negative counter from local JSON data."""
+
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int) and value >= 0:
+        return value
+    return 0
+
+
+def _str_or_none(value: Any) -> str | None:
+    """Return a string field from local JSON data."""
+
+    if isinstance(value, str):
+        return value
+    return None
+
+
+def _pid_exists(pid: int) -> bool:
+    """Return whether a specific persisted PID still exists."""
+
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _shutdown_timeout_seconds(spec: ServiceSpec) -> float:
+    """Return the configured graceful stop timeout for one service."""
+
+    timeout_seconds = spec.shutdown_timeout_seconds
+    if timeout_seconds is None:
+        timeout_seconds = DEFAULT_SHUTDOWN_TIMEOUT_SECONDS
+    return timeout_seconds
 
 
 def _resolve_cwd(cwd: str | None) -> Path | None:

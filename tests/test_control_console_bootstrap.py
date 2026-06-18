@@ -268,3 +268,77 @@ def test_bootstrap_reports_live_brain_health_when_brain_is_unmanaged(
     assert overview["brain_health"]["status"] == "ok"
     assert overview["brain_health"]["db"] is True
     assert overview["runtime_status"]["worker_error_level"] == "ok"
+
+
+def test_bootstrap_does_not_query_brain_for_stale_unowned_conflict(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Only live endpoint conflicts should make brain HTTP calls available."""
+
+    from fastapi.testclient import TestClient
+
+    from control_console import app as app_module
+    from control_console import repository as repository_module
+    from control_console.auth import hash_operator_token
+    from control_console.contracts import ServiceRuntimeState
+    from control_console.settings import ControlConsoleSettings
+
+    async def application_identity(self):
+        _ = self
+        return {
+            "status": "available",
+            "character_name": "Test Character",
+            "source": "character_state",
+        }
+
+    class StaleConflictSupervisor:
+        def all_service_states(self):
+            state = ServiceRuntimeState(
+                id="brain",
+                display_name="Brain service",
+                kind="backend",
+                actual_state="conflict",
+                last_error_preview="no console-owned process handle",
+            )
+            return [state]
+
+    class FailingKazusaClient:
+        def __init__(self, *, base_url: str, timeout_seconds: float) -> None:
+            _ = base_url
+            _ = timeout_seconds
+
+        async def get_health(self) -> dict:
+            raise AssertionError("stale conflicts must not query brain health")
+
+        async def get_runtime_status(self) -> dict:
+            raise AssertionError("stale conflicts must not query runtime status")
+
+        async def get_latest_cognition_graph(self):
+            raise AssertionError("stale conflicts must not query latest graph")
+
+    monkeypatch.setattr(app_module, "KazusaClient", FailingKazusaClient)
+    monkeypatch.setattr(
+        repository_module.ControlConsoleRepository,
+        "application_identity",
+        application_identity,
+    )
+    settings = ControlConsoleSettings(
+        state_dir=tmp_path,
+        operator_token_hash=hash_operator_token("secret"),
+    )
+    app = app_module.create_app(
+        settings=settings,
+        supervisor=StaleConflictSupervisor(),
+    )
+    client = TestClient(app)
+
+    login = client.post("/api/auth/login", json={"token": "secret"})
+    assert login.status_code == 200
+
+    bootstrap = client.get("/api/bootstrap")
+
+    assert bootstrap.status_code == 200
+    overview = bootstrap.json()["overview"]
+    assert overview["brain_health"]["status"] == "unavailable"
+    assert overview["brain_health"]["reason"] == "brain service is conflict"

@@ -82,18 +82,28 @@ class ProcessStore:
         """Return the stored version for one service."""
 
         snapshot = self.load_snapshot()
-        services = snapshot["services"]
+        services = snapshot.get("services", {})
+        if not isinstance(services, dict):
+            return 0
         service = services.get(service_id, {})
-        version = int(service.get("version", 0))
+        if not isinstance(service, dict):
+            return 0
+        version = _non_negative_int(service.get("version"))
         return version
 
     def _service_record(self, *, snapshot: dict[str, Any], service_id: str) -> dict[str, Any]:
         """Return a mutable service record inside the snapshot."""
 
         services = snapshot.setdefault("services", {})
+        if not isinstance(services, dict):
+            services = {}
+            snapshot["services"] = services
         service = services.setdefault(service_id, {"version": 0})
-        service["version"] = int(service.get("version", 0)) + 1
-        snapshot["version"] = int(snapshot.get("version", 0)) + 1
+        if not isinstance(service, dict):
+            service = {"version": 0}
+            services[service_id] = service
+        service["version"] = _non_negative_int(service.get("version")) + 1
+        snapshot["version"] = _non_negative_int(snapshot.get("version")) + 1
         return service
 
     def _write_snapshot(self, snapshot: dict[str, Any]) -> None:
@@ -105,3 +115,13 @@ class ProcessStore:
             os.replace(self._tmp_path, self._path)
         except OSError as exc:
             raise RuntimeError(f"cannot write process state snapshot: {exc}") from exc
+
+
+def _non_negative_int(value: Any) -> int:
+    """Return a usable local version counter from persisted JSON data."""
+
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int) and value >= 0:
+        return value
+    return 0

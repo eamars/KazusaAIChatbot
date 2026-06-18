@@ -155,3 +155,65 @@ def test_debug_chat_uses_live_unmanaged_brain_endpoint(
     payload = response.json()
     assert payload["brain_available"] is True
     assert payload["response"]["messages"][0]["text"] == "hello operator"
+
+
+def test_debug_chat_rejects_stale_unowned_brain_conflict(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """A stale conflict without a live endpoint must not enable debug chat."""
+
+    from fastapi.testclient import TestClient
+
+    from control_console import app as app_module
+    from control_console.app import create_app
+    from control_console.auth import hash_operator_token
+    from control_console.contracts import ServiceRuntimeState
+    from control_console.settings import ControlConsoleSettings
+
+    class StaleConflictBrainSupervisor:
+        def service_state(self, service_id: str):
+            assert service_id == "brain"
+            state = ServiceRuntimeState(
+                id="brain",
+                display_name="Brain service",
+                kind="backend",
+                actual_state="conflict",
+                last_error_preview="no console-owned process handle",
+            )
+            return state
+
+    class FailingKazusaClient:
+        def __init__(self, *, base_url: str, timeout_seconds: float) -> None:
+            _ = base_url
+            _ = timeout_seconds
+
+        async def send_debug_chat(self, request):
+            _ = request
+            raise AssertionError("stale conflicts must not call debug chat")
+
+    monkeypatch.setattr(app_module, "KazusaClient", FailingKazusaClient)
+    settings = ControlConsoleSettings(
+        state_dir=tmp_path,
+        operator_token_hash=hash_operator_token("secret"),
+    )
+    client = TestClient(
+        create_app(settings=settings, supervisor=StaleConflictBrainSupervisor()),
+    )
+    csrf_header_name, csrf_token = _login(client)
+
+    response = client.post(
+        "/api/debug-chat",
+        headers={csrf_header_name: csrf_token},
+        json={
+            "channel_id": "debug",
+            "user_id": "operator",
+            "user_display_name": "Operator",
+            "message_text": "hello",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["brain_available"] is False
+    assert payload["error"]["code"] == "brain_unavailable"

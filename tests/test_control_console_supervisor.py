@@ -41,6 +41,31 @@ class _FakeProcess:
         return return_code
 
 
+class _HangingProcess(_FakeProcess):
+    """Fake process that ignores graceful termination until killed."""
+
+    def terminate(self) -> None:
+        """Record graceful termination without exiting."""
+
+        self.terminated = True
+
+    def kill(self) -> None:
+        """Record forced termination and exit."""
+
+        self.killed = True
+        self.returncode = -9
+
+    async def wait(self) -> int:
+        """Block long enough for supervisor timeout handling to run."""
+
+        if self.returncode is not None:
+            return_code = self.returncode
+            return return_code
+        await asyncio.sleep(10)
+        return_code = self.returncode if self.returncode is not None else 0
+        return return_code
+
+
 class _FakeStream:
     """Async readline stream for subprocess log-drain tests."""
 
@@ -541,6 +566,241 @@ async def test_stop_refuses_stale_or_unowned_process_metadata(
     assert supervisor.service_state("brain").actual_state == "conflict"
 
 
+def test_service_state_recovers_dead_unowned_conflict_after_restart(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Dead persisted unowned conflicts should not poison a restarted console."""
+
+    from control_console.audit import LocalAuditWriter
+    from control_console.log_store import ProcessLogStore
+    from control_console.process_store import ProcessStore
+    from control_console import supervisor as supervisor_module
+    from control_console.supervisor import ProcessSupervisor
+
+    monkeypatch.setattr(
+        supervisor_module,
+        "_pid_exists",
+        lambda pid: False,
+        raising=False,
+    )
+    store = ProcessStore(tmp_path / "state")
+    store.update_service(
+        "adapter.napcat",
+        {
+            "desired_state": "stopped",
+            "actual_state": "conflict",
+            "pid": 12072,
+            "last_error_preview": "no console-owned process handle",
+        },
+    )
+    supervisor = ProcessSupervisor(
+        services={"adapter.napcat": _service_spec("adapter.napcat", tmp_path)},
+        store=store,
+        log_store=ProcessLogStore(tmp_path / "logs"),
+        audit_writer=LocalAuditWriter(tmp_path / "audit.jsonl"),
+    )
+
+    state = supervisor.service_state("adapter.napcat")
+
+    assert state.actual_state == "stopped"
+    assert state.pid is None
+    assert state.last_error_preview is None
+
+
+def test_service_state_marks_dead_persisted_running_as_crashed(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """A dead owned-looking process from an earlier run should not stay running."""
+
+    from control_console.audit import LocalAuditWriter
+    from control_console.log_store import ProcessLogStore
+    from control_console.process_store import ProcessStore
+    from control_console import supervisor as supervisor_module
+    from control_console.supervisor import ProcessSupervisor
+
+    monkeypatch.setattr(
+        supervisor_module,
+        "_pid_exists",
+        lambda pid: False,
+        raising=False,
+    )
+    store = ProcessStore(tmp_path / "state")
+    store.update_service(
+        "brain",
+        {
+            "desired_state": "running",
+            "actual_state": "running",
+            "pid": 69248,
+            "command_fingerprint": "old-fingerprint",
+            "last_error_preview": None,
+        },
+    )
+    supervisor = ProcessSupervisor(
+        services={"brain": _service_spec("brain", tmp_path)},
+        store=store,
+        log_store=ProcessLogStore(tmp_path / "logs"),
+        audit_writer=LocalAuditWriter(tmp_path / "audit.jsonl"),
+    )
+
+    state = supervisor.service_state("brain")
+
+    assert state.actual_state == "crashed"
+    assert state.pid is None
+    assert state.last_error_preview == (
+        "previous console-owned process is no longer alive"
+    )
+
+
+def test_service_state_normalizes_malformed_snapshot_values(tmp_path) -> None:
+    """Bad local service fields should not break bootstrap projection."""
+
+    import json
+
+    from control_console.audit import LocalAuditWriter
+    from control_console.log_store import ProcessLogStore
+    from control_console.process_store import ProcessStore
+    from control_console.supervisor import ProcessSupervisor
+
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    snapshot = {
+        "version": 1,
+        "services": {
+            "brain": {
+                "desired_state": "bad-desired",
+                "actual_state": "bad-actual",
+                "pid": "not-a-pid",
+                "version": "not-a-version",
+            },
+        },
+    }
+    (state_dir / "services.json").write_text(
+        json.dumps(snapshot),
+        encoding="utf-8",
+    )
+    supervisor = ProcessSupervisor(
+        services={"brain": _service_spec("brain", tmp_path)},
+        store=ProcessStore(state_dir),
+        log_store=ProcessLogStore(tmp_path / "logs"),
+        audit_writer=LocalAuditWriter(tmp_path / "audit.jsonl"),
+    )
+
+    state = supervisor.service_state("brain")
+
+    assert state.desired_state == "stopped"
+    assert state.actual_state == "unknown"
+    assert state.pid is None
+    assert state.version == 0
+
+
+def test_service_state_clears_endpoint_conflict_when_endpoint_is_free(tmp_path) -> None:
+    """Endpoint conflicts should clear after the unmanaged listener exits."""
+
+    from control_console.audit import LocalAuditWriter
+    from control_console.contracts import ServiceSpec
+    from control_console.log_store import ProcessLogStore
+    from control_console.process_store import ProcessStore
+    from control_console.supervisor import (
+        ENDPOINT_CONFLICT_MESSAGE,
+        ProcessSupervisor,
+    )
+
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    port = listener.getsockname()[1]
+    listener.close()
+    store = ProcessStore(tmp_path / "state")
+    store.update_service(
+        "brain",
+        {
+            "actual_state": "conflict",
+            "last_error_preview": ENDPOINT_CONFLICT_MESSAGE,
+            "pid": 81234,
+        },
+    )
+    spec = ServiceSpec.model_validate({
+        "id": "brain",
+        "display_name": "Brain service",
+        "kind": "backend",
+        "command": ["python", "-m", "brain"],
+        "cwd": str(tmp_path),
+        "health_url": f"http://127.0.0.1:{port}/health",
+    })
+    supervisor = ProcessSupervisor(
+        services={"brain": spec},
+        store=store,
+        log_store=ProcessLogStore(tmp_path / "logs"),
+        audit_writer=LocalAuditWriter(tmp_path / "audit.jsonl"),
+    )
+
+    state = supervisor.service_state("brain")
+
+    assert state.actual_state == "stopped"
+    assert state.pid is None
+    assert state.last_error_preview is None
+
+
+@pytest.mark.asyncio
+async def test_stop_kills_child_after_shutdown_timeout(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """A child that ignores terminate should not block console shutdown."""
+
+    from control_console.audit import LocalAuditWriter
+    from control_console.contracts import ServiceSpec
+    from control_console.log_store import ProcessLogStore
+    from control_console.process_store import ProcessStore
+    from control_console.supervisor import ProcessSupervisor
+
+    processes: list[_HangingProcess] = []
+
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        del args, kwargs
+        process = _HangingProcess()
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(
+        asyncio,
+        "create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+    spec = ServiceSpec.model_validate({
+        "id": "brain",
+        "display_name": "Brain service",
+        "kind": "backend",
+        "command": ["python", "-m", "brain"],
+        "cwd": str(tmp_path),
+        "shutdown_timeout_seconds": 0.01,
+    })
+    supervisor = ProcessSupervisor(
+        services={"brain": spec},
+        store=ProcessStore(tmp_path / "state"),
+        log_store=ProcessLogStore(tmp_path / "logs"),
+        audit_writer=LocalAuditWriter(tmp_path / "audit.jsonl"),
+    )
+
+    await supervisor.start_service(
+        service_id="brain",
+        operator_id="operator",
+        reason="start hanging child",
+    )
+    await supervisor.stop_service(
+        service_id="brain",
+        operator_id="operator",
+        reason="stop hanging child",
+    )
+
+    assert processes[0].terminated is True
+    assert processes[0].killed is True
+    state = supervisor.service_state("brain")
+    assert state.actual_state == "stopped"
+    assert state.exit_code == -9
+
+
 @pytest.mark.asyncio
 async def test_shutdown_and_crash_refresh_cover_owned_process_edges(
     monkeypatch,
@@ -638,16 +898,37 @@ async def test_log_drain_and_task_cleanup_edge_paths(tmp_path) -> None:
     assert pending_task.cancelled() or pending_task.cancelling()
 
 
-def test_supervisor_small_helper_edges() -> None:
+def test_supervisor_small_helper_edges(monkeypatch) -> None:
     """Small helper branches should stay explicit and covered."""
 
+    from control_console import supervisor as supervisor_module
     from control_console.supervisor import (
+        _actual_state,
         _endpoint_is_listening,
         _endpoint_port,
+        _non_negative_int,
+        _optional_int,
+        _pid_exists,
+        _pid_or_none,
         _resolve_cwd,
     )
 
     assert _resolve_cwd(None) is None
+    assert _actual_state("starting") == "starting"
+    assert _actual_state("stopping") == "stopping"
+    assert _actual_state("unhealthy") == "unhealthy"
+    assert _pid_or_none(True) is None
+    assert _optional_int(True) is None
+    assert _non_negative_int(True) == 0
+    assert _pid_exists(0) is False
+
+    def raise_permission_error(pid, signal_value) -> None:
+        del pid, signal_value
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(supervisor_module.os, "kill", raise_permission_error)
+    assert _pid_exists(1234) is True
+
     assert _endpoint_port("https", None) == 443
     assert _endpoint_port("http", None) == 80
     with pytest.raises(ValueError):

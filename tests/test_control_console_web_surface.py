@@ -196,14 +196,17 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert "Brain endpoint already running outside the console" in (
         script.text
     )
+    assert "Brain has a stale lifecycle conflict" in script.text
     assert '["conflict", "crashed", "unhealthy"].includes(status)' in script.text
-    assert 'brainState === "conflict"' in script.text
+    assert "function isEndpointConflict" in script.text
+    assert "function isServiceHttpAvailable" in script.text
+    assert "ENDPOINT_CONFLICT_MESSAGE" in script.text
     assert "function dependenciesAvailable" in script.text
-    assert '["running", "conflict"].includes(serviceStatus(serviceId))' in (
+    assert 'dependency.actual_state === "running" || isEndpointConflict(dependency)' in (
         script.text
     )
     assert "renderDebugAvailability()" in script.text
-    assert "isBrainHttpAvailable(brainState)" in script.text
+    assert "isServiceHttpAvailable(brainService)" in script.text
     assert 'form.get("debug_mode")' in script.text
     assert 'form.getAll("debug_modes")' in script.text
     assert "payload.debug_modes = debugModes" in script.text

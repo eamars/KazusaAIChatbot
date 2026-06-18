@@ -52,3 +52,64 @@ def test_state_store_reports_invalid_json_and_write_failures(
     monkeypatch.setattr(process_store_module.os, "replace", fail_replace)
     with pytest.raises(RuntimeError, match="cannot write"):
         store.set_desired_state("brain", "running")
+
+
+def test_state_store_normalizes_malformed_version_counters(tmp_path) -> None:
+    """Malformed local counters should not break version reads or writes."""
+
+    import json
+
+    from control_console.process_store import ProcessStore
+
+    snapshot = {
+        "version": "bad-snapshot-version",
+        "services": {
+            "brain": {
+                "version": "bad-service-version",
+            },
+        },
+    }
+    (tmp_path / "services.json").write_text(
+        json.dumps(snapshot),
+        encoding="utf-8",
+    )
+    store = ProcessStore(tmp_path)
+
+    assert store.service_version("brain") == 0
+
+    store.set_desired_state("brain", "running")
+    recovered = store.load_snapshot()
+
+    assert recovered["version"] == 1
+    assert recovered["services"]["brain"]["version"] == 1
+    assert recovered["services"]["brain"]["desired_state"] == "running"
+
+    bad_services = {
+        "version": "bad-snapshot-version",
+        "services": "bad-services-shape",
+    }
+    (tmp_path / "services.json").write_text(
+        json.dumps(bad_services),
+        encoding="utf-8",
+    )
+    assert store.service_version("brain") == 0
+    store.set_desired_state("brain", "stopped")
+    recovered = store.load_snapshot()
+    assert recovered["version"] == 1
+    assert recovered["services"]["brain"]["version"] == 1
+
+    bad_service_record = {
+        "version": 1,
+        "services": {
+            "brain": "bad-service-record",
+        },
+    }
+    (tmp_path / "services.json").write_text(
+        json.dumps(bad_service_record),
+        encoding="utf-8",
+    )
+    assert store.service_version("brain") == 0
+    store.set_desired_state("brain", "running")
+    recovered = store.load_snapshot()
+    assert recovered["version"] == 2
+    assert recovered["services"]["brain"]["version"] == 1

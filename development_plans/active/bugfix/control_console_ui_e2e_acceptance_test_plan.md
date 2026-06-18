@@ -936,6 +936,88 @@ The final report must include:
 - Decision for next iteration:
   - No next iteration required for the current acceptance scope.
 
+### Iteration 9 - 2026-06-18 11:54 local
+
+- Objective: Re-test and harden stale persisted process state, stale conflict
+  availability, shutdown timeout, malformed local stores, and measured coverage
+  after the port-conflict/state persistence failure mode surfaced.
+- Environment:
+  - Console URL: isolated pytest loopback URLs
+  - Browser: Browser plugin attempted first; fallback to Python Playwright
+    because the in-app `iab` browser was unavailable in this session
+  - Brain mode: fake HTTP brain for normal E2E; opt-in real brain/debug/NapCat
+    lifecycle executed through the web UI
+  - Adapter mode: fake registry for normal E2E; real debug and NapCat paths
+    executed in opt-in lifecycle E2E
+- Test slices run:
+  - `venv\Scripts\python.exe -m pytest tests\control_console_e2e -q`
+  - `$env:KAZUSA_RUN_REAL_CONTROL_CONSOLE_E2E='1'; venv\Scripts\python.exe -m pytest tests\control_console_e2e\test_real_service_lifecycle_e2e.py -q`
+  - PowerShell-expanded deterministic coverage command over
+    `tests/test_control_console_*.py`, `tests/test_console_debug_chat.py`, and
+    `tests/test_console_lookup_limits.py` with
+    `--cov=control_console --cov-fail-under=95`
+  - `node --check src\control_console\static\console.js`
+- Coverage:
+  - control_console line coverage: 95.23%
+  - changed integration line coverage: covered by deterministic tests plus
+    Chrome E2E
+  - full-repo line coverage: not measured
+- Product conclusion:
+  - pass for the currently implemented desktop Chrome control-console
+    acceptance scope
+- Human-review readiness:
+  - acceptable for the tested scope
+- Consolidated findings:
+  - Finding 1:
+    - User-visible symptom: a stale persisted conflict could make the UI treat
+      an unavailable brain as HTTP-available, causing stale status and broken
+      debug/lifecycle behavior after process restarts or conflicts.
+    - Reproduction: deterministic stale-conflict bootstrap and debug-chat
+      regressions.
+    - Root cause: conflict state did not distinguish real endpoint conflicts
+      from stale ownership conflicts.
+    - Fix status: fixed; only `ENDPOINT_CONFLICT_MESSAGE` conflicts are treated
+      as HTTP-available.
+  - Finding 2:
+    - User-visible symptom: stale persisted `running` or unowned conflict state
+      could survive process death and poison UI/service state after restart.
+    - Reproduction: supervisor persisted-state regressions.
+    - Root cause: persisted process records were not reconciled against live
+      process existence when the new console process had no child handle.
+    - Fix status: fixed; dead persisted records are cleared or marked crashed.
+  - Finding 3:
+    - User-visible symptom: malformed local JSONL/state rows could break
+      rendered logs/audit or service projection.
+    - Reproduction: malformed process log, audit log, service snapshot, and
+      version-counter regressions.
+    - Root cause: local persistence readers assumed every existing row/field
+      was valid.
+    - Fix status: fixed; malformed optional rows are skipped and malformed
+      service state fields are normalized.
+  - Finding 4:
+    - User-visible symptom: a child process that ignored terminate could keep
+      the console shutdown path stuck.
+    - Reproduction: hanging subprocess regression.
+    - Root cause: stop waited indefinitely for graceful process exit.
+    - Fix status: fixed; shutdown timeout kills the child after the configured
+      grace period.
+- Error paths exercised:
+  - stale conflict bootstrap, stale conflict debug chat, malformed local log and
+    audit rows, malformed service snapshot fields, malformed version counters,
+    hanging child shutdown, debug-chat unavailable/500 paths from existing E2E
+- Lifecycle paths exercised:
+  - fake registry lifecycle by default; opt-in real brain start/stop, debug
+    adapter start/stop, NapCat visible start/failure state, and web debug chat
+    send path
+- Graph paths exercised:
+  - overview graph update from latest brain run, debug chat graph update,
+    refresh/page-switch correctness, SSE invalidation
+- Raw artifact directory:
+  - not created for this iteration; consolidated command results are recorded
+    here
+- Decision for next iteration:
+  - No next iteration required for the current surfaced issue set.
+
 ## Approval Boundary
 
 The user approved execution on 2026-06-18. Production-code changes remain

@@ -8,6 +8,8 @@ from typing import Literal
 import json
 import uuid
 
+from pydantic import ValidationError
+
 from control_console.contracts import ProcessLogLine
 from control_console.redaction import redact_text
 
@@ -64,11 +66,16 @@ class ProcessLogStore:
             raise RuntimeError(f"cannot read process log: {exc}") from exc
 
         selected_lines = raw_lines[-limit:]
-        lines = [
-            ProcessLogLine.model_validate(json.loads(line))
-            for line in selected_lines
-            if line.strip()
-        ]
+        lines: list[ProcessLogLine] = []
+        for line in selected_lines:
+            if not line.strip():
+                continue
+            try:
+                payload = json.loads(line)
+                log_line = ProcessLogLine.model_validate(payload)
+            except (json.JSONDecodeError, ValidationError):
+                continue
+            lines.append(log_line)
         return lines
 
     def _path_for(self, service_id: str) -> Path:

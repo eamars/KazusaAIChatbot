@@ -49,7 +49,11 @@ from control_console.repository import ControlConsoleRepository
 from control_console.service_registry import load_service_registry
 from control_console.settings import ControlConsoleSettings
 from control_console.stream import SSEEventBuffer, encode_sse_event
-from control_console.supervisor import ProcessSupervisor, ServiceLifecycleError
+from control_console.supervisor import (
+    ENDPOINT_CONFLICT_MESSAGE,
+    ProcessSupervisor,
+    ServiceLifecycleError,
+)
 
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -220,8 +224,13 @@ def create_app(
         """Return the initial UI snapshot."""
 
         states = _all_service_states(app_supervisor, services)
-        brain_state = _service_actual_state(states, service_id="brain")
-        brain_http_available = _brain_http_available(brain_state)
+        brain_record = _service_state_record(states, service_id="brain")
+        brain_state = _service_actual_state(brain_record)
+        brain_error = _service_last_error_preview(brain_record)
+        brain_http_available = _brain_http_available(
+            brain_state,
+            last_error_preview=brain_error,
+        )
         brain_health: dict[str, Any]
         runtime_status: dict[str, Any]
         if brain_http_available:
@@ -467,8 +476,13 @@ def create_app(
 
         _ = operator
         request_id = f"cc-req-{uuid.uuid4().hex[:12]}"
-        brain_state = _service_state_for_debug(app_supervisor, services)
-        if not _brain_http_available(brain_state):
+        brain_record = _service_state_for_debug(app_supervisor, services)
+        brain_state = _service_actual_state(brain_record)
+        brain_error = _service_last_error_preview(brain_record)
+        if not _brain_http_available(
+            brain_state,
+            last_error_preview=brain_error,
+        ):
             audit_writer.write_event(
                 event_type="debug_chat_unavailable",
                 operator_id=operator.operator_id,
@@ -766,11 +780,16 @@ async def _stream_console_events(
         if await request.is_disconnected():
             break
         current_states = _all_service_states(supervisor, services)
-        current_brain_state = _service_actual_state(
+        current_brain_record = _service_state_record(
             current_states,
             service_id="brain",
         )
-        if _brain_http_available(current_brain_state):
+        current_brain_state = _service_actual_state(current_brain_record)
+        current_brain_error = _service_last_error_preview(current_brain_record)
+        if _brain_http_available(
+            current_brain_state,
+            last_error_preview=current_brain_error,
+        ):
             latest_cognition_graph_state["run_id"] = await (
                 _append_cognition_graph_invalidation_if_changed(
                     kazusa_client=kazusa_client,
@@ -1097,26 +1116,58 @@ def _all_service_states(supervisor: Any, services: dict[str, Any]) -> list[Any]:
     return states
 
 
-def _service_actual_state(states: list[Any], *, service_id: str) -> str:
-    """Return the actual state for one service from a mixed state list."""
+def _service_state_record(states: list[Any], *, service_id: str) -> Any | None:
+    """Return one service state record from a mixed state list."""
 
     for state in states:
         if isinstance(state, dict):
             state_id = state.get("id")
-            actual_state = state.get("actual_state", "unknown")
         else:
             state_id = getattr(state, "id", "")
-            actual_state = getattr(state, "actual_state", "unknown")
         if state_id == service_id:
-            state_text = str(actual_state)
-            return state_text
-    return "unavailable"
+            return state
+    return None
 
 
-def _brain_http_available(actual_state: str) -> bool:
+def _service_actual_state(state: Any | None) -> str:
+    """Return the actual state from a dict, model, or missing record."""
+
+    if state is None:
+        return "unavailable"
+    if isinstance(state, dict):
+        actual_state = state.get("actual_state", "unknown")
+    else:
+        actual_state = getattr(state, "actual_state", "unknown")
+    state_text = str(actual_state)
+    return state_text
+
+
+def _service_last_error_preview(state: Any | None) -> str:
+    """Return one service state's bounded error preview."""
+
+    if state is None:
+        return ""
+    if isinstance(state, dict):
+        last_error_preview = state.get("last_error_preview") or ""
+    else:
+        last_error_preview = getattr(state, "last_error_preview", "") or ""
+    error_text = str(last_error_preview)
+    return error_text
+
+
+def _brain_http_available(
+    actual_state: str,
+    *,
+    last_error_preview: str = "",
+) -> bool:
     """Return whether the configured brain HTTP API may be queried."""
 
-    is_available = actual_state in {"running", "conflict"}
+    if actual_state == "running":
+        return True
+    is_available = (
+        actual_state == "conflict"
+        and last_error_preview == ENDPOINT_CONFLICT_MESSAGE
+    )
     return is_available
 
 
@@ -1183,13 +1234,12 @@ def _page_capabilities() -> dict[str, dict[str, Any]]:
     return capabilities
 
 
-def _service_state_for_debug(supervisor: Any, services: dict[str, Any]) -> str:
-    """Return the current brain actual state for debug-chat availability."""
+def _service_state_for_debug(supervisor: Any, services: dict[str, Any]) -> Any | None:
+    """Return the current brain state for debug-chat availability."""
 
     if "brain" not in services:
-        return "unavailable"
+        return None
     if hasattr(supervisor, "service_state"):
         state = supervisor.service_state("brain")
-        actual_state = getattr(state, "actual_state", "stopped")
-        return actual_state
-    return "stopped"
+        return state
+    return None

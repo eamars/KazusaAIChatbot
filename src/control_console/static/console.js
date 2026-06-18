@@ -11,6 +11,7 @@ const state = {
 };
 
 const THEME_STORAGE_KEY = "kazusa-control-theme";
+const ENDPOINT_CONFLICT_MESSAGE = "configured endpoint is already in use by an unmanaged process";
 const LEGACY_THEME_NAMES = {
   expo: "dark",
   ollama: "bright",
@@ -108,7 +109,8 @@ function badgeClass(status) {
 }
 
 function renderShellStatus(payload) {
-  const brainState = serviceStatus("brain");
+  const brainService = serviceById("brain");
+  const brainState = brainService ? brainService.actual_state : "unavailable";
   const dot = qs(".status-dot");
   const statusText = qs("#shell-status-text");
   if (!state.isAuthenticated) {
@@ -123,8 +125,12 @@ function renderShellStatus(payload) {
     statusText.textContent = `Brain running; ${streamState}.`;
     return;
   }
-  if (brainState === "conflict") {
+  if (isEndpointConflict(brainService)) {
     statusText.textContent = "Brain endpoint already running outside the console; lifecycle is unmanaged.";
+    return;
+  }
+  if (brainState === "conflict") {
+    statusText.textContent = "Brain has a stale lifecycle conflict; inspect Services.";
     return;
   }
   if (brainState === "unavailable") {
@@ -134,15 +140,25 @@ function renderShellStatus(payload) {
   statusText.textContent = `Brain ${brainState}; lifecycle controls available.`;
 }
 
-function isBrainHttpAvailable(brainState) {
-  return ["running", "conflict"].includes(brainState);
+function isEndpointConflict(service) {
+  return Boolean(service)
+    && service.actual_state === "conflict"
+    && service.last_error_preview === ENDPOINT_CONFLICT_MESSAGE;
+}
+
+function isServiceHttpAvailable(service) {
+  return Boolean(service)
+    && (service.actual_state === "running" || isEndpointConflict(service));
 }
 
 function renderDebugAvailability() {
-  const brainState = serviceStatus("brain");
-  const available = state.isAuthenticated && isBrainHttpAvailable(brainState);
+  const brainService = serviceById("brain");
+  const brainState = brainService ? brainService.actual_state : "unavailable";
+  const available = state.isAuthenticated && isServiceHttpAvailable(brainService);
   const statusBadge = qs("#debug-brain-status");
-  statusBadge.textContent = brainState === "conflict" ? "brain unmanaged" : `brain ${brainState}`;
+  statusBadge.textContent = isEndpointConflict(brainService)
+    ? "brain unmanaged"
+    : `brain ${brainState}`;
   statusBadge.className = available ? "badge success" : "badge";
   qsa("[data-debug-input]").forEach((control) => {
     control.disabled = !available;
@@ -438,13 +454,21 @@ function renderHealth(overview) {
     : `<tr><td>Status</td><td>${escapeHtml(runtime.reason || "runtime status not available")}</td></tr>`;
 }
 
+function serviceById(serviceId) {
+  return state.services.find((item) => item.id === serviceId);
+}
+
 function serviceStatus(serviceId) {
-  const service = state.services.find((item) => item.id === serviceId);
+  const service = serviceById(serviceId);
   return service ? service.actual_state : "unavailable";
 }
 
 function dependenciesAvailable(service) {
-  return (service.dependencies || []).every((serviceId) => ["running", "conflict"].includes(serviceStatus(serviceId)));
+  return (service.dependencies || []).every((serviceId) => {
+    const dependency = serviceById(serviceId);
+    return Boolean(dependency)
+      && (dependency.actual_state === "running" || isEndpointConflict(dependency));
+  });
 }
 
 function serviceActionEnabled(service, action) {
