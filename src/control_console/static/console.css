@@ -118,6 +118,9 @@ body[data-auth-state="authenticated"] #login-form { display: none; }
 .badge.success { color: var(--success); background: color-mix(in srgb, var(--success) 12%, var(--panel)); border-color: transparent; }
 .badge.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, var(--panel)); border-color: transparent; }
 .badge.danger { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, var(--panel)); border-color: transparent; }
+.badge.pending { color: var(--muted); background: var(--panel); border-color: var(--line-strong); }
+.badge.terminal { color: var(--muted); background: color-mix(in srgb, var(--muted) 7%, var(--panel)); border-style: dashed; border-color: var(--line-strong); }
+.badge.selected { color: var(--primary-ink); background: var(--primary); border-color: var(--primary); }
 .badge-stack { display: flex; align-items: flex-end; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .btn, .input, .textarea { min-height: 36px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--panel); color: var(--ink); padding: 8px 13px; }
 .btn { font-size: 13px; font-weight: 500; }
@@ -163,9 +166,9 @@ body[data-auth-state="authenticated"] #login-form { display: none; }
 .cognition-graph-stage { display: grid; min-height: 260px; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--panel-soft); overflow: hidden; }
 .graph-stage-rail { display: grid; grid-template-columns: repeat(var(--graph-columns), minmax(0, 1fr)); gap: 12px; align-items: stretch; min-width: 0; }
 .graph-stage-group { position: relative; min-width: 0; display: grid; grid-template-rows: auto 1fr auto; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--panel); box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 5%, transparent); }
-.graph-stage-group.status-running { border-color: color-mix(in srgb, var(--warn) 36%, var(--line-strong)); }
-.graph-stage-group.status-failed { border-color: color-mix(in srgb, var(--danger) 42%, var(--line-strong)); }
-.graph-stage-group.status-completed { border-color: color-mix(in srgb, var(--success) 28%, var(--line)); }
+.graph-stage-group.status-running { border-color: color-mix(in srgb, var(--warn) 32%, var(--line-strong)); background: color-mix(in srgb, var(--warn) 3%, var(--panel)); }
+.graph-stage-group.status-failed { border-color: color-mix(in srgb, var(--danger) 36%, var(--line-strong)); }
+.graph-stage-group.status-terminated { border-style: dashed; border-color: var(--line-strong); background: color-mix(in srgb, var(--muted) 4%, var(--panel)); }
 .graph-stage-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; min-width: 0; }
 .graph-stage-header div { display: grid; gap: 2px; min-width: 0; }
 .graph-stage-header span:first-child, .graph-stage-meta { color: var(--muted); font-size: 11px; text-transform: uppercase; }
@@ -174,17 +177,31 @@ body[data-auth-state="authenticated"] #login-form { display: none; }
 .graph-branch-stack { display: grid; align-content: start; gap: 8px; min-width: 0; }
 .graph-connector { position: absolute; top: 32px; right: -13px; z-index: 2; width: 13px; border-top: 1px solid var(--line-strong); }
 .graph-connector::after { content: ""; position: absolute; top: -4px; right: 0; width: 7px; height: 7px; border-top: 1px solid var(--line-strong); border-right: 1px solid var(--line-strong); transform: rotate(45deg); background: transparent; }
+.graph-connector.status-running { border-top-color: var(--warn); }
+.graph-connector.status-running::after { border-top-color: var(--warn); border-right-color: var(--warn); }
+.graph-connector.status-failed { border-top-color: var(--danger); }
+.graph-connector.status-failed::after { border-top-color: var(--danger); border-right-color: var(--danger); }
+.graph-connector.status-terminated { border-top-style: dashed; border-top-color: var(--muted); }
+.graph-connector.status-terminated::after { border-top-color: var(--muted); border-right-color: var(--muted); }
 .graph-node { position: relative; z-index: 1; min-height: 96px; min-width: 0; display: grid; gap: 5px; align-content: start; border: 1px solid var(--line-strong); border-left-width: 4px; border-radius: var(--radius-card); background: var(--panel); color: var(--ink); padding: 10px 12px; text-align: left; box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 6%, transparent); }
 .graph-node strong { font-size: 13px; overflow-wrap: anywhere; }
-.graph-node.status-running { border-color: color-mix(in srgb, var(--warn) 42%, var(--line-strong)); border-left-color: var(--warn); }
-.graph-node.status-completed { border-color: color-mix(in srgb, var(--success) 42%, var(--line-strong)); border-left-color: var(--success); }
+.graph-node.status-running { border-color: color-mix(in srgb, var(--warn) 42%, var(--line-strong)); border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 4%, var(--panel)); }
+.graph-node.status-completed { border-color: var(--line-strong); border-left-color: var(--success); }
 .graph-node.status-failed { border-color: color-mix(in srgb, var(--danger) 48%, var(--line-strong)); border-left-color: var(--danger); }
-.graph-node.is-current { box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 20%, transparent), 0 1px 2px color-mix(in srgb, var(--ink) 8%, transparent); }
-.graph-node.is-selected { outline: 2px solid color-mix(in srgb, var(--primary) 44%, transparent); outline-offset: 2px; }
+.graph-node.status-skipped { border-style: dashed; border-left-style: solid; border-left-color: var(--muted); background: color-mix(in srgb, var(--muted) 5%, var(--panel)); }
+.graph-node.status-pending { border-style: dotted; border-left-style: solid; border-left-color: var(--line-strong); }
+.graph-node.is-current { scroll-margin: 12px; }
+.graph-node.status-running.is-current { box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 18%, transparent), 0 1px 2px color-mix(in srgb, var(--ink) 8%, transparent); }
+.graph-node.is-selected { outline: 2px solid var(--primary); outline-offset: 3px; box-shadow: 0 0 0 5px color-mix(in srgb, var(--primary) 12%, transparent), 0 1px 2px color-mix(in srgb, var(--ink) 8%, transparent); }
 .graph-node.is-highlighted:not(.is-current) { background: color-mix(in srgb, var(--warn) 6%, var(--panel)); }
+.node-header { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
 .node-stage { width: fit-content; border-radius: 9999px; background: var(--primary); color: var(--primary-ink); padding: 2px 7px; font-size: 11px; font-weight: 600; }
+.node-status, .node-selected-badge { min-height: 20px; padding: 2px 7px; font-size: 11px; }
+.node-status { margin-left: auto; gap: 6px; }
+.graph-node.status-running .node-status::before { content: ""; width: 6px; height: 6px; border-radius: 9999px; background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 14%, transparent); }
 .node-meta { display: inline-flex; gap: 6px; flex-wrap: wrap; color: var(--muted); font-size: 12px; }
 .node-summary { color: var(--muted); font-size: 12px; line-height: 1.4; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.graph-node.is-terminal .node-summary, .graph-node.status-pending .node-summary { color: var(--muted); }
 .graph-inspector { position: sticky; top: 12px; display: grid; gap: 12px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--panel); color: var(--ink); }
 .graph-inspector-header { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
 .graph-inspector-header div { display: grid; gap: 3px; min-width: 0; }

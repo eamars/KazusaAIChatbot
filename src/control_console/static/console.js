@@ -457,6 +457,7 @@ function cognitionGraphFocusKind(graphStatus, node) {
   if (graphStatus === "completed" && node.status === "completed") return "final";
   if (node.status === "failed") return "failed";
   if (node.status === "running") return "current";
+  if (node.status === "skipped") return "terminated";
   return "selected";
 }
 
@@ -509,10 +510,18 @@ function setCognitionGraphPinnedNode(source, runId, nodeId) {
 }
 
 function cognitionGraphStatusBadgeClass(status) {
-  if (status === "completed") return "badge success";
-  if (status === "failed") return "badge danger";
-  if (status === "running" || status === "partial") return "badge warn";
+  const label = cognitionGraphStatusLabel(status);
+  if (label === "completed") return "badge success";
+  if (label === "failed") return "badge danger";
+  if (label === "running" || label === "partial") return "badge warn";
+  if (label === "terminated") return "badge terminal";
+  if (label === "pending") return "badge pending";
   return "badge";
+}
+
+function cognitionGraphStatusLabel(status) {
+  if (status === "skipped" || status === "terminated") return "terminated";
+  return String(status || "not_reported").replaceAll("_", " ");
 }
 
 function cognitionGraphFreshnessLabel(ageMs, stale) {
@@ -549,7 +558,7 @@ function cognitionGraphLatestEvent(node, edges, nodes) {
 
 function cognitionGraphSummaryMarkup(model) {
   const current = model.currentNode;
-  const status = String(model.graph.status || "not_reported").replaceAll("_", " ");
+  const status = cognitionGraphStatusLabel(model.graph.status || "not_reported");
   const currentLabel = current
     ? `${model.focusKind} · ${current.stage || "stage"} · ${current.label || current.id}`
     : "no current node";
@@ -621,7 +630,12 @@ function cognitionGraphGroupStatus(nodes) {
   if (nodes.some((node) => node.status === "failed")) return "failed";
   if (nodes.some((node) => node.status === "pending")) return "pending";
   if (nodes.every((node) => node.status === "completed")) return "completed";
-  if (nodes.every((node) => node.status === "skipped")) return "skipped";
+  if (
+    nodes.some((node) => node.status === "skipped")
+    && nodes.every((node) => node.status === "completed" || node.status === "skipped")
+  ) {
+    return "terminated";
+  }
   return "partial";
 }
 
@@ -635,7 +649,7 @@ function cognitionGraphStageGroupMarkup(group, model, index, groups) {
           <span>Step ${escapeHtml(group.column)}</span>
           <strong>${escapeHtml(group.title)}</strong>
         </div>
-        <span class="${escapeHtml(cognitionGraphStatusBadgeClass(group.status))}" data-component="Badge">${escapeHtml(group.status.replaceAll("_", " "))}</span>
+        <span class="${escapeHtml(cognitionGraphStatusBadgeClass(group.status))}" data-component="Badge">${escapeHtml(cognitionGraphStatusLabel(group.status))}</span>
       </div>
       <div class="graph-branch-stack">
         ${nodes}
@@ -648,19 +662,35 @@ function cognitionGraphStageGroupMarkup(group, model, index, groups) {
 
 function cognitionGraphConnectorMarkup(index, groups) {
   if (index >= groups.length - 1) return "";
-  return '<span class="graph-connector" aria-hidden="true"></span>';
+  const status = cognitionGraphConnectorStatus(groups[index], groups[index + 1]);
+  return `<span class="graph-connector status-${escapeHtml(status)}" aria-hidden="true"></span>`;
+}
+
+function cognitionGraphConnectorStatus(group, nextGroup) {
+  if (nextGroup?.status === "terminated" || group?.status === "terminated") return "terminated";
+  if (group?.status === "failed" || nextGroup?.status === "failed") return "failed";
+  if (group?.status === "running" || nextGroup?.status === "running") return "running";
+  return "default";
 }
 
 function cognitionGraphNodeMarkup(node, model) {
   const status = node.status || "not_reported";
+  const statusLabel = cognitionGraphStatusLabel(status);
   const selected = model.selectedNode && model.selectedNode.id === node.id;
   const highlighted = model.highlightedIds.has(node.id);
   const current = model.currentNode && model.currentNode.id === node.id;
   const summary = cognitionGraphNodeSummary(node);
   const branch = node.branch ? `<span>${escapeHtml(node.branch)}</span>` : "";
+  const selectedBadge = selected
+    ? '<span class="badge selected node-selected-badge" data-component="Badge">selected</span>'
+    : "";
   return `
-    <button class="graph-node status-${escapeHtml(status)}${current ? " is-current" : ""}${selected ? " is-selected" : ""}${highlighted ? " is-highlighted" : ""}" type="button" data-graph-node data-node-id="${escapeHtml(node.id)}" aria-pressed="${selected ? "true" : "false"}" title="${escapeHtml(summary)}">
-      <span class="node-stage">${escapeHtml(node.stage || "stage")}</span>
+    <button class="graph-node status-${escapeHtml(status)}${statusLabel === "terminated" ? " is-terminal" : ""}${current ? " is-current" : ""}${selected ? " is-selected" : ""}${highlighted ? " is-highlighted" : ""}" type="button" data-graph-node data-node-id="${escapeHtml(node.id)}" aria-pressed="${selected ? "true" : "false"}" title="${escapeHtml(summary)}">
+      <span class="node-header">
+        <span class="node-stage">${escapeHtml(node.stage || "stage")}</span>
+        <span class="${escapeHtml(cognitionGraphStatusBadgeClass(status))} node-status" data-component="Badge">${escapeHtml(statusLabel)}</span>
+        ${selectedBadge}
+      </span>
       <strong>${escapeHtml(node.label || node.id)}</strong>
       <span class="node-meta"><span>${escapeHtml(node.lane || "cognition")}</span>${branch}</span>
       <span class="node-summary">${escapeHtml(summary)}</span>
@@ -687,7 +717,7 @@ function cognitionGraphInspectorMarkup(model) {
           <span>${escapeHtml(model.pinned ? "Selected node detail" : `${model.focusKind[0].toUpperCase()}${model.focusKind.slice(1)} node detail`)}</span>
           <strong>${escapeHtml(title)}</strong>
         </div>
-        <span class="${escapeHtml(cognitionGraphStatusBadgeClass(node?.status || "not_reported"))}" data-component="Badge">${escapeHtml((node?.status || "not_reported").replaceAll("_", " "))}</span>
+        <span class="${escapeHtml(cognitionGraphStatusBadgeClass(node?.status || "not_reported"))}" data-component="Badge">${escapeHtml(cognitionGraphStatusLabel(node?.status || "not_reported"))}</span>
       </div>
       <div class="graph-inspector-rows">${rows}</div>
       <div class="graph-inspector-actions">
