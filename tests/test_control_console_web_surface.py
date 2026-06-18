@@ -253,6 +253,18 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert "function renderCognitionGraph" in script.text
     assert "function renderOverviewCognitionGraph" in script.text
     assert "function renderDebugCognitionGraph" in script.text
+    assert "function cognitionGraphModel" in script.text
+    assert "function cognitionGraphCurrentNode" in script.text
+    assert "function cognitionGraphInspectorMarkup" in script.text
+    assert "function setCognitionGraphPinnedNode" in script.text
+    assert "GRAPH_STALE_AFTER_MS = 10000" in script.text
+    assert "Return to current" in script.text
+    assert "data-graph-current-node-id" in script.text
+    assert "data-graph-selected-node-id" in script.text
+    assert "graph-inspector" in script.text
+    assert "graph-run-summary" in script.text
+    assert "graph-lane-row" in script.text
+    assert "is-current" in script.text
     assert "control.cognition_graph_invalidated" in script.text
     assert "function openServiceConfig" in script.text
     assert "function renderServiceConfigDialog" in script.text
@@ -274,6 +286,18 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert '.status-dot[data-state="conflict"]' in stylesheet.text
     assert ".cognition-graph" in stylesheet.text
     assert ".graph-node:focus-within .node-detail" in stylesheet.text
+    assert ".cognition-graph-shell" in stylesheet.text
+    assert ".graph-run-summary" in stylesheet.text
+    assert ".graph-body" in stylesheet.text
+    assert ".graph-inspector" in stylesheet.text
+    assert ".graph-lane-row" in stylesheet.text
+    assert ".graph-node.is-current" in stylesheet.text
+    assert ".graph-node.is-selected" in stylesheet.text
+    assert ".graph-node .node-detail" in stylesheet.text
+    assert (
+        "grid-template-columns: minmax(0, 1fr) minmax(min(300px, 100%), 0.38fr)"
+        in stylesheet.text
+    )
     assert ".notice[data-tone=\"danger\"]" in stylesheet.text
     assert 'body[data-auth-state="authenticated"] #login-form' in stylesheet.text
     assert "--nav-active-bg:" in stylesheet.text

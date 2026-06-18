@@ -18,11 +18,13 @@ const state = {
   logStreamRevision: 0,
   logPaused: false,
   logDroppedLocal: 0,
+  cognitionGraphPins: {},
   isAuthenticated: false,
 };
 
 const THEME_STORAGE_KEY = "kazusa-control-theme";
 const LOG_ROW_LIMIT = 500;
+const GRAPH_STALE_AFTER_MS = 10000;
 const ENDPOINT_CONFLICT_MESSAGE = "configured endpoint is already in use by an unmanaged process";
 const LEGACY_THEME_NAMES = {
   expo: "dark",
@@ -362,9 +364,7 @@ function renderCognitionGraph({containerSelector, statusSelector, snapshot, empt
   const edges = Array.isArray(graph.edges) ? graph.edges : [];
   const graphStatus = graph.status || "not_reported";
   status.textContent = graphStatus.replaceAll("_", " ");
-  status.className = graphStatus === "completed" || graphStatus === "running"
-    ? "badge success"
-    : "badge";
+  status.className = cognitionGraphStatusBadgeClass(graphStatus);
 
   if (!nodes.length) {
     container.innerHTML = `<p class="graph-empty">${escapeHtml(emptyMessage)}</p>`;
@@ -373,14 +373,29 @@ function renderCognitionGraph({containerSelector, statusSelector, snapshot, empt
 
   const lanes = cognitionGraphLanes(nodes);
   const maxColumn = nodes.reduce((maximum, node) => Math.max(maximum, Number(node.column) || 1), 1);
-  const nodeMarkup = nodes.map((node) => cognitionGraphNodeMarkup(node, lanes)).join("");
+  const model = cognitionGraphModel({graph, nodes, edges, lanes, maxColumn});
   container.innerHTML = `
-    <div class="cognition-graph-stage" style="--graph-columns: ${maxColumn}; --graph-lanes: ${lanes.length};">
-      <svg class="graph-edge-layer" aria-hidden="true"></svg>
-      ${nodeMarkup}
+    <div class="cognition-graph-shell" data-graph-source="${escapeHtml(model.source)}" data-graph-run-id="${escapeHtml(model.runId)}" data-graph-current-node-id="${escapeHtml(model.currentNode?.id || "")}" data-graph-selected-node-id="${escapeHtml(model.selectedNode?.id || "")}">
+      ${cognitionGraphSummaryMarkup(model)}
+      <div class="graph-body">
+        ${cognitionGraphStageMarkup(model)}
+        ${cognitionGraphInspectorMarkup(model)}
+      </div>
     </div>
-    <div class="graph-legend">${escapeHtml(graph.run_id || "run id not reported")}</div>
   `;
+  container.querySelectorAll("[data-graph-node]").forEach((button) => {
+    button.addEventListener("click", () => {
+      setCognitionGraphPinnedNode(model.source, model.runId, button.dataset.nodeId || "");
+      renderCognitionGraph({containerSelector, statusSelector, snapshot, emptyMessage});
+    });
+  });
+  const returnButton = container.querySelector("[data-graph-return-current]");
+  if (returnButton) {
+    returnButton.addEventListener("click", () => {
+      setCognitionGraphPinnedNode(model.source, model.runId, "");
+      renderCognitionGraph({containerSelector, statusSelector, snapshot, emptyMessage});
+    });
+  }
   window.requestAnimationFrame(() => drawCognitionGraphEdges(container, edges));
 }
 
@@ -404,21 +419,240 @@ function cognitionGraphLanes(nodes) {
   return lanes.length ? lanes : ["cognition"];
 }
 
-function cognitionGraphNodeMarkup(node, lanes) {
-  const column = Math.max(1, Number(node.column) || 1);
+function cognitionGraphModel({graph, nodes, edges, lanes, maxColumn}) {
+  const source = graph.source || "overview_latest";
+  const runId = graph.run_id || "run id not reported";
+  const currentNode = cognitionGraphCurrentNode(nodes, lanes);
+  const highlightedIds = new Set(
+    nodes.filter((node) => node.status === "running").map((node) => node.id),
+  );
+  if (currentNode) highlightedIds.add(currentNode.id);
+  const pinnedNodeId = cognitionGraphPinnedNodeId(source, runId, nodes);
+  const selectedNode = nodes.find((node) => node.id === pinnedNodeId) || currentNode || nodes[0];
+  const generatedAt = Date.parse(graph.generated_at || "");
+  const ageMs = Number.isFinite(generatedAt) ? Math.max(0, Date.now() - generatedAt) : null;
+  const stale = graph.status === "running" && ageMs !== null && ageMs > GRAPH_STALE_AFTER_MS;
+  return {
+    graph,
+    nodes,
+    edges,
+    lanes,
+    maxColumn,
+    source,
+    runId,
+    currentNode,
+    selectedNode,
+    highlightedIds,
+    pinned: Boolean(pinnedNodeId),
+    ageMs,
+    stale,
+    freshness: cognitionGraphFreshnessLabel(ageMs, stale),
+    latestEvent: cognitionGraphLatestEvent(currentNode || selectedNode, edges, nodes),
+  };
+}
+
+function cognitionGraphCurrentNode(nodes, lanes) {
+  const running = nodes.filter((node) => node.status === "running");
+  if (running.length) return cognitionGraphFurthestNode(running, lanes);
+  const failed = nodes.filter((node) => node.status === "failed");
+  if (failed.length) return cognitionGraphFurthestNode(failed, lanes);
+  const completed = nodes.filter((node) => node.status === "completed");
+  if (completed.length) return cognitionGraphFurthestNode(completed, lanes);
+  const pending = nodes.filter((node) => node.status === "pending" || node.status === "skipped");
+  if (pending.length) return cognitionGraphEarliestNode(pending, lanes);
+  return nodes[0] || null;
+}
+
+function cognitionGraphFurthestNode(nodes, lanes) {
+  return [...nodes].sort((left, right) => {
+    const columnDelta = (Number(right.column) || 1) - (Number(left.column) || 1);
+    if (columnDelta) return columnDelta;
+    return cognitionGraphLaneIndex(left, lanes) - cognitionGraphLaneIndex(right, lanes);
+  })[0] || null;
+}
+
+function cognitionGraphEarliestNode(nodes, lanes) {
+  return [...nodes].sort((left, right) => {
+    const columnDelta = (Number(left.column) || 1) - (Number(right.column) || 1);
+    if (columnDelta) return columnDelta;
+    return cognitionGraphLaneIndex(left, lanes) - cognitionGraphLaneIndex(right, lanes);
+  })[0] || null;
+}
+
+function cognitionGraphLaneIndex(node, lanes) {
   const lane = node.lane || "cognition";
-  const row = Math.max(1, lanes.indexOf(lane) + 1);
+  const index = lanes.indexOf(lane);
+  return index >= 0 ? index : lanes.length;
+}
+
+function cognitionGraphPinnedNodeId(source, runId, nodes) {
+  const pin = state.cognitionGraphPins[source];
+  if (!pin || pin.runId !== runId) return "";
+  return nodes.some((node) => node.id === pin.nodeId) ? pin.nodeId : "";
+}
+
+function setCognitionGraphPinnedNode(source, runId, nodeId) {
+  if (!nodeId) {
+    delete state.cognitionGraphPins[source];
+    return;
+  }
+  state.cognitionGraphPins[source] = {runId, nodeId};
+}
+
+function cognitionGraphStatusBadgeClass(status) {
+  if (status === "completed") return "badge success";
+  if (status === "failed") return "badge danger";
+  if (status === "running" || status === "partial") return "badge warn";
+  return "badge";
+}
+
+function cognitionGraphFreshnessLabel(ageMs, stale) {
+  if (ageMs === null) return "timestamp not reported";
+  const age = cognitionGraphAgeLabel(ageMs);
+  return stale ? `stale · updated ${age} ago` : `updated ${age} ago`;
+}
+
+function cognitionGraphAgeLabel(ageMs) {
+  const seconds = Math.floor(ageMs / 1000);
+  if (seconds < 1) return "just now";
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h`;
+}
+
+function cognitionGraphLatestEvent(node, edges, nodes) {
+  if (!node) return "No cognition node selected.";
+  const detail = node.detail || {};
+  const summary = detail.summary || detail.conclusion || detail.decision || detail.status || detail.blocker;
+  const outgoing = edges
+    .filter((edge) => edge.source === node.id)
+    .map((edge) => nodes.find((candidate) => candidate.id === edge.target))
+    .filter(Boolean);
+  const nextRunning = outgoing.find((candidate) => candidate.status === "running");
+  const nextPending = outgoing.find((candidate) => candidate.status === "pending");
+  if (nextRunning) return `${node.label || node.id} advanced to ${nextRunning.label || nextRunning.id}.`;
+  if (nextPending) return `${node.label || node.id} is waiting for ${nextPending.label || nextPending.id}.`;
+  if (summary) return `${node.label || node.id}: ${cognitionGraphValue(summary)}`;
+  return `${node.label || node.id} is ${String(node.status || "not reported").replaceAll("_", " ")}.`;
+}
+
+function cognitionGraphSummaryMarkup(model) {
+  const current = model.currentNode;
+  const status = String(model.graph.status || "not_reported").replaceAll("_", " ");
+  const currentLabel = current ? `${current.stage || "stage"} · ${current.label || current.id}` : "no current node";
+  return `
+    <div class="graph-run-summary">
+      <div class="graph-run-title">
+        <strong>${escapeHtml(model.runId)}</strong>
+        <span>${escapeHtml(model.source.replaceAll("_", " "))}</span>
+      </div>
+      <div class="badge-stack">
+        <span class="${escapeHtml(cognitionGraphStatusBadgeClass(model.graph.status || "not_reported"))}" data-component="Badge">${escapeHtml(status)}</span>
+        <span class="badge${model.stale ? " warn" : ""}" data-component="Badge">${escapeHtml(model.freshness)}</span>
+        <span class="badge" data-component="Badge">${escapeHtml(currentLabel)}</span>
+      </div>
+      <div class="graph-latest-event">${escapeHtml(model.latestEvent)}</div>
+    </div>
+  `;
+}
+
+function cognitionGraphStageMarkup(model) {
+  const rows = model.lanes.map((lane) => {
+    const cells = [];
+    for (let column = 1; column <= model.maxColumn; column += 1) {
+      const cellNodes = model.nodes.filter((node) => {
+        const nodeLane = node.lane || "cognition";
+        const nodeColumn = Math.max(1, Number(node.column) || 1);
+        return nodeLane === lane && nodeColumn === column;
+      });
+      cells.push(`<div class="graph-cell">${cellNodes.map((node) => cognitionGraphNodeMarkup(node, model)).join("")}</div>`);
+    }
+    return `<div class="graph-lane-row"><div class="graph-lane-label">${escapeHtml(lane)}</div>${cells.join("")}</div>`;
+  }).join("");
+  return `
+    <div class="cognition-graph-stage" data-component="ScrollArea" style="--graph-columns: ${model.maxColumn};">
+      <svg class="graph-edge-layer" aria-hidden="true"></svg>
+      ${rows}
+    </div>
+  `;
+}
+
+function cognitionGraphNodeMarkup(node, model) {
+  const status = node.status || "not_reported";
+  const selected = model.selectedNode && model.selectedNode.id === node.id;
+  const highlighted = model.highlightedIds.has(node.id);
+  const current = model.currentNode && model.currentNode.id === node.id;
   const detail = cognitionGraphDetail(node.detail || {});
   const branch = node.branch ? `<span>${escapeHtml(node.branch)}</span>` : "";
-  const status = node.status || "not_reported";
   return `
-    <button class="graph-node status-${escapeHtml(status)}" type="button" data-node-id="${escapeHtml(node.id)}" style="grid-column: ${column}; grid-row: ${row};">
+    <button class="graph-node status-${escapeHtml(status)}${current ? " is-current" : ""}${selected ? " is-selected" : ""}${highlighted ? " is-highlighted" : ""}" type="button" data-graph-node data-node-id="${escapeHtml(node.id)}" aria-pressed="${selected ? "true" : "false"}">
       <span class="node-stage">${escapeHtml(node.stage || "stage")}</span>
       <strong>${escapeHtml(node.label || node.id)}</strong>
-      <span class="node-meta">${escapeHtml(lane)}${branch}</span>
+      <span class="node-meta"><span>${escapeHtml(node.lane || "cognition")}</span>${branch}</span>
       <span class="node-detail">${detail}</span>
     </button>
   `;
+}
+
+function cognitionGraphInspectorMarkup(model) {
+  const node = model.selectedNode;
+  const currentId = model.currentNode?.id || "";
+  const selectedId = node?.id || "";
+  const showReturn = model.pinned && currentId && selectedId !== currentId;
+  const rows = cognitionGraphInspectorRows(node).map(([label, value]) => `
+    <div class="graph-inspector-row">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(cognitionGraphValue(value))}</strong>
+    </div>
+  `).join("");
+  const title = node ? `${node.stage || "stage"} · ${node.label || node.id}` : "No selected node";
+  return `
+    <aside class="graph-inspector" aria-label="Cognition node detail">
+      <div class="graph-inspector-header">
+        <div>
+          <span>${model.pinned ? "Selected node detail" : "Current node detail"}</span>
+          <strong>${escapeHtml(title)}</strong>
+        </div>
+        <span class="${escapeHtml(cognitionGraphStatusBadgeClass(node?.status || "not_reported"))}" data-component="Badge">${escapeHtml((node?.status || "not_reported").replaceAll("_", " "))}</span>
+      </div>
+      <div class="graph-inspector-rows">${rows}</div>
+      <div class="graph-inspector-actions">
+        ${showReturn ? `<button class="btn" type="button" data-graph-return-current>Return to current</button>` : ""}
+      </div>
+    </aside>
+  `;
+}
+
+function cognitionGraphInspectorRows(node) {
+  if (!node) return [["Status", "No cognition node selected."]];
+  const detail = node.detail || {};
+  const rows = [];
+  const priorityKeys = [
+    "summary",
+    "conclusion",
+    "reasoning",
+    "internal_monologue",
+    "important_signal",
+    "decision",
+    "logical_stance",
+    "character_intent",
+    "judgment_note",
+    "status",
+    "blocker",
+  ];
+  priorityKeys.forEach((key) => {
+    if (detail[key] !== null && detail[key] !== undefined && detail[key] !== "") {
+      rows.push([key.replaceAll("_", " "), detail[key]]);
+    }
+  });
+  const hasBoundedDetail = rows.length > 0;
+  if (!hasBoundedDetail) rows.push(["Detail", "This node reported no bounded detail."]);
+  rows.push(["stage", node.stage || "stage"]);
+  rows.push(["lane", node.lane || "cognition"]);
+  if (node.branch) rows.push(["branch", node.branch]);
+  return rows.slice(0, 7);
 }
 
 function cognitionGraphDetail(detail) {
@@ -441,7 +675,11 @@ function drawCognitionGraphEdges(container, edges) {
   if (!stage || !svg) return;
 
   const bounds = stage.getBoundingClientRect();
-  svg.setAttribute("viewBox", `0 0 ${bounds.width} ${bounds.height}`);
+  const width = Math.max(stage.scrollWidth, bounds.width);
+  const height = Math.max(stage.scrollHeight, bounds.height);
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("width", width);
+  svg.setAttribute("height", height);
   svg.innerHTML = "";
   edges.forEach((edge) => {
     const source = stage.querySelector(`[data-node-id="${CSS.escape(edge.source)}"]`);
