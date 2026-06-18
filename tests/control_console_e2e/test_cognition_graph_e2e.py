@@ -155,16 +155,26 @@ def test_cognition_graph_option_a_state_treatment(
             page.locator("[data-node-id='decision.reply']").click()
             selected = page.locator("[data-node-id='decision.reply']")
             assert selected.get_attribute("aria-pressed") == "true"
-            assert selected.locator(".node-selected-badge").inner_text() == "selected"
+            assert selected.locator(".node-selected-badge").count() == 0
             selected_style = selected.evaluate(
-                """(element) => ({
-                  outlineStyle: getComputedStyle(element).outlineStyle,
-                  outlineWidth: getComputedStyle(element).outlineWidth,
-                  boxShadow: getComputedStyle(element).boxShadow,
-                })"""
+                """(element) => {
+                  const activeProbe = document.createElement("span");
+                  activeProbe.style.background = "var(--nav-active-bg)";
+                  document.body.appendChild(activeProbe);
+                  const activeBackground =
+                    getComputedStyle(activeProbe).backgroundColor;
+                  activeProbe.remove();
+                  const style = getComputedStyle(element);
+                  return {
+                    activeBackground,
+                    backgroundColor: style.backgroundColor,
+                    outlineStyle: style.outlineStyle,
+                    boxShadow: style.boxShadow,
+                  };
+                }"""
             )
-            assert selected_style["outlineStyle"] == "solid"
-            assert selected_style["outlineWidth"] == "2px"
+            assert selected_style["backgroundColor"] == selected_style["activeBackground"]
+            assert selected_style["outlineStyle"] in {"none", ""}
             assert selected_style["boxShadow"] != "none"
 
             running = page.locator("[data-node-id='l2.reasoning']")

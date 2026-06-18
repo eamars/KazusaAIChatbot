@@ -681,15 +681,11 @@ function cognitionGraphNodeMarkup(node, model) {
   const current = model.currentNode && model.currentNode.id === node.id;
   const summary = cognitionGraphNodeSummary(node);
   const branch = node.branch ? `<span>${escapeHtml(node.branch)}</span>` : "";
-  const selectedBadge = selected
-    ? '<span class="badge selected node-selected-badge" data-component="Badge">selected</span>'
-    : "";
   return `
     <button class="graph-node status-${escapeHtml(status)}${statusLabel === "terminated" ? " is-terminal" : ""}${current ? " is-current" : ""}${selected ? " is-selected" : ""}${highlighted ? " is-highlighted" : ""}" type="button" data-graph-node data-node-id="${escapeHtml(node.id)}" aria-pressed="${selected ? "true" : "false"}" title="${escapeHtml(summary)}">
       <span class="node-header">
         <span class="node-stage">${escapeHtml(node.stage || "stage")}</span>
         <span class="${escapeHtml(cognitionGraphStatusBadgeClass(status))} node-status" data-component="Badge">${escapeHtml(statusLabel)}</span>
-        ${selectedBadge}
       </span>
       <strong>${escapeHtml(node.label || node.id)}</strong>
       <span class="node-meta"><span>${escapeHtml(node.lane || "cognition")}</span>${branch}</span>
