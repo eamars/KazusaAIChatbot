@@ -6,6 +6,13 @@ The package root exports `NapCatWSAdapter`, `QQEnvelopeNormalizer`,
 `project_qq_semantic_text`, `runtime_app`, and `main`. The command
 `python -m adapters.napcat_qq_adapter` starts the same adapter CLI.
 
+The CLI reads `BRAIN_URL`, `NAPCAT_WS_URL`, `NAPCAT_WS_TOKEN`, runtime callback
+settings, and `NAPCAT_ACTIVE_GROUPS` from the environment after loading
+`.env`. `NAPCAT_ACTIVE_GROUPS` is a comma- or whitespace-separated list of QQ
+group ids used when `--channels` is omitted. Explicit `--channels` values take
+precedence. When neither source provides groups, public groups are listen-only
+and private chats remain active.
+
 ## Submodule Responsibility Table
 
 `cli.py` owns argument and environment parsing. `runtime_api.py` owns the

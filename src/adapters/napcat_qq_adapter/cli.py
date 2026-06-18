@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import logging
 import os
+import re
 import sys
 
 from dotenv import load_dotenv
@@ -15,6 +16,22 @@ from kazusa_ai_chatbot.logging_config import configure_adapter_logging
 
 configure_adapter_logging()
 logger = logging.getLogger(__name__)
+
+
+def _active_groups_from_env() -> list[str] | None:
+    """Return active QQ group ids configured for non-interactive launches."""
+
+    raw_groups = os.getenv("NAPCAT_ACTIVE_GROUPS", "").strip()
+    if not raw_groups:
+        return_value = None
+        return return_value
+
+    group_ids = [
+        group_id
+        for group_id in re.split(r"[\s,]+", raw_groups)
+        if group_id
+    ]
+    return group_ids
 
 
 def main() -> None:
@@ -78,6 +95,9 @@ def main() -> None:
         args.runtime_public_url or f"http://127.0.0.1:{args.runtime_port}"
     )
     runtime_shared_secret = os.getenv("ADAPTER_RUNTIME_SHARED_SECRET", "")
+    channel_ids = args.channels
+    if channel_ids is None:
+        channel_ids = _active_groups_from_env()
 
     from .ws_adapter import NapCatWSAdapter
 
@@ -91,7 +111,7 @@ def main() -> None:
         runtime_public_url=runtime_public_url,
         runtime_shared_secret=runtime_shared_secret,
         heartbeat_seconds=args.heartbeat_seconds,
-        channel_ids=args.channels,
+        channel_ids=channel_ids,
         debug_modes={},
     )
 

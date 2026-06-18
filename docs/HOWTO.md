@@ -398,14 +398,17 @@ the public channel list.
 ### NapCat QQ
 
 The NapCat adapter reads `BRAIN_URL`, `NAPCAT_WS_URL`, and `NAPCAT_WS_TOKEN`
-from the environment.
+from the environment. For console-managed launches, set
+`NAPCAT_ACTIVE_GROUPS` to a comma- or space-separated list of QQ group ids.
+Explicit `--channels` CLI values override `NAPCAT_ACTIVE_GROUPS`.
 
 ```bash
 python -m adapters.napcat_qq_adapter --channels 987654321
 ```
 
 Listed groups are active, non-listed groups become listen-only, and private
-chats are always active.
+chats are always active. If neither `--channels` nor `NAPCAT_ACTIVE_GROUPS` is
+provided, all groups are listen-only and only private chats are active.
 
 Outbound brain-originated sends follow the same public-group list. Runtime
 callback sends to non-listed groups are rejected before NapCat `send_msg`, and
