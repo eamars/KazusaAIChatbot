@@ -39,21 +39,30 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
             page.wait_for_selector("body[data-auth-state='authenticated']")
             _assert_graph_status(page, "running")
             assert page.locator("#overview-cognition-graph .graph-node").count() == 4
+            assert page.locator("#overview-cognition-graph .graph-stage-group").count() == 3
             assert "run-live" in page.locator(
-                "#overview-cognition-graph .graph-legend"
+                "#overview-cognition-graph .graph-run-summary"
             ).inner_text()
-            assert "internal_monologue" in page.locator(
-                "[data-node-id='l2.reasoning'] .node-detail"
-            ).inner_text()
-            assert not page.locator(
-                "[data-node-id='l2.reasoning'] .node-detail"
-            ).is_visible()
-            page.locator("[data-node-id='l2.reasoning']").hover()
+            assert page.locator("#overview-cognition-graph .graph-edge-layer").count() == 0
+            assert page.locator("#overview-cognition-graph .node-detail").count() == 0
+            assert page.locator("[data-node-id='l2.reasoning']").get_attribute(
+                "title"
+            ) == "weigh intent, memory, and scene pressure"
             assert page.locator(
-                "[data-node-id='l2.reasoning'] .node-detail"
-            ).is_visible()
+                "#overview-cognition-graph .graph-node.is-current"
+            ).count() == 1
+            assert page.evaluate(
+                """() => {
+                  const stage = document.querySelector(
+                    '#overview-cognition-graph .cognition-graph-stage'
+                  );
+                  return stage.scrollWidth <= stage.clientWidth + 1;
+                }"""
+            )
+
+            page.locator("[data-node-id='l2.reasoning']").click()
             assert "weigh intent, memory, and scene pressure" in page.locator(
-                "[data-node-id='l2.reasoning'] .node-detail"
+                "#overview-cognition-graph .graph-inspector"
             ).inner_text()
 
             page.locator("[data-page-link='services']").click()
@@ -65,7 +74,10 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
                 "() => document.querySelector('#overview-cognition-status')?.textContent === 'completed'"
             )
             assert "run-complete" in page.locator(
-                "#overview-cognition-graph .graph-legend"
+                "#overview-cognition-graph .graph-run-summary"
+            ).inner_text()
+            assert "Final node detail" in page.locator(
+                "#overview-cognition-graph .graph-inspector"
             ).inner_text()
 
             fake_brain.set_graph(graph_snapshot(status="failed", run_id="run-failed"))
@@ -102,7 +114,9 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
                         "page switch",
                         "SSE invalidation",
                         "parallel branch nodes",
-                        "reasoning hover detail content",
+                        "compact stage groups",
+                        "stable inspector detail",
+                        "graph stage no horizontal overflow",
                     ],
                 },
             )

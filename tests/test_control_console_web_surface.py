@@ -263,7 +263,15 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert "data-graph-selected-node-id" in script.text
     assert "graph-inspector" in script.text
     assert "graph-run-summary" in script.text
-    assert "graph-lane-row" in script.text
+    assert "function cognitionGraphStageGroups" in script.text
+    assert "function cognitionGraphStageGroupMarkup" in script.text
+    assert "function cognitionGraphConnectorMarkup" in script.text
+    assert "graph-stage-rail" in script.text
+    assert "graph-stage-group" in script.text
+    assert "graph-connector" in script.text
+    assert "graph-lane-row" not in script.text
+    assert "graph-edge-layer" not in script.text
+    assert "drawCognitionGraphEdges" not in script.text
     assert "is-current" in script.text
     assert "control.cognition_graph_invalidated" in script.text
     assert "function openServiceConfig" in script.text
@@ -285,17 +293,22 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert stylesheet.status_code == 200
     assert '.status-dot[data-state="conflict"]' in stylesheet.text
     assert ".cognition-graph" in stylesheet.text
-    assert ".graph-node:focus-within .node-detail" in stylesheet.text
     assert ".cognition-graph-shell" in stylesheet.text
     assert ".graph-run-summary" in stylesheet.text
     assert ".graph-body" in stylesheet.text
     assert ".graph-inspector" in stylesheet.text
-    assert ".graph-lane-row" in stylesheet.text
+    assert ".graph-stage-rail" in stylesheet.text
+    assert ".graph-stage-group" in stylesheet.text
+    assert ".graph-connector" in stylesheet.text
+    assert ".graph-branch-stack" in stylesheet.text
+    assert ".graph-lane-row" not in stylesheet.text
+    assert "min-width: max-content" not in stylesheet.text
+    assert ".graph-edge-layer" not in stylesheet.text
     assert ".graph-node.is-current" in stylesheet.text
     assert ".graph-node.is-selected" in stylesheet.text
-    assert ".graph-node .node-detail" in stylesheet.text
+    assert ".graph-node .node-detail" not in stylesheet.text
     assert (
-        "grid-template-columns: minmax(0, 1fr) minmax(min(300px, 100%), 0.38fr)"
+        "grid-template-columns: minmax(min(560px, 100%), 1fr) minmax(min(280px, 100%), 320px)"
         in stylesheet.text
     )
     assert ".notice[data-tone=\"danger\"]" in stylesheet.text
@@ -422,11 +435,16 @@ def test_live_logs_static_surface_and_controls(tmp_path) -> None:
     assert "log.gap" in script.text
     assert "log.status" in script.text
     assert "log.ready" in script.text
+    assert 'class="btn log-copy"' in script.text
 
     stylesheet = client.get("/static/console.css")
     assert stylesheet.status_code == 200
     assert ".log-toolbar" in stylesheet.text
     assert ".log-viewport" in stylesheet.text
+    assert ".log-table { table-layout: fixed;" in stylesheet.text
+    assert ".log-row td:last-child" in stylesheet.text
+    assert ".log-copy" in stylesheet.text
+    assert "inline-size: 56px" in stylesheet.text
     assert ".log-row" in stylesheet.text
     assert ".log-row.wrap" in stylesheet.text
     assert "--log-font" in stylesheet.text

@@ -22,6 +22,7 @@ def test_desktop_visual_acceptance_for_cards_buttons_and_branding(
         pages = [
             "overview",
             "services",
+            "logs",
             "debug",
             "events",
             "character",
@@ -52,6 +53,29 @@ def test_desktop_visual_acceptance_for_cards_buttons_and_branding(
             assert card_overflows == []
             assert button_overflows == []
 
+        page.locator("[data-page-link='logs']").click()
+        page.evaluate(
+            """() => {
+              document.querySelector('#log-table').innerHTML = `
+                <tr class="log-row wrap">
+                  <td><code>2026-06-19T00:00:00Z</code><br>brain stderr</td>
+                  <td>long production log line with Chinese text 中文 and enough content to wrap inside the message column without changing the action width</td>
+                  <td><button class="btn log-copy" data-copy-log="sample" type="button">Copy</button></td>
+                </tr>`;
+            }"""
+        )
+        copy_metrics = page.locator(".log-copy").evaluate(
+            """(element) => ({
+              clientWidth: element.clientWidth,
+              offsetWidth: element.offsetWidth,
+              scrollWidth: element.scrollWidth,
+              text: element.textContent,
+            })"""
+        )
+        assert copy_metrics["text"] == "Copy"
+        assert copy_metrics["offsetWidth"] == 56
+        assert copy_metrics["scrollWidth"] <= copy_metrics["clientWidth"]
+
         assert getattr(page, "kazusa_console_messages", None) == []
 
         summary = e2e_summary_writer(
@@ -66,6 +90,7 @@ def test_desktop_visual_acceptance_for_cards_buttons_and_branding(
                     "database fallback brand does not say Kazusa",
                     "active page cards do not horizontally overflow",
                     "visible buttons do not clip labels",
+                    "live-log copy button keeps fixed width",
                 ],
             },
         )

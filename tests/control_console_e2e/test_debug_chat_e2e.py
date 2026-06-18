@@ -57,8 +57,10 @@ def test_debug_chat_sends_to_brain_and_updates_history_and_graph(
             assert "fake brain reply" in chat_text
             assert page.locator("#debug-cognition-status").inner_text() == "completed"
             assert "debug-run-1" in page.locator(
-                "#debug-cognition-graph .graph-legend"
+                "#debug-cognition-graph .graph-run-summary"
             ).inner_text()
+            assert page.locator("#debug-cognition-graph .graph-stage-group").count() == 3
+            assert page.locator("#debug-cognition-graph .graph-edge-layer").count() == 0
 
             requests = fake_brain.chat_requests()
             assert len(requests) == 3

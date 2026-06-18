@@ -396,7 +396,6 @@ function renderCognitionGraph({containerSelector, statusSelector, snapshot, empt
       renderCognitionGraph({containerSelector, statusSelector, snapshot, emptyMessage});
     });
   }
-  window.requestAnimationFrame(() => drawCognitionGraphEdges(container, edges));
 }
 
 function cognitionGraphLanes(nodes) {
@@ -432,6 +431,7 @@ function cognitionGraphModel({graph, nodes, edges, lanes, maxColumn}) {
   const generatedAt = Date.parse(graph.generated_at || "");
   const ageMs = Number.isFinite(generatedAt) ? Math.max(0, Date.now() - generatedAt) : null;
   const stale = graph.status === "running" && ageMs !== null && ageMs > GRAPH_STALE_AFTER_MS;
+  const focusKind = cognitionGraphFocusKind(graph.status, currentNode);
   return {
     graph,
     nodes,
@@ -446,9 +446,18 @@ function cognitionGraphModel({graph, nodes, edges, lanes, maxColumn}) {
     pinned: Boolean(pinnedNodeId),
     ageMs,
     stale,
+    focusKind,
     freshness: cognitionGraphFreshnessLabel(ageMs, stale),
     latestEvent: cognitionGraphLatestEvent(currentNode || selectedNode, edges, nodes),
   };
+}
+
+function cognitionGraphFocusKind(graphStatus, node) {
+  if (!node) return "selected";
+  if (graphStatus === "completed" && node.status === "completed") return "final";
+  if (node.status === "failed") return "failed";
+  if (node.status === "running") return "current";
+  return "selected";
 }
 
 function cognitionGraphCurrentNode(nodes, lanes) {
@@ -541,7 +550,9 @@ function cognitionGraphLatestEvent(node, edges, nodes) {
 function cognitionGraphSummaryMarkup(model) {
   const current = model.currentNode;
   const status = String(model.graph.status || "not_reported").replaceAll("_", " ");
-  const currentLabel = current ? `${current.stage || "stage"} · ${current.label || current.id}` : "no current node";
+  const currentLabel = current
+    ? `${model.focusKind} · ${current.stage || "stage"} · ${current.label || current.id}`
+    : "no current node";
   return `
     <div class="graph-run-summary">
       <div class="graph-run-title">
@@ -559,24 +570,85 @@ function cognitionGraphSummaryMarkup(model) {
 }
 
 function cognitionGraphStageMarkup(model) {
-  const rows = model.lanes.map((lane) => {
-    const cells = [];
-    for (let column = 1; column <= model.maxColumn; column += 1) {
-      const cellNodes = model.nodes.filter((node) => {
-        const nodeLane = node.lane || "cognition";
-        const nodeColumn = Math.max(1, Number(node.column) || 1);
-        return nodeLane === lane && nodeColumn === column;
-      });
-      cells.push(`<div class="graph-cell">${cellNodes.map((node) => cognitionGraphNodeMarkup(node, model)).join("")}</div>`);
-    }
-    return `<div class="graph-lane-row"><div class="graph-lane-label">${escapeHtml(lane)}</div>${cells.join("")}</div>`;
-  }).join("");
+  const groups = cognitionGraphStageGroups(model);
+  const columns = Math.max(1, groups.length);
+  const stageGroups = groups.map((group, index) => (
+    cognitionGraphStageGroupMarkup(group, model, index, groups)
+  )).join("");
   return `
-    <div class="cognition-graph-stage" data-component="ScrollArea" style="--graph-columns: ${model.maxColumn};">
-      <svg class="graph-edge-layer" aria-hidden="true"></svg>
-      ${rows}
+    <div class="cognition-graph-stage" data-component="ScrollArea">
+      <div class="graph-stage-rail" style="--graph-columns: ${columns};">
+        ${stageGroups}
+      </div>
     </div>
   `;
+}
+
+function cognitionGraphStageGroups(model) {
+  const columns = [...new Set(model.nodes.map((node) => (
+    Math.max(1, Number(node.column) || 1)
+  )))].sort((left, right) => left - right);
+  return columns.map((column) => {
+    const nodes = model.nodes
+      .filter((node) => Math.max(1, Number(node.column) || 1) === column)
+      .sort((left, right) => {
+        const laneDelta = cognitionGraphLaneIndex(left, model.lanes) - cognitionGraphLaneIndex(right, model.lanes);
+        if (laneDelta) return laneDelta;
+        return String(left.label || left.id).localeCompare(String(right.label || right.id));
+      });
+    return {
+      column,
+      nodes,
+      title: cognitionGraphStageTitle(column, nodes),
+      status: cognitionGraphGroupStatus(nodes),
+      lanes: [...new Set(nodes.map((node) => node.lane || "cognition"))],
+    };
+  });
+}
+
+function cognitionGraphStageTitle(column, nodes) {
+  if (!nodes.length) return `Step ${column}`;
+  const stages = [...new Set(nodes.map((node) => node.stage).filter(Boolean))];
+  if (stages.length === 1) return stages[0];
+  if (nodes.some((node) => (node.lane || "") === "input")) return "Input";
+  if (nodes.some((node) => (node.lane || "") === "gate")) return "Decision";
+  if (nodes.some((node) => (node.lane || "") === "surface")) return "Surface";
+  return `Step ${column}`;
+}
+
+function cognitionGraphGroupStatus(nodes) {
+  if (nodes.some((node) => node.status === "running")) return "running";
+  if (nodes.some((node) => node.status === "failed")) return "failed";
+  if (nodes.some((node) => node.status === "pending")) return "pending";
+  if (nodes.every((node) => node.status === "completed")) return "completed";
+  if (nodes.every((node) => node.status === "skipped")) return "skipped";
+  return "partial";
+}
+
+function cognitionGraphStageGroupMarkup(group, model, index, groups) {
+  const lanes = group.lanes.join(", ");
+  const nodes = group.nodes.map((node) => cognitionGraphNodeMarkup(node, model)).join("");
+  return `
+    <section class="graph-stage-group status-${escapeHtml(group.status)}" aria-label="${escapeHtml(group.title)}">
+      <div class="graph-stage-header">
+        <div>
+          <span>Step ${escapeHtml(group.column)}</span>
+          <strong>${escapeHtml(group.title)}</strong>
+        </div>
+        <span class="${escapeHtml(cognitionGraphStatusBadgeClass(group.status))}" data-component="Badge">${escapeHtml(group.status.replaceAll("_", " "))}</span>
+      </div>
+      <div class="graph-branch-stack">
+        ${nodes}
+      </div>
+      <div class="graph-stage-meta">${escapeHtml(lanes || "cognition")}</div>
+      ${cognitionGraphConnectorMarkup(index, groups)}
+    </section>
+  `;
+}
+
+function cognitionGraphConnectorMarkup(index, groups) {
+  if (index >= groups.length - 1) return "";
+  return '<span class="graph-connector" aria-hidden="true"></span>';
 }
 
 function cognitionGraphNodeMarkup(node, model) {
@@ -584,14 +656,14 @@ function cognitionGraphNodeMarkup(node, model) {
   const selected = model.selectedNode && model.selectedNode.id === node.id;
   const highlighted = model.highlightedIds.has(node.id);
   const current = model.currentNode && model.currentNode.id === node.id;
-  const detail = cognitionGraphDetail(node.detail || {});
+  const summary = cognitionGraphNodeSummary(node);
   const branch = node.branch ? `<span>${escapeHtml(node.branch)}</span>` : "";
   return `
-    <button class="graph-node status-${escapeHtml(status)}${current ? " is-current" : ""}${selected ? " is-selected" : ""}${highlighted ? " is-highlighted" : ""}" type="button" data-graph-node data-node-id="${escapeHtml(node.id)}" aria-pressed="${selected ? "true" : "false"}">
+    <button class="graph-node status-${escapeHtml(status)}${current ? " is-current" : ""}${selected ? " is-selected" : ""}${highlighted ? " is-highlighted" : ""}" type="button" data-graph-node data-node-id="${escapeHtml(node.id)}" aria-pressed="${selected ? "true" : "false"}" title="${escapeHtml(summary)}">
       <span class="node-stage">${escapeHtml(node.stage || "stage")}</span>
       <strong>${escapeHtml(node.label || node.id)}</strong>
       <span class="node-meta"><span>${escapeHtml(node.lane || "cognition")}</span>${branch}</span>
-      <span class="node-detail">${detail}</span>
+      <span class="node-summary">${escapeHtml(summary)}</span>
     </button>
   `;
 }
@@ -612,7 +684,7 @@ function cognitionGraphInspectorMarkup(model) {
     <aside class="graph-inspector" aria-label="Cognition node detail">
       <div class="graph-inspector-header">
         <div>
-          <span>${model.pinned ? "Selected node detail" : "Current node detail"}</span>
+          <span>${escapeHtml(model.pinned ? "Selected node detail" : `${model.focusKind[0].toUpperCase()}${model.focusKind.slice(1)} node detail`)}</span>
           <strong>${escapeHtml(title)}</strong>
         </div>
         <span class="${escapeHtml(cognitionGraphStatusBadgeClass(node?.status || "not_reported"))}" data-component="Badge">${escapeHtml((node?.status || "not_reported").replaceAll("_", " "))}</span>
@@ -655,51 +727,23 @@ function cognitionGraphInspectorRows(node) {
   return rows.slice(0, 7);
 }
 
-function cognitionGraphDetail(detail) {
-  const rows = Object.entries(detail)
-    .filter(([, value]) => value !== null && value !== undefined && value !== "")
-    .slice(0, 6)
-    .map(([key, value]) => `<span><strong>${escapeHtml(key)}</strong>${escapeHtml(cognitionGraphValue(value))}</span>`);
-  return rows.length ? rows.join("") : "<span>No reasoning detail reported.</span>";
+function cognitionGraphNodeSummary(node) {
+  const detail = node.detail || {};
+  const value = detail.summary
+    || detail.conclusion
+    || detail.reasoning
+    || detail.internal_monologue
+    || detail.important_signal
+    || detail.decision
+    || detail.status
+    || "No bounded detail reported.";
+  return cognitionGraphValue(value);
 }
 
 function cognitionGraphValue(value) {
   if (Array.isArray(value)) return value.join(", ");
   if (value && typeof value === "object") return JSON.stringify(value);
   return String(value);
-}
-
-function drawCognitionGraphEdges(container, edges) {
-  const stage = container.querySelector(".cognition-graph-stage");
-  const svg = container.querySelector(".graph-edge-layer");
-  if (!stage || !svg) return;
-
-  const bounds = stage.getBoundingClientRect();
-  const width = Math.max(stage.scrollWidth, bounds.width);
-  const height = Math.max(stage.scrollHeight, bounds.height);
-  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-  svg.setAttribute("width", width);
-  svg.setAttribute("height", height);
-  svg.innerHTML = "";
-  edges.forEach((edge) => {
-    const source = stage.querySelector(`[data-node-id="${CSS.escape(edge.source)}"]`);
-    const target = stage.querySelector(`[data-node-id="${CSS.escape(edge.target)}"]`);
-    if (!source || !target) return;
-
-    const sourceBounds = source.getBoundingClientRect();
-    const targetBounds = target.getBoundingClientRect();
-    const x1 = sourceBounds.left - bounds.left + sourceBounds.width;
-    const y1 = sourceBounds.top - bounds.top + sourceBounds.height / 2;
-    const x2 = targetBounds.left - bounds.left;
-    const y2 = targetBounds.top - bounds.top + targetBounds.height / 2;
-    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    line.setAttribute("x1", x1);
-    line.setAttribute("y1", y1);
-    line.setAttribute("x2", x2);
-    line.setAttribute("y2", y2);
-    line.setAttribute("class", `graph-edge edge-${edge.kind || "sequence"}`);
-    svg.appendChild(line);
-  });
 }
 
 function renderCapabilitySummary() {
@@ -1514,7 +1558,7 @@ function renderLogRow(row) {
     <tr class="log-row${wrap}">
       <td><code>${escapeHtml(timestamp)}</code><br>${escapeHtml(label)}</td>
       <td>${highlightLogLine(line)}</td>
-      <td><button class="btn" data-copy-log="${escapeHtml(line)}" type="button">Copy</button></td>
+      <td><button class="btn log-copy" data-copy-log="${escapeHtml(line)}" type="button">Copy</button></td>
     </tr>
   `;
   return renderedRow;
@@ -1522,7 +1566,7 @@ function renderLogRow(row) {
 
 function renderLogPlaceholder(message) {
   const table = qs("#log-table");
-  table.innerHTML = `<tr class="log-row log-placeholder wrap"><td>Status</td><td>${escapeHtml(message)}</td></tr>`;
+  table.innerHTML = `<tr class="log-row log-placeholder wrap"><td>Status</td><td>${escapeHtml(message)}</td><td></td></tr>`;
   updateLogBufferStatus();
 }
 
