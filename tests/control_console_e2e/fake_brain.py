@@ -7,6 +7,7 @@ from pathlib import Path
 from threading import Lock, Thread
 from typing import Any
 import json
+import time
 
 
 class FakeBrainServer(AbstractContextManager["FakeBrainServer"]):
@@ -21,6 +22,7 @@ class FakeBrainServer(AbstractContextManager["FakeBrainServer"]):
         self._graph = graph_snapshot(status="not_reported", run_id="not-reported")
         self._chat_requests: list[dict[str, Any]] = []
         self._chat_status_code = 200
+        self._chat_delay_seconds = 0.0
         self._server: ThreadingHTTPServer | None = None
         self._thread: Thread | None = None
 
@@ -80,12 +82,25 @@ class FakeBrainServer(AbstractContextManager["FakeBrainServer"]):
         with self._lock:
             self._chat_status_code = status_code
 
+    def set_chat_delay_seconds(self, delay_seconds: float) -> None:
+        """Delay `/chat` responses to expose in-flight browser UI state."""
+
+        with self._lock:
+            self._chat_delay_seconds = delay_seconds
+
     def chat_status_code(self) -> int:
         """Return the current `/chat` status code."""
 
         with self._lock:
             status_code = self._chat_status_code
         return status_code
+
+    def chat_delay_seconds(self) -> float:
+        """Return the current `/chat` response delay."""
+
+        with self._lock:
+            delay_seconds = self._chat_delay_seconds
+        return delay_seconds
 
     def _handler_class(self) -> type[BaseHTTPRequestHandler]:
         """Build a request handler bound to this fake brain."""
@@ -117,6 +132,9 @@ class FakeBrainServer(AbstractContextManager["FakeBrainServer"]):
                 if status_code != 200:
                     self.send_error(status_code)
                     return
+                delay_seconds = owner.chat_delay_seconds()
+                if delay_seconds > 0:
+                    time.sleep(delay_seconds)
                 content_length = int(self.headers.get("content-length", "0"))
                 payload: dict[str, Any] = {}
                 if content_length:

@@ -19,12 +19,13 @@ def test_auth_session_refresh_and_csrf_are_visible_in_browser(
         )
         assert bootstrap_status == 401
 
-        with page.expect_event("dialog") as dialog_info:
-            page.locator("#token").fill("bad-token")
-            page.locator("#login").click()
-        dialog = dialog_info.value
-        assert "401" in dialog.message
-        dialog.accept()
+        dialogs = []
+        page.on("dialog", lambda dialog: (dialogs.append(dialog.message), dialog.accept()))
+        page.locator("#token").fill("bad-token")
+        page.locator("#login").click()
+        page.wait_for_selector("#ui-notice[data-tone='danger']")
+        assert dialogs == []
+        assert "401" in page.locator("#ui-notice").inner_text()
         page.wait_for_selector("body[data-auth-state='locked']")
 
         page.locator("#token").fill(DEFAULT_E2E_OPERATOR_TOKEN)
@@ -77,7 +78,7 @@ def test_auth_session_refresh_and_csrf_are_visible_in_browser(
                 "console_url": console.base_url,
                 "checked_controls": [
                     "locked bootstrap",
-                    "bad login alert",
+                    "bad login notice",
                     "valid login",
                     "refresh session restore",
                     "invalid csrf rejection",

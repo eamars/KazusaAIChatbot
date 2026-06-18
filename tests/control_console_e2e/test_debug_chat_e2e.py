@@ -49,8 +49,12 @@ def test_debug_chat_sends_to_brain_and_updates_history_and_graph(
                 message="listen only probe",
             )
 
-            assert page.locator("#chat-history .message").count() == 4
-            assert "fake brain reply" in page.locator("#chat-history").inner_text()
+            assert page.locator("#chat-history .message").count() == 7
+            chat_text = page.locator("#chat-history").inner_text()
+            assert "visible reply probe" in chat_text
+            assert "think only probe" in chat_text
+            assert "listen only probe" in chat_text
+            assert "fake brain reply" in chat_text
             assert page.locator("#debug-cognition-status").inner_text() == "completed"
             assert "debug-run-1" in page.locator(
                 "#debug-cognition-graph .graph-legend"
@@ -95,6 +99,55 @@ def test_debug_chat_sends_to_brain_and_updates_history_and_graph(
             )
 
     assert summary.exists()
+
+
+def test_debug_chat_click_shows_live_running_state_before_response(
+    tmp_path: Path,
+    unused_tcp_port_factory,
+    e2e_console,
+    e2e_browser_page,
+) -> None:
+    """A slow debug cognition run should immediately update visible UI state."""
+
+    brain_port = unused_tcp_port_factory()
+    with FakeBrainServer(brain_port) as fake_brain:
+        fake_brain.set_chat_delay_seconds(1.0)
+        registry_path = write_conflict_brain_registry(
+            path=tmp_path / "brain_conflict_registry.json",
+            fake_brain_base_url=fake_brain.base_url,
+            python_executable=sys.executable,
+        )
+
+        with e2e_console(
+            brain_base_url=fake_brain.base_url,
+            service_registry_path=registry_path,
+        ) as console:
+            page = e2e_browser_page(console.base_url)
+            _login(page)
+            page.locator("[data-page-link='debug']").click()
+            page.locator("input[name='debug_mode'][value='visible_reply']").check()
+            page.locator("textarea[name='message_text']").fill(
+                "slow visible reply probe"
+            )
+
+            page.locator("#debug-send").click()
+
+            page.wait_for_function(
+                "() => document.querySelector('#debug-cognition-status')?.textContent === 'running'",
+                timeout=1000,
+            )
+            assert page.locator("#debug-send").is_disabled()
+            assert page.locator("#debug-cognition-graph .status-running").count() >= 1
+            assert "slow visible reply probe" in page.locator(
+                "#chat-history",
+            ).inner_text()
+
+            page.wait_for_function(
+                "() => document.querySelector('#debug-cognition-status')?.textContent === 'completed'",
+                timeout=5000,
+            )
+            assert page.locator("#debug-send").is_enabled()
+            assert "fake brain reply" in page.locator("#chat-history").inner_text()
 
 
 def _login(page) -> None:

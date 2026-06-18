@@ -1018,6 +1018,96 @@ The final report must include:
 - Decision for next iteration:
   - No next iteration required for the current surfaced issue set.
 
+### Iteration 10 - 2026-06-18 12:25 local
+
+- Objective: Shift verification from final API states to operator-visible
+  product behavior for every obvious clickable control class: auth, sidebar
+  refresh actions, service lifecycle, debug send, graph hover, and browser
+  console health.
+- Environment:
+  - Console URL: isolated pytest loopback URLs
+  - Browser: Python Playwright using installed Google Chrome
+  - Brain mode: fake HTTP brain for normal E2E; opt-in real brain/debug/NapCat
+    lifecycle executed through the web UI
+  - Adapter mode: fake registry for normal E2E; real debug and NapCat paths
+    executed in opt-in lifecycle E2E
+- Test slices run:
+  - `venv\Scripts\python.exe -m pytest tests\control_console_e2e -q`
+  - `$env:KAZUSA_RUN_REAL_CONTROL_CONSOLE_E2E='1'; venv\Scripts\python.exe -m pytest tests\control_console_e2e\test_real_service_lifecycle_e2e.py -q`
+  - PowerShell-expanded deterministic coverage command over
+    `tests/test_control_console_*.py`, `tests/test_console_debug_chat.py`, and
+    `tests/test_console_lookup_limits.py` with
+    `--cov=control_console --cov-fail-under=95`
+  - `node --check src\control_console\static\console.js`
+  - Python compile checks for changed E2E helper/test files
+  - `git diff --check`
+- Coverage:
+  - control_console line coverage: 95.23%
+  - changed UI behavior: covered by Chrome E2E for visible feedback,
+    in-flight states, graph hover, and console health
+  - full-repo line coverage: not measured
+- Product conclusion:
+  - pass for the currently implemented desktop Chrome control-console
+    acceptance scope
+- Human-review readiness:
+  - improved; operator-visible feedback is now verified for the main control
+    classes instead of relying on final-state endpoint checks
+- Consolidated findings:
+  - Finding 1:
+    - User-visible symptom: login failures and action failures used blocking
+      browser alerts.
+    - Reproduction: bad token and empty login browser actions.
+    - Root cause: event handlers routed rejected promises to `alert()`.
+    - Fix status: fixed; errors now use an in-page ARIA live notice.
+  - Finding 2:
+    - User-visible symptom: refresh buttons did not show that a click was
+      being processed.
+    - Reproduction: delayed fetch wrappers for events, memory, interaction
+      style, calendar, and background refreshes.
+    - Root cause: refresh handlers awaited network calls without shared
+      loading state.
+    - Fix status: fixed; buttons disable and the notice reports loading and
+      completion.
+  - Finding 3:
+    - User-visible symptom: service Start/Stop/Restart could look idle while a
+      lifecycle request was pending.
+    - Reproduction: delayed service start E2E.
+    - Root cause: lifecycle actions disabled only the clicked button and waited
+      for bootstrap before visible feedback.
+    - Fix status: fixed; lifecycle actions show pending and success notices.
+  - Finding 4:
+    - User-visible symptom: graph reasoning hover was previously asserted only
+      as hidden DOM text.
+    - Reproduction: overview graph hover E2E.
+    - Root cause: test coverage inspected text content, not visible hover
+      behavior.
+    - Fix status: fixed in coverage; Chrome now verifies hover-revealed
+      reasoning detail.
+  - Finding 5:
+    - User-visible symptom: browser console warnings/errors were only written
+      as artifacts and did not fail acceptance tests.
+    - Reproduction: visual acceptance test lacked console-health assertion.
+    - Root cause: harness captured console messages but did not expose them to
+      tests.
+    - Fix status: fixed; visual acceptance fails on captured warning/error or
+      pageerror messages.
+- Error paths exercised:
+  - auth failure notice, no blocking dialog, debug unavailable/500, stale
+    conflict, invalid graph, lookup unavailable/empty, local IO failures
+- Lifecycle paths exercised:
+  - fake registry lifecycle by default; opt-in real brain start/stop, debug
+    adapter start/stop, NapCat visible start/failure state, and web debug chat
+    send path
+- Graph paths exercised:
+  - overview graph running/completed/failed, debug graph pending/completed,
+    page switch, refresh, SSE invalidation, hover reasoning detail
+- Raw artifact directory:
+  - not created for this iteration; consolidated command results are recorded
+    here
+- Decision for next iteration:
+  - Continue only if additional human review finds a specific product behavior
+    gap outside this currently tested control set.
+
 ## Approval Boundary
 
 The user approved execution on 2026-06-18. Production-code changes remain

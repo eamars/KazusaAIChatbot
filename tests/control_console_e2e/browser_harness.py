@@ -215,6 +215,7 @@ class BrowserSession(AbstractContextManager[Any]):
             }
         )
         self._page = self._context.new_page()
+        self._page.kazusa_console_messages = self.console_messages
         self._page.on("console", self._record_console_message)
         self._page.on("pageerror", self._record_page_error)
         return self._page

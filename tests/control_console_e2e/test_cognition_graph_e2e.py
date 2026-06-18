@@ -45,6 +45,16 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
             assert "internal_monologue" in page.locator(
                 "[data-node-id='l2.reasoning'] .node-detail"
             ).inner_text()
+            assert not page.locator(
+                "[data-node-id='l2.reasoning'] .node-detail"
+            ).is_visible()
+            page.locator("[data-node-id='l2.reasoning']").hover()
+            assert page.locator(
+                "[data-node-id='l2.reasoning'] .node-detail"
+            ).is_visible()
+            assert "weigh intent, memory, and scene pressure" in page.locator(
+                "[data-node-id='l2.reasoning'] .node-detail"
+            ).inner_text()
 
             page.locator("[data-page-link='services']").click()
             fake_brain.set_graph(

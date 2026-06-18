@@ -24,11 +24,9 @@ def test_logged_out_and_logged_in_shell_controls_are_responsive(
         page.locator("[data-theme-choice='bright']").click()
         assert page.locator("body").get_attribute("data-theme") == "bright"
 
-        with page.expect_event("dialog") as dialog_info:
-            page.locator("#login").click()
-        dialog = dialog_info.value
-        assert "422" in dialog.message
-        dialog.accept()
+        page.locator("#login").click()
+        page.wait_for_selector("#ui-notice[data-tone='danger']")
+        assert "422" in page.locator("#ui-notice").inner_text()
 
         page.locator("#token").fill(DEFAULT_E2E_OPERATOR_TOKEN)
         page.locator("#login").click()
@@ -49,7 +47,7 @@ def test_logged_out_and_logged_in_shell_controls_are_responsive(
                 "nav_count": nav_count,
                 "checked_controls": [
                     "theme toggle",
-                    "empty login alert",
+                    "empty login notice",
                     "valid login",
                     "services nav",
                 ],
@@ -57,3 +55,107 @@ def test_logged_out_and_logged_in_shell_controls_are_responsive(
         )
 
     assert summary.exists()
+
+
+def test_operator_actions_use_in_page_feedback_not_blocking_alerts(
+    e2e_console,
+    e2e_browser_page,
+) -> None:
+    """Visible operator errors and loading states should stay in the page."""
+
+    with e2e_console() as console:
+        page = e2e_browser_page(console.base_url)
+        page.wait_for_selector("body[data-auth-state='locked']")
+        dialogs = []
+        page.on("dialog", lambda dialog: (dialogs.append(dialog.message), dialog.accept()))
+
+        page.locator("#login").click()
+
+        page.wait_for_selector("#ui-notice[data-tone='danger']")
+        assert dialogs == []
+        assert "422" in page.locator("#ui-notice").inner_text()
+
+        page.locator("#token").fill(DEFAULT_E2E_OPERATOR_TOKEN)
+        page.locator("#login").click()
+        page.wait_for_selector("body[data-auth-state='authenticated']")
+        page.locator("[data-page-link='events']").click()
+        page.evaluate(
+            """() => {
+              const originalFetch = window.fetch.bind(window);
+              window.fetch = (input, init) => {
+                const url = String(input);
+                if (url.includes('/api/events')) {
+                  return new Promise((resolve) => {
+                    setTimeout(() => resolve(originalFetch(input, init)), 650);
+                  });
+                }
+                return originalFetch(input, init);
+              };
+            }"""
+        )
+
+        page.locator("#refresh-events").click()
+
+        page.wait_for_selector("#refresh-events:disabled")
+        assert "Loading events" in page.locator("#ui-notice").inner_text()
+        page.wait_for_selector("#refresh-events:not(:disabled)", timeout=5000)
+
+        refresh_cases = [
+            {
+                "page": "memory",
+                "button": "#refresh-memory",
+                "endpoint": "/api/lookups/memory",
+                "loading": "Loading memory",
+                "setup": """() => {
+                  document.querySelector('#memory-global-user-id').value = 'e2e-user';
+                }""",
+            },
+            {
+                "page": "style",
+                "button": "#refresh-style",
+                "endpoint": "/api/lookups/style",
+                "loading": "Loading interaction style",
+                "setup": """() => {
+                  document.querySelector('#style-platform').value = 'debug';
+                  document.querySelector('#style-channel-id').value = 'e2e-group';
+                }""",
+            },
+            {
+                "page": "calendar",
+                "button": "#refresh-calendar",
+                "endpoint": "/api/lookups/calendar",
+                "loading": "Loading calendar",
+                "setup": "() => {}",
+            },
+            {
+                "page": "background",
+                "button": "#refresh-background",
+                "endpoint": "/api/lookups/background",
+                "loading": "Loading background work",
+                "setup": "() => {}",
+            },
+        ]
+        for case in refresh_cases:
+            page.locator(f"[data-page-link='{case['page']}']").click()
+            page.evaluate(case["setup"])
+            page.evaluate(
+                """(endpoint) => {
+                  const originalFetch = window.fetch.bind(window);
+                  window.fetch = (input, init) => {
+                    const url = String(input);
+                    if (url.includes(endpoint)) {
+                      return new Promise((resolve) => {
+                        setTimeout(() => resolve(originalFetch(input, init)), 650);
+                      });
+                    }
+                    return originalFetch(input, init);
+                  };
+                }""",
+                case["endpoint"],
+            )
+
+            page.locator(case["button"]).click()
+
+            page.wait_for_selector(f"{case['button']}:disabled")
+            assert case["loading"] in page.locator("#ui-notice").inner_text()
+            page.wait_for_selector(f"{case['button']}:not(:disabled)", timeout=5000)

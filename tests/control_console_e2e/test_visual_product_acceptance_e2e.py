@@ -52,6 +52,8 @@ def test_desktop_visual_acceptance_for_cards_buttons_and_branding(
             assert card_overflows == []
             assert button_overflows == []
 
+        assert getattr(page, "kazusa_console_messages", None) == []
+
         summary = e2e_summary_writer(
             name="visual_product_acceptance",
             conclusion="pass",

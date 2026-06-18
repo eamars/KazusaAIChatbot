@@ -75,6 +75,45 @@ def test_service_cards_start_stop_and_dependency_states(
     assert summary.exists()
 
 
+def test_service_action_click_shows_operator_feedback_while_pending(
+    tmp_path: Path,
+    e2e_console,
+    e2e_browser_page,
+) -> None:
+    """Lifecycle clicks should give immediate in-page feedback while pending."""
+
+    registry_path = _write_fake_registry(tmp_path)
+
+    with e2e_console(service_registry_path=registry_path) as console:
+        page = e2e_browser_page(console.base_url)
+        _login(page)
+        page.locator("[data-page-link='services']").click()
+        page.evaluate(
+            """() => {
+              const originalFetch = window.fetch.bind(window);
+              window.fetch = (input, init) => {
+                const url = String(input);
+                if (url.includes('/api/services/brain/start')) {
+                  return new Promise((resolve) => {
+                    setTimeout(() => resolve(originalFetch(input, init)), 650);
+                  });
+                }
+                return originalFetch(input, init);
+              };
+            }"""
+        )
+
+        _button(page, "brain", "start").click()
+
+        page.wait_for_selector("[data-service='brain'][data-action='start']:disabled")
+        assert "Starting Brain service" in page.locator("#ui-notice").inner_text()
+        page.wait_for_function(
+            "() => document.querySelector(\"[data-service-card='brain'] .badge\")?.textContent === 'running'",
+            timeout=10000,
+        )
+        assert "Brain service started" in page.locator("#ui-notice").inner_text()
+
+
 def _write_fake_registry(tmp_path: Path) -> Path:
     """Write a deterministic service registry for fake lifecycle processes."""
 

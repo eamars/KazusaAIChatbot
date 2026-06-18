@@ -6,6 +6,7 @@ const state = {
   applicationIdentity: {},
   latestCognitionGraph: null,
   debugCognitionGraph: null,
+  debugRequestInFlight: false,
   eventSource: null,
   isAuthenticated: false,
 };
@@ -40,12 +41,12 @@ function setPage(name) {
   if (targetLink && targetLink.disabled) return;
   qsa("[data-page]").forEach((page) => page.classList.toggle("active", page.dataset.page === name));
   qsa("[data-page-link]").forEach((link) => link.classList.toggle("active", link.dataset.pageLink === name));
-  if (name === "audit" && state.csrfHeaderName) refreshAudit().catch((error) => alert(error.message));
-  if (name === "character" && state.csrfHeaderName) refreshCharacter().catch((error) => alert(error.message));
-  if (name === "memory" && state.csrfHeaderName) refreshMemory(false).catch((error) => alert(error.message));
-  if (name === "style" && state.csrfHeaderName) refreshStyle(false).catch((error) => alert(error.message));
-  if (name === "calendar" && state.csrfHeaderName) refreshCalendar().catch((error) => alert(error.message));
-  if (name === "background" && state.csrfHeaderName) refreshBackground().catch((error) => alert(error.message));
+  if (name === "audit" && state.csrfHeaderName) refreshAudit().catch(reportActionError);
+  if (name === "character" && state.csrfHeaderName) refreshCharacter().catch(reportActionError);
+  if (name === "memory" && state.csrfHeaderName) refreshMemory(false).catch(reportActionError);
+  if (name === "style" && state.csrfHeaderName) refreshStyle(false).catch(reportActionError);
+  if (name === "calendar" && state.csrfHeaderName) refreshCalendar().catch(reportActionError);
+  if (name === "background" && state.csrfHeaderName) refreshBackground().catch(reportActionError);
 }
 
 function setAuthState(isAuthenticated) {
@@ -166,7 +167,38 @@ function renderDebugAvailability() {
   qs("[name='message_text']").placeholder = available
     ? "Send a debug message through /chat"
     : "Start or connect the brain service before sending a debug message";
-  qs("#debug-send").disabled = !available;
+  qs("#debug-send").disabled = !available || state.debugRequestInFlight;
+}
+
+function showNotice(message, tone = "info") {
+  const notice = qs("#ui-notice");
+  notice.hidden = false;
+  notice.dataset.tone = tone;
+  notice.textContent = message;
+}
+
+function clearNotice() {
+  const notice = qs("#ui-notice");
+  notice.hidden = true;
+  notice.dataset.tone = "idle";
+  notice.textContent = "";
+}
+
+async function runButtonAction(button, loadingMessage, successMessage, action) {
+  button.disabled = true;
+  showNotice(loadingMessage, "info");
+  try {
+    await action();
+    if (successMessage) showNotice(successMessage, "success");
+  } catch (error) {
+    showNotice(error.message, "danger");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function reportActionError(error) {
+  showNotice(error.message, "danger");
 }
 
 async function api(path, options = {}) {
@@ -197,9 +229,11 @@ async function login() {
   setAuthState(true);
   qs("#session-state").textContent = payload.operator.operator_id;
   await bootstrap();
+  showNotice("Signed in.", "success");
 }
 
 async function bootstrap() {
+  clearNotice();
   const payload = await api("/api/bootstrap");
   state.csrfHeaderName = payload.csrf_header_name || "";
   state.csrfToken = payload.csrf_token || "";
@@ -231,6 +265,7 @@ function lockSession() {
   qs("#session-state").textContent = "signed out";
   renderBrand({status: "unavailable", character_name: "not connected"});
   renderDebugAvailability();
+  showNotice("Sign in to inspect local services.", "info");
 }
 
 async function resumeSession() {
@@ -539,7 +574,11 @@ async function serviceAction(event) {
   const serviceId = button.dataset.service;
   const action = button.dataset.action;
   const expectedVersion = Number(button.dataset.version);
+  const service = serviceById(serviceId) || {};
+  const serviceName = service.display_name || serviceId;
+  const actionLabel = lifecycleActionLabel(action);
   button.disabled = true;
+  showNotice(`${actionLabel} ${serviceName}...`, "info");
   try {
     await api(`/api/services/${serviceId}/${action}`, {
       method: "POST",
@@ -547,6 +586,7 @@ async function serviceAction(event) {
       body: JSON.stringify({reason: "operator console action", expected_version: expectedVersion}),
     });
     await bootstrap();
+    showNotice(`${serviceName} ${lifecycleActionDoneLabel(action)}.`, "success");
   } catch (error) {
     await bootstrap();
     throw error;
@@ -555,8 +595,23 @@ async function serviceAction(event) {
   }
 }
 
+function lifecycleActionLabel(action) {
+  if (action === "start") return "Starting";
+  if (action === "stop") return "Stopping";
+  if (action === "restart") return "Restarting";
+  return "Updating";
+}
+
+function lifecycleActionDoneLabel(action) {
+  if (action === "start") return "started";
+  if (action === "stop") return "stopped";
+  if (action === "restart") return "restarted";
+  return "updated";
+}
+
 async function sendDebug(event) {
   event.preventDefault();
+  const sendButton = qs("#debug-send");
   const form = new FormData(event.target);
   const payload = Object.fromEntries(form.entries());
   const selectedMode = form.get("debug_mode");
@@ -564,13 +619,95 @@ async function sendDebug(event) {
   if (selectedMode && selectedMode !== "visible_reply") debugModes.push(selectedMode);
   payload.debug_modes = debugModes;
   delete payload.debug_mode;
-  const result = await api("/api/debug-chat", {method: "POST", csrf: true, body: JSON.stringify(payload)});
-  state.debugCognitionGraph = result.cognition_graph || null;
-  const label = result.brain_available ? "brain" : "unavailable";
-  const body = debugResponseBody(result);
-  const meta = debugResponseMeta(result);
-  qs("#chat-history").insertAdjacentHTML("beforeend", `<article class="message"><div class="meta">${escapeHtml(label)}</div><p>${escapeHtml(body)}</p><div class="meta">${escapeHtml(meta)}</div></article>`);
+  const messageText = String(payload.message_text || "").trim();
+  state.debugRequestInFlight = true;
+  sendButton.disabled = true;
+  state.debugCognitionGraph = pendingDebugCognitionGraph(messageText);
+  appendChatMessage({
+    label: "operator",
+    body: messageText || "Debug message sent.",
+    meta: "awaiting brain response",
+  });
   renderDebugCognitionGraph(state.debugCognitionGraph);
+  try {
+    const result = await api("/api/debug-chat", {method: "POST", csrf: true, body: JSON.stringify(payload)});
+    state.debugCognitionGraph = result.cognition_graph || null;
+    const label = result.brain_available ? "brain" : "unavailable";
+    const body = debugResponseBody(result);
+    const meta = debugResponseMeta(result);
+    appendChatMessage({label, body, meta});
+    renderDebugCognitionGraph(state.debugCognitionGraph);
+  } catch (error) {
+    state.debugCognitionGraph = failedDebugCognitionGraph(error);
+    renderDebugCognitionGraph(state.debugCognitionGraph);
+    appendChatMessage({
+      label: "error",
+      body: error.message,
+      meta: "debug request failed",
+    });
+    throw error;
+  } finally {
+    state.debugRequestInFlight = false;
+    renderDebugAvailability();
+  }
+}
+
+function pendingDebugCognitionGraph(messageText) {
+  return {
+    source: "debug_latest",
+    status: "running",
+    run_id: "debug request in progress",
+    nodes: [
+      {
+        id: "debug.input",
+        label: "Debug input",
+        stage: "Input",
+        lane: "input",
+        column: 1,
+        branch: "debug",
+        status: "completed",
+        detail: {summary: messageText || "message submitted"},
+      },
+      {
+        id: "debug.cognition",
+        label: "Cognition",
+        stage: "Brain",
+        lane: "cognition",
+        column: 2,
+        branch: "live",
+        status: "running",
+        detail: {summary: "waiting for debug cognition result"},
+      },
+    ],
+    edges: [
+      {source: "debug.input", target: "debug.cognition", kind: "sequence"},
+    ],
+  };
+}
+
+function failedDebugCognitionGraph(error) {
+  return {
+    source: "debug_latest",
+    status: "failed",
+    run_id: "debug request failed",
+    nodes: [
+      {
+        id: "debug.error",
+        label: "Request failed",
+        stage: "Error",
+        lane: "cognition",
+        column: 1,
+        branch: "debug",
+        status: "failed",
+        detail: {summary: error.message},
+      },
+    ],
+    edges: [],
+  };
+}
+
+function appendChatMessage({label, body, meta}) {
+  qs("#chat-history").insertAdjacentHTML("beforeend", `<article class="message"><div class="meta">${escapeHtml(label)}</div><p>${escapeHtml(body)}</p><div class="meta">${escapeHtml(meta)}</div></article>`);
 }
 
 function debugResponseBody(result) {
@@ -759,17 +896,49 @@ function openStream(url) {
 initializeTheme();
 qsa("[data-page-link]").forEach((link) => link.addEventListener("click", () => setPage(link.dataset.pageLink)));
 qsa("[data-theme-choice]").forEach((button) => button.addEventListener("click", () => setTheme(button.dataset.themeChoice)));
-qs("#login").addEventListener("click", () => login().catch((error) => alert(error.message)));
+qs("#login").addEventListener("click", () => runButtonAction(
+  qs("#login"),
+  "Signing in...",
+  "Signed in.",
+  login,
+));
 qs("#token").addEventListener("keydown", (event) => {
-  if (event.key === "Enter") login().catch((error) => alert(error.message));
+  if (event.key === "Enter") {
+    runButtonAction(qs("#login"), "Signing in...", "Signed in.", login);
+  }
 });
-qs("#service-grid").addEventListener("click", (event) => serviceAction(event).catch((error) => alert(error.message)));
-qs("#debug-form").addEventListener("submit", (event) => sendDebug(event).catch((error) => alert(error.message)));
-qs("#refresh-events").addEventListener("click", () => refreshEvents().catch((error) => alert(error.message)));
-qs("#refresh-memory").addEventListener("click", () => refreshMemory().catch((error) => alert(error.message)));
-qs("#refresh-style").addEventListener("click", () => refreshStyle().catch((error) => alert(error.message)));
-qs("#refresh-calendar").addEventListener("click", () => refreshCalendar().catch((error) => alert(error.message)));
-qs("#refresh-background").addEventListener("click", () => refreshBackground().catch((error) => alert(error.message)));
+qs("#service-grid").addEventListener("click", (event) => serviceAction(event).catch(reportActionError));
+qs("#debug-form").addEventListener("submit", (event) => sendDebug(event).catch(reportActionError));
+qs("#refresh-events").addEventListener("click", () => runButtonAction(
+  qs("#refresh-events"),
+  "Loading events...",
+  "Events updated.",
+  refreshEvents,
+));
+qs("#refresh-memory").addEventListener("click", () => runButtonAction(
+  qs("#refresh-memory"),
+  "Loading memory...",
+  "Memory lookup updated.",
+  refreshMemory,
+));
+qs("#refresh-style").addEventListener("click", () => runButtonAction(
+  qs("#refresh-style"),
+  "Loading interaction style...",
+  "Interaction style updated.",
+  refreshStyle,
+));
+qs("#refresh-calendar").addEventListener("click", () => runButtonAction(
+  qs("#refresh-calendar"),
+  "Loading calendar...",
+  "Calendar updated.",
+  refreshCalendar,
+));
+qs("#refresh-background").addEventListener("click", () => runButtonAction(
+  qs("#refresh-background"),
+  "Loading background work...",
+  "Background work updated.",
+  refreshBackground,
+));
 window.addEventListener("resize", () => {
   renderOverviewCognitionGraph(state.latestCognitionGraph);
   renderDebugCognitionGraph(state.debugCognitionGraph);

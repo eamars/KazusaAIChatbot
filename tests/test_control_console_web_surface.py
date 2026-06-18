@@ -183,6 +183,8 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert 'id="character-state-table"' in index.text
     assert 'id="character-growth-table"' in index.text
     assert 'id="login-form"' in index.text
+    assert 'id="ui-notice"' in index.text
+    assert 'aria-live="polite"' in index.text
 
     script = client.get("/static/console.js")
     assert script.status_code == 200
@@ -211,13 +213,20 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert 'form.getAll("debug_modes")' in script.text
     assert "payload.debug_modes = debugModes" in script.text
     assert "delete payload.debug_mode" in script.text
-    assert "refreshMemory()" in script.text
+    assert "function showNotice" in script.text
+    assert "function runButtonAction" in script.text
+    assert "alert(" not in script.text
+    assert "Loading memory..." in script.text
+    assert "refreshMemory" in script.text
     assert "/api/lookups/memory" in script.text
-    assert "refreshStyle()" in script.text
+    assert "Loading interaction style..." in script.text
+    assert "refreshStyle" in script.text
     assert "/api/lookups/style" in script.text
-    assert "refreshCalendar()" in script.text
+    assert "Loading calendar..." in script.text
+    assert "refreshCalendar" in script.text
     assert "/api/lookups/calendar" in script.text
-    assert "refreshBackground()" in script.text
+    assert "Loading background work..." in script.text
+    assert "refreshBackground" in script.text
     assert "/api/lookups/background" in script.text
     assert "/api/character/status" in script.text
     assert "/api/character/growth" in script.text
@@ -234,6 +243,7 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert '.status-dot[data-state="conflict"]' in stylesheet.text
     assert ".cognition-graph" in stylesheet.text
     assert ".graph-node:focus-within .node-detail" in stylesheet.text
+    assert ".notice[data-tone=\"danger\"]" in stylesheet.text
     assert 'body[data-auth-state="authenticated"] #login-form' in stylesheet.text
 
     bootstrap = client.get("/api/bootstrap")
