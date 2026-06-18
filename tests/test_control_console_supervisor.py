@@ -363,6 +363,92 @@ async def test_start_clears_previous_exit_code_and_error_preview(
 
 
 @pytest.mark.asyncio
+async def test_clean_child_exit_is_stopped_not_crashed(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """A zero return code should not be reported as a service crash."""
+
+    from control_console.audit import LocalAuditWriter
+    from control_console.log_store import ProcessLogStore
+    from control_console.process_store import ProcessStore
+    from control_console.supervisor import ProcessSupervisor
+
+    processes: list[_FakeProcess] = []
+
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        _ = args
+        _ = kwargs
+        process = _FakeProcess()
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(
+        asyncio,
+        "create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    audit_writer = LocalAuditWriter(tmp_path / "audit.jsonl")
+    supervisor = ProcessSupervisor(
+        services={"brain": _service_spec("brain", tmp_path)},
+        store=ProcessStore(tmp_path / "state"),
+        log_store=ProcessLogStore(tmp_path / "logs"),
+        audit_writer=audit_writer,
+    )
+
+    await supervisor.start_service(
+        service_id="brain",
+        operator_id="operator",
+        reason="start clean child",
+    )
+    processes[0].returncode = 0
+
+    state = supervisor.service_state("brain")
+
+    assert state.actual_state == "stopped"
+    assert state.pid is None
+    assert state.exit_code == 0
+    assert state.last_error_preview is None
+    event_types = [event.event_type for event in audit_writer.read_recent(limit=20)]
+    assert "service_crashed" not in event_types
+
+
+def test_stopped_process_exit_preview_is_cleared_on_state_refresh(
+    tmp_path,
+) -> None:
+    """Stopped services should not keep displaying stale exit summaries."""
+
+    from control_console.audit import LocalAuditWriter
+    from control_console.log_store import ProcessLogStore
+    from control_console.process_store import ProcessStore
+    from control_console.supervisor import ProcessSupervisor
+
+    store = ProcessStore(tmp_path / "state")
+    store.update_service(
+        "adapter.napcat",
+        {
+            "desired_state": "stopped",
+            "actual_state": "stopped",
+            "pid": None,
+            "exit_code": 1,
+            "last_error_preview": "process exited with code 1",
+        },
+    )
+    supervisor = ProcessSupervisor(
+        services={"adapter.napcat": _service_spec("adapter.napcat", tmp_path)},
+        store=store,
+        log_store=ProcessLogStore(tmp_path / "logs"),
+        audit_writer=LocalAuditWriter(tmp_path / "audit.jsonl"),
+    )
+
+    state = supervisor.service_state("adapter.napcat")
+
+    assert state.actual_state == "stopped"
+    assert state.last_error_preview is None
+
+
+@pytest.mark.asyncio
 async def test_start_drains_child_stdout_stderr_to_redacted_process_logs(
     monkeypatch,
     tmp_path,

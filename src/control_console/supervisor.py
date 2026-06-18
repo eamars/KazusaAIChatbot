@@ -221,6 +221,7 @@ class ProcessSupervisor:
                 "stopped_at": datetime.now(timezone.utc).isoformat(),
                 "pid": None,
                 "exit_code": getattr(process, "returncode", 0),
+                "last_error_preview": None,
             },
         )
         self._log_store.append_line(
@@ -422,7 +423,7 @@ class ProcessSupervisor:
         )
 
     def _refresh_process_exit(self, service_id: str) -> None:
-        """Persist crash state for a child process that has exited."""
+        """Persist terminal state for a child process that has exited."""
 
         process = self._processes.get(service_id)
         if process is None or process.returncode is None:
@@ -431,12 +432,34 @@ class ProcessSupervisor:
         if state.get("actual_state") != "running":
             return
         exit_code = process.returncode
+        self._processes.pop(service_id, None)
+        self._process_command_fingerprints.pop(service_id, None)
+        stopped_at = datetime.now(timezone.utc).isoformat()
+        if exit_code == 0:
+            self._store.update_service(
+                service_id,
+                {
+                    "actual_state": "stopped",
+                    "exit_code": exit_code,
+                    "pid": None,
+                    "stopped_at": stopped_at,
+                    "last_error_preview": None,
+                },
+            )
+            self._log_store.append_line(
+                service_id=service_id,
+                stream="supervisor",
+                line=f"service exited exit_code={exit_code}",
+            )
+            return
+
         self._store.update_service(
             service_id,
             {
                 "actual_state": "crashed",
                 "exit_code": exit_code,
-                "stopped_at": datetime.now(timezone.utc).isoformat(),
+                "pid": None,
+                "stopped_at": stopped_at,
                 "last_error_preview": f"process exited with code {exit_code}",
             },
         )
@@ -461,14 +484,27 @@ class ProcessSupervisor:
 
         snapshot = self._store.load_snapshot()
         raw_service = snapshot["services"].get(service_id, {})
+        actual_state = raw_service.get("actual_state", "stopped")
+        last_error_preview = raw_service.get("last_error_preview")
+        if (
+            actual_state == "stopped"
+            and isinstance(last_error_preview, str)
+            and last_error_preview.startswith("process exited with code ")
+        ):
+            self._store.update_service(
+                service_id,
+                {
+                    "last_error_preview": None,
+                },
+            )
+            return
+
         pid = _pid_or_none(raw_service.get("pid"))
         if pid is None:
             return
         if _pid_exists(pid):
             return
 
-        actual_state = raw_service.get("actual_state", "stopped")
-        last_error_preview = raw_service.get("last_error_preview")
         desired_state = raw_service.get("desired_state", "stopped")
         if actual_state == "running":
             self._store.update_service(
