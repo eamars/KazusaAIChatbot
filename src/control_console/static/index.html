@@ -336,6 +336,29 @@
 
     </main>
   </div>
+  <div class="dialog-backdrop" id="service-config-dialog" data-component="Dialog" role="dialog" aria-modal="true" aria-labelledby="service-config-title" aria-describedby="service-config-description" hidden>
+    <section class="dialog-panel service-config-panel" data-component="Card">
+      <div class="card-header">
+        <div>
+          <h3 id="service-config-title">Service configuration</h3>
+          <p id="service-config-description">Descriptor-backed runtime override for a managed service.</p>
+        </div>
+        <button class="btn" id="service-config-close" type="button" aria-label="Close configuration dialog">Close</button>
+      </div>
+      <div class="card-content service-config-content">
+        <div class="config-summary-row">
+          <span class="badge" id="service-config-state">not loaded</span>
+          <span class="badge warn" id="service-config-restart-note">Apply and restart when running</span>
+        </div>
+        <div class="notice config-warning" data-tone="info">Applying changes restarts the service when it is running. Stopped services use the override on next start.</div>
+        <div class="field-group" id="service-config-fields" data-component="FieldGroup"></div>
+      </div>
+      <div class="dialog-footer">
+        <button class="btn" id="service-config-reset" type="button">Reset to default</button>
+        <button class="btn primary" id="service-config-apply" type="button">Apply and restart</button>
+      </div>
+    </section>
+  </div>
   <script src="/static/console.js"></script>
 </body>
 </html>

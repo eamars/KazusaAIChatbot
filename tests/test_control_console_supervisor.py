@@ -178,6 +178,63 @@ async def test_start_stop_restart_uses_argv_no_shell_and_records_audit(
 
 
 @pytest.mark.asyncio
+async def test_start_service_uses_command_overlay_for_subprocess_argv(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Runtime config overlays should affect argv without changing registry specs."""
+
+    from control_console.audit import LocalAuditWriter
+    from control_console.log_store import ProcessLogStore
+    from control_console.process_store import ProcessStore
+    from control_console.supervisor import ProcessSupervisor
+
+    calls: list[dict] = []
+
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        calls.append({"args": args, "kwargs": kwargs})
+        return_value = _FakeProcess()
+        return return_value
+
+    def command_resolver(service_id: str, base_command: list[str]) -> list[str]:
+        assert service_id == "adapter.napcat"
+        rendered_command = [*base_command, "--channels", "54369546"]
+        return rendered_command
+
+    monkeypatch.setattr(
+        asyncio,
+        "create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    spec = _service_spec("adapter.napcat", tmp_path)
+    supervisor = ProcessSupervisor(
+        services={"adapter.napcat": spec},
+        store=ProcessStore(tmp_path / "state"),
+        log_store=ProcessLogStore(tmp_path / "logs"),
+        audit_writer=LocalAuditWriter(tmp_path / "audit.jsonl"),
+        command_resolver=command_resolver,
+    )
+
+    await supervisor.start_service(
+        service_id="adapter.napcat",
+        operator_id="operator",
+        reason="start with runtime config",
+    )
+
+    assert calls[0]["args"] == (
+        "python",
+        "-m",
+        "adapter_napcat",
+        "--channels",
+        "54369546",
+    )
+    assert spec.command == ["python", "-m", "adapter_napcat"]
+    state = supervisor.service_state("adapter.napcat")
+    assert state.command_fingerprint
+
+
+@pytest.mark.asyncio
 async def test_dependency_order_requires_brain_before_adapter_and_stops_dependents(
     monkeypatch,
     tmp_path,

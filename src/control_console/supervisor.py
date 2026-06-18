@@ -8,7 +8,7 @@ import hashlib
 import os
 from pathlib import Path
 import socket
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 from urllib.parse import urlparse
 import uuid
 
@@ -30,6 +30,7 @@ STALE_UNOWNED_CONFLICT_MESSAGES = frozenset({
     NO_PROCESS_HANDLE_MESSAGE,
     PROCESS_METADATA_MISMATCH_MESSAGE,
 })
+CommandResolver = Callable[[str, list[str]], list[str]]
 
 
 class ServiceLifecycleError(RuntimeError):
@@ -46,6 +47,7 @@ class ProcessSupervisor:
         store: ProcessStore,
         log_store: ProcessLogStore,
         audit_writer: LocalAuditWriter,
+        command_resolver: CommandResolver | None = None,
     ) -> None:
         """Create a process supervisor for one registry."""
 
@@ -53,8 +55,10 @@ class ProcessSupervisor:
         self._store = store
         self._log_store = log_store
         self._audit_writer = audit_writer
+        self._command_resolver = command_resolver
         self._processes: dict[str, asyncio.subprocess.Process] = {}
         self._log_tasks: dict[str, set[asyncio.Task[None]]] = {}
+        self._process_command_fingerprints: dict[str, str] = {}
 
     def service_version(self, service_id: str) -> int:
         """Return the current service state version."""
@@ -114,8 +118,9 @@ class ProcessSupervisor:
         cwd = _resolve_cwd(spec.cwd)
         env = os.environ.copy()
         env.update(spec.env)
+        start_command = self._start_command(service_id)
         process = await asyncio.create_subprocess_exec(
-            *spec.command,
+            *start_command,
             cwd=str(cwd) if cwd else None,
             env=env,
             stdout=asyncio.subprocess.PIPE,
@@ -124,7 +129,8 @@ class ProcessSupervisor:
         self._processes[service_id] = process
         self._start_log_readers(service_id=service_id, process=process)
         generation = f"generation-{uuid.uuid4().hex}"
-        fingerprint = _command_fingerprint(spec.command)
+        fingerprint = _command_fingerprint(start_command)
+        self._process_command_fingerprints[service_id] = fingerprint
         self._store.record_process_owner(
             service_id=service_id,
             pid=process.pid,
@@ -203,6 +209,7 @@ class ProcessSupervisor:
                 await process.wait()
         if process is not None:
             self._processes.pop(service_id, None)
+            self._process_command_fingerprints.pop(service_id, None)
         self._cancel_log_tasks(service_id)
         self._store.update_service(
             service_id,
@@ -372,12 +379,28 @@ class ProcessSupervisor:
         if process is None:
             self._mark_conflict(service_id, NO_PROCESS_HANDLE_MESSAGE)
             raise ServiceLifecycleError(f"service {service_id} is not console-owned")
-        expected_fingerprint = _command_fingerprint(self._services[service_id].command)
+        expected_fingerprint = self._process_command_fingerprints.get(service_id)
+        if expected_fingerprint is None:
+            expected_fingerprint = _command_fingerprint(
+                self._start_command(service_id),
+            )
         if state.pid != process.pid or state.command_fingerprint != expected_fingerprint:
             self._mark_conflict(service_id, PROCESS_METADATA_MISMATCH_MESSAGE)
             raise ServiceLifecycleError(
                 f"service {service_id} ownership metadata mismatch"
             )
+
+    def _start_command(self, service_id: str) -> list[str]:
+        """Return the argv list used to start one service."""
+
+        spec = self._services[service_id]
+        base_command = list(spec.command)
+        if self._command_resolver is None:
+            return base_command
+
+        rendered_command = self._command_resolver(service_id, base_command)
+        _validate_start_command(rendered_command)
+        return rendered_command
 
     def _mark_conflict(self, service_id: str, message: str) -> None:
         """Persist conflict state without touching the process."""
@@ -715,6 +738,18 @@ def _command_fingerprint(command: list[str]) -> str:
     joined_command = "\0".join(command)
     fingerprint = hashlib.sha256(joined_command.encode("utf-8")).hexdigest()
     return fingerprint
+
+
+def _validate_start_command(command: list[str]) -> None:
+    """Reject command overlays that do not preserve argv-only execution."""
+
+    if not isinstance(command, list) or not command:
+        raise ServiceLifecycleError("rendered command must be a non-empty argv list")
+    for part in command:
+        if not isinstance(part, str) or not part.strip():
+            raise ServiceLifecycleError(
+                "rendered command entries must be non-empty strings"
+            )
 
 
 def _endpoint_is_listening(health_url: str) -> bool:

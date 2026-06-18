@@ -41,6 +41,10 @@ The brain owns cognition and persistence coordination for chat turns. Adapters o
 - Auth: `POST /api/auth/login`, `GET /api/auth/session`
 - Bootstrap: `GET /api/bootstrap`
 - Lifecycle: `POST /api/services/{service_id}/start|stop|restart`
+- Service config:
+  `GET /api/services/{service_id}/config`,
+  `PUT /api/services/{service_id}/config`,
+  `POST /api/services/{service_id}/config/reset`
 - Logs and events: `GET /api/logs/{service_id}`, `GET /api/events`
 - Debug chat: `POST /api/debug-chat`
 - Lookups: `GET /api/lookups/{namespace}`
@@ -58,6 +62,12 @@ the configured CSRF header.
   `not connected`.
 - `csrf_token`: the current session CSRF token, returned only after the
   HTTP-only session cookie has authenticated the browser.
+
+`GET /api/bootstrap` also returns `service_config_summaries`, keyed by
+service id, for services with registered configuration descriptors. The
+summary is intentionally compact: configurable state, apply behavior, and
+field count only. Full field metadata is loaded on demand through the generic
+service config route.
 
 `GET /api/bootstrap` also returns `latest_cognition_graph` and mirrors it
 under `overview.latest_cognition_graph`. When the brain HTTP endpoint is
@@ -176,6 +186,11 @@ Override registries are loaded from `KAZUSA_CONTROL_SERVICE_REGISTRY`, validated
 
 The supervisor starts services with `asyncio.create_subprocess_exec(*argv)`. It never uses `shell=True`, command concatenation, broad process scanning, external process adoption, or PID killing outside console-owned child processes.
 
+Descriptor-backed service config may render a command overlay before a service
+starts. The overlay returns argv parts only and is included in the process
+ownership fingerprint. Browser requests cannot submit arbitrary commands,
+environment dictionaries, shells, or command strings.
+
 If a configured dependency endpoint is already listening before the console
 starts it, that dependency is marked as an unmanaged conflict. The console must
 not stop, restart, or adopt that process. Dependent services may still start
@@ -183,6 +198,60 @@ against that live endpoint when the conflict is specifically
 `configured endpoint is already in use by an unmanaged process`; this supports
 debug-adapter and read-only inspection workflows while preserving ownership
 boundaries.
+
+## Runtime Service Config
+
+The console exposes a generic descriptor-driven configuration API for services
+that have descriptors registered inside `control_console`. Services without a
+descriptor have no Configure action and no config route payload.
+
+The config snapshot shape is descriptor-driven:
+
+- `service_id`, `title`, `description`
+- `apply_behavior: "restart"`
+- `state: "default" | "override_active" | "apply_failed" | "unavailable"`
+- `fields[]` with key, label, description, value type, default source,
+  default value, override value, effective value, restart flag, sensitivity,
+  and validation metadata
+
+State-changing config calls are authenticated and CSRF-protected:
+
+- `PUT /api/services/{service_id}/config` accepts `reason`,
+  optional `expected_version`, and a `values` object keyed by descriptor field.
+- `POST /api/services/{service_id}/config/reset` accepts `reason` and optional
+  `expected_version`, clears the process-local override, and restores the
+  descriptor default.
+- Unknown services, services without descriptors, stale versions, and invalid
+  values are rejected before restart.
+
+Overrides are process-local. They live only in the running control-console
+process, are not written to the service registry, audit JSONL, `.env`, or a
+database, and disappear when the console process restarts.
+
+Apply is restart-based. If the target service is running, the console stores
+the override, audits the request, restarts only that service with reason
+`config apply requires restart`, and returns the config snapshot, service
+state, restart result, and audit event id. If the service is stopped, the
+console stores the override without attempting a restart; the next console
+start for that service uses the effective config. Reset uses the same restart
+rule when the service is running.
+
+Defaults follow the console settings precedence style: dotenv values are
+loaded first and real process environment values override them. The API exposes
+only descriptor-approved default sources and validated field values; it never
+returns raw environment maps, secrets, tokens, or command environments.
+
+The initial production descriptor is for the NapCat QQ adapter active-group
+allowlist. The descriptor reads `NAPCAT_ACTIVE_GROUPS` as a comma- or
+space-separated list of numeric group ids and renders the effective list as
+the adapter's existing `--channels` argv when the list is non-empty. An empty
+effective list renders no `--channels` argument.
+
+Audit records are written for config views, apply requests, reset requests,
+restart requests, successful application, and validation or version failures.
+Audit targets include service ids, field keys, config state, and restart
+status, but not submitted values, secrets, raw `.env` content, or full
+environment dictionaries.
 
 ## Static UI Contract
 

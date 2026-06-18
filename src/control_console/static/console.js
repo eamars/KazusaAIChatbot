@@ -2,6 +2,8 @@ const state = {
   csrfHeaderName: "",
   csrfToken: "",
   services: [],
+  serviceConfigSummaries: {},
+  currentServiceConfig: null,
   pageCapabilities: {},
   applicationIdentity: {},
   latestCognitionGraph: null,
@@ -240,6 +242,7 @@ async function bootstrap(options = {}) {
   state.csrfHeaderName = payload.csrf_header_name || "";
   state.csrfToken = payload.csrf_token || "";
   state.services = payload.services;
+  state.serviceConfigSummaries = payload.service_config_summaries || {};
   state.pageCapabilities = payload.page_capabilities || {};
   state.applicationIdentity = payload.application_identity || {};
   state.latestCognitionGraph = payload.latest_cognition_graph || payload.overview?.latest_cognition_graph || null;
@@ -260,6 +263,8 @@ function lockSession() {
   state.csrfHeaderName = "";
   state.csrfToken = "";
   state.services = [];
+  state.serviceConfigSummaries = {};
+  state.currentServiceConfig = null;
   state.pageCapabilities = {};
   state.latestCognitionGraph = null;
   state.debugCognitionGraph = null;
@@ -524,6 +529,20 @@ function serviceActionButton(service, action, label, variant = "") {
   return `<button class="${className}" data-action="${action}" data-service="${escapeHtml(service.id)}" data-version="${escapeHtml(service.version)}"${disabled}>${label}</button>`;
 }
 
+function serviceConfigButton(service) {
+  const summary = state.serviceConfigSummaries[service.id] || {};
+  if (!summary.configurable) return "";
+  return `<button class="btn" data-config-service="${escapeHtml(service.id)}" type="button">Configure</button>`;
+}
+
+function serviceConfigBadge(service) {
+  const summary = state.serviceConfigSummaries[service.id] || {};
+  if (!summary.configurable) return "";
+  const configState = summary.state || "default";
+  const className = configState === "override_active" ? "badge warn" : "badge";
+  return `<span class="${className}">${escapeHtml(configState.replaceAll("_", " "))}</span>`;
+}
+
 function renderServices() {
   const grid = qs("#service-grid");
   grid.innerHTML = "";
@@ -531,12 +550,17 @@ function renderServices() {
     const startButton = serviceActionButton(service, "start", "Start", "primary");
     const restartButton = serviceActionButton(service, "restart", "Restart");
     const stopButton = serviceActionButton(service, "stop", "Stop", "danger");
+    const configButton = serviceConfigButton(service);
+    const configBadge = serviceConfigBadge(service);
     const serviceError = service.last_error_preview ? `<div class="service-error">${escapeHtml(service.last_error_preview)}</div>` : "";
     grid.insertAdjacentHTML("beforeend", `
       <article class="service-card" data-component="Card" data-service-card="${escapeHtml(service.id)}">
         <div class="service-card-header">
           <div><strong>${escapeHtml(service.display_name)}</strong><br><code>${escapeHtml(service.id)}</code></div>
-          <span class="${badgeClass(service.actual_state)}">${escapeHtml(service.actual_state)}</span>
+          <div class="badge-stack">
+            <span class="${badgeClass(service.actual_state)}">${escapeHtml(service.actual_state)}</span>
+            ${configBadge}
+          </div>
         </div>
         <div class="service-card-body">
           <div class="kv"><span>desired</span><strong>${escapeHtml(service.desired_state)}</strong></div>
@@ -549,6 +573,7 @@ function renderServices() {
           ${startButton}
           ${restartButton}
           ${stopButton}
+          ${configButton}
         </div>
       </article>
     `);
@@ -600,6 +625,15 @@ async function serviceAction(event) {
   }
 }
 
+function handleServiceGridClick(event) {
+  const configButton = event.target.closest("[data-config-service]");
+  if (configButton) {
+    openServiceConfig(configButton.dataset.configService).catch(reportActionError);
+    return;
+  }
+  serviceAction(event).catch(reportActionError);
+}
+
 function lifecycleActionLabel(action) {
   if (action === "start") return "Starting";
   if (action === "stop") return "Stopping";
@@ -612,6 +646,184 @@ function lifecycleActionDoneLabel(action) {
   if (action === "stop") return "stopped";
   if (action === "restart") return "restarted";
   return "updated";
+}
+
+async function openServiceConfig(serviceId) {
+  const payload = await api(`/api/services/${encodeURIComponent(serviceId)}/config`);
+  state.currentServiceConfig = payload;
+  renderServiceConfigDialog(payload);
+  qs("#service-config-dialog").hidden = false;
+}
+
+function closeServiceConfig() {
+  qs("#service-config-dialog").hidden = true;
+  state.currentServiceConfig = null;
+}
+
+function renderServiceConfigDialog(config) {
+  const service = serviceById(config.service_id) || {};
+  const serviceLabel = service.display_name || config.service_id;
+  qs("#service-config-title").textContent = config.title || serviceLabel;
+  qs("#service-config-description").textContent = config.description || "Service runtime override.";
+  qs("#service-config-state").textContent = (config.state || "default").replaceAll("_", " ");
+  qs("#service-config-state").className = config.state === "override_active" ? "badge warn" : "badge";
+  const running = service.actual_state === "running";
+  qs("#service-config-restart-note").textContent = running
+    ? "Apply and restart"
+    : "Applies on next start";
+  qs("#service-config-apply").textContent = running ? "Apply and restart" : "Apply override";
+  qs("#service-config-fields").innerHTML = (config.fields || []).map((field) => renderConfigField(field)).join("");
+}
+
+function renderConfigField(field) {
+  const control = configFieldControl(field);
+  const defaultValue = configDisplayValue(field.default_value);
+  const effectiveValue = configDisplayValue(field.effective_value);
+  const overrideValue = field.override_value === null || field.override_value === undefined
+    ? "none"
+    : configDisplayValue(field.override_value);
+  const source = field.default_source || "descriptor default";
+  const validation = configValidationText(field.validation || {});
+  return `
+    <section class="config-field field-set" data-component="FieldSet">
+      <div class="field-legend">${escapeHtml(field.label || field.key)}</div>
+      <p class="field-description">${escapeHtml(field.description || "")}</p>
+      <div class="config-state-grid">
+        <div class="kv"><span>default source</span><code>${escapeHtml(source)}</code></div>
+        <div class="kv"><span>default</span><strong>${escapeHtml(defaultValue)}</strong></div>
+        <div class="kv"><span>effective</span><strong>${escapeHtml(effectiveValue)}</strong></div>
+        <div class="kv"><span>override</span><strong>${escapeHtml(overrideValue)}</strong></div>
+      </div>
+      ${validation ? `<p class="field-description">${escapeHtml(validation)}</p>` : ""}
+      ${control}
+    </section>
+  `;
+}
+
+function configFieldControl(field) {
+  const key = escapeHtml(field.key);
+  const value = field.override_value === null || field.override_value === undefined
+    ? field.effective_value
+    : field.override_value;
+  if (field.value_type === "string_list") {
+    const textValue = Array.isArray(value) ? value.join("\n") : "";
+    return `
+      <label class="field">
+        Runtime override
+        <textarea class="textarea config-input" data-config-input="${key}" data-config-type="${escapeHtml(field.value_type)}" placeholder="one value per line">${escapeHtml(textValue)}</textarea>
+      </label>
+    `;
+  }
+  if (field.value_type === "boolean") {
+    const checked = value === true ? " checked" : "";
+    return `
+      <label class="check-field config-check">
+        <input type="checkbox" data-config-input="${key}" data-config-type="${escapeHtml(field.value_type)}"${checked} />
+        Runtime override enabled
+      </label>
+    `;
+  }
+  return `
+    <label class="field">
+      Runtime override
+      <input class="input config-input" data-config-input="${key}" data-config-type="${escapeHtml(field.value_type)}" value="${escapeHtml(value ?? "")}" />
+    </label>
+  `;
+}
+
+function configDisplayValue(value) {
+  if (Array.isArray(value)) return value.length ? value.join(", ") : "empty";
+  if (value === null || value === undefined || value === "") return "empty";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  return String(value);
+}
+
+function configValidationText(validation) {
+  const parts = [];
+  if (validation.pattern) parts.push(`pattern ${validation.pattern}`);
+  if (validation.max_items) parts.push(`max ${validation.max_items} items`);
+  if (validation.max_item_length) parts.push(`max ${validation.max_item_length} chars per item`);
+  if (Array.isArray(validation.options) && validation.options.length) {
+    parts.push(`options ${validation.options.join(", ")}`);
+  }
+  return parts.join("; ");
+}
+
+function collectServiceConfigValues() {
+  const values = {};
+  qsa("[data-config-input]").forEach((input) => {
+    const key = input.dataset.configInput;
+    const type = input.dataset.configType;
+    if (type === "string_list") {
+      values[key] = input.value.split(/[\n,\s]+/).map((item) => item.trim()).filter(Boolean);
+      return;
+    }
+    if (type === "boolean") {
+      values[key] = input.checked;
+      return;
+    }
+    if (type === "integer") {
+      values[key] = Number(input.value);
+      return;
+    }
+    values[key] = input.value;
+  });
+  return values;
+}
+
+async function applyServiceConfig() {
+  const config = state.currentServiceConfig;
+  if (!config) return;
+  const service = serviceById(config.service_id) || {};
+  const payload = {
+    reason: "operator console action",
+    expected_version: service.version,
+    values: collectServiceConfigValues(),
+  };
+  const result = await api(`/api/services/${encodeURIComponent(config.service_id)}/config`, {
+    method: "PUT",
+    csrf: true,
+    body: JSON.stringify(payload),
+  });
+  state.currentServiceConfig = result.config;
+  await bootstrap();
+  renderServiceConfigDialog(result.config);
+  if (result.restart && result.restart.succeeded === false) {
+    showNotice(
+      `${service.display_name || config.service_id} configuration saved, but restart failed. ${result.restart.reason || ""}`,
+      "error",
+    );
+    return;
+  }
+  const restartText = result.restart && result.restart.attempted
+    ? " Override applied and restart attempted."
+    : " Override stored for next start.";
+  showNotice(`${service.display_name || config.service_id} configuration saved.${restartText}`, "success");
+}
+
+async function resetServiceConfig() {
+  const config = state.currentServiceConfig;
+  if (!config) return;
+  const service = serviceById(config.service_id) || {};
+  const result = await api(`/api/services/${encodeURIComponent(config.service_id)}/config/reset`, {
+    method: "POST",
+    csrf: true,
+    body: JSON.stringify({
+      reason: "operator console action",
+      expected_version: service.version,
+    }),
+  });
+  state.currentServiceConfig = result.config;
+  await bootstrap();
+  renderServiceConfigDialog(result.config);
+  if (result.restart && result.restart.succeeded === false) {
+    showNotice(
+      `${service.display_name || config.service_id} configuration reset, but restart failed. ${result.restart.reason || ""}`,
+      "error",
+    );
+    return;
+  }
+  showNotice(`${service.display_name || config.service_id} configuration reset to default.`, "success");
 }
 
 async function sendDebug(event) {
@@ -914,7 +1126,23 @@ qs("#token").addEventListener("keydown", (event) => {
     runButtonAction(qs("#login"), "Signing in...", "Signed in.", login);
   }
 });
-qs("#service-grid").addEventListener("click", (event) => serviceAction(event).catch(reportActionError));
+qs("#service-grid").addEventListener("click", handleServiceGridClick);
+qs("#service-config-close").addEventListener("click", closeServiceConfig);
+qs("#service-config-apply").addEventListener("click", () => runButtonAction(
+  qs("#service-config-apply"),
+  "Saving service configuration...",
+  "",
+  applyServiceConfig,
+));
+qs("#service-config-reset").addEventListener("click", () => runButtonAction(
+  qs("#service-config-reset"),
+  "Resetting service configuration...",
+  "",
+  resetServiceConfig,
+));
+qs("#service-config-dialog").addEventListener("click", (event) => {
+  if (event.target === qs("#service-config-dialog")) closeServiceConfig();
+});
 qs("#debug-form").addEventListener("submit", (event) => sendDebug(event).catch(reportActionError));
 qs("#refresh-events").addEventListener("click", () => runButtonAction(
   qs("#refresh-events"),

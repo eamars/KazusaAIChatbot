@@ -203,6 +203,39 @@ class ServiceActionResponse(StrictModel):
     audit_event_id: str
 
 
+class ServiceConfigApplyRequest(StrictModel):
+    """Operator request to apply descriptor-backed service config values."""
+
+    reason: str = Field(min_length=1, max_length=240)
+    expected_version: int | None = None
+    values: dict[str, Any] = Field(default_factory=dict, max_length=32)
+
+
+class ServiceConfigResetRequest(StrictModel):
+    """Operator request to clear a process-local service config override."""
+
+    reason: str = Field(min_length=1, max_length=240)
+    expected_version: int | None = None
+
+
+class ServiceConfigRestartResult(StrictModel):
+    """Restart result for a config apply or reset operation."""
+
+    attempted: bool
+    succeeded: bool | None = None
+    reason: str
+
+
+class ServiceConfigActionResponse(StrictModel):
+    """Generic config apply/reset response."""
+
+    service_id: str
+    config: dict[str, Any]
+    service: ServiceRuntimeState | dict[str, Any]
+    restart: ServiceConfigRestartResult
+    audit_event_id: str
+
+
 class ControlConsoleOperator(StrictModel):
     """Authenticated local operator identity."""
 
@@ -352,6 +385,7 @@ class ControlConsoleBootstrapResponse(StrictModel):
     event_counters: dict[str, int]
     ui_capabilities: dict[str, bool]
     page_capabilities: dict[str, dict[str, Any]]
+    service_config_summaries: dict[str, dict[str, Any]] = Field(default_factory=dict)
     stream_url: str = "/api/stream"
 
 

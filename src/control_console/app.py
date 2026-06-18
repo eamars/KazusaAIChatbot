@@ -10,12 +10,14 @@ from typing import Any
 import asyncio
 import inspect
 import logging
+import os
 import secrets
 import uuid
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from dotenv import dotenv_values, find_dotenv
 import httpx
 from pymongo.errors import PyMongoError
 
@@ -39,6 +41,10 @@ from control_console.contracts import (
     OperationalEventQuery,
     ProcessLogQuery,
     ServiceActionRequest,
+    ServiceConfigActionResponse,
+    ServiceConfigApplyRequest,
+    ServiceConfigResetRequest,
+    ServiceConfigRestartResult,
 )
 from control_console.event_monitor import EventMonitor
 from control_console.kazusa_client import KazusaClient, not_reported_cognition_graph
@@ -47,6 +53,12 @@ from control_console.process_store import ProcessStore
 from control_console.redaction import redact_mapping
 from control_console.repository import ControlConsoleRepository
 from control_console.service_registry import load_service_registry
+from control_console.service_config import (
+    ServiceConfigOverrideStore,
+    ServiceConfigRegistry,
+    ServiceConfigValidationError,
+    build_default_service_config_registry,
+)
 from control_console.settings import ControlConsoleSettings
 from control_console.stream import SSEEventBuffer, encode_sse_event
 from control_console.supervisor import (
@@ -96,6 +108,26 @@ def create_app(
         override_path=app_settings.service_registry_path,
         repo_root=REPO_ROOT,
     )
+    service_config_registry = build_default_service_config_registry()
+    service_config_overrides = ServiceConfigOverrideStore()
+
+    def command_resolver(service_id: str, base_command: list[str]) -> list[str]:
+        """Resolve descriptor-backed config into service start argv."""
+
+        environment = _service_config_environment()
+        try:
+            rendered_command = service_config_registry.render_start_command(
+                service_id=service_id,
+                base_command=base_command,
+                environment=environment,
+                overrides=service_config_overrides,
+            )
+        except ServiceConfigValidationError as exc:
+            raise ServiceLifecycleError(
+                f"service config command overlay failed: {exc}"
+            ) from exc
+        return rendered_command
+
     audit_writer = LocalAuditWriter(app_settings.audit_path)
     log_store = ProcessLogStore(app_settings.log_dir)
     process_store = ProcessStore(app_settings.process_state_dir)
@@ -104,6 +136,7 @@ def create_app(
         store=process_store,
         log_store=log_store,
         audit_writer=audit_writer,
+        command_resolver=command_resolver,
     )
     repository = ControlConsoleRepository()
     kazusa_client = KazusaClient(
@@ -306,6 +339,12 @@ def create_app(
                 "lookups": True,
             },
             page_capabilities=_page_capabilities(),
+            service_config_summaries=_service_config_summaries(
+                states=states,
+                registry=service_config_registry,
+                environment=_service_config_environment(),
+                overrides=service_config_overrides,
+            ),
         )
         return payload.model_dump(mode="json")
 
@@ -381,6 +420,85 @@ def create_app(
         stream_buffer.append(
             "control.service",
             {"service_id": service_id, "action": "restart"},
+        )
+        return response_payload
+
+    @app.get("/api/services/{service_id}/config")
+    async def service_config(
+        service_id: str,
+        operator: ControlConsoleOperator = Depends(current_operator),
+    ) -> dict[str, Any]:
+        """Return a descriptor-driven config snapshot for one service."""
+
+        request_id = f"cc-req-{uuid.uuid4().hex[:12]}"
+        snapshot = _service_config_snapshot_or_http_error(
+            service_id=service_id,
+            services=services,
+            registry=service_config_registry,
+            overrides=service_config_overrides,
+        )
+        audit_writer.write_event(
+            event_type="service_config_view",
+            operator_id=operator.operator_id,
+            service_id=service_id,
+            target={"service_id": service_id, "field_count": len(snapshot.fields)},
+            request_id=request_id,
+        )
+        return snapshot.model_dump(mode="json")
+
+    @app.put(
+        "/api/services/{service_id}/config",
+        dependencies=[Depends(csrf_guard)],
+    )
+    async def apply_service_config(
+        service_id: str,
+        request: ServiceConfigApplyRequest,
+        operator: ControlConsoleOperator = Depends(current_operator),
+    ) -> dict[str, Any]:
+        """Store a process-local config override and restart if required."""
+
+        response_payload = await _apply_service_config_change(
+            service_id=service_id,
+            request=request,
+            operator=operator,
+            supervisor=app_supervisor,
+            services=services,
+            registry=service_config_registry,
+            overrides=service_config_overrides,
+            audit_writer=audit_writer,
+            clear_override=False,
+        )
+        stream_buffer.append(
+            "control.service",
+            {"service_id": service_id, "action": "config"},
+        )
+        return response_payload
+
+    @app.post(
+        "/api/services/{service_id}/config/reset",
+        dependencies=[Depends(csrf_guard)],
+    )
+    async def reset_service_config(
+        service_id: str,
+        request: ServiceConfigResetRequest,
+        operator: ControlConsoleOperator = Depends(current_operator),
+    ) -> dict[str, Any]:
+        """Clear a process-local config override and restart if required."""
+
+        response_payload = await _apply_service_config_change(
+            service_id=service_id,
+            request=request,
+            operator=operator,
+            supervisor=app_supervisor,
+            services=services,
+            registry=service_config_registry,
+            overrides=service_config_overrides,
+            audit_writer=audit_writer,
+            clear_override=True,
+        )
+        stream_buffer.append(
+            "control.service",
+            {"service_id": service_id, "action": "config"},
         )
         return response_payload
 
@@ -1092,6 +1210,298 @@ async def _run_lifecycle_action(
             detail={"message": str(exc)},
         ) from exc
     return result
+
+
+async def _apply_service_config_change(
+    *,
+    service_id: str,
+    request: ServiceConfigApplyRequest | ServiceConfigResetRequest,
+    operator: ControlConsoleOperator,
+    supervisor: Any,
+    services: dict[str, Any],
+    registry: ServiceConfigRegistry,
+    overrides: ServiceConfigOverrideStore,
+    audit_writer: LocalAuditWriter,
+    clear_override: bool,
+) -> dict[str, Any]:
+    """Apply or clear an ephemeral override and restart a running service."""
+
+    if service_id not in services:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    if not registry.has_descriptor(service_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+    request_id = f"cc-req-{uuid.uuid4().hex[:12]}"
+    current_version = await _service_version(
+        supervisor=supervisor,
+        service_id=service_id,
+    )
+    if (
+        request.expected_version is not None
+        and request.expected_version != current_version
+    ):
+        audit_writer.write_event(
+            event_type=(
+                "service_config_reset_failed"
+                if clear_override
+                else "service_config_apply_failed"
+            ),
+            operator_id=operator.operator_id,
+            service_id=service_id,
+            target={
+                "service_id": service_id,
+                "current_version": current_version,
+            },
+            reason="expected version mismatch",
+            request_id=request_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"current_version": current_version},
+        )
+
+    event_type = (
+        "service_config_reset_requested"
+        if clear_override
+        else "service_config_apply_requested"
+    )
+    field_keys: list[str] = []
+    if isinstance(request, ServiceConfigApplyRequest):
+        field_keys = list(request.values)
+    audit_writer.write_event(
+        event_type=event_type,
+        operator_id=operator.operator_id,
+        service_id=service_id,
+        target={"service_id": service_id, "field_keys": field_keys},
+        reason=request.reason,
+        request_id=request_id,
+    )
+
+    environment = _service_config_environment()
+    previous_snapshot = _service_config_snapshot_or_http_error(
+        service_id=service_id,
+        services=services,
+        registry=registry,
+        overrides=overrides,
+    )
+    try:
+        if clear_override:
+            overrides.clear_override(service_id=service_id)
+        elif isinstance(request, ServiceConfigApplyRequest):
+            overrides.set_override(
+                service_id=service_id,
+                values=request.values,
+                registry=registry,
+                environment=environment,
+            )
+    except ServiceConfigValidationError as exc:
+        audit_writer.write_event(
+            event_type=(
+                "service_config_reset_failed"
+                if clear_override
+                else "service_config_apply_failed"
+            ),
+            operator_id=operator.operator_id,
+            service_id=service_id,
+            target={"service_id": service_id, "field_keys": field_keys},
+            previous_state=previous_snapshot.model_dump(mode="json"),
+            reason=str(exc),
+            request_id=request_id,
+        )
+        raise HTTPException(
+            status_code=422,
+            detail={"message": str(exc)},
+        ) from exc
+
+    overrides.clear_apply_failed(service_id)
+    service_state = supervisor.service_state(service_id)
+    should_restart = _service_actual_state(service_state) == "running"
+    restart = ServiceConfigRestartResult(
+        attempted=should_restart,
+        succeeded=None,
+        reason="config apply requires restart",
+    )
+    service_payload = _service_state_payload(service_state)
+    if should_restart:
+        audit_writer.write_event(
+            event_type="service_config_restart_requested",
+            operator_id=operator.operator_id,
+            service_id=service_id,
+            target={"service_id": service_id},
+            reason="config apply requires restart",
+            request_id=request_id,
+        )
+        try:
+            restart_result = await supervisor.restart_service(
+                service_id=service_id,
+                operator_id=operator.operator_id,
+                reason="config apply requires restart",
+            )
+        except ServiceLifecycleError as exc:
+            restart = ServiceConfigRestartResult(
+                attempted=True,
+                succeeded=False,
+                reason=f"config apply requires restart: {exc}",
+            )
+            service_state = supervisor.service_state(service_id)
+            service_payload = _service_state_payload(service_state)
+            overrides.mark_apply_failed(service_id)
+        else:
+            restart = ServiceConfigRestartResult(
+                attempted=True,
+                succeeded=True,
+                reason="config apply requires restart",
+            )
+            raw_service_payload = restart_result.get("service", service_payload)
+            service_payload = raw_service_payload
+            overrides.clear_apply_failed(service_id)
+    else:
+        overrides.clear_apply_failed(service_id)
+
+    next_snapshot = _service_config_snapshot_or_http_error(
+        service_id=service_id,
+        services=services,
+        registry=registry,
+        overrides=overrides,
+    )
+    applied_event_type = "service_config_applied"
+    if restart.succeeded is False:
+        applied_event_type = (
+            "service_config_reset_failed"
+            if clear_override
+            else "service_config_apply_failed"
+        )
+    applied_event = audit_writer.write_event(
+        event_type=applied_event_type,
+        operator_id=operator.operator_id,
+        service_id=service_id,
+        target={"service_id": service_id, "field_keys": field_keys},
+        previous_state=previous_snapshot.model_dump(mode="json"),
+        new_state={
+            "config_state": next_snapshot.state,
+            "restart": restart.model_dump(mode="json"),
+        },
+        reason=request.reason,
+        request_id=request_id,
+    )
+    response = ServiceConfigActionResponse(
+        service_id=service_id,
+        config=next_snapshot.model_dump(mode="json"),
+        service=service_payload,
+        restart=restart,
+        audit_event_id=applied_event.event_id,
+    )
+    response_payload = response.model_dump(mode="json")
+    return response_payload
+
+
+async def _service_version(*, supervisor: Any, service_id: str) -> int:
+    """Return a service version from sync or async supervisor implementations."""
+
+    current_version_result = supervisor.service_version(service_id)
+    if inspect.isawaitable(current_version_result):
+        current_version = await current_version_result
+    else:
+        current_version = current_version_result
+    version = int(current_version)
+    return version
+
+
+def _service_config_snapshot_or_http_error(
+    *,
+    service_id: str,
+    services: dict[str, Any],
+    registry: ServiceConfigRegistry,
+    overrides: ServiceConfigOverrideStore,
+) -> Any:
+    """Return a config snapshot or raise the API-level status code."""
+
+    if service_id not in services:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    if not registry.has_descriptor(service_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+    try:
+        snapshot = registry.snapshot_for_service(
+            service_id=service_id,
+            environment=_service_config_environment(),
+            overrides=overrides,
+        )
+    except ServiceConfigValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"message": str(exc)},
+        ) from exc
+    return snapshot
+
+
+def _service_config_summaries(
+    *,
+    states: list[Any],
+    registry: ServiceConfigRegistry,
+    environment: dict[str, str],
+    overrides: ServiceConfigOverrideStore,
+) -> dict[str, dict[str, Any]]:
+    """Return compact config state for service-card entrypoints."""
+
+    state_ids = {
+        state.get("id") if isinstance(state, dict) else getattr(state, "id", "")
+        for state in states
+    }
+    summaries: dict[str, dict[str, Any]] = {}
+    for service_id in registry.configurable_service_ids():
+        if service_id not in state_ids:
+            continue
+        try:
+            snapshot = registry.snapshot_for_service(
+                service_id=service_id,
+                environment=environment,
+                overrides=overrides,
+            )
+        except ServiceConfigValidationError:
+            summaries[service_id] = {
+                "configurable": True,
+                "state": "unavailable",
+                "apply_behavior": "restart",
+                "field_count": 0,
+            }
+            continue
+        summaries[service_id] = {
+            "configurable": True,
+            "state": snapshot.state,
+            "apply_behavior": snapshot.apply_behavior,
+            "field_count": len(snapshot.fields),
+        }
+    return summaries
+
+
+def _service_config_environment() -> dict[str, str]:
+    """Build config defaults from dotenv values with process env overrides."""
+
+    dotenv_path = find_dotenv(usecwd=True)
+    dotenv_config = dotenv_values(dotenv_path) if dotenv_path else {}
+    environment: dict[str, str] = {}
+    for key, value in dotenv_config.items():
+        if value is not None:
+            environment[key] = value
+    environment.update(os.environ)
+    return environment
+
+
+def _service_state_payload(state: Any) -> dict[str, Any]:
+    """Serialize one service state model or dictionary for API output."""
+
+    if state is None:
+        payload: dict[str, Any] = {"actual_state": "unavailable"}
+        return payload
+    if isinstance(state, dict):
+        payload = dict(state)
+        return payload
+    if hasattr(state, "model_dump"):
+        payload = state.model_dump(mode="json")
+        return payload
+    payload = {"actual_state": str(state)}
+    return payload
 
 
 def _all_service_states(supervisor: Any, services: dict[str, Any]) -> list[Any]:

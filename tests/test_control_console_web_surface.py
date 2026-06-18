@@ -185,6 +185,23 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert 'id="login-form"' in index.text
     assert 'id="ui-notice"' in index.text
     assert 'aria-live="polite"' in index.text
+    assert 'id="service-config-dialog"' in index.text
+    assert 'role="dialog"' in index.text
+    assert 'aria-modal="true"' in index.text
+    assert 'data-component="Dialog"' in index.text
+    assert 'id="service-config-title"' in index.text
+    assert 'id="service-config-description"' in index.text
+    assert 'id="service-config-fields"' in index.text
+    assert 'id="service-config-restart-note"' in index.text
+    assert 'id="service-config-apply"' in index.text
+    assert 'id="service-config-reset"' in index.text
+    assert 'id="service-config-close"' in index.text
+    assert 'Apply and restart' in index.text
+    assert "hot apply" not in index.text.lower()
+    assert "zero downtime" not in index.text.lower()
+    assert "adapter.napcat" not in index.text
+    assert "active_groups" not in index.text
+    assert "NAPCAT_ACTIVE_GROUPS" not in index.text
 
     script = client.get("/static/console.js")
     assert script.status_code == 200
@@ -236,6 +253,19 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert "function renderOverviewCognitionGraph" in script.text
     assert "function renderDebugCognitionGraph" in script.text
     assert "control.cognition_graph_invalidated" in script.text
+    assert "function openServiceConfig" in script.text
+    assert "function renderServiceConfigDialog" in script.text
+    assert "function applyServiceConfig" in script.text
+    assert "function resetServiceConfig" in script.text
+    assert "data-config-service" in script.text
+    assert "/config/reset" in script.text
+    assert "Apply and restart" in script.text
+    assert "service-config-dialog" in script.text
+    assert "hot apply" not in script.text.lower()
+    assert "zero downtime" not in script.text.lower()
+    assert "adapter.napcat" not in script.text
+    assert "active_groups" not in script.text
+    assert "NAPCAT_ACTIVE_GROUPS" not in script.text
     assert "JSON.stringify(result.response)" not in script.text
 
     stylesheet = client.get("/static/console.css")
