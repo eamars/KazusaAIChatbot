@@ -272,17 +272,19 @@ There is no private fallback, retry loop, adapter capability probe, or
 reflection-specific group-review interval.
 
 For the newest selected group-review window, reflection source preparation may
-also add one optional first-person observational digest under
-`conversation_progress.group_scene_digest = {"digest": str}`. The digest is
-generated only from the already-selected bounded window rows and compact
-activity labels. Digest rows preserve visible `display_name` values so the
-summary can name who spoke; internal global ids, platform ids, message ids,
-URLs, and `participant_N` aliases are not rendered into the digest prompt or
-output contract. Assistant rows are summarized as the current role's own
-visible speech, and the digest states whether newer text exists after the
-current role's last visible line. It is source hydration for noisy group flow,
-not RAG evidence, raw reflection output, persistence state, a speaker target,
-or action guidance.
+also add one optional neutral observational digest under
+`conversation_progress.group_scene_digest = {"digest": str}` with optional
+`summary`. The digest is generated only from the already-selected bounded
+window rows and compact activity labels. Digest rows preserve visible
+`display_name` values so the summary can name who spoke; internal global ids,
+platform ids, message ids, URLs, and `participant_N` aliases are not rendered
+into the digest prompt or output contract. Assistant rows are summarized with
+visible speaker attribution, not active-character first person. Quoted `你` and
+`我` remain source text owned by the quoted row speaker, and ambiguous
+second-person wording must not be resolved to the active character unless the
+same row explicitly supports that address. It is source hydration for noisy
+group flow, not RAG evidence, raw reflection output, persistence state, a
+speaker target, or action guidance.
 
 Daily-channel synthesis is period-level maintenance, not per-slot catch-up.
 For scheduled worker runs it asks the calendar-backed phase provider for the

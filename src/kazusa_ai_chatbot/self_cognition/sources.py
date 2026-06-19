@@ -30,12 +30,17 @@ from kazusa_ai_chatbot.reflection_cycle.activity_windows import (
 )
 from kazusa_ai_chatbot.reflection_cycle.group_scene_digest import (
     build_group_scene_digest,
+    normalize_group_scene_digest_output,
 )
 from kazusa_ai_chatbot.reflection_cycle.selector import collect_reflection_inputs
 from kazusa_ai_chatbot.rag.conversation_evidence import ConversationEvidenceAgent
 from kazusa_ai_chatbot.self_cognition import models
 from kazusa_ai_chatbot.self_cognition.group_review_participant_context import (
+    THREAD_REFERENCE_GUIDANCE,
+    THREAD_REFERENCE_ROW_LIMIT,
+    VISIBLE_SAMPLE_CHAR_LIMIT,
     build_group_review_participant_context,
+    build_group_review_thread_reference_context,
 )
 from kazusa_ai_chatbot.self_cognition.sleep_period import (
     is_self_cognition_sleep_period,
@@ -174,6 +179,7 @@ async def collect_group_review_cases(
     windows: list[GroupActivityWindow],
     max_cases: int,
     participant_context_builder: Callable[..., Any] | None = None,
+    thread_reference_context_builder: Callable[..., Any] | None = None,
     scene_digest_builder: Callable[..., Any] | None = None,
     conversation_evidence_builder: Callable[..., Any] | None = None,
 ) -> list[models.SelfCognitionCase]:
@@ -182,6 +188,10 @@ async def collect_group_review_cases(
     cases: list[models.SelfCognitionCase] = []
     context_builder = (
         participant_context_builder or build_group_review_participant_context
+    )
+    thread_context_builder = (
+        thread_reference_context_builder
+        or build_group_review_thread_reference_context
     )
     digest_builder = scene_digest_builder or build_group_scene_digest
     evidence_builder = (
@@ -212,15 +222,27 @@ async def collect_group_review_cases(
             case["conversation_progress"]["participant_context"] = (
                 participant_context
             )
+        thread_reference_context = await _call_maybe_async(
+            thread_context_builder,
+            participant_rows=[dict(row) for row in window.participant_rows],
+            character_profile=character_profile,
+        )
+        if _is_group_review_thread_reference_context(
+            thread_reference_context,
+        ):
+            case["conversation_progress"]["thread_reference_context"] = (
+                thread_reference_context
+            )
         scene_digest = await _call_maybe_async(
             digest_builder,
             window=window,
         )
-        if _is_group_scene_digest(scene_digest):
+        normalized_scene_digest = _normalize_group_scene_digest(scene_digest)
+        if normalized_scene_digest is not None:
             case["conversation_progress"]["group_scene_digest"] = {
-                "digest": scene_digest["digest"].strip(),
+                "digest": normalized_scene_digest["digest"].strip(),
             }
-            summary = _group_scene_summary(scene_digest)
+            summary = _group_scene_summary(normalized_scene_digest)
             if summary:
                 case["conversation_progress"]["summary"] = summary
                 conversation_evidence = await _call_maybe_async(
@@ -932,27 +954,75 @@ def _attach_binding(
         case["delivery_target"] = target
 
 
-def _is_group_scene_digest(value: object) -> bool:
-    """Return whether a value matches the optional digest source contract."""
+def _normalize_group_scene_digest(value: object) -> dict[str, str] | None:
+    """Return a prompt-safe scene digest or ``None`` for invalid output."""
+
+    if not isinstance(value, dict):
+        return_value = None
+        return return_value
+    normalized = normalize_group_scene_digest_output(value)
+    return_value = normalized
+    return return_value
+
+
+def _is_group_review_thread_reference_context(value: object) -> bool:
+    """Return whether a value matches the bounded thread-warning contract."""
 
     if not isinstance(value, dict):
         return_value = False
         return return_value
-    allowed_keys = {"digest", "summary"}
-    output_keys = set(value.keys())
-    if "digest" not in output_keys or not output_keys.issubset(allowed_keys):
+    expected_keys = {
+        "source",
+        "context_shape",
+        "guidance",
+        "ambiguous_second_person_rows",
+    }
+    if set(value.keys()) != expected_keys:
         return_value = False
         return return_value
-    digest = value["digest"]
-    if not isinstance(digest, str):
+    if value["source"] != "group_review_thread_reference":
         return_value = False
         return return_value
-    if "summary" in value:
-        summary = value["summary"]
-        if not isinstance(summary, str):
+    if value["context_shape"] != "bounded_second_person_reference_warnings":
+        return_value = False
+        return return_value
+    if value["guidance"] != THREAD_REFERENCE_GUIDANCE:
+        return_value = False
+        return return_value
+
+    ambiguous_rows = value["ambiguous_second_person_rows"]
+    if not isinstance(ambiguous_rows, list) or not ambiguous_rows:
+        return_value = False
+        return return_value
+    if len(ambiguous_rows) > THREAD_REFERENCE_ROW_LIMIT:
+        return_value = False
+        return return_value
+
+    expected_row_keys = {
+        "speaker",
+        "sample",
+        "referent_status",
+        "basis",
+    }
+    for row in ambiguous_rows:
+        if not isinstance(row, dict):
             return_value = False
             return return_value
-    return_value = bool(digest.strip())
+        if set(row.keys()) != expected_row_keys:
+            return_value = False
+            return return_value
+        for field_name in expected_row_keys:
+            if not isinstance(row[field_name], str) or not row[field_name]:
+                return_value = False
+                return return_value
+        if len(row["sample"]) > VISIBLE_SAMPLE_CHAR_LIMIT:
+            return_value = False
+            return return_value
+        if row["referent_status"] != "ambiguous_or_side_thread":
+            return_value = False
+            return return_value
+
+    return_value = True
     return return_value
 
 

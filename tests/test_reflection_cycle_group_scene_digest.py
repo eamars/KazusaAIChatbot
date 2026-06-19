@@ -175,24 +175,28 @@ def test_group_scene_digest_payload_uses_wide_digest_rows() -> None:
     assert "future row must not leak" not in digest_text
 
 
-def test_group_scene_digest_prompt_contract_is_first_person_only() -> None:
-    """Prompt rendering should keep one-string first-person summary rules."""
+def test_group_scene_digest_prompt_contract_is_neutral_thread_aware() -> None:
+    """Prompt rendering should require neutral, thread-aware summary rules."""
 
     messages = group_scene_digest.build_group_scene_digest_messages(
         _duplicate_answer_window(),
     )
     rendered = "\n".join(str(message.content) for message in messages)
 
-    assert "第一人称" in rendered
+    assert "中立观察" in rendered
     assert "digest" in rendered
     assert "summary" in rendered
     assert "说话人" in rendered
     assert '# 生成步骤' in rendered
-    assert '当前角色自己的行当作原文引用' in rendered
+    assert '# 输入含义' not in rendered
+    assert '当前角色' in rendered
     assert '引用里的 `你`、`我`、称呼和语气词保持原样' in rendered
-    assert '先看 activity_labels.assistant_presence' in rendered
+    assert '二人称归属按同一行明确地址和可见线程读取' in rendered
+    assert '侧线/未定对象' in rendered
     assert 'assistant_presence="present"' in rendered
-    assert '最后补一句当前角色发言后的状态' in rendered
+    assert '第一人称观察资料' not in rendered
+    assert '我（说话人）' not in rendered
+    assert '我最后发言后' not in rendered
     assert "participant_1" not in rendered
     assert "Kazusa" not in rendered
     assert "杏山千纱" not in rendered
@@ -207,7 +211,7 @@ def test_group_scene_digest_prompt_contract_is_first_person_only() -> None:
 def test_group_scene_digest_normalizes_one_string_output() -> None:
     """Only the one-string JSON contract should be accepted and bounded."""
 
-    raw_digest = " 我看到这段群聊里有人问词义，我已经解释过；" + ("x" * 900)
+    raw_digest = " 这段群聊里，Ab 问了词义，杏山千纱已经解释过；" + ("x" * 900)
 
     normalized = group_scene_digest.normalize_group_scene_digest_output({
         "digest": raw_digest,
@@ -215,7 +219,7 @@ def test_group_scene_digest_normalizes_one_string_output() -> None:
 
     assert normalized is not None
     assert set(normalized) == {"digest"}
-    assert normalized["digest"].startswith("我看到这段群聊里")
+    assert normalized["digest"].startswith("这段群聊里")
     assert (
         len(normalized["digest"])
         <= group_scene_digest.GROUP_SCENE_DIGEST_MAX_CHARS
@@ -226,12 +230,12 @@ def test_group_scene_digest_normalizes_optional_short_summary() -> None:
     """A short string topic summary may accompany the full digest."""
 
     normalized = group_scene_digest.normalize_group_scene_digest_output({
-        "digest": "我看到 W 的调侃承接的是温格前面说身体不舒服。",
+        "digest": "W 的调侃承接的是温格前面说身体不舒服。",
         "summary": "W 和温格围绕受凉、拉稀和没力气开玩笑。",
     })
 
     assert normalized == {
-        "digest": "我看到 W 的调侃承接的是温格前面说身体不舒服。",
+        "digest": "W 的调侃承接的是温格前面说身体不舒服。",
         "summary": "W 和温格围绕受凉、拉稀和没力气开玩笑。",
     }
 
@@ -239,11 +243,27 @@ def test_group_scene_digest_normalizes_optional_short_summary() -> None:
 @pytest.mark.parametrize(
     "parsed_output",
     [
-        {"digest": "我看到这段群聊有人问问题。", "summary": 7},
-        {"digest": "我看到这段群聊有人问问题。", "summary": ""},
+        {"digest": "这段群聊里有人问问题。", "summary": 7},
+        {"digest": "这段群聊里有人问问题。", "summary": ""},
         {
-            "digest": "我看到这段群聊有人问问题。",
+            "digest": "这段群聊里有人问问题。",
             "summary": "这段应该保持沉默。",
+        },
+        {
+            "digest": "这段群聊里有人问问题。",
+            "summary": "我已经接过这个话题。",
+        },
+        {
+            "digest": "这段群聊里有人问问题。",
+            "summary": "我没有在这个窗口中发言。",
+        },
+        {
+            "digest": "这段群聊里有人问问题。",
+            "summary": "我被比作暖气片旁边的猫。",
+        },
+        {
+            "digest": "这段群聊里有人问问题。",
+            "summary": "当前角色的头发被灯描述。",
         },
     ],
 )
@@ -256,7 +276,34 @@ def test_group_scene_digest_omits_invalid_optional_summary(
         parsed_output,
     )
 
-    assert normalized == {"digest": "我看到这段群聊有人问问题。"}
+    assert normalized == {"digest": "这段群聊里有人问问题。"}
+
+
+@pytest.mark.parametrize(
+    "parsed_output",
+    [
+        {"digest": "我看到这段群聊里有人问问题。"},
+        {"digest": "我没有在这个窗口中发言。"},
+        {"digest": "我已经接过这个话题。"},
+        {"digest": "我（杏山千纱）说了：知道了。"},
+        {"digest": "灯把我比作暖气片旁边的猫。"},
+        {"digest": "我的头发被灯说成很软。"},
+        {"digest": "灯对我说：你的头发像猫。"},
+        {"digest": "灯把当前角色比作暖气片旁边的猫。"},
+        {"digest": "当前角色的头发被灯说成很软。"},
+        {"digest": "当前角色被灯描述成靠在暖气片旁边的猫。"},
+    ],
+)
+def test_group_scene_digest_rejects_active_character_ownership_output(
+    parsed_output: dict[str, Any],
+) -> None:
+    """Digest and summary must not own ambiguous group text as first person."""
+
+    normalized = group_scene_digest.normalize_group_scene_digest_output(
+        parsed_output,
+    )
+
+    assert normalized is None
 
 
 @pytest.mark.parametrize(
@@ -298,8 +345,8 @@ async def test_build_group_scene_digest_invokes_llm_once(
             response = SimpleNamespace(
                 content=(
                     '{"digest": "这段群聊里，user 问了词义，'
-                    '我（assistant）随后已经解释过；后面只有媒体/空内容。",'
-                    '"summary": "user 问词义，我已经解释过。"}'
+                    'assistant 随后已经解释过；后面只有媒体/空内容。",'
+                    '"summary": "user 问词义，assistant 已经解释过。"}'
                 ),
             )
             return response
@@ -317,11 +364,33 @@ async def test_build_group_scene_digest_invokes_llm_once(
     assert result == {
         "digest": (
             "这段群聊里，user 问了词义，"
-            "我（assistant）随后已经解释过；后面只有媒体/空内容。"
+            "assistant 随后已经解释过；后面只有媒体/空内容。"
         ),
-        "summary": "user 问词义，我已经解释过。",
+        "summary": "user 问词义，assistant 已经解释过。",
     }
     assert len(captured_messages) == 2
+
+
+def test_group_scene_digest_cat_side_thread_prompt_keeps_you_attributed() -> None:
+    """The Snow/Lamp cat fixture must keep `你` tied to the visible row."""
+
+    messages = group_scene_digest.build_group_scene_digest_messages(
+        _cat_side_thread_window(),
+    )
+    rendered = "\n".join(str(message.content) for message in messages)
+    payload = group_scene_digest.build_group_scene_digest_prompt_payload(
+        _cat_side_thread_window(),
+    )
+    message_lines = "\n".join(payload["message_lines"])
+
+    assert "雪凪:" in message_lines
+    assert "灯（23岁）:" in message_lines
+    assert "你的头发软软的" in message_lines
+    assert "二人称归属按同一行明确地址和可见线程读取" in rendered
+    assert "侧线/未定对象" in rendered
+    assert "引用里的 `你`、`我`、称呼和语气词保持原样" in rendered
+    assert "character-global" not in rendered
+    assert "bot-1" not in rendered
 
 
 def _duplicate_answer_window():
@@ -553,6 +622,59 @@ def _busy_truncation_window():
         window_start=datetime(2026, 5, 18, 4, 0, tzinfo=timezone.utc),
         window_end=datetime(2026, 5, 18, 4, 15, tzinfo=timezone.utc),
         now=datetime(2026, 5, 18, 4, 15, tzinfo=timezone.utc),
+        character_global_user_id="character-global",
+        platform_bot_id="bot-1",
+    )
+    assert len(windows) == 1
+    return windows[0]
+
+
+def _cat_side_thread_window():
+    """Build the Snow/Lamp side-thread cat comparison fixture."""
+
+    messages = [
+        _message(
+            role="user",
+            timestamp="2026-06-18T05:24:09+00:00",
+            body_text="@灯（23岁） 摸摸大姐姐",
+            global_user_id="user-snow",
+            platform_user_id="qq-snow",
+            display_name="雪凪",
+        ),
+        _message(
+            role="user",
+            timestamp="2026-06-18T05:24:17+00:00",
+            body_text="灯：嗯，摸到了。",
+            global_user_id="user-lamp",
+            platform_user_id="qq-lamp",
+            display_name="灯（23岁）",
+        ),
+        _message(
+            role="user",
+            timestamp="2026-06-18T05:24:19+00:00",
+            body_text="你的头发软软的，像rana家那只靠在暖气片旁边的猫。",
+            global_user_id="user-lamp",
+            platform_user_id="qq-lamp",
+            display_name="灯（23岁）",
+        ),
+    ]
+    scope = ReflectionScopeInput(
+        scope_ref="scope_group_cat",
+        platform="qq",
+        platform_channel_id="group-1",
+        channel_type="group",
+        assistant_message_count=0,
+        user_message_count=3,
+        total_message_count=3,
+        first_timestamp="2026-06-18T05:24:09+00:00",
+        last_timestamp="2026-06-18T05:24:19+00:00",
+        messages=messages,
+    )
+    windows = build_group_activity_windows(
+        scope=scope,
+        window_start=datetime(2026, 6, 18, 5, 15, tzinfo=timezone.utc),
+        window_end=datetime(2026, 6, 18, 5, 30, tzinfo=timezone.utc),
+        now=datetime(2026, 6, 18, 5, 30, tzinfo=timezone.utc),
         character_global_user_id="character-global",
         platform_bot_id="bot-1",
     )

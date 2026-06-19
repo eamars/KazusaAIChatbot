@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from collections.abc import Callable
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -276,6 +277,265 @@ def _build_base_state() -> dict:
     }
 
 
+def _invitation_history_row(
+    *,
+    role: str,
+    platform_user_id: str,
+    global_user_id: str,
+    display_name: str,
+    body_text: str,
+    timestamp: str,
+    platform_message_id: str,
+    addressed_to_global_user_ids: list[str] | None = None,
+    attachments: list[dict[str, object]] | None = None,
+    reply_context: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Build one production-shaped row for the webinar advice fixture."""
+
+    row: dict[str, object] = {
+        "role": role,
+        "platform_user_id": platform_user_id,
+        "global_user_id": global_user_id,
+        "display_name": display_name,
+        "body_text": body_text,
+        "content": body_text,
+        "timestamp": timestamp,
+        "platform_message_id": platform_message_id,
+        "addressed_to_global_user_ids": addressed_to_global_user_ids or [],
+        "mentions": [],
+        "broadcast": False,
+        "attachments": attachments or [],
+        "reply_context": reply_context or {},
+    }
+    return row
+
+
+def _build_webinar_invitation_advice_state() -> dict:
+    """Rebuild the production window where the invitation subject inverted."""
+
+    state = _build_base_state()
+    character_global_id = "00000000-0000-4000-8000-000000000001"
+    platform_bot_id = "3768713357"
+    current_global_user_id = "256e8a10-c406-47e9-ac8f-efd270d18160"
+    current_platform_user_id = "673225019"
+    current_display_name = "蚝爹油"
+    storage_timestamp_utc = "2026-06-19T11:07:51.669688+00:00"
+    local_time_context = {
+        "current_local_datetime": "2026-06-19 23:07",
+        "current_local_weekday": "Friday",
+    }
+    image_description = (
+        '这张图片展示了一个智能手机通话界面的截图，显示正在拨打或接听来自澳大利亚号码 '
+        '00 61 480 844... 的电话。屏幕下半部分包含一段长篇的转录文本，内容是 Ruby '
+        '代表 HP Enterprise 邀请收听关于企业级智能体 AI 平台的网络研讨会，'
+        '日期定于 7 月 2 日下午 2 点。'
+    )
+    prior_assistant = (
+        '当然懂英文啦。别以为我是做服装的就不懂这个~\n'
+        '这张图是澳大利亚的电话截图，内容是 HP Enterprise 发来的邀请通知：\n'
+        'Ruby 代表 HP Enterprise 邀请您参加关于“企业级智能体 AI 平台”的网络研讨会。\n'
+        '时间是 7 月 2 日下午 2 点。\n'
+        '需要我帮你看看要不要参加吗？'
+    )
+    reply_context = {
+        "reply_to_message_id": "1748560667",
+        "reply_to_platform_user_id": platform_bot_id,
+        "reply_to_display_name": "杏山千纱",
+        "reply_to_current_bot": True,
+        "reply_excerpt": prior_assistant,
+    }
+    current_input = "要不要参加呢？"
+    history = [
+        _invitation_history_row(
+            role="user",
+            platform_user_id=current_platform_user_id,
+            global_user_id=current_global_user_id,
+            display_name=current_display_name,
+            body_text="",
+            timestamp="2026-06-19T11:05:49.242046+00:00",
+            platform_message_id="1096476522",
+            attachments=[{
+                "media_type": "image/jpeg",
+                "storage_shape": "inline",
+                "description": image_description,
+            }],
+        ),
+        _invitation_history_row(
+            role="user",
+            platform_user_id=current_platform_user_id,
+            global_user_id=current_global_user_id,
+            display_name=current_display_name,
+            body_text='今天也收到离谱广告了',
+            timestamp="2026-06-19T11:05:55.866385+00:00",
+            platform_message_id="1173772304",
+        ),
+        _invitation_history_row(
+            role="user",
+            platform_user_id=current_platform_user_id,
+            global_user_id=current_global_user_id,
+            display_name=current_display_name,
+            body_text='怎么HPE广告能打到我头上的',
+            timestamp="2026-06-19T11:06:17.598322+00:00",
+            platform_message_id="1021288897",
+        ),
+        _invitation_history_row(
+            role="user",
+            platform_user_id=current_platform_user_id,
+            global_user_id=current_global_user_id,
+            display_name=current_display_name,
+            body_text='@杏山千纱 千纱懂英文么？能帮我翻译一下这张图讲了什么么',
+            timestamp="2026-06-19T11:06:40.259948+00:00",
+            platform_message_id="406003667",
+            addressed_to_global_user_ids=[
+                character_global_id,
+                current_global_user_id,
+            ],
+            reply_context={
+                "reply_to_message_id": "1096476522",
+                "reply_to_platform_user_id": current_platform_user_id,
+                "reply_to_display_name": current_display_name,
+                "reply_attachments": [{
+                    "media_kind": "image",
+                    "description": image_description,
+                    "summary_status": "available",
+                }],
+            },
+        ),
+        _invitation_history_row(
+            role="assistant",
+            platform_user_id=platform_bot_id,
+            global_user_id=character_global_id,
+            display_name="杏山千纱",
+            body_text=prior_assistant,
+            timestamp="2026-06-19T11:07:23.163649+00:00",
+            platform_message_id="1748560667",
+            addressed_to_global_user_ids=[current_global_user_id],
+        ),
+        _invitation_history_row(
+            role="user",
+            platform_user_id=current_platform_user_id,
+            global_user_id=current_global_user_id,
+            display_name=current_display_name,
+            body_text=current_input,
+            timestamp=storage_timestamp_utc,
+            platform_message_id="1842815538",
+            addressed_to_global_user_ids=[character_global_id],
+            reply_context=reply_context,
+        ),
+    ]
+    state.update(
+        {
+            "timestamp": storage_timestamp_utc,
+            "storage_timestamp_utc": storage_timestamp_utc,
+            "local_time_context": local_time_context,
+            "user_input": current_input,
+            "global_user_id": current_global_user_id,
+            "user_name": current_display_name,
+            "platform_user_id": current_platform_user_id,
+            "user_profile": {
+                "affinity": 720,
+                "facts": [],
+                "last_relationship_insight": "对方经常在群里直接向千纱提问和开玩笑。",
+            },
+            "platform": "qq",
+            "platform_channel_id": "905393941",
+            "channel_type": "group",
+            "platform_message_id": "1842815538",
+            "platform_bot_id": platform_bot_id,
+            "chat_history_wide": history,
+            "chat_history_recent": history,
+            "indirect_speech_context": "",
+            "channel_topic": "HPE 网络研讨会广告截图翻译与是否参加的建议",
+            "reply_context": reply_context,
+            "prompt_message_context": {
+                "body_text": current_input,
+                "addressed_to_global_user_ids": [character_global_id],
+                "mentions": [],
+                "broadcast": False,
+                "attachments": [],
+                "reply_context": reply_context,
+            },
+            "conversation_progress": {
+                "current_thread": (
+                    "用户让千纱翻译一张 HPE 网络研讨会广告截图，"
+                    "并询问自己要不要参加。"
+                ),
+                "user_goal": "让千纱判断用户是否值得参加该网络研讨会。",
+                "assistant_moves": [
+                    "已翻译截图并主动提出可以帮用户判断要不要参加。",
+                ],
+            },
+            "internal_monologue_residue_context": "",
+            "decontexualized_input": current_input,
+            "referents": [],
+            "cognitive_episode": build_text_chat_cognitive_episode(
+                episode_id="live-webinar-invitation-advice-episode",
+                percept_id="live-webinar-invitation-advice-percept",
+                storage_timestamp_utc=storage_timestamp_utc,
+                local_time_context=local_time_context,
+                user_input=current_input,
+                platform="qq",
+                platform_channel_id="905393941",
+                channel_type="group",
+                platform_message_id="1842815538",
+                platform_user_id=current_platform_user_id,
+                global_user_id=current_global_user_id,
+                user_name=current_display_name,
+                active_turn_platform_message_ids=["1842815538"],
+                active_turn_conversation_row_ids=[],
+                debug_modes={},
+                output_mode="visible_reply",
+                target_addressed_user_ids=[character_global_id],
+                target_broadcast=False,
+            ),
+            "rag_result": _rag_result(),
+        }
+    )
+    return state
+
+
+def _webinar_subject_inversion_hits(payload: object) -> list[str]:
+    """Return wrong-subject phrases where the character attends herself."""
+
+    text = str(payload)
+    forbidden_phrases = [
+        "我就去参加",
+        "我去参加",
+        "我会去参加",
+        "我会去的",
+        "我是否要参加",
+        "我很乐意参加",
+        "我很想去",
+        "我愿意去",
+        "我愿意尝试参与",
+        "我当然有空",
+        "我很期待参加",
+        "我也很期待参加",
+        "你都邀请",
+        "既然是你邀请",
+        "你邀请的",
+        "你的邀请",
+    ]
+    hits = [
+        f"phrase:{phrase}"
+        for phrase in forbidden_phrases
+        if phrase in text
+    ]
+    wrong_actor_patterns = [
+        r"问我要不要(参加|去|出席|听)",
+        r"(邀请|邀约)我[^。！？\n]{0,12}(参加|去|出席|听)",
+        r"我[^。！？\n]{0,12}(专门去|当然有空|很乐意参加)",
+        r"我[^。！？\n]{0,16}(是否|要不要|想看看)[^。！？\n]{0,16}(参加|去|出席|听)",
+        r"值不值得我[^。！？\n]{0,16}(参加|去|出席|听)",
+    ]
+    hits.extend(
+        f"pattern:{pattern}"
+        for pattern in wrong_actor_patterns
+        if re.search(pattern, text, flags=re.IGNORECASE)
+    )
+    return hits
+
+
 def _bind_live_stage_services() -> list[_ServiceBinding]:
     """Bind connector-owned live services for direct stage smoke tests."""
 
@@ -461,6 +721,76 @@ async def test_live_dialog_agent_renders_from_live_cognition_output(ensure_live_
     assert isinstance(result["final_dialog"], list), f"Unexpected dialog result: {result!r}"
     assert result["final_dialog"], f"Empty final_dialog: {result!r}"
     assert any(segment.strip() for segment in result["final_dialog"]), f"Blank final_dialog segments: {result!r}"
+
+
+async def test_live_webinar_invitation_advice_keeps_user_as_attendee(
+    ensure_live_llm,
+) -> None:
+    """Captured group reply: user asks whether they should attend the webinar."""
+
+    state = _build_webinar_invitation_advice_state()
+    decontext = await call_msg_decontexualizer(state)
+    state.update(decontext)
+    state = await _run_live_cognition_stack(state)
+    dialog_result = await dialog_agent(state)
+    final_dialog = dialog_result["final_dialog"]
+    trace_path = write_llm_trace(
+        "cognition_live_llm",
+        "webinar_invitation_advice_subject_boundary",
+        {
+            "production_window": {
+                "assistant_bad_reply_timestamp": (
+                    "2026-06-19T11:08:27.296754+00:00"
+                ),
+                "current_user_input": "要不要参加呢？",
+                "reply_context": state["reply_context"],
+                "chat_history_recent": state["chat_history_recent"],
+            },
+            "decontextualizer_output": decontext,
+            "l2_internal_monologue": state["internal_monologue"],
+            "l2_judgment": {
+                "logical_stance": state["logical_stance"],
+                "character_intent": state["character_intent"],
+                "judgment_synthesis": state.get("judgment_synthesis"),
+            },
+            "content_plan": state["content_plan"],
+            "action_directives": state["action_directives"],
+            "dialog_output": dialog_result,
+            "manual_review_required": True,
+            "manual_review_guidance": (
+                "Inspect decontextualizer output, L2 judgment, content plan, "
+                "action directives, and final dialog. The intended behavior is "
+                "advice about whether the user should attend the HPE webinar; "
+                "minor wording differences are acceptable when the attendee "
+                "remains the user."
+            ),
+            "judgment": (
+                "The model should advise whether the user should attend the "
+                "HPE webinar; it must not say the active character will attend "
+                "or that the user invited the active character."
+            ),
+        },
+    )
+    logger.info(
+        f"WEBINAR_INVITATION_ADVICE trace={trace_path} "
+        f"decontext={decontext} final_dialog={final_dialog}"
+    )
+
+    assert final_dialog
+    inspected_payload = {
+        "decontext": decontext,
+        "internal_monologue": state["internal_monologue"],
+        "judgment": state["judgment_note"],
+        "content_plan": state["content_plan"],
+        "action_directives": state["action_directives"],
+        "final_dialog": final_dialog,
+    }
+    inversion_hits = _webinar_subject_inversion_hits(inspected_payload)
+    assert not inversion_hits, (
+        "webinar invitation subject inverted; "
+        f"hits={inversion_hits} trace={trace_path}"
+    )
+    assert trace_path.exists()
 
 
 async def test_live_cognition_propagates_explicit_future_group_message_details(ensure_live_llm) -> None:

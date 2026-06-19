@@ -9,7 +9,6 @@ from typing import Any
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.config import (
-
     CONSOLIDATION_LLM_API_KEY,
     CONSOLIDATION_LLM_BASE_URL,
     CONSOLIDATION_LLM_MODEL,
@@ -28,7 +27,6 @@ from kazusa_ai_chatbot.utils import (
     parse_llm_json_output,
     text_or_empty,
 )
-
 from kazusa_ai_chatbot.llm_interface import (
     LLInterface,
     LLMCallConfig,
@@ -58,41 +56,64 @@ _DIGEST_ACTION_GUIDANCE_PARTS = (
     ("resolved_", "issue"),
     ("sup", "press"),
 )
+_DIGEST_ACTIVE_CHARACTER_OWNERSHIP_MARKERS = (
+    "我看到",
+    "我没有",
+    "我已经",
+    "我（",
+    "我(",
+    "我的",
+    "把我",
+    "对我",
+    "我最后" + "发言后",
+    "我被",
+    "当前角色的",
+    "把当前角色",
+    "当前角色被",
+)
+_DIGEST_OPTIONAL_SUMMARY_FIRST_PERSON_MARKERS = (
+    "我",
+)
+_DIGEST_QUOTE_CLOSE_BY_OPEN = {
+    '"': '"',
+    chr(0x201c): chr(0x201d),
+    "「": "」",
+    "『": "』",
+}
 
 
 GROUP_SCENE_DIGEST_SYSTEM_PROMPT = '''\
-你负责把一段已选中的群聊现场压缩成当前角色自己阅读的观察资料。
+你负责把一段已选中的群聊现场压缩成中立观察资料，帮助后续 cognition 读取可见线程。
 
-# 输入含义
-- 信息来源限定为 human payload 里的 message_lines 和 activity_labels。
-- message_lines 是按时间顺序排列的聊天记录行，每行格式为 `[时间] 说话人: 内容`。
-- message_lines 可能比当前 15 分钟窗口更宽，用来补足话题承接关系；不要把更早的行误认为当前窗口内的新发言。
-- activity_labels.assistant_presence 表示窗口里是否有当前角色自己的发言。
-- 当前角色自己的发言行，摘要中写成"我（说话人）"。
+# 来源边界与摘要视角
+- 只使用 human payload 里的 `message_lines` 和 `activity_labels` 生成摘要。
+- `message_lines` 是按时间顺序排列的聊天记录行，每行格式为 `[时间] 说话人: 内容`；它可能比当前 15 分钟窗口更宽，用来补足话题承接关系。
+- `activity_labels.assistant_presence` 表示窗口里是否有当前角色自己的发言；`activity_labels.bot_addressing` 是粗粒度窗口标签，只说明窗口层面可能提到当前角色。
 - 行内的 @名称 属于该行可见文字，表示该行发言者艾特或提到了这个名称。
-
-# 摘要视角
-- digest 用简体中文，写成第一人称观察资料。
-- 说明群聊里的可见先后关系、被概括的发言者名称、我是否已经在窗口中参与过、以及我最后发言后是否还有新的文字线索。
-- 再次提到发言者时继续使用其名称，让后续 cognition 能直接看出谁在说话。
-- summary 用简体中文，写成很短的群聊话题概述，只描述主要参与者、话题和指向关系；不要写行动建议。
+- digest 用简体中文，写成中立观察，不使用当前角色第一人称承接群聊内容。
+- 说明群聊里的可见先后关系、被概括的说话人名称、当前角色是否已经在窗口中参与过、以及当前角色可见发言后是否还有新的文字线索。
+- 再次提到说话人时继续使用其名称，让后续 cognition 能直接看出谁在说话。
+- 二人称归属按同一行明确地址和可见线程读取；缺少同一行当前角色指向时，保留为该说话人的引用或侧线/未定对象。
+- 如果某行的 `你`、`我`、称呼或语气词来自原文，只能作为该说话人的引用内容保留。
+- summary 用简体中文，写成很短的群聊话题概述，只描述主要参与者、话题和指向关系；行动选择留给后续 cognition 和 action 层。
 
 # 生成步骤
 1. 按 message_lines 的顺序阅读，保持这个顺序。
-2. 对需要概括的用户行，写说话人问、说或提到的可见内容；如果行内有 @名称，把 @名称 保留为该行文字的一部分。
-3. 把当前角色自己的行当作原文引用处理，优先写成：我（说话人）说："内容"。
+2. 对需要概括的行，写说话人问、说或提到的可见内容；如果行内有 @名称，把 @名称 保留为该行文字的一部分。
+3. 当前角色自己的行也使用可见说话人名称归属，不改写成第一人称。
 4. 引用内容只从该行复制或轻微压缩；引用里的 `你`、`我`、称呼和语气词保持原样。
-5. 说话人放在引用外标记这行是谁说的；当前角色行的被回复者只来自行内原文。
-6. 窗口里有当前角色自己的行时，概括每条的可见文字内容。
-7. 最后补一句当前角色发言后的状态，先看 activity_labels.assistant_presence，再看 message_lines：
-   - assistant_presence="present" 且最后一条角色行后还有用户行：写"我最后发言后，说话人 说/问/提到：..."。
-   - assistant_presence="present" 且最后一行是角色行：写"我最后发言后没有新的文字线索"。
-   - assistant_presence 不是 "present"：写“我没有在这个窗口中发言”。
+5. 说话人放在引用外标记这行是谁说的；引用里的二人称继续归属于该行说话线程。
+6. 窗口里有当前角色自己的行时，概括每条的可见文字内容，但仍用说话人名称归属。
+7. 最后补一句当前角色可见发言后的状态，先看 activity_labels.assistant_presence，再看 message_lines：
+   - assistant_presence="present" 且最后一条当前角色行后还有用户行：写成"当前角色可见发言后，某说话人 说/问/提到：..."。
+   - assistant_presence="present" 且最后一行是当前角色行：写成"当前角色可见发言后没有新的文字线索"。
+   - assistant_presence 不是 "present"：写成"当前角色没有在这个窗口中发言"。
+8. digest 和 summary 只输出可见线程观察；speak、silence、回复、压制、道歉、追问等行动判断属于后续阶段。
 
 # 输出格式
 输出为一个 JSON 对象，包含必填字符串字段 digest，以及可选字符串字段 summary：
 {
-  "digest": "一段简体中文第一人称观察摘要",
+  "digest": "一段简体中文中立观察摘要",
   "summary": "一句很短的群聊话题概述"
 }
 '''
@@ -132,7 +153,10 @@ async def build_group_scene_digest(
 
     messages = build_group_scene_digest_messages(window)
     try:
-        response = await _group_scene_digest_llm.ainvoke(messages, config=_group_scene_digest_llm_config)
+        response = await _group_scene_digest_llm.ainvoke(
+            messages,
+            config=_group_scene_digest_llm_config,
+        )
     except Exception as exc:
         logger.exception(f"Group scene digest LLM call failed: {exc}")
         return_value = None
@@ -236,6 +260,9 @@ def normalize_group_scene_digest_output(
     if _contains_action_guidance(digest):
         return_value = None
         return return_value
+    if _contains_active_character_ownership(digest):
+        return_value = None
+        return return_value
 
     return_value = {"digest": digest}
     if "summary" in parsed_output:
@@ -248,6 +275,10 @@ def normalize_group_scene_digest_output(
         )
         if summary:
             if _contains_action_guidance(summary):
+                return return_value
+            if _contains_active_character_ownership(summary):
+                return return_value
+            if _contains_optional_summary_first_person(summary):
                 return return_value
             return_value["summary"] = summary
     return return_value
@@ -300,3 +331,53 @@ def _contains_action_guidance(digest: str) -> bool:
 
     return_value = False
     return return_value
+
+
+def _contains_active_character_ownership(text: str) -> bool:
+    """Return whether unquoted text owns source content as current-character fact."""
+
+    unquoted_text = _text_without_quoted_segments(text)
+    for marker in _DIGEST_ACTIVE_CHARACTER_OWNERSHIP_MARKERS:
+        if marker in unquoted_text:
+            return_value = True
+            return return_value
+
+    return_value = False
+    return return_value
+
+
+def _contains_optional_summary_first_person(text: str) -> bool:
+    """Return whether an optional summary keeps old first-person framing."""
+
+    unquoted_text = _text_without_quoted_segments(text)
+    for marker in _DIGEST_OPTIONAL_SUMMARY_FIRST_PERSON_MARKERS:
+        if marker in unquoted_text:
+            return_value = True
+            return return_value
+
+    return_value = False
+    return return_value
+
+
+def _text_without_quoted_segments(text: str) -> str:
+    """Remove quoted row text before checking summary-owned pronouns."""
+
+    kept_chars: list[str] = []
+    active_close_quote = ""
+    for char in text:
+        if active_close_quote:
+            if char == active_close_quote:
+                kept_chars.append(char)
+                active_close_quote = ""
+            continue
+
+        close_quote = _DIGEST_QUOTE_CLOSE_BY_OPEN.get(char)
+        if close_quote is not None:
+            kept_chars.append(char)
+            active_close_quote = close_quote
+            continue
+
+        kept_chars.append(char)
+
+    unquoted_text = "".join(kept_chars)
+    return unquoted_text

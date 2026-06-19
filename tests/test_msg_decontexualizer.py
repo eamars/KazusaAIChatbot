@@ -595,7 +595,9 @@ async def test_decontexualizer_forwards_reply_context_to_llm():
     assert '"addressed_to_global_user_ids": ["character-global"]' in payload
     assert '"reply_excerpt": "评价这种事' in payload
     assert "# 输入格式" not in system_prompt
-    assert "# 本轮输入字段说明" in system_prompt
+    assert "# 输入读取说明" not in system_prompt
+    assert "# 本轮输入字段说明" not in system_prompt
+    assert "# 来源与角色锚点" in system_prompt
     assert "prompt_message_context.body_text" in system_prompt
     assert "addressed_to_global_user_ids" in system_prompt
     assert "`broadcast`" in system_prompt
@@ -604,6 +606,28 @@ async def test_decontexualizer_forwards_reply_context_to_llm():
     assert "`summary_status`" in system_prompt
     assert "reply_context.reply_excerpt" in system_prompt
     assert result["decontexualized_input"] == "是的，我是想让 active character 具体评价我。"
+
+
+def test_decontexualizer_prompt_explains_reply_ellipsis_decision_owner() -> None:
+    """Prompt should anchor omitted decision questions to reply-source ownership."""
+
+    system_prompt = decontextualizer_module._render_msg_decontexualizer_prompt(
+        "Character",
+    )
+
+    assert "# 输入格式" not in system_prompt
+    assert "# 输入读取说明" not in system_prompt
+    assert "# 本轮输入字段说明" not in system_prompt
+    assert '省略决策问题' in system_prompt
+    assert '同时补出决策主体和动作对象' in system_prompt
+    assert 'reply_context.reply_excerpt' in system_prompt
+    assert '“帮你”标识当前用户是决策主体' in system_prompt
+    assert '当前用户自己为被判断对象' in system_prompt
+    assert '判断当前用户是否' in system_prompt
+    assert '帮你看看' in system_prompt
+    assert '要不要 / 该不该 / 值不值得' in system_prompt
+    assert '第三方向当前用户发出邀请、通知、请求或建议' in system_prompt
+    assert '附件描述、回复摘录和相邻历史可提供动作对象' in system_prompt
 
 
 @pytest.mark.asyncio
@@ -645,7 +669,8 @@ async def test_decontexualizer_forwards_scope_users_as_neutral_identity_table():
     assert all('retry' not in key for key in payload)
     assert 'scope_users' in system_prompt
     assert '身份' in system_prompt
-    assert '候选' in system_prompt
+    assert '其他来源已经桥接到某个可见身份' in system_prompt
+    assert '稳定显示名' in system_prompt
     assert result == {
         'decontexualized_input': '@杏山千纱 还不报警抓蚝爹油吗？',
         'referents': [

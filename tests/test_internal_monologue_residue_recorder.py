@@ -76,6 +76,67 @@ def test_validate_recorder_output_rejects_over_limit_text() -> None:
     assert result["failure_reason"] == "row_char_limit"
 
 
+def test_build_recorder_input_includes_group_review_reliability_notes() -> None:
+    """Ambiguous group-review subject warnings should reach recorder input."""
+
+    completed_state = {
+        "character_profile": {
+            "name": "杏山千纱",
+            "global_user_id": "character-global",
+        },
+        "platform": "qq",
+        "platform_channel_id": "group-1",
+        "channel_type": "group",
+        "global_user_id": "",
+        "user_name": "group audience",
+        "internal_monologue": (
+            '我刚才看到灯说“你的头发软软的”，但这行属于雪凪和灯的侧线。'
+        ),
+        "logical_stance": "TENTATIVE",
+        "character_intent": "DISMISS",
+        "emotional_appraisal": "",
+        "interaction_subtext": "",
+        "social_distance": "",
+        "relational_dynamic": "",
+        "final_dialog": [],
+        "conversation_progress": {
+            "thread_reference_context": {
+                "source": "group_review_thread_reference",
+                "context_shape": (
+                    "bounded_second_person_reference_warnings"
+                ),
+                "guidance": (
+                    "二人称归属按同一行明确地址和可见线程读取；"
+                    "缺少同一行当前角色指向时，保留为侧线/未定对象。"
+                ),
+                "ambiguous_second_person_rows": [
+                    {
+                        "speaker": "灯（23岁）",
+                        "sample": (
+                            "你的头发软软的，像rana家那只靠在暖气片旁边的猫。"
+                        ),
+                        "referent_status": "ambiguous_or_side_thread",
+                        "basis": "same row has no direct active-character address",
+                    },
+                ],
+            },
+        },
+        "cognitive_episode": {
+            "episode_id": "episode-cat",
+            "trigger_source": "internal_thought",
+            "origin_metadata": {},
+        },
+    }
+
+    recorder_input = recorder._build_recorder_input(completed_state)
+
+    assert recorder_input is not None
+    assert recorder_input["source_kind"] == "self_cognition"
+    assert recorder_input["source_reliability_notes"] == [
+        "group review contained ambiguous second-person side-thread rows",
+    ]
+
+
 @pytest.mark.asyncio
 async def test_record_completed_episode_retries_wrong_schema_output(
     monkeypatch,

@@ -13,7 +13,6 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot import db, event_logging
 from kazusa_ai_chatbot.config import (
-
     CHARACTER_GLOBAL_USER_ID,
     COGNITION_LLM_API_KEY,
     COGNITION_LLM_BASE_URL,
@@ -36,7 +35,6 @@ from kazusa_ai_chatbot.internal_monologue_residue.models import (
     ResidueScopeKind,
     ResidueSourceKind,
 )
-
 from kazusa_ai_chatbot.llm_interface import (
     LLInterface,
     LLMCallConfig,
@@ -64,6 +62,9 @@ PROMPT_LEAKAGE_MARKERS = (
 THIRD_PERSON_SELF_MARKERS = (
     "角色",
 )
+GROUP_REVIEW_AMBIGUOUS_SECOND_PERSON_NOTE = (
+    "group review contained ambiguous second-person side-thread rows"
+)
 
 
 _RECORDER_PROMPT = '''\
@@ -86,13 +87,15 @@ _RECORDER_PROMPT = '''\
 - `incoming_residue_context` 是我此前留下的短期余波窗口，只用于判断延续、缓和或变旧；不要机械复述窗口内容。
 - `ambient_evidence_summary` 只说明群聊、私聊、聊天完成后或自我回顾后的场景边界；不要把它写成报告。
 - `current_speaker_display_name` 与 `exact_name_candidates` 只是可用称呼提示；缺少准确称呼时可以自然省略。
+- `source_reliability_notes` 是来源可靠性限制；如果它提示群聊里有有歧义的二人称侧线，按来源优先级把该内容保留为被观察说话人的侧线/未定对象，我自己的私念只记录由这个限制引发的情绪、迟疑或放下。
 
 # 生成步骤
 1. 先读取 `internal_monologue`，找出其中仍可能影响后续理解的主观原因。
 2. 对照 `incoming_residue_context`，判断这是新原因、旧原因延续，还是旧余波已经被当前理解放轻。
-3. 只保留一条最有用的私念；不要总结整段内心，也不要列出所有事实。
-4. 若当前只是普通、已接住、已放下或没有持续影响的内容，输出空字符串。
-5. 输出前检查：它必须像我私下留给自己的短句，而不是报告、行动计划、长期记忆或可见台词。
+3. 读取 `source_reliability_notes`；来源可靠性限制优先于主观余波，被标记为有歧义二人称侧线的内容只可作为侧线/未定对象影响我的心情。
+4. 只保留一条最有用的私念；不要总结整段内心，也不要列出所有事实。
+5. 若当前只是普通、已接住、已放下或没有持续影响的内容，输出空字符串。
+6. 输出前检查：它必须像我私下留给自己的短句，而不是报告、行动计划、长期记忆或可见台词。
 
 # 私念视角契约
 - 写成自然第一人称，可以写我为什么仍在意、放松、防备、期待、迟疑或释然。
@@ -101,16 +104,6 @@ _RECORDER_PROMPT = '''\
 - 若关系指代更自然，也可以写对方、那个人、某人、他或她；不要为了命名而写不确定的人名。
 - 不写可见回复、行动指令、长期用户事实、提示内容、模型信息、字段说明、格式说明或处理过程。
 - 最长 {row_char_limit} 个字符。
-
-# 输入格式
-human payload 是以下 JSON：
-{{
-  "internal_monologue": "本轮已经生成的第一人称内心解释",
-  "current_speaker_display_name": "当前说话者显示名，可能为空",
-  "exact_name_candidates": ["可安全使用的名字"],
-  "ambient_evidence_summary": "不含原始消息正文的场景摘要",
-  "incoming_residue_context": "已有短期余波窗口，可能为空"
-}}
 
 # 输出格式
 请务必返回合法的 JSON 字符串，仅包含以下字段：
@@ -380,6 +373,7 @@ async def _call_recorder(
         "exact_name_candidates": recorder_input["exact_name_candidates"],
         "ambient_evidence_summary": recorder_input["ambient_evidence_summary"],
         "incoming_residue_context": recorder_input["incoming_residue_context"],
+        "source_reliability_notes": recorder_input["source_reliability_notes"],
     }
     if repair_reason:
         payload["validation_failure"] = repair_reason
@@ -454,6 +448,9 @@ def _build_recorder_input(
         "incoming_residue_context": _string_field(
             completed_state,
             "internal_monologue_residue_context",
+        ),
+        "source_reliability_notes": _source_reliability_notes(
+            completed_state,
         ),
     }
     return recorder_input
@@ -590,6 +587,34 @@ def _ambient_evidence_summary(
     fields.append(f"visible_dialog_selected={has_visible_dialog}")
     summary = "; ".join(fields)
     return summary
+
+
+def _source_reliability_notes(
+    completed_state: Mapping[str, object],
+) -> list[str]:
+    """Return prompt-safe reliability notes from current source evidence."""
+
+    conversation_progress = completed_state.get("conversation_progress")
+    if not isinstance(conversation_progress, Mapping):
+        notes: list[str] = []
+        return notes
+
+    thread_reference_context = conversation_progress.get(
+        "thread_reference_context",
+    )
+    if not isinstance(thread_reference_context, Mapping):
+        notes = []
+        return notes
+
+    ambiguous_rows = thread_reference_context.get(
+        "ambiguous_second_person_rows",
+    )
+    if not isinstance(ambiguous_rows, list) or not ambiguous_rows:
+        notes = []
+        return notes
+
+    notes = [GROUP_REVIEW_AMBIGUOUS_SECOND_PERSON_NOTE]
+    return notes
 
 
 def _exact_name_candidates(

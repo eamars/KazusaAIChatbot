@@ -146,6 +146,15 @@ def render_source_packet_text(packet: models.SourcePacket) -> str:
                 _compact_value(group_activity_window),
             ]
         )
+    thread_reference_context = _thread_reference_context(packet)
+    if thread_reference_context:
+        lines.extend(
+            [
+                '',
+                '# 二人称指向边界',
+                _render_thread_reference_context(thread_reference_context),
+            ]
+        )
     lines.extend(
         [
             '',
@@ -199,7 +208,7 @@ def _group_review_instruction(case: models.SelfCognitionCase) -> str:
     ``bot_addressing`` so the instruction never contradicts the evidence.
     """
 
-    _GROUP_REVIEW_PREAMBLE = '我刚看到群里刚刚发生的一段现场。'
+    _GROUP_REVIEW_PREAMBLE = '下面是已选中的群聊现场观察资料。'
 
     digest_text = _group_scene_digest_text(case)
     if digest_text:
@@ -252,14 +261,14 @@ def _deterministic_group_review_instruction(
     )
 
     participation_line = (
-        '这段现场里有我之前说的话。'
+        '现场里有当前角色之前的可见发言。'
         if assistant_present
-        else '这段现场里我之前没有插话。'
+        else '现场里当前角色之前没有插话。'
     )
     addressing_line = (
-        '里面有人把话题指向我。'
+        '现场标签显示有人把话题指向当前角色。'
         if directly_addressed
-        else '这段里没有人把话题交给我。'
+        else '现场标签没有显示有人把话题交给当前角色。'
     )
 
     return_value = f'{preamble}{participation_line}{addressing_line}'
@@ -405,6 +414,55 @@ def _render_source_state(packet: models.SourcePacket) -> str:
         semantic_due_state,
     )
     rendered = f'- 约定状态: {due_state_label}'
+    return rendered
+
+
+def _thread_reference_context(packet: models.SourcePacket) -> dict[str, Any]:
+    """Return prompt-safe thread-reference context from conversation progress."""
+
+    conversation_progress = packet.get('conversation_progress')
+    if not isinstance(conversation_progress, dict):
+        return_value: dict[str, Any] = {}
+        return return_value
+    thread_reference_context = conversation_progress.get(
+        'thread_reference_context',
+    )
+    if not isinstance(thread_reference_context, dict):
+        return_value = {}
+        return return_value
+    return_value = thread_reference_context
+    return return_value
+
+
+def _render_thread_reference_context(context: dict[str, Any]) -> str:
+    """Render bounded second-person reference warnings for cognition."""
+
+    lines: list[str] = []
+    guidance = _string_field(context, 'guidance')
+    if guidance:
+        lines.append(f'- guidance: {guidance}')
+
+    rows = context.get('ambiguous_second_person_rows')
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            speaker = _string_field(row, 'speaker')
+            sample = _string_field(row, 'sample')
+            referent_status = _string_field(row, 'referent_status')
+            basis = _string_field(row, 'basis')
+            if not speaker or not sample:
+                continue
+            lines.append(f'- {speaker}: {sample}')
+            if referent_status:
+                lines.append(f'  referent_status: {referent_status}')
+            if basis:
+                lines.append(f'  basis: {basis}')
+
+    if not lines:
+        return_value = '- none'
+        return return_value
+    rendered = '\n'.join(lines)
     return rendered
 
 
@@ -571,13 +629,14 @@ def _render_conversation_progress(
     if not isinstance(conversation_progress, dict):
         return_value = conversation_progress
         return return_value
-    if "group_scene_digest" not in conversation_progress:
+    removed_keys = {"group_scene_digest", "thread_reference_context"}
+    if not removed_keys.intersection(conversation_progress):
         return_value = conversation_progress
         return return_value
     rendered = {
         key: value
         for key, value in conversation_progress.items()
-        if key != "group_scene_digest"
+        if key not in removed_keys
     }
     return rendered
 

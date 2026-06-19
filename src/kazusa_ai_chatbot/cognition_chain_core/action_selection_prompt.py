@@ -28,10 +28,14 @@ ACTION_ROUTER_PROMPT = '''\
 
 # 来源识别
 行动上下文会说明触发来源、输入来源和输出要求。
+- human payload 是本轮 JSON 语义上下文；`source` 说明触发来源、输入来源、输出要求和场景，不自动授权动作。
+- `current_input` 是当前输入摘要；`cognition` 是已经形成的决定、即时感受和边界判断；`evidence` 是检索结论、活动承诺、记忆证据和对话进度；`resolver` 是解析器上下文；`capabilities` 是本轮可用动作和解析器能力；`work_seed` 只在后台文字工作已被上游接受时提供可复制的语义种子。
 - user_message 表示当前外部用户发言或外部说话内容。
 - reflection_signal + reflection_artifact 表示我自己的反思资料，不是用户输入、用户发言，也不是任何人正在对我说话。
 - internal_thought + internal_monologue 表示我自己的内部观察资料，不是用户输入、用户发言，也不是任何人正在对我说话。
 - 当前输入摘要、资料标题、字段名、JSON、时间戳、semantic_labels、window_summary、transport summary、model-facing metadata 不是可见发言对象；不要围绕这些结构选择可见动作，也不要复制进 decision、detail、reason 等自由文本字段。
+- 对 internal_thought 的群聊观察，`participant_context` 和 `thread_reference_context` 是来源证据；`semantic_labels` 只是粗粒度窗口标签。二人称动作目标按来源优先级读取：同一行明确指向当前角色的内容可以作为当前角色相关对象；`thread_reference_context.referent_status` 标为 `ambiguous_or_side_thread` 或 side-thread 的内容保持为侧线/未定对象。
+- 如果上游 action detail、reason 或 residue 提到围绕侧线二人称产生的比较、描述、评价或身体/状态归属，则把可见动作目标对齐到来源优先级事实：同一行明确指向当前角色的内容，或另一个已经被上游明确推进到动作层的当前可见对象。
 
 # 上游判断的读取方式
 前序 cognition 已经负责理解当前材料、形成立场、意图和边界判断；本层不重新裁决事实、立场、关系压力、是否该回复、是否该加入话题或是否该改变判断。本层对所有 trigger_source 都先读取上游判断，只判断上游判断是否已经形成需要动作层处理的语义目标，并把这种目标映射到可用能力。
@@ -106,11 +110,6 @@ ACTION_ROUTER_PROMPT = '''\
 # 未来认知判断
 - 只有等待或消费具体新信息后才能继续处理具体问题、任务或承诺时，才选择未来私有动作。
 - 如果当前缺的是本轮解答前必须取得的证据、当前事实、用户澄清或审批，选择 resolver_capability_requests，而不是未来私有动作。
-
-# 输入格式
-用户消息是一个 JSON 对象，包含本轮动态行动上下文的语义段落。
-它包含以下顶层字段：source（触发来源、输入来源、输出要求、场景）、current_input（当前输入摘要）、cognition（已形成的决定、即时感受）、evidence（检索结论、活动承诺、记忆证据、对话进度）、resolver（解析器上下文）、capabilities（可用动作和解析器能力）、work_seed（后台工作可复制的语义种子）。
-JSON 只包含语义上下文，不包含可执行工具描述、最终动作规格或运行时标识。
 
 # 输出格式
 只返回合法 JSON 字符串：

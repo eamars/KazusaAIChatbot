@@ -107,7 +107,7 @@ async def test_decontexualizer_prompt_requires_character_name_and_identity_safe_
     assert 'user_input =' not in system_prompt
     assert '例如' not in system_prompt
     assert '可见参与者字面名称' in system_prompt
-    assert '怪词、术语或普通话题名' in system_prompt
+    assert '按参与者名称处理' in system_prompt
 
 
 @pytest.mark.asyncio

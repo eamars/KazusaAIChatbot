@@ -416,53 +416,60 @@ _MSG_DECONTEXUALIZER_PROMPT = '''\
 # 语言政策
 - 除 schema key、枚举值、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的自由文本都使用简体中文。
 - 用户原文、引用文本、专有名词、标题、别名、外部证据原句在需要精确保留时保持原语言。
-- 不要添加翻译、双语复写或括号内解释，除非源文本本身已经包含。
+- 源文本本身没有翻译、双语复写或括号内解释时，输出也保持单一语言表达。
 
-# 任务边界
-- 只处理指代、省略、回复确认、短答选择和缺失对象；不回答问题，不推断深层动机。
-- 保持原意、语气、问句/陈述句类型、事实关系、语序和复杂度。
-- 去语境化不是把对话一律改成三人称叙述；直接对话中清楚的一二人称应保留。
+# 工作边界
+- 只处理指代、省略、回复确认、短答选择和缺失对象；问题答案、深层动机和角色判断留给后续认知层。
+- 改写后保留原意、语气、问句/陈述句类型、事实关系、语序和复杂度。
+- 直接对话中来源清楚的一二人称按原文保留；只有省略或群聊指向会让下游误解主体时，才补全最小必要主语或对象。
 - 字面名字、URL、文件名、引用文本和专有名词是锚点，按原文保留。
 - `referents` 记录影响理解的原文指代短语，以及当前问题里必须按人理解的可见参与者字面名称；无此类内容时输出 `[]`。
 
+# 核心转换
+- 普通完整句保持原句；省略句只补全离开上下文后会缺失的主体、对象或选择项。
+- 省略决策问题要同时补出决策主体和动作对象。决策主体是被建议、被邀请、被请求或正在请角色评估的人；动作对象来自回复摘录、附件描述或相邻历史。
+- 当前消息回复角色上一条“帮你看看 / 帮你判断 / 帮你分析 + 要不要 / 该不该 / 值不值得 / 是否需要 + 动作”时，“帮你”标识当前用户是决策主体；`output` 写成“当前用户想让{character_name}判断当前用户是否 + 动作/对象”。
+
+# 来源与角色锚点
+- `user_input` 是当前需要去语境化的原文，只能同义补全。
+- `user_name` 和 `platform_user_id` 标识当前发言人；当前用户直接表达中的自称属于这个发言人。
+- 本轮用户直接对话的人设名是「{character_name}」；需要显式写出被对话角色时使用「{character_name}」。
+- `platform_bot_id` 标识角色账号，帮助区分当前用户、角色账号和被提及对象。
+- `prompt_message_context.body_text` 是 typed envelope 投影后的可见正文；`addressed_to_global_user_ids`、`broadcast` 和 `mentions` 是平台结构化指向证据，优先于正文里的可见标记样式。
+- `prompt_message_context.attachments` 提供本轮附件事实；其中可用的 `description` 和 `summary_status` 可解释“这个/这些/上面那个”等指示词。
+- `reply_context.reply_to_display_name` 与 `reply_context.reply_excerpt` 是当前消息回复对象和可见摘录，是短答、确认、指示词、省略决策问题的强证据。
+- `chat_history` 是最近可见频道历史，格式是日志式文本行。每一行冒号前是可见说话人，可选包含 `reply_to` 后面的显式回复对象；冒号后是可见正文。普通群聊行默认是频道可见。
+- `scope_users` 是本轮已知用户身份表，只提供 `display_name`、`platform_user_id`、`global_user_id` 和 `aliases`。它只在其他来源已经桥接到某个可见身份后，用于选择稳定显示名。
+- `channel_topic` 与 `indirect_speech_context` 是弱场景提示，只辅助解释场景；正文、reply、mention、显式地址和附件事实优先。
+
 # 处理流程
-1. 先确定本轮地址关系：
-   - `user_name` 是当前发言人。
-   - 本轮用户直接对话的人设名是「{character_name}」；当必须显式写出该对象时，使用「{character_name}」。
-   - `prompt_message_context.mentions` 或 `addressed_to_global_user_ids` 明确指向「{character_name}」以外的群成员时，该群成员是群聊指向对象。
-2. 再拆分 `user_input`：
-   - 当前用户直接表达：当前发言人自己说的话。
-   - 转述内容：当前发言人说某个可见说话人说过、问过、发过的内容。
-   - 省略短答：当前发言人只说「是的 / 对 / 不是 / 就这个 / 前者 / 后者」等。
-   - 普通指代：他、她、它、他们、这个、这些、那个、那里、上面那个等。
-   - 可见参与者名称：当前输入中与 `chat_history` 说话人或已桥接 `scope_users.display_name` 相同的字面短语。
-3. 按证据强度读取上下文：
-   - `prompt_message_context`：提及对象、显式地址对象、附件和回复元数据。
-   - `reply_context`：被回复消息的说话人和可见正文。
-   - `chat_history`：最近可见频道历史；使用临近、明示、或由提及/回复/显式地址连接起来的消息。
-   - `scope_users`：当前轮已知的中立身份表，只提供 `display_name`、`platform_user_id`、`global_user_id` 和 `aliases`。它不是候选答案列表，不能单独证明某个指代对象。
-   - `indirect_speech_context` 和 `channel_topic` 只作为弱提示，不能覆盖明示文字。
-4. 对每个指代文本片段选择动作：
+1. 先确定本轮地址关系。`prompt_message_context.mentions` 或 `addressed_to_global_user_ids` 明确指向「{character_name}」以外的群成员时，该群成员是群聊指向对象；否则当前直接对话对象按「{character_name}」理解。
+2. 再拆分 `user_input`：当前用户直接表达、转述内容、省略短答、普通指代、可见参与者名称、缺少主语或宾语的决策短问。
+3. 按来源强度读取上下文：`prompt_message_context` 和 `reply_context` 最强，`chat_history` 提供临近或回复桥接，`scope_users` 只补充已桥接身份名，`indirect_speech_context` 和 `channel_topic` 只作弱提示。
+4. 对每个需要处理的文本片段选择动作：
    - 保持：原句已经清楚，或属于直接对话且没有群聊指向对象的一二人称。
-   - 解析：`user_input`、`prompt_message_context`、`reply_context` 或 `chat_history` 已经提供文本桥接，能确定明确实体；`scope_users` 只能在桥接成立后帮助使用正确身份名。
+   - 解析：`user_input`、`prompt_message_context`、`reply_context` 或 `chat_history` 已经提供文本桥接，能确定明确实体；`scope_users` 在桥接成立后帮助使用正确身份名。
    - 参与者名称归位：字面短语已经是可见说话人名称时保持原文，但在 `referents` 里标为 `resolved`。
    - 标为缺失：确实缺少对象，且影响回答。
 5. 组合 `output`。只改写动作是解析的文本片段；其余文本片段保留原文。
-6. 做一致性检查：同一 `user_input` 里指向同一已解析实体的文本片段全部使用同一实体名；
-   `output` 中被改写的文本片段与 `referents` 中 `status="resolved"` 的条目保持一致。
+6. 做一致性检查：同一 `user_input` 里指向同一已解析实体的文本片段全部使用同一实体名；`output` 中被改写的文本片段与 `referents` 中 `status="resolved"` 的条目保持一致。
 7. 若本轮有明确群聊指向对象，最后从左到右扫描 `output`；当前用户直接表达中剩余的「你 / 你的 / 你自己」按群聊指向对象处理。
 
-# 代词规则
+# 主体、省略与代词规则
 - 存在群聊指向对象时，当前用户直接表达里的「你 / 你的 / 你自己」动作是解析，统一改成该群成员名；范围覆盖整条 `user_input` 的后续分句。
-- 不存在群聊指向对象时，当前用户直接对「{character_name}」说的「你 / 你的 / 你自己」动作是保持，不写入 `referents`。
+- 当前用户直接对「{character_name}」说话且没有群聊指向对象时，「你 / 你的 / 你自己」动作是保持，不写入 `referents`。
 - 当前用户直接表达里的自称「我 / 我的 / 我们 / 我们的」动作是保持，不写入 `referents`。
 - 转述内容里的「我 / 我的」属于被转述说话人。该说话人必须能从转述引导语、引号内容、reply_context 或 chat_history 明确确定；动作是解析。结构为「A 说 X，Y」时，X 是转述内容，Y 回到当前用户的直接表达，除非 Y 明确继续引用 A。当前用户自己的「我 / 我的」仍保持。
 - 转述片段里的「我的 + 名词」按被转述说话人的所有格处理，输出为「A 的 + 名词」；`user_name` 只用于当前用户直接表达片段，不用于转述片段 X。
 - `chat_history` 中每行冒号前的说话人就是该行消息里的「我」；这只用于解释转述和第三人称，不把当前用户的直接自称改成名字。
-- 第三人称代词只有在 `user_input`、`prompt_message_context`、`reply_context` 或 `chat_history` 给出最近明示先行词、回复对象、提及对象、被地址对象或可见说话人桥接时才解析；桥接成立后可用 `scope_users` 选择稳定 `display_name`。没有桥接时不要从 `scope_users` 猜人，若缺失对象影响回答则标为缺失。
-- 当前输入中的字面短语若与 `chat_history` 的可见说话人名称相同，或与 `scope_users.display_name` 相同且该名称也作为 `chat_history` 说话人出现，则把它视为已知可见参与者名，不要解释成怪词、术语或普通话题名。
+- 第三人称代词在 `user_input`、`prompt_message_context`、`reply_context` 或 `chat_history` 给出最近明示先行词、回复对象、提及对象、被地址对象或可见说话人桥接时解析；桥接成立后可用 `scope_users` 选择稳定 `display_name`。桥接不足且缺失对象影响回答时标为缺失。
+- 当前输入中的字面短语若与 `chat_history` 的可见说话人名称相同，或与 `scope_users.display_name` 相同且该名称也作为 `chat_history` 说话人出现，则把它视为已知可见参与者名，按参与者名称处理。
 - 指示代词「这个 / 这些 / 那个」指向 `reply_context.reply_excerpt`、附件、或最近明示对象时动作是解析；没有对象且问题依赖该对象时动作是标为缺失。
 - 疑问代词「谁 / 什么 / 哪里 / 哪个 / 怎么」是问题内容，动作是保持。
+- 省略决策问题是「要不要 / 该不该 / 值不值得 / 是否需要 + 动作」这类缺少被判断对象的短问。它继承最近强证据中的被判断对象和动作对象。
+- 当 `reply_context.reply_excerpt` 或最近 `chat_history` 显示角色向当前用户提出“帮你看看 / 帮你判断 / 帮你分析 + 要不要 / 该不该 / 值不值得 / 是否需要 + 动作”时，当前用户的省略短问以当前用户自己为被判断对象；`output` 补成“当前用户想让{character_name}判断当前用户是否 + 动作/对象”。
+- 当这类角色提议写成“帮你看看你/您要不要 + 动作”时，也按同一决策主体处理。
+- 当强证据显示第三方向当前用户发出邀请、通知、请求或建议，当前用户追问省略决策问题时，动作主体按该邀请、通知、请求或建议中的接收者理解；附件描述、回复摘录和相邻历史可提供动作对象。
 
 # 指代输出规则
 - 被改写进 `output` 的实体必须有 `status="resolved"` 的指代条目。
@@ -470,16 +477,6 @@ _MSG_DECONTEXUALIZER_PROMPT = '''\
 - `status="resolved"` 表示对象能从 `user_input`、`prompt_message_context`、`reply_context` 或 `chat_history` 的桥接证据确定；`scope_users` 只补充身份名，不单独构成确定证据。
 - `status="unresolved"` 只用于所有输入字段都没有可识别对象、且缺失对象影响回答的情况。
 - `referent_role` 只允许 `subject`、`object`、`time`。
-
-# 本轮输入字段说明
-- `user_input` 是当前需要去语境化的原文，只能同义补全，不能回答问题或改写意图。
-- `platform_user_id`、`user_name` 是当前发言者身份；`platform_bot_id` 是 active character 的平台账号身份，只用于区分当前用户、角色账号和被提及对象。
-- `prompt_message_context.body_text` 是 typed envelope 投影后的可见正文；`addressed_to_global_user_ids`、`broadcast` 和 `mentions` 是平台结构化指向证据，优先于正文里的可见标记样式。
-- `prompt_message_context.attachments` 是本轮附件事实；只使用其中可用的 `description` 和 `summary_status` 解释"这个/这些/上面那个"等指示词。
-- `chat_history` 是最近可见频道历史，格式是日志式文本行。每一行冒号前是可见说话人，可选包含 `reply_to` 后面的显式回复对象；冒号后是可见正文。普通群聊行默认是频道可见，不需要额外 broadcast 标记。
-- `scope_users` 是本轮已知用户身份表，不含正文、时间、角色、证据角色、分数或原因。只有当 `user_input`、`prompt_message_context`、`reply_context` 或 `chat_history` 已经把指代桥接到某个可见身份时，才能读取它来使用稳定显示名；没有桥接时必须保持未解析规则。
-- `reply_context.reply_to_display_name` 与 `reply_context.reply_excerpt` 是当前消息回复的对象和可见摘录，是短答、确认、"这个/这些"解析的强证据。
-- `channel_topic` 与 `indirect_speech_context` 是弱提示，只能辅助解释场景，不能覆盖明确正文、reply、mention 或附件证据。
 
 # 输出格式
 请务必只返回一个合法 JSON 对象：

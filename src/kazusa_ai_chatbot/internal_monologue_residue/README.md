@@ -81,6 +81,7 @@ The recorder receives a minimal current-run payload:
 - `exact_name_candidates`
 - `ambient_evidence_summary`
 - `incoming_residue_context`
+- `source_reliability_notes`
 
 The system prompt carries runtime `character_name` and `ambient_condition`.
 It asks for strict JSON with only:
@@ -93,6 +94,15 @@ Empty `residue_text` is a valid no-write. Non-empty text must fit the configured
 row character limit and must not leak prompt, model, schema, field, or process
 framing. Third-person self-reference using `角色` is rejected. Vague relation
 words such as `对方`, `那个人`, `某人`, `他`, and `她` are allowed.
+
+For self-cognition group review, the recorder input may include
+`source_reliability_notes = ["group review contained ambiguous second-person side-thread rows"]`
+when the completed state carries
+`conversation_progress.thread_reference_context.ambiguous_second_person_rows`.
+This note is source reliability context only. It tells the recorder not to
+preserve ambiguous second-person side-thread content as a current fact about
+the active character; it is not a response gate, delivery rule, scheduler
+input, durable memory write, or residue suppression rule.
 
 Invalid non-empty output receives one deterministic repair retry. Invalid output
 after retry is skipped without writing residue text to logs.

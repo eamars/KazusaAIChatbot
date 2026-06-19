@@ -87,6 +87,7 @@ class RecorderInput(TypedDict):
     exact_name_candidates: list[str]
     ambient_evidence_summary: str
     incoming_residue_context: str
+    source_reliability_notes: list[str]
 
 
 class RecorderValidationResult(TypedDict):

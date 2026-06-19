@@ -42,7 +42,9 @@ _FORBIDDEN_REFERENCES = (
     "active_character",
     "对方",
     "有人",
-    "我没有在这个窗口中发言之外",
+    "我看到",
+    "我最后发言后",
+    "我没有在这个窗口中发言",
     "他们",
     "她们",
     "那个人",
@@ -121,7 +123,6 @@ async def test_live_digest_preserves_names_for_duplicate_thanks_closed_flow(
         required_fragments=("帮到",),
         required_any_fragment_groups=(
             ("已经", "回复", "回应", "说"),
-            ("我最后发言后", "最后发言后"),
             ("没有新", "没有再", "没有继续"),
         ),
     )
@@ -160,8 +161,7 @@ async def test_live_digest_preserves_names_for_one_kazusa_participation(
         required_names=("Ab", "杏山千纱"),
         required_fragments=("耄耋",),
         required_any_fragment_groups=(
-            ("已经", "回复", "回应", "说", "解释"),
-            ("我最后发言后", "最后发言后"),
+            ("已经", "回复", "回应", "回答", "说", "解释"),
             ("没有新", "没有再", "没有继续"),
         ),
     )
@@ -197,8 +197,8 @@ async def test_live_digest_preserves_latest_kazusa_row_in_busy_group(
         window,
     )
     visible_text = "\n".join(
-        row["text"]
-        for row in payload["message_rows"]
+        line
+        for line in payload["message_lines"]
     )
 
     assert "old noisy row 01" not in visible_text
@@ -209,7 +209,7 @@ async def test_live_digest_preserves_latest_kazusa_row_in_busy_group(
         window=window,
         required_names=("蚝爹油", "杏山千纱", "张伟"),
         required_fragments=("能帮到你", "张伟"),
-        required_any_fragment_groups=(("我最后发言后", "最后发言后"),),
+        required_any_fragment_groups=(),
     )
 
     assert result["trace_path"]
@@ -228,6 +228,7 @@ async def _run_digest_case(
     messages = group_scene_digest.build_group_scene_digest_messages(window)
     response = await group_scene_digest._group_scene_digest_llm.ainvoke(
         messages,
+        config=group_scene_digest._group_scene_digest_llm_config,
     )
     raw_output = str(response.content)
     parsed_output = parse_llm_json_output(raw_output)
@@ -297,6 +298,9 @@ def _assert_digest_quality(
     if "杏山千纱" in required_names:
         assert "我没有在这个窗口中发言" not in digest, (
             f"assistant presence contradicted: {digest}"
+        )
+        assert "我最后发言后" not in digest, (
+            f"old first-person closure leaked: {digest}"
         )
 
 

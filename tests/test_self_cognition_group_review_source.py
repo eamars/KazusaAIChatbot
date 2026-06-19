@@ -499,10 +499,10 @@ async def test_collect_group_review_cases_attaches_scene_digest(
         captured_window = kwargs["window"]
         digest = {
             "digest": (
-                "这段群聊里，participant_1 问了我一个问题，"
-                "我已经在窗口里接过一次。"
+                "这段群聊里，user 提了一个问题，"
+                "assistant 已经在窗口里接过一次。"
             ),
-            "summary": "participant_1 问我问题，我已经接过一次。",
+            "summary": "user 提问，assistant 已经接过一次。",
         }
         return digest
 
@@ -529,12 +529,12 @@ async def test_collect_group_review_cases_attaches_scene_digest(
     case = cases[0]
     assert case["conversation_progress"]["group_scene_digest"] == {
         "digest": (
-            "这段群聊里，participant_1 问了我一个问题，"
-            "我已经在窗口里接过一次。"
+            "这段群聊里，user 提了一个问题，"
+            "assistant 已经在窗口里接过一次。"
         ),
     }
     assert case["conversation_progress"]["summary"] == (
-        "participant_1 问我问题，我已经接过一次。"
+        "user 提问，assistant 已经接过一次。"
     )
 
     source_packet = projection.build_source_packet(case)
@@ -542,14 +542,61 @@ async def test_collect_group_review_cases_attaches_scene_digest(
     serialized_packet = json.dumps(source_packet, ensure_ascii=False)
 
     assert "group_scene_digest" not in rendered_packet
-    assert "participant_1 问了我一个问题" in rendered_packet
-    assert "participant_1 问我问题，我已经接过一次" in rendered_packet
+    assert "user 提了一个问题" in rendered_packet
+    assert "user 提问，assistant 已经接过一次" in rendered_packet
     assert "group_scene_digest" in serialized_packet
     assert '"summary"' in serialized_packet
     assert "delivery_target" not in serialized_packet
     assert "user-1" not in serialized_packet
     assert "qq-user-1" not in serialized_packet
     assert "bot-1" not in serialized_packet
+
+
+@pytest.mark.asyncio
+async def test_collect_group_review_cases_rejects_stale_scene_digest(
+) -> None:
+    """Collector should not re-admit stale first-person digest output."""
+
+    now = datetime(2026, 5, 18, 4, 15, tzinfo=timezone.utc)
+    windows = build_group_activity_windows(
+        scope=_group_scope(),
+        window_start=datetime(2026, 5, 18, 4, 0, tzinfo=timezone.utc),
+        window_end=datetime(2026, 5, 18, 4, 30, tzinfo=timezone.utc),
+        now=now,
+        character_global_user_id="character-global",
+        platform_bot_id="bot-1",
+    )
+
+    async def participant_context_builder(**kwargs: Any) -> None:
+        del kwargs
+        return None
+
+    async def scene_digest_builder(**kwargs: Any) -> dict[str, str]:
+        del kwargs
+        digest = {
+            "digest": "我没有在这个窗口中发言。user 后来又补了一句。",
+            "summary": "我已经接过这个话题。",
+        }
+        return digest
+
+    cases = await sources.collect_group_review_cases(
+        now=now,
+        character_profile={
+            "name": "Character",
+            "global_user_id": "character-global",
+            "platform_bot_id": "bot-1",
+        },
+        windows=windows,
+        max_cases=1,
+        participant_context_builder=participant_context_builder,
+        scene_digest_builder=scene_digest_builder,
+        conversation_evidence_builder=lambda **kwargs: [],
+    )
+
+    assert len(cases) == 1
+    conversation_progress = cases[0]["conversation_progress"]
+    assert "group_scene_digest" not in conversation_progress
+    assert "summary" not in conversation_progress
 
 
 def test_group_review_summary_conversation_context_bounds_before_window(
@@ -610,7 +657,7 @@ async def test_collect_group_review_cases_attaches_summary_conversation_evidence
         del kwargs
         digest = {
             "digest": (
-                "我没有在这个窗口中发言。W 的话承接温格前面说骑行、"
+                "W 的话承接温格前面说骑行、"
                 "受凉和肠胃状态的上下文。"
             ),
             "summary": "W 和温格围绕骑行、受凉和拉稀没力气开玩笑。",
@@ -684,7 +731,11 @@ async def test_collect_self_cognition_cases_does_not_schedule_group_review(
         "collect_scheduled_future_cognition_cases",
         no_scheduled,
     )
-    monkeypatch.setattr(sources, "collect_active_commitment_cases", no_commitments)
+    monkeypatch.setattr(
+        sources,
+        "collect_commitment_due_cognition_cases",
+        no_commitments,
+    )
     monkeypatch.setattr(sources, "collect_group_chat_review_cases", group_cases)
 
     cases = await sources.collect_self_cognition_cases(
@@ -697,7 +748,7 @@ async def test_collect_self_cognition_cases_does_not_schedule_group_review(
 
 
 def test_group_review_source_packet_uses_active_group_review_contract() -> None:
-    """Group review should use first-person chat-window data framing."""
+    """Group review should use neutral chat-window data framing."""
 
     case = _group_review_case()
 
@@ -707,14 +758,14 @@ def test_group_review_source_packet_uses_active_group_review_contract() -> None:
 
     assert source_packet["instruction"] != models.SELF_COGNITION_INPUT_TEXT
     assert source_packet["instruction"] == (
-        "我刚看到群里刚刚发生的一段现场。"
-        "这段现场里有我之前说的话。"
-        "里面有人把话题指向我。"
+        "下面是已选中的群聊现场观察资料。"
+        "现场里有当前角色之前的可见发言。"
+        "现场标签显示有人把话题指向当前角色。"
     )
     assert rendered_packet.startswith(
-        "我刚看到群里刚刚发生的一段现场。"
-        "这段现场里有我之前说的话。"
-        "里面有人把话题指向我。"
+        "下面是已选中的群聊现场观察资料。"
+        "现场里有当前角色之前的可见发言。"
+        "现场标签显示有人把话题指向当前角色。"
         "\n\n# 当前聊天窗口"
     )
     _assert_no_group_source_trigger_labels(rendered_packet)
@@ -727,6 +778,7 @@ def test_group_review_source_packet_uses_active_group_review_contract() -> None:
     assert "# 群聊窗口信息" in rendered_packet
     assert "当前自检" not in rendered_packet
     assert "自然路线" not in rendered_packet
+    assert "我刚看到群里刚刚发生的一段现场" not in rendered_packet
     assert "delivery_target" not in serialized_packet
     assert "dm-" not in serialized_packet
     assert "self_cognition_delivery_target" not in serialized_packet
@@ -748,14 +800,14 @@ def test_group_review_source_packet_uses_ambient_sentence_when_not_addressed(
     rendered_packet = projection.render_source_packet_text(source_packet)
 
     assert source_packet["instruction"] == (
-        "我刚看到群里刚刚发生的一段现场。"
-        "这段现场里有我之前说的话。"
-        "这段里没有人把话题交给我。"
+        "下面是已选中的群聊现场观察资料。"
+        "现场里有当前角色之前的可见发言。"
+        "现场标签没有显示有人把话题交给当前角色。"
     )
     assert rendered_packet.startswith(
-        "我刚看到群里刚刚发生的一段现场。"
-        "这段现场里有我之前说的话。"
-        "这段里没有人把话题交给我。"
+        "下面是已选中的群聊现场观察资料。"
+        "现场里有当前角色之前的可见发言。"
+        "现场标签没有显示有人把话题交给当前角色。"
         "\n\n# 当前聊天窗口"
     )
     _assert_no_group_source_trigger_labels(rendered_packet)
@@ -767,15 +819,15 @@ def test_group_review_instruction_uses_digest_when_available() -> None:
     case = _group_review_case()
     case["conversation_progress"]["group_scene_digest"] = {
         "digest": (
-            '我（杏山千纱）说了：\u201c诶？你居然知道我在用GLM啊？\u201d，'
-            '我最后发言后，蚝爹油说：千纱不可以在有codex的时候悄悄出bug'
+            '杏山千纱说：\u201c诶？你居然知道我在用GLM啊？\u201d，'
+            '之后蚝爹油说：千纱不可以在有codex的时候悄悄出bug'
         ),
     }
 
     source_packet = projection.build_source_packet(case)
 
     assert source_packet["instruction"].startswith(
-        "我刚看到群里刚刚发生的一段现场。\n"
+        "下面是已选中的群聊现场观察资料。\n"
     )
     assert "杏山千纱" in source_packet["instruction"]
     assert "蚝爹油" in source_packet["instruction"]
@@ -812,7 +864,145 @@ def test_group_review_instruction_never_contradicts_assistant_presence() -> None
     source_packet = projection.build_source_packet(case)
 
     assert "没有插话" not in source_packet["instruction"]
-    assert "有我之前说的话" in source_packet["instruction"]
+    assert "有当前角色之前的可见发言" in source_packet["instruction"]
+
+
+@pytest.mark.asyncio
+async def test_collect_group_review_cases_attaches_thread_reference_context(
+) -> None:
+    """Source collection should attach bounded second-person warnings."""
+
+    now = datetime(2026, 6, 18, 5, 30, tzinfo=timezone.utc)
+    window = _cat_side_thread_window()
+    captured_payload: dict[str, Any] = {}
+
+    async def participant_context_builder(**kwargs: Any) -> dict[str, Any]:
+        del kwargs
+        context = {
+            "source": "group_review_participant_context",
+            "context_shape": "single_flow_focus",
+            "focus_mode": "direct_reply",
+            "guidance": "reply to current thread only",
+            "primary_reply_target": {
+                "display_name": "雪凪",
+                "reply_target_fit": "high",
+                "role_in_window": ["direct_cue"],
+                "relationship_label": "Neutral",
+                "relationship_band": "neutral",
+                "last_relationship_insight": "",
+                "engagement_guidelines": [],
+                "nearby_conversation_evidence": [],
+                "visible_samples": ["@杏山千纱 🐷"],
+            },
+            "background_flow": {
+                "mode": "side_thread",
+                "summary": "other speakers form a side thread",
+                "participant_count_label": "few",
+            },
+        }
+        return context
+
+    def thread_reference_context_builder(**kwargs: Any) -> dict[str, Any]:
+        captured_payload.update(kwargs)
+        context = {
+            "source": "group_review_thread_reference",
+            "context_shape": "bounded_second_person_reference_warnings",
+            "guidance": (
+                "二人称归属按同一行明确地址和可见线程读取；"
+                "缺少同一行当前角色指向时，保留为侧线/未定对象。"
+            ),
+            "ambiguous_second_person_rows": [
+                {
+                    "speaker": "灯（23岁）",
+                    "sample": "你的头发软软的，像rana家那只靠在暖气片旁边的猫。",
+                    "referent_status": "ambiguous_or_side_thread",
+                    "basis": (
+                        "same row has no direct active-character address; "
+                        "adjacent visible flow points to another participant thread"
+                    ),
+                },
+            ],
+        }
+        return context
+
+    cases = await sources.collect_group_review_cases(
+        now=now,
+        character_profile={
+            "name": "Character",
+            "global_user_id": "character-global",
+            "platform_bot_id": "bot-1",
+        },
+        windows=[window],
+        max_cases=1,
+        participant_context_builder=participant_context_builder,
+        scene_digest_builder=lambda **kwargs: None,
+        conversation_evidence_builder=lambda **kwargs: [],
+        thread_reference_context_builder=thread_reference_context_builder,
+    )
+
+    assert len(cases) == 1
+    assert captured_payload["participant_rows"][0]["display_name"] == "雪凪"
+    assert captured_payload["character_profile"]["global_user_id"] == (
+        "character-global"
+    )
+    context = cases[0]["conversation_progress"]["thread_reference_context"]
+    assert context["source"] == "group_review_thread_reference"
+    assert context["ambiguous_second_person_rows"][0]["speaker"] == "灯（23岁）"
+
+
+def test_group_review_source_packet_renders_thread_reference_before_visible_context(
+) -> None:
+    """Thread-reference warnings should be visible before transcript rows."""
+
+    case = _group_review_case()
+    case["visible_context"] = [
+        {
+            "timestamp": "2026-06-18T05:24:09+00:00",
+            "role": "user",
+            "display_name": "雪凪",
+            "body_text": "@灯（23岁） 摸摸大姐姐",
+        },
+        {
+            "timestamp": "2026-06-18T05:24:19+00:00",
+            "role": "user",
+            "display_name": "灯（23岁）",
+            "body_text": "你的头发软软的，像rana家那只靠在暖气片旁边的猫。",
+        },
+    ]
+    case["conversation_progress"]["thread_reference_context"] = {
+        "source": "group_review_thread_reference",
+        "context_shape": "bounded_second_person_reference_warnings",
+        "guidance": (
+            "二人称归属按同一行明确地址和可见线程读取；"
+            "缺少同一行当前角色指向时，保留为侧线/未定对象。"
+        ),
+        "ambiguous_second_person_rows": [
+            {
+                "speaker": "灯（23岁）",
+                "sample": "你的头发软软的，像rana家那只靠在暖气片旁边的猫。",
+                "referent_status": "ambiguous_or_side_thread",
+                "basis": (
+                    "same row has no direct active-character address; "
+                    "adjacent visible flow points to another participant thread"
+                ),
+            },
+        ],
+    }
+
+    source_packet = projection.build_source_packet(case)
+    rendered_packet = projection.render_source_packet_text(source_packet)
+    serialized_packet = json.dumps(source_packet, ensure_ascii=False)
+
+    assert "# 二人称指向边界" in rendered_packet
+    assert rendered_packet.index("# 二人称指向边界") < rendered_packet.index(
+        "# 最近可见对话",
+    )
+    assert "二人称归属按同一行明确地址和可见线程读取" in rendered_packet
+    assert "侧线/未定对象" in rendered_packet
+    assert "灯（23岁）" in rendered_packet
+    assert "你的头发软软的" in rendered_packet
+    assert "user-lamp" not in serialized_packet
+    assert "delivery_target" not in serialized_packet
 
 
 def test_group_review_cognition_state_does_not_invent_target_user() -> None:
@@ -1031,6 +1221,68 @@ def _laxi_review_window():
         if item.window_start == datetime(2026, 6, 12, 0, 15, tzinfo=timezone.utc)
     )
     return window
+
+
+def _cat_side_thread_window():
+    """Build the Snow/Lamp side-thread cat comparison fixture."""
+
+    messages = [
+        _message(
+            "user",
+            "2026-06-18T05:23:43+00:00",
+            "@杏山千纱 🐷",
+            global_user_id="user-snow",
+            platform_user_id="qq-snow",
+        ),
+        _message(
+            "user",
+            "2026-06-18T05:24:09+00:00",
+            "@灯（23岁） 摸摸大姐姐",
+            global_user_id="user-snow",
+            platform_user_id="qq-snow",
+        ),
+        _message(
+            "user",
+            "2026-06-18T05:24:17+00:00",
+            "灯：嗯，摸到了。",
+            global_user_id="user-lamp",
+            platform_user_id="qq-lamp",
+        ),
+        _message(
+            "user",
+            "2026-06-18T05:24:19+00:00",
+            "你的头发软软的，像rana家那只靠在暖气片旁边的猫。",
+            global_user_id="user-lamp",
+            platform_user_id="qq-lamp",
+        ),
+    ]
+    messages[0]["display_name"] = "雪凪"
+    messages[0]["addressed_to_global_user_ids"] = ["character-global"]
+    messages[1]["display_name"] = "雪凪"
+    messages[2]["display_name"] = "灯（23岁）"
+    messages[3]["display_name"] = "灯（23岁）"
+    scope = ReflectionScopeInput(
+        scope_ref="scope_group_cat",
+        platform="qq",
+        platform_channel_id="group-1",
+        channel_type="group",
+        assistant_message_count=0,
+        user_message_count=len(messages),
+        total_message_count=len(messages),
+        first_timestamp="2026-06-18T05:23:43+00:00",
+        last_timestamp="2026-06-18T05:24:19+00:00",
+        messages=messages,
+    )
+    windows = build_group_activity_windows(
+        scope=scope,
+        window_start=datetime(2026, 6, 18, 5, 15, tzinfo=timezone.utc),
+        window_end=datetime(2026, 6, 18, 5, 30, tzinfo=timezone.utc),
+        now=datetime(2026, 6, 18, 5, 30, tzinfo=timezone.utc),
+        character_global_user_id="character-global",
+        platform_bot_id="bot-1",
+    )
+    assert len(windows) == 1
+    return windows[0]
 
 
 def _message(

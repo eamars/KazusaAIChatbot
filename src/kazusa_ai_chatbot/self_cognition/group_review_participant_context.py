@@ -20,6 +20,14 @@ from kazusa_ai_chatbot.utils import build_affinity_block, text_or_empty
 
 SOURCE_NAME = "group_review_participant_context"
 CONTEXT_SHAPE = "single_flow_focus"
+THREAD_REFERENCE_SOURCE_NAME = "group_review_thread_reference"
+THREAD_REFERENCE_CONTEXT_SHAPE = "bounded_second_person_reference_warnings"
+THREAD_REFERENCE_GUIDANCE = (
+    "二人称归属按同一行明确地址和可见线程读取；"
+    "缺少同一行当前角色指向时，保留为侧线/未定对象。"
+)
+THREAD_REFERENCE_ROW_LIMIT = 3
+THREAD_REFERENCE_ADJACENT_LOOKBACK_ROWS = 2
 CONVERSATION_HELPER_ATTEMPTS = 1
 CONVERSATION_LOOKBACK_HOURS = 72
 CONVERSATION_EVIDENCE_LIMIT = 3
@@ -27,6 +35,7 @@ CONVERSATION_EVIDENCE_CHAR_LIMIT = 240
 VISIBLE_SAMPLE_LIMIT = 3
 VISIBLE_SAMPLE_CHAR_LIMIT = 160
 ENGAGEMENT_GUIDELINES_LIMIT = 3
+_SECOND_PERSON_MARKERS = ("你", "您")
 
 _ROLE_ORDER = {
     "direct_cue": 0,
@@ -179,6 +188,62 @@ async def build_group_review_participant_context(
     return context
 
 
+def build_group_review_thread_reference_context(
+    participant_rows: list[dict[str, Any]],
+    character_profile: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Build bounded warnings for ambiguous second-person group rows.
+
+    Args:
+        participant_rows: Prompt-safe activity-window participant rows.
+        character_profile: Active character profile used only to recognize
+            direct row-level address.
+
+    Returns:
+        Prompt-facing thread-reference context, or ``None`` when no ambiguous
+        second-person row is visible.
+    """
+
+    user_rows = _user_rows(participant_rows)
+    ambiguous_rows: list[dict[str, str]] = []
+    for index, row in enumerate(user_rows):
+        body_text = text_or_empty(row.get("body_text"))
+        if not _contains_second_person(body_text):
+            continue
+        if _row_has_direct_cue(row, character_profile=character_profile):
+            continue
+        if _row_replies_to_character(row, character_profile=character_profile):
+            continue
+
+        sample = _clip_text(body_text, VISIBLE_SAMPLE_CHAR_LIMIT)
+        if not sample:
+            continue
+        warning = {
+            "speaker": text_or_empty(row.get("display_name")) or "visible speaker",
+            "sample": sample,
+            "referent_status": "ambiguous_or_side_thread",
+            "basis": _thread_reference_basis(
+                user_rows=user_rows,
+                row_index=index,
+            ),
+        }
+        ambiguous_rows.append(warning)
+        if len(ambiguous_rows) >= THREAD_REFERENCE_ROW_LIMIT:
+            break
+
+    if not ambiguous_rows:
+        return_value = None
+        return return_value
+
+    context = {
+        "source": THREAD_REFERENCE_SOURCE_NAME,
+        "context_shape": THREAD_REFERENCE_CONTEXT_SHAPE,
+        "guidance": THREAD_REFERENCE_GUIDANCE,
+        "ambiguous_second_person_rows": ambiguous_rows,
+    }
+    return context
+
+
 def _user_rows(
     participant_rows: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -190,6 +255,63 @@ def _user_rows(
         if text_or_empty(row.get("role")) == "user"
     ]
     return rows
+
+
+def _contains_second_person(text: str) -> bool:
+    """Return whether visible text contains a second-person marker."""
+
+    contains_marker = any(marker in text for marker in _SECOND_PERSON_MARKERS)
+    return contains_marker
+
+
+def _thread_reference_basis(
+    *,
+    user_rows: list[dict[str, Any]],
+    row_index: int,
+) -> str:
+    """Return semantic basis text for an ambiguous second-person row."""
+
+    basis_parts = ["same row has no direct active-character address"]
+    if _adjacent_flow_points_elsewhere(
+        user_rows=user_rows,
+        row_index=row_index,
+    ):
+        basis_parts.append(
+            "adjacent visible flow points to another participant thread"
+        )
+    basis = "; ".join(basis_parts)
+    return basis
+
+
+def _adjacent_flow_points_elsewhere(
+    *,
+    user_rows: list[dict[str, Any]],
+    row_index: int,
+) -> bool:
+    """Return whether nearby visible rows suggest another participant thread."""
+
+    current_speaker = text_or_empty(user_rows[row_index].get("display_name"))
+    prior_start = max(0, row_index - THREAD_REFERENCE_ADJACENT_LOOKBACK_ROWS)
+    prior_rows = user_rows[prior_start:row_index]
+    for prior_row in prior_rows:
+        prior_speaker = text_or_empty(prior_row.get("display_name"))
+        if prior_speaker and prior_speaker != current_speaker:
+            return_value = True
+            return return_value
+
+    current_text = text_or_empty(user_rows[row_index].get("body_text"))
+    for prior_row in prior_rows:
+        prior_text = text_or_empty(prior_row.get("body_text"))
+        if current_speaker and current_speaker in prior_text:
+            return_value = True
+            return return_value
+        prior_speaker = text_or_empty(prior_row.get("display_name"))
+        if prior_speaker and prior_speaker in current_text:
+            return_value = True
+            return return_value
+
+    return_value = False
+    return return_value
 
 
 def _build_candidates(

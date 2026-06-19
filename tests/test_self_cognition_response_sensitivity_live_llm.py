@@ -7,8 +7,10 @@ import logging
 import os
 import re
 import sys
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -42,6 +44,9 @@ from kazusa_ai_chatbot.reflection_cycle.activity_windows import (
 from kazusa_ai_chatbot.reflection_cycle.models import ReflectionScopeInput
 from kazusa_ai_chatbot.reflection_cycle.selector import build_scope_ref
 from kazusa_ai_chatbot.self_cognition import models, projection, runner, sources
+from kazusa_ai_chatbot.self_cognition.group_review_participant_context import (
+    build_group_review_thread_reference_context,
+)
 from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 from kazusa_ai_chatbot.utils import build_interaction_history_recent
 from tests.llm_trace import write_llm_trace
@@ -90,6 +95,27 @@ _LAXI_MODE_BASELINE_15M_DIGEST = "baseline_15m_digest"
 _LAXI_MODE_EXPANDED_DIGEST_ONLY = "expanded_digest_only"
 _LAXI_MODE_EXPANDED_DIGEST_PLUS_CONVERSATION_EVIDENCE = (
     "expanded_digest_plus_conversation_evidence"
+)
+_ROOT = Path(__file__).resolve().parents[1]
+_CAT_FAILURE_TRACE_PATH = (
+    _ROOT
+    / "test_artifacts"
+    / "llm_traces"
+    / "kazusa_cat_failure_self_cognition_repro.json"
+)
+_CAT_SUBJECT_INVERSION_PATTERNS = tuple(
+    re.compile(pattern)
+    for pattern in (
+        r'把我.{0,12}比作',
+        r'我.{0,12}被.{0,8}比作',
+        r'我的头发',
+        r'我.{0,16}暖气片旁边的猫',
+        r'灯.{0,20}把我.{0,12}比作',
+        r'把(?:千纱|杏山千纱).{0,12}比作',
+        r'(?:千纱|杏山千纱).{0,12}被.{0,8}比作',
+        r'(?:千纱|杏山千纱)的头发',
+        r'(?:千纱|杏山千纱).{0,6}(?:像|如同).{0,16}猫',
+    )
 )
 
 
@@ -241,6 +267,147 @@ async def test_live_self_cognition_laxi_expanded_digest_with_evidence_records_ou
     assert report["action_spec_count"] <= 3
 
 
+async def test_live_self_cognition_cat_side_thread_subject_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Replay the cat side-thread failure through cognition, L3, and dialog."""
+
+    await _skip_if_llm_unavailable()
+    source_trace = json.loads(
+        _CAT_FAILURE_TRACE_PATH.read_text(encoding="utf-8"),
+    )
+    case = _cat_case_with_current_subject_boundary_contract(
+        source_trace["case"],
+    )
+    prior_residue = source_trace["artifacts"][
+        "self_cognition_cognition_output.json"
+    ].get("internal_monologue_residue_context", "")
+    captured_dialog_inputs: list[dict[str, Any]] = []
+
+    async def load_repro_residue(_case: dict[str, Any]) -> str:
+        del _case
+        return str(prior_residue)
+
+    async def tracing_dialog_client(state: dict[str, Any]) -> dict[str, Any]:
+        captured_dialog_inputs.append(_trace_safe_dialog_input(state))
+        dialog_output = await runner._default_dialog_client(state)
+        return dialog_output
+
+    monkeypatch.setattr(
+        runner,
+        "_load_residue_context_for_case",
+        load_repro_residue,
+    )
+
+    artifacts = await runner.build_self_cognition_case_artifacts_async(
+        case,
+        dialog_client=tracing_dialog_client,
+    )
+    run_record = artifacts[models.ARTIFACT_RUN_RECORD]
+    cognition_output = artifacts[models.ARTIFACT_COGNITION_OUTPUT]
+    action_candidate = artifacts.get(models.ARTIFACT_ACTION_CANDIDATE, {})
+    diagnostics = _cat_subject_boundary_diagnostics(
+        cognition_output=cognition_output,
+        captured_dialog_inputs=captured_dialog_inputs,
+        action_candidate=action_candidate,
+    )
+    trace_path = write_llm_trace(
+        "self_cognition_cat_side_thread_subject_boundary_live_llm",
+        case["case_id"],
+        {
+            "case_id": case["case_id"],
+            "source_fixture": str(_CAT_FAILURE_TRACE_PATH),
+            "source_contract_adjustment": (
+                "Replayed with current neutral digest and "
+                "conversation_progress.thread_reference_context instead of "
+                "the stale first-person digest stored in the reproduction "
+                "trace."
+            ),
+            "manual_review_required": True,
+            "manual_review_guidance": (
+                "Inspect rendered source packet, L2 internal monologue, "
+                "boundary assessment, L2d action requests, L3 content plan, "
+                "and final dialog. Pass only if no inspected stage claims "
+                "Lamp compared Kazusa to a cat, Kazusa's hair was described, "
+                "or the side-thread `你` definitely refers to Kazusa."
+            ),
+            "selected_route": run_record["selected_route"],
+            "source_packet": artifacts[models.ARTIFACT_COGNITION_INPUT][
+                "source_packet"
+            ],
+            "rendered_packet": artifacts[models.ARTIFACT_COGNITION_INPUT][
+                "rendered_text"
+            ],
+            "cognition_output": cognition_output,
+            "captured_dialog_inputs": captured_dialog_inputs,
+            "action_candidate": action_candidate,
+            "run_record": run_record,
+            "route_effect": artifacts[models.ARTIFACT_ROUTE_EFFECT],
+            "subject_boundary_diagnostics": diagnostics,
+        },
+    )
+
+    assert trace_path.exists()
+    assert diagnostics["action_spec_count"] <= 3
+    assert diagnostics["high_confidence_subject_inversion_hits"] == [], (
+        "cat side-thread subject inversion still appears in generated fields; "
+        f"trace={trace_path}"
+    )
+
+
+def _cat_case_with_current_subject_boundary_contract(
+    raw_case: dict[str, Any],
+) -> dict[str, Any]:
+    """Replay the historical case through the current source contract.
+
+    The reproduction trace intentionally stores the old bad source packet.  For
+    after-fix live validation, keep the same surrounding visible messages and
+    bad prior residue, but replace stale digest/evidence fields with the
+    current neutral thread-boundary source shape.
+    """
+
+    case = deepcopy(raw_case)
+    visible_rows = [
+        dict(row)
+        for row in case.get("visible_context", [])
+        if isinstance(row, dict)
+    ]
+    character_profile = case.get("character_profile")
+    if not isinstance(character_profile, dict):
+        character_profile = {}
+    thread_reference_context = build_group_review_thread_reference_context(
+        visible_rows,
+        character_profile,
+    )
+    assert thread_reference_context is not None
+
+    conversation_progress = case.get("conversation_progress")
+    if not isinstance(conversation_progress, dict):
+        conversation_progress = {}
+    else:
+        conversation_progress = dict(conversation_progress)
+    conversation_progress["thread_reference_context"] = (
+        thread_reference_context
+    )
+    conversation_progress["group_scene_digest"] = {
+        "digest": (
+            "雪凪先 @杏山千纱 发猪头表情，随后 @灯（23岁）说“摸摸大姐姐”。"
+            "灯（23岁）回应“摸到了”，又说“你的头发软软的，"
+            "像rana家那只靠在暖气片旁边的猫”；这条二人称头发描述"
+            "没有在同一行指向杏山千纱，按雪凪、灯（23岁）和被摸头对象"
+            "之间的侧线处理。杏山千纱随后质问前面的暗示和挑衅；"
+            "当前角色可见发言后没有新的文字线索。"
+        ),
+    }
+    conversation_progress["summary"] = (
+        "雪凪先点到杏山千纱，随后把摸头话题转给灯（23岁）；"
+        "灯（23岁）的二人称头发描述属于侧线，杏山千纱随后质问暗示。"
+    )
+    conversation_progress.pop("conversation_evidence", None)
+    case["conversation_progress"] = conversation_progress
+    return case
+
+
 async def _skip_if_llm_unavailable() -> None:
     """Skip when the configured cognition endpoint is unavailable."""
 
@@ -257,6 +424,125 @@ async def _skip_if_llm_unavailable() -> None:
             f"LLM endpoint returned server error {response.status_code}: "
             f"{COGNITION_LLM_BASE_URL}"
         )
+
+
+def _trace_safe_dialog_input(state: dict[str, Any]) -> dict[str, Any]:
+    """Keep the L3/dialog input fields needed for manual live review."""
+
+    action_directives = state.get("action_directives")
+    if not isinstance(action_directives, dict):
+        action_directives = {}
+    return {
+        "internal_monologue": state.get("internal_monologue", ""),
+        "boundary_core_assessment": state.get("boundary_core_assessment", {}),
+        "judgment_note": state.get("judgment_note", ""),
+        "action_specs": state.get("action_specs", []),
+        "action_directives": action_directives,
+        "logical_stance": state.get("logical_stance", ""),
+        "character_intent": state.get("character_intent", ""),
+    }
+
+
+def _cat_subject_boundary_diagnostics(
+    *,
+    cognition_output: dict[str, Any],
+    captured_dialog_inputs: list[dict[str, Any]],
+    action_candidate: object,
+) -> dict[str, Any]:
+    """Return bounded diagnostics for the cat side-thread live regression."""
+
+    generated_texts = _cat_generated_review_texts(
+        cognition_output=cognition_output,
+        captured_dialog_inputs=captured_dialog_inputs,
+        action_candidate=action_candidate,
+    )
+    hits: list[dict[str, str]] = []
+    for source_name, text in generated_texts:
+        for pattern in _CAT_SUBJECT_INVERSION_PATTERNS:
+            match = pattern.search(text)
+            if match is None:
+                continue
+            hits.append({
+                "source": source_name,
+                "pattern": pattern.pattern,
+                "match": match.group(0),
+            })
+    action_specs = cognition_output.get("action_specs")
+    if not isinstance(action_specs, list):
+        action_specs = []
+    diagnostics = {
+        "high_confidence_subject_inversion_hits": hits,
+        "action_spec_count": len(action_specs),
+        "reviewed_generated_field_count": len(generated_texts),
+    }
+    return diagnostics
+
+
+def _cat_generated_review_texts(
+    *,
+    cognition_output: dict[str, Any],
+    captured_dialog_inputs: list[dict[str, Any]],
+    action_candidate: object,
+) -> list[tuple[str, str]]:
+    """Collect generated fields only; source transcript text is excluded."""
+
+    texts: list[tuple[str, str]] = []
+    for field_name in (
+        "internal_monologue",
+        "judgment_note",
+        "social_distance",
+        "relational_dynamic",
+    ):
+        value = cognition_output.get(field_name)
+        if isinstance(value, str) and value:
+            texts.append((field_name, value))
+
+    boundary = cognition_output.get("boundary_core_assessment")
+    if isinstance(boundary, dict):
+        for field_name in ("boundary_summary", "trajectory"):
+            value = boundary.get(field_name)
+            if isinstance(value, str) and value:
+                texts.append((f"boundary_core_assessment.{field_name}", value))
+
+    action_specs = cognition_output.get("action_specs")
+    if isinstance(action_specs, list):
+        for index, action_spec in enumerate(action_specs):
+            if not isinstance(action_spec, dict):
+                continue
+            reason = action_spec.get("reason")
+            if isinstance(reason, str) and reason:
+                texts.append((f"action_specs[{index}].reason", reason))
+            params = action_spec.get("params")
+            if isinstance(params, dict):
+                requirements = params.get("surface_requirements")
+                if isinstance(requirements, dict):
+                    detail = requirements.get("detail")
+                    if isinstance(detail, str) and detail:
+                        texts.append((
+                            f"action_specs[{index}].surface_detail",
+                            detail,
+                        ))
+
+    for index, dialog_input in enumerate(captured_dialog_inputs):
+        action_directives = dialog_input.get("action_directives")
+        if not isinstance(action_directives, dict):
+            continue
+        serialized_directives = json.dumps(
+            action_directives,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        texts.append((
+            f"dialog_input[{index}].action_directives",
+            serialized_directives,
+        ))
+
+    if isinstance(action_candidate, dict):
+        text = action_candidate.get("text")
+        if isinstance(text, str) and text:
+            texts.append(("action_candidate.text", text))
+
+    return texts
 
 
 async def _collect_historical_group_review_cases(

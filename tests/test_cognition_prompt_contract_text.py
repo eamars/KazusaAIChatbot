@@ -591,12 +591,12 @@ def test_l3_content_plan_scope_preserves_complete_plan_deliverables() -> None:
     prompt_text = l3_module._CONTENT_PLAN_AGENT_PROMPT
 
     for required_text in (
-        '你决定“本轮要说什么”',
-        '`semantic_content` 是本轮用户可见回复的语义载荷',
-        '下游只能改写它，不能替你补事实、话题、问题、结论、代码、例子或下一步',
-        '不要把生成任务写进 `semantic_content`',
-        '不要写“给出一个俏皮回应”',
-        '要写“被对方逗乐了，有点小得意',
+        '你决定本轮可见台词需要承载的内容',
+        '`semantic_content` 只承载用户可见台词需要说出的内容',
+        '可被下游台词生成器直接渲染',
+        '内容计划是内部计划，不是最终台词',
+        '不写完整台词',
+        '只写需要说出口的立场或回应点',
         '具体要问的内容',
         '固定格式块必须作为一个字符串原样进入 `semantic_content`',
         '缩进、空行、符号和顺序不变',
@@ -612,19 +612,19 @@ def test_l3_content_plan_scope_preserves_complete_plan_deliverables() -> None:
         '无法确认的部分、可说的泛化范围、核实办法或行动骨架',
         '不要补造具体当前对象、状态、时间或可用性',
         '写出 resolved semantic content',
-        '下游不需要再决定“说什么”',
+        '写出 resolved semantic content',
         '`visible_goal` 写交互目的',
-        '`voice` 写温度和分寸',
+        '`voice` 写温度、分寸和情绪姿态',
         '`rendering` 写单气泡内的布局、长短和固定格式保护',
-        '不能新增事实或话题',
-        '轻松接梗',
+        '不能改变立场、事实或答案',
+        '接梗',
         '技术对比',
         '保留所有已给数值、单位和结论',
         '固定格式代码',
         '直接包含 fenced code block',
         '证据不足',
-        '当前来源未确认 X',
-        '本轮可见回复的实际语义载荷；下游可改写但不需要再决定说什么',
+        '当前来源未确认的部分',
+        '`semantic_content` 是下游可见内容的首要来源',
         '必须已经写在计划值里',
     ):
         assert required_text in prompt_text
@@ -773,3 +773,101 @@ def test_prompts_do_not_anchor_generated_self_text_to_third_person_role() -> Non
                 f'{prompt_name} contains third-person self-reference anchor: '
                 f'{forbidden_phrase}'
             )
+
+
+def test_reusable_prompts_do_not_hard_code_kazusa_display_names() -> None:
+    """Reusable runtime prompts must not contain concrete character names."""
+
+    for _, prompt_name, prompt_text in _AFFECTED_PROMPTS:
+        for forbidden_name in ('千纱', '杏山千纱', 'Kazusa'):
+            assert forbidden_name not in prompt_text, (
+                f'{prompt_name} contains concrete character name: '
+                f'{forbidden_name}'
+            )
+
+
+def test_l2_and_l2d_prompts_omit_dedicated_input_sections() -> None:
+    """Touched cognition prompts explain fields inside their task flow."""
+
+    for prompt_name, prompt_text in (
+        (
+            '_COGNITION_CONSCIOUSNESS_PROMPT',
+            l2_module._COGNITION_CONSCIOUSNESS_PROMPT,
+        ),
+        ('_BOUNDARY_CORE_PROMPT', l2_module._BOUNDARY_CORE_PROMPT),
+        ('_JUDGEMENT_CORE_PROMPT', l2_module._JUDGEMENT_CORE_PROMPT),
+        ('ACTION_ROUTER_PROMPT', ACTION_ROUTER_PROMPT),
+    ):
+        for forbidden_heading in ('# 输入格式', '# 输入读取说明'):
+            assert forbidden_heading not in prompt_text, prompt_name
+
+
+def test_l2_group_review_prompts_use_thread_reference_context() -> None:
+    """L2a/L2b/L2c1 must treat group-review thread warnings as evidence."""
+
+    for prompt_name, prompt_text in (
+        (
+            '_COGNITION_CONSCIOUSNESS_PROMPT',
+            l2_module._COGNITION_CONSCIOUSNESS_PROMPT,
+        ),
+        ('_BOUNDARY_CORE_PROMPT', l2_module._BOUNDARY_CORE_PROMPT),
+        ('_JUDGEMENT_CORE_PROMPT', l2_module._JUDGEMENT_CORE_PROMPT),
+    ):
+        for required_text in (
+            'thread_reference_context',
+            'participant_context',
+            '二人称',
+            '来源优先级',
+            'referent_status',
+            'ambiguous_or_side_thread',
+            '侧线/未定对象',
+            '私念残留',
+            '比较、描述或身体/状态归属',
+        ):
+            assert required_text in prompt_text, prompt_name
+
+
+def test_l2a_preserves_explicit_current_user_decision_ownership() -> None:
+    """L2a must not let first-person thought override explicit input ownership."""
+
+    prompt_text = l2_module._COGNITION_CONSCIOUSNESS_PROMPT
+
+    for required_text in (
+        'decontextualized_input',
+        '当前用户',
+        '动作主体',
+        '决策主体',
+        '被邀请者',
+        '被建议者',
+        'L1 里出现的邀请、压力、亲近感或期待感只说明我的感受强度',
+        '事实主体、动作主体和决策主体仍来自 `decontextualized_input`',
+        '先按来源事实复述当前真实现场和动作/决策主体',
+        '第一人称只承载我的感受、判断、边界和准备提供的建议',
+    ):
+        assert required_text in prompt_text
+
+
+def test_l2d_prompt_uses_thread_reference_context_before_visible_action() -> None:
+    """L2d must not turn coarse group labels into an action target."""
+
+    prompt_text = ACTION_ROUTER_PROMPT
+
+    for required_text in (
+        'thread_reference_context',
+        'participant_context',
+        '二人称',
+        '二人称动作目标按来源优先级',
+        'thread_reference_context.referent_status',
+        'ambiguous_or_side_thread',
+        '侧线/未定对象',
+        '粗粒度',
+        'semantic_labels',
+        'source',
+        'current_input',
+        'work_seed',
+        '比较',
+        '描述',
+        '身体/状态',
+        '可见动作',
+    ):
+        assert required_text in prompt_text

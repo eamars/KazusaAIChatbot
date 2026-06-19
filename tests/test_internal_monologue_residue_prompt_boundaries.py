@@ -28,6 +28,7 @@ def test_recorder_system_prompt_is_chinese_first_person_and_not_appended() -> No
     assert '# 生成步骤' in prompt
     assert '# 私念视角契约' in prompt
     assert '# 输出格式' in prompt
+    assert '# 输入格式' not in prompt
     assert '# Input Format' not in prompt
     assert '# Output Format' not in prompt
     assert '补充约束' not in prompt
@@ -35,6 +36,10 @@ def test_recorder_system_prompt_is_chinese_first_person_and_not_appended() -> No
     assert 'system message' not in prompt.lower()
     assert '不要用我的名字称呼我自己' in prompt
     assert '对方、那个人、某人、他或她' in prompt
+    assert 'source_reliability_notes' in prompt
+    assert '来源可靠性限制' in prompt
+    assert '侧线/未定对象' in prompt
+    assert '来源优先级' in prompt
     assert prompt.count('# 输出格式') == 1
 
 

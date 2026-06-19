@@ -38,6 +38,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [coding_agent_phase1_fetching_reading_plan.md](active/short_term/coding_agent_phase1_fetching_reading_plan.md) | Large standalone coding-agent Phase 1 plan | draft |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 
 ## Supporting Experiment Records
@@ -57,6 +58,7 @@ long_term/todo.md
 | Document | Type |
 |---|---|
 | [action_spec_effector_expansion_architecture.md](reference/designs/action_spec_effector_expansion_architecture.md) | Architecture reference |
+| [coding_agent_architecture.md](reference/designs/coding_agent_architecture.md) | Architecture reference |
 | [cognition_contracts_design.md](reference/designs/cognition_contracts_design.md) | Authoritative contract reference |
 | [cognition_core_evolution_progression.md](reference/designs/cognition_core_evolution_progression.md) | Architectural progression |
 | [kazusa_parallel_cognition_architecture.md](reference/designs/kazusa_parallel_cognition_architecture.md) | Architecture reference |
@@ -135,6 +137,7 @@ plans.
 | [self_cognition_group_digest_context_evidence_bugfix_plan.md](archive/completed/bugfix/self_cognition_group_digest_context_evidence_bugfix_plan.md) |
 | [self_cognition_character_global_id_config_bugfix_plan.md](archive/completed/bugfix/self_cognition_character_global_id_config_bugfix_plan.md) |
 | [self_cognition_dialog_state_contract_bugfix_plan.md](archive/completed/bugfix/self_cognition_dialog_state_contract_bugfix_plan.md) |
+| [self_cognition_group_thread_subject_boundary_bugfix_plan.md](archive/completed/bugfix/self_cognition_group_thread_subject_boundary_bugfix_plan.md) |
 | [self_cognition_group_speak_selection_bugfix_plan.md](archive/completed/bugfix/self_cognition_group_speak_selection_bugfix_plan.md) |
 | [self_cognition_sleep_period_plan.md](archive/completed/bugfix/self_cognition_sleep_period_plan.md) |
 | [self_cognition_speak_delivery_bugfix_plan.md](archive/completed/bugfix/self_cognition_speak_delivery_bugfix_plan.md) |

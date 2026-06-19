@@ -385,6 +385,99 @@ async def test_returns_none_when_no_user_rows() -> None:
     assert result is None
 
 
+def test_build_thread_reference_context_marks_cat_side_thread() -> None:
+    """Ambiguous second-person side-thread rows should get bounded warnings."""
+
+    context = context_module.build_group_review_thread_reference_context(
+        participant_rows=[
+            _participant_row(
+                display_name="雪凪",
+                global_user_id="user-snow",
+                platform_user_id="qq-snow",
+                body_text="@杏山千纱 🐷",
+                timestamp="2026-06-18T05:23:43+00:00",
+                addressed_to_global_user_ids=["character-global"],
+            ),
+            _participant_row(
+                display_name="雪凪",
+                global_user_id="user-snow",
+                platform_user_id="qq-snow",
+                body_text="@灯（23岁） 摸摸大姐姐",
+                timestamp="2026-06-18T05:24:09+00:00",
+            ),
+            _participant_row(
+                display_name="灯（23岁）",
+                global_user_id="user-lamp",
+                platform_user_id="qq-lamp",
+                body_text="灯：嗯，摸到了。",
+                timestamp="2026-06-18T05:24:17+00:00",
+            ),
+            _participant_row(
+                display_name="灯（23岁）",
+                global_user_id="user-lamp",
+                platform_user_id="qq-lamp",
+                body_text="你的头发软软的，像rana家那只靠在暖气片旁边的猫。",
+                timestamp="2026-06-18T05:24:19+00:00",
+            ),
+        ],
+        character_profile={
+            "global_user_id": "character-global",
+            "platform_bot_id": "bot-1",
+            "name": "杏山千纱",
+        },
+    )
+
+    assert context is not None
+    assert context["source"] == "group_review_thread_reference"
+    assert context["context_shape"] == (
+        "bounded_second_person_reference_warnings"
+    )
+    assert context["guidance"] == (
+        "二人称归属按同一行明确地址和可见线程读取；"
+        "缺少同一行当前角色指向时，保留为侧线/未定对象。"
+    )
+    rows = context["ambiguous_second_person_rows"]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["speaker"] == "灯（23岁）"
+    assert row["sample"] == "你的头发软软的，像rana家那只靠在暖气片旁边的猫。"
+    assert row["referent_status"] == "ambiguous_or_side_thread"
+    assert "same row has no direct active-character address" in row["basis"]
+    assert "another participant thread" in row["basis"]
+    serialized = str(context)
+    assert "user-lamp" not in serialized
+    assert "qq-lamp" not in serialized
+    assert "msg-" not in serialized
+
+
+def test_thread_reference_context_caps_ambiguous_rows() -> None:
+    """Thread warnings should stay small even in a noisy window."""
+
+    participant_rows = [
+        _participant_row(
+            display_name=f"Speaker {index}",
+            global_user_id=f"user-{index}",
+            platform_user_id=f"qq-{index}",
+            body_text=f"你这句话不是给当前角色的第 {index} 条。",
+            timestamp=f"2026-06-18T05:2{index}:00+00:00",
+        )
+        for index in range(5)
+    ]
+
+    context = context_module.build_group_review_thread_reference_context(
+        participant_rows=participant_rows,
+        character_profile={"global_user_id": "character-global"},
+    )
+
+    assert context is not None
+    rows = context["ambiguous_second_person_rows"]
+    assert len(rows) == 3
+    assert all(
+        len(row["sample"]) <= context_module.VISIBLE_SAMPLE_CHAR_LIMIT
+        for row in rows
+    )
+
+
 def _participant_row(
     *,
     display_name: str,

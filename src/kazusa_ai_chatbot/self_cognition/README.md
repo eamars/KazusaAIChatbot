@@ -139,8 +139,8 @@ validation, and adapter delivery are not paused by this predicate.
 - `topic_rag_followup`
 
 `group_chat_review` is built from reflection-cycle group activity windows. It
-uses label-free first-person chat-window data framing, bounded visible
-context, deterministic semantic labels, and source-aligned delivery metadata.
+uses neutral chat-window data framing, bounded visible context, deterministic
+semantic labels, and source-aligned delivery metadata.
 For ambient group windows, the model-facing source packet says the character
 has just noticed a group scene where she has not yet joined and nobody has
 handed the topic to her. For directly addressed group windows, the source
@@ -166,14 +166,41 @@ identity lookup, background participant profiles, web lookup, and full RAG
 supervisor planning are not used.
 
 Group review may also attach
-`conversation_progress.group_scene_digest = {"digest": str}`. This is a single
-first-person observational string generated from the selected activity window
-to help cognition read noisy group flow. The digest preserves visible
-participant display names and Kazusa's own visible assistant rows, including
-whether newer text exists after Kazusa's last visible line. It does not expose
-internal ids, platform ids, message ids, URLs, or `participant_N` aliases. It
-is optional source hydration only: it does not add a deterministic flow state,
-route decision, response gate, speaker target, or action recommendation.
+`conversation_progress.group_scene_digest = {"digest": str}` with optional
+`summary`. This is a single neutral observational string generated from the
+selected activity window to help cognition read noisy group flow. The digest
+preserves visible participant display names and visible assistant rows with
+speaker attribution. It preserves quoted `你` and `我` as quoted row text and
+does not resolve ambiguous second-person wording to the active character unless
+the same row explicitly supports that address. It does not expose internal ids,
+platform ids, message ids, URLs, or `participant_N` aliases. It is optional
+source hydration only: it does not add a deterministic flow state, route
+decision, response gate, speaker target, or action recommendation.
+
+Group review may also attach
+`conversation_progress.thread_reference_context` when a bounded visible row
+contains second-person wording that is not directly addressed to the active
+character. The object shape is:
+
+```python
+{
+    "source": "group_review_thread_reference",
+    "context_shape": "bounded_second_person_reference_warnings",
+    "guidance": "二人称归属按同一行明确地址和可见线程读取；缺少同一行当前角色指向时，保留为侧线/未定对象。",
+    "ambiguous_second_person_rows": [
+        {
+            "speaker": str,
+            "sample": str,
+            "referent_status": "ambiguous_or_side_thread",
+            "basis": str,
+        }
+    ],
+}
+```
+
+The context is bounded to three visible samples, contains no ids or delivery
+metadata, and is rendered before the recent visible transcript. It is source
+evidence for pronoun resolution, not a deterministic silence rule.
 
 When these cases are consolidated, the deterministic target plan gives the
 group channel its own target eligibility. Group-review participant presence is
