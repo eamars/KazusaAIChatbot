@@ -377,7 +377,7 @@ unchanged.
 - `git status --short` must list only files under `src/control_console/`,
   `tests/test_control_console*`, `tests/control_console_e2e/`,
   `development_plans/README.md`, and
-  `development_plans/active/short_term/control_console_runtime_service_config_plan.md`.
+  `development_plans/archive/completed/short_term/control_console_runtime_service_config_plan.md`.
 - `git diff -- src/adapters src/kazusa_ai_chatbot docs README.md tests/test_runtime_adapter_registration.py`
   must return no diff. Existing adapter and HOWTO references to
   `NAPCAT_ACTIVE_GROUPS` are historical context; this plan must not modify or
@@ -504,7 +504,7 @@ This plan is complete when:
   src\control_console tests` returned no matches.
 - 2026-06-18 changed-file scope:
   `git status --short` listed only `development_plans/README.md`,
-  `development_plans/active/short_term/control_console_runtime_service_config_plan.md`,
+  `development_plans/archive/completed/short_term/control_console_runtime_service_config_plan.md`,
   files under `src/control_console/`, and `tests/test_control_console*`.
 - 2026-06-18 independent review:
   The single independent reviewer found one high-severity issue and one

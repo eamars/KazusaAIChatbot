@@ -61,14 +61,14 @@ def test_bootstrap_returns_initial_state_session_csrf_services_and_stream_url(
     assert page_capabilities["overview"]["status"] == "ready"
     assert page_capabilities["events"]["status"] == "ready"
     assert "unsupported" not in page_capabilities["events"]
-    assert page_capabilities["memory"]["status"] == "partial"
-    assert page_capabilities["style"]["status"] == "partial"
+    assert page_capabilities["users"]["status"] == "partial"
+    assert page_capabilities["groups"]["status"] == "partial"
     assert page_capabilities["calendar"]["status"] == "partial"
     assert page_capabilities["background"]["status"] == "partial"
     assert "remediated" not in page_capabilities["character"]["reason"]
     assert page_capabilities["character"]["reason"] == (
-        "Character status and growth summaries are available; raw reflection "
-        "output is excluded."
+        "Character profile, state, growth, and safe learning panels are "
+        "available; raw reflection output is excluded."
     )
 
 

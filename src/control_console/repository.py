@@ -11,10 +11,24 @@ from pymongo.errors import PyMongoError
 
 from control_console.redaction import redact_mapping
 from kazusa_ai_chatbot.calendar_scheduler import models as calendar_models
+from kazusa_ai_chatbot.calendar_scheduler.repository import (
+    list_due_calendar_runs as default_list_due_calendar_runs,
+)
 from kazusa_ai_chatbot.db.character import (
     get_character_profile as default_get_character_profile,
+    get_character_runtime_state as default_get_character_runtime_state,
 )
 from kazusa_ai_chatbot.db.errors import DatabaseOperationError
+from kazusa_ai_chatbot.db.global_character_growth import (
+    list_active_growth_traits as default_list_active_growth_traits,
+)
+from kazusa_ai_chatbot.db.interaction_style_images import (
+    build_interaction_style_context as default_build_interaction_style_context,
+)
+from kazusa_ai_chatbot.db.user_memory_units import (
+    query_user_memory_units as default_query_user_memory_units,
+    search_user_memory_units_by_keyword as default_search_user_memory_units_by_keyword,
+)
 from kazusa_ai_chatbot.db.users import (
     find_user_profile_by_identifier as default_find_user_profile_by_identifier,
 )
@@ -87,11 +101,7 @@ class ControlConsoleRepository:
         """Return the active character name for the browser shell."""
 
         try:
-            helper = self._get_character_profile
-            if helper is None:
-                from kazusa_ai_chatbot.db.character import get_character_profile
-
-                helper = get_character_profile
+            helper = self._get_character_profile or default_get_character_profile
             profile = await asyncio.wait_for(
                 helper(),
                 timeout=APPLICATION_IDENTITY_TIMEOUT_SECONDS,
@@ -264,11 +274,7 @@ class ControlConsoleRepository:
         try:
             helper = self._get_character_runtime_state
             if helper is None:
-                from kazusa_ai_chatbot.db.character import (
-                    get_character_runtime_state,
-                )
-
-                helper = get_character_runtime_state
+                helper = default_get_character_runtime_state
             runtime_state = await helper()
         except REPOSITORY_HELPER_ERRORS as exc:
             summary = _unavailable_summary(
@@ -278,7 +284,8 @@ class ControlConsoleRepository:
             return summary
 
         if not runtime_state:
-            return _empty_summary(area="character_status")
+            summary = _empty_summary(area="character_status")
+            return summary
 
         status = {
             "status": "available",
@@ -302,11 +309,7 @@ class ControlConsoleRepository:
         try:
             helper = self._list_growth_traits
             if helper is None:
-                from kazusa_ai_chatbot.db.global_character_growth import (
-                    list_active_growth_traits,
-                )
-
-                helper = list_active_growth_traits
+                helper = default_list_active_growth_traits
             traits = await helper(limit=12)
         except REPOSITORY_HELPER_ERRORS as exc:
             summary = _unavailable_summary(
@@ -469,13 +472,8 @@ class ControlConsoleRepository:
         }
         try:
             if query_helper is None or keyword_helper is None:
-                from kazusa_ai_chatbot.db.user_memory_units import (
-                    query_user_memory_units,
-                    search_user_memory_units_by_keyword,
-                )
-
-                query_helper = query_user_memory_units
-                keyword_helper = search_user_memory_units_by_keyword
+                query_helper = default_query_user_memory_units
+                keyword_helper = default_search_user_memory_units_by_keyword
 
             if clean_query:
                 documents = await keyword_helper(
@@ -718,11 +716,7 @@ class ControlConsoleRepository:
         )
         try:
             if helper is None:
-                from kazusa_ai_chatbot.calendar_scheduler.repository import (
-                    list_due_calendar_runs,
-                )
-
-                helper = list_due_calendar_runs
+                helper = default_list_due_calendar_runs
 
             documents = await helper(
                 current_timestamp_utc=current_timestamp_utc,
@@ -805,11 +799,7 @@ class ControlConsoleRepository:
         )
         try:
             if helper is None:
-                from kazusa_ai_chatbot.db.interaction_style_images import (
-                    build_interaction_style_context,
-                )
-
-                helper = build_interaction_style_context
+                helper = default_build_interaction_style_context
 
             context = await helper(
                 global_user_id=clean_global_user_id,

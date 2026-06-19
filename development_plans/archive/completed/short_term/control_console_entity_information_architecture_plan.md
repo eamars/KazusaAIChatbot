@@ -239,7 +239,7 @@ and after LLM call count is unchanged.
   - Keep raw MongoDB access out of route handlers.
 - `src/control_console/README.md`
   - Update page capability and ICD wording to describe `Character`, `Users`, and `Groups`.
-- `development_plans/active/short_term/backend_control_console_development_plan.md`
+- `development_plans/archive/completed/short_term/backend_control_console_development_plan.md`
   - Add a short cross-reference to this plan if execution starts, so the older in-progress plan no longer implies the implementation-shaped `Memory`/`Interaction style` sidebar is final.
 - `tests/test_control_console_web_surface.py`
   - Assert new page links, old page links absent, owner-oriented selectors present, and platform selects remain bounded.
@@ -439,7 +439,7 @@ This plan is complete when:
   - `venv\Scripts\python -m pytest tests\test_console_lookup_limits.py::test_lookup_routes_enforce_pagination_redaction_and_no_embeddings -q -s` failed as expected: `/api/entities/user` is not implemented yet and returned 404.
 - Production implementation summary:
   - One production-code subagent updated the approved production source files: `src/control_console/app.py`, `src/control_console/repository.py`, `src/control_console/static/index.html`, and `src/control_console/static/console.js`.
-  - The same subagent also made the adjacent README/cross-reference documentation edits listed in this plan's `Change Surface`: `src/control_console/README.md` and `development_plans/active/short_term/backend_control_console_development_plan.md`. Parent retained ownership of test and plan-evidence edits. This is recorded explicitly because the execution model intended production-code-only subagent work; no unapproved code surface was changed.
+  - The same subagent also made the adjacent README/cross-reference documentation edits listed in this plan's `Change Surface`: `src/control_console/README.md` and `development_plans/archive/completed/short_term/backend_control_console_development_plan.md`. Parent retained ownership of test and plan-evidence edits. This is recorded explicitly because the execution model intended production-code-only subagent work; no unapproved code surface was changed.
   - Added owner-oriented routes `/api/entities/character`, `/api/entities/user`, and `/api/entities/group` using repository composition methods instead of raw MongoDB access in route handlers.
   - Replaced top-level `Memory` and `Interaction style` sidebar entries with `Users` and `Groups`; expanded `Character` panels for character-owned profile/state/self-image/growth/memory/learning surfaces.
   - Added static JS panel rendering helpers for repeated panel state and lookup table output while keeping existing card, badge, field, table, select, input, and button anatomy.

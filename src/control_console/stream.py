@@ -149,7 +149,8 @@ class LogStreamHub:
     def subscriber_count(self) -> int:
         """Return the number of active log subscribers."""
 
-        return len(self._subscribers)
+        count = len(self._subscribers)
+        return count
 
     def publish(
         self,

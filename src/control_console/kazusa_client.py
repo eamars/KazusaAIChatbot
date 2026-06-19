@@ -393,7 +393,8 @@ def _project_known_cognition_fields(
         })
 
     if not nodes:
-        return not_reported_cognition_graph(source=source, run_id=run_id)
+        snapshot = not_reported_cognition_graph(source=source, run_id=run_id)
+        return snapshot
 
     snapshot = CognitionRunGraphSnapshot(
         source=source,

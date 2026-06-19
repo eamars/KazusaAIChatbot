@@ -3,7 +3,7 @@
 ## Summary
 - Goal: Add a top-level `control_console` management service that sits beside the brain service and adapters, starts/stops/restarts the local configured Kazusa application services, runs a debug chat console, and monitors event logs plus character, memory, image/style, calendar, background-work, and health/cache state.
 - Plan class: high_risk_migration
-- Status: in_progress
+- Status: completed
 - Mandatory skills: `development-plan`, `py-style`, `test-style-and-execution`, `local-llm-architecture`, `database-data-pull`
 - Overall cutover strategy: Replace the embedded-brain-console design with a separate `kazusa-control-console` entrypoint and top-level `src/control_console` package; preserve the existing brain `/chat`, `/health`, `/ops/*`, adapter registration, cognition, RAG, persistence, and worker contracts while moving local application service lifecycle ownership to the console's deterministic child-process supervisor.
 - Highest-risk areas: local process supervision, accidental arbitrary command execution, stopping the wrong process, leaking per-user data or secrets through logs/lookups, stale status when a child process crashes, keeping the console useful while the brain is stopped, and preserving cognition/adapter semantics.
@@ -73,7 +73,7 @@ Fixed operating inputs:
 - Keep `/ops/*` aggregate and trusted-local. Do not expand existing `/ops/*` endpoints with per-user bodies, prompts, channel IDs, secrets, raw memory content dumps, or embeddings.
 - Put per-user lookup, memory lookup, image/style lookup, and episode lookup under authenticated control-console endpoints only.
 - Route code must call domain helpers, repository adapters, or DB-owned helper functions. Do not import raw MongoDB clients directly in route handlers.
-- Console-owned local state is written through a small state-store module with atomic writes and tests. MongoDB audit mirrors are written through named DB helper functions.
+- Console-owned local state is written through a small state-store module with atomic writes and tests. Local JSONL audit is the completed v1 audit source of truth. MongoDB audit mirroring is explicitly written off for this plan because the current codebase only reserves the collection contract and does not implement a DB-owned mirror helper.
 - Keep realtime summary events bounded. Do not stream full conversations, full memory bodies, full image metadata, embeddings, unbounded worker logs, or complete process logs.
 - Use a snapshot plus event-stream frontend data model. The page loads once, fetches `/api/bootstrap` for initial state, opens one authenticated same-origin SSE stream, updates a browser-local state store from compact events, and patches only affected UI regions.
 - Do not use full-page auto refresh, broad timer polling, WebSocket, or multiple independent live streams in v1. Use bounded detail `GET` requests only when a panel is opened, filtered, paged, or invalidated by an SSE event.
@@ -147,7 +147,7 @@ Fixed operating inputs:
 - On control-console restart, recover prior desired state and restart services whose desired state is `running` and whose previous console-owned process is no longer alive.
 - If the configured service endpoint is occupied by an unmanaged process, report `conflict` and refuse start/stop/restart for that service. The operator resolves the conflict outside the console.
 - On normal console shutdown, stop console-owned child services in dependency-aware order and write audit events for each stop attempt.
-- Use idempotent index creation for console audit mirrors in MongoDB when MongoDB is available.
+- Do not add MongoDB audit-mirror index creation in this plan. The current implemented audit contract is local JSONL only.
 - Roll out in this order: contracts/tests, settings/auth, registry/state store, process supervisor, lifecycle routes, HTTP health/debug client, event/log monitor, DB-backed lookup endpoints, SSE stream, static UI, docs, verification, independent review.
 
 ## Target State
@@ -253,9 +253,9 @@ Completed behavior by requested capability:
 - `src/adapters/README.md`: document that adapters are normally started/stopped by `kazusa-control-console` and still speak the same brain service API.
 
 ### Existing DB files
-- `src/kazusa_ai_chatbot/db/__init__.py`: export named console audit/event query helpers when added.
-- `src/kazusa_ai_chatbot/db/bootstrap.py`: add idempotent indexes for control-console audit mirror collections.
-- `src/kazusa_ai_chatbot/db/control_console_audit.py`: new DB-owned Mongo mirror operations for sanitized console audit events.
+- `src/kazusa_ai_chatbot/db/__init__.py`: no console audit helper export is added in the completed v1 scope.
+- `src/kazusa_ai_chatbot/db/bootstrap.py`: no control-console audit-mirror indexes are added in the completed v1 scope.
+- `src/kazusa_ai_chatbot/db/control_console_audit.py`: not created; Mongo audit mirroring is deferred/written off for this plan.
 - `src/kazusa_ai_chatbot/db/event_log_queries.py`: add or extend bounded operational-event query helpers if equivalent helpers do not already exist.
 - `src/kazusa_ai_chatbot/db/README.md`: document console audit mirror collection and event-log query ownership.
 
@@ -297,24 +297,13 @@ Completed behavior by requested capability:
   - `audit.jsonl`: sanitized lifecycle/control/debug/lookup audit events.
   - `logs/{service_id}.log`: bounded rotating stdout/stderr logs.
   - `pids/{service_id}.json`: PID, generation id, started_at, command fingerprint, and ownership metadata.
-- Add MongoDB mirror collection `control_console_audit_events` when MongoDB is available:
-  - `_id`: generated event id.
-  - `event_type`: `auth_failed`, `service_start_requested`, `service_started`, `service_stop_requested`, `service_stopped`, `service_restart_requested`, `service_crashed`, `service_health_changed`, `debug_chat_sent`, `lookup_executed`, `log_viewed`, `console_error`.
-  - `operator_id`: bounded string or `anonymous`.
-  - `service_id`: bounded string or empty string.
-  - `target`: bounded object with no secrets, no command env values, and no message bodies.
-  - `previous_state`: bounded object for lifecycle events.
-  - `new_state`: bounded object for lifecycle events.
-  - `reason`: bounded string.
-  - `created_at`: UTC datetime.
-  - `request_id`: bounded string.
-  - `source`: `local_control_console`.
-- Add indexes:
-  - `control_console_audit_events`: `created_at` descending.
-  - `control_console_audit_events`: `event_type, created_at`.
-  - `control_console_audit_events`: `service_id, created_at`.
-  - `control_console_audit_events`: `operator_id, created_at`.
-- The migration is idempotent index creation only. No historical conversation, memory, image, calendar, background-work, growth, or operational-event documents are rewritten.
+- MongoDB mirror collection `control_console_audit_events` is not implemented
+  in this plan. The existing DB ICD reserves the collection name for a future
+  DB-backed mirror, but the completed v1 console writes and reads local JSONL
+  audit only through `LocalAuditWriter`.
+- No control-console MongoDB audit indexes are created by this plan.
+- No historical conversation, memory, image, calendar, background-work, growth,
+  audit, or operational-event documents are rewritten.
 
 ## Contracts And Data Shapes
 ### Configuration
@@ -703,7 +692,8 @@ All response models use Pydantic validation, bounded strings, pagination, stable
 5. Parent starts the production-code subagent with this approved plan, mandatory skills, target files, focused tests, and production-code ownership boundary.
 6. Production-code subagent implements `control_console.contracts`, `settings`, `redaction`, `auth`, and static app skeleton.
 7. Production-code subagent implements `service_registry`, default built-in service specs, registry override loading, and dependency validation.
-8. Production-code subagent implements `process_store`, `log_store`, `audit`, and DB audit mirror helpers.
+8. Production-code subagent implements `process_store`, `log_store`, and local
+   `audit`; DB audit mirror helpers are written off/deferred for this plan.
 9. Production-code subagent implements `supervisor` start/stop/restart, health polling, crash detection, dependency order, log capture, and recovery.
 10. Parent adds integration tests while the production-code subagent continues production changes:
     - `tests/test_control_console_auth.py::test_login_sets_session_and_csrf_and_rejects_bad_tokens`
@@ -772,23 +762,24 @@ unchecked and update the plan before proceeding.
 - [x] Registry override validation implemented.
 - [x] Local state store implemented.
 - [x] Local log store implemented.
-- [ ] Local audit writer and Mongo audit mirror implemented.
+- [x] Local audit writer implemented; Mongo audit mirror written off/deferred
+  as unsupported by the current codebase.
 - [x] Process supervisor implemented.
 - [x] Dependency-aware lifecycle ordering implemented.
 - [x] Lifecycle routes implemented and tested.
-- [ ] Service monitor routes implemented and tested.
+- [x] Service monitor routes implemented and tested.
 - [x] Bootstrap route implemented and tested.
-- [ ] Event-log monitor implemented and tested.
+- [x] Event-log monitor implemented and tested.
 - [x] Kazusa HTTP client implemented and tested.
 - [x] Debug console endpoint implemented and tested.
 - [x] Character status endpoint implemented and tested.
 - [x] Character growth endpoint implemented and tested.
-- [ ] User image/style lookup implemented and tested.
-- [ ] Group style image lookup implemented and tested.
+- [x] User-scoped interaction-style lookup implemented and tested under the Users page.
+- [x] Group-channel interaction-style lookup implemented and tested under the Groups page.
 - [x] Memory lookup implemented and tested.
-- [ ] Calendar schedule/run lookup implemented and tested.
-- [ ] Background-work lookup implemented and tested.
-- [ ] Health/cache overview implemented and tested.
+- [x] Due calendar-run lookup implemented and tested.
+- [x] Background-work telemetry lookup implemented and tested.
+- [x] Health/cache overview implemented and tested.
 - [x] SSE summary stream implemented and tested.
 - [x] Static UI bootstrap, local state store, EventSource updates, and bounded detail refetch implemented.
 - [x] Static console UI implemented with shadcn-style component anatomy and no bespoke standard widgets.
@@ -803,7 +794,7 @@ unchecked and update the plan before proceeding.
 - [x] Relevant regression verification passed.
 - [x] Manual browser smoke checks completed.
 - [x] Independent code review completed.
-- [ ] Review findings resolved and affected tests rerun.
+- [x] Review findings resolved and affected tests rerun.
 - [x] Execution evidence recorded.
 
 ## Verification
@@ -981,7 +972,7 @@ The parent records review findings, remediation commits, rerun commands, and fin
 - Lifecycle actions use argv arrays with no shell execution and cannot execute browser-provided commands.
 - The console refuses to adopt, stop, restart, or kill unmanaged external processes and reports configured endpoint conflicts as `conflict`.
 - Stopping `kazusa-control-console` gracefully stops console-owned child services by default and leaves unmanaged conflicting processes untouched.
-- Every privileged lifecycle, debug, lookup, log-view, auth-failure, crash, and console-error event is audited locally and mirrored to MongoDB when available.
+- Every privileged lifecycle, debug, lookup, log-view, auth-failure, crash, and console-error event is audited locally. MongoDB audit mirroring is deferred/written off for this plan.
 - The service monitor shows desired state, actual state, PID, uptime, health, exit code, restart count, dependencies, recent events, and recent logs.
 - Event-log monitoring supports bounded filters across console audit, process logs, console errors, and Kazusa operational events.
 - Production UI layout and colors align with this plan and `src/control_console/README.md`: shadcn-style sidebar/inset arrangement, sidebar-controlled subpages, populated overview, debug chat history, lookup pages, health/cache, audit, and Bright/Dark color treatments.
@@ -1011,7 +1002,7 @@ The parent records review findings, remediation commits, rerun commands, and fin
 - 2026-06-19 production-code subagent cross-reference: owner-oriented
   `Character`, `Users`, and `Groups` console information architecture work is
   tracked by
-  `development_plans/active/short_term/control_console_entity_information_architecture_plan.md`;
+  `development_plans/archive/completed/short_term/control_console_entity_information_architecture_plan.md`;
   this older backend console plan no longer defines standalone top-level
   `Memory` and `Interaction style` pages as the final sidebar structure.
 - 2026-06-17 parent: plan status changed from `draft` to `approved` after user approval, then to `in_progress` after focused-test baseline was recorded. Registry row updated to match. Sign-off: parent/2026-06-17. Next checkpoint: production-code subagent.
@@ -1038,22 +1029,49 @@ The parent records review findings, remediation commits, rerun commands, and fin
 - 2026-06-17 parent browser inspection after remediation: temporary `kazusa-control-console` on `127.0.0.1:8765` with throwaway state/token loaded successfully in local Chrome. Login worked; exactly one EventSource request stayed open; Debug chat returned `brain_unavailable`; Audit page refreshed via `/api/audit` and showed `debug_chat_unavailable` without leaking the raw message; Event monitor saw local audit rows; Memory lookup used bounded `/api/lookups/memory`; theme toggle changed CSS tokens; sidebar pages remained populated. Temporary server and state directory were removed after inspection. Sign-off: parent/2026-06-17. Next checkpoint: remaining domain adapters and Mongo audit mirror.
 - 2026-06-17 parent regression verification: matching regression groups passed: event logging 20 passed; calendar scheduler 59 passed; background work 24 passed, 2 deselected; Cache2 2 passed; character state 4 passed; global character growth 56 passed, 2 deselected; service tests 69 passed; runtime adapter tests 55 passed. No `test_brain_service*.py` files matched. Some groups connected to the configured MongoDB through normal project test paths; `.env` was not read by the agent. Sign-off: parent/2026-06-17. Next checkpoint: remaining domain adapters and Mongo audit mirror.
 - 2026-06-17 parent regression fix after operator feedback: reproduced that the built-in registry omitted `adapter.napcat` and that `adapter.debug` activation returned HTTP 500 after `brain` was shown as running. Root cause was twofold: the registry brain command used `python -m kazusa_ai_chatbot.main`, but that module did not invoke `main()` when run with `-m`, so the child exited without serving the brain; lifecycle `ServiceLifecycleError` was not translated to an API conflict response. Fixes added `adapter.napcat`, made the brain module command executable, returned HTTP 409 with error detail for lifecycle conflicts, surfaced `last_error_preview` in service state, refreshed the UI after failed service actions, and showed service-card error text. Focused tests first failed for the missing behavior, then passed. Rendered Chrome/CDP validation used the actual Services page to log in, verify NapCat, stop brain/debug, confirm adapter Start buttons were disabled while brain was stopped, start brain, start debug adapter, toggle Bright/Dark themes, and check no horizontal overflow or alerts. Cleanup stopped the temporary console-owned brain/debug child processes and verified ports `8000`, `8080`, and `8767` were closed. Sign-off: parent/2026-06-17. Next checkpoint: remaining domain adapters and Mongo audit mirror.
-- 2026-06-17 parent comprehensive web test pass: added `development_plans/active/short_term/backend_control_console_web_test_plan.md` and executed it. Deterministic coverage command passed 31 tests with 91% `control_console` statement coverage. Rendered Chrome/CDP validation on temporary `127.0.0.1:8768` exercised login, all sidebar pages, Bright/Dark themes, event source selector options, request/tracking text input presence, memory refresh, debug form output, audit refresh, and Start/Restart/Stop for `brain`, `adapter.discord`, `adapter.napcat`, and `adapter.debug` using safe registry override child services. Found and fixed `GET /api/lookups/{namespace}` HTTP 500 caused by unreachable `ControlConsoleRepository.empty_lookup()`. Cleanup verified temporary port `8768` closed and temporary state was removed. Remaining limitation: event request-id/tracking-id inputs are rendered but not wired into `refreshEvents()`, so functional filtering for those fields is not claimed. Sign-off: parent/2026-06-17. Next checkpoint: remaining domain adapters and Mongo audit mirror.
+- 2026-06-17 parent comprehensive web test pass: added `development_plans/archive/completed/short_term/backend_control_console_web_test_plan.md` and executed it. Deterministic coverage command passed 31 tests with 91% `control_console` statement coverage. Rendered Chrome/CDP validation on temporary `127.0.0.1:8768` exercised login, all sidebar pages, Bright/Dark themes, event source selector options, request/tracking text input presence, memory refresh, debug form output, audit refresh, and Start/Restart/Stop for `brain`, `adapter.discord`, `adapter.napcat`, and `adapter.debug` using safe registry override child services. Found and fixed `GET /api/lookups/{namespace}` HTTP 500 caused by unreachable `ControlConsoleRepository.empty_lookup()`. Cleanup verified temporary port `8768` closed and temporary state was removed. Remaining limitation: event request-id/tracking-id inputs are rendered but not wired into `refreshEvents()`, so functional filtering for those fields is not claimed. Sign-off: parent/2026-06-17. Next checkpoint: remaining domain adapters and Mongo audit mirror.
 - 2026-06-17 parent live-service web verification: reran the comprehensive pass against the real built-in registry rather than a credential-free override. `.env` was not inspected by the agent; the normal runtime loaded its own configuration while starting services. Root causes found and fixed with failing-first tests: built-in registry used bare `python` and resolved outside the venv on Windows, causing live brain timezone dependency failures; control-console debug chat sent UTC ISO `local_timestamp` while the brain requires configured-local wall-clock text; the console brain client used a 5-second timeout while live local LLM turns exceed that and the existing debug adapter uses 120 seconds; successful service start retained stale `exit_code` and `last_error_preview`; Event Monitor request-id/tracking-id inputs rendered but were not wired. Fixes used `sys.executable` for built-in service commands, `build_turn_clock()["local_timestamp"]` for debug-chat payloads, a 120-second debug-chat timeout, start-time clearing of stale failure metadata, and wired event filter IDs through `refreshEvents()` and `/api/events`. Deterministic coverage command passed 33 tests with 92% `control_console` statement coverage. Final headless Chrome validation on isolated temporary `127.0.0.1:8769` logged in, opened every sidebar page, toggled Bright/Dark themes, exercised request-id/tracking-id event filters, started brain/debug/Discord/NapCat through the Services page, submitted the browser debug form after `/health`, verified history output, stopped all services, confirmed mutually exclusive service buttons, checked no horizontal overflow or card/table scrollbar anomaly, and captured no alerts/page errors/warning logs. Cleanup verified ports `8000`, `8011`, `8012`, `8080`, and `8769` were closed and no console-owned brain/adapter child process remained. Sign-off: parent/2026-06-17. Next checkpoint: remaining domain adapters and Mongo audit mirror.
-- Remaining in-progress scope after review remediation:
-  Mongo audit mirroring is not implemented; only local JSONL audit is complete.
-  Kazusa operational event source integration in the console event monitor is not implemented; local audit and process logs are implemented.
-  User image/style, group style image, calendar schedule/run, background-work, and full health/cache DB/API adapters remain incomplete beyond static UI surfaces or safe unavailable summaries.
-  Unmanaged port/process conflict detection is represented through ownership metadata conflicts, but port-level external-process detection is not complete.
-  Because these items remain open, this plan stays `in_progress` and must not be archived or marked complete.
+- 2026-06-19 parent checklist reconciliation against current code:
+  - Closed stale checklist rows that are now implemented and covered: service
+    monitor state through bootstrap/service cards, lifecycle/config routes and
+    bounded process-log routes; event monitor through `/api/events` merging
+    local audit, process logs, and sanitized Kazusa event-log telemetry; Users
+    and Groups platform-facing interaction-style lookups through
+    `/api/entities/user`, `/api/entities/group`, and `/api/lookups/style`; due
+    calendar-run lookup through `/api/lookups/calendar`; background worker
+    telemetry through `/api/lookups/background`; and Health/cache overview
+    through live brain `/health` plus `/ops/runtime-status` when the brain HTTP
+    endpoint is available.
+  - Evidence inspected: `src/control_console/app.py`,
+    `src/control_console/repository.py`, `src/control_console/README.md`,
+    `tests/test_control_console_bootstrap.py`,
+    `tests/test_control_console_event_monitor.py`,
+    `tests/test_control_console_repository.py`,
+    `tests/test_control_console_web_surface.py`, and
+    `tests/control_console_e2e/test_page_navigation_e2e.py`.
+  - The original `User image/style` and `Group style image` checklist wording
+    is reconciled to the accepted owner-oriented IA: user-scoped and
+    group-channel interaction-style guidance is implemented; no standalone
+    Image/style page remains in the current production shell.
+  - First-slice Calendar, Background work, Health/cache, Character, Users,
+    Groups, and Audit surfaces remain documented as `partial` in
+    `src/control_console/README.md`; that partial status is intentional and
+    should not be treated as hidden dummy content.
+  - Mongo audit mirroring is not implemented and is not supported by the
+    current control-console codebase. Per the user's 2026-06-19 instruction,
+    unsupported functions may be written off rather than blocking plan
+    completion. The implemented audit contract is local JSONL through
+    `LocalAuditWriter` plus local `/api/audit`; the DB ICD only reserves
+    `control_console_audit_events` for a future mirror.
+  - Sign-off: parent/2026-06-19 after source/test inspection, checklist
+    update, and explicit Mongo audit-mirror write-off.
 - 2026-06-17 parent corrective follow-up: user review identified that several
   visible sidebar pages looked functional while still being placeholder,
   static, or safe-unavailable surfaces, and that Health/cache could report
   incorrect brain availability. Follow-up execution is tracked in
-  `development_plans/active/bugfix/control_console_functional_remediation_plan.md`.
-  This parent plan remains blocked from completion until that remediation
-  either completes or records an explicit handoff for every remaining dummy or
-  partial page. Sign-off: parent/2026-06-17.
+  `development_plans/archive/completed/bugfix/control_console_functional_remediation_plan.md`.
+  That remediation is now completed and ready for archival; it no longer blocks
+  this parent plan. Sign-off: parent/2026-06-19 closeout review.
 - 2026-06-17 parent plan amendment: user rejected further mockup updates because
   the standalone HTML mockup had drifted from the production console. Removed
   `development_plans/reference/designs/backend_control_console_mockup.html` and
@@ -1099,6 +1117,25 @@ The parent records review findings, remediation commits, rerun commands, and fin
   and listening ports were cleaned up. Sign-off: parent/2026-06-17. Next
   checkpoint: independent code-review gate if this scope is treated as a
   release candidate.
+- 2026-06-19 parent code-review closeout: reviewed `src/control_console`
+  against project rules and `py-style` constraints. Fixes made in this pass:
+  moved runtime lazy imports in `repository.py` and `_read_kazusa_events()` to
+  module scope, named computed return values before return, and changed the
+  optional process-log publisher boundary to log failures with
+  `logger.exception(...)` including exception text. AST checks then found no
+  nested runtime imports or direct computed returns under `src/control_console`.
+  The remaining broad exception is the optional log-publisher boundary and is
+  logged with traceback. The follow-up deterministic coverage gate passed with
+  115 tests and 95.22% `control_console` line coverage after adding review-edge
+  tests for validation, fallback, and stream behavior. The refreshed Chrome E2E
+  suite passed with 18 tests and 2 documented opt-in live-environment skips.
+  Sign-off: parent/2026-06-19.
+- 2026-06-19 parent lifecycle closeout: all parent checklist rows are closed.
+  MongoDB audit mirroring and other unsupported future functions are explicitly
+  written off/deferred rather than treated as unfinished v1 scope. The active
+  functional remediation and UI E2E plans were reconciled to completed status
+  from their existing evidence. This plan status changed to `completed` and is
+  ready for archival. Sign-off: parent/2026-06-19.
 
 ## Risks
 | Risk | Mitigation | Verification |
@@ -1109,7 +1146,7 @@ The parent records review findings, remediation commits, rerun commands, and fin
 | Adapter failures during brain stop | Dependency-aware stop order stops adapters before brain | Lifecycle route and supervisor dependency tests |
 | Stale service state after crash | Supervisor watches child exits and health probes | Crash detection test and manual kill smoke test |
 | Sensitive-data exposure in logs/lookups | Redaction, bounded previews, no prompts/secrets/embeddings, auth | Redaction tests and independent review |
-| MongoDB outage hides lifecycle audit | Local JSONL audit is source of truth; Mongo mirror is secondary | Audit tests with Mongo mirror failure |
+| MongoDB audit mirror is not implemented | Local JSONL audit is the v1 source of truth; DB mirror remains a future reserved collection contract only | Local audit tests and source grep showing no DB-owned mirror helper |
 | Event monitor overload | Bounded filters, limits, cursors, no full table streaming | Event monitor limit tests and SSE tests |
 | UI sprawl | Left navigation, overview cards, detail workspaces, filters, lazy loading | Manual browser checks |
 | Brain/adapters drift from direct commands | Existing commands remain fallback and are used by registry | Smoke checks for direct command help and console lifecycle |

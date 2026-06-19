@@ -69,7 +69,7 @@ class ProcessLogStore:
             try:
                 self._log_publisher(log_line)
             except Exception as exc:
-                logger.warning(f"process log publisher failed: {exc}")
+                logger.exception(f"process log publisher failed: {exc}")
         return log_line
 
     def tail(self, *, service_id: str, limit: int) -> list[ProcessLogLine]:

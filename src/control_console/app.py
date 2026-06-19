@@ -72,6 +72,7 @@ from control_console.supervisor import (
     ProcessSupervisor,
     ServiceLifecycleError,
 )
+from kazusa_ai_chatbot.event_logging import repository as event_repository
 
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -356,7 +357,8 @@ def create_app(
                 overrides=service_config_overrides,
             ),
         )
-        return payload.model_dump(mode="json")
+        payload_data = payload.model_dump(mode="json")
+        return payload_data
 
     @app.post(
         "/api/services/{service_id}/start",
@@ -454,7 +456,8 @@ def create_app(
             target={"service_id": service_id, "field_count": len(snapshot.fields)},
             request_id=request_id,
         )
-        return snapshot.model_dump(mode="json")
+        snapshot_data = snapshot.model_dump(mode="json")
+        return snapshot_data
 
     @app.put(
         "/api/services/{service_id}/config",
@@ -607,7 +610,8 @@ def create_app(
                 "limit": limit,
             },
         )
-        return page.model_dump(mode="json")
+        page_data = page.model_dump(mode="json")
+        return page_data
 
     @app.get("/api/audit")
     async def audit_events(
@@ -1259,8 +1263,6 @@ async def _read_kazusa_events(
     event_finder = find_events
     try:
         if event_finder is None:
-            from kazusa_ai_chatbot.event_logging import repository as event_repository
-
             event_finder = event_repository.find_events
     except KAZUSA_EVENT_READER_ERRORS as exc:
         rows = [_kazusa_event_reader_unavailable(reason=str(exc))]

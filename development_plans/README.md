@@ -38,10 +38,6 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [backend_control_console_development_plan.md](active/short_term/backend_control_console_development_plan.md) | Local application control console development plan | in_progress |
-| [control_console_entity_information_architecture_plan.md](active/short_term/control_console_entity_information_architecture_plan.md) | Control-console owner-oriented information architecture plan | completed |
-| [control_console_live_logs_plan.md](active/short_term/control_console_live_logs_plan.md) | Control-console live logs stream and UI plan | completed |
-| [control_console_runtime_service_config_plan.md](active/short_term/control_console_runtime_service_config_plan.md) | Control-console runtime service configuration plan | completed |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 
 ## Supporting Experiment Records
@@ -54,8 +50,6 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [control_console_functional_remediation_plan.md](active/bugfix/control_console_functional_remediation_plan.md) | Control-console functional remediation plan | in_progress |
-| [control_console_ui_e2e_acceptance_test_plan.md](active/bugfix/control_console_ui_e2e_acceptance_test_plan.md) | Control-console UI E2E acceptance test plan | in_progress |
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
 
 ## Reference Documents
@@ -104,6 +98,8 @@ plans.
 | Plan |
 |---|
 | [character_self_image_rolling_state_bugfix_plan.md](archive/completed/bugfix/character_self_image_rolling_state_bugfix_plan.md) |
+| [control_console_functional_remediation_plan.md](archive/completed/bugfix/control_console_functional_remediation_plan.md) |
+| [control_console_ui_e2e_acceptance_test_plan.md](archive/completed/bugfix/control_console_ui_e2e_acceptance_test_plan.md) |
 | [cognition_silence_short_circuit_and_dialog_evaluator_quality_plan.md](archive/completed/bugfix/cognition_silence_short_circuit_and_dialog_evaluator_quality_plan.md) |
 | [consolidation_module_boundary_migration_bugfix_plan.md](archive/completed/bugfix/consolidation_module_boundary_migration_bugfix_plan.md) |
 | [consolidator_facts_prompt_budget_bugfix_plan.md](archive/completed/bugfix/consolidator_facts_prompt_budget_bugfix_plan.md) |
@@ -151,8 +147,10 @@ plans.
 
 | Plan |
 |---|
-| [cache2_agent_stats_health_plan.md](archive/completed/short_term/cache2_agent_stats_health_plan.md) |
+| [backend_control_console_development_plan.md](archive/completed/short_term/backend_control_console_development_plan.md) |
+| [backend_control_console_web_test_plan.md](archive/completed/short_term/backend_control_console_web_test_plan.md) |
 | [background_artifact_handoff_poc_plan.md](archive/completed/short_term/background_artifact_handoff_poc_plan.md) |
+| [cache2_agent_stats_health_plan.md](archive/completed/short_term/cache2_agent_stats_health_plan.md) |
 | [character_local_time_context_plan.md](archive/completed/short_term/character_local_time_context_plan.md) |
 | [character_profile_runtime_state_split_plan.md](archive/completed/short_term/character_profile_runtime_state_split_plan.md) |
 | [character_reflection_cycle_stage1a_plan.md](archive/completed/short_term/character_reflection_cycle_stage1a_plan.md) |
@@ -161,6 +159,9 @@ plans.
 | [cognition_llm_stage_reconnection_plan.md](archive/completed/short_term/cognition_llm_stage_reconnection_plan.md) |
 | [cognition_visual_directives_control_plan.md](archive/completed/short_term/cognition_visual_directives_control_plan.md) |
 | [cognition_state_integrity_plan.md](archive/completed/short_term/cognition_state_integrity_plan.md) |
+| [control_console_entity_information_architecture_plan.md](archive/completed/short_term/control_console_entity_information_architecture_plan.md) |
+| [control_console_live_logs_plan.md](archive/completed/short_term/control_console_live_logs_plan.md) |
+| [control_console_runtime_service_config_plan.md](archive/completed/short_term/control_console_runtime_service_config_plan.md) |
 | [consolidator_text_dispatch_decommission_plan.md](archive/completed/short_term/consolidator_text_dispatch_decommission_plan.md) |
 | [consolidation_evidence_hardening_plan.md](archive/completed/short_term/consolidation_evidence_hardening_plan.md) |
 | [consolidation_target_routing_architecture_plan.md](archive/completed/short_term/consolidation_target_routing_architecture_plan.md) |
