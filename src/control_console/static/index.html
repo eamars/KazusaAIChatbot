@@ -234,12 +234,11 @@
           <article class="metric" data-component="Card"><div class="metric-label">Excluded</div><div class="metric-value">private</div><div class="metric-label">raw prompts, embeddings, raw reflection text</div></article>
         </div>
         <div class="content-grid two">
-          <article class="card" data-component="Card"><div class="card-header"><h3>Profile</h3><span class="badge">character</span></div><div class="table-wrap flush"><table><tbody id="character-profile-table"><tr><td>Status</td><td>Open this page after login to load character profile.</td></tr></tbody></table></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Profile</h3><span class="badge">character</span></div><div class="card-content character-panel" id="character-profile-table"><p class="panel-empty">Open this page after login to load character profile.</p></div></article>
           <article class="card" data-component="Card"><div class="card-header"><h3>Latest State</h3><span class="badge">runtime</span></div><div class="table-wrap flush"><table><tbody id="character-state-table"><tr><td>Status</td><td>Open this page after login to refresh character status.</td></tr></tbody></table></div></article>
-          <article class="card" data-component="Card"><div class="card-header"><h3>Self Image</h3><span class="badge">profile</span></div><div class="table-wrap flush"><table><tbody id="character-self-image-table"><tr><td>Status</td><td>Open this page after login to load self-image summary.</td></tr></tbody></table></div></article>
-          <article class="card" data-component="Card"><div class="card-header"><h3>Growth</h3><span class="badge">promoted only</span></div><div class="table-wrap flush"><table><tbody id="character-growth-table"><tr><td>Status</td><td>Open this page after login to refresh growth traits.</td></tr></tbody></table></div></article>
-          <article class="card" data-component="Card"><div class="card-header"><h3>Character Memory</h3><span class="badge">safe projection</span></div><div class="table-wrap flush"><table><tbody id="character-memory-table"><tr><td>Status</td><td>Open this page after login to inspect available character-owned memory projection.</td></tr></tbody></table></div></article>
           <article class="card" data-component="Card"><div class="card-header"><h3>Background Learning</h3><span class="badge">summary</span></div><div class="table-wrap flush"><table><tbody id="character-learning-table"><tr><td>Status</td><td>Open this page after login to inspect promoted learning summaries.</td></tr></tbody></table></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Self Image</h3><span class="badge">profile</span></div><div class="card-content character-panel" id="character-self-image-table"><p class="panel-empty">Open this page after login to load self-image summary.</p></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Growth</h3><span class="badge">active traits</span></div><div class="card-content trait-list" id="character-growth-table"><p class="panel-empty">Open this page after login to refresh growth traits.</p></div></article>
         </div>
       </section>
 
@@ -270,7 +269,7 @@
             <label class="field">Platform<select class="input" id="user-platform"><option value="">Select platform</option><option value="qq">QQ (NapCat)</option><option value="discord">Discord</option><option value="debug">Debug</option></select></label>
             <label class="field">Platform user ID<input class="input" id="user-platform-user-id" placeholder="platform account id" /></label>
             <label class="field">Keyword<input class="input" id="user-query" placeholder="optional memory keyword" /></label>
-            <button class="btn primary" id="refresh-users" type="button">Refresh</button>
+            <button class="btn primary" id="refresh-users" type="button">Search</button>
           </div>
         </article>
         <div class="content-grid three">
@@ -279,8 +278,7 @@
           <article class="metric" data-component="Card"><div class="metric-label">Style</div><div class="metric-value">private</div><div class="metric-label">user-scoped guidance rows</div></article>
         </div>
         <div class="content-grid two">
-          <article class="card" data-component="Card"><div class="card-header"><h3>Profile</h3><span class="badge">redacted</span></div><div class="table-wrap flush"><table><tbody id="user-profile-table"><tr><td>Status</td><td>Enter platform and platform user ID to load profile.</td></tr></tbody></table></div></article>
-          <article class="card" data-component="Card"><div class="card-header"><h3>Relationship</h3><span class="badge">summary</span></div><div class="table-wrap flush"><table><tbody id="user-relationship-table"><tr><td>Status</td><td>Enter platform and platform user ID to load relationship summary.</td></tr></tbody></table></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Profile</h3><span class="badge">identity + relationship</span></div><div class="table-wrap flush"><table><tbody id="user-profile-table"><tr><td>Status</td><td>Enter platform and platform user ID to load profile.</td></tr></tbody></table></div></article>
           <article class="card" data-component="Card"><div class="card-header"><h3>User Memory</h3><span class="badge">redacted</span></div><div class="table-wrap flush"><table><tbody id="user-memory-table"><tr><td>Status</td><td>Enter platform and platform user ID to load recent memory units.</td></tr></tbody></table></div></article>
           <article class="card" data-component="Card"><div class="card-header"><h3>User Style</h3><span class="badge">guidance</span></div><div class="table-wrap flush"><table><tbody id="user-style-table"><tr><td>Status</td><td>Enter platform and platform user ID to load interaction-style guidance.</td></tr></tbody></table></div></article>
         </div>
@@ -299,18 +297,16 @@
           <div class="card-content filter-row" data-component="FieldGroup">
             <label class="field">Platform<select class="input" id="group-platform"><option value="">Select platform</option><option value="qq">QQ (NapCat)</option><option value="discord">Discord</option><option value="debug">Debug</option></select></label>
             <label class="field">Group ID<input class="input" id="group-id" placeholder="platform group or channel id" /></label>
-            <button class="btn primary" id="refresh-groups" type="button">Refresh</button>
+            <button class="btn primary" id="refresh-groups" type="button">Search</button>
           </div>
         </article>
         <div class="content-grid three">
           <article class="metric" data-component="Card"><div class="metric-label">Identity</div><div class="metric-value">group</div><div class="metric-label">platform-facing group id</div></article>
           <article class="metric" data-component="Card"><div class="metric-label">Style</div><div class="metric-value">channel</div><div class="metric-label">group-channel guidance</div></article>
-          <article class="metric" data-component="Card"><div class="metric-label">Reflection</div><div class="metric-value">safe</div><div class="metric-label">no raw reflection text</div></article>
+          <article class="metric" data-component="Card"><div class="metric-label">Redaction</div><div class="metric-value">safe</div><div class="metric-label">no raw reflection text</div></article>
         </div>
-        <div class="content-grid two">
+        <div class="content-grid">
           <article class="card" data-component="Card"><div class="card-header"><h3>Group Style</h3><span class="badge">guidance</span></div><div class="table-wrap flush"><table><tbody id="group-style-table"><tr><td>Status</td><td>Enter platform and group ID to load group-channel style.</td></tr></tbody></table></div></article>
-          <article class="card" data-component="Card"><div class="card-header"><h3>Progress</h3><span class="badge">safe context</span></div><div class="table-wrap flush"><table><tbody id="group-progress-table"><tr><td>Status</td><td>Enter platform and group ID to inspect available progress context.</td></tr></tbody></table></div></article>
-          <article class="card" data-component="Card"><div class="card-header"><h3>Reflection Guidance</h3><span class="badge">summary</span></div><div class="table-wrap flush"><table><tbody id="group-guidance-table"><tr><td>Status</td><td>Enter platform and group ID to inspect available reflection-derived guidance.</td></tr></tbody></table></div></article>
         </div>
       </section>
 
@@ -357,7 +353,7 @@
         </article>
         <div class="content-grid three">
           <article class="metric" data-component="Card"><div class="metric-label">Source</div><div class="metric-value">events</div><div class="metric-label">event_log_events telemetry</div></article>
-          <article class="metric" data-component="Card"><div class="metric-label">Job browser</div><div class="metric-value">off</div><div class="metric-label">payload browsing not exposed</div></article>
+          <article class="metric" data-component="Card"><div class="metric-label">Activity</div><div class="metric-value">worker</div><div class="metric-label">recent sanitized events</div></article>
           <article class="metric" data-component="Card"><div class="metric-label">Excluded</div><div class="metric-value">safe</div><div class="metric-label">task briefs, artifacts, raw messages</div></article>
         </div>
         <article class="card" data-component="Card">
@@ -370,7 +366,7 @@
         <div class="page-intro"><div><h2>Audit</h2><p>Privileged actions, auth failures, lookups, log views, and lifecycle events.</p></div><span class="badge">sanitized</span></div>
         <div class="content-grid three">
           <article class="metric" data-component="Card"><div class="metric-label">Privileged actions</div><div class="metric-value">all</div><div class="metric-label">start, stop, restart, debug, lookup</div></article>
-          <article class="metric" data-component="Card"><div class="metric-label">Mirror</div><div class="metric-value">off</div><div class="metric-label">Mongo mirror not implemented</div></article>
+          <article class="metric" data-component="Card"><div class="metric-label">Storage</div><div class="metric-value">local</div><div class="metric-label">JSONL audit source</div></article>
           <article class="metric" data-component="Card"><div class="metric-label">Fields</div><div class="metric-value">safe</div><div class="metric-label">operator, target, reason, request id</div></article>
         </div>
         <article class="card"><div class="card-header"><h3>Audit List</h3><span class="badge">local JSONL</span></div><div class="table-wrap flush"><table><tbody id="audit-table"></tbody></table></div></article>

@@ -1888,7 +1888,7 @@ def _page_capabilities() -> dict[str, dict[str, Any]]:
         "groups": {
             "status": "partial",
             "label": "group lookup",
-            "reason": "Platform-facing group style and safe context panels are available.",
+            "reason": "Platform-facing group style guidance is available.",
         },
         "calendar": {
             "status": "partial",
@@ -1898,7 +1898,7 @@ def _page_capabilities() -> dict[str, dict[str, Any]]:
         "background": {
             "status": "partial",
             "label": "worker events",
-            "reason": "Background worker event telemetry is available; job payload browsing is not implemented.",
+            "reason": "Sanitized background worker event telemetry is available.",
         },
         "health": {
             "status": "partial",
@@ -1908,7 +1908,7 @@ def _page_capabilities() -> dict[str, dict[str, Any]]:
         "audit": {
             "status": "partial",
             "label": "local only",
-            "reason": "Local JSONL audit is available; Mongo audit mirroring is not implemented.",
+            "reason": "Local JSONL audit is available.",
         },
     }
     return capabilities

@@ -149,13 +149,13 @@ The current first-slice status is:
 | Services | `ready` | Registry and supervisor state |
 | Debug chat | `ready` | Existing brain `/chat` contract when brain is running |
 | Event monitor | `ready` | Local audit, process logs, and sanitized Kazusa event-log telemetry |
-| Character | `partial` | Owner-oriented profile, runtime state, self-image, growth, character-memory placeholder, and promoted/background-learning summaries where safely available |
+| Character | `partial` | Owner-oriented profile, runtime state, self-image, active growth traits, and background-learning summaries where safely available |
 | Users | `partial` | Platform-facing user lookup for profile, relationship summary, `user_memory_units`, and user-scoped interaction-style guidance; internal global user ids are not browser inputs |
-| Groups | `partial` | Platform-facing group lookup for group-channel style plus explicit progress and reflection-guidance states where browser-safe summaries are unavailable |
+| Groups | `partial` | Platform-facing group lookup for group-channel style; unavailable progress and reflection-guidance sources are not rendered as product cards |
 | Calendar | `partial` | Due `calendar_runs` inspection; schedule editing is not implemented |
-| Background work | `partial` | Sanitized `background_work.worker` event telemetry; job payload browsing is not implemented |
+| Background work | `partial` | Sanitized `background_work.worker` event telemetry |
 | Health/cache | `partial` | Brain `/health` and `/ops/runtime-status` when brain is running |
-| Audit | `partial` | Local JSONL audit only; Mongo mirroring is not implemented |
+| Audit | `partial` | Local JSONL audit only |
 
 ## Operator Token
 

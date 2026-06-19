@@ -38,13 +38,12 @@ CHARACTER_PROFILE_FIELDS = (
 SELF_IMAGE_FIELDS = (
     "summary",
     "current_self_concept",
+    "historical_summary",
+    "recent_window",
     "milestones",
     "updated_at",
 )
 USER_PROFILE_FIELDS = (
-    "affinity",
-    "relationship_summary",
-    "relationship_status",
     "updated_at",
 )
 REPOSITORY_HELPER_ERRORS = (
@@ -194,7 +193,16 @@ class ControlConsoleRepository:
                 )
 
         state_summary = await self.latest_character_status()
-        state_items = _project_key_value_items(state_summary.get("summary", {}))
+        state_summary_payload = state_summary.get("summary", {})
+        if isinstance(state_summary_payload, dict):
+            state_row = {
+                key: state_summary_payload[key]
+                for key in ("mood", "global_vibe", "updated_at")
+                if key in state_summary_payload
+            }
+        else:
+            state_row = {}
+        state_items = _project_key_value_items(state_row)
         state_panel = _entity_panel(
             status="available" if state_items else state_summary.get(
                 "status",
@@ -295,10 +303,10 @@ class ControlConsoleRepository:
             helper = self._list_growth_traits
             if helper is None:
                 from kazusa_ai_chatbot.db.global_character_growth import (
-                    list_prompt_visible_growth_traits,
+                    list_active_growth_traits,
                 )
 
-                helper = list_prompt_visible_growth_traits
+                helper = list_active_growth_traits
             traits = await helper(limit=12)
         except REPOSITORY_HELPER_ERRORS as exc:
             summary = _unavailable_summary(
@@ -315,8 +323,14 @@ class ControlConsoleRepository:
                 redact_mapping({
                     "trait_id": trait.get("trait_id", ""),
                     "growth_axis": trait.get("growth_axis", ""),
+                    "trait_name": trait.get("trait_name", ""),
+                    "guidance": trait.get("guidance", ""),
+                    "strength": trait.get("strength", ""),
                     "status": trait.get("status", ""),
                     "maturity_band": trait.get("maturity_band", ""),
+                    "evidence_count": trait.get("evidence_count", ""),
+                    "first_observed_date": trait.get("first_observed_date", ""),
+                    "last_observed_date": trait.get("last_observed_date", ""),
                     "updated_at": trait.get("updated_at", ""),
                 })
                 for trait in list(traits)[:12]
@@ -996,11 +1010,24 @@ def _project_self_image(value: Any) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         return items
 
-    row = {
-        field: value[field]
-        for field in SELF_IMAGE_FIELDS
-        if field in value and value[field] not in (None, "")
-    }
+    row: dict[str, Any] = {}
+    for field in SELF_IMAGE_FIELDS:
+        if field not in value:
+            continue
+        field_value = value[field]
+        if field_value in (None, "", [], {}):
+            continue
+        row[field] = field_value
+
+    meta = value.get("meta")
+    if isinstance(meta, dict):
+        last_updated = meta.get("last_updated")
+        if last_updated not in (None, ""):
+            row["last_updated"] = last_updated
+        synthesis_count = meta.get("synthesis_count")
+        if synthesis_count not in (None, ""):
+            row["synthesis_count"] = synthesis_count
+
     items = [redact_mapping(row)] if row else []
     return items
 
@@ -1070,6 +1097,18 @@ def _project_relationship_items(profile: dict[str, Any]) -> list[dict[str, Any]]
         rows.append({
             "key": "relationship_summary",
             "value": relationship_summary,
+        })
+    last_relationship_insight = profile.get("last_relationship_insight")
+    if last_relationship_insight:
+        rows.append({
+            "key": "last_relationship_insight",
+            "value": last_relationship_insight,
+        })
+    relationship_status = profile.get("relationship_status")
+    if relationship_status:
+        rows.append({
+            "key": "relationship_status",
+            "value": relationship_status,
         })
     affinity = profile.get("affinity")
     if affinity not in (None, ""):

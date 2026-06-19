@@ -60,7 +60,6 @@ def test_live_database_owner_pages_render_human_readable_data(
                 "#character-state-table",
                 "#character-self-image-table",
                 "#character-growth-table",
-                "#character-memory-table",
                 "#character-learning-table",
             ),
         )
@@ -90,7 +89,6 @@ def test_live_database_owner_pages_render_human_readable_data(
             page,
             selectors=(
                 "#user-profile-table",
-                "#user-relationship-table",
                 "#user-memory-table",
                 "#user-style-table",
             ),
@@ -115,8 +113,6 @@ def test_live_database_owner_pages_render_human_readable_data(
             page,
             selectors=(
                 "#group-style-table",
-                "#group-progress-table",
-                "#group-guidance-table",
             ),
         )
 

@@ -53,6 +53,24 @@ def test_desktop_visual_acceptance_for_cards_buttons_and_branding(
             assert card_overflows == []
             assert button_overflows == []
 
+        page.locator("[data-page-link='users']").click()
+        user_alignment = _button_input_bottom_delta(
+            page,
+            "#refresh-users",
+            "#user-platform-user-id",
+        )
+        assert user_alignment <= 1
+        assert page.locator("#refresh-users").inner_text() == "Search"
+
+        page.locator("[data-page-link='groups']").click()
+        group_alignment = _button_input_bottom_delta(
+            page,
+            "#refresh-groups",
+            "#group-id",
+        )
+        assert group_alignment <= 1
+        assert page.locator("#refresh-groups").inner_text() == "Search"
+
         page.locator("[data-page-link='logs']").click()
         page.evaluate(
             """() => {
@@ -96,3 +114,19 @@ def test_desktop_visual_acceptance_for_cards_buttons_and_branding(
         )
 
     assert summary.exists()
+
+
+def _button_input_bottom_delta(page, button_selector: str, input_selector: str) -> float:
+    """Return the vertical bottom-edge delta between a button and input."""
+
+    metrics = page.evaluate(
+        """([buttonSelector, inputSelector]) => {
+          const button = document.querySelector(buttonSelector);
+          const input = document.querySelector(inputSelector);
+          const buttonRect = button.getBoundingClientRect();
+          const inputRect = input.getBoundingClientRect();
+          return Math.abs(buttonRect.bottom - inputRect.bottom);
+        }""",
+        [button_selector, input_selector],
+    )
+    return float(metrics)

@@ -62,8 +62,12 @@ async def test_repository_projects_character_and_growth_helpers_safely() -> None
             {
                 "trait_id": "trait-1",
                 "growth_axis": "communication",
+                "trait_name": "concrete follow-up",
+                "guidance": "ask one concrete follow-up when intent is vague",
+                "strength": 0.5,
                 "status": "active",
-                "maturity_band": "promoted",
+                "maturity_band": "emerging",
+                "evidence_count": 2,
                 "prompt_text": "must redact",
                 "updated_at": "2026-06-17T00:00:00+00:00",
             }
@@ -82,6 +86,12 @@ async def test_repository_projects_character_and_growth_helpers_safely() -> None
     assert "prompt_text" not in character["summary"]
     assert growth["status"] == "available"
     assert growth["items"][0]["trait_id"] == "trait-1"
+    assert growth["items"][0]["trait_name"] == "concrete follow-up"
+    assert growth["items"][0]["guidance"] == (
+        "ask one concrete follow-up when intent is vague"
+    )
+    assert growth["items"][0]["maturity_band"] == "emerging"
+    assert growth["items"][0]["evidence_count"] == 2
     assert "prompt_text" not in growth["items"][0]
 
 
@@ -256,8 +266,16 @@ async def test_repository_composes_owner_entity_envelopes() -> None:
         return {
             "name": "Test Character",
             "self_image": {
-                "summary": "quiet precision under pressure",
-                "milestones": ["accepted direct operator review"],
+                "historical_summary": "quiet precision under pressure",
+                "recent_window": [
+                    {
+                        "timestamp": "2026-06-19T00:00:00+00:00",
+                        "summary": "accepted direct operator review",
+                    },
+                ],
+                "meta": {
+                    "last_updated": "2026-06-19T00:00:00+00:00",
+                },
             },
             "prompt_text": "must redact",
         }
@@ -274,8 +292,12 @@ async def test_repository_composes_owner_entity_envelopes() -> None:
         return [{
             "trait_id": "trait-1",
             "growth_axis": "operator trust",
+            "trait_name": "direct-review calibration",
+            "guidance": "treat direct review as a high-signal correction",
+            "strength": 0.75,
             "status": "active",
-            "maturity_band": "promoted",
+            "maturity_band": "observed",
+            "evidence_count": 3,
         }]
 
     async def find_user_profile_by_identifier(
@@ -377,17 +399,45 @@ async def test_repository_composes_owner_entity_envelopes() -> None:
     assert character["owner"] == "character"
     assert character["status"] == "available"
     assert character["panels"]["profile"]["items"][0]["name"] == "Test Character"
-    assert character["panels"]["self_image"]["items"]
+    self_image = character["panels"]["self_image"]["items"][0]
+    assert self_image["historical_summary"] == "quiet precision under pressure"
+    assert self_image["recent_window"][0]["summary"] == (
+        "accepted direct operator review"
+    )
+    assert self_image["last_updated"] == "2026-06-19T00:00:00+00:00"
     assert character["panels"]["state"]["items"][0]["key"] == "mood"
+    state_keys = {
+        item["key"]
+        for item in character["panels"]["state"]["items"]
+    }
+    assert "reflection_summary" not in state_keys
     assert character["panels"]["growth"]["items"][0]["trait_id"] == "trait-1"
-    assert "memory" in character["panels"]
+    assert character["panels"]["growth"]["items"][0]["trait_name"] == (
+        "direct-review calibration"
+    )
+    assert character["panels"]["growth"]["items"][0]["guidance"] == (
+        "treat direct review as a high-signal correction"
+    )
     assert "learning" in character["panels"]
+    assert character["panels"]["learning"]["items"][0]["summary"] == (
+        "short safe summary"
+    )
 
     assert user["owner"] == "user"
     assert user["identity"]["display_name"] == "Tester"
     assert "global_user_id" not in user["identity"]
-    assert user["panels"]["profile"]["items"][0]["affinity"] == 742
-    assert user["panels"]["relationship"]["items"]
+    user_profile = user["panels"]["profile"]["items"][0]
+    assert user_profile == {
+        "platform": "qq",
+        "platform_user_id": "platform-user-1",
+        "display_name": "Tester",
+    }
+    relationship_values = {
+        item["key"]: item["value"]
+        for item in user["panels"]["relationship"]["items"]
+    }
+    assert relationship_values["affinity"] == 742
+    assert relationship_values["relationship_summary"] == "trusts direct review"
     assert user["panels"]["memory"]["items"][0]["unit_id"] == "unit-1"
     assert user["panels"]["style"]["items"][0]["scope"] == "user_style"
 

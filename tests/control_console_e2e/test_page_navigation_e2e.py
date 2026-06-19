@@ -40,7 +40,7 @@ def test_each_sidebar_page_has_connected_or_explicitly_gated_state(
         assert page.locator("#character-state-table").inner_text().strip()
         assert page.locator("#character-self-image-table").inner_text().strip()
         assert page.locator("#character-growth-table").inner_text().strip()
-        assert page.locator("#character-memory-table").inner_text().strip()
+        assert page.locator("#character-memory-table").count() == 0
 
         _open_page(page, "users", "Users")
         assert page.locator("#users-status").inner_text() == "needs input"
@@ -77,8 +77,8 @@ def test_each_sidebar_page_has_connected_or_explicitly_gated_state(
         ):
             page.locator("#refresh-groups").click()
         assert page.locator("#group-style-table").inner_text().strip()
-        assert page.locator("#group-progress-table").inner_text().strip()
-        assert page.locator("#group-guidance-table").inner_text().strip()
+        assert page.locator("#group-progress-table").count() == 0
+        assert page.locator("#group-guidance-table").count() == 0
 
         with page.expect_response(
             lambda response: "/api/lookups/calendar" in response.url
@@ -227,9 +227,7 @@ def test_owner_entity_unavailable_panels_render_reasons(
         assert "Group style helper is unavailable." in page.locator(
             "#group-style-table",
         ).inner_text()
-        guidance_text = page.locator("#group-guidance-table").inner_text()
-        assert "Reflection guidance source is unavailable." in guidance_text
-        assert "Revision" not in guidance_text
+        assert page.locator("#group-guidance-table").count() == 0
 
         summary = e2e_summary_writer(
             name="owner_entity_unavailable_panel_states",
@@ -239,7 +237,6 @@ def test_owner_entity_unavailable_panels_render_reasons(
                 "checked_panels": [
                     "user-style",
                     "group-style",
-                    "group-guidance",
                 ],
             },
         )
@@ -272,6 +269,7 @@ def test_owner_lookup_tables_render_nested_values_readably(
                         status: 'available',
                         items: [{
                           name: 'Nested Test',
+                          description: 'First profile line\\nSecond profile line\\n\\nThird profile line',
                           personality_brief: {
                             core: 'quiet',
                             traits: ['observant', 'reserved']
@@ -281,6 +279,7 @@ def test_owner_lookup_tables_render_nested_values_readably(
                       self_image: {
                         status: 'available',
                         items: [{
+                          historical_summary: 'First self image line\\nSecond self image line',
                           milestones: [
                             {title: 'joined band', year: '2026'}
                           ]
@@ -311,9 +310,26 @@ def test_owner_lookup_tables_render_nested_values_readably(
         self_image_text = page.locator("#character-self-image-table").inner_text()
         combined_text = f"{profile_text}\n{self_image_text}"
         assert "[object Object]" not in combined_text
-        assert "core: quiet" in profile_text
-        assert "traits: observant; reserved" in profile_text
+        assert "core" in profile_text.lower()
+        assert "quiet" in profile_text
+        assert "traits" in profile_text.lower()
+        assert "observant" in profile_text
+        assert "reserved" in profile_text
+        assert "First profile line" in profile_text
+        assert "Second profile line" in profile_text
+        assert "First self image line" in self_image_text
+        assert "Second self image line" in self_image_text
         assert "title: joined band" in self_image_text
+        for selector, expected_text in (
+            ("#character-profile-table .character-prose", "First profile line"),
+            ("#character-self-image-table .character-prose", "First self image line"),
+        ):
+            locator = page.locator(selector).filter(has_text=expected_text).first
+            locator.wait_for()
+            white_space = locator.evaluate(
+                "element => getComputedStyle(element).whiteSpace",
+            )
+            assert white_space == "pre-line"
 
         summary = e2e_summary_writer(
             name="owner_lookup_nested_value_rendering",
@@ -324,6 +340,160 @@ def test_owner_lookup_tables_render_nested_values_readably(
                     "nested object value",
                     "array of strings",
                     "array of objects",
+                ],
+            },
+        )
+
+    assert summary.exists()
+
+
+def test_character_page_uses_readable_profile_self_image_and_growth_panels(
+    e2e_console,
+    e2e_browser_page,
+    e2e_summary_writer,
+) -> None:
+    """Character prose and traits should not render as raw key-value tables."""
+
+    with e2e_console() as console:
+        page = e2e_browser_page(console.base_url)
+        _login(page)
+        page.evaluate(
+            """() => {
+              const originalFetch = window.fetch.bind(window);
+              window.fetch = (input, init) => {
+                const url = String(input);
+                if (url.includes('/api/entities/character')) {
+                  return Promise.resolve(new Response(JSON.stringify({
+                    status: 'available',
+                    owner: 'character',
+                    identity: {character_name: 'Panel Test'},
+                    panels: {
+                      profile: {
+                        status: 'available',
+                        items: [{
+                          name: 'Panel Test',
+                          description: 'First readable profile line\\nSecond readable profile line',
+                          gender: 'female',
+                          age: 15,
+                          birthday: 'Aug 5',
+                          personality_brief: {
+                            logic: 'leads with emotional anchors',
+                            tempo: 'quiet until interested',
+                            defense: 'uses distance to hide uncertainty'
+                          },
+                          updated_at: '2026-06-19T03:20:12+00:00'
+                        }]
+                      },
+                      self_image: {
+                        status: 'available',
+                        items: [{
+                          historical_summary: 'First self image paragraph\\n\\nSecond self image paragraph',
+                          recent_window: [
+                            {
+                              timestamp: '2026-06-19T01:21:23+00:00',
+                              summary: 'She relaxed into ordinary conversation.'
+                            },
+                            {
+                              timestamp: '2026-06-19T03:20:12+00:00',
+                              summary: 'She answered with a warmer, steadier tone.'
+                            }
+                          ],
+                          last_updated: '2026-06-19T03:20:12+00:00',
+                          synthesis_count: 1685
+                        }]
+                      },
+                      state: {status: 'empty', items: [], reason: 'none'},
+                      growth: {
+                        status: 'available',
+                        items: [
+                          {
+                            trait_id: 'gct_raw_identifier',
+                            growth_axis: 'clarity',
+                            trait_name: 'Clear intent handling',
+                            guidance: 'Ask one grounded follow-up before guessing.',
+                            strength: 0.36272249999999995,
+                            status: 'active',
+                            maturity_band: 'emerging',
+                            evidence_count: 3,
+                            updated_at: '2026-06-19T03:20:12+00:00'
+                          },
+                          {
+                            trait_id: 'gct_second_identifier',
+                            growth_axis: 'boundary_timing',
+                            trait_name: 'Boundary timing',
+                            guidance: 'Hold the refusal posture without overexplaining.',
+                            strength: 0.27,
+                            status: 'active',
+                            maturity_band: 'observed',
+                            evidence_count: 2
+                          }
+                        ]
+                      },
+                      memory: {status: 'empty', items: [], reason: 'none'},
+                      learning: {status: 'empty', items: [], reason: 'none'}
+                    },
+                    redaction: {model_inputs: 'excluded'}
+                  }), {
+                    status: 200,
+                    headers: {'Content-Type': 'application/json'}
+                  }));
+                }
+                return originalFetch(input, init);
+              };
+            }"""
+        )
+
+        _open_page(page, "character", "Character")
+        page.locator("#character-profile-table").get_by_text("Panel Test").wait_for()
+
+        profile = page.locator("#character-profile-table")
+        assert profile.locator(".character-title").inner_text() == "Panel Test"
+        assert profile.locator(".detail-chip").count() >= 3
+        profile_body = profile.locator(".character-prose").filter(
+            has_text="First readable profile line",
+        ).first
+        profile_body.wait_for()
+        assert profile_body.evaluate(
+            "element => getComputedStyle(element).fontWeight",
+        ) not in {"600", "700", "bold"}
+        assert profile_body.evaluate(
+            "element => getComputedStyle(element).whiteSpace",
+        ) == "pre-line"
+
+        self_image = page.locator("#character-self-image-table")
+        assert self_image.locator(".timeline-item").count() == 2
+        self_image_text = self_image.inner_text()
+        assert "She relaxed into ordinary conversation." in self_image_text
+        assert "She answered with a warmer, steadier tone." in self_image_text
+        assert "Long-term self-image" in self_image_text
+        assert "Historical summary" not in self_image_text
+        assert self_image_text.index("Recent window") < self_image_text.index(
+            "Long-term self-image"
+        )
+        assert "timestamp:" not in self_image_text
+        assert "summary:" not in self_image_text
+
+        growth = page.locator("#character-growth-table")
+        assert growth.locator(".trait-card").count() == 2
+        growth_text = growth.inner_text()
+        assert "Clear intent handling" in growth_text
+        assert "Ask one grounded follow-up before guessing." in growth_text
+        assert "0.363" in growth_text
+        assert "0.36272249999999995" not in growth_text
+        assert "trait_id" not in growth_text
+        assert "trait id" not in growth_text.lower()
+        assert "gct_raw_identifier" not in growth_text
+        assert growth.locator("tr").count() == 0
+
+        summary = e2e_summary_writer(
+            name="character_readable_profile_self_image_growth",
+            conclusion="pass",
+            details={
+                "console_url": console.base_url,
+                "checked": [
+                    "profile prose normal weight",
+                    "recent-window timeline entries",
+                    "growth trait cards without raw trait ids",
                 ],
             },
         )
@@ -387,13 +557,17 @@ def test_style_overlay_rows_use_readable_two_column_layout(
         ).wait_for()
 
         row_count = page.locator("#group-style-table tr").count()
-        assert row_count >= 4
+        assert row_count == 1
         for index in range(row_count):
             row = page.locator("#group-style-table tr").nth(index)
             cell_count = row.locator("td").count()
             assert cell_count <= 2
         style_text = page.locator("#group-style-table").inner_text()
         assert "Guidance" in style_text
+        assert "Scope" not in style_text
+        assert "Confidence" not in style_text
+        assert "group_channel_style" in style_text
+        assert "confidence: high" in style_text
         assert "keep the technical topic visible" in style_text
         assert "[object Object]" not in style_text
 
@@ -461,7 +635,10 @@ def test_owner_tables_use_panel_specific_readable_layouts(
                       profile: {status: 'empty', items: [], reason: 'none'},
                       relationship: {
                         status: 'available',
-                        items: [{key: 'affinity', value: 742}]
+                        items: [
+                          {key: 'affinity', value: 742},
+                          {key: 'relationship_summary', value: 'trusts direct review'}
+                        ]
                       },
                       memory: {
                         status: 'available',
@@ -513,11 +690,32 @@ def test_owner_tables_use_panel_specific_readable_layouts(
         page.locator("#user-memory-table").get_by_text(
             "User wants product-grade UI checks.",
         ).wait_for()
+        profile_text = page.locator("#user-profile-table").inner_text()
+        assert "affinity" in profile_text
+        assert "742" in profile_text
+        assert "relationship summary" in profile_text
+        assert "trusts direct review" in profile_text
+        assert page.locator("#user-relationship-table").count() == 0
+        user_profile_value = page.locator("#user-profile-table .table-primary").filter(
+            has_text="trusts direct review",
+        ).first
+        user_profile_value.wait_for()
+        assert user_profile_value.evaluate(
+            "element => getComputedStyle(element).whiteSpace",
+        ) == "pre-line"
 
         memory_rows = page.locator("#user-memory-table tr")
         assert memory_rows.count() == 2
         for index in range(memory_rows.count()):
             assert memory_rows.nth(index).locator("td").count() == 2
+        first_memory_cells = memory_rows.nth(0).locator("td")
+        first_memory_left = first_memory_cells.nth(0).inner_text()
+        first_memory_right = first_memory_cells.nth(1).inner_text()
+        assert "active" in first_memory_left
+        assert "updated: 2026-06-19T00:00:00+00:00" in first_memory_left
+        assert "updated: 2026-06-19T00:00:00+00:00" not in first_memory_right
+        assert "relationship: prefers direct review" in first_memory_right
+        assert "appraisal: high operator trust" in first_memory_right
         memory_text = page.locator("#user-memory-table").inner_text()
         assert "stable pattern" in memory_text
         assert "prefers direct review" in memory_text

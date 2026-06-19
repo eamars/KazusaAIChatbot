@@ -1383,6 +1383,237 @@ function renderLookupTable(target, {items = [], emptyText = "No rows available."
   }).join("");
 }
 
+function renderReadableLookupValue(value) {
+  return `<span class="table-primary">${escapeHtml(formatLookupValue(value))}</span>`;
+}
+
+function renderReadableLookupTable(target, {items = [], emptyText = "No rows available.", redaction = {}} = {}) {
+  const element = typeof target === "string" ? qs(target) : target;
+  if (!items.length) {
+    renderLookupTable(element, {items, emptyText, redaction});
+    return;
+  }
+  if (isKeyValueItems(items)) {
+    element.innerHTML = items.map((item) => (
+      `<tr><td>${escapeHtml(formatLookupLabel(item.key))}</td><td>${renderReadableLookupValue(item.value)}</td></tr>`
+    )).join("");
+    return;
+  }
+  element.innerHTML = items.map((item) => {
+    const rows = Object.entries(item)
+      .filter(([, value]) => value !== null && value !== undefined && value !== "")
+      .map(([key, value]) => `<tr><td>${escapeHtml(formatLookupLabel(key))}</td><td>${renderReadableLookupValue(value)}</td></tr>`);
+    return rows.join("");
+  }).join("");
+}
+
+function renderPanelEmptyContent(target, {emptyText = "No rows available.", redaction = {}} = {}) {
+  const element = typeof target === "string" ? qs(target) : target;
+  const redactionNote = redaction.model_inputs ? ` Model inputs ${redaction.model_inputs}.` : "";
+  element.innerHTML = `<p class="panel-empty">${escapeHtml(emptyText + redactionNote)}</p>`;
+}
+
+function firstObjectItem(items) {
+  return items.find((item) => item && typeof item === "object" && !Array.isArray(item)) || {};
+}
+
+function formatCharacterProse(value) {
+  return formatLookupValue(value).replace(/;\s+/g, "\n");
+}
+
+function detailChip(label, value) {
+  if (value === null || value === undefined || value === "") return "";
+  return `<span class="detail-chip"><span>${escapeHtml(formatLookupLabel(label))}</span>${escapeHtml(formatLookupValue(value))}</span>`;
+}
+
+function detailChipRow(entries) {
+  const chips = entries
+    .map(([label, value]) => detailChip(label, value))
+    .filter(Boolean)
+    .join("");
+  return chips ? `<div class="detail-chip-row">${chips}</div>` : "";
+}
+
+function renderDetailGrid(entries) {
+  const rows = entries
+    .filter(([, value]) => value !== null && value !== undefined && value !== "")
+    .map(([label, value]) => `
+      <div class="detail-kv">
+        <span class="detail-label">${escapeHtml(formatLookupLabel(label))}</span>
+        <span class="detail-value">${escapeHtml(formatCharacterProse(value))}</span>
+      </div>
+    `)
+    .join("");
+  return rows ? `<div class="detail-grid">${rows}</div>` : "";
+}
+
+function renderCharacterProfilePanel(target, {items = [], emptyText = "No character profile rows.", redaction = {}} = {}) {
+  const element = typeof target === "string" ? qs(target) : target;
+  if (!items.length) {
+    renderPanelEmptyContent(element, {emptyText, redaction});
+    return;
+  }
+  const item = firstObjectItem(items);
+  const knownFields = new Set(["name", "description", "gender", "age", "birthday", "personality_brief", "updated_at"]);
+  const name = formatLookupValue(item.name || "Character");
+  const description = item.description ? formatCharacterProse(item.description) : "";
+  const personality = item.personality_brief && typeof item.personality_brief === "object"
+    ? Object.entries(item.personality_brief)
+    : [];
+  const extraDetails = Object.entries(item).filter(([key, value]) => (
+    !knownFields.has(key) && value !== null && value !== undefined && value !== ""
+  ));
+  element.innerHTML = `
+    <section class="character-summary">
+      <div class="character-heading">
+        <div>
+          <h4 class="character-title">${escapeHtml(name)}</h4>
+          ${item.updated_at ? `<span class="detail-muted">updated ${escapeHtml(formatLookupValue(item.updated_at))}</span>` : ""}
+        </div>
+        ${detailChipRow([
+          ["gender", item.gender],
+          ["age", item.age],
+          ["birthday", item.birthday],
+        ])}
+      </div>
+      ${description ? `<p class="character-prose">${escapeHtml(description)}</p>` : ""}
+      ${personality.length ? `
+        <section class="detail-section">
+          <h5>Personality brief</h5>
+          ${renderDetailGrid(personality)}
+        </section>
+      ` : ""}
+      ${extraDetails.length ? `
+        <section class="detail-section">
+          <h5>Additional profile</h5>
+          ${renderDetailGrid(extraDetails)}
+        </section>
+      ` : ""}
+    </section>
+  `;
+}
+
+function recentWindowEntries(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) {
+    return value.slice(0, 8).map((item) => {
+      if (item && typeof item === "object" && !Array.isArray(item)) {
+        const timestamp = item.timestamp || item.updated_at || item.date || item.year || "";
+        const summary = item.summary || (item.title ? `title: ${formatLookupValue(item.title)}` : "");
+        if (summary) return {timestamp, summary};
+        const fallbackEntries = Object.entries(item).filter(([key]) => !["timestamp", "updated_at", "date", "year"].includes(key));
+        return {timestamp, summary: formatLookupValue(Object.fromEntries(fallbackEntries))};
+      }
+      return {timestamp: "", summary: formatLookupValue(item)};
+    }).filter((entry) => entry.summary);
+  }
+  if (typeof value === "object") {
+    return recentWindowEntries([value]);
+  }
+  const text = String(value).trim();
+  const entries = [];
+  const pattern = /timestamp:\s*([^;]+);\s*summary:\s*([^;]+)/gi;
+  let match = pattern.exec(text);
+  while (match) {
+    entries.push({timestamp: match[1].trim(), summary: match[2].trim()});
+    match = pattern.exec(text);
+  }
+  if (entries.length) return entries;
+  return text
+    .split(/\s*;\s*/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((summary) => ({timestamp: "", summary}));
+}
+
+function renderTimeline(entries) {
+  if (!entries.length) return "";
+  return `
+    <div class="timeline-list">
+      ${entries.map((entry) => `
+        <article class="timeline-item">
+          ${entry.timestamp ? `<span class="detail-muted">${escapeHtml(formatLookupValue(entry.timestamp))}</span>` : ""}
+          <p>${escapeHtml(formatCharacterProse(entry.summary))}</p>
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
+function formatTraitStrength(value) {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue)) return value;
+  return String(Math.round(numberValue * 1000) / 1000);
+}
+
+function renderCharacterSelfImagePanel(target, {items = [], emptyText = "No self-image rows.", redaction = {}} = {}) {
+  const element = typeof target === "string" ? qs(target) : target;
+  if (!items.length) {
+    renderPanelEmptyContent(element, {emptyText, redaction});
+    return;
+  }
+  const item = firstObjectItem(items);
+  const historicalSummary = item.historical_summary || item.current_self_concept || item.summary || "";
+  const recentEntries = recentWindowEntries(item.recent_window);
+  const milestoneEntries = recentWindowEntries(item.milestones);
+  element.innerHTML = `
+    <section class="character-summary">
+      ${recentEntries.length ? `
+        <section class="detail-section">
+          <h5>Recent window</h5>
+          ${renderTimeline(recentEntries)}
+        </section>
+      ` : ""}
+      ${milestoneEntries.length ? `
+        <section class="detail-section">
+          <h5>Milestones</h5>
+          ${renderTimeline(milestoneEntries)}
+        </section>
+      ` : ""}
+      ${historicalSummary ? `
+        <section class="detail-section">
+          <h5>Long-term self-image</h5>
+          <p class="character-prose">${escapeHtml(formatCharacterProse(historicalSummary))}</p>
+        </section>
+      ` : ""}
+      ${detailChipRow([
+        ["last updated", item.last_updated || item.updated_at],
+        ["synthesis count", item.synthesis_count],
+      ])}
+    </section>
+  `;
+}
+
+function renderCharacterGrowthPanel(target, {items = [], emptyText = "No growth traits.", redaction = {}} = {}) {
+  const element = typeof target === "string" ? qs(target) : target;
+  if (!items.length) {
+    renderPanelEmptyContent(element, {emptyText, redaction});
+    return;
+  }
+  element.innerHTML = items.map((item) => {
+    const title = item.trait_name || item.growth_axis || "Growth trait";
+    const guidance = item.guidance || item.summary || "";
+    return `
+      <article class="trait-card">
+        <div class="trait-header">
+          <div>
+            <h4>${escapeHtml(formatLookupValue(title))}</h4>
+            ${item.updated_at ? `<span class="detail-muted">updated ${escapeHtml(formatLookupValue(item.updated_at))}</span>` : ""}
+          </div>
+          ${item.status ? `<span class="badge success">${escapeHtml(formatLookupValue(item.status))}</span>` : ""}
+        </div>
+        ${detailChipRow([
+          ["axis", item.growth_axis],
+          ["maturity", item.maturity_band],
+          ["evidence", item.evidence_count],
+          ["strength", formatTraitStrength(item.strength)],
+        ])}
+        ${guidance ? `<p class="character-prose">${escapeHtml(formatCharacterProse(guidance))}</p>` : ""}
+      </article>
+    `;
+  }).join("");
+}
+
 function renderMemoryUnitRows(target, {items = [], emptyText = "No memory rows available.", redaction = {}} = {}) {
   const element = typeof target === "string" ? qs(target) : target;
   if (!items.length) {
@@ -1393,12 +1624,14 @@ function renderMemoryUnitRows(target, {items = [], emptyText = "No memory rows a
     const typeText = formatLookupLabel(item.unit_type || "memory");
     const statusText = item.status ? formatLookupLabel(item.status) : "";
     const factText = formatLookupValue(item.fact || item.subjective_appraisal || item.relationship_signal);
-    const primaryMeta = memoryMeta([statusText]);
+    const primaryMeta = memoryMeta([
+      statusText,
+      item.updated_at ? `updated: ${formatLookupValue(item.updated_at)}` : "",
+      item.last_seen_at && !item.updated_at ? `last seen: ${formatLookupValue(item.last_seen_at)}` : "",
+    ]);
     const detailMeta = memoryMeta([
       item.relationship_signal ? `relationship: ${formatLookupValue(item.relationship_signal)}` : "",
       item.subjective_appraisal ? `appraisal: ${formatLookupValue(item.subjective_appraisal)}` : "",
-      item.updated_at ? `updated: ${formatLookupValue(item.updated_at)}` : "",
-      item.last_seen_at && !item.updated_at ? `last seen: ${formatLookupValue(item.last_seen_at)}` : "",
       item.due_at ? `due: ${formatLookupValue(item.due_at)}` : "",
     ]);
     return `
@@ -1424,11 +1657,19 @@ function renderStyleOverlayRows(target, {items = [], scopeLabel = "style"} = {})
   }
   element.innerHTML = items.map((item, index) => {
     const separator = index < items.length - 1 ? `<tr class="table-row-separator"><td colspan="2"></td></tr>` : "";
+    const meta = memoryMeta([
+      item.field ? formatLookupLabel(item.field) : "",
+      item.scope ? `scope: ${formatLookupValue(item.scope)}` : "",
+      item.confidence ? `confidence: ${formatLookupValue(item.confidence)}` : "",
+    ]);
     const rows = `
-      <tr><td>Scope</td><td>${escapeHtml(item.scope || scopeLabel)}</td></tr>
-      <tr><td>Field</td><td>${escapeHtml(formatLookupLabel(item.field || "-"))}</td></tr>
-      <tr><td>Guidance</td><td>${escapeHtml(formatLookupValue(item.guidelines || []))}</td></tr>
-      <tr><td>Confidence</td><td>${escapeHtml(item.confidence || "-")}</td></tr>
+      <tr>
+        <td>Guidance</td>
+        <td>
+          <span class="table-primary">${escapeHtml(formatLookupValue(item.guidelines || []))}</span>
+          ${meta ? `<span class="table-meta">${escapeHtml(meta)}</span>` : ""}
+        </td>
+      </tr>
       ${separator}
     `;
     return rows;
@@ -1448,29 +1689,11 @@ function renderStyleOverlayPanel(target, panel, {scopeLabel = "style"} = {}) {
   renderStyleOverlayRows(target, {items, scopeLabel});
 }
 
-function hasLineageFields(panel) {
-  if (!panel) return false;
-  const sourceIds = Array.isArray(panel.source_reflection_run_ids) ? panel.source_reflection_run_ids : [];
-  const evidenceRefs = Array.isArray(panel.evidence_refs) ? panel.evidence_refs : [];
-  return Boolean(panel.revision || panel.updated_at || sourceIds.length || evidenceRefs.length);
-}
-
-function renderLineageRows(target, {revision = "", updated_at = "", source_reflection_run_ids = [], evidence_refs = []} = {}) {
-  const element = typeof target === "string" ? qs(target) : target;
-  const rows = [
-    ["Revision", revision || "-"],
-    ["Updated", updated_at || "-"],
-    ["Source runs", source_reflection_run_ids.length ? `${source_reflection_run_ids.length} redacted refs` : "-"],
-    ["Evidence", evidence_refs.length ? `${evidence_refs.length} bounded refs` : "-"],
-  ];
-  element.innerHTML = rows.map(([label, value]) => `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(value)}</td></tr>`).join("");
-}
-
 async function refreshCharacter() {
   const payload = await api("/api/entities/character?limit=25");
   setEntityStatus("#character-status", payload.status || "unavailable");
   const panels = payload.panels || {};
-  renderLookupTable("#character-profile-table", {
+  renderCharacterProfilePanel("#character-profile-table", {
     items: panelItems(panels.profile),
     emptyText: panelEmptyText(panels.profile, "No character profile rows."),
     redaction: payload.redaction || {},
@@ -1480,19 +1703,14 @@ async function refreshCharacter() {
     emptyText: panelEmptyText(panels.state, "No character state rows."),
     redaction: payload.redaction || {},
   });
-  renderLookupTable("#character-self-image-table", {
+  renderCharacterSelfImagePanel("#character-self-image-table", {
     items: panelItems(panels.self_image),
     emptyText: panelEmptyText(panels.self_image, "No self-image rows."),
     redaction: payload.redaction || {},
   });
-  renderLookupTable("#character-growth-table", {
+  renderCharacterGrowthPanel("#character-growth-table", {
     items: panelItems(panels.growth),
     emptyText: panelEmptyText(panels.growth, "No growth traits."),
-    redaction: payload.redaction || {},
-  });
-  renderLookupTable("#character-memory-table", {
-    items: panelItems(panels.memory),
-    emptyText: panelEmptyText(panels.memory, "No character memory rows."),
     redaction: payload.redaction || {},
   });
   renderLookupTable("#character-learning-table", {
@@ -1509,8 +1727,7 @@ async function refreshUsers(showNeedsInput = true) {
   if (!platform || !platformUserId) {
     setEntityStatus("#users-status", "needs input");
     if (showNeedsInput) {
-      renderPanelState("#user-profile-table", {status: "needs_input", reason: "Enter platform and platform user ID to load user panels."});
-      renderPanelState("#user-relationship-table", {status: "needs_input", reason: "Enter platform and platform user ID to load relationship summary."});
+      renderPanelState("#user-profile-table", {status: "needs_input", reason: "Enter platform and platform user ID to load user profile and relationship."});
       renderPanelState("#user-memory-table", {status: "needs_input", reason: "Enter platform and platform user ID to load user memory."});
       renderPanelState("#user-style-table", {status: "needs_input", reason: "Enter platform and platform user ID to load user style."});
     }
@@ -1522,14 +1739,18 @@ async function refreshUsers(showNeedsInput = true) {
   const payload = await api(`/api/entities/user?${params.toString()}`);
   setEntityStatus("#users-status", payload.status || "unavailable");
   const panels = payload.panels || {};
-  renderLookupTable("#user-profile-table", {
-    items: panelItems(panels.profile),
-    emptyText: panelEmptyText(panels.profile, "No user profile rows."),
-    redaction: payload.redaction || {},
-  });
-  renderLookupTable("#user-relationship-table", {
-    items: panelItems(panels.relationship),
-    emptyText: panelEmptyText(panels.relationship, "No relationship rows."),
+  const relationshipRows = panelItems(panels.relationship);
+  const relationshipItem = relationshipRows.reduce((row, item) => {
+    if (item && item.key) row[item.key] = item.value;
+    return row;
+  }, {});
+  const profileItems = panelItems(panels.profile);
+  const mergedProfileItems = Object.keys(relationshipItem).length
+    ? [...profileItems, relationshipItem]
+    : profileItems;
+  renderReadableLookupTable("#user-profile-table", {
+    items: mergedProfileItems,
+    emptyText: panelEmptyText(panels.profile, panelEmptyText(panels.relationship, "No user profile rows.")),
     redaction: payload.redaction || {},
   });
   renderMemoryUnitRows("#user-memory-table", {
@@ -1549,8 +1770,6 @@ async function refreshGroups(showNeedsInput = true) {
     setEntityStatus("#groups-status", "needs input");
     if (showNeedsInput) {
       renderPanelState("#group-style-table", {status: "needs_input", reason: "Enter platform and group ID to load group style."});
-      renderPanelState("#group-progress-table", {status: "needs_input", reason: "Enter platform and group ID to load group progress."});
-      renderPanelState("#group-guidance-table", {status: "needs_input", reason: "Enter platform and group ID to load reflection-derived guidance."});
     }
     return;
   }
@@ -1562,31 +1781,6 @@ async function refreshGroups(showNeedsInput = true) {
   renderStyleOverlayPanel("#group-style-table", panels.style, {
     scopeLabel: "group style",
   });
-  renderLookupTable("#group-progress-table", {
-    items: panelItems(panels.progress),
-    emptyText: panelEmptyText(panels.progress, "No group progress rows."),
-    redaction: payload.redaction || {},
-  });
-  if (panelItems(panels.guidance).length) {
-    renderLookupTable("#group-guidance-table", {
-      items: panelItems(panels.guidance),
-      emptyText: panelEmptyText(panels.guidance, "No group guidance rows."),
-      redaction: payload.redaction || {},
-    });
-  } else if (hasLineageFields(panels.guidance)) {
-    renderLineageRows("#group-guidance-table", {
-      revision: panels.guidance?.revision || "",
-      updated_at: panels.guidance?.updated_at || panels.guidance?.generated_at || "",
-      source_reflection_run_ids: panels.guidance?.source_reflection_run_ids || [],
-      evidence_refs: panels.guidance?.evidence_refs || [],
-    });
-  } else {
-    renderPanelState("#group-guidance-table", {
-      status: panels.guidance?.status || "empty",
-      reason: panels.guidance?.reason || "No group guidance rows.",
-      generated_at: panels.guidance?.generated_at || "",
-    });
-  }
 }
 
 async function refreshCalendar() {
@@ -1909,14 +2103,14 @@ qs("#refresh-events").addEventListener("click", () => runButtonAction(
 ));
 qs("#refresh-users").addEventListener("click", () => runButtonAction(
   qs("#refresh-users"),
-  "Loading user profile...",
-  "User panels updated.",
+  "Searching user...",
+  "User search complete.",
   refreshUsers,
 ));
 qs("#refresh-groups").addEventListener("click", () => runButtonAction(
   qs("#refresh-groups"),
-  "Loading group context...",
-  "Group panels updated.",
+  "Searching group...",
+  "Group search complete.",
   refreshGroups,
 ));
 qs("#refresh-calendar").addEventListener("click", () => runButtonAction(

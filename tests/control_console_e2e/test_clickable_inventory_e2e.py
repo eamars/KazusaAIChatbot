@@ -105,7 +105,7 @@ def test_operator_actions_use_in_page_feedback_not_blocking_alerts(
                 "page": "users",
                 "button": "#refresh-users",
                 "endpoint": "/api/entities/user",
-                "loading": "Loading user profile",
+                "loading": "Searching user",
                 "setup": """() => {
                   document.querySelector('#user-platform').value = 'qq';
                   document.querySelector('#user-platform-user-id').value = 'e2e-user';
@@ -115,7 +115,7 @@ def test_operator_actions_use_in_page_feedback_not_blocking_alerts(
                 "page": "groups",
                 "button": "#refresh-groups",
                 "endpoint": "/api/entities/group",
-                "loading": "Loading group context",
+                "loading": "Searching group",
                 "setup": """() => {
                   document.querySelector('#group-platform').value = 'debug';
                   document.querySelector('#group-id').value = 'e2e-group';

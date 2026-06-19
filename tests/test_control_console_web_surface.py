@@ -139,15 +139,18 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert 'id="user-platform-user-id"' in index.text
     assert 'id="user-query"' in index.text
     assert 'id="refresh-users"' in index.text
+    assert 'id="refresh-users" type="button">Search</button>' in index.text
     assert 'id="user-profile-table"' in index.text
+    assert 'id="user-relationship-table"' not in index.text
     assert 'id="user-memory-table"' in index.text
     assert 'id="user-style-table"' in index.text
     assert '<select class="input" id="group-platform"' in index.text
     assert 'id="group-id"' in index.text
     assert 'id="refresh-groups"' in index.text
+    assert 'id="refresh-groups" type="button">Search</button>' in index.text
     assert 'id="group-style-table"' in index.text
-    assert 'id="group-progress-table"' in index.text
-    assert 'id="group-guidance-table"' in index.text
+    assert 'id="group-progress-table"' not in index.text
+    assert 'id="group-guidance-table"' not in index.text
     assert 'id="calendar-status"' in index.text
     assert 'id="refresh-calendar"' in index.text
     assert 'id="calendar-table"' in index.text
@@ -198,8 +201,13 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert 'id="character-state-table"' in index.text
     assert 'id="character-self-image-table"' in index.text
     assert 'id="character-growth-table"' in index.text
-    assert 'id="character-memory-table"' in index.text
+    assert 'id="character-memory-table"' not in index.text
     assert 'id="character-learning-table"' in index.text
+    assert "promoted only" not in index.text
+    assert "Character Memory" not in index.text
+    assert "Job browser" not in index.text
+    assert "payload browsing not exposed" not in index.text
+    assert "Mongo mirror not implemented" not in index.text
     assert 'id="login-form"' in index.text
     assert 'id="ui-notice"' in index.text
     assert 'aria-live="polite"' in index.text
@@ -252,10 +260,10 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert "function showNotice" in script.text
     assert "function runButtonAction" in script.text
     assert "alert(" not in script.text
-    assert "Loading user profile..." in script.text
+    assert "Searching user..." in script.text
     assert "refreshUsers" in script.text
     assert "/api/entities/user" in script.text
-    assert "Loading group context..." in script.text
+    assert "Searching group..." in script.text
     assert "refreshGroups" in script.text
     assert "/api/entities/group" in script.text
     assert "renderLookupTable" in script.text
