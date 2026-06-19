@@ -117,29 +117,37 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
         '<button class="nav-link" data-page-link="services" disabled '
         'aria-disabled="true">'
     ) in index.text
-    assert 'data-page-link="memory"' in index.text
-    assert 'data-page-link="style"' in index.text
+    assert 'data-page-link="memory"' not in index.text
+    assert 'data-page-link="style"' not in index.text
+    assert 'data-page-link="users"' in index.text
+    assert 'data-page-link="groups"' in index.text
     assert 'data-page-link="calendar"' in index.text
     assert 'data-page-link="background"' in index.text
-    assert 'data-page="memory"' in index.text
-    assert 'data-page="style"' in index.text
+    assert 'data-page="memory"' not in index.text
+    assert 'data-page="style"' not in index.text
+    assert 'data-page="users"' in index.text
+    assert 'data-page="groups"' in index.text
     assert 'data-page="calendar"' in index.text
     assert 'data-page="background"' in index.text
     assert 'id="memory-global-user-id"' not in index.text
-    assert '<select class="input" id="memory-platform"' in index.text
+    assert 'id="style-global-user-id"' not in index.text
+    assert 'id="user-global-user-id"' not in index.text
+    assert '<select class="input" id="user-platform"' in index.text
     assert 'value="qq">QQ (NapCat)</option>' in index.text
     assert 'value="discord">Discord</option>' in index.text
     assert 'value="debug">Debug</option>' in index.text
-    assert 'id="memory-platform-user-id"' in index.text
-    assert 'id="memory-query"' in index.text
-    assert 'id="refresh-memory"' in index.text
-    assert 'id="memory-table"' in index.text
-    assert 'id="style-global-user-id"' not in index.text
-    assert '<select class="input" id="style-platform"' in index.text
-    assert 'id="style-platform-user-id"' in index.text
-    assert 'id="style-channel-id"' in index.text
-    assert 'id="refresh-style"' in index.text
-    assert 'id="style-table"' in index.text
+    assert 'id="user-platform-user-id"' in index.text
+    assert 'id="user-query"' in index.text
+    assert 'id="refresh-users"' in index.text
+    assert 'id="user-profile-table"' in index.text
+    assert 'id="user-memory-table"' in index.text
+    assert 'id="user-style-table"' in index.text
+    assert '<select class="input" id="group-platform"' in index.text
+    assert 'id="group-id"' in index.text
+    assert 'id="refresh-groups"' in index.text
+    assert 'id="group-style-table"' in index.text
+    assert 'id="group-progress-table"' in index.text
+    assert 'id="group-guidance-table"' in index.text
     assert 'id="calendar-status"' in index.text
     assert 'id="refresh-calendar"' in index.text
     assert 'id="calendar-table"' in index.text
@@ -186,8 +194,12 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert 'id="health-brain-status"' in index.text
     assert 'id="health-cache-table"' in index.text
     assert 'id="health-runtime-table"' in index.text
+    assert 'id="character-profile-table"' in index.text
     assert 'id="character-state-table"' in index.text
+    assert 'id="character-self-image-table"' in index.text
     assert 'id="character-growth-table"' in index.text
+    assert 'id="character-memory-table"' in index.text
+    assert 'id="character-learning-table"' in index.text
     assert 'id="login-form"' in index.text
     assert 'id="ui-notice"' in index.text
     assert 'aria-live="polite"' in index.text
@@ -240,20 +252,21 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert "function showNotice" in script.text
     assert "function runButtonAction" in script.text
     assert "alert(" not in script.text
-    assert "Loading memory..." in script.text
-    assert "refreshMemory" in script.text
-    assert "/api/lookups/memory" in script.text
-    assert "Loading interaction style..." in script.text
-    assert "refreshStyle" in script.text
-    assert "/api/lookups/style" in script.text
+    assert "Loading user profile..." in script.text
+    assert "refreshUsers" in script.text
+    assert "/api/entities/user" in script.text
+    assert "Loading group context..." in script.text
+    assert "refreshGroups" in script.text
+    assert "/api/entities/group" in script.text
+    assert "renderLookupTable" in script.text
+    assert "renderPanelState" in script.text
     assert "Loading calendar..." in script.text
     assert "refreshCalendar" in script.text
     assert "/api/lookups/calendar" in script.text
     assert "Loading background work..." in script.text
     assert "refreshBackground" in script.text
     assert "/api/lookups/background" in script.text
-    assert "/api/character/status" in script.text
-    assert "/api/character/growth" in script.text
+    assert "/api/entities/character" in script.text
     assert "#health-brain-status" in script.text
     assert "debugResponseBody(result)" in script.text
     assert "function renderCognitionGraph" in script.text
@@ -341,7 +354,13 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert "repeat(auto-fit, minmax(min(280px, 100%), 1fr))" in (
         stylesheet.text
     )
-    assert "repeat(auto-fit, minmax(min(320px, 100%), 1fr))" in (
+    assert ".content-grid { display: grid; gap: 12px; align-items: start; }" in (
+        stylesheet.text
+    )
+    assert "repeat(2, minmax(min(320px, 100%), 1fr))" in (
+        stylesheet.text
+    )
+    assert ".content-grid.two { grid-template-columns: 1fr; }" in (
         stylesheet.text
     )
     assert ".table-wrap { overflow: auto;" in stylesheet.text
@@ -353,18 +372,21 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     capabilities = bootstrap.json()["page_capabilities"]
     assert capabilities["debug"]["label"] == "brain gated"
     assert capabilities["health"]["label"] == "runtime gated"
+    assert "memory" not in capabilities
+    assert "style" not in capabilities
+    assert capabilities["users"]["label"] == "platform lookup"
+    assert capabilities["groups"]["label"] == "group lookup"
 
     favicon = client.get("/favicon.ico")
     assert favicon.status_code == 200
     assert favicon.headers["content-type"] == "image/png"
 
-    lookup = client.get("/api/lookups/style?limit=7")
+    lookup = client.get("/api/entities/group?limit=7")
     assert lookup.status_code == 200
     payload = lookup.json()
-    assert payload["items"] == []
-    assert payload["next_cursor"] is None
     assert payload["status"] == "needs_input"
-    assert payload["redaction"]["source_run_ids"] == "excluded"
+    assert payload["owner"] == "group"
+    assert payload["panels"]["style"]["items"] == []
     assert payload["redaction"]["model_inputs"] == "excluded"
 
 

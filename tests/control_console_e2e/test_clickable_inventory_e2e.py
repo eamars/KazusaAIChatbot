@@ -102,24 +102,23 @@ def test_operator_actions_use_in_page_feedback_not_blocking_alerts(
 
         refresh_cases = [
             {
-                "page": "memory",
-                "button": "#refresh-memory",
-                "endpoint": "/api/lookups/memory",
-                "loading": "Loading memory",
+                "page": "users",
+                "button": "#refresh-users",
+                "endpoint": "/api/entities/user",
+                "loading": "Loading user profile",
                 "setup": """() => {
-                  document.querySelector('#memory-platform').value = 'qq';
-                  document.querySelector('#memory-platform-user-id').value = 'e2e-user';
+                  document.querySelector('#user-platform').value = 'qq';
+                  document.querySelector('#user-platform-user-id').value = 'e2e-user';
                 }""",
             },
             {
-                "page": "style",
-                "button": "#refresh-style",
-                "endpoint": "/api/lookups/style",
-                "loading": "Loading interaction style",
+                "page": "groups",
+                "button": "#refresh-groups",
+                "endpoint": "/api/entities/group",
+                "loading": "Loading group context",
                 "setup": """() => {
-                  document.querySelector('#style-platform').value = 'debug';
-                  document.querySelector('#style-platform-user-id').value = 'e2e-user';
-                  document.querySelector('#style-channel-id').value = 'e2e-group';
+                  document.querySelector('#group-platform').value = 'debug';
+                  document.querySelector('#group-id').value = 'e2e-group';
                 }""",
             },
             {

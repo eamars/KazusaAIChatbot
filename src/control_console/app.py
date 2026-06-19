@@ -720,7 +720,7 @@ def create_app(
 
     @app.get("/api/lookups/memory")
     async def lookup_memory(
-        query: str = "",
+        query: str = Query(default="", max_length=240),
         platform: str | None = Query(default=None, max_length=80),
         platform_user_id: str | None = Query(default=None, max_length=120),
         limit: int = Query(default=25, ge=1, le=100),
@@ -855,6 +855,91 @@ def create_app(
                 "raw_messages": "excluded",
             },
         }
+        return payload
+
+    @app.get("/api/entities/character")
+    async def character_entity(
+        limit: int = Query(default=25, ge=1, le=100),
+        operator: ControlConsoleOperator = Depends(current_operator),
+    ) -> dict[str, Any]:
+        """Return the owner-oriented character inspection envelope."""
+
+        lookup_query = ConsoleLookupQuery.model_validate({"limit": limit})
+        audit_writer.write_event(
+            event_type="lookup_view",
+            operator_id=operator.operator_id,
+            target={
+                "namespace": "entity.character",
+                "limit": lookup_query.limit,
+            },
+        )
+        payload = await repository.character_entity(limit=lookup_query.limit)
+        return payload
+
+    @app.get("/api/entities/user")
+    async def user_entity(
+        query: str = Query(default="", max_length=240),
+        platform: str | None = Query(default=None, max_length=80),
+        platform_user_id: str | None = Query(default=None, max_length=120),
+        limit: int = Query(default=25, ge=1, le=100),
+        operator: ControlConsoleOperator = Depends(current_operator),
+    ) -> dict[str, Any]:
+        """Return a platform-facing user owner inspection envelope."""
+
+        lookup_query = ConsoleLookupQuery.model_validate({
+            "query": query,
+            "platform": platform,
+            "platform_user_id": platform_user_id,
+            "limit": limit,
+        })
+        audit_writer.write_event(
+            event_type="lookup_view",
+            operator_id=operator.operator_id,
+            target={
+                "namespace": "entity.user",
+                "query": lookup_query.query,
+                "platform": lookup_query.platform or "",
+                "has_platform_user_id": bool(lookup_query.platform_user_id),
+                "limit": lookup_query.limit,
+            },
+        )
+        payload = await repository.lookup_user_entity(
+            platform=lookup_query.platform or "",
+            platform_user_id=lookup_query.platform_user_id or "",
+            query=lookup_query.query,
+            limit=lookup_query.limit,
+        )
+        return payload
+
+    @app.get("/api/entities/group")
+    async def group_entity(
+        platform: str | None = Query(default=None, max_length=80),
+        group_id: str | None = Query(default=None, max_length=120),
+        limit: int = Query(default=25, ge=1, le=100),
+        operator: ControlConsoleOperator = Depends(current_operator),
+    ) -> dict[str, Any]:
+        """Return a platform-facing group owner inspection envelope."""
+
+        lookup_query = ConsoleLookupQuery.model_validate({
+            "platform": platform,
+            "group_id": group_id,
+            "limit": limit,
+        })
+        audit_writer.write_event(
+            event_type="lookup_view",
+            operator_id=operator.operator_id,
+            target={
+                "namespace": "entity.group",
+                "platform": lookup_query.platform or "",
+                "has_group_id": bool(lookup_query.group_id),
+                "limit": lookup_query.limit,
+            },
+        )
+        payload = await repository.lookup_group_entity(
+            platform=lookup_query.platform or "",
+            group_id=lookup_query.group_id or "",
+            limit=lookup_query.limit,
+        )
         return payload
 
     @app.get("/api/character/status")
@@ -1793,17 +1878,17 @@ def _page_capabilities() -> dict[str, dict[str, Any]]:
         "character": {
             "status": "partial",
             "label": "partial",
-            "reason": "Character status and growth summaries are available; raw reflection output is excluded.",
+            "reason": "Character profile, state, growth, and safe learning panels are available; raw reflection output is excluded.",
         },
-        "memory": {
+        "users": {
             "status": "partial",
-            "label": "scoped lookup",
-            "reason": "Scoped user-memory lookup is available by platform account; semantic vector search is not exposed.",
+            "label": "platform lookup",
+            "reason": "Platform-facing user profile, relationship, memory, and style panels are available.",
         },
-        "style": {
+        "groups": {
             "status": "partial",
-            "label": "scoped lookup",
-            "reason": "Interaction-style guidance lookup is available by platform account or group scope; image asset browsing is not implemented.",
+            "label": "group lookup",
+            "reason": "Platform-facing group style and safe context panels are available.",
         },
         "calendar": {
             "status": "partial",

@@ -247,6 +247,163 @@ async def test_repository_projects_user_memory_units_with_redaction() -> None:
 
 
 @pytest.mark.asyncio
+async def test_repository_composes_owner_entity_envelopes() -> None:
+    """Owner pages should group profile, memory, and style by semantic owner."""
+
+    from control_console.repository import ControlConsoleRepository
+
+    async def get_character_profile():
+        return {
+            "name": "Test Character",
+            "self_image": {
+                "summary": "quiet precision under pressure",
+                "milestones": ["accepted direct operator review"],
+            },
+            "prompt_text": "must redact",
+        }
+
+    async def get_character_runtime_state():
+        return {
+            "mood": "focused",
+            "global_vibe": "steady",
+            "reflection_summary": "short safe summary",
+        }
+
+    async def list_growth_traits(*, limit: int):
+        assert limit == 12
+        return [{
+            "trait_id": "trait-1",
+            "growth_axis": "operator trust",
+            "status": "active",
+            "maturity_band": "promoted",
+        }]
+
+    async def find_user_profile_by_identifier(
+        *,
+        identifier: str,
+        platform: str | None = None,
+    ) -> dict[str, object] | None:
+        assert identifier == "platform-user-1"
+        assert platform == "qq"
+        return {
+            "global_user_id": "global-user-1",
+            "affinity": 742,
+            "relationship_summary": "trusts direct review",
+            "platform_accounts": [
+                {
+                    "platform": "qq",
+                    "platform_user_id": "platform-user-1",
+                    "display_name": "Tester",
+                }
+            ],
+            "raw_prompt": "must redact",
+        }
+
+    async def query_user_memory_units(global_user_id: str, *, limit: int):
+        assert global_user_id == "global-user-1"
+        assert limit == 5
+        return [{
+            "unit_id": "unit-1",
+            "unit_type": "stable_pattern",
+            "status": "active",
+            "fact": "User wants product-grade UI checks.",
+            "embedding": [0.1],
+        }]
+
+    async def search_user_memory_units_by_keyword(
+        global_user_id: str,
+        keyword: str,
+        *,
+        limit: int,
+    ):
+        _ = global_user_id
+        _ = keyword
+        _ = limit
+        raise AssertionError("keyword helper should not run")
+
+    async def build_interaction_style_context(
+        *,
+        global_user_id: str,
+        channel_type: str,
+        platform: str,
+        platform_channel_id: str,
+    ):
+        assert platform == "qq"
+        if channel_type == "private":
+            assert global_user_id == "global-user-1"
+            assert platform_channel_id == ""
+            return {
+                "application_order": ["user_style"],
+                "user_style": {
+                    "speech_guidelines": ["be concrete"],
+                    "confidence": "high",
+                },
+            }
+
+        assert global_user_id == ""
+        assert channel_type == "group"
+        assert platform_channel_id == "group-1"
+        return {
+            "application_order": ["group_channel_style"],
+            "group_channel_style": {
+                "social_guidelines": ["keep shared context concise"],
+                "confidence": "medium",
+            },
+        }
+
+    repository = ControlConsoleRepository(
+        get_character_profile=get_character_profile,
+        get_character_runtime_state=get_character_runtime_state,
+        list_growth_traits=list_growth_traits,
+        find_user_profile_by_identifier=find_user_profile_by_identifier,
+        query_user_memory_units=query_user_memory_units,
+        search_user_memory_units_by_keyword=search_user_memory_units_by_keyword,
+        build_interaction_style_context=build_interaction_style_context,
+    )
+
+    character = await repository.character_entity(limit=5)
+    user = await repository.lookup_user_entity(
+        platform="qq",
+        platform_user_id="platform-user-1",
+        query="",
+        limit=5,
+    )
+    group = await repository.lookup_group_entity(
+        platform="qq",
+        group_id="group-1",
+        limit=5,
+    )
+
+    assert character["owner"] == "character"
+    assert character["status"] == "available"
+    assert character["panels"]["profile"]["items"][0]["name"] == "Test Character"
+    assert character["panels"]["self_image"]["items"]
+    assert character["panels"]["state"]["items"][0]["key"] == "mood"
+    assert character["panels"]["growth"]["items"][0]["trait_id"] == "trait-1"
+    assert "memory" in character["panels"]
+    assert "learning" in character["panels"]
+
+    assert user["owner"] == "user"
+    assert user["identity"]["display_name"] == "Tester"
+    assert "global_user_id" not in user["identity"]
+    assert user["panels"]["profile"]["items"][0]["affinity"] == 742
+    assert user["panels"]["relationship"]["items"]
+    assert user["panels"]["memory"]["items"][0]["unit_id"] == "unit-1"
+    assert user["panels"]["style"]["items"][0]["scope"] == "user_style"
+
+    assert group["owner"] == "group"
+    assert group["identity"] == {"platform": "qq", "group_id": "group-1"}
+    assert group["panels"]["style"]["items"][0]["scope"] == "group_channel_style"
+    assert "progress" in group["panels"]
+    assert "guidance" in group["panels"]
+
+    rendered = repr({"character": character, "user": user, "group": group})
+    assert "global-user-1" not in rendered
+    assert "embedding" not in rendered
+    assert "prompt" not in rendered
+
+
+@pytest.mark.asyncio
 async def test_repository_memory_lookup_requires_platform_user_id() -> None:
     """Memory lookup should not query all users from a blank platform account."""
 

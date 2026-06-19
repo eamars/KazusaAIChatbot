@@ -24,8 +24,8 @@
         <button class="nav-link" data-page-link="debug" disabled aria-disabled="true">Debug chat</button>
         <button class="nav-link" data-page-link="events" disabled aria-disabled="true">Event monitor</button>
         <button class="nav-link" data-page-link="character" disabled aria-disabled="true">Character</button>
-        <button class="nav-link" data-page-link="memory" disabled aria-disabled="true">Memory</button>
-        <button class="nav-link" data-page-link="style" disabled aria-disabled="true">Interaction style</button>
+        <button class="nav-link" data-page-link="users" disabled aria-disabled="true">Users</button>
+        <button class="nav-link" data-page-link="groups" disabled aria-disabled="true">Groups</button>
         <button class="nav-link" data-page-link="calendar" disabled aria-disabled="true">Calendar</button>
         <button class="nav-link" data-page-link="background" disabled aria-disabled="true">Background work</button>
         <button class="nav-link" data-page-link="health" disabled aria-disabled="true">Health/cache</button>
@@ -227,10 +227,19 @@
       </section>
 
       <section class="page" data-page="character">
-        <div class="page-intro"><div><h2>Character</h2><p>Latest character-state and growth projections stay read-only.</p></div><span class="badge">read only</span></div>
+        <div class="page-intro"><div><h2>Character</h2><p>Character-owned profile, state, self-image, growth, memory, and background learning stay read-only.</p></div><span class="badge" id="character-status">not loaded</span></div>
+        <div class="content-grid three">
+          <article class="metric" data-component="Card"><div class="metric-label">Owner</div><div class="metric-value">character</div><div class="metric-label">profile and runtime state</div></article>
+          <article class="metric" data-component="Card"><div class="metric-label">Learning</div><div class="metric-value">safe</div><div class="metric-label">promoted summaries only</div></article>
+          <article class="metric" data-component="Card"><div class="metric-label">Excluded</div><div class="metric-value">private</div><div class="metric-label">raw prompts, embeddings, raw reflection text</div></article>
+        </div>
         <div class="content-grid two">
-          <article class="card"><div class="card-header"><h3>Latest State</h3><span class="badge">partial</span></div><div class="table-wrap flush"><table><tbody id="character-state-table"><tr><td>Status</td><td>open this page after login to refresh character status</td></tr><tr><td>Reflection</td><td>summary only, no raw reflection output</td></tr></tbody></table></div></article>
-          <article class="card"><div class="card-header"><h3>Growth</h3><span class="badge">promoted only</span></div><div class="table-wrap flush"><table><tbody id="character-growth-table"><tr><td>Status</td><td>open this page after login to refresh growth traits</td></tr><tr><td>Guidance</td><td>prompt-safe projection only</td></tr></tbody></table></div></article>
+          <article class="card" data-component="Card"><div class="card-header"><h3>Profile</h3><span class="badge">character</span></div><div class="table-wrap flush"><table><tbody id="character-profile-table"><tr><td>Status</td><td>Open this page after login to load character profile.</td></tr></tbody></table></div></article>
+          <article class="card" data-component="Card"><div class="card-header"><h3>Latest State</h3><span class="badge">runtime</span></div><div class="table-wrap flush"><table><tbody id="character-state-table"><tr><td>Status</td><td>Open this page after login to refresh character status.</td></tr></tbody></table></div></article>
+          <article class="card" data-component="Card"><div class="card-header"><h3>Self Image</h3><span class="badge">profile</span></div><div class="table-wrap flush"><table><tbody id="character-self-image-table"><tr><td>Status</td><td>Open this page after login to load self-image summary.</td></tr></tbody></table></div></article>
+          <article class="card" data-component="Card"><div class="card-header"><h3>Growth</h3><span class="badge">promoted only</span></div><div class="table-wrap flush"><table><tbody id="character-growth-table"><tr><td>Status</td><td>Open this page after login to refresh growth traits.</td></tr></tbody></table></div></article>
+          <article class="card" data-component="Card"><div class="card-header"><h3>Character Memory</h3><span class="badge">safe projection</span></div><div class="table-wrap flush"><table><tbody id="character-memory-table"><tr><td>Status</td><td>Open this page after login to inspect available character-owned memory projection.</td></tr></tbody></table></div></article>
+          <article class="card" data-component="Card"><div class="card-header"><h3>Background Learning</h3><span class="badge">summary</span></div><div class="table-wrap flush"><table><tbody id="character-learning-table"><tr><td>Status</td><td>Open this page after login to inspect promoted learning summaries.</td></tr></tbody></table></div></article>
         </div>
       </section>
 
@@ -247,60 +256,62 @@
         </div>
       </section>
 
-      <section class="page" data-page="memory">
+      <section class="page" data-page="users">
         <div class="page-intro">
           <div>
-            <h2>Memory</h2>
-            <p>Scoped user-memory inspection by platform account with bounded redacted rows.</p>
+            <h2>Users</h2>
+            <p>Platform-user lookup for profile, relationship, memory, and user-scoped interaction style.</p>
           </div>
-          <span class="badge" id="memory-status">needs input</span>
+          <span class="badge" id="users-status">needs input</span>
         </div>
         <article class="card" data-component="Card">
-          <div class="card-header"><h3>Lookup Scope</h3><span class="badge">limit 25</span></div>
+          <div class="card-header"><h3>Platform User Lookup</h3><span class="badge">limit 25</span></div>
           <div class="card-content filter-row" data-component="FieldGroup">
-            <label class="field">Platform<select class="input" id="memory-platform"><option value="">Select platform</option><option value="qq">QQ (NapCat)</option><option value="discord">Discord</option><option value="debug">Debug</option></select></label>
-            <label class="field">Platform user ID<input class="input" id="memory-platform-user-id" placeholder="platform account id" /></label>
-            <label class="field">Keyword<input class="input" id="memory-query" placeholder="optional fact or relationship keyword" /></label>
-            <button class="btn primary" id="refresh-memory" type="button">Refresh</button>
+            <label class="field">Platform<select class="input" id="user-platform"><option value="">Select platform</option><option value="qq">QQ (NapCat)</option><option value="discord">Discord</option><option value="debug">Debug</option></select></label>
+            <label class="field">Platform user ID<input class="input" id="user-platform-user-id" placeholder="platform account id" /></label>
+            <label class="field">Keyword<input class="input" id="user-query" placeholder="optional memory keyword" /></label>
+            <button class="btn primary" id="refresh-users" type="button">Refresh</button>
           </div>
         </article>
         <div class="content-grid three">
-          <article class="metric" data-component="Card"><div class="metric-label">Scope</div><div class="metric-value">user</div><div class="metric-label">no all-user query</div></article>
-          <article class="metric" data-component="Card"><div class="metric-label">Search</div><div class="metric-value">recent</div><div class="metric-label">keyword when provided</div></article>
-          <article class="metric" data-component="Card"><div class="metric-label">Excluded</div><div class="metric-value">safe</div><div class="metric-label">embeddings, prompts, raw messages</div></article>
+          <article class="metric" data-component="Card"><div class="metric-label">Identity</div><div class="metric-value">platform</div><div class="metric-label">no internal user ids</div></article>
+          <article class="metric" data-component="Card"><div class="metric-label">Memory</div><div class="metric-value">user</div><div class="metric-label">recent or keyword bounded</div></article>
+          <article class="metric" data-component="Card"><div class="metric-label">Style</div><div class="metric-value">private</div><div class="metric-label">user-scoped guidance rows</div></article>
         </div>
-        <article class="card" data-component="Card">
-          <div class="card-header"><h3>Memory Units</h3><span class="badge">redacted</span></div>
-          <div class="table-wrap flush"><table><tbody id="memory-table"><tr><td>Status</td><td>Enter platform and platform user ID to load recent memory units.</td></tr></tbody></table></div>
-        </article>
+        <div class="content-grid two">
+          <article class="card" data-component="Card"><div class="card-header"><h3>Profile</h3><span class="badge">redacted</span></div><div class="table-wrap flush"><table><tbody id="user-profile-table"><tr><td>Status</td><td>Enter platform and platform user ID to load profile.</td></tr></tbody></table></div></article>
+          <article class="card" data-component="Card"><div class="card-header"><h3>Relationship</h3><span class="badge">summary</span></div><div class="table-wrap flush"><table><tbody id="user-relationship-table"><tr><td>Status</td><td>Enter platform and platform user ID to load relationship summary.</td></tr></tbody></table></div></article>
+          <article class="card" data-component="Card"><div class="card-header"><h3>User Memory</h3><span class="badge">redacted</span></div><div class="table-wrap flush"><table><tbody id="user-memory-table"><tr><td>Status</td><td>Enter platform and platform user ID to load recent memory units.</td></tr></tbody></table></div></article>
+          <article class="card" data-component="Card"><div class="card-header"><h3>User Style</h3><span class="badge">guidance</span></div><div class="table-wrap flush"><table><tbody id="user-style-table"><tr><td>Status</td><td>Enter platform and platform user ID to load interaction-style guidance.</td></tr></tbody></table></div></article>
+        </div>
       </section>
 
-      <section class="page" data-page="style">
+      <section class="page" data-page="groups">
         <div class="page-intro">
           <div>
-            <h2>Interaction style</h2>
-            <p>Read-only user and group interaction guidance used by the dialog surface.</p>
+            <h2>Groups</h2>
+            <p>Platform-group lookup for group-channel style, progress, and safe reflection-derived context.</p>
           </div>
-          <span class="badge" id="style-status">needs input</span>
+          <span class="badge" id="groups-status">needs input</span>
         </div>
         <article class="card" data-component="Card">
-          <div class="card-header"><h3>Lookup Scope</h3><span class="badge">limit 25</span></div>
+          <div class="card-header"><h3>Platform Group Lookup</h3><span class="badge">limit 25</span></div>
           <div class="card-content filter-row" data-component="FieldGroup">
-            <label class="field">Platform<select class="input" id="style-platform"><option value="">Select platform</option><option value="qq">QQ (NapCat)</option><option value="discord">Discord</option><option value="debug">Debug</option></select></label>
-            <label class="field">Platform user ID<input class="input" id="style-platform-user-id" placeholder="optional for group scope" /></label>
-            <label class="field">Group id<input class="input" id="style-channel-id" placeholder="optional platform channel or group id" /></label>
-            <button class="btn primary" id="refresh-style" type="button">Refresh</button>
+            <label class="field">Platform<select class="input" id="group-platform"><option value="">Select platform</option><option value="qq">QQ (NapCat)</option><option value="discord">Discord</option><option value="debug">Debug</option></select></label>
+            <label class="field">Group ID<input class="input" id="group-id" placeholder="platform group or channel id" /></label>
+            <button class="btn primary" id="refresh-groups" type="button">Refresh</button>
           </div>
         </article>
         <div class="content-grid three">
-          <article class="metric" data-component="Card"><div class="metric-label">Private</div><div class="metric-value">user</div><div class="metric-label">platform and user ID</div></article>
-          <article class="metric" data-component="Card"><div class="metric-label">Group</div><div class="metric-value">user + group</div><div class="metric-label">platform and group id</div></article>
-          <article class="metric" data-component="Card"><div class="metric-label">Excluded</div><div class="metric-value">safe</div><div class="metric-label">reflection ids, prompts, raw reflection text</div></article>
+          <article class="metric" data-component="Card"><div class="metric-label">Identity</div><div class="metric-value">group</div><div class="metric-label">platform-facing group id</div></article>
+          <article class="metric" data-component="Card"><div class="metric-label">Style</div><div class="metric-value">channel</div><div class="metric-label">group-channel guidance</div></article>
+          <article class="metric" data-component="Card"><div class="metric-label">Reflection</div><div class="metric-value">safe</div><div class="metric-label">no raw reflection text</div></article>
         </div>
-        <article class="card" data-component="Card">
-          <div class="card-header"><h3>Guidance Rows</h3><span class="badge">redacted</span></div>
-          <div class="table-wrap flush"><table><tbody id="style-table"><tr><td>Status</td><td>Enter a platform user or group scope to load interaction-style guidance.</td></tr></tbody></table></div>
-        </article>
+        <div class="content-grid two">
+          <article class="card" data-component="Card"><div class="card-header"><h3>Group Style</h3><span class="badge">guidance</span></div><div class="table-wrap flush"><table><tbody id="group-style-table"><tr><td>Status</td><td>Enter platform and group ID to load group-channel style.</td></tr></tbody></table></div></article>
+          <article class="card" data-component="Card"><div class="card-header"><h3>Progress</h3><span class="badge">safe context</span></div><div class="table-wrap flush"><table><tbody id="group-progress-table"><tr><td>Status</td><td>Enter platform and group ID to inspect available progress context.</td></tr></tbody></table></div></article>
+          <article class="card" data-component="Card"><div class="card-header"><h3>Reflection Guidance</h3><span class="badge">summary</span></div><div class="table-wrap flush"><table><tbody id="group-guidance-table"><tr><td>Status</td><td>Enter platform and group ID to inspect available reflection-derived guidance.</td></tr></tbody></table></div></article>
+        </div>
       </section>
 
       <section class="page" data-page="calendar">

@@ -1008,6 +1008,12 @@ The parent records review findings, remediation commits, rerun commands, and fin
 - Docs explain setup, local-only warning, OS-user permission model, shared local environment configuration, auth, service registry, lifecycle controls, event monitoring, and smoke checks.
 
 ## Execution Evidence
+- 2026-06-19 production-code subagent cross-reference: owner-oriented
+  `Character`, `Users`, and `Groups` console information architecture work is
+  tracked by
+  `development_plans/active/short_term/control_console_entity_information_architecture_plan.md`;
+  this older backend console plan no longer defines standalone top-level
+  `Memory` and `Interaction style` pages as the final sidebar structure.
 - 2026-06-17 parent: plan status changed from `draft` to `approved` after user approval, then to `in_progress` after focused-test baseline was recorded. Registry row updated to match. Sign-off: parent/2026-06-17. Next checkpoint: production-code subagent.
 - 2026-06-17 parent: mandatory skills loaded and plan reread after context compaction. Loaded `development-plan`, `py-style`, `test-style-and-execution`, `local-llm-architecture`, `build-web-apps:shadcn`, and `build-web-apps:frontend-app-builder` guidance relevant to the static UI constraints. Sign-off: parent/2026-06-17. Next checkpoint: production-code subagent.
 - 2026-06-17 parent: focused deterministic tests added:

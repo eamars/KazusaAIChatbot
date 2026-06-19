@@ -18,7 +18,7 @@ The console is not mounted by the brain service and must not change `/chat`, cog
 - Start the brain and local adapters from one operator page.
 - Inspect current service state, live process logs, lifecycle audit records, health summaries, and event summaries.
 - Send debug-chat messages through the existing brain `/chat` contract when the brain is running, with operator-selectable visible-reply, think-only, listen-only, and no-remember debug modes.
-- Browse bounded read-only character, memory, interaction-style, calendar, background-work, health/cache, event, and audit summaries.
+- Browse bounded read-only Character, Users, Groups, calendar, background-work, health/cache, event, and audit summaries.
 - Inspect due calendar runs and sanitized background-worker telemetry as partial read-only workflows; schedule editing and job payload browsing are not implemented.
 
 ## Interface boundary
@@ -50,6 +50,10 @@ The brain owns cognition and persistence coordination for chat turns. Adapters o
   `GET /api/logs/stream`,
   `GET /api/events`
 - Debug chat: `POST /api/debug-chat`
+- Owner entity inspection:
+  `GET /api/entities/character`,
+  `GET /api/entities/user`,
+  `GET /api/entities/group`
 - Lookups: `GET /api/lookups/{namespace}`
 - SSE: `GET /api/stream`
 
@@ -145,9 +149,9 @@ The current first-slice status is:
 | Services | `ready` | Registry and supervisor state |
 | Debug chat | `ready` | Existing brain `/chat` contract when brain is running |
 | Event monitor | `ready` | Local audit, process logs, and sanitized Kazusa event-log telemetry |
-| Character | `partial` | Existing character status and growth routes |
-| Memory | `partial` | Scoped `user_memory_units` recent and keyword lookup by platform account; semantic vector search and all-user browsing are not exposed |
-| Interaction style | `partial` | Scoped user and group interaction-style guidance lookup by platform account or platform group; image asset browsing is not implemented |
+| Character | `partial` | Owner-oriented profile, runtime state, self-image, growth, character-memory placeholder, and promoted/background-learning summaries where safely available |
+| Users | `partial` | Platform-facing user lookup for profile, relationship summary, `user_memory_units`, and user-scoped interaction-style guidance; internal global user ids are not browser inputs |
+| Groups | `partial` | Platform-facing group lookup for group-channel style plus explicit progress and reflection-guidance states where browser-safe summaries are unavailable |
 | Calendar | `partial` | Due `calendar_runs` inspection; schedule editing is not implemented |
 | Background work | `partial` | Sanitized `background_work.worker` event telemetry; job payload browsing is not implemented |
 | Health/cache | `partial` | Brain `/health` and `/ops/runtime-status` when brain is running |

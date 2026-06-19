@@ -11,6 +11,9 @@ from pymongo.errors import PyMongoError
 
 from control_console.redaction import redact_mapping
 from kazusa_ai_chatbot.calendar_scheduler import models as calendar_models
+from kazusa_ai_chatbot.db.character import (
+    get_character_profile as default_get_character_profile,
+)
 from kazusa_ai_chatbot.db.errors import DatabaseOperationError
 from kazusa_ai_chatbot.db.users import (
     find_user_profile_by_identifier as default_find_user_profile_by_identifier,
@@ -22,6 +25,27 @@ STYLE_GUIDELINE_FIELDS = (
     "social_guidelines",
     "pacing_guidelines",
     "engagement_guidelines",
+)
+CHARACTER_PROFILE_FIELDS = (
+    "name",
+    "description",
+    "gender",
+    "age",
+    "birthday",
+    "personality_brief",
+    "updated_at",
+)
+SELF_IMAGE_FIELDS = (
+    "summary",
+    "current_self_concept",
+    "milestones",
+    "updated_at",
+)
+USER_PROFILE_FIELDS = (
+    "affinity",
+    "relationship_summary",
+    "relationship_status",
+    "updated_at",
 )
 REPOSITORY_HELPER_ERRORS = (
     DatabaseOperationError,
@@ -102,6 +126,129 @@ class ControlConsoleRepository:
             "source": "character_state",
         }
         return identity
+
+    async def character_entity(self, *, limit: int = 25) -> dict[str, Any]:
+        """Return the owner-oriented character inspection envelope."""
+
+        profile_panel = _entity_panel(
+            status="unavailable",
+            items=[],
+            reason="character profile helper is unavailable",
+        )
+        self_image_panel = _entity_panel(
+            status="unavailable",
+            items=[],
+            reason="character profile helper is unavailable",
+        )
+        identity: dict[str, Any] = {}
+        try:
+            helper = self._get_character_profile or default_get_character_profile
+            profile = await helper()
+        except APPLICATION_IDENTITY_ERRORS as exc:
+            reason = str(exc)
+            profile_panel = _entity_panel(
+                status="unavailable",
+                items=[],
+                reason=reason,
+            )
+            self_image_panel = _entity_panel(
+                status="unavailable",
+                items=[],
+                reason=reason,
+            )
+        else:
+            if isinstance(profile, dict):
+                profile_items = _project_character_profile(profile)
+                self_image_items = _project_self_image(profile.get("self_image"))
+                identity = {
+                    "character_name": str(profile.get("name", "")).strip()[:120],
+                }
+                profile_panel = _entity_panel(
+                    status="available" if profile_items else "empty",
+                    items=profile_items[:limit],
+                    reason=(
+                        ""
+                        if profile_items
+                        else "character profile has no browser-safe fields"
+                    ),
+                )
+                self_image_panel = _entity_panel(
+                    status="available" if self_image_items else "empty",
+                    items=self_image_items[:limit],
+                    reason=(
+                        ""
+                        if self_image_items
+                        else "character self-image is not available"
+                    ),
+                )
+            else:
+                profile_panel = _entity_panel(
+                    status="unavailable",
+                    items=[],
+                    reason="character profile helper returned invalid data",
+                )
+                self_image_panel = _entity_panel(
+                    status="unavailable",
+                    items=[],
+                    reason="character profile helper returned invalid data",
+                )
+
+        state_summary = await self.latest_character_status()
+        state_items = _project_key_value_items(state_summary.get("summary", {}))
+        state_panel = _entity_panel(
+            status="available" if state_items else state_summary.get(
+                "status",
+                "empty",
+            ),
+            items=state_items[:limit],
+            reason=str(state_summary.get("reason", "")),
+        )
+
+        growth_summary = await self.global_growth_summary()
+        growth_items = [
+            item
+            for item in growth_summary.get("items", [])
+            if isinstance(item, dict)
+        ]
+        growth_panel = _entity_panel(
+            status="available" if growth_items else growth_summary.get(
+                "status",
+                "empty",
+            ),
+            items=growth_items[:limit],
+            reason=str(growth_summary.get("reason", "")),
+        )
+        learning_items = _project_learning_items(state_summary)
+
+        panels = {
+            "profile": profile_panel,
+            "self_image": self_image_panel,
+            "state": state_panel,
+            "growth": growth_panel,
+            "memory": _entity_panel(
+                status="empty",
+                items=[],
+                reason=(
+                    "shared and character memory search is not exposed by this "
+                    "read-only console surface"
+                ),
+            ),
+            "learning": _entity_panel(
+                status="available" if learning_items else "empty",
+                items=learning_items[:limit],
+                reason=(
+                    ""
+                    if learning_items
+                    else "no promoted background-learning summary is available"
+                ),
+            ),
+        }
+        envelope = _owner_entity_envelope(
+            owner="character",
+            identity=identity,
+            panels=panels,
+        )
+        return envelope
 
     async def latest_character_status(self) -> dict[str, Any]:
         """Return a bounded character-status summary."""
@@ -267,6 +414,7 @@ class ControlConsoleRepository:
             reason="",
             display_name=display_name,
             global_user_id=global_user_id,
+            profile=profile,
         )
         return resolution
 
@@ -342,6 +490,187 @@ class ControlConsoleRepository:
             identity=resolution["identity"],
         )
         return page
+
+    async def lookup_user_entity(
+        self,
+        *,
+        platform: str,
+        platform_user_id: str,
+        query: str,
+        limit: int,
+    ) -> dict[str, Any]:
+        """Return the owner-oriented user inspection envelope."""
+
+        resolution = await self._resolve_platform_user_identity(
+            platform=platform,
+            platform_user_id=platform_user_id,
+        )
+        if resolution["status"] != "resolved":
+            panels = {
+                "profile": _entity_panel(
+                    status=resolution["status"],
+                    items=[],
+                    reason=resolution["reason"],
+                ),
+                "relationship": _entity_panel(
+                    status=resolution["status"],
+                    items=[],
+                    reason=resolution["reason"],
+                ),
+                "memory": _entity_panel(
+                    status=resolution["status"],
+                    items=[],
+                    reason=resolution["reason"],
+                ),
+                "style": _entity_panel(
+                    status=resolution["status"],
+                    items=[],
+                    reason=resolution["reason"],
+                ),
+            }
+            envelope = _owner_entity_envelope(
+                owner="user",
+                identity=resolution["identity"],
+                panels=panels,
+                status=resolution["status"],
+            )
+            return envelope
+
+        profile = resolution.get("profile")
+        if not isinstance(profile, dict):
+            profile = {}
+        identity = dict(resolution["identity"])
+        profile_items = _project_user_profile(
+            profile,
+            identity=identity,
+        )
+        relationship_items = _project_relationship_items(profile)
+        memory = await self.lookup_memory(
+            platform=platform,
+            platform_user_id=platform_user_id,
+            query=query,
+            limit=limit,
+        )
+        style = await self.lookup_interaction_style(
+            platform=platform,
+            platform_user_id=platform_user_id,
+            platform_channel_id="",
+            limit=limit,
+        )
+        panels = {
+            "profile": _entity_panel(
+                status="available" if profile_items else "empty",
+                items=profile_items[:limit],
+                reason=(
+                    ""
+                    if profile_items
+                    else "user profile has no browser-safe fields"
+                ),
+            ),
+            "relationship": _entity_panel(
+                status="available" if relationship_items else "empty",
+                items=relationship_items[:limit],
+                reason=(
+                    ""
+                    if relationship_items
+                    else "relationship summary is not available"
+                ),
+            ),
+            "memory": _lookup_panel_from_page(memory),
+            "style": _lookup_panel_from_page(style),
+        }
+        envelope = _owner_entity_envelope(
+            owner="user",
+            identity=identity,
+            panels=panels,
+        )
+        return envelope
+
+    async def lookup_group_entity(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        limit: int,
+    ) -> dict[str, Any]:
+        """Return the owner-oriented group inspection envelope."""
+
+        clean_platform = platform.strip()
+        clean_group_id = group_id.strip()
+        identity = {
+            "platform": clean_platform,
+            "group_id": clean_group_id,
+        }
+        if not clean_platform and not clean_group_id:
+            status_value = "needs_input"
+            reason = "platform and group id are required"
+        elif not clean_platform:
+            status_value = "needs_input"
+            reason = "platform is required when group id is provided"
+        elif not clean_group_id:
+            status_value = "needs_input"
+            reason = "group id is required when platform is provided"
+        else:
+            status_value = ""
+            reason = ""
+
+        if status_value:
+            panels = {
+                "style": _entity_panel(
+                    status=status_value,
+                    items=[],
+                    reason=reason,
+                ),
+                "progress": _entity_panel(
+                    status=status_value,
+                    items=[],
+                    reason=reason,
+                ),
+                "guidance": _entity_panel(
+                    status=status_value,
+                    items=[],
+                    reason=reason,
+                ),
+            }
+            envelope = _owner_entity_envelope(
+                owner="group",
+                identity=identity,
+                panels=panels,
+                status=status_value,
+            )
+            return envelope
+
+        style = await self.lookup_interaction_style(
+            platform=clean_platform,
+            platform_user_id="",
+            platform_channel_id=clean_group_id,
+            limit=limit,
+        )
+        panels = {
+            "style": _lookup_panel_from_page(style),
+            "progress": _entity_panel(
+                status="empty",
+                items=[],
+                reason=(
+                    "group conversation-progress summaries are not exposed by "
+                    "this read-only console surface"
+                ),
+            ),
+            "guidance": _entity_panel(
+                status="empty",
+                items=[],
+                reason=(
+                    "reflection-derived group guidance is not available in a "
+                    "browser-safe projection"
+                ),
+            ),
+        }
+        envelope = _owner_entity_envelope(
+            owner="group",
+            identity=identity,
+            panels=panels,
+        )
+        return envelope
 
     async def empty_lookup(self, *, namespace: str) -> dict[str, Any]:
         """Return a bounded empty lookup for a not-yet-wired helper."""
@@ -562,6 +891,196 @@ def _display_name_for_platform_account(
     return return_value
 
 
+def _owner_entity_envelope(
+    *,
+    owner: str,
+    identity: dict[str, Any],
+    panels: dict[str, dict[str, Any]],
+    status: str | None = None,
+) -> dict[str, Any]:
+    """Build a browser-safe owner inspection envelope."""
+
+    status_value = status or _combined_panel_status(panels)
+    envelope = {
+        "status": status_value,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "owner": owner,
+        "identity": redact_mapping(identity),
+        "panels": panels,
+        "redaction": _owner_entity_redaction(),
+    }
+    return envelope
+
+
+def _combined_panel_status(panels: dict[str, dict[str, Any]]) -> str:
+    """Return one top-level status from child panel states."""
+
+    statuses = [
+        str(panel.get("status", "empty"))
+        for panel in panels.values()
+        if isinstance(panel, dict)
+    ]
+    if "available" in statuses:
+        status_value = "available"
+    elif "needs_input" in statuses:
+        status_value = "needs_input"
+    elif "unavailable" in statuses:
+        status_value = "unavailable"
+    else:
+        status_value = "empty"
+    return status_value
+
+
+def _entity_panel(
+    *,
+    status: str,
+    items: list[dict[str, Any]],
+    reason: str = "",
+) -> dict[str, Any]:
+    """Build one owner-page panel from bounded table rows."""
+
+    panel = {
+        "status": status,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "items": [redact_mapping(item) for item in items if isinstance(item, dict)],
+        "reason": str(reason)[:160],
+    }
+    return panel
+
+
+def _lookup_panel_from_page(page: dict[str, Any]) -> dict[str, Any]:
+    """Convert an existing lookup page into an owner-envelope panel."""
+
+    raw_items = page.get("items", [])
+    items = raw_items if isinstance(raw_items, list) else []
+    panel = _entity_panel(
+        status=str(page.get("status", "unavailable")),
+        items=[item for item in items if isinstance(item, dict)],
+        reason=str(page.get("reason", "")),
+    )
+    return panel
+
+
+def _owner_entity_redaction() -> dict[str, str]:
+    """Return the owner-envelope redaction contract."""
+
+    redaction = {
+        "model_inputs": "excluded",
+        "raw_messages": "excluded",
+        "raw_reflections": "excluded",
+        "internal_global_ids": "excluded",
+        "vector_fields": "excluded",
+    }
+    return redaction
+
+
+def _project_character_profile(profile: dict[str, Any]) -> list[dict[str, Any]]:
+    """Project character profile fields that are safe for the console."""
+
+    row = {
+        field: profile[field]
+        for field in CHARACTER_PROFILE_FIELDS
+        if field in profile and profile[field] not in (None, "")
+    }
+    items = [redact_mapping(row)] if row else []
+    return items
+
+
+def _project_self_image(value: Any) -> list[dict[str, Any]]:
+    """Project the character self-image field into table rows."""
+
+    if isinstance(value, str) and value.strip():
+        items = [{"summary": value.strip()}]
+        return items
+    if not isinstance(value, dict):
+        items: list[dict[str, Any]] = []
+        return items
+
+    row = {
+        field: value[field]
+        for field in SELF_IMAGE_FIELDS
+        if field in value and value[field] not in (None, "")
+    }
+    items = [redact_mapping(row)] if row else []
+    return items
+
+
+def _project_key_value_items(value: Any) -> list[dict[str, Any]]:
+    """Project a mapping into key/value rows."""
+
+    if not isinstance(value, dict):
+        items: list[dict[str, Any]] = []
+        return items
+
+    items = [
+        redact_mapping({"key": key, "value": item})
+        for key, item in value.items()
+        if item not in (None, "")
+    ]
+    return items
+
+
+def _project_learning_items(state_summary: dict[str, Any]) -> list[dict[str, Any]]:
+    """Project promoted learning summaries from safe character state fields."""
+
+    summary = state_summary.get("summary", {})
+    if not isinstance(summary, dict):
+        items: list[dict[str, Any]] = []
+        return items
+
+    reflection_summary = summary.get("reflection_summary")
+    if not reflection_summary:
+        items = []
+        return items
+
+    items = [redact_mapping({
+        "source": "character_state.reflection_summary",
+        "summary": reflection_summary,
+    })]
+    return items
+
+
+def _project_user_profile(
+    profile: dict[str, Any],
+    *,
+    identity: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Project a user profile without internal canonical identifiers."""
+
+    row = {
+        field: profile[field]
+        for field in USER_PROFILE_FIELDS
+        if field in profile and profile[field] not in (None, "")
+    }
+    for field in ("platform", "platform_user_id", "display_name"):
+        value = identity.get(field)
+        if value not in (None, ""):
+            row[field] = value
+
+    items = [redact_mapping(row)] if row else []
+    return items
+
+
+def _project_relationship_items(profile: dict[str, Any]) -> list[dict[str, Any]]:
+    """Project relationship-oriented user profile fields."""
+
+    rows: list[dict[str, Any]] = []
+    relationship_summary = profile.get("relationship_summary")
+    if relationship_summary:
+        rows.append({
+            "key": "relationship_summary",
+            "value": relationship_summary,
+        })
+    affinity = profile.get("affinity")
+    if affinity not in (None, ""):
+        rows.append({
+            "key": "affinity",
+            "value": affinity,
+        })
+    items = [redact_mapping(row) for row in rows]
+    return items
+
+
 def _platform_user_resolution(
     *,
     status: str,
@@ -570,6 +1089,7 @@ def _platform_user_resolution(
     reason: str,
     display_name: str = "",
     global_user_id: str = "",
+    profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build an identity-resolution result for lookup pages.
 
@@ -589,6 +1109,8 @@ def _platform_user_resolution(
             "resolution_status": status,
         },
     }
+    if profile is not None:
+        resolution["profile"] = profile
     return resolution
 
 

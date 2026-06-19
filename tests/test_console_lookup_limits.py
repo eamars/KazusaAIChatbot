@@ -32,6 +32,57 @@ def test_lookup_routes_enforce_pagination_redaction_and_no_embeddings(
         _ = self
         return {"status": "empty", "items": []}
 
+    async def character_entity(self, *, limit: int = 25):
+        _ = self
+        assert limit == 5
+        return {
+            "status": "empty",
+            "owner": "character",
+            "identity": {},
+            "panels": {},
+            "redaction": {"model_inputs": "excluded"},
+        }
+
+    async def lookup_user_entity(
+        self,
+        *,
+        platform: str,
+        platform_user_id: str,
+        query: str,
+        limit: int,
+    ):
+        _ = self
+        assert platform == ""
+        assert platform_user_id == ""
+        assert query == ""
+        assert limit == 5
+        return {
+            "status": "needs_input",
+            "owner": "user",
+            "identity": {},
+            "panels": {"memory": {"items": []}},
+            "redaction": {"embeddings": "excluded"},
+        }
+
+    async def lookup_group_entity(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        limit: int,
+    ):
+        _ = self
+        assert platform == ""
+        assert group_id == ""
+        assert limit == 5
+        return {
+            "status": "needs_input",
+            "owner": "group",
+            "identity": {},
+            "panels": {"style": {"items": []}},
+            "redaction": {"model_inputs": "excluded"},
+        }
+
     monkeypatch.setattr(
         repository_module.ControlConsoleRepository,
         "latest_character_status",
@@ -41,6 +92,24 @@ def test_lookup_routes_enforce_pagination_redaction_and_no_embeddings(
         repository_module.ControlConsoleRepository,
         "global_growth_summary",
         global_growth_summary,
+    )
+    monkeypatch.setattr(
+        repository_module.ControlConsoleRepository,
+        "character_entity",
+        character_entity,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        repository_module.ControlConsoleRepository,
+        "lookup_user_entity",
+        lookup_user_entity,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        repository_module.ControlConsoleRepository,
+        "lookup_group_entity",
+        lookup_group_entity,
+        raising=False,
     )
 
     settings = ControlConsoleSettings(
@@ -52,6 +121,11 @@ def test_lookup_routes_enforce_pagination_redaction_and_no_embeddings(
 
     rejected = client.get("/api/lookups/memory?limit=101")
     assert rejected.status_code == 422
+
+    rejected_memory_query = client.get(
+        f"/api/lookups/memory?query={'x' * 241}&limit=5",
+    )
+    assert rejected_memory_query.status_code == 422
 
     accepted = client.get("/api/lookups/memory?limit=5")
     assert accepted.status_code == 200
@@ -81,3 +155,25 @@ def test_lookup_routes_enforce_pagination_redaction_and_no_embeddings(
     growth = client.get("/api/character/growth")
     assert growth.status_code == 200
     assert growth.json()["status"] in {"unavailable", "empty", "available"}
+
+    rejected_user = client.get("/api/entities/user?limit=101")
+    assert rejected_user.status_code == 422
+
+    rejected_user_query = client.get(
+        f"/api/entities/user?query={'x' * 241}&limit=5",
+    )
+    assert rejected_user_query.status_code == 422
+
+    character_entity_page = client.get("/api/entities/character?limit=5")
+    assert character_entity_page.status_code == 200
+    assert character_entity_page.json()["owner"] == "character"
+
+    user_entity_page = client.get("/api/entities/user?limit=5")
+    assert user_entity_page.status_code == 200
+    assert user_entity_page.json()["owner"] == "user"
+    assert user_entity_page.json()["status"] == "needs_input"
+
+    group_entity_page = client.get("/api/entities/group?limit=5")
+    assert group_entity_page.status_code == 200
+    assert group_entity_page.json()["owner"] == "group"
+    assert group_entity_page.json()["status"] == "needs_input"

@@ -48,6 +48,49 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+function formatLookupLabel(value) {
+  return String(value ?? "")
+    .replaceAll("_", " ")
+    .replaceAll("-", " ");
+}
+
+function formatLookupValue(value, depth = 0) {
+  if (value === null || value === undefined || value === "") return "-";
+  if (Array.isArray(value)) {
+    if (!value.length) return "-";
+    const visibleItems = value.slice(0, 6).map((item) => formatLookupValue(item, depth + 1));
+    const extraCount = value.length - visibleItems.length;
+    if (extraCount > 0) visibleItems.push(`+${extraCount} more`);
+    return visibleItems.join("; ");
+  }
+  if (typeof value === "object") {
+    const entries = Object.entries(value)
+      .filter(([, item]) => item !== null && item !== undefined && item !== "")
+      .slice(0, 8);
+    if (!entries.length) return "-";
+    return entries
+      .map(([key, item]) => `${formatLookupLabel(key)}: ${formatLookupValue(item, depth + 1)}`)
+      .join("; ");
+  }
+  return String(value);
+}
+
+function isKeyValueItems(items) {
+  return items.length > 0 && items.every((item) => (
+    item
+    && typeof item === "object"
+    && Object.prototype.hasOwnProperty.call(item, "key")
+    && Object.prototype.hasOwnProperty.call(item, "value")
+  ));
+}
+
+function memoryMeta(parts) {
+  return parts
+    .filter((part) => part !== null && part !== undefined && part !== "")
+    .map((part) => formatLookupValue(part))
+    .join(" · ");
+}
+
 function setPage(name) {
   if (!state.isAuthenticated && name !== "overview") return;
   const targetLink = qsa("[data-page-link]").find((link) => link.dataset.pageLink === name);
@@ -62,8 +105,8 @@ function setPage(name) {
   }
   if (name === "audit" && state.csrfHeaderName) refreshAudit().catch(reportActionError);
   if (name === "character" && state.csrfHeaderName) refreshCharacter().catch(reportActionError);
-  if (name === "memory" && state.csrfHeaderName) refreshMemory(false).catch(reportActionError);
-  if (name === "style" && state.csrfHeaderName) refreshStyle(false).catch(reportActionError);
+  if (name === "users" && state.csrfHeaderName) refreshUsers(false).catch(reportActionError);
+  if (name === "groups" && state.csrfHeaderName) refreshGroups(false).catch(reportActionError);
   if (name === "calendar" && state.csrfHeaderName) refreshCalendar().catch(reportActionError);
   if (name === "background" && state.csrfHeaderName) refreshBackground().catch(reportActionError);
 }
@@ -780,8 +823,8 @@ function renderCapabilitySummary() {
     debug: "Debug chat",
     events: "Event monitor",
     character: "Character",
-    memory: "Memory",
-    style: "Interaction style",
+    users: "Users",
+    groups: "Groups",
     calendar: "Calendar",
     background: "Background work",
     health: "Health/cache",
@@ -1296,97 +1339,254 @@ function debugResponseMeta(result) {
   return parts.length ? parts.join(" | ") : "redacted response summary";
 }
 
-async function refreshCharacter() {
-  const status = await api("/api/character/status");
-  const growth = await api("/api/character/growth");
-  const summary = status.summary || {};
-  const statusRows = Object.entries(summary).map(([key, value]) => `<tr><td>${escapeHtml(key)}</td><td>${escapeHtml(value)}</td></tr>`);
-  qs("#character-state-table").innerHTML = statusRows.length
-    ? statusRows.join("")
-    : `<tr><td>Status</td><td>${escapeHtml(status.status || "unavailable")}</td></tr><tr><td>Reason</td><td>${escapeHtml(status.reason || "no character status rows")}</td></tr>`;
-
-  const items = Array.isArray(growth.items) ? growth.items : [];
-  qs("#character-growth-table").innerHTML = items.length
-    ? items.map((item) => `<tr><td>${escapeHtml(item.growth_axis || item.trait_id || "trait")}</td><td>${escapeHtml(item.status || growth.status || "available")}</td></tr>`).join("")
-    : `<tr><td>Status</td><td>${escapeHtml(growth.status || "unavailable")}</td></tr><tr><td>Reason</td><td>${escapeHtml(growth.reason || "no growth traits")}</td></tr>`;
+function panelItems(panel) {
+  return panel && Array.isArray(panel.items) ? panel.items : [];
 }
 
-async function refreshMemory(showNeedsInput = true) {
-  const platform = qs("#memory-platform").value.trim();
-  const platformUserId = qs("#memory-platform-user-id").value.trim();
-  const query = qs("#memory-query").value.trim();
+function panelEmptyText(panel, fallback) {
+  if (!panel) return fallback;
+  return panel.reason || panel.status || fallback;
+}
+
+function setEntityStatus(selector, status) {
+  const element = qs(selector);
+  element.textContent = status || "unavailable";
+  element.className = status === "available" ? "badge success" : "badge";
+}
+
+function renderPanelState(target, panel) {
+  const element = typeof target === "string" ? qs(target) : target;
+  const status = panel?.status || "unavailable";
+  const reason = panel?.reason || "No rows are available for this panel.";
+  const generatedAt = panel?.generated_at || "";
+  element.innerHTML = `<tr><td>Status</td><td>${escapeHtml(status)}</td></tr><tr><td>Reason</td><td>${escapeHtml(reason)}</td></tr>${generatedAt ? `<tr><td>Generated</td><td>${escapeHtml(generatedAt)}</td></tr>` : ""}`;
+}
+
+function renderLookupTable(target, {items = [], emptyText = "No rows available.", redaction = {}} = {}) {
+  const element = typeof target === "string" ? qs(target) : target;
+  if (!items.length) {
+    const redactionNote = redaction.model_inputs ? ` Model inputs ${redaction.model_inputs}.` : "";
+    element.innerHTML = `<tr><td>Status</td><td>${escapeHtml(emptyText + redactionNote)}</td></tr>`;
+    return;
+  }
+  if (isKeyValueItems(items)) {
+    element.innerHTML = items.map((item) => (
+      `<tr><td>${escapeHtml(formatLookupLabel(item.key))}</td><td>${escapeHtml(formatLookupValue(item.value))}</td></tr>`
+    )).join("");
+    return;
+  }
+  element.innerHTML = items.map((item) => {
+    const rows = Object.entries(item)
+      .filter(([, value]) => value !== null && value !== undefined && value !== "")
+      .map(([key, value]) => `<tr><td>${escapeHtml(formatLookupLabel(key))}</td><td>${escapeHtml(formatLookupValue(value))}</td></tr>`);
+    return rows.join("");
+  }).join("");
+}
+
+function renderMemoryUnitRows(target, {items = [], emptyText = "No memory rows available.", redaction = {}} = {}) {
+  const element = typeof target === "string" ? qs(target) : target;
+  if (!items.length) {
+    renderLookupTable(element, {items, emptyText, redaction});
+    return;
+  }
+  element.innerHTML = items.map((item) => {
+    const typeText = formatLookupLabel(item.unit_type || "memory");
+    const statusText = item.status ? formatLookupLabel(item.status) : "";
+    const factText = formatLookupValue(item.fact || item.subjective_appraisal || item.relationship_signal);
+    const primaryMeta = memoryMeta([statusText]);
+    const detailMeta = memoryMeta([
+      item.relationship_signal ? `relationship: ${formatLookupValue(item.relationship_signal)}` : "",
+      item.subjective_appraisal ? `appraisal: ${formatLookupValue(item.subjective_appraisal)}` : "",
+      item.updated_at ? `updated: ${formatLookupValue(item.updated_at)}` : "",
+      item.last_seen_at && !item.updated_at ? `last seen: ${formatLookupValue(item.last_seen_at)}` : "",
+      item.due_at ? `due: ${formatLookupValue(item.due_at)}` : "",
+    ]);
+    return `
+      <tr>
+        <td>
+          <span class="table-primary">${escapeHtml(typeText || "memory")}</span>
+          ${primaryMeta ? `<span class="table-meta">${escapeHtml(primaryMeta)}</span>` : ""}
+        </td>
+        <td>
+          <span class="table-primary">${escapeHtml(factText)}</span>
+          ${detailMeta ? `<span class="table-meta">${escapeHtml(detailMeta)}</span>` : ""}
+        </td>
+      </tr>
+    `;
+  }).join("");
+}
+
+function renderStyleOverlayRows(target, {items = [], scopeLabel = "style"} = {}) {
+  const element = typeof target === "string" ? qs(target) : target;
+  if (!items.length) {
+    element.innerHTML = `<tr><td>Status</td><td>No ${escapeHtml(scopeLabel)} guidance rows are available.</td></tr>`;
+    return;
+  }
+  element.innerHTML = items.map((item, index) => {
+    const separator = index < items.length - 1 ? `<tr class="table-row-separator"><td colspan="2"></td></tr>` : "";
+    const rows = `
+      <tr><td>Scope</td><td>${escapeHtml(item.scope || scopeLabel)}</td></tr>
+      <tr><td>Field</td><td>${escapeHtml(formatLookupLabel(item.field || "-"))}</td></tr>
+      <tr><td>Guidance</td><td>${escapeHtml(formatLookupValue(item.guidelines || []))}</td></tr>
+      <tr><td>Confidence</td><td>${escapeHtml(item.confidence || "-")}</td></tr>
+      ${separator}
+    `;
+    return rows;
+  }).join("");
+}
+
+function renderStyleOverlayPanel(target, panel, {scopeLabel = "style"} = {}) {
+  const items = panelItems(panel);
+  if (!items.length && (panel?.status || panel?.reason)) {
+    renderPanelState(target, {
+      status: panel?.status || "empty",
+      reason: panel?.reason || `No ${scopeLabel} guidance rows are available.`,
+      generated_at: panel?.generated_at || "",
+    });
+    return;
+  }
+  renderStyleOverlayRows(target, {items, scopeLabel});
+}
+
+function hasLineageFields(panel) {
+  if (!panel) return false;
+  const sourceIds = Array.isArray(panel.source_reflection_run_ids) ? panel.source_reflection_run_ids : [];
+  const evidenceRefs = Array.isArray(panel.evidence_refs) ? panel.evidence_refs : [];
+  return Boolean(panel.revision || panel.updated_at || sourceIds.length || evidenceRefs.length);
+}
+
+function renderLineageRows(target, {revision = "", updated_at = "", source_reflection_run_ids = [], evidence_refs = []} = {}) {
+  const element = typeof target === "string" ? qs(target) : target;
+  const rows = [
+    ["Revision", revision || "-"],
+    ["Updated", updated_at || "-"],
+    ["Source runs", source_reflection_run_ids.length ? `${source_reflection_run_ids.length} redacted refs` : "-"],
+    ["Evidence", evidence_refs.length ? `${evidence_refs.length} bounded refs` : "-"],
+  ];
+  element.innerHTML = rows.map(([label, value]) => `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(value)}</td></tr>`).join("");
+}
+
+async function refreshCharacter() {
+  const payload = await api("/api/entities/character?limit=25");
+  setEntityStatus("#character-status", payload.status || "unavailable");
+  const panels = payload.panels || {};
+  renderLookupTable("#character-profile-table", {
+    items: panelItems(panels.profile),
+    emptyText: panelEmptyText(panels.profile, "No character profile rows."),
+    redaction: payload.redaction || {},
+  });
+  renderLookupTable("#character-state-table", {
+    items: panelItems(panels.state),
+    emptyText: panelEmptyText(panels.state, "No character state rows."),
+    redaction: payload.redaction || {},
+  });
+  renderLookupTable("#character-self-image-table", {
+    items: panelItems(panels.self_image),
+    emptyText: panelEmptyText(panels.self_image, "No self-image rows."),
+    redaction: payload.redaction || {},
+  });
+  renderLookupTable("#character-growth-table", {
+    items: panelItems(panels.growth),
+    emptyText: panelEmptyText(panels.growth, "No growth traits."),
+    redaction: payload.redaction || {},
+  });
+  renderLookupTable("#character-memory-table", {
+    items: panelItems(panels.memory),
+    emptyText: panelEmptyText(panels.memory, "No character memory rows."),
+    redaction: payload.redaction || {},
+  });
+  renderLookupTable("#character-learning-table", {
+    items: panelItems(panels.learning),
+    emptyText: panelEmptyText(panels.learning, "No background learning rows."),
+    redaction: payload.redaction || {},
+  });
+}
+
+async function refreshUsers(showNeedsInput = true) {
+  const platform = qs("#user-platform").value.trim();
+  const platformUserId = qs("#user-platform-user-id").value.trim();
+  const query = qs("#user-query").value.trim();
   if (!platform || !platformUserId) {
-    qs("#memory-status").textContent = "needs input";
-    qs("#memory-status").className = "badge";
+    setEntityStatus("#users-status", "needs input");
     if (showNeedsInput) {
-      qs("#memory-table").innerHTML = "<tr><td>Status</td><td>Enter platform and platform user ID to load scoped memory units.</td></tr>";
+      renderPanelState("#user-profile-table", {status: "needs_input", reason: "Enter platform and platform user ID to load user panels."});
+      renderPanelState("#user-relationship-table", {status: "needs_input", reason: "Enter platform and platform user ID to load relationship summary."});
+      renderPanelState("#user-memory-table", {status: "needs_input", reason: "Enter platform and platform user ID to load user memory."});
+      renderPanelState("#user-style-table", {status: "needs_input", reason: "Enter platform and platform user ID to load user style."});
     }
     return;
   }
 
   const params = new URLSearchParams({platform, platform_user_id: platformUserId, limit: "25"});
   if (query) params.set("query", query);
-  const payload = await api(`/api/lookups/memory?${params.toString()}`);
-  const status = payload.status || "unavailable";
-  qs("#memory-status").textContent = status;
-  qs("#memory-status").className = status === "available" ? "badge success" : "badge";
-  const items = Array.isArray(payload.items) ? payload.items : [];
-  if (!items.length) {
-    qs("#memory-table").innerHTML = `<tr><td>Status</td><td>${escapeHtml(payload.reason || "No memory rows matched the current lookup.")}</td></tr>`;
-    return;
-  }
-  qs("#memory-table").innerHTML = items.map((item) => `
-    <tr>
-      <td><code>${escapeHtml(item.unit_id || "-")}</code></td>
-      <td>${escapeHtml(item.unit_type || "-")}</td>
-      <td>${escapeHtml(item.fact || item.relationship_signal || "-")}</td>
-      <td>${escapeHtml(item.status || "-")}</td>
-    </tr>
-  `).join("");
+  const payload = await api(`/api/entities/user?${params.toString()}`);
+  setEntityStatus("#users-status", payload.status || "unavailable");
+  const panels = payload.panels || {};
+  renderLookupTable("#user-profile-table", {
+    items: panelItems(panels.profile),
+    emptyText: panelEmptyText(panels.profile, "No user profile rows."),
+    redaction: payload.redaction || {},
+  });
+  renderLookupTable("#user-relationship-table", {
+    items: panelItems(panels.relationship),
+    emptyText: panelEmptyText(panels.relationship, "No relationship rows."),
+    redaction: payload.redaction || {},
+  });
+  renderMemoryUnitRows("#user-memory-table", {
+    items: panelItems(panels.memory),
+    emptyText: panelEmptyText(panels.memory, "No user memory rows."),
+    redaction: payload.redaction || {},
+  });
+  renderStyleOverlayPanel("#user-style-table", panels.style, {
+    scopeLabel: "user style",
+  });
 }
 
-async function refreshStyle(showNeedsInput = true) {
-  const platform = qs("#style-platform").value.trim();
-  const platformUserId = qs("#style-platform-user-id").value.trim();
-  const groupId = qs("#style-channel-id").value.trim();
-  if (!platformUserId && !groupId) {
-    qs("#style-status").textContent = "needs input";
-    qs("#style-status").className = "badge";
+async function refreshGroups(showNeedsInput = true) {
+  const platform = qs("#group-platform").value.trim();
+  const groupId = qs("#group-id").value.trim();
+  if (!platform || !groupId) {
+    setEntityStatus("#groups-status", "needs input");
     if (showNeedsInput) {
-      qs("#style-table").innerHTML = "<tr><td>Status</td><td>Enter a platform user or group scope to load interaction-style guidance.</td></tr>";
-    }
-    return;
-  }
-  if (!platform) {
-    qs("#style-status").textContent = "needs input";
-    qs("#style-status").className = "badge";
-    if (showNeedsInput) {
-      qs("#style-table").innerHTML = "<tr><td>Status</td><td>Enter platform with the user or group scope.</td></tr>";
+      renderPanelState("#group-style-table", {status: "needs_input", reason: "Enter platform and group ID to load group style."});
+      renderPanelState("#group-progress-table", {status: "needs_input", reason: "Enter platform and group ID to load group progress."});
+      renderPanelState("#group-guidance-table", {status: "needs_input", reason: "Enter platform and group ID to load reflection-derived guidance."});
     }
     return;
   }
 
-  const params = new URLSearchParams({limit: "25"});
-  if (platform) params.set("platform", platform);
-  if (platformUserId) params.set("platform_user_id", platformUserId);
-  if (groupId) params.set("group_id", groupId);
-  const payload = await api(`/api/lookups/style?${params.toString()}`);
-  const status = payload.status || "unavailable";
-  qs("#style-status").textContent = status;
-  qs("#style-status").className = status === "available" ? "badge success" : "badge";
-  const items = Array.isArray(payload.items) ? payload.items : [];
-  if (!items.length) {
-    qs("#style-table").innerHTML = `<tr><td>Status</td><td>${escapeHtml(payload.reason || "No interaction-style guidance matched the current lookup.")}</td></tr>`;
-    return;
+  const params = new URLSearchParams({platform, group_id: groupId, limit: "25"});
+  const payload = await api(`/api/entities/group?${params.toString()}`);
+  setEntityStatus("#groups-status", payload.status || "unavailable");
+  const panels = payload.panels || {};
+  renderStyleOverlayPanel("#group-style-table", panels.style, {
+    scopeLabel: "group style",
+  });
+  renderLookupTable("#group-progress-table", {
+    items: panelItems(panels.progress),
+    emptyText: panelEmptyText(panels.progress, "No group progress rows."),
+    redaction: payload.redaction || {},
+  });
+  if (panelItems(panels.guidance).length) {
+    renderLookupTable("#group-guidance-table", {
+      items: panelItems(panels.guidance),
+      emptyText: panelEmptyText(panels.guidance, "No group guidance rows."),
+      redaction: payload.redaction || {},
+    });
+  } else if (hasLineageFields(panels.guidance)) {
+    renderLineageRows("#group-guidance-table", {
+      revision: panels.guidance?.revision || "",
+      updated_at: panels.guidance?.updated_at || panels.guidance?.generated_at || "",
+      source_reflection_run_ids: panels.guidance?.source_reflection_run_ids || [],
+      evidence_refs: panels.guidance?.evidence_refs || [],
+    });
+  } else {
+    renderPanelState("#group-guidance-table", {
+      status: panels.guidance?.status || "empty",
+      reason: panels.guidance?.reason || "No group guidance rows.",
+      generated_at: panels.guidance?.generated_at || "",
+    });
   }
-  qs("#style-table").innerHTML = items.map((item) => `
-    <tr>
-      <td>${escapeHtml(item.scope || "-")}</td>
-      <td>${escapeHtml(item.field || "-")}</td>
-      <td>${escapeHtml((item.guidelines || []).join("; "))}</td>
-      <td>${escapeHtml(item.confidence || "-")}</td>
-    </tr>
-  `).join("");
 }
 
 async function refreshCalendar() {
@@ -1707,17 +1907,17 @@ qs("#refresh-events").addEventListener("click", () => runButtonAction(
   "Events updated.",
   refreshEvents,
 ));
-qs("#refresh-memory").addEventListener("click", () => runButtonAction(
-  qs("#refresh-memory"),
-  "Loading memory...",
-  "Memory lookup updated.",
-  refreshMemory,
+qs("#refresh-users").addEventListener("click", () => runButtonAction(
+  qs("#refresh-users"),
+  "Loading user profile...",
+  "User panels updated.",
+  refreshUsers,
 ));
-qs("#refresh-style").addEventListener("click", () => runButtonAction(
-  qs("#refresh-style"),
-  "Loading interaction style...",
-  "Interaction style updated.",
-  refreshStyle,
+qs("#refresh-groups").addEventListener("click", () => runButtonAction(
+  qs("#refresh-groups"),
+  "Loading group context...",
+  "Group panels updated.",
+  refreshGroups,
 ));
 qs("#refresh-calendar").addEventListener("click", () => runButtonAction(
   qs("#refresh-calendar"),
