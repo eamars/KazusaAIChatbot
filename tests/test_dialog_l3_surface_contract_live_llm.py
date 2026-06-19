@@ -81,6 +81,7 @@ class _CapturingLiveLLM:
                 for message in messages[2:]
             ],
             'raw_response': response.content,
+            'usage': dict(response.usage),
         })
         return response
 

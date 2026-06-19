@@ -58,14 +58,19 @@ def _config(*, thinking_enabled: bool = False) -> LLMCallConfig:
     return config
 
 
-def _backend(*, thinking_strategy: str = "disabled") -> BackendDescriptor:
+def _backend(
+    *,
+    model_family: str = "gemma4",
+    model: str = "gemma-4-27b-it",
+    thinking_strategy: str = "disabled",
+) -> BackendDescriptor:
     """Build a provider backend descriptor for request mapping tests."""
 
     descriptor = BackendDescriptor(
         route_name="COGNITION_LLM",
         backend_kind="openai_compatible",
-        model_family="gemma4",
-        model="gemma-4-27b-it",
+        model_family=model_family,
+        model=model,
         normalized_base_url="http://localhost:1234/v1",
         thinking_strategy=thinking_strategy,
         confidence="model_name_inferred",
@@ -163,6 +168,97 @@ def test_provider_adds_gemma4_thinking_payload_only_when_enabled() -> None:
     assert sent_messages[1] is messages[1]
 
 
+def test_provider_adds_qwen3_thinking_payload_and_prefill() -> None:
+    """Qwen3 thinking maps request kwargs and LM Studio assistant prefill."""
+
+    created_models: list[_FakeChatModel] = []
+
+    def _factory(**kwargs: object) -> _FakeChatModel:
+        model = _FakeChatModel(**kwargs)
+        created_models.append(model)
+        return model
+
+    provider = OpenAICompatibleProvider(chat_model_factory=_factory)
+    messages = [SystemMessage(content="system"), HumanMessage(content="hello")]
+
+    provider.invoke(
+        messages,
+        config=_config(thinking_enabled=True),
+        backend=_backend(
+            model_family="qwen",
+            model="qwen3.6-34b-80l-fable-5-heretic",
+            thinking_strategy="qwen3_enabled",
+        ),
+    )
+
+    extra_body = created_models[0].constructor_kwargs["extra_body"]
+    assert extra_body == {"chat_template_kwargs": {"enable_thinking": True}}
+    sent_messages = created_models[0].sync_calls[0]
+    assert sent_messages is not messages
+    assert sent_messages[:2] == messages
+    assert isinstance(sent_messages[2], AIMessage)
+    assert sent_messages[2].content == "<think>\n"
+
+
+def test_provider_does_not_duplicate_existing_qwen3_prefill() -> None:
+    """Qwen3 thinking keeps an explicit existing prefill stable."""
+
+    created_models: list[_FakeChatModel] = []
+
+    def _factory(**kwargs: object) -> _FakeChatModel:
+        model = _FakeChatModel(**kwargs)
+        created_models.append(model)
+        return model
+
+    provider = OpenAICompatibleProvider(chat_model_factory=_factory)
+    messages = [
+        SystemMessage(content="system"),
+        HumanMessage(content="hello"),
+        AIMessage(content="<think>\n"),
+    ]
+
+    provider.invoke(
+        messages,
+        config=_config(thinking_enabled=True),
+        backend=_backend(
+            model_family="qwen",
+            model="qwen3.6-34b-80l-fable-5-heretic",
+            thinking_strategy="qwen3_enabled",
+        ),
+    )
+
+    sent_messages = created_models[0].sync_calls[0]
+    assert sent_messages == messages
+
+
+def test_provider_sends_qwen3_disabled_payload_without_prefill() -> None:
+    """Qwen3 disabled routes enforce non-thinking where backends support it."""
+
+    created_models: list[_FakeChatModel] = []
+
+    def _factory(**kwargs: object) -> _FakeChatModel:
+        model = _FakeChatModel(**kwargs)
+        created_models.append(model)
+        return model
+
+    provider = OpenAICompatibleProvider(chat_model_factory=_factory)
+    messages = [HumanMessage(content="hello")]
+
+    provider.invoke(
+        messages,
+        config=_config(thinking_enabled=False),
+        backend=_backend(
+            model_family="qwen",
+            model="qwen3.6-34b-80l-fable-5-heretic",
+            thinking_strategy="qwen3_disabled",
+        ),
+    )
+
+    extra_body = created_models[0].constructor_kwargs["extra_body"]
+    assert extra_body == {"chat_template_kwargs": {"enable_thinking": False}}
+    assert created_models[0].sync_calls == [messages]
+
+
 def test_provider_does_not_duplicate_existing_gemma4_thinking_trigger() -> None:
     """Gemma 4 thinking keeps an explicit existing trigger stable."""
 
@@ -209,7 +305,11 @@ def test_provider_omits_thinking_payload_for_unsupported_or_disabled() -> None:
     provider.invoke(
         [HumanMessage(content="unsupported")],
         config=_config(thinking_enabled=True),
-        backend=_backend(thinking_strategy="ignored_unsupported_model"),
+        backend=_backend(
+            model_family="qwen",
+            model="qwen2.5-32b",
+            thinking_strategy="ignored_unsupported_model",
+        ),
     )
 
     assert "extra_body" not in created_models[0].constructor_kwargs

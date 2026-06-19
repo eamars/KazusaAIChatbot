@@ -100,8 +100,9 @@ Chat LLM calls are routed through `LLInterface`. Each module owns its route,
 model, generation budget, and thinking toggle via `LLMCallConfig`; the
 interface owns backend detection, provider sessions, request mapping, response
 normalization, and reload retry. Public token budget config uses
-`max_completion_tokens`. Thinking is disabled by default and only emits a
-Gemma 4 thinking payload when the normalized model name supports it. The
+`max_completion_tokens`. Thinking is disabled by default. When enabled, the
+interface currently maps provider-specific thinking controls for Gemma 4,
+Qwen3-family model names, and Qwen-compatible Qwopus 3.x model names. The
 runtime contract is documented in the
 [LLM Interface ICD](src/kazusa_ai_chatbot/llm_interface/README.md).
 

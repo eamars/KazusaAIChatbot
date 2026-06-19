@@ -101,7 +101,7 @@ def _optional_feature_tags(diagnostic: RouteDiagnostic) -> str:
     """Render effective optional backend features as compact route tags."""
 
     tags: list[str] = []
-    if diagnostic.thinking_strategy == "gemma4_enabled":
+    if diagnostic.thinking_strategy in {"gemma4_enabled", "qwen3_enabled"}:
         tags.append("thinking_on")
 
     if not tags:

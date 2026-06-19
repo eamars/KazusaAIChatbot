@@ -207,6 +207,7 @@ plans.
 | [outbound_adapter_channel_allowlist_plan.md](archive/completed/short_term/outbound_adapter_channel_allowlist_plan.md) |
 | [prompt_prefix_and_input_format_optimization_plan.md](archive/completed/short_term/prompt_prefix_and_input_format_optimization_plan.md) |
 | [prompt_safe_message_context_plan.md](archive/completed/short_term/prompt_safe_message_context_plan.md) |
+| [qwen_thinking_support_plan.md](archive/completed/short_term/qwen_thinking_support_plan.md) |
 | [qq_adapter_readable_mentions_plan.md](archive/completed/short_term/qq_adapter_readable_mentions_plan.md) |
 | [rag1_decommission_plan.md](archive/completed/short_term/rag1_decommission_plan.md) |
 | [rag_2_1_initializer_subagent_contract_plan.md](archive/completed/short_term/rag_2_1_initializer_subagent_contract_plan.md) |

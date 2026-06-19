@@ -9,6 +9,8 @@ from langchain_core.messages import BaseMessage
 
 GEMMA4_THOUGHT_CHANNEL_START = "<|channel>thought"
 GEMMA4_THOUGHT_CHANNEL_END = "<channel|>"
+QWEN_THINK_TAG_START = "<think>"
+QWEN_THINK_TAG_END = "</think>"
 
 
 @dataclass(frozen=True)
@@ -161,6 +163,9 @@ def _normalize_response_content(
 ) -> str:
     """Return caller-facing content with provider thought channels removed."""
 
+    if backend.model_family == "qwen":
+        content = _strip_qwen_think_tags(raw_content)
+        return content
     if backend.model_family != "gemma4":
         return raw_content
 
@@ -186,4 +191,25 @@ def _strip_gemma4_thought_channels(raw_content: str) -> str:
             return stripped_content
 
         after_end_index = end_index + len(GEMMA4_THOUGHT_CHANNEL_END)
+        content = content[:start_index] + content[after_end_index:]
+
+
+def _strip_qwen_think_tags(raw_content: str) -> str:
+    """Remove Qwen visible thinking spans from caller-facing content."""
+
+    content = raw_content
+    while True:
+        start_index = content.find(QWEN_THINK_TAG_START)
+        if start_index == -1:
+            return content
+
+        end_index = content.find(
+            QWEN_THINK_TAG_END,
+            start_index + len(QWEN_THINK_TAG_START),
+        )
+        if end_index == -1:
+            stripped_content = content[:start_index].rstrip()
+            return stripped_content
+
+        after_end_index = end_index + len(QWEN_THINK_TAG_END)
         content = content[:start_index] + content[after_end_index:]

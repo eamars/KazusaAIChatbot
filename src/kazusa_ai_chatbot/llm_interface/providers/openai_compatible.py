@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from typing import Callable, Sequence
 
-from langchain_core.messages import BaseMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from kazusa_ai_chatbot.llm_interface.contracts import (
@@ -18,6 +18,7 @@ from kazusa_ai_chatbot.llm_interface.reload import ReloadingChatModel
 ChatModelFactory = Callable[..., object]
 ChatModelCacheKey = tuple[object, ...]
 GEMMA4_THINKING_TRIGGER = "/think"
+QWEN3_THINKING_PREFILL = "<think>\n"
 
 
 class OpenAICompatibleProvider:
@@ -102,6 +103,14 @@ class OpenAICompatibleProvider:
             kwargs["extra_body"] = {
                 "chat_template_kwargs": {"enable_thinking": True},
             }
+        if backend.thinking_strategy == "qwen3_enabled":
+            kwargs["extra_body"] = {
+                "chat_template_kwargs": {"enable_thinking": True},
+            }
+        if backend.thinking_strategy == "qwen3_disabled":
+            kwargs["extra_body"] = {
+                "chat_template_kwargs": {"enable_thinking": False},
+            }
 
         inner_model = self._chat_model_factory(**kwargs)
         chat_model = ReloadingChatModel(
@@ -127,11 +136,14 @@ def _provider_messages(
 ) -> Sequence[BaseMessage]:
     """Return backend-ready messages for one provider invocation."""
 
-    if backend.thinking_strategy != "gemma4_enabled":
-        return messages
+    if backend.thinking_strategy == "gemma4_enabled":
+        provider_messages = _gemma4_thinking_messages(messages)
+        return provider_messages
+    if backend.thinking_strategy == "qwen3_enabled":
+        provider_messages = _qwen3_thinking_messages(messages)
+        return provider_messages
 
-    provider_messages = _gemma4_thinking_messages(messages)
-    return provider_messages
+    return messages
 
 
 def _gemma4_thinking_messages(
@@ -166,6 +178,29 @@ def _gemma4_thinking_messages(
     provider_messages = [
         SystemMessage(content=GEMMA4_THINKING_TRIGGER),
         *messages,
+    ]
+    return provider_messages
+
+
+def _qwen3_thinking_messages(
+    messages: Sequence[BaseMessage],
+) -> list[BaseMessage]:
+    """Add Qwen3's assistant prefill without mutating caller messages."""
+
+    if messages:
+        last_message = messages[-1]
+        if isinstance(last_message, AIMessage):
+            content = last_message.content
+            if (
+                isinstance(content, str)
+                and content.lstrip().startswith(QWEN3_THINKING_PREFILL.strip())
+            ):
+                provider_messages = list(messages)
+                return provider_messages
+
+    provider_messages = [
+        *messages,
+        AIMessage(content=QWEN3_THINKING_PREFILL),
     ]
     return provider_messages
 

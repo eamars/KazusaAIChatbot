@@ -92,9 +92,19 @@ def test_llm_route_inventory_renders_optional_feature_tags() -> None:
             fallback_backed=False,
         ),
         RouteDiagnostic(
+            route_name="QWEN_THINKING_LLM",
+            backend="openai_compatible",
+            model="qwen3.6-34b",
+            normalized_base_url="http://localhost:1234/v1",
+            model_family="qwen",
+            thinking_strategy="qwen3_enabled",
+            required=True,
+            fallback_backed=False,
+        ),
+        RouteDiagnostic(
             route_name="UNSUPPORTED_THINKING_LLM",
             backend="openai_compatible",
-            model="qwen3",
+            model="qwen2.5-32b",
             normalized_base_url="http://localhost:1234/v1",
             model_family="qwen",
             thinking_strategy="ignored_unsupported_model",
@@ -129,6 +139,10 @@ def test_llm_route_inventory_renders_optional_feature_tags() -> None:
 
     assert (
         rows_by_route["GEMMA_THINKING_LLM"]["optional_feature"]
+        == "thinking_on"
+    )
+    assert (
+        rows_by_route["QWEN_THINKING_LLM"]["optional_feature"]
         == "thinking_on"
     )
     assert (

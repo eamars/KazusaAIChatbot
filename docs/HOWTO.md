@@ -174,8 +174,9 @@ Route-specific variables replace the retired generic `LLM_BASE_URL`,
 config loading. Chat routes also accept route-specific
 `*_MAX_COMPLETION_TOKENS` and `*_THINKING_ENABLED` values, with
 `DEFAULT_LLM_MAX_COMPLETION_TOKENS` as the shared completion budget default.
-Thinking is a boolean route toggle, defaults to disabled, and only adds the
-Gemma 4 thinking request payload when the normalized model name supports it.
+Thinking is a boolean route toggle and defaults to disabled. When enabled, the
+LLM interface currently maps provider-specific thinking controls for Gemma 4,
+Qwen3-family model names, and Qwen-compatible Qwopus 3.x model names.
 
 `CHARACTER_GLOBAL_USER_ID` defaults to
 `00000000-0000-4000-8000-000000000001`. Set it explicitly in production so the

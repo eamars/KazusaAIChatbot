@@ -77,9 +77,10 @@ runtime module
 Runtime modules own ordinary message content. The interface passes ordered
 `BaseMessage` objects through without rewriting prompts, payloads, or message
 order except when an enabled provider compatibility feature requires a
-backend-specific control token. The current exception is Gemma 4 thinking,
-where the OpenAI-compatible provider injects the Gemma thinking trigger on a
-copied system message so caller-owned message objects are not mutated.
+backend-specific control token. Current thinking exceptions are Gemma 4 and
+Qwen3-family models. The OpenAI-compatible provider injects their documented
+or validated backend controls on copied messages so caller-owned message
+objects are not mutated.
 
 Provider-specific fields terminate inside provider adapters. Stage modules must
 not construct `extra_body`, provider-native clients, backend-kind constants, or
@@ -178,8 +179,10 @@ reason approved by this ICD.
 
 For Gemma 4 thinking responses, normalized content removes raw
 `<|channel>thought ... <channel|>` thought-channel spans when LM Studio exposes
-them in the visible message content. The original provider response remains
-available through `raw_response` for diagnostics.
+them in the visible message content. For Qwen-family responses, normalized
+content removes visible `<think> ... </think>` spans if a backend exposes them
+in message content. The original provider response remains available through
+`raw_response` for diagnostics.
 
 ## Backend Detection
 
@@ -192,7 +195,7 @@ Current model-family labels include:
 | Detected family | Model-name signal |
 | --- | --- |
 | `gemma4` | `gemma4` or `gemma-4` |
-| `qwen` | `qwen` |
+| `qwen` | `qwen` or Qwen-derived aliases such as `qwopus` |
 | `deepseek` | `deepseek` |
 | `openai` | `gpt` or `openai` |
 | `unknown` | no known signal |
@@ -212,13 +215,18 @@ Thinking is a boolean request owned by route config:
 LLMThinkingConfig(enabled=True)
 ```
 
-Default behavior is disabled. When thinking is disabled, provider request
-payloads must not contain thinking-specific fields.
+Default behavior is disabled. When thinking is disabled for ordinary or
+unsupported models, provider request payloads must not contain
+thinking-specific fields. When thinking is disabled for Qwen3-family models,
+the OpenAI-compatible provider sends the request-level disable hint where the
+backend supports it and does not add the assistant prefill.
 
-Initial provider-side thinking support is limited to Gemma 4. When thinking is
-enabled and the detected model family is `gemma4`, the OpenAI-compatible
-provider maps it to both the request-level chat-template hint and Gemma's
-prompt-level thinking trigger:
+Provider-side thinking support currently covers Gemma 4, Qwen3-family models,
+and Qwen-compatible Qwopus 3.x model names.
+
+When thinking is enabled and the detected model family is `gemma4`, the
+OpenAI-compatible provider maps it to both the request-level chat-template hint
+and Gemma's prompt-level thinking trigger:
 
 ```python
 extra_body = {
@@ -231,6 +239,27 @@ is not already present. If no system message is supplied, it inserts a new
 leading system message containing `/think`. This is a backend compatibility
 step for LM Studio/Gemma setups where `chat_template_kwargs.enable_thinking`
 may be accepted but not enough to activate thinking.
+
+When thinking is enabled for Qwen3-family models, the OpenAI-compatible
+provider sends the same request-level chat-template hint:
+
+```python
+extra_body = {
+    "chat_template_kwargs": {"enable_thinking": True},
+}
+```
+
+For the validated LM Studio GGUF path, the provider also appends a copied
+assistant prefill containing `<think>\n`. Direct local validation showed that
+this prefill is the effective activation mechanism for
+`qwen3.6-34b-80l-fable-5-heretic`; the request-level hint alone was accepted
+but did not produce reasoning tokens.
+
+Qwen3-compatible matching is segment-based after model-name normalization, so
+repository-prefixed model ids such as
+`hiebo/Qwen3.6-34B-80L-Fable-5-Heretic`, `Qwen/Qwen3-32B`, and
+`Jackrong/Qwopus3.6-27B-v2-GGUF` are supported without broadening support to
+unversioned adjacent names such as `qwen30` or `qwopus3-coder`.
 
 When thinking is enabled for unsupported or unknown model families, the
 interface records an `ignored_unsupported_model` strategy and omits
@@ -318,7 +347,8 @@ Provider adapters own:
 
 Provider adapters must not change message content or ordering except for
 documented backend compatibility controls such as the copied Gemma 4 thinking
-trigger. Caller-owned message objects must not be mutated.
+trigger or Qwen3 assistant prefill. Caller-owned message objects must not be
+mutated.
 
 ## Session And Cache Contract
 
@@ -458,6 +488,9 @@ Required deterministic coverage includes:
 - backend/model-family detection;
 - Gemma 4 thinking payload mapping;
 - Gemma 4 thinking prompt-trigger mapping without caller message mutation;
+- Qwen3 thinking payload and assistant-prefill mapping without caller message
+  mutation;
+- Qwen visible think-tag response normalization;
 - unsupported-model thinking ignore behavior;
 - provider request mapping and message pass-through;
 - per-interface descriptor caching and route invalidation;

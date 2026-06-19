@@ -9,6 +9,10 @@ from kazusa_ai_chatbot.llm_interface.contracts import (
     LLMCallConfig,
 )
 
+QWEN3_THINKING_MODEL_PATTERN = re.compile(
+    r"(^|-)(?:qwen3|qwopus3)(?:$|[.-]\d)",
+)
+
 
 def normalize_base_url(base_url: str) -> str:
     """Normalize a provider base URL for cache and diagnostics identity."""
@@ -34,7 +38,7 @@ def detect_model_family(model: str) -> tuple[str, str]:
     if "gemma4" in compact_model or "gemma-4" in normalized_model:
         return_value = ("gemma4", "model_name_inferred")
         return return_value
-    if "qwen" in normalized_model:
+    if "qwen" in normalized_model or "qwopus" in normalized_model:
         return_value = ("qwen", "model_name_inferred")
         return return_value
     if "deepseek" in normalized_model:
@@ -58,6 +62,7 @@ def detect_backend_descriptor(
     model_family, confidence = detect_model_family(config.model)
     thinking_strategy = _thinking_strategy(
         model_family=model_family,
+        model=config.model,
         thinking_enabled=config.thinking.enabled,
     )
     descriptor = BackendDescriptor(
@@ -76,12 +81,27 @@ def detect_backend_descriptor(
 def _thinking_strategy(
     *,
     model_family: str,
+    model: str,
     thinking_enabled: bool,
 ) -> str:
     """Return the effective provider-side thinking strategy."""
+
+    if model_family == "qwen" and _is_qwen3_thinking_model(model):
+        if thinking_enabled:
+            return "qwen3_enabled"
+        return "qwen3_disabled"
 
     if not thinking_enabled:
         return "disabled"
     if model_family == "gemma4":
         return "gemma4_enabled"
     return "ignored_unsupported_model"
+
+
+def _is_qwen3_thinking_model(model: str) -> bool:
+    """Return whether a Qwen model name uses the Qwen3 thinking template."""
+
+    normalized_model = normalize_model_name(model)
+    match = QWEN3_THINKING_MODEL_PATTERN.search(normalized_model)
+    is_qwen3_thinking_model = match is not None
+    return is_qwen3_thinking_model
