@@ -251,14 +251,15 @@
         <div class="page-intro">
           <div>
             <h2>Memory</h2>
-            <p>Scoped user-memory inspection by global user id with bounded redacted rows.</p>
+            <p>Scoped user-memory inspection by platform account with bounded redacted rows.</p>
           </div>
           <span class="badge" id="memory-status">needs input</span>
         </div>
         <article class="card" data-component="Card">
           <div class="card-header"><h3>Lookup Scope</h3><span class="badge">limit 25</span></div>
           <div class="card-content filter-row" data-component="FieldGroup">
-            <label class="field">Global user id<input class="input" id="memory-global-user-id" placeholder="user global id" /></label>
+            <label class="field">Platform<select class="input" id="memory-platform"><option value="">Select platform</option><option value="qq">QQ (NapCat)</option><option value="discord">Discord</option><option value="debug">Debug</option></select></label>
+            <label class="field">Platform user ID<input class="input" id="memory-platform-user-id" placeholder="platform account id" /></label>
             <label class="field">Keyword<input class="input" id="memory-query" placeholder="optional fact or relationship keyword" /></label>
             <button class="btn primary" id="refresh-memory" type="button">Refresh</button>
           </div>
@@ -270,7 +271,7 @@
         </div>
         <article class="card" data-component="Card">
           <div class="card-header"><h3>Memory Units</h3><span class="badge">redacted</span></div>
-          <div class="table-wrap flush"><table><tbody id="memory-table"><tr><td>Status</td><td>Enter a global user id to load recent memory units.</td></tr></tbody></table></div>
+          <div class="table-wrap flush"><table><tbody id="memory-table"><tr><td>Status</td><td>Enter platform and platform user ID to load recent memory units.</td></tr></tbody></table></div>
         </article>
       </section>
 
@@ -285,20 +286,20 @@
         <article class="card" data-component="Card">
           <div class="card-header"><h3>Lookup Scope</h3><span class="badge">limit 25</span></div>
           <div class="card-content filter-row" data-component="FieldGroup">
-            <label class="field">Global user id<input class="input" id="style-global-user-id" placeholder="optional for group, required for private" /></label>
-            <label class="field">Platform<input class="input" id="style-platform" placeholder="debug, discord, napcat" /></label>
+            <label class="field">Platform<select class="input" id="style-platform"><option value="">Select platform</option><option value="qq">QQ (NapCat)</option><option value="discord">Discord</option><option value="debug">Debug</option></select></label>
+            <label class="field">Platform user ID<input class="input" id="style-platform-user-id" placeholder="optional for group scope" /></label>
             <label class="field">Group id<input class="input" id="style-channel-id" placeholder="optional platform channel or group id" /></label>
             <button class="btn primary" id="refresh-style" type="button">Refresh</button>
           </div>
         </article>
         <div class="content-grid three">
-          <article class="metric" data-component="Card"><div class="metric-label">Private</div><div class="metric-value">user</div><div class="metric-label">requires global user id</div></article>
+          <article class="metric" data-component="Card"><div class="metric-label">Private</div><div class="metric-value">user</div><div class="metric-label">platform and user ID</div></article>
           <article class="metric" data-component="Card"><div class="metric-label">Group</div><div class="metric-value">user + group</div><div class="metric-label">platform and group id</div></article>
           <article class="metric" data-component="Card"><div class="metric-label">Excluded</div><div class="metric-value">safe</div><div class="metric-label">reflection ids, prompts, raw reflection text</div></article>
         </div>
         <article class="card" data-component="Card">
           <div class="card-header"><h3>Guidance Rows</h3><span class="badge">redacted</span></div>
-          <div class="table-wrap flush"><table><tbody id="style-table"><tr><td>Status</td><td>Enter a global user id or group scope to load interaction-style guidance.</td></tr></tbody></table></div>
+          <div class="table-wrap flush"><table><tbody id="style-table"><tr><td>Status</td><td>Enter a platform user or group scope to load interaction-style guidance.</td></tr></tbody></table></div>
         </article>
       </section>
 

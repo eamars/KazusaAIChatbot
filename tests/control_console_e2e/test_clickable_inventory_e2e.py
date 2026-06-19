@@ -107,7 +107,8 @@ def test_operator_actions_use_in_page_feedback_not_blocking_alerts(
                 "endpoint": "/api/lookups/memory",
                 "loading": "Loading memory",
                 "setup": """() => {
-                  document.querySelector('#memory-global-user-id').value = 'e2e-user';
+                  document.querySelector('#memory-platform').value = 'qq';
+                  document.querySelector('#memory-platform-user-id').value = 'e2e-user';
                 }""",
             },
             {
@@ -117,6 +118,7 @@ def test_operator_actions_use_in_page_feedback_not_blocking_alerts(
                 "loading": "Loading interaction style",
                 "setup": """() => {
                   document.querySelector('#style-platform').value = 'debug';
+                  document.querySelector('#style-platform-user-id').value = 'e2e-user';
                   document.querySelector('#style-channel-id').value = 'e2e-group';
                 }""",
             },

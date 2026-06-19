@@ -1312,18 +1312,19 @@ async function refreshCharacter() {
 }
 
 async function refreshMemory(showNeedsInput = true) {
-  const globalUserId = qs("#memory-global-user-id").value.trim();
+  const platform = qs("#memory-platform").value.trim();
+  const platformUserId = qs("#memory-platform-user-id").value.trim();
   const query = qs("#memory-query").value.trim();
-  if (!globalUserId) {
+  if (!platform || !platformUserId) {
     qs("#memory-status").textContent = "needs input";
     qs("#memory-status").className = "badge";
     if (showNeedsInput) {
-      qs("#memory-table").innerHTML = "<tr><td>Status</td><td>Enter a global user id to load scoped memory units.</td></tr>";
+      qs("#memory-table").innerHTML = "<tr><td>Status</td><td>Enter platform and platform user ID to load scoped memory units.</td></tr>";
     }
     return;
   }
 
-  const params = new URLSearchParams({global_user_id: globalUserId, limit: "25"});
+  const params = new URLSearchParams({platform, platform_user_id: platformUserId, limit: "25"});
   if (query) params.set("query", query);
   const payload = await api(`/api/lookups/memory?${params.toString()}`);
   const status = payload.status || "unavailable";
@@ -1345,21 +1346,29 @@ async function refreshMemory(showNeedsInput = true) {
 }
 
 async function refreshStyle(showNeedsInput = true) {
-  const globalUserId = qs("#style-global-user-id").value.trim();
   const platform = qs("#style-platform").value.trim();
+  const platformUserId = qs("#style-platform-user-id").value.trim();
   const groupId = qs("#style-channel-id").value.trim();
-  if (!globalUserId && !groupId) {
+  if (!platformUserId && !groupId) {
     qs("#style-status").textContent = "needs input";
     qs("#style-status").className = "badge";
     if (showNeedsInput) {
-      qs("#style-table").innerHTML = "<tr><td>Status</td><td>Enter a global user id or group scope to load interaction-style guidance.</td></tr>";
+      qs("#style-table").innerHTML = "<tr><td>Status</td><td>Enter a platform user or group scope to load interaction-style guidance.</td></tr>";
+    }
+    return;
+  }
+  if (!platform) {
+    qs("#style-status").textContent = "needs input";
+    qs("#style-status").className = "badge";
+    if (showNeedsInput) {
+      qs("#style-table").innerHTML = "<tr><td>Status</td><td>Enter platform with the user or group scope.</td></tr>";
     }
     return;
   }
 
   const params = new URLSearchParams({limit: "25"});
-  if (globalUserId) params.set("global_user_id", globalUserId);
   if (platform) params.set("platform", platform);
+  if (platformUserId) params.set("platform_user_id", platformUserId);
   if (groupId) params.set("group_id", groupId);
   const payload = await api(`/api/lookups/style?${params.toString()}`);
   const status = payload.status || "unavailable";

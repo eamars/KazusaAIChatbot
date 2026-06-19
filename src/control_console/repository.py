@@ -12,6 +12,9 @@ from pymongo.errors import PyMongoError
 from control_console.redaction import redact_mapping
 from kazusa_ai_chatbot.calendar_scheduler import models as calendar_models
 from kazusa_ai_chatbot.db.errors import DatabaseOperationError
+from kazusa_ai_chatbot.db.users import (
+    find_user_profile_by_identifier as default_find_user_profile_by_identifier,
+)
 
 AsyncHelper = Callable[..., Awaitable[Any]]
 STYLE_GUIDELINE_FIELDS = (
@@ -44,6 +47,7 @@ class ControlConsoleRepository:
         search_user_memory_units_by_keyword: AsyncHelper | None = None,
         build_interaction_style_context: AsyncHelper | None = None,
         list_due_calendar_runs: AsyncHelper | None = None,
+        find_user_profile_by_identifier: AsyncHelper | None = None,
     ) -> None:
         """Create a read-only repository facade."""
 
@@ -54,6 +58,7 @@ class ControlConsoleRepository:
         self._search_user_memory_units_by_keyword = search_user_memory_units_by_keyword
         self._build_interaction_style_context = build_interaction_style_context
         self._list_due_calendar_runs = list_due_calendar_runs
+        self._find_user_profile_by_identifier = find_user_profile_by_identifier
 
     async def application_identity(self) -> dict[str, Any]:
         """Return the active character name for the browser shell."""
@@ -173,24 +178,122 @@ class ControlConsoleRepository:
         }
         return summary
 
+    async def _resolve_platform_user_identity(
+        self,
+        *,
+        platform: str,
+        platform_user_id: str,
+    ) -> dict[str, Any]:
+        """Resolve an operator-facing platform account.
+
+        Returns:
+            A resolution envelope containing safe browser identity metadata and
+            the canonical user id needed by repository helpers.
+        """
+
+        clean_platform = platform.strip()
+        clean_platform_user_id = platform_user_id.strip()
+        if not clean_platform and not clean_platform_user_id:
+            resolution = _platform_user_resolution(
+                status="needs_input",
+                platform=clean_platform,
+                platform_user_id=clean_platform_user_id,
+                reason="platform and platform user id are required",
+            )
+            return resolution
+        if not clean_platform:
+            resolution = _platform_user_resolution(
+                status="needs_input",
+                platform=clean_platform,
+                platform_user_id=clean_platform_user_id,
+                reason="platform is required when platform user id is provided",
+            )
+            return resolution
+        if not clean_platform_user_id:
+            resolution = _platform_user_resolution(
+                status="needs_input",
+                platform=clean_platform,
+                platform_user_id=clean_platform_user_id,
+                reason="platform user id is required when platform is provided",
+            )
+            return resolution
+
+        helper = (
+            self._find_user_profile_by_identifier
+            or default_find_user_profile_by_identifier
+        )
+        try:
+            profile = await helper(
+                identifier=clean_platform_user_id,
+                platform=clean_platform,
+            )
+        except REPOSITORY_HELPER_ERRORS as exc:
+            resolution = _platform_user_resolution(
+                status="unavailable",
+                platform=clean_platform,
+                platform_user_id=clean_platform_user_id,
+                reason=str(exc)[:160],
+            )
+            return resolution
+
+        if not isinstance(profile, dict):
+            resolution = _platform_user_resolution(
+                status="empty",
+                platform=clean_platform,
+                platform_user_id=clean_platform_user_id,
+                reason="no user profile matched the platform account",
+            )
+            return resolution
+
+        global_user_id = str(profile.get("global_user_id", "")).strip()
+        if not global_user_id:
+            resolution = _platform_user_resolution(
+                status="unavailable",
+                platform=clean_platform,
+                platform_user_id=clean_platform_user_id,
+                reason="matched user profile is missing canonical identity",
+            )
+            return resolution
+
+        display_name = _display_name_for_platform_account(
+            profile,
+            platform=clean_platform,
+            platform_user_id=clean_platform_user_id,
+        )
+        resolution = _platform_user_resolution(
+            status="resolved",
+            platform=clean_platform,
+            platform_user_id=clean_platform_user_id,
+            reason="",
+            display_name=display_name,
+            global_user_id=global_user_id,
+        )
+        return resolution
+
     async def lookup_memory(
         self,
         *,
-        global_user_id: str,
+        platform: str,
+        platform_user_id: str,
         query: str,
         limit: int,
     ) -> dict[str, Any]:
         """Return a bounded redacted memory lookup page."""
 
-        clean_global_user_id = global_user_id.strip()
         clean_query = query.strip()
-        if not clean_global_user_id:
+        resolution = await self._resolve_platform_user_identity(
+            platform=platform,
+            platform_user_id=platform_user_id,
+        )
+        if resolution["status"] != "resolved":
             page = _lookup_page(
-                status="needs_input",
+                status=resolution["status"],
                 items=[],
-                reason="global_user_id is required for scoped memory lookup",
+                reason=resolution["reason"],
+                identity=resolution["identity"],
             )
             return page
+        clean_global_user_id = resolution["global_user_id"]
 
         query_helper = self._query_user_memory_units
         keyword_helper = self._search_user_memory_units_by_keyword
@@ -236,6 +339,7 @@ class ControlConsoleRepository:
             status="available" if items else "empty",
             items=items,
             reason="no memory units matched the lookup" if not items else "",
+            identity=resolution["identity"],
         )
         return page
 
@@ -302,33 +406,52 @@ class ControlConsoleRepository:
     async def lookup_interaction_style(
         self,
         *,
-        global_user_id: str,
         platform: str,
+        platform_user_id: str,
         platform_channel_id: str,
         limit: int = 25,
     ) -> dict[str, Any]:
         """Return scoped interaction-style guidance for operator inspection."""
 
-        clean_global_user_id = global_user_id.strip()
         clean_platform = platform.strip()
+        clean_platform_user_id = platform_user_id.strip()
         clean_platform_channel_id = platform_channel_id.strip()
-        if not clean_global_user_id and not clean_platform_channel_id:
+        if not clean_platform_user_id and not clean_platform_channel_id:
             page = _style_lookup_page(
                 status="needs_input",
                 items=[],
                 reason=(
-                    "global_user_id is required for private style lookup; "
-                    "platform and group id are required for group style lookup"
+                    "platform and platform user id are required for private "
+                    "style lookup; platform and group id are required for "
+                    "group style lookup"
                 ),
             )
             return page
-        if clean_platform_channel_id and not clean_platform:
+        if (clean_platform_user_id or clean_platform_channel_id) and not clean_platform:
             page = _style_lookup_page(
                 status="needs_input",
                 items=[],
-                reason="platform is required when group id is provided",
+                reason="platform is required for user or group style lookup",
             )
             return page
+
+        identity: dict[str, Any] | None = None
+        clean_global_user_id = ""
+        if clean_platform_user_id:
+            resolution = await self._resolve_platform_user_identity(
+                platform=clean_platform,
+                platform_user_id=clean_platform_user_id,
+            )
+            identity = resolution["identity"]
+            if resolution["status"] != "resolved":
+                page = _style_lookup_page(
+                    status=resolution["status"],
+                    items=[],
+                    reason=resolution["reason"],
+                    identity=identity,
+                )
+                return page
+            clean_global_user_id = resolution["global_user_id"]
 
         channel_type = "group" if clean_platform_channel_id else "private"
         helper = self._build_interaction_style_context
@@ -360,6 +483,7 @@ class ControlConsoleRepository:
             status="available" if items else "empty",
             items=items,
             reason="no interaction-style guidance matched the lookup" if not items else "",
+            identity=identity,
         )
         return page
 
@@ -407,6 +531,67 @@ def _not_connected_identity(*, status: str, reason: str) -> dict[str, Any]:
     return identity
 
 
+def _display_name_for_platform_account(
+    profile: dict[str, Any],
+    *,
+    platform: str,
+    platform_user_id: str,
+) -> str:
+    """Return the display name for the matched platform account.
+
+    Returns:
+        The matching account display name, or an empty string when unavailable.
+    """
+
+    accounts = profile.get("platform_accounts")
+    if not isinstance(accounts, list):
+        return_value = ""
+        return return_value
+
+    for account in accounts:
+        if not isinstance(account, dict):
+            continue
+        account_platform = str(account.get("platform", "")).strip()
+        account_platform_user_id = str(account.get("platform_user_id", "")).strip()
+        if account_platform != platform or account_platform_user_id != platform_user_id:
+            continue
+        return_value = str(account.get("display_name", "")).strip()
+        return return_value
+
+    return_value = ""
+    return return_value
+
+
+def _platform_user_resolution(
+    *,
+    status: str,
+    platform: str,
+    platform_user_id: str,
+    reason: str,
+    display_name: str = "",
+    global_user_id: str = "",
+) -> dict[str, Any]:
+    """Build an identity-resolution result for lookup pages.
+
+    Returns:
+        A dictionary with browser-safe identity metadata plus the canonical user
+        id reserved for internal repository calls.
+    """
+
+    resolution = {
+        "status": status,
+        "reason": reason,
+        "global_user_id": global_user_id,
+        "identity": {
+            "platform": platform,
+            "platform_user_id": platform_user_id,
+            "display_name": display_name,
+            "resolution_status": status,
+        },
+    }
+    return resolution
+
+
 def _project_memory_unit(document: dict[str, Any]) -> dict[str, Any]:
     """Project one memory-unit document into a browser-safe row."""
 
@@ -435,6 +620,7 @@ def _lookup_page(
     status: str,
     items: list[dict[str, Any]],
     reason: str,
+    identity: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a bounded lookup page with shared redaction metadata."""
 
@@ -446,6 +632,8 @@ def _lookup_page(
         "reason": reason,
         "redaction": _lookup_redaction(),
     }
+    if identity is not None:
+        page["identity"] = identity
     return page
 
 
@@ -498,6 +686,7 @@ def _style_lookup_page(
     status: str,
     items: list[dict[str, Any]],
     reason: str,
+    identity: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a bounded interaction-style lookup page."""
 
@@ -513,6 +702,8 @@ def _style_lookup_page(
             "raw_reflections": "excluded",
         },
     }
+    if identity is not None:
+        page["identity"] = identity
     return page
 
 

@@ -125,12 +125,18 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert 'data-page="style"' in index.text
     assert 'data-page="calendar"' in index.text
     assert 'data-page="background"' in index.text
-    assert 'id="memory-global-user-id"' in index.text
+    assert 'id="memory-global-user-id"' not in index.text
+    assert '<select class="input" id="memory-platform"' in index.text
+    assert 'value="qq">QQ (NapCat)</option>' in index.text
+    assert 'value="discord">Discord</option>' in index.text
+    assert 'value="debug">Debug</option>' in index.text
+    assert 'id="memory-platform-user-id"' in index.text
     assert 'id="memory-query"' in index.text
     assert 'id="refresh-memory"' in index.text
     assert 'id="memory-table"' in index.text
-    assert 'id="style-global-user-id"' in index.text
-    assert 'id="style-platform"' in index.text
+    assert 'id="style-global-user-id"' not in index.text
+    assert '<select class="input" id="style-platform"' in index.text
+    assert 'id="style-platform-user-id"' in index.text
     assert 'id="style-channel-id"' in index.text
     assert 'id="refresh-style"' in index.text
     assert 'id="style-table"' in index.text

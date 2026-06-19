@@ -22,12 +22,14 @@ async def test_repository_returns_safe_unavailable_summaries_without_db() -> Non
     repository = ControlConsoleRepository(
         get_character_runtime_state=unavailable_character_helper,
         list_growth_traits=unavailable_helper,
+        find_user_profile_by_identifier=unavailable_helper,
     )
 
     character = await repository.latest_character_status()
     growth = await repository.global_growth_summary()
     memory = await repository.lookup_memory(
-        global_user_id="",
+        platform="qq",
+        platform_user_id="platform-user-1",
         query="",
         limit=5,
     )
@@ -130,6 +132,24 @@ async def test_repository_projects_user_memory_units_with_redaction() -> None:
 
     calls: list[dict[str, object]] = []
 
+    async def find_user_profile_by_identifier(
+        *,
+        identifier: str,
+        platform: str | None = None,
+    ) -> dict[str, object] | None:
+        assert identifier == "platform-user-1"
+        assert platform == "qq"
+        return {
+            "global_user_id": "global-user-1",
+            "platform_accounts": [
+                {
+                    "platform": "qq",
+                    "platform_user_id": "platform-user-1",
+                    "display_name": "Tester",
+                }
+            ],
+        }
+
     async def query_user_memory_units(global_user_id: str, *, limit: int):
         calls.append({
             "helper": "recent",
@@ -176,31 +196,40 @@ async def test_repository_projects_user_memory_units_with_redaction() -> None:
         ]
 
     repository = ControlConsoleRepository(
+        find_user_profile_by_identifier=find_user_profile_by_identifier,
         query_user_memory_units=query_user_memory_units,
         search_user_memory_units_by_keyword=search_user_memory_units_by_keyword,
     )
 
     recent = await repository.lookup_memory(
-        global_user_id="user-1",
+        platform="qq",
+        platform_user_id="platform-user-1",
         query="",
         limit=5,
     )
     keyword = await repository.lookup_memory(
-        global_user_id="user-1",
+        platform="qq",
+        platform_user_id="platform-user-1",
         query="reviews",
         limit=3,
     )
 
     assert calls == [
-        {"helper": "recent", "global_user_id": "user-1", "limit": 5},
+        {"helper": "recent", "global_user_id": "global-user-1", "limit": 5},
         {
             "helper": "keyword",
-            "global_user_id": "user-1",
+            "global_user_id": "global-user-1",
             "keyword": "reviews",
             "limit": 3,
         },
     ]
     assert recent["status"] == "available"
+    assert recent["identity"] == {
+        "platform": "qq",
+        "platform_user_id": "platform-user-1",
+        "display_name": "Tester",
+        "resolution_status": "resolved",
+    }
     assert recent["items"][0] == {
         "unit_id": "unit-1",
         "unit_type": "stable_pattern",
@@ -218,22 +247,23 @@ async def test_repository_projects_user_memory_units_with_redaction() -> None:
 
 
 @pytest.mark.asyncio
-async def test_repository_memory_lookup_requires_global_user_id() -> None:
-    """Memory lookup should not query all users from a blank scope."""
+async def test_repository_memory_lookup_requires_platform_user_id() -> None:
+    """Memory lookup should not query all users from a blank platform account."""
 
     from control_console.repository import ControlConsoleRepository
 
     repository = ControlConsoleRepository()
 
     page = await repository.lookup_memory(
-        global_user_id="",
+        platform="qq",
+        platform_user_id="",
         query="anything",
         limit=5,
     )
 
     assert page["status"] == "needs_input"
     assert page["items"] == []
-    assert "global_user_id" in page["reason"]
+    assert "platform user id" in page["reason"]
 
 
 @pytest.mark.asyncio
@@ -258,13 +288,24 @@ async def test_repository_memory_lookup_reports_invalid_configuration() -> None:
         _ = limit
         raise AssertionError("keyword helper should not run")
 
+    async def find_user_profile_by_identifier(
+        *,
+        identifier: str,
+        platform: str | None = None,
+    ) -> dict[str, str] | None:
+        assert identifier == "platform-user-1"
+        assert platform == "qq"
+        return {"global_user_id": "global-user-1"}
+
     repository = ControlConsoleRepository(
+        find_user_profile_by_identifier=find_user_profile_by_identifier,
         query_user_memory_units=query_user_memory_units,
         search_user_memory_units_by_keyword=search_user_memory_units_by_keyword,
     )
 
     page = await repository.lookup_memory(
-        global_user_id="user-1",
+        platform="qq",
+        platform_user_id="platform-user-1",
         query="",
         limit=5,
     )
@@ -280,6 +321,24 @@ async def test_repository_projects_interaction_style_context_safely() -> None:
     from control_console.repository import ControlConsoleRepository
 
     calls: list[dict[str, str]] = []
+
+    async def find_user_profile_by_identifier(
+        *,
+        identifier: str,
+        platform: str | None = None,
+    ) -> dict[str, object] | None:
+        assert identifier == "platform-user-1"
+        assert platform == "debug"
+        return {
+            "global_user_id": "global-user-1",
+            "platform_accounts": [
+                {
+                    "platform": "debug",
+                    "platform_user_id": "platform-user-1",
+                    "display_name": "Debug User",
+                }
+            ],
+        }
 
     async def build_interaction_style_context(
         *,
@@ -314,24 +373,31 @@ async def test_repository_projects_interaction_style_context_safely() -> None:
         }
 
     repository = ControlConsoleRepository(
+        find_user_profile_by_identifier=find_user_profile_by_identifier,
         build_interaction_style_context=build_interaction_style_context,
     )
 
     page = await repository.lookup_interaction_style(
-        global_user_id="user-1",
         platform="debug",
+        platform_user_id="platform-user-1",
         platform_channel_id="group-1",
     )
 
     assert calls == [
         {
-            "global_user_id": "user-1",
+            "global_user_id": "global-user-1",
             "channel_type": "group",
             "platform": "debug",
             "platform_channel_id": "group-1",
         }
     ]
     assert page["status"] == "available"
+    assert page["identity"] == {
+        "platform": "debug",
+        "platform_user_id": "platform-user-1",
+        "display_name": "Debug User",
+        "resolution_status": "resolved",
+    }
     assert page["items"] == [
         {
             "scope": "user_style",
@@ -376,14 +442,14 @@ async def test_repository_interaction_style_lookup_requires_scope() -> None:
     repository = ControlConsoleRepository()
 
     page = await repository.lookup_interaction_style(
-        global_user_id="",
         platform="",
+        platform_user_id="",
         platform_channel_id="",
     )
 
     assert page["status"] == "needs_input"
     assert page["items"] == []
-    assert "global_user_id" in page["reason"]
+    assert "platform user id" in page["reason"]
 
 
 @pytest.mark.asyncio
@@ -493,6 +559,15 @@ async def test_repository_fallback_and_empty_branches_are_explicit() -> None:
         del kwargs
         raise KeyError("style helper unavailable")
 
+    async def find_user_profile_by_identifier(
+        *,
+        identifier: str,
+        platform: str | None = None,
+    ) -> dict[str, str] | None:
+        assert identifier == "platform-user-1"
+        assert platform in {"qq", "debug"}
+        return {"global_user_id": "global-user-1"}
+
     invalid_identity = await ControlConsoleRepository(
         get_character_profile=invalid_character_profile,
     ).application_identity()
@@ -506,9 +581,15 @@ async def test_repository_fallback_and_empty_branches_are_explicit() -> None:
         list_growth_traits=empty_growth_traits,
     ).global_growth_summary()
     memory_page = await ControlConsoleRepository(
+        find_user_profile_by_identifier=find_user_profile_by_identifier,
         query_user_memory_units=memory_import_failure,
         search_user_memory_units_by_keyword=memory_import_failure,
-    ).lookup_memory(global_user_id="user-1", query="keyword", limit=5)
+    ).lookup_memory(
+        platform="qq",
+        platform_user_id="platform-user-1",
+        query="keyword",
+        limit=5,
+    )
     calendar_page = await ControlConsoleRepository(
         list_due_calendar_runs=calendar_failure,
     ).lookup_due_calendar_runs(
@@ -516,15 +597,16 @@ async def test_repository_fallback_and_empty_branches_are_explicit() -> None:
         limit=5,
     )
     style_missing_platform = await ControlConsoleRepository().lookup_interaction_style(
-        global_user_id="",
         platform="",
+        platform_user_id="",
         platform_channel_id="group-1",
     )
     style_unavailable = await ControlConsoleRepository(
+        find_user_profile_by_identifier=find_user_profile_by_identifier,
         build_interaction_style_context=style_failure,
     ).lookup_interaction_style(
-        global_user_id="user-1",
         platform="debug",
+        platform_user_id="platform-user-1",
         platform_channel_id="",
     )
 

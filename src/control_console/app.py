@@ -721,7 +721,8 @@ def create_app(
     @app.get("/api/lookups/memory")
     async def lookup_memory(
         query: str = "",
-        global_user_id: str = Query(default="", max_length=120),
+        platform: str | None = Query(default=None, max_length=80),
+        platform_user_id: str | None = Query(default=None, max_length=120),
         limit: int = Query(default=25, ge=1, le=100),
         _: ControlConsoleOperator = Depends(current_operator),
     ) -> dict[str, Any]:
@@ -729,7 +730,8 @@ def create_app(
 
         lookup_query = ConsoleLookupQuery.model_validate({
             "query": query,
-            "global_user_id": global_user_id,
+            "platform": platform,
+            "platform_user_id": platform_user_id,
             "limit": limit,
         })
         audit_writer.write_event(
@@ -738,11 +740,13 @@ def create_app(
             target={
                 "namespace": "memory",
                 "query": lookup_query.query,
-                "has_global_user_id": bool(lookup_query.global_user_id),
+                "platform": lookup_query.platform or "",
+                "has_platform_user_id": bool(lookup_query.platform_user_id),
             },
         )
         payload = await repository.lookup_memory(
-            global_user_id=lookup_query.global_user_id or "",
+            platform=lookup_query.platform or "",
+            platform_user_id=lookup_query.platform_user_id or "",
             query=lookup_query.query,
             limit=lookup_query.limit,
         )
@@ -750,8 +754,8 @@ def create_app(
 
     @app.get("/api/lookups/style")
     async def lookup_style(
-        global_user_id: str = Query(default="", max_length=120),
         platform: str | None = Query(default=None, max_length=80),
+        platform_user_id: str | None = Query(default=None, max_length=120),
         group_id: str | None = Query(default=None, max_length=120),
         limit: int = Query(default=25, ge=1, le=100),
         _: ControlConsoleOperator = Depends(current_operator),
@@ -759,8 +763,8 @@ def create_app(
         """Return scoped interaction-style guidance."""
 
         lookup_query = ConsoleLookupQuery.model_validate({
-            "global_user_id": global_user_id,
             "platform": platform,
+            "platform_user_id": platform_user_id,
             "group_id": group_id,
             "limit": limit,
         })
@@ -770,13 +774,13 @@ def create_app(
             target={
                 "namespace": "style",
                 "platform": lookup_query.platform or "",
-                "has_global_user_id": bool(lookup_query.global_user_id),
+                "has_platform_user_id": bool(lookup_query.platform_user_id),
                 "has_group_id": bool(lookup_query.group_id),
             },
         )
         payload = await repository.lookup_interaction_style(
-            global_user_id=lookup_query.global_user_id or "",
             platform=lookup_query.platform or "",
+            platform_user_id=lookup_query.platform_user_id or "",
             platform_channel_id=lookup_query.group_id or "",
             limit=lookup_query.limit,
         )
@@ -1794,12 +1798,12 @@ def _page_capabilities() -> dict[str, dict[str, Any]]:
         "memory": {
             "status": "partial",
             "label": "scoped lookup",
-            "reason": "Scoped user-memory lookup is available by global user id; semantic vector search is not exposed.",
+            "reason": "Scoped user-memory lookup is available by platform account; semantic vector search is not exposed.",
         },
         "style": {
             "status": "partial",
             "label": "scoped lookup",
-            "reason": "Interaction-style guidance lookup is available by global user id or group scope; image asset browsing is not implemented.",
+            "reason": "Interaction-style guidance lookup is available by platform account or group scope; image asset browsing is not implemented.",
         },
         "calendar": {
             "status": "partial",

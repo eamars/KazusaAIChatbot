@@ -41,16 +41,37 @@ def test_each_sidebar_page_has_connected_or_explicitly_gated_state(
 
         _open_page(page, "memory", "Memory")
         assert page.locator("#memory-status").inner_text() == "needs input"
-        page.locator("#memory-global-user-id").fill("e2e-user")
-        with page.expect_response(lambda response: "/api/lookups/memory" in response.url):
+        assert page.locator("#memory-global-user-id").count() == 0
+        assert page.locator("select#memory-platform").count() == 1
+        page.locator("#memory-platform").select_option("qq")
+        page.locator("#memory-platform-user-id").fill("e2e-user")
+        with page.expect_response(
+            lambda response: (
+                "/api/lookups/memory" in response.url
+                and "platform=qq" in response.url
+                and "platform_user_id=e2e-user" in response.url
+                and "global_user_id" not in response.url
+            )
+        ):
             page.locator("#refresh-memory").click()
         assert page.locator("#memory-table").inner_text().strip()
 
         _open_page(page, "style", "Interaction style")
         assert page.locator("#style-status").inner_text() == "needs input"
-        page.locator("#style-platform").fill("debug")
+        assert page.locator("#style-global-user-id").count() == 0
+        assert page.locator("select#style-platform").count() == 1
+        page.locator("#style-platform").select_option("debug")
+        page.locator("#style-platform-user-id").fill("e2e-user")
         page.locator("#style-channel-id").fill("e2e-group")
-        with page.expect_response(lambda response: "/api/lookups/style" in response.url):
+        with page.expect_response(
+            lambda response: (
+                "/api/lookups/style" in response.url
+                and "platform=debug" in response.url
+                and "platform_user_id=e2e-user" in response.url
+                and "group_id=e2e-group" in response.url
+                and "global_user_id" not in response.url
+            )
+        ):
             page.locator("#refresh-style").click()
         assert page.locator("#style-table").inner_text().strip()
 

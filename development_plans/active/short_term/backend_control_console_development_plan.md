@@ -165,9 +165,9 @@ Completed behavior by requested capability:
 3. Integrated debug console: operators send debug messages through the control console. The console builds a valid debug `ChatRequest`, sends it to the running brain `/chat` endpoint, and renders `ChatResponse`, delivery metadata, scheduled follow-ups, tracking id, latency, and error state.
 4. Latest character status: the console shows current mood, global vibe, reflection summary, updated timestamp, and source descriptors from existing character-state helpers. DB-backed status remains readable when the brain is stopped and MongoDB is available.
 5. Character growth progression and status: the console shows active global-growth axes, guidance, maturity, last update, run history summaries, and drift/progression indicators from global-character-growth DB helpers.
-6. User image/style lookup with conversation episode: operators search by global user id, platform id, display name, or episode id. Results include redacted user-image fields, interaction-style overlays, source episode ids, timestamps, and confidence/status fields.
+6. User image/style lookup with conversation episode: operators search by platform name plus platform user id, display name, or episode id. The browser UI must not require operators to enter internal `global_user_id` values; the console resolves platform identity read-only before calling scoped helpers. Results include redacted user-image fields, interaction-style overlays, source episode ids, timestamps, and confidence/status fields.
 7. Group style image lookup: operators search by platform/group/channel identifiers and see group style overlays, source episodes, update timestamps, and status fields.
-8. Memory lookup: operators search shared memory and user memory through bounded helper calls and see ids, memory names, type, authority, status, provenance labels, privacy-review flags, timestamps, and short redacted content previews.
+8. Memory lookup: operators search shared memory and user memory through bounded helper calls using platform-facing identity in the UI. User-scoped memory pages resolve `platform + platform_user_id` read-only inside the console before querying global-id keyed helpers. Results show ids, memory names, type, authority, status, provenance labels, privacy-review flags, timestamps, and short redacted content previews.
 9. Calendar schedules: operators inspect active/paused/completed/cancelled schedules and pending/running/completed/failed/cancelled/skipped runs with trigger kind, next run, last run, source, and worker status.
 10. Background works: operators inspect queued, in-progress, completed, failed, delivery-in-progress, delivered, and delivery-failed background-work jobs with task brief preview, worker, timestamps, delivery state, and failure summary.
 11. Cache hit status and health page coverage: operators see `/health`, Cache2 per-agent stats, DB health, service graph readiness, worker liveness from `/ops/runtime-status` when the brain is running, reflection/self-cognition stats links, event logging status, and recent resource-health events.
@@ -575,7 +575,7 @@ class ConsoleDebugChatResponse(BaseModel):
 class ConsoleLookupQuery(BaseModel):
     query: str = Field(default="", max_length=240)
     platform: str | None = None
-    global_user_id: str | None = None
+    platform_user_id: str | None = None
     group_id: str | None = None
     episode_id: str | None = None
     status: str | None = None

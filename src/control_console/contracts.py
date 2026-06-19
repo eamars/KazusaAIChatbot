@@ -351,7 +351,7 @@ class ConsoleLookupQuery(StrictModel):
 
     query: str = Field(default="", max_length=240)
     platform: str | None = Field(default=None, max_length=80)
-    global_user_id: str | None = Field(default=None, max_length=120)
+    platform_user_id: str | None = Field(default=None, max_length=120)
     group_id: str | None = Field(default=None, max_length=120)
     episode_id: str | None = Field(default=None, max_length=120)
     status: str | None = Field(default=None, max_length=80)

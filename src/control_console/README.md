@@ -146,8 +146,8 @@ The current first-slice status is:
 | Debug chat | `ready` | Existing brain `/chat` contract when brain is running |
 | Event monitor | `ready` | Local audit, process logs, and sanitized Kazusa event-log telemetry |
 | Character | `partial` | Existing character status and growth routes |
-| Memory | `partial` | Scoped `user_memory_units` recent and keyword lookup by global user id; semantic vector search and all-user browsing are not exposed |
-| Interaction style | `partial` | Scoped user and group interaction-style guidance lookup; image asset browsing is not implemented |
+| Memory | `partial` | Scoped `user_memory_units` recent and keyword lookup by platform account; semantic vector search and all-user browsing are not exposed |
+| Interaction style | `partial` | Scoped user and group interaction-style guidance lookup by platform account or platform group; image asset browsing is not implemented |
 | Calendar | `partial` | Due `calendar_runs` inspection; schedule editing is not implemented |
 | Background work | `partial` | Sanitized `background_work.worker` event telemetry; job payload browsing is not implemented |
 | Health/cache | `partial` | Brain `/health` and `/ops/runtime-status` when brain is running |
