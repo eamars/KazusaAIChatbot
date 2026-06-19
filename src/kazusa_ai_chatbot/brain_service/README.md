@@ -41,6 +41,10 @@ both inbound and outbound state:
 - background-work worker lifecycle is started, stopped, and reported by the
   service runtime while result delivery still returns through cognition/dialog.
 
+Local process lifecycle management is owned by the separate top-level
+`control_console` package and `kazusa-control-console` command. The brain
+service does not mount, import, or control console routes.
+
 ## Scope
 
 This ICD covers:
@@ -97,7 +101,7 @@ platform event
   -> POST /chat
   -> brain queue and persona graph
   -> selected text surface outputs
-  -> ChatResponse(messages, use_reply_feature, delivery_mentions, delivery_tracking_id)
+  -> ChatResponse(messages, use_reply_feature, delivery_mentions, delivery_tracking_id, cognition_graph?)
   -> adapter platform send
   -> platform returns outbound message id
   -> POST /delivery_receipt
@@ -126,6 +130,18 @@ metadata: the brain keeps outbound text platform-neutral, and the adapter
 renders a native prefix user mention only when feasible. Missing, empty, or
 unrenderable mention metadata must not block text delivery.
 
+Normal `/chat` responses may also include optional `cognition_graph` telemetry
+for local operator inspection. It is a bounded graph snapshot derived from the
+current graph result and consolidation state. It must not include prompts,
+embeddings, raw messages, message envelopes, raw user input, secrets, or
+unbounded memory content. Adapters may ignore this field.
+
+The service also keeps a process-local latest cognition graph snapshot for
+trusted local operator inspection. Normal chat/debug turns update it from the
+`/chat` response graph. Completed self-cognition cases update it from bounded
+self-cognition artifacts. Reading this snapshot is observational only and must
+not trigger cognition.
+
 Visible `/chat` delivery follows selected `SurfaceOutputV1` text surfaces.
 Private action results, private finalization, calendar-triggered action
 results, and no-visible-output decisions may still make an episode
@@ -151,6 +167,22 @@ The response field named `scheduler` is a legacy readiness field in
 `HealthResponse`; it is not the calendar scheduler liveness contract. Trusted
 operators use `/ops/runtime-status` for calendar scheduler enablement,
 configuration, and task liveness.
+
+### `GET /ops/latest-cognition-graph`
+
+Response model: `OpsLatestCognitionGraphResponse`.
+
+Purpose:
+
+- Return the latest bounded cognition graph snapshot reported by live chat,
+  debug chat, or self-cognition.
+- Support the local control-console Overview graph without running cognition.
+- Return `cognition_graph: null` when no completed run has published telemetry
+  since service startup.
+
+The endpoint is process-local and read-only. It must not expose prompts,
+embeddings, raw messages, message envelopes, raw source packets, secrets, or
+unbounded memory content.
 
 ### `GET /ops/runtime-status`
 

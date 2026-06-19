@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>not connected</title>
+  <link rel="icon" type="image/png" href="/favicon.ico" />
+  <link rel="stylesheet" href="/static/console.css" />
+</head>
+<body data-theme="bright" data-auth-state="locked">
+  <div class="app">
+    <aside class="sidebar" data-component="Sidebar">
+      <div class="brand" data-component="Avatar">
+        <img class="brand-mark" src="/favicon.ico" alt="" />
+        <div>
+          <strong id="brand-name">not connected</strong>
+          <span id="brand-subtitle">database not connected</span>
+        </div>
+      </div>
+      <nav class="nav-group" aria-label="Console pages" data-auth-required="true">
+        <button class="nav-link active" data-page-link="overview" disabled aria-disabled="true">Overview</button>
+        <button class="nav-link" data-page-link="services" disabled aria-disabled="true">Services</button>
+        <button class="nav-link" data-page-link="logs" disabled aria-disabled="true">Live logs</button>
+        <button class="nav-link" data-page-link="debug" disabled aria-disabled="true">Debug chat</button>
+        <button class="nav-link" data-page-link="events" disabled aria-disabled="true">Event monitor</button>
+        <button class="nav-link" data-page-link="character" disabled aria-disabled="true">Character</button>
+        <button class="nav-link" data-page-link="users" disabled aria-disabled="true">Users</button>
+        <button class="nav-link" data-page-link="groups" disabled aria-disabled="true">Groups</button>
+        <button class="nav-link" data-page-link="calendar" disabled aria-disabled="true">Calendar</button>
+        <button class="nav-link" data-page-link="background" disabled aria-disabled="true">Background work</button>
+        <button class="nav-link" data-page-link="health" disabled aria-disabled="true">Health/cache</button>
+        <button class="nav-link" data-page-link="audit" disabled aria-disabled="true">Audit</button>
+      </nav>
+    </aside>
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-title">
+          <span class="status-dot" data-state="locked" aria-hidden="true"></span>
+          <div>
+            <p id="shell-status-text">Sign in to inspect local services.</p>
+          </div>
+        </div>
+        <div class="topbar-actions" data-component="ToggleGroup">
+          <div class="theme-toggle" aria-label="Color scheme">
+            <button class="toggle-item active" data-theme-choice="bright" type="button">Bright</button>
+            <button class="toggle-item" data-theme-choice="dark" type="button">Dark</button>
+          </div>
+          <div class="login-form" id="login-form">
+            <label class="sr-only" for="token">Operator token</label>
+            <input class="input" id="token" type="password" placeholder="operator token" />
+            <button class="btn primary" id="login" type="button">Login</button>
+          </div>
+        </div>
+      </header>
+      <div class="notice" id="ui-notice" role="status" aria-live="polite" data-tone="idle" hidden></div>
+
+      <section class="page active" data-page="overview">
+        <div class="page-intro">
+          <div>
+            <h2>Overview</h2>
+            <p>Service graph, current session, stream state, and bounded runtime summaries.</p>
+          </div>
+          <span class="badge" id="session-state" data-component="Badge">signed out</span>
+        </div>
+        <div class="overview-grid" id="overview-grid"></div>
+        <article class="card cognition-card" data-component="Card">
+          <div class="card-header"><h3>Latest cognition run</h3><span class="badge" id="overview-cognition-status">not reported</span></div>
+          <div class="card-content">
+            <div class="cognition-graph" id="overview-cognition-graph" data-cognition-graph="overview_latest">
+              <p class="graph-empty">Cognition run telemetry appears here when the brain reports a bounded snapshot.</p>
+            </div>
+          </div>
+        </article>
+        <div class="content-grid two">
+          <article class="card" data-component="Card">
+            <div class="card-header"><h3>Runtime Summary</h3><span class="badge">bounded</span></div>
+            <div class="card-content table-wrap flush"><table><tbody id="overview-runtime-table"><tr><td>Session</td><td>Sign in to load service state.</td></tr><tr><td>Stream</td><td>Starts after authentication.</td></tr></tbody></table></div>
+          </article>
+          <article class="card" data-component="Card">
+            <div class="card-header"><h3>Recent Audit</h3><span class="badge">local JSONL</span></div>
+            <div class="card-content table-wrap flush"><table><tbody id="overview-audit-table"><tr><td>Status</td><td>Audit rows appear after sign in.</td><td>redacted</td></tr></tbody></table></div>
+          </article>
+        </div>
+        <div class="content-grid two">
+          <article class="card" data-component="Card">
+            <div class="card-header"><h3>Lifecycle Guardrails</h3><span class="badge">deterministic</span></div>
+            <div class="table-wrap flush"><table><tbody><tr><td>Start order</td><td>brain before adapters</td></tr><tr><td>Stop order</td><td>dependent adapters before brain</td></tr><tr><td>Ownership</td><td>console-owned PID, generation, fingerprint</td></tr></tbody></table></div>
+          </article>
+          <article class="card" data-component="Card">
+            <div class="card-header"><h3>Available Workflows</h3><span class="badge">operator ready</span></div>
+            <div class="table-wrap flush"><table><tbody id="overview-capability-table"><tr><td>Status</td><td>Sign in to load available workflows.</td></tr></tbody></table></div>
+          </article>
+          <article class="card" data-component="Card">
+            <div class="card-header"><h3>Unavailable Workflows</h3><span class="badge">hidden from nav</span></div>
+            <div class="table-wrap flush"><table><tbody id="overview-unavailable-table"><tr><td>Status</td><td>Sign in to load unavailable workflows.</td></tr></tbody></table></div>
+          </article>
+          <article class="card" data-component="Card">
+            <div class="card-header"><h3>Data Safety</h3><span class="badge">redacted</span></div>
+            <div class="table-wrap flush"><table><tbody><tr><td>Excluded</td><td>secrets, prompts, embeddings</td></tr><tr><td>Live path</td><td>compact status stream plus bounded log stream</td></tr><tr><td>Details</td><td>bounded REST fetch on demand</td></tr></tbody></table></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="page" data-page="services">
+        <div class="page-intro">
+          <div>
+            <h2>Services</h2>
+            <p>Registry-declared child processes. Commands are fixed argv arrays and not browser-editable.</p>
+          </div>
+          <span class="badge">managed local</span>
+        </div>
+        <div class="service-grid" id="service-grid"></div>
+      </section>
+
+      <section class="page" data-page="logs">
+        <div class="page-intro">
+          <div>
+            <h2>Live logs</h2>
+            <p>Console-owned service stdout, stderr, and supervisor lines stream here while the page is open.</p>
+          </div>
+          <span class="badge" id="log-stream-status" data-component="Badge">signed out</span>
+        </div>
+        <article class="card" data-component="Card">
+          <div class="card-header"><h3>Stream Controls</h3><span class="badge" id="log-buffer-status">0 rows</span></div>
+          <div class="card-content log-toolbar" data-component="FieldGroup">
+            <label class="field">Service<select class="input" id="log-service-filter"><option value="all">all services</option></select></label>
+            <label class="field">Stream<select class="input" id="log-stream-filter"><option value="stdout,stderr,supervisor">all streams</option><option value="stdout">stdout</option><option value="stderr">stderr</option><option value="supervisor">supervisor</option></select></label>
+            <label class="field">Filter<input class="input" id="log-text-filter" placeholder="plain text contains" maxlength="120" /></label>
+            <label class="field">Highlight<input class="input" id="log-highlight-filter" placeholder="highlight text" maxlength="120" /></label>
+            <label class="check-field"><input type="checkbox" id="log-autoscroll" checked />Autoscroll</label>
+            <label class="check-field"><input type="checkbox" id="log-wrap-lines" checked />Wrap lines</label>
+            <button class="btn" id="log-pause" type="button">Pause</button>
+            <button class="btn" id="log-clear" type="button">Clear</button>
+          </div>
+        </article>
+        <article class="card log-card" data-component="Card">
+          <div class="card-header"><h3>Process Output</h3><span class="badge">redacted</span></div>
+          <div class="card-content log-viewport" id="log-viewport" data-component="ScrollArea">
+            <table class="log-table"><tbody id="log-table"><tr class="log-row log-placeholder wrap"><td>Status</td><td>Open this page after login to start the live log stream.</td><td></td></tr></tbody></table>
+          </div>
+        </article>
+      </section>
+
+      <section class="page" data-page="debug">
+        <div class="page-intro">
+          <div>
+            <h2>Debug chat</h2>
+            <p>Messages use the existing brain /chat contract when the brain is running.</p>
+          </div>
+          <span class="badge" id="debug-brain-status">locked</span>
+        </div>
+        <div class="chat-layout">
+          <article class="card" data-component="Card">
+            <div class="card-header"><h3>History</h3><span class="badge">redacted</span></div>
+            <div class="chat-history" id="chat-history">
+              <article class="message"><div class="meta">system</div><p>Debug history appears here after authenticated sends.</p></article>
+            </div>
+          </article>
+          <form class="card" id="debug-form" data-component="FieldGroup">
+            <div class="card-header"><h3>Composer</h3><span class="badge">POST + CSRF</span></div>
+            <div class="card-content field-group">
+              <label class="field">Channel<input class="input" name="channel_id" value="debug" data-debug-input disabled /></label>
+              <label class="field">User<input class="input" name="user_id" value="operator" data-debug-input disabled /></label>
+              <label class="field">Name<input class="input" name="user_display_name" value="Operator" data-debug-input disabled /></label>
+              <fieldset class="field-set" data-component="FieldSet">
+                <legend class="field-legend">Run mode</legend>
+                <div class="choice-row">
+                  <label class="check-field"><input type="radio" name="debug_mode" value="visible_reply" checked data-debug-input disabled />Visible reply</label>
+                  <label class="check-field"><input type="radio" name="debug_mode" value="think_only" data-debug-input disabled />Think only</label>
+                  <label class="check-field"><input type="radio" name="debug_mode" value="listen_only" data-debug-input disabled />Listen only</label>
+                </div>
+              </fieldset>
+              <fieldset class="field-set" data-component="FieldSet">
+                <legend class="field-legend">Persistence</legend>
+                <label class="check-field"><input type="checkbox" name="debug_modes" value="no_remember" checked data-debug-input disabled />Do not remember test turn</label>
+              </fieldset>
+              <label class="field">Message<textarea class="textarea" name="message_text" placeholder="Start the brain service before sending a debug message" data-debug-input disabled></textarea></label>
+              <button class="btn primary" id="debug-send" type="submit" disabled>Send</button>
+            </div>
+          </form>
+        </div>
+        <article class="card cognition-card" data-component="Card">
+          <div class="card-header"><h3>Debug cognition run</h3><span class="badge" id="debug-cognition-status">not reported</span></div>
+          <div class="card-content">
+            <div class="cognition-graph" id="debug-cognition-graph" data-cognition-graph="debug_latest">
+              <p class="graph-empty">Send a debug message to inspect reported cognition telemetry.</p>
+            </div>
+          </div>
+        </article>
+        <div class="content-grid two">
+          <article class="card" data-component="Card">
+            <div class="card-header"><h3>Request Contract</h3><span class="badge">/chat</span></div>
+            <div class="table-wrap flush"><table><tbody><tr><td>Transport</td><td>control console POST to brain /chat</td></tr><tr><td>Brain stopped</td><td>safe unavailable response, no cognition start</td></tr><tr><td>Audit</td><td>debug send with operator and request id</td></tr></tbody></table></div>
+          </article>
+          <article class="card" data-component="Card">
+            <div class="card-header"><h3>Visible Fields</h3><span class="badge">bounded</span></div>
+            <div class="table-wrap flush"><table><tbody><tr><td>Input</td><td>channel, user, display name, run mode, persistence, message</td></tr><tr><td>Output</td><td>reply summary, tracking id, latency</td></tr><tr><td>Excluded</td><td>prompts, raw memory, embeddings</td></tr></tbody></table></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="page" data-page="events">
+        <div class="page-intro">
+          <div>
+            <h2>Event monitor</h2>
+            <p>Local console audit, process logs, and sanitized application event-log telemetry.</p>
+          </div>
+          <button class="btn" id="refresh-events" type="button">Refresh</button>
+        </div>
+        <article class="card" data-component="Card">
+          <div class="card-header"><h3>Filters</h3><span class="badge">limit 200</span></div>
+          <div class="card-content filter-row" data-component="FieldGroup">
+            <label class="field">Source<select class="input" id="event-source"><option value="all">all</option><option value="console">console</option><option value="process">process</option><option value="kazusa">application event log</option></select></label>
+            <label class="field">Request id<input class="input" id="event-request-id" placeholder="cc-req-..." /></label>
+            <label class="field">Tracking id<input class="input" id="event-tracking-id" placeholder="delivery tracking id" /></label>
+          </div>
+        </article>
+        <div class="content-grid three">
+          <article class="metric" data-component="Card"><div class="metric-label">Console audit</div><div class="metric-value">local</div><div class="metric-label">JSONL source of truth</div></article>
+          <article class="metric" data-component="Card"><div class="metric-label">Process logs</div><div class="metric-value">tail</div><div class="metric-label">bounded stdout/stderr</div></article>
+          <article class="metric" data-component="Card"><div class="metric-label">Application events</div><div class="metric-value">log</div><div class="metric-label">sanitized event_log_events</div></article>
+        </div>
+        <article class="card" data-component="Card">
+          <div class="card-header"><h3>Events</h3><span class="badge">redacted</span></div>
+          <div class="table-wrap flush"><table><tbody id="event-table"><tr><td>Ready</td><td>Select filters and refresh for audit, process, or application event-log rows.</td><td>redacted</td></tr><tr><td>Sources</td><td>console audit, process logs, sanitized event_log_events</td><td>limit 200</td></tr></tbody></table></div>
+        </article>
+      </section>
+
+      <section class="page" data-page="character">
+        <div class="page-intro"><div><h2>Character</h2><p>Character-owned profile, state, self-image, growth, memory, and background learning stay read-only.</p></div><span class="badge" id="character-status">not loaded</span></div>
+        <div class="content-grid three">
+          <article class="metric" data-component="Card"><div class="metric-label">Owner</div><div class="metric-value">character</div><div class="metric-label">profile and runtime state</div></article>
+          <article class="metric" data-component="Card"><div class="metric-label">Learning</div><div class="metric-value">safe</div><div class="metric-label">promoted summaries only</div></article>
+          <article class="metric" data-component="Card"><div class="metric-label">Excluded</div><div class="metric-value">private</div><div class="metric-label">raw prompts, embeddings, raw reflection text</div></article>
+        </div>
+        <div class="content-grid two">
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Profile</h3><span class="badge">character</span></div><div class="card-content character-panel" id="character-profile-table"><p class="panel-empty">Open this page after login to load character profile.</p></div></article>
+          <article class="card" data-component="Card"><div class="card-header"><h3>Latest State</h3><span class="badge">runtime</span></div><div class="table-wrap flush"><table><tbody id="character-state-table"><tr><td>Status</td><td>Open this page after login to refresh character status.</td></tr></tbody></table></div></article>
+          <article class="card" data-component="Card"><div class="card-header"><h3>Background Learning</h3><span class="badge">summary</span></div><div class="table-wrap flush"><table><tbody id="character-learning-table"><tr><td>Status</td><td>Open this page after login to inspect promoted learning summaries.</td></tr></tbody></table></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Self Image</h3><span class="badge">profile</span></div><div class="card-content character-panel" id="character-self-image-table"><p class="panel-empty">Open this page after login to load self-image summary.</p></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Growth</h3><span class="badge">active traits</span></div><div class="card-content trait-list" id="character-growth-table"><p class="panel-empty">Open this page after login to refresh growth traits.</p></div></article>
+        </div>
+      </section>
+
+      <section class="page" data-page="health">
+        <div class="page-intro"><div><h2>Health/cache</h2><p>Brain health, Cache2 stats, DB readiness, and worker liveness.</p></div><span class="badge">aggregate</span></div>
+        <div class="content-grid three">
+          <article class="card"><div class="card-header"><h3>Brain</h3></div><div class="card-content metric small"><div class="metric-value" id="health-brain-status">locked</div><div class="metric-label" id="health-brain-detail">sign in to load health</div></div></article>
+          <article class="card"><div class="card-header"><h3>Cache2</h3></div><div class="card-content metric small"><div class="metric-value" id="health-cache-status">locked</div><div class="metric-label">per-agent stats from /health when available</div></div></article>
+          <article class="card"><div class="card-header"><h3>Runtime</h3></div><div class="card-content metric small"><div class="metric-value" id="health-runtime-status">locked</div><div class="metric-label">from /ops/runtime-status when available</div></div></article>
+        </div>
+        <div class="content-grid two">
+          <article class="card"><div class="card-header"><h3>Readiness Matrix</h3><span class="badge">aggregate</span></div><div class="table-wrap flush"><table><tbody id="health-runtime-table"><tr><td>Status</td><td>sign in to load runtime state</td></tr></tbody></table></div></article>
+          <article class="card"><div class="card-header"><h3>Cache Surfaces</h3><span class="badge">per-agent</span></div><div class="table-wrap flush"><table><tbody id="health-cache-table"><tr><td>Status</td><td>sign in to load Cache2 stats</td></tr></tbody></table></div></article>
+        </div>
+      </section>
+
+      <section class="page" data-page="users">
+        <div class="page-intro">
+          <div>
+            <h2>Users</h2>
+            <p>Platform-user lookup for profile, relationship, memory, and user-scoped interaction style.</p>
+          </div>
+          <span class="badge" id="users-status">needs input</span>
+        </div>
+        <article class="card" data-component="Card">
+          <div class="card-header"><h3>Platform User Lookup</h3><span class="badge">limit 25</span></div>
+          <div class="card-content filter-row" data-component="FieldGroup">
+            <label class="field">Platform<select class="input" id="user-platform"><option value="">Select platform</option><option value="qq">QQ (NapCat)</option><option value="discord">Discord</option><option value="debug">Debug</option></select></label>
+            <label class="field">Platform user ID<input class="input" id="user-platform-user-id" placeholder="platform account id" /></label>
+            <label class="field">Keyword<input class="input" id="user-query" placeholder="optional memory keyword" /></label>
+            <button class="btn primary" id="refresh-users" type="button">Search</button>
+          </div>
+        </article>
+        <div class="content-grid three">
+          <article class="metric" data-component="Card"><div class="metric-label">Identity</div><div class="metric-value">platform</div><div class="metric-label">no internal user ids</div></article>
+          <article class="metric" data-component="Card"><div class="metric-label">Memory</div><div class="metric-value">user</div><div class="metric-label">recent or keyword bounded</div></article>
+          <article class="metric" data-component="Card"><div class="metric-label">Style</div><div class="metric-value">private</div><div class="metric-label">user-scoped guidance rows</div></article>
+        </div>
+        <div class="content-grid two">
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Profile</h3><span class="badge">identity + relationship</span></div><div class="table-wrap flush"><table><tbody id="user-profile-table"><tr><td>Status</td><td>Enter platform and platform user ID to load profile.</td></tr></tbody></table></div></article>
+          <article class="card" data-component="Card"><div class="card-header"><h3>User Memory</h3><span class="badge">redacted</span></div><div class="table-wrap flush"><table><tbody id="user-memory-table"><tr><td>Status</td><td>Enter platform and platform user ID to load recent memory units.</td></tr></tbody></table></div></article>
+          <article class="card" data-component="Card"><div class="card-header"><h3>User Style</h3><span class="badge">guidance</span></div><div class="table-wrap flush"><table><tbody id="user-style-table"><tr><td>Status</td><td>Enter platform and platform user ID to load interaction-style guidance.</td></tr></tbody></table></div></article>
+        </div>
+      </section>
+
+      <section class="page" data-page="groups">
+        <div class="page-intro">
+          <div>
+            <h2>Groups</h2>
+            <p>Platform-group lookup for group-channel style, progress, and safe reflection-derived context.</p>
+          </div>
+          <span class="badge" id="groups-status">needs input</span>
+        </div>
+        <article class="card" data-component="Card">
+          <div class="card-header"><h3>Platform Group Lookup</h3><span class="badge">limit 25</span></div>
+          <div class="card-content filter-row" data-component="FieldGroup">
+            <label class="field">Platform<select class="input" id="group-platform"><option value="">Select platform</option><option value="qq">QQ (NapCat)</option><option value="discord">Discord</option><option value="debug">Debug</option></select></label>
+            <label class="field">Group ID<input class="input" id="group-id" placeholder="platform group or channel id" /></label>
+            <button class="btn primary" id="refresh-groups" type="button">Search</button>
+          </div>
+        </article>
+        <div class="content-grid three">
+          <article class="metric" data-component="Card"><div class="metric-label">Identity</div><div class="metric-value">group</div><div class="metric-label">platform-facing group id</div></article>
+          <article class="metric" data-component="Card"><div class="metric-label">Style</div><div class="metric-value">channel</div><div class="metric-label">group-channel guidance</div></article>
+          <article class="metric" data-component="Card"><div class="metric-label">Redaction</div><div class="metric-value">safe</div><div class="metric-label">no raw reflection text</div></article>
+        </div>
+        <div class="content-grid">
+          <article class="card" data-component="Card"><div class="card-header"><h3>Group Style</h3><span class="badge">guidance</span></div><div class="table-wrap flush"><table><tbody id="group-style-table"><tr><td>Status</td><td>Enter platform and group ID to load group-channel style.</td></tr></tbody></table></div></article>
+        </div>
+      </section>
+
+      <section class="page" data-page="calendar">
+        <div class="page-intro">
+          <div>
+            <h2>Calendar</h2>
+            <p>Due typed scheduler runs from the durable calendar queue.</p>
+          </div>
+          <span class="badge" id="calendar-status">not loaded</span>
+        </div>
+        <article class="card" data-component="Card">
+          <div class="card-header"><h3>Due Run Lookup</h3><span class="badge">limit 25</span></div>
+          <div class="card-content filter-row" data-component="FieldGroup">
+            <div class="field"><span>Scope</span><strong>all closed trigger kinds due at or before now</strong></div>
+            <button class="btn primary" id="refresh-calendar" type="button">Refresh</button>
+          </div>
+        </article>
+        <div class="content-grid three">
+          <article class="metric" data-component="Card"><div class="metric-label">Source</div><div class="metric-value">runs</div><div class="metric-label">calendar_runs due queue</div></article>
+          <article class="metric" data-component="Card"><div class="metric-label">Actions</div><div class="metric-value">read</div><div class="metric-label">no claiming or schedule edits</div></article>
+          <article class="metric" data-component="Card"><div class="metric-label">Excluded</div><div class="metric-value">safe</div><div class="metric-label">payloads, source scope, idempotency keys</div></article>
+        </div>
+        <article class="card" data-component="Card">
+          <div class="card-header"><h3>Due Runs</h3><span class="badge">redacted</span></div>
+          <div class="table-wrap flush"><table><tbody id="calendar-table"><tr><td>Status</td><td>Open this page after login to load due calendar runs.</td></tr></tbody></table></div>
+        </article>
+      </section>
+
+      <section class="page" data-page="background">
+        <div class="page-intro">
+          <div>
+            <h2>Background work</h2>
+            <p>Sanitized worker telemetry for asynchronous background work.</p>
+          </div>
+          <span class="badge" id="background-status">not loaded</span>
+        </div>
+        <article class="card" data-component="Card">
+          <div class="card-header"><h3>Worker Event Lookup</h3><span class="badge">limit 25</span></div>
+          <div class="card-content filter-row" data-component="FieldGroup">
+            <div class="field"><span>Component</span><strong>background_work.worker</strong></div>
+            <button class="btn primary" id="refresh-background" type="button">Refresh</button>
+          </div>
+        </article>
+        <div class="content-grid three">
+          <article class="metric" data-component="Card"><div class="metric-label">Source</div><div class="metric-value">events</div><div class="metric-label">event_log_events telemetry</div></article>
+          <article class="metric" data-component="Card"><div class="metric-label">Activity</div><div class="metric-value">worker</div><div class="metric-label">recent sanitized events</div></article>
+          <article class="metric" data-component="Card"><div class="metric-label">Excluded</div><div class="metric-value">safe</div><div class="metric-label">task briefs, artifacts, raw messages</div></article>
+        </div>
+        <article class="card" data-component="Card">
+          <div class="card-header"><h3>Worker Events</h3><span class="badge">redacted</span></div>
+          <div class="table-wrap flush"><table><tbody id="background-table"><tr><td>Status</td><td>Open this page after login to load worker telemetry.</td></tr></tbody></table></div>
+        </article>
+      </section>
+
+      <section class="page" data-page="audit">
+        <div class="page-intro"><div><h2>Audit</h2><p>Privileged actions, auth failures, lookups, log views, and lifecycle events.</p></div><span class="badge">sanitized</span></div>
+        <div class="content-grid three">
+          <article class="metric" data-component="Card"><div class="metric-label">Privileged actions</div><div class="metric-value">all</div><div class="metric-label">start, stop, restart, debug, lookup</div></article>
+          <article class="metric" data-component="Card"><div class="metric-label">Storage</div><div class="metric-value">local</div><div class="metric-label">JSONL audit source</div></article>
+          <article class="metric" data-component="Card"><div class="metric-label">Fields</div><div class="metric-value">safe</div><div class="metric-label">operator, target, reason, request id</div></article>
+        </div>
+        <article class="card"><div class="card-header"><h3>Audit List</h3><span class="badge">local JSONL</span></div><div class="table-wrap flush"><table><tbody id="audit-table"></tbody></table></div></article>
+      </section>
+
+    </main>
+  </div>
+  <div class="dialog-backdrop" id="service-config-dialog" data-component="Dialog" role="dialog" aria-modal="true" aria-labelledby="service-config-title" aria-describedby="service-config-description" hidden>
+    <section class="dialog-panel service-config-panel card" data-component="Card">
+      <div class="card-header">
+        <div>
+          <h3 id="service-config-title">Service configuration</h3>
+          <p id="service-config-description">Descriptor-backed runtime override for a managed service.</p>
+        </div>
+        <button class="btn" id="service-config-close" type="button" aria-label="Close configuration dialog">Close</button>
+      </div>
+      <div class="card-content service-config-content">
+        <div class="config-summary-row">
+          <span class="badge" id="service-config-state">not loaded</span>
+          <span class="badge warn" id="service-config-restart-note">Apply and restart when running</span>
+        </div>
+        <div class="notice config-warning" data-tone="info">Applying changes restarts the service when it is running. Stopped services use the override on next start.</div>
+        <div class="field-group" id="service-config-fields" data-component="FieldGroup"></div>
+      </div>
+      <div class="dialog-footer">
+        <button class="btn" id="service-config-reset" type="button">Reset to default</button>
+        <button class="btn primary" id="service-config-apply" type="button">Apply and restart</button>
+      </div>
+    </section>
+  </div>
+  <script src="/static/console.js"></script>
+</body>
+</html>

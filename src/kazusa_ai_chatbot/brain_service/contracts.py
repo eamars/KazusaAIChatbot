@@ -89,6 +89,11 @@ class ChatResponse(BaseModel):
     delivery_mentions: list[dict[str, Any]] = Field(default_factory=list)
     scheduled_followups: int = 0
     delivery_tracking_id: str = ""
+    cognition_graph: dict[str, Any] | None = None
+
+
+class OpsLatestCognitionGraphResponse(BaseModel):
+    cognition_graph: dict[str, Any] | None = None
 
 
 class DeliveryReceiptRequest(BaseModel):

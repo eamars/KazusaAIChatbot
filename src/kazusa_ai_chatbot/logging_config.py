@@ -12,6 +12,7 @@ APP_LOG_LEVEL = getattr(logging, _APP_LOG_LEVEL_NAME, logging.INFO)
 THIRD_PARTY_LOG_LEVEL = logging.WARNING
 SERVICE_LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 ADAPTER_LOG_FORMAT = "%(asctime)s [%(levelname)s] adapter:%(name)s: %(message)s"
+BENIGN_ASYNCIO_SOCKET_SEND_WARNING = "socket.send() raised exception."
 QUIET_LOGGERS = (
     "asyncio",
     "discord",
@@ -31,6 +32,20 @@ QUIET_LOGGERS = (
 )
 
 _configured_profile: str | None = None
+
+
+class _BenignAsyncioSocketSendWarningFilter(logging.Filter):
+    """Suppress the Windows asyncio noise emitted for closed client sockets."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """Return whether the logging record should be emitted."""
+
+        message = record.getMessage()
+        allowed = not (
+            record.name == "asyncio"
+            and message == BENIGN_ASYNCIO_SOCKET_SEND_WARNING
+        )
+        return allowed
 
 
 def configure_service_logging() -> None:
@@ -83,6 +98,13 @@ def _configure_logging(*, profile: str, log_format: str) -> None:
         format=log_format,
         force=True,
     )
+    asyncio_logger = logging.getLogger("asyncio")
+    has_socket_filter = any(
+        isinstance(logger_filter, _BenignAsyncioSocketSendWarningFilter)
+        for logger_filter in asyncio_logger.filters
+    )
+    if not has_socket_filter:
+        asyncio_logger.addFilter(_BenignAsyncioSocketSendWarningFilter())
     for logger_name in QUIET_LOGGERS:
         logging.getLogger(logger_name).setLevel(THIRD_PARTY_LOG_LEVEL)
     _configured_profile = profile

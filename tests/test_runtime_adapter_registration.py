@@ -229,6 +229,74 @@ def test_napcat_module_cli_help_exits_successfully() -> None:
     assert "--channels" in result.stdout
 
 
+def test_napcat_cli_reads_active_groups_from_environment(monkeypatch) -> None:
+    """Console-launched NapCat should activate configured QQ groups."""
+
+    from adapters.napcat_qq_adapter import cli as napcat_cli
+    from adapters.napcat_qq_adapter import ws_adapter as napcat_ws_module
+
+    created_adapters = []
+
+    class FakeNapCatAdapter:
+        """Capture CLI adapter construction without opening network sockets."""
+
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+            created_adapters.append(self)
+
+        async def connect(self) -> None:
+            return
+
+    monkeypatch.setattr(napcat_ws_module, "NapCatWSAdapter", FakeNapCatAdapter)
+    monkeypatch.setattr(sys, "argv", ["napcat"])
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
+    monkeypatch.setenv("BRAIN_URL", "http://127.0.0.1:8000")
+    monkeypatch.setenv("NAPCAT_WS_URL", "ws://127.0.0.1:5001")
+    monkeypatch.setenv("NAPCAT_WS_TOKEN", "token")
+    monkeypatch.setenv("NAPCAT_ACTIVE_GROUPS", "54369546, 905393941 961633605")
+
+    napcat_cli.main()
+
+    assert len(created_adapters) == 1
+    assert created_adapters[0].kwargs["channel_ids"] == [
+        "54369546",
+        "905393941",
+        "961633605",
+    ]
+
+
+def test_napcat_cli_channels_argument_overrides_environment(monkeypatch) -> None:
+    """Explicit CLI group args should remain stronger than environment config."""
+
+    from adapters.napcat_qq_adapter import cli as napcat_cli
+    from adapters.napcat_qq_adapter import ws_adapter as napcat_ws_module
+
+    created_adapters = []
+
+    class FakeNapCatAdapter:
+        """Capture CLI adapter construction without opening network sockets."""
+
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+            created_adapters.append(self)
+
+        async def connect(self) -> None:
+            return
+
+    monkeypatch.setattr(napcat_ws_module, "NapCatWSAdapter", FakeNapCatAdapter)
+    monkeypatch.setattr(sys, "argv", ["napcat", "--channels", "123456"])
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
+    monkeypatch.setenv("BRAIN_URL", "http://127.0.0.1:8000")
+    monkeypatch.setenv("NAPCAT_WS_URL", "ws://127.0.0.1:5001")
+    monkeypatch.setenv("NAPCAT_WS_TOKEN", "token")
+    monkeypatch.setenv("NAPCAT_ACTIVE_GROUPS", "54369546")
+
+    napcat_cli.main()
+
+    assert len(created_adapters) == 1
+    assert created_adapters[0].kwargs["channel_ids"] == ["123456"]
+
+
 def test_register_remote_runtime_adapter_registers_proxy_in_service(monkeypatch):
     """The brain service should store a remote adapter proxy by platform."""
 

@@ -260,6 +260,7 @@ cognition, and calendar scheduling remain in the platform-neutral core.
 | Layer                    | Owns                                                                                    | Key docs                                                                               |
 | ------------------------ | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | Adapters                 | Discord, NapCat QQ, debug UI transport and platform rendering                           | [HOWTO](docs/HOWTO.md)                                                                 |
+| Control console          | Local operator auth, service lifecycle, process logs, audit, static UI, debug-chat handoff | [Control Console ICD](src/control_console/README.md)                                  |
 | Brain service            | HTTP API, queue, graph startup, health, delivery receipts, runtime adapter registration | [Brain Service ICD](src/kazusa_ai_chatbot/brain_service/README.md)                     |
 | Message envelope         | Typed inbound content, mentions, replies, attachments, addressees, broadcast state      | [Message Envelope ICD](src/kazusa_ai_chatbot/message_envelope/README.md)               |
 | LLM interface            | Backend-compatible chat LLM invocation, provider sessions, diagnostics, and reload retry | [LLM Interface ICD](src/kazusa_ai_chatbot/llm_interface/README.md)                    |
@@ -300,7 +301,15 @@ Load a character profile before starting the brain:
 python -m scripts.load_character_profile personalities/kazusa.json
 ```
 
-Run the brain service:
+Normal local operation starts the buildless Python/FastAPI control console,
+then uses the console to start or stop the brain and adapters:
+
+```powershell
+kazusa-control-console --host 127.0.0.1 --port 8765
+```
+
+Run the brain service directly only when bypassing the console for
+development:
 
 ```powershell
 kazusa-brain --host 0.0.0.0 --port 8000
@@ -324,6 +333,7 @@ Then open `http://localhost:8080`.
 
 ```text
 src/
+  control_console/              Local operator console, lifecycle, logs, audit, static UI
   adapters/                    Platform adapters and debug UI
   kazusa_ai_chatbot/
     brain_service/             Service API, graph, intake, health, post-turn glue
