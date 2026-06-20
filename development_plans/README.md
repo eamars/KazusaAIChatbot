@@ -38,7 +38,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [coding_agent_phase1_fetching_reading_plan.md](active/short_term/coding_agent_phase1_fetching_reading_plan.md) | Large standalone coding-agent Phase 1 plan | draft |
+| [coding_agent_phase1_reading_plan.md](active/short_term/coding_agent_phase1_reading_plan.md) | Large standalone coding-agent Phase 1 reading plan | draft |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 
 ## Supporting Experiment Records
@@ -156,6 +156,7 @@ plans.
 | [cache2_agent_stats_health_plan.md](archive/completed/short_term/cache2_agent_stats_health_plan.md) |
 | [character_local_time_context_plan.md](archive/completed/short_term/character_local_time_context_plan.md) |
 | [character_profile_runtime_state_split_plan.md](archive/completed/short_term/character_profile_runtime_state_split_plan.md) |
+| [coding_agent_phase0_fetching_plan.md](archive/completed/short_term/coding_agent_phase0_fetching_plan.md) |
 | [character_reflection_cycle_stage1a_plan.md](archive/completed/short_term/character_reflection_cycle_stage1a_plan.md) |
 | [character_self_words_retrieval_delivery_receipt_plan.md](archive/completed/short_term/character_self_words_retrieval_delivery_receipt_plan.md) |
 | [cognition_chain_module_separation_plan.md](archive/completed/short_term/cognition_chain_module_separation_plan.md) |

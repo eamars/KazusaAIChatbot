@@ -4,14 +4,16 @@
 
 - Type: reference architecture and decision record
 - Status: draft reference
-- Related execution plan:
-  `development_plans/active/short_term/coding_agent_phase1_fetching_reading_plan.md`
+- Related execution plans:
+  - `development_plans/archive/completed/short_term/coding_agent_phase0_fetching_plan.md`
+  - `development_plans/active/short_term/coding_agent_phase1_reading_plan.md`
 - Execution rule: do not execute directly from this document
 
 This document captures the top-level architecture for replacing placeholder
 code-related background work with a specialized `coding_agent`. The active
-Phase 1 plan contains the executable scope for `code_fetching`, `code_reading`,
-and the top-level supervisor.
+completed Phase 0 plan records the implemented `code_fetching` contract; the
+active Phase 1 plan builds `code_reading` and the direct answer interface on
+top of that fetching contract.
 
 ## Problem
 
@@ -52,8 +54,8 @@ bounded step is required.
 ## Runtime Placement
 
 The diagram below is the long-term Kazusa integration target after the
-standalone coding-agent core exists. Phase 1 implements only the direct
-`coding_agent` module path shown after the diagram.
+standalone coding-agent core exists. Phase 0 and Phase 1 implement only direct
+module paths shown after the diagram.
 
 ```mermaid
 flowchart TD
@@ -79,20 +81,28 @@ command, patch, or final answer. It can only select the private
 materializes the trusted task brief and delivery scope. The background-work
 router selects `coding_agent` after the live turn.
 
+The Phase 0 standalone path is:
+
+```text
+CodeFetchingRequest
+  -> code_fetching.run
+  -> CodeFetchingResult
+```
+
 The Phase 1 standalone path is:
 
 ```text
 CodingAgentRequest
   -> coding_agent.answer_code_question
   -> coding supervisor loop
-  -> code_fetching
-  -> code_reading
+  -> code_fetching.run from Phase 0
+  -> code_reading.run
   -> CodingAgentResponse
 ```
 
-Phase 1 tests call this public interface directly. They do not use L2d,
-background-work jobs, router integration, result-ready cognition, service
-delivery, or placeholder removal.
+Phase 0 and Phase 1 tests call these public interfaces directly. They do not
+use L2d, background-work jobs, router integration, result-ready cognition,
+service delivery, or placeholder removal.
 
 ## Ownership Boundaries
 
@@ -142,7 +152,8 @@ Its next-action output is always one of:
 }
 ```
 
-Deterministic code validates allowed transitions. Phase 1 allows only
+Deterministic code validates allowed transitions. Phase 0 has no top-level
+supervisor and exposes only `code_fetching.run`. Phase 1 allows only
 `code_fetching`, `code_reading`, `finish`, and `fail`.
 
 ## Subagent Contracts
@@ -153,20 +164,40 @@ Purpose: resolve the code workspace for a task.
 
 Responsibilities:
 
+- Publish `code_fetching/README.md` as the upstream ICD.
 - Extract public repository URLs from the task.
+- Resolve source scope as `repository`, `directory`, or `file`.
+- Support public GitHub repository, `.git`, tree, blob, raw file, markdown-link,
+  shorthand `owner/repo`, explicit local checkout, and explicit local path
+  inputs.
 - Prefer an existing matching local checkout.
 - Clone public HTTPS GitHub repositories into a managed coding workspace when
   no local checkout is available.
 - Identify the resolved commit, branch, root path, and whether the checkout is
   managed by the coding workspace.
+- Validate that parsed GitHub `tree`, `blob`, and raw-file scopes exist in the
+  resolved checkout before handing them to reading.
+- Return public-safe local source labels for local checkout scopes while
+  keeping `repository.local_root` as the internal read root.
 - Refuse private URLs, SSH URLs, raw filesystem paths outside the managed
   workspace, and ambiguous repository targets.
+- Store managed clones under:
+  `<workspace_root>/repos/github/<owner>/<repo>/refs/<ref_key>/checkout`.
+- Protect managed paths with matching `metadata.json` before reuse.
+- Store lock files and temporary clone directories under the same configured
+  workspace root.
+- Return explicit unsupported outcomes for GitHub issues, pull requests,
+  discussions, release archives, SSH URLs, private/auth URLs, non-GitHub
+  providers, package registry names, Gists, paste URLs, and generic raw HTTP
+  sources.
 
 Future responsibilities:
 
 - `git pull` and `git checkout` only for managed clean clones.
 - Version pinning and branch/tag resolution.
 - Download archive support for non-git public code packages.
+- Optional LLM source disambiguation after deterministic fetching exposes a
+  concrete semantic ambiguity that cannot be handled by clarification.
 
 ### `code_reading`
 
@@ -174,6 +205,9 @@ Purpose: inspect code and answer codebase questions with file evidence.
 
 Responsibilities:
 
+- Publish `code_reading/README.md` as the upstream ICD.
+- Consume `CodeFetchingResult`, `CodeRepositoryRef`, and `CodeSourceScope`;
+  do not parse source URLs or clone repositories.
 - Build a small reading plan from the task and repository metadata.
 - Use deterministic tools such as `rg --files`, `rg -n --json`, and bounded
   file reads.
@@ -220,7 +254,7 @@ ordinary code questions should not require execution.
 The coding subsystem should use proven tools rather than custom parsers where
 the standard tool is stronger.
 
-Phase 1 tool candidates:
+Tool candidates for Phases 0 and 1:
 
 - `git remote -v`, `git rev-parse`, `git status --porcelain`, `git clone`
   through a deterministic subprocess facade.
@@ -265,6 +299,7 @@ Rules:
 - Deterministic code owns filesystem safety, command allowlists, timeouts,
   output caps, and persistence boundaries.
 - LLM stages own semantic planning and answer synthesis only.
+- Phase 0 owns source fetching and storage. Phase 1 consumes Phase 0 output.
 - Phase 1 is read-only after repository fetching. It does not write files,
   apply patches, install packages, or run arbitrary shell commands.
 - Managed clones live under a dedicated coding-agent workspace. The active
@@ -278,7 +313,8 @@ Rules:
 
 | Phase | Scope | User-Visible Capability |
 |---|---|---|
-| Phase 1 | Standalone top-level module, README ICD, `code_fetching`, `code_reading`, supervisor, direct public-interface tests. | Direct callers can answer repository/codebase questions with cited local file evidence. |
+| Phase 0 | Standalone `code_fetching` package, README ICD, deterministic source-scope routing, managed storage, direct fetching tests, unsupported-input tests, and 10-source public internet smoke. | Direct callers can resolve supported repo/file/tree/raw/local sources into a safe local source contract or receive explicit unsupported/clarification results. |
+| Phase 1 | Standalone `code_reading` package, README ICD, top-level direct answer interface, supervisor over Phase 0 output and reading. | Direct callers can answer repository/codebase questions with cited local file evidence. |
 | Phase 2 | Background-worker integration, L2d/action-spec affordance update, result-ready delivery, placeholder removal. | Kazusa can route repository/codebase questions through the normal background-work path. |
 | Phase 3 | `code_writing`, patch proposal, patch validation in sandbox. | Propose patches first without mutating the real workspace. |
 | Phase 4 | Patch apply flow with explicit approval and workspace safety. | Apply approved patches in a controlled sandbox or approved workspace. |
@@ -287,12 +323,21 @@ Rules:
 
 ## Real Demand Mapping
 
-For the image-reading question, the intended Phase 1 flow is:
+For the image-reading question, the intended Phase 0 flow is:
+
+```text
+test builds CodeFetchingRequest
+-> code_fetching.run
+-> resolves eamars/KazusaAIChatbot to local checkout or managed clone
+-> returns CodeFetchingResult with repository source scope
+```
+
+The intended Phase 1 flow is:
 
 ```text
 test builds CodingAgentRequest
 -> coding_agent.answer_code_question
--> code_fetching resolves eamars/KazusaAIChatbot to local checkout
+-> code_fetching.run returns Phase 0 CodeFetchingResult
 -> code_reading searches for image, vision, attachment, multimedia,
    VISION_DESCRIPTOR_LLM, user_multimedia_input, image_observation
 -> code_reading reads the relevant source and tests
