@@ -218,6 +218,21 @@ def with_requested_ref(
     return updated_source
 
 
+def is_raw_github_source(source: GitHubSource) -> bool:
+    """Return whether a parsed source came from raw.githubusercontent.com.
+
+    Args:
+        source: Parsed GitHub source descriptor.
+
+    Returns:
+        `True` when the source URL is a raw GitHub file URL.
+    """
+
+    parsed_url = urlparse(source.source_url)
+    is_raw_source = parsed_url.netloc.lower() == _RAW_GITHUB_HOST
+    return is_raw_source
+
+
 def is_safe_repo_relative_path(repo_relative_path: str | None) -> bool:
     """Return whether a repository-relative path is safe to expose.
 
@@ -246,11 +261,11 @@ def _parse_raw_github_url(
     parts = [part for part in path.split("/") if part]
     if len(parts) < 4:
         return None
-    owner, repo, requested_ref = parts[0], parts[1], parts[2]
+    owner, repo = parts[0], parts[1]
     if not _valid_owner_repo(owner, repo):
         return None
 
-    repo_relative_path = "/".join(parts[3:])
+    requested_ref, repo_relative_path = _raw_ref_and_path(parts[2:])
     if not repo_relative_path:
         return None
     if not is_safe_repo_relative_path(repo_relative_path):
@@ -265,6 +280,28 @@ def _parse_raw_github_url(
         repo_relative_path=repo_relative_path,
     )
     return source
+
+
+def _raw_ref_and_path(parts: list[str]) -> tuple[str, str | None]:
+    """Split raw GitHub URL path segments into ref and repository path.
+
+    Args:
+        parts: URL path segments after owner and repository.
+
+    Returns:
+        Requested ref plus the repository-relative file path when available.
+    """
+
+    if len(parts) >= 4 and parts[0] == "refs" and parts[1] in {"heads", "tags"}:
+        requested_ref = "/".join(parts[:3])
+        repo_relative_path = "/".join(parts[3:])
+        split_result = (requested_ref, repo_relative_path)
+        return split_result
+
+    requested_ref = parts[0]
+    repo_relative_path = "/".join(parts[1:])
+    split_result = (requested_ref, repo_relative_path or None)
+    return split_result
 
 
 def _parse_github_web_url(

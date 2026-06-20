@@ -1,79 +1,8 @@
-"""Question planning for the code-reading subagent."""
+"""Deterministic safety checks for the code-reading subagent."""
 
-from __future__ import annotations
-
-import re
-from dataclasses import dataclass
 from pathlib import PurePosixPath
 
 from kazusa_ai_chatbot.coding_agent.code_fetching.models import CodeSourceScope
-
-_CODE_TOKEN_RE = re.compile(r"`([^`]+)`|[A-Za-z_][A-Za-z0-9_./:-]*")
-
-_STOP_WORDS = {
-    "a",
-    "after",
-    "all",
-    "and",
-    "are",
-    "as",
-    "before",
-    "by",
-    "code",
-    "does",
-    "for",
-    "from",
-    "how",
-    "i",
-    "in",
-    "into",
-    "is",
-    "it",
-    "me",
-    "of",
-    "on",
-    "or",
-    "project",
-    "repository",
-    "source",
-    "tell",
-    "that",
-    "the",
-    "this",
-    "to",
-    "what",
-    "when",
-    "where",
-    "which",
-    "with",
-}
-
-_IMAGE_TERMS = [
-    "base64_data",
-    "user_multimedia_input",
-    "multimedia_descriptor_agent",
-    "VISION_DESCRIPTOR_LLM",
-    "image_observation",
-    "update_conversation_attachment_descriptions",
-    "<image>",
-    "ImagePipeline",
-    "attachments",
-    "image",
-    "images",
-]
-
-
-@dataclass(frozen=True)
-class ReadingPlan:
-    """Concrete read-only plan for bounded evidence collection."""
-
-    family: str
-    terms: tuple[str, ...]
-    summary_scope: bool
-    broad: bool
-    compare_symbols: tuple[str, ...]
-    symbol: str | None
-    needs_tests: bool
 
 
 def rejection_reason(question: str) -> str | None:
@@ -181,82 +110,6 @@ def source_scope_rejection_reason(source_scope: CodeSourceScope) -> str | None:
     return None
 
 
-def build_plan(question: str, source_scope: CodeSourceScope) -> ReadingPlan:
-    """Build a deterministic evidence plan from the question and source scope."""
-
-    normalized = question.casefold()
-    terms = _terms_from_question(question)
-    family = "general_reading"
-    summary_scope = False
-    broad = False
-    needs_tests = False
-
-    if "everything" in normalized and "repository" in normalized:
-        broad = True
-        family = "broad_repository_read"
-    elif "test" in normalized and "cover" in normalized:
-        family = "test_coverage_mapping"
-        needs_tests = True
-        terms.extend(["test_", "image"])
-    elif "compare" in normalized:
-        family = "intra_repo_comparison"
-    elif "readme" in normalized and (
-        "match" in normalized or "consistent" in normalized
-    ):
-        family = "docs_to_code_consistency"
-        terms.extend(["README", "/chat", "ChatRequest"])
-    elif "run this project" in normalized or "how do i run" in normalized:
-        family = "build_run_reading"
-        terms.extend(["fixture-service", "CLI_COMMAND", "Run with"])
-    elif "depend on" in normalized or "depends on" in normalized:
-        family = "static_impact_read"
-    elif any(
-        item in normalized
-        for item in ("mongo", "openai", "fastapi", "external integration")
-    ):
-        family = "dependency_usage"
-        terms.extend(["MongoClient", "OpenAI", "FastAPI"])
-    elif any(item in normalized for item in ("failure", "cached", "stored")):
-        family = "lifecycle_cache_persistence"
-        terms.extend(["cache_failure", "MongoClient", "persist", "stored"])
-    elif "created and consumed" in normalized or "state" in normalized:
-        family = "state_model_reading"
-    elif "where is" in normalized or "used" in normalized:
-        family = "definition_usage_search"
-    elif "what does" in normalized:
-        family = "symbol_explanation"
-    elif "request shape" in normalized or "endpoint" in normalized:
-        family = "api_contract_lookup"
-        terms.extend(["/chat", "ChatRequest", "attachments"])
-    elif "owns" in normalized or "responsibility" in normalized:
-        family = "architecture_responsibility"
-        terms.extend(["background_work", "route_background_work"])
-    elif (
-        source_scope["kind"] in ("file", "directory")
-        and "summarize" in normalized
-    ):
-        family = "scope_summary"
-        summary_scope = True
-    elif any(item in normalized for item in ("image", "images", "读图", "图片")):
-        family = "feature_pipeline_explanation"
-        terms.extend(_IMAGE_TERMS)
-
-    compare_symbols = _comparison_symbols(question)
-    symbol = _primary_symbol(question)
-    if symbol is not None:
-        terms.extend(_symbol_terms(symbol, question))
-    terms = _dedupe_terms(terms)
-    return ReadingPlan(
-        family=family,
-        terms=tuple(terms),
-        summary_scope=summary_scope,
-        broad=broad,
-        compare_symbols=tuple(compare_symbols),
-        symbol=symbol,
-        needs_tests=needs_tests,
-    )
-
-
 def is_secret_like_path(path: str) -> bool:
     """Return whether a repository-relative path is likely secret material."""
 
@@ -274,10 +127,9 @@ def is_secret_like_path(path: str) -> bool:
         ".p12",
         ".pfx",
     ]
-    return any(item in lowered for item in secret_fragments) or any(
-        lowered.endswith(item)
-        for item in secret_suffixes
-    )
+    has_fragment = any(item in lowered for item in secret_fragments)
+    has_suffix = any(lowered.endswith(item) for item in secret_suffixes)
+    return has_fragment or has_suffix
 
 
 def is_binary_like_path(path: str) -> bool:
@@ -302,70 +154,5 @@ def is_binary_like_path(path: str) -> bool:
         ".webp",
         ".zip",
     ]
-    return any(lowered.endswith(item) for item in binary_suffixes)
-
-
-def _terms_from_question(question: str) -> list[str]:
-    terms: list[str] = []
-    for match in _CODE_TOKEN_RE.finditer(question):
-        token = match.group(1) or match.group(0)
-        token = token.strip(".,?!;:()[]{}")
-        if not token:
-            continue
-        lowered = token.casefold()
-        if lowered in _STOP_WORDS:
-            continue
-        if token.startswith("http"):
-            continue
-        terms.append(token)
-
-    if any(item in question for item in ("读图", "图片", "图像")):
-        terms.extend(_IMAGE_TERMS)
-
-    return terms
-
-
-def _primary_symbol(question: str) -> str | None:
-    tokens = _terms_from_question(question)
-    for token in tokens:
-        if "." in token and not token.startswith("/"):
-            return token
-        if token and (token[0].isupper() or "_" in token):
-            return token
-    return None
-
-
-def _symbol_terms(symbol: str, question: str) -> list[str]:
-    terms = [symbol]
-    if "." in symbol:
-        terms.extend(part for part in symbol.split(".") if part)
-    normalized = question.casefold()
-    if "what does" in normalized:
-        for token in terms[:]:
-            if token and token[0].isupper():
-                terms.append(f"class {token}")
-            else:
-                terms.append(f"def {token}")
-    return terms
-
-
-def _comparison_symbols(question: str) -> list[str]:
-    if "compare" not in question.casefold():
-        return []
-    symbols = []
-    for token in _terms_from_question(question):
-        if token and token[0].isupper():
-            symbols.append(token)
-    return _dedupe_terms(symbols)
-
-
-def _dedupe_terms(terms: list[str]) -> list[str]:
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for term in terms:
-        key = term.casefold()
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(term)
-    return deduped
+    binary_like = any(lowered.endswith(item) for item in binary_suffixes)
+    return binary_like

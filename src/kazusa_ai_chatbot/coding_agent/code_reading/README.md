@@ -23,6 +23,79 @@ returns bounded repo-relative evidence rows and must not expose absolute checkou
 paths, workspace roots, cache keys, raw command output, full source files,
 secret-like files, `.env` files, `.git` internals, or binary asset contents.
 
+Internally, `run(...)` is a PM/programmer reading flow:
+
+```text
+CodeReadingRequest
+-> reading supervisor
+-> repository-map summary
+-> reading PM consumes PMInput and returns PMDecision
+-> bounded ProgrammerAssignment objects
+-> programmer workers return ProgrammerReport objects
+-> PM sufficiency check
+-> report-based final synthesis
+```
+
+The PM owns question intent, decomposition, assignment boundaries,
+sufficiency, limitations, and final synthesis. Programmer workers own exactly
+one bounded local inspection task and return compact report memory. The final
+answer is synthesized from programmer reports and selected evidence rows, not
+from an unbounded source context or raw search output.
+
+`PMInput` contains:
+
+- `question`
+- `repository_summary`
+- `source_scope`
+- `repo_map_summary`
+- `previous_reports`
+
+`PMDecision` contains:
+
+- `status`: `need_programmers`, `sufficient`, `needs_user_input`, or
+  `overloaded`
+- `intent`
+- `required_slots`
+- `assignments`
+- `missing_slots`
+
+Each `ProgrammerAssignment` must declare:
+
+- `assignment_id`
+- `role`
+- `scope.kind`: `file`, `directory`, `symbol`, or `search`
+- `scope.values`
+- `questions`
+- `required_slots`
+
+Assignment validation rejects unbounded whole-repository reads. A programmer
+must not inspect files outside its assignment boundary, write files, run project
+commands, install packages, fetch code, inspect `.env`, inspect `.git`, inspect
+secret-like paths, or inspect binary assets. File, excerpt, report, and wave
+limits are supervisor-owned deterministic policy, not PM-generated fields.
+
+Each `ProgrammerReport` contains:
+
+- assignment identity
+- status
+- repo-relative files read
+- typed facts with evidence references
+- bounded evidence rows
+- open questions
+
+Phase 1 caps one PM at three programmer assignments per wave, two waves, and
+six total programmer reports. When a question exceeds those limits, the PM
+returns `overloaded`; Phase 1 reports a limitation or asks for a narrower user
+scope instead of pretending to read a whole project. Full distributed
+master/subsystem PM fan-out is not implemented in Phase 1.
+
+LLM-backed PM, programmer, or synthesis calls use the effective
+`CODING_AGENT_LLM` route. `CODING_AGENT_LLM_*` is optional; when it is absent,
+the effective route falls back to `BACKGROUND_WORK_LLM_*`. Partial
+`CODING_AGENT_LLM_BASE_URL`, `CODING_AGENT_LLM_API_KEY`, or
+`CODING_AGENT_LLM_MODEL` configuration is invalid. Phase 1 does not define
+separate PM, programmer, or synthesizer LLM routes.
+
 `CodeReadingResult` contains:
 
 - `status`: `succeeded`, `failed`, `needs_user_input`, or `rejected`.
@@ -31,6 +104,15 @@ secret-like files, `.env` files, `.git` internals, or binary asset contents.
   `excerpt`, and `reason`.
 - `limitations`: uncertainty, caps, missing evidence, or rejection reasons.
 - `trace_summary`: public-safe planning and evidence-collection trace notes.
+
+Public traces are sanitized but must show the decomposition path, including
+items such as:
+
+- `reading_pm:repository_map`
+- `reading_pm:work_plan`
+- `programmer:<role name>`
+- `programmer_report`
+- `reading_pm:sufficiency=<status>`
 
 Source-scope rules:
 

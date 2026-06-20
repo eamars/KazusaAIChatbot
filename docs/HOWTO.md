@@ -59,6 +59,11 @@ BACKGROUND_ARTIFACT_LLM_MODEL=your-chat-model
 BACKGROUND_WORK_LLM_BASE_URL=http://localhost:1234/v1
 BACKGROUND_WORK_LLM_API_KEY=lm-studio
 BACKGROUND_WORK_LLM_MODEL=your-chat-model
+# Optional standalone coding-agent route. Omit all three to use
+# BACKGROUND_WORK_LLM provider settings.
+# CODING_AGENT_LLM_BASE_URL=http://localhost:1234/v1
+# CODING_AGENT_LLM_API_KEY=lm-studio
+# CODING_AGENT_LLM_MODEL=your-chat-model
 DIALOG_GENERATOR_LLM_BASE_URL=http://localhost:1234/v1
 DIALOG_GENERATOR_LLM_API_KEY=lm-studio
 DIALOG_GENERATOR_LLM_MODEL=your-chat-model
@@ -166,9 +171,13 @@ NAPCAT_RUNTIME_PORT=8011
 ```
 
 All route-specific chat model variables are required except the background
-artifact and background-work routes. The background artifact route falls back
-to the cognition route when omitted; the background-work route falls back to
-the background artifact route when omitted.
+artifact, background-work, and coding-agent routes. The background artifact
+route falls back to the cognition route when omitted; the background-work route
+falls back to the background artifact route when omitted. The coding-agent
+route falls back to `BACKGROUND_WORK_LLM` only when
+`CODING_AGENT_LLM_BASE_URL`, `CODING_AGENT_LLM_API_KEY`, and
+`CODING_AGENT_LLM_MODEL` are all omitted. Setting only part of those three
+coding-agent identity variables stops config loading.
 Route-specific variables replace the retired generic `LLM_BASE_URL`,
 `LLM_API_KEY`, and `LLM_MODEL` settings. Missing required route variables stop
 config loading. Chat routes also accept route-specific

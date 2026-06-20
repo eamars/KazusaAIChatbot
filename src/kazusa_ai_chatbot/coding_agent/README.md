@@ -32,9 +32,10 @@ Deferred subagents:
 - `code_writing`
 - `code_executing`
 
-Managed checkouts live under the caller-supplied coding workspace root. Direct
-standalone use may fall back to an OS temp workspace, but future worker
-integration must pass an explicit configured workspace.
+Managed checkouts and managed raw-file downloads live under the caller-supplied
+coding workspace root. Direct standalone use may fall back to an OS temp
+workspace, but future worker integration must pass an explicit configured
+workspace.
 
 ## Direct Request
 
@@ -84,19 +85,25 @@ The supervisor passes all Phase 0 source fields through unchanged to
 - `managed_checkout`
 - `dirty_state`
 
+`storage_kind` is `existing_local_checkout`, `managed_clone`, or
+`managed_download`. For `managed_download`, `current_commit` is a
+`raw-sha256:<hash>` content identity rather than a Git commit.
+
 The direct response and future worker metadata must not include `local_root`,
 `workspace_root`, `cache_key`, raw command output, full source files, `.env`
 content, secret-like file content, `.git` internals, or binary asset content.
 
-## Phase 2 Worker Handoff
+## Phase 3 Worker Handoff
 
 Future Kazusa background-work integration should register:
 
 - Worker name: `coding_agent`
-- Worker description: answers read-only source-code questions from bounded
-  repository evidence; Phase 1 does not write code or execute project commands.
+- Worker description: handles supported standalone coding-agent tasks from
+  bounded repository evidence. The current Phase 1 surface answers read-only
+  source-code questions; Phase 2 will add patch-proposal artifacts. Phase 3
+  must not add patch application or project command execution.
 
-Recommended `BackgroundWorkResult` mapping:
+Recommended Phase 1 `BackgroundWorkResult` mapping:
 
 - `worker`: `coding_agent`
 - `status`: `CodingAgentResponse.status`
@@ -105,6 +112,6 @@ Recommended `BackgroundWorkResult` mapping:
 - `limitations`: `CodingAgentResponse.limitations`
 - `trace_summary`: `CodingAgentResponse.trace_summary`
 
-The Phase 2 worker must supply the configured coding workspace root. It must not
+The Phase 3 worker must supply the configured coding workspace root. It must not
 parse workspace paths from user text, fall back to worker-local temp paths, or
 send adapter-visible text directly.

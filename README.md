@@ -87,6 +87,7 @@ HOWTO. One working-style configuration looks like this:
 | `BOUNDARY_CORE_LLM`        | `local-model`                            | `http://localhost:1234/v1` |
 | `BACKGROUND_ARTIFACT_LLM`  | `local-model`                            | `http://localhost:1234/v1` |
 | `BACKGROUND_WORK_LLM`      | `local-model`                            | `http://localhost:1234/v1` |
+| `CODING_AGENT_LLM`         | `local-model`                            | `http://localhost:1234/v1` |
 | `DIALOG_GENERATOR_LLM`     | `deepseek-v4-flash`                      | `https://api.deepseek.com` |
 | `CONSOLIDATION_LLM`        | `local-model`                            | `http://localhost:1234/v1` |
 | `JSON_REPAIR_LLM`          | `local-model`                            | `http://localhost:1234/v1` |
@@ -95,6 +96,12 @@ HOWTO. One working-style configuration looks like this:
 The table is an example, not a fixed requirement. Any route can point to any
 OpenAI-compatible endpoint that can satisfy that stage's latency and quality
 needs.
+
+`CODING_AGENT_LLM` is optional. When its base URL, API key, and model are all
+omitted, standalone coding-agent reading uses `BACKGROUND_WORK_LLM` provider
+settings. If any of `CODING_AGENT_LLM_BASE_URL`,
+`CODING_AGENT_LLM_API_KEY`, or `CODING_AGENT_LLM_MODEL` is set, all three must
+be set together.
 
 Chat LLM calls are routed through `LLInterface`. Each module owns its route,
 model, generation budget, and thinking toggle via `LLMCallConfig`; the

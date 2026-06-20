@@ -1,5 +1,6 @@
 import subprocess
 from pathlib import Path
+import urllib.request
 
 import pytest
 
@@ -85,6 +86,79 @@ def test_github_parser_handles_repo_tree_blob_and_raw_sources() -> None:
     assert raw_source.source_kind == "file"
     assert raw_source.requested_ref == "main"
     assert raw_source.repo_relative_path == "Python.gitignore"
+
+    raw_refs_source = parse_github_source(
+        "https://raw.githubusercontent.com/eamars/"
+        "OpenTrickler-RP2040-Controller/refs/heads/main/src/charge_mode.cpp"
+    )
+    assert raw_refs_source is not None
+    assert raw_refs_source.owner == "eamars"
+    assert raw_refs_source.repo == "OpenTrickler-RP2040-Controller"
+    assert raw_refs_source.source_kind == "file"
+    assert raw_refs_source.requested_ref == "refs/heads/main"
+    assert raw_refs_source.repo_relative_path == "src/charge_mode.cpp"
+
+
+async def test_run_downloads_raw_github_file_without_clone(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_fetching import managed_clone
+
+    source_url = (
+        "https://raw.githubusercontent.com/eamars/"
+        "OpenTrickler-RP2040-Controller/refs/heads/main/src/charge_mode.cpp"
+    )
+    downloaded = b"// Define PID terms\nfloat fine_trickler_integral = 0.0f;\n"
+
+    class FakeResponse:
+        def __enter__(self) -> "FakeResponse":
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return downloaded
+
+    def fake_urlopen(
+        request: urllib.request.Request,
+        timeout: int,
+    ) -> FakeResponse:
+        assert request.full_url == source_url
+        assert timeout == 60
+        return FakeResponse()
+
+    def fail_clone(source, workspace_root: str):
+        raise AssertionError("raw GitHub file should not require git clone")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(
+        managed_clone,
+        "ensure_managed_checkout",
+        fail_clone,
+    )
+
+    result = await run(
+        {
+            "source_url": source_url,
+            "workspace_root": str(tmp_path / "coding_workspace"),
+        }
+    )
+
+    assert result["status"] == "succeeded"
+    assert result["repository"] is not None
+    assert result["repository"]["storage_kind"] == "managed_download"
+    assert result["repository"]["managed_checkout"] is True
+    assert result["repository"]["current_commit"].startswith("raw-sha256:")
+    assert result["source_scope"] is not None
+    assert result["source_scope"]["kind"] == "file"
+    assert result["source_scope"]["requested_ref"] == "refs/heads/main"
+    assert result["source_scope"]["repo_relative_path"] == "src/charge_mode.cpp"
+
+    local_root = Path(result["repository"]["local_root"])
+    downloaded_path = local_root / "src" / "charge_mode.cpp"
+    assert downloaded_path.read_bytes() == downloaded
 
 
 @pytest.mark.parametrize(

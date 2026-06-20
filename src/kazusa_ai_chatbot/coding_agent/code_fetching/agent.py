@@ -6,6 +6,7 @@ from pathlib import Path
 from kazusa_ai_chatbot.coding_agent.code_fetching import github
 from kazusa_ai_chatbot.coding_agent.code_fetching import local_checkout
 from kazusa_ai_chatbot.coding_agent.code_fetching import managed_clone
+from kazusa_ai_chatbot.coding_agent.code_fetching import managed_download
 from kazusa_ai_chatbot.coding_agent.code_fetching import source_scope
 from kazusa_ai_chatbot.coding_agent.code_fetching.github import GitHubSource
 from kazusa_ai_chatbot.coding_agent.code_fetching.models import (
@@ -80,21 +81,38 @@ async def run(request: CodeFetchingRequest) -> CodeFetchingResult:
         workspace_root = managed_clone.default_workspace_root()
         trace_summary.append("Using standalone temp coding workspace.")
 
-    try:
-        repository = managed_clone.ensure_managed_checkout(
-            source,
-            workspace_root,
-        )
-    except managed_clone.ManagedCloneError as exc:
-        result = _result(
-            status="failed",
-            message=f"Unable to prepare managed checkout: {exc}",
-            repository=None,
-            source_scope=None,
-            limitations=["Managed checkout preparation failed."],
-            trace_summary=trace_summary,
-        )
-        return result
+    if github.is_raw_github_source(source):
+        try:
+            repository = managed_download.ensure_managed_raw_file_download(
+                source,
+                workspace_root,
+            )
+        except managed_download.ManagedDownloadError as exc:
+            result = _result(
+                status="failed",
+                message=f"Unable to prepare managed raw file download: {exc}",
+                repository=None,
+                source_scope=None,
+                limitations=["Managed raw file download failed."],
+                trace_summary=trace_summary,
+            )
+            return result
+    else:
+        try:
+            repository = managed_clone.ensure_managed_checkout(
+                source,
+                workspace_root,
+            )
+        except managed_clone.ManagedCloneError as exc:
+            result = _result(
+                status="failed",
+                message=f"Unable to prepare managed checkout: {exc}",
+                repository=None,
+                source_scope=None,
+                limitations=["Managed checkout preparation failed."],
+                trace_summary=trace_summary,
+            )
+            return result
 
     source_scope_error = _source_scope_validation_error(repository, source)
     if source_scope_error:
@@ -110,7 +128,10 @@ async def run(request: CodeFetchingRequest) -> CodeFetchingResult:
         return result
 
     source_scope_result = _source_scope_from_github_source(source)
-    trace_summary.append("Resolved public GitHub source to managed checkout.")
+    if repository["storage_kind"] == "managed_download":
+        trace_summary.append("Resolved raw GitHub file to managed download.")
+    else:
+        trace_summary.append("Resolved public GitHub source to managed checkout.")
     result = _result(
         status="succeeded",
         message="Code source resolved.",

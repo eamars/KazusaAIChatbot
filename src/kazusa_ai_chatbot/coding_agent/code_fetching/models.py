@@ -4,7 +4,11 @@ from typing import Literal, TypedDict
 
 SourceKind = Literal["repository", "directory", "file"]
 ResultStatus = Literal["succeeded", "failed", "needs_user_input", "rejected"]
-StorageKind = Literal["existing_local_checkout", "managed_clone"]
+StorageKind = Literal[
+    "existing_local_checkout",
+    "managed_clone",
+    "managed_download",
+]
 DirtyState = Literal["clean", "dirty", "unknown"]
 
 

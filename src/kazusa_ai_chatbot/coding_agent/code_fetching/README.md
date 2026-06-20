@@ -30,11 +30,18 @@ credential-bearing URLs, non-GitHub providers, GitHub issues, pull requests,
 discussions, archives, Gists, package registry names, paste URLs, and arbitrary
 raw HTTP files.
 
-GitHub `tree`, `blob`, and raw-file scopes must exist in the resolved checkout.
-Missing scoped paths return `rejected` instead of handing an invalid path to
-reading. Local checkout scopes use public-safe `local://github/<owner>/<repo>`
-source labels; `repository.local_root` remains the internal filesystem root
-used by downstream readers.
+GitHub repository, tree, and blob scopes resolve through a managed clone.
+GitHub raw-file URLs resolve through a managed single-file download under the
+configured workspace. Raw download metadata uses `storage_kind:
+"managed_download"` and a `raw-sha256:<hash>` content identity because the raw
+HTTP response does not expose a Git commit. Existing matching managed downloads
+are reused and not auto-refreshed.
+
+GitHub `tree`, `blob`, and raw-file scopes must exist in the resolved local
+root. Missing scoped paths return `rejected` instead of handing an invalid path
+to reading. Local checkout scopes use public-safe
+`local://github/<owner>/<repo>` source labels; `repository.local_root` remains
+the internal filesystem root used by downstream readers.
 
 Result shape:
 

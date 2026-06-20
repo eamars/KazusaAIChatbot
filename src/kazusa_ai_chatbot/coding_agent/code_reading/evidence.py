@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-import json
 import subprocess
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from kazusa_ai_chatbot.coding_agent.code_fetching.models import CodeSourceScope
-from kazusa_ai_chatbot.coding_agent.code_reading.models import CodeEvidenceRow
+from kazusa_ai_chatbot.coding_agent.code_reading.models import (
+    CodeEvidenceRow,
+    ProgrammerAssignment,
+)
 from kazusa_ai_chatbot.coding_agent.code_reading.planner import (
-    ReadingPlan,
     is_binary_like_path,
     is_secret_like_path,
 )
@@ -19,10 +20,8 @@ from kazusa_ai_chatbot.coding_agent.tools.paths import (
     ensure_path_inside,
 )
 
-MAX_EVIDENCE_ROWS = 24
-MAX_ROWS_PER_TERM = 32
-MAX_EXCERPT_CHARS = 700
 MAX_FILE_BYTES = 128_000
+MAX_SEARCH_ROWS_PER_VALUE = 24
 
 
 class EvidenceCollectionError(ValueError):
@@ -31,63 +30,71 @@ class EvidenceCollectionError(ValueError):
 
 @dataclass(frozen=True)
 class EvidenceBundle:
-    """Collected evidence plus trace notes and limitations."""
+    """Collected evidence plus file and limitation metadata."""
 
     rows: list[CodeEvidenceRow]
+    files_read: list[str]
     limitations: list[str]
     trace_summary: list[str]
 
 
-def collect_evidence(
+def collect_assignment_evidence(
     *,
     repo_root: Path,
     source_scope: CodeSourceScope,
-    plan: ReadingPlan,
+    assignment: ProgrammerAssignment,
+    max_files: int,
+    max_excerpt_chars: int,
 ) -> EvidenceBundle:
-    """Collect bounded evidence for a reading plan."""
+    """Collect bounded source rows for one programmer assignment.
+
+    Args:
+        repo_root: Resolved checkout root from Phase 0.
+        source_scope: Phase 0 source scope that bounds all reads.
+        assignment: PM-selected file, directory, symbol, or search mission.
+        max_files: Supervisor-owned maximum files one programmer may inspect.
+        max_excerpt_chars: Supervisor-owned total excerpt character cap.
+
+    Returns:
+        Evidence rows, repo-relative files read, limitations, and safe trace
+        notes for the programmer report.
+    """
 
     root = repo_root.resolve(strict=True)
-    scoped_files = _scoped_files(root, source_scope)
-    trace_summary = [
-        f"reading:scope={source_scope['kind']}",
-        "reading:listed files with rg --files",
-    ]
+    scoped_files = _scoped_safe_files(root, source_scope)
+    scope_kind = assignment["scope"]["kind"]
+    values = _bounded_scope_values(assignment)
+    trace_summary = [f"programmer_scope:{scope_kind}"]
 
-    if plan.broad:
-        return EvidenceBundle(
-            rows=[],
-            limitations=[],
-            trace_summary=[*trace_summary, "reading:broad question needs scope"],
+    if scope_kind in ("file", "directory"):
+        candidate_files = _files_for_path_values(
+            root=root,
+            scoped_files=scoped_files,
+            values=values,
+        )
+        rows = _summary_rows(
+            root=root,
+            relative_paths=candidate_files[:max_files],
+            topic=assignment["role"],
+        )
+    else:
+        rows = _search_rows(
+            root=root,
+            scoped_files=scoped_files,
+            values=values,
+            symbol_mode=scope_kind == "symbol",
         )
 
-    if plan.summary_scope or not plan.terms:
-        rows = _summarize_files(root, scoped_files, plan)
-        limitations = _limitations_for_rows(rows, plan)
-        return EvidenceBundle(
-            rows=rows,
-            limitations=limitations,
-            trace_summary=trace_summary,
-        )
-
-    rows = _search_terms(
-        root=root,
-        scoped_files=scoped_files,
-        terms=plan.terms,
-        plan=plan,
-    )
-    if plan.needs_tests:
-        rows = [
-            row for row in rows if row["path"].startswith("tests/")
-        ] or rows
-
-    rows = _rank_rows(rows, plan)[:MAX_EVIDENCE_ROWS]
-    limitations = _limitations_for_rows(rows, plan)
-    trace_summary.append("reading:searched files with rg -n --json")
-    return EvidenceBundle(
-        rows=rows,
+    capped_rows = _cap_rows(rows, max_files, max_excerpt_chars)
+    files_read = _files_from_rows(capped_rows, max_files)
+    limitations = _limitations_for_rows(capped_rows, values)
+    bundle = EvidenceBundle(
+        rows=capped_rows,
+        files_read=files_read,
         limitations=limitations,
         trace_summary=trace_summary,
     )
+    return bundle
 
 
 def find_definition_paths(
@@ -99,46 +106,48 @@ def find_definition_paths(
     """Find repository-relative paths defining a class or function symbol."""
 
     root = repo_root.resolve(strict=True)
-    scoped_files = _scoped_files(root, source_scope)
-    definition_symbols = [symbol]
-    if "." in symbol:
-        definition_symbols.extend(part for part in symbol.split(".") if part)
-    definition_prefixes = tuple(
-        prefix
-        for item in definition_symbols
-        for prefix in (
-            f"class {item}",
-            f"def {item}",
-            f"async def {item}",
-        )
-    )
+    scoped_files = _scoped_safe_files(root, source_scope)
+    definition_terms = _definition_terms(symbol)
     paths: list[str] = []
     for relative_path in scoped_files:
         text = _read_text_file(root / relative_path)
         if text is None:
             continue
         for line in text.splitlines():
-            stripped = line.strip()
-            if stripped.startswith(definition_prefixes):
+            if line.strip().startswith(definition_terms):
                 paths.append(_to_posix(relative_path))
                 break
-    return sorted(set(paths))
+    result = sorted(set(paths))
+    return result
 
 
-def _scoped_files(root: Path, source_scope: CodeSourceScope) -> list[Path]:
+def list_scoped_safe_files(
+    *,
+    repo_root: Path,
+    source_scope: CodeSourceScope,
+) -> list[str]:
+    """Return safe repo-relative files visible inside the source scope."""
+
+    root = repo_root.resolve(strict=True)
+    scoped_files = _scoped_safe_files(root, source_scope)
+    safe_files = [_to_posix(path) for path in scoped_files]
+    return safe_files
+
+
+def _scoped_safe_files(root: Path, source_scope: CodeSourceScope) -> list[Path]:
     all_files = _rg_files(root)
     scoped_path = source_scope.get("repo_relative_path")
     if scoped_path is None:
         candidates = all_files
     else:
-        scope_root = ensure_path_inside(root / scoped_path, root)
+        scope_root = _safe_scope_root(root, scoped_path)
         if source_scope["kind"] == "file":
             relative_path = scope_root.relative_to(root)
             candidates = [relative_path]
         else:
             candidates = [
                 item for item in all_files
-                if (root / item).is_relative_to(scope_root)
+                if ensure_path_inside(root / item, root).is_relative_to(scope_root)
             ]
 
     safe_files = [
@@ -146,6 +155,19 @@ def _scoped_files(root: Path, source_scope: CodeSourceScope) -> list[Path]:
         if _is_safe_relative_file(item)
     ]
     return safe_files
+
+
+def _safe_scope_root(root: Path, repo_relative_path: str) -> Path:
+    scope_path = PurePosixPath(repo_relative_path.replace("\\", "/"))
+    if scope_path.is_absolute() or ".." in scope_path.parts:
+        raise EvidenceCollectionError("Source scope escapes the repository.")
+    try:
+        safe_root = ensure_path_inside(root / Path(*scope_path.parts), root)
+    except PathSafetyError as exc:
+        raise EvidenceCollectionError(
+            f"Source scope escapes the repository: {exc}"
+        ) from exc
+    return safe_root
 
 
 def _rg_files(root: Path) -> list[Path]:
@@ -169,16 +191,17 @@ def _rg_files(root: Path) -> list[Path]:
             timeout=10,
         )
     except (OSError, subprocess.SubprocessError):
-        return _walk_files(root)
+        files = _walk_files(root)
+        return files
 
     if completed.returncode not in (0, 1):
-        return _walk_files(root)
+        files = _walk_files(root)
+        return files
 
     files: list[Path] = []
     for line in completed.stdout.splitlines():
-        if not line.strip():
-            continue
-        files.append(Path(line))
+        if line.strip():
+            files.append(Path(line))
     return files
 
 
@@ -190,125 +213,145 @@ def _walk_files(root: Path) -> list[Path]:
     return files
 
 
-def _search_terms(
+def _bounded_scope_values(assignment: ProgrammerAssignment) -> list[str]:
+    values: list[str] = []
+    for value in assignment["scope"]["values"]:
+        clean_value = value.strip()
+        if not clean_value:
+            continue
+        values.append(clean_value)
+        if len(values) >= 12:
+            break
+    return values
+
+
+def _files_for_path_values(
     *,
     root: Path,
     scoped_files: list[Path],
-    terms: tuple[str, ...],
-    plan: ReadingPlan,
-) -> list[CodeEvidenceRow]:
+    values: list[str],
+) -> list[Path]:
     scoped_set = {_to_posix(path) for path in scoped_files}
+    files: list[Path] = []
+    for value in values:
+        path = PurePosixPath(value.replace("\\", "/"))
+        if path.is_absolute() or ".." in path.parts:
+            raise EvidenceCollectionError("Assignment path escapes the repository.")
+        candidate = Path(*path.parts)
+        candidate_root = ensure_path_inside(root / candidate, root)
+        if candidate_root.is_file() and _to_posix(candidate) in scoped_set:
+            files.append(candidate)
+            continue
+        if candidate_root.is_dir():
+            for scoped_file in scoped_files:
+                if (root / scoped_file).is_relative_to(candidate_root):
+                    files.append(scoped_file)
+    deduped = _dedupe_paths(files)
+    return deduped
+
+
+def _summary_rows(
+    *,
+    root: Path,
+    relative_paths: list[Path],
+    topic: str,
+) -> list[CodeEvidenceRow]:
     rows: list[CodeEvidenceRow] = []
-    seen: set[tuple[str, int, str]] = set()
-    for term in terms:
-        term_rows = 0
-        for row in _rg_search(root, term):
-            if row["path"] not in scoped_set:
-                continue
-            key = (row["path"], row["line_start"], term.casefold())
-            if key in seen:
-                continue
-            seen.add(key)
-            rows.append(row)
-            term_rows += 1
-            if term_rows >= MAX_ROWS_PER_TERM:
-                break
-
-    if rows:
-        return rows
-
-    return _summarize_files(root, scoped_files, plan)
-
-
-def _rg_search(root: Path, term: str) -> list[CodeEvidenceRow]:
-    try:
-        completed = subprocess.run(
-            [
-                "rg",
-                "-n",
-                "--json",
-                "--hidden",
-                "-g",
-                "!.git/*",
-                "-g",
-                "!.tmp_pytest/**",
-                "-F",
-                "--",
-                term,
-                ".",
-            ],
-            cwd=root,
-            check=False,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=10,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return _python_search(root, term)
-
-    if completed.returncode not in (0, 1):
-        return _python_search(root, term)
-
-    rows: list[CodeEvidenceRow] = []
-    for line in completed.stdout.splitlines():
-        try:
-            payload = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if payload.get("type") != "match":
-            continue
-        data = payload.get("data", {})
-        path_text = data.get("path", {}).get("text")
-        line_number = data.get("line_number")
-        if not isinstance(path_text, str) or not isinstance(line_number, int):
-            continue
-        relative_path = Path(path_text)
-        if not _is_safe_relative_file(relative_path):
-            continue
-        row = _row_for_match(root, relative_path, line_number, term)
-        if row is not None:
-            rows.append(row)
-    return rows
-
-
-def _python_search(root: Path, term: str) -> list[CodeEvidenceRow]:
-    rows: list[CodeEvidenceRow] = []
-    for relative_path in _rg_files(root):
-        if not _is_safe_relative_file(relative_path):
-            continue
+    for relative_path in relative_paths:
         text = _read_text_file(root / relative_path)
         if text is None:
             continue
-        for index, line in enumerate(text.splitlines(), start=1):
-            if term in line:
-                row = _row_for_match(root, relative_path, index, term)
-                if row is not None:
-                    rows.append(row)
+        excerpt = _summary_excerpt(text)
+        if not excerpt:
+            continue
+        row: CodeEvidenceRow = {
+            "path": _to_posix(relative_path),
+            "line_start": 1,
+            "line_end": _line_count(excerpt),
+            "symbol_or_topic": topic,
+            "excerpt": excerpt,
+            "reason": "Selected bounded file-scope evidence.",
+        }
+        rows.append(row)
     return rows
 
 
-def _summarize_files(
+def _search_rows(
+    *,
     root: Path,
     scoped_files: list[Path],
-    plan: ReadingPlan,
+    values: list[str],
+    symbol_mode: bool,
 ) -> list[CodeEvidenceRow]:
     rows: list[CodeEvidenceRow] = []
-    for relative_path in scoped_files:
-        row = _row_for_file_summary(root, relative_path, plan)
-        if row is not None:
-            rows.append(row)
-        if len(rows) >= MAX_EVIDENCE_ROWS:
-            break
+    seen: set[tuple[str, int, str]] = set()
+    for value in values:
+        value_count = 0
+        for relative_path in scoped_files:
+            text = _read_text_file(root / relative_path)
+            if text is None:
+                continue
+            for line_number, line in enumerate(text.splitlines(), start=1):
+                if not _line_matches(line, value, symbol_mode=symbol_mode):
+                    continue
+                key = (_to_posix(relative_path), line_number, value.casefold())
+                if key in seen:
+                    continue
+                seen.add(key)
+                row = _row_around_line(
+                    root=root,
+                    relative_path=relative_path,
+                    line_number=line_number,
+                    topic=value,
+                )
+                if row is not None:
+                    rows.append(row)
+                    value_count += 1
+                if value_count >= MAX_SEARCH_ROWS_PER_VALUE:
+                    break
+            if value_count >= MAX_SEARCH_ROWS_PER_VALUE:
+                break
     return rows
 
 
-def _row_for_match(
+def _line_matches(line: str, value: str, *, symbol_mode: bool) -> bool:
+    if not symbol_mode:
+        return value.casefold() in line.casefold()
+
+    stripped = line.strip()
+    prefixes = _definition_terms(value)
+    if stripped.startswith(prefixes):
+        return True
+    if value in line:
+        return True
+    if "." not in value:
+        return False
+    parts = [part for part in value.split(".") if part]
+    return any(part in line for part in parts)
+
+
+def _definition_terms(symbol: str) -> tuple[str, ...]:
+    symbols = [symbol]
+    if "." in symbol:
+        symbols.extend(part for part in symbol.split(".") if part)
+    prefixes = tuple(
+        prefix
+        for item in symbols
+        for prefix in (
+            f"class {item}",
+            f"def {item}",
+            f"async def {item}",
+        )
+    )
+    return prefixes
+
+
+def _row_around_line(
+    *,
     root: Path,
     relative_path: Path,
     line_number: int,
-    term: str,
+    topic: str,
 ) -> CodeEvidenceRow | None:
     text = _read_text_file(root / relative_path)
     if text is None:
@@ -325,324 +368,82 @@ def _row_for_match(
         "path": _to_posix(relative_path),
         "line_start": start,
         "line_end": end,
-        "symbol_or_topic": term,
-        "excerpt": _cap_excerpt(excerpt),
-        "reason": f"Matched query term: {term}",
+        "symbol_or_topic": topic,
+        "excerpt": excerpt,
+        "reason": f"Matched assignment value: {topic}",
     }
     return row
 
 
-def _row_for_file_summary(
-    root: Path,
-    relative_path: Path,
-    plan: ReadingPlan,
-) -> CodeEvidenceRow | None:
-    text = _read_text_file(root / relative_path)
-    if text is None:
-        return None
-
+def _summary_excerpt(text: str) -> str:
     selected_lines: list[str] = []
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped:
             continue
-        if (
-            stripped.startswith(("class ", "def ", "async def "))
-            or stripped.startswith(("#", "from ", "import ", "@"))
-            or "=" in stripped
-        ):
-            selected_lines.append(line)
-        if len(selected_lines) >= 8:
+        selected_lines.append(line)
+        if len(selected_lines) >= 12:
             break
 
-    if not selected_lines:
-        selected_lines = text.splitlines()[:8]
-
-    excerpt = "\n".join(selected_lines)
-    if not excerpt.strip():
-        return None
-
-    row: CodeEvidenceRow = {
-        "path": _to_posix(relative_path),
-        "line_start": 1,
-        "line_end": min(8, max(1, len(text.splitlines()))),
-        "symbol_or_topic": plan.family,
-        "excerpt": _cap_excerpt(excerpt),
-        "reason": "Selected bounded file summary evidence.",
-    }
-    return row
+    excerpt = "\n".join(selected_lines).strip()
+    return excerpt
 
 
-def _rank_rows(
+def _cap_rows(
     rows: list[CodeEvidenceRow],
-    plan: ReadingPlan,
+    max_files: int,
+    max_excerpt_chars: int,
 ) -> list[CodeEvidenceRow]:
-    family = plan.family
-
-    def score(row: CodeEvidenceRow) -> tuple[int, str, int]:
+    capped_rows: list[CodeEvidenceRow] = []
+    files_seen: list[str] = []
+    used_chars = 0
+    for row in rows:
         path = row["path"]
-        value = 100
-        if family == "test_coverage_mapping" and path.startswith("tests/"):
-            value -= 50
-        if family == "docs_to_code_consistency" and path == "README.md":
-            value -= 30
-        if family == "build_run_reading" and (
-            path == "README.md" or "deploy" in path
-        ):
-            value -= 30
-        if family == "architecture_responsibility" and (
-            "background_work" in path or "architecture" in path
-        ):
-            value -= 30
-        if family == "dependency_usage" and (
-            "integrations" in path or "routes" in path
-        ):
-            value -= 30
-        if family == "feature_pipeline_explanation" and (
-            "adapter" in path
-            or "service" in path
-            or "brain_service" in path
-            or "descriptor" in path
-            or "pipeline" in path
-            or "episode" in path
-            or "history" in path
-            or "attachments" in path
-            or "message_envelope" in path
-            or "persona_supervisor2_msg_decontexualizer" in path
-            or "persona_supervisor2_cognition" in path
-            or "routes" in path
-        ):
-            value -= 30
-        if family == "feature_pipeline_explanation" and path.startswith("src/"):
-            value -= 40
-        if family == "feature_pipeline_explanation":
-            value += _feature_path_penalty(path)
-            value -= _feature_topic_bonus(row["symbol_or_topic"])
-            value -= _feature_exact_path_bonus(path)
-        if family == "feature_pipeline_explanation" and path.startswith("tests/"):
-            value += 25
-        return (value, path, row["line_start"])
-
-    sorted_rows = sorted(rows, key=score)
-    if family == "feature_pipeline_explanation":
-        return _rank_feature_rows(sorted_rows)
-
-    deduped: list[CodeEvidenceRow] = []
-    seen_lines: set[tuple[str, int]] = set()
-    for row in sorted_rows:
-        key = (row["path"], row["line_start"])
-        if key in seen_lines:
-            continue
-        seen_lines.add(key)
-        deduped.append(row)
-    return deduped
-
-
-def _rank_feature_rows(
-    sorted_rows: list[CodeEvidenceRow],
-) -> list[CodeEvidenceRow]:
-    stage_topics = [
-        "base64_data",
-        "user_multimedia_input",
-        "multimedia_descriptor_agent",
-        "VISION_DESCRIPTOR_LLM",
-        "image_observation",
-        "update_conversation_attachment_descriptions",
-        "<image>",
-    ]
-    selected: list[CodeEvidenceRow] = []
-    seen_lines: set[tuple[str, int]] = set()
-    path_counts: dict[str, int] = {}
-
-    for topic in stage_topics:
-        topic_rows = [
-            row for row in sorted_rows
-            if row["symbol_or_topic"] == topic
-        ]
-        for row in sorted(
-            topic_rows,
-            key=lambda item, stage_topic=topic: _stage_topic_score(
-                item,
-                stage_topic,
-            ),
-        ):
-            if _feature_row_blocked(row, seen_lines, path_counts):
+        if path not in files_seen:
+            if len(files_seen) >= max_files:
                 continue
-            _select_feature_row(row, selected, seen_lines, path_counts)
+            files_seen.append(path)
+        remaining_chars = max_excerpt_chars - used_chars
+        if remaining_chars <= 0:
             break
+        excerpt = row["excerpt"][:remaining_chars].rstrip()
+        if not excerpt:
+            break
+        capped_row: CodeEvidenceRow = {
+            "path": row["path"],
+            "line_start": row["line_start"],
+            "line_end": row["line_end"],
+            "symbol_or_topic": row["symbol_or_topic"],
+            "excerpt": excerpt,
+            "reason": row["reason"],
+        }
+        capped_rows.append(capped_row)
+        used_chars += len(excerpt)
+    return capped_rows
 
-    for row in sorted_rows:
-        if _feature_row_blocked(row, seen_lines, path_counts):
+
+def _files_from_rows(rows: list[CodeEvidenceRow], max_files: int) -> list[str]:
+    files: list[str] = []
+    for row in rows:
+        path = row["path"]
+        if path in files:
             continue
-        _select_feature_row(row, selected, seen_lines, path_counts)
-
-    return selected
-
-
-def _feature_row_blocked(
-    row: CodeEvidenceRow,
-    seen_lines: set[tuple[str, int]],
-    path_counts: dict[str, int],
-) -> bool:
-    key = (row["path"], row["line_start"])
-    if key in seen_lines:
-        return True
-    return path_counts.get(row["path"], 0) >= 3
-
-
-def _select_feature_row(
-    row: CodeEvidenceRow,
-    selected: list[CodeEvidenceRow],
-    seen_lines: set[tuple[str, int]],
-    path_counts: dict[str, int],
-) -> None:
-    selected.append(row)
-    seen_lines.add((row["path"], row["line_start"]))
-    path_counts[row["path"]] = path_counts.get(row["path"], 0) + 1
-
-
-def _stage_topic_score(row: CodeEvidenceRow, topic: str) -> tuple[int, str, int]:
-    path = row["path"]
-    score = _feature_path_penalty(path)
-    if topic == "base64_data":
-        score += _path_preference(
-            path,
-            [
-                "src/adapters/",
-                "src/kazusa_ai_chatbot/message_envelope/",
-                "src/kazusa_ai_chatbot/service.py",
-                "src/kazusa_ai_chatbot/brain_service/contracts.py",
-            ],
-        )
-    elif topic == "user_multimedia_input":
-        score += _path_preference(
-            path,
-            [
-                "src/kazusa_ai_chatbot/service.py",
-                "src/kazusa_ai_chatbot/brain_service/graph.py",
-                "src/kazusa_ai_chatbot/nodes/persona_supervisor2_msg_decontexualizer.py",
-            ],
-        )
-    elif topic == "multimedia_descriptor_agent":
-        score += _path_preference(
-            path,
-            [
-                "src/kazusa_ai_chatbot/brain_service/graph.py",
-                "src/kazusa_ai_chatbot/service.py",
-                "src/kazusa_ai_chatbot/nodes/persona_supervisor2_msg_decontexualizer.py",
-            ],
-        )
-    elif topic == "VISION_DESCRIPTOR_LLM":
-        score += _path_preference(
-            path,
-            [
-                "src/kazusa_ai_chatbot/nodes/persona_supervisor2_msg_decontexualizer.py",
-                "src/kazusa_ai_chatbot/config.py",
-                "src/kazusa_ai_chatbot/llm_interface/route_report.py",
-            ],
-        )
-    elif topic == "image_observation":
-        score += _path_preference(
-            path,
-            [
-                "src/kazusa_ai_chatbot/cognition_episode.py",
-                "src/kazusa_ai_chatbot/nodes/persona_supervisor2_msg_decontexualizer.py",
-                "src/kazusa_ai_chatbot/cognition_chain_core/prompt_selection.py",
-                "src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition.py",
-            ],
-        )
-    elif topic == "update_conversation_attachment_descriptions":
-        score += _path_preference(
-            path,
-            [
-                "src/kazusa_ai_chatbot/nodes/persona_supervisor2_msg_decontexualizer.py",
-                "src/kazusa_ai_chatbot/db/conversation.py",
-            ],
-        )
-    elif topic == "<image>":
-        score += _path_preference(
-            path,
-            [
-                "src/kazusa_ai_chatbot/utils.py",
-                "src/kazusa_ai_chatbot/message_envelope/prompt_projection.py",
-                "src/kazusa_ai_chatbot/rag/prompt_projection.py",
-                "src/adapters/napcat_qq_adapter/cq_projection.py",
-            ],
-        )
-    return (score, path, row["line_start"])
-
-
-def _path_preference(path: str, prefixes_or_paths: list[str]) -> int:
-    for index, prefix_or_path in enumerate(prefixes_or_paths):
-        if path == prefix_or_path or path.startswith(prefix_or_path):
-            return -100 + (index * 10)
-    return 0
-
-
-def _feature_path_penalty(path: str) -> int:
-    if "/coding_agent/" in path:
-        return 90
-    if path.startswith("development_plans/"):
-        return 60
-    if path.startswith("tests/"):
-        return 40
-    if path.startswith(("README", "docs/", "AGENTS.md")):
-        return 30
-    return 0
-
-
-def _feature_topic_bonus(topic: str) -> int:
-    priorities = {
-        "base64_data": 50,
-        "user_multimedia_input": 55,
-        "multimedia_descriptor_agent": 60,
-        "VISION_DESCRIPTOR_LLM": 55,
-        "image_observation": 45,
-        "update_conversation_attachment_descriptions": 45,
-        "<image>": 45,
-    }
-    return priorities.get(topic, 0)
-
-
-def _feature_exact_path_bonus(path: str) -> int:
-    priority_paths = {
-        "src/kazusa_ai_chatbot/brain_service/graph.py": 70,
-        "src/kazusa_ai_chatbot/service.py": 70,
-        (
-            "src/kazusa_ai_chatbot/nodes/"
-            "persona_supervisor2_msg_decontexualizer.py"
-        ): 80,
-        "src/kazusa_ai_chatbot/cognition_episode.py": 65,
-        "src/kazusa_ai_chatbot/message_envelope/attachment_handlers/image.py": 60,
-        "src/kazusa_ai_chatbot/message_envelope/prompt_projection.py": 55,
-        "src/kazusa_ai_chatbot/utils.py": 55,
-        "src/kazusa_ai_chatbot/db/conversation.py": 50,
-        "src/adapters/discord_adapter.py": 55,
-        "src/adapters/napcat_qq_adapter/attachments.py": 55,
-    }
-    return priority_paths.get(path, 0)
+        files.append(path)
+        if len(files) >= max_files:
+            break
+    return files
 
 
 def _limitations_for_rows(
     rows: list[CodeEvidenceRow],
-    plan: ReadingPlan,
+    values: list[str],
 ) -> list[str]:
     limitations: list[str] = []
     if not rows:
-        limitations.append("No bounded source evidence matched the question.")
-        return limitations
-
-    if len(rows) >= MAX_EVIDENCE_ROWS:
-        limitations.append("Evidence was capped to the top bounded matches.")
-
-    if plan.family == "lifecycle_cache_persistence":
-        limitations.append(
-            "Only checked-in cache and persistence evidence was available."
-        )
-    elif plan.family == "general_reading":
-        limitations.append(
-            "Answer is limited to repository evidence matched by query terms."
-        )
+        if values:
+            limitations.append("No bounded source evidence matched assignment scope.")
+        else:
+            limitations.append("Programmer assignment had no usable scope values.")
     return limitations
 
 
@@ -676,15 +477,27 @@ def _read_text_file(path: Path) -> str | None:
         return None
 
     try:
-        return data.decode("utf-8")
+        text = data.decode("utf-8")
     except UnicodeDecodeError:
         return None
+    return text
 
 
-def _cap_excerpt(excerpt: str) -> str:
-    if len(excerpt) <= MAX_EXCERPT_CHARS:
-        return excerpt
-    return excerpt[:MAX_EXCERPT_CHARS].rstrip()
+def _dedupe_paths(paths: list[Path]) -> list[Path]:
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for path in paths:
+        key = _to_posix(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(path)
+    return deduped
+
+
+def _line_count(text: str) -> int:
+    line_count = max(1, len(text.splitlines()))
+    return line_count
 
 
 def _to_posix(path: Path) -> str:

@@ -38,7 +38,8 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [coding_agent_phase1_reading_plan.md](active/short_term/coding_agent_phase1_reading_plan.md) | Large standalone coding-agent Phase 1 reading plan | draft |
+| [coding_agent_phase1_code_reading_final_plan.md](active/short_term/coding_agent_phase1_code_reading_final_plan.md) | Large standalone coding-agent Phase 1 final code-reading plan | in_progress |
+| [coding_agent_phase3_background_worker_integration_plan.md](active/short_term/coding_agent_phase3_background_worker_integration_plan.md) | Large coding-agent Phase 3 background-worker integration plan | draft |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 
 ## Supporting Experiment Records
