@@ -10,10 +10,10 @@
 - Execution rule: do not execute directly from this document
 
 This document captures the top-level architecture for replacing placeholder
-code-related background work with a specialized `coding_agent`. The active
+code-related background work with a specialized `coding_agent`. The archived
 completed Phase 0 plan records the implemented `code_fetching` contract; the
-active Phase 1 plan builds `code_reading` and the direct answer interface on
-top of that fetching contract.
+active Phase 1 draft plan builds `code_reading` and the direct answer
+interface on top of that fetching contract.
 
 ## Problem
 
@@ -104,6 +104,11 @@ Phase 0 and Phase 1 tests call these public interfaces directly. They do not
 use L2d, background-work jobs, router integration, result-ready cognition,
 service delivery, or placeholder removal.
 
+Phase 1 direct responses expose only a public-safe repository summary and
+repo-relative evidence. Raw checkout roots, workspace roots, cache keys,
+subprocess traces, job ids, leases, and adapter delivery fields remain private
+implementation data.
+
 ## Ownership Boundaries
 
 | Layer | Owns | Must Not Own |
@@ -156,6 +161,28 @@ Deterministic code validates allowed transitions. Phase 0 has no top-level
 supervisor and exposes only `code_fetching.run`. Phase 1 allows only
 `code_fetching`, `code_reading`, `finish`, and `fail`.
 
+## Phase 2 Handoff Boundary
+
+Phase 2 must register the future worker as `coding_agent` and map the Phase 1
+direct `CodingAgentResponse` into the existing `BackgroundWorkResult`
+contract. The worker description should identify repository/codebase question
+answering with bounded local source evidence and explicitly reject code
+writing, execution, patching, and package installation until later phases.
+
+The handoff artifact is:
+
+- `artifact_text`: capped answer text;
+- `result_summary`: short repository, commit, status, and evidence-count
+  summary;
+- `failure_summary`: most specific failure or limitation on non-success;
+- `worker_metadata`: sanitized repository summary, source scope,
+  repo-relative evidence references without excerpts, and limitations.
+
+Phase 2 must provide the coding workspace root from configuration. It must not
+parse workspace paths from user text, use Phase 0's temp fallback, or expose
+absolute local paths, workspace roots, cache keys, raw source excerpts, raw
+command output, job ids, leases, adapter ids, or delivery fields.
+
 ## Subagent Contracts
 
 ### `code_fetching`
@@ -206,8 +233,9 @@ Purpose: inspect code and answer codebase questions with file evidence.
 Responsibilities:
 
 - Publish `code_reading/README.md` as the upstream ICD.
-- Consume `CodeFetchingResult`, `CodeRepositoryRef`, and `CodeSourceScope`;
-  do not parse source URLs or clone repositories.
+- Consume only a successful `CodeRepositoryRef` and `CodeSourceScope` passed by
+  the top-level supervisor; do not consume non-success `CodeFetchingResult`
+  values, parse source URLs, or clone repositories.
 - Build a small reading plan from the task and repository metadata.
 - Use deterministic tools such as `rg --files`, `rg -n --json`, and bounded
   file reads.
@@ -305,6 +333,10 @@ Rules:
 - Managed clones live under a dedicated coding-agent workspace. The active
   project checkout may be read for matching repository questions, but it must
   not be pulled, checked out, or mutated by `code_fetching`.
+- Phase 1 public responses and Phase 2 worker metadata expose only sanitized
+  repository summaries and repo-relative evidence references. Absolute
+  `local_root`, configured `workspace_root`, and storage `cache_key` values are
+  internal-only.
 - Raw repository files and tool traces remain private job evidence. The
   result-ready cognition episode receives only a bounded artifact and
   prompt-safe metadata.
@@ -315,7 +347,7 @@ Rules:
 |---|---|---|
 | Phase 0 | Standalone `code_fetching` package, README ICD, deterministic source-scope routing, managed storage, direct fetching tests, unsupported-input tests, and 10-source public internet smoke. | Direct callers can resolve supported repo/file/tree/raw/local sources into a safe local source contract or receive explicit unsupported/clarification results. |
 | Phase 1 | Standalone `code_reading` package, README ICD, top-level direct answer interface, supervisor over Phase 0 output and reading. | Direct callers can answer repository/codebase questions with cited local file evidence. |
-| Phase 2 | Background-worker integration, L2d/action-spec affordance update, result-ready delivery, placeholder removal. | Kazusa can route repository/codebase questions through the normal background-work path. |
+| Phase 2 | Background-worker integration, L2d/action-spec affordance update, result-ready delivery, placeholder removal, and `CodingAgentResponse` to `BackgroundWorkResult` mapping for `WORKER="coding_agent"`. | Kazusa can route repository/codebase questions through the normal background-work path. |
 | Phase 3 | `code_writing`, patch proposal, patch validation in sandbox. | Propose patches first without mutating the real workspace. |
 | Phase 4 | Patch apply flow with explicit approval and workspace safety. | Apply approved patches in a controlled sandbox or approved workspace. |
 | Phase 5 | `code_executing` sandbox/Docker execution. | Run bounded verification commands and include results. |

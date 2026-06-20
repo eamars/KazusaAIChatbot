@@ -1,6 +1,80 @@
-"""Shared constants for standalone coding-agent modules."""
+"""Public contracts and shared constants for standalone coding-agent modules."""
+
+from typing import Literal, TypedDict
 
 DEFAULT_WORKSPACE_DIR_NAME = "kazusa_coding_agent"
 GIT_COMMAND_TIMEOUT_SECONDS = 60
 MANAGED_METADATA_SCHEMA_VERSION = 1
 TRACE_ITEM_LIMIT = 12
+
+SourceKind = Literal["repository", "directory", "file"]
+ResultStatus = Literal["succeeded", "failed", "needs_user_input", "rejected"]
+
+
+class CodingAgentSourceScope(TypedDict):
+    """Public resolved repository-relative source scope."""
+
+    kind: SourceKind
+    repo_relative_path: str | None
+    source_url: str
+    requested_ref: str | None
+    interpretation: str
+
+
+class CodingAgentRequest(TypedDict, total=False):
+    """Top-level direct coding-agent request.
+
+    The fetching fields are passed through unchanged to Phase 0. Reading fields
+    are consumed only after Phase 0 returns a successful repository contract.
+    """
+
+    question: str
+    source_url: str
+    repo_url: str
+    repo_hint: str
+    local_root_hint: str
+    local_path_hint: str
+    requested_ref: str
+    source_scope_hint: SourceKind
+    workspace_root: str
+    preferred_language: str
+    max_answer_chars: int
+
+
+class CodingAgentRepositorySummary(TypedDict):
+    """Public-safe repository metadata for direct callers and future workers."""
+
+    provider: Literal["github"]
+    owner: str
+    repo: str
+    source_url: str
+    requested_ref: str | None
+    resolved_ref: str
+    current_commit: str
+    default_branch: str
+    storage_kind: str
+    managed_checkout: bool
+    dirty_state: str
+
+
+class CodeEvidenceReference(TypedDict):
+    """Public evidence row returned by the top-level coding agent."""
+
+    path: str
+    line_start: int
+    line_end: int
+    symbol_or_topic: str
+    excerpt: str
+    reason: str
+
+
+class CodingAgentResponse(TypedDict):
+    """Top-level direct coding-agent response."""
+
+    status: ResultStatus
+    answer_text: str
+    repository: CodingAgentRepositorySummary | None
+    source_scope: CodingAgentSourceScope | None
+    evidence: list[CodeEvidenceReference]
+    limitations: list[str]
+    trace_summary: list[str]
