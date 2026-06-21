@@ -6,7 +6,7 @@
 - Status: draft reference
 - Related execution plans:
   - `development_plans/archive/completed/short_term/coding_agent_phase0_fetching_plan.md`
-  - `development_plans/active/short_term/coding_agent_phase1_code_reading_final_plan.md`
+  - `development_plans/archive/completed/short_term/coding_agent_phase1_code_reading_final_plan.md`
   - `development_plans/active/short_term/coding_agent_phase3_background_worker_integration_plan.md`
 - Planned next execution plan:
   - Phase 2 standalone `code_writing` plan, not yet written.
@@ -96,10 +96,9 @@ The accepted architecture is explicit context partitioning:
   LLM stages receive normalized, bounded evidence rows and task-specific
   semantic summaries.
 - Coding-agent LLM use is route-configurable. The standalone coding agent uses
-  an optional `CODING_AGENT_LLM` route for PM, programmer, and synthesis calls.
-  If that route is not configured, it falls back to `BACKGROUND_WORK_LLM`.
-  Separate PM, programmer, and synthesizer model routes are intentionally not
-  part of the Phase 1 architecture.
+  `CODING_AGENT_PM_LLM` for PM decisions and final synthesis, and
+  `CODING_AGENT_PROGRAMMER_LLM` for bounded programmer workers. A separate
+  synthesizer model route is intentionally not part of the architecture.
 
 This requirement is mandatory for scalability. The coding agent must be able
 to inspect projects whose relevant implementation cannot fit in one prompt.
@@ -446,11 +445,9 @@ parse workspace paths from user text, use Phase 0's temp fallback, or expose
 absolute local paths, workspace roots, cache keys, raw source excerpts, raw
 command output, job ids, leases, adapter ids, or delivery fields.
 
-Phase 3 must reuse the standalone coding-agent effective LLM route resolution.
-It may provide the configured worker environment, but it must not add a second
-worker-only coding model route, split PM/programmer/synthesis routes, or
-reinterpret missing `CODING_AGENT_LLM` settings differently from the standalone
-core.
+Phase 3 must reuse the standalone coding-agent split LLM route resolution. It
+may provide the configured worker environment, but it must not add a second
+worker-only coding model route or a separate synthesizer route.
 
 ## Subagent Contracts
 

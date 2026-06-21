@@ -130,6 +130,16 @@ def _report() -> dict[str, Any]:
         ],
         "evidence": _evidence(),
         "open_questions": [],
+        "discovered_symbols": ["OrderService", "PaymentGateway"],
+        "candidate_next_hops": [
+            {
+                "reason": "Bounded evidence imports related modules.",
+                "scope": {
+                    "kind": "search",
+                    "values": ["orders.payments"],
+                },
+            }
+        ],
     }
     return report
 
@@ -249,6 +259,123 @@ def test_public_run_returns_needs_user_input_for_overloaded_pm(
     assert result["status"] == "needs_user_input"
     assert "narrower" in " ".join(result["limitations"]).casefold()
     assert result["evidence"] == []
+
+
+def test_public_run_allows_third_bounded_programmer_wave(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_reading import run
+    from kazusa_ai_chatbot.coding_agent.code_reading import supervisor
+
+    assignment = _decision()["assignments"][0]
+    decisions = [
+        {
+            **_decision("need_programmers"),
+            "assignments": [{**assignment, "assignment_id": "wave-1"}],
+        },
+        {
+            **_decision("need_programmers"),
+            "assignments": [{**assignment, "assignment_id": "wave-2"}],
+        },
+        {
+            **_decision("need_programmers"),
+            "assignments": [{**assignment, "assignment_id": "wave-3"}],
+        },
+        {**_decision(), "assignments": []},
+    ]
+    reports = []
+
+    def fake_pm(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        return decisions.pop(0)
+
+    def fake_programmer(
+        _repository_arg: dict[str, Any],
+        assignment_arg: dict[str, Any],
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        report = {**_report(), "assignment_id": assignment_arg["assignment_id"]}
+        reports.append(report)
+        return report
+
+    monkeypatch.setattr(supervisor, "decide_reading_work", fake_pm)
+    monkeypatch.setattr(supervisor, "run_programmer_assignment", fake_programmer)
+    monkeypatch.setattr(
+        supervisor,
+        "synthesize_from_programmer_reports",
+        lambda *_args, **_kwargs: ("Third wave evidence was synthesized.", []),
+    )
+
+    result = run(_request(tmp_path, "How does the bounded flow finish?"))
+
+    assert result["status"] == "succeeded"
+    assert len(reports) == 3
+    assert "Third wave" in result["answer_text"]
+
+
+def test_public_run_trims_assignments_to_remaining_report_budget(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_reading import run
+    from kazusa_ai_chatbot.coding_agent.code_reading import supervisor
+
+    assignment = _decision()["assignments"][0]
+    decisions = [
+        {
+            **_decision("need_programmers"),
+            "assignments": [
+                {**assignment, "assignment_id": "wave-1-a"},
+                {**assignment, "assignment_id": "wave-1-b"},
+                {**assignment, "assignment_id": "wave-1-c"},
+            ],
+        },
+        {
+            **_decision("need_programmers"),
+            "assignments": [
+                {**assignment, "assignment_id": "wave-2-a"},
+                {**assignment, "assignment_id": "wave-2-b"},
+            ],
+        },
+        {
+            **_decision("need_programmers"),
+            "assignments": [
+                {**assignment, "assignment_id": "wave-3-a"},
+                {**assignment, "assignment_id": "wave-3-b"},
+            ],
+        },
+        {**_decision(), "assignments": []},
+    ]
+    reports = []
+
+    def fake_pm(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        return decisions.pop(0)
+
+    def fake_programmer(
+        _repository_arg: dict[str, Any],
+        assignment_arg: dict[str, Any],
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        report = {**_report(), "assignment_id": assignment_arg["assignment_id"]}
+        reports.append(report)
+        return report
+
+    monkeypatch.setattr(supervisor, "decide_reading_work", fake_pm)
+    monkeypatch.setattr(supervisor, "run_programmer_assignment", fake_programmer)
+    monkeypatch.setattr(
+        supervisor,
+        "synthesize_from_programmer_reports",
+        lambda *_args, **_kwargs: ("Budget-trimmed evidence was synthesized.", []),
+    )
+
+    result = run(_request(tmp_path, "How does the bounded flow finish?"))
+
+    assert result["status"] == "succeeded"
+    assert len(reports) == supervisor.MAX_PROGRAMMER_REPORTS_PER_PM
+    assert reports[-1]["assignment_id"] == "wave-3-a"
+    assert "Budget-trimmed" in result["answer_text"]
 
 
 def test_public_run_blocks_ungrounded_identifier_in_final_answer(

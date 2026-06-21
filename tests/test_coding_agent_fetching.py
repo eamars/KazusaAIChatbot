@@ -6,13 +6,17 @@ import pytest
 
 from kazusa_ai_chatbot.coding_agent.code_fetching import run
 from kazusa_ai_chatbot.coding_agent.code_fetching.github import (
+    GitHubSource,
     parse_github_source,
 )
+from kazusa_ai_chatbot.coding_agent.code_fetching import managed_clone
 from kazusa_ai_chatbot.coding_agent.code_fetching.managed_clone import (
+    ManagedCloneError,
     build_managed_checkout_paths,
     can_reuse_managed_checkout,
     write_metadata,
 )
+from kazusa_ai_chatbot.coding_agent.tools.git import GitCommandError
 
 
 def _run_git(args: list[str], cwd: Path) -> str:
@@ -384,6 +388,92 @@ async def test_run_preserves_unsupported_limitations_on_success(
     assert "issues" in result["limitations"][0]
 
 
+async def test_run_sanitizes_managed_checkout_failure_result(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_fetching import managed_clone
+
+    sensitive_temp_root = tmp_path / "coding_workspace" / "t"
+
+    def fake_ensure_managed_checkout(source, workspace_root: str):
+        raise ManagedCloneError(
+            "git command failed with exit code 128: "
+            f"Cloning into '{sensitive_temp_root}' failed; "
+            "raw git stderr; cache_key=github-owner-repo-main"
+        )
+
+    monkeypatch.setattr(
+        managed_clone,
+        "ensure_managed_checkout",
+        fake_ensure_managed_checkout,
+    )
+
+    result = await run(
+        {
+            "source_url": "https://github.com/owner/repo",
+            "workspace_root": str(tmp_path / "coding_workspace"),
+        }
+    )
+
+    rendered_result = repr(result)
+    assert result["status"] == "failed"
+    assert result["message"] == "Unable to prepare managed checkout."
+    assert result["limitations"] == ["Managed checkout preparation failed."]
+    assert str(tmp_path) not in rendered_result
+    assert "raw git stderr" not in rendered_result
+    assert "github-owner-repo-main" not in rendered_result
+
+
+async def test_run_sanitizes_managed_raw_download_cleanup_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_fetching import managed_download
+
+    workspace_root = tmp_path / "coding_workspace"
+    source_url = "https://raw.githubusercontent.com/owner/repo/main/src/app.py"
+    source = parse_github_source(source_url)
+    assert source is not None
+    paths = build_managed_checkout_paths(
+        workspace_root=str(workspace_root),
+        provider="github_raw_file",
+        owner=source.owner,
+        repo=source.repo,
+        requested_ref=source.requested_ref,
+        require_checkout_path_budget=False,
+    )
+    temporary_root = Path(paths["temporary_root"])
+    temporary_root.mkdir(parents=True)
+
+    def fake_download_raw_file(_source_url: str) -> bytes:
+        return b"print('fixture')\n"
+
+    def fail_cleanup(path: Path) -> None:
+        raise PermissionError(f"locked cleanup path: {path}")
+
+    monkeypatch.setattr(
+        managed_download,
+        "_download_raw_file",
+        fake_download_raw_file,
+    )
+    monkeypatch.setattr(managed_download.shutil, "rmtree", fail_cleanup)
+
+    result = await run(
+        {
+            "source_url": source_url,
+            "workspace_root": str(workspace_root),
+        }
+    )
+
+    rendered_result = repr(result)
+    assert result["status"] == "failed"
+    assert result["message"] == "Unable to prepare managed raw file download."
+    assert result["limitations"] == ["Managed raw file download failed."]
+    assert str(tmp_path) not in rendered_result
+    assert "locked cleanup path" not in rendered_result
+
+
 async def test_run_resolves_existing_local_checkout_without_mutation(
     tmp_path: Path,
 ) -> None:
@@ -484,3 +574,111 @@ def test_managed_workspace_paths_and_metadata_guard(tmp_path: Path) -> None:
     mismatch = dict(metadata)
     mismatch["repo"] = "other"
     assert not can_reuse_managed_checkout(paths["metadata_path"], mismatch)
+
+
+def test_managed_checkout_paths_use_compact_hash_storage(
+    tmp_path: Path,
+) -> None:
+    paths = build_managed_checkout_paths(
+        workspace_root=str(tmp_path / "coding_workspace"),
+        provider="github",
+        owner="very-long-owner-name",
+        repo="very-long-repository-name",
+        requested_ref="feature/very-long-branch-name",
+    )
+
+    workspace_root = tmp_path / "coding_workspace"
+    forbidden_parts = {
+        "very-long-owner-name",
+        "very-long-repository-name",
+        "feature_very-long-branch-name",
+    }
+    for key in ("checkout_root", "metadata_path", "temporary_root", "lock_path"):
+        relative_parts = Path(paths[key]).relative_to(workspace_root).parts
+        assert not forbidden_parts.intersection(relative_parts)
+        assert len(relative_parts) <= 4
+
+    other_paths = build_managed_checkout_paths(
+        workspace_root=str(tmp_path / "coding_workspace"),
+        provider="github",
+        owner="very-long-owner-name",
+        repo="other-repository-name",
+        requested_ref="feature/very-long-branch-name",
+    )
+    assert paths["temporary_root"] != other_paths["temporary_root"]
+
+
+def test_managed_checkout_rejects_workspace_root_with_no_path_budget(
+    tmp_path: Path,
+) -> None:
+    deep_workspace = tmp_path
+    for index in range(20):
+        deep_workspace = deep_workspace / f"long-segment-{index:02d}"
+
+    with pytest.raises(ManagedCloneError, match="workspace root"):
+        build_managed_checkout_paths(
+            workspace_root=str(deep_workspace),
+            provider="github",
+            owner="owner",
+            repo="repo",
+            requested_ref=None,
+        )
+
+
+def test_managed_checkout_accepts_normal_deep_workspace_budget() -> None:
+    deep_workspace = (
+        Path("test_artifacts")
+        / "coding_agent_live_workspaces"
+        / "phase1_hard_gates"
+        / "normal_deep_workspace_root"
+        / "managed_checkout_area"
+        / "case_with_long_but_supported_workspace"
+    )
+
+    paths = build_managed_checkout_paths(
+        workspace_root=str(deep_workspace),
+        provider="github",
+        owner="owner",
+        repo="repo",
+        requested_ref=None,
+    )
+
+    checkout_root = Path(paths["checkout_root"])
+    assert checkout_root.is_relative_to(deep_workspace.resolve(strict=False))
+    assert len(str(checkout_root)) <= 220
+
+
+def test_managed_clone_preserves_git_failure_when_cleanup_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source = GitHubSource(
+        owner="owner",
+        repo="repo",
+        source_url="https://github.com/owner/repo",
+        source_kind="repository",
+        requested_ref=None,
+        repo_relative_path=None,
+    )
+    paths = build_managed_checkout_paths(
+        workspace_root=str(tmp_path / "coding_workspace"),
+        provider="github",
+        owner=source.owner,
+        repo=source.repo,
+        requested_ref=source.requested_ref,
+    )
+    temporary_root = Path(paths["temporary_root"])
+
+    def fail_git_clone(args: list[str]) -> object:
+        assert args[:3] == ["-c", "core.longpaths=true", "clone"]
+        temporary_root.mkdir(parents=True)
+        raise GitCommandError("primary clone failure")
+
+    def fail_cleanup(path: Path, **_kwargs) -> None:
+        raise PermissionError("cleanup target is locked")
+
+    monkeypatch.setattr(managed_clone, "run_git_command", fail_git_clone)
+    monkeypatch.setattr(managed_clone.shutil, "rmtree", fail_cleanup)
+
+    with pytest.raises(ManagedCloneError, match="primary clone failure"):
+        managed_clone._clone_into_managed_checkout(source, paths)

@@ -3,9 +3,11 @@
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import tempfile
 from typing import TypedDict
 
@@ -22,6 +24,9 @@ from kazusa_ai_chatbot.coding_agent.tools.git import (
 from kazusa_ai_chatbot.coding_agent.tools.paths import ensure_path_inside
 
 _SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9_.-]+")
+_CACHE_HASH_CHARS = 16
+_REF_HASH_CHARS = 12
+_MAX_GENERATED_CHECKOUT_ROOT_CHARS = 220
 
 
 class ManagedCheckoutPaths(TypedDict):
@@ -58,6 +63,7 @@ def build_managed_checkout_paths(
     owner: str,
     repo: str,
     requested_ref: str | None,
+    require_checkout_path_budget: bool = True,
 ) -> ManagedCheckoutPaths:
     """Build contained managed-checkout paths for one repository ref.
 
@@ -67,6 +73,8 @@ def build_managed_checkout_paths(
         owner: Repository owner.
         repo: Repository name.
         requested_ref: Requested branch, tag, or commit.
+        require_checkout_path_budget: Whether to enforce clone checkout path
+            budget for deep git working trees.
 
     Returns:
         Path bundle for checkout, metadata, lock, and temporary clone location.
@@ -74,32 +82,36 @@ def build_managed_checkout_paths(
 
     root = Path(workspace_root).expanduser().resolve(strict=False)
     ref_value = requested_ref or "default"
-    ref_slug = _safe_slug(ref_value)
-    ref_hash = hashlib.sha1(ref_value.encode("utf-8")).hexdigest()[:12]
-    ref_key = f"{ref_slug}-{ref_hash}"
-    owner_slug = _safe_slug(owner)
-    repo_slug = _safe_slug(repo)
+    ref_hash = hashlib.sha1(ref_value.encode("utf-8")).hexdigest()[:_REF_HASH_CHARS]
+    ref_key = f"ref-{ref_hash}"
     provider_slug = _safe_slug(provider)
-    cache_key = f"{provider_slug}-{owner_slug}-{repo_slug}-{ref_key}"
-
-    checkout_root = (
-        root
-        / "repos"
-        / provider_slug
-        / owner_slug
-        / repo_slug
-        / "refs"
-        / ref_key
-        / "checkout"
+    cache_identity = json.dumps(
+        {
+            "provider": provider,
+            "owner": owner,
+            "repo": repo,
+            "requested_ref": requested_ref,
+        },
+        ensure_ascii=True,
+        sort_keys=True,
     )
-    metadata_path = checkout_root.parent / "metadata.json"
-    lock_path = root / "locks" / f"{cache_key}.lock"
-    temporary_root = root / "tmp" / f"{cache_key}.tmp"
+    cache_hash = hashlib.sha256(
+        cache_identity.encode("utf-8")
+    ).hexdigest()[:_CACHE_HASH_CHARS]
+    path_hash = cache_hash[:12]
+    cache_key = f"{provider_slug}-{cache_hash}"
+
+    checkout_root = root / f"r{path_hash}"
+    metadata_path = root / f"m{path_hash}.json"
+    lock_path = root / f"l{path_hash}.lock"
+    temporary_root = root / f"t{path_hash}"
 
     ensure_path_inside(checkout_root, root)
     ensure_path_inside(metadata_path, root)
     ensure_path_inside(lock_path, root)
     ensure_path_inside(temporary_root, root)
+    if require_checkout_path_budget:
+        _validate_checkout_path_budget(checkout_root)
 
     paths: ManagedCheckoutPaths = {
         "workspace_root": str(root),
@@ -214,13 +226,23 @@ def _clone_into_managed_checkout(
     ensure_path_inside(checkout_root, workspace_root)
 
     if temporary_root.exists():
-        shutil.rmtree(temporary_root)
+        cleanup_failed = _remove_tree_best_effort(temporary_root)
+        if cleanup_failed and temporary_root.exists():
+            message = "managed temporary checkout cleanup failed before clone."
+            raise ManagedCloneError(message)
 
     checkout_root.parent.mkdir(parents=True, exist_ok=True)
     temporary_root.parent.mkdir(parents=True, exist_ok=True)
 
     clone_url = f"https://github.com/{source.owner}/{source.repo}.git"
-    clone_args = ["clone", "--depth", "1", "--no-tags"]
+    clone_args = [
+        "-c",
+        "core.longpaths=true",
+        "clone",
+        "--depth",
+        "1",
+        "--no-tags",
+    ]
     if source.requested_ref:
         clone_args.extend(["--branch", source.requested_ref])
     clone_args.extend([clone_url, str(temporary_root)])
@@ -228,17 +250,19 @@ def _clone_into_managed_checkout(
     try:
         run_git_command(clone_args)
     except GitCommandError as exc:
-        if temporary_root.exists():
-            shutil.rmtree(temporary_root)
         message = f"managed git clone failed: {exc}"
+        cleanup_failed = _remove_tree_best_effort(temporary_root)
+        if cleanup_failed:
+            message = f"{message}. Temporary checkout cleanup also failed."
         raise ManagedCloneError(message) from exc
 
     try:
         temporary_root.replace(checkout_root)
     except OSError as exc:
-        if temporary_root.exists():
-            shutil.rmtree(temporary_root)
         message = f"managed checkout move failed: {exc}"
+        cleanup_failed = _remove_tree_best_effort(temporary_root)
+        if cleanup_failed:
+            message = f"{message}. Temporary checkout cleanup also failed."
         raise ManagedCloneError(message) from exc
 
 
@@ -345,3 +369,53 @@ def _safe_slug(value: str) -> str:
 
     fallback_slug = "default"
     return fallback_slug
+
+
+def _validate_checkout_path_budget(checkout_root: Path) -> None:
+    checkout_text = str(checkout_root)
+    if len(checkout_text) <= _MAX_GENERATED_CHECKOUT_ROOT_CHARS:
+        return
+
+    message = (
+        "managed checkout workspace root leaves insufficient path budget; "
+        "use a shorter coding workspace root."
+    )
+    raise ManagedCloneError(message)
+
+
+def _remove_tree_best_effort(path: Path) -> bool:
+    if not path.exists():
+        return False
+
+    try:
+        shutil.rmtree(path, onerror=_retry_remove_writable)
+    except OSError:
+        try:
+            shutil.rmtree(
+                _windows_long_path(path),
+                onerror=_retry_remove_writable,
+            )
+        except OSError:
+            return True
+
+    return False
+
+
+def _retry_remove_writable(function, path: str, _exc_info) -> None:
+    try:
+        os.chmod(path, stat.S_IREAD | stat.S_IWRITE | stat.S_IEXEC)
+    except OSError:
+        pass
+    function(path)
+
+
+def _windows_long_path(path: Path) -> str:
+    if os.name != "nt":
+        return str(path)
+
+    path_text = str(path.resolve(strict=False))
+    if not path_text.startswith("\\\\"):
+        return "\\\\?\\" + path_text
+    if path_text.startswith("\\\\?\\"):
+        return path_text
+    return "\\\\?\\UNC\\" + path_text.lstrip("\\")

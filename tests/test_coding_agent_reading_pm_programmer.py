@@ -107,6 +107,8 @@ def test_contracts_define_simplified_pm_programmer_shapes() -> None:
         "facts",
         "evidence",
         "open_questions",
+        "discovered_symbols",
+        "candidate_next_hops",
     } == set(ProgrammerReport.__annotations__)
 
 
@@ -200,6 +202,8 @@ def test_programmer_report_uses_simplified_memory_shape(
         "facts",
         "evidence",
         "open_questions",
+        "discovered_symbols",
+        "candidate_next_hops",
     } == set(report)
     assert report["status"] == "succeeded"
     assert report["files_read"] == ["src/orders/service.py"]
@@ -209,62 +213,72 @@ def test_programmer_report_uses_simplified_memory_shape(
     assert "cache_key" not in repr(report)
 
 
-def test_coding_agent_llm_route_absent_falls_back_to_background() -> None:
+def test_code_reading_llm_routes_require_full_pm_and_programmer_settings() -> None:
     from kazusa_ai_chatbot.coding_agent.code_reading.llm_config import (
-        resolve_coding_agent_llm_settings,
+        resolve_code_reading_llm_settings,
     )
 
-    settings = resolve_coding_agent_llm_settings(
+    settings = resolve_code_reading_llm_settings(
         {
-            "BACKGROUND_WORK_LLM_BASE_URL": "http://background.example/v1",
-            "BACKGROUND_WORK_LLM_API_KEY": "background-key",
-            "BACKGROUND_WORK_LLM_MODEL": "background-model",
-            "BACKGROUND_WORK_LLM_MAX_COMPLETION_TOKENS": "1200",
-            "BACKGROUND_WORK_LLM_THINKING_ENABLED": "false",
+            "CODING_AGENT_PM_LLM_BASE_URL": "http://pm.example/v1",
+            "CODING_AGENT_PM_LLM_API_KEY": "pm-key",
+            "CODING_AGENT_PM_LLM_MODEL": "pm-model",
+            "CODING_AGENT_PROGRAMMER_LLM_BASE_URL": "http://programmer.example/v1",
+            "CODING_AGENT_PROGRAMMER_LLM_API_KEY": "programmer-key",
+            "CODING_AGENT_PROGRAMMER_LLM_MODEL": "programmer-model",
         }
     )
 
-    assert settings["route_name"] == "CODING_AGENT_LLM"
-    assert settings["fallback_route_name"] == "BACKGROUND_WORK_LLM"
-    assert settings["uses_fallback"] is True
-    assert settings["base_url"] == "http://background.example/v1"
-    assert settings["api_key"] == "background-key"
-    assert settings["model"] == "background-model"
+    assert settings["pm"]["route_name"] == "CODING_AGENT_PM_LLM"
+    assert settings["pm"]["base_url"] == "http://pm.example/v1"
+    assert settings["pm"]["api_key"] == "pm-key"
+    assert settings["pm"]["model"] == "pm-model"
+    assert settings["programmer"]["route_name"] == "CODING_AGENT_PROGRAMMER_LLM"
+    assert settings["programmer"]["base_url"] == "http://programmer.example/v1"
+    assert settings["programmer"]["api_key"] == "programmer-key"
+    assert settings["programmer"]["model"] == "programmer-model"
 
 
-def test_coding_agent_llm_route_complete_configuration_is_used() -> None:
+def test_code_reading_pm_route_is_reused_for_synthesis() -> None:
     from kazusa_ai_chatbot.coding_agent.code_reading.llm_config import (
-        resolve_coding_agent_llm_settings,
+        resolve_code_reading_llm_settings,
     )
 
-    settings = resolve_coding_agent_llm_settings(
+    settings = resolve_code_reading_llm_settings(
         {
-            "CODING_AGENT_LLM_BASE_URL": "http://coding.example/v1",
-            "CODING_AGENT_LLM_API_KEY": "coding-key",
-            "CODING_AGENT_LLM_MODEL": "coding-model",
-            "BACKGROUND_WORK_LLM_BASE_URL": "http://background.example/v1",
-            "BACKGROUND_WORK_LLM_API_KEY": "background-key",
-            "BACKGROUND_WORK_LLM_MODEL": "background-model",
+            "CODING_AGENT_PM_LLM_BASE_URL": "http://pm.example/v1",
+            "CODING_AGENT_PM_LLM_API_KEY": "pm-key",
+            "CODING_AGENT_PM_LLM_MODEL": "pm-model",
+            "CODING_AGENT_PROGRAMMER_LLM_BASE_URL": "http://programmer.example/v1",
+            "CODING_AGENT_PROGRAMMER_LLM_API_KEY": "programmer-key",
+            "CODING_AGENT_PROGRAMMER_LLM_MODEL": "programmer-model",
         }
     )
 
-    assert settings["route_name"] == "CODING_AGENT_LLM"
-    assert settings["base_url"] == "http://coding.example/v1"
-    assert settings["api_key"] == "coding-key"
-    assert settings["model"] == "coding-model"
+    assert settings["synthesis"] == settings["pm"]
 
 
-def test_coding_agent_llm_route_partial_configuration_fails_fast() -> None:
+def test_code_reading_llm_route_partial_configuration_fails_fast() -> None:
     from kazusa_ai_chatbot.coding_agent.code_reading.llm_config import (
-        resolve_coding_agent_llm_settings,
+        resolve_code_reading_llm_settings,
     )
 
-    with pytest.raises(ValueError, match="CODING_AGENT_LLM"):
-        resolve_coding_agent_llm_settings(
+    with pytest.raises(ValueError, match="CODING_AGENT_PM_LLM"):
+        resolve_code_reading_llm_settings(
             {
-                "CODING_AGENT_LLM_BASE_URL": "http://coding.example/v1",
-                "BACKGROUND_WORK_LLM_BASE_URL": "http://background.example/v1",
-                "BACKGROUND_WORK_LLM_API_KEY": "background-key",
-                "BACKGROUND_WORK_LLM_MODEL": "background-model",
+                "CODING_AGENT_PM_LLM_BASE_URL": "http://pm.example/v1",
+                "CODING_AGENT_PROGRAMMER_LLM_BASE_URL": "http://programmer.example/v1",
+                "CODING_AGENT_PROGRAMMER_LLM_API_KEY": "programmer-key",
+                "CODING_AGENT_PROGRAMMER_LLM_MODEL": "programmer-model",
+            }
+        )
+
+    with pytest.raises(ValueError, match="CODING_AGENT_PROGRAMMER_LLM"):
+        resolve_code_reading_llm_settings(
+            {
+                "CODING_AGENT_PM_LLM_BASE_URL": "http://pm.example/v1",
+                "CODING_AGENT_PM_LLM_API_KEY": "pm-key",
+                "CODING_AGENT_PM_LLM_MODEL": "pm-model",
+                "CODING_AGENT_PROGRAMMER_LLM_BASE_URL": "http://programmer.example/v1",
             }
         )

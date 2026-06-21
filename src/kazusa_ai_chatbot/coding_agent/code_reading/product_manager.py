@@ -19,11 +19,11 @@ from kazusa_ai_chatbot.coding_agent.code_reading.models import (
     ReadingIntent,
 )
 from kazusa_ai_chatbot.config import (
-    CODING_AGENT_LLM_API_KEY,
-    CODING_AGENT_LLM_BASE_URL,
-    CODING_AGENT_LLM_MAX_COMPLETION_TOKENS,
-    CODING_AGENT_LLM_MODEL,
-    CODING_AGENT_LLM_THINKING_ENABLED,
+    CODING_AGENT_PM_LLM_API_KEY,
+    CODING_AGENT_PM_LLM_BASE_URL,
+    CODING_AGENT_PM_LLM_MAX_COMPLETION_TOKENS,
+    CODING_AGENT_PM_LLM_MODEL,
+    CODING_AGENT_PM_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.llm_interface import (
     LLInterface,
@@ -82,7 +82,46 @@ facts until programmer workers read bounded source evidence.
   needs_user_input.
 - If previous programmer reports already contain enough source-backed facts,
   return sufficient and no assignments.
+- Treat no_evidence reports and unresolved open_questions as missing evidence,
+  not sufficiency, unless other successful reports directly answer the same
+  required slot from source-backed facts.
+- If previous reports cover upstream modality or input handling plus a
+  downstream component's generic plan/state consumption, treat that handoff as
+  sufficient for downstream output construction unless the user explicitly asks
+  for modality-specific downstream code.
+- Do not repeat assignments that already returned supported facts unless the
+  remaining missing slot is specific and materially different.
+- Prefer concrete symbols and next-hop scopes discovered in successful reports
+  over guessed method or class names. Do not invent likely private method names
+  or framework internals; if a symbol is not visible in repository metadata or
+  previous reports, use a search scope with generic source terms instead.
+- When a previous report found relevant files but left an open question, prefer
+  a follow-up file scope using exact previous files_read paths or exact
+  candidate_next_hops. Do not switch to a guessed path.
+- Do not use file or directory scope for a guessed path. File and directory
+  values must be exact paths visible in repo_map_summary, previous files_read,
+  or previous candidate_next_hops. If unsure, use search with short source
+  terms instead of a path-like guess.
+- If the payload review_mode is final_no_more_programmers, do not return
+  need_programmers and do not include assignments. Returning need_programmers
+  in this mode is invalid. Return sufficient when previous reports support a
+  coherent source-backed answer chain with only minor limitations. Return
+  needs_user_input when any user-requested chain segment remains represented
+  only by no_evidence, blocked reports, or unresolved open_questions.
 - Otherwise return need_programmers with one to three bounded assignments.
+- There is a total budget of six programmer reports across all waves. Count
+  previous_reports before assigning more work. Do not request more assignments
+  than the remaining report budget; choose the most decisive missing slots
+  first.
+- Use repo_map_summary source classes, defined symbols, imported modules, and
+  previous report candidate_next_hops as generic navigation hints when choosing
+  bounded assignments.
+- For pipeline_or_data_flow questions, identify each user-named event in the
+  requested chain. Include bounded work for the first ingress, every named
+  middle transition or dispatcher stage, internal representation or decision
+  logic, and downstream output or response construction when those scopes are
+  visible or searchable. Do not mark sufficient if a named middle transition
+  remains ungrounded.
 - For control_or_feedback_flow questions, include bounded work for both the
   control calculation and the caller or output application when those files or
   symbols are visible in the repository map.
@@ -92,6 +131,10 @@ facts until programmer workers read bounded source evidence.
   repository map.
 - Symbol and search values must be short generic source terms from the user's
   question or repository map, not phrases chosen to force a known answer.
+- When the user question names concrete symbols, events, methods, routes,
+  services, fields, or constants, preserve those identifiers in the relevant
+  assignment questions or values so the programmer can find exact source
+  evidence.
 - Do not include concrete code facts unless they are visible in the current
   input, and do not include repository-specific shortcuts, domain-specific
   shortcuts, file-system roots, cache keys, API keys, or raw provider details.
@@ -136,17 +179,17 @@ Return strict JSON:
 _reading_pm_llm = LLInterface()
 _reading_pm_llm_config = LLMCallConfig(
     stage_name=__name__,
-    route_name="CODING_AGENT_LLM",
-    base_url=CODING_AGENT_LLM_BASE_URL,
-    api_key=CODING_AGENT_LLM_API_KEY,
-    model=CODING_AGENT_LLM_MODEL,
+    route_name="CODING_AGENT_PM_LLM",
+    base_url=CODING_AGENT_PM_LLM_BASE_URL,
+    api_key=CODING_AGENT_PM_LLM_API_KEY,
+    model=CODING_AGENT_PM_LLM_MODEL,
     temperature=0.1,
     top_p=0.7,
     top_k=None,
-    max_completion_tokens=CODING_AGENT_LLM_MAX_COMPLETION_TOKENS,
+    max_completion_tokens=CODING_AGENT_PM_LLM_MAX_COMPLETION_TOKENS,
     presence_penalty=None,
     thinking=LLMThinkingConfig(
-        enabled=CODING_AGENT_LLM_THINKING_ENABLED,
+        enabled=CODING_AGENT_PM_LLM_THINKING_ENABLED,
     ),
 )
 
@@ -304,6 +347,9 @@ def _pm_payload(pm_input: PMInput) -> dict[str, object]:
         "repo_map_summary": pm_input["repo_map_summary"],
         "previous_reports": _compact_reports(pm_input["previous_reports"]),
     }
+    review_mode = pm_input.get("review_mode")
+    if review_mode:
+        payload["review_mode"] = review_mode
     return payload
 
 
@@ -318,6 +364,8 @@ def _compact_reports(
             "files_read": report["files_read"],
             "facts": report["facts"],
             "open_questions": report["open_questions"],
+            "discovered_symbols": report["discovered_symbols"],
+            "candidate_next_hops": report["candidate_next_hops"],
             "evidence_refs": [
                 _evidence_ref(row)
                 for row in report["evidence"]

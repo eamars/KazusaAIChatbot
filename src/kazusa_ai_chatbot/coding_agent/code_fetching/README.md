@@ -37,6 +37,12 @@ configured workspace. Raw download metadata uses `storage_kind:
 HTTP response does not expose a Git commit. Existing matching managed downloads
 are reused and not auto-refreshed.
 
+Managed clone and raw-download storage use compact hash-named paths under the
+configured workspace. Repository identity stays in metadata instead of nested
+owner/repo/ref directories. Failed managed preparation returns a generic
+public-safe failure message and limitation; local roots, workspace roots,
+cache keys, raw command stderr, and cleanup paths stay out of public results.
+
 GitHub `tree`, `blob`, and raw-file scopes must exist in the resolved local
 root. Missing scoped paths return `rejected` instead of handing an invalid path
 to reading. Local checkout scopes use public-safe

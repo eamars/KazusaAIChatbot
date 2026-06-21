@@ -53,6 +53,7 @@ def ensure_managed_raw_file_download(
         owner=source.owner,
         repo=source.repo,
         requested_ref=source.requested_ref,
+        require_checkout_path_budget=False,
     )
     checkout_root = Path(paths["checkout_root"])
     metadata_path = Path(paths["metadata_path"])
@@ -128,10 +129,14 @@ def _write_managed_file(
     ensure_path_inside(temporary_root, workspace_root)
     ensure_path_inside(checkout_root, workspace_root)
 
-    if temporary_root.exists():
-        shutil.rmtree(temporary_root)
-    if checkout_root.exists():
-        shutil.rmtree(checkout_root)
+    try:
+        if temporary_root.exists():
+            shutil.rmtree(temporary_root)
+        if checkout_root.exists():
+            shutil.rmtree(checkout_root)
+    except OSError as exc:
+        message = f"managed raw download cleanup failed: {exc}"
+        raise ManagedDownloadError(message) from exc
 
     target_path = _downloaded_file_path(temporary_root, source)
     target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -140,7 +145,10 @@ def _write_managed_file(
         target_path.write_bytes(data)
     except OSError as exc:
         if temporary_root.exists():
-            shutil.rmtree(temporary_root)
+            try:
+                shutil.rmtree(temporary_root)
+            except OSError:
+                pass
         message = f"managed raw download write failed: {exc}"
         raise ManagedDownloadError(message) from exc
 
@@ -149,7 +157,10 @@ def _write_managed_file(
         temporary_root.replace(checkout_root)
     except OSError as exc:
         if temporary_root.exists():
-            shutil.rmtree(temporary_root)
+            try:
+                shutil.rmtree(temporary_root)
+            except OSError:
+                pass
         message = f"managed raw download move failed: {exc}"
         raise ManagedDownloadError(message) from exc
 

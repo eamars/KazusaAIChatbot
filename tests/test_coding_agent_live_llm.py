@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import sys
 from pathlib import Path
 from typing import Any
@@ -9,7 +10,10 @@ from typing import Any
 import httpx
 import pytest
 
-from kazusa_ai_chatbot.config import BACKGROUND_WORK_LLM_BASE_URL
+from kazusa_ai_chatbot.config import (
+    CODING_AGENT_PM_LLM_BASE_URL,
+    CODING_AGENT_PROGRAMMER_LLM_BASE_URL,
+)
 from tests.llm_trace import write_llm_trace
 
 
@@ -23,6 +27,17 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
 
 
 _TEST_NAME = "coding_agent_phase1_live_llm"
+_HARD_GATE_WORKSPACE_ROOT = (
+    Path("test_artifacts")
+    / "coding_agent_live_workspaces"
+    / "phase1_hard_gates"
+    / "normal_deep_workspace_root"
+    / "managed_checkout_area"
+)
+_REMEDIATION_PLAN_PATH = Path(
+    "development_plans/active/short_term/"
+    "coding_agent_phase1_real_repo_retrieval_remediation_plan.md"
+)
 
 
 def _write_text(path: Path, lines: list[str]) -> None:
@@ -236,25 +251,75 @@ def _directory_files() -> dict[str, list[str]]:
 
 
 async def _skip_if_llm_unavailable() -> None:
-    base_url = _effective_route_base_url()
-    try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            response = await client.get(f"{base_url.rstrip('/')}/models")
-    except httpx.HTTPError as exc:
-        pytest.skip(f"Coding-agent LLM endpoint is unavailable: {base_url}; {exc}")
+    for route_label, base_url in _unique_route_base_urls().items():
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                response = await client.get(f"{base_url.rstrip('/')}/models")
+        except httpx.HTTPError as exc:
+            pytest.skip(
+                "Coding-agent LLM endpoint is unavailable for "
+                f"{route_label}: {base_url}; {exc}"
+            )
 
-    if response.status_code >= 500:
-        pytest.skip(
-            "Coding-agent LLM endpoint returned server error "
-            f"{response.status_code}: {base_url}"
-        )
+        if response.status_code >= 500:
+            pytest.skip(
+                "Coding-agent LLM endpoint returned server error for "
+                f"{route_label}: {response.status_code}: {base_url}"
+            )
+
+
+def _effective_route_base_urls() -> dict[str, str]:
+    route_base_urls = {
+        "pm": CODING_AGENT_PM_LLM_BASE_URL,
+        "programmer": CODING_AGENT_PROGRAMMER_LLM_BASE_URL,
+        "synthesis": CODING_AGENT_PM_LLM_BASE_URL,
+    }
+    return route_base_urls
 
 
 def _effective_route_base_url() -> str:
-    from os import getenv
+    return CODING_AGENT_PM_LLM_BASE_URL
 
-    base_url = getenv("CODING_AGENT_LLM_BASE_URL") or BACKGROUND_WORK_LLM_BASE_URL
-    return base_url
+
+def _unique_route_base_urls() -> dict[str, str]:
+    unique_base_urls: dict[str, str] = {}
+    seen_base_urls: set[str] = set()
+    for route_label, base_url in _effective_route_base_urls().items():
+        normalized_base_url = base_url.rstrip("/")
+        if normalized_base_url in seen_base_urls:
+            continue
+        seen_base_urls.add(normalized_base_url)
+        unique_base_urls[route_label] = base_url
+    return unique_base_urls
+
+
+async def _require_llm_available() -> None:
+    for route_label, base_url in _unique_route_base_urls().items():
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                response = await client.get(f"{base_url.rstrip('/')}/models")
+        except httpx.HTTPError as exc:
+            pytest.fail(
+                "Coding-agent LLM endpoint is unavailable for "
+                f"{route_label}: {base_url}; {exc}"
+            )
+
+        if response.status_code >= 500:
+            pytest.fail(
+                "Coding-agent LLM endpoint returned server error for "
+                f"{route_label}: {response.status_code}: {base_url}"
+            )
+
+
+def _read_plan_for_hard_gate() -> dict[str, object]:
+    plan_text = _REMEDIATION_PLAN_PATH.read_text(encoding="utf-8")
+    plan_sha256 = hashlib.sha256(plan_text.encode("utf-8")).hexdigest()
+    plan_snapshot = {
+        "path": _REMEDIATION_PLAN_PATH.as_posix(),
+        "sha256": plan_sha256,
+        "line_count": len(plan_text.splitlines()),
+    }
+    return plan_snapshot
 
 
 def _trace_payload(
@@ -270,6 +335,7 @@ def _trace_payload(
         "case_id": case_id,
         "command_subject": command_subject,
         "effective_route_base_url": _effective_route_base_url(),
+        "effective_route_base_urls": _effective_route_base_urls(),
         "repository": _safe_repository(repository),
         "raw_stage_trace": raw_trace,
         "result": result,
@@ -286,9 +352,6 @@ def _safe_repository(
         return None
 
     safe = dict(_repository_summary(repository))
-    safe["local_root"] = "<redacted>"
-    safe["workspace_root"] = "<redacted>"
-    safe["cache_key"] = "<redacted>"
     return safe
 
 
@@ -320,6 +383,50 @@ def _write_case_trace(
     return trace_path
 
 
+def _write_hard_gate_trace(
+    *,
+    case_id: str,
+    question: str,
+    source_url: str,
+    plan_snapshot: dict[str, object],
+    fetching_result: dict[str, object],
+    reading_trace: dict[str, object],
+    response: dict[str, object],
+    validation: dict[str, object],
+) -> Path:
+    payload = {
+        "case_id": case_id,
+        "gate_type": "phase1_hard_real_github_gate",
+        "question": question,
+        "source_url": source_url,
+        "plan_snapshot": plan_snapshot,
+        "effective_route_base_url": _effective_route_base_url(),
+        "effective_route_base_urls": _effective_route_base_urls(),
+        "workspace_root": "<redacted>",
+        "fetching_result": _safe_fetching_result(fetching_result),
+        "raw_stage_trace": reading_trace,
+        "response": response,
+        "validation": validation,
+        "judgment": "ai_agent_review_required_no_keyword_pass_fail",
+    }
+    trace_path = write_llm_trace(_TEST_NAME, case_id, payload)
+    print(
+        "coding_agent_hard_gate_trace="
+        f"{trace_path} case_id={case_id} validation={validation}"
+    )
+    return trace_path
+
+
+def _safe_fetching_result(
+    fetching_result: dict[str, object],
+) -> dict[str, object]:
+    safe_result = dict(fetching_result)
+    repository = fetching_result.get("repository")
+    if isinstance(repository, dict):
+        safe_result["repository"] = _safe_repository(repository)
+    return safe_result
+
+
 def _assert_stage_trace(raw_trace: dict[str, object]) -> None:
     assert raw_trace.get("effective_route")
     assert raw_trace.get("raw_output")
@@ -328,9 +435,107 @@ def _assert_stage_trace(raw_trace: dict[str, object]) -> None:
 
 def _assert_public_safe(value: object) -> None:
     serialized = repr(value)
-    assert "local_root" not in serialized
-    assert "workspace_root" not in serialized
-    assert "cache_key" not in serialized
+    assert "'local_root':" not in serialized
+    assert '"local_root":' not in serialized
+    assert "'workspace_root':" not in serialized
+    assert '"workspace_root":' not in serialized
+    assert "'cache_key':" not in serialized
+    assert '"cache_key":' not in serialized
+
+
+def _assert_hard_gate_structure(response: dict[str, object]) -> None:
+    trace_summary = response["trace_summary"]
+    assert response["status"] == "succeeded"
+    assert response["answer_text"]
+    assert response["evidence"]
+    assert any(
+        "Resolved public GitHub source to managed checkout" in item
+        for item in trace_summary
+    )
+    assert any(
+        item.startswith("reading_pm:repository_map")
+        for item in trace_summary
+    )
+    assert any(item.startswith("programmer:") for item in trace_summary)
+    assert any(
+        item.startswith("programmer_report")
+        for item in trace_summary
+    )
+    assert "reading_pm:sufficiency=sufficient" in trace_summary
+    _assert_public_safe(response)
+
+
+async def _run_hard_real_github_gate(
+    *,
+    case_id: str,
+    source_url: str,
+    question: str,
+) -> dict[str, object]:
+    await _require_llm_available()
+    plan_snapshot = _read_plan_for_hard_gate()
+
+    from kazusa_ai_chatbot.coding_agent import code_fetching
+    from kazusa_ai_chatbot.coding_agent.code_reading.supervisor import (
+        run_reading_supervisor,
+    )
+
+    workspace_root = _HARD_GATE_WORKSPACE_ROOT / case_id
+    fetching_result = await code_fetching.run(
+        {
+            "question": question,
+            "source_url": source_url,
+            "workspace_root": str(workspace_root),
+        }
+    )
+    assert fetching_result["status"] == "succeeded"
+    assert fetching_result["repository"] is not None
+    assert fetching_result["source_scope"] is not None
+
+    reading_trace: dict[str, object] = {}
+    reading_result = run_reading_supervisor(
+        {
+            "question": question,
+            "repository": fetching_result["repository"],
+            "source_scope": fetching_result["source_scope"],
+            "preferred_language": "English",
+            "max_answer_chars": 4000,
+        },
+        trace=reading_trace,
+    )
+    response = {
+        "status": reading_result["status"],
+        "answer_text": reading_result["answer_text"],
+        "repository": _safe_repository(fetching_result["repository"]),
+        "source_scope": fetching_result["source_scope"],
+        "evidence": reading_result["evidence"],
+        "limitations": [
+            *fetching_result["limitations"],
+            *reading_result["limitations"],
+        ],
+        "trace_summary": [
+            *fetching_result["trace_summary"],
+            *reading_result["trace_summary"],
+        ],
+    }
+    validation = {
+        "status": response["status"],
+        "answer_chars": len(str(response["answer_text"])),
+        "evidence_count": len(response["evidence"]),
+        "trace_count": len(response["trace_summary"]),
+        "has_synthesis": "synthesis" in reading_trace,
+    }
+    _write_hard_gate_trace(
+        case_id=case_id,
+        question=question,
+        source_url=source_url,
+        plan_snapshot=plan_snapshot,
+        fetching_result=fetching_result,
+        reading_trace=reading_trace,
+        response=response,
+        validation=validation,
+    )
+    _assert_hard_gate_structure(response)
+    return response
 
 
 def _assert_assignment_limits(decision: dict[str, Any]) -> None:
@@ -442,6 +647,22 @@ def _programmer_report_from_evidence(
         ],
         "evidence": evidence,
         "open_questions": [],
+        "discovered_symbols": [
+            "OrderService",
+            "PaymentGateway",
+        ],
+        "candidate_next_hops": [
+            {
+                "reason": "Bounded evidence defines related symbols.",
+                "scope": {
+                    "kind": "symbol",
+                    "values": [
+                        "OrderService",
+                        "PaymentGateway",
+                    ],
+                },
+            }
+        ],
     }
     return report
 
@@ -538,6 +759,84 @@ def _run_synthesizer(
     )
     answer_text = answer[0] if isinstance(answer, tuple) else answer
     return answer_text, raw_trace
+
+
+async def test_hard_gate_real_github_character_image_response() -> None:
+    await _run_hard_real_github_gate(
+        case_id="hard_gate_character_image_response",
+        source_url="https://github.com/eamars/KazusaAIChatbot",
+        question=(
+            "Per https://github.com/eamars/KazusaAIChatbot project, how does "
+            "the character respond to the image."
+        ),
+    )
+
+
+async def test_hard_gate_real_github_home_assistant_entity_action() -> None:
+    await _run_hard_real_github_gate(
+        case_id="hard_gate_home_assistant_entity_action",
+        source_url="https://github.com/home-assistant/core",
+        question=(
+            "Per https://github.com/home-assistant/core, when a user turns on "
+            "a light entity from the UI or API, how does Home Assistant route "
+            "that request to the integration, update the state machine, and "
+            "broadcast the resulting state change?"
+        ),
+    )
+
+
+async def test_hard_gate_real_github_zulip_notification_decision() -> None:
+    await _run_hard_real_github_gate(
+        case_id="hard_gate_zulip_notification_decision",
+        source_url="https://github.com/zulip/zulip",
+        question=(
+            "Per https://github.com/zulip/zulip, when a stream message "
+            "mentions a user who may have muted the stream or topic and may be "
+            "offline, how does Zulip decide whether that user gets an unread "
+            "mention, desktop notification, mobile push, or email?"
+        ),
+    )
+
+
+async def test_hard_gate_real_github_airflow_task_state_flow() -> None:
+    await _run_hard_real_github_gate(
+        case_id="hard_gate_airflow_task_state_flow",
+        source_url="https://github.com/apache/airflow",
+        question=(
+            "Per https://github.com/apache/airflow, when a task instance "
+            "finishes and the DAG run contains a mix of successful, skipped, "
+            "failed, and upstream-failed tasks, how does Airflow decide what "
+            "downstream tasks to schedule next and when to mark the DAG run "
+            "finished?"
+        ),
+    )
+
+
+async def test_hard_gate_real_github_fastapi_dependency_lifecycle() -> None:
+    await _run_hard_real_github_gate(
+        case_id="hard_gate_fastapi_dependency_lifecycle",
+        source_url="https://github.com/fastapi/fastapi",
+        question=(
+            "Per https://github.com/fastapi/fastapi, if an endpoint uses a "
+            "generator-style dependency and the endpoint raises an HTTP "
+            "exception before returning normally, what happens to the "
+            "dependency cleanup code, exception handling, and final response "
+            "sent to the client?"
+        ),
+    )
+
+
+async def test_hard_gate_real_github_comfyui_uploaded_image_flow() -> None:
+    await _run_hard_real_github_gate(
+        case_id="hard_gate_comfyui_uploaded_image_flow",
+        source_url="https://github.com/comfy-org/comfyui",
+        question=(
+            "Per https://github.com/comfy-org/comfyui, when a user uploads an "
+            "image for a workflow and queues execution, how does ComfyUI move "
+            "that image from upload/storage into node execution and then "
+            "report progress or output back to the browser?"
+        ),
+    )
 
 
 async def test_live_pm_decides_architecture_overview(tmp_path: Path) -> None:

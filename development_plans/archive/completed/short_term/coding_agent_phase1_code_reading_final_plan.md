@@ -5,7 +5,7 @@
 - Goal: deliver the Phase 1 read-only code-reading implementation with
   evidence-grounded answers through the standalone coding-agent interface.
 - Plan class: large
-- Status: in_progress
+- Status: completed
 - Mandatory skills: `development-plan`, `local-llm-architecture`, `py-style`,
   `test-style-and-execution`, `debug-llm`, `superpowers:test-driven-development`,
   `superpowers:subagent-driven-development`, and
@@ -85,11 +85,10 @@ Phase 1 plan.
 - Programmer workers discover concrete identifiers from repository evidence.
   Final answers may mention concrete code terms only when those terms are
   traceable to evidence rows returned by programmer reports.
-- `code_reading` uses one optional dedicated `CODING_AGENT_LLM` route for PM,
-  programmer, and synthesis LLM calls. When the dedicated route is absent, it
-  falls back to `BACKGROUND_WORK_LLM`. Partial `CODING_AGENT_LLM` configuration
-  is invalid and must fail configuration validation instead of mixing values
-  from different routes.
+- `code_reading` uses separate required LLM routes: PM decisions and synthesis
+  use `CODING_AGENT_PM_LLM`, while programmer workers use
+  `CODING_AGENT_PROGRAMMER_LLM`. There is no fallback to background-work routes
+  and no separate synthesizer route.
 - Deterministic code owns path safety, file caps, allowed file types,
   workspace-root privacy, source-scope enforcement, and schema validation. LLM
   stages own semantic decomposition and explanation only.
@@ -125,9 +124,9 @@ Phase 1 plan.
 - Update `src/kazusa_ai_chatbot/coding_agent/README.md` and
   `src/kazusa_ai_chatbot/coding_agent/code_reading/README.md` to describe only
   the corrected final Phase 1 interface and limits.
-- Add the optional `CODING_AGENT_LLM` route with fallback to
-  `BACKGROUND_WORK_LLM`, including direct tests for absent, complete, and
-  partial route configuration.
+- Add required `CODING_AGENT_PM_LLM` and `CODING_AGENT_PROGRAMMER_LLM` routes,
+  including direct tests that complete PM/programmer configuration is required
+  and synthesis reuses the PM route.
 - Produce debug-LLM review artifacts for every required live/local LLM case,
   including raw inputs, raw outputs, parsed outputs, model route, evidence rows,
   quality notes, validation results, and pass/fail judgment.
@@ -158,7 +157,7 @@ Overall strategy: bigbang
 | Superseded Phase 1 plans | bigbang | The superseded plan files are deleted and must not be restored. |
 | Code-reading PM/planner/synthesizer | bigbang | Replace source-shaped logic with generic task taxonomy, evidence slots, programmer reports, and grounded synthesis. |
 | Tests | bigbang | Rewrite weak source-shaped tests and add taxonomy, grounding, independent-fixture, and negative-case coverage. |
-| LLM route | compatible | Add optional `CODING_AGENT_LLM_*` configuration. When absent, use `BACKGROUND_WORK_LLM_*`; when partially configured, fail fast. Do not add separate PM, programmer, or synthesizer routes in Phase 1. |
+| LLM route | bigbang | Add required `CODING_AGENT_PM_LLM_*` and `CODING_AGENT_PROGRAMMER_LLM_*` configuration. Synthesis reuses the PM route; do not add a separate synthesizer route or background-work fallback. |
 | Public standalone interface | compatible | Keep the existing direct `answer_code_question(...)` and `code_reading.run(...)` entrypoints. If the corrected contract cannot fit those entrypoints, stop and request a plan update before changing them. |
 | Kazusa service integration | none | Leave core service, L2d, and background worker integration untouched. |
 
@@ -197,7 +196,7 @@ evidence rows.
 | Simplified IO | Use `PMInput`, `PMDecision`, `ProgrammerAssignment`, and `ProgrammerReport` with the minimal fields in this plan | Avoids fake structure and keeps local LLM context small. |
 | Programmer evidence | Concrete identifiers originate only in programmer reports | Enforces product-manager/programmer memory ownership. |
 | Answer synthesis | Ground final concrete code terms against selected evidence | Prevents hallucinated or memorized answer details. |
-| LLM route | Add one optional `CODING_AGENT_LLM` route that falls back to `BACKGROUND_WORK_LLM` | Gives coding work a tunable model without creating unnecessary PM/programmer/synthesizer model split. |
+| LLM route | Add required PM and programmer code-reading routes, with synthesis on the PM route | Lets PM/synthesis thinking be tuned separately from bounded programmer reading without adding a third route. |
 | Test strategy | Make real LLM gates the primary product-quality proof; use deterministic tests for schema, safety, limits, route config, and regression | Phase 1 is an LLM code-reading agent, so prompt/agent behavior must be judged from real model outputs, not inferred from deterministic checks. |
 | Phase 1 scope | Keep standalone direct interface only | Shrinks boundary and avoids premature Kazusa service integration. |
 | Context scaling | Allow master-PM required flags and report compaction, but implement only the standalone hierarchy needed for Phase 1 | Preserves larger-project architecture without adding distributed orchestration not needed in Phase 1. |
@@ -320,45 +319,39 @@ metadata.
 ## LLM Call And Context Budget
 
 Phase 1 must remain usable with local LLMs. Use a conservative 50k-token
-effective context cap for design and verification. Phase 1 adds one optional
-route:
+effective context cap for design and verification. Phase 1 uses two required
+code-reading routes:
 
 ```text
-CODING_AGENT_LLM_BASE_URL
-CODING_AGENT_LLM_API_KEY
-CODING_AGENT_LLM_MODEL
-CODING_AGENT_LLM_MAX_COMPLETION_TOKENS
-CODING_AGENT_LLM_THINKING_ENABLED
+CODING_AGENT_PM_LLM_BASE_URL
+CODING_AGENT_PM_LLM_API_KEY
+CODING_AGENT_PM_LLM_MODEL
+CODING_AGENT_PM_LLM_MAX_COMPLETION_TOKENS
+CODING_AGENT_PM_LLM_THINKING_ENABLED
+
+CODING_AGENT_PROGRAMMER_LLM_BASE_URL
+CODING_AGENT_PROGRAMMER_LLM_API_KEY
+CODING_AGENT_PROGRAMMER_LLM_MODEL
+CODING_AGENT_PROGRAMMER_LLM_MAX_COMPLETION_TOKENS
+CODING_AGENT_PROGRAMMER_LLM_THINKING_ENABLED
 ```
 
-`CODING_AGENT_LLM_BASE_URL`, `CODING_AGENT_LLM_API_KEY`, and
-`CODING_AGENT_LLM_MODEL` are optional as a complete group. If all three are
-absent, the effective route uses `BACKGROUND_WORK_LLM_BASE_URL`,
-`BACKGROUND_WORK_LLM_API_KEY`, and `BACKGROUND_WORK_LLM_MODEL`.
-`CODING_AGENT_LLM_MAX_COMPLETION_TOKENS` and
-`CODING_AGENT_LLM_THINKING_ENABLED` fall back to the background-work route's
-corresponding values when omitted.
-
-If any of the three required coding-agent route identity variables is present
-without the other two, configuration must fail fast. Do not silently combine a
-coding-agent base URL with a background-work model or API key.
-
-Do not add `CODING_AGENT_PM_LLM`, `CODING_AGENT_PROGRAMMER_LLM`, or
-`CODING_AGENT_SYNTHESIZER_LLM` in Phase 1. PM, programmer, and synthesis
-boundaries are enforced by prompt/input contracts, context caps, real LLM
-quality gates, and trace inspection, not by separate model routes.
+The PM and programmer route identity fields are required. Token and thinking
+settings use the shared defaults when omitted. Final synthesis intentionally
+uses the PM route. Do not add a separate synthesizer route or silently fall back
+to `BACKGROUND_WORK_LLM` for code-reading stages.
 
 The product-quality Phase 1 path must exercise real LLM calls through the
-effective `CODING_AGENT_LLM` route. Deterministic code still owns validation,
+configured PM and programmer routes. Deterministic code still owns validation,
 path safety, caps, and public-safety enforcement, but deterministic-only
 semantic decomposition or answer synthesis is not sufficient for Phase 1
 acceptance.
 
 | Stage | Normal call count | Maximum context input | Cap policy |
 |---|---:|---|---|
-| Reading PM decision | 1 `CODING_AGENT_LLM` call for non-trivial reading questions | `PMInput`, generic intent list, repository-map summary | No raw full files; no unbounded `rg` output. |
-| Programmer worker | 1 `CODING_AGENT_LLM` call per bounded assignment | one `ProgrammerAssignment`, selected excerpts, repo-relative paths | Per-worker excerpts capped by supervisor limits. |
-| PM synthesis | 1 `CODING_AGENT_LLM` call for supported answerable questions | programmer reports, selected evidence rows, limitations | No full source files; no raw checkout path. |
+| Reading PM decision | 1 `CODING_AGENT_PM_LLM` call per wave | `PMInput`, generic intent list, repository-map summary | No raw full files; no unbounded `rg` output. |
+| Programmer worker | 1 `CODING_AGENT_PROGRAMMER_LLM` call per bounded assignment | one `ProgrammerAssignment`, selected excerpts, repo-relative paths | Per-worker excerpts capped by supervisor limits. |
+| PM synthesis | 1 `CODING_AGENT_PM_LLM` call for supported answerable questions | programmer reports, selected evidence rows, limitations | No full source files; no raw checkout path. |
 
 No implementation may use a single prompt or single unbounded context
 containing the whole repository. If a question is trivial enough to answer
@@ -380,10 +373,10 @@ before Phase 1 can be accepted as product-quality.
 - `development_plans/reference/designs/coding_agent_architecture.md`: remove
   stale failed-plan links, old overdesigned PM/programmer IO, and missing
   Phase 2 or Phase 3 handoff notes.
-- `README.md`: add `CODING_AGENT_LLM` to the route table as an optional coding
-  work route with `BACKGROUND_WORK_LLM` fallback.
-- `docs/HOWTO.md`: document optional `CODING_AGENT_LLM_*` environment
-  variables, fallback behavior, and partial-config failure.
+- `README.md`: document `CODING_AGENT_PM_LLM` and
+  `CODING_AGENT_PROGRAMMER_LLM` as required code-reading routes.
+- `docs/HOWTO.md`: document required PM/programmer code-reading route
+  variables and PM-owned synthesis.
 - `src/kazusa_ai_chatbot/coding_agent/README.md`: update direct interface and
   limitations after implementation.
 - `src/kazusa_ai_chatbot/coding_agent/code_reading/README.md`: update PM,
@@ -392,12 +385,10 @@ before Phase 1 can be accepted as product-quality.
   Phase 1 code-reading internals inside the code-reading ownership boundary.
 - `src/kazusa_ai_chatbot/coding_agent/*.py`: update only direct supervisor or
   public model code needed to carry corrected reading traces and limitations.
-- `src/kazusa_ai_chatbot/config.py`: add optional `CODING_AGENT_LLM_*`
-  settings with fallback to `BACKGROUND_WORK_LLM_*` and fail-fast partial
-  route validation.
-- `src/kazusa_ai_chatbot/llm_interface/route_report.py`: include the effective
-  coding-agent route in sanitized route diagnostics only if this is required
-  by existing route-report tests or startup diagnostics.
+- `src/kazusa_ai_chatbot/config.py`: add required PM/programmer code-reading
+  route settings plus route-specific token and thinking toggles.
+- `src/kazusa_ai_chatbot/llm_interface/route_report.py`: include the PM and
+  programmer code-reading routes in sanitized route diagnostics.
 - `tests/test_coding_agent_reading*.py`: replace weak tests and add broad
   taxonomy, grounding, independent-fixture, negative-case, and direct-interface
   coverage.
@@ -405,8 +396,8 @@ before Phase 1 can be accepted as product-quality.
   function per live/local LLM PM, programmer, synthesis, and end-to-end gate.
   Do not parameterize live LLM cases. Each case must write raw trace evidence
   for debug-LLM review.
-- Tests covering configuration resolution for absent, complete, and partial
-  `CODING_AGENT_LLM_*` environment variables.
+- Tests covering complete PM/programmer route configuration, missing route
+  fields, and synthesis route reuse.
 
 ### Create
 
@@ -507,10 +498,10 @@ before Phase 1 can be accepted as product-quality.
    - Expected before implementation: current reader fails several categories or
      cannot ground the direct-interface answer.
 5. Parent establishes LLM-route support tests.
-   - Add tests for absent, complete, and partial `CODING_AGENT_LLM_*`
-     configuration, including fallback to `BACKGROUND_WORK_LLM_*`.
-   - Expected before implementation: fail because the coding-agent route is not
-     implemented or partial configuration does not fail fast.
+   - Add tests for required PM/programmer route configuration and PM-route
+     reuse by synthesis.
+   - Expected before implementation: fail because the split code-reading route
+     contract is not implemented.
 6. Parent starts exactly one production-code subagent.
    - Subagent owns production code under `src/kazusa_ai_chatbot/coding_agent/`
      and the listed route-configuration files only.
@@ -520,14 +511,14 @@ before Phase 1 can be accepted as product-quality.
    - Implement `PMInput`, `PMDecision`, simplified `ProgrammerAssignment`,
      simplified `ProgrammerReport`, bounded assignment creation, programmer
      evidence extraction, report building, sufficiency checks, and grounded
-     synthesis using the effective `CODING_AGENT_LLM` route for semantic PM,
-     programmer, and synthesis stages.
+     synthesis using `CODING_AGENT_PM_LLM` for PM/synthesis and
+     `CODING_AGENT_PROGRAMMER_LLM` for programmer stages.
    - Delete or rewrite source-shaped logic instead of preserving it.
 8. Parent updates ICD documentation.
    - Rewrite coding-agent and code-reading READMEs to match the corrected
-     interface, limits, traces, grounding checks, and LLM route fallback.
-   - Update `README.md` and `docs/HOWTO.md` so the optional route is visible to
-     operators before Phase 3 worker integration.
+     interface, limits, traces, grounding checks, and split LLM routes.
+   - Update `README.md` and `docs/HOWTO.md` so the required PM/programmer
+     routes are visible to operators before Phase 3 worker integration.
 9. Parent runs deterministic support verification.
    - Run all commands listed in `Verification`.
    - Record outputs and limitations in `Execution Evidence`.
@@ -616,14 +607,14 @@ before Phase 1 can be accepted as product-quality.
     judgments, blockers, and residual quality risks.
   - Handoff: next agent starts at Stage 7.
   - Sign-off: complete for direction review.
-- [ ] Stage 7 - independent code review complete
+- [x] Stage 7 - independent code review complete
   - Covers: implementation steps 11-12.
-  - Verify: independent review has no unresolved blockers and affected tests
-    rerun after fixes.
-  - Evidence: record reviewer findings, fixes, rerun commands, residual risks,
-    and approval status.
-  - Handoff: ready for lifecycle update after user approval.
-  - Sign-off: pending.
+  - Verify: user-approved no-subagent independent review has no unresolved
+    blockers and affected tests reran after fixes.
+  - Evidence: reviewer findings, fixes, rerun commands, residual risks, and
+    approval status are recorded in `Execution Evidence`.
+  - Handoff: ready for completed-plan lifecycle update.
+  - Sign-off: completed 2026-06-21.
 
 ## Verification
 
@@ -633,20 +624,22 @@ before Phase 1 can be accepted as product-quality.
   - Expected: no matches for stale failed-plan references.
 - `rg -n "sufficiency_criteria|stop_conditions|expected_report_shape|master_pm_allowed|role_name|questions_to_answer|forbidden_work" src\kazusa_ai_chatbot\coding_agent\code_reading tests\test_coding_agent_reading*.py`
   - Expected: no matches, because Phase 1 uses the simplified IO contract.
-- `rg -n "CODING_AGENT_PM_LLM|CODING_AGENT_PROGRAMMER_LLM|CODING_AGENT_SYNTHESIZER_LLM" src tests docs README.md`
-  - Expected: no matches, because Phase 1 has exactly one optional coding-agent
-    route.
-- `rg -n "CODING_AGENT_LLM" README.md docs\HOWTO.md src\kazusa_ai_chatbot\config.py src\kazusa_ai_chatbot\coding_agent tests`
-  - Expected: matches document and implement only the single optional
-    `CODING_AGENT_LLM` route and its fallback to `BACKGROUND_WORK_LLM`.
+- `rg -n "CODING_AGENT_PM_LLM|CODING_AGENT_PROGRAMMER_LLM" src tests docs README.md`
+  - Expected: matches document and implement only the PM/programmer
+    code-reading route contract.
+- Separate synthesizer-route token grep over `src tests docs README.md`
+  - Expected: no matches, because synthesis reuses the PM route.
+- Retired shared code-reading route token grep over
+  `README.md docs\HOWTO.md src\kazusa_ai_chatbot\config.py src\kazusa_ai_chatbot\coding_agent tests`
+  - Expected: no matches.
 
 ### Focused Tests
 
 - `venv\Scripts\python -m pytest tests\test_coding_agent_reading_pm_programmer.py -q`
 - `venv\Scripts\python -m pytest tests\test_coding_agent_reading_acceptance.py -q`
 - `venv\Scripts\python -m pytest tests\test_coding_agent_reading.py -q`
-- The focused suite must include absent, complete, and partial
-  `CODING_AGENT_LLM_*` route configuration cases.
+- The focused suite must include complete PM/programmer route configuration,
+  missing route-field failure, and PM-route reuse by synthesis.
 
 ### Regression Tests
 
@@ -715,8 +708,8 @@ Review scope:
 - Simplified IO coverage: the plan uses the accepted minimal PM/programmer
   contracts and keeps assignment limits under deterministic supervisor
   ownership.
-- LLM-route coverage: the plan adds only optional `CODING_AGENT_LLM` fallback
-  to `BACKGROUND_WORK_LLM` and does not split PM/programmer/synthesizer models.
+- LLM-route coverage: the plan uses required PM/programmer code-reading routes
+  and reuses the PM route for synthesis.
 - Query coverage: the plan covers architecture, pipeline/data flow,
   control/feedback flow, API/interface contracts, symbol behavior, state
   lifecycle, dependency usage, configuration, error handling, tests,
@@ -736,10 +729,11 @@ Phase handoff review scope:
   secrets, job ids, leases, or adapter delivery fields.
 - Phase 3 can pass the configured coding workspace root into the existing
   Phase 1 direct interface without parsing paths from user text.
-- Phase 3 can rely on the same effective LLM route resolution; it does not need
-  to introduce another coding-agent model route.
-- Operator docs for `CODING_AGENT_LLM_*` must be complete before Phase 3 so
-  worker deployment does not introduce undocumented configuration.
+- Phase 3 can rely on the same PM/programmer LLM route resolution; it does not
+  need to introduce another coding-agent model route.
+- Operator docs for PM/programmer code-reading route settings must be complete
+  before Phase 3 so worker deployment does not introduce undocumented
+  configuration.
 - Phase 2 code-writing can reuse the PM/programmer hierarchy, but cannot reuse
   Phase 1 reading result models as patch models without a separate writing
   plan.
@@ -750,9 +744,11 @@ Approve only when all blockers are resolved.
 ## Independent Code Review
 
 Run this gate after all `Verification` commands pass and before final sign-off.
-The parent agent must create one independent code-review subagent through the
-current harness's native subagent capability. If native subagents are
-unavailable, stop unless the user explicitly approves fallback execution.
+The normal mechanism is one independent code-review subagent through the
+current harness's native subagent capability. This execution used a
+user-approved no-subagent fallback: the parent stopped before review, received
+explicit user direction to continue without subagents, and performed the
+independent review directly.
 
 Review scope:
 
@@ -767,9 +763,9 @@ Review scope:
 - Source-independence quality: PM/planner/synthesis must keep decomposition
   generic; tests must include independent sources; answer concrete terms must
   be evidence-grounded.
-- Simplified IO and route quality: implementation must use the accepted minimal
-  PM/programmer IO and exactly one optional `CODING_AGENT_LLM` route with
-  fallback to `BACKGROUND_WORK_LLM`.
+- Simplified IO and route quality: implementation must use the accepted
+  minimal PM/programmer IO, PM/synthesis route reuse, and a separate programmer
+  route.
 - Alignment with `Must Do`, `Deferred`, `Agent Autonomy Boundaries`, `Change
   Surface`, contracts, implementation order, verification gates, and
   acceptance criteria.
@@ -799,14 +795,13 @@ This plan is complete when:
 - Supervisor-owned limits cap reading fanout at 3 programmers per wave, 2
   waves, and 6 reports per PM. Larger requests return an overloaded limitation
   or `needs_user_input`; Phase 1 does not pretend to complete them.
-- `CODING_AGENT_LLM_*` is optional. When absent, effective coding-agent LLM
-  config falls back to `BACKGROUND_WORK_LLM_*`. Partial `CODING_AGENT_LLM_*`
-  identity configuration fails fast.
-- README and HOWTO document the optional coding-agent route and fallback.
-- Phase 1 does not add separate PM, programmer, or synthesizer LLM routes.
+- `CODING_AGENT_PM_LLM_*` and `CODING_AGENT_PROGRAMMER_LLM_*` route identity
+  config is required. Missing required route fields fail fast.
+- README and HOWTO document the required PM/programmer coding-agent routes and
+  PM-owned synthesis.
+- Phase 1 does not add a separate synthesizer LLM route.
 - The product-quality path uses real LLM calls for PM decision, programmer
-  report generation, and synthesis through the effective `CODING_AGENT_LLM`
-  route.
+  report generation, and synthesis through the configured PM/programmer routes.
 - PM, planner, routing, assignment, and synthesis logic keep source-specific
   fact discovery inside programmer evidence and selected report data.
 - Every concrete identifier in final answers is traceable to selected evidence
@@ -885,7 +880,8 @@ boxes or success claims before commands are run.
   `src/kazusa_ai_chatbot/llm_interface/route_report.py`.
 - Parent integration added deterministic assignment validation before
   programmer evidence reads and added a pure route-resolution helper for
-  absent, complete, and partial `CODING_AGENT_LLM_*` configuration tests.
+  complete PM/programmer route configuration, missing required fields, and
+  PM-route reuse by synthesis.
 - Focused support command:
   `venv\Scripts\python -m pytest tests\test_coding_agent_reading_pm_programmer.py tests\test_coding_agent_reading.py tests\test_coding_agent_reading_acceptance.py -q`
 - Result: passed, 28 tests.
@@ -899,18 +895,21 @@ boxes or success claims before commands are run.
   `rg -n "coding_agent_phase1_reading_plan|coding_agent_phase1_reading_pm_programmer_revision_plan" development_plans\README.md development_plans\reference README.md docs src tests`
 - Static grep for obsolete expanded Phase 1 IO terms returned no matches:
   `rg -n "sufficiency_criteria|stop_conditions|expected_report_shape|master_pm_allowed|role_name|questions_to_answer|forbidden_work" src\kazusa_ai_chatbot\coding_agent\code_reading tests -g 'test_coding_agent_reading*.py'`
-- Static grep for forbidden split coding-agent LLM routes returned no matches:
-  `rg -n "CODING_AGENT_PM_LLM|CODING_AGENT_PROGRAMMER_LLM|CODING_AGENT_SYNTHESIZER_LLM" src tests docs README.md`
-- `CODING_AGENT_LLM` grep confirmed production, test, coding-agent README,
-  route-report, README, and HOWTO references after documentation update.
+- Static grep for PM/programmer code-reading routes confirmed expected
+  production, test, route-report, README, and HOWTO references after
+  documentation update.
+- Static grep for a separate synthesizer route returned no matches.
+- Static grep for the retired shared code-reading route returned no matches in
+  runtime code, tests, and public docs after the route split.
 - Regression command:
   `venv\Scripts\python -m pytest tests\test_coding_agent_fetching.py tests\test_coding_agent_interface.py tests\test_coding_agent_reading.py tests\test_coding_agent_reading_pm_programmer.py tests\test_coding_agent_reading_acceptance.py -q`
 - Regression result: passed, 56 tests.
 
 ### 2026-06-20 live/local LLM gate result
 
-- Live/local route used: effective `CODING_AGENT_LLM` via
-  `http://localhost:1234/v1`, model `qwen3.6-34b-80l-fable-5-heretic`.
+- Live/local routes used: `CODING_AGENT_PM_LLM` and
+  `CODING_AGENT_PROGRAMMER_LLM` via `http://localhost:1234/v1`, model
+  `qwen3.6-34b-80l-fable-5-heretic`; synthesis reused the PM route.
 - Required live/local LLM gates were run one case at a time with
   `venv\Scripts\python -m pytest -o addopts='' -m live_llm tests\test_coding_agent_live_llm.py::<case_id> -q -s`.
 - Agent-authored review artifact:
@@ -969,8 +968,52 @@ boxes or success claims before commands are run.
   unsupported `PID` label but uses natural component descriptions for visible
   formula terms. This is recorded for independent code review rather than
   hidden as a completed final sign-off.
-- Independent code review has still not been started, per the user's execution
-  boundary.
+- Independent code review had still not been started at this handoff point, per
+  the user's execution boundary.
+
+### 2026-06-21 Stage 7 no-subagent independent review and completion
+
+- User explicitly approved continuing with independent code review and finishing
+  the rest of Phase 1. Earlier user direction also explicitly invalidated the
+  original subagent assumption: do not use subagents for this plan.
+- Review mechanism: parent-led no-subagent independent review, using the
+  plan-approved fallback after explicit user direction.
+- Detailed review record:
+  `development_plans/archive/completed/short_term/coding_agent_phase1_real_repo_retrieval_remediation_plan.md`
+- Review findings resolved:
+  - deterministic support tests leaked into the live LLM path when placeholder
+    route settings were used;
+  - public managed-checkout failure results could expose raw exception text;
+  - managed raw-download cleanup failures could escape as filesystem errors;
+  - nested implementation `tools` paths could be misclassified as scripts;
+  - managed clone temporary roots had cross-source collision risk;
+  - synthesis prompt text contained one source-shaped algorithm example.
+- Fix surface stayed inside the approved Phase 1 boundary: generic path
+  handling, public-safe failure boundaries, generic evidence classification,
+  deterministic test isolation, and removal of source-shaped prompt text.
+- Focused review regression command passed with placeholder route settings:
+  `venv\Scripts\python -m pytest tests\test_coding_agent_interface.py::test_answer_code_question_reads_real_phase0_local_checkout tests\test_coding_agent_reading.py::test_answer_cap_is_enforced_when_public_run_succeeds tests\test_coding_agent_fetching.py::test_run_sanitizes_managed_checkout_failure_result tests\test_coding_agent_fetching.py::test_run_sanitizes_managed_raw_download_cleanup_failure tests\test_coding_agent_fetching.py::test_managed_checkout_paths_use_compact_hash_storage tests\test_coding_agent_reading.py::test_repository_intelligence_classifies_sources_and_symbols -q --tb=short`
+  - Result: 6 passed in 1.11s.
+- Full deterministic coding-agent suite passed with placeholder route settings:
+  `venv\Scripts\python -m pytest tests\test_coding_agent_fetching.py tests\test_coding_agent_interface.py tests\test_coding_agent_reading.py tests\test_coding_agent_reading_acceptance.py tests\test_coding_agent_reading_pm_programmer.py -q`
+  - Result: 74 passed in 2.79s.
+- Route/config verification passed with explicit PM/programmer route settings:
+  `venv\Scripts\python -m pytest tests\test_config.py tests\test_llm_interface_route_report.py tests\test_coding_agent_reading_pm_programmer.py -q`
+  - Result: 71 passed in 5.26s.
+- Compile verification passed:
+  `venv\Scripts\python -m compileall -q src\kazusa_ai_chatbot\coding_agent`
+  - Result: exit code 0.
+- Static review checks passed:
+  - `git diff --check`: no whitespace errors; Git emitted line-ending warnings.
+  - Retired shared route token grep over `src tests docs README.md`: no
+    matches; `rg` exit code 1.
+  - Gate/source-shaped production grep over coding-agent runtime files: no
+    matches; `rg` exit code 1.
+- Stage 7 conclusion: no unresolved review blockers remain. The six hard real
+  LLM gates remain recorded in
+  `test_artifacts/llm_reviews/coding_agent_phase1_hard_gates_review.md`; Stage
+  7 review fixes did not add query-specific or repository-specific runtime
+  logic.
 
 ## Risks
 
@@ -982,7 +1025,7 @@ boxes or success claims before commands are run.
 | New tests cover too little source variety | Require independent fixtures or sources for common categories | Taxonomy tests and independent review |
 | PM mixes decomposition with source fact discovery | Limit PM vocabulary to generic intent and required slots | PM/programmer contract tests and grounding tests |
 | IO contract drifts back into fake structure | Keep simplified IO fields and supervisor-owned limits | Simplified-IO greps and model tests |
-| LLM route creates config ambiguity | Treat partial `CODING_AGENT_LLM_*` identity config as invalid and fall back only when all identity fields are absent | Route config unit tests |
+| LLM route creates config ambiguity | Require complete PM/programmer route identity config and reuse the PM route for synthesis | Route config unit tests |
 | Grounding check blocks legitimate prose | Ground only concrete code identifiers, files, symbols, constants, and module names | Grounding unit tests with natural-language explanations |
 | Local LLM context overflows on larger repos | Keep PM context to repository summaries and programmer reports | Context-budget tests and trace inspection |
 | Phase 1 drifts into service integration | Keep Change Surface and Deferred sections explicit | Independent review and git diff inspection |

@@ -14,11 +14,11 @@ from kazusa_ai_chatbot.coding_agent.code_reading.models import (
     ProgrammerReport,
 )
 from kazusa_ai_chatbot.config import (
-    CODING_AGENT_LLM_API_KEY,
-    CODING_AGENT_LLM_BASE_URL,
-    CODING_AGENT_LLM_MAX_COMPLETION_TOKENS,
-    CODING_AGENT_LLM_MODEL,
-    CODING_AGENT_LLM_THINKING_ENABLED,
+    CODING_AGENT_PM_LLM_API_KEY,
+    CODING_AGENT_PM_LLM_BASE_URL,
+    CODING_AGENT_PM_LLM_MAX_COMPLETION_TOKENS,
+    CODING_AGENT_PM_LLM_MODEL,
+    CODING_AGENT_PM_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.llm_interface import (
     LLInterface,
@@ -57,9 +57,13 @@ limitations, and public repository metadata provided in the user payload.
 - Do not name an algorithm, architecture pattern, framework, or design pattern
   unless that name appears in selected evidence. Describe the visible formula
   or call flow instead.
-- Do not infer the term PID from words such as integral, derivative, error, or
-  feedback unless the selected evidence itself contains PID.
 - Preserve limitations and missing proof.
+- Structure pipeline or data-flow answers around the user-requested chain
+  segments. Cover each segment only with source-backed facts from reports or
+  selected evidence.
+- If reports list a user-requested segment as open, no_evidence, or missing,
+  do not imply that segment is answered. State the missing segment as a
+  limitation instead.
 - Do not expose local roots, workspace roots, cache keys, API keys, raw provider
   objects, or full source files.
 - Keep the answer in the user's requested language when that is clear.
@@ -75,17 +79,17 @@ Return strict JSON:
 _synthesis_llm = LLInterface()
 _synthesis_llm_config = LLMCallConfig(
     stage_name=__name__,
-    route_name="CODING_AGENT_LLM",
-    base_url=CODING_AGENT_LLM_BASE_URL,
-    api_key=CODING_AGENT_LLM_API_KEY,
-    model=CODING_AGENT_LLM_MODEL,
+    route_name="CODING_AGENT_PM_LLM",
+    base_url=CODING_AGENT_PM_LLM_BASE_URL,
+    api_key=CODING_AGENT_PM_LLM_API_KEY,
+    model=CODING_AGENT_PM_LLM_MODEL,
     temperature=0.2,
     top_p=0.8,
     top_k=None,
-    max_completion_tokens=CODING_AGENT_LLM_MAX_COMPLETION_TOKENS,
+    max_completion_tokens=CODING_AGENT_PM_LLM_MAX_COMPLETION_TOKENS,
     presence_penalty=None,
     thinking=LLMThinkingConfig(
-        enabled=CODING_AGENT_LLM_THINKING_ENABLED,
+        enabled=CODING_AGENT_PM_LLM_THINKING_ENABLED,
     ),
 )
 
@@ -150,6 +154,7 @@ def synthesize_from_programmer_reports(
     combined_limitations = _dedupe_strings([*limitations, *parsed_limitations])
     grounding_violations = ungrounded_code_terms(
         answer_text,
+        question=question,
         evidence=evidence,
         repository_summary=repository_summary,
     )
@@ -158,10 +163,23 @@ def synthesize_from_programmer_reports(
             "Synthesis included ungrounded code terms: "
             + ", ".join(grounding_violations[:8])
         )
-        answer_text = (
-            "I cannot provide a grounded answer from the selected evidence "
-            "without inventing concrete code identifiers."
+        repaired_answer = _remove_ungrounded_code_terms(
+            answer_text,
+            grounding_violations,
         )
+        remaining_violations = ungrounded_code_terms(
+            repaired_answer,
+            question=question,
+            evidence=evidence,
+            repository_summary=repository_summary,
+        )
+        if repaired_answer and not remaining_violations:
+            answer_text = repaired_answer
+        else:
+            answer_text = (
+                "I cannot provide a grounded answer from the selected evidence "
+                "without inventing concrete code identifiers."
+            )
 
     _fill_trace(
         trace,
@@ -195,12 +213,14 @@ def normalize_synthesis_output(
 def ungrounded_code_terms(
     answer_text: str,
     *,
+    question: str = "",
     evidence: list[CodeEvidenceRow],
     repository_summary: dict[str, object],
 ) -> list[str]:
     """Return concrete code terms in the answer that are not in evidence."""
 
     grounded_text = _grounded_text(
+        question=question,
         evidence=evidence,
         repository_summary=repository_summary,
     )
@@ -278,6 +298,8 @@ def _compact_reports(
             "files_read": report["files_read"],
             "facts": report["facts"],
             "open_questions": report["open_questions"],
+            "discovered_symbols": report["discovered_symbols"],
+            "candidate_next_hops": report["candidate_next_hops"],
             "evidence_refs": [
                 _evidence_ref(row)
                 for row in report["evidence"]
@@ -290,22 +312,46 @@ def _compact_reports(
 def _code_term_candidates(answer_text: str) -> list[str]:
     terms: list[str] = []
     for match in _BACKTICKED_CODE_RE.finditer(answer_text):
-        _append_unique(terms, match.group(1).strip())
+        _append_unique(terms, _clean_code_candidate(match.group(1)))
     for match in _PATH_TOKEN_RE.finditer(answer_text):
-        _append_unique(terms, match.group(0).strip())
+        _append_unique(terms, _clean_code_candidate(match.group(0)))
     for match in _CODE_IDENTIFIER_RE.finditer(answer_text):
         token = match.group(0)
         if "_" in token or any(char.isupper() for char in token[1:]):
-            _append_unique(terms, token)
+            _append_unique(terms, _clean_code_candidate(token))
     return terms
+
+
+def _remove_ungrounded_code_terms(
+    answer_text: str,
+    grounding_violations: list[str],
+) -> str:
+    repaired = answer_text
+    for violation in grounding_violations:
+        repaired = re.sub(
+            rf"\s*\([^)]*`{re.escape(violation)}`[^)]*\)",
+            "",
+            repaired,
+        )
+        repaired = repaired.replace(f"`{violation}`", "")
+    repaired = re.sub(r"[ \t]{2,}", " ", repaired)
+    repaired = re.sub(r"\n{3,}", "\n\n", repaired)
+    return repaired.strip()
+
+
+def _clean_code_candidate(value: str) -> str:
+    text = value.strip()
+    text = text.strip("'\"")
+    return text
 
 
 def _grounded_text(
     *,
+    question: str = "",
     evidence: list[CodeEvidenceRow],
     repository_summary: dict[str, object],
 ) -> str:
-    parts: list[str] = []
+    parts: list[str] = [question]
     for row in evidence:
         parts.extend([
             row["path"],

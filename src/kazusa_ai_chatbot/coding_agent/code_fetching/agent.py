@@ -87,10 +87,10 @@ async def run(request: CodeFetchingRequest) -> CodeFetchingResult:
                 source,
                 workspace_root,
             )
-        except managed_download.ManagedDownloadError as exc:
+        except managed_download.ManagedDownloadError:
             result = _result(
                 status="failed",
-                message=f"Unable to prepare managed raw file download: {exc}",
+                message="Unable to prepare managed raw file download.",
                 repository=None,
                 source_scope=None,
                 limitations=["Managed raw file download failed."],
@@ -103,10 +103,10 @@ async def run(request: CodeFetchingRequest) -> CodeFetchingResult:
                 source,
                 workspace_root,
             )
-        except managed_clone.ManagedCloneError as exc:
+        except managed_clone.ManagedCloneError:
             result = _result(
                 status="failed",
-                message=f"Unable to prepare managed checkout: {exc}",
+                message="Unable to prepare managed checkout.",
                 repository=None,
                 source_scope=None,
                 limitations=["Managed checkout preparation failed."],

@@ -59,11 +59,16 @@ BACKGROUND_ARTIFACT_LLM_MODEL=your-chat-model
 BACKGROUND_WORK_LLM_BASE_URL=http://localhost:1234/v1
 BACKGROUND_WORK_LLM_API_KEY=lm-studio
 BACKGROUND_WORK_LLM_MODEL=your-chat-model
-# Optional standalone coding-agent route. Omit all three to use
-# BACKGROUND_WORK_LLM provider settings.
-# CODING_AGENT_LLM_BASE_URL=http://localhost:1234/v1
-# CODING_AGENT_LLM_API_KEY=lm-studio
-# CODING_AGENT_LLM_MODEL=your-chat-model
+CODING_AGENT_PM_LLM_BASE_URL=http://localhost:1234/v1
+CODING_AGENT_PM_LLM_API_KEY=lm-studio
+CODING_AGENT_PM_LLM_MODEL=your-chat-model
+CODING_AGENT_PM_LLM_MAX_COMPLETION_TOKENS=8192
+CODING_AGENT_PM_LLM_THINKING_ENABLED=true
+CODING_AGENT_PROGRAMMER_LLM_BASE_URL=http://localhost:1234/v1
+CODING_AGENT_PROGRAMMER_LLM_API_KEY=lm-studio
+CODING_AGENT_PROGRAMMER_LLM_MODEL=your-chat-model
+CODING_AGENT_PROGRAMMER_LLM_MAX_COMPLETION_TOKENS=8192
+CODING_AGENT_PROGRAMMER_LLM_THINKING_ENABLED=false
 DIALOG_GENERATOR_LLM_BASE_URL=http://localhost:1234/v1
 DIALOG_GENERATOR_LLM_API_KEY=lm-studio
 DIALOG_GENERATOR_LLM_MODEL=your-chat-model
@@ -171,21 +176,23 @@ NAPCAT_RUNTIME_PORT=8011
 ```
 
 All route-specific chat model variables are required except the background
-artifact, background-work, and coding-agent routes. The background artifact
-route falls back to the cognition route when omitted; the background-work route
-falls back to the background artifact route when omitted. The coding-agent
-route falls back to `BACKGROUND_WORK_LLM` only when
-`CODING_AGENT_LLM_BASE_URL`, `CODING_AGENT_LLM_API_KEY`, and
-`CODING_AGENT_LLM_MODEL` are all omitted. Setting only part of those three
-coding-agent identity variables stops config loading.
+artifact and background-work routes. The background artifact route falls back
+to the cognition route when omitted; the background-work route falls back to
+the background artifact route when omitted. Code-reading PM and programmer
+routes are required first-class routes. Final code-reading synthesis reuses the
+PM route and has no separate route identity.
 Route-specific variables replace the retired generic `LLM_BASE_URL`,
 `LLM_API_KEY`, and `LLM_MODEL` settings. Missing required route variables stop
 config loading. Chat routes also accept route-specific
 `*_MAX_COMPLETION_TOKENS` and `*_THINKING_ENABLED` values, with
 `DEFAULT_LLM_MAX_COMPLETION_TOKENS` as the shared completion budget default.
-Thinking is a boolean route toggle and defaults to disabled. When enabled, the
-LLM interface currently maps provider-specific thinking controls for Gemma 4,
-Qwen3-family model names, and Qwen-compatible Qwopus 3.x model names.
+Thinking is a boolean route toggle and defaults to disabled. For code reading,
+the recommended local-model starting point is PM thinking enabled and
+programmer thinking disabled, because PM planning and synthesis benefit more
+from longer reasoning while programmer workers should stay bounded to selected
+source evidence. When enabled, the LLM interface currently maps
+provider-specific thinking controls for Gemma 4, Qwen3-family model names, and
+Qwen-compatible Qwopus 3.x model names.
 
 `CHARACTER_GLOBAL_USER_ID` defaults to
 `00000000-0000-4000-8000-000000000001`. Set it explicitly in production so the

@@ -36,7 +36,7 @@ from kazusa_ai_chatbot.coding_agent.code_reading.synthesizer import (
 
 DEFAULT_MAX_ANSWER_CHARS = 4000
 MAX_PROGRAMMERS_PER_WAVE = 3
-MAX_PROGRAMMER_WAVES = 2
+MAX_PROGRAMMER_WAVES = 3
 MAX_PROGRAMMER_REPORTS_PER_PM = 6
 MAX_FILES_PER_PROGRAMMER = 6
 MAX_EXCERPT_CHARS_PER_PROGRAMMER = 12000
@@ -134,6 +134,11 @@ def run_reading_supervisor(
             previous_reports=state["programmer_reports"],
         )
         pm_decision = decide_reading_work(pm_input, trace=pm_trace)
+        pm_decision = _trim_assignments_to_report_budget(
+            pm_decision=pm_decision,
+            existing_reports=state["programmer_reports"],
+            trace_summary=trace_summary,
+        )
         state["pm_decisions"].append(pm_decision)
         _record_internal_trace(trace, f"pm_wave_{wave_index + 1}", pm_trace)
         trace_summary.append(
@@ -212,6 +217,18 @@ def run_reading_supervisor(
         )
         return result
 
+    final_review = _final_pm_review(
+        question=question,
+        repository_summary=repository_summary,
+        source_scope=source_scope,
+        repo_map_summary=repo_map_summary,
+        state=state,
+        trace_summary=trace_summary,
+        trace=trace,
+    )
+    if final_review is not None:
+        return final_review
+
     selected_evidence = selected_evidence_from_reports(state["programmer_reports"])
     result = _result(
         status="needs_user_input",
@@ -226,6 +243,81 @@ def run_reading_supervisor(
         trace_summary=[*trace_summary, "reading_pm:sufficiency=wave_limit"],
     )
     return result
+
+
+def _final_pm_review(
+    *,
+    question: str,
+    repository_summary: dict[str, object],
+    source_scope: dict[str, object],
+    repo_map_summary: dict[str, object],
+    state: ReadingManagerState,
+    trace_summary: list[str],
+    trace: dict[str, object] | None,
+) -> CodeReadingResult | None:
+    if not state["programmer_reports"]:
+        return None
+
+    pm_trace: dict[str, object] = {}
+    pm_input = _pm_input(
+        question=question,
+        repository_summary=repository_summary,
+        source_scope=source_scope,
+        repo_map_summary=repo_map_summary,
+        previous_reports=state["programmer_reports"],
+    )
+    pm_input["review_mode"] = "final_no_more_programmers"
+    pm_decision = decide_reading_work(pm_input, trace=pm_trace)
+    state["pm_decisions"].append(pm_decision)
+    _record_internal_trace(trace, "pm_final_review", pm_trace)
+    trace_summary.append(
+        "reading_pm:final_review "
+        f"intent={pm_decision['intent']} "
+        f"status={pm_decision['status']} "
+        f"assignments={len(pm_decision['assignments'])}"
+    )
+
+    selected_evidence = selected_evidence_from_reports(
+        state["programmer_reports"]
+    )
+    state["selected_evidence"] = selected_evidence
+    if pm_decision["status"] == "sufficient":
+        result = _synthesize_result(
+            request=state["request"],
+            question=question,
+            repository_summary=repository_summary,
+            pm_decision=pm_decision,
+            programmer_reports=state["programmer_reports"],
+            selected_evidence=selected_evidence,
+            trace_summary=trace_summary,
+            trace=trace,
+        )
+        return result
+
+    if pm_decision["status"] == "overloaded":
+        result = _result(
+            status="needs_user_input",
+            answer_text=_missing_slot_text(pm_decision),
+            evidence=selected_evidence,
+            limitations=_missing_slot_limitations(pm_decision),
+            trace_summary=[*trace_summary, "reading_pm:sufficiency=overloaded"],
+        )
+        return result
+
+    if pm_decision["status"] == "needs_user_input":
+        result = _result(
+            status="needs_user_input",
+            answer_text=_missing_slot_text(pm_decision),
+            evidence=selected_evidence,
+            limitations=_missing_slot_limitations(pm_decision),
+            trace_summary=[
+                *trace_summary,
+                "reading_pm:sufficiency=needs_user_input",
+            ],
+        )
+        return result
+
+    return None
 
 
 def _run_programmer_wave(
@@ -360,6 +452,39 @@ def _overload_result_if_any(
         return result
 
     return None
+
+
+def _trim_assignments_to_report_budget(
+    *,
+    pm_decision: PMDecision,
+    existing_reports: list[ProgrammerReport],
+    trace_summary: list[str],
+) -> PMDecision:
+    """Apply the supervisor-owned total report cap to PM assignments."""
+
+    if pm_decision["status"] != "need_programmers":
+        return pm_decision
+
+    remaining_reports = MAX_PROGRAMMER_REPORTS_PER_PM - len(existing_reports)
+    if remaining_reports <= 0:
+        return pm_decision
+
+    assignments = pm_decision["assignments"]
+    if len(assignments) <= remaining_reports:
+        return pm_decision
+
+    trimmed_decision: PMDecision = {
+        "status": pm_decision["status"],
+        "intent": pm_decision["intent"],
+        "required_slots": pm_decision["required_slots"],
+        "assignments": assignments[:remaining_reports],
+        "missing_slots": pm_decision["missing_slots"],
+    }
+    trace_summary.append(
+        "reading_pm:assignment_budget_trimmed "
+        f"remaining_reports={remaining_reports}"
+    )
+    return trimmed_decision
 
 
 def _missing_slot_text(pm_decision: PMDecision) -> str:

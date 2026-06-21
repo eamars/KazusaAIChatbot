@@ -104,7 +104,7 @@ Two current implementation details must be corrected for Phase 3:
   unless the user explicitly approves fallback execution.
 - Execution is blocked until Phase 1 and Phase 2 selected standalone
   capabilities are completed and accepted. If
-  `development_plans/active/short_term/coding_agent_phase1_code_reading_final_plan.md`
+  `development_plans/archive/completed/short_term/coding_agent_phase1_code_reading_final_plan.md`
   remains `draft`, `approved`, or `in_progress`, stop before production-code
   changes. If the Phase 2 code-writing plan is not completed, stop before
   production-code changes.
@@ -139,10 +139,10 @@ Two current implementation details must be corrected for Phase 3:
   local paths, `workspace_root`, `local_root`, cache keys, raw command output,
   raw source excerpts in metadata, `.env` content, `.git` internals, job ids,
   leases, adapter ids, or delivery fields.
-- Phase 3 must reuse the standalone coding-agent effective LLM route decision:
-  optional `CODING_AGENT_LLM_*` with fallback to `BACKGROUND_WORK_LLM_*`. Do
-  not add `CODING_AGENT_WORKER_LLM`, `CODING_AGENT_PM_LLM`,
-  `CODING_AGENT_PROGRAMMER_LLM`, or `CODING_AGENT_SYNTHESIZER_LLM`.
+- Phase 3 must reuse the standalone coding-agent LLM route split. PM decisions
+  and synthesis use `CODING_AGENT_PM_LLM`; programmer workers use
+  `CODING_AGENT_PROGRAMMER_LLM`. Do not add a worker-only coding model route
+  or a separate synthesizer route.
 
 ## Must Do
 
@@ -200,7 +200,7 @@ Overall strategy: compatible
 | Router worker enum | bigbang | Replace hardcoded `text_artifact` normalization with enabled-worker validation from the registry. No unknown-worker fallback. |
 | L2d/action-spec contract | compatible | Preserve `background_work_request` as route-only. Update semantic affordance wording only. |
 | Worker decision context | bigbang | Pass trusted `task_brief` to workers; do not overload `source_summary` with route reason as the only worker input. |
-| LLM routes | compatible | Reuse Phase 1 effective `CODING_AGENT_LLM` fallback to `BACKGROUND_WORK_LLM`; add no new coding model route. |
+| LLM routes | compatible | Reuse Phase 1 `CODING_AGENT_PM_LLM` and `CODING_AGENT_PROGRAMMER_LLM`; synthesis remains on the PM route and no worker-only route is added. |
 
 ## Target State
 
@@ -432,8 +432,9 @@ After Phase 3:
   includes task brief, source summary, max output chars, and enabled worker
   descriptions. Keep this payload under `BACKGROUND_WORK_INPUT_CHAR_LIMIT`.
 - Coding worker: no extra model route. It calls the public standalone
-  coding-agent interface selected for the job. PM/programmer/synthesis calls
-  use the effective `CODING_AGENT_LLM` route or fallback `BACKGROUND_WORK_LLM`.
+  coding-agent interface selected for the job. PM decisions and synthesis use
+  `CODING_AGENT_PM_LLM`; programmer workers use
+  `CODING_AGENT_PROGRAMMER_LLM`.
 - Result-ready cognition: existing background-work result-ready cognition path.
   It receives bounded artifact text and prompt-safe summaries only.
 
@@ -658,8 +659,10 @@ turn must not wait for repository fetching or reading.
   - Expected: no matches in L2d runtime prompts, action-spec schemas, or
     prompt-safe affordances. Matches in tests are allowed only when asserting
     non-leakage.
-- `rg -n "CODING_AGENT_PM_LLM|CODING_AGENT_PROGRAMMER_LLM|CODING_AGENT_SYNTHESIZER_LLM|CODING_AGENT_WORKER_LLM" src tests docs README.md development_plans`
-  - Expected: the only allowed matches are this plan's prohibition lines.
+- Grep for PM/programmer code-reading routes and unsupported worker-only or
+  synthesizer route tokens across `src tests docs README.md development_plans`.
+  - Expected: PM/programmer route matches are allowed; worker-only and
+    synthesizer route token matches are not allowed outside prohibition text.
 - `rg -n "local_root|workspace_root|cache_key" src/kazusa_ai_chatbot/background_work tests/test_background_work_coding_agent.py`
   - Expected: production matches only in sanitizer/prohibition tests or docs;
     no result mapping includes these fields.

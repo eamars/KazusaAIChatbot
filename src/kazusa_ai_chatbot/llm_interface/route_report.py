@@ -23,11 +23,12 @@ _REQUIRED_ROUTES = frozenset((
     "DIALOG_GENERATOR_LLM",
     "CONSOLIDATION_LLM",
     "JSON_REPAIR_LLM",
+    "CODING_AGENT_PM_LLM",
+    "CODING_AGENT_PROGRAMMER_LLM",
 ))
 _FALLBACK_BACKED_ROUTES = frozenset((
     "BACKGROUND_ARTIFACT_LLM",
     "BACKGROUND_WORK_LLM",
-    "CODING_AGENT_LLM",
 ))
 
 
@@ -72,7 +73,8 @@ def _configured_chat_routes() -> tuple[LLMCallConfig, ...]:
         "JSON_REPAIR_LLM",
         "BACKGROUND_ARTIFACT_LLM",
         "BACKGROUND_WORK_LLM",
-        "CODING_AGENT_LLM",
+        "CODING_AGENT_PM_LLM",
+        "CODING_AGENT_PROGRAMMER_LLM",
     )
     routes = tuple(_route_config(route_name) for route_name in route_names)
     return routes

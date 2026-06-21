@@ -1,6 +1,6 @@
 """Public and internal data contracts for code reading."""
 
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 from kazusa_ai_chatbot.coding_agent.code_fetching.models import (
     CodeRepositoryRef,
@@ -90,6 +90,13 @@ class ProgrammerFact(TypedDict):
     evidence_refs: list[str]
 
 
+class CandidateNextHop(TypedDict):
+    """Generic follow-up scope discovered from bounded evidence."""
+
+    reason: str
+    scope: AssignmentScope
+
+
 class ProgrammerReport(TypedDict):
     """Compressed memory artifact returned by one programmer worker."""
 
@@ -99,6 +106,8 @@ class ProgrammerReport(TypedDict):
     facts: list[ProgrammerFact]
     evidence: list[CodeEvidenceRow]
     open_questions: list[str]
+    discovered_symbols: list[str]
+    candidate_next_hops: list[CandidateNextHop]
 
 
 class PMInput(TypedDict):
@@ -109,6 +118,7 @@ class PMInput(TypedDict):
     source_scope: dict[str, object]
     repo_map_summary: dict[str, object]
     previous_reports: list[ProgrammerReport]
+    review_mode: NotRequired[str]
 
 
 class PMDecision(TypedDict):

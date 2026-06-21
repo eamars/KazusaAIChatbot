@@ -225,11 +225,532 @@ def test_repository_map_excludes_secret_and_binary_files(tmp_path: Path) -> None
     assert "assets/logo.png" not in summary["files"]
 
 
+def test_repository_intelligence_classifies_sources_and_symbols(
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_reading.repository_map import (
+        build_repository_map_summary,
+    )
+
+    repository = _make_repository(tmp_path)
+    repo_root = Path(repository["local_root"])
+    (repo_root / "tests").mkdir()
+    (repo_root / "scripts").mkdir()
+    (repo_root / "tests" / "test_service.py").write_text(
+        "def test_submit_order_flow():\n    assert True\n",
+        encoding="utf-8",
+    )
+    (repo_root / "docs" / "orders.md").write_text(
+        "The order service is documented here.\n",
+        encoding="utf-8",
+    )
+    (repo_root / "scripts" / "inspect_orders.py").write_text(
+        "print('inspect orders')\n",
+        encoding="utf-8",
+    )
+    (repo_root / "src" / "orders" / "tools").mkdir()
+    (repo_root / "src" / "orders" / "tools" / "runtime.py").write_text(
+        "def run_order_tooling() -> None:\n    pass\n",
+        encoding="utf-8",
+    )
+    (repo_root / "pyproject.toml").write_text(
+        "[project]\nname = 'fixture'\n",
+        encoding="utf-8",
+    )
+
+    summary = build_repository_map_summary(repository, _scope())
+
+    source_classes = summary["source_classes"]
+    implementation_paths = [
+        item["path"]
+        for item in source_classes["implementation"]
+    ]
+    test_paths = [item["path"] for item in source_classes["tests"]]
+    docs_paths = [item["path"] for item in source_classes["docs"]]
+    scripts_paths = [item["path"] for item in source_classes["scripts"]]
+    config_paths = [item["path"] for item in source_classes["config"]]
+
+    assert "src/orders/service.py" in implementation_paths
+    assert "src/orders/tools/runtime.py" in implementation_paths
+    assert "tests/test_service.py" in test_paths
+    assert "docs/orders.md" in docs_paths
+    assert "scripts/inspect_orders.py" in scripts_paths
+    assert "pyproject.toml" in config_paths
+
+    service_summary = next(
+        item
+        for item in source_classes["implementation"]
+        if item["path"] == "src/orders/service.py"
+    )
+    assert "OrderService" in service_summary["defined_symbols"]
+    assert "orders.gateway" in service_summary["imported_modules"]
+
+
+def test_search_evidence_prefers_implementation_over_tests_and_docs(
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_reading.evidence import (
+        collect_assignment_evidence,
+    )
+
+    repository = _make_repository(tmp_path)
+    repo_root = Path(repository["local_root"])
+    (repo_root / "tests").mkdir()
+    (repo_root / "docs" / "handoff.md").write_text(
+        "handoff appears in operational documentation.\n",
+        encoding="utf-8",
+    )
+    (repo_root / "tests" / "test_handoff.py").write_text(
+        "def test_handoff_contract():\n    assert 'handoff'\n",
+        encoding="utf-8",
+    )
+    (repo_root / "src" / "orders" / "handoff.py").write_text(
+        "def commit_handoff(event: dict) -> str:\n    return event['status']\n",
+        encoding="utf-8",
+    )
+    assignment = {
+        "assignment_id": "handoff-search",
+        "role": "flow reader",
+        "scope": {
+            "kind": "search",
+            "values": ["handoff"],
+        },
+        "questions": ["How does the handoff flow work?"],
+        "required_slots": ["implementation flow"],
+    }
+
+    bundle = collect_assignment_evidence(
+        repo_root=repo_root,
+        source_scope=_scope(),
+        assignment=assignment,
+        max_files=3,
+        max_excerpt_chars=12000,
+    )
+
+    assert bundle.files_read[0] == "src/orders/handoff.py"
+
+
+def test_search_evidence_uses_assignment_questions_to_rank_broad_terms(
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_reading.evidence import (
+        collect_assignment_evidence,
+    )
+
+    repository = _make_repository(tmp_path)
+    repo_root = Path(repository["local_root"])
+    flow_root = repo_root / "src" / "orders" / "flow"
+    flow_root.mkdir()
+    for index in range(6):
+        (flow_root / f"a_noise_{index}.py").write_text(
+            "\n".join(
+                [
+                    f"def generic_notice_{index}() -> str:",
+                    "    return 'notice was recorded'",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    (flow_root / "z_decision.py").write_text(
+        "\n".join(
+            [
+                "def decide_notice_channels(account: dict) -> list[str]:",
+                "    if account['suspended'] or account['offline']:",
+                "        return ['email', 'webhook']",
+                "    return ['inbox']",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    assignment = {
+        "assignment_id": "notice-routing",
+        "role": "flow reader",
+        "scope": {
+            "kind": "search",
+            "values": ["notice"],
+        },
+        "questions": [
+            "When an account may be suspended or offline, how are "
+            "email, webhook, and inbox notices decided?"
+        ],
+        "required_slots": ["channel decision logic"],
+    }
+
+    bundle = collect_assignment_evidence(
+        repo_root=repo_root,
+        source_scope=_scope(),
+        assignment=assignment,
+        max_files=3,
+        max_excerpt_chars=12000,
+    )
+
+    assert bundle.files_read[0] == "src/orders/flow/z_decision.py"
+
+
+def test_search_evidence_keeps_distinct_regions_from_same_file(
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_reading.evidence import (
+        collect_assignment_evidence,
+    )
+
+    repository = _make_repository(tmp_path)
+    repo_root = Path(repository["local_root"])
+    flow_root = repo_root / "src" / "orders" / "flow"
+    flow_root.mkdir()
+    early_lines = [
+        "def decide_notice_channels(account: dict) -> list[str]:",
+        "    # notice suspended offline email webhook inbox decision",
+        "    if account['suspended'] or account['offline']:",
+        "        return ['email', 'webhook']",
+    ]
+    spacer_lines = [f"    audit_value_{index} = {index}" for index in range(50)]
+    later_lines = [
+        "def archive_notice_delivery(account: dict) -> bool:",
+        "    archive_marker = account['archive_marker']",
+        "    return bool(archive_marker)",
+    ]
+    (flow_root / "decision.py").write_text(
+        "\n".join([*early_lines, *spacer_lines, *later_lines]) + "\n",
+        encoding="utf-8",
+    )
+    assignment = {
+        "assignment_id": "notice-routing",
+        "role": "flow reader",
+        "scope": {
+            "kind": "search",
+            "values": ["notice"],
+        },
+        "questions": [
+            "How are suspended, offline, email, webhook, inbox, and "
+            "archive notice decisions handled?"
+        ],
+        "required_slots": ["channel decision logic"],
+    }
+
+    bundle = collect_assignment_evidence(
+        repo_root=repo_root,
+        source_scope=_scope(),
+        assignment=assignment,
+        max_files=3,
+        max_excerpt_chars=12000,
+    )
+
+    assert any("archive_marker" in row["excerpt"] for row in bundle.rows)
+
+
+def test_search_evidence_keeps_more_than_three_source_regions(
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_reading.evidence import (
+        collect_assignment_evidence,
+    )
+
+    repository = _make_repository(tmp_path)
+    repo_root = Path(repository["local_root"])
+    flow_root = repo_root / "src" / "orders" / "flow"
+    flow_root.mkdir()
+    source_lines: list[str] = []
+    for marker in ["alpha", "beta", "gamma", "delta"]:
+        source_lines.extend([
+            f"def notice_decision_checkpoint_{marker}(account: dict) -> str:",
+            "    # notice decision checkpoint",
+            f"    {marker}_outcome = account['{marker}']",
+            f"    return {marker}_outcome",
+        ])
+        source_lines.extend(
+            f"padding_{marker}_{index} = {index}" for index in range(60)
+        )
+    (flow_root / "multi_region.py").write_text(
+        "\n".join(source_lines) + "\n",
+        encoding="utf-8",
+    )
+    assignment = {
+        "assignment_id": "notice-multi-region",
+        "role": "flow reader",
+        "scope": {
+            "kind": "search",
+            "values": ["notice"],
+        },
+        "questions": [
+            "How are notice decision checkpoints handled across the workflow?"
+        ],
+        "required_slots": ["checkpoint decision logic"],
+    }
+
+    bundle = collect_assignment_evidence(
+        repo_root=repo_root,
+        source_scope=_scope(),
+        assignment=assignment,
+        max_files=3,
+        max_excerpt_chars=20000,
+    )
+
+    assert any("delta_outcome" in row["excerpt"] for row in bundle.rows)
+
+
+def test_search_evidence_prefers_state_transition_branches(
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_reading.evidence import (
+        collect_assignment_evidence,
+    )
+
+    repository = _make_repository(tmp_path)
+    repo_root = Path(repository["local_root"])
+    flow_root = repo_root / "src" / "orders" / "flow"
+    flow_root.mkdir()
+    source_lines: list[str] = []
+    for marker in ["alpha", "beta", "gamma", "delta", "epsilon"]:
+        source_lines.extend([
+            f"def workflow_state_context_{marker}(workflow_run):",
+            "    # WorkflowRun evaluate item states terminal state context",
+            f"    {marker}_state_note = workflow_run.state",
+            f"    return {marker}_state_note",
+        ])
+        source_lines.extend(
+            f"state_padding_{marker}_{index} = {index}"
+            for index in range(35)
+        )
+    source_lines.extend([
+        "def workflow_state_terminal_decision(workflow_run):",
+        "    # WorkflowRun evaluate item states terminal state context",
+        "    if any(item.state in ItemState.failed_states for item in workflow_run.items):",
+        "        workflow_run.set_state(WorkflowState.FAILED)",
+        "    elif all(item.state in ItemState.success_states for item in workflow_run.items):",
+        "        workflow_run.set_state(WorkflowState.SUCCESS)",
+        "    return workflow_run.state",
+    ])
+    (flow_root / "state_machine.py").write_text(
+        "\n".join(source_lines) + "\n",
+        encoding="utf-8",
+    )
+    assignment = {
+        "assignment_id": "state-transition",
+        "role": "flow reader",
+        "scope": {
+            "kind": "search",
+            "values": ["WorkflowRun", "state"],
+        },
+        "questions": [
+            "How does WorkflowRun evaluate item states to determine terminal state?"
+        ],
+        "required_slots": ["terminal state decision logic"],
+    }
+
+    bundle = collect_assignment_evidence(
+        repo_root=repo_root,
+        source_scope=_scope(),
+        assignment=assignment,
+        max_files=3,
+        max_excerpt_chars=20000,
+    )
+
+    assert any("WorkflowState.FAILED" in row["excerpt"] for row in bundle.rows)
+    assert any("WorkflowState.SUCCESS" in row["excerpt"] for row in bundle.rows)
+
+
+def test_search_evidence_splits_multiword_scope_values(
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_reading.evidence import (
+        collect_assignment_evidence,
+    )
+
+    repository = _make_repository(tmp_path)
+    repo_root = Path(repository["local_root"])
+    flow_root = repo_root / "src" / "orders" / "flow"
+    flow_root.mkdir()
+    (flow_root / "routing.py").write_text(
+        "\n".join([
+            "def get_route_handler(call):",
+            "    response = run_endpoint_function(call)",
+            "    return response",
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    assignment = {
+        "assignment_id": "route-handler",
+        "role": "reader",
+        "scope": {
+            "kind": "search",
+            "values": ["OrderRoute get_route_handler exception"],
+        },
+        "questions": ["Which source handles it?"],
+        "required_slots": ["result"],
+    }
+
+    bundle = collect_assignment_evidence(
+        repo_root=repo_root,
+        source_scope=_scope(),
+        assignment=assignment,
+        max_files=3,
+        max_excerpt_chars=12000,
+    )
+
+    assert bundle.files_read[0] == "src/orders/flow/routing.py"
+    assert any("run_endpoint_function" in row["excerpt"] for row in bundle.rows)
+
+
+def test_file_scope_reads_bounded_rows_from_large_source_file(
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_reading.evidence import (
+        collect_assignment_evidence,
+    )
+
+    repository = _make_repository(tmp_path)
+    repo_root = Path(repository["local_root"])
+    flow_root = repo_root / "src" / "orders" / "flow"
+    flow_root.mkdir()
+    padding = "x" * 180_000
+    (flow_root / "large_routing.py").write_text(
+        "\n".join([
+            "def get_route_handler(call):",
+            "    response = run_endpoint_function(call)",
+            "    return response",
+            f"PADDING = '{padding}'",
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    assignment = {
+        "assignment_id": "large-route-handler",
+        "role": "reader",
+        "scope": {
+            "kind": "file",
+            "values": ["src/orders/flow/large_routing.py"],
+        },
+        "questions": ["How does get_route_handler call the endpoint?"],
+        "required_slots": ["endpoint call logic"],
+    }
+
+    bundle = collect_assignment_evidence(
+        repo_root=repo_root,
+        source_scope=_scope(),
+        assignment=assignment,
+        max_files=3,
+        max_excerpt_chars=12000,
+    )
+
+    assert bundle.files_read == ["src/orders/flow/large_routing.py"]
+    assert any("run_endpoint_function" in row["excerpt"] for row in bundle.rows)
+    assert all(len(row["excerpt"]) <= 12000 for row in bundle.rows)
+
+
+def test_search_evidence_keeps_nearby_class_execution_method(
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_reading.evidence import (
+        collect_assignment_evidence,
+    )
+
+    repository = _make_repository(tmp_path)
+    repo_root = Path(repository["local_root"])
+    flow_root = repo_root / "src" / "orders" / "flow"
+    flow_root.mkdir()
+    source_lines = [
+        "class LoadRecord:",
+        "    @classmethod",
+        "    def INPUT_TYPES(cls):",
+        "        return {'required': {'record': ('STRING',)}}",
+    ]
+    source_lines.extend(f"    config_{index} = {index}" for index in range(12))
+    source_lines.extend([
+        "    FUNCTION = 'load_record'",
+        "",
+        "    def load_record(self, record):",
+        "        payload = open_record(record)",
+        "        return payload",
+    ])
+    (flow_root / "loader.py").write_text(
+        "\n".join(source_lines) + "\n",
+        encoding="utf-8",
+    )
+    assignment = {
+        "assignment_id": "load-record-node",
+        "role": "reader",
+        "scope": {
+            "kind": "search",
+            "values": ["LoadRecord"],
+        },
+        "questions": ["Which method implements the LoadRecord node?"],
+        "required_slots": ["execution method"],
+    }
+
+    bundle = collect_assignment_evidence(
+        repo_root=repo_root,
+        source_scope=_scope(),
+        assignment=assignment,
+        max_files=3,
+        max_excerpt_chars=12000,
+    )
+
+    assert any("def load_record" in row["excerpt"] for row in bundle.rows)
+    assert any("open_record" in row["excerpt"] for row in bundle.rows)
+
+
+def test_search_evidence_keeps_nearby_branch_inside_excerpt_window(
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_reading.evidence import (
+        collect_assignment_evidence,
+    )
+
+    repository = _make_repository(tmp_path)
+    repo_root = Path(repository["local_root"])
+    flow_root = repo_root / "src" / "orders" / "flow"
+    flow_root.mkdir()
+    source_lines = [
+        "def decide_notice_channels(account: dict) -> list[str]:",
+        "    '''Decide notice behavior from a hierarchy of settings.",
+        "    The notice setting can override broad defaults.",
+        "    The branch below applies account-specific rules.",
+        "    '''",
+        "    base_setting = account['base_setting']",
+        "    stream_setting = account['stream_setting']",
+        "    effective_setting = stream_setting or base_setting",
+        "    if effective_setting == 'silent':",
+        "        return []",
+        "    if account['mode'] == 'suppress':",
+        "        final_action = 'suppress'",
+        "        return [final_action]",
+        "    return ['email']",
+    ]
+    (flow_root / "window.py").write_text(
+        "\n".join(source_lines) + "\n",
+        encoding="utf-8",
+    )
+    assignment = {
+        "assignment_id": "notice-window",
+        "role": "flow reader",
+        "scope": {
+            "kind": "search",
+            "values": ["notice"],
+        },
+        "questions": [
+            "How does the notice hierarchy handle archive policy branches?"
+        ],
+        "required_slots": ["branch decision logic"],
+    }
+
+    bundle = collect_assignment_evidence(
+        repo_root=repo_root,
+        source_scope=_scope(),
+        assignment=assignment,
+        max_files=3,
+        max_excerpt_chars=12000,
+    )
+
+    assert any("final_action" in row["excerpt"] for row in bundle.rows)
+
+
 def test_answer_cap_is_enforced_when_public_run_succeeds(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from kazusa_ai_chatbot.coding_agent.code_reading import supervisor
+    from kazusa_ai_chatbot.coding_agent.code_reading import agent
 
     def fake_supervisor(_request: dict[str, Any]) -> dict[str, Any]:
         result = {
@@ -241,7 +762,7 @@ def test_answer_cap_is_enforced_when_public_run_succeeds(
         }
         return result
 
-    monkeypatch.setattr(supervisor, "run_reading_supervisor", fake_supervisor)
+    monkeypatch.setattr(agent, "run_reading_supervisor", fake_supervisor)
     result = _run_reading(
         tmp_path,
         question="Summarize OrderService.",

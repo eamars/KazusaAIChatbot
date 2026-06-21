@@ -163,41 +163,6 @@ def _non_empty_string_from_env(name: str, default: str) -> str:
     return value
 
 
-def _effective_optional_route_identity(
-    route_name: str,
-    *,
-    fallback_base_url: str,
-    fallback_api_key: str,
-    fallback_model: str,
-) -> tuple[str, str, str]:
-    """Resolve an optional complete LLM route identity with fallback values."""
-
-    base_url_raw = os.getenv(f"{route_name}_BASE_URL")
-    api_key_raw = os.getenv(f"{route_name}_API_KEY")
-    model_raw = os.getenv(f"{route_name}_MODEL")
-    raw_values = (base_url_raw, api_key_raw, model_raw)
-    present = [
-        raw_value is not None and raw_value.strip() != ""
-        for raw_value in raw_values
-    ]
-    if any(present) and not all(present):
-        raise ValueError(
-            f"{route_name}_BASE_URL, {route_name}_API_KEY, and "
-            f"{route_name}_MODEL must be configured together"
-        )
-
-    if all(present):
-        route_identity = (
-            base_url_raw.strip(),
-            api_key_raw.strip(),
-            model_raw.strip(),
-        )
-        return route_identity
-
-    fallback_identity = (fallback_base_url, fallback_api_key, fallback_model)
-    return fallback_identity
-
-
 def _optional_http_url_from_env(name: str, default: str) -> str:
     """Read an optional HTTP(S) URL, stripping whitespace and trailing slashes."""
 
@@ -331,16 +296,20 @@ BACKGROUND_WORK_LLM_MODEL = os.getenv(
     "BACKGROUND_WORK_LLM_MODEL",
     BACKGROUND_ARTIFACT_LLM_MODEL,
 )
-(
-    CODING_AGENT_LLM_BASE_URL,
-    CODING_AGENT_LLM_API_KEY,
-    CODING_AGENT_LLM_MODEL,
-) = _effective_optional_route_identity(
-    "CODING_AGENT_LLM",
-    fallback_base_url=BACKGROUND_WORK_LLM_BASE_URL,
-    fallback_api_key=BACKGROUND_WORK_LLM_API_KEY,
-    fallback_model=BACKGROUND_WORK_LLM_MODEL,
-)
+
+CODING_AGENT_PM_LLM_BASE_URL = os.environ["CODING_AGENT_PM_LLM_BASE_URL"]
+CODING_AGENT_PM_LLM_API_KEY = os.environ["CODING_AGENT_PM_LLM_API_KEY"]
+CODING_AGENT_PM_LLM_MODEL = os.environ["CODING_AGENT_PM_LLM_MODEL"]
+
+CODING_AGENT_PROGRAMMER_LLM_BASE_URL = os.environ[
+    "CODING_AGENT_PROGRAMMER_LLM_BASE_URL"
+]
+CODING_AGENT_PROGRAMMER_LLM_API_KEY = os.environ[
+    "CODING_AGENT_PROGRAMMER_LLM_API_KEY"
+]
+CODING_AGENT_PROGRAMMER_LLM_MODEL = os.environ[
+    "CODING_AGENT_PROGRAMMER_LLM_MODEL"
+]
 
 RELEVANCE_AGENT_LLM_MAX_COMPLETION_TOKENS = _positive_int_from_env(
     "RELEVANCE_AGENT_LLM_MAX_COMPLETION_TOKENS",
@@ -446,13 +415,21 @@ BACKGROUND_WORK_LLM_THINKING_ENABLED = _bool_from_env(
     "BACKGROUND_WORK_LLM_THINKING_ENABLED",
     "false",
 )
-CODING_AGENT_LLM_MAX_COMPLETION_TOKENS = _positive_int_from_env(
-    "CODING_AGENT_LLM_MAX_COMPLETION_TOKENS",
-    str(BACKGROUND_WORK_LLM_MAX_COMPLETION_TOKENS),
+CODING_AGENT_PM_LLM_MAX_COMPLETION_TOKENS = _positive_int_from_env(
+    "CODING_AGENT_PM_LLM_MAX_COMPLETION_TOKENS",
+    str(DEFAULT_LLM_MAX_COMPLETION_TOKENS),
 )
-CODING_AGENT_LLM_THINKING_ENABLED = _bool_from_env(
-    "CODING_AGENT_LLM_THINKING_ENABLED",
-    "true" if BACKGROUND_WORK_LLM_THINKING_ENABLED else "false",
+CODING_AGENT_PM_LLM_THINKING_ENABLED = _bool_from_env(
+    "CODING_AGENT_PM_LLM_THINKING_ENABLED",
+    "false",
+)
+CODING_AGENT_PROGRAMMER_LLM_MAX_COMPLETION_TOKENS = _positive_int_from_env(
+    "CODING_AGENT_PROGRAMMER_LLM_MAX_COMPLETION_TOKENS",
+    str(DEFAULT_LLM_MAX_COMPLETION_TOKENS),
+)
+CODING_AGENT_PROGRAMMER_LLM_THINKING_ENABLED = _bool_from_env(
+    "CODING_AGENT_PROGRAMMER_LLM_THINKING_ENABLED",
+    "false",
 )
 
 # Embedding model (LM Studio)

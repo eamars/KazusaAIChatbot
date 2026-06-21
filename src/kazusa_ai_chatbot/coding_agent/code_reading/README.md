@@ -83,18 +83,16 @@ Each `ProgrammerReport` contains:
 - bounded evidence rows
 - open questions
 
-Phase 1 caps one PM at three programmer assignments per wave, two waves, and
+Phase 1 caps one PM at three programmer assignments per wave, three waves, and
 six total programmer reports. When a question exceeds those limits, the PM
 returns `overloaded`; Phase 1 reports a limitation or asks for a narrower user
 scope instead of pretending to read a whole project. Full distributed
 master/subsystem PM fan-out is not implemented in Phase 1.
 
-LLM-backed PM, programmer, or synthesis calls use the effective
-`CODING_AGENT_LLM` route. `CODING_AGENT_LLM_*` is optional; when it is absent,
-the effective route falls back to `BACKGROUND_WORK_LLM_*`. Partial
-`CODING_AGENT_LLM_BASE_URL`, `CODING_AGENT_LLM_API_KEY`, or
-`CODING_AGENT_LLM_MODEL` configuration is invalid. Phase 1 does not define
-separate PM, programmer, or synthesizer LLM routes.
+LLM-backed PM calls use `CODING_AGENT_PM_LLM`; final synthesis intentionally
+uses the same PM route. Programmer workers use `CODING_AGENT_PROGRAMMER_LLM`.
+Both routes require base URL, API key, and model settings. Phase 1 does not
+define a separate synthesizer LLM route.
 
 `CodeReadingResult` contains:
 

@@ -332,11 +332,21 @@ async def test_question_only_embedded_github_url_is_handed_to_fetching(
 
 
 async def test_answer_code_question_reads_real_phase0_local_checkout(
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     from kazusa_ai_chatbot.coding_agent import answer_code_question
+    from kazusa_ai_chatbot.coding_agent import code_reading
 
     repo_root = _make_reading_git_checkout(tmp_path)
+    reading_calls: list[dict[str, Any]] = []
+
+    def fake_reading_run(request: dict[str, Any]) -> dict[str, Any]:
+        reading_calls.append(request)
+        result = _successful_reading_result()
+        return result
+
+    monkeypatch.setattr(code_reading, "run", fake_reading_run)
 
     response = await answer_code_question(
         {
@@ -357,6 +367,10 @@ async def test_answer_code_question_reads_real_phase0_local_checkout(
     assert "cache_key" not in repr(response)
     assert response["source_scope"] is not None
     assert response["source_scope"]["kind"] == "repository"
+    assert reading_calls
+    reading_request = reading_calls[0]
+    assert reading_request["repository"]["local_root"] == str(repo_root)
+    assert reading_request["source_scope"]["kind"] == "repository"
     assert {row["path"] for row in response["evidence"]} & {
         "src/app/image_pipeline.py",
         "README.md",
