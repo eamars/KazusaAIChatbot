@@ -1,6 +1,6 @@
 """Public contracts and shared constants for standalone coding-agent modules."""
 
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 DEFAULT_WORKSPACE_DIR_NAME = "kazusa_coding_agent"
 GIT_COMMAND_TIMEOUT_SECONDS = 60
@@ -41,6 +41,29 @@ class CodingAgentRequest(TypedDict, total=False):
     max_answer_chars: int
 
 
+class CodingAgentWriteRequest(TypedDict, total=False):
+    """Top-level direct coding-agent request for patch proposal work.
+
+    The source fields are explicit structure used to decide whether source
+    fetching and reading are required. Source-free requests are handled as
+    new-project writing tasks.
+    """
+
+    question: str
+    source_url: str
+    repo_url: str
+    repo_hint: str
+    local_root_hint: str
+    local_path_hint: str
+    requested_ref: str
+    source_scope_hint: SourceKind
+    workspace_root: str
+    preferred_language: str
+    max_answer_chars: int
+    session_id: str
+    max_artifact_chars: int
+
+
 class CodingAgentRepositorySummary(TypedDict):
     """Public-safe repository metadata for direct callers and future workers."""
 
@@ -78,3 +101,23 @@ class CodingAgentResponse(TypedDict):
     evidence: list[CodeEvidenceReference]
     limitations: list[str]
     trace_summary: list[str]
+
+
+class CodingPatchProposalResponse(TypedDict):
+    """Top-level direct coding-agent response for patch proposal work."""
+
+    status: ResultStatus
+    mode: str
+    answer_text: str
+    repository: CodingAgentRepositorySummary | None
+    source_scope: CodingAgentSourceScope | None
+    evidence: list[CodeEvidenceReference]
+    patch_artifacts: list[dict[str, object]]
+    created_files: list[dict[str, str]]
+    changed_files: list[dict[str, str]]
+    validation: dict[str, object]
+    external_evidence: list[dict[str, object]]
+    session: dict[str, object] | None
+    limitations: list[str]
+    trace_summary: list[str]
+    trace: NotRequired[dict[str, object]]

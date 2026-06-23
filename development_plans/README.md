@@ -38,6 +38,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [coding_agent_phase2_code_writing_plan.md](active/short_term/coding_agent_phase2_code_writing_plan.md) | High-risk coding-agent Phase 2 code-writing plan | in_progress |
 | [coding_agent_phase3_background_worker_integration_plan.md](active/short_term/coding_agent_phase3_background_worker_integration_plan.md) | Large coding-agent Phase 3 background-worker integration plan | draft |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 
@@ -59,6 +60,7 @@ long_term/todo.md
 |---|---|
 | [action_spec_effector_expansion_architecture.md](reference/designs/action_spec_effector_expansion_architecture.md) | Architecture reference |
 | [coding_agent_architecture.md](reference/designs/coding_agent_architecture.md) | Architecture reference |
+| [codex_single_agent_source_guide.md](reference/designs/codex_single_agent_source_guide.md) | Codex single-agent source reference |
 | [cognition_contracts_design.md](reference/designs/cognition_contracts_design.md) | Authoritative contract reference |
 | [cognition_core_evolution_progression.md](reference/designs/cognition_core_evolution_progression.md) | Architectural progression |
 | [kazusa_parallel_cognition_architecture.md](reference/designs/kazusa_parallel_cognition_architecture.md) | Architecture reference |

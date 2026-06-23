@@ -243,8 +243,6 @@ def _clone_into_managed_checkout(
         "1",
         "--no-tags",
     ]
-    if source.requested_ref:
-        clone_args.extend(["--branch", source.requested_ref])
     clone_args.extend([clone_url, str(temporary_root)])
 
     try:
@@ -256,6 +254,16 @@ def _clone_into_managed_checkout(
             message = f"{message}. Temporary checkout cleanup also failed."
         raise ManagedCloneError(message) from exc
 
+    if source.requested_ref:
+        try:
+            _checkout_requested_ref(source.requested_ref, temporary_root)
+        except ManagedCloneError as exc:
+            message = str(exc)
+            cleanup_failed = _remove_tree_best_effort(temporary_root)
+            if cleanup_failed:
+                message = f"{message}. Temporary checkout cleanup also failed."
+            raise ManagedCloneError(message) from exc
+
     try:
         temporary_root.replace(checkout_root)
     except OSError as exc:
@@ -263,6 +271,47 @@ def _clone_into_managed_checkout(
         cleanup_failed = _remove_tree_best_effort(temporary_root)
         if cleanup_failed:
             message = f"{message}. Temporary checkout cleanup also failed."
+        raise ManagedCloneError(message) from exc
+
+
+def _checkout_requested_ref(requested_ref: str, checkout_root: Path) -> None:
+    """Fetch and detach-checkout a requested branch, tag, or commit ref.
+
+    Args:
+        requested_ref: Branch, tag, ref path, or commit supplied by the caller.
+        checkout_root: Temporary clone root.
+    """
+
+    try:
+        run_git_command(
+            [
+                "-c",
+                "core.longpaths=true",
+                "fetch",
+                "--depth",
+                "1",
+                "origin",
+                requested_ref,
+            ],
+            cwd=str(checkout_root),
+        )
+    except GitCommandError as exc:
+        message = f"managed requested ref fetch failed: {exc}"
+        raise ManagedCloneError(message) from exc
+
+    try:
+        run_git_command(
+            [
+                "-c",
+                "core.longpaths=true",
+                "checkout",
+                "--detach",
+                "FETCH_HEAD",
+            ],
+            cwd=str(checkout_root),
+        )
+    except GitCommandError as exc:
+        message = f"managed requested ref checkout failed: {exc}"
         raise ManagedCloneError(message) from exc
 
 

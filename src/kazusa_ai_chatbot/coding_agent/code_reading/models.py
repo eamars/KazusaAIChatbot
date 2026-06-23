@@ -28,6 +28,7 @@ class CodeReadingRequest(TypedDict, total=False):
     source_scope: CodeSourceScope
     preferred_language: str
     max_answer_chars: int
+    read_only_context_handoff: bool
 
 
 class CodeReadingResult(TypedDict):

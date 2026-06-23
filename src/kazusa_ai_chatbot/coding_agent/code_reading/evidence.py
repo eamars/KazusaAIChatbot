@@ -1170,6 +1170,8 @@ def _is_safe_relative_file(relative_path: Path) -> bool:
         return False
     if ".git" in parts:
         return False
+    if _is_hidden_support_path(parts):
+        return False
 
     path_text = _to_posix(relative_path)
     name = parts[-1].casefold()
@@ -1180,6 +1182,15 @@ def _is_safe_relative_file(relative_path: Path) -> bool:
     if is_binary_like_path(path_text):
         return False
     return True
+
+
+def _is_hidden_support_path(parts: tuple[str, ...]) -> bool:
+    """Exclude hidden support directories from broad source evidence scans."""
+
+    for part in parts[:-1]:
+        if part.startswith("."):
+            return True
+    return False
 
 
 def _read_text_file(path: Path) -> str | None:

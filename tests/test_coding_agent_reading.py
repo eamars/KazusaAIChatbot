@@ -3,6 +3,8 @@ from typing import Any
 
 import pytest
 
+from kazusa_ai_chatbot.coding_agent.code_reading.planner import rejection_reason
+
 
 def _make_repository(tmp_path: Path) -> dict[str, Any]:
     repo_root = tmp_path / "reading_repo"
@@ -148,6 +150,172 @@ def test_rejects_unsupported_phase1_requests(
     assert result["evidence"] == []
 
 
+def test_read_only_handoff_treats_write_terms_as_context() -> None:
+    assert rejection_reason("Apply a patch to rewrite OrderService.") is not None
+
+    reason = rejection_reason(
+        "Read current evidence. User request context: apply a patch and run tests.",
+        read_only_context_handoff=True,
+    )
+
+    assert reason is None
+    assert (
+        rejection_reason(
+            "Read current evidence. User request context: inspect .env.",
+            read_only_context_handoff=True,
+        )
+        is not None
+    )
+
+
+def test_reading_pm_payload_compacts_large_repository_map() -> None:
+    from kazusa_ai_chatbot.coding_agent.code_reading.product_manager import (
+        MAX_PM_ITEM_EXCERPT_CHARS,
+        MAX_PM_REPO_MAP_DIRECTORIES,
+        MAX_PM_REPO_MAP_FILES,
+        MAX_PM_SOURCE_CLASS_ITEMS,
+        MAX_PM_TOP_SYMBOLS,
+        MAX_PM_QUESTION_CHARS,
+        _pm_payload,
+    )
+
+    long_excerpt = "class Example:\n    pass\n" * 80
+    source_items = [
+        {
+            "path": f"src/module_{index}.py",
+            "source_class": "python",
+            "defined_symbols": [f"Symbol{nested}" for nested in range(20)],
+            "imported_modules": [f"module_{nested}" for nested in range(20)],
+            "summary_excerpt": long_excerpt,
+        }
+        for index in range(80)
+    ]
+    pm_input = {
+        "question": "Read current evidence.\n" + ("requirements\n" * 5000),
+        "repository_summary": {"repo": "fixture"},
+        "source_scope": {"kind": "repository", "repo_relative_path": None},
+        "repo_map_summary": {
+            "source_scope_kind": "repository",
+            "source_scope_path": None,
+            "total_safe_files": 200,
+            "files": [f"src/module_{index}.py" for index in range(200)],
+            "top_directories": [f"src/package_{index}" for index in range(80)],
+            "source_classes": {"python": source_items},
+            "top_symbols": [
+                {
+                    "symbol": f"Symbol{index}",
+                    "path": f"src/module_{index}.py",
+                    "source_class": "python",
+                }
+                for index in range(120)
+            ],
+        },
+        "previous_reports": [],
+    }
+
+    payload = _pm_payload(pm_input)
+    repo_map = payload["repo_map_summary"]
+
+    assert len(payload["question"]) <= MAX_PM_QUESTION_CHARS
+    assert len(repo_map["files"]) == MAX_PM_REPO_MAP_FILES
+    assert len(repo_map["top_directories"]) == MAX_PM_REPO_MAP_DIRECTORIES
+    assert len(repo_map["source_classes"]["python"]) == MAX_PM_SOURCE_CLASS_ITEMS
+    assert (
+        len(repo_map["source_classes"]["python"][0]["summary_excerpt"])
+        <= MAX_PM_ITEM_EXCERPT_CHARS
+    )
+    assert len(repo_map["top_symbols"]) == MAX_PM_TOP_SYMBOLS
+
+
+def test_reading_synthesis_payload_compacts_large_evidence() -> None:
+    from kazusa_ai_chatbot.coding_agent.code_reading.synthesizer import (
+        MAX_SYNTHESIS_EVIDENCE_EXCERPT_CHARS,
+        MAX_SYNTHESIS_EVIDENCE_ROWS,
+        MAX_SYNTHESIS_FACTS,
+        MAX_SYNTHESIS_FILES_READ,
+        MAX_SYNTHESIS_NEXT_HOPS,
+        MAX_SYNTHESIS_QUESTION_CHARS,
+        MAX_SYNTHESIS_REPORTS,
+        _synthesis_payload,
+    )
+
+    long_excerpt = "def example():\n    return 'value'\n" * 120
+    evidence = [
+        {
+            "path": f"src/module_{index}.py",
+            "line_start": 1,
+            "line_end": 20,
+            "symbol_or_topic": f"Symbol{index}",
+            "excerpt": long_excerpt,
+            "reason": "source evidence",
+        }
+        for index in range(80)
+    ]
+    reports = [
+        {
+            "assignment_id": f"assignment-{index}",
+            "status": "succeeded",
+            "files_read": [f"src/module_{nested}.py" for nested in range(20)],
+            "facts": [
+                {
+                    "kind": "behavior",
+                    "summary": "fact summary " * 200,
+                    "evidence_refs": [f"src/module_{nested}.py:1-2" for nested in range(20)],
+                }
+                for _ in range(20)
+            ],
+            "evidence": evidence,
+            "open_questions": ["open question" for _ in range(20)],
+            "discovered_symbols": [f"Symbol{nested}" for nested in range(20)],
+            "candidate_next_hops": [
+                {
+                    "reason": "next hop" * 100,
+                    "scope": {
+                        "kind": "file",
+                        "values": [f"src/module_{nested}.py"],
+                    },
+                }
+                for nested in range(20)
+            ],
+        }
+        for index in range(12)
+    ]
+
+    payload = _synthesis_payload(
+        question="requirements\n" * 5000,
+        pm_decision={
+            "status": "sufficient",
+            "intent": "architecture_overview",
+            "required_slots": [],
+            "assignments": [],
+            "missing_slots": [],
+        },
+        programmer_reports=reports,
+        evidence=evidence,
+        limitations=[],
+        repository_summary={"repo": "fixture"},
+        preferred_language="English",
+        max_answer_chars=1600,
+    )
+
+    assert len(payload["question"]) <= MAX_SYNTHESIS_QUESTION_CHARS
+    assert len(payload["programmer_reports"]) == MAX_SYNTHESIS_REPORTS
+    assert (
+        len(payload["programmer_reports"][0]["files_read"])
+        == MAX_SYNTHESIS_FILES_READ
+    )
+    assert len(payload["programmer_reports"][0]["facts"]) == MAX_SYNTHESIS_FACTS
+    assert (
+        len(payload["programmer_reports"][0]["candidate_next_hops"])
+        == MAX_SYNTHESIS_NEXT_HOPS
+    )
+    assert len(payload["selected_evidence"]) == MAX_SYNTHESIS_EVIDENCE_ROWS
+    assert (
+        len(payload["selected_evidence"][0]["excerpt"])
+        <= MAX_SYNTHESIS_EVIDENCE_EXCERPT_CHARS
+    )
+
+
 @pytest.mark.parametrize(
     ("repo_relative_path", "expected_fragment"),
     [
@@ -218,11 +386,18 @@ def test_repository_map_excludes_secret_and_binary_files(tmp_path: Path) -> None
     )
 
     repository = _make_repository(tmp_path)
+    repo_root = Path(repository["local_root"])
+    (repo_root / ".agents" / "skills").mkdir(parents=True)
+    (repo_root / ".agents" / "skills" / "tool.py").write_text(
+        "def support_tool() -> None:\n    pass\n",
+        encoding="utf-8",
+    )
     summary = build_repository_map_summary(repository, _scope())
 
     assert "src/orders/service.py" in summary["files"]
     assert ".env" not in summary["files"]
     assert "assets/logo.png" not in summary["files"]
+    assert ".agents/skills/tool.py" not in summary["files"]
 
 
 def test_repository_intelligence_classifies_sources_and_symbols(

@@ -60,7 +60,12 @@ def run_reading_supervisor(
         )
         return result
 
-    rejected_reason = rejection_reason(question)
+    rejected_reason = rejection_reason(
+        question,
+        read_only_context_handoff=(
+            request.get("read_only_context_handoff") is True
+        ),
+    )
     if rejected_reason is not None:
         result = _result(
             status="rejected",
@@ -430,11 +435,12 @@ def _overload_result_if_any(
     trace_summary: list[str],
 ) -> CodeReadingResult | None:
     assignments = pm_decision["assignments"]
+    selected_evidence = selected_evidence_from_reports(existing_reports)
     if len(assignments) > MAX_PROGRAMMERS_PER_WAVE:
         result = _result(
             status="needs_user_input",
             answer_text="Please narrow the question to at most three source scopes.",
-            evidence=[],
+            evidence=selected_evidence,
             limitations=["PM requested too many programmer assignments."],
             trace_summary=[*trace_summary, "reading_pm:sufficiency=overloaded"],
         )
@@ -445,8 +451,8 @@ def _overload_result_if_any(
         result = _result(
             status="needs_user_input",
             answer_text="Please narrow the question before more source reading.",
-            evidence=[],
-            limitations=["Programmer report limit would be exceeded."],
+            evidence=selected_evidence,
+            limitations=["Source-reading report limit would be exceeded."],
             trace_summary=[*trace_summary, "reading_pm:sufficiency=overloaded"],
         )
         return result

@@ -648,6 +648,82 @@ def test_managed_checkout_accepts_normal_deep_workspace_budget() -> None:
     assert len(str(checkout_root)) <= 220
 
 
+def test_managed_clone_fetches_requested_commit_after_clone(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    requested_ref = "a" * 40
+    source = GitHubSource(
+        owner="owner",
+        repo="repo",
+        source_url="https://github.com/owner/repo",
+        source_kind="repository",
+        requested_ref=requested_ref,
+        repo_relative_path=None,
+    )
+    paths = build_managed_checkout_paths(
+        workspace_root=str(tmp_path / "coding_workspace"),
+        provider="github",
+        owner=source.owner,
+        repo=source.repo,
+        requested_ref=source.requested_ref,
+    )
+    temporary_root = Path(paths["temporary_root"])
+    checkout_root = Path(paths["checkout_root"])
+    calls: list[tuple[list[str], str | None]] = []
+
+    def fake_git(args: list[str], *, cwd: str | None = None) -> object:
+        calls.append((args, cwd))
+        if args[:3] == ["-c", "core.longpaths=true", "clone"]:
+            assert "--branch" not in args
+            temporary_root.mkdir(parents=True)
+            return object()
+        if args == [
+            "-c",
+            "core.longpaths=true",
+            "fetch",
+            "--depth",
+            "1",
+            "origin",
+            requested_ref,
+        ]:
+            assert cwd == str(temporary_root)
+            return object()
+        if args == [
+            "-c",
+            "core.longpaths=true",
+            "checkout",
+            "--detach",
+            "FETCH_HEAD",
+        ]:
+            assert cwd == str(temporary_root)
+            return object()
+        raise AssertionError(f"unexpected git call: {args}")
+
+    monkeypatch.setattr(managed_clone, "run_git_command", fake_git)
+
+    managed_clone._clone_into_managed_checkout(source, paths)
+
+    assert checkout_root.exists()
+    assert not temporary_root.exists()
+    assert calls[1][0] == [
+        "-c",
+        "core.longpaths=true",
+        "fetch",
+        "--depth",
+        "1",
+        "origin",
+        requested_ref,
+    ]
+    assert calls[2][0] == [
+        "-c",
+        "core.longpaths=true",
+        "checkout",
+        "--detach",
+        "FETCH_HEAD",
+    ]
+
+
 def test_managed_clone_preserves_git_failure_when_cleanup_fails(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -99,6 +99,8 @@ class OpenAICompatibleProvider:
             kwargs["max_completion_tokens"] = config.max_completion_tokens
         if config.presence_penalty is not None:
             kwargs["presence_penalty"] = config.presence_penalty
+        if config.timeout_seconds is not None:
+            kwargs["timeout"] = config.timeout_seconds
         if backend.thinking_strategy == "gemma4_enabled":
             kwargs["extra_body"] = {
                 "chat_template_kwargs": {"enable_thinking": True},
@@ -222,6 +224,7 @@ def _chat_model_cache_key(
         config.top_k,
         config.max_completion_tokens,
         config.presence_penalty,
+        config.timeout_seconds,
         backend.thinking_strategy,
     )
     return cache_key

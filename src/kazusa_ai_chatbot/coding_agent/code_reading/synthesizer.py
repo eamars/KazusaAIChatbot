@@ -8,6 +8,11 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from kazusa_ai_chatbot.coding_agent.context_budget import (
+    SYNTHESIS_TARGET_INPUT_TOKEN_CAP,
+    collect_selected_evidence_refs,
+    prompt_budget_metadata,
+)
 from kazusa_ai_chatbot.coding_agent.code_reading.models import (
     CodeEvidenceRow,
     PMDecision,
@@ -39,6 +44,17 @@ _COMMON_CODE_WORDS = {
     "PM",
 }
 MAX_TEXT_FIELD_CHARS = 6000
+MAX_SYNTHESIS_QUESTION_CHARS = 8000
+MAX_SYNTHESIS_REPORTS = 6
+MAX_SYNTHESIS_FILES_READ = 8
+MAX_SYNTHESIS_FACTS = 8
+MAX_SYNTHESIS_OPEN_QUESTIONS = 6
+MAX_SYNTHESIS_DISCOVERED_SYMBOLS = 8
+MAX_SYNTHESIS_NEXT_HOPS = 6
+MAX_SYNTHESIS_EVIDENCE_REFS = 12
+MAX_SYNTHESIS_EVIDENCE_ROWS = 18
+MAX_SYNTHESIS_EVIDENCE_EXCERPT_CHARS = 450
+SYNTHESIS_LLM_CALL_TIMEOUT_SECONDS = 300
 
 
 SYNTHESIS_PROMPT = '''\
@@ -88,6 +104,7 @@ _synthesis_llm_config = LLMCallConfig(
     top_k=None,
     max_completion_tokens=CODING_AGENT_PM_LLM_MAX_COMPLETION_TOKENS,
     presence_penalty=None,
+    timeout_seconds=SYNTHESIS_LLM_CALL_TIMEOUT_SECONDS,
     thinking=LLMThinkingConfig(
         enabled=CODING_AGENT_PM_LLM_THINKING_ENABLED,
     ),
@@ -142,15 +159,56 @@ def synthesize_from_programmer_reports(
         preferred_language=preferred_language,
         max_answer_chars=max_answer_chars,
     )
-    response = _synthesis_llm.invoke([
-        SystemMessage(content=SYNTHESIS_PROMPT),
-        HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
-    ], config=_synthesis_llm_config)
-    parsed = parse_llm_json_output(response.content)
+    payload_text = json.dumps(payload, ensure_ascii=False)
+    prompt_input_chars = len(SYNTHESIS_PROMPT) + len(payload_text)
+    context_budget = prompt_budget_metadata(
+        system_prompt=SYNTHESIS_PROMPT,
+        payload_text=payload_text,
+        target_input_tokens=SYNTHESIS_TARGET_INPUT_TOKEN_CAP,
+        selected_evidence_refs=collect_selected_evidence_refs(payload),
+    )
+    if context_budget["over_hard_cap"]:
+        answer_text = (
+            "I cannot synthesize a grounded code-reading answer because the "
+            "selected evidence exceeded the context budget."
+        )
+        combined_limitations = _dedupe_strings([
+            *limitations,
+            "Reading synthesis prompt exceeded the context budget.",
+        ])
+        _fill_trace(
+            trace,
+            raw_output="",
+            parsed_output={},
+            normalized_answer=answer_text,
+            limitations=combined_limitations,
+            prompt_input_chars=prompt_input_chars,
+            context_budget=context_budget,
+            blocked_before_invoke=True,
+        )
+        return answer_text, combined_limitations
+    raw_output = ""
+    parsed: object = {}
+    timed_out = False
+    try:
+        response = _synthesis_llm.invoke([
+            SystemMessage(content=SYNTHESIS_PROMPT),
+            HumanMessage(content=payload_text),
+        ], config=_synthesis_llm_config)
+        raw_output = response.content
+        parsed = parse_llm_json_output(raw_output)
+    except TimeoutError:
+        timed_out = True
     answer_text, parsed_limitations = normalize_synthesis_output(
         parsed,
         max_answer_chars=max_answer_chars,
     )
+    if timed_out:
+        answer_text = (
+            "I cannot synthesize a grounded code-reading answer because the "
+            "reading synthesis LLM call timed out."
+        )
+        parsed_limitations = ["Reading synthesis LLM call timed out."]
     combined_limitations = _dedupe_strings([*limitations, *parsed_limitations])
     grounding_violations = ungrounded_code_terms(
         answer_text,
@@ -183,10 +241,14 @@ def synthesize_from_programmer_reports(
 
     _fill_trace(
         trace,
-        raw_output=response.content,
+        raw_output=raw_output,
         parsed_output=parsed,
         normalized_answer=answer_text,
         limitations=combined_limitations,
+        prompt_input_chars=prompt_input_chars,
+        context_budget=context_budget,
+        blocked_before_invoke=False,
+        timed_out=timed_out,
     )
     return answer_text, combined_limitations
 
@@ -259,7 +321,7 @@ def _synthesis_payload(
     max_answer_chars: int,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
-        "question": question,
+        "question": _bounded_text(question, MAX_SYNTHESIS_QUESTION_CHARS),
         "preferred_language": preferred_language,
         "max_answer_chars": max_answer_chars,
         "repository_summary": repository_summary,
@@ -270,18 +332,7 @@ def _synthesis_payload(
             "missing_slots": pm_decision["missing_slots"],
         },
         "programmer_reports": _compact_reports(programmer_reports),
-        "selected_evidence": [
-            {
-                "evidence_ref": _evidence_ref(row),
-                "path": row["path"],
-                "line_start": row["line_start"],
-                "line_end": row["line_end"],
-                "symbol_or_topic": row["symbol_or_topic"],
-                "excerpt": row["excerpt"],
-                "reason": row["reason"],
-            }
-            for row in evidence
-        ],
+        "selected_evidence": _compact_evidence_rows(evidence),
         "limitations": limitations,
     }
     return payload
@@ -291,22 +342,94 @@ def _compact_reports(
     reports: list[ProgrammerReport],
 ) -> list[dict[str, object]]:
     compact_reports: list[dict[str, object]] = []
-    for report in reports:
+    for report in reports[:MAX_SYNTHESIS_REPORTS]:
         compact_report = {
             "assignment_id": report["assignment_id"],
             "status": report["status"],
-            "files_read": report["files_read"],
-            "facts": report["facts"],
-            "open_questions": report["open_questions"],
-            "discovered_symbols": report["discovered_symbols"],
-            "candidate_next_hops": report["candidate_next_hops"],
+            "files_read": _string_list(
+                report["files_read"],
+                MAX_SYNTHESIS_FILES_READ,
+            ),
+            "facts": _compact_facts(report["facts"]),
+            "open_questions": _string_list(
+                report["open_questions"],
+                MAX_SYNTHESIS_OPEN_QUESTIONS,
+            ),
+            "discovered_symbols": _string_list(
+                report["discovered_symbols"],
+                MAX_SYNTHESIS_DISCOVERED_SYMBOLS,
+            ),
+            "candidate_next_hops": _compact_next_hops(
+                report["candidate_next_hops"],
+            ),
             "evidence_refs": [
                 _evidence_ref(row)
-                for row in report["evidence"]
+                for row in report["evidence"][:MAX_SYNTHESIS_EVIDENCE_REFS]
             ],
         }
         compact_reports.append(compact_report)
     return compact_reports
+
+
+def _compact_facts(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+
+    facts: list[dict[str, object]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        fact = {
+            "kind": _bounded_text(item.get("kind"), MAX_TEXT_FIELD_CHARS),
+            "summary": _bounded_text(item.get("summary"), MAX_TEXT_FIELD_CHARS),
+            "evidence_refs": _string_list(
+                item.get("evidence_refs"),
+                MAX_SYNTHESIS_EVIDENCE_REFS,
+            ),
+        }
+        facts.append(fact)
+        if len(facts) >= MAX_SYNTHESIS_FACTS:
+            break
+    return facts
+
+
+def _compact_next_hops(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+
+    hops: list[dict[str, object]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        hop = {
+            "reason": _bounded_text(item.get("reason"), MAX_TEXT_FIELD_CHARS),
+            "scope": item.get("scope"),
+        }
+        hops.append(hop)
+        if len(hops) >= MAX_SYNTHESIS_NEXT_HOPS:
+            break
+    return hops
+
+
+def _compact_evidence_rows(
+    evidence: list[CodeEvidenceRow],
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for row in evidence[:MAX_SYNTHESIS_EVIDENCE_ROWS]:
+        compact_row = {
+            "evidence_ref": _evidence_ref(row),
+            "path": row["path"],
+            "line_start": row["line_start"],
+            "line_end": row["line_end"],
+            "symbol_or_topic": row["symbol_or_topic"],
+            "excerpt": _bounded_text(
+                row["excerpt"],
+                MAX_SYNTHESIS_EVIDENCE_EXCERPT_CHARS,
+            ),
+            "reason": row["reason"],
+        }
+        rows.append(compact_row)
+    return rows
 
 
 def _code_term_candidates(answer_text: str) -> list[str]:
@@ -413,15 +536,23 @@ def _fill_trace(
     trace: dict[str, object] | None,
     *,
     raw_output: str,
-    parsed_output: dict[str, Any],
+    parsed_output: object,
     normalized_answer: str,
     limitations: list[str],
+    prompt_input_chars: int,
+    context_budget: dict[str, object],
+    blocked_before_invoke: bool,
+    timed_out: bool = False,
 ) -> None:
     if trace is None:
         return
 
     trace["effective_route"] = _synthesis_llm_config.route_name
     trace["model"] = _synthesis_llm_config.model
+    trace["prompt_input_chars"] = prompt_input_chars
+    trace["context_budget"] = context_budget
+    trace["blocked_before_invoke"] = blocked_before_invoke
+    trace["timed_out"] = timed_out
     trace["raw_output"] = raw_output
     trace["parsed_output"] = parsed_output
     trace["normalized_output"] = {

@@ -5,33 +5,45 @@ from pathlib import PurePosixPath
 from kazusa_ai_chatbot.coding_agent.code_fetching.models import CodeSourceScope
 
 
-def rejection_reason(question: str) -> str | None:
-    """Return a read-only rejection reason, if the request is unsupported."""
+def rejection_reason(
+    question: str,
+    *,
+    read_only_context_handoff: bool = False,
+) -> str | None:
+    """Return a read-only rejection reason, if the request is unsupported.
+
+    Args:
+        question: Prompt-facing reading request.
+        read_only_context_handoff: Whether write or execution terms are
+            requirements context from the top-level coding supervisor, not a
+            direct instruction for the reading workflow to mutate or execute.
+    """
 
     normalized = question.casefold()
-    write_patterns = [
-        "apply a patch",
-        "write a patch",
-        "propose patches",
-        "rewrite ",
-        "modify ",
-        "edit ",
-        "change the code",
-    ]
-    if any(pattern in normalized for pattern in write_patterns):
-        return "Phase 1 code reading is read-only and cannot write patches."
+    if not read_only_context_handoff:
+        write_patterns = [
+            "apply a patch",
+            "write a patch",
+            "propose patches",
+            "rewrite ",
+            "modify ",
+            "edit ",
+            "change the code",
+        ]
+        if any(pattern in normalized for pattern in write_patterns):
+            return "Phase 1 code reading is read-only and cannot write patches."
 
-    execution_patterns = [
-        "run pytest",
-        "run tests",
-        "execute ",
-        "shell command",
-        "install ",
-        "pip install",
-        "npm install",
-    ]
-    if any(pattern in normalized for pattern in execution_patterns):
-        return "Phase 1 code reading cannot execute commands or install packages."
+        execution_patterns = [
+            "run pytest",
+            "run tests",
+            "execute ",
+            "shell command",
+            "install ",
+            "pip install",
+            "npm install",
+        ]
+        if any(pattern in normalized for pattern in execution_patterns):
+            return "Phase 1 code reading cannot execute commands or install packages."
 
     secret_patterns = [
         ".env",

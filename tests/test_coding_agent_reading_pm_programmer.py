@@ -112,6 +112,66 @@ def test_contracts_define_simplified_pm_programmer_shapes() -> None:
     } == set(ProgrammerReport.__annotations__)
 
 
+def test_reading_pm_retries_when_assignment_cap_is_exceeded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_reading import product_manager
+    from kazusa_ai_chatbot.coding_agent.code_reading.product_manager import (
+        decide_reading_work,
+    )
+
+    def _decision_with_assignment_count(count: int) -> str:
+        assignments = [
+            {
+                "assignment_id": f"reader_{index}",
+                "role": "source reader",
+                "scope": {
+                    "kind": "search",
+                    "values": [f"term_{index}"],
+                },
+                "questions": ["Read bounded source evidence."],
+                "required_slots": [f"slot_{index}"],
+            }
+            for index in range(count)
+        ]
+        return product_manager.json.dumps({
+            "status": "need_programmers",
+            "intent": "architecture_overview",
+            "required_slots": ["overview"],
+            "assignments": assignments,
+            "missing_slots": [],
+        })
+
+    responses = [
+        _decision_with_assignment_count(4),
+        _decision_with_assignment_count(2),
+    ]
+    calls = []
+
+    def _fake_invoke(*args: Any, **kwargs: Any) -> SimpleNamespace:
+        calls.append((args, kwargs))
+        return SimpleNamespace(content=responses[len(calls) - 1])
+
+    monkeypatch.setattr(product_manager._reading_pm_llm, "invoke", _fake_invoke)
+    trace: dict[str, Any] = {}
+
+    decision = decide_reading_work(
+        {
+            "question": "Explain the local flow from source evidence.",
+            "repository_summary": {"repo": "fixture"},
+            "source_scope": _source_scope(),
+            "repo_map_summary": {"files": ["src/flow.py"]},
+            "previous_reports": [],
+        },
+        trace=trace,
+    )
+
+    assert decision["status"] == "need_programmers"
+    assert len(decision["assignments"]) == 2
+    assert len(calls) == 2
+    assert len(trace["attempts"]) == 2
+
+
 def test_assignment_validation_accepts_bounded_simplified_scope() -> None:
     from kazusa_ai_chatbot.coding_agent.code_reading.product_manager import (
         validate_programmer_assignment,
@@ -211,6 +271,53 @@ def test_programmer_report_uses_simplified_memory_shape(
     assert report["evidence"]
     assert "workspace" not in repr(report)
     assert "cache_key" not in repr(report)
+
+
+def test_reading_overload_preserves_existing_evidence() -> None:
+    from kazusa_ai_chatbot.coding_agent.code_reading.supervisor import (
+        MAX_PROGRAMMERS_PER_WAVE,
+        _overload_result_if_any,
+    )
+
+    evidence = [{
+        "path": "src/runtime.py",
+        "line_start": 1,
+        "line_end": 4,
+        "symbol_or_topic": "runtime owner",
+        "excerpt": "def handle() -> None:\n    pass\n",
+        "reason": "Shows the current owner.",
+    }]
+    existing_reports = [{
+        "assignment_id": "runtime",
+        "status": "succeeded",
+        "files_read": ["src/runtime.py"],
+        "facts": [],
+        "evidence": evidence,
+        "open_questions": [],
+        "discovered_symbols": [],
+        "candidate_next_hops": [],
+    }]
+    decision = {
+        "status": "need_programmers",
+        "intent": "read more",
+        "assignments": [
+            {
+                "assignment_id": f"extra_{index}",
+                "role": "code_reader",
+                "scope": {"kind": "repository", "values": ["runtime"]},
+                "questions": ["Read one extra slice."],
+                "required_slots": ["runtime"],
+            }
+            for index in range(MAX_PROGRAMMERS_PER_WAVE + 1)
+        ],
+        "missing_slots": [],
+    }
+
+    result = _overload_result_if_any(decision, existing_reports, [])
+
+    assert result is not None
+    assert result["status"] == "needs_user_input"
+    assert result["evidence"] == evidence
 
 
 def test_code_reading_llm_routes_require_full_pm_and_programmer_settings() -> None:

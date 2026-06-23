@@ -42,6 +42,7 @@ MAX_OPEN_QUESTIONS = 5
 MAX_TEXT_FIELD_CHARS = 500
 MAX_DISCOVERED_SYMBOLS = 12
 MAX_CANDIDATE_NEXT_HOPS = 6
+PROGRAMMER_LLM_CALL_TIMEOUT_SECONDS = 300
 _PYTHON_DEFINITION_RE = re.compile(
     r"^\s*(?:async\s+def|def|class)\s+([A-Za-z_][A-Za-z0-9_]*)",
 )
@@ -104,6 +105,7 @@ _programmer_llm_config = LLMCallConfig(
     top_k=None,
     max_completion_tokens=CODING_AGENT_PROGRAMMER_LLM_MAX_COMPLETION_TOKENS,
     presence_penalty=None,
+    timeout_seconds=PROGRAMMER_LLM_CALL_TIMEOUT_SECONDS,
     thinking=LLMThinkingConfig(
         enabled=CODING_AGENT_PROGRAMMER_LLM_THINKING_ENABLED,
     ),
@@ -146,22 +148,36 @@ def run_programmer_assignment(
         assignment=assignment,
         bundle=bundle,
     )
-    response = _programmer_llm.invoke([
-        SystemMessage(content=PROGRAMMER_REPORT_PROMPT),
-        HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
-    ], config=_programmer_llm_config)
-    parsed = parse_llm_json_output(response.content)
+    raw_output = ""
+    parsed: object = {}
+    timed_out = False
+    try:
+        response = _programmer_llm.invoke([
+            SystemMessage(content=PROGRAMMER_REPORT_PROMPT),
+            HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
+        ], config=_programmer_llm_config)
+        raw_output = response.content
+        parsed = parse_llm_json_output(raw_output)
+    except TimeoutError:
+        timed_out = True
     report = normalize_programmer_report(
         parsed,
         assignment=assignment,
         bundle=bundle,
     )
+    if timed_out:
+        report = _blocked_report(
+            assignment=assignment,
+            bundle=bundle,
+            reason="Programmer LLM call timed out.",
+        )
     _fill_trace(
         trace,
-        raw_output=response.content,
+        raw_output=raw_output,
         parsed_output=parsed,
         normalized_output=report,
         bundle=bundle,
+        timed_out=timed_out,
     )
     return report
 
@@ -463,9 +479,10 @@ def _fill_trace(
     trace: dict[str, object] | None,
     *,
     raw_output: str,
-    parsed_output: dict[str, Any],
+    parsed_output: object,
     normalized_output: ProgrammerReport,
     bundle: EvidenceBundle,
+    timed_out: bool,
 ) -> None:
     if trace is None:
         return
@@ -477,3 +494,4 @@ def _fill_trace(
     trace["normalized_output"] = normalized_output
     trace["evidence_count"] = len(bundle.rows)
     trace["files_read"] = bundle.files_read
+    trace["timed_out"] = timed_out
