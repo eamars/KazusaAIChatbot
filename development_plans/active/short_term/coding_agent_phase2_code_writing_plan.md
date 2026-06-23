@@ -850,3 +850,63 @@ This plan is complete when:
       exhaustion.
   - **Suite result**: 1/5 hard E2E gates passed and 4/5 failed. Stage 8
     remains unchecked and unsigned.
+- 2026-06-23: Failed E2E gates rerun after code update on branch
+  `coding_agent_feature`.
+  - **Scope**: reran only the previously failed gates from Stage 8:
+    `gate_01`, `gate_02`, `gate_03`, and `gate_05`.
+  - **Timeout mitigation**:
+    - `gate_01`, `gate_03`, and `gate_05` were run with the requested
+      30-minute outer command timeout (`timeout_ms=1800000`).
+    - `gate_02` first hit the 30-minute guard at 30m04s before trace writing;
+      no trace was produced for that attempt.
+    - `gate_02` was rerun again with a 45-minute outer command timeout
+      (`timeout_ms=2700000`) and completed in 23m20s with a trace.
+  - **Review artifact updated**:
+    `test_artifacts/llm_reviews/coding_agent_phase2_e2e_live_review.md`
+  - **Gate 01 rerun**: failed in 10m06s.
+    - Console log:
+      `test_artifacts/llm_run_logs/phase2_e2e_rerun_gate_01_pytest.log`
+    - Trace:
+      `test_artifacts/llm_traces/coding_agent_phase2_live_llm__gate_01__20260623T081610133835Z.json`
+    - Result: `status=rejected`, `validation.status=rejected`,
+      `patch_artifacts=0`, `sandbox_applied=false`.
+    - Failure: Module PM contract repair still failed; `symbols_to_modify`
+      signatures for `__init__` and `get` were invalid placeholder Python.
+  - **Gate 02 rerun attempt 1**: timed out at 30m04s.
+    - Console log:
+      `test_artifacts/llm_run_logs/phase2_e2e_rerun_gate_02_pytest.log`
+    - Trace: none written before timeout.
+    - Follow-up: orphaned Gate 02 pytest processes were inspected and stopped
+      before the second Gate 02 rerun.
+  - **Gate 02 rerun attempt 2**: failed in 23m20s.
+    - Console log:
+      `test_artifacts/llm_run_logs/phase2_e2e_rerun2_gate_02_pytest.log`
+    - Trace:
+      `test_artifacts/llm_traces/coding_agent_phase2_live_llm__gate_02__20260623T092746090133Z.json`
+    - Result: `status=failed`, `validation.status=failed`,
+      `patch_artifacts=4`, `sandbox_applied=false`.
+    - Failure: validation rejected broad runtime exception wrapping in
+      `src/kazusa_ai_chatbot/chat_input_queue.py` and
+      `src/kazusa_ai_chatbot/service.py`; evidence was also incomplete for
+      existing queue tests and `_QueuedChatItem`.
+  - **Gate 03 rerun**: failed in 1.13s.
+    - Console log:
+      `test_artifacts/llm_run_logs/phase2_e2e_rerun_gate_03_pytest.log`
+    - Trace:
+      `test_artifacts/llm_traces/coding_agent_phase2_live_llm__gate_03__20260623T084707619994Z.json`
+    - Result: `status=rejected`, `validation.status=failed`,
+      `patch_artifacts=0`, `sandbox_applied=false`.
+    - Failure: Phase 1 rejected the request as requiring current external web
+      evidence before patch proposal.
+  - **Gate 05 rerun**: failed in 16m04s.
+    - Console log:
+      `test_artifacts/llm_run_logs/phase2_e2e_rerun_gate_05_pytest.log`
+    - Trace:
+      `test_artifacts/llm_traces/coding_agent_phase2_live_llm__gate_05__20260623T090317407917Z.json`
+    - Result: `status=failed`, `validation.status=failed`,
+      `patch_artifacts=5`, `sandbox_applied=false`.
+    - Failure: validation rejected broad exception handling in
+      `tests/test_runner.py` and missing documentation/README artifact
+      `docs/documentation.md`.
+  - **Rerun result**: 0/4 previously failed gates passed. Stage 8 remains
+    unchecked and unsigned.
