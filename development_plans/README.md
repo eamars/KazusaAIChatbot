@@ -52,6 +52,7 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
+| [text_chat_current_event_grounding_bugfix_plan.md](active/bugfix/text_chat_current_event_grounding_bugfix_plan.md) | Large text-chat current-event grounding bugfix plan | draft |
 
 ## Reference Documents
 
