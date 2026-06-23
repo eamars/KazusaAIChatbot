@@ -34,7 +34,7 @@ _CASES_PATH = (
 )
 _ALLOWED_PM_STATUSES = {
     "need_reading",
-    "need_file_pms",
+    "need_module_pms",
     "ready_to_write",
     "needs_user_input",
     "overloaded",
@@ -163,7 +163,7 @@ def _evaluate_top_level_pm(
     status = decision.get("status")
     if status not in _ALLOWED_PM_STATUSES:
         errors.append(f"Top-level PM returned unsupported status {status!r}.")
-    if status != "need_file_pms":
+    if status != "need_module_pms":
         errors.append(
             "Top-level PM did not return module/file work for the ideal input; "
             f"status was {status!r}."
@@ -180,7 +180,7 @@ def _evaluate_top_level_pm(
     if not isinstance(cross_module_imports, dict):
         errors.append("Top-level PM did not expose cross_module_imports.")
     elif cross_module_imports:
-        errors.append("Top-level PM emitted import lines owned by File PM.")
+        errors.append("Top-level PM emitted import lines owned by Module PM.")
 
     leaked_keys = sorted(
         _forbidden_keys(parsed_output, _FORBIDDEN_TOP_PM_OUTPUT_KEYS)

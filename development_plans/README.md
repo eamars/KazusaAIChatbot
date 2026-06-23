@@ -38,7 +38,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [coding_agent_phase2_code_writing_plan.md](active/short_term/coding_agent_phase2_code_writing_plan.md) | High-risk coding-agent Phase 2 code-writing plan | in_progress |
+| [coding_agent_phase2_code_writing_plan.md](active/short_term/coding_agent_phase2_code_writing_plan.md) | High-risk coding-agent Phase 2 code-writing replacement plan | in_progress |
 | [coding_agent_phase3_background_worker_integration_plan.md](active/short_term/coding_agent_phase3_background_worker_integration_plan.md) | Large coding-agent Phase 3 background-worker integration plan | draft |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 
@@ -263,4 +263,5 @@ plans.
 | [self_cognition_tracking_icd.md](archive/superseded/self_cognition_tracking_icd.md) |
 | [rag_supervisor2_inner_loop_agents_plan.md](archive/superseded/rag_supervisor2_inner_loop_agents_plan.md) |
 | [short_circuit_early_stop_plan.md](archive/superseded/short_circuit_early_stop_plan.md) |
+| [coding_agent_phase2_code_writing_plan_superseded_20260623.md](archive/superseded/coding_agent_phase2_code_writing_plan_superseded_20260623.md) |
 

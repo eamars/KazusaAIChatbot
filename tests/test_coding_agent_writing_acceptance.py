@@ -284,8 +284,8 @@ def _writing_result(mode: str = "edit_existing_repository") -> dict[str, Any]:
         "trace_summary": ["writing:done"],
         "trace": {
             "pm_initial": {
-                "raw_output": "{\"status\":\"need_file_pms\"}",
-                "parsed_output": {"status": "need_file_pms"},
+                "raw_output": "{\"status\":\"need_module_pms\"}",
+                "parsed_output": {"status": "need_module_pms"},
             }
         },
     }
@@ -355,7 +355,7 @@ async def test_propose_code_change_uses_fetching_reading_then_writing(
     assert response["patch_artifacts"]
     assert response["validation"]["status"] == "succeeded"
     assert response["trace"]["pm_initial"]["parsed_output"] == {
-        "status": "need_file_pms"
+        "status": "need_module_pms"
     }
     assert calls["fetching"]
     assert calls["reading"]

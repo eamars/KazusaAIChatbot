@@ -39,7 +39,7 @@ from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 PM_STATUSES: tuple[WritingPMStatus, ...] = (
     "need_reading",
-    "need_file_pms",
+    "need_module_pms",
     "ready_to_write",
     "needs_user_input",
     "overloaded",
@@ -49,7 +49,7 @@ WRITING_MODES: tuple[WritingMode, ...] = (
     "edit_existing_repository",
     "create_new_project",
 )
-MAX_ASSIGNMENTS_PER_DECISION = 5
+MAX_ASSIGNMENTS_PER_DECISION = 8
 MAX_ASSIGNMENT_VALUES = 8
 MAX_WORK_INSTRUCTIONS = 4
 MAX_REQUIRED_SLOTS = 8
@@ -89,7 +89,7 @@ patches.
 - repository_summary: public repository metadata for existing-source work.
 - reading_reports: scope-free reading status rows. Source paths, source owner
   candidates, line refs, excerpts, and current-file context are reserved for
-  File Agent and File PM.
+  File Agent and Module PM.
 - source_reading_state: whether source reading is absent, sufficient, or
   exhausted.
 - previous_writing_reports: programmer reports from this writing request.
@@ -102,7 +102,7 @@ patches.
 
 # Decision Procedure
 1. Start from mode.
-   - Return need_file_pms whenever you return one or more file_demands.
+   - Return need_module_pms whenever you return one or more file_demands.
    - Return ready_to_write only when previous_writing_reports already contain
      sufficient completed implementation artifacts and no new file_demands are
      needed.
@@ -117,6 +117,8 @@ patches.
    - Describe the semantic modules, scripts, tests, docs, config, and support
      files needed for the new project.
    - Do not choose concrete paths. File Agent owns file names and locations.
+   - If the user explicitly names a file (e.g. "named foo.py"), set
+     preferred_name to that exact filename.
 4. Build one to five file_demands:
    - Each demand has one semantic owner role, purpose, file_kind,
      interface_contract, integration_contract, change_goal,
@@ -128,10 +130,10 @@ patches.
      and tests together only when one worker can safely own the interface; use
      companion demands when separate workers should own separate files.
    - Keep shared inputs, outputs, data shapes, producer demand ids, consumer
-     demand ids, and validation rules explicit so File PMs do not invent
+     demand ids, and validation rules explicit so Module PMs do not invent
      incompatible interfaces.
    - Do not produce exact import lines. Return cross_module_imports as an empty
-     object; File Agent and File PM will derive imports after paths are known.
+     object; File Agent and Module PM will derive imports after paths are known.
 5. Use previous_writing_reports and patch_check_result:
    - If prior programmer reports are sufficient and validation is absent or
      succeeded, return ready_to_write with no file demands.
@@ -152,7 +154,7 @@ patches.
 # Output Format
 Return strict JSON:
 {
-  "status": "need_reading | need_file_pms | ready_to_write | needs_user_input | overloaded | rejected",
+  "status": "need_reading | need_module_pms | ready_to_write | needs_user_input | overloaded | rejected",
   "mode": "edit_existing_repository | create_new_project",
   "intent": "short generic implementation intent",
   "reading_requests": [
@@ -179,6 +181,7 @@ Return strict JSON:
         "provides_to_pm": ["deliverables PM will reconcile"],
         "consumes_from": ["other file contracts this file needs"]
       },
+      "preferred_name": "user-specified filename or omit",
       "change_goal": "one sentence scoped implementation goal",
       "work_instructions": ["bounded downstream work instruction"],
       "required_slots": ["slots this worker must satisfy"],
@@ -209,7 +212,7 @@ Choose one JSON decision for the provided payload.
 
 Rules:
 - Use the provided mode.
-- If you return any file_demands, status must be need_file_pms.
+- If you return any file_demands, status must be need_module_pms.
 - Use ready_to_write only when previous_writing_reports already contain
   sufficient completed implementation artifacts.
 - For edit_existing_repository, use the user request and source_reading_state.
@@ -227,14 +230,14 @@ Rules:
 - If patch_check_result failed, assign a complete corrected replacement,
   request missing source evidence, or return needs_user_input/overloaded.
 - If file_resolution_feedback or file_plan_feedback is present, correct the
-  file demands for the same user goal before returning need_file_pms.
+  file demands for the same user goal before returning need_module_pms.
 - Return rejected or needs_user_input for command execution, package
   installation, real patch application, secrets, or private credentials.
 - Return strict JSON only, with no markdown or commentary.
 
 Schema:
 {
-  "status": "need_reading | need_file_pms | ready_to_write | needs_user_input | overloaded | rejected",
+  "status": "need_reading | need_module_pms | ready_to_write | needs_user_input | overloaded | rejected",
   "mode": "edit_existing_repository | create_new_project",
   "intent": "short implementation intent",
   "reading_requests": [
@@ -445,10 +448,10 @@ def normalize_writing_pm_decision(
         reading_requests = [_fallback_reading_request(missing_slots)]
     if status == "need_reading":
         external_requests = []
-    if status == "need_file_pms" and not file_demands:
+    if status == "need_module_pms" and not file_demands:
         status = "needs_user_input"
         missing_slots.append("No semantic file demands were provided.")
-    if status != "need_file_pms":
+    if status != "need_module_pms":
         file_demands = []
         cross_module_imports = {}
     if status != "need_reading":
@@ -515,7 +518,7 @@ def _scope_free_reading_reports(
 
         scope_free_report: dict[str, object] = {
             "status": _bounded_text(report.get("status")),
-            "scope_details": "reserved_for_file_agent_and_file_pm",
+            "scope_details": "reserved_for_file_agent_and_module_pm",
         }
         facts = _string_list(report.get("facts"), MAX_PM_READING_FACTS)
         if facts:

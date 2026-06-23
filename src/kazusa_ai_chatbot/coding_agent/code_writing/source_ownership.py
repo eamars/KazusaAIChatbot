@@ -603,7 +603,7 @@ def _repair_feedback(errors: list[str]) -> list[str]:
     if not errors:
         return []
     feedback = [
-        "Correct source ownership before File PM dispatch.",
+        "Correct source ownership before Module PM dispatch.",
         *errors[:MAX_LIST_ITEMS],
     ]
     return feedback

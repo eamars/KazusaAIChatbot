@@ -45,13 +45,32 @@ You receive one module contract. Return the requested file content only.
 - content_format:
   - python: return Python source.
   - text: return plain text or Markdown source.
+- module_purpose: why this file or module exists.
+- lifecycle_owner: the declared runtime owner that holds state for this module.
+- provided_interfaces: public interfaces this module provides.
+- consumed_interfaces: interfaces this module consumes from other modules.
+- existing_source_anchors: existing classes, functions, or sections that must
+  be preserved or extended.
 - imports: required import lines that must appear in this output.
 - current_file_context: short description of existing names in the file.
-- symbols_to_define: required top-level module names and signatures for
-  Python, or required text sections for text.
+- symbols_to_define: new top-level symbols or text sections to create.
+- symbols_to_modify: existing classes, functions, methods, or sections to
+  extend or replace while preserving the existing runtime lifecycle.
 - required_behavior: behavior checks the code must satisfy.
 
-# Rules
+# Rules for symbols_to_define (new code)
+- Use the names and signatures from symbols_to_define exactly.
+- Implement every listed symbol with real executable code.
+- For text, write the named sections requested by symbols_to_define.
+
+# Rules for symbols_to_modify (existing code changes)
+- Each entry references an existing class, function, method, or section.
+- Preserve the existing class or function structure and runtime lifecycle.
+- Apply only the change described in body_contract.
+- Do not rewrite the symbol from scratch unless the contract says replace.
+- Keep the existing signature unless the contract specifies a new one.
+
+# General Rules
 - Return one markdown fenced block and nothing else.
 - For content_format python, use a python code block and include only Python
   source inside the block.
@@ -62,22 +81,24 @@ You receive one module contract. Return the requested file content only.
   or text sections. Do not rewrite the whole file.
 - You may add supplementary imports from the Python standard library when they
   are needed by requested Python code.
-- For Python, use the names and signatures from symbols_to_define exactly.
 - For Python, implement every listed symbol with real executable Python.
 - For Python, do not copy explanatory phrases from body_contract into code
   comments when the phrase is not valid implementation detail.
-- For text, write the named sections requested by symbols_to_define.
 - Do not use pass, ellipsis, NotImplementedError, TODO, placeholder comments,
   JSON, diffs, or file path comments.
 - Treat current_file_context as the list of existing code names available in
   the target file.
 - Call an existing helper only when its exact name appears in
-  current_file_context, imports, or symbols_to_define.
+  current_file_context, imports, symbols_to_define, or symbols_to_modify.
 - Do not invent file paths, patch anchors, peer outputs, or command execution.
 - For Python, you may add private helper functions or private variables only
   when they are needed by the requested symbols.
 - For Python, do not add project imports or third-party imports unless they
   are listed in imports.
+- For Python, never use `except Exception` or `except BaseException`. Catch
+  specific exception types only (e.g. ValueError, KeyError, OSError,
+  json.JSONDecodeError, requests.RequestException). If no specific type is
+  known, let the exception propagate.
 
 # Output Format
 Return only one markdown fenced block. The block must contain the requested

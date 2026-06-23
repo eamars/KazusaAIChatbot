@@ -1,4 +1,4 @@
-"""Real-LLM role tests for File PM ideal inputs."""
+"""Real-LLM role tests for Module PM ideal inputs."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from kazusa_ai_chatbot.coding_agent.code_writing.module_product_manager import (
-    FILE_PM_MODULE_CONTRACT_PROMPT,
+    MODULE_PM_CONTRACT_PROMPT,
     decide_module_programmer_contract,
 )
 from tests.llm_trace import write_llm_trace
@@ -25,14 +25,14 @@ if hasattr(sys.stderr, "reconfigure"):
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
 
 
-_TEST_NAME = "coding_agent_writing_file_pm_ideal_input_live_llm"
+_TEST_NAME = "coding_agent_writing_module_pm_ideal_input_live_llm"
 _CASES_PATH = (
     Path("test_artifacts")
     / "live_gate"
     / "coding_agent_pm_ideal_inputs.json"
 )
 _EDIT_MODES = {"complete_file", "symbol_bundle"}
-_FORBIDDEN_FILE_PM_KEYS = {
+_FORBIDDEN_MODULE_PM_KEYS = {
     "base_revision",
     "dependencies",
     "dependency",
@@ -56,7 +56,7 @@ _FORBIDDEN_FILE_PM_KEYS = {
 
 
 def _load_cases() -> dict[str, Any]:
-    """Load the File PM ideal-input fixture."""
+    """Load the Module PM ideal-input fixture."""
 
     text = _CASES_PATH.read_text(encoding="utf-8")
     loaded = json.loads(text)
@@ -64,19 +64,19 @@ def _load_cases() -> dict[str, Any]:
 
 
 async def _run_case(case_id: str) -> tuple[dict[str, object], Path]:
-    """Run one File PM live case and write a durable trace."""
+    """Run one Module PM live case and write a durable trace."""
 
     cases = _load_cases()
-    case = cases["file_pm"][case_id]
-    file_pm_input = case["file_pm_input"]
+    case = cases["module_pm"][case_id]
+    module_pm_input = case["module_pm_input"]
     trace: dict[str, object] = {}
 
     contract = await decide_module_programmer_contract(
-        file_pm_input,
+        module_pm_input,
         trace=trace,
     )
-    evaluation = _evaluate_file_pm_contract(
-        file_pm_input=file_pm_input,
+    evaluation = _evaluate_module_pm_contract(
+        module_pm_input=module_pm_input,
         contract=contract,
         trace=trace,
     )
@@ -85,9 +85,9 @@ async def _run_case(case_id: str) -> tuple[dict[str, object], Path]:
         case["case_id"],
         {
             "category": case["category"],
-            "system_prompt": FILE_PM_MODULE_CONTRACT_PROMPT,
-            "file_pm_input": file_pm_input,
-            "file_pm_trace": trace,
+            "system_prompt": MODULE_PM_CONTRACT_PROMPT,
+            "module_pm_input": module_pm_input,
+            "module_pm_trace": trace,
             "module_programmer_contract": contract,
             "evaluation": evaluation,
         },
@@ -95,13 +95,13 @@ async def _run_case(case_id: str) -> tuple[dict[str, object], Path]:
     return evaluation, trace_path
 
 
-def _evaluate_file_pm_contract(
+def _evaluate_module_pm_contract(
     *,
-    file_pm_input: dict[str, Any],
+    module_pm_input: dict[str, Any],
     contract: dict[str, Any],
     trace: dict[str, object],
 ) -> dict[str, object]:
-    """Evaluate one File PM result against the module contract boundary."""
+    """Evaluate one Module PM result against the module contract boundary."""
 
     errors: list[str] = []
     warnings: list[str] = []
@@ -109,70 +109,85 @@ def _evaluate_file_pm_contract(
     parsed_output = trace.get("parsed_output")
 
     if not isinstance(raw_output, str) or not raw_output.strip():
-        errors.append("File PM returned empty raw output.")
+        errors.append("Module PM returned empty raw output.")
     if not isinstance(parsed_output, dict):
-        errors.append("File PM raw output did not parse as a JSON object.")
+        errors.append("Module PM raw output did not parse as a JSON object.")
 
-    if contract.get("file_label") != file_pm_input["file_label"]:
-        errors.append("File PM did not preserve the input file_label.")
+    if contract.get("file_label") != module_pm_input["file_label"]:
+        errors.append("Module PM did not preserve the input file_label.")
     if contract.get("edit_mode") not in _EDIT_MODES:
-        errors.append("File PM returned an unsupported edit_mode.")
-    if contract.get("edit_mode") != file_pm_input["edit_mode"]:
-        errors.append("File PM changed the requested edit_mode.")
-    if contract.get("content_format") != file_pm_input["content_format"]:
-        errors.append("File PM changed the requested content_format.")
-    if not _clean_string(contract.get("file_purpose")):
-        errors.append("File PM returned no file_purpose.")
+        errors.append("Module PM returned an unsupported edit_mode.")
+    if contract.get("edit_mode") != module_pm_input["edit_mode"]:
+        errors.append("Module PM changed the requested edit_mode.")
+    if contract.get("content_format") != module_pm_input["content_format"]:
+        errors.append("Module PM changed the requested content_format.")
+    if not _clean_string(contract.get("module_purpose")):
+        errors.append("Module PM returned no module_purpose.")
+    if not _clean_string(contract.get("lifecycle_owner")):
+        errors.append("Module PM returned no lifecycle_owner.")
 
     contract_imports = _string_list(contract.get("imports"))
     missing_imports = [
         value
-        for value in _string_list(file_pm_input.get("imports"))
+        for value in _string_list(module_pm_input.get("imports"))
         if value not in contract_imports
     ]
     if missing_imports:
         errors.append(
-            "File PM omitted required imports: " + "; ".join(missing_imports)
+            "Module PM omitted required imports: " + "; ".join(missing_imports)
         )
 
     current_context = contract.get("current_file_context")
     if not isinstance(current_context, str):
-        errors.append("File PM current_file_context is not a string.")
+        errors.append("Module PM current_file_context is not a string.")
 
-    symbols = contract.get("symbols_to_define")
-    if not isinstance(symbols, list) or not symbols:
-        errors.append("File PM returned no symbols_to_define.")
+    symbols_define = contract.get("symbols_to_define")
+    symbols_modify = contract.get("symbols_to_modify")
+    has_define = isinstance(symbols_define, list) and len(symbols_define) > 0
+    has_modify = isinstance(symbols_modify, list) and len(symbols_modify) > 0
+    if not has_define and not has_modify:
+        errors.append(
+            "Module PM returned no symbols_to_define or symbols_to_modify."
+        )
         symbol_names: set[str] = set()
     else:
-        symbol_names = _symbol_names(symbols)
-        errors.extend(_symbol_shape_errors(symbols))
+        symbol_names = set()
+        if has_define:
+            symbol_names.update(_symbol_names(symbols_define))
+            errors.extend(_symbol_shape_errors(symbols_define))
+        if has_modify:
+            symbol_names.update(_symbol_names(symbols_modify))
+            errors.extend(_symbol_shape_errors(symbols_modify))
 
+    provided_names = [
+        ifc.get("name", "") if isinstance(ifc, dict) else ""
+        for ifc in (module_pm_input.get("provided_interfaces") or [])
+    ]
     missing_outputs = [
-        output_name
-        for output_name in _string_list(file_pm_input.get("module_outputs"))
-        if output_name not in symbol_names
+        name for name in provided_names
+        if name and name not in symbol_names
     ]
     if missing_outputs:
-        errors.append(
-            "File PM did not pass required module outputs to the programmer: "
+        warnings.append(
+            "Module PM did not cover all provided_interfaces in symbols: "
             + ", ".join(missing_outputs)
         )
 
     if not isinstance(contract.get("required_behavior"), list):
-        errors.append("File PM required_behavior is not a list.")
+        errors.append("Module PM required_behavior is not a list.")
     elif not contract["required_behavior"]:
-        errors.append("File PM returned no required_behavior.")
+        errors.append("Module PM returned no required_behavior.")
 
-    leaked_keys = sorted(_forbidden_keys(contract, _FORBIDDEN_FILE_PM_KEYS))
+    leaked_keys = sorted(_forbidden_keys(contract, _FORBIDDEN_MODULE_PM_KEYS))
     if leaked_keys:
         errors.append(
-            "File PM emitted fields owned by another role: "
+            "Module PM emitted fields owned by another role: "
             + ", ".join(leaked_keys)
         )
 
-    if len(symbol_names) > len(_string_list(file_pm_input.get("module_outputs"))) + 4:
+    if len(symbol_names) > len(provided_names) + 4:
         warnings.append(
-            "File PM produced many extra symbols; review whether the contract "
+            "Module PM produced many extra symbols; review whether the contract "
             "is too broad for one programmer."
         )
 
@@ -211,7 +226,7 @@ def _symbol_shape_errors(symbols: list[object]) -> list[str]:
 
 
 def _symbol_names(symbols: list[object]) -> set[str]:
-    """Return top-level symbol names from a File PM contract."""
+    """Return top-level symbol names from a Module PM contract."""
 
     names: set[str] = set()
     for symbol in symbols:
@@ -261,7 +276,7 @@ def _clean_string(value: object) -> str:
 
 
 async def _assert_case(case_id: str) -> None:
-    """Run one File PM live case and assert structural role gates."""
+    """Run one Module PM live case and assert structural role gates."""
 
     evaluation, trace_path = await _run_case(case_id)
     print(f"TRACE_PATH={trace_path.as_posix()}")

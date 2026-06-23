@@ -625,6 +625,8 @@ def _provided_python_symbols(
     values = [
         interface_contract.get("component"),
         interface_contract.get("exports"),
+        interface_contract.get("outputs"),
+        interface_contract.get("invariants"),
     ]
     symbols: list[str] = []
     for value in values:

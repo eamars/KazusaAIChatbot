@@ -178,7 +178,7 @@ mutation by the model.
 Kazusa lesson:
 
 - Codex's patch path is the strongest implementation reference for Kazusa's
-  File Edit Manager and patcher boundary.
+  Patcher boundary.
 - Keep semantic code generation separate from edit mechanics.
 - Deterministic code should own path targeting, patch grammar, filesystem
   verification, sandbox policy, and final patch artifact validation.
@@ -263,7 +263,7 @@ guide is about the normal one-session agent loop.
 | Shell/exec tools | Repository discovery, bounded `rg`, file reads, validation commands in future `code_executing` | Adapt with stricter allowlists and output caps. |
 | `ContextManager` | Run ledger, evidence store, compact role reports | Adapt. Store private raw evidence outside model prompts. |
 | `AGENTS.md` loading | Source/project guidance and runtime role instructions | Adapt. Do not let broad project docs overload local role prompts. |
-| `apply_patch` runtime | File Edit Manager and patcher validation | Keep the separation between semantic content and edit mechanics. |
+| `apply_patch` runtime | Patcher validation | Keep the separation between semantic content and edit mechanics. |
 | Auto-compaction | Context budget and role-report summarization | Adapt around local-LLM contracts, not free-form transcript summaries. |
 
 ## Implementation-Agent Checklist
@@ -281,7 +281,7 @@ When using Codex as a reference for Kazusa:
    - file agent owns path resolution and owned/read-only maps;
    - sub-PMs own one-file or one-module unit contracts;
    - programmers produce one bounded function/test/doc body;
-   - File Edit Manager or patcher owns edit mechanics;
+   - Patcher owns edit mechanics;
    - validators own structural and behavioral acceptance.
 5. Keep raw repository files, command output, local paths, workspace roots,
    cache keys, and traces out of public responses.

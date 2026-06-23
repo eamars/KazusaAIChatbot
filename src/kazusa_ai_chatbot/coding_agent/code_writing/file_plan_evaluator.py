@@ -23,7 +23,7 @@ def evaluate_file_plan(
     source_scope: CodeSourceScope | None,
     mode: WritingMode,
 ) -> WritingFilePlanEvaluation:
-    """Validate resolved file/module contracts before File PM dispatch."""
+    """Validate resolved file/module contracts before Module PM dispatch."""
 
     errors: list[str] = []
     if not file_contracts:

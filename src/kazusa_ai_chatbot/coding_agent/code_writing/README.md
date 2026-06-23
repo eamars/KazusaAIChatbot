@@ -72,8 +72,8 @@ CodeWritingRequest
 -> Source Ownership PM selects existing-source owners from bounded evidence
 -> file agent validates file mechanics and builds file/module contracts
 -> file-plan evaluator accepts the resolved contracts
--> one File PM per accepted file/module contract on CODING_AGENT_PM_LLM
--> module-contract evaluator accepts each File PM programmer contract
+-> one Module PM per accepted file/module contract on CODING_AGENT_PM_LLM
+-> module-contract evaluator accepts each Module PM programmer contract
 -> limited programmer workers on CODING_AGENT_PROGRAMMER_LLM, one module contract each
 -> patcher on CODING_AGENT_PROGRAMMER_LLM builds PM-selected output
 -> sandbox patch validation
@@ -83,16 +83,25 @@ CodeWritingRequest
 ```
 
 The top-level writing PM owns semantic decomposition, sufficiency, writing
-mode, external evidence need, file purposes, cross-file import needs, File PM
-review reconciliation, and final artifact selection. The Source Ownership PM
-chooses existing-source owner paths from bounded reading evidence and candidate
-paths. The shared file agent owns file mechanics after ownership is known:
-path safety, new-file reservation, base revision checks, current file context
-packaging, and path maps. Each File PM owns one module-level programmer
-contract for an accepted file/module assignment, including exact imports,
-required symbols, bounded current file context, and required behavior.
-Programmer workers own scoped implementation content for one accepted module
-contract and do not see peer programmer work. The patcher owns edit mechanics
+mode, external evidence need, file purposes, the feature-level interface
+contract, lifecycle ownership, provided/consumed interfaces across files,
+Module PM review reconciliation, and final artifact selection. The Source
+Ownership PM chooses existing-source owner paths from bounded reading evidence
+and candidate paths. The shared file agent owns file mechanics after ownership
+is known: path safety, new-file reservation, base revision checks, current file
+context packaging, and path maps. Each Module PM owns one local
+module-boundary programmer contract for an accepted file/module assignment,
+including lifecycle owner, provided/consumed interfaces, existing source
+anchors, exact imports, symbols to define or modify, a compact
+`cross_slice_interfaces` summary of consumed interfaces from other module
+slices, bounded current file context, and required behavior. The module-contract
+evaluator validates that `symbols_to_modify` entries reference names present in
+`current_file_context` or `existing_source_anchors`. Programmer workers own
+scoped implementation content for one accepted module-boundary contract and do
+not see peer programmer work or the whole feature picture. The programmer
+prompt uses separate instructions for `symbols_to_define` (write new code) and
+`symbols_to_modify` (extend or replace existing code while preserving runtime
+lifecycle). The patcher owns edit mechanics
 and converts PM-selected programmer content into unified diffs or new-project
 file trees. Deterministic code owns workspace preparation, patch parsing,
 sandbox validation, caps, and public sanitization.

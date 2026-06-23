@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 from kazusa_ai_chatbot.coding_agent.code_writing.module_product_manager import (
-    FILE_PM_MODULE_CONTRACT_PROMPT,
+    MODULE_PM_CONTRACT_PROMPT,
     decide_module_programmer_contract,
 )
 from kazusa_ai_chatbot.coding_agent.code_writing.product_manager import (
@@ -54,7 +54,7 @@ _FORBIDDEN_PM_KEYS = {
     "repo_relative_path",
     "symbols_to_define",
 }
-_FORBIDDEN_FILE_PM_KEYS = {
+_FORBIDDEN_MODULE_PM_KEYS = {
     "base_revision",
     "diff",
     "owned_path",
@@ -102,16 +102,16 @@ async def test_role_top_pm_case_01() -> None:
     assert evaluation["status"] == "passed", "\n".join(evaluation["errors"])
 
 
-async def test_role_file_pm_case_01() -> None:
-    await _assert_file_pm_case("case_01")
+async def test_role_module_pm_case_01() -> None:
+    await _assert_module_pm_case("case_01")
 
 
-async def test_role_file_pm_case_02() -> None:
-    await _assert_file_pm_case("case_02")
+async def test_role_module_pm_case_02() -> None:
+    await _assert_module_pm_case("case_02")
 
 
-async def test_role_file_pm_case_03() -> None:
-    await _assert_file_pm_case("case_03")
+async def test_role_module_pm_case_03() -> None:
+    await _assert_module_pm_case("case_03")
 
 
 async def test_role_programmer_case_01() -> None:
@@ -122,29 +122,29 @@ async def test_role_programmer_case_02() -> None:
     await _assert_programmer_case("case_02")
 
 
-async def _assert_file_pm_case(case_id: str) -> None:
+async def _assert_module_pm_case(case_id: str) -> None:
     cases = _cases()
-    case = cases["file_pm"][case_id]
-    file_pm_input = case["file_pm_input"]
+    case = cases["module_pm"][case_id]
+    module_pm_input = case["module_pm_input"]
     trace: dict[str, object] = {}
 
     contract = await decide_module_programmer_contract(
-        file_pm_input,
+        module_pm_input,
         trace=trace,
     )
-    evaluation = _evaluate_file_pm(
-        file_pm_input=file_pm_input,
+    evaluation = _evaluate_module_pm(
+        module_pm_input=module_pm_input,
         contract=contract,
         trace=trace,
     )
     trace_path = write_llm_trace(
         _TEST_NAME,
-        f"file_pm_{case['case_id']}",
+        f"module_pm_{case['case_id']}",
         {
             "category": case["category"],
-            "system_prompt": FILE_PM_MODULE_CONTRACT_PROMPT,
-            "file_pm_input": file_pm_input,
-            "file_pm_trace": trace,
+            "system_prompt": MODULE_PM_CONTRACT_PROMPT,
+            "module_pm_input": module_pm_input,
+            "module_pm_trace": trace,
             "module_programmer_contract": contract,
             "evaluation": evaluation,
         },
@@ -199,8 +199,8 @@ def _evaluate_top_pm(
         errors.append("Top PM returned empty raw output.")
     if not isinstance(trace.get("parsed_output"), dict):
         errors.append("Top PM output did not parse as JSON.")
-    if decision.get("status") != "need_file_pms":
-        errors.append("Top PM did not request File PM work.")
+    if decision.get("status") != "need_module_pms":
+        errors.append("Top PM did not request Module PM work.")
     file_demands = decision.get("file_demands")
     if not isinstance(file_demands, list) or not file_demands:
         errors.append("Top PM returned no file demands.")
@@ -217,31 +217,31 @@ def _evaluate_top_pm(
     return _evaluation(errors=errors)
 
 
-def _evaluate_file_pm(
+def _evaluate_module_pm(
     *,
-    file_pm_input: dict[str, Any],
+    module_pm_input: dict[str, Any],
     contract: dict[str, Any],
     trace: dict[str, object],
 ) -> dict[str, object]:
     errors: list[str] = []
     if not isinstance(trace.get("raw_output"), str) or not trace["raw_output"]:
-        errors.append("File PM returned empty raw output.")
+        errors.append("Module PM returned empty raw output.")
     if not isinstance(trace.get("parsed_output"), dict):
-        errors.append("File PM output did not parse as JSON.")
+        errors.append("Module PM output did not parse as JSON.")
     for field_name in ("file_label", "edit_mode", "content_format"):
-        if contract.get(field_name) != file_pm_input[field_name]:
-            errors.append(f"File PM changed {field_name}.")
+        if contract.get(field_name) != module_pm_input[field_name]:
+            errors.append(f"Module PM changed {field_name}.")
     if not isinstance(contract.get("imports"), list):
-        errors.append("File PM imports is not a list.")
+        errors.append("Module PM imports is not a list.")
     if not isinstance(contract.get("symbols_to_define"), list):
-        errors.append("File PM symbols_to_define is not a list.")
+        errors.append("Module PM symbols_to_define is not a list.")
     elif not contract["symbols_to_define"]:
-        errors.append("File PM returned no symbols_to_define.")
+        errors.append("Module PM returned no symbols_to_define.")
     if not isinstance(contract.get("required_behavior"), list):
-        errors.append("File PM required_behavior is not a list.")
-    leaked = sorted(_forbidden_keys(contract, _FORBIDDEN_FILE_PM_KEYS))
+        errors.append("Module PM required_behavior is not a list.")
+    leaked = sorted(_forbidden_keys(contract, _FORBIDDEN_MODULE_PM_KEYS))
     if leaked:
-        errors.append("File PM leaked non-programmer fields: " + ", ".join(leaked))
+        errors.append("Module PM leaked non-programmer fields: " + ", ".join(leaked))
     return _evaluation(errors=errors)
 
 

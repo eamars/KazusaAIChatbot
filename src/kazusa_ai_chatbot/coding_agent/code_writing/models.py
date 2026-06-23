@@ -14,7 +14,7 @@ from kazusa_ai_chatbot.coding_agent.code_reading.models import (
 WritingMode = Literal["edit_existing_repository", "create_new_project"]
 WritingPMStatus = Literal[
     "need_reading",
-    "need_file_pms",
+    "need_module_pms",
     "ready_to_write",
     "needs_user_input",
     "overloaded",
@@ -129,7 +129,7 @@ class WritingFilePlanEvaluation(TypedDict):
 
 
 class ModuleContractEvaluation(TypedDict):
-    """Structural evaluation of one File-PM programmer contract."""
+    """Structural evaluation of one Module-PM programmer contract."""
 
     status: ModuleContractEvaluationStatus
     file_contract_id: str
@@ -174,7 +174,7 @@ class WritingFileDemand(TypedDict, total=False):
 
 
 class WritingFileResolution(TypedDict):
-    """Resolved file plan returned before File PM dispatch."""
+    """Resolved file plan returned before Module PM dispatch."""
 
     status: WritingFileResolutionStatus
     file_contracts: list["WritingFileModuleContract"]
@@ -301,7 +301,7 @@ class WritingProgrammerAssignment(TypedDict, total=False):
 
 
 class WritingFileModuleContract(TypedDict, total=False):
-    """One resolved file/module responsibility owned by a File PM."""
+    """One resolved file/module responsibility owned by a Module PM."""
 
     file_contract_id: str
     role: str
@@ -336,10 +336,15 @@ class ModuleProgrammerContract(TypedDict):
     file_label: str
     edit_mode: ModuleProgrammerEditMode
     content_format: ModuleProgrammerContentFormat
-    file_purpose: str
+    module_purpose: str
+    lifecycle_owner: str
+    provided_interfaces: list[dict[str, object]]
+    consumed_interfaces: list[dict[str, object]]
+    existing_source_anchors: list[dict[str, object]]
     imports: list[str]
     current_file_context: str
     symbols_to_define: list[ModuleProgrammerSymbol]
+    symbols_to_modify: list[ModuleProgrammerSymbol]
     required_behavior: list[str]
 
 
@@ -349,20 +354,32 @@ class ModuleProgrammerResult(TypedDict):
     code_artifact: str
 
 
-class FilePMModuleInput(TypedDict):
-    """Model-facing input for one File PM module contract."""
+class CrossSliceInterfaceSummary(TypedDict):
+    """Compact summary of one provided interface from another module slice."""
+
+    provider_slice_id: str
+    name: str
+    contract: str
+
+
+class ModulePMInput(TypedDict):
+    """Model-facing input for one Module PM module contract."""
 
     file_label: str
     edit_mode: ModuleProgrammerEditMode
     content_format: ModuleProgrammerContentFormat
-    file_need: str
-    file_purpose: str
-    module_outputs: list[str]
-    module_consumers: list[str]
+    module_purpose: str
+    lifecycle_owner: str
+    provided_interfaces: list[dict[str, object]]
+    consumed_interfaces: list[dict[str, object]]
+    existing_source_anchors: list[dict[str, object]]
+    integration_behaviors: list[str]
     imports: list[str]
     current_file_context: str
+    source_file_chars: int
     selected_evidence: list[dict[str, object]]
     required_behavior: list[str]
+    cross_slice_interfaces: list[CrossSliceInterfaceSummary]
     module_contract_feedback: NotRequired[ModuleContractEvaluation]
 
 

@@ -4,7 +4,7 @@ from kazusa_ai_chatbot.coding_agent.code_writing.agent import run
 from kazusa_ai_chatbot.coding_agent.code_writing.models import (
     CodeWritingRequest,
     CodeWritingResult,
-    FilePMModuleInput,
+    ModulePMInput,
     ModuleContractEvaluation,
     ModuleProgrammerContract,
     ModuleProgrammerResult,
@@ -27,7 +27,7 @@ from kazusa_ai_chatbot.coding_agent.code_writing.models import (
 __all__ = [
     "CodeWritingRequest",
     "CodeWritingResult",
-    "FilePMModuleInput",
+    "ModulePMInput",
     "ModuleContractEvaluation",
     "ModuleProgrammerContract",
     "ModuleProgrammerResult",

@@ -14,7 +14,7 @@ from kazusa_ai_chatbot.coding_agent.context_budget import (
     prompt_budget_metadata,
 )
 from kazusa_ai_chatbot.coding_agent.code_writing.models import (
-    FilePMModuleInput,
+    ModulePMInput,
     ModuleProgrammerContentFormat,
     ModuleProgrammerContract,
     ModuleProgrammerEditMode,
@@ -50,8 +50,8 @@ MODULE_PROGRAMMER_CONTENT_FORMATS: tuple[ModuleProgrammerContentFormat, ...] = (
 )
 
 
-FILE_PM_MODULE_CONTRACT_PROMPT = '''\
-You are a File PM for a code-writing agent.
+MODULE_PM_CONTRACT_PROMPT = '''\
+You are a Module PM for a code-writing agent.
 You receive one accepted file assignment. Create one programmer contract for
 that file or module. The programmer will use only your contract.
 
@@ -63,11 +63,20 @@ that file or module. The programmer will use only your contract.
 - content_format:
   - python: programmer writes Python source.
   - text: programmer writes plain text or Markdown source.
-- file_need and file_purpose: why this file or module exists.
-- module_outputs: public names this module should provide.
-- module_consumers: who uses those names.
+- module_purpose: why this file or module exists.
+- lifecycle_owner: the declared runtime owner that holds state for this module.
+- provided_interfaces: public interfaces this module provides.
+- consumed_interfaces: interfaces this module consumes from other modules.
+- existing_source_anchors: existing classes, functions, or sections that must
+  be preserved or extended.
+- integration_behaviors: how this module fits the wider feature.
+- cross_slice_interfaces: compact summaries of interfaces from other module
+  slices that this module consumes.
 - imports: required import lines. Pass these through when they are needed.
 - current_file_context: existing names and behavior available in this file.
+  This is a bounded excerpt. It may be shorter than the full source file.
+- source_file_chars: total character count of the original source file.
+  0 for new files.
 - selected_evidence: source facts relevant to this file assignment.
 - required_behavior: observable behavior this file assignment must satisfy.
 
@@ -79,10 +88,17 @@ that file or module. The programmer will use only your contract.
 - Do not invent project imports. Use only import lines supplied in the input
   or exact imported names visible in current_file_context or selected_evidence.
 - Use exact Python identifiers visible in current_file_context,
-  selected_evidence, module_outputs, or imports. Do not rename existing
-  classes, functions, methods, or helpers.
-- Use symbols_to_define to list the public or test symbols the programmer must
-  write for Python, or the named sections the programmer must write for text.
+  selected_evidence, provided_interfaces, existing_source_anchors, or imports.
+  Do not rename existing classes, functions, methods, or helpers.
+- Use symbols_to_define to list new public or test symbols the programmer must
+  write for Python, or the new named sections the programmer must write for text.
+- Use symbols_to_modify to list existing classes, functions, methods, or
+  sections the programmer must extend or replace. Every entry must reference a
+  name visible in current_file_context or existing_source_anchors.
+- If source_file_chars is larger than the current_file_context length, the
+  source file was too large to include in full. Only reference symbols visible
+  in current_file_context or existing_source_anchors. Do not guess at symbols
+  that might exist beyond the bounded excerpt.
 - Give each symbol or section a name, kind, signature, and body_contract.
 - Put required fields or methods for a class in children.
 - For Python signatures, write valid Python declarations or assignments only.
@@ -95,15 +111,28 @@ that file or module. The programmer will use only your contract.
   "file_label": "same file_label as input",
   "edit_mode": "complete_file | symbol_bundle",
   "content_format": "python | text",
-  "file_purpose": "plain-language purpose for this file or module",
+  "module_purpose": "plain-language purpose for this file or module",
+  "lifecycle_owner": "declared runtime owner that holds state",
+  "provided_interfaces": [{"name": "...", "kind": "...", "contract": "..."}],
+  "consumed_interfaces": [{"name": "...", "provider_slice_id": "...", "contract": "..."}],
+  "existing_source_anchors": [{"name": "...", "kind": "...", "required_action": "preserve | extend | call | replace"}],
   "imports": ["required import line"],
   "current_file_context": "bounded context string",
   "symbols_to_define": [
     {
-      "name": "symbol name",
+      "name": "new symbol name",
       "kind": "module_variable | dataclass | class | function | method | test | section",
       "signature": "exact declaration, assignment shape, or section heading",
       "body_contract": "plain-language behavior or text the item must implement",
+      "children": []
+    }
+  ],
+  "symbols_to_modify": [
+    {
+      "name": "existing symbol name from current_file_context or existing_source_anchors",
+      "kind": "class | function | method | section",
+      "signature": "exact current declaration",
+      "body_contract": "plain-language change to apply while preserving existing lifecycle",
       "children": []
     }
   ],
@@ -111,15 +140,15 @@ that file or module. The programmer will use only your contract.
 }
 '''
 
-FILE_PM_MODULE_CONTRACT_RETRY_PROMPT = '''\
-Your previous File PM response was empty or not valid JSON.
+MODULE_PM_CONTRACT_RETRY_PROMPT = '''\
+Your previous Module PM response was empty or not valid JSON.
 Return one strict JSON object only, matching the required output format from
 the system instructions. Do not include markdown, commentary, or code fences.
 '''
 
-_file_pm_module_llm = LLInterface()
-_file_pm_module_llm_config = LLMCallConfig(
-    stage_name=f"{__name__}.file_pm_module_contract",
+_module_pm_module_llm = LLInterface()
+_module_pm_module_llm_config = LLMCallConfig(
+    stage_name=f"{__name__}.module_pm_module_contract",
     route_name="CODING_AGENT_PM_LLM",
     base_url=CODING_AGENT_PM_LLM_BASE_URL,
     api_key=CODING_AGENT_PM_LLM_API_KEY,
@@ -136,24 +165,24 @@ _file_pm_module_llm_config = LLMCallConfig(
 
 
 async def decide_module_programmer_contract(
-    file_pm_input: FilePMModuleInput,
+    module_pm_input: ModulePMInput,
     *,
     trace: dict[str, object] | None = None,
 ) -> ModuleProgrammerContract:
-    """Ask the File PM for one module-level programmer contract."""
+    """Ask the Module PM for one module-level programmer contract."""
 
-    payload = _file_pm_module_payload(file_pm_input)
+    payload = _module_pm_module_payload(module_pm_input)
     payload_text = json.dumps(payload, ensure_ascii=False, indent=2)
     context_budget = prompt_budget_metadata(
-        system_prompt=FILE_PM_MODULE_CONTRACT_PROMPT,
+        system_prompt=MODULE_PM_CONTRACT_PROMPT,
         payload_text=payload_text,
         target_input_tokens=PM_TARGET_INPUT_TOKEN_CAP,
         selected_evidence_refs=collect_selected_evidence_refs(payload),
     )
     if context_budget["over_hard_cap"]:
         contract = _empty_module_programmer_contract(
-            file_pm_input=file_pm_input,
-            reason="File PM prompt exceeded the context budget.",
+            module_pm_input=module_pm_input,
+            reason="Module PM prompt exceeded the context budget.",
         )
         _fill_module_contract_trace(
             trace,
@@ -165,12 +194,12 @@ async def decide_module_programmer_contract(
         )
         return contract
 
-    raw_output, parsed, attempts = await _invoke_file_pm_module_json(
+    raw_output, parsed, attempts = await _invoke_module_pm_module_json(
         payload_text,
     )
     contract = normalize_module_programmer_contract(
         parsed,
-        file_pm_input=file_pm_input,
+        module_pm_input=module_pm_input,
     )
     _fill_module_contract_trace(
         trace,
@@ -184,7 +213,7 @@ async def decide_module_programmer_contract(
     return contract
 
 
-async def _invoke_file_pm_module_json(
+async def _invoke_module_pm_module_json(
     payload_text: str,
 ) -> tuple[str, object, list[dict[str, object]]]:
     attempts: list[dict[str, object]] = []
@@ -192,17 +221,17 @@ async def _invoke_file_pm_module_json(
     parsed: object = {}
     for attempt_index in range(2):
         messages = [
-            SystemMessage(content=FILE_PM_MODULE_CONTRACT_PROMPT),
+            SystemMessage(content=MODULE_PM_CONTRACT_PROMPT),
             HumanMessage(content=payload_text),
         ]
         if attempt_index > 0:
-            messages.append(HumanMessage(content=FILE_PM_MODULE_CONTRACT_RETRY_PROMPT))
+            messages.append(HumanMessage(content=MODULE_PM_CONTRACT_RETRY_PROMPT))
         timed_out = False
         try:
             response = await asyncio.wait_for(
-                _file_pm_module_llm.ainvoke(
+                _module_pm_module_llm.ainvoke(
                     messages,
-                    config=_file_pm_module_llm_config,
+                    config=_module_pm_module_llm_config,
                 ),
                 timeout=SUB_PM_LLM_CALL_TIMEOUT_SECONDS,
             )
@@ -226,28 +255,28 @@ async def _invoke_file_pm_module_json(
 def normalize_module_programmer_contract(
     parsed: object,
     *,
-    file_pm_input: FilePMModuleInput,
+    module_pm_input: ModulePMInput,
 ) -> ModuleProgrammerContract:
-    """Normalize File PM JSON into the module programmer contract."""
+    """Normalize Module PM JSON into the module programmer contract."""
 
     if not isinstance(parsed, dict):
         contract = _empty_module_programmer_contract(
-            file_pm_input=file_pm_input,
-            reason="File PM returned malformed output.",
+            module_pm_input=module_pm_input,
+            reason="Module PM returned malformed output.",
         )
         return contract
 
     edit_mode = _bounded_text(parsed.get("edit_mode"))
     if edit_mode not in MODULE_PROGRAMMER_EDIT_MODES:
-        edit_mode = file_pm_input["edit_mode"]
+        edit_mode = module_pm_input["edit_mode"]
 
     content_format = _bounded_text(parsed.get("content_format"))
     if content_format not in MODULE_PROGRAMMER_CONTENT_FORMATS:
-        content_format = file_pm_input["content_format"]
+        content_format = module_pm_input["content_format"]
 
     imports = _string_list(parsed.get("imports"), MAX_LIST_ITEMS)
     if not imports:
-        imports = _string_list(file_pm_input["imports"], MAX_LIST_ITEMS)
+        imports = _string_list(module_pm_input["imports"], MAX_LIST_ITEMS)
 
     current_file_context = _bounded_multiline_text(
         parsed.get("current_file_context"),
@@ -255,7 +284,7 @@ def normalize_module_programmer_contract(
     )
     if not current_file_context:
         current_file_context = _bounded_multiline_text(
-            file_pm_input["current_file_context"],
+            module_pm_input["current_file_context"],
             MAX_SOURCE_CONTEXT_TEXT_CHARS,
         )
 
@@ -265,68 +294,101 @@ def normalize_module_programmer_contract(
     )
     if not required_behavior:
         required_behavior = _string_list(
-            file_pm_input["required_behavior"],
+            module_pm_input["required_behavior"],
             MAX_LIST_ITEMS,
         )
 
     contract: ModuleProgrammerContract = {
         "file_label": (
             _bounded_text(parsed.get("file_label"))
-            or file_pm_input["file_label"]
+            or module_pm_input["file_label"]
         ),
         "edit_mode": edit_mode,
         "content_format": content_format,
-        "file_purpose": (
-            _bounded_text(parsed.get("file_purpose"))
-            or file_pm_input["file_purpose"]
+        "module_purpose": (
+            _bounded_text(parsed.get("module_purpose"))
+            or module_pm_input["module_purpose"]
         ),
+        "lifecycle_owner": (
+            _bounded_text(parsed.get("lifecycle_owner"))
+            or module_pm_input["lifecycle_owner"]
+        ),
+        "provided_interfaces": _dict_list(
+            parsed.get("provided_interfaces"),
+            MAX_LIST_ITEMS,
+        ) or module_pm_input["provided_interfaces"],
+        "consumed_interfaces": _dict_list(
+            parsed.get("consumed_interfaces"),
+            MAX_LIST_ITEMS,
+        ) or module_pm_input["consumed_interfaces"],
+        "existing_source_anchors": _dict_list(
+            parsed.get("existing_source_anchors"),
+            MAX_LIST_ITEMS,
+        ) or module_pm_input["existing_source_anchors"],
         "imports": imports,
         "current_file_context": current_file_context,
         "symbols_to_define": _module_symbols_from_parsed(
             parsed.get("symbols_to_define"),
+        ),
+        "symbols_to_modify": _module_symbols_from_parsed(
+            parsed.get("symbols_to_modify"),
         ),
         "required_behavior": required_behavior,
     }
     return contract
 
 
-def _file_pm_module_payload(
-    file_pm_input: FilePMModuleInput,
+def _module_pm_module_payload(
+    module_pm_input: ModulePMInput,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
-        "file_label": _bounded_text(file_pm_input["file_label"]),
-        "edit_mode": file_pm_input["edit_mode"],
-        "content_format": file_pm_input["content_format"],
-        "file_need": _bounded_multiline_text(
-            file_pm_input["file_need"],
+        "file_label": _bounded_text(module_pm_input["file_label"]),
+        "edit_mode": module_pm_input["edit_mode"],
+        "content_format": module_pm_input["content_format"],
+        "module_purpose": _bounded_multiline_text(
+            module_pm_input["module_purpose"],
             MAX_QUESTION_CHARS,
         ),
-        "file_purpose": _bounded_multiline_text(
-            file_pm_input["file_purpose"],
-            MAX_QUESTION_CHARS,
+        "lifecycle_owner": _bounded_text(
+            module_pm_input["lifecycle_owner"],
         ),
-        "module_outputs": _string_list(
-            file_pm_input["module_outputs"],
+        "provided_interfaces": _dict_list(
+            module_pm_input["provided_interfaces"],
             MAX_LIST_ITEMS,
         ),
-        "module_consumers": _string_list(
-            file_pm_input["module_consumers"],
+        "consumed_interfaces": _dict_list(
+            module_pm_input["consumed_interfaces"],
             MAX_LIST_ITEMS,
         ),
-        "imports": _string_list(file_pm_input["imports"], MAX_LIST_ITEMS),
+        "existing_source_anchors": _dict_list(
+            module_pm_input["existing_source_anchors"],
+            MAX_LIST_ITEMS,
+        ),
+        "integration_behaviors": _string_list(
+            module_pm_input["integration_behaviors"],
+            MAX_LIST_ITEMS,
+        ),
+        "imports": _string_list(module_pm_input["imports"], MAX_LIST_ITEMS),
         "current_file_context": _bounded_multiline_text(
-            file_pm_input["current_file_context"],
+            module_pm_input["current_file_context"],
             MAX_SOURCE_CONTEXT_TEXT_CHARS,
         ),
+        "source_file_chars": module_pm_input.get("source_file_chars", 0),
         "selected_evidence": _compact_source_context(
-            file_pm_input["selected_evidence"],
+            module_pm_input["selected_evidence"],
         ),
         "required_behavior": _string_list(
-            file_pm_input["required_behavior"],
+            module_pm_input["required_behavior"],
             MAX_LIST_ITEMS,
         ),
     }
-    module_contract_feedback = file_pm_input.get("module_contract_feedback")
+    cross_slice_interfaces = module_pm_input.get("cross_slice_interfaces")
+    if cross_slice_interfaces:
+        payload["cross_slice_interfaces"] = _dict_list(
+            cross_slice_interfaces,
+            MAX_LIST_ITEMS,
+        )
+    module_contract_feedback = module_pm_input.get("module_contract_feedback")
     if module_contract_feedback is not None:
         payload["module_contract_feedback"] = module_contract_feedback
     return payload
@@ -389,20 +451,25 @@ def _module_symbol_children(parsed: object) -> list[object]:
 
 def _empty_module_programmer_contract(
     *,
-    file_pm_input: FilePMModuleInput,
+    module_pm_input: ModulePMInput,
     reason: str,
 ) -> ModuleProgrammerContract:
     contract: ModuleProgrammerContract = {
-        "file_label": file_pm_input["file_label"],
-        "edit_mode": file_pm_input["edit_mode"],
-        "content_format": file_pm_input["content_format"],
-        "file_purpose": file_pm_input["file_purpose"],
-        "imports": _string_list(file_pm_input["imports"], MAX_LIST_ITEMS),
+        "file_label": module_pm_input["file_label"],
+        "edit_mode": module_pm_input["edit_mode"],
+        "content_format": module_pm_input["content_format"],
+        "module_purpose": module_pm_input["module_purpose"],
+        "lifecycle_owner": module_pm_input["lifecycle_owner"],
+        "provided_interfaces": module_pm_input["provided_interfaces"],
+        "consumed_interfaces": module_pm_input["consumed_interfaces"],
+        "existing_source_anchors": module_pm_input["existing_source_anchors"],
+        "imports": _string_list(module_pm_input["imports"], MAX_LIST_ITEMS),
         "current_file_context": _bounded_multiline_text(
-            file_pm_input["current_file_context"],
+            module_pm_input["current_file_context"],
             MAX_SOURCE_CONTEXT_TEXT_CHARS,
         ),
         "symbols_to_define": [],
+        "symbols_to_modify": [],
         "required_behavior": [reason],
     }
     return contract
@@ -421,8 +488,8 @@ def _fill_module_contract_trace(
     if trace is None:
         return
 
-    trace["effective_route"] = _file_pm_module_llm_config.route_name
-    trace["model"] = _file_pm_module_llm_config.model
+    trace["effective_route"] = _module_pm_module_llm_config.route_name
+    trace["model"] = _module_pm_module_llm_config.model
     trace["thinking_enabled"] = CODING_AGENT_PM_LLM_THINKING_ENABLED
     trace["context_budget"] = context_budget
     trace["blocked_before_invoke"] = blocked_before_invoke
@@ -447,6 +514,19 @@ def _compact_source_context(
             )
         compact_rows.append(compact_row)
     return compact_rows
+
+
+def _dict_list(value: object, limit: int) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    items: list[dict[str, object]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        items.append(item)
+        if len(items) >= limit:
+            break
+    return items
 
 
 def _string_list(value: object, limit: int) -> list[str]:

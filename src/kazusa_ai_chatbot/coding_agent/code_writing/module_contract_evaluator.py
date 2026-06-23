@@ -1,4 +1,4 @@
-"""Structural evaluation for File-PM module programmer contracts."""
+"""Structural evaluation for Module PM programmer contracts."""
 
 from __future__ import annotations
 
@@ -36,9 +36,9 @@ def evaluate_module_contract(
     *,
     file_contract: WritingFileModuleContract,
     module_contract: ModuleProgrammerContract,
-    file_pm_input: dict[str, object] | None = None,
+    module_pm_input: dict[str, object] | None = None,
 ) -> ModuleContractEvaluation:
-    """Validate a File PM contract before programmer dispatch."""
+    """Validate a Module PM contract before programmer dispatch."""
 
     errors: list[str] = []
     file_contract_id = file_contract.get("file_contract_id", "")
@@ -54,20 +54,42 @@ def evaluate_module_contract(
         errors.append(
             "Module programmer contract has unsupported content_format."
         )
-    if not _clean_string(module_contract.get("file_purpose")):
-        errors.append("Module programmer contract has no file_purpose.")
+    if not _clean_string(module_contract.get("module_purpose")):
+        errors.append("Module programmer contract has no module_purpose.")
+    if not _clean_string(module_contract.get("lifecycle_owner")):
+        errors.append("Module programmer contract has no lifecycle_owner.")
     if not isinstance(module_contract.get("imports"), list):
         errors.append("Module programmer contract imports is not a list.")
     if not isinstance(module_contract.get("current_file_context"), str):
         errors.append(
             "Module programmer contract current_file_context is not a string."
         )
-    errors.extend(_symbol_errors(module_contract.get("symbols_to_define")))
+    symbols_to_define = module_contract.get("symbols_to_define")
+    symbols_to_modify = module_contract.get("symbols_to_modify")
+    has_define = isinstance(symbols_to_define, list) and len(symbols_to_define) > 0
+    has_modify = isinstance(symbols_to_modify, list) and len(symbols_to_modify) > 0
+    if not has_define and not has_modify:
+        errors.append(
+            "Module programmer contract has no symbols_to_define or "
+            "symbols_to_modify."
+        )
+    if has_define:
+        errors.extend(_symbol_errors(symbols_to_define))
+    if has_modify:
+        errors.extend(_symbol_errors(symbols_to_modify, label="symbols_to_modify"))
+        errors.extend(_symbols_to_modify_grounding_errors(
+            symbols_to_modify,
+            module_contract=module_contract,
+            module_pm_input=module_pm_input,
+        ))
     if module_contract.get("content_format") == "python":
         errors.extend(_python_contract_errors(module_contract))
+        errors.extend(_python_contract_errors_for_symbols(
+            module_contract.get("symbols_to_modify"),
+        ))
         errors.extend(_project_import_grounding_errors(
             module_contract,
-            file_pm_input=file_pm_input,
+            module_pm_input=module_pm_input,
         ))
     if not _string_values(module_contract.get("required_behavior")):
         errors.append("Module programmer contract has no required_behavior.")
@@ -129,6 +151,31 @@ def _python_contract_errors(
     return errors
 
 
+def _python_contract_errors_for_symbols(
+    symbols: object,
+) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(symbols, list):
+        return errors
+    for symbol in symbols:
+        if not isinstance(symbol, dict):
+            continue
+        signature = _clean_string(symbol.get("signature"))
+        if not signature:
+            continue
+        parse_text = _parseable_signature_text(signature)
+        if not parse_text:
+            continue
+        try:
+            ast.parse(parse_text)
+        except SyntaxError:
+            name = _clean_string(symbol.get("name")) or signature
+            errors.append(
+                f"symbols_to_modify symbol {name!r} signature is not valid Python."
+            )
+    return errors
+
+
 def _parseable_signature_text(signature: str) -> str:
     if signature.startswith(("def ", "async def ", "class ")):
         return signature.rstrip(":") + ":\n    pass"
@@ -140,13 +187,13 @@ def _parseable_signature_text(signature: str) -> str:
 def _project_import_grounding_errors(
     module_contract: ModuleProgrammerContract,
     *,
-    file_pm_input: dict[str, object] | None,
+    module_pm_input: dict[str, object] | None,
 ) -> list[str]:
-    if file_pm_input is None:
+    if module_pm_input is None:
         return []
 
-    allowed_import_lines = set(_string_values(file_pm_input.get("imports")))
-    grounding_text = json.dumps(file_pm_input, ensure_ascii=False)
+    allowed_import_lines = set(_string_values(module_pm_input.get("imports")))
+    grounding_text = json.dumps(module_pm_input, ensure_ascii=False)
     errors: list[str] = []
     for import_line in _string_values(module_contract.get("imports")):
         if not _is_project_import(import_line):
@@ -160,7 +207,7 @@ def _project_import_grounding_errors(
         ]
         if missing_names:
             errors.append(
-                "Project import is not grounded in the File PM input context: "
+                "Project import is not grounded in the Module PM input context: "
                 + import_line
             )
     return errors
@@ -187,10 +234,54 @@ def _imported_names(import_line: str) -> list[str]:
     return [alias.name for alias in parsed_import.body[0].names]
 
 
-def _symbol_errors(value: object) -> list[str]:
+def _symbols_to_modify_grounding_errors(
+    symbols_to_modify: list[object],
+    *,
+    module_contract: ModuleProgrammerContract,
+    module_pm_input: dict[str, object] | None,
+) -> list[str]:
+    grounding_sources: list[str] = []
+    current_file_context = module_contract.get("current_file_context")
+    if isinstance(current_file_context, str):
+        grounding_sources.append(current_file_context)
+    anchors = module_contract.get("existing_source_anchors")
+    if isinstance(anchors, list):
+        for anchor in anchors:
+            if isinstance(anchor, dict):
+                anchor_name = _clean_string(anchor.get("name"))
+                if anchor_name:
+                    grounding_sources.append(anchor_name)
+    if module_pm_input is not None:
+        pm_context = module_pm_input.get("current_file_context")
+        if isinstance(pm_context, str):
+            grounding_sources.append(pm_context)
+        pm_anchors = module_pm_input.get("existing_source_anchors")
+        if isinstance(pm_anchors, list):
+            for anchor in pm_anchors:
+                if isinstance(anchor, dict):
+                    anchor_name = _clean_string(anchor.get("name"))
+                    if anchor_name:
+                        grounding_sources.append(anchor_name)
+    grounding_text = "\n".join(grounding_sources)
+    errors: list[str] = []
+    for symbol in symbols_to_modify:
+        if not isinstance(symbol, dict):
+            continue
+        name = _clean_string(symbol.get("name"))
+        if not name:
+            continue
+        if name not in grounding_text:
+            errors.append(
+                f"symbols_to_modify entry {name!r} is not grounded in "
+                "current_file_context or existing_source_anchors."
+            )
+    return errors
+
+
+def _symbol_errors(value: object, *, label: str = "symbols_to_define") -> list[str]:
     errors: list[str] = []
     if not isinstance(value, list) or not value:
-        return ["Module programmer contract has no symbols_to_define."]
+        return [f"Module programmer contract has no {label}."]
 
     for index, symbol in enumerate(value, start=1):
         if not isinstance(symbol, dict):

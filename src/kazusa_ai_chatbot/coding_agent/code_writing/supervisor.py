@@ -78,6 +78,7 @@ DEFAULT_MAX_ARTIFACT_CHARS = 48000
 MAX_PATCH_FILES = 32
 MAX_PM_ASSIGNMENT_REPAIR_ATTEMPTS = 1
 MAX_MODULE_CONTRACT_REPAIR_ATTEMPTS = 1
+MAX_VALIDATION_REPAIR_ATTEMPTS = 1
 MAX_READING_REPORT_ANSWER_CHARS = 2200
 MAX_READING_REPORT_EVIDENCE_REFS = 24
 MAX_READING_REPORT_EVIDENCE_ROWS = 12
@@ -199,7 +200,7 @@ async def run_writing_supervisor(
     if external_result is not None:
         return external_result
 
-    if pm_decision["status"] != "need_file_pms":
+    if pm_decision["status"] != "need_module_pms":
         return _pm_terminal_result(
             mode=mode,
             pm_decision=pm_decision,
@@ -242,7 +243,7 @@ async def run_writing_supervisor(
     )
     if external_result is not None:
         return external_result
-    if pm_decision["status"] != "need_file_pms":
+    if pm_decision["status"] != "need_module_pms":
         return _pm_terminal_result(
             mode=mode,
             pm_decision=pm_decision,
@@ -251,59 +252,178 @@ async def run_writing_supervisor(
             trace_summary=trace_summary,
         )
 
-    try:
-        programmer_reports = await _run_file_module_wave(
+    max_artifact_chars = request.get(
+        "max_artifact_chars",
+        DEFAULT_MAX_ARTIFACT_CHARS,
+    )
+    patcher_report: WritingPatcherReport | None = None
+    validation = _empty_validation("failed")
+    for validation_attempt in range(MAX_VALIDATION_REPAIR_ATTEMPTS + 1):
+        try:
+            programmer_reports = await _run_file_module_wave(
+                mode=mode,
+                pm_decision=pm_decision,
+                repository=repository,
+                reading_evidence=reading_evidence,
+                trace=trace,
+                trace_summary=trace_summary,
+            )
+        except ValueError as exc:
+            return _result(
+                status="rejected",
+                mode=mode,
+                answer_text=str(exc),
+                patch_artifacts=[],
+                created_files=[],
+                changed_files=[],
+                external_evidence_requests=[],
+                external_evidence=external_evidence,
+                validation=_empty_validation("rejected"),
+                session=session,
+                limitations=[str(exc)],
+                trace_summary=[
+                    *trace_summary,
+                    "writing:rejected module contract",
+                ],
+            )
+
+        trace_key_suffix = (
+            "initial" if validation_attempt == 0
+            else f"validation_repair_{validation_attempt}"
+        )
+        patcher_report = _materialize_patcher_report(
+            question=question,
             mode=mode,
-            pm_decision=pm_decision,
             repository=repository,
-            reading_evidence=reading_evidence,
+            source_scope=source_scope,
+            file_contracts=pm_decision["file_contracts"],
+            programmer_reports=programmer_reports,
+            integration_notes=_pm_integration_notes(pm_decision),
+            max_artifact_chars=max_artifact_chars,
             trace=trace,
+            trace_key=f"patcher_{trace_key_suffix}",
             trace_summary=trace_summary,
         )
-    except ValueError as exc:
-        return _result(
-            status="rejected",
+        validation = validate_patch_artifacts(
+            repo_root=_validation_repo_root(repository),
+            workspace_root=Path(workspace_root),
+            patch_artifacts=patcher_report["patch_artifacts"],
+            max_files=MAX_PATCH_FILES,
+            max_diff_chars=max_artifact_chars,
+        )
+        validation = _validation_with_operation_errors(
+            validation,
+            patcher_report["edit_diagnostics"],
+        )
+        trace_summary.append(
+            "writing_validation:"
+            f"{trace_key_suffix} status={validation['status']}"
+        )
+        if validation["status"] == "succeeded":
+            break
+        if validation_attempt >= MAX_VALIDATION_REPAIR_ATTEMPTS:
+            trace_summary.append(
+                "writing_validation:repair_exhausted "
+                f"status={validation['status']}"
+            )
+            break
+
+        pm_decision = await _decide_pm(
+            question=question,
             mode=mode,
-            answer_text=str(exc),
+            repository_summary=repository_summary,
+            reading_result=reading_result,
+            supervisor_evidence_state=supervisor_evidence_state,
+            programmer_reports=programmer_reports,
+            external_evidence=external_evidence,
+            validation_feedback=validation,
+            trace=trace,
+            trace_key=f"pm_validation_repair_{validation_attempt + 1}",
+        )
+        trace_summary.append(
+            "writing_pm:validation_repair "
+            f"status={pm_decision['status']} "
+            f"file_demands={len(pm_decision['file_demands'])}"
+        )
+
+        external_result = _external_evidence_result_if_needed(
+            mode=mode,
+            pm_decision=pm_decision,
+            session=session,
+            external_evidence=external_evidence,
+            trace_summary=trace_summary,
+        )
+        if external_result is not None:
+            return external_result
+        if pm_decision["status"] != "need_module_pms":
+            return _pm_terminal_result(
+                mode=mode,
+                pm_decision=pm_decision,
+                session=session,
+                external_evidence=external_evidence,
+                trace_summary=trace_summary,
+            )
+
+        pm_decision, file_plan_evaluation = await _accept_or_repair_file_plan(
+            question=question,
+            mode=mode,
+            repository_summary=repository_summary,
+            reading_result=reading_result,
+            supervisor_evidence_state=supervisor_evidence_state,
+            programmer_reports=programmer_reports,
+            external_evidence=external_evidence,
+            repository=repository,
+            source_scope=source_scope,
+            owner_candidates=owner_candidates,
+            pm_decision=pm_decision,
+            trace=trace,
+            trace_summary=trace_summary,
+            trace_prefix=(
+                f"pm_validation_repair_{validation_attempt + 1}_file_plan"
+            ),
+        )
+        if file_plan_evaluation["status"] != "accepted":
+            return _file_plan_rejected_result(
+                mode=mode,
+                evaluation=file_plan_evaluation,
+                session=session,
+                external_evidence=external_evidence,
+                trace_summary=trace_summary,
+            )
+
+        external_result = _external_evidence_result_if_needed(
+            mode=mode,
+            pm_decision=pm_decision,
+            session=session,
+            external_evidence=external_evidence,
+            trace_summary=trace_summary,
+        )
+        if external_result is not None:
+            return external_result
+        if pm_decision["status"] != "need_module_pms":
+            return _pm_terminal_result(
+                mode=mode,
+                pm_decision=pm_decision,
+                session=session,
+                external_evidence=external_evidence,
+                trace_summary=trace_summary,
+            )
+
+    if patcher_report is None:
+        return _result(
+            status="failed",
+            mode=mode,
+            answer_text="The writing patcher did not produce a patch report.",
             patch_artifacts=[],
             created_files=[],
             changed_files=[],
             external_evidence_requests=[],
             external_evidence=external_evidence,
-            validation=_empty_validation("rejected"),
+            validation=validation,
             session=session,
-            limitations=[str(exc)],
-            trace_summary=[*trace_summary, "writing:rejected module contract"],
+            limitations=["The writing patcher did not produce a patch report."],
+            trace_summary=[*trace_summary, "writing:missing patcher report"],
         )
-
-    max_artifact_chars = request.get(
-        "max_artifact_chars",
-        DEFAULT_MAX_ARTIFACT_CHARS,
-    )
-    patcher_report = _materialize_patcher_report(
-        question=question,
-        mode=mode,
-        repository=repository,
-        source_scope=source_scope,
-        file_contracts=pm_decision["file_contracts"],
-        programmer_reports=programmer_reports,
-        integration_notes=_pm_integration_notes(pm_decision),
-        max_artifact_chars=max_artifact_chars,
-        trace=trace,
-        trace_key="patcher_initial",
-        trace_summary=trace_summary,
-    )
-    validation = validate_patch_artifacts(
-        repo_root=_validation_repo_root(repository),
-        workspace_root=Path(workspace_root),
-        patch_artifacts=patcher_report["patch_artifacts"],
-        max_files=MAX_PATCH_FILES,
-        max_diff_chars=max_artifact_chars,
-    )
-    validation = _validation_with_operation_errors(
-        validation,
-        patcher_report["edit_diagnostics"],
-    )
 
     synthesis_trace: dict[str, object] = {}
     limitations = _report_limitations(programmer_reports)
@@ -353,7 +473,7 @@ async def _run_file_module_wave(
     trace: dict[str, object] | None,
     trace_summary: list[str],
 ) -> list[WritingProgrammerReport]:
-    """Run one File PM and one module programmer per file contract."""
+    """Run one Module PM and one module programmer per file contract."""
 
     programmer_reports: list[WritingProgrammerReport] = []
     for file_contract in pm_decision["file_contracts"]:
@@ -362,7 +482,7 @@ async def _run_file_module_wave(
             reading_evidence=reading_evidence,
             file_contract=file_contract,
         )
-        file_pm_input = _file_pm_input_for_contract(
+        module_pm_input = _module_pm_input_for_contract(
             mode=mode,
             pm_decision=pm_decision,
             file_contract=file_contract,
@@ -371,9 +491,9 @@ async def _run_file_module_wave(
         )
         module_contract = await _accepted_module_contract(
             file_contract=file_contract,
-            file_pm_input=file_pm_input,
+            module_pm_input=module_pm_input,
             trace=trace,
-            trace_key=f"file_pm_{file_contract_id}",
+            trace_key=f"module_pm_{file_contract_id}",
             trace_summary=trace_summary,
         )
         programmer_trace: dict[str, object] = {}
@@ -404,35 +524,35 @@ async def _run_file_module_wave(
 async def _accepted_module_contract(
     *,
     file_contract: WritingFileModuleContract,
-    file_pm_input: dict[str, object],
+    module_pm_input: dict[str, object],
     trace: dict[str, object] | None,
     trace_key: str,
     trace_summary: list[str],
 ) -> ModuleProgrammerContract:
-    """Run File PM and one structural repair loop before programmer dispatch."""
+    """Run Module PM and one structural repair loop before programmer dispatch."""
 
-    current_input = dict(file_pm_input)
+    current_input = dict(module_pm_input)
     for attempt_index in range(MAX_MODULE_CONTRACT_REPAIR_ATTEMPTS + 1):
-        file_pm_trace: dict[str, object] = {}
+        module_pm_trace: dict[str, object] = {}
         module_contract = await decide_module_programmer_contract(
             current_input,
-            trace=file_pm_trace,
+            trace=module_pm_trace,
         )
         evaluation = evaluate_module_contract(
             file_contract=file_contract,
             module_contract=module_contract,
-            file_pm_input=current_input,
+            module_pm_input=current_input,
         )
         _record_internal_trace(
             trace,
             f"{trace_key}_{attempt_index + 1}",
             {
-                "file_pm_trace": file_pm_trace,
+                "module_pm_trace": module_pm_trace,
                 "evaluation": evaluation,
             },
         )
         trace_summary.append(
-            "file_pm:"
+            "module_pm:"
             f"{file_contract['file_contract_id']} "
             f"evaluation={evaluation['status']}"
         )
@@ -445,7 +565,7 @@ async def _accepted_module_contract(
     raise ValueError("Module contract evaluation did not complete.")
 
 
-def _file_pm_input_for_contract(
+def _module_pm_input_for_contract(
     *,
     mode: WritingMode,
     pm_decision: WritingPMDecision,
@@ -461,29 +581,41 @@ def _file_pm_input_for_contract(
     )
     interface_contract = file_contract.get("interface_contract", {})
     integration_contract = file_contract.get("integration_contract", {})
+    source_file_chars = _total_source_file_chars(context_rows)
     input_payload = {
         "file_label": file_label,
         "edit_mode": _edit_mode_for_contract(mode, file_contract),
         "content_format": _content_format_for_contract(file_contract),
-        "file_need": _joined_text(
-            file_contract.get("work_instructions", []),
-            fallback=file_contract.get("change_goal", ""),
-        ),
-        "file_purpose": file_contract.get("purpose", ""),
-        "module_outputs": _module_outputs(
+        "module_purpose": file_contract.get("purpose", ""),
+        "lifecycle_owner": _lifecycle_owner(interface_contract),
+        "provided_interfaces": _provided_interfaces(
             interface_contract,
             integration_contract,
             file_contract=file_contract,
         ),
-        "module_consumers": _module_consumers(integration_contract),
+        "consumed_interfaces": _consumed_interfaces(integration_contract),
+        "existing_source_anchors": _existing_source_anchors(
+            interface_contract,
+            file_contract=file_contract,
+            selected_evidence=selected_evidence,
+        ),
+        "integration_behaviors": _integration_behaviors(
+            integration_contract,
+            file_contract=file_contract,
+        ),
         "imports": _imports_for_contract(
             pm_decision=pm_decision,
             file_contract=file_contract,
             file_label=file_label,
         ),
         "current_file_context": _file_context_summary(context_rows),
+        "source_file_chars": source_file_chars,
         "selected_evidence": _compact_selected_evidence(selected_evidence),
         "required_behavior": _required_behavior(file_contract),
+        "cross_slice_interfaces": _cross_slice_interfaces(
+            pm_decision=pm_decision,
+            current_file_contract_id=file_contract.get("file_contract_id", ""),
+        ),
     }
     return input_payload
 
@@ -580,7 +712,7 @@ async def _accept_or_repair_file_plan(
     trace_summary: list[str],
     trace_prefix: str,
 ) -> tuple[WritingPMDecision, dict[str, object]]:
-    """Resolve PM file demands and repair the handoff before File PM dispatch."""
+    """Resolve PM file demands and repair the handoff before Module PM dispatch."""
 
     current_decision = pm_decision
     evaluation: dict[str, object] = _accepted_file_plan_evaluation()
@@ -635,7 +767,7 @@ async def _accept_or_repair_file_plan(
                 f"status={current_decision['status']} "
                 f"file_demands={len(current_decision['file_demands'])}"
             )
-            if current_decision["status"] != "need_file_pms":
+            if current_decision["status"] != "need_module_pms":
                 return current_decision, _accepted_file_plan_evaluation()
             continue
 
@@ -713,7 +845,7 @@ async def _accept_or_repair_file_plan(
             f"status={current_decision['status']} "
             f"file_demands={len(current_decision['file_demands'])}"
         )
-        if current_decision["status"] != "need_file_pms":
+        if current_decision["status"] != "need_module_pms":
             return current_decision, _accepted_file_plan_evaluation()
 
     return current_decision, evaluation
@@ -1159,13 +1291,15 @@ def _read_file_context(
         text = resolved_file.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
-    if len(text) > MAX_FILE_CONTEXT_CHARS:
+    full_chars = len(text)
+    if full_chars > MAX_FILE_CONTEXT_CHARS:
         text = text[:MAX_FILE_CONTEXT_CHARS].rstrip()
     return {
         "path": safe_path,
         "line_start": 1,
         "line_end": len(text.splitlines()),
         "text": text,
+        "full_chars": full_chars,
     }
 
 
@@ -1227,27 +1361,156 @@ def _content_format_for_contract(
     return "python"
 
 
-def _module_outputs(
+def _lifecycle_owner(interface_contract: dict[str, object]) -> str:
+    owner = interface_contract.get("lifecycle_owner")
+    if isinstance(owner, str) and owner.strip():
+        return owner.strip()
+    component = interface_contract.get("component")
+    if isinstance(component, str) and component.strip():
+        return component.strip()
+    return ""
+
+
+def _provided_interfaces(
     interface_contract: dict[str, object],
     integration_contract: dict[str, object],
     *,
     file_contract: WritingFileModuleContract,
+) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    for name in _string_values(interface_contract.get("outputs")):
+        items.append({"name": name, "kind": "function", "contract": ""})
+    for name in _string_values(interface_contract.get("exports")):
+        if not any(i["name"] == name for i in items):
+            items.append({"name": name, "kind": "function", "contract": ""})
+    for name in _string_values(integration_contract.get("provides_to_pm")):
+        if not any(i["name"] == name for i in items):
+            items.append({"name": name, "kind": "function", "contract": ""})
+    if not items:
+        for name in _string_values(file_contract.get("required_slots")):
+            items.append({"name": name, "kind": "function", "contract": ""})
+    return items[:MAX_LIST_ITEMS]
+
+
+def _consumed_interfaces(
+    integration_contract: dict[str, object],
+) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    for name in _string_values(integration_contract.get("consumes_from")):
+        items.append({"name": name, "provider_slice_id": "", "contract": ""})
+    for name in _string_values(integration_contract.get("called_by")):
+        if not any(i["name"] == name for i in items):
+            items.append({"name": name, "provider_slice_id": "", "contract": ""})
+    for name in _string_values(integration_contract.get("calls")):
+        if not any(i["name"] == name for i in items):
+            items.append({"name": name, "provider_slice_id": "", "contract": ""})
+    return items[:MAX_LIST_ITEMS]
+
+
+def _existing_source_anchors(
+    interface_contract: dict[str, object],
+    *,
+    file_contract: WritingFileModuleContract,
+    selected_evidence: list[CodeEvidenceRow] | None = None,
+) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    seen_names: set[str] = set()
+    for inv in _string_values(interface_contract.get("invariants")):
+        if inv not in seen_names:
+            items.append({
+                "name": inv,
+                "kind": "function",
+                "required_action": "preserve",
+            })
+            seen_names.add(inv)
+    if selected_evidence:
+        for row in selected_evidence:
+            for name in _symbols_from_excerpt(row.get("excerpt", "")):
+                if name not in seen_names:
+                    items.append({
+                        "name": name,
+                        "kind": "function",
+                        "required_action": "preserve",
+                    })
+                    seen_names.add(name)
+    return items[:MAX_LIST_ITEMS]
+
+
+def _symbols_from_excerpt(excerpt: str) -> list[str]:
+    if not isinstance(excerpt, str):
+        return []
+    symbols: list[str] = []
+    for line in excerpt.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith("class "):
+            name = stripped[6:].split("(")[0].split(":")[0].strip()
+            if name:
+                symbols.append(name)
+        elif stripped.startswith("def "):
+            name = stripped[4:].split("(")[0].strip()
+            if name:
+                symbols.append(name)
+        elif stripped.startswith("async def "):
+            name = stripped[10:].split("(")[0].strip()
+            if name:
+                symbols.append(name)
+    return symbols
+
+
+def _total_source_file_chars(context_rows: list[dict[str, object]]) -> int:
+    total = 0
+    for row in context_rows:
+        full_chars = row.get("full_chars")
+        if isinstance(full_chars, int):
+            total += full_chars
+        else:
+            text = row.get("text", "")
+            if isinstance(text, str):
+                total += len(text)
+    return total
+
+
+def _integration_behaviors(
+    integration_contract: dict[str, object],
+    *,
+    file_contract: WritingFileModuleContract,
 ) -> list[str]:
-    values = _string_values(interface_contract.get("outputs"))
-    values.extend(_string_values(interface_contract.get("exports")))
-    values.extend(_string_values(integration_contract.get("provides_to_pm")))
+    values = _string_values(file_contract.get("validation_expectations"))
     if not values:
-        values.extend(_string_values(file_contract.get("required_slots")))
-    if not values:
-        values.append(_file_label(file_contract))
+        change_goal = file_contract.get("change_goal")
+        if isinstance(change_goal, str) and change_goal.strip():
+            values.append(change_goal.strip())
     return _dedupe_strings(values)[:MAX_LIST_ITEMS]
 
 
-def _module_consumers(integration_contract: dict[str, object]) -> list[str]:
-    values = _string_values(integration_contract.get("consumes_from"))
-    values.extend(_string_values(integration_contract.get("called_by")))
-    values.extend(_string_values(integration_contract.get("calls")))
-    return _dedupe_strings(values)[:MAX_LIST_ITEMS]
+def _cross_slice_interfaces(
+    *,
+    pm_decision: WritingPMDecision,
+    current_file_contract_id: str,
+) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    for fc in pm_decision.get("file_contracts", []):
+        fc_id = fc.get("file_contract_id", "")
+        if fc_id == current_file_contract_id:
+            continue
+        ifc = fc.get("interface_contract", {})
+        for name in _string_values(ifc.get("outputs")):
+            items.append({
+                "provider_slice_id": fc_id,
+                "name": name,
+                "contract": "",
+            })
+        for name in _string_values(ifc.get("exports")):
+            if not any(
+                i["provider_slice_id"] == fc_id and i["name"] == name
+                for i in items
+            ):
+                items.append({
+                    "provider_slice_id": fc_id,
+                    "name": name,
+                    "contract": "",
+                })
+    return items[:MAX_LIST_ITEMS]
 
 
 def _imports_for_contract(

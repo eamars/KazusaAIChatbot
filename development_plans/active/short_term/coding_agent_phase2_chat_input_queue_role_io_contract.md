@@ -4,9 +4,9 @@ Status: Phase 2 gate_02 final role-boundary contract.
 
 This document records the expected role IO flow for the chat input queue task.
 It is the target contract for prompt and workflow development. The flow uses
-one top-level writing PM, one File PM per accepted module/file assignment, and
+one top-level writing PM, one Module PM per accepted module/file assignment, and
 module-level programmer calls. The only PM layers in this contract are the
-top-level writing PM and File PM.
+top-level writing PM and Module PM.
 
 ## Gate Source
 
@@ -35,11 +35,11 @@ create patches, or call reading/external workflows directly.
 The File Agent owns concrete repository file management. It resolves semantic
 file needs into repo-relative paths, file actions, base revisions, permission
 checks, path ownership, current file context, and mutex identifiers. These file
-management fields are for validators and the File Edit Manager, not for the
+management fields are for validators and the Patcher, not for the
 programmer.
 
-Each File PM receives one accepted file assignment plus bounded reading facts,
-File Agent context, and exact imports for its assigned module. The File PM
+Each Module PM receives one accepted file assignment plus bounded reading facts,
+File Agent context, and exact imports for its assigned module. The Module PM
 emits one module-level programmer contract. It does not write code or patch
 hunks.
 
@@ -65,10 +65,10 @@ flowchart TD
     S --> WPM[Top-level writing PM]
     WPM --> FA[File Agent]
     FA --> FPE[File Plan Evaluator]
-    FPE --> FPM1[File PM: queue module]
-    FPE --> FPM2[File PM: service integration]
-    FPE --> FPM3[File PM: state latch]
-    FPE --> FPM4[File PM: queue tests]
+    FPE --> FPM1[Module PM: queue module]
+    FPE --> FPM2[Module PM: service integration]
+    FPE --> FPM3[Module PM: state latch]
+    FPE --> FPM4[Module PM: queue tests]
     FPM1 --> MCE1[Module Contract Evaluator]
     FPM2 --> MCE2[Module Contract Evaluator]
     FPM3 --> MCE3[Module Contract Evaluator]
@@ -77,11 +77,11 @@ flowchart TD
     MCE2 --> P2[Programmer: service symbols]
     MCE3 --> P3[Programmer: state symbols]
     MCE4 --> P4[Programmer: test module]
-    P1 --> R1[File PM Review]
-    P2 --> R2[File PM Review]
-    P3 --> R3[File PM Review]
-    P4 --> R4[File PM Review]
-    R1 --> FEM[File Edit Manager]
+    P1 --> R1[Module PM Review]
+    P2 --> R2[Module PM Review]
+    P3 --> R3[Module PM Review]
+    P4 --> R4[Module PM Review]
+    R1 --> FEM[Patcher]
     R2 --> FEM
     R3 --> FEM
     R4 --> FEM
@@ -93,11 +93,11 @@ flowchart TD
 ```
 
 All failure loops return to the top-level coding supervisor. Validators, File
-PMs, and the File Edit Manager do not directly retry programmers.
+PMs, and the Patcher do not directly retry programmers.
 
 ## Concrete Behavior Records
 
-These records are shared by PMs, evaluators, File PM review, File Edit Manager,
+These records are shared by PMs, evaluators, Module PM review, Patcher,
 and validators. They are not sent raw as deterministic pass/fail keywords.
 
 | Record | Input values | Expected result |
@@ -224,15 +224,15 @@ Emits semantic file work orders:
 ```
 
 The writing PM names semantic producers and consumers only. Exact import lines
-are created later after File Agent resolves concrete files and File PM receives
+are created later after File Agent resolves concrete files and Module PM receives
 the selected scope for one module.
 
 ## File Agent
 
 Receives semantic file work orders.
 
-Emits path ownership and current file context for validators, File PMs, and
-the File Edit Manager:
+Emits path ownership and current file context for validators, Module PMs, and
+the Patcher:
 
 ```json
 {
@@ -295,12 +295,12 @@ Emits:
 The evaluator accepts only when every semantic work order has one safe file
 owner, every edit/create action has a base revision or `new_file`, every new
 file has a reserved name, exact imports have been derived for downstream File
-PMs, and no file ownership overlaps without one File PM owning the full module
+PMs, and no file ownership overlaps without one Module PM owning the full module
 contract for that file.
 
-## File PM To Programmer Contracts
+## Module PM To Programmer Contracts
 
-Each File PM emits exactly one module-level programmer contract.
+Each Module PM emits exactly one module-level programmer contract.
 
 The contract shape is:
 
@@ -335,7 +335,7 @@ from `imports` and the requested top-level symbols. It is not a patch.
 
 ## Module Contract Evaluator
 
-Receives one File PM programmer contract.
+Receives one Module PM programmer contract.
 
 Accepts only if:
 
@@ -648,9 +648,9 @@ programmer output must contain complete executable code, not placeholders.
 }
 ```
 
-## File PM Review
+## Module PM Review
 
-Each File PM receives the programmer code block for its own module-level
+Each Module PM receives the programmer code block for its own module-level
 contract and emits:
 
 ```json
@@ -672,9 +672,9 @@ contract and emits:
 If review rejects the output, it emits the rejected `file_label`, compact
 reason, and `next_owner_recommendation: "top_level_coding_supervisor"`.
 
-## File Edit Manager
+## Patcher
 
-Receives File Agent output, accepted File PM reviews, and programmer code
+Receives File Agent output, accepted Module PM reviews, and programmer code
 blocks. It owns file lifecycle, base revision checks, mutex use, import
 insertion, symbol replacement, complete-file creation, overlap detection, and
 final diff materialization.
@@ -734,7 +734,7 @@ Output:
 
 ## Structural Validator
 
-Receives File Edit Manager staged files.
+Receives Patcher staged files.
 
 Emits:
 
@@ -757,7 +757,7 @@ Emits:
 ## File Level Validator
 
 Receives staged patch artifact, concrete behavior records, structural
-validation, and File PM review results.
+validation, and Module PM review results.
 
 Emits accepted output:
 
@@ -784,7 +784,7 @@ Emits rejected output:
 ```json
 {
   "status": "rejected",
-  "failed_owner": "top_level_writing_pm | file_agent | file_pm | programmer | file_edit_manager | reading_workflow",
+  "failed_owner": "top_level_writing_pm | file_agent | module_pm | programmer | patcher | reading_workflow",
   "failed_contract": "file_label or role output id",
   "reason": "compact concrete failure reason",
   "next_owner_recommendation": "top_level_coding_supervisor"
@@ -797,7 +797,7 @@ Supervisor receives all rejection packets and chooses the next owner:
 
 ```json
 {
-  "loop_decision": "revise_writing_pm_work_orders | revise_file_agent_resolution | revise_file_pm_contract | retry_programmer_module | request_more_reading | stop_failed",
+  "loop_decision": "revise_writing_pm_work_orders | revise_file_agent_resolution | revise_module_pm_contract | retry_programmer_module | request_more_reading | stop_failed",
   "target_contract": "file_label or role output id",
   "reason": "why this owner is selected",
   "retry_count": 1
@@ -821,17 +821,17 @@ Gate_02 role IO passes only if:
   "The top-level writing PM receives no source scope, path, line-ref, source-owner, current-file-context, or import-line input.",
   "The top-level writing PM emits semantic file work orders with producers and consumers, not code, paths, import lines, patch hunks, or programmer output.",
   "The File Agent owns repo-relative paths, file actions, base revisions, current file context, permission checks, new-file reservation, and mutex identifiers.",
-  "The File Plan Evaluator accepts file ownership before any File PM or programmer call.",
-  "Each File PM emits exactly one module-level programmer contract for one file_label.",
+  "The File Plan Evaluator accepts file ownership before any Module PM or programmer call.",
+  "Each Module PM emits exactly one module-level programmer contract for one file_label.",
   "Each module-level programmer contract uses imports as the only external-name channel.",
   "Each module-level programmer contract uses symbols_to_define to name the required module surface.",
   "No programmer input contains repository URL, read path, write path, test path, file mutex, base revision, insertion point, patch format, validation trace, peer output, workflow ledger state, or a separate external-name field.",
   "Each programmer output is exactly one markdown fenced Python code block.",
   "A complete_file programmer output contains a complete file.",
   "A symbol_bundle programmer output contains only requested imports and new or replacement top-level symbols.",
-  "File PM Review signs off the programmer output for the same file_label before File Edit Manager materialization.",
-  "File Edit Manager owns lifecycle, base revision checks, mutex use, import insertion, symbol replacement, complete-file creation, overlap detection, and final diff materialization.",
-  "File Edit Manager does not invent feature behavior that is absent from accepted programmer code.",
+  "Module PM Review signs off the programmer output for the same file_label before Patcher materialization.",
+  "Patcher owns lifecycle, base revision checks, mutex use, import insertion, symbol replacement, complete-file creation, overlap detection, and final diff materialization.",
+  "Patcher does not invent feature behavior that is absent from accepted programmer code.",
   "Structural Validator signs off file applicability only.",
   "File Level Validator checks the staged patch against concrete behavior records and required files.",
   "All failure loops return to the top-level coding supervisor before another PM or programmer call."

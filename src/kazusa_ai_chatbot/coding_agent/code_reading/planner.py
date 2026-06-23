@@ -1,5 +1,6 @@
 """Deterministic safety checks for the code-reading subagent."""
 
+import re
 from pathlib import PurePosixPath
 
 from kazusa_ai_chatbot.coding_agent.code_fetching.models import CodeSourceScope
@@ -46,13 +47,14 @@ def rejection_reason(
             return "Phase 1 code reading cannot execute commands or install packages."
 
     secret_patterns = [
-        ".env",
-        "secret",
-        "token",
-        "credential",
-        "private key",
+        r"(?<![a-z])\.env(?:\b|$)",
+        r"\bread\b.*\bsecret\b",
+        r"\binspect\b.*\bsecret\b",
+        r"\bdump\b.*\btoken\b",
+        r"\bread\b.*\bcredential\b",
+        r"\bprivate[_ ]key\b",
     ]
-    if any(pattern in normalized for pattern in secret_patterns):
+    if any(re.search(pattern, normalized) for pattern in secret_patterns):
         return "Phase 1 code reading cannot inspect secrets or environment files."
 
     raw_dump_patterns = [
