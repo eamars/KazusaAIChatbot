@@ -19,6 +19,9 @@ from kazusa_ai_chatbot.cognition_chain_core.contracts import (
     LLMStageBinding,
     require_llm_binding,
 )
+from kazusa_ai_chatbot.cognition_chain_core.current_event_grounding import (
+    build_current_event_grounding_for_llm,
+)
 from kazusa_ai_chatbot.cognition_chain_core.linguistic_texture import (
     get_abstraction_reframing_description,
     get_counter_questioning_description,
@@ -575,19 +578,28 @@ _CONTENT_PLAN_AGENT_PROMPT = '''\
 - `selected_text_surface_intent` 是已选择文本输出时传下来的语义目标；它帮助你覆盖本轮交付范围，但不是事实来源，也不能改变上游立场。里面可能包含已清洗的 resolver observation 摘要，可用于保留已查到的事实、风险和失败边界。
 - `memory_lifecycle_context` 只包含活动承诺复核后的提示安全角色计划；它可以帮助你避免重开已兑现承诺或承认承诺变化，但不能授权新的事实、数据库操作或用户可见技术细节。
 
+# 当前事件归属
+- `current_event_grounding` 只会在外部文本消息里出现。它回答三个问题：谁说了当前文本，文本里可见地说了什么，当前文本点名、提及或回复了谁。
+- 它只负责可见事实归属：主体、对象、收件人、回复对象和引用文本。它不决定 `logical_stance`、`character_intent`、边界强度、检索结论或最终语气。
+- 如果当前可见文本含有明确的主体和谓语，例如“某人完成了某事”“某人处于某种状态”“某物属于某人”，并且本轮回复正在承接这句话，`semantic_content` 本身必须保留这个主体和谓语。只写进 `visible_goal`、`voice` 或隐含语气不算完成。
+- 如果明确主体是当前角色 `{character_name}` 的全名、连续短称、提及名或回复对象名，可以在计划中写成当前角色第一人称；但不能把说话人、被称呼者、被回复者、奖励提供者或接收者互换成事件主体。
+- 如果上游意识、`decontexualized_input` 或 `selected_text_surface_intent` 与当前可见文本的主体归属冲突，只修正主体和对象归属；立场、意图、边界和语气仍按上游已定结果执行。
+
 # 生成步骤
-1. **确定本轮任务**：读取 `decontexualized_input`、`referents`、`internal_monologue`、`logical_stance`、`character_intent`、`selected_text_surface_intent` 和 `memory_lifecycle_context`。判断本轮是在回答、澄清、接梗、拒绝、收束、交付计划、交付代码，还是处理 open loop。
-2. **处理澄清优先级**：如果任一 `referents[].status = "unresolved"` 且该指代影响回答，`semantic_content` 只写一个具体澄清问题，优先点名未解析的 `phrase`。
-3. **收集可见语义**：从当前输入、媒体观察、`rag_result.answer`、已确认外部证据、resolver 目标进度、resolver observation 摘要和活动承诺上下文中提取本轮可以公开表达的事实、回答、结论、代码、限制或下一步。无直接关系的历史记忆和互动风格不要进入事实内容。
-4. **合并交付范围**：如果 `selected_text_surface_intent` 含原始目标、目标进度、deliverables、blockers 或 final_response_requirements，把这些转成可见回答骨架。当前输入可能只是补充约束，不能缩小原始目标。
-5. **判断 open loop 状态**：当 `conversation_progress.open_loops`、`current_thread` 或 `current_blocker` 存在时，先判断当前输入是否解决、部分解决、答错、回避或只是社交回应。以当前输入和上游意识判断覆盖旧阻碍。
-6. **处理证据边界**：如果实时、易变或来源绑定的事实没有被 `rag_result.answer` 或已确认外部证据支持，`semantic_content` 写明无法确认的部分、可说的泛化范围、核实办法或行动骨架；不要补造具体当前对象、状态、时间或可用性。
-7. **写出 resolved semantic content**：把本轮需要说出口的可见内容压成一个内容-bearing 字符串。这个字符串只回答“台词要承载哪些可见内容”。
-8. **补充目的、声音和布局**：`visible_goal` 写交互目的和互动动作；`voice` 写温度、分寸和情绪姿态；`rendering` 写单气泡内的布局、长短和固定格式保护。
+1. **确定来源和任务**：读取 `decontexualized_input`、`referents`、`internal_monologue`、`logical_stance`、`character_intent`、`selected_text_surface_intent` 和 `memory_lifecycle_context`。先判断本轮是在回答、澄清、接梗、拒绝、收束、交付计划、交付代码，还是处理 open loop。
+2. **锁定当前事件归属**：如果有 `current_event_grounding`，先固定当前说话人、当前文本、直接称呼、提及对象和回复对象。若当前文本有明确主体和谓语，记录这个主体和谓语；写 `semantic_content` 时必须让读者看出谁发生了什么或谁处于什么状态。
+3. **处理澄清优先级**：如果任一 `referents[].status = "unresolved"` 且该指代影响回答，`semantic_content` 只写一个具体澄清问题，优先点名未解析的 `phrase`。
+4. **收集可见语义**：从当前输入、当前事件归属、媒体观察、`rag_result.answer`、已确认外部证据、resolver 目标进度、resolver observation 摘要和活动承诺上下文中提取本轮可以公开表达的事实、回答、结论、代码、限制或下一步。无直接关系的历史记忆和互动风格不要进入事实内容。
+5. **执行已定立场和范围**：按 `logical_stance`、`character_intent` 和 `selected_text_surface_intent` 组织回答骨架。如果其中的主体归属与当前事件归属冲突，只改主体和对象，不改已定立场、意图或语气。
+6. **合并交付范围**：如果 `selected_text_surface_intent` 含原始目标、目标进度、deliverables、blockers 或 final_response_requirements，把这些转成可见回答骨架。当前输入可能只是补充约束，不能缩小原始目标。
+7. **判断 open loop 状态**：当 `conversation_progress.open_loops`、`current_thread` 或 `current_blocker` 存在时，先判断当前输入是否解决、部分解决、答错、回避或只是社交回应。以当前输入和上游意识判断覆盖旧阻碍。
+8. **处理证据边界**：如果实时、易变或来源绑定的事实没有被 `rag_result.answer` 或已确认外部证据支持，`semantic_content` 写明无法确认的部分、可说的泛化范围、核实办法或行动骨架；不要补造具体当前对象、状态、时间或可用性。
+9. **写出 resolved semantic content**：把本轮需要说出口的可见内容压成一个内容-bearing 字符串。这个字符串只回答“台词要承载哪些可见内容”。如果当前事件有明确主体和谓语，检查 `semantic_content` 里是否保留了它；没有保留就先修正 `semantic_content`。
+10. **补充目的、声音和布局**：`visible_goal` 写交互目的和互动动作；`voice` 写温度、分寸和情绪姿态；`rendering` 写单气泡内的布局、长短和固定格式保护。
 
 # 字段写法
 - `visible_goal`：写本轮可见回复要完成的交互目的和互动动作。
-- `semantic_content`：写需要说出口的可见内容。允许包含事实、回答、结论、具体问题、代码块、边界说明或下一步。
+- `semantic_content`：写需要说出口的可见内容。允许包含事实、回答、结论、具体问题、代码块、边界说明或下一步。当前事件里的明确主体和谓语必须写在这里，不能只放在 `visible_goal` 或 `voice`。
 - `voice`：写角色声音、情绪温度、关系温度和分寸。
 - `rendering`：写单个聊天气泡内的布局要求；可以要求简短、多行、保留数值单位、保留 fenced code block 或固定格式。
 
@@ -599,6 +611,7 @@ _CONTENT_PLAN_AGENT_PROMPT = '''\
  
 # 本轮输入字段说明
 - `decontexualized_input` 是当前输入或触发材料的语义摘要，是判断问题、请求、回答、玩笑、补充或澄清需求的第一入口。
+- `current_event_grounding` 若存在，是当前文本消息的可见事实锚点；重点读取 `speaker_display_name`、`current_message_text`、`mentions`、`addressing`、`reply.reply_to_display_name` 和 `reply.reply_excerpt`。它用于保持主体、收件人、回复对象和引用文本归属；若当前文本中的可见主语与上游解释冲突，内容计划必须保留当前文本主语。
 - `referents` 是指代解析结果；任一 `status` 为 `unresolved` 时，必须按澄清优先级使用对应 `phrase` 生成具体澄清内容。
 - `media_observations` 若存在，是本轮图片或音频的直接事实。只在当前输入询问或引用媒体内容时用于实际语义载荷，不要把它当成长期偏好或动作描写来源。
 - `rag_result` 是检索证据包：`answer` 是最高优先级的直接检索结论；`memory_evidence`、`conversation_evidence`、`external_evidence` 和 `recall_evidence` 是可引用支撑；`user_image.user_memory_context` 是当前用户连续性，其中 `active_commitments.due_state` 用于判断承诺时态；`character_image` 只在当前输入询问 active character 自我状态时使用；`third_party_profiles` 是他人信息；`supervisor_trace` 是检索过程痕迹，不是用户可见事实。
@@ -795,7 +808,19 @@ async def call_content_plan_agent(state: dict[str, Any]) -> dict[str, Any]:
     ))
 
     referents = normalize_referents(state["referents"])
-    msg = {
+    msg: dict[str, Any] = {}
+    if str(selection["variant"]).startswith("text_chat_user_message"):
+        msg["current_event_grounding"] = build_current_event_grounding_for_llm(
+            user_input=state["user_input"],
+            prompt_message_context=state["prompt_message_context"],
+            reply_context=state["reply_context"],
+            speaker_display_name=state["user_name"],
+            active_character_display_name=state["character_profile"]["name"],
+            active_character_global_user_id=(
+                state["character_profile"].get("global_user_id") or ""
+            ),
+        )
+    msg.update({
         "decontexualized_input": state["decontexualized_input"],
         "referents": referents,
         "rag_result": _cognition_rag_result(state["rag_result"]),
@@ -820,7 +845,7 @@ async def call_content_plan_agent(state: dict[str, Any]) -> dict[str, Any]:
             ),
         ),
         "conversation_progress": state.get("conversation_progress"),
-    }
+    })
     msg.update(_content_plan_source_payload(
         episode=episode,
         selection=selection,

@@ -93,6 +93,7 @@ def _character_profile() -> dict:
 
     return {
         'name': '杏山千纱',
+        'global_user_id': '00000000-0000-4000-8000-000000000001',
         'mood': 'Neutral',
         'global_vibe': 'Playful',
         'reflection_summary': '群聊里正在玩企鹅叫声和点心的轻松梗。',
@@ -176,8 +177,12 @@ def _prompt_message_context(reply_context: dict) -> dict:
         'mentions': [
             {
                 'platform_user_id': '3768713357',
+                'global_user_id': '00000000-0000-4000-8000-000000000001',
                 'display_name': '杏山千纱',
             },
+        ],
+        'addressed_to_global_user_ids': [
+            '00000000-0000-4000-8000-000000000001',
         ],
         'attachments': [],
         'broadcast': False,
@@ -191,6 +196,7 @@ def _reply_context() -> dict:
     return {
         'reply_to_message_id': '1933211842',
         'reply_to_platform_user_id': '3768713357',
+        'reply_to_global_user_id': '00000000-0000-4000-8000-000000000001',
         'reply_to_display_name': '杏山千纱',
         'reply_excerpt': _REPLY_EXCERPT,
     }
@@ -218,11 +224,13 @@ def _state() -> dict:
             'user_image': {},
         },
         'internal_monologue': (
-            '对方接着刚才无聊的企鹅叫声比赛宣布胜利，还拿提拉米苏来诱惑我。'
+            '对方接着刚才无聊的企鹅叫声比赛，说千纱赢了，还把提拉米苏递给我。'
         ),
         'logical_stance': 'CONFIRM',
         'character_intent': 'BANTAR',
-        'selected_text_surface_intent': '接住提拉米苏梗，嘴硬地承认这场无聊比赛的胜负。',
+        'selected_text_surface_intent': (
+            '接住提拉米苏梗，嘴硬地承认当前文本把杏山千纱标为胜利者。'
+        ),
         'memory_lifecycle_context': {'content_plan_roles': []},
         'interaction_style_context': {},
         'conversation_progress': {
@@ -237,6 +245,7 @@ def _state() -> dict:
         'platform': 'qq',
         'platform_channel_id': '638473184',
         'global_user_id': '256e8a10-c406-47e9-ac8f-efd270d18160',
+        'user_name': '蚝爹油',
     }
 
 
@@ -249,6 +258,35 @@ def _joined_plan(content_plan: object) -> str:
         str(value) for value in content_plan.values()
         if isinstance(value, str)
     )
+
+
+def _assigns_victory_to_user(plan_text: str) -> bool:
+    """Return whether the plan treats the current user as the winner."""
+
+    if re.search(r'算你赢|你这次赢|这次算你赢', plan_text):
+        return True
+
+    for match in re.finditer(r'你([^。！？\n]{0,8})赢', plan_text):
+        bridge = match.group(1)
+        if any(anchor in bridge for anchor in ('我', '自己', '千纱', '杏山千纱')):
+            continue
+        return True
+
+    return False
+
+
+def _preserves_active_character_victory(plan_text: str) -> bool:
+    """Return whether the plan keeps the active character as winner."""
+
+    victory_pattern = (
+        r'千纱[^。！？\n]{0,12}赢|'
+        r'杏山千纱[^。！？\n]{0,12}赢|'
+        r'我[^。！？\n]{0,8}赢|'
+        r'自己[^。！？\n]{0,8}赢|'
+        r'胜利者[^。！？\n]{0,8}身份'
+    )
+    has_active_character_victory = re.search(victory_pattern, plan_text)
+    return has_active_character_victory is not None
 
 
 async def test_live_content_plan_preserves_kazusa_as_victory_subject(
@@ -288,6 +326,9 @@ async def test_live_content_plan_preserves_kazusa_as_victory_subject(
                 'prompt_message_context' in prompt_payload
             ),
             'user_input_in_prompt': 'user_input' in prompt_payload,
+            'current_event_grounding_in_prompt': (
+                'current_event_grounding' in prompt_payload
+            ),
         },
     }
     trace_path = write_llm_trace(
@@ -300,11 +341,26 @@ async def test_live_content_plan_preserves_kazusa_as_victory_subject(
     assert joined_plan.strip(), trace_path
     assert 'reply_context' not in prompt_payload, trace_path
     assert 'prompt_message_context' not in prompt_payload, trace_path
-    assert not re.search(r'你[^。！？\n]{0,8}赢|算你赢|你这次赢', joined_plan), (
+    assert prompt_payload['current_event_grounding'] == {
+        'speaker_display_name': '蚝爹油',
+        'current_message_text': _USER_TEXT,
+        'mentions': ['杏山千纱'],
+        'addressing': {
+            'addresses_active_character': True,
+            'addressed_display_names': ['杏山千纱'],
+            'broadcast': False,
+        },
+        'reply': {
+            'reply_to_display_name': '杏山千纱',
+            'reply_excerpt': _REPLY_EXCERPT,
+            'reply_to_active_character': True,
+        },
+    }, trace_path
+    assert not _assigns_victory_to_user(joined_plan), (
         trace_path,
         joined_plan,
     )
-    assert re.search(r'千纱[^。！？\n]{0,12}赢|我[^。！？\n]{0,8}赢', joined_plan), (
+    assert _preserves_active_character_victory(joined_plan), (
         trace_path,
         joined_plan,
     )

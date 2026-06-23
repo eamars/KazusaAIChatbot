@@ -52,7 +52,6 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
-| [text_chat_current_event_grounding_bugfix_plan.md](active/bugfix/text_chat_current_event_grounding_bugfix_plan.md) | Large text-chat current-event grounding bugfix plan | draft |
 
 ## Reference Documents
 
@@ -145,6 +144,7 @@ plans.
 | [self_other_inversion_personality_question_bugfix_plan.md](archive/completed/bugfix/self_other_inversion_personality_question_bugfix_plan.md) |
 | [task_dispatcher_json_contract_bugfix_plan.md](archive/completed/bugfix/task_dispatcher_json_contract_bugfix_plan.md) |
 | [temporal_grounding_rag_episode_state_plan.md](archive/completed/bugfix/temporal_grounding_rag_episode_state_plan.md) |
+| [text_chat_current_event_grounding_bugfix_plan.md](archive/completed/bugfix/text_chat_current_event_grounding_bugfix_plan.md) |
 | [time_source_boundary_bugfix_plan.md](archive/completed/bugfix/time_source_boundary_bugfix_plan.md) |
 
 ### Completed Short-Term Records

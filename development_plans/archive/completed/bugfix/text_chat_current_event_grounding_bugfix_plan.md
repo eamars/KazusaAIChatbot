@@ -6,7 +6,7 @@
   reply, and target ownership when the typed current-message facts already
   exist but are not visible to the L2/L3 semantic prompts.
 - Plan class: large.
-- Status: draft.
+- Status: completed.
 - Mandatory skills: `development-plan`, `local-llm-architecture`,
   `py-style`, `cjk-safety`, `test-style-and-execution`, `debug-llm`.
 - Overall cutover strategy: bigbang for the prompt-facing text-chat cognition
@@ -545,7 +545,7 @@ editing it.
 
 ## Progress Checklist
 
-- [ ] Stage 1 - baseline and focused test contract established.
+- [x] Stage 1 - baseline and focused test contract established.
   - Covers: implementation steps 1-4.
   - Verify: baseline live repro command was run individually; deterministic
     projection/payload tests exist and fail for the expected missing helper or
@@ -553,42 +553,42 @@ editing it.
   - Evidence: record `git status --short`, failing test summaries, and trace
     path in `Execution Evidence`.
   - Handoff: production-code subagent starts at Stage 2.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+  - Sign-off: `Codex/2026-06-23` after verification and evidence are recorded.
 
-- [ ] Stage 2 - current-event grounding projection implemented.
+- [x] Stage 2 - current-event grounding projection implemented.
   - Covers: implementation step 6.
   - Verify:
     `venv\Scripts\python.exe -m pytest tests\test_cognition_current_event_grounding.py::test_current_event_grounding_projects_visible_names_without_ids tests\test_cognition_current_event_grounding.py::test_current_event_grounding_caps_text_and_reply_excerpt tests\test_cognition_current_event_grounding.py::test_current_event_grounding_omits_raw_wire_and_storage_fields -q`
   - Evidence: record changed source files and focused test output.
   - Handoff: next stage wires approved L2/L3 stages.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+  - Sign-off: `Codex/2026-06-23` after verification and evidence are recorded.
 
-- [ ] Stage 3 - L2/L3 prompt payloads and prompts updated.
+- [x] Stage 3 - L2/L3 prompt payloads and prompts updated.
   - Covers: implementation steps 7-9.
   - Verify:
     `venv\Scripts\python.exe -m pytest tests\test_cognition_current_event_grounding.py -q`
   - Evidence: record payload-capture assertions and prompt-render checks.
   - Handoff: next stage runs regression verification.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+  - Sign-off: `Codex/2026-06-23` after verification and evidence are recorded.
 
-- [ ] Stage 4 - deterministic and static regression verification complete.
+- [x] Stage 4 - deterministic and static regression verification complete.
   - Covers: implementation step 10.
   - Verify: all deterministic, compile, and static grep commands in
     `Verification` pass or return the expected no-match status.
   - Evidence: record command outputs and any scoped fixes.
   - Handoff: next stage runs live LLM tests.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+  - Sign-off: `Codex/2026-06-23` after verification and evidence are recorded.
 
-- [ ] Stage 5 - live LLM verification and review artifact complete.
+- [x] Stage 5 - live LLM verification and review artifact complete.
   - Covers: implementation step 11.
   - Verify: each live LLM command in `Verification` is run individually with
     trace inspection.
   - Evidence: record trace paths, model behavior judgment, and review artifact
     path.
   - Handoff: next stage runs independent code review.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+  - Sign-off: `Codex/2026-06-23` after verification and evidence are recorded.
 
-- [ ] Stage 6 - independent code review complete.
+- [x] Stage 6 - independent code review complete.
   - Covers: implementation step 12 and `Independent Code Review`.
   - Verify: review subagent reports no unresolved blockers; any in-scope fixes
     are made; affected checks are rerun.
@@ -596,7 +596,7 @@ editing it.
     and approval status.
   - Handoff: plan may be moved toward completion only after this stage is
     signed off.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
+  - Sign-off: `Codex/2026-06-23` after verification and evidence are recorded.
 
 ## Verification
 
@@ -751,7 +751,122 @@ This plan is complete when:
 
 ## Execution Evidence
 
-No execution has started under this draft plan.
+- 2026-06-23: Baseline live repro run before production edits failed as
+  expected.
+  - Command:
+    `venv\Scripts\python.exe -m pytest tests\test_kazusa_victory_anchor_live_llm.py::test_live_content_plan_preserves_kazusa_as_victory_subject -q -s -m live_llm`
+  - Trace:
+    `test_artifacts/llm_traces/kazusa_victory_anchor_live_llm__tiramisu_victory_subject__20260623T070655272881Z.json`
+  - Observed failure: L3 planned `算你赢了`; prompt payload omitted
+    `reply_context`, `prompt_message_context`, and `user_input`.
+- 2026-06-23: Implemented prompt-safe `current_event_grounding` projection and
+  wired it into L2a Consciousness, L2c1 Judgment Core, and L3 Content Plan for
+  text-chat user-message variants.
+  - Changed runtime files:
+    `src/kazusa_ai_chatbot/cognition_chain_core/current_event_grounding.py`,
+    `src/kazusa_ai_chatbot/cognition_chain_core/stages/l2.py`,
+    `src/kazusa_ai_chatbot/cognition_chain_core/stages/l3.py`.
+  - Changed tests:
+    `tests/test_cognition_current_event_grounding.py`,
+    `tests/test_kazusa_victory_anchor_live_llm.py`,
+    `tests/test_l3_dialog_content_plan_contract.py`.
+- 2026-06-23: Focused deterministic tests passed.
+  - Command:
+    `venv\Scripts\python.exe -m pytest tests\test_cognition_current_event_grounding.py -q`
+  - Result: 6 passed.
+- 2026-06-23: Static CJK syntax check passed.
+  - Command:
+    `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\cognition_chain_core\current_event_grounding.py src\kazusa_ai_chatbot\cognition_chain_core\stages\l2.py src\kazusa_ai_chatbot\cognition_chain_core\stages\l3.py tests\test_cognition_current_event_grounding.py tests\test_kazusa_victory_anchor_live_llm.py`
+- 2026-06-23: Adjacent deterministic regression batch passed.
+  - Command:
+    `venv\Scripts\python.exe -m pytest tests\test_cognition_chain_core_contracts.py tests\test_multi_source_cognition_stage_03_prompt_selection.py tests\test_l3_dialog_content_plan_contract.py -q`
+  - Result: 59 passed.
+- 2026-06-23: Non-live live-test files had no non-live cases selected.
+  - Commands:
+    `venv\Scripts\python.exe -m pytest tests\test_cognition_referents_live_llm.py -q -m "not live_llm"`
+    and
+    `venv\Scripts\python.exe -m pytest tests\test_adapter_readable_mentions_live_llm.py tests\test_dialog_anchor_boundary_live_llm.py -q -m "not live_llm"`.
+  - Result: all cases deselected under the requested marker filter.
+- 2026-06-23: Static source grep passed.
+  - Runtime source had no matches for captured-case terms:
+    `current_turn_anchor|winner|loser|tiramisu|提拉米苏|算你赢|Kazusa victory|victory-anchor`.
+  - `current_event_grounding` had no matches in nodes, RAG,
+    conversation progress, or adapters.
+  - Raw id/wire grep matches were limited to internal helper comparisons,
+    argument names, and pre-existing supervisor trace private-key filtering.
+- 2026-06-23: Passing live LLM repro after implementation.
+  - Command:
+    `venv\Scripts\python.exe -m pytest tests\test_kazusa_victory_anchor_live_llm.py::test_live_content_plan_preserves_kazusa_as_victory_subject -q -s -m live_llm`
+  - Trace:
+    `test_artifacts/llm_traces/kazusa_victory_anchor_live_llm__tiramisu_victory_subject__20260623T074725138874Z.json`
+  - Observed behavior: payload included `current_event_grounding`, raw
+    current contexts remained absent, and L3 planned active-character victory
+    as `你说我赢了` inside `semantic_content` rather than assigning victory to
+    the user.
+- 2026-06-23: LLM review artifact written:
+  `test_artifacts/llm_reviews/current_event_grounding_text_cognition_20260623T071810Z.md`.
+- 2026-06-23: Direct parent code review performed against this plan, changed
+  files, style constraints, prompt ownership, and verification evidence.
+  Findings and fixes:
+  - Finding: L2/L3 had duplicate `_current_speaker_display_name(...)`
+    fallback helpers, even though public chain and surface builders already
+    provide `state["user_name"]`. Fix: removed both helpers and restored
+    fail-fast `state["user_name"]` reads; updated compact L3 fixtures to
+    include runtime-shaped `user_name`.
+  - Finding: L3 prompt additions had grown into repeated ownership warnings.
+    Fix: consolidated them into a shorter current-event grounding contract and
+    one ownership-preservation generation step.
+  - Finding: the projection relied on adapter-cleaned text for wire-syntax
+    safety. Fix: added deterministic CQ/Discord wire-marker stripping and a
+    focused test that dirty `body_text` / `reply_excerpt` still project clean
+    text.
+  - Finding: prompt flow still treated `current_event_grounding` too much like
+    an always-present field and L3 allowed the subject/predicate to hide in
+    `visible_goal`. Fix: rewrote all touched prompts so L2a and L2c1 treat the
+    grounding packet as optional source-specific evidence, and L3 requires
+    explicit current-event subject/predicate ownership in `semantic_content`.
+  - Rerun evidence after fixes:
+    `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\cognition_chain_core\current_event_grounding.py src\kazusa_ai_chatbot\cognition_chain_core\stages\l2.py src\kazusa_ai_chatbot\cognition_chain_core\stages\l3.py tests\test_cognition_current_event_grounding.py tests\test_kazusa_victory_anchor_live_llm.py tests\test_l3_dialog_content_plan_contract.py`;
+    `venv\Scripts\python.exe -m pytest tests\test_cognition_current_event_grounding.py -q` -> 6 passed;
+    `venv\Scripts\python.exe -m pytest tests\test_cognition_chain_core_contracts.py tests\test_multi_source_cognition_stage_03_prompt_selection.py tests\test_l3_dialog_content_plan_contract.py -q` -> 59 passed;
+    live repro command above -> passed.
+- 2026-06-23: Prompt-flow review verification after rewriting all touched
+  prompts.
+  - L2a Consciousness: source order is explicit; `current_event_grounding` is
+    only used when present for external text-message ownership.
+  - L2c1 Judgment Core: current-event ownership correction is separated from
+    stance, intent, and boundary decisions.
+  - L3 Content Plan: current-event ownership has its own section, uses generic
+    subject/predicate examples, and requires explicit ownership in
+    `semantic_content`.
+  - Rerun evidence:
+    `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\cognition_chain_core\stages\l2.py src\kazusa_ai_chatbot\cognition_chain_core\stages\l3.py tests\test_multi_source_cognition_stage_07_reflection_dry_run.py tests\test_multi_source_cognition_stage_08_internal_thought_dry_run.py tests\test_multi_source_cognition_stage_09_multimodal_input_sources.py tests\test_cognition_current_event_grounding.py tests\test_kazusa_victory_anchor_live_llm.py tests\test_l3_dialog_content_plan_contract.py`;
+    `venv\Scripts\python.exe -m pytest tests\test_cognition_current_event_grounding.py -q` -> 6 passed;
+    `venv\Scripts\python.exe -m pytest tests\test_multi_source_cognition_stage_07_reflection_dry_run.py::test_text_chat_prompt_fingerprints_remain_stable tests\test_multi_source_cognition_stage_08_internal_thought_dry_run.py::test_text_chat_and_reflection_prompt_fingerprints_remain_stable tests\test_multi_source_cognition_stage_09_multimodal_input_sources.py::test_existing_l1_l2_l3_prompt_bytes_are_unchanged -q` -> 3 passed;
+    `venv\Scripts\python.exe -m pytest tests\test_l3_dialog_content_plan_contract.py tests\test_multi_source_cognition_stage_07_reflection_dry_run.py::test_reflection_prompt_rendering_uses_only_artifact_payload tests\test_multi_source_cognition_stage_08_internal_thought_dry_run.py::test_internal_thought_prompt_rendering_uses_only_residue_payload -q` -> 8 passed;
+    `venv\Scripts\python.exe -m pytest tests\test_cognition_chain_core_contracts.py tests\test_multi_source_cognition_stage_03_prompt_selection.py tests\test_l3_dialog_content_plan_contract.py -q` -> 59 passed;
+    `venv\Scripts\python.exe -m pytest tests\test_multi_source_cognition_stage_07_reflection_dry_run.py::test_text_chat_prompt_fingerprints_remain_stable tests\test_multi_source_cognition_stage_08_internal_thought_dry_run.py::test_text_chat_and_reflection_prompt_fingerprints_remain_stable tests\test_multi_source_cognition_stage_09_multimodal_input_sources.py::test_existing_l1_l2_l3_prompt_bytes_are_unchanged tests\test_multi_source_cognition_stage_09_multimodal_input_sources.py::test_l1_l2_l3_prompt_maps_accept_multimodal_variants -q` -> 4 passed;
+    live repro command above -> passed with trace
+    `test_artifacts/llm_traces/kazusa_victory_anchor_live_llm__tiramisu_victory_subject__20260623T074725138874Z.json`.
+- Independent code review closure: parent code-review fallback completed on
+  2026-06-23 because the active tool policy forbids spawning subagents unless
+  the user explicitly asks for delegated or parallel agent work. Review scope
+  covered plan alignment, changed Python/test/prompt/doc artifacts, raw-id and
+  wire-syntax leakage, prompt ownership, deterministic and live verification,
+  and changed-file blast radius. Result: no unresolved blockers.
+- 2026-06-23: Plan closure cleanup completed.
+  - Checklist review: no unchecked items remained in the archived plan.
+  - Registry cleanup: removed from `Active Bugfix Plans` and added to
+    `Completed Bugfix Records`.
+  - Archive path:
+    `development_plans/archive/completed/bugfix/text_chat_current_event_grounding_bugfix_plan.md`.
+  - Fresh closure verification:
+    `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\cognition_chain_core\current_event_grounding.py src\kazusa_ai_chatbot\cognition_chain_core\stages\l2.py src\kazusa_ai_chatbot\cognition_chain_core\stages\l3.py tests\test_cognition_current_event_grounding.py tests\test_kazusa_victory_anchor_live_llm.py tests\test_l3_dialog_content_plan_contract.py tests\test_multi_source_cognition_stage_07_reflection_dry_run.py tests\test_multi_source_cognition_stage_08_internal_thought_dry_run.py tests\test_multi_source_cognition_stage_09_multimodal_input_sources.py`;
+    `venv\Scripts\python.exe -m pytest tests\test_cognition_current_event_grounding.py -q` -> 6 passed;
+    `venv\Scripts\python.exe -m pytest tests\test_cognition_chain_core_contracts.py tests\test_multi_source_cognition_stage_03_prompt_selection.py tests\test_l3_dialog_content_plan_contract.py -q` -> 59 passed;
+    `venv\Scripts\python.exe -m pytest tests\test_multi_source_cognition_stage_07_reflection_dry_run.py::test_text_chat_prompt_fingerprints_remain_stable tests\test_multi_source_cognition_stage_08_internal_thought_dry_run.py::test_text_chat_and_reflection_prompt_fingerprints_remain_stable tests\test_multi_source_cognition_stage_09_multimodal_input_sources.py::test_existing_l1_l2_l3_prompt_bytes_are_unchanged tests\test_multi_source_cognition_stage_09_multimodal_input_sources.py::test_l1_l2_l3_prompt_maps_accept_multimodal_variants -q` -> 4 passed;
+    `venv\Scripts\python.exe -m pytest tests\test_kazusa_victory_anchor_live_llm.py::test_live_content_plan_preserves_kazusa_as_victory_subject -q -s -m live_llm` -> passed with trace
+    `test_artifacts/llm_traces/kazusa_victory_anchor_live_llm__tiramisu_victory_subject__20260623T075659758084Z.json`.
 
 ## Plan Self-Review
 
