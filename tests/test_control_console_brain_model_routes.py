@@ -202,3 +202,20 @@ async def test_available_model_listing_is_bounded_and_redacted() -> None:
         "models": [],
         "message": "Provider model list unavailable.",
     }
+
+    empty_transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            json={"data": [{"id": "bad model with spaces"}, {"object": "model"}]},
+        ),
+    )
+    empty = await fetch_available_models(
+        base_url="http://provider.local/v1",
+        api_key="secret-token",
+        transport=empty_transport,
+    )
+    assert empty == {
+        "status": "empty",
+        "models": [],
+        "message": "Provider returned no valid model ids.",
+    }

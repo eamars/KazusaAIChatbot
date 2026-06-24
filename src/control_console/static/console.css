@@ -161,9 +161,11 @@ body[data-auth-state="authenticated"] #login-form { display: none; }
 .brain-route-editor-header strong { overflow-wrap: anywhere; font-size: 15px; }
 .brain-route-editor-header span { color: var(--muted); font-size: 12px; }
 .brain-route-current { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-.brain-route-form { display: grid; grid-template-columns: minmax(170px, 1fr) minmax(170px, 1fr) minmax(132px, 0.6fr) minmax(126px, 0.45fr); gap: 10px; align-items: end; }
+.brain-route-form { display: grid; grid-template-columns: minmax(220px, 1.2fr) minmax(132px, 0.6fr) minmax(126px, 0.45fr); gap: 10px; align-items: end; }
 .brain-thinking-toggle { align-self: end; min-height: 36px; }
 .brain-model-picker-state { min-height: 24px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.brain-discovered-model { min-height: 36px; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; padding: 7px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--panel); color: var(--muted); font-size: 12px; }
+.brain-discovered-model code { color: var(--ink); overflow-wrap: anywhere; }
 .brain-route-actions { justify-content: flex-end; padding: 0; }
 .brain-route-actions .btn { max-width: 100%; white-space: normal; }
 .badge { display: inline-flex; align-items: center; min-height: 24px; padding: 3px 9px; border-radius: 9999px; border: 1px solid var(--line); background: var(--panel-soft); color: var(--muted); font-size: 12px; font-weight: 500; white-space: nowrap; }

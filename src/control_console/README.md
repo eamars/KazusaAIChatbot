@@ -319,6 +319,15 @@ server-side for the route's effective provider. Responses are bounded to
 model ids and model-family labels; provider credentials and raw provider
 errors are not returned to the browser.
 
+The browser model editor is discovery-only. Opening a route lazily discovers
+models for that route if no cached discovery result exists. Unavailable and
+empty provider results render as explicit states with a retry control. A
+single discovered model renders as a read-only discovered-model row; if that
+model differs from the route's current effective model, applying the route
+uses that discovered model. Multiple discovered models render as a select
+containing only discovered model ids. The Services tab does not expose a
+free-text model id field.
+
 Audit records are written for config views, apply requests, reset requests,
 restart requests, successful application, and validation or version failures.
 Audit targets include service ids, field keys, config state, and restart

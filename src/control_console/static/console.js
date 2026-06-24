@@ -1142,8 +1142,10 @@ function renderBrainRouteEditor(route, service) {
   const tokensValue = dirty.max_completion_tokens ?? route.override?.max_completion_tokens ?? route.effective?.max_completion_tokens ?? "";
   const thinkingValue = dirty.thinking_enabled ?? route.override?.thinking_enabled ?? route.effective?.thinking_enabled ?? false;
   const modelsState = state.availableModelCache[route.route_key] || {status: "not_loaded", models: []};
+  const modelPicker = renderBrainModelPicker(route, modelsState, modelValue);
   const applyDisabled = state.brainRouteActionInFlight || !brainRouteHasDirty(route) ? " disabled aria-disabled=\"true\"" : "";
   const loadingDisabled = state.brainRouteActionInFlight ? " disabled aria-disabled=\"true\"" : "";
+  const refreshLabel = brainModelRefreshLabel(modelsState);
   const runningText = service.actual_state === "running" ? "apply and restart" : "store for next start";
   return `
     <section class="brain-route-editor" data-selected-brain-route="${escapeHtml(route.route_key)}">
@@ -1163,16 +1165,7 @@ function renderBrainRouteEditor(route, service) {
         <div class="kv"><span>source</span><strong>${escapeHtml(route.effective?.source || "default")}</strong></div>
       </div>
       <div class="brain-route-form">
-        <label class="field">
-          Available model
-          <select class="input" data-brain-route-input="model">
-            ${availableModelOptions(modelsState, modelValue)}
-          </select>
-        </label>
-        <label class="field">
-          Manual model ID
-          <input class="input" data-brain-route-input="model" value="${escapeHtml(modelValue)}" placeholder="provider model id" />
-        </label>
+        ${modelPicker}
         <label class="field">
           Max completion tokens
           <input class="input" data-brain-route-input="max_completion_tokens" type="number" min="1" max="65536" value="${escapeHtml(tokensValue)}" />
@@ -1184,7 +1177,7 @@ function renderBrainRouteEditor(route, service) {
       </div>
       <div class="brain-model-picker-state">${availableModelStatus(modelsState)}</div>
       <div class="service-card-actions brain-route-actions">
-        <button class="btn" data-brain-route-refresh="${escapeHtml(route.route_key)}"${loadingDisabled} type="button">Refresh models</button>
+        <button class="btn" data-brain-route-refresh="${escapeHtml(route.route_key)}"${loadingDisabled} type="button">${refreshLabel}</button>
         <button class="btn" data-brain-route-reset="${escapeHtml(route.route_key)}"${loadingDisabled} type="button">Reset route</button>
         <button class="btn primary" data-brain-route-apply="${escapeHtml(route.route_key)}"${applyDisabled} type="button">${escapeHtml(runningText)}</button>
       </div>
@@ -1192,8 +1185,15 @@ function renderBrainRouteEditor(route, service) {
   `;
 }
 
+function ensureBrainRouteModelsLoaded(routeKey) {
+  const cache = state.availableModelCache[routeKey] || {status: "not_loaded"};
+  if (cache.status !== "not_loaded") return;
+  refreshBrainAvailableModels(routeKey).catch(reportActionError);
+}
+
 function refreshBrainAvailableModels(routeKey) {
   const cache = state.availableModelCache[routeKey] || {};
+  if (cache.status === "loading") return Promise.resolve();
   state.availableModelCache[routeKey] = {...cache, status: "loading", models: []};
   renderServices();
   return api(`/api/services/brain/model-routes/${encodeURIComponent(routeKey)}/available-models`)
@@ -1228,24 +1228,109 @@ function brainRouteHasDirty(route) {
   return Object.keys(brainRouteDirtyValues(route)).length > 0;
 }
 
-function availableModelOptions(modelsState, selectedModel) {
+function setBrainRouteDirtyValue(route, fieldName, value) {
+  const dirtyValues = {...brainRouteDirtyValues(route)};
+  if (route.effective?.[fieldName] === value) {
+    delete dirtyValues[fieldName];
+  } else {
+    dirtyValues[fieldName] = value;
+  }
+  if (Object.keys(dirtyValues).length) {
+    state.dirtyBrainRouteValues[route.route_key] = dirtyValues;
+  } else {
+    delete state.dirtyBrainRouteValues[route.route_key];
+  }
+}
+
+function renderBrainModelPicker(route, modelsState, selectedModel) {
+  const status = modelsState.status || "not_loaded";
   const models = modelsState.models || [];
-  const selected = selectedModel || "";
-  const options = [`<option value="${escapeHtml(selected)}">${escapeHtml(selected || "manual model")}</option>`];
-  models.forEach((model) => {
+  if (status === "available" && models.length === 1) {
+    return singleBrainModelState(route, models[0]);
+  }
+  if (status === "available" && models.length > 1) {
+    const selected = selectedAvailableModel(models, selectedModel);
+    if (selected !== selectedModel) setBrainRouteDirtyValue(route, "model", selected);
+    return `
+      <label class="field">
+        Available model
+        <select class="input" data-brain-route-input="model">
+          ${availableModelOptions(models, selected)}
+        </select>
+      </label>
+    `;
+  }
+  if (status === "loading") {
+    return brainModelStateMarkup("Available model", "loading", "Loading provider model list...");
+  }
+  if (status === "empty") {
+    return brainModelStateMarkup("Available model", "empty", modelsState.message || "Provider returned no valid model ids.");
+  }
+  if (status === "unavailable") {
+    return brainModelStateMarkup("Available model", "unavailable", modelsState.message || "Provider model list unavailable.");
+  }
+  return brainModelStateMarkup("Available model", "not loaded", "Provider model discovery will start for this route.");
+}
+
+function singleBrainModelState(route, model) {
+  const modelId = model.id || "";
+  if (modelId) setBrainRouteDirtyValue(route, "model", modelId);
+  return `
+    <div class="field">
+      Available model
+      <div class="brain-discovered-model">
+        <span class="badge success">single discovered model</span>
+        <code>${escapeHtml(modelId || "no valid model id")}</code>
+        <span>${escapeHtml(model.family || "unknown")}</span>
+      </div>
+    </div>
+  `;
+}
+
+function brainModelStateMarkup(label, status, message) {
+  const tone = status === "loading" ? "badge warn" : "badge";
+  return `
+    <div class="field">
+      ${escapeHtml(label)}
+      <div class="brain-discovered-model">
+        <span class="${tone}">${escapeHtml(status)}</span>
+        <span>${escapeHtml(message)}</span>
+      </div>
+    </div>
+  `;
+}
+
+function availableModelOptions(models, selectedModel) {
+  const selected = selectedAvailableModel(models, selectedModel);
+  return models.map((model) => {
     const value = model.id || "";
-    if (!value || value === selected) return;
-    options.push(`<option value="${escapeHtml(value)}">${escapeHtml(value)} · ${escapeHtml(model.family || "unknown")}</option>`);
-  });
-  return options.join("");
+    const selectedText = value === selected ? " selected" : "";
+    return `<option value="${escapeHtml(value)}"${selectedText}>${escapeHtml(value)} · ${escapeHtml(model.family || "unknown")}</option>`;
+  }).join("");
+}
+
+function selectedAvailableModel(models, selectedModel) {
+  const modelIds = models.map((model) => model.id || "").filter(Boolean);
+  return modelIds.includes(selectedModel) ? selectedModel : modelIds[0] || "";
 }
 
 function availableModelStatus(modelsState) {
   const status = modelsState.status || "not_loaded";
   if (status === "loading") return "Loading provider model list...";
-  if (status === "available") return `${(modelsState.models || []).length} provider models available.`;
+  if (status === "available") {
+    const count = (modelsState.models || []).length;
+    if (count === 1) return "One discovered provider model.";
+    return `${count} provider models available.`;
+  }
+  if (status === "empty") return modelsState.message || "Provider returned no valid model ids.";
   if (status === "unavailable") return modelsState.message || "Provider model list unavailable.";
-  return "Refresh models to populate the picker for this route.";
+  return "Provider model discovery has not loaded for this route.";
+}
+
+function brainModelRefreshLabel(modelsState) {
+  const status = modelsState.status || "not_loaded";
+  if (status === "empty" || status === "unavailable") return "Retry discovery";
+  return "Refresh models";
 }
 
 function brainRouteSummary(routes) {
@@ -1331,6 +1416,8 @@ function renderServices() {
       : renderGenericServiceCard(service);
     appendHtml(grid, "beforeend", markup);
   });
+  const route = selectedBrainRoute();
+  if (route) ensureBrainRouteModelsLoaded(route.route_key);
 }
 
 function auditRows(events) {
@@ -1430,13 +1517,16 @@ function handleServiceGridInput(event) {
   const route = selectedBrainRoute();
   if (!route) return;
   const fieldName = input.dataset.brainRouteInput;
-  const dirtyValues = {...brainRouteDirtyValues(route)};
   let value = input.type === "checkbox" ? input.checked : input.value;
   if (fieldName === "max_completion_tokens") {
     value = Number(input.value);
   }
-  dirtyValues[fieldName] = value;
-  state.dirtyBrainRouteValues[route.route_key] = dirtyValues;
+  if (fieldName === "model") {
+    const modelsState = state.availableModelCache[route.route_key] || {};
+    const discoveredIds = (modelsState.models || []).map((model) => model.id || "");
+    if (!discoveredIds.includes(value)) return;
+  }
+  setBrainRouteDirtyValue(route, fieldName, value);
   if (event.type === "change") renderServices();
   else updateBrainRouteApplyButtons();
 }

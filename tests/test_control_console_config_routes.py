@@ -295,6 +295,44 @@ def test_available_models_route_returns_redacted_provider_status(
     assert "test-key" not in response.text
 
 
+def test_available_models_route_reports_empty_provider_result(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """The browser should distinguish empty provider lists from failures."""
+
+    import httpx
+
+    _route_environment(monkeypatch)
+
+    from control_console import brain_model_routes
+
+    monkeypatch.setattr(
+        brain_model_routes,
+        "_MODEL_LIST_TRANSPORT",
+        httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                json={"data": [{"id": "bad model with spaces"}]},
+            ),
+        ),
+    )
+    supervisor = _ConfigRouteSupervisor(napcat_state="stopped")
+    client, _, _ = _client_with_login(tmp_path, supervisor)
+
+    response = client.get(
+        "/api/services/brain/model-routes/cognition_llm/available-models",
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "route_key": "cognition_llm",
+        "status": "empty",
+        "models": [],
+        "message": "Provider returned no valid model ids.",
+    }
+
+
 def test_apply_config_to_stopped_service_stores_override_without_restart(
     monkeypatch,
     tmp_path,

@@ -363,6 +363,13 @@ async def fetch_available_models(
         return _unavailable_model_list("Provider model list unavailable.")
 
     models = _sanitize_model_payload(payload)
+    if not models:
+        return {
+            "status": "empty",
+            "models": [],
+            "message": "Provider returned no valid model ids.",
+        }
+
     return {
         "status": "available",
         "models": models,

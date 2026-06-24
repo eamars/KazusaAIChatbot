@@ -311,6 +311,11 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert "function renderBrainRouteMatrix" in script.text
     assert "function renderBrainRouteEditor" in script.text
     assert "function refreshBrainAvailableModels" in script.text
+    assert "function ensureBrainRouteModelsLoaded" in script.text
+    assert "function renderBrainModelPicker" in script.text
+    assert "function singleBrainModelState" in script.text
+    assert "Manual model " + "ID" not in script.text
+    assert "provider model " + "id" not in script.text
     assert "data-brain-route-key" in script.text
     assert "/api/services/brain/model-routes" in script.text
     assert "function renderServiceConfigDialog" in script.text
