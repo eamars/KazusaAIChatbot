@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import pytest
@@ -256,6 +257,52 @@ def test_static_renderers_tolerate_missing_optional_panel_targets(tmp_path) -> N
         next_function = script_text.find("\nfunction ", function_start + 1)
         function_body = script_text[function_start:next_function]
         assert "if (!element) return;" in function_body
+
+
+def test_static_renderers_do_not_write_inner_html_through_raw_selectors(
+    tmp_path,
+) -> None:
+    """Render output writes should use the null-safe DOM helper."""
+
+    client = _authenticated_client(tmp_path)
+
+    script = client.get("/static/console.js")
+    assert script.status_code == 200
+    script_text = script.text
+
+    assert "function setHtml" in script_text
+    assert not re.search(r"qs\([^)]*\)\.innerHTML\s*=", script_text)
+    assert not re.search(r"qs\([^)]*\)\.insertAdjacentHTML\(", script_text)
+
+
+def test_static_shell_dom_access_uses_guarded_helpers(tmp_path) -> None:
+    """Direct DOM property access through qs should stay behind helpers."""
+
+    client = _authenticated_client(tmp_path)
+
+    script = client.get("/static/console.js")
+    assert script.status_code == 200
+    script_text = script.text
+
+    for helper_name in [
+        "setText",
+        "setClassName",
+        "setHidden",
+        "setDisabled",
+        "setValue",
+        "getValue",
+        "isChecked",
+        "bind",
+    ]:
+        assert f"function {helper_name}" in script_text
+
+    assert not re.search(
+        r"qs\([^)]*\)\."
+        r"(textContent|className|hidden|value|checked|disabled|"
+        r"addEventListener|scrollTop|scrollHeight|placeholder)\b",
+        script_text,
+    )
+    assert 'getValue("#event-source", "console") || "console"' in script_text
 
 
 @pytest.mark.asyncio

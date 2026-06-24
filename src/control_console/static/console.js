@@ -39,6 +39,92 @@ function qsa(selector) {
   return Array.from(document.querySelectorAll(selector));
 }
 
+function optionalElement(target) {
+  return typeof target === "string" ? qs(target) : target;
+}
+
+function setHtml(target, html) {
+  const element = optionalElement(target);
+  if (!element) return null;
+  element.innerHTML = html;
+  return element;
+}
+
+function appendHtml(target, position, html) {
+  const element = optionalElement(target);
+  if (!element) return null;
+  element.insertAdjacentHTML(position, html);
+  return element;
+}
+
+function setText(target, text) {
+  const element = optionalElement(target);
+  if (!element) return null;
+  element.textContent = text;
+  return element;
+}
+
+function setClassName(target, className) {
+  const element = optionalElement(target);
+  if (!element) return null;
+  element.className = className;
+  return element;
+}
+
+function setHidden(target, hidden) {
+  const element = optionalElement(target);
+  if (!element) return null;
+  element.hidden = hidden;
+  return element;
+}
+
+function setDisabled(target, disabled) {
+  const element = optionalElement(target);
+  if (!element) return null;
+  element.disabled = disabled;
+  return element;
+}
+
+function setValue(target, value) {
+  const element = optionalElement(target);
+  if (!element) return null;
+  element.value = value;
+  return element;
+}
+
+function getValue(target, fallback = "") {
+  const element = optionalElement(target);
+  if (!element) return fallback;
+  return element.value ?? fallback;
+}
+
+function isChecked(target, fallback = false) {
+  const element = optionalElement(target);
+  if (!element) return fallback;
+  return Boolean(element.checked);
+}
+
+function setPlaceholder(target, placeholder) {
+  const element = optionalElement(target);
+  if (!element) return null;
+  element.placeholder = placeholder;
+  return element;
+}
+
+function bind(target, eventName, handler) {
+  const element = optionalElement(target);
+  if (!element) return null;
+  element.addEventListener(eventName, handler);
+  return element;
+}
+
+function scrollToBottom(target) {
+  const element = optionalElement(target);
+  if (!element) return null;
+  element.scrollTop = element.scrollHeight;
+  return element;
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -138,8 +224,8 @@ function renderPageCapabilities() {
 function renderBrand(identity = {}) {
   const name = identity.character_name || "not connected";
   const connected = identity.status === "available" && name !== "not connected";
-  qs("#brand-name").textContent = name;
-  qs("#brand-subtitle").textContent = connected ? "Control console" : "database not connected";
+  setText("#brand-name", name);
+  setText("#brand-subtitle", connected ? "Control console" : "database not connected");
   document.title = connected ? `${name} Control Console` : "not connected";
 }
 
@@ -176,31 +262,32 @@ function renderShellStatus(payload) {
   const brainState = brainService ? brainService.actual_state : "unavailable";
   const dot = qs(".status-dot");
   const statusText = qs("#shell-status-text");
+  if (!dot || !statusText) return;
   if (!state.isAuthenticated) {
     dot.dataset.state = "locked";
-    statusText.textContent = "Sign in to inspect local services.";
+    setText(statusText, "Sign in to inspect local services.");
     return;
   }
 
   dot.dataset.state = brainState;
   const streamState = payload.ui_capabilities.event_stream ? "stream ready" : "stream off";
   if (brainState === "running") {
-    statusText.textContent = `Brain running; ${streamState}.`;
+    setText(statusText, `Brain running; ${streamState}.`);
     return;
   }
   if (isEndpointConflict(brainService)) {
-    statusText.textContent = "Brain endpoint already running outside the console; lifecycle is unmanaged.";
+    setText(statusText, "Brain endpoint already running outside the console; lifecycle is unmanaged.");
     return;
   }
   if (brainState === "conflict") {
-    statusText.textContent = "Brain has a stale lifecycle conflict; inspect Services.";
+    setText(statusText, "Brain has a stale lifecycle conflict; inspect Services.");
     return;
   }
   if (brainState === "unavailable") {
-    statusText.textContent = "Brain unavailable; check the service registry.";
+    setText(statusText, "Brain unavailable; check the service registry.");
     return;
   }
-  statusText.textContent = `Brain ${brainState}; lifecycle controls available.`;
+  setText(statusText, `Brain ${brainState}; lifecycle controls available.`);
 }
 
 function isEndpointConflict(service) {
@@ -219,35 +306,37 @@ function renderDebugAvailability() {
   const brainState = brainService ? brainService.actual_state : "unavailable";
   const available = state.isAuthenticated && isServiceHttpAvailable(brainService);
   const statusBadge = qs("#debug-brain-status");
-  statusBadge.textContent = isEndpointConflict(brainService)
+  setText(statusBadge, isEndpointConflict(brainService)
     ? "brain unmanaged"
-    : `brain ${brainState}`;
-  statusBadge.className = available ? "badge success" : "badge";
+    : `brain ${brainState}`);
+  setClassName(statusBadge, available ? "badge success" : "badge");
   qsa("[data-debug-input]").forEach((control) => {
     control.disabled = !available;
   });
-  qs("[name='message_text']").placeholder = available
+  setPlaceholder("[name='message_text']", available
     ? "Send a debug message through /chat"
-    : "Start or connect the brain service before sending a debug message";
-  qs("#debug-send").disabled = !available || state.debugRequestInFlight;
+    : "Start or connect the brain service before sending a debug message");
+  setDisabled("#debug-send", !available || state.debugRequestInFlight);
 }
 
 function showNotice(message, tone = "info") {
   const notice = qs("#ui-notice");
-  notice.hidden = false;
+  if (!notice) return;
+  setHidden(notice, false);
   notice.dataset.tone = tone;
-  notice.textContent = message;
+  setText(notice, message);
 }
 
 function clearNotice() {
   const notice = qs("#ui-notice");
-  notice.hidden = true;
+  if (!notice) return;
+  setHidden(notice, true);
   notice.dataset.tone = "idle";
-  notice.textContent = "";
+  setText(notice, "");
 }
 
 async function runButtonAction(button, loadingMessage, successMessage, action) {
-  button.disabled = true;
+  setDisabled(button, true);
   showNotice(loadingMessage, "info");
   try {
     await action();
@@ -255,7 +344,7 @@ async function runButtonAction(button, loadingMessage, successMessage, action) {
   } catch (error) {
     showNotice(error.message, "danger");
   } finally {
-    button.disabled = false;
+    setDisabled(button, false);
   }
 }
 
@@ -283,13 +372,13 @@ async function api(path, options = {}) {
 }
 
 async function login() {
-  const token = qs("#token").value;
+  const token = getValue("#token");
   const payload = await api("/api/auth/login", {method: "POST", body: JSON.stringify({token})});
   state.csrfHeaderName = payload.csrf_header_name;
   state.csrfToken = payload.csrf_token;
-  qs("#token").value = "";
+  setValue("#token", "");
   setAuthState(true);
-  qs("#session-state").textContent = payload.operator.operator_id;
+  setText("#session-state", payload.operator.operator_id);
   await bootstrap();
   showNotice("Signed in.", "success");
 }
@@ -306,7 +395,7 @@ async function bootstrap(options = {}) {
   state.applicationIdentity = payload.application_identity || {};
   state.latestCognitionGraph = payload.latest_cognition_graph || payload.overview?.latest_cognition_graph || null;
   setAuthState(true);
-  qs("#session-state").textContent = payload.operator ? payload.operator.operator_id : "signed in";
+  setText("#session-state", payload.operator ? payload.operator.operator_id : "signed in");
   renderBrand(payload.application_identity || {});
   renderPageCapabilities();
   renderShellStatus(payload);
@@ -333,7 +422,7 @@ function lockSession() {
   state.eventSource = null;
   state.streamUrl = "";
   setAuthState(false);
-  qs("#session-state").textContent = "signed out";
+  setText("#session-state", "signed out");
   renderBrand({status: "unavailable", character_name: "not connected"});
   renderDebugAvailability();
   showNotice("Sign in to inspect local services.", "info");
@@ -356,7 +445,8 @@ async function resumeSession() {
 
 function renderOverview(payload) {
   const grid = qs("#overview-grid");
-  grid.innerHTML = "";
+  if (!grid) return;
+  setHtml(grid, "");
   const runningCount = payload.services.filter((service) => service.actual_state === "running").length;
   const visibleWorkflowCount = qsa("[data-page-link]").length;
   const cards = [
@@ -366,15 +456,15 @@ function renderOverview(payload) {
     ["Visible workflows", visibleWorkflowCount, "primary navigation"],
   ];
   cards.forEach(([label, value, note]) => {
-    grid.insertAdjacentHTML("beforeend", `<article class="metric" data-component="Card"><div class="metric-label">${escapeHtml(label)}</div><div class="metric-value">${escapeHtml(value)}</div><div class="metric-label">${escapeHtml(note)}</div></article>`);
+    appendHtml(grid, "beforeend", `<article class="metric" data-component="Card"><div class="metric-label">${escapeHtml(label)}</div><div class="metric-value">${escapeHtml(value)}</div><div class="metric-label">${escapeHtml(note)}</div></article>`);
   });
-  qs("#overview-runtime-table").innerHTML = [
+  setHtml("#overview-runtime-table", [
     ["Services", payload.services.length],
     ["Audit events", payload.recent_audit_events.length],
     ["CSRF header", payload.csrf_header_name],
     ["Stream URL", payload.stream_url],
-  ].map(([key, value]) => `<tr><td>${escapeHtml(key)}</td><td>${escapeHtml(value)}</td></tr>`).join("");
-  qs("#overview-audit-table").innerHTML = auditRows(payload.recent_audit_events);
+  ].map(([key, value]) => `<tr><td>${escapeHtml(key)}</td><td>${escapeHtml(value)}</td></tr>`).join(""));
+  setHtml("#overview-audit-table", auditRows(payload.recent_audit_events));
   renderCapabilitySummary();
   renderOverviewCognitionGraph(state.latestCognitionGraph);
 }
@@ -410,14 +500,14 @@ function renderCognitionGraph({containerSelector, statusSelector, snapshot, empt
   status.className = cognitionGraphStatusBadgeClass(graphStatus);
 
   if (!nodes.length) {
-    container.innerHTML = `<p class="graph-empty">${escapeHtml(emptyMessage)}</p>`;
+    setHtml(container, `<p class="graph-empty">${escapeHtml(emptyMessage)}</p>`);
     return;
   }
 
   const lanes = cognitionGraphLanes(nodes);
   const maxColumn = nodes.reduce((maximum, node) => Math.max(maximum, Number(node.column) || 1), 1);
   const model = cognitionGraphModel({graph, nodes, edges, lanes, maxColumn});
-  container.innerHTML = `
+  setHtml(container, `
     <div class="cognition-graph-shell" data-graph-source="${escapeHtml(model.source)}" data-graph-run-id="${escapeHtml(model.runId)}" data-graph-current-node-id="${escapeHtml(model.currentNode?.id || "")}" data-graph-selected-node-id="${escapeHtml(model.selectedNode?.id || "")}">
       ${cognitionGraphSummaryMarkup(model)}
       <div class="graph-body">
@@ -425,7 +515,7 @@ function renderCognitionGraph({containerSelector, statusSelector, snapshot, empt
         ${cognitionGraphInspectorMarkup(model)}
       </div>
     </div>
-  `;
+  `);
   container.querySelectorAll("[data-graph-node]").forEach((button) => {
     button.addEventListener("click", () => {
       setCognitionGraphPinnedNode(model.source, model.runId, button.dataset.nodeId || "");
@@ -838,12 +928,12 @@ function renderCapabilitySummary() {
     .filter(([, capability]) => capability.status === "disabled")
     .map(([key, capability]) => `<tr><td>${escapeHtml(labels[key] || key)}</td><td>${escapeHtml(capability.reason || "not available")}</td></tr>`);
 
-  qs("#overview-capability-table").innerHTML = visibleRows.length
+  setHtml("#overview-capability-table", visibleRows.length
     ? visibleRows.join("")
-    : "<tr><td>Status</td><td>No product-ready workflows loaded.</td></tr>";
-  qs("#overview-unavailable-table").innerHTML = unavailableRows.length
+    : "<tr><td>Status</td><td>No product-ready workflows loaded.</td></tr>");
+  setHtml("#overview-unavailable-table", unavailableRows.length
     ? unavailableRows.join("")
-    : "<tr><td>Status</td><td>No disabled workflows.</td></tr>";
+    : "<tr><td>Status</td><td>No disabled workflows.</td></tr>");
 }
 
 function renderHealth(overview) {
@@ -852,19 +942,19 @@ function renderHealth(overview) {
   const cache2 = overview.cache2 || {};
   const agents = Array.isArray(cache2.agents) ? cache2.agents : [];
   const healthStatus = health.status || "unavailable";
-  qs("#health-brain-status").textContent = healthStatus;
-  qs("#health-brain-detail").textContent = health.reason || (health.db === true ? "database reachable" : "health loaded");
-  qs("#health-cache-status").textContent = agents.length ? `${agents.length} agents` : healthStatus;
-  qs("#health-cache-table").innerHTML = agents.length
+  setText("#health-brain-status", healthStatus);
+  setText("#health-brain-detail", health.reason || (health.db === true ? "database reachable" : "health loaded"));
+  setText("#health-cache-status", agents.length ? `${agents.length} agents` : healthStatus);
+  setHtml("#health-cache-table", agents.length
     ? agents.map((agent) => `<tr><td>${escapeHtml(agent.agent_name || "agent")}</td><td>hits ${escapeHtml(agent.hit_count || 0)} / misses ${escapeHtml(agent.miss_count || 0)}</td></tr>`).join("")
-    : `<tr><td>Status</td><td>${escapeHtml(health.reason || "no Cache2 agent stats reported")}</td></tr>`;
-  qs("#health-runtime-status").textContent = runtime.worker_error_level || runtime.status || healthStatus;
+    : `<tr><td>Status</td><td>${escapeHtml(health.reason || "no Cache2 agent stats reported")}</td></tr>`);
+  setText("#health-runtime-status", runtime.worker_error_level || runtime.status || healthStatus);
   const runtimeRows = Object.entries(runtime)
     .filter(([, value]) => ["string", "number", "boolean"].includes(typeof value))
     .map(([key, value]) => `<tr><td>${escapeHtml(key)}</td><td>${escapeHtml(value)}</td></tr>`);
-  qs("#health-runtime-table").innerHTML = runtimeRows.length
+  setHtml("#health-runtime-table", runtimeRows.length
     ? runtimeRows.join("")
-    : `<tr><td>Status</td><td>${escapeHtml(runtime.reason || "runtime status not available")}</td></tr>`;
+    : `<tr><td>Status</td><td>${escapeHtml(runtime.reason || "runtime status not available")}</td></tr>`);
 }
 
 function serviceById(serviceId) {
@@ -917,7 +1007,8 @@ function serviceConfigBadge(service) {
 
 function renderServices() {
   const grid = qs("#service-grid");
-  grid.innerHTML = "";
+  if (!grid) return;
+  setHtml(grid, "");
   state.services.forEach((service) => {
     const startButton = serviceActionButton(service, "start", "Start", "primary");
     const restartButton = serviceActionButton(service, "restart", "Restart");
@@ -926,7 +1017,7 @@ function renderServices() {
     const logsButton = serviceLogsButton(service);
     const configBadge = serviceConfigBadge(service);
     const serviceError = service.last_error_preview ? `<div class="service-error">${escapeHtml(service.last_error_preview)}</div>` : "";
-    grid.insertAdjacentHTML("beforeend", `
+    appendHtml(grid, "beforeend", `
       <article class="service-card" data-component="Card" data-service-card="${escapeHtml(service.id)}">
         <div class="service-card-header">
           <div><strong>${escapeHtml(service.display_name)}</strong><br><code>${escapeHtml(service.id)}</code></div>
@@ -963,7 +1054,7 @@ function auditRows(events) {
 
 function renderAudit(events) {
   const rows = auditRows(events);
-  qs("#audit-table").innerHTML = rows;
+  setHtml("#audit-table", rows);
 }
 
 async function refreshAudit() {
@@ -1037,27 +1128,27 @@ async function openServiceConfig(serviceId) {
   const payload = await api(`/api/services/${encodeURIComponent(serviceId)}/config`);
   state.currentServiceConfig = payload;
   renderServiceConfigDialog(payload);
-  qs("#service-config-dialog").hidden = false;
+  setHidden("#service-config-dialog", false);
 }
 
 function closeServiceConfig() {
-  qs("#service-config-dialog").hidden = true;
+  setHidden("#service-config-dialog", true);
   state.currentServiceConfig = null;
 }
 
 function renderServiceConfigDialog(config) {
   const service = serviceById(config.service_id) || {};
   const serviceLabel = service.display_name || config.service_id;
-  qs("#service-config-title").textContent = config.title || serviceLabel;
-  qs("#service-config-description").textContent = config.description || "Service runtime override.";
-  qs("#service-config-state").textContent = (config.state || "default").replaceAll("_", " ");
-  qs("#service-config-state").className = config.state === "override_active" ? "badge warn" : "badge";
+  setText("#service-config-title", config.title || serviceLabel);
+  setText("#service-config-description", config.description || "Service runtime override.");
+  setText("#service-config-state", (config.state || "default").replaceAll("_", " "));
+  setClassName("#service-config-state", config.state === "override_active" ? "badge warn" : "badge");
   const running = service.actual_state === "running";
-  qs("#service-config-restart-note").textContent = running
+  setText("#service-config-restart-note", running
     ? "Apply and restart"
-    : "Applies on next start";
-  qs("#service-config-apply").textContent = running ? "Apply and restart" : "Apply override";
-  qs("#service-config-fields").innerHTML = (config.fields || []).map((field) => renderConfigField(field)).join("");
+    : "Applies on next start");
+  setText("#service-config-apply", running ? "Apply and restart" : "Apply override");
+  setHtml("#service-config-fields", (config.fields || []).map((field) => renderConfigField(field)).join(""));
 }
 
 function renderConfigField(field) {
@@ -1223,7 +1314,7 @@ async function sendDebug(event) {
   delete payload.debug_mode;
   const messageText = String(payload.message_text || "").trim();
   state.debugRequestInFlight = true;
-  sendButton.disabled = true;
+  setDisabled(sendButton, true);
   state.debugCognitionGraph = pendingDebugCognitionGraph(messageText);
   appendChatMessage({
     label: "operator",
@@ -1309,7 +1400,7 @@ function failedDebugCognitionGraph(error) {
 }
 
 function appendChatMessage({label, body, meta}) {
-  qs("#chat-history").insertAdjacentHTML("beforeend", `<article class="message"><div class="meta">${escapeHtml(label)}</div><p>${escapeHtml(body)}</p><div class="meta">${escapeHtml(meta)}</div></article>`);
+  appendHtml("#chat-history", "beforeend", `<article class="message"><div class="meta">${escapeHtml(label)}</div><p>${escapeHtml(body)}</p><div class="meta">${escapeHtml(meta)}</div></article>`);
 }
 
 function debugResponseBody(result) {
@@ -1360,7 +1451,7 @@ function renderPanelState(target, panel) {
   const status = panel?.status || "unavailable";
   const reason = panel?.reason || "No rows are available for this panel.";
   const generatedAt = panel?.generated_at || "";
-  element.innerHTML = `<tr><td>Status</td><td>${escapeHtml(status)}</td></tr><tr><td>Reason</td><td>${escapeHtml(reason)}</td></tr>${generatedAt ? `<tr><td>Generated</td><td>${escapeHtml(generatedAt)}</td></tr>` : ""}`;
+  setHtml(element, `<tr><td>Status</td><td>${escapeHtml(status)}</td></tr><tr><td>Reason</td><td>${escapeHtml(reason)}</td></tr>${generatedAt ? `<tr><td>Generated</td><td>${escapeHtml(generatedAt)}</td></tr>` : ""}`);
 }
 
 function renderLookupTable(target, {items = [], emptyText = "No rows available.", redaction = {}} = {}) {
@@ -1368,21 +1459,21 @@ function renderLookupTable(target, {items = [], emptyText = "No rows available."
   if (!element) return;
   if (!items.length) {
     const redactionNote = redaction.model_inputs ? ` Model inputs ${redaction.model_inputs}.` : "";
-    element.innerHTML = `<tr><td>Status</td><td>${escapeHtml(emptyText + redactionNote)}</td></tr>`;
+    setHtml(element, `<tr><td>Status</td><td>${escapeHtml(emptyText + redactionNote)}</td></tr>`);
     return;
   }
   if (isKeyValueItems(items)) {
-    element.innerHTML = items.map((item) => (
+    setHtml(element, items.map((item) => (
       `<tr><td>${escapeHtml(formatLookupLabel(item.key))}</td><td>${escapeHtml(formatLookupValue(item.value))}</td></tr>`
-    )).join("");
+    )).join(""));
     return;
   }
-  element.innerHTML = items.map((item) => {
+  setHtml(element, items.map((item) => {
     const rows = Object.entries(item)
       .filter(([, value]) => value !== null && value !== undefined && value !== "")
       .map(([key, value]) => `<tr><td>${escapeHtml(formatLookupLabel(key))}</td><td>${escapeHtml(formatLookupValue(value))}</td></tr>`);
     return rows.join("");
-  }).join("");
+  }).join(""));
 }
 
 function renderPromptPanel(target, panel, {emptyText = "No prompt context is available."} = {}) {
@@ -1420,7 +1511,7 @@ function renderPromptPanel(target, panel, {emptyText = "No prompt context is ava
     renderPanelState(element, {status: panel.status || "empty", reason: panel.reason || emptyText, generated_at: panel.generated_at || ""});
     return;
   }
-  element.innerHTML = rows.join("");
+  setHtml(element, rows.join(""));
 }
 
 function renderOperationalPanel(target, panel, {emptyText = "No backing rows are available."} = {}) {
@@ -1434,9 +1525,9 @@ function renderOperationalPanel(target, panel, {emptyText = "No backing rows are
   }).filter(Boolean);
   if (!items.length) {
     const reason = panelEmptyText(panel, emptyText);
-    element.innerHTML = metadataRows.concat(
+    setHtml(element, metadataRows.concat(
       `<tr><td>Status</td><td>${escapeHtml(reason)}</td></tr>`,
-    ).join("");
+    ).join(""));
     return;
   }
   const rowHtml = items.map((item) => {
@@ -1445,7 +1536,7 @@ function renderOperationalPanel(target, panel, {emptyText = "No backing rows are
       .map(([key, value]) => `<tr><td>${escapeHtml(formatLookupLabel(key))}</td><td>${escapeHtml(formatLookupValue(value))}</td></tr>`);
     return rows.join("");
   });
-  element.innerHTML = metadataRows.concat(rowHtml).join("");
+  setHtml(element, metadataRows.concat(rowHtml).join(""));
 }
 
 function renderReadableLookupValue(value) {
@@ -1460,24 +1551,24 @@ function renderReadableLookupTable(target, {items = [], emptyText = "No rows ava
     return;
   }
   if (isKeyValueItems(items)) {
-    element.innerHTML = items.map((item) => (
+    setHtml(element, items.map((item) => (
       `<tr><td>${escapeHtml(formatLookupLabel(item.key))}</td><td>${renderReadableLookupValue(item.value)}</td></tr>`
-    )).join("");
+    )).join(""));
     return;
   }
-  element.innerHTML = items.map((item) => {
+  setHtml(element, items.map((item) => {
     const rows = Object.entries(item)
       .filter(([, value]) => value !== null && value !== undefined && value !== "")
       .map(([key, value]) => `<tr><td>${escapeHtml(formatLookupLabel(key))}</td><td>${renderReadableLookupValue(value)}</td></tr>`);
     return rows.join("");
-  }).join("");
+  }).join(""));
 }
 
 function renderPanelEmptyContent(target, {emptyText = "No rows available.", redaction = {}} = {}) {
   const element = typeof target === "string" ? qs(target) : target;
   if (!element) return;
   const redactionNote = redaction.model_inputs ? ` Model inputs ${redaction.model_inputs}.` : "";
-  element.innerHTML = `<p class="panel-empty">${escapeHtml(emptyText + redactionNote)}</p>`;
+  setHtml(element, `<p class="panel-empty">${escapeHtml(emptyText + redactionNote)}</p>`);
 }
 
 function firstObjectItem(items) {
@@ -1531,7 +1622,7 @@ function renderCharacterProfilePanel(target, {items = [], emptyText = "No charac
   const extraDetails = Object.entries(item).filter(([key, value]) => (
     !knownFields.has(key) && value !== null && value !== undefined && value !== ""
   ));
-  element.innerHTML = `
+  setHtml(element, `
     <section class="character-summary">
       <div class="character-heading">
         <div>
@@ -1558,7 +1649,7 @@ function renderCharacterProfilePanel(target, {items = [], emptyText = "No charac
         </section>
       ` : ""}
     </section>
-  `;
+  `);
 }
 
 function recentWindowEntries(value) {
@@ -1625,7 +1716,7 @@ function renderCharacterSelfImagePanel(target, {items = [], emptyText = "No self
   const historicalSummary = item.historical_summary || item.current_self_concept || item.summary || "";
   const recentEntries = recentWindowEntries(item.recent_window);
   const milestoneEntries = recentWindowEntries(item.milestones);
-  element.innerHTML = `
+  setHtml(element, `
     <section class="character-summary">
       ${recentEntries.length ? `
         <section class="detail-section">
@@ -1650,7 +1741,7 @@ function renderCharacterSelfImagePanel(target, {items = [], emptyText = "No self
         ["synthesis count", item.synthesis_count],
       ])}
     </section>
-  `;
+  `);
 }
 
 function renderCharacterGrowthPanel(target, {items = [], emptyText = "No growth traits.", redaction = {}} = {}) {
@@ -1660,7 +1751,7 @@ function renderCharacterGrowthPanel(target, {items = [], emptyText = "No growth 
     renderPanelEmptyContent(element, {emptyText, redaction});
     return;
   }
-  element.innerHTML = items.map((item) => {
+  setHtml(element, items.map((item) => {
     const title = item.trait_name || item.growth_axis || "Growth trait";
     const guidance = item.guidance || item.summary || "";
     return `
@@ -1681,7 +1772,7 @@ function renderCharacterGrowthPanel(target, {items = [], emptyText = "No growth 
         ${guidance ? `<p class="character-prose">${escapeHtml(formatCharacterProse(guidance))}</p>` : ""}
       </article>
     `;
-  }).join("");
+  }).join(""));
 }
 
 function renderMemoryUnitRows(target, {items = [], emptyText = "No memory rows available.", redaction = {}} = {}) {
@@ -1691,7 +1782,7 @@ function renderMemoryUnitRows(target, {items = [], emptyText = "No memory rows a
     renderLookupTable(element, {items, emptyText, redaction});
     return;
   }
-  element.innerHTML = items.map((item) => {
+  setHtml(element, items.map((item) => {
     const typeText = formatLookupLabel(item.unit_type || "memory");
     const statusText = item.status ? formatLookupLabel(item.status) : "";
     const factText = formatLookupValue(item.fact || item.subjective_appraisal || item.relationship_signal);
@@ -1717,17 +1808,17 @@ function renderMemoryUnitRows(target, {items = [], emptyText = "No memory rows a
         </td>
       </tr>
     `;
-  }).join("");
+  }).join(""));
 }
 
 function renderStyleOverlayRows(target, {items = [], scopeLabel = "style"} = {}) {
   const element = typeof target === "string" ? qs(target) : target;
   if (!element) return;
   if (!items.length) {
-    element.innerHTML = `<tr><td>Status</td><td>No ${escapeHtml(scopeLabel)} guidance rows are available.</td></tr>`;
+    setHtml(element, `<tr><td>Status</td><td>No ${escapeHtml(scopeLabel)} guidance rows are available.</td></tr>`);
     return;
   }
-  element.innerHTML = items.map((item, index) => {
+  setHtml(element, items.map((item, index) => {
     const separator = index < items.length - 1 ? `<tr class="table-row-separator"><td colspan="2"></td></tr>` : "";
     const meta = memoryMeta([
       item.field ? formatLookupLabel(item.field) : "",
@@ -1745,7 +1836,7 @@ function renderStyleOverlayRows(target, {items = [], scopeLabel = "style"} = {})
       ${separator}
     `;
     return rows;
-  }).join("");
+  }).join(""));
 }
 
 function renderStyleOverlayPanel(target, panel, {scopeLabel = "style"} = {}) {
@@ -1802,11 +1893,11 @@ async function refreshCharacter() {
 }
 
 async function refreshUsers(showNeedsInput = true) {
-  const platform = qs("#user-platform").value.trim();
-  const platformUserId = qs("#user-platform-user-id").value.trim();
-  const platformChannelId = qs("#user-platform-channel-id").value.trim();
-  const channelType = qs("#user-channel-type").value.trim();
-  const query = qs("#user-query").value.trim();
+  const platform = getValue("#user-platform").trim();
+  const platformUserId = getValue("#user-platform-user-id").trim();
+  const platformChannelId = getValue("#user-platform-channel-id").trim();
+  const channelType = getValue("#user-channel-type").trim();
+  const query = getValue("#user-query").trim();
   if (!platform || !platformUserId) {
     setEntityStatus("#users-status", "needs input");
     if (showNeedsInput) {
@@ -1857,9 +1948,9 @@ async function refreshUsers(showNeedsInput = true) {
 }
 
 async function refreshGroups(showNeedsInput = true) {
-  const platform = qs("#group-platform").value.trim();
-  const groupId = qs("#group-id").value.trim();
-  const participantPlatformUserId = qs("#group-participant-platform-user-id").value.trim();
+  const platform = getValue("#group-platform").trim();
+  const groupId = getValue("#group-id").trim();
+  const participantPlatformUserId = getValue("#group-participant-platform-user-id").trim();
   if (!platform || !groupId) {
     setEntityStatus("#groups-status", "needs input");
     if (showNeedsInput) {
@@ -1889,10 +1980,10 @@ async function refreshGroups(showNeedsInput = true) {
 }
 
 async function refreshCalendar() {
-  const platform = qs("#calendar-platform").value.trim();
-  const platformChannelId = qs("#calendar-platform-channel-id").value.trim();
-  const platformUserId = qs("#calendar-platform-user-id").value.trim();
-  const channelType = qs("#calendar-channel-type").value.trim();
+  const platform = getValue("#calendar-platform").trim();
+  const platformChannelId = getValue("#calendar-platform-channel-id").trim();
+  const platformUserId = getValue("#calendar-platform-user-id").trim();
+  const channelType = getValue("#calendar-channel-type").trim();
   const params = new URLSearchParams({limit: "25"});
   if (platform) params.set("platform", platform);
   if (platformChannelId) params.set("platform_channel_id", platformChannelId);
@@ -1900,8 +1991,8 @@ async function refreshCalendar() {
   if (channelType) params.set("channel_type", channelType);
   const payload = await api(`/api/lookups/calendar?${params.toString()}`);
   const status = payload.status || "unavailable";
-  qs("#calendar-status").textContent = status;
-  qs("#calendar-status").className = status === "available" ? "badge success" : "badge";
+  setText("#calendar-status", status);
+  setClassName("#calendar-status", status === "available" ? "badge success" : "badge");
   const panels = payload.panels || {};
   renderPromptPanel("#calendar-prompt-runs-table", panels.cognition_pending_runs, {
     emptyText: "No pending calendar prompt candidates.",
@@ -1917,8 +2008,8 @@ async function refreshCalendar() {
 async function refreshBackground() {
   const payload = await api("/api/lookups/background?limit=25");
   const status = payload.status || "unavailable";
-  qs("#background-status").textContent = status;
-  qs("#background-status").className = status === "available" ? "badge success" : "badge";
+  setText("#background-status", status);
+  setClassName("#background-status", status === "available" ? "badge success" : "badge");
   const panels = payload.panels || {};
   renderPromptPanel("#background-result-ready-table", panels.result_ready_cognition_deliveries, {
     emptyText: "No result-ready cognition deliveries.",
@@ -1932,18 +2023,18 @@ async function refreshBackground() {
 }
 
 async function refreshEvents() {
-  const source = qs("#event-source").value;
+  const source = getValue("#event-source", "console") || "console";
   const params = new URLSearchParams({source, limit: "25"});
-  const requestId = qs("#event-request-id").value.trim();
-  const trackingId = qs("#event-tracking-id").value.trim();
+  const requestId = getValue("#event-request-id").trim();
+  const trackingId = getValue("#event-tracking-id").trim();
   if (requestId) params.set("request_id", requestId);
   if (trackingId) params.set("tracking_id", trackingId);
   const payload = await api(`/api/events?${params.toString()}`);
   if (!payload.items.length) {
-    qs("#event-table").innerHTML = "<tr><td>No events</td><td>no rows for the selected source and filters</td><td>redacted</td></tr>";
+    setHtml("#event-table", "<tr><td>No events</td><td>no rows for the selected source and filters</td><td>redacted</td></tr>");
     return;
   }
-  qs("#event-table").innerHTML = payload.items.map((event) => `
+  setHtml("#event-table", payload.items.map((event) => `
     <tr>
       <td>${escapeHtml(event.source || "-")}</td>
       <td>${escapeHtml(event.component || event.service_id || "-")}</td>
@@ -1951,7 +2042,7 @@ async function refreshEvents() {
       <td>${escapeHtml(event.status || event.level || "-")}</td>
       <td>${escapeHtml(event.created_at || "-")}</td>
     </tr>
-  `).join("");
+  `).join(""));
 }
 
 function renderLogControls() {
@@ -1961,15 +2052,15 @@ function renderLogControls() {
   const options = ['<option value="all">all services</option>'].concat(
     state.services.map((service) => `<option value="${escapeHtml(service.id)}">${escapeHtml(service.display_name || service.id)}</option>`),
   );
-  serviceFilter.innerHTML = options.join("");
+  setHtml(serviceFilter, options.join(""));
   serviceFilter.value = state.services.some((service) => service.id === selected) ? selected : "all";
   updateLogBufferStatus();
 }
 
 function logStreamUrl() {
   const params = new URLSearchParams({
-    service_id: qs("#log-service-filter").value || "all",
-    streams: qs("#log-stream-filter").value || "stdout,stderr,supervisor",
+    service_id: getValue("#log-service-filter", "all") || "all",
+    streams: getValue("#log-stream-filter", "stdout,stderr,supervisor") || "stdout,stderr,supervisor",
     tail: "100",
   });
   return `/api/logs/stream?${params.toString()}`;
@@ -2061,31 +2152,32 @@ function appendLogRow(row, options = {}) {
 
 function renderBufferedLogRows() {
   const table = qs("#log-table");
+  if (!table) return;
   const rows = state.logRows.filter(logRowMatches);
   if (!rows.length) {
     renderLogPlaceholder(emptyLogMessage());
     return;
   }
-  table.innerHTML = rows.map(renderLogRow).join("");
-  if (qs("#log-autoscroll").checked) qs("#log-viewport").scrollTop = qs("#log-viewport").scrollHeight;
+  setHtml(table, rows.map(renderLogRow).join(""));
+  if (isChecked("#log-autoscroll")) scrollToBottom("#log-viewport");
   updateLogBufferStatus();
 }
 
 function emptyLogMessage() {
-  const filter = qs("#log-text-filter").value.trim();
+  const filter = getValue("#log-text-filter").trim();
   if (filter) return "No retained rows match this filter. Watching live logs...";
   return "No retained rows for this selection. Watching live logs...";
 }
 
 function logRowMatches(row) {
-  const filter = qs("#log-text-filter").value.trim().toLowerCase();
+  const filter = getValue("#log-text-filter").trim().toLowerCase();
   const line = String(row.line || "");
   const matches = !filter || line.toLowerCase().includes(filter);
   return matches;
 }
 
 function renderLogRow(row) {
-  const wrap = qs("#log-wrap-lines").checked ? " wrap" : "";
+  const wrap = isChecked("#log-wrap-lines") ? " wrap" : "";
   const timestamp = row.created_at || new Date().toISOString();
   const label = `${row.service_id || "-"} ${row.stream || "-"}`;
   const line = String(row.line || "");
@@ -2101,12 +2193,13 @@ function renderLogRow(row) {
 
 function renderLogPlaceholder(message) {
   const table = qs("#log-table");
-  table.innerHTML = `<tr class="log-row log-placeholder wrap"><td>Status</td><td>${escapeHtml(message)}</td><td></td></tr>`;
+  if (!table) return;
+  setHtml(table, `<tr class="log-row log-placeholder wrap"><td>Status</td><td>${escapeHtml(message)}</td><td></td></tr>`);
   updateLogBufferStatus();
 }
 
 function highlightLogLine(line) {
-  const highlight = qs("#log-highlight-filter").value.trim();
+  const highlight = getValue("#log-highlight-filter").trim();
   const escapedLine = escapeHtml(line);
   if (!highlight) return escapedLine;
   const escapedHighlight = escapeHtml(highlight);
@@ -2124,7 +2217,7 @@ function updateLogBufferStatus() {
 
 function toggleLogPause() {
   state.logPaused = !state.logPaused;
-  qs("#log-pause").textContent = state.logPaused ? "Resume" : "Pause";
+  setText("#log-pause", state.logPaused ? "Resume" : "Pause");
   setLogStreamStatus(
     state.logPaused ? "paused locally" : "live",
     state.logPaused ? "badge warn" : "badge success",
@@ -2162,71 +2255,71 @@ function openStream(url) {
 initializeTheme();
 qsa("[data-page-link]").forEach((link) => link.addEventListener("click", () => setPage(link.dataset.pageLink)));
 qsa("[data-theme-choice]").forEach((button) => button.addEventListener("click", () => setTheme(button.dataset.themeChoice)));
-qs("#login").addEventListener("click", () => runButtonAction(
-  qs("#login"),
+bind("#login", "click", () => runButtonAction(
+  optionalElement("#login"),
   "Signing in...",
   "Signed in.",
   login,
 ));
-qs("#token").addEventListener("keydown", (event) => {
+bind("#token", "keydown", (event) => {
   if (event.key === "Enter") {
-    runButtonAction(qs("#login"), "Signing in...", "Signed in.", login);
+    runButtonAction(optionalElement("#login"), "Signing in...", "Signed in.", login);
   }
 });
-qs("#service-grid").addEventListener("click", handleServiceGridClick);
-qs("#log-service-filter").addEventListener("change", refreshLogStream);
-qs("#log-stream-filter").addEventListener("change", refreshLogStream);
-qs("#log-text-filter").addEventListener("input", renderBufferedLogRows);
-qs("#log-highlight-filter").addEventListener("input", renderBufferedLogRows);
-qs("#log-pause").addEventListener("click", toggleLogPause);
-qs("#log-clear").addEventListener("click", clearLogRows);
-qs("#log-wrap-lines").addEventListener("change", () => {
-  qsa(".log-row").forEach((row) => row.classList.toggle("wrap", qs("#log-wrap-lines").checked));
+bind("#service-grid", "click", handleServiceGridClick);
+bind("#log-service-filter", "change", refreshLogStream);
+bind("#log-stream-filter", "change", refreshLogStream);
+bind("#log-text-filter", "input", renderBufferedLogRows);
+bind("#log-highlight-filter", "input", renderBufferedLogRows);
+bind("#log-pause", "click", toggleLogPause);
+bind("#log-clear", "click", clearLogRows);
+bind("#log-wrap-lines", "change", () => {
+  qsa(".log-row").forEach((row) => row.classList.toggle("wrap", isChecked("#log-wrap-lines")));
 });
-qs("#log-table").addEventListener("click", copyLogRow);
-qs("#service-config-close").addEventListener("click", closeServiceConfig);
-qs("#service-config-apply").addEventListener("click", () => runButtonAction(
-  qs("#service-config-apply"),
+bind("#log-table", "click", copyLogRow);
+bind("#service-config-close", "click", closeServiceConfig);
+bind("#service-config-apply", "click", () => runButtonAction(
+  optionalElement("#service-config-apply"),
   "Saving service configuration...",
   "",
   applyServiceConfig,
 ));
-qs("#service-config-reset").addEventListener("click", () => runButtonAction(
-  qs("#service-config-reset"),
+bind("#service-config-reset", "click", () => runButtonAction(
+  optionalElement("#service-config-reset"),
   "Resetting service configuration...",
   "",
   resetServiceConfig,
 ));
-qs("#service-config-dialog").addEventListener("click", (event) => {
-  if (event.target === qs("#service-config-dialog")) closeServiceConfig();
+bind("#service-config-dialog", "click", (event) => {
+  if (event.target === optionalElement("#service-config-dialog")) closeServiceConfig();
 });
-qs("#debug-form").addEventListener("submit", (event) => sendDebug(event).catch(reportActionError));
-qs("#refresh-events").addEventListener("click", () => runButtonAction(
-  qs("#refresh-events"),
+bind("#debug-form", "submit", (event) => sendDebug(event).catch(reportActionError));
+bind("#refresh-events", "click", () => runButtonAction(
+  optionalElement("#refresh-events"),
   "Loading events...",
   "Events updated.",
   refreshEvents,
 ));
-qs("#refresh-users").addEventListener("click", () => runButtonAction(
-  qs("#refresh-users"),
+bind("#refresh-users", "click", () => runButtonAction(
+  optionalElement("#refresh-users"),
   "Searching user...",
   "User search complete.",
   refreshUsers,
 ));
-qs("#refresh-groups").addEventListener("click", () => runButtonAction(
-  qs("#refresh-groups"),
+bind("#refresh-groups", "click", () => runButtonAction(
+  optionalElement("#refresh-groups"),
   "Searching group...",
   "Group search complete.",
   refreshGroups,
 ));
-qs("#refresh-calendar").addEventListener("click", () => runButtonAction(
-  qs("#refresh-calendar"),
+bind("#refresh-calendar", "click", () => runButtonAction(
+  optionalElement("#refresh-calendar"),
   "Loading calendar...",
   "Calendar updated.",
   refreshCalendar,
 ));
-qs("#refresh-background").addEventListener("click", () => runButtonAction(
-  qs("#refresh-background"),
+bind("#refresh-background", "click", () => runButtonAction(
+  optionalElement("#refresh-background"),
   "Loading background work...",
   "Background work updated.",
   refreshBackground,

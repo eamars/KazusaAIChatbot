@@ -457,18 +457,18 @@ def test_live_logs_static_surface_and_controls(tmp_path) -> None:
     assert "data-log-service" in script.text
     assert "setPage(\"logs\")" in script.text
     assert "function refreshLogStream()" in script.text
-    assert 'qs("#log-service-filter").addEventListener("change", refreshLogStream)' in (
+    assert 'bind("#log-service-filter", "change", refreshLogStream)' in (
         script.text
     )
-    assert 'qs("#log-stream-filter").addEventListener("change", refreshLogStream)' in (
+    assert 'bind("#log-stream-filter", "change", refreshLogStream)' in (
         script.text
     )
     assert (
-        'qs("#log-text-filter").addEventListener("input", renderBufferedLogRows)'
+        'bind("#log-text-filter", "input", renderBufferedLogRows)'
         in script.text
     )
     assert (
-        'qs("#log-highlight-filter").addEventListener("input", renderBufferedLogRows)'
+        'bind("#log-highlight-filter", "input", renderBufferedLogRows)'
         in script.text
     )
     assert ".log-row:not(.log-placeholder)" in script.text
