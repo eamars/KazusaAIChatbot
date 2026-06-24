@@ -1356,6 +1356,7 @@ function setEntityStatus(selector, status) {
 
 function renderPanelState(target, panel) {
   const element = typeof target === "string" ? qs(target) : target;
+  if (!element) return;
   const status = panel?.status || "unavailable";
   const reason = panel?.reason || "No rows are available for this panel.";
   const generatedAt = panel?.generated_at || "";
@@ -1364,6 +1365,7 @@ function renderPanelState(target, panel) {
 
 function renderLookupTable(target, {items = [], emptyText = "No rows available.", redaction = {}} = {}) {
   const element = typeof target === "string" ? qs(target) : target;
+  if (!element) return;
   if (!items.length) {
     const redactionNote = redaction.model_inputs ? ` Model inputs ${redaction.model_inputs}.` : "";
     element.innerHTML = `<tr><td>Status</td><td>${escapeHtml(emptyText + redactionNote)}</td></tr>`;
@@ -1385,6 +1387,7 @@ function renderLookupTable(target, {items = [], emptyText = "No rows available."
 
 function renderPromptPanel(target, panel, {emptyText = "No prompt context is available."} = {}) {
   const element = typeof target === "string" ? qs(target) : target;
+  if (!element) return;
   if (!panel || panel.status === "needs_input" || panel.status === "unavailable") {
     renderPanelState(element, panel || {status: "needs_input", reason: emptyText});
     return;
@@ -1422,6 +1425,7 @@ function renderPromptPanel(target, panel, {emptyText = "No prompt context is ava
 
 function renderOperationalPanel(target, panel, {emptyText = "No backing rows are available."} = {}) {
   const element = typeof target === "string" ? qs(target) : target;
+  if (!element) return;
   const items = panelItems(panel);
   const metadataRows = ["panel_contract", "projection_owner"].map((key) => {
     const value = panel ? panel[key] : "";
@@ -1450,6 +1454,7 @@ function renderReadableLookupValue(value) {
 
 function renderReadableLookupTable(target, {items = [], emptyText = "No rows available.", redaction = {}} = {}) {
   const element = typeof target === "string" ? qs(target) : target;
+  if (!element) return;
   if (!items.length) {
     renderLookupTable(element, {items, emptyText, redaction});
     return;
@@ -1470,6 +1475,7 @@ function renderReadableLookupTable(target, {items = [], emptyText = "No rows ava
 
 function renderPanelEmptyContent(target, {emptyText = "No rows available.", redaction = {}} = {}) {
   const element = typeof target === "string" ? qs(target) : target;
+  if (!element) return;
   const redactionNote = redaction.model_inputs ? ` Model inputs ${redaction.model_inputs}.` : "";
   element.innerHTML = `<p class="panel-empty">${escapeHtml(emptyText + redactionNote)}</p>`;
 }
@@ -1510,6 +1516,7 @@ function renderDetailGrid(entries) {
 
 function renderCharacterProfilePanel(target, {items = [], emptyText = "No character profile rows.", redaction = {}} = {}) {
   const element = typeof target === "string" ? qs(target) : target;
+  if (!element) return;
   if (!items.length) {
     renderPanelEmptyContent(element, {emptyText, redaction});
     return;
@@ -1609,6 +1616,7 @@ function formatTraitStrength(value) {
 
 function renderCharacterSelfImagePanel(target, {items = [], emptyText = "No self-image rows.", redaction = {}} = {}) {
   const element = typeof target === "string" ? qs(target) : target;
+  if (!element) return;
   if (!items.length) {
     renderPanelEmptyContent(element, {emptyText, redaction});
     return;
@@ -1647,6 +1655,7 @@ function renderCharacterSelfImagePanel(target, {items = [], emptyText = "No self
 
 function renderCharacterGrowthPanel(target, {items = [], emptyText = "No growth traits.", redaction = {}} = {}) {
   const element = typeof target === "string" ? qs(target) : target;
+  if (!element) return;
   if (!items.length) {
     renderPanelEmptyContent(element, {emptyText, redaction});
     return;
@@ -1677,6 +1686,7 @@ function renderCharacterGrowthPanel(target, {items = [], emptyText = "No growth 
 
 function renderMemoryUnitRows(target, {items = [], emptyText = "No memory rows available.", redaction = {}} = {}) {
   const element = typeof target === "string" ? qs(target) : target;
+  if (!element) return;
   if (!items.length) {
     renderLookupTable(element, {items, emptyText, redaction});
     return;
@@ -1712,6 +1722,7 @@ function renderMemoryUnitRows(target, {items = [], emptyText = "No memory rows a
 
 function renderStyleOverlayRows(target, {items = [], scopeLabel = "style"} = {}) {
   const element = typeof target === "string" ? qs(target) : target;
+  if (!element) return;
   if (!items.length) {
     element.innerHTML = `<tr><td>Status</td><td>No ${escapeHtml(scopeLabel)} guidance rows are available.</td></tr>`;
     return;

@@ -228,6 +228,36 @@ def test_static_surface_adds_existing_widget_prompt_panels(tmp_path) -> None:
     assert "color: var(--ink)" in css
 
 
+def test_static_renderers_tolerate_missing_optional_panel_targets(tmp_path) -> None:
+    """Panel renderers should not crash on stale or partial static shells."""
+
+    client = _authenticated_client(tmp_path)
+
+    script = client.get("/static/console.js")
+    assert script.status_code == 200
+    script_text = script.text
+    guarded_renderers = [
+        "renderPanelState",
+        "renderLookupTable",
+        "renderPromptPanel",
+        "renderOperationalPanel",
+        "renderReadableLookupTable",
+        "renderPanelEmptyContent",
+        "renderCharacterProfilePanel",
+        "renderCharacterSelfImagePanel",
+        "renderCharacterGrowthPanel",
+        "renderMemoryUnitRows",
+        "renderStyleOverlayRows",
+    ]
+
+    for function_name in guarded_renderers:
+        marker = f"function {function_name}"
+        function_start = script_text.index(marker)
+        next_function = script_text.find("\nfunction ", function_start + 1)
+        function_body = script_text[function_start:next_function]
+        assert "if (!element) return;" in function_body
+
+
 @pytest.mark.asyncio
 async def test_calendar_lookup_uses_prompt_collector_and_backing_panels() -> None:
     """Calendar lookup should separate prompt candidates from backing rows."""
