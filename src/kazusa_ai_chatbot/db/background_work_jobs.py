@@ -245,6 +245,46 @@ async def find_deliverable_background_work_jobs(
     return return_value
 
 
+async def list_recent_background_work_jobs(*, limit: int) -> list[dict[str, Any]]:
+    """Return bounded recent job queue rows for read-only inspection."""
+
+    db = await get_db()
+    collection = db[BACKGROUND_WORK_JOBS_COLLECTION]
+    try:
+        cursor = (
+            collection.find(
+                {},
+                {
+                    "_id": 0,
+                    "job_id": 1,
+                    "status": 1,
+                    "delivery_state": 1,
+                    "worker": 1,
+                    "created_at": 1,
+                    "updated_at": 1,
+                    "completed_at": 1,
+                    "delivery_attempt_count": 1,
+                    "result_summary": 1,
+                    "failure_summary": 1,
+                    "artifact_char_count": 1,
+                    "source_platform": 1,
+                    "source_channel_type": 1,
+                    "requester_display_name": 1,
+                },
+            )
+            .sort([("updated_at", -1), ("job_id", 1)])
+            .limit(limit)
+        )
+        rows = await cursor.to_list(length=limit)
+    except PyMongoError as exc:
+        raise DatabaseOperationError(
+            f"failed to list recent background work jobs: {exc}"
+        ) from exc
+
+    return_value = [dict(row) for row in rows]
+    return return_value
+
+
 async def mark_background_work_delivery_in_progress(
     *,
     job_id: str,

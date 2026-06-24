@@ -792,21 +792,41 @@ def create_app(
 
     @app.get("/api/lookups/calendar")
     async def lookup_calendar(
+        platform: str | None = Query(default=None, max_length=80),
+        platform_channel_id: str | None = Query(default=None, max_length=120),
+        platform_user_id: str | None = Query(default=None, max_length=120),
+        channel_type: str | None = Query(default=None, max_length=40),
         limit: int = Query(default=25, ge=1, le=100),
         _: ControlConsoleOperator = Depends(current_operator),
     ) -> dict[str, Any]:
-        """Return bounded due calendar-run state."""
+        """Return calendar prompt and backing panels."""
 
-        lookup_query = ConsoleLookupQuery.model_validate({"limit": limit})
+        lookup_query = ConsoleLookupQuery.model_validate({
+            "platform": platform,
+            "platform_channel_id": platform_channel_id,
+            "platform_user_id": platform_user_id,
+            "channel_type": channel_type,
+            "limit": limit,
+        })
         audit_writer.write_event(
             event_type="lookup_view",
             operator_id=_.operator_id,
             target={
                 "namespace": "calendar",
+                "platform": lookup_query.platform or "",
+                "has_platform_channel_id": bool(
+                    lookup_query.platform_channel_id
+                ),
+                "has_platform_user_id": bool(lookup_query.platform_user_id),
+                "channel_type": lookup_query.channel_type or "",
                 "limit": lookup_query.limit,
             },
         )
-        payload = await repository.lookup_due_calendar_runs(
+        payload = await repository.lookup_calendar(
+            platform=lookup_query.platform or "",
+            platform_channel_id=lookup_query.platform_channel_id or "",
+            platform_user_id=lookup_query.platform_user_id or "",
+            channel_type=lookup_query.channel_type or "",
             current_timestamp_utc=datetime.now(timezone.utc).isoformat(),
             limit=lookup_query.limit,
         )
@@ -833,32 +853,10 @@ def create_app(
             },
         )
         rows = await _read_kazusa_events(query)
-        unavailable = any(
-            row.get("event_type") == "event_log.unavailable"
-            for row in rows
+        payload = await repository.lookup_background_work(
+            worker_event_rows=rows,
+            limit=query.limit,
         )
-        if unavailable:
-            status_label = "unavailable"
-            reason = "background-work event telemetry is unavailable"
-        elif rows:
-            status_label = "available"
-            reason = ""
-        else:
-            status_label = "empty"
-            reason = "no background-work worker events matched the lookup"
-        payload = {
-            "status": status_label,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "items": rows,
-            "next_cursor": None,
-            "reason": reason,
-            "redaction": {
-                "job_payloads": "excluded",
-                "task_briefs": "excluded",
-                "artifact_text": "excluded",
-                "raw_messages": "excluded",
-            },
-        }
         return payload
 
     @app.get("/api/entities/character")
@@ -877,7 +875,10 @@ def create_app(
                 "limit": lookup_query.limit,
             },
         )
-        payload = await repository.character_entity(limit=lookup_query.limit)
+        payload = await repository.character_entity(
+            current_timestamp_utc=datetime.now(timezone.utc).isoformat(),
+            limit=lookup_query.limit,
+        )
         return payload
 
     @app.get("/api/entities/user")
@@ -885,6 +886,8 @@ def create_app(
         query: str = Query(default="", max_length=240),
         platform: str | None = Query(default=None, max_length=80),
         platform_user_id: str | None = Query(default=None, max_length=120),
+        platform_channel_id: str | None = Query(default=None, max_length=120),
+        channel_type: str | None = Query(default=None, max_length=40),
         limit: int = Query(default=25, ge=1, le=100),
         operator: ControlConsoleOperator = Depends(current_operator),
     ) -> dict[str, Any]:
@@ -894,6 +897,8 @@ def create_app(
             "query": query,
             "platform": platform,
             "platform_user_id": platform_user_id,
+            "platform_channel_id": platform_channel_id,
+            "channel_type": channel_type,
             "limit": limit,
         })
         audit_writer.write_event(
@@ -904,13 +909,20 @@ def create_app(
                 "query": lookup_query.query,
                 "platform": lookup_query.platform or "",
                 "has_platform_user_id": bool(lookup_query.platform_user_id),
+                "has_platform_channel_id": bool(
+                    lookup_query.platform_channel_id
+                ),
+                "channel_type": lookup_query.channel_type or "",
                 "limit": lookup_query.limit,
             },
         )
         payload = await repository.lookup_user_entity(
             platform=lookup_query.platform or "",
             platform_user_id=lookup_query.platform_user_id or "",
+            platform_channel_id=lookup_query.platform_channel_id or "",
+            channel_type=lookup_query.channel_type or "",
             query=lookup_query.query,
+            current_timestamp_utc=datetime.now(timezone.utc).isoformat(),
             limit=lookup_query.limit,
         )
         return payload
@@ -919,6 +931,10 @@ def create_app(
     async def group_entity(
         platform: str | None = Query(default=None, max_length=80),
         group_id: str | None = Query(default=None, max_length=120),
+        participant_platform_user_id: str | None = Query(
+            default=None,
+            max_length=120,
+        ),
         limit: int = Query(default=25, ge=1, le=100),
         operator: ControlConsoleOperator = Depends(current_operator),
     ) -> dict[str, Any]:
@@ -927,6 +943,7 @@ def create_app(
         lookup_query = ConsoleLookupQuery.model_validate({
             "platform": platform,
             "group_id": group_id,
+            "participant_platform_user_id": participant_platform_user_id,
             "limit": limit,
         })
         audit_writer.write_event(
@@ -936,12 +953,19 @@ def create_app(
                 "namespace": "entity.group",
                 "platform": lookup_query.platform or "",
                 "has_group_id": bool(lookup_query.group_id),
+                "has_participant_platform_user_id": bool(
+                    lookup_query.participant_platform_user_id
+                ),
                 "limit": lookup_query.limit,
             },
         )
         payload = await repository.lookup_group_entity(
             platform=lookup_query.platform or "",
             group_id=lookup_query.group_id or "",
+            participant_platform_user_id=(
+                lookup_query.participant_platform_user_id or ""
+            ),
+            current_timestamp_utc=datetime.now(timezone.utc).isoformat(),
             limit=lookup_query.limit,
         )
         return payload

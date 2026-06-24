@@ -259,6 +259,7 @@ td:first-child, th:first-child { width: 32%; color: var(--muted); }
 .table-primary { display: block; color: var(--ink); font-weight: 600; line-height: 1.45; white-space: pre-line; overflow-wrap: anywhere; }
 .table-meta { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.35; }
 .table-row-separator td { padding: 4px 0; background: var(--panel-soft); }
+.prompt-content { margin: 0; max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); background: var(--panel); font-family: var(--mono); font-size: 12px; line-height: 1.55; }
 code { font-family: var(--mono); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 

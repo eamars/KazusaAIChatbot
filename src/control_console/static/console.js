@@ -1383,6 +1383,67 @@ function renderLookupTable(target, {items = [], emptyText = "No rows available."
   }).join("");
 }
 
+function renderPromptPanel(target, panel, {emptyText = "No prompt context is available."} = {}) {
+  const element = typeof target === "string" ? qs(target) : target;
+  if (!panel || panel.status === "needs_input" || panel.status === "unavailable") {
+    renderPanelState(element, panel || {status: "needs_input", reason: emptyText});
+    return;
+  }
+  const content = panel.content;
+  const rows = [];
+  if (content !== null && content !== undefined && content !== "") {
+    if (typeof content === "object") {
+      Object.entries(content).forEach(([key, value]) => {
+        rows.push(`<tr><td>${escapeHtml(formatLookupLabel(key))}</td><td><pre class="prompt-content">${escapeHtml(formatLookupValue(value))}</pre></td></tr>`);
+      });
+    } else {
+      rows.push(`<tr><td>content</td><td><pre class="prompt-content">${escapeHtml(content)}</pre></td></tr>`);
+    }
+  }
+  panelItems(panel).forEach((item) => {
+    Object.entries(item)
+      .filter(([, value]) => value !== null && value !== undefined && value !== "")
+      .forEach(([key, value]) => {
+        rows.push(`<tr><td>${escapeHtml(formatLookupLabel(key))}</td><td>${escapeHtml(formatLookupValue(value))}</td></tr>`);
+      });
+  });
+  ["panel_contract", "source", "turn_count", "continuity", "selected_count", "candidate_count", "scope_order", "scope_summary", "projection_owner"].forEach((key) => {
+    const value = panel[key];
+    if (value !== null && value !== undefined && value !== "") {
+      rows.push(`<tr><td>${escapeHtml(formatLookupLabel(key))}</td><td>${escapeHtml(formatLookupValue(value))}</td></tr>`);
+    }
+  });
+  if (!rows.length) {
+    renderPanelState(element, {status: panel.status || "empty", reason: panel.reason || emptyText, generated_at: panel.generated_at || ""});
+    return;
+  }
+  element.innerHTML = rows.join("");
+}
+
+function renderOperationalPanel(target, panel, {emptyText = "No backing rows are available."} = {}) {
+  const element = typeof target === "string" ? qs(target) : target;
+  const items = panelItems(panel);
+  const metadataRows = ["panel_contract", "projection_owner"].map((key) => {
+    const value = panel ? panel[key] : "";
+    if (value === null || value === undefined || value === "") return "";
+    return `<tr><td>${escapeHtml(formatLookupLabel(key))}</td><td>${escapeHtml(formatLookupValue(value))}</td></tr>`;
+  }).filter(Boolean);
+  if (!items.length) {
+    const reason = panelEmptyText(panel, emptyText);
+    element.innerHTML = metadataRows.concat(
+      `<tr><td>Status</td><td>${escapeHtml(reason)}</td></tr>`,
+    ).join("");
+    return;
+  }
+  const rowHtml = items.map((item) => {
+    const rows = Object.entries(item)
+      .filter(([, value]) => value !== null && value !== undefined && value !== "")
+      .map(([key, value]) => `<tr><td>${escapeHtml(formatLookupLabel(key))}</td><td>${escapeHtml(formatLookupValue(value))}</td></tr>`);
+    return rows.join("");
+  });
+  element.innerHTML = metadataRows.concat(rowHtml).join("");
+}
+
 function renderReadableLookupValue(value) {
   return `<span class="table-primary">${escapeHtml(formatLookupValue(value))}</span>`;
 }
@@ -1693,6 +1754,15 @@ async function refreshCharacter() {
   const payload = await api("/api/entities/character?limit=25");
   setEntityStatus("#character-status", payload.status || "unavailable");
   const panels = payload.panels || {};
+  renderPromptPanel("#character-growth-prompt-table", panels.promoted_global_growth_prompt, {
+    emptyText: "No promoted global-growth prompt context.",
+  });
+  renderPromptPanel("#character-carry-over-table", panels.current_carry_over, {
+    emptyText: "No character-global carry-over.",
+  });
+  renderOperationalPanel("#character-growth-runs-table", panels.growth_runs_audit, {
+    emptyText: "No global-growth run audit rows.",
+  });
   renderCharacterProfilePanel("#character-profile-table", {
     items: panelItems(panels.profile),
     emptyText: panelEmptyText(panels.profile, "No character profile rows."),
@@ -1723,6 +1793,8 @@ async function refreshCharacter() {
 async function refreshUsers(showNeedsInput = true) {
   const platform = qs("#user-platform").value.trim();
   const platformUserId = qs("#user-platform-user-id").value.trim();
+  const platformChannelId = qs("#user-platform-channel-id").value.trim();
+  const channelType = qs("#user-channel-type").value.trim();
   const query = qs("#user-query").value.trim();
   if (!platform || !platformUserId) {
     setEntityStatus("#users-status", "needs input");
@@ -1730,15 +1802,25 @@ async function refreshUsers(showNeedsInput = true) {
       renderPanelState("#user-profile-table", {status: "needs_input", reason: "Enter platform and platform user ID to load user profile and relationship."});
       renderPanelState("#user-memory-table", {status: "needs_input", reason: "Enter platform and platform user ID to load user memory."});
       renderPanelState("#user-style-table", {status: "needs_input", reason: "Enter platform and platform user ID to load user style."});
+      renderPanelState("#user-conversation-progress-table", {status: "needs_input", reason: "Enter platform, platform user ID, channel ID, and channel type to load conversation progress."});
+      renderPanelState("#user-carry-over-table", {status: "needs_input", reason: "Enter platform, platform user ID, channel ID, and channel type to load carry-over."});
     }
     return;
   }
 
   const params = new URLSearchParams({platform, platform_user_id: platformUserId, limit: "25"});
+  if (platformChannelId) params.set("platform_channel_id", platformChannelId);
+  if (channelType) params.set("channel_type", channelType);
   if (query) params.set("query", query);
   const payload = await api(`/api/entities/user?${params.toString()}`);
   setEntityStatus("#users-status", payload.status || "unavailable");
   const panels = payload.panels || {};
+  renderPromptPanel("#user-conversation-progress-table", panels.conversation_progress_prompt, {
+    emptyText: "No conversation-progress prompt context.",
+  });
+  renderPromptPanel("#user-carry-over-table", panels.current_carry_over, {
+    emptyText: "No current carry-over.",
+  });
   const relationshipRows = panelItems(panels.relationship);
   const relationshipItem = relationshipRows.reduce((row, item) => {
     if (item && item.key) row[item.key] = item.value;
@@ -1766,42 +1848,59 @@ async function refreshUsers(showNeedsInput = true) {
 async function refreshGroups(showNeedsInput = true) {
   const platform = qs("#group-platform").value.trim();
   const groupId = qs("#group-id").value.trim();
+  const participantPlatformUserId = qs("#group-participant-platform-user-id").value.trim();
   if (!platform || !groupId) {
     setEntityStatus("#groups-status", "needs input");
     if (showNeedsInput) {
       renderPanelState("#group-style-table", {status: "needs_input", reason: "Enter platform and group ID to load group style."});
+      renderPanelState("#group-carry-over-table", {status: "needs_input", reason: "Enter platform and group ID to load group carry-over."});
+      renderPanelState("#group-participant-progress-table", {status: "needs_input", reason: "Enter participant platform user ID to load participant progress."});
     }
     return;
   }
 
   const params = new URLSearchParams({platform, group_id: groupId, limit: "25"});
+  if (participantPlatformUserId) {
+    params.set("participant_platform_user_id", participantPlatformUserId);
+  }
   const payload = await api(`/api/entities/group?${params.toString()}`);
   setEntityStatus("#groups-status", payload.status || "unavailable");
   const panels = payload.panels || {};
+  renderPromptPanel("#group-carry-over-table", panels.group_carry_over, {
+    emptyText: "No group carry-over.",
+  });
+  renderPromptPanel("#group-participant-progress-table", panels.participant_conversation_progress_prompt, {
+    emptyText: "No participant conversation-progress prompt context.",
+  });
   renderStyleOverlayPanel("#group-style-table", panels.style, {
     scopeLabel: "group style",
   });
 }
 
 async function refreshCalendar() {
-  const payload = await api("/api/lookups/calendar?limit=25");
+  const platform = qs("#calendar-platform").value.trim();
+  const platformChannelId = qs("#calendar-platform-channel-id").value.trim();
+  const platformUserId = qs("#calendar-platform-user-id").value.trim();
+  const channelType = qs("#calendar-channel-type").value.trim();
+  const params = new URLSearchParams({limit: "25"});
+  if (platform) params.set("platform", platform);
+  if (platformChannelId) params.set("platform_channel_id", platformChannelId);
+  if (platformUserId) params.set("platform_user_id", platformUserId);
+  if (channelType) params.set("channel_type", channelType);
+  const payload = await api(`/api/lookups/calendar?${params.toString()}`);
   const status = payload.status || "unavailable";
   qs("#calendar-status").textContent = status;
   qs("#calendar-status").className = status === "available" ? "badge success" : "badge";
-  const items = Array.isArray(payload.items) ? payload.items : [];
-  if (!items.length) {
-    qs("#calendar-table").innerHTML = `<tr><td>Status</td><td>${escapeHtml(payload.reason || "No due calendar runs.")}</td></tr>`;
-    return;
-  }
-  qs("#calendar-table").innerHTML = items.map((item) => `
-    <tr>
-      <td><code>${escapeHtml(item.run_id || "-")}</code></td>
-      <td>${escapeHtml(item.trigger_kind || "-")}</td>
-      <td>${escapeHtml(item.status || "-")}</td>
-      <td>${escapeHtml(item.due_at || "-")}</td>
-      <td>${escapeHtml(item.attempt_count || 0)} / ${escapeHtml(item.max_attempts || "-")}</td>
-    </tr>
-  `).join("");
+  const panels = payload.panels || {};
+  renderPromptPanel("#calendar-prompt-runs-table", panels.cognition_pending_runs, {
+    emptyText: "No pending calendar prompt candidates.",
+  });
+  renderOperationalPanel("#calendar-schedules-table", panels.schedule_definitions, {
+    emptyText: "No schedule definitions.",
+  });
+  renderOperationalPanel("#calendar-due-runs-table", panels.due_runs, {
+    emptyText: "No due calendar runs.",
+  });
 }
 
 async function refreshBackground() {
@@ -1809,20 +1908,16 @@ async function refreshBackground() {
   const status = payload.status || "unavailable";
   qs("#background-status").textContent = status;
   qs("#background-status").className = status === "available" ? "badge success" : "badge";
-  const items = Array.isArray(payload.items) ? payload.items : [];
-  if (!items.length) {
-    qs("#background-table").innerHTML = `<tr><td>Status</td><td>${escapeHtml(payload.reason || "No background worker events.")}</td></tr>`;
-    return;
-  }
-  qs("#background-table").innerHTML = items.map((item) => `
-    <tr>
-      <td><code>${escapeHtml(item.event_id || "-")}</code></td>
-      <td>${escapeHtml(item.event_type || "-")}</td>
-      <td>${escapeHtml(item.status || item.level || "-")}</td>
-      <td>${escapeHtml(item.created_at || "-")}</td>
-      <td>${escapeHtml(item.message || "-")}</td>
-    </tr>
-  `).join("");
+  const panels = payload.panels || {};
+  renderPromptPanel("#background-result-ready-table", panels.result_ready_cognition_deliveries, {
+    emptyText: "No result-ready cognition deliveries.",
+  });
+  renderOperationalPanel("#background-job-queue-table", panels.job_queue, {
+    emptyText: "No background-work jobs.",
+  });
+  renderOperationalPanel("#background-worker-events-table", panels.worker_events, {
+    emptyText: "No background worker events.",
+  });
 }
 
 async function refreshEvents() {

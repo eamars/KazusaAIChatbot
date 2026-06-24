@@ -450,7 +450,9 @@ async def test_repository_composes_owner_entity_envelopes() -> None:
     rendered = repr({"character": character, "user": user, "group": group})
     assert "global-user-1" not in rendered
     assert "embedding" not in rendered
-    assert "prompt" not in rendered
+    assert "prompt_text" not in rendered
+    assert "raw_prompt" not in rendered
+    assert "must redact" not in rendered
 
 
 @pytest.mark.asyncio
