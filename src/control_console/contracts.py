@@ -236,6 +236,53 @@ class ServiceConfigActionResponse(StrictModel):
     audit_event_id: str
 
 
+class BrainModelRouteValues(StrictModel):
+    """Editable values for one Brain model route."""
+
+    model: str | None = Field(default=None, max_length=200)
+    max_completion_tokens: int | None = Field(default=None, ge=1, le=65536)
+    thinking_enabled: bool | None = None
+
+    @field_validator("model")
+    @classmethod
+    def _validate_model(cls, model: str | None) -> str | None:
+        """Reject empty model IDs before descriptor validation."""
+
+        if model is None:
+            return None
+        normalized_model = model.strip()
+        if not normalized_model:
+            raise ValueError("model must not be empty")
+        return normalized_model
+
+
+class BrainModelRouteApplyRequest(StrictModel):
+    """Operator request to apply selected Brain route values."""
+
+    reason: str = Field(min_length=1, max_length=240)
+    expected_version: int | None = None
+    values: BrainModelRouteValues
+
+
+class BrainModelRouteResetRequest(StrictModel):
+    """Operator request to clear one Brain route override."""
+
+    reason: str = Field(min_length=1, max_length=240)
+    expected_version: int | None = None
+
+
+class BrainModelRouteActionResponse(StrictModel):
+    """Selected-route apply/reset response."""
+
+    service_id: str
+    route: dict[str, Any]
+    routes: list[dict[str, Any]]
+    config: dict[str, Any]
+    service: ServiceRuntimeState | dict[str, Any]
+    restart: ServiceConfigRestartResult
+    audit_event_id: str
+
+
 class ControlConsoleOperator(StrictModel):
     """Authenticated local operator identity."""
 

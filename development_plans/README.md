@@ -39,6 +39,7 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [coding_agent_phase1_fetching_reading_plan.md](active/short_term/coding_agent_phase1_fetching_reading_plan.md) | Large standalone coding-agent Phase 1 plan | draft |
+| [control_console_brain_model_route_config_plan.md](active/short_term/control_console_brain_model_route_config_plan.md) | Large control-console Brain model route configuration plan | completed |
 | [control_console_cognition_debug_visibility_plan.md](active/short_term/control_console_cognition_debug_visibility_plan.md) | Large control-console cognition-debug visibility plan | completed |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 

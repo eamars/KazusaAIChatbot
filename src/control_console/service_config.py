@@ -12,9 +12,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 NAPCAT_ACTIVE_GROUP_PATTERN = r"^[0-9]{1,32}$"
 DEFAULT_MAX_ITEMS = 50
 DEFAULT_MAX_ITEM_LENGTH = 120
+MAX_DESCRIPTOR_FIELDS = 64
 
 ConfigValue = str | int | bool | list[str]
 CommandRenderer = Callable[[list[str], dict[str, object]], list[str]]
+EnvironmentRenderer = Callable[[dict[str, object]], dict[str, str]]
 
 
 class ServiceConfigValidationError(ValueError):
@@ -35,12 +37,16 @@ class ServiceConfigField(StrictConfigModel):
     description: str = Field(min_length=1, max_length=240)
     value_type: Literal["string_list", "string", "boolean", "integer", "enum"]
     default_env: str | None = Field(default=None, pattern=r"^[A-Z0-9_]{1,80}$")
+    default_fallback_env: list[str] = Field(default_factory=list, max_length=8)
+    default_literal: str = Field(default="", max_length=240)
     sensitive: bool = False
     restart_required: bool = True
     max_items: int = Field(default=DEFAULT_MAX_ITEMS, ge=1, le=500)
     max_item_length: int = Field(default=DEFAULT_MAX_ITEM_LENGTH, ge=1, le=1000)
     pattern: str | None = Field(default=None, max_length=240)
     options: list[str] = Field(default_factory=list, max_length=64)
+    min_value: int | None = None
+    max_value: int | None = None
 
     @field_validator("pattern")
     @classmethod
@@ -55,6 +61,16 @@ class ServiceConfigField(StrictConfigModel):
             raise ValueError(f"invalid field pattern: {exc}") from exc
         return pattern
 
+    @field_validator("default_fallback_env")
+    @classmethod
+    def _validate_default_fallback_env(cls, values: list[str]) -> list[str]:
+        """Reject non-environment fallback names in descriptors."""
+
+        for value in values:
+            if re.fullmatch(r"^[A-Z0-9_]{1,80}$", value) is None:
+                raise ValueError("fallback environment keys must be uppercase names")
+        return values
+
 
 class ServiceConfigDescriptor(StrictConfigModel):
     """Configuration descriptor registered for one service id."""
@@ -62,7 +78,10 @@ class ServiceConfigDescriptor(StrictConfigModel):
     service_id: str = Field(pattern=r"^[a-z0-9][a-z0-9_.-]{0,63}$")
     title: str = Field(min_length=1, max_length=80)
     description: str = Field(min_length=1, max_length=240)
-    fields: list[ServiceConfigField] = Field(min_length=1, max_length=32)
+    fields: list[ServiceConfigField] = Field(
+        min_length=1,
+        max_length=MAX_DESCRIPTOR_FIELDS,
+    )
 
     @field_validator("fields")
     @classmethod
@@ -168,6 +187,7 @@ class ServiceConfigRegistry:
         *,
         descriptors: list[ServiceConfigDescriptor],
         command_renderers: dict[str, CommandRenderer] | None = None,
+        environment_renderers: dict[str, EnvironmentRenderer] | None = None,
     ) -> None:
         """Create a registry from descriptors and optional command renderers."""
 
@@ -179,6 +199,7 @@ class ServiceConfigRegistry:
                 )
             self._descriptors[descriptor.service_id] = descriptor
         self._command_renderers = dict(command_renderers or {})
+        self._environment_renderers = dict(environment_renderers or {})
 
     def has_descriptor(self, service_id: str) -> bool:
         """Return whether a service has an operator config descriptor."""
@@ -288,6 +309,33 @@ class ServiceConfigRegistry:
         _validate_rendered_command(rendered_command)
         return rendered_command
 
+    def render_environment_overlay(
+        self,
+        *,
+        service_id: str,
+        environment: Mapping[str, str],
+        overrides: ServiceConfigOverrideStore,
+    ) -> dict[str, str]:
+        """Render descriptor-approved environment values for service start."""
+
+        renderer = self._environment_renderers.get(service_id)
+        if renderer is None:
+            return {}
+
+        snapshot = self.snapshot_for_service(
+            service_id=service_id,
+            environment=environment,
+            overrides=overrides,
+        )
+        override_values = {
+            field.key: field.override_value
+            for field in snapshot.fields
+            if field.override_value is not None
+        }
+        rendered_environment = renderer(override_values)
+        _validate_environment_overlay(rendered_environment)
+        return rendered_environment
+
     def _descriptor_for_service(self, service_id: str) -> ServiceConfigDescriptor:
         """Return one descriptor or raise a validation error."""
 
@@ -309,6 +357,13 @@ class ServiceConfigRegistry:
         raw_value = ""
         if field.default_env is not None:
             raw_value = environment.get(field.default_env, "")
+        if not raw_value.strip():
+            for fallback_env in field.default_fallback_env:
+                raw_value = environment.get(fallback_env, "")
+                if raw_value.strip():
+                    break
+        if not raw_value.strip():
+            raw_value = field.default_literal
         default_value = _default_from_raw(field=field, raw_value=raw_value)
         return default_value
 
@@ -316,7 +371,13 @@ class ServiceConfigRegistry:
 def build_default_service_config_registry() -> ServiceConfigRegistry:
     """Build production service config descriptors and command renderers."""
 
-    descriptor = ServiceConfigDescriptor(
+    brain_descriptor = ServiceConfigDescriptor(
+        service_id="brain",
+        title="Brain model routes",
+        description="Restart-applied model routing for Brain chat LLM stages.",
+        fields=_brain_model_route_fields(),
+    )
+    napcat_descriptor = ServiceConfigDescriptor(
         service_id="adapter.napcat",
         title="NapCat QQ adapter",
         description="Runtime configuration applied by restarting the service.",
@@ -334,8 +395,9 @@ def build_default_service_config_registry() -> ServiceConfigRegistry:
         ],
     )
     registry = ServiceConfigRegistry(
-        descriptors=[descriptor],
+        descriptors=[brain_descriptor, napcat_descriptor],
         command_renderers={"adapter.napcat": _render_napcat_command},
+        environment_renderers={"brain": _render_brain_environment},
     )
     return registry
 
@@ -445,6 +507,14 @@ def _validate_integer(*, field: ServiceConfigField, value: object) -> int:
 
     if isinstance(value, bool) or not isinstance(value, int):
         raise ServiceConfigValidationError(f"{field.key}: value must be integer")
+    if field.min_value is not None and value < field.min_value:
+        raise ServiceConfigValidationError(
+            f"{field.key}: value must be at least {field.min_value}"
+        )
+    if field.max_value is not None and value > field.max_value:
+        raise ServiceConfigValidationError(
+            f"{field.key}: value must be at most {field.max_value}"
+        )
     return value
 
 
@@ -491,6 +561,11 @@ def _validation_metadata(field: ServiceConfigField) -> dict[str, Any]:
         validation["max_item_length"] = field.max_item_length
     if field.value_type == "enum":
         validation["options"] = list(field.options)
+    if field.value_type == "integer":
+        if field.min_value is not None:
+            validation["min_value"] = field.min_value
+        if field.max_value is not None:
+            validation["max_value"] = field.max_value
     return validation
 
 
@@ -519,6 +594,102 @@ def _render_napcat_command(
     return rendered_command
 
 
+def _brain_model_route_fields() -> list[ServiceConfigField]:
+    """Return descriptor fields for every Brain model route."""
+
+    from control_console.brain_model_routes import (
+        MODEL_ID_PATTERN,
+        route_default_fallback_env,
+        route_default_literal,
+        route_descriptors,
+        route_env_name,
+        route_field_key,
+    )
+
+    fields: list[ServiceConfigField] = []
+    for route in route_descriptors():
+        fields.extend([
+            ServiceConfigField(
+                key=route_field_key(route, "model"),
+                label=f"{route.label} model",
+                description=f"Model ID for the {route.label} Brain route.",
+                value_type="string",
+                default_env=route_env_name(route, "model"),
+                default_fallback_env=route_default_fallback_env(route, "model"),
+                default_literal=route_default_literal("model"),
+                pattern=MODEL_ID_PATTERN,
+                max_item_length=200,
+                restart_required=True,
+            ),
+            ServiceConfigField(
+                key=route_field_key(route, "max_completion_tokens"),
+                label=f"{route.label} max completion tokens",
+                description=(
+                    f"Maximum completion token budget for the {route.label} route."
+                ),
+                value_type="integer",
+                default_env=route_env_name(route, "max_completion_tokens"),
+                default_fallback_env=route_default_fallback_env(
+                    route,
+                    "max_completion_tokens",
+                ),
+                default_literal=route_default_literal("max_completion_tokens"),
+                min_value=1,
+                max_value=65536,
+                restart_required=True,
+            ),
+            ServiceConfigField(
+                key=route_field_key(route, "thinking_enabled"),
+                label=f"{route.label} thinking mode",
+                description=f"Whether the {route.label} route enables thinking.",
+                value_type="boolean",
+                default_env=route_env_name(route, "thinking_enabled"),
+                default_fallback_env=route_default_fallback_env(
+                    route,
+                    "thinking_enabled",
+                ),
+                default_literal=route_default_literal("thinking_enabled"),
+                restart_required=True,
+            ),
+        ])
+    return fields
+
+
+def _render_brain_environment(
+    effective_values: dict[str, object],
+) -> dict[str, str]:
+    """Render Brain route descriptor values into child-process env vars."""
+
+    from control_console.brain_model_routes import (
+        route_descriptors,
+        route_env_name,
+        route_field_key,
+    )
+
+    environment: dict[str, str] = {}
+    for route in route_descriptors():
+        for field_name in route.editable_fields:
+            key = route_field_key(route, field_name)
+            if key not in effective_values:
+                continue
+            value = effective_values[key]
+            env_name = route_env_name(route, field_name)
+            environment[env_name] = _environment_value(key=key, value=value)
+    return environment
+
+
+def _environment_value(*, key: str, value: object) -> str:
+    """Serialize a validated descriptor value for process environment use."""
+
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, str):
+        return value
+    raise ServiceConfigValidationError(f"{key}: value cannot be rendered to env")
+
+
 def _validate_rendered_command(command: list[str]) -> None:
     """Reject command renderers that return non-argv values."""
 
@@ -528,4 +699,22 @@ def _validate_rendered_command(command: list[str]) -> None:
         if not isinstance(part, str) or not part.strip():
             raise ServiceConfigValidationError(
                 "rendered command entries must be non-empty strings"
+            )
+
+
+def _validate_environment_overlay(environment: dict[str, str]) -> None:
+    """Reject malformed environment overlays from descriptor renderers."""
+
+    for key, value in environment.items():
+        if re.fullmatch(r"^[A-Z0-9_]{1,80}$", key) is None:
+            raise ServiceConfigValidationError(
+                "rendered environment keys must be uppercase names"
+            )
+        if not isinstance(value, str):
+            raise ServiceConfigValidationError(
+                "rendered environment values must be strings"
+            )
+        if len(value) > 2000:
+            raise ServiceConfigValidationError(
+                "rendered environment values are too large"
             )

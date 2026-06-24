@@ -4,6 +4,13 @@ const state = {
   services: [],
   serviceConfigSummaries: {},
   currentServiceConfig: null,
+  brainModelRoutes: [],
+  brainModelServiceState: {},
+  selectedBrainRouteKey: "",
+  brainRouteFilters: {search: "", group: "all", source: "all", family: "all"},
+  dirtyBrainRouteValues: {},
+  availableModelCache: {},
+  brainRouteActionInFlight: false,
   pageCapabilities: {},
   applicationIdentity: {},
   latestCognitionGraph: null,
@@ -403,6 +410,7 @@ async function bootstrap(options = {}) {
   renderOverview(payload);
   renderHealth(payload.overview || {});
   renderServices();
+  await refreshBrainModelRoutes({silent: true});
   renderLogControls();
   renderAudit(payload.recent_audit_events || []);
   if (reconnectStream) openStream(payload.stream_url);
@@ -414,6 +422,13 @@ function lockSession() {
   state.services = [];
   state.serviceConfigSummaries = {};
   state.currentServiceConfig = null;
+  state.brainModelRoutes = [];
+  state.brainModelServiceState = {};
+  state.selectedBrainRouteKey = "";
+  state.brainRouteFilters = {search: "", group: "all", source: "all", family: "all"};
+  state.dirtyBrainRouteValues = {};
+  state.availableModelCache = {};
+  state.brainRouteActionInFlight = false;
   state.pageCapabilities = {};
   state.latestCognitionGraph = null;
   state.debugCognitionGraph = null;
@@ -1005,43 +1020,316 @@ function serviceConfigBadge(service) {
   return `<span class="${className}">${escapeHtml(configState.replaceAll("_", " "))}</span>`;
 }
 
+async function refreshBrainModelRoutes(options = {}) {
+  try {
+    const payload = await api("/api/services/brain/model-routes");
+    state.brainModelRoutes = payload.routes || [];
+    state.brainModelServiceState = payload.service_state || payload.service || {};
+    if (!state.selectedBrainRouteKey && state.brainModelRoutes.length) {
+      state.selectedBrainRouteKey = state.brainModelRoutes[0].route_key;
+    }
+    renderServices();
+  } catch (error) {
+    state.brainModelRoutes = [];
+    state.brainModelServiceState = {};
+    if (!options.silent) throw error;
+  }
+}
+
+function renderBrainServiceCard(service) {
+  const routes = state.brainModelRoutes || [];
+  const selectedRoute = selectedBrainRoute();
+  const routeSummary = brainRouteSummary(routes);
+  const startButton = serviceActionButton(service, "start", "Start", "primary");
+  const restartButton = serviceActionButton(service, "restart", "Restart");
+  const stopButton = serviceActionButton(service, "stop", "Stop", "danger");
+  const logsButton = serviceLogsButton(service);
+  const configBadge = serviceConfigBadge(service);
+  const serviceError = service.last_error_preview ? `<div class="service-error">${escapeHtml(service.last_error_preview)}</div>` : "";
+  return `
+    <article class="service-card brain-service-card" data-component="Card" data-service-card="${escapeHtml(service.id)}">
+      <div class="service-card-header">
+        <div><strong>${escapeHtml(service.display_name)}</strong><br><code>${escapeHtml(service.id)}</code></div>
+        <div class="badge-stack">
+          <span class="${badgeClass(service.actual_state)}">${escapeHtml(service.actual_state)}</span>
+          ${configBadge}
+          <span class="badge">${escapeHtml(routes.length)} routes</span>
+        </div>
+      </div>
+      <div class="brain-service-layout">
+        <section class="brain-runtime-panel">
+          <div class="brain-runtime-grid">
+            <div class="kv"><span>desired</span><strong>${escapeHtml(service.desired_state)}</strong></div>
+            <div class="kv"><span>version</span><strong>${escapeHtml(service.version)}</strong></div>
+            <div class="kv"><span>pid</span><strong>${escapeHtml(service.pid || "-")}</strong></div>
+            <div class="kv"><span>depends</span><code>${escapeHtml((service.dependencies || []).join(", ") || "-")}</code></div>
+            <div class="kv"><span>override routes</span><strong>${escapeHtml(routeSummary.overrideCount)}</strong></div>
+            <div class="kv"><span>families</span><strong>${escapeHtml(routeSummary.familyCount)}</strong></div>
+          </div>
+          ${serviceError}
+          <div class="service-card-actions brain-runtime-actions">
+            ${startButton}
+            ${restartButton}
+            ${stopButton}
+            ${logsButton}
+            <button class="btn" data-brain-route-refresh-all type="button">Refresh routes</button>
+          </div>
+        </section>
+        <section class="brain-routes-panel">
+          ${renderBrainRouteMatrix(routes)}
+          ${renderBrainRouteEditor(selectedRoute, service)}
+        </section>
+      </div>
+    </article>
+  `;
+}
+
+function renderBrainRouteMatrix(routes) {
+  const filteredRoutes = filteredBrainRoutes(routes);
+  const groups = uniqueRouteValues(routes, "group");
+  const sources = uniqueRouteValues(routes, "effective", "source");
+  const families = uniqueRouteValues(routes, "diagnostics", "model_family");
+  return `
+    <div class="brain-route-toolbar">
+      <label class="field">
+        Search
+        <input class="input" data-brain-route-filter="search" value="${escapeHtml(state.brainRouteFilters.search)}" placeholder="route or model" />
+      </label>
+      <label class="field">
+        Group
+        <select class="input" data-brain-route-filter="group">${brainFilterOptions(groups, state.brainRouteFilters.group)}</select>
+      </label>
+      <label class="field">
+        Source
+        <select class="input" data-brain-route-filter="source">${brainFilterOptions(sources, state.brainRouteFilters.source)}</select>
+      </label>
+      <label class="field">
+        Family
+        <select class="input" data-brain-route-filter="family">${brainFilterOptions(families, state.brainRouteFilters.family)}</select>
+      </label>
+    </div>
+    <div class="brain-route-matrix" role="list">
+      ${filteredRoutes.length ? filteredRoutes.map(renderBrainRouteTile).join("") : "<p class=\"panel-empty\">No model routes match the selected filters.</p>"}
+    </div>
+  `;
+}
+
+function renderBrainRouteTile(route) {
+  const selected = route.route_key === state.selectedBrainRouteKey ? " selected" : "";
+  const source = route.effective?.source || "default";
+  const sourceClass = source === "override" ? "badge warn" : "badge";
+  const family = route.diagnostics?.model_family || "unknown";
+  const thinking = route.effective?.thinking_enabled ? "thinking" : "standard";
+  return `
+    <button class="brain-route-tile${selected}" data-brain-route-key="${escapeHtml(route.route_key)}" type="button" role="listitem">
+      <span class="brain-route-name">${escapeHtml(route.label || route.route_key)}</span>
+      <code>${escapeHtml(route.effective?.model || "not configured")}</code>
+      <span class="brain-route-meta">
+        <span class="${sourceClass}">${escapeHtml(source)}</span>
+        <span class="badge">${escapeHtml(family)}</span>
+        <span class="badge">${escapeHtml(thinking)}</span>
+      </span>
+    </button>
+  `;
+}
+
+function renderBrainRouteEditor(route, service) {
+  if (!route) {
+    return `<section class="brain-route-editor"><p class="panel-empty">Select a route to configure its model override.</p></section>`;
+  }
+  const dirty = brainRouteDirtyValues(route);
+  const modelValue = dirty.model ?? route.override?.model ?? route.effective?.model ?? "";
+  const tokensValue = dirty.max_completion_tokens ?? route.override?.max_completion_tokens ?? route.effective?.max_completion_tokens ?? "";
+  const thinkingValue = dirty.thinking_enabled ?? route.override?.thinking_enabled ?? route.effective?.thinking_enabled ?? false;
+  const modelsState = state.availableModelCache[route.route_key] || {status: "not_loaded", models: []};
+  const applyDisabled = state.brainRouteActionInFlight || !brainRouteHasDirty(route) ? " disabled aria-disabled=\"true\"" : "";
+  const loadingDisabled = state.brainRouteActionInFlight ? " disabled aria-disabled=\"true\"" : "";
+  const runningText = service.actual_state === "running" ? "apply and restart" : "store for next start";
+  return `
+    <section class="brain-route-editor" data-selected-brain-route="${escapeHtml(route.route_key)}">
+      <div class="brain-route-editor-header">
+        <div>
+          <strong>${escapeHtml(route.label)}</strong>
+          <span>${escapeHtml(route.group)} · ${escapeHtml(route.env_prefix)}</span>
+        </div>
+        <div class="badge-stack">
+          <span class="${route.required ? "badge warn" : "badge"}">${route.required ? "required" : "fallback backed"}</span>
+          <span class="badge">${escapeHtml(route.diagnostics?.base_url_label || "provider unknown")}</span>
+        </div>
+      </div>
+      <div class="brain-route-current">
+        <div class="kv"><span>effective</span><strong>${escapeHtml(route.effective?.model || "not configured")}</strong></div>
+        <div class="kv"><span>default</span><strong>${escapeHtml(route.default?.model || "empty")}</strong></div>
+        <div class="kv"><span>source</span><strong>${escapeHtml(route.effective?.source || "default")}</strong></div>
+      </div>
+      <div class="brain-route-form">
+        <label class="field">
+          Available model
+          <select class="input" data-brain-route-input="model">
+            ${availableModelOptions(modelsState, modelValue)}
+          </select>
+        </label>
+        <label class="field">
+          Manual model ID
+          <input class="input" data-brain-route-input="model" value="${escapeHtml(modelValue)}" placeholder="provider model id" />
+        </label>
+        <label class="field">
+          Max completion tokens
+          <input class="input" data-brain-route-input="max_completion_tokens" type="number" min="1" max="65536" value="${escapeHtml(tokensValue)}" />
+        </label>
+        <label class="check-field brain-thinking-toggle">
+          <input type="checkbox" data-brain-route-input="thinking_enabled"${thinkingValue ? " checked" : ""} />
+          Thinking enabled
+        </label>
+      </div>
+      <div class="brain-model-picker-state">${availableModelStatus(modelsState)}</div>
+      <div class="service-card-actions brain-route-actions">
+        <button class="btn" data-brain-route-refresh="${escapeHtml(route.route_key)}"${loadingDisabled} type="button">Refresh models</button>
+        <button class="btn" data-brain-route-reset="${escapeHtml(route.route_key)}"${loadingDisabled} type="button">Reset route</button>
+        <button class="btn primary" data-brain-route-apply="${escapeHtml(route.route_key)}"${applyDisabled} type="button">${escapeHtml(runningText)}</button>
+      </div>
+    </section>
+  `;
+}
+
+function refreshBrainAvailableModels(routeKey) {
+  const cache = state.availableModelCache[routeKey] || {};
+  state.availableModelCache[routeKey] = {...cache, status: "loading", models: []};
+  renderServices();
+  return api(`/api/services/brain/model-routes/${encodeURIComponent(routeKey)}/available-models`)
+    .then((payload) => {
+      state.availableModelCache[routeKey] = {
+        status: payload.status || "unavailable",
+        models: payload.models || [],
+        message: payload.message || "",
+      };
+      renderServices();
+    })
+    .catch((error) => {
+      state.availableModelCache[routeKey] = {
+        status: "unavailable",
+        models: [],
+        message: error.message,
+      };
+      renderServices();
+    });
+}
+
+function selectedBrainRoute() {
+  const routes = state.brainModelRoutes || [];
+  return routes.find((route) => route.route_key === state.selectedBrainRouteKey) || routes[0] || null;
+}
+
+function brainRouteDirtyValues(route) {
+  return state.dirtyBrainRouteValues[route.route_key] || {};
+}
+
+function brainRouteHasDirty(route) {
+  return Object.keys(brainRouteDirtyValues(route)).length > 0;
+}
+
+function availableModelOptions(modelsState, selectedModel) {
+  const models = modelsState.models || [];
+  const selected = selectedModel || "";
+  const options = [`<option value="${escapeHtml(selected)}">${escapeHtml(selected || "manual model")}</option>`];
+  models.forEach((model) => {
+    const value = model.id || "";
+    if (!value || value === selected) return;
+    options.push(`<option value="${escapeHtml(value)}">${escapeHtml(value)} · ${escapeHtml(model.family || "unknown")}</option>`);
+  });
+  return options.join("");
+}
+
+function availableModelStatus(modelsState) {
+  const status = modelsState.status || "not_loaded";
+  if (status === "loading") return "Loading provider model list...";
+  if (status === "available") return `${(modelsState.models || []).length} provider models available.`;
+  if (status === "unavailable") return modelsState.message || "Provider model list unavailable.";
+  return "Refresh models to populate the picker for this route.";
+}
+
+function brainRouteSummary(routes) {
+  const overrideCount = routes.filter((route) => route.effective?.source === "override").length;
+  const families = new Set(routes.map((route) => route.diagnostics?.model_family || "unknown"));
+  return {overrideCount, familyCount: families.size};
+}
+
+function filteredBrainRoutes(routes) {
+  const filters = state.brainRouteFilters;
+  const search = filters.search.trim().toLowerCase();
+  return routes.filter((route) => {
+    const source = route.effective?.source || "default";
+    const family = route.diagnostics?.model_family || "unknown";
+    const haystack = `${route.label} ${route.route_key} ${route.effective?.model || ""}`.toLowerCase();
+    return (!search || haystack.includes(search))
+      && (filters.group === "all" || route.group === filters.group)
+      && (filters.source === "all" || source === filters.source)
+      && (filters.family === "all" || family === filters.family);
+  });
+}
+
+function uniqueRouteValues(routes, primaryKey, secondaryKey = "") {
+  const values = new Set();
+  routes.forEach((route) => {
+    const source = secondaryKey ? route[primaryKey]?.[secondaryKey] : route[primaryKey];
+    if (source) values.add(source);
+  });
+  return Array.from(values).sort((a, b) => String(a).localeCompare(String(b)));
+}
+
+function brainFilterOptions(values, selected) {
+  const options = [`<option value="all"${selected === "all" ? " selected" : ""}>all</option>`];
+  values.forEach((value) => {
+    const selectedText = value === selected ? " selected" : "";
+    options.push(`<option value="${escapeHtml(value)}"${selectedText}>${escapeHtml(value)}</option>`);
+  });
+  return options.join("");
+}
+
+function renderGenericServiceCard(service) {
+  const startButton = serviceActionButton(service, "start", "Start", "primary");
+  const restartButton = serviceActionButton(service, "restart", "Restart");
+  const stopButton = serviceActionButton(service, "stop", "Stop", "danger");
+  const configButton = serviceConfigButton(service);
+  const logsButton = serviceLogsButton(service);
+  const configBadge = serviceConfigBadge(service);
+  const serviceError = service.last_error_preview ? `<div class="service-error">${escapeHtml(service.last_error_preview)}</div>` : "";
+  return `
+    <article class="service-card" data-component="Card" data-service-card="${escapeHtml(service.id)}">
+      <div class="service-card-header">
+        <div><strong>${escapeHtml(service.display_name)}</strong><br><code>${escapeHtml(service.id)}</code></div>
+        <div class="badge-stack">
+          <span class="${badgeClass(service.actual_state)}">${escapeHtml(service.actual_state)}</span>
+          ${configBadge}
+        </div>
+      </div>
+      <div class="service-card-body">
+        <div class="kv"><span>desired</span><strong>${escapeHtml(service.desired_state)}</strong></div>
+        <div class="kv"><span>version</span><strong>${escapeHtml(service.version)}</strong></div>
+        <div class="kv"><span>pid</span><strong>${escapeHtml(service.pid || "-")}</strong></div>
+        <div class="kv"><span>depends</span><code>${escapeHtml((service.dependencies || []).join(", ") || "-")}</code></div>
+      </div>
+      ${serviceError}
+      <div class="service-card-actions">
+        ${startButton}
+        ${restartButton}
+        ${stopButton}
+        ${logsButton}
+        ${configButton}
+      </div>
+    </article>
+  `;
+}
+
 function renderServices() {
   const grid = qs("#service-grid");
   if (!grid) return;
   setHtml(grid, "");
   state.services.forEach((service) => {
-    const startButton = serviceActionButton(service, "start", "Start", "primary");
-    const restartButton = serviceActionButton(service, "restart", "Restart");
-    const stopButton = serviceActionButton(service, "stop", "Stop", "danger");
-    const configButton = serviceConfigButton(service);
-    const logsButton = serviceLogsButton(service);
-    const configBadge = serviceConfigBadge(service);
-    const serviceError = service.last_error_preview ? `<div class="service-error">${escapeHtml(service.last_error_preview)}</div>` : "";
-    appendHtml(grid, "beforeend", `
-      <article class="service-card" data-component="Card" data-service-card="${escapeHtml(service.id)}">
-        <div class="service-card-header">
-          <div><strong>${escapeHtml(service.display_name)}</strong><br><code>${escapeHtml(service.id)}</code></div>
-          <div class="badge-stack">
-            <span class="${badgeClass(service.actual_state)}">${escapeHtml(service.actual_state)}</span>
-            ${configBadge}
-          </div>
-        </div>
-        <div class="service-card-body">
-          <div class="kv"><span>desired</span><strong>${escapeHtml(service.desired_state)}</strong></div>
-          <div class="kv"><span>version</span><strong>${escapeHtml(service.version)}</strong></div>
-          <div class="kv"><span>pid</span><strong>${escapeHtml(service.pid || "-")}</strong></div>
-          <div class="kv"><span>depends</span><code>${escapeHtml((service.dependencies || []).join(", ") || "-")}</code></div>
-        </div>
-        ${serviceError}
-        <div class="service-card-actions">
-          ${startButton}
-          ${restartButton}
-          ${stopButton}
-          ${logsButton}
-          ${configButton}
-        </div>
-      </article>
-    `);
+    const markup = service.id === "brain"
+      ? renderBrainServiceCard(service)
+      : renderGenericServiceCard(service);
+    appendHtml(grid, "beforeend", markup);
   });
 }
 
@@ -1091,6 +1379,32 @@ async function serviceAction(event) {
 }
 
 function handleServiceGridClick(event) {
+  const routeButton = event.target.closest("[data-brain-route-key]");
+  if (routeButton) {
+    state.selectedBrainRouteKey = routeButton.dataset.brainRouteKey || "";
+    renderServices();
+    return;
+  }
+  const routeRefreshAllButton = event.target.closest("[data-brain-route-refresh-all]");
+  if (routeRefreshAllButton) {
+    refreshBrainModelRoutes().catch(reportActionError);
+    return;
+  }
+  const routeRefreshButton = event.target.closest("[data-brain-route-refresh]");
+  if (routeRefreshButton) {
+    refreshBrainAvailableModels(routeRefreshButton.dataset.brainRouteRefresh).catch(reportActionError);
+    return;
+  }
+  const routeApplyButton = event.target.closest("[data-brain-route-apply]");
+  if (routeApplyButton) {
+    applyBrainRoute(routeApplyButton.dataset.brainRouteApply).catch(reportActionError);
+    return;
+  }
+  const routeResetButton = event.target.closest("[data-brain-route-reset]");
+  if (routeResetButton) {
+    resetBrainRoute(routeResetButton.dataset.brainRouteReset).catch(reportActionError);
+    return;
+  }
   const logButton = event.target.closest("[data-log-service]");
   if (logButton) {
     openServiceLogs(logButton.dataset.logService);
@@ -1102,6 +1416,89 @@ function handleServiceGridClick(event) {
     return;
   }
   serviceAction(event).catch(reportActionError);
+}
+
+function handleServiceGridInput(event) {
+  const filter = event.target.closest("[data-brain-route-filter]");
+  if (filter) {
+    state.brainRouteFilters[filter.dataset.brainRouteFilter] = filter.value;
+    renderServices();
+    return;
+  }
+  const input = event.target.closest("[data-brain-route-input]");
+  if (!input) return;
+  const route = selectedBrainRoute();
+  if (!route) return;
+  const fieldName = input.dataset.brainRouteInput;
+  const dirtyValues = {...brainRouteDirtyValues(route)};
+  let value = input.type === "checkbox" ? input.checked : input.value;
+  if (fieldName === "max_completion_tokens") {
+    value = Number(input.value);
+  }
+  dirtyValues[fieldName] = value;
+  state.dirtyBrainRouteValues[route.route_key] = dirtyValues;
+  if (event.type === "change") renderServices();
+  else updateBrainRouteApplyButtons();
+}
+
+function updateBrainRouteApplyButtons() {
+  const route = selectedBrainRoute();
+  qsa("[data-brain-route-apply]").forEach((button) => {
+    button.disabled = !route || state.brainRouteActionInFlight || !brainRouteHasDirty(route);
+  });
+}
+
+async function applyBrainRoute(routeKey) {
+  const route = (state.brainModelRoutes || []).find((item) => item.route_key === routeKey);
+  if (!route) return;
+  const dirtyValues = brainRouteDirtyValues(route);
+  if (!Object.keys(dirtyValues).length) return;
+  const service = serviceById("brain") || {};
+  state.brainRouteActionInFlight = true;
+  renderServices();
+  try {
+    const payload = await api(`/api/services/brain/model-routes/${encodeURIComponent(routeKey)}`, {
+      method: "PUT",
+      csrf: true,
+      body: JSON.stringify({
+        reason: "operator console model route change",
+        expected_version: service.version,
+        values: dirtyValues,
+      }),
+    });
+    state.brainModelRoutes = payload.routes || [];
+    state.brainModelServiceState = payload.service_state || payload.service || {};
+    delete state.dirtyBrainRouteValues[routeKey];
+    await bootstrap();
+    showNotice(payload.restart?.attempted ? "Brain model route saved; restart attempted." : "Brain model route saved for next start.", "success");
+  } finally {
+    state.brainRouteActionInFlight = false;
+    renderServices();
+  }
+}
+
+async function resetBrainRoute(routeKey) {
+  const service = serviceById("brain") || {};
+  state.brainRouteActionInFlight = true;
+  renderServices();
+  try {
+    const payload = await api(`/api/services/brain/model-routes/${encodeURIComponent(routeKey)}/reset`, {
+      method: "POST",
+      csrf: true,
+      body: JSON.stringify({
+        reason: "operator console model route reset",
+        expected_version: service.version,
+      }),
+    });
+    state.brainModelRoutes = payload.routes || [];
+    state.brainModelServiceState = payload.service_state || payload.service || {};
+    delete state.dirtyBrainRouteValues[routeKey];
+    await bootstrap();
+    showNotice("Brain model route reset.", "success");
+  } finally {
+    state.brainRouteActionInFlight = false;
+    renderServices();
+  }
 }
 
 function openServiceLogs(serviceId) {
@@ -2267,6 +2664,8 @@ bind("#token", "keydown", (event) => {
   }
 });
 bind("#service-grid", "click", handleServiceGridClick);
+bind("#service-grid", "input", handleServiceGridInput);
+bind("#service-grid", "change", handleServiceGridInput);
 bind("#log-service-filter", "change", refreshLogStream);
 bind("#log-stream-filter", "change", refreshLogStream);
 bind("#log-text-filter", "input", renderBufferedLogRows);

@@ -33,6 +33,9 @@ from control_console.auth import (
     verify_operator_token,
 )
 from control_console.contracts import (
+    BrainModelRouteActionResponse,
+    BrainModelRouteApplyRequest,
+    BrainModelRouteResetRequest,
     ConsoleDebugChatRequest,
     ConsoleLookupQuery,
     ControlConsoleBootstrapResponse,
@@ -45,6 +48,13 @@ from control_console.contracts import (
     ServiceConfigApplyRequest,
     ServiceConfigResetRequest,
     ServiceConfigRestartResult,
+)
+from control_console.brain_model_routes import (
+    descriptor_for_route,
+    fetch_available_models,
+    project_brain_model_routes,
+    route_environment_value,
+    route_field_key,
 )
 from control_console.event_monitor import EventMonitor
 from control_console.kazusa_client import KazusaClient, not_reported_cognition_graph
@@ -135,6 +145,24 @@ def create_app(
             ) from exc
         return rendered_command
 
+    def environment_resolver(service_id: str) -> dict[str, str]:
+        """Resolve descriptor-backed config into service start environment."""
+
+        environment = _service_config_environment()
+        try:
+            rendered_environment = (
+                service_config_registry.render_environment_overlay(
+                    service_id=service_id,
+                    environment=environment,
+                    overrides=service_config_overrides,
+                )
+            )
+        except ServiceConfigValidationError as exc:
+            raise ServiceLifecycleError(
+                f"service config environment overlay failed: {exc}"
+            ) from exc
+        return rendered_environment
+
     audit_writer = LocalAuditWriter(app_settings.audit_path)
     log_stream_hub = LogStreamHub()
     log_store = ProcessLogStore(
@@ -148,6 +176,7 @@ def create_app(
         log_store=log_store,
         audit_writer=audit_writer,
         command_resolver=command_resolver,
+        environment_resolver=environment_resolver,
     )
     repository = ControlConsoleRepository()
     kazusa_client = KazusaClient(
@@ -514,6 +543,117 @@ def create_app(
             {"service_id": service_id, "action": "config"},
         )
         return response_payload
+
+    @app.get("/api/services/brain/model-routes")
+    async def brain_model_routes(
+        operator: ControlConsoleOperator = Depends(current_operator),
+    ) -> dict[str, Any]:
+        """Return route-focused Brain model configuration."""
+
+        request_id = f"cc-req-{uuid.uuid4().hex[:12]}"
+        payload = _brain_model_routes_snapshot_or_http_error(
+            services=services,
+            registry=service_config_registry,
+            overrides=service_config_overrides,
+            supervisor=app_supervisor,
+        )
+        audit_writer.write_event(
+            event_type="brain_model_routes_view",
+            operator_id=operator.operator_id,
+            service_id="brain",
+            target={"service_id": "brain", "route_count": len(payload["routes"])},
+            request_id=request_id,
+        )
+        return payload
+
+    @app.put(
+        "/api/services/brain/model-routes/{route_key}",
+        dependencies=[Depends(csrf_guard)],
+    )
+    async def apply_brain_model_route(
+        route_key: str,
+        request: BrainModelRouteApplyRequest,
+        operator: ControlConsoleOperator = Depends(current_operator),
+    ) -> dict[str, Any]:
+        """Apply descriptor-backed overrides for one Brain model route."""
+
+        response_payload = await _apply_brain_model_route_change(
+            route_key=route_key,
+            request=request,
+            operator=operator,
+            supervisor=app_supervisor,
+            services=services,
+            registry=service_config_registry,
+            overrides=service_config_overrides,
+            audit_writer=audit_writer,
+            clear_route=False,
+        )
+        stream_buffer.append(
+            "control.service",
+            {"service_id": "brain", "action": "model_route"},
+        )
+        return response_payload
+
+    @app.post(
+        "/api/services/brain/model-routes/{route_key}/reset",
+        dependencies=[Depends(csrf_guard)],
+    )
+    async def reset_brain_model_route(
+        route_key: str,
+        request: BrainModelRouteResetRequest,
+        operator: ControlConsoleOperator = Depends(current_operator),
+    ) -> dict[str, Any]:
+        """Clear descriptor-backed overrides for one Brain model route."""
+
+        response_payload = await _apply_brain_model_route_change(
+            route_key=route_key,
+            request=request,
+            operator=operator,
+            supervisor=app_supervisor,
+            services=services,
+            registry=service_config_registry,
+            overrides=service_config_overrides,
+            audit_writer=audit_writer,
+            clear_route=True,
+        )
+        stream_buffer.append(
+            "control.service",
+            {"service_id": "brain", "action": "model_route"},
+        )
+        return response_payload
+
+    @app.get("/api/services/brain/model-routes/{route_key}/available-models")
+    async def available_brain_models(
+        route_key: str,
+        operator: ControlConsoleOperator = Depends(current_operator),
+    ) -> dict[str, Any]:
+        """Return bounded provider model IDs for one Brain route."""
+
+        try:
+            route = descriptor_for_route(route_key)
+        except KeyError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND) from exc
+
+        environment = _service_config_environment()
+        base_url, _ = route_environment_value(route, "base_url", environment)
+        api_key, _ = route_environment_value(route, "api_key", environment)
+        model_list = await fetch_available_models(base_url, api_key)
+        audit_writer.write_event(
+            event_type="brain_model_route_models_view",
+            operator_id=operator.operator_id,
+            service_id="brain",
+            target={
+                "service_id": "brain",
+                "route_key": route.env_prefix.lower(),
+                "status": model_list.get("status", "unavailable"),
+                "count": len(model_list.get("models", [])),
+            },
+            request_id=f"cc-req-{uuid.uuid4().hex[:12]}",
+        )
+        return {
+            "route_key": route.env_prefix.lower(),
+            **model_list,
+        }
 
     @app.get("/api/logs/stream")
     async def process_log_stream(
@@ -1684,6 +1824,269 @@ async def _apply_service_config_change(
     )
     response_payload = response.model_dump(mode="json")
     return response_payload
+
+
+async def _apply_brain_model_route_change(
+    *,
+    route_key: str,
+    request: BrainModelRouteApplyRequest | BrainModelRouteResetRequest,
+    operator: ControlConsoleOperator,
+    supervisor: Any,
+    services: dict[str, Any],
+    registry: ServiceConfigRegistry,
+    overrides: ServiceConfigOverrideStore,
+    audit_writer: LocalAuditWriter,
+    clear_route: bool,
+) -> dict[str, Any]:
+    """Apply or clear one Brain model-route override and restart if needed."""
+
+    if "brain" not in services or not registry.has_descriptor("brain"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    try:
+        route = descriptor_for_route(route_key)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND) from exc
+
+    request_id = f"cc-req-{uuid.uuid4().hex[:12]}"
+    current_version = await _service_version(
+        supervisor=supervisor,
+        service_id="brain",
+    )
+    if (
+        request.expected_version is not None
+        and request.expected_version != current_version
+    ):
+        audit_writer.write_event(
+            event_type="brain_model_route_apply_failed",
+            operator_id=operator.operator_id,
+            service_id="brain",
+            target={"route_key": route.route_key, "current_version": current_version},
+            reason="expected version mismatch",
+            request_id=request_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"current_version": current_version},
+        )
+
+    field_keys = [
+        route_field_key(route, field_name)
+        for field_name in route.editable_fields
+    ]
+    event_type = (
+        "brain_model_route_reset_requested"
+        if clear_route
+        else "brain_model_route_apply_requested"
+    )
+    audit_writer.write_event(
+        event_type=event_type,
+        operator_id=operator.operator_id,
+        service_id="brain",
+        target={"route_key": route.route_key, "field_keys": field_keys},
+        reason=request.reason,
+        request_id=request_id,
+    )
+
+    previous_snapshot = _service_config_snapshot_or_http_error(
+        service_id="brain",
+        services=services,
+        registry=registry,
+        overrides=overrides,
+    )
+    environment = _service_config_environment()
+    try:
+        merged_values = overrides.override_for_service("brain")
+        if clear_route:
+            for field_key in field_keys:
+                merged_values.pop(field_key, None)
+        elif isinstance(request, BrainModelRouteApplyRequest):
+            route_values = _route_values_to_config_fields(
+                route_key=route.route_key,
+                values=request.values.model_dump(mode="python"),
+            )
+            if not route_values:
+                raise ServiceConfigValidationError(
+                    "route apply request must contain at least one value"
+                )
+            merged_values.update(route_values)
+
+        if merged_values:
+            overrides.set_override(
+                service_id="brain",
+                values=merged_values,
+                registry=registry,
+                environment=environment,
+            )
+        else:
+            overrides.clear_override("brain")
+    except ServiceConfigValidationError as exc:
+        audit_writer.write_event(
+            event_type=(
+                "brain_model_route_reset_failed"
+                if clear_route
+                else "brain_model_route_apply_failed"
+            ),
+            operator_id=operator.operator_id,
+            service_id="brain",
+            target={"route_key": route.route_key, "field_keys": field_keys},
+            previous_state=previous_snapshot.model_dump(mode="json"),
+            reason=str(exc),
+            request_id=request_id,
+        )
+        raise HTTPException(status_code=422, detail={"message": str(exc)}) from exc
+
+    overrides.clear_apply_failed("brain")
+    service_state = supervisor.service_state("brain")
+    should_restart = _service_actual_state(service_state) == "running"
+    restart = ServiceConfigRestartResult(
+        attempted=should_restart,
+        succeeded=None,
+        reason="model route apply requires restart",
+    )
+    service_payload = _service_state_payload(service_state)
+    if should_restart:
+        try:
+            restart_result = await supervisor.restart_service(
+                service_id="brain",
+                operator_id=operator.operator_id,
+                reason="model route apply requires restart",
+            )
+        except ServiceLifecycleError as exc:
+            restart = ServiceConfigRestartResult(
+                attempted=True,
+                succeeded=False,
+                reason=f"model route apply requires restart: {exc}",
+            )
+            service_state = supervisor.service_state("brain")
+            service_payload = _service_state_payload(service_state)
+            overrides.mark_apply_failed("brain")
+        else:
+            restart = ServiceConfigRestartResult(
+                attempted=True,
+                succeeded=True,
+                reason="model route apply requires restart",
+            )
+            service_payload = restart_result.get("service", service_payload)
+            overrides.clear_apply_failed("brain")
+
+    next_snapshot = _service_config_snapshot_or_http_error(
+        service_id="brain",
+        services=services,
+        registry=registry,
+        overrides=overrides,
+    )
+    route_payload = _projected_brain_routes_from_snapshot(
+        snapshot=next_snapshot,
+        registry=registry,
+    )
+    selected_route = _route_response_from_projection(
+        route.env_prefix.lower(),
+        route_payload,
+    )
+    applied_event_type = "brain_model_route_applied"
+    if restart.succeeded is False:
+        applied_event_type = (
+            "brain_model_route_reset_failed"
+            if clear_route
+            else "brain_model_route_apply_failed"
+        )
+    applied_event = audit_writer.write_event(
+        event_type=applied_event_type,
+        operator_id=operator.operator_id,
+        service_id="brain",
+        target={"route_key": route.route_key, "field_keys": field_keys},
+        previous_state=previous_snapshot.model_dump(mode="json"),
+        new_state={
+            "config_state": next_snapshot.state,
+            "restart": restart.model_dump(mode="json"),
+        },
+        reason=request.reason,
+        request_id=request_id,
+    )
+    response = BrainModelRouteActionResponse(
+        service_id="brain",
+        route=selected_route,
+        routes=route_payload,
+        config=next_snapshot.model_dump(mode="json"),
+        service=service_payload,
+        restart=restart,
+        audit_event_id=applied_event.event_id,
+    )
+    return response.model_dump(mode="json")
+
+
+def _brain_model_routes_snapshot_or_http_error(
+    *,
+    services: dict[str, Any],
+    registry: ServiceConfigRegistry,
+    overrides: ServiceConfigOverrideStore,
+    supervisor: Any,
+) -> dict[str, Any]:
+    """Return Brain route projection or raise the API-level status code."""
+
+    snapshot = _service_config_snapshot_or_http_error(
+        service_id="brain",
+        services=services,
+        registry=registry,
+        overrides=overrides,
+    )
+    routes = _projected_brain_routes_from_snapshot(
+        snapshot=snapshot,
+        registry=registry,
+    )
+    service_state = supervisor.service_state("brain")
+    payload = {
+        "service_id": "brain",
+        "config": snapshot.model_dump(mode="json"),
+        "service": _service_state_payload(service_state),
+        "service_state": _service_state_payload(service_state),
+        "routes": routes,
+        "route_count": len(routes),
+    }
+    return payload
+
+
+def _projected_brain_routes_from_snapshot(
+    *,
+    snapshot: Any,
+    registry: ServiceConfigRegistry,
+) -> list[dict[str, Any]]:
+    """Project a Brain config snapshot into UI route rows."""
+
+    _ = registry
+    routes = project_brain_model_routes(
+        snapshot,
+        _service_config_environment(),
+    )
+    return routes
+
+
+def _route_response_from_projection(
+    route_key: str,
+    routes: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Return one projected route or raise not found."""
+
+    for route in routes:
+        if route.get("route_key") == route_key:
+            return route
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+
+def _route_values_to_config_fields(
+    *,
+    route_key: str,
+    values: dict[str, Any],
+) -> dict[str, object]:
+    """Map route-editor values to generic config descriptor field keys."""
+
+    route = descriptor_for_route(route_key)
+    config_values: dict[str, object] = {}
+    for field_name in route.editable_fields:
+        value = values.get(field_name)
+        if value is not None:
+            config_values[route_field_key(route, field_name)] = value
+    return config_values
 
 
 async def _service_version(*, supervisor: Any, service_id: str) -> int:

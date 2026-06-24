@@ -53,6 +53,11 @@ The brain owns cognition and persistence coordination for chat turns. Adapters o
   `GET /api/services/{service_id}/config`,
   `PUT /api/services/{service_id}/config`,
   `POST /api/services/{service_id}/config/reset`
+- Brain model routes:
+  `GET /api/services/brain/model-routes`,
+  `PUT /api/services/brain/model-routes/{route_key}`,
+  `POST /api/services/brain/model-routes/{route_key}/reset`,
+  `GET /api/services/brain/model-routes/{route_key}/available-models`
 - Logs and events:
   `GET /api/logs/{service_id}`,
   `GET /api/logs/stream`,
@@ -232,10 +237,12 @@ Override registries are loaded from `KAZUSA_CONTROL_SERVICE_REGISTRY`, validated
 
 The supervisor starts services with `asyncio.create_subprocess_exec(*argv)`. It never uses `shell=True`, command concatenation, broad process scanning, external process adoption, or PID killing outside console-owned child processes.
 
-Descriptor-backed service config may render a command overlay before a service
-starts. The overlay returns argv parts only and is included in the process
-ownership fingerprint. Browser requests cannot submit arbitrary commands,
-environment dictionaries, shells, or command strings.
+Descriptor-backed service config may render command or environment overlays
+before a service starts. Command overlays return argv parts only. Environment
+overlays are descriptor-approved name/value pairs. Both are included in the
+process ownership fingerprint without storing raw secret values. Browser
+requests cannot submit arbitrary commands, environment dictionaries, shells,
+or command strings.
 
 If a configured dependency endpoint is already listening before the console
 starts it, that dependency is marked as an unmanaged conflict. The console must
@@ -292,6 +299,25 @@ allowlist. The descriptor reads `NAPCAT_ACTIVE_GROUPS` as a comma- or
 space-separated list of numeric group ids and renders the effective list as
 the adapter's existing `--channels` argv when the list is non-empty. An empty
 effective list renders no `--channels` argument.
+
+The Brain service also has a descriptor-backed model-route workflow on the
+Services tab. The Brain service card spans the full service-grid row and shows
+all chat LLM routes in a route matrix with a selected-route editor. Operators
+can override only the route model id, max completion token budget, and
+thinking flag. The console does not expose API keys, base URLs, embedding
+routes, raw dotenv values, or a general environment editor.
+
+Brain route overrides are process-local. If the Brain service is running and
+console-owned, saving a route restarts it through the existing lifecycle path.
+If it is stopped, the override is rendered as descriptor-approved
+child-process environment on the next start. The Brain runtime path is
+unchanged: after restart it reads the existing environment variables used by
+its `LLMCallConfig` constants.
+
+The selected-route model picker fetches OpenAI-compatible `/models` data
+server-side for the route's effective provider. Responses are bounded to
+model ids and model-family labels; provider credentials and raw provider
+errors are not returned to the browser.
 
 Audit records are written for config views, apply requests, reset requests,
 restart requests, successful application, and validation or version failures.

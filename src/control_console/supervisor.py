@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import hashlib
 import os
 from pathlib import Path
+import re
 import socket
 from typing import Any, Callable, Literal
 from urllib.parse import urlparse
@@ -32,6 +33,7 @@ STALE_UNOWNED_CONFLICT_MESSAGES = frozenset({
     PROCESS_METADATA_MISMATCH_MESSAGE,
 })
 CommandResolver = Callable[[str, list[str]], list[str]]
+EnvironmentResolver = Callable[[str], dict[str, str]]
 
 
 class ServiceLifecycleError(RuntimeError):
@@ -49,6 +51,7 @@ class ProcessSupervisor:
         log_store: ProcessLogStore,
         audit_writer: LocalAuditWriter,
         command_resolver: CommandResolver | None = None,
+        environment_resolver: EnvironmentResolver | None = None,
     ) -> None:
         """Create a process supervisor for one registry."""
 
@@ -57,6 +60,7 @@ class ProcessSupervisor:
         self._log_store = log_store
         self._audit_writer = audit_writer
         self._command_resolver = command_resolver
+        self._environment_resolver = environment_resolver
         self._processes: dict[str, asyncio.subprocess.Process] = {}
         self._log_tasks: dict[str, set[asyncio.Task[None]]] = {}
         self._process_command_fingerprints: dict[str, str] = {}
@@ -122,6 +126,8 @@ class ProcessSupervisor:
         env.setdefault("PYTHONUTF8", "1")
         env.update(spec.env)
         start_command = self._start_command(service_id)
+        environment_overlay = self._environment_overlay(service_id)
+        env.update(environment_overlay)
         process = await asyncio.create_subprocess_exec(
             *start_command,
             cwd=str(cwd) if cwd else None,
@@ -132,7 +138,10 @@ class ProcessSupervisor:
         self._processes[service_id] = process
         self._start_log_readers(service_id=service_id, process=process)
         generation = f"generation-{uuid.uuid4().hex}"
-        fingerprint = _command_fingerprint(start_command)
+        fingerprint = _command_fingerprint(
+            start_command,
+            environment_overlay=environment_overlay,
+        )
         self._process_command_fingerprints[service_id] = fingerprint
         self._store.record_process_owner(
             service_id=service_id,
@@ -387,6 +396,7 @@ class ProcessSupervisor:
         if expected_fingerprint is None:
             expected_fingerprint = _command_fingerprint(
                 self._start_command(service_id),
+                environment_overlay=self._environment_overlay(service_id),
             )
         if state.pid != process.pid or state.command_fingerprint != expected_fingerprint:
             self._mark_conflict(service_id, PROCESS_METADATA_MISMATCH_MESSAGE)
@@ -405,6 +415,15 @@ class ProcessSupervisor:
         rendered_command = self._command_resolver(service_id, base_command)
         _validate_start_command(rendered_command)
         return rendered_command
+
+    def _environment_overlay(self, service_id: str) -> dict[str, str]:
+        """Return descriptor-approved child-process environment values."""
+
+        if self._environment_resolver is None:
+            return {}
+        overlay = self._environment_resolver(service_id)
+        _validate_environment_overlay(overlay)
+        return overlay
 
     def _mark_conflict(self, service_id: str, message: str) -> None:
         """Persist conflict state without touching the process."""
@@ -785,11 +804,21 @@ def _decode_process_log_line(raw_line: bytes) -> str:
     return decoded_line
 
 
-def _command_fingerprint(command: list[str]) -> str:
-    """Return a stable non-secret fingerprint for a service argv."""
+def _command_fingerprint(
+    command: list[str],
+    *,
+    environment_overlay: dict[str, str] | None = None,
+) -> str:
+    """Return a stable non-secret fingerprint for service argv and env."""
 
     joined_command = "\0".join(command)
-    fingerprint = hashlib.sha256(joined_command.encode("utf-8")).hexdigest()
+    environment_parts: list[str] = []
+    for key, value in sorted((environment_overlay or {}).items()):
+        value_hash = hashlib.sha256(value.encode("utf-8")).hexdigest()
+        environment_parts.append(f"{key}={value_hash}")
+    joined_environment = "\0".join(environment_parts)
+    fingerprint_text = f"{joined_command}\0env\0{joined_environment}"
+    fingerprint = hashlib.sha256(fingerprint_text.encode("utf-8")).hexdigest()
     return fingerprint
 
 
@@ -802,6 +831,26 @@ def _validate_start_command(command: list[str]) -> None:
         if not isinstance(part, str) or not part.strip():
             raise ServiceLifecycleError(
                 "rendered command entries must be non-empty strings"
+            )
+
+
+def _validate_environment_overlay(environment: dict[str, str]) -> None:
+    """Reject malformed child-process environment overlays."""
+
+    if not isinstance(environment, dict):
+        raise ServiceLifecycleError("environment overlay must be a dictionary")
+    for key, value in environment.items():
+        if not isinstance(key, str) or not re.fullmatch(r"^[A-Z0-9_]{1,80}$", key):
+            raise ServiceLifecycleError(
+                "environment overlay keys must be uppercase names"
+            )
+        if not isinstance(value, str):
+            raise ServiceLifecycleError(
+                "environment overlay values must be strings"
+            )
+        if len(value) > 2000:
+            raise ServiceLifecycleError(
+                "environment overlay values are too large"
             )
 
 

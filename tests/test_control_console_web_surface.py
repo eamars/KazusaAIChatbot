@@ -306,6 +306,13 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert "is-current" in script.text
     assert "control.cognition_graph_invalidated" in script.text
     assert "function openServiceConfig" in script.text
+    assert "function refreshBrainModelRoutes" in script.text
+    assert "function renderBrainServiceCard" in script.text
+    assert "function renderBrainRouteMatrix" in script.text
+    assert "function renderBrainRouteEditor" in script.text
+    assert "function refreshBrainAvailableModels" in script.text
+    assert "data-brain-route-key" in script.text
+    assert "/api/services/brain/model-routes" in script.text
     assert "function renderServiceConfigDialog" in script.text
     assert "function applyServiceConfig" in script.text
     assert "function resetServiceConfig" in script.text
@@ -316,6 +323,8 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert "hot apply" not in script.text.lower()
     assert "zero downtime" not in script.text.lower()
     assert "adapter.napcat" not in script.text
+    assert "COGNITION_LLM" not in script.text
+    assert "DIALOG_GENERATOR_LLM" not in script.text
     assert "active_groups" not in script.text
     assert "NAPCAT_ACTIVE_GROUPS" not in script.text
     assert "JSON.stringify(result.response)" not in script.text
@@ -366,6 +375,10 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert "repeat(auto-fit, minmax(min(280px, 100%), 1fr))" in (
         stylesheet.text
     )
+    assert ".service-card.brain-service-card" in stylesheet.text
+    assert ".brain-service-layout" in stylesheet.text
+    assert ".brain-route-matrix" in stylesheet.text
+    assert ".brain-route-editor" in stylesheet.text
     assert ".content-grid { display: grid; gap: 12px; align-items: start; }" in (
         stylesheet.text
     )

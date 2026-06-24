@@ -140,6 +140,32 @@ body[data-auth-state="authenticated"] #login-form { display: none; }
 .kv strong, .kv code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .service-error { margin: 0 12px; padding: 9px 10px; border: 1px solid color-mix(in srgb, var(--danger) 24%, var(--line)); border-radius: var(--radius-control); color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, var(--panel)); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
 .service-card-actions { padding: 10px 12px 12px; }
+.service-card.brain-service-card { grid-column: 1 / -1; min-height: 560px; }
+.brain-service-layout { display: grid; grid-template-columns: minmax(260px, 0.62fr) minmax(520px, 1.38fr); gap: 12px; min-width: 0; padding: 12px; }
+.brain-runtime-panel, .brain-routes-panel, .brain-route-editor { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--panel-soft); }
+.brain-runtime-panel { display: grid; align-content: start; gap: 12px; padding: 12px; }
+.brain-runtime-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 12px; }
+.brain-runtime-actions { padding: 0; }
+.brain-routes-panel { display: grid; gap: 12px; padding: 12px; background: var(--panel); }
+.brain-route-toolbar { display: grid; grid-template-columns: minmax(180px, 1fr) repeat(3, minmax(120px, 0.45fr)); gap: 8px; align-items: end; }
+.brain-route-matrix { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: 8px; min-width: 0; }
+.brain-route-tile { min-width: 0; min-height: 92px; display: grid; gap: 6px; align-content: start; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--panel-soft); color: var(--ink); text-align: left; }
+.brain-route-tile:hover { border-color: var(--line-strong); background: var(--panel); }
+.brain-route-tile.selected { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); background: var(--panel); }
+.brain-route-name { font-size: 13px; font-weight: 650; overflow-wrap: anywhere; }
+.brain-route-tile code { min-width: 0; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brain-route-meta { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+.brain-route-editor { display: grid; gap: 12px; padding: 12px; }
+.brain-route-editor-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px 16px; flex-wrap: wrap; }
+.brain-route-editor-header > div:first-child { display: grid; gap: 3px; min-width: 0; }
+.brain-route-editor-header strong { overflow-wrap: anywhere; font-size: 15px; }
+.brain-route-editor-header span { color: var(--muted); font-size: 12px; }
+.brain-route-current { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.brain-route-form { display: grid; grid-template-columns: minmax(170px, 1fr) minmax(170px, 1fr) minmax(132px, 0.6fr) minmax(126px, 0.45fr); gap: 10px; align-items: end; }
+.brain-thinking-toggle { align-self: end; min-height: 36px; }
+.brain-model-picker-state { min-height: 24px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.brain-route-actions { justify-content: flex-end; padding: 0; }
+.brain-route-actions .btn { max-width: 100%; white-space: normal; }
 .badge { display: inline-flex; align-items: center; min-height: 24px; padding: 3px 9px; border-radius: 9999px; border: 1px solid var(--line); background: var(--panel-soft); color: var(--muted); font-size: 12px; font-weight: 500; white-space: nowrap; }
 .badge.success { color: var(--success); background: color-mix(in srgb, var(--success) 12%, var(--panel)); border-color: transparent; }
 .badge.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, var(--panel)); border-color: transparent; }
@@ -272,6 +298,8 @@ code { font-family: var(--mono); }
   .nav-link { flex: 0 0 auto; white-space: nowrap; text-align: center; }
   .nav-link.active::before { left: 10px; right: 10px; top: auto; bottom: 4px; width: auto; height: 3px; }
   .chat-layout { grid-template-columns: 1fr; }
+  .brain-service-layout, .brain-route-toolbar, .brain-route-form { grid-template-columns: 1fr; }
+  .brain-route-current { grid-template-columns: 1fr; }
   .dialog-backdrop { justify-items: stretch; }
   .dialog-panel { width: 100%; }
   .config-state-grid { grid-template-columns: 1fr; }
