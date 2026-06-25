@@ -7,6 +7,7 @@ from datetime import timedelta
 from typing import Any
 
 from kazusa_ai_chatbot.db._client import get_db
+from kazusa_ai_chatbot.logging_retention import expiry_from_storage_iso
 from kazusa_ai_chatbot.time_boundary import storage_utc_now, storage_utc_now_iso
 
 EVENT_LOG_EVENTS_COLLECTION = "event_log_events"
@@ -18,6 +19,19 @@ def _utc_now_iso() -> str:
 
     timestamp_utc = storage_utc_now_iso()
     return timestamp_utc
+
+
+def _ttl_document(document: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a DB document with BSON-date ``expires_at`` when present."""
+
+    db_document = dict(document)
+    raw_expires_at = db_document.get("expires_at")
+    if isinstance(raw_expires_at, str) and raw_expires_at.strip():
+        db_document["expires_at"] = expiry_from_storage_iso(
+            raw_expires_at,
+            ttl_days=0,
+        )
+    return db_document
 
 
 async def ensure_event_log_indexes() -> None:
@@ -59,6 +73,11 @@ async def ensure_event_log_indexes() -> None:
         [("attempt_id", 1), ("occurred_at", -1)],
         name="event_log_attempt_time",
     )
+    await events.create_index(
+        "expires_at",
+        expireAfterSeconds=0,
+        name="event_log_events_expires_at_ttl",
+    )
     await snapshots.create_index(
         "snapshot_id",
         unique=True,
@@ -67,6 +86,11 @@ async def ensure_event_log_indexes() -> None:
     await snapshots.create_index(
         [("snapshot_kind", 1), ("generated_at", -1)],
         name="event_log_snapshot_kind_time",
+    )
+    await snapshots.create_index(
+        "expires_at",
+        expireAfterSeconds=0,
+        name="event_log_snapshots_expires_at_ttl",
     )
 
 
@@ -81,7 +105,7 @@ async def insert_event_log_event(document: Mapping[str, Any]) -> str:
     """
 
     db = await get_db()
-    await db[EVENT_LOG_EVENTS_COLLECTION].insert_one(dict(document))
+    await db[EVENT_LOG_EVENTS_COLLECTION].insert_one(_ttl_document(document))
     event_id = str(document["event_id"])
     return event_id
 
@@ -90,7 +114,7 @@ async def insert_event_log_snapshot(document: Mapping[str, Any]) -> str:
     """Insert one aggregate event-log snapshot."""
 
     db = await get_db()
-    await db[EVENT_LOG_SNAPSHOTS_COLLECTION].insert_one(dict(document))
+    await db[EVENT_LOG_SNAPSHOTS_COLLECTION].insert_one(_ttl_document(document))
     snapshot_id = str(document["snapshot_id"])
     return snapshot_id
 

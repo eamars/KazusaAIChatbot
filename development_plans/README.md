@@ -42,6 +42,7 @@ long_term/todo.md
 | [control_console_auto_model_discovery_picker_plan.md](active/short_term/control_console_auto_model_discovery_picker_plan.md) | Medium control-console automatic model discovery picker plan | completed |
 | [control_console_brain_model_route_config_plan.md](active/short_term/control_console_brain_model_route_config_plan.md) | Large control-console Brain model route configuration plan | completed |
 | [control_console_cognition_debug_visibility_plan.md](active/short_term/control_console_cognition_debug_visibility_plan.md) | Large control-console cognition-debug visibility plan | completed |
+| [llm_trace_observability_and_retrieval_plan.md](active/short_term/llm_trace_observability_and_retrieval_plan.md) | Large LLM trace observability and agent retrieval-skill plan | completed |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 
 ## Supporting Experiment Records

@@ -171,6 +171,7 @@ class RuntimeContextV1(TypedDict):
 
 class CognitionChainInputV1(TypedDict):
     schema_version: Literal["cognition_chain_input.v1"]
+    llm_trace_id: NotRequired[str]
     episode: CognitionEpisodePromptV1
     character: CharacterPromptV1
     current_user: UserPromptV1

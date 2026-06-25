@@ -40,6 +40,7 @@ async def record_assistant_outbound_message(
     broadcast: bool,
     fallback_addressed_global_user_id: str = "",
     delivery_tracking_id: str = "",
+    llm_trace_id: str = "",
     storage_timestamp_utc: str,
     ensure_character_global_identity_func: EnsureCharacterIdentity,
     save_conversation_func: SaveConversation,
@@ -58,6 +59,7 @@ async def record_assistant_outbound_message(
         fallback_addressed_global_user_id: User id used when a direct
             assistant row has no explicit addressee.
         delivery_tracking_id: Optional local id for delivery receipts.
+        llm_trace_id: Optional turn-scoped LLM trace id.
         storage_timestamp_utc: Storage UTC timestamp for the persisted row.
         ensure_character_global_identity_func: Identity resolver/backfiller.
         save_conversation_func: Conversation-history persistence function.
@@ -102,6 +104,9 @@ async def record_assistant_outbound_message(
     if clean_tracking_id:
         assistant_doc["delivery_tracking_id"] = clean_tracking_id
         assistant_doc["delivery_status"] = "pending"
+    clean_trace_id = str(llm_trace_id or "").strip()
+    if clean_trace_id:
+        assistant_doc["llm_trace_id"] = clean_trace_id
 
     conversation_row_id = await save_conversation_func(assistant_doc)
     if not conversation_row_id:

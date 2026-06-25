@@ -1,6 +1,7 @@
 """L2c2 social context appraisal cognition agent."""
 
 import json
+import time
 from contextvars import ContextVar, Token
 from typing import Any
 
@@ -23,6 +24,9 @@ from kazusa_ai_chatbot.cognition_chain_core.output_contracts import (
 from kazusa_ai_chatbot.cognition_chain_core.prompt_selection import (
     build_cognition_prompt_source_payload,
     select_cognition_prompt_variant,
+)
+from kazusa_ai_chatbot.cognition_chain_core.stages.tracing import (
+    record_cognition_stage_trace,
 )
 from kazusa_ai_chatbot.cognition_chain_core.utils import (
     build_affinity_block,
@@ -194,6 +198,7 @@ async def call_social_context_appraisal(state: dict[str, Any]) -> dict[str, Any]
         _contextual_agent_llm_context.get() or _contextual_agent_llm,
         "contextual_agent_llm",
     )
+    started_at = time.perf_counter()
     response = await llm.llm.ainvoke(
         [
             system_prompt,
@@ -225,5 +230,20 @@ async def call_social_context_appraisal(state: dict[str, Any]) -> dict[str, Any]
     validate_cognition_output_contract(
         stage="l2c2_social_context_appraisal",
         payload=return_value,
+    )
+    await record_cognition_stage_trace(
+        state=state,
+        stage_name="l2c2_social_context_appraisal",
+        llm=llm,
+        messages=[system_prompt, human_message],
+        response_text=str(response.content),
+        parsed_output=return_value,
+        output_state_fields=[
+            "social_distance",
+            "emotional_intensity",
+            "vibe_check",
+            "relational_dynamic",
+        ],
+        started_at=started_at,
     )
     return return_value

@@ -156,6 +156,7 @@ def build_cognition_chain_input_from_global_state(
     )
     payload: CognitionChainInputV1 = {
         "schema_version": "cognition_chain_input.v1",
+        "llm_trace_id": state.get("llm_trace_id", ""),
         "episode": {
             "episode_id": _text(cognitive_episode.get("episode_id")),
             "trigger_source": _text(cognitive_episode.get("trigger_source")),

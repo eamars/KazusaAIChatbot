@@ -53,6 +53,7 @@ class GlobalPersonaState(TypedDict):
     # Inputs
     storage_timestamp_utc: str
     local_time_context: LocalTimeContextDoc
+    llm_trace_id: NotRequired[str]
     user_input: str
     prompt_message_context: PromptMessageContext
     cognitive_episode: NotRequired[CognitiveEpisode]
@@ -152,6 +153,7 @@ class CognitionState(TypedDict):
 
     storage_timestamp_utc: str
     local_time_context: LocalTimeContextDoc
+    llm_trace_id: NotRequired[str]
     user_input: str
     prompt_message_context: PromptMessageContext
     cognitive_episode: NotRequired[CognitiveEpisode]

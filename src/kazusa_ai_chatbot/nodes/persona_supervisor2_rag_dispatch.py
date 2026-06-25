@@ -9,7 +9,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from kazusa_ai_chatbot import event_logging
+from kazusa_ai_chatbot import event_logging, llm_tracing
 from kazusa_ai_chatbot.config import (
 
     RAG_PLANNER_LLM_API_KEY,
@@ -558,6 +558,24 @@ async def rag_dispatcher(state: ProgressiveRAGState) -> dict:
         "current_dispatch": normalized_dispatch,
         "loop_count": state.get("loop_count", 0) + 1,
     }
+    await llm_tracing.record_llm_trace_step(
+        trace_id=str(state.get("llm_trace_id", "")),
+        stage_name="rag_dispatcher",
+        route_name=normalized_dispatch["route_source"],
+        model_name=RAG_PLANNER_LLM_MODEL,
+        messages=[system_prompt, human_message] + recent_messages,
+        response_text=str(response.content),
+        parsed_output=return_value,
+        parse_status=parse_status,
+        status="succeeded" if normalized_dispatch["agent_name"] else "failed",
+        duration_ms=_elapsed_ms(started_at),
+        output_state_fields=[
+            "messages",
+            "current_slot",
+            "current_dispatch",
+            "loop_count",
+        ],
+    )
     return return_value
 
 

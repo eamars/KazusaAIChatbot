@@ -13,6 +13,7 @@ import time
 from typing import Any, TypedDict
 
 from kazusa_ai_chatbot import event_logging
+from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.config import (
     DIALOG_GENERATOR_LLM_API_KEY,
@@ -263,6 +264,7 @@ class DialogAgentState(TypedDict):
     target_broadcast: bool
     mention_target_user: bool
     dialog_usage_mode: str
+    llm_trace_id: str
 
 _DIALOG_GENERATOR_PROMPT = '''\
 你是角色 `{character_name}` 的文本表达执行官。你的工作不是重新判断要不要回答，而是把上游已经选定的可见语义计划写成角色当场说出口的聊天文本。
@@ -542,6 +544,20 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
         f"dialog={log_list_preview(generated_dialog_preview)}"
     )
     parse_status = "succeeded" if not invalid_fields else "warning"
+    llm_trace_id = state.get("llm_trace_id", "")
+    await llm_tracing.record_llm_trace_step(
+        trace_id=llm_trace_id,
+        stage_name="dialog_generator",
+        route_name="DIALOG_GENERATOR_LLM",
+        model_name=DIALOG_GENERATOR_LLM_MODEL,
+        messages=[system_prompt, human_message],
+        response_text=str(response.content),
+        parsed_output=result,
+        parse_status=parse_status,
+        status="succeeded",
+        duration_ms=_elapsed_ms(started_at),
+        output_state_fields=["final_dialog", "mention_target_user"],
+    )
     await event_logging.record_llm_stage_event(
         component=DIALOG_COMPONENT,
         stage_name="dialog_generator",
@@ -555,6 +571,7 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
         json_repair_used=False,
         duration_ms=_elapsed_ms(started_at),
         severity="info" if not invalid_fields else "warning",
+        correlation_id=llm_trace_id,
     )
     if invalid_fields:
         await event_logging.record_model_contract_event(
@@ -565,6 +582,7 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
             invalid_fields=invalid_fields,
             repair_used=True,
             status="repaired",
+            correlation_id=llm_trace_id,
         )
 
     return_value = {
@@ -618,6 +636,7 @@ async def dialog_agent(
         "target_broadcast": False,
         "mention_target_user": False,
         "dialog_usage_mode": usage_mode,
+        "llm_trace_id": global_state.get("llm_trace_id", ""),
     }
 
     result = await sub_graph.ainvoke(subState)

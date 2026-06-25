@@ -41,6 +41,7 @@ class EventLogEventDoc(TypedDict):
     attempt_id: str
     occurred_at: str
     created_at: str
+    expires_at: str
     duration_ms: int | None
     scope: EventScopeRecord
     metrics: dict[str, int | float | bool | str]
@@ -59,6 +60,7 @@ class EventLogSnapshotDoc(TypedDict):
     window_start: str
     window_end: str
     generated_at: str
+    expires_at: str
     source_counts: dict[str, int]
     semantic_descriptors: dict[str, str]
     findings: list[dict[str, str]]

@@ -19,7 +19,9 @@ diagnostic, and maintenance commands.
 | `export_character_state.py` | `python -m scripts.export_character_state` / `export-character-state` | Export singleton character state JSON. |
 | `export_chat_history.py` | `python -m scripts.export_chat_history <channel-id>` / `export-chat-history` | Export conversation history rows for a channel with optional time filters. |
 | `export_collection.py` | `python -m scripts.export_collection <collection>` / `export-collection` | Export arbitrary collection rows by filter/sort/limit. |
+| `export_dialog_trace_review_input.py` | `python -m scripts.export_dialog_trace_review_input --dialog-text <text>` | Export compact review input for one dialog's protected LLM trace. |
 | `export_event_log.py` | `python -m scripts.export_event_log --hours 24` | Export sanitized event-log aggregate diagnostics. |
+| `export_llm_trace.py` | `python -m scripts.export_llm_trace --trace-id <id>` | Export protected LLM trace rows plus linked audit and conversation rows. |
 | `export_memory.py` | `python -m scripts.export_memory` / `export-memory` | Export memory rows (optionally filtered by memory type/status). |
 | `export_user_image.py` | `python -m scripts.export_user_image <user>` / `export-user-image` | Export a user image profile bundle. |
 | `export_user_memories.py` | `python -m scripts.export_user_memories <user>` / `export-user-memories` | Export user memory rows. |
@@ -28,6 +30,7 @@ diagnostic, and maintenance commands.
 | `identify_group_image.py` | `python -m scripts.identify_group_image <group-id>` / `identify-group-image` | Export/inspect group image metadata by ID. |
 | `identify_user_image.py` | `python -m scripts.identify_user_image <user-id>` / `identify-user-image` | Export/inspect user image diagnostics. |
 | `inspect_consolidation_target_lifecycle.py` | `python -m scripts.inspect_consolidation_target_lifecycle [--apply]` | Dry-run report and approved apply cleanup for synthetic consolidation user rows and malformed target lifecycle data. |
+| `apply_logging_retention.py` | `python -m scripts.apply_logging_retention --dry-run|--apply` | Assign or delete legacy logging rows under `AUDIT_LOG_TTL_DAYS` and `DEBUG_LOG_TTL_DAYS`. |
 | `load_character_profile.py` | `python -m scripts.load_character_profile personalities/<file>.json` | Load a character profile JSON into MongoDB (service bootstrap prerequisite). |
 | `manage_memory_knowledge.py` | `manage-memory-knowledge` | Edit and sync local memory knowledge entries. |
 | `migrate_conversation_history_envelope.py` | `python -m scripts.migrate_conversation_history_envelope [--apply]` | Repair conversation rows that violate typed-envelope storage fields or semantic-text cleanliness. |

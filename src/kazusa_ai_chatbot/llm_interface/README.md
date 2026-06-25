@@ -177,6 +177,11 @@ is retained for diagnostics or targeted tests, but production stage logic
 should prefer the normalized fields unless it has a specific provider-aware
 reason approved by this ICD.
 
+LLM trace recording is stage-owned and lives outside `LLInterface`.
+Instrumentation belongs at semantic stage call sites, where the caller can name
+the stage, parser result, and downstream state fields. Do not add broad hidden
+provider or `LLInterface` interceptors for prompt/output capture.
+
 For Gemma 4 thinking responses, normalized content removes raw
 `<|channel>thought ... <channel|>` thought-channel spans when LM Studio exposes
 them in the visible message content. For Qwen-family responses, normalized

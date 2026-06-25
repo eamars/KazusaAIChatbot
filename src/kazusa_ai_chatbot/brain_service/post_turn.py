@@ -85,6 +85,7 @@ async def save_assistant_message(
         broadcast=bool(result["target_broadcast"]),
         fallback_addressed_global_user_id=str(result["global_user_id"]),
         delivery_tracking_id=str(result.get("delivery_tracking_id") or ""),
+        llm_trace_id=str(result.get("llm_trace_id") or ""),
         storage_timestamp_utc=utc_timestamp(now_func),
         ensure_character_global_identity_func=(
             ensure_character_global_identity_func

@@ -46,6 +46,11 @@ from kazusa_ai_chatbot.db.event_logging import (
     EVENT_LOG_SNAPSHOTS_COLLECTION,
     ensure_event_log_indexes,
 )
+from kazusa_ai_chatbot.db.llm_tracing import (
+    LLM_TRACE_RUNS_COLLECTION,
+    LLM_TRACE_STEPS_COLLECTION,
+    ensure_llm_trace_indexes,
+)
 from kazusa_ai_chatbot.db.reflection_cycle import ensure_reflection_run_indexes
 from kazusa_ai_chatbot.db.rag_cache2_persistent import (
     INITIALIZER_CACHE_NAME,
@@ -105,6 +110,8 @@ async def db_bootstrap() -> None:
         PERSISTENT_CACHE_COLLECTION,
         EVENT_LOG_EVENTS_COLLECTION,
         EVENT_LOG_SNAPSHOTS_COLLECTION,
+        LLM_TRACE_RUNS_COLLECTION,
+        LLM_TRACE_STEPS_COLLECTION,
         SELF_COGNITION_ACTION_ATTEMPTS_COLLECTION,
         SELF_COGNITION_GROUP_REVIEW_WINDOWS_COLLECTION,
         BACKGROUND_WORK_JOBS_COLLECTION,
@@ -288,6 +295,7 @@ async def db_bootstrap() -> None:
     await ensure_interaction_style_image_indexes()
     await ensure_global_character_growth_indexes()
     await ensure_event_log_indexes()
+    await ensure_llm_trace_indexes()
     await ensure_internal_monologue_residue_indexes()
 
     await purge_stale_initializer_entries()

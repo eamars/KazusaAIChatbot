@@ -441,6 +441,7 @@ async def call_rag_supervisor(
         "last_agent_result": {},
         "loop_count": 0,
         "final_answer": "",
+        "llm_trace_id": str(runtime_context.get("llm_trace_id", "")),
     }
 
     logger.debug(
