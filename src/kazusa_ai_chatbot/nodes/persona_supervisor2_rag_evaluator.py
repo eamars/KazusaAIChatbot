@@ -6,7 +6,6 @@ import copy
 import json
 import logging
 import time
-from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -207,6 +206,8 @@ async def _summarize_agent_result(
     resolved: bool,
     raw_result: object,
     known_facts: list[dict],
+    *,
+    llm_trace_id: str = "",
 ) -> str:
     """Distil a resolved agent result into a concise fact summary for downstream agents.
 
@@ -261,7 +262,7 @@ async def _summarize_agent_result(
         duration_ms=_elapsed_ms(started_at),
     )
     await llm_tracing.record_llm_trace_step(
-        trace_id=str(state.get("llm_trace_id", "")),
+        trace_id=llm_trace_id,
         stage_name="rag_result_summarizer",
         route_name=agent_name,
         model_name=RAG_SUBAGENT_LLM_MODEL,
@@ -670,6 +671,7 @@ async def _assess_continuation(
     original_query: str,
     previous_refined_queries: list[str],
     continuation_count: int,
+    llm_trace_id: str = "",
 ) -> RAGContinuationDecision:
     """Classify an unresolved observation and validate refined-query re-entry."""
     if not _has_continuation_observation(observation_payload):
@@ -771,7 +773,7 @@ async def _assess_continuation(
         severity="info" if parse_status == "succeeded" else "warning",
     )
     await llm_tracing.record_llm_trace_step(
-        trace_id=str(state.get("llm_trace_id", "")),
+        trace_id=llm_trace_id,
         stage_name="continuation_assessor",
         route_name="continuation",
         model_name=RAG_SUBAGENT_LLM_MODEL,
@@ -997,6 +999,7 @@ async def rag_evaluator(state: ProgressiveRAGState) -> dict:
             resolved,
             raw_result,
             known_facts,
+            llm_trace_id=str(state.get("llm_trace_id", "")),
         )
     else:
         summary = _unresolved_summary(slot, raw_result)
@@ -1033,6 +1036,7 @@ async def rag_evaluator(state: ProgressiveRAGState) -> dict:
                     original_query=state.get("original_query", ""),
                     previous_refined_queries=_previous_refined_queries(known_facts),
                     continuation_count=_accepted_continuation_count(known_facts),
+                    llm_trace_id=str(state.get("llm_trace_id", "")),
                 )
                 if (
                     _has_resolved_known_fact(known_facts)

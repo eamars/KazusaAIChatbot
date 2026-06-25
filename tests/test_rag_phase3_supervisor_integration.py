@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -610,6 +611,12 @@ async def test_evaluator_summary_prompt_uses_compact_capability_payload(
         "_evaluator_summarizer_llm",
         capture_llm,
     )
+    trace_recorder = AsyncMock()
+    monkeypatch.setattr(
+        evaluator_module.llm_tracing,
+        "record_llm_trace_step",
+        trace_recorder,
+    )
 
     summary = await supervisor2_module._summarize_agent_result(
         "Person-context: retrieve profile/impression for speaker found in slot 1",
@@ -617,10 +624,13 @@ async def test_evaluator_summary_prompt_uses_compact_capability_payload(
         True,
         raw_result,
         known_facts,
+        llm_trace_id="trace-summary",
     )
 
     rendered_payload = json.dumps(capture_llm.payload, ensure_ascii=False)
     assert summary == "compact summary"
+    trace_recorder.assert_awaited_once()
+    assert trace_recorder.await_args.kwargs["trace_id"] == "trace-summary"
     assert "worker_payloads" not in rendered_payload
     assert huge_text not in rendered_payload
     assert len(rendered_payload) < 20000

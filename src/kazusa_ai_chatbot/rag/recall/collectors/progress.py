@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from kazusa_ai_chatbot.rag.recall.contracts import (
     _candidate,
     _entry_text,
