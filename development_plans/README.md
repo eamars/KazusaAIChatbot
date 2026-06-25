@@ -263,4 +263,5 @@ plans.
 | [self_cognition_tracking_icd.md](archive/superseded/self_cognition_tracking_icd.md) |
 | [rag_supervisor2_inner_loop_agents_plan.md](archive/superseded/rag_supervisor2_inner_loop_agents_plan.md) |
 | [short_circuit_early_stop_plan.md](archive/superseded/short_circuit_early_stop_plan.md) |
+| [visual_descriptor_seeded_reference_images_plan.md](archive/superseded/visual_descriptor_seeded_reference_images_plan.md) |
 
