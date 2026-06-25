@@ -9,12 +9,14 @@ from typing import Literal
 from uuid import uuid4
 
 from kazusa_ai_chatbot.event_logging import repository
+from kazusa_ai_chatbot.config import AUDIT_LOG_TTL_DAYS
 from kazusa_ai_chatbot.event_logging.models import EventLogWriteResult
 from kazusa_ai_chatbot.event_logging.recording import (
     EVENT_LOG_WRITE_TIMEOUT_SECONDS,
 )
 from kazusa_ai_chatbot.event_logging.sanitization import sanitized_failure_reason
 from kazusa_ai_chatbot.event_logging.schemas import EventLogSnapshotDoc
+from kazusa_ai_chatbot.logging_retention import expiry_from_datetime
 from kazusa_ai_chatbot.event_logging.status import (
     build_semantic_descriptors,
     build_snapshot_source_counts,
@@ -61,6 +63,10 @@ async def write_analysis_snapshot(
         window_start=window_start_utc.isoformat(),
         window_end=generated_at_utc.isoformat(),
         generated_at=generated_at_utc.isoformat(),
+        expires_at=expiry_from_datetime(
+            generated_at_utc,
+            ttl_days=AUDIT_LOG_TTL_DAYS,
+        ).isoformat(),
         source_counts=source_counts,
         semantic_descriptors=descriptors,
         findings=[],

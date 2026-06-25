@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections.abc import Mapping
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.action_spec.models import (
     ActionSourceRefV1,
     ActionSpecV1,
@@ -145,6 +147,7 @@ async def call_memory_lifecycle_update_handler(
         return return_value
 
     review = await _invoke_memory_lifecycle_specialist(
+        trace_id=str(state.get("llm_trace_id", "")),
         prompt_payload=prepared["prompt_payload"],
         alias_bindings=alias_bindings,
         visible_alias_count=int(prepared["visible_alias_count"]),
@@ -263,6 +266,7 @@ async def call_post_surface_memory_lifecycle_review(
         if not alias_bindings:
             continue
         review = await _invoke_memory_lifecycle_specialist(
+            trace_id=str(state.get("llm_trace_id", "")),
             prompt_payload=prepared["prompt_payload"],
             alias_bindings=alias_bindings,
             visible_alias_count=int(prepared["visible_alias_count"]),
@@ -365,6 +369,7 @@ def materialize_memory_lifecycle_actions(
 
 async def _invoke_memory_lifecycle_specialist(
     *,
+    trace_id: str,
     prompt_payload: dict[str, object],
     alias_bindings: list[dict[str, Any]],
     visible_alias_count: int,
@@ -376,6 +381,7 @@ async def _invoke_memory_lifecycle_specialist(
     human_message = HumanMessage(
         content=json.dumps(prompt_payload, ensure_ascii=False)
     )
+    started_at = time.perf_counter()
     response = await _memory_lifecycle_specialist_llm.ainvoke([
         system_prompt,
         human_message,
@@ -392,6 +398,22 @@ async def _invoke_memory_lifecycle_specialist(
         "normalized": normalized,
         "materialized": materialized,
     }
+    await llm_tracing.record_llm_trace_step(
+        trace_id=trace_id,
+        stage_name="memory_lifecycle_specialist",
+        route_name="memory_lifecycle",
+        model_name=COGNITION_LLM_MODEL,
+        messages=[system_prompt, human_message],
+        response_text=str(response.content),
+        parsed_output=review,
+        parse_status="succeeded",
+        status="succeeded",
+        duration_ms=max(0, int((time.perf_counter() - started_at) * 1000)),
+        output_state_fields=[
+            "action_specs",
+            "memory_lifecycle_context",
+        ],
+    )
     return review
 
 

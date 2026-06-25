@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from collections.abc import Mapping
 from contextvars import ContextVar, Token
 from typing import Any
@@ -42,6 +43,9 @@ from kazusa_ai_chatbot.cognition_chain_core.prompt_selection import (
     build_cognition_prompt_source_payload,
     select_cognition_prompt_variant,
 )
+from kazusa_ai_chatbot.cognition_chain_core.stages.tracing import (
+    record_cognition_stage_trace,
+)
 from kazusa_ai_chatbot.cognition_chain_core.referent_resolution import (
     normalize_referents,
 )
@@ -63,7 +67,6 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
 from kazusa_ai_chatbot.cognition_resolver.state import (
     MAX_PROJECTED_RESOLVER_OBSERVATIONS,
 )
-
 logger = logging.getLogger(__name__)
 
 
@@ -518,6 +521,7 @@ async def call_style_agent(state: dict[str, Any]) -> dict[str, Any]:
         _style_agent_llm_context.get() or _style_agent_llm,
         "style_agent_llm",
     )
+    started_at = time.perf_counter()
     response = await llm.llm.ainvoke(
         [
             system_prompt,
@@ -546,6 +550,20 @@ async def call_style_agent(state: dict[str, Any]) -> dict[str, Any]:
     validate_cognition_output_contract(
         stage="l3_style_agent",
         payload=return_value,
+    )
+    await record_cognition_stage_trace(
+        state=state,
+        stage_name="l3_style_agent",
+        llm=llm,
+        messages=[system_prompt, human_message],
+        response_text=str(response.content),
+        parsed_output=return_value,
+        output_state_fields=[
+            "rhetorical_strategy",
+            "linguistic_style",
+            "forbidden_phrases",
+        ],
+        started_at=started_at,
     )
     return return_value
 
@@ -855,6 +873,7 @@ async def call_content_plan_agent(state: dict[str, Any]) -> dict[str, Any]:
         _content_plan_agent_llm_context.get() or _content_plan_agent_llm,
         "content_plan_agent_llm",
     )
+    started_at = time.perf_counter()
     response = await llm.llm.ainvoke(
         [
             system_prompt,
@@ -865,6 +884,16 @@ async def call_content_plan_agent(state: dict[str, Any]) -> dict[str, Any]:
     result = parse_llm_json_output(response.content)
 
     content_plan = _normalize_content_plan(result.get("content_plan"))
+    await record_cognition_stage_trace(
+        state=state,
+        stage_name="l3_content_plan_agent",
+        llm=llm,
+        messages=[system_prompt, human_message],
+        response_text=str(response.content),
+        parsed_output={"content_plan": content_plan},
+        output_state_fields=["content_plan"],
+        started_at=started_at,
+    )
     logger.info(
         f"Content plan output: entries={len(content_plan)} "
         f"plan={log_preview(content_plan)}"
@@ -1013,6 +1042,7 @@ async def call_preference_adapter(state: dict[str, Any]) -> dict[str, Any]:
         _preference_adapter_llm_context.get() or _preference_adapter_llm,
         "preference_adapter_llm",
     )
+    started_at = time.perf_counter()
     response = await llm.llm.ainvoke(
         [
             system_prompt,
@@ -1046,6 +1076,16 @@ async def call_preference_adapter(state: dict[str, Any]) -> dict[str, Any]:
     validate_cognition_output_contract(
         stage="l3_preference_adapter",
         payload=return_value,
+    )
+    await record_cognition_stage_trace(
+        state=state,
+        stage_name="l3_preference_adapter",
+        llm=llm,
+        messages=[system_prompt, human_message],
+        response_text=str(response.content),
+        parsed_output=return_value,
+        output_state_fields=["accepted_user_preferences"],
+        started_at=started_at,
     )
     return return_value
 
@@ -1276,6 +1316,7 @@ async def call_visual_agent(state: dict[str, Any]) -> dict[str, Any]:
         _visual_agent_llm_context.get() or _visual_agent_llm,
         "visual_agent_llm",
     )
+    started_at = time.perf_counter()
     response = await llm.llm.ainvoke(
         [
             system_prompt,
@@ -1308,6 +1349,21 @@ async def call_visual_agent(state: dict[str, Any]) -> dict[str, Any]:
     validate_cognition_output_contract(
         stage="l3_visual_agent",
         payload=return_value,
+    )
+    await record_cognition_stage_trace(
+        state=state,
+        stage_name="l3_visual_agent",
+        llm=llm,
+        messages=[system_prompt, human_message],
+        response_text=str(response.content),
+        parsed_output=return_value,
+        output_state_fields=[
+            "facial_expression",
+            "body_language",
+            "gaze_direction",
+            "visual_vibe",
+        ],
+        started_at=started_at,
     )
     return return_value
 

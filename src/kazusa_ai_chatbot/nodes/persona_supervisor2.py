@@ -685,6 +685,7 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         # Inputs
         "storage_timestamp_utc": state["storage_timestamp_utc"],
         "local_time_context": state["local_time_context"],
+        "llm_trace_id": state.get("llm_trace_id", ""),
         "user_input": state["user_input"],
         "prompt_message_context": state["prompt_message_context"],
         "platform": state["platform"],
@@ -730,5 +731,6 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "surface_outputs": results.get("surface_outputs", []),
         "action_results": results.get("action_results", []),
         "episode_trace": results.get("episode_trace"),
+        "llm_trace_id": state.get("llm_trace_id", ""),
     }
     return return_value

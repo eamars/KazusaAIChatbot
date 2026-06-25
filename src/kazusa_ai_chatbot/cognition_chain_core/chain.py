@@ -178,6 +178,7 @@ def _state_from_chain_input(
         input_payload.get("action_selection_context", {}),
     )
     state = {
+        "llm_trace_id": input_payload.get("llm_trace_id", ""),
         "character_profile": character_profile,
         "storage_timestamp_utc": scene["storage_timestamp_utc"],
         "local_time_context": _mapping(scene["local_time_context"]),

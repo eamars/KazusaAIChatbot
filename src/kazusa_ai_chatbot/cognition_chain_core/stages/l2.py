@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from contextvars import ContextVar, Token
 from typing import Any
 
@@ -29,6 +30,9 @@ from kazusa_ai_chatbot.cognition_chain_core.output_contracts import (
 from kazusa_ai_chatbot.cognition_chain_core.prompt_selection import (
     build_cognition_prompt_source_payload,
     select_cognition_prompt_variant,
+)
+from kazusa_ai_chatbot.cognition_chain_core.stages.tracing import (
+    record_cognition_stage_trace,
 )
 from kazusa_ai_chatbot.cognition_chain_core.referent_resolution import (
     needs_referent_clarification,
@@ -405,6 +409,7 @@ async def call_cognition_consciousness(state: dict[str, Any]) -> dict[str, Any]:
         _conscious_llm_context.get() or _conscious_llm,
         "conscious_llm",
     )
+    started_at = time.perf_counter()
     response = await llm.llm.ainvoke(
         [
             system_prompt,
@@ -443,6 +448,20 @@ async def call_cognition_consciousness(state: dict[str, Any]) -> dict[str, Any]:
     validate_cognition_output_contract(
         stage="l2a_conscious_framing",
         payload=return_value,
+    )
+    await record_cognition_stage_trace(
+        state=state,
+        stage_name="l2a_conscious_framing",
+        llm=llm,
+        messages=[system_prompt, human_message],
+        response_text=str(response.content),
+        parsed_output=return_value,
+        output_state_fields=[
+            "internal_monologue",
+            "logical_stance",
+            "character_intent",
+        ],
+        started_at=started_at,
     )
     return return_value
 
@@ -607,6 +626,7 @@ async def call_boundary_core_agent(state: dict[str, Any]) -> dict[str, Any]:
         _boundary_core_llm_context.get() or _boundary_core_llm,
         "boundary_core_llm",
     )
+    started_at = time.perf_counter()
     response = await llm.llm.ainvoke(
         [
             system_prompt,
@@ -646,6 +666,16 @@ async def call_boundary_core_agent(state: dict[str, Any]) -> dict[str, Any]:
     validate_cognition_output_contract(
         stage="l2b_boundary_appraisal",
         payload=return_value,
+    )
+    await record_cognition_stage_trace(
+        state=state,
+        stage_name="l2b_boundary_appraisal",
+        llm=llm,
+        messages=[system_prompt, human_message],
+        response_text=str(response.content),
+        parsed_output=return_value,
+        output_state_fields=["boundary_core_assessment"],
+        started_at=started_at,
     )
     return return_value
 
@@ -801,6 +831,7 @@ async def call_judgment_core_agent(state: dict[str, Any]) -> dict[str, Any]:
         _judgement_core_llm_context.get() or _judgement_core_llm,
         "judgement_core_llm",
     )
+    started_at = time.perf_counter()
     response = await llm.llm.ainvoke(
         [
             system_prompt,
@@ -839,5 +870,19 @@ async def call_judgment_core_agent(state: dict[str, Any]) -> dict[str, Any]:
     validate_cognition_output_contract(
         stage="l2c1_judgment_synthesis",
         payload=return_value,
+    )
+    await record_cognition_stage_trace(
+        state=state,
+        stage_name="l2c1_judgment_synthesis",
+        llm=llm,
+        messages=[system_prompt, human_message],
+        response_text=str(response.content),
+        parsed_output=return_value,
+        output_state_fields=[
+            "logical_stance",
+            "character_intent",
+            "judgment_note",
+        ],
+        started_at=started_at,
     )
     return return_value

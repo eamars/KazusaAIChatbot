@@ -4,9 +4,11 @@ import binascii
 import hashlib
 import json
 import logging
+import time
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.config import (
 
     MSG_DECONTEXTUALIZER_LLM_API_KEY,
@@ -549,7 +551,10 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
     #     log_preview(user_input),
     # )
 
+    trace_parse_status = "failed"
+    trace_status = "failed"
     try:
+        started_at = time.perf_counter()
         llm_response = await _msg_decontexualizer_llm.ainvoke([
             system_prompt, 
             human_message,
@@ -578,6 +583,8 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
             is_modified = False
             referents = []
         else:
+            trace_parse_status = "succeeded"
+            trace_status = "succeeded"
             if not isinstance(result, dict):
                 result = {}
 
@@ -619,4 +626,21 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
         "decontexualized_input": output,
         "referents": referents,
     }
+    if "llm_response" in locals():
+        await llm_tracing.record_llm_trace_step(
+            trace_id=str(state.get("llm_trace_id", "")),
+            stage_name="message_decontextualizer",
+            route_name="message_decontextualizer",
+            model_name=MSG_DECONTEXTUALIZER_LLM_MODEL,
+            messages=[system_prompt, human_message],
+            response_text=str(llm_response.content),
+            parsed_output=return_value,
+            parse_status=trace_parse_status,
+            status=trace_status,
+            duration_ms=max(0, int((time.perf_counter() - started_at) * 1000)),
+            output_state_fields=[
+                "decontexualized_input",
+                "referents",
+            ],
+        )
     return return_value

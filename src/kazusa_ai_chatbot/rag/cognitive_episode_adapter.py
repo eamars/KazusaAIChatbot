@@ -49,6 +49,7 @@ def build_text_chat_rag_request(
     conversation_progress: dict[str, Any] | None = None,
     conversation_episode_state: dict[str, Any] | None = None,
     promoted_reflection_context: dict[str, Any] | None = None,
+    llm_trace_id: str = "",
 ) -> RAGEpisodeRequest:
     """Build the current text-chat RAG request from a cognitive episode.
 
@@ -100,6 +101,7 @@ def build_text_chat_rag_request(
             conversation_progress=conversation_progress,
             conversation_episode_state=conversation_episode_state,
             promoted_reflection_context=promoted_reflection_context,
+            llm_trace_id=llm_trace_id,
             platform=projection["platform"],
             platform_channel_id=projection["platform_channel_id"],
             channel_type=projection["channel_type"],
@@ -138,6 +140,7 @@ def build_text_chat_rag_request(
             conversation_progress=conversation_progress,
             conversation_episode_state=conversation_episode_state,
             promoted_reflection_context=promoted_reflection_context,
+            llm_trace_id=llm_trace_id,
             platform=target_scope["platform"],
             platform_channel_id=target_scope["platform_channel_id"],
             channel_type=target_scope["channel_type"],
@@ -190,6 +193,7 @@ def _build_rag_request_from_fields(
     conversation_progress: dict[str, Any] | None,
     conversation_episode_state: dict[str, Any] | None,
     promoted_reflection_context: dict[str, Any] | None,
+    llm_trace_id: str,
     platform: str,
     platform_channel_id: str,
     channel_type: str,
@@ -225,6 +229,8 @@ def _build_rag_request_from_fields(
         "conversation_episode_state": conversation_episode_state,
         "promoted_reflection_context": promoted_reflection_context,
     }
+    if llm_trace_id:
+        context["llm_trace_id"] = llm_trace_id
     request: RAGEpisodeRequest = {
         "original_query": decontexualized_input,
         "character_name": character_name,

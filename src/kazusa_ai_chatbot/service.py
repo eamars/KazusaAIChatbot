@@ -79,6 +79,7 @@ from kazusa_ai_chatbot.internal_monologue_residue import (
     record_completed_episode_residue,
 )
 from kazusa_ai_chatbot.llm_interface.route_report import render_llm_route_table
+from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.reflection_cycle.phase_scheduler import (
     REFLECTION_PHASE_GROUPS_PER_SLOT,
 )
@@ -983,6 +984,7 @@ async def _deliver_background_artifact_result_episode(
         initial_state: IMProcessState = {
             "storage_timestamp_utc": episode["storage_timestamp_utc"],
             "local_time_context": episode["local_time_context"],
+            "llm_trace_id": llm_tracing.build_trace_id(),
             "platform": platform,
             "platform_message_id": episode["origin_metadata"][
                 "platform_message_id"
@@ -1893,6 +1895,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
     req = item.request
     character_name = _static_character_profile.get("name", "Character")
     correlation_id = _chat_correlation_id(req)
+    llm_trace_id = llm_tracing.build_trace_id()
     scope = _service_event_scope(req)
     turn_started_at = time.perf_counter()
     stages_reached: list[str] = []
@@ -1908,6 +1911,15 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         global_user_id, user_profile = await _resolve_queued_user(item)
         message_envelope = await _resolve_message_envelope_identities(req)
         stages_reached.append("identity")
+        await llm_tracing.ensure_llm_trace_run(
+            trace_id=llm_trace_id,
+            platform=req.platform,
+            platform_channel_id=req.platform_channel_id,
+            channel_type=req.channel_type,
+            platform_message_id=req.platform_message_id,
+            global_user_id=global_user_id,
+            started_at=item.storage_timestamp_utc,
+        )
 
         multimedia_input: list[MultiMediaDoc] = []
         for queued_item in [item, *item.collapsed_items]:
@@ -2147,6 +2159,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         initial_state: IMProcessState = {
             "storage_timestamp_utc": item.storage_timestamp_utc,
             "local_time_context": local_time_context,
+            "llm_trace_id": llm_trace_id,
             "platform": req.platform,
             "platform_message_id": req.platform_message_id,
             "active_turn_platform_message_ids": active_turn_platform_message_ids,
@@ -2204,6 +2217,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
                 "target_broadcast": False,
                 "mention_target_user": False,
                 "delivery_tracking_id": delivery_tracking_id,
+                "llm_trace_id": llm_trace_id,
             }
             try:
                 await _save_assistant_message(fallback_result)
@@ -2247,6 +2261,12 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
                 scope=scope,
                 duration_ms=_elapsed_ms(turn_started_at),
                 severity="error",
+            )
+            await llm_tracing.finalize_llm_trace_run(
+                trace_id=llm_trace_id,
+                status="failed",
+                final_dialog_count=1,
+                delivery_tracking_id=delivery_tracking_id,
             )
             return
 
@@ -2315,6 +2335,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         if response_dialog and should_save_assistant_message:
             delivery_tracking_id = uuid4().hex
             result["delivery_tracking_id"] = delivery_tracking_id
+        result["llm_trace_id"] = llm_trace_id
 
         cognition_graph = _build_response_cognition_graph(
             graph_result=result,
@@ -2364,6 +2385,12 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
                     duration_ms=_elapsed_ms(turn_started_at),
                     severity="error",
                 )
+                await llm_tracing.finalize_llm_trace_run(
+                    trace_id=llm_trace_id,
+                    status="failed",
+                    final_dialog_count=len(final_dialog),
+                    delivery_tracking_id=delivery_tracking_id,
+                )
                 return
 
             stages_reached.append("assistant_persisted")
@@ -2403,6 +2430,12 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
                 consolidation_state_dict,
             )
             stages_reached.append("residue_recorded")
+        await llm_tracing.finalize_llm_trace_run(
+            trace_id=llm_trace_id,
+            status="succeeded",
+            final_dialog_count=len(final_dialog),
+            delivery_tracking_id=delivery_tracking_id,
+        )
     except Exception as exc:
         logger.exception(f"Queued chat item failed: {exc}")
         _chat_input_queue.fail(item, exc)
@@ -2434,6 +2467,12 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             scope=scope,
             duration_ms=_elapsed_ms(turn_started_at),
             severity="error",
+        )
+        await llm_tracing.finalize_llm_trace_run(
+            trace_id=llm_trace_id,
+            status="failed",
+            final_dialog_count=0,
+            delivery_tracking_id="",
         )
 
 

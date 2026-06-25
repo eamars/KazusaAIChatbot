@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -20,6 +21,7 @@ from kazusa_ai_chatbot.cognition_chain_core.action_selection_prompt import (
 )
 from kazusa_ai_chatbot.cognition_chain_core.utils import parse_llm_json_output
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig, LLMInvoker
+from kazusa_ai_chatbot import llm_tracing
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +138,7 @@ async def route_action_requests(
     """Call the route-selection LLM and normalize its semantic output."""
 
     messages = build_action_selection_messages(state, capabilities)
+    started_at = time.perf_counter()
     response = await llm.ainvoke(messages, config=config)
     raw_content = getattr(response, "content", None)
     if not isinstance(raw_content, str):
@@ -150,6 +153,25 @@ async def route_action_requests(
         parsed.get("semantic_action_requests"),
         state,
         capabilities,
+    )
+    trace_id = _safe_text(state.get("llm_trace_id"))
+    await llm_tracing.record_llm_trace_step(
+        trace_id=trace_id,
+        stage_name="l2d_action_selection",
+        route_name=config.route_name,
+        model_name=config.model,
+        messages=messages,
+        response_text=raw_content,
+        parsed_output=parsed,
+        parse_status="succeeded",
+        status="succeeded",
+        duration_ms=max(0, int((time.perf_counter() - started_at) * 1000)),
+        output_state_fields=[
+            "semantic_action_requests",
+            "resolver_capability_requests",
+            "resolver_pending_resolution",
+            "resolver_goal_progress",
+        ],
     )
     return parsed
 

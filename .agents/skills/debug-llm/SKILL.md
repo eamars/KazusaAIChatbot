@@ -94,6 +94,16 @@ them as synthetic and do not treat them as LLM performance evidence.
 Redact credentials, tokens, and secrets. Avoid altering semantic content needed
 to judge LLM quality. Mark any redaction explicitly.
 
+For production dialog RCA, prefer the protected trace export path before
+writing custom queries:
+
+```powershell
+venv\Scripts\python.exe -m scripts.export_dialog_trace_review_input --dialog-text "<visible dialog>"
+```
+
+Use the resulting JSON as raw evidence, then author the human-readable review
+yourself.
+
 ## Agent Interpretation
 
 Base interpretation on the real input and output shown in the artifact.
