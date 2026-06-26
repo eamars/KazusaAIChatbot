@@ -38,8 +38,13 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [coding_agent_phase1_fetching_reading_plan.md](active/short_term/coding_agent_phase1_fetching_reading_plan.md) | Large standalone coding-agent Phase 1 plan | draft |
 | [coding_agent_phase2_code_writing_plan.md](active/short_term/coding_agent_phase2_code_writing_plan.md) | High-risk coding-agent Phase 2 code-writing replacement plan | in_progress |
 | [coding_agent_phase3_background_worker_integration_plan.md](active/short_term/coding_agent_phase3_background_worker_integration_plan.md) | Large coding-agent Phase 3 background-worker integration plan | draft |
+| [control_console_auto_model_discovery_picker_plan.md](active/short_term/control_console_auto_model_discovery_picker_plan.md) | Medium control-console automatic model discovery picker plan | completed |
+| [control_console_brain_model_route_config_plan.md](active/short_term/control_console_brain_model_route_config_plan.md) | Large control-console Brain model route configuration plan | completed |
+| [control_console_cognition_debug_visibility_plan.md](active/short_term/control_console_cognition_debug_visibility_plan.md) | Large control-console cognition-debug visibility plan | completed |
+| [llm_trace_observability_and_retrieval_plan.md](active/short_term/llm_trace_observability_and_retrieval_plan.md) | Large LLM trace observability and agent retrieval-skill plan | completed |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 
 ## Supporting Experiment Records
@@ -146,6 +151,7 @@ plans.
 | [self_other_inversion_personality_question_bugfix_plan.md](archive/completed/bugfix/self_other_inversion_personality_question_bugfix_plan.md) |
 | [task_dispatcher_json_contract_bugfix_plan.md](archive/completed/bugfix/task_dispatcher_json_contract_bugfix_plan.md) |
 | [temporal_grounding_rag_episode_state_plan.md](archive/completed/bugfix/temporal_grounding_rag_episode_state_plan.md) |
+| [text_chat_current_event_grounding_bugfix_plan.md](archive/completed/bugfix/text_chat_current_event_grounding_bugfix_plan.md) |
 | [time_source_boundary_bugfix_plan.md](archive/completed/bugfix/time_source_boundary_bugfix_plan.md) |
 
 ### Completed Short-Term Records
@@ -264,4 +270,5 @@ plans.
 | [rag_supervisor2_inner_loop_agents_plan.md](archive/superseded/rag_supervisor2_inner_loop_agents_plan.md) |
 | [short_circuit_early_stop_plan.md](archive/superseded/short_circuit_early_stop_plan.md) |
 | [coding_agent_phase2_code_writing_plan_superseded_20260623.md](archive/superseded/coding_agent_phase2_code_writing_plan_superseded_20260623.md) |
+| [visual_descriptor_seeded_reference_images_plan.md](archive/superseded/visual_descriptor_seeded_reference_images_plan.md) |
 

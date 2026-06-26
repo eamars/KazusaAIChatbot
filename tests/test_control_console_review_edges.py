@@ -409,11 +409,18 @@ async def test_repository_owner_pages_write_off_unsupported_surfaces() -> None:
 
     assert user["status"] == "empty"
     assert user["identity"]["resolution_status"] == "empty"
-    assert set(user["panels"]) == {"profile", "relationship", "memory", "style"}
+    assert set(user["panels"]) == {
+        "profile",
+        "relationship",
+        "memory",
+        "style",
+        "conversation_progress_prompt",
+        "current_carry_over",
+    }
     assert all(panel["items"] == [] for panel in user["panels"].values())
     assert missing_group_platform["status"] == "needs_input"
     assert "platform is required" in missing_group_platform["panels"]["style"]["reason"]
-    assert group["status"] == "empty"
+    assert group["status"] == "needs_input"
     assert group["panels"]["style"]["reason"] == (
         "no interaction-style guidance matched the lookup"
     )
@@ -473,7 +480,9 @@ async def test_repository_character_projection_fallbacks_are_readable() -> None:
     assert self_image["synthesis_count"] == 2
     assert learning["source"] == "character_state.reflection_summary"
     assert growth["trait_id"] == "trait-1"
-    assert "prompt" not in repr(character).lower()
+    rendered = repr(character).lower()
+    assert "prompt_text" not in rendered
+    assert "must redact" not in rendered
 
 
 def test_stream_parsing_replay_and_status_events_cover_failure_branches() -> None:

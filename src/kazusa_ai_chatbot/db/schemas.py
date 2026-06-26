@@ -96,6 +96,7 @@ class ConversationMessageDoc(TypedDict, total=False):
     delivery_status: str       # "pending" | "delivered"
     delivered_at: str          # ISO timestamp reported by the adapter
     delivery_adapter: str      # Adapter that reported the delivery receipt
+    llm_trace_id: str          # Turn-scoped LLM trace id, when available
     timestamp: str             # ISO-8601 UTC timestamp
     embedding: list[float]     # Dense vector (on text content only)
 

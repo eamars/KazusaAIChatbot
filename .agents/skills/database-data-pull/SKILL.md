@@ -28,6 +28,8 @@ Use the script that matches the requested data:
 - Shared/world memory collection: `python -m scripts.export_memory`
 - Character profile/runtime state: `python -m scripts.export_character_state`
 - Arbitrary collection rows: `python -m scripts.export_collection`
+- LLM trace from visible dialog or trace id: `python -m scripts.export_llm_trace`
+- Dialog trace review input: `python -m scripts.export_dialog_trace_review_input`
 
 ## Common Commands
 
@@ -71,6 +73,12 @@ Export arbitrary collection rows with a JSON filter:
 
 ```powershell
 venv\Scripts\python.exe -m scripts.export_collection conversation_history --filter "{\"platform_channel_id\":\"673225019\"}" --sort "{\"timestamp\":-1}" --limit 20
+```
+
+Export the LLM trace behind a visible dialog:
+
+```powershell
+venv\Scripts\python.exe -m scripts.export_llm_trace --dialog-text "14:30了"
 ```
 
 ## Options To Reach For

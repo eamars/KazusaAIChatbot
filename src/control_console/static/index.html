@@ -235,6 +235,9 @@
         </div>
         <div class="content-grid two">
           <article class="card span-two" data-component="Card"><div class="card-header"><h3>Profile</h3><span class="badge">character</span></div><div class="card-content character-panel" id="character-profile-table"><p class="panel-empty">Open this page after login to load character profile.</p></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Promoted Global Growth Prompt View</h3><span class="badge">Prompt View</span></div><div class="table-wrap flush"><table><tbody id="character-growth-prompt-table"><tr><td>Status</td><td>Open this page after login to load promoted growth prompt context.</td></tr></tbody></table></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Character Carry-over Prompt View</h3><span class="badge">Prompt View</span></div><div class="table-wrap flush"><table><tbody id="character-carry-over-table"><tr><td>Status</td><td>Open this page after login to load current carry-over.</td></tr></tbody></table></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Growth Runs Audit</h3><span class="badge">Operational Backing</span></div><div class="table-wrap flush"><table><tbody id="character-growth-runs-table"><tr><td>Status</td><td>Open this page after login to load growth run audit rows.</td></tr></tbody></table></div></article>
           <article class="card" data-component="Card"><div class="card-header"><h3>Latest State</h3><span class="badge">runtime</span></div><div class="table-wrap flush"><table><tbody id="character-state-table"><tr><td>Status</td><td>Open this page after login to refresh character status.</td></tr></tbody></table></div></article>
           <article class="card" data-component="Card"><div class="card-header"><h3>Background Learning</h3><span class="badge">summary</span></div><div class="table-wrap flush"><table><tbody id="character-learning-table"><tr><td>Status</td><td>Open this page after login to inspect promoted learning summaries.</td></tr></tbody></table></div></article>
           <article class="card span-two" data-component="Card"><div class="card-header"><h3>Self Image</h3><span class="badge">profile</span></div><div class="card-content character-panel" id="character-self-image-table"><p class="panel-empty">Open this page after login to load self-image summary.</p></div></article>
@@ -268,6 +271,8 @@
           <div class="card-content filter-row" data-component="FieldGroup">
             <label class="field">Platform<select class="input" id="user-platform"><option value="">Select platform</option><option value="qq">QQ (NapCat)</option><option value="discord">Discord</option><option value="debug">Debug</option></select></label>
             <label class="field">Platform user ID<input class="input" id="user-platform-user-id" placeholder="platform account id" /></label>
+            <label class="field">Channel ID<input class="input" id="user-platform-channel-id" placeholder="platform channel or private id" /></label>
+            <label class="field">Channel type<select class="input" id="user-channel-type"><option value="">Select type</option><option value="private">Private</option><option value="group">Group</option></select></label>
             <label class="field">Keyword<input class="input" id="user-query" placeholder="optional memory keyword" /></label>
             <button class="btn primary" id="refresh-users" type="button">Search</button>
           </div>
@@ -278,6 +283,8 @@
           <article class="metric" data-component="Card"><div class="metric-label">Style</div><div class="metric-value">private</div><div class="metric-label">user-scoped guidance rows</div></article>
         </div>
         <div class="content-grid two">
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Conversation Progress Prompt View</h3><span class="badge">Prompt View</span></div><div class="table-wrap flush"><table><tbody id="user-conversation-progress-table"><tr><td>Status</td><td>Enter platform, user, channel, and channel type to load prompt context.</td></tr></tbody></table></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Current Carry-over Prompt View</h3><span class="badge">Prompt View</span></div><div class="table-wrap flush"><table><tbody id="user-carry-over-table"><tr><td>Status</td><td>Enter platform, user, channel, and channel type to load carry-over.</td></tr></tbody></table></div></article>
           <article class="card span-two" data-component="Card"><div class="card-header"><h3>Profile</h3><span class="badge">identity + relationship</span></div><div class="table-wrap flush"><table><tbody id="user-profile-table"><tr><td>Status</td><td>Enter platform and platform user ID to load profile.</td></tr></tbody></table></div></article>
           <article class="card" data-component="Card"><div class="card-header"><h3>User Memory</h3><span class="badge">redacted</span></div><div class="table-wrap flush"><table><tbody id="user-memory-table"><tr><td>Status</td><td>Enter platform and platform user ID to load recent memory units.</td></tr></tbody></table></div></article>
           <article class="card" data-component="Card"><div class="card-header"><h3>User Style</h3><span class="badge">guidance</span></div><div class="table-wrap flush"><table><tbody id="user-style-table"><tr><td>Status</td><td>Enter platform and platform user ID to load interaction-style guidance.</td></tr></tbody></table></div></article>
@@ -297,6 +304,7 @@
           <div class="card-content filter-row" data-component="FieldGroup">
             <label class="field">Platform<select class="input" id="group-platform"><option value="">Select platform</option><option value="qq">QQ (NapCat)</option><option value="discord">Discord</option><option value="debug">Debug</option></select></label>
             <label class="field">Group ID<input class="input" id="group-id" placeholder="platform group or channel id" /></label>
+            <label class="field">Participant user ID<input class="input" id="group-participant-platform-user-id" placeholder="optional platform user id" /></label>
             <button class="btn primary" id="refresh-groups" type="button">Search</button>
           </div>
         </article>
@@ -306,6 +314,8 @@
           <article class="metric" data-component="Card"><div class="metric-label">Redaction</div><div class="metric-value">safe</div><div class="metric-label">no raw reflection text</div></article>
         </div>
         <div class="content-grid">
+          <article class="card" data-component="Card"><div class="card-header"><h3>Group Carry-over Prompt View</h3><span class="badge">Prompt View</span></div><div class="table-wrap flush"><table><tbody id="group-carry-over-table"><tr><td>Status</td><td>Enter platform and group ID to load group carry-over.</td></tr></tbody></table></div></article>
+          <article class="card" data-component="Card"><div class="card-header"><h3>Participant Progress Prompt View</h3><span class="badge">Prompt View</span></div><div class="table-wrap flush"><table><tbody id="group-participant-progress-table"><tr><td>Status</td><td>Enter participant user ID to load participant progress.</td></tr></tbody></table></div></article>
           <article class="card" data-component="Card"><div class="card-header"><h3>Group Style</h3><span class="badge">guidance</span></div><div class="table-wrap flush"><table><tbody id="group-style-table"><tr><td>Status</td><td>Enter platform and group ID to load group-channel style.</td></tr></tbody></table></div></article>
         </div>
       </section>
@@ -314,14 +324,17 @@
         <div class="page-intro">
           <div>
             <h2>Calendar</h2>
-            <p>Due typed scheduler runs from the durable calendar queue.</p>
+            <p>Calendar prompt candidates, schedule definitions, and due-run backing rows.</p>
           </div>
           <span class="badge" id="calendar-status">not loaded</span>
         </div>
         <article class="card" data-component="Card">
-          <div class="card-header"><h3>Due Run Lookup</h3><span class="badge">limit 25</span></div>
+          <div class="card-header"><h3>Calendar Lookup</h3><span class="badge">limit 25</span></div>
           <div class="card-content filter-row" data-component="FieldGroup">
-            <div class="field"><span>Scope</span><strong>all closed trigger kinds due at or before now</strong></div>
+            <label class="field">Platform<select class="input" id="calendar-platform"><option value="">Select platform</option><option value="qq">QQ (NapCat)</option><option value="discord">Discord</option><option value="debug">Debug</option></select></label>
+            <label class="field">Channel ID<input class="input" id="calendar-platform-channel-id" placeholder="platform channel id" /></label>
+            <label class="field">Platform user ID<input class="input" id="calendar-platform-user-id" placeholder="platform account id" /></label>
+            <label class="field">Channel type<select class="input" id="calendar-channel-type"><option value="">Select type</option><option value="private">Private</option><option value="group">Group</option></select></label>
             <button class="btn primary" id="refresh-calendar" type="button">Refresh</button>
           </div>
         </article>
@@ -330,17 +343,18 @@
           <article class="metric" data-component="Card"><div class="metric-label">Actions</div><div class="metric-value">read</div><div class="metric-label">no claiming or schedule edits</div></article>
           <article class="metric" data-component="Card"><div class="metric-label">Excluded</div><div class="metric-value">safe</div><div class="metric-label">payloads, source scope, idempotency keys</div></article>
         </div>
-        <article class="card" data-component="Card">
-          <div class="card-header"><h3>Due Runs</h3><span class="badge">redacted</span></div>
-          <div class="table-wrap flush"><table><tbody id="calendar-table"><tr><td>Status</td><td>Open this page after login to load due calendar runs.</td></tr></tbody></table></div>
-        </article>
+        <div class="content-grid two">
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Cognition Pending Runs Prompt View</h3><span class="badge">Prompt View</span></div><div class="table-wrap flush"><table><tbody id="calendar-prompt-runs-table"><tr><td>Status</td><td>Enter scope to load pending calendar prompt candidates.</td></tr></tbody></table></div></article>
+          <article class="card" data-component="Card"><div class="card-header"><h3>Schedule Definitions</h3><span class="badge">Operational Backing</span></div><div class="table-wrap flush"><table><tbody id="calendar-schedules-table"><tr><td>Status</td><td>Open this page after login to load schedule definitions.</td></tr></tbody></table></div></article>
+          <article class="card" data-component="Card"><div class="card-header"><h3>Due Runs</h3><span class="badge">Operational Backing</span></div><div class="table-wrap flush"><table><tbody id="calendar-due-runs-table"><tr><td>Status</td><td>Open this page after login to load due calendar runs.</td></tr></tbody></table></div></article>
+        </div>
       </section>
 
       <section class="page" data-page="background">
         <div class="page-intro">
           <div>
             <h2>Background work</h2>
-            <p>Sanitized worker telemetry for asynchronous background work.</p>
+            <p>Result-ready cognition deliveries, job queue backing rows, and sanitized worker telemetry.</p>
           </div>
           <span class="badge" id="background-status">not loaded</span>
         </div>
@@ -356,10 +370,11 @@
           <article class="metric" data-component="Card"><div class="metric-label">Activity</div><div class="metric-value">worker</div><div class="metric-label">recent sanitized events</div></article>
           <article class="metric" data-component="Card"><div class="metric-label">Excluded</div><div class="metric-value">safe</div><div class="metric-label">task briefs, artifacts, raw messages</div></article>
         </div>
-        <article class="card" data-component="Card">
-          <div class="card-header"><h3>Worker Events</h3><span class="badge">redacted</span></div>
-          <div class="table-wrap flush"><table><tbody id="background-table"><tr><td>Status</td><td>Open this page after login to load worker telemetry.</td></tr></tbody></table></div>
-        </article>
+        <div class="content-grid two">
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Result-Ready Cognition Deliveries Prompt View</h3><span class="badge">Prompt View</span></div><div class="table-wrap flush"><table><tbody id="background-result-ready-table"><tr><td>Status</td><td>Open this page after login to load result-ready cognition deliveries.</td></tr></tbody></table></div></article>
+          <article class="card" data-component="Card"><div class="card-header"><h3>Job Queue</h3><span class="badge">Operational Backing</span></div><div class="table-wrap flush"><table><tbody id="background-job-queue-table"><tr><td>Status</td><td>Open this page after login to load recent jobs.</td></tr></tbody></table></div></article>
+          <article class="card" data-component="Card"><div class="card-header"><h3>Worker Events</h3><span class="badge">Operational Backing</span></div><div class="table-wrap flush"><table><tbody id="background-worker-events-table"><tr><td>Status</td><td>Open this page after login to load worker telemetry.</td></tr></tbody></table></div></article>
+        </div>
       </section>
 
       <section class="page" data-page="audit">

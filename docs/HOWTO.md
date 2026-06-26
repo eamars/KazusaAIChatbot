@@ -86,6 +86,9 @@ EMBEDDING_MODEL=your-embedding-model
 
 # Character and service behavior
 CHARACTER_GLOBAL_USER_ID=00000000-0000-4000-8000-000000000001
+AUDIT_LOG_TTL_DAYS=90
+DEBUG_LOG_TTL_DAYS=14
+LLM_TRACE_CAPTURE_MODE=metadata
 CONVERSATION_HISTORY_LIMIT=10
 COGNITION_VISUAL_DIRECTIVES_ENABLED=true
 COGNITION_RESOLVER_MAX_CYCLES=3
@@ -513,9 +516,8 @@ failures, handled request/worker exceptions, and worker-loop exceptions. It
 does not prove OS kills, interpreter aborts, host crashes, power loss, or
 external supervisor restarts.
 
-Event-log collections are append-only for now. Retention, archival, and
-high-volume pruning require a separate approved plan before production scale
-becomes a concern.
+Sanitized event-log rows use `AUDIT_LOG_TTL_DAYS`. Protected LLM trace rows use
+`DEBUG_LOG_TTL_DAYS`.
 
 Routine successful chat input is not mirrored into `event_log_events`.
 Successful user and assistant message writes are audited through
@@ -532,6 +534,25 @@ Without `--output`, the command writes
 `test_artifacts/diagnostics/event_log_<UTC>.json`. The export includes the
 same aggregate status/stat payloads and the deterministic snapshot write
 result. It does not export raw event documents.
+
+LLM trace export:
+
+```bash
+python -m scripts.export_llm_trace --dialog-text "14:30了"
+python -m scripts.export_dialog_trace_review_input --trace-id llmtrace_<id>
+```
+
+`LLM_TRACE_CAPTURE_MODE=metadata` records stage names, route/model metadata,
+prompt/output hashes, character counts, parse status, and state handoff fields.
+`full` additionally stores raw prompt messages, raw response text, and parsed
+output in protected trace collections. `off` skips trace row writes.
+
+Apply or inspect logging retention for existing rows:
+
+```bash
+python -m scripts.apply_logging_retention --dry-run
+python -m scripts.apply_logging_retention --apply
+```
 
 Recent terminal status:
 

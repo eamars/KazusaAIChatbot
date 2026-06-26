@@ -146,6 +146,7 @@ def _state_from_surface_input(
     residue = input_payload["cognition_residue"]
     intent = input_payload["selected_text_surface_intent"]
     state = {
+        "llm_trace_id": chain_input.get("llm_trace_id", ""),
         "character_profile": {
             "global_user_id": character["character_global_id"],
             "name": character["name"],

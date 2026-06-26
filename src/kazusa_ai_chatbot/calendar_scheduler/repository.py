@@ -86,6 +86,34 @@ async def list_due_calendar_runs(
     return runs
 
 
+async def list_calendar_schedules_for_inspection(
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Return active and paused schedule definitions for operator inspection."""
+
+    db = await get_db()
+    cursor = (
+        db.calendar_schedules.find(
+            {
+                "status": {
+                    "$in": [
+                        models.SCHEDULE_STATUS_ACTIVE,
+                        models.SCHEDULE_STATUS_PAUSED,
+                    ]
+                }
+            },
+            {"_id": 0},
+        )
+        .sort([("next_run_at", 1), ("schedule_id", 1)])
+        .limit(limit)
+    )
+    schedules: list[dict[str, Any]] = []
+    async for schedule in cursor:
+        schedules.append(schedule)
+    return schedules
+
+
 async def list_pending_calendar_runs_for_source(
     *,
     platform: str,

@@ -32,8 +32,14 @@ def test_lookup_routes_enforce_pagination_redaction_and_no_embeddings(
         _ = self
         return {"status": "empty", "items": []}
 
-    async def character_entity(self, *, limit: int = 25):
+    async def character_entity(
+        self,
+        *,
+        current_timestamp_utc: str | None = None,
+        limit: int = 25,
+    ):
         _ = self
+        assert current_timestamp_utc
         assert limit == 5
         return {
             "status": "empty",
@@ -48,13 +54,19 @@ def test_lookup_routes_enforce_pagination_redaction_and_no_embeddings(
         *,
         platform: str,
         platform_user_id: str,
+        platform_channel_id: str = "",
+        channel_type: str = "",
         query: str,
+        current_timestamp_utc: str | None = None,
         limit: int,
     ):
         _ = self
         assert platform == ""
         assert platform_user_id == ""
+        assert platform_channel_id == ""
+        assert channel_type == ""
         assert query == ""
+        assert current_timestamp_utc
         assert limit == 5
         return {
             "status": "needs_input",
@@ -69,11 +81,15 @@ def test_lookup_routes_enforce_pagination_redaction_and_no_embeddings(
         *,
         platform: str,
         group_id: str,
+        participant_platform_user_id: str = "",
+        current_timestamp_utc: str | None = None,
         limit: int,
     ):
         _ = self
         assert platform == ""
         assert group_id == ""
+        assert participant_platform_user_id == ""
+        assert current_timestamp_utc
         assert limit == 5
         return {
             "status": "needs_input",

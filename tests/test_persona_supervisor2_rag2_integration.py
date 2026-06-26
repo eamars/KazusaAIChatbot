@@ -634,6 +634,60 @@ async def test_assess_continuation_finalizes_memory_miss_after_recall(
 
 
 @pytest.mark.asyncio
+async def test_assess_continuation_records_trace_with_supplied_trace_id(
+    monkeypatch,
+) -> None:
+    """Continuation assessor tracing should use caller-provided trace id."""
+
+    continuation_llm = _ContinuationLLM(
+        {
+            "should_continue": True,
+            "refined_query": "Search current evidence for the unresolved target.",
+            "reason": "candidate evidence is plausible but incomplete",
+        }
+    )
+    monkeypatch.setattr(
+        rag_evaluator_module,
+        "_continuation_assessor_llm",
+        continuation_llm,
+    )
+    trace_recorder = AsyncMock()
+    monkeypatch.setattr(
+        rag_evaluator_module.llm_tracing,
+        "record_llm_trace_step",
+        trace_recorder,
+    )
+
+    decision = await rag2_module._assess_continuation(
+        observation_payload={
+            "original_query": "Need current evidence.",
+            "current_slot": "Live-context: retrieve current public evidence",
+            "agent": "live_context_agent",
+            "resolved": False,
+            "source_policy": "",
+            "missing_context": ["live_context"],
+            "conflicts": [],
+            "observation_candidates": [
+                {"content": "A current-source candidate needs confirmation."}
+            ],
+            "source_hints": [],
+            "user_resolution_hints": [],
+            "known_facts": [],
+            "pending_slots": [],
+        },
+        original_query="Need current evidence.",
+        previous_refined_queries=[],
+        continuation_count=0,
+        llm_trace_id="trace-continuation",
+    )
+
+    assert decision["should_continue"] is True
+    assert len(continuation_llm.calls) == 1
+    trace_recorder.assert_awaited_once()
+    assert trace_recorder.await_args.kwargs["trace_id"] == "trace-continuation"
+
+
+@pytest.mark.asyncio
 async def test_call_rag_supervisor_does_not_expand_after_resolved_evidence(
     monkeypatch,
 ) -> None:

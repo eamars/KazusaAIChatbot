@@ -24,6 +24,7 @@ class ProgressiveRAGState(TypedDict):
         initializer_cache: Cache metadata for the initializer strategy lookup.
         loop_count: Safety cap counter.
         final_answer: Synthesised answer from the finalizer.
+        llm_trace_id: Turn-scoped trace id for protected LLM trace joins.
     """
 
     original_query: str
@@ -38,6 +39,7 @@ class ProgressiveRAGState(TypedDict):
     last_agent_result: dict
     loop_count: int
     final_answer: str
+    llm_trace_id: str
 
 
 RAGAgentCallable = Callable[..., Awaitable[dict]]

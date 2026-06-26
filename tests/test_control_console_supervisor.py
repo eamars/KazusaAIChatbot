@@ -235,6 +235,56 @@ async def test_start_service_uses_command_overlay_for_subprocess_argv(
 
 
 @pytest.mark.asyncio
+async def test_start_service_uses_environment_overlay_for_child_process(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Runtime config env overlays should affect only child process env."""
+
+    from control_console.audit import LocalAuditWriter
+    from control_console.log_store import ProcessLogStore
+    from control_console.process_store import ProcessStore
+    from control_console.supervisor import ProcessSupervisor
+
+    calls: list[dict] = []
+
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        calls.append({"args": args, "kwargs": kwargs})
+        return_value = _FakeProcess()
+        return return_value
+
+    def environment_resolver(service_id: str) -> dict[str, str]:
+        assert service_id == "brain"
+        environment = {"COGNITION_LLM_MODEL": "deepseek-v4-flash"}
+        return environment
+
+    monkeypatch.setattr(
+        asyncio,
+        "create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    spec = _service_spec("brain", tmp_path)
+    supervisor = ProcessSupervisor(
+        services={"brain": spec},
+        store=ProcessStore(tmp_path / "state"),
+        log_store=ProcessLogStore(tmp_path / "logs"),
+        audit_writer=LocalAuditWriter(tmp_path / "audit.jsonl"),
+        environment_resolver=environment_resolver,
+    )
+
+    await supervisor.start_service(
+        service_id="brain",
+        operator_id="operator",
+        reason="start with route override",
+    )
+
+    child_env = calls[0]["kwargs"]["env"]
+    assert child_env["COGNITION_LLM_MODEL"] == "deepseek-v4-flash"
+    assert "COGNITION_LLM_MODEL" not in spec.env
+
+
+@pytest.mark.asyncio
 async def test_dependency_order_requires_brain_before_adapter_and_stops_dependents(
     monkeypatch,
     tmp_path,

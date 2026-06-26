@@ -122,6 +122,7 @@ async def run_rag_evidence_for_persona_state(
         conversation_progress=state.get("conversation_progress"),
         conversation_episode_state=state.get("conversation_episode_state"),
         promoted_reflection_context=state.get("promoted_reflection_context"),
+        llm_trace_id=str(state.get("llm_trace_id", "")),
     )
     fresh_query = _fresh_query_for_objective(
         objective,
@@ -217,6 +218,7 @@ async def run_first_cycle_shared_memory_prewarm(
         conversation_progress=state.get("conversation_progress"),
         conversation_episode_state=state.get("conversation_episode_state"),
         promoted_reflection_context=state.get("promoted_reflection_context"),
+        llm_trace_id=str(state.get("llm_trace_id", "")),
     )
 
     try:

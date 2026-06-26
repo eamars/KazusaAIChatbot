@@ -64,6 +64,7 @@ def _content_plan_state() -> dict:
             'attachments': [],
             'broadcast': False,
         },
+        'reply_context': {},
         'decontexualized_input': '用户想延续轻松调侃。',
         'referents': [],
         'rag_result': {
@@ -103,6 +104,7 @@ def _content_plan_state() -> dict:
         'platform': 'debug',
         'platform_channel_id': 'channel-1',
         'global_user_id': 'user-1',
+        'user_name': 'Test User',
     }
     return state
 

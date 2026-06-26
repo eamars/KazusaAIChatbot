@@ -51,8 +51,13 @@ wire envelopes, embeddings, binary payloads, credentials, or backend
 query/update documents. It does not add new LLM calls for telemetry. Analysis
 snapshots are deterministic aggregate summaries only.
 
-Authentication for `/ops/*`, retention, archival, and external supervisor
-health are outside this ICD and require later approved plans.
+Authentication for `/ops/*`, archival, and external supervisor health are
+outside this ICD and require later approved plans.
+
+Retention is configured by `AUDIT_LOG_TTL_DAYS`. Event rows and snapshots store
+`expires_at` as a MongoDB TTL date. Protected raw/debug LLM traces are outside
+this event-log contract; they live under `kazusa_ai_chatbot.llm_tracing` and
+use `DEBUG_LOG_TTL_DAYS`.
 
 ## Public Imports
 
@@ -472,6 +477,7 @@ class EventLogEventDoc(TypedDict):
     attempt_id: str
     occurred_at: str
     created_at: str
+    expires_at: str
     duration_ms: int | None
     scope: EventScopeRecord
     metrics: dict[str, int | float | bool | str]
@@ -506,6 +512,7 @@ class EventLogSnapshotDoc(TypedDict):
     window_start: str
     window_end: str
     generated_at: str
+    expires_at: str
     source_counts: dict[str, int]
     semantic_descriptors: dict[str, str]
     findings: list[dict[str, str]]
@@ -590,11 +597,13 @@ Indexes created by DB bootstrap:
 | `event_log_events` | `event_log_run_time` | `run_id`, `occurred_at` |
 | `event_log_events` | `event_log_trigger_time` | `trigger_id`, `occurred_at` |
 | `event_log_events` | `event_log_attempt_time` | `attempt_id`, `occurred_at` |
+| `event_log_events` | `event_log_events_expires_at_ttl` | `expires_at` TTL |
 | `event_log_snapshots` | `event_log_snapshot_id_unique` | `snapshot_id` unique |
 | `event_log_snapshots` | `event_log_snapshot_kind_time` | `snapshot_kind`, `generated_at` |
+| `event_log_snapshots` | `event_log_snapshots_expires_at_ttl` | `expires_at` TTL |
 
-Retention is not implemented by this ICD. Event collections are append-only
-until a later retention or archival plan is approved.
+Existing logging rows without `expires_at` are handled by
+`python -m scripts.apply_logging_retention --dry-run|--apply`.
 
 ## Operator Status Contract
 

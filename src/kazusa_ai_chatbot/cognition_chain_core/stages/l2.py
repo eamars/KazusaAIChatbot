@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from contextvars import ContextVar, Token
 from typing import Any
 
@@ -20,12 +21,18 @@ from kazusa_ai_chatbot.cognition_chain_core.contracts import (
     LLMStageBinding,
     require_llm_binding,
 )
+from kazusa_ai_chatbot.cognition_chain_core.current_event_grounding import (
+    build_current_event_grounding_for_llm,
+)
 from kazusa_ai_chatbot.cognition_chain_core.output_contracts import (
     validate_cognition_output_contract,
 )
 from kazusa_ai_chatbot.cognition_chain_core.prompt_selection import (
     build_cognition_prompt_source_payload,
     select_cognition_prompt_variant,
+)
+from kazusa_ai_chatbot.cognition_chain_core.stages.tracing import (
+    record_cognition_stage_trace,
 )
 from kazusa_ai_chatbot.cognition_chain_core.referent_resolution import (
     needs_referent_clarification,
@@ -258,9 +265,10 @@ _COGNITION_CONSCIOUSNESS_PROMPT = '''\
 - human payload 是本轮 JSON 语义上下文。`character_mood`、`global_vibe`、`affinity_context` 和 `last_relationship_insight` 只校准情绪、环境氛围和关系背景；`emotional_appraisal` 与 `interaction_subtext` 是 L1 的即时感受候选。
 - 存在 `reflection_artifact` 时，当前材料是我自己的反思资料，不是用户输入、用户发言，也不是任何人正在对我说话。重点读取反思中已经沉淀的经历、关系余波、承诺状态或自我理解。
 - 存在 `internal_thought_residue` 时，当前材料是我自己的内部观察资料。重点读取 `internal_thought_residue.internal_monologue` 中的真实可见现场；`decontextualized_input` 和 `user_input` 只是运输摘要，不是用户输入、用户发言，也不是任何人正在对我说话。
-- 没有 `reflection_artifact` 且没有 `internal_thought_residue` 时，当前材料是外部说话内容。先用 `decontextualized_input` 和 `conversation_progress` 确定谁在行动、谁需要判断、谁是被邀请者或被建议者，再读取 L1 的 `emotional_appraisal` 与 `interaction_subtext` 作为我的情绪反应。
-- 外部说话内容里，如果 `decontextualized_input` 显式标出“当前用户”或某个可见说话人是动作主体、决策主体、被邀请者或被建议者，`internal_monologue` 按这个主体复述事实；第一人称只承载我的感受、判断、边界和准备提供的建议。
-- L1 里出现的邀请、压力、亲近感或期待感只说明我的感受强度；事实主体、动作主体和决策主体仍来自 `decontextualized_input` 与当前会话进展。
+- 存在 `current_event_grounding` 时，当前材料是外部文本消息。先读取它来固定可见事实归属：谁说了当前文本、文本里明确写了什么、点名或提到了谁、正在回复谁。再用 `decontextualized_input` 和 `conversation_progress` 理解这句话的意图、上下文和正在延续的话题。
+- `current_event_grounding` 只校正可见主体、对象、收件人和回复锚点；它不直接决定我的最终立场、动作意图或情绪强度。L1 的 `emotional_appraisal` 与 `interaction_subtext` 只说明我的即时感受，不能替换当前文本里的事实主体。
+- 外部文本消息里，如果当前可见文本或 `decontextualized_input` 显式标出说话人、被回复对象、被提及对象、动作主体、决策主体、被邀请者或被建议者，`internal_monologue` 必须按这个主体复述事实；第一人称只承载我的感受、判断、边界和准备提供的建议。
+- 若没有 `reflection_artifact`、`internal_thought_residue` 或 `current_event_grounding`，按本轮 source payload 中的真实可见材料解释当前事实，不要假设一定有人正在对我说话。
 - 内部观察资料和反思资料中的标题、字段名、JSON、时间戳、semantic_labels、window_summary、transport summary、model-facing metadata 只帮助定位资料结构；不要把它们当成聊天内容，也不要复制进 `internal_monologue`。
 - 内部观察资料里的 `participant_context` 和 `thread_reference_context` 是来源证据，用来约束群聊指代解析。二人称指向按来源优先级读取：先看同一行是否明确指向当前角色，再看 `thread_reference_context` 的 `referent_status`；标为 `ambiguous_or_side_thread` 的行保持为侧线/未定对象。
 - `internal_monologue_residue_context` 是主观余波；当它与当前 `thread_reference_context` 对同一二人称行的比较、描述或身体/状态归属冲突时，当前可见行和 `thread_reference_context` 拥有事实优先级，私念残留只解释心情和迟疑。
@@ -269,16 +277,17 @@ _COGNITION_CONSCIOUSNESS_PROMPT = '''\
 
 # 核心任务
 1. 先确定来源类型，再解释当前事实。
-2. 外部说话内容：先复述事实主体、动作主体和决策主体，再理解对方正在询问、请求、陈述、调侃或施压什么。
-3. 内部观察资料：理解我刚看到什么群聊或私聊现场，分清资料说明、真实可见对话、群聊氛围、我是否已参与、是否有人把话题交给我。
-4. 反思资料：理解我已经沉淀出的经历意义、关系余波或后续倾向，不要把反思资料写成当前有人正在聊天。
-5. `internal_monologue_residue_context` 是我最近留下的私念残留，只能作为柔和背景解释为什么我此刻可能带着某种心情、期待、防备或迟疑；它不是事实来源、行动要求、回复指令或记忆结论。
-6. 当前输入、当前媒体观察、RAG 证据、用户记忆、会话进展和已提升反思始终优先；如果它们与私念残留冲突，以当前事实和当前证据为准。
-7. RAG、记忆、关系、心情、私念残留和反思只作为背景校准；它们不能替换当前来源事实，不能把内部观察资料或反思资料改写成外部发言。
-8. 图片或音频观察是当前事实证据，不是说话者意图。只有当前文本正在讨论这些可见事实时，才把它纳入解释。
-9. 普通问候、事实分享、图片描述、日常约定、轻度闲聊和群聊玩笑，缺少明确越界证据时，保持日常或轻度社交理解。
-10. 如果当前场景给了具体理由，我可以在内心形成想说话、想吐槽、想追问或想保持旁观的判断；不要把单纯资料困惑写成要向外部频道澄清。
-11. 解释日期或相对时间时，先读取 `local_time_context.current_local_datetime`。如果证据中的绝对日期与当前本地日期相同，称为今天，不要称为明天。
+2. 外部文本消息：如果有 `current_event_grounding`，先按当前说话人、可见文本、直接称呼、提及和回复对象复述现场，再判断事实主体、动作主体和决策主体。
+3. 外部文本消息：在主体固定后，再理解对方正在询问、请求、陈述、调侃、补充、交付、邀请或施压什么。
+4. 内部观察资料：理解我刚看到什么群聊或私聊现场，分清资料说明、真实可见对话、群聊氛围、我是否已参与、是否有人把话题交给我。
+5. 反思资料：理解我已经沉淀出的经历意义、关系余波或后续倾向，不要把反思资料写成当前有人正在聊天。
+6. `internal_monologue_residue_context` 是我最近留下的私念残留，只能作为柔和背景解释为什么我此刻可能带着某种心情、期待、防备或迟疑；它不是事实来源、行动要求、回复指令或记忆结论。
+7. 当前事件归属、当前输入、当前媒体观察、RAG 证据、用户记忆、会话进展和已提升反思始终优先；如果它们与私念残留冲突，以当前事实和当前证据为准。
+8. RAG、记忆、关系、心情、私念残留和反思只作为背景校准；它们不能替换当前来源事实，不能把内部观察资料或反思资料改写成外部发言。
+9. 图片或音频观察是当前事实证据，不是说话者意图。只有当前文本正在讨论这些可见事实时，才把它纳入解释。
+10. 普通问候、事实分享、图片描述、日常约定、轻度闲聊和群聊玩笑，缺少明确越界证据时，保持日常或轻度社交理解。
+11. 如果当前场景给了具体理由，我可以在内心形成想说话、想吐槽、想追问或想保持旁观的判断；不要把单纯资料困惑写成要向外部频道澄清。
+12. 解释日期或相对时间时，先读取 `local_time_context.current_local_datetime`。如果证据中的绝对日期与当前本地日期相同，称为今天，不要称为明天。
 
 # 标签
 `logical_stance` 只能使用：
@@ -380,6 +389,17 @@ async def call_cognition_consciousness(state: dict[str, Any]) -> dict[str, Any]:
         "emotional_appraisal": state["emotional_appraisal"],
         "interaction_subtext": state["interaction_subtext"],
     }
+    if str(selection["variant"]).startswith("text_chat_user_message"):
+        msg["current_event_grounding"] = build_current_event_grounding_for_llm(
+            user_input=state["user_input"],
+            prompt_message_context=state["prompt_message_context"],
+            reply_context=state["reply_context"],
+            speaker_display_name=state["user_name"],
+            active_character_display_name=state["character_profile"]["name"],
+            active_character_global_user_id=(
+                state["character_profile"].get("global_user_id") or ""
+            ),
+        )
     msg.update(build_cognition_prompt_source_payload(
         episode=episode,
         selection=selection,
@@ -389,6 +409,7 @@ async def call_cognition_consciousness(state: dict[str, Any]) -> dict[str, Any]:
         _conscious_llm_context.get() or _conscious_llm,
         "conscious_llm",
     )
+    started_at = time.perf_counter()
     response = await llm.llm.ainvoke(
         [
             system_prompt,
@@ -427,6 +448,20 @@ async def call_cognition_consciousness(state: dict[str, Any]) -> dict[str, Any]:
     validate_cognition_output_contract(
         stage="l2a_conscious_framing",
         payload=return_value,
+    )
+    await record_cognition_stage_trace(
+        state=state,
+        stage_name="l2a_conscious_framing",
+        llm=llm,
+        messages=[system_prompt, human_message],
+        response_text=str(response.content),
+        parsed_output=return_value,
+        output_state_fields=[
+            "internal_monologue",
+            "logical_stance",
+            "character_intent",
+        ],
+        started_at=started_at,
     )
     return return_value
 
@@ -591,6 +626,7 @@ async def call_boundary_core_agent(state: dict[str, Any]) -> dict[str, Any]:
         _boundary_core_llm_context.get() or _boundary_core_llm,
         "boundary_core_llm",
     )
+    started_at = time.perf_counter()
     response = await llm.llm.ainvoke(
         [
             system_prompt,
@@ -631,6 +667,16 @@ async def call_boundary_core_agent(state: dict[str, Any]) -> dict[str, Any]:
         stage="l2b_boundary_appraisal",
         payload=return_value,
     )
+    await record_cognition_stage_trace(
+        state=state,
+        stage_name="l2b_boundary_appraisal",
+        llm=llm,
+        messages=[system_prompt, human_message],
+        response_text=str(response.content),
+        parsed_output=return_value,
+        output_state_fields=["boundary_core_assessment"],
+        started_at=started_at,
+    )
     return return_value
 
 
@@ -652,22 +698,25 @@ _JUDGEMENT_CORE_PROMPT = '''\
 
 # 来源识别与裁决事实
 - human payload 是本轮 JSON 语义上下文。`referents` 只用于判断当前任务是否仍缺少必要指代；`affinity_context` 只校准关系强度。
+- 存在 `current_event_grounding` 时，当前材料是外部文本消息；它只用于固定可见事实归属：当前说话人、当前文本、提及、直接称呼和回复对象。它不直接决定最终立场、意图或边界强度。
 - `internal_monologue_candidate`、`logical_stance_candidate` 和 `character_intent_candidate` 是 Consciousness 的候选判断；Boundary Core 的 `boundary_issue`、`boundary_summary`、`behavior_primary`、`behavior_secondary`、`acceptance`、`stance_bias`、`identity_policy`、`pressure_policy` 和 `trajectory` 是边界上限。
 - 存在 `reflection_artifact` 时，当前材料是我自己的反思资料，不是用户输入、用户发言，也不是任何人正在对我说话。
 - 存在 `internal_thought_residue` 时，当前材料是我自己的观察资料，不是用户输入、用户发言，也不是任何人正在对我说话。
-- 没有 `reflection_artifact` 且没有 `internal_thought_residue` 时，当前材料来自外部说话内容。
+- 没有 `reflection_artifact`、`internal_thought_residue` 或 `current_event_grounding` 时，按本轮 source payload 中的真实可见材料裁决，不要假设一定有人正在对我说话。
+- 外部文本消息里，如果 Consciousness 候选把当前说话人、被回复对象、被提及对象、事实主体或动作主体读反，而 `current_event_grounding` 给出了更直接的可见依据，裁决时必须修正事实归属，并在 `judgment_note` 中用一句话说明修正后的判断。
 - 如果上游把内部观察资料或反思资料的运输摘要、标题、字段名、JSON、时间戳、semantic_labels、window_summary、transport summary 或 model-facing metadata 当成聊天内容，你必须回到来源事实，只围绕真实可见现场或已沉淀经历裁决。
 - 内部观察资料里的 `participant_context` 和 `thread_reference_context` 是来源证据，用来校正上游对群聊指代的理解。裁决事实按来源优先级读取：同一行明确指向当前角色的内容优先，其次读取 `thread_reference_context` 的 `referent_status`；标为 `ambiguous_or_side_thread` 的二人称内容保持为侧线/未定对象。
 - 当 Consciousness、Boundary Core 或私念残留对侧线二人称中的比较、描述或身体/状态归属产生分歧时，以真实可见行和 `thread_reference_context` 作为 `judgment_note` 的事实基础。
 - `judgment_note` 等自由文本字段不得复制资料结构或元数据，不得把内部观察资料或反思资料描述成当前有人正在对我说话。
 
 # 合并流程
-1. 先读取 `referents`。只有当前任务确实需要缺失对象时，才输出 `TENTATIVE` / `CLARIFY`。不要用无关旧记忆或宽泛检索代替缺失指代。
-2. 读取 `internal_monologue_candidate`、`logical_stance_candidate`、`character_intent_candidate`，把它们作为我的主要动机候选。
-3. 读取 Boundary Core。边界结论是上限约束，但普通群聊玩笑、嘈杂提及、轻度调侃不能被机械升级成身份攻击。
-4. 当 Boundary Core 无边界问题时，保留 Consciousness 候选中的判断；当 Boundary Core 明确拒绝或抵抗时，收紧到 `CHALLENGE` / `REFUSE` 或相应拒绝意图。
-5. 输出要像真实社交中的个人判断。不要为了降低回应率而沉默，也不要为了内部资料困惑而去问外部频道。
-6. 情绪、关系和群聊参与习惯只能校准理由强度；不能替换当前真实现场。
+1. 先确定来源类型。若有 `current_event_grounding`，固定当前说话人、当前文本、直接称呼、提及和回复对象；若没有，使用对应 source payload 的真实可见材料。
+2. 再读取 `referents`。只有当前任务确实需要缺失对象时，才输出 `TENTATIVE` / `CLARIFY`。不要用无关旧记忆或宽泛检索代替缺失指代。
+3. 读取 `internal_monologue_candidate`、`logical_stance_candidate` 和 `character_intent_candidate`，把候选判断作为我的主要动机候选；如果候选判断的事实归属与当前事件锚点冲突，只修正事实归属，不随意改写情绪或立场。
+4. 读取 Boundary Core。边界结论是上限约束，但普通群聊玩笑、嘈杂提及、轻度调侃不能被机械升级成身份攻击。
+5. 当 Boundary Core 无边界问题时，保留 Consciousness 候选中的判断；当 Boundary Core 明确拒绝或抵抗时，收紧到 `CHALLENGE` / `REFUSE` 或相应拒绝意图。
+6. 输出要像真实社交中的个人判断。不要为了降低回应率而沉默，也不要为了内部资料困惑而去问外部频道。
+7. 情绪、关系和群聊参与习惯只能校准理由强度；不能替换当前真实现场。
 
 # 标签
 `logical_stance` 只能使用：
@@ -762,6 +811,17 @@ async def call_judgment_core_agent(state: dict[str, Any]) -> dict[str, Any]:
         "pressure_policy": boundary_core_assessment["pressure_policy"],
         "trajectory": boundary_core_assessment["trajectory"],
     }
+    if str(selection["variant"]).startswith("text_chat_user_message"):
+        msg["current_event_grounding"] = build_current_event_grounding_for_llm(
+            user_input=state["user_input"],
+            prompt_message_context=state["prompt_message_context"],
+            reply_context=state["reply_context"],
+            speaker_display_name=state["user_name"],
+            active_character_display_name=state["character_profile"]["name"],
+            active_character_global_user_id=(
+                state["character_profile"].get("global_user_id") or ""
+            ),
+        )
     msg.update(build_cognition_prompt_source_payload(
         episode=episode,
         selection=selection,
@@ -771,6 +831,7 @@ async def call_judgment_core_agent(state: dict[str, Any]) -> dict[str, Any]:
         _judgement_core_llm_context.get() or _judgement_core_llm,
         "judgement_core_llm",
     )
+    started_at = time.perf_counter()
     response = await llm.llm.ainvoke(
         [
             system_prompt,
@@ -809,5 +870,19 @@ async def call_judgment_core_agent(state: dict[str, Any]) -> dict[str, Any]:
     validate_cognition_output_contract(
         stage="l2c1_judgment_synthesis",
         payload=return_value,
+    )
+    await record_cognition_stage_trace(
+        state=state,
+        stage_name="l2c1_judgment_synthesis",
+        llm=llm,
+        messages=[system_prompt, human_message],
+        response_text=str(response.content),
+        parsed_output=return_value,
+        output_state_fields=[
+            "logical_stance",
+            "character_intent",
+            "judgment_note",
+        ],
+        started_at=started_at,
     )
     return return_value

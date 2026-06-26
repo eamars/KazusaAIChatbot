@@ -76,6 +76,7 @@ def keep_false(current: bool | None, update: bool | None) -> bool:
 class IMProcessState(TypedDict):
     storage_timestamp_utc: str
     local_time_context: LocalTimeContextDoc
+    llm_trace_id: NotRequired[str]
 
     # Platform identity
     platform: str                # "discord" | "qq" | "wechat" | etc.

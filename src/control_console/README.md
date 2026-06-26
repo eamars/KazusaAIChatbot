@@ -18,8 +18,16 @@ The console is not mounted by the brain service and must not change `/chat`, cog
 - Start the brain and local adapters from one operator page.
 - Inspect current service state, live process logs, lifecycle audit records, health summaries, and event summaries.
 - Send debug-chat messages through the existing brain `/chat` contract when the brain is running, with operator-selectable visible-reply, think-only, listen-only, and no-remember debug modes.
-- Browse bounded read-only Character, Users, Groups, calendar, background-work, health/cache, event, and audit summaries.
-- Inspect due calendar runs and sanitized background-worker telemetry as partial read-only workflows; schedule editing and job payload browsing are not implemented.
+- Browse bounded read-only Character, Users, Groups, calendar, background-work,
+  health/cache, event, and audit summaries.
+- Inspect cognition-debug Prompt View panels for the production prompt-facing
+  windows used by calendar recall, background-work result delivery,
+  conversation progress, internal-monologue carry-over, and promoted global
+  growth. Supporting queue, schedule, run, and event rows remain separate
+  Operational Backing panels.
+- Inspect due calendar runs and sanitized background-worker telemetry as
+  partial read-only workflows; schedule editing and job payload browsing are
+  not implemented.
 
 ## Interface boundary
 
@@ -45,6 +53,11 @@ The brain owns cognition and persistence coordination for chat turns. Adapters o
   `GET /api/services/{service_id}/config`,
   `PUT /api/services/{service_id}/config`,
   `POST /api/services/{service_id}/config/reset`
+- Brain model routes:
+  `GET /api/services/brain/model-routes`,
+  `PUT /api/services/brain/model-routes/{route_key}`,
+  `POST /api/services/brain/model-routes/{route_key}/reset`,
+  `GET /api/services/brain/model-routes/{route_key}/available-models`
 - Logs and events:
   `GET /api/logs/{service_id}`,
   `GET /api/logs/stream`,
@@ -149,11 +162,11 @@ The current first-slice status is:
 | Services | `ready` | Registry and supervisor state |
 | Debug chat | `ready` | Existing brain `/chat` contract when brain is running |
 | Event monitor | `ready` | Local audit, process logs, and sanitized Kazusa event-log telemetry |
-| Character | `partial` | Owner-oriented profile, runtime state, self-image, active growth traits, and background-learning summaries where safely available |
-| Users | `partial` | Platform-facing user lookup for profile, relationship summary, `user_memory_units`, and user-scoped interaction-style guidance; internal global user ids are not browser inputs |
-| Groups | `partial` | Platform-facing group lookup for group-channel style; unavailable progress and reflection-guidance sources are not rendered as product cards |
-| Calendar | `partial` | Due `calendar_runs` inspection; schedule editing is not implemented |
-| Background work | `partial` | Sanitized `background_work.worker` event telemetry |
+| Character | `partial` | Owner-oriented profile, runtime state, self-image, active growth traits, promoted global-growth Prompt View, character-global carry-over Prompt View, growth-run audit rows, and background-learning summaries where safely available |
+| Users | `partial` | Platform-facing user lookup for profile, relationship summary, `user_memory_units`, user-scoped interaction-style guidance, exact conversation-progress Prompt View, and current carry-over Prompt View; internal global user ids are not browser inputs |
+| Groups | `partial` | Platform-facing group lookup for group-channel style, group-scene carry-over Prompt View, and participant conversation-progress Prompt View when a participant platform user id is supplied |
+| Calendar | `partial` | Pending calendar recall Prompt View, schedule definition backing rows, and due `calendar_runs` inspection; schedule editing is not implemented |
+| Background work | `partial` | Result-ready cognition delivery Prompt View, recent job queue backing rows, and sanitized `background_work.worker` event telemetry |
 | Health/cache | `partial` | Brain `/health` and `/ops/runtime-status` when brain is running |
 | Audit | `partial` | Local JSONL audit only |
 
@@ -204,6 +217,13 @@ The console binds to loopback by default and has only the operating-system permi
 
 Responses are redacted before they reach the browser. Secrets, tokens, prompts, embeddings, raw environment values, raw message bodies, callback secrets, and unbounded text are excluded from logs, events, audit records, and lookup pages.
 
+Prompt View panels show only production prompt-facing projections or source
+episodes returned by their owning runtime helpers. Operational Backing panels
+show bounded redacted rows for queue, schedule, audit, or telemetry context and
+are not prompt input. Event-log snapshot browsing remains excluded from the
+control console because snapshots are aggregate debugging telemetry, not a
+cognition prompt window.
+
 ## Service Registry And Supervisor
 
 The built-in registry contains:
@@ -217,10 +237,12 @@ Override registries are loaded from `KAZUSA_CONTROL_SERVICE_REGISTRY`, validated
 
 The supervisor starts services with `asyncio.create_subprocess_exec(*argv)`. It never uses `shell=True`, command concatenation, broad process scanning, external process adoption, or PID killing outside console-owned child processes.
 
-Descriptor-backed service config may render a command overlay before a service
-starts. The overlay returns argv parts only and is included in the process
-ownership fingerprint. Browser requests cannot submit arbitrary commands,
-environment dictionaries, shells, or command strings.
+Descriptor-backed service config may render command or environment overlays
+before a service starts. Command overlays return argv parts only. Environment
+overlays are descriptor-approved name/value pairs. Both are included in the
+process ownership fingerprint without storing raw secret values. Browser
+requests cannot submit arbitrary commands, environment dictionaries, shells,
+or command strings.
 
 If a configured dependency endpoint is already listening before the console
 starts it, that dependency is marked as an unmanaged conflict. The console must
@@ -277,6 +299,34 @@ allowlist. The descriptor reads `NAPCAT_ACTIVE_GROUPS` as a comma- or
 space-separated list of numeric group ids and renders the effective list as
 the adapter's existing `--channels` argv when the list is non-empty. An empty
 effective list renders no `--channels` argument.
+
+The Brain service also has a descriptor-backed model-route workflow on the
+Services tab. The Brain service card spans the full service-grid row and shows
+all chat LLM routes in a route matrix with a selected-route editor. Operators
+can override only the route model id, max completion token budget, and
+thinking flag. The console does not expose API keys, base URLs, embedding
+routes, raw dotenv values, or a general environment editor.
+
+Brain route overrides are process-local. If the Brain service is running and
+console-owned, saving a route restarts it through the existing lifecycle path.
+If it is stopped, the override is rendered as descriptor-approved
+child-process environment on the next start. The Brain runtime path is
+unchanged: after restart it reads the existing environment variables used by
+its `LLMCallConfig` constants.
+
+The selected-route model picker fetches OpenAI-compatible `/models` data
+server-side for the route's effective provider. Responses are bounded to
+model ids and model-family labels; provider credentials and raw provider
+errors are not returned to the browser.
+
+The browser model editor is discovery-only. Opening a route lazily discovers
+models for that route if no cached discovery result exists. Unavailable and
+empty provider results render as explicit states with a retry control. A
+single discovered model renders as a read-only discovered-model row; if that
+model differs from the route's current effective model, applying the route
+uses that discovered model. Multiple discovered models render as a select
+containing only discovered model ids. The Services tab does not expose a
+free-text model id field.
 
 Audit records are written for config views, apply requests, reset requests,
 restart requests, successful application, and validation or version failures.

@@ -6,10 +6,12 @@ import asyncio
 import json
 import logging
 import re
+import time
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.config import (
 
     RAG_PLANNER_LLM_API_KEY,
@@ -542,7 +544,11 @@ async def rag_initializer(state: ProgressiveRAGState) -> dict:
     }
     human_message = HumanMessage(content=json.dumps(user_input, ensure_ascii=False))
 
-    response = await _initializer_llm.ainvoke([system_prompt, human_message], config=_initializer_llm_config)
+    started_at = time.perf_counter()
+    response = await _initializer_llm.ainvoke(
+        [system_prompt, human_message],
+        config=_initializer_llm_config,
+    )
     result = parse_llm_json_output(response.content)
 
     cacheable_result = isinstance(result, dict) and isinstance(
@@ -577,4 +583,20 @@ async def rag_initializer(state: ProgressiveRAGState) -> dict:
             cache_key=cache_key,
         ),
     }
+    await llm_tracing.record_llm_trace_step(
+        trace_id=str(state.get("llm_trace_id", "")),
+        stage_name="rag_initializer",
+        route_name="rag_initializer",
+        model_name=RAG_PLANNER_LLM_MODEL,
+        messages=[system_prompt, human_message],
+        response_text=str(response.content),
+        parsed_output=return_value,
+        parse_status="succeeded",
+        status="succeeded",
+        duration_ms=max(0, int((time.perf_counter() - started_at) * 1000)),
+        output_state_fields=[
+            "unknown_slots",
+            "initializer_cache",
+        ],
+    )
     return return_value

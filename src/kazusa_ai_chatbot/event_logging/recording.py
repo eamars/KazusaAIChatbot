@@ -10,6 +10,7 @@ from typing import Literal
 from uuid import uuid4
 
 from kazusa_ai_chatbot.event_logging import repository
+from kazusa_ai_chatbot.config import AUDIT_LOG_TTL_DAYS
 from kazusa_ai_chatbot.event_logging.models import (
     EVENT_SEVERITIES,
     EventLogWriteResult,
@@ -26,6 +27,7 @@ from kazusa_ai_chatbot.event_logging.sanitization import (
     unsafe_field_paths,
 )
 from kazusa_ai_chatbot.event_logging.schemas import EventLogEventDoc
+from kazusa_ai_chatbot.logging_retention import expiry_from_storage_iso
 from kazusa_ai_chatbot.time_boundary import (
     normalize_storage_utc_iso,
     storage_utc_now_iso,
@@ -164,6 +166,10 @@ async def _record_event(
         attempt_id=sanitize_short_text(attempt_id, limit=160),
         occurred_at=occurred_at_utc,
         created_at=created_at_utc,
+        expires_at=expiry_from_storage_iso(
+            occurred_at_utc,
+            ttl_days=AUDIT_LOG_TTL_DAYS,
+        ).isoformat(),
         duration_ms=duration_ms,
         scope=build_scope_record(scope),
         metrics=metrics or {},

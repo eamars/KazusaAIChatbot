@@ -113,6 +113,29 @@ def _client_with_login(tmp_path, supervisor: _ConfigRouteSupervisor):
     return client, payload, settings
 
 
+def _route_environment(monkeypatch) -> None:
+    """Install complete route env defaults without reading local dotenv files."""
+
+    routes = [
+        "RELEVANCE_AGENT_LLM",
+        "VISION_DESCRIPTOR_LLM",
+        "MSG_DECONTEXTUALIZER_LLM",
+        "RAG_PLANNER_LLM",
+        "RAG_SUBAGENT_LLM",
+        "WEB_SEARCH_LLM",
+        "COGNITION_LLM",
+        "BOUNDARY_CORE_LLM",
+        "DIALOG_GENERATOR_LLM",
+        "CONSOLIDATION_LLM",
+        "JSON_REPAIR_LLM",
+    ]
+    monkeypatch.setenv("DEFAULT_LLM_MAX_COMPLETION_TOKENS", "8192")
+    for route in routes:
+        monkeypatch.setenv(f"{route}_BASE_URL", "http://localhost:1234/v1")
+        monkeypatch.setenv(f"{route}_API_KEY", "test-key")
+        monkeypatch.setenv(f"{route}_MODEL", f"{route.lower()}-qwen3")
+
+
 def test_config_routes_require_auth_and_csrf(monkeypatch, tmp_path) -> None:
     """Config routes must use the same auth and CSRF boundary as lifecycle."""
 
@@ -164,6 +187,150 @@ def test_config_routes_require_auth_and_csrf(monkeypatch, tmp_path) -> None:
         json={"reason": "test", "values": {"active_groups": ["not-a-group"]}},
     )
     assert invalid_value.status_code == 422
+
+
+def test_brain_model_route_api_applies_and_resets_selected_route(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Route-specific API should reuse auth, validation, restart, and audit."""
+
+    _route_environment(monkeypatch)
+    supervisor = _ConfigRouteSupervisor(napcat_state="stopped")
+    client, auth, settings = _client_with_login(tmp_path, supervisor)
+    route_url = "/api/services/brain/model-routes/cognition_llm"
+
+    snapshot_response = client.get("/api/services/brain/model-routes")
+    assert snapshot_response.status_code == 200
+    snapshot = snapshot_response.json()
+    assert snapshot["service_id"] == "brain"
+    assert snapshot["service_state"]["actual_state"] == "running"
+    assert len(snapshot["routes"]) == 13
+    assert "test-key" not in snapshot_response.text
+
+    missing_csrf = client.put(
+        route_url,
+        json={
+            "reason": "change cognition route",
+            "values": {"model": "deepseek-v4-flash"},
+        },
+    )
+    assert missing_csrf.status_code == 403
+
+    apply_response = client.put(
+        route_url,
+        headers={auth["csrf_header_name"]: auth["csrf_token"]},
+        json={
+            "reason": "change cognition route",
+            "expected_version": 3,
+            "values": {
+                "model": "deepseek-v4-flash",
+                "max_completion_tokens": 4096,
+                "thinking_enabled": True,
+            },
+        },
+    )
+    assert apply_response.status_code == 200
+    payload = apply_response.json()
+    assert payload["restart"]["attempted"] is True
+    assert payload["restart"]["succeeded"] is True
+    assert payload["route"]["effective"]["model"] == "deepseek-v4-flash"
+    assert payload["route"]["effective"]["source"] == "override"
+    assert supervisor.restart_calls[-1]["service_id"] == "brain"
+
+    reset_response = client.post(
+        f"{route_url}/reset",
+        headers={auth["csrf_header_name"]: auth["csrf_token"]},
+        json={"reason": "reset cognition route", "expected_version": 4},
+    )
+    assert reset_response.status_code == 200
+    reset_payload = reset_response.json()
+    assert reset_payload["route"]["effective"]["model"] == "cognition_llm-qwen3"
+
+    from control_console.audit import LocalAuditWriter
+
+    event_types = [
+        event.event_type
+        for event in LocalAuditWriter(settings.audit_path).read_recent(limit=30)
+    ]
+    assert "brain_model_route_apply_requested" in event_types
+    assert "brain_model_route_reset_requested" in event_types
+
+
+def test_available_models_route_returns_redacted_provider_status(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """The browser should receive model ids without provider credentials."""
+
+    import httpx
+
+    _route_environment(monkeypatch)
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["authorization"] == "Bearer test-key"
+        return httpx.Response(200, json={"data": [{"id": "qwen3-32b"}]})
+
+    from control_console import brain_model_routes
+
+    monkeypatch.setattr(
+        brain_model_routes,
+        "_MODEL_LIST_TRANSPORT",
+        httpx.MockTransport(handler),
+    )
+    supervisor = _ConfigRouteSupervisor(napcat_state="stopped")
+    client, _, _ = _client_with_login(tmp_path, supervisor)
+
+    response = client.get(
+        "/api/services/brain/model-routes/cognition_llm/available-models",
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "route_key": "cognition_llm",
+        "status": "available",
+        "models": [{"id": "qwen3-32b", "family": "qwen"}],
+        "message": None,
+    }
+    assert "test-key" not in response.text
+
+
+def test_available_models_route_reports_empty_provider_result(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """The browser should distinguish empty provider lists from failures."""
+
+    import httpx
+
+    _route_environment(monkeypatch)
+
+    from control_console import brain_model_routes
+
+    monkeypatch.setattr(
+        brain_model_routes,
+        "_MODEL_LIST_TRANSPORT",
+        httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                json={"data": [{"id": "bad model with spaces"}]},
+            ),
+        ),
+    )
+    supervisor = _ConfigRouteSupervisor(napcat_state="stopped")
+    client, _, _ = _client_with_login(tmp_path, supervisor)
+
+    response = client.get(
+        "/api/services/brain/model-routes/cognition_llm/available-models",
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "route_key": "cognition_llm",
+        "status": "empty",
+        "models": [],
+        "message": "Provider returned no valid model ids.",
+    }
 
 
 def test_apply_config_to_stopped_service_stores_override_without_restart(

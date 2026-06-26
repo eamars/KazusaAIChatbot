@@ -109,6 +109,41 @@ async def list_prompt_visible_growth_traits(
     return return_value
 
 
+async def list_recent_global_character_growth_runs(
+    *,
+    limit: int,
+) -> list[dict]:
+    """Return bounded global-growth run audit rows without prompt payloads."""
+
+    db = await get_db()
+    cursor = (
+        db[GLOBAL_CHARACTER_GROWTH_RUNS_COLLECTION]
+        .find(
+            {},
+            {
+                "_id": 0,
+                "run_id": 1,
+                "status": 1,
+                "mode": 1,
+                "started_at": 1,
+                "updated_at": 1,
+                "completed_at": 1,
+                "eligible_count": 1,
+                "accepted_count": 1,
+                "rejected_count": 1,
+                "trait_update_count": 1,
+                "promoted_count": 1,
+                "failure_summary": 1,
+            },
+        )
+        .sort([("updated_at", -1), ("run_id", 1)])
+        .limit(limit)
+    )
+    documents = await cursor.to_list(length=limit)
+    return_value = [dict(document) for document in documents]
+    return return_value
+
+
 async def upsert_growth_trait_documents(
     trait_documents: Sequence[GlobalCharacterGrowthTraitDoc],
 ) -> None:

@@ -10,18 +10,21 @@ from typing import Any
 from pymongo.errors import PyMongoError
 
 from control_console.redaction import redact_mapping
+from kazusa_ai_chatbot import global_character_growth as global_growth
+from kazusa_ai_chatbot.background_work import result_source as background_result_source
 from kazusa_ai_chatbot.calendar_scheduler import models as calendar_models
-from kazusa_ai_chatbot.calendar_scheduler.repository import (
-    list_due_calendar_runs as default_list_due_calendar_runs,
+from kazusa_ai_chatbot.calendar_scheduler import repository as calendar_repository
+from kazusa_ai_chatbot.conversation_progress import (
+    ConversationProgressScope,
+    load_progress_context as default_load_progress_context,
 )
+from kazusa_ai_chatbot.db import background_work_jobs as background_work_job_store
+from kazusa_ai_chatbot.db import global_character_growth as growth_store
 from kazusa_ai_chatbot.db.character import (
     get_character_profile as default_get_character_profile,
     get_character_runtime_state as default_get_character_runtime_state,
 )
 from kazusa_ai_chatbot.db.errors import DatabaseOperationError
-from kazusa_ai_chatbot.db.global_character_growth import (
-    list_active_growth_traits as default_list_active_growth_traits,
-)
 from kazusa_ai_chatbot.db.interaction_style_images import (
     build_interaction_style_context as default_build_interaction_style_context,
 )
@@ -31,6 +34,12 @@ from kazusa_ai_chatbot.db.user_memory_units import (
 )
 from kazusa_ai_chatbot.db.users import (
     find_user_profile_by_identifier as default_find_user_profile_by_identifier,
+)
+from kazusa_ai_chatbot.internal_monologue_residue import (
+    load_residue_context as default_load_residue_context,
+)
+from kazusa_ai_chatbot.rag.recall.collectors.calendar_runs import (
+    CalendarRunCollector,
 )
 
 AsyncHelper = Callable[..., Awaitable[Any]]
@@ -85,6 +94,15 @@ class ControlConsoleRepository:
         build_interaction_style_context: AsyncHelper | None = None,
         list_due_calendar_runs: AsyncHelper | None = None,
         find_user_profile_by_identifier: AsyncHelper | None = None,
+        collect_calendar_pending_runs: AsyncHelper | None = None,
+        list_calendar_schedules: AsyncHelper | None = None,
+        find_deliverable_background_work_jobs: AsyncHelper | None = None,
+        build_result_ready_episode_from_job: Callable[..., Any] | None = None,
+        list_recent_background_work_jobs: AsyncHelper | None = None,
+        load_progress_context: AsyncHelper | None = None,
+        load_residue_context: AsyncHelper | None = None,
+        build_global_character_growth_context: AsyncHelper | None = None,
+        list_recent_global_character_growth_runs: AsyncHelper | None = None,
     ) -> None:
         """Create a read-only repository facade."""
 
@@ -96,6 +114,23 @@ class ControlConsoleRepository:
         self._build_interaction_style_context = build_interaction_style_context
         self._list_due_calendar_runs = list_due_calendar_runs
         self._find_user_profile_by_identifier = find_user_profile_by_identifier
+        self._collect_calendar_pending_runs = collect_calendar_pending_runs
+        self._list_calendar_schedules = list_calendar_schedules
+        self._find_deliverable_background_work_jobs = (
+            find_deliverable_background_work_jobs
+        )
+        self._build_result_ready_episode_from_job = (
+            build_result_ready_episode_from_job
+        )
+        self._list_recent_background_work_jobs = list_recent_background_work_jobs
+        self._load_progress_context = load_progress_context
+        self._load_residue_context = load_residue_context
+        self._build_global_character_growth_context = (
+            build_global_character_growth_context
+        )
+        self._list_recent_global_character_growth_runs = (
+            list_recent_global_character_growth_runs
+        )
 
     async def application_identity(self) -> dict[str, Any]:
         """Return the active character name for the browser shell."""
@@ -136,9 +171,15 @@ class ControlConsoleRepository:
         }
         return identity
 
-    async def character_entity(self, *, limit: int = 25) -> dict[str, Any]:
+    async def character_entity(
+        self,
+        *,
+        current_timestamp_utc: str | None = None,
+        limit: int = 25,
+    ) -> dict[str, Any]:
         """Return the owner-oriented character inspection envelope."""
 
+        timestamp = current_timestamp_utc or datetime.now(timezone.utc).isoformat()
         profile_panel = _entity_panel(
             status="unavailable",
             items=[],
@@ -150,9 +191,10 @@ class ControlConsoleRepository:
             reason="character profile helper is unavailable",
         )
         identity: dict[str, Any] = {}
+        profile: dict[str, Any] = {}
         try:
             helper = self._get_character_profile or default_get_character_profile
-            profile = await helper()
+            loaded_profile = await helper()
         except APPLICATION_IDENTITY_ERRORS as exc:
             reason = str(exc)
             profile_panel = _entity_panel(
@@ -166,7 +208,8 @@ class ControlConsoleRepository:
                 reason=reason,
             )
         else:
-            if isinstance(profile, dict):
+            if isinstance(loaded_profile, dict):
+                profile = loaded_profile
                 profile_items = _project_character_profile(profile)
                 self_image_items = _project_self_image(profile.get("self_image"))
                 identity = {
@@ -243,6 +286,14 @@ class ControlConsoleRepository:
             "self_image": self_image_panel,
             "state": state_panel,
             "growth": growth_panel,
+            "promoted_global_growth_prompt": await (
+                self._promoted_global_growth_prompt_panel()
+            ),
+            "current_carry_over": await self._character_carry_over_panel(
+                character_id=_character_id_from_profile(profile),
+                current_timestamp_utc=timestamp,
+            ),
+            "growth_runs_audit": await self._growth_runs_audit_panel(limit=limit),
             "memory": _entity_panel(
                 status="empty",
                 items=[],
@@ -267,6 +318,105 @@ class ControlConsoleRepository:
             panels=panels,
         )
         return envelope
+
+    async def _promoted_global_growth_prompt_panel(self) -> dict[str, Any]:
+        """Return the prompt-visible global growth context panel."""
+
+        helper = (
+            self._build_global_character_growth_context
+            or global_growth.build_global_character_growth_context
+        )
+        try:
+            context = await helper()
+        except REPOSITORY_HELPER_ERRORS as exc:
+            panel = _debug_panel(
+                status="unavailable",
+                content=None,
+                items=[],
+                reason=str(exc),
+                projection_owner=(
+                    "global_character_growth.context."
+                    "build_global_character_growth_context"
+                ),
+                prompt_view=True,
+            )
+            return panel
+
+        panel = _debug_panel(
+            status="available" if context else "empty",
+            content=context,
+            items=[],
+            reason="" if context else "no promoted global-growth context is visible",
+            projection_owner=(
+                "global_character_growth.context."
+                "build_global_character_growth_context"
+            ),
+            prompt_view=True,
+        )
+        return panel
+
+    async def _character_carry_over_panel(
+        self,
+        *,
+        character_id: str,
+        current_timestamp_utc: str,
+    ) -> dict[str, Any]:
+        """Return character-global internal-monologue carry-over context."""
+
+        trigger_scope = {
+            "character_id": character_id,
+            "platform": "",
+            "platform_channel_id": "",
+            "channel_type": "",
+            "global_user_id": "",
+        }
+        panel = await self._residue_panel(
+            trigger_scope=trigger_scope,
+            current_timestamp_utc=current_timestamp_utc,
+            empty_reason="no character-global carry-over is loaded",
+        )
+        return panel
+
+    async def _growth_runs_audit_panel(self, *, limit: int) -> dict[str, Any]:
+        """Return bounded global-growth run audit rows."""
+
+        helper = (
+            self._list_recent_global_character_growth_runs
+            or growth_store.list_recent_global_character_growth_runs
+        )
+        try:
+            rows = await helper(limit=limit)
+        except REPOSITORY_HELPER_ERRORS as exc:
+            panel = _debug_panel(
+                status="unavailable",
+                content=None,
+                items=[],
+                reason=str(exc),
+                projection_owner=(
+                    "db.global_character_growth."
+                    "list_recent_global_character_growth_runs"
+                ),
+                prompt_view=False,
+            )
+            return panel
+
+        items = [
+            _project_global_growth_run(row)
+            for row in list(rows)[:limit]
+            if isinstance(row, dict)
+        ]
+        panel = _debug_panel(
+            status="available" if items else "empty",
+            content=None,
+            items=items,
+            reason="no global-growth run records matched the lookup" if not items else "",
+            projection_owner=(
+                "db.global_character_growth."
+                "list_recent_global_character_growth_runs"
+            ),
+            prompt_view=False,
+        )
+        return panel
 
     async def latest_character_status(self) -> dict[str, Any]:
         """Return a bounded character-status summary."""
@@ -309,7 +459,7 @@ class ControlConsoleRepository:
         try:
             helper = self._list_growth_traits
             if helper is None:
-                helper = default_list_active_growth_traits
+                helper = growth_store.list_active_growth_traits
             traits = await helper(limit=12)
         except REPOSITORY_HELPER_ERRORS as exc:
             summary = _unavailable_summary(
@@ -508,11 +658,15 @@ class ControlConsoleRepository:
         *,
         platform: str,
         platform_user_id: str,
+        platform_channel_id: str = "",
+        channel_type: str = "",
         query: str,
+        current_timestamp_utc: str | None = None,
         limit: int,
     ) -> dict[str, Any]:
         """Return the owner-oriented user inspection envelope."""
 
+        timestamp = current_timestamp_utc or datetime.now(timezone.utc).isoformat()
         resolution = await self._resolve_platform_user_identity(
             platform=platform,
             platform_user_id=platform_user_id,
@@ -538,6 +692,27 @@ class ControlConsoleRepository:
                     status=resolution["status"],
                     items=[],
                     reason=resolution["reason"],
+                ),
+                "conversation_progress_prompt": _debug_panel(
+                    status=resolution["status"],
+                    content=None,
+                    items=[],
+                    reason=resolution["reason"],
+                    projection_owner=(
+                        "conversation_progress.runtime.load_progress_context"
+                    ),
+                    prompt_view=True,
+                ),
+                "current_carry_over": _debug_panel(
+                    status=resolution["status"],
+                    content="",
+                    items=[],
+                    reason=resolution["reason"],
+                    projection_owner=(
+                        "internal_monologue_residue.loader."
+                        "load_residue_context"
+                    ),
+                    prompt_view=True,
                 ),
             }
             envelope = _owner_entity_envelope(
@@ -590,6 +765,26 @@ class ControlConsoleRepository:
             ),
             "memory": _lookup_panel_from_page(memory),
             "style": _lookup_panel_from_page(style),
+            "conversation_progress_prompt": await (
+                self._conversation_progress_panel(
+                    platform=platform,
+                    platform_channel_id=platform_channel_id,
+                    channel_type=channel_type,
+                    global_user_id=resolution["global_user_id"],
+                    current_timestamp_utc=timestamp,
+                )
+            ),
+            "current_carry_over": await self._residue_panel(
+                trigger_scope={
+                    "character_id": await self._active_character_id(),
+                    "platform": platform.strip(),
+                    "platform_channel_id": platform_channel_id.strip(),
+                    "channel_type": channel_type.strip(),
+                    "global_user_id": resolution["global_user_id"],
+                },
+                current_timestamp_utc=timestamp,
+                empty_reason="no current user-thread carry-over is loaded",
+            ),
         }
         envelope = _owner_entity_envelope(
             owner="user",
@@ -603,12 +798,16 @@ class ControlConsoleRepository:
         *,
         platform: str,
         group_id: str,
+        participant_platform_user_id: str = "",
+        current_timestamp_utc: str | None = None,
         limit: int,
     ) -> dict[str, Any]:
         """Return the owner-oriented group inspection envelope."""
 
+        timestamp = current_timestamp_utc or datetime.now(timezone.utc).isoformat()
         clean_platform = platform.strip()
         clean_group_id = group_id.strip()
+        clean_participant_platform_user_id = participant_platform_user_id.strip()
         identity = {
             "platform": clean_platform,
             "group_id": clean_group_id,
@@ -643,6 +842,27 @@ class ControlConsoleRepository:
                     items=[],
                     reason=reason,
                 ),
+                "group_carry_over": _debug_panel(
+                    status=status_value,
+                    content="",
+                    items=[],
+                    reason=reason,
+                    projection_owner=(
+                        "internal_monologue_residue.loader."
+                        "load_residue_context"
+                    ),
+                    prompt_view=True,
+                ),
+                "participant_conversation_progress_prompt": _debug_panel(
+                    status=status_value,
+                    content=None,
+                    items=[],
+                    reason=reason,
+                    projection_owner=(
+                        "conversation_progress.runtime.load_progress_context"
+                    ),
+                    prompt_view=True,
+                ),
             }
             envelope = _owner_entity_envelope(
                 owner="group",
@@ -675,6 +895,25 @@ class ControlConsoleRepository:
                     "reflection-derived group guidance is not available in a "
                     "browser-safe projection"
                 ),
+            ),
+            "group_carry_over": await self._residue_panel(
+                trigger_scope={
+                    "character_id": await self._active_character_id(),
+                    "platform": clean_platform,
+                    "platform_channel_id": clean_group_id,
+                    "channel_type": "group",
+                    "global_user_id": "",
+                },
+                current_timestamp_utc=timestamp,
+                empty_reason="no group-scene carry-over is loaded",
+            ),
+            "participant_conversation_progress_prompt": await (
+                self._participant_progress_panel(
+                    platform=clean_platform,
+                    group_id=clean_group_id,
+                    participant_platform_user_id=clean_participant_platform_user_id,
+                    current_timestamp_utc=timestamp,
+                )
             ),
         }
         envelope = _owner_entity_envelope(
@@ -716,7 +955,7 @@ class ControlConsoleRepository:
         )
         try:
             if helper is None:
-                helper = default_list_due_calendar_runs
+                helper = calendar_repository.list_due_calendar_runs
 
             documents = await helper(
                 current_timestamp_utc=current_timestamp_utc,
@@ -739,6 +978,537 @@ class ControlConsoleRepository:
             reason="no due calendar runs matched the lookup" if not items else "",
         )
         return page
+
+    async def lookup_calendar(
+        self,
+        *,
+        platform: str,
+        platform_channel_id: str,
+        platform_user_id: str,
+        channel_type: str,
+        current_timestamp_utc: str,
+        limit: int,
+    ) -> dict[str, Any]:
+        """Return calendar prompt and backing panels for operator inspection."""
+
+        pending_panel = await self._calendar_pending_runs_panel(
+            platform=platform,
+            platform_channel_id=platform_channel_id,
+            platform_user_id=platform_user_id,
+            channel_type=channel_type,
+            current_timestamp_utc=current_timestamp_utc,
+        )
+        schedule_panel = await self._calendar_schedules_panel(limit=limit)
+        due_runs = await self.lookup_due_calendar_runs(
+            current_timestamp_utc=current_timestamp_utc,
+            limit=limit,
+        )
+        panels = {
+            "cognition_pending_runs": pending_panel,
+            "schedule_definitions": schedule_panel,
+            "due_runs": _debug_panel(
+                status=str(due_runs.get("status", "unavailable")),
+                content=None,
+                items=[
+                    item
+                    for item in due_runs.get("items", [])
+                    if isinstance(item, dict)
+                ],
+                reason=str(due_runs.get("reason", "")),
+                projection_owner="calendar_scheduler.repository.list_due_calendar_runs",
+                prompt_view=False,
+            ),
+        }
+        page = _panel_lookup_page(namespace="calendar", panels=panels)
+        return page
+
+    async def _calendar_pending_runs_panel(
+        self,
+        *,
+        platform: str,
+        platform_channel_id: str,
+        platform_user_id: str,
+        channel_type: str,
+        current_timestamp_utc: str,
+    ) -> dict[str, Any]:
+        """Return source-scoped pending calendar candidates from Recall."""
+
+        clean_platform = platform.strip()
+        clean_platform_channel_id = platform_channel_id.strip()
+        clean_platform_user_id = platform_user_id.strip()
+        clean_channel_type = channel_type.strip()
+        if not (
+            clean_platform
+            and clean_platform_channel_id
+            and clean_platform_user_id
+            and clean_channel_type
+        ):
+            panel = _debug_panel(
+                status="needs_input",
+                content=None,
+                items=[],
+                reason=(
+                    "platform, channel id, platform user id, and channel type "
+                    "are required for the calendar prompt view"
+                ),
+                projection_owner="CalendarRunCollector.collect",
+                prompt_view=True,
+                scope_summary=_scope_summary(
+                    platform=clean_platform,
+                    platform_channel_id=clean_platform_channel_id,
+                    platform_user_id=clean_platform_user_id,
+                    channel_type=clean_channel_type,
+                ),
+            )
+            return panel
+
+        resolution = await self._resolve_platform_user_identity(
+            platform=clean_platform,
+            platform_user_id=clean_platform_user_id,
+        )
+        if resolution["status"] != "resolved":
+            panel = _debug_panel(
+                status=resolution["status"],
+                content=None,
+                items=[],
+                reason=resolution["reason"],
+                projection_owner="CalendarRunCollector.collect",
+                prompt_view=True,
+                scope_summary=_scope_summary(
+                    platform=clean_platform,
+                    platform_channel_id=clean_platform_channel_id,
+                    platform_user_id=clean_platform_user_id,
+                    channel_type=clean_channel_type,
+                ),
+            )
+            return panel
+
+        context = {
+            "platform": clean_platform,
+            "platform_channel_id": clean_platform_channel_id,
+            "global_user_id": resolution["global_user_id"],
+            "current_timestamp_utc": current_timestamp_utc,
+        }
+        try:
+            if self._collect_calendar_pending_runs is None:
+                collector = CalendarRunCollector()
+                candidates = await collector.collect(context)
+            else:
+                candidates = await self._collect_calendar_pending_runs(context)
+        except REPOSITORY_HELPER_ERRORS as exc:
+            panel = _debug_panel(
+                status="unavailable",
+                content=None,
+                items=[],
+                reason=str(exc),
+                projection_owner="CalendarRunCollector.collect",
+                prompt_view=True,
+                scope_summary=_scope_summary(
+                    platform=clean_platform,
+                    platform_channel_id=clean_platform_channel_id,
+                    platform_user_id=clean_platform_user_id,
+                    channel_type=clean_channel_type,
+                ),
+            )
+            return panel
+
+        items = [
+            _project_calendar_candidate(candidate)
+            for candidate in list(candidates)
+            if isinstance(candidate, dict)
+        ]
+        panel = _debug_panel(
+            status="available" if items else "empty",
+            content=None,
+            items=items,
+            reason="no pending calendar recall candidates matched the scope"
+            if not items
+            else "",
+            projection_owner="CalendarRunCollector.collect",
+            prompt_view=True,
+            scope_summary=_scope_summary(
+                platform=clean_platform,
+                platform_channel_id=clean_platform_channel_id,
+                platform_user_id=clean_platform_user_id,
+                channel_type=clean_channel_type,
+            ),
+        )
+        return panel
+
+    async def _calendar_schedules_panel(self, *, limit: int) -> dict[str, Any]:
+        """Return bounded schedule-definition backing rows."""
+
+        helper = (
+            self._list_calendar_schedules
+            or calendar_repository.list_calendar_schedules_for_inspection
+        )
+        try:
+            schedules = await helper(limit=limit)
+        except REPOSITORY_HELPER_ERRORS as exc:
+            panel = _debug_panel(
+                status="unavailable",
+                content=None,
+                items=[],
+                reason=str(exc),
+                projection_owner=(
+                    "calendar_scheduler.repository."
+                    "list_calendar_schedules_for_inspection"
+                ),
+                prompt_view=False,
+            )
+            return panel
+
+        items = [
+            _project_calendar_schedule(schedule)
+            for schedule in list(schedules)[:limit]
+            if isinstance(schedule, dict)
+        ]
+        panel = _debug_panel(
+            status="available" if items else "empty",
+            content=None,
+            items=items,
+            reason="no active or paused schedule definitions matched the lookup"
+            if not items
+            else "",
+            projection_owner=(
+                "calendar_scheduler.repository."
+                "list_calendar_schedules_for_inspection"
+            ),
+            prompt_view=False,
+        )
+        return panel
+
+    async def lookup_background_work(
+        self,
+        *,
+        worker_event_rows: list[dict[str, Any]],
+        limit: int,
+    ) -> dict[str, Any]:
+        """Return background-work prompt and backing panels."""
+
+        panels = {
+            "result_ready_cognition_deliveries": await (
+                self._background_result_ready_panel(limit=limit)
+            ),
+            "job_queue": await self._background_job_queue_panel(limit=limit),
+            "worker_events": _worker_events_panel(worker_event_rows, limit=limit),
+        }
+        page = _panel_lookup_page(namespace="background", panels=panels)
+        return page
+
+    async def _background_result_ready_panel(
+        self,
+        *,
+        limit: int,
+    ) -> dict[str, Any]:
+        """Return result-ready background-work cognitive episodes."""
+
+        job_helper = (
+            self._find_deliverable_background_work_jobs
+            or background_work_job_store.find_deliverable_background_work_jobs
+        )
+        episode_builder = (
+            self._build_result_ready_episode_from_job
+            or background_result_source.build_result_ready_episode_from_job
+        )
+        try:
+            jobs = await job_helper(limit=limit)
+        except REPOSITORY_HELPER_ERRORS as exc:
+            panel = _debug_panel(
+                status="unavailable",
+                content=None,
+                items=[],
+                reason=str(exc),
+                projection_owner=(
+                    "background_work.result_source."
+                    "build_result_ready_episode_from_job"
+                ),
+                prompt_view=True,
+            )
+            return panel
+
+        items: list[dict[str, Any]] = []
+        skipped_count = 0
+        for job in list(jobs)[:limit]:
+            if not isinstance(job, dict):
+                continue
+            try:
+                episode = episode_builder(job)
+            except (KeyError, TypeError, ValueError):
+                skipped_count += 1
+                continue
+            if not isinstance(episode, dict):
+                skipped_count += 1
+                continue
+            items.append(_project_background_result_ready_episode(episode))
+
+        if skipped_count and not items:
+            status_value = "unavailable"
+            reason = "result-ready background-work jobs could not be projected"
+        elif skipped_count:
+            status_value = "available"
+            reason = f"{skipped_count} background-work job rows could not be projected"
+        else:
+            status_value = "available" if items else "empty"
+            reason = (
+                "no result-ready background-work deliveries matched the lookup"
+                if not items
+                else ""
+            )
+        panel = _debug_panel(
+            status=status_value,
+            content=None,
+            items=items,
+            reason=reason,
+            projection_owner=(
+                "background_work.result_source."
+                "build_result_ready_episode_from_job"
+            ),
+            prompt_view=True,
+        )
+        return panel
+
+    async def _background_job_queue_panel(
+        self,
+        *,
+        limit: int,
+    ) -> dict[str, Any]:
+        """Return bounded background-work job queue rows."""
+
+        helper = (
+            self._list_recent_background_work_jobs
+            or background_work_job_store.list_recent_background_work_jobs
+        )
+        try:
+            jobs = await helper(limit=limit)
+        except REPOSITORY_HELPER_ERRORS as exc:
+            panel = _debug_panel(
+                status="unavailable",
+                content=None,
+                items=[],
+                reason=str(exc),
+                projection_owner="db.background_work_jobs.list_recent_background_work_jobs",
+                prompt_view=False,
+            )
+            return panel
+
+        items = [
+            _project_background_job(job)
+            for job in list(jobs)[:limit]
+            if isinstance(job, dict)
+        ]
+        panel = _debug_panel(
+            status="available" if items else "empty",
+            content=None,
+            items=items,
+            reason="no background-work jobs matched the lookup" if not items else "",
+            projection_owner="db.background_work_jobs.list_recent_background_work_jobs",
+            prompt_view=False,
+        )
+        return panel
+
+    async def _conversation_progress_panel(
+        self,
+        *,
+        platform: str,
+        platform_channel_id: str,
+        channel_type: str,
+        global_user_id: str,
+        current_timestamp_utc: str,
+    ) -> dict[str, Any]:
+        """Return one exact conversation-progress prompt projection."""
+
+        clean_platform = platform.strip()
+        clean_platform_channel_id = platform_channel_id.strip()
+        clean_channel_type = channel_type.strip()
+        clean_global_user_id = global_user_id.strip()
+        if not (
+            clean_platform
+            and clean_platform_channel_id
+            and clean_channel_type
+            and clean_global_user_id
+        ):
+            panel = _debug_panel(
+                status="needs_input",
+                content=None,
+                items=[],
+                reason=(
+                    "platform, channel id, channel type, and platform user id "
+                    "are required for conversation progress"
+                ),
+                projection_owner="conversation_progress.runtime.load_progress_context",
+                prompt_view=True,
+                scope_summary=_scope_summary(
+                    platform=clean_platform,
+                    platform_channel_id=clean_platform_channel_id,
+                    platform_user_id=clean_global_user_id,
+                    channel_type=clean_channel_type,
+                    user_identifier_kind="resolved_global_user",
+                ),
+            )
+            return panel
+
+        helper = self._load_progress_context or default_load_progress_context
+        scope = ConversationProgressScope(
+            platform=clean_platform,
+            platform_channel_id=clean_platform_channel_id,
+            global_user_id=clean_global_user_id,
+        )
+        try:
+            result = await helper(
+                scope=scope,
+                current_timestamp_utc=current_timestamp_utc,
+            )
+        except REPOSITORY_HELPER_ERRORS as exc:
+            panel = _debug_panel(
+                status="unavailable",
+                content=None,
+                items=[],
+                reason=str(exc),
+                projection_owner="conversation_progress.runtime.load_progress_context",
+                prompt_view=True,
+                scope_summary=_scope_summary(
+                    platform=clean_platform,
+                    platform_channel_id=clean_platform_channel_id,
+                    platform_user_id=clean_global_user_id,
+                    channel_type=clean_channel_type,
+                    user_identifier_kind="resolved_global_user",
+                ),
+            )
+            return panel
+
+        prompt_doc = result.get("conversation_progress")
+        if not isinstance(prompt_doc, dict):
+            prompt_doc = {}
+        status_value = str(prompt_doc.get("status", "empty")) if prompt_doc else "empty"
+        if status_value not in ("empty", "unavailable", "needs_input"):
+            status_value = "available"
+        source = str(result.get("source", ""))
+        panel = _debug_panel(
+            status=status_value,
+            content=prompt_doc,
+            items=[],
+            reason="" if prompt_doc else "no conversation-progress prompt context is loaded",
+            projection_owner="conversation_progress.runtime.load_progress_context",
+            prompt_view=True,
+            source=source,
+            turn_count=prompt_doc.get("turn_count", ""),
+            continuity=prompt_doc.get("continuity", ""),
+            scope_summary=_scope_summary(
+                platform=clean_platform,
+                platform_channel_id=clean_platform_channel_id,
+                platform_user_id=clean_global_user_id,
+                channel_type=clean_channel_type,
+                user_identifier_kind="resolved_global_user",
+            ),
+        )
+        return panel
+
+    async def _participant_progress_panel(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        participant_platform_user_id: str,
+        current_timestamp_utc: str,
+    ) -> dict[str, Any]:
+        """Return participant progress only for an explicit group user id."""
+
+        if not participant_platform_user_id:
+            panel = _debug_panel(
+                status="needs_input",
+                content=None,
+                items=[],
+                reason="participant platform user id is required",
+                projection_owner="conversation_progress.runtime.load_progress_context",
+                prompt_view=True,
+            )
+            return panel
+
+        resolution = await self._resolve_platform_user_identity(
+            platform=platform,
+            platform_user_id=participant_platform_user_id,
+        )
+        if resolution["status"] != "resolved":
+            panel = _debug_panel(
+                status=resolution["status"],
+                content=None,
+                items=[],
+                reason=resolution["reason"],
+                projection_owner="conversation_progress.runtime.load_progress_context",
+                prompt_view=True,
+            )
+            return panel
+
+        panel = await self._conversation_progress_panel(
+            platform=platform,
+            platform_channel_id=group_id,
+            channel_type="group",
+            global_user_id=resolution["global_user_id"],
+            current_timestamp_utc=current_timestamp_utc,
+        )
+        return panel
+
+    async def _residue_panel(
+        self,
+        *,
+        trigger_scope: dict[str, str],
+        current_timestamp_utc: str,
+        empty_reason: str,
+    ) -> dict[str, Any]:
+        """Return current internal-monologue carry-over context."""
+
+        helper = self._load_residue_context or default_load_residue_context
+        try:
+            result = await helper(
+                trigger_scope=trigger_scope,
+                current_timestamp_utc=current_timestamp_utc,
+            )
+        except REPOSITORY_HELPER_ERRORS as exc:
+            panel = _debug_panel(
+                status="unavailable",
+                content="",
+                items=[],
+                reason=str(exc),
+                projection_owner=(
+                    "internal_monologue_residue.loader.load_residue_context"
+                ),
+                prompt_view=True,
+                scope_summary=_scope_summary_from_residue_trigger(trigger_scope),
+            )
+            return panel
+
+        content = str(result.get("internal_monologue_residue_context", ""))
+        status_value = str(result.get("status", "empty"))
+        if status_value == "loaded":
+            status_value = "available"
+        panel = _debug_panel(
+            status=status_value,
+            content=content,
+            items=[],
+            reason="" if content else empty_reason,
+            projection_owner="internal_monologue_residue.loader.load_residue_context",
+            prompt_view=True,
+            selected_count=result.get("selected_count", 0),
+            candidate_count=result.get("candidate_count", 0),
+            scope_order=result.get("scope_order", []),
+            scope_summary=_scope_summary_from_residue_trigger(trigger_scope),
+        )
+        return panel
+
+    async def _active_character_id(self) -> str:
+        """Return the active character id used for residue trigger scopes."""
+
+        helper = self._get_character_profile or default_get_character_profile
+        try:
+            profile = await helper()
+        except APPLICATION_IDENTITY_ERRORS:
+            profile = {}
+        if isinstance(profile, dict):
+            character_id = _character_id_from_profile(profile)
+            return character_id
+        character_id = _character_id_from_profile({})
+        return character_id
 
     async def lookup_interaction_style(
         self,
@@ -952,6 +1722,137 @@ def _entity_panel(
     return panel
 
 
+def _debug_panel(
+    *,
+    status: str,
+    content: Any,
+    items: list[dict[str, Any]],
+    reason: str,
+    projection_owner: str,
+    prompt_view: bool,
+    **metadata: Any,
+) -> dict[str, Any]:
+    """Build a prompt-view or operational-backing panel envelope."""
+
+    panel_contract = (
+        "production prompt input"
+        if prompt_view
+        else "operational backing; not prompt input"
+    )
+    panel = {
+        "status": status,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "content": content,
+        "items": [redact_mapping(item) for item in items if isinstance(item, dict)],
+        "reason": str(reason)[:160],
+        "projection_owner": projection_owner,
+        "prompt_view": prompt_view,
+        "panel_contract": panel_contract,
+    }
+    for key, value in metadata.items():
+        panel[key] = redact_mapping(value) if isinstance(value, dict) else value
+    return panel
+
+
+def _worker_events_panel(
+    worker_event_rows: list[dict[str, Any]],
+    *,
+    limit: int,
+) -> dict[str, Any]:
+    """Build the background worker-event operational panel."""
+
+    rows = [
+        row
+        for row in worker_event_rows[:limit]
+        if isinstance(row, dict)
+    ]
+    has_unavailable_sentinel = any(
+        row.get("event_type") == "event_log.unavailable"
+        for row in rows
+    )
+    if has_unavailable_sentinel:
+        status_value = "unavailable"
+        reason = "background-work event telemetry is unavailable"
+    elif rows:
+        status_value = "available"
+        reason = ""
+    else:
+        status_value = "empty"
+        reason = "no background-work worker events matched the lookup"
+
+    panel = _debug_panel(
+        status=status_value,
+        content=None,
+        items=rows,
+        reason=reason,
+        projection_owner="event_logging.repository.find_events",
+        prompt_view=False,
+    )
+    return panel
+
+
+def _scope_summary(
+    *,
+    platform: str,
+    platform_channel_id: str,
+    platform_user_id: str,
+    channel_type: str,
+    user_identifier_kind: str = "platform_user_id",
+) -> dict[str, Any]:
+    """Return browser-safe scope metadata without raw internal ids."""
+
+    summary = {
+        "platform": platform.strip(),
+        "channel_type": channel_type.strip(),
+        "has_platform_channel_id": bool(platform_channel_id.strip()),
+        "has_user_identifier": bool(platform_user_id.strip()),
+        "user_identifier_kind": user_identifier_kind,
+    }
+    return summary
+
+
+def _scope_summary_from_residue_trigger(
+    trigger_scope: dict[str, str],
+) -> dict[str, Any]:
+    """Return browser-safe residue trigger scope metadata."""
+
+    summary = _scope_summary(
+        platform=str(trigger_scope.get("platform", "")),
+        platform_channel_id=str(trigger_scope.get("platform_channel_id", "")),
+        platform_user_id=str(trigger_scope.get("global_user_id", "")),
+        channel_type=str(trigger_scope.get("channel_type", "")),
+        user_identifier_kind="resolved_global_user",
+    )
+    summary["has_character_id"] = bool(str(trigger_scope.get("character_id", "")))
+    return summary
+
+
+def _panel_lookup_page(
+    *,
+    namespace: str,
+    panels: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Build a lookup response from panel envelopes."""
+
+    status_value = _combined_panel_status(panels)
+    page = {
+        "status": status_value,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "items": [],
+        "next_cursor": None,
+        "reason": "",
+        "namespace": namespace,
+        "panels": panels,
+        "redaction": {
+            "prompt_view": "production projections only",
+            "raw_documents": "excluded",
+            "internal_global_ids": "excluded",
+            "dedupe_tokens": "excluded",
+        },
+    }
+    return page
+
+
 def _lookup_panel_from_page(page: dict[str, Any]) -> dict[str, Any]:
     """Convert an existing lookup page into an owner-envelope panel."""
 
@@ -976,6 +1877,173 @@ def _owner_entity_redaction() -> dict[str, str]:
         "vector_fields": "excluded",
     }
     return redaction
+
+
+def _character_id_from_profile(profile: dict[str, Any]) -> str:
+    """Return the active character id with the service-compatible fallback."""
+
+    character_id = str(profile.get("global_user_id", "")).strip()
+    if not character_id:
+        character_id = "00000000-0000-4000-8000-000000000001"
+    return character_id
+
+
+def _project_calendar_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+    """Project one Recall calendar candidate into browser-safe fields."""
+
+    allowed_fields = (
+        "source",
+        "claim",
+        "temporal_scope",
+        "lifecycle_status",
+        "evidence_time",
+        "authority",
+    )
+    row = {
+        field: candidate[field]
+        for field in allowed_fields
+        if field in candidate and candidate[field] not in (None, "")
+    }
+    projected_row = redact_mapping(row)
+    return projected_row
+
+
+def _project_calendar_schedule(schedule: dict[str, Any]) -> dict[str, Any]:
+    """Project one schedule definition without source ids or payload internals."""
+
+    source_scope = schedule.get("source_scope")
+    if not isinstance(source_scope, dict):
+        source_scope = {}
+    row = {
+        "schedule_id": schedule.get("schedule_id", ""),
+        "trigger_kind": schedule.get("trigger_kind", ""),
+        "status": schedule.get("status", ""),
+        "next_run_at": schedule.get("next_run_at", ""),
+        "source_platform": source_scope.get("source_platform", ""),
+        "source_channel_type": source_scope.get("source_channel_type", ""),
+        "recurrence": schedule.get("recurrence", {}),
+    }
+    projected_row = redact_mapping({
+        key: value
+        for key, value in row.items()
+        if value not in (None, "", {})
+    })
+    return projected_row
+
+
+def _project_background_result_ready_episode(
+    episode: dict[str, Any],
+) -> dict[str, Any]:
+    """Project one result-ready episode into prompt-visible fields."""
+
+    target_scope = episode.get("target_scope")
+    if not isinstance(target_scope, dict):
+        target_scope = {}
+    percepts = episode.get("percepts")
+    if not isinstance(percepts, list):
+        percepts = []
+    percept = next(
+        (item for item in percepts if isinstance(item, dict)),
+        {},
+    )
+    metadata = percept.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+    row = {
+        "episode_id": episode.get("episode_id", ""),
+        "trigger_source": episode.get("trigger_source", ""),
+        "output_mode": episode.get("output_mode", ""),
+        "target_scope": {
+            "platform": target_scope.get("platform", ""),
+            "platform_channel_id": target_scope.get("platform_channel_id", ""),
+            "channel_type": target_scope.get("channel_type", ""),
+            "current_display_name": target_scope.get("current_display_name", ""),
+        },
+        "input_source": percept.get("input_source", ""),
+        "content": percept.get("content", ""),
+        "metadata": _project_background_result_metadata(metadata),
+    }
+    projected_row = redact_mapping(row)
+    return projected_row
+
+
+def _project_background_result_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Project prompt-visible scalar background result metadata."""
+
+    worker_metadata = metadata.get("worker_metadata")
+    if not isinstance(worker_metadata, dict):
+        worker_metadata = {}
+    row = {
+        "task_brief": metadata.get("task_brief", ""),
+        "failure_summary": metadata.get("failure_summary", ""),
+        "result_summary": metadata.get("result_summary", ""),
+        "worker": metadata.get("worker", ""),
+        "worker_metadata": {
+            key: value
+            for key, value in worker_metadata.items()
+            if isinstance(value, (str, int, float, bool)) and value not in ("", None)
+        },
+    }
+    projected_row = {
+        key: value
+        for key, value in row.items()
+        if value not in (None, "", {})
+    }
+    return projected_row
+
+
+def _project_background_job(job: dict[str, Any]) -> dict[str, Any]:
+    """Project one background-work job without task payload internals."""
+
+    allowed_fields = (
+        "job_id",
+        "status",
+        "delivery_state",
+        "worker",
+        "created_at",
+        "updated_at",
+        "completed_at",
+        "delivery_attempt_count",
+        "result_summary",
+        "failure_summary",
+        "artifact_char_count",
+        "source_platform",
+        "source_channel_type",
+        "requester_display_name",
+    )
+    row = {
+        field: job[field]
+        for field in allowed_fields
+        if field in job and job[field] not in (None, "")
+    }
+    projected_row = redact_mapping(row)
+    return projected_row
+
+
+def _project_global_growth_run(row: dict[str, Any]) -> dict[str, Any]:
+    """Project one global-growth run without prompt or source payloads."""
+
+    allowed_fields = (
+        "run_id",
+        "status",
+        "mode",
+        "started_at",
+        "updated_at",
+        "completed_at",
+        "eligible_count",
+        "accepted_count",
+        "rejected_count",
+        "trait_update_count",
+        "promoted_count",
+        "failure_summary",
+    )
+    projected = {
+        field: row[field]
+        for field in allowed_fields
+        if field in row and row[field] not in (None, "")
+    }
+    projected_row = redact_mapping(projected)
+    return projected_row
 
 
 def _project_character_profile(profile: dict[str, Any]) -> list[dict[str, Any]]:

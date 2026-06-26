@@ -6,11 +6,10 @@ import copy
 import json
 import logging
 import time
-from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from kazusa_ai_chatbot import event_logging
+from kazusa_ai_chatbot import event_logging, llm_tracing
 from kazusa_ai_chatbot.config import (
 
     RAG_SUBAGENT_LLM_API_KEY,
@@ -207,6 +206,8 @@ async def _summarize_agent_result(
     resolved: bool,
     raw_result: object,
     known_facts: list[dict],
+    *,
+    llm_trace_id: str = "",
 ) -> str:
     """Distil a resolved agent result into a concise fact summary for downstream agents.
 
@@ -246,6 +247,7 @@ async def _summarize_agent_result(
     )
     started_at = time.perf_counter()
     response = await _evaluator_summarizer_llm.ainvoke([system_prompt, human_message], config=_evaluator_summarizer_llm_config)
+    summary_text = response.content.strip()
     await event_logging.record_llm_stage_event(
         component=RAG_EVALUATOR_COMPONENT,
         stage_name="rag_result_summarizer",
@@ -259,7 +261,20 @@ async def _summarize_agent_result(
         json_repair_used=False,
         duration_ms=_elapsed_ms(started_at),
     )
-    return_value = response.content.strip()
+    await llm_tracing.record_llm_trace_step(
+        trace_id=llm_trace_id,
+        stage_name="rag_result_summarizer",
+        route_name=agent_name,
+        model_name=RAG_SUBAGENT_LLM_MODEL,
+        messages=[system_prompt, human_message],
+        response_text=str(response.content),
+        parsed_output={"summary": summary_text},
+        parse_status="not_json",
+        status="succeeded",
+        duration_ms=_elapsed_ms(started_at),
+        output_state_fields=["summary"],
+    )
+    return_value = summary_text
     return return_value
 
 
@@ -656,6 +671,7 @@ async def _assess_continuation(
     original_query: str,
     previous_refined_queries: list[str],
     continuation_count: int,
+    llm_trace_id: str = "",
 ) -> RAGContinuationDecision:
     """Classify an unresolved observation and validate refined-query re-entry."""
     if not _has_continuation_observation(observation_payload):
@@ -755,6 +771,19 @@ async def _assess_continuation(
         json_repair_used=False,
         duration_ms=_elapsed_ms(started_at),
         severity="info" if parse_status == "succeeded" else "warning",
+    )
+    await llm_tracing.record_llm_trace_step(
+        trace_id=llm_trace_id,
+        stage_name="continuation_assessor",
+        route_name="continuation",
+        model_name=RAG_SUBAGENT_LLM_MODEL,
+        messages=[system_prompt, human_message],
+        response_text=str(response.content),
+        parsed_output=decision,
+        parse_status=parse_status,
+        status="succeeded" if parse_status == "succeeded" else "failed",
+        duration_ms=_elapsed_ms(started_at),
+        output_state_fields=["continuation_decision"],
     )
     return decision
 
@@ -970,6 +999,7 @@ async def rag_evaluator(state: ProgressiveRAGState) -> dict:
             resolved,
             raw_result,
             known_facts,
+            llm_trace_id=str(state.get("llm_trace_id", "")),
         )
     else:
         summary = _unresolved_summary(slot, raw_result)
@@ -1006,6 +1036,7 @@ async def rag_evaluator(state: ProgressiveRAGState) -> dict:
                     original_query=state.get("original_query", ""),
                     previous_refined_queries=_previous_refined_queries(known_facts),
                     continuation_count=_accepted_continuation_count(known_facts),
+                    llm_trace_id=str(state.get("llm_trace_id", "")),
                 )
                 if (
                     _has_resolved_known_fact(known_facts)
@@ -1441,4 +1472,17 @@ async def rag_finalizer(state: ProgressiveRAGState) -> dict:
     )
     final_answer = sanitize_public_rag_evidence_text(response.content)
     return_value = {"final_answer": final_answer}
+    await llm_tracing.record_llm_trace_step(
+        trace_id=str(state.get("llm_trace_id", "")),
+        stage_name="rag_finalizer",
+        route_name="finalize",
+        model_name=RAG_SUBAGENT_LLM_MODEL,
+        messages=[system_prompt, human_message],
+        response_text=str(response.content),
+        parsed_output=return_value,
+        parse_status="not_json",
+        status="succeeded",
+        duration_ms=_elapsed_ms(started_at),
+        output_state_fields=["final_answer"],
+    )
     return return_value

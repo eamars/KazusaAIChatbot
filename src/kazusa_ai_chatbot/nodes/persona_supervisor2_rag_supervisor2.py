@@ -25,9 +25,6 @@ from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_prompt_views as _pro
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_types import (
     _MAX_LOOP_COUNT,
     ProgressiveRAGState,
-    RAGAgentCallable,
-    RAGAgentRegistryEntry,
-    RAGFactSource,
 )
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 from kazusa_ai_chatbot.utils import log_list_preview, log_preview
@@ -173,6 +170,8 @@ async def _summarize_agent_result(
     resolved: bool,
     raw_result: object,
     known_facts: list[dict],
+    *,
+    llm_trace_id: str = "",
 ) -> str:
     """Summarize one agent result through the evaluator domain."""
     _sync_evaluator_domain()
@@ -182,6 +181,7 @@ async def _summarize_agent_result(
         resolved,
         raw_result,
         known_facts,
+        llm_trace_id=llm_trace_id,
     )
     return summary
 
@@ -192,6 +192,7 @@ async def _assess_continuation(
     original_query: str,
     previous_refined_queries: list[str],
     continuation_count: int,
+    llm_trace_id: str = "",
 ) -> dict[str, object]:
     """Assess whether an unresolved observation should re-enter RAG."""
     _sync_evaluator_domain()
@@ -200,6 +201,7 @@ async def _assess_continuation(
         original_query=original_query,
         previous_refined_queries=previous_refined_queries,
         continuation_count=continuation_count,
+        llm_trace_id=llm_trace_id,
     )
     return decision
 
@@ -441,6 +443,7 @@ async def call_rag_supervisor(
         "last_agent_result": {},
         "loop_count": 0,
         "final_answer": "",
+        "llm_trace_id": str(runtime_context.get("llm_trace_id", "")),
     }
 
     logger.debug(

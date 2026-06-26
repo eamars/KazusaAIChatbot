@@ -10,9 +10,11 @@ from __future__ import annotations
 from datetime import datetime
 import json
 import logging
+import time
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.config import (
     CHARACTER_GLOBAL_USER_ID,
     RELEVANCE_AGENT_LLM_API_KEY,
@@ -692,7 +694,11 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
 
     human_message = HumanMessage(content=json.dumps(human_data, ensure_ascii=False))
 
-    response = await _relevance_agent_llm.ainvoke([system_prompt, human_message], config=_relevance_agent_llm_config)
+    started_at = time.perf_counter()
+    response = await _relevance_agent_llm.ainvoke(
+        [system_prompt, human_message],
+        config=_relevance_agent_llm_config,
+    )
     result = parse_llm_json_output(response.content)
 
     # Read important data back
@@ -724,4 +730,24 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
         # Update user input with optional image descriptions
         "user_input": user_input
     }
+    await llm_tracing.record_llm_trace_step(
+        trace_id=str(state.get("llm_trace_id", "")),
+        stage_name="persona_relevance_agent",
+        route_name="relevance",
+        model_name=RELEVANCE_AGENT_LLM_MODEL,
+        messages=[system_prompt, human_message],
+        response_text=str(response.content),
+        parsed_output=return_value,
+        parse_status="succeeded",
+        status="succeeded",
+        duration_ms=max(0, int((time.perf_counter() - started_at) * 1000)),
+        output_state_fields=[
+            "should_respond",
+            "reason_to_respond",
+            "use_reply_feature",
+            "channel_topic",
+            "indirect_speech_context",
+            "user_input",
+        ],
+    )
     return return_value

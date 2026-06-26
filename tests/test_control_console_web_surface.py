@@ -153,10 +153,14 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert 'id="group-guidance-table"' not in index.text
     assert 'id="calendar-status"' in index.text
     assert 'id="refresh-calendar"' in index.text
-    assert 'id="calendar-table"' in index.text
+    assert 'id="calendar-prompt-runs-table"' in index.text
+    assert 'id="calendar-schedules-table"' in index.text
+    assert 'id="calendar-due-runs-table"' in index.text
     assert 'id="background-status"' in index.text
     assert 'id="refresh-background"' in index.text
-    assert 'id="background-table"' in index.text
+    assert 'id="background-result-ready-table"' in index.text
+    assert 'id="background-job-queue-table"' in index.text
+    assert 'id="background-worker-events-table"' in index.text
     assert '<input class="input" id="token"' in index.text
     assert 'data-theme-choice="bright"' in index.text
     assert 'data-theme-choice="dark"' in index.text
@@ -302,6 +306,18 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert "is-current" in script.text
     assert "control.cognition_graph_invalidated" in script.text
     assert "function openServiceConfig" in script.text
+    assert "function refreshBrainModelRoutes" in script.text
+    assert "function renderBrainServiceCard" in script.text
+    assert "function renderBrainRouteMatrix" in script.text
+    assert "function renderBrainRouteEditor" in script.text
+    assert "function refreshBrainAvailableModels" in script.text
+    assert "function ensureBrainRouteModelsLoaded" in script.text
+    assert "function renderBrainModelPicker" in script.text
+    assert "function singleBrainModelState" in script.text
+    assert "Manual model " + "ID" not in script.text
+    assert "provider model " + "id" not in script.text
+    assert "data-brain-route-key" in script.text
+    assert "/api/services/brain/model-routes" in script.text
     assert "function renderServiceConfigDialog" in script.text
     assert "function applyServiceConfig" in script.text
     assert "function resetServiceConfig" in script.text
@@ -312,6 +328,8 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert "hot apply" not in script.text.lower()
     assert "zero downtime" not in script.text.lower()
     assert "adapter.napcat" not in script.text
+    assert "COGNITION_LLM" not in script.text
+    assert "DIALOG_GENERATOR_LLM" not in script.text
     assert "active_groups" not in script.text
     assert "NAPCAT_ACTIVE_GROUPS" not in script.text
     assert "JSON.stringify(result.response)" not in script.text
@@ -362,6 +380,10 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert "repeat(auto-fit, minmax(min(280px, 100%), 1fr))" in (
         stylesheet.text
     )
+    assert ".service-card.brain-service-card" in stylesheet.text
+    assert ".brain-service-layout" in stylesheet.text
+    assert ".brain-route-matrix" in stylesheet.text
+    assert ".brain-route-editor" in stylesheet.text
     assert ".content-grid { display: grid; gap: 12px; align-items: start; }" in (
         stylesheet.text
     )
@@ -453,18 +475,18 @@ def test_live_logs_static_surface_and_controls(tmp_path) -> None:
     assert "data-log-service" in script.text
     assert "setPage(\"logs\")" in script.text
     assert "function refreshLogStream()" in script.text
-    assert 'qs("#log-service-filter").addEventListener("change", refreshLogStream)' in (
+    assert 'bind("#log-service-filter", "change", refreshLogStream)' in (
         script.text
     )
-    assert 'qs("#log-stream-filter").addEventListener("change", refreshLogStream)' in (
+    assert 'bind("#log-stream-filter", "change", refreshLogStream)' in (
         script.text
     )
     assert (
-        'qs("#log-text-filter").addEventListener("input", renderBufferedLogRows)'
+        'bind("#log-text-filter", "input", renderBufferedLogRows)'
         in script.text
     )
     assert (
-        'qs("#log-highlight-filter").addEventListener("input", renderBufferedLogRows)'
+        'bind("#log-highlight-filter", "input", renderBufferedLogRows)'
         in script.text
     )
     assert ".log-row:not(.log-placeholder)" in script.text
@@ -532,16 +554,32 @@ def test_web_api_outputs_for_logs_events_audit_character_and_debug_error(
         _ = self
         return {"status": "empty", "items": []}
 
-    async def lookup_due_calendar_runs(
+    async def lookup_calendar(
         self,
         *,
+        platform: str,
+        platform_channel_id: str,
+        platform_user_id: str,
+        channel_type: str,
         current_timestamp_utc: str,
         limit: int,
     ):
         _ = self
+        assert platform == ""
+        assert platform_channel_id == ""
+        assert platform_user_id == ""
+        assert channel_type == ""
         assert current_timestamp_utc
         assert limit == 5
-        return {"status": "empty", "items": [], "next_cursor": None}
+        return {
+            "status": "empty",
+            "panels": {
+                "cognition_pending_runs": {"items": [], "prompt_view": True},
+                "schedule_definitions": {"items": [], "prompt_view": False},
+                "due_runs": {"items": [], "prompt_view": False},
+            },
+            "next_cursor": None,
+        }
 
     class FakeKazusaClient:
         def __init__(self, *, base_url: str, timeout_seconds: float) -> None:
@@ -564,8 +602,9 @@ def test_web_api_outputs_for_logs_events_audit_character_and_debug_error(
     )
     monkeypatch.setattr(
         repository_module.ControlConsoleRepository,
-        "lookup_due_calendar_runs",
-        lookup_due_calendar_runs,
+        "lookup_calendar",
+        lookup_calendar,
+        raising=False,
     )
     monkeypatch.setattr(
         app_module,
@@ -618,7 +657,9 @@ def test_web_api_outputs_for_logs_events_audit_character_and_debug_error(
     assert background.status_code == 200
     background_payload = background.json()
     assert background_payload["status"] == "available"
-    assert background_payload["items"][0]["component"] == "background_work.worker"
+    assert background_payload["panels"]["worker_events"]["items"][0]["component"] == (
+        "background_work.worker"
+    )
     assert background_payload["next_cursor"] is None
 
     debug = client.post(
@@ -729,14 +770,17 @@ def test_background_lookup_reports_empty_and_unavailable(
 
     empty = client.get("/api/lookups/background?limit=5")
     assert empty.status_code == 200
-    assert empty.json()["status"] == "empty"
+    empty_payload = empty.json()
+    assert empty_payload["panels"]["worker_events"]["status"] == "empty"
 
     monkeypatch.setattr(app_module, "_read_kazusa_events", unavailable_events)
     unavailable = client.get("/api/lookups/background?limit=5")
     assert unavailable.status_code == 200
     payload = unavailable.json()
-    assert payload["status"] == "unavailable"
-    assert payload["items"][0]["event_type"] == "event_log.unavailable"
+    assert payload["panels"]["worker_events"]["status"] == "unavailable"
+    assert payload["panels"]["worker_events"]["items"][0]["event_type"] == (
+        "event_log.unavailable"
+    )
 
 
 def test_auth_optional_mode_and_invalid_hash_rejections(

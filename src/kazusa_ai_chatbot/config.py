@@ -163,6 +163,17 @@ def _non_empty_string_from_env(name: str, default: str) -> str:
     return value
 
 
+def _choice_from_env(name: str, default: str, allowed: set[str]) -> str:
+    """Read a string choice from the environment and fail fast if invalid."""
+
+    raw_value = os.getenv(name, default)
+    value = raw_value.strip().lower()
+    if value not in allowed:
+        allowed_text = ", ".join(sorted(allowed))
+        raise ValueError(f"{name} must be one of: {allowed_text}")
+    return value
+
+
 def _optional_http_url_from_env(name: str, default: str) -> str:
     """Read an optional HTTP(S) URL, stripping whitespace and trailing slashes."""
 
@@ -441,6 +452,13 @@ EMBEDDING_MODEL = os.environ["EMBEDDING_MODEL"]
 CHARACTER_GLOBAL_USER_ID = _non_empty_string_from_env(
     "CHARACTER_GLOBAL_USER_ID",
     "00000000-0000-4000-8000-000000000001",
+)
+AUDIT_LOG_TTL_DAYS = _positive_int_from_env("AUDIT_LOG_TTL_DAYS", "90")
+DEBUG_LOG_TTL_DAYS = _positive_int_from_env("DEBUG_LOG_TTL_DAYS", "14")
+LLM_TRACE_CAPTURE_MODE = _choice_from_env(
+    "LLM_TRACE_CAPTURE_MODE",
+    "metadata",
+    {"off", "metadata", "full"},
 )
 CONVERSATION_HISTORY_LIMIT = int(os.getenv("CONVERSATION_HISTORY_LIMIT", "10"))
 RAG_SEARCH_DEFAULT_TOP_K = _positive_int_from_env_alias(
