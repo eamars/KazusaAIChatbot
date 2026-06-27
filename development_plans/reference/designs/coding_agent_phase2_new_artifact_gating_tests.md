@@ -28,22 +28,21 @@ artifacts satisfy the requested behavior and preserve the Phase 2 architecture.
   the gate execution method.
 - Each E2E test function must call `coding_agent.propose_code_change(...)`,
   capture the raw response, preserve the role trace, and record the
-  materialized validation artifact paths for human inspection.
+  materialized review artifact paths for human inspection.
 - The pytest test body must not use deterministic semantic pass/fail criteria
   for artifact quality. It may fail only when the run cannot produce reviewable
   evidence, such as environment failure, exception, missing response, missing
   trace, missing artifact package, missing materialized artifact file, or real
   workspace mutation. The AI reviewer owns the quality judgment.
-- Do not add new generated-code execution or target-project command execution
-  in Phase 2. The known validation-time generated-code execution path is
-  recorded as Phase 2.5 security scope and does not block Phase 2 artifact
-  quality pass/fail.
+- Do not add generated-code execution, generated-test execution, validation
+  feedback loops, repair loops, or target-project command execution in Phase 2.
+  Phase 2 gates inspect generated artifacts as review packages only.
 - Do not require exact file names, exact function names, exact module layout,
   exact prose, exact decomposition, or exact implementation strategy.
 - Do not use keyword matching over user input to decide pass or fail.
 - The harness may enforce only evidence-collection and safety checks: request
   completed, trace exists, output is non-empty, artifact package exists,
-  materialized validation artifact files exist, public response is sanitized,
+  materialized review artifact files exist, public response is sanitized,
   and no real workspace mutation occurred. These checks prove the run is
   reviewable; they do not decide artifact quality.
 - The AI reviewer owns quality judgment. The reviewer reads the request,
@@ -51,9 +50,11 @@ artifacts satisfy the requested behavior and preserve the Phase 2 architecture.
 - Environment failure is failure. Failure to produce an answer is failure.
   Unrelated answers are failure. Incomplete output due to loop limits is
   failure. Output from the wrong workflow is failure.
-- Compilation is not required in Phase 2. However, obvious self-contradictory
-  code, missing artifact bodies, impossible imports between generated files, or
-  artifacts that cannot plausibly satisfy the request are AI-review failures.
+- Compilation is not required in Phase 2. Code-level mistakes are recorded in
+  the review comment and may still pass. Structural mistakes fail the gate:
+  missing artifact bodies, impossible artifact relationships, workflow output
+  that cannot be reviewed, or artifacts that cannot plausibly satisfy the
+  request.
 - The final review MUST be reviewed by human. At the end of each test, present
   the direct materialized artifact path to the human for evaluation.
 
@@ -90,9 +91,9 @@ required dimension to be acceptable.
 | Safety and privacy    | Output does not expose local roots, cache keys, secrets, raw traces, or unsupported execution claims. |
 | Loop outcome          | The run finishes within loop limits with a complete artifact package or a clear failure.              |
 
-Known validation-time generated-code execution is recorded as a Phase 2.5
-security finding. It does not fail a Phase 2 gate when the generated artifacts,
-workflow, public response, and artifact package otherwise satisfy this matrix.
+The reviewer must read the materialized artifact content and write a short
+review comment. A gate may pass with code mistakes when the output is sound,
+request-aligned, structurally coherent, and produced by the intended workflow.
 
 ## Gate 01 - Easy Single-File Utility
 

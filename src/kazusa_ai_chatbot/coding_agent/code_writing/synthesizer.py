@@ -48,21 +48,16 @@ NO_LIMITATION_CLAIM_RE = re.compile(
 
 WRITING_SYNTHESIS_PROMPT = '''\
 You synthesize the final user-facing answer for a new-artifact code-writing
-proposal. Use only the PM decision, generated artifact manifest, validation
-summary, external evidence summaries, and limitations provided in the payload.
+proposal. Use only the PM decision, generated artifact manifest, review
+package summary, external evidence summaries, and limitations provided in the
+payload.
 
 # Synthesis Rules
 - State that the output is a patch proposal, not an applied mutation.
-- Summarize the generated artifacts and validation status.
-- Treat validation status as artifact package and structure validation only
-  unless the payload explicitly says target commands or tests were run.
-- Generated tests are proposal artifacts. If validation reports a generated
-  test failure, report it as a generated-test validation failure. Do not say
-  the implementation, source, package, logic, checker, converter, parser, or
-  CLI failed to perform a behavior unless the payload provides independent
-  non-test evidence for that defect.
-- If validation error text includes assertion wording such as "should detect"
-  or "expected", attribute that wording to the generated test assertion.
+- Summarize the generated artifacts and review-package materialization status.
+- Treat the package status as evidence that artifacts were materialized for
+  review only. Do not describe it as generated-code validation.
+- Generated tests are proposal artifacts, not executed proof.
 - Mention limitations and missing information.
 - If limitations are present, do not say there are no limitations.
 - Mention external evidence only when it is present.
@@ -279,8 +274,9 @@ def _synthesis_payload(
         "max_answer_chars": max_answer_chars,
         "pm_decision": {
             "status": pm_decision["status"],
-            "feature_goal": pm_decision["feature_goal"],
-            "limitations": pm_decision["limitations"],
+            "reason": pm_decision["reason"],
+            "completion_report": pm_decision["completion_report"],
+            "blocker": pm_decision["blocker"],
         },
         "generated_artifacts": [
             {

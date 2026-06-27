@@ -16,6 +16,13 @@ WORKSPACE_ROOT = Path("test_artifacts/coding_agent_phase2_e2e_workspace")
 MAX_ANSWER_CHARS = 4000
 MAX_ARTIFACT_CHARS = 48000
 
+GATE_01_REQUEST = """Create a single Python command-line script that reads a plain text application
+log file and counts entries by severity. Each valid line starts with one of
+DEBUG, INFO, WARNING, ERROR, or CRITICAL followed by a space and the message.
+The script should print a terminal summary with one count per severity, report
+how many malformed lines were skipped, handle a missing input file clearly, and
+use only the Python standard library."""
+
 GATE_02_REQUEST = """Create a small Python utility that converts JSONL records into CSV. It should
 include a command-line script and focused tests. The CLI must accept input and
 output paths, an optional list of fields, preserve stable column order, write
@@ -42,6 +49,21 @@ with the inventory rows, and writes a consolidated CSV report. It should include
 a CLI, source modules, mocked HTTP tests, and a README that explains the input
 CSV columns and command workflow. The project may use only the Python standard
 library."""
+
+
+async def test_live_gate_01_single_file_log_counter() -> None:
+    """Run Gate 01 through the public coding-agent patch proposal interface."""
+
+    response = await _run_e2e_gate(
+        gate_id="gate_01",
+        request_text=GATE_01_REQUEST,
+        session_id="phase2_gate_01_log_counter",
+    )
+
+    _assert_reviewable_evidence(
+        gate_id="gate_01",
+        response=response,
+    )
 
 
 async def test_live_gate_02_jsonl_to_csv_cli_and_tests() -> None:
@@ -175,7 +197,7 @@ def _materialized_artifact_paths(
     gate_id: str,
     response: dict[str, Any],
 ) -> list[str]:
-    """Return direct validation-sandbox paths for generated artifact files."""
+    """Return direct review-package paths for generated artifact files."""
 
     validation_root = WORKSPACE_ROOT / gate_id / "writing_validation"
     candidate_roots = [

@@ -2,66 +2,59 @@
 
 ## Summary
 
-- Goal: implement Phase 2 as new-artifact `code_writing`: create new files,
-  scripts, tests, docs, or small projects from scratch, then materialize them
-  through the `code_patching` artifact boundary without mutating the caller
-  workspace.
-- Plan class: high_risk_migration. This replaces the previous Phase 2
-  existing-repository modification attempt with a narrower new-artifact scope
-  aligned to the coding-agent architecture.
-- Status: in_progress
+- Goal: implement Phase 2 as new-artifact code writing through the recursive PM
+  lifecycle architecture: each PM owns direct child lifecycle, may choose a child
+  PM or programmer, and grounds dependent instructions through
+  supervisor-mediated workspace facts.
+- Plan class: high_risk_migration.
+- Status: in_progress.
 - Mandatory skills: `development-plan`, `local-llm-architecture`,
   `no-prepost-user-input`, `py-style`, `test-style-and-execution`, and
   `debug-llm`.
-- Overall cutover strategy: bigbang inside Phase 2. Production code, prompts,
-  tests, fixtures, and docs move to one new-artifact role contract with no
-  compatibility layer for stale Phase 2 role shapes.
-- Highest-risk areas: local-LLM overloading, vague artifact contracts,
-  premature existing-source modification, weak role-level live LLM evidence,
-  patch/file-tree assembly errors, unsafe workspace mutation, and context
-  overflow under the 50k project cap.
-- Acceptance criteria: every Phase 2 LLM role has a live LLM diagnostic suite
-  generated from the five new-artifact hard gates; each role suite is run one
-  case at a time and reviewed before any E2E attempt; unresolved role
-  weaknesses block E2E; after role weaknesses are resolved, all five hard
-  Phase 2 new-artifact gates pass by agent-authored review. The known
-  validation-time generated-code execution issue is recorded as Phase 2.5
-  security scope and does not block Phase 2 artifact-quality signoff.
+- Overall cutover strategy: bigbang inside Phase 2. Replace the flattened
+  one-layer Writing PM flow with one canonical recursive PM contract.
+- Highest-risk areas: PM role drift, weak workspace-grounded feedback loop,
+  local-LLM inconsistency, premature E2E testing, boundary leakage between PMs
+  and programmers, and deterministic code making semantic decisions.
+- Acceptance criteria: PM role live LLM suites cover every supported PM action
+  for all five Phase 2 gates before downstream role work or E2E resumes; then
+  all five hard gates pass by agent-authored review.
 
 ## Context
 
-The previous Phase 2 attempt combined new-code generation and existing-source
-modification. Live E2E failures showed that this overloaded the local LLM with
-source ownership, lifecycle preservation, current-file grounding, new-file
-composition, patch materialization, and validation repair in one phase.
+Phase 2 is reset. Earlier Phase 2 progress used a flattened writing flow where
+one Writing PM emitted multiple artifact contracts and programmers generated
+artifacts independently. Live E2E failures showed a system failure: dependent
+files could disagree because the next instruction was made from plan memory or
+parallel contracts instead of actual workspace state.
 
-The architecture now separates the capabilities:
+The architecture reference now defines the stable rule:
 
-- `code_reading`: understand existing source.
-- `code_writing`: create new artifacts from scratch.
-- `code_modifying`: plan semantic changes to existing source files.
-- `code_patching`: materialize selected artifacts into a patch or file tree.
+- The top-level coding supervisor owns cross-domain workflow, the work ledger,
+  and calls to `code_reading`, `code_writing`, `code_patching`, external
+  evidence, and later execution.
+- A PM owns the semantic lifecycle of its direct children.
+- A PM may choose a child PM or one programmer as a direct child.
+- A PM manages only direct children.
+- A programmer receives one bounded implementation or reading contract and
+  returns one artifact or report.
+- When prior generated work or existing source affects the next child
+  instruction, the PM requests workspace facts through the supervisor. The
+  supervisor invokes `code_reading` and resumes the PM with compact
+  evidence-backed facts.
 
-The top-level coding supervisor owns the work ledger and can later interleave
-reading, writing, modifying, patching, external evidence, and execution. Phase
-2 implements only the new-artifact side of that architecture, plus the patching
-boundary needed to return proposed artifacts. Existing-source modification is
-assigned to a later `code_modifying` plan.
-
-Phase 2 returns proposed artifacts only. It does not apply patches, run target
-project commands, mutate real checkouts, or perform code execution.
-
-The current validation-time generated-code execution issue is excluded from
-Phase 2 pass/fail. It must be recorded as a Phase 2.5 security finding and
-must not be used as permission to add new execution, mutation, or command
-capabilities inside Phase 2.
+Phase 2 remains new-artifact writing only. It proposes artifacts and patch/file
+tree packages for human review; it does not apply patches, mutate caller
+workspaces, run project commands, execute generated tests, validate generated
+behavior, repair generated artifacts, or perform existing-source semantic
+modification.
 
 ## Mandatory Skills
 
-- `development-plan`: load before editing, approving, executing, reviewing, or
-  signing off this plan.
-- `local-llm-architecture`: load before changing role boundaries, prompts,
-  model calls, context packets, supervisor loops, or evaluator ownership.
+- `development-plan`: load before editing, executing, reviewing, or signing off
+  this plan.
+- `local-llm-architecture`: load before changing PM boundaries, prompts,
+  workflow loops, model calls, evaluator ownership, or context packets.
 - `no-prepost-user-input`: load before changing request interpretation,
   hard-gate loading, or any code that could keyword-route user input.
 - `py-style`: load before editing Python production files.
@@ -71,26 +64,21 @@ capabilities inside Phase 2.
 
 ## Mandatory Rules
 
-- After automatic context compaction, the active agent must reread this entire
-  plan before continuing implementation, verification, handoff, lifecycle
-  updates, or final reporting.
-- After signing off any major checklist stage, the active agent must reread
-  this entire plan before starting the next stage.
-- The user has explicitly prohibited Codex execution subagents for the current
-  Phase 2 work. Execute this plan single-agent unless the user later changes
-  that instruction.
-- Before final completion, lifecycle status changes, merge, or sign-off, run
-  the code-review gate defined by this plan and record the result in
-  `Execution Evidence`.
+- After automatic context compaction, reread this entire plan before continuing
+  implementation, verification, handoff, lifecycle updates, or final reporting.
+- After signing off any major checklist stage, reread this entire plan before
+  starting the next stage.
+- The user has prohibited Codex execution subagents for the current Phase 2
+  work. Execute this plan single-agent unless the user later changes that
+  instruction.
+- Quality, correctness, workflow shape, and role-boundary clarity outrank LLM
+  call count and latency.
 - Real LLM tests are the primary quality gates. Deterministic tests support
-  schema, parsing, filesystem safety, artifact validation, and wiring only.
-- No E2E hard-gate run may start until every LLM role suite generated from all
-  five hard gates has run one case at a time and produced an agent-authored
-  review that identifies role weaknesses, pass behavior, and unresolved
-  blockers.
-- E2E remains blocked while any role-level live LLM review has an unresolved
-  blocker weakness. Fix the smallest affected role contract first and rerun
-  only the affected role cases before reassessing E2E readiness.
+  schema, parsing, path safety, prompt caps, artifact package materialization,
+  and workflow transition enforcement only.
+- Do not run E2E hard gates until the PM role live LLM suite passes every
+  supported PM function for all five gates and the agent records at least 90%
+  readiness confidence from role-level evidence.
 - Do not batch live LLM tests. Run one live LLM case, inspect its trace, write
   or update the review artifact, then decide the next run.
 - Do not encode hard-gate keywords, repository names, expected files, expected
@@ -98,73 +86,62 @@ capabilities inside Phase 2.
   deterministic routing, deterministic pass/fail logic, or non-live tests.
 - Hard-gate challenge text may appear only in the supporting gate document,
   allowed live-gate fixtures, raw traces, and agent-authored review artifacts.
-- LLM stages own semantic judgment. Deterministic code owns validation,
-  persistence, limits, path safety, prompt budget caps, patch parsing,
-  sandboxing, public-output redaction, and file mechanics.
-- Deterministic evaluators may reject missing required fields, invalid Python
-  signatures, path leaks, prompt-budget overflow, unsafe paths, malformed
-  artifacts, and impossible handoff shapes. They must not use user-input
-  keyword matching to decide semantic pass/fail.
-- The top-level coding supervisor owns cross-domain dispatch and loop memory.
-  `code_writing` may return `need_external_evidence`; the supervisor performs
-  that call and resumes writing with bounded evidence.
-- `code_writing` must not modify existing source files in Phase 2. Requests
-  that require existing-source semantic edits must be reported as requiring
-  `code_modifying`.
-- Programmers never receive peer programmer output. A programmer receives one
-  local new-artifact contract and returns one implementation artifact for that
-  contract.
+- LLM stages own semantic judgment. Deterministic code owns persistence,
+  limits, path safety, prompt budget caps, patch parsing, review-package
+  materialization, public-output redaction, and file mechanics.
+- Deterministic code must enforce workflow transitions and role-boundary shape.
+  It must not decide semantic decomposition, file purpose, feature design,
+  child PM need, or programmer task meaning.
+- A PM manages direct children only. A parent PM may create a child PM task or
+  one programmer task. It must not manage descendants owned by a child PM.
+- A PM may send a programmer task only when it can provide one complete bounded
+  implementation contract from supervisor-approved facts.
+- A dependent child instruction must be grounded in actual workspace or artifact
+  facts when prior generated work affects the instruction. Those facts come
+  through supervisor-mediated `code_reading`, not from stale plan memory.
+- Programmers never receive raw peer output. They receive one PM-approved
+  contract and return one implementation artifact.
 - The replacement design must stay within the 50k context cap. Each role input
   must have a prompt-budget report and must fail closed before invoking the LLM
   when over the hard cap.
 
 ## Must Do
 
-- Update the architecture, code-writing ICD, production contracts, prompts,
-  fixtures, and tests to make Phase 2 `code_writing` a new-artifact capability.
-- Keep the top-level supervisor as the only owner of interleaving. Workers
-  return needs and artifacts; workers do not call other workers directly.
-- Implement or keep a `code_patching` boundary sufficient to materialize
-  new-file artifacts as a file tree or patch proposal.
-- Remove stale Phase 2 role shapes that assign existing-source modification to
-  `code_writing`.
-- Define a Writing PM contract that emits new-artifact work items with purpose,
-  file kind, imports, provided interfaces, consumed interfaces, required
-  behavior, and artifact format.
-- Define a Writing programmer contract that accepts exactly one new-artifact
-  work item and returns exactly one fenced code or text artifact.
-- Define a Patching worker contract that accepts selected new artifacts plus
-  File Agent path reservations and returns one artifact package.
-- Define an acceptance owner that preserves user-visible requirements before
-  artifact decomposition.
-- Define an alignment owner that compares generated artifacts against the
-  preserved requirements before synthesis and feeds blocker feedback back to
-  the Writing PM.
-- Generate full role-level live LLM suites from every Phase 2 hard gate before
-  any E2E run.
-- Run role-level live LLM suites first, one case at a time, and write
-  agent-authored review artifacts that highlight weaknesses.
-- Block E2E until all role-level live LLM blocker weaknesses are resolved or
-  explicitly accepted by the user.
-- Preserve real-workspace immutability: Phase 2 proposes artifacts only.
-- Preserve anti-cheat guardrails and run static checks before signoff.
+- Align Phase 2 code-writing docs, production contracts, prompts, tests, and
+  review artifacts with the recursive PM lifecycle architecture.
+- Define the PM external input/output contract now. PM internals may remain a
+  mono LLM call in Phase 2, but the external PM boundary must support later
+  internal PM clustering without changing callers.
+- Implement PM outputs for these Phase 2 supported actions:
+  `request_information`, `create_child_pm`, `create_programmer_task`,
+  `complete`, and `blocked`.
+- Implement deterministic validation for PM action shape, direct-child
+  boundaries, prompt caps, and required workspace-fact grounding before
+  dependent child instructions.
+- Build a large PM-focused live LLM suite from all five Phase 2 hard gates.
+  The suite must cover child-type choice, child PM instruction, programmer
+  instruction, information request, direct report handling, completion, and
+  blocked output.
+- Run PM live LLM tests one case at a time and record human-readable
+  input/output, trace path, model route, thinking setting, review judgment, and
+  failure mode.
+- Keep Phase 2 new-artifact only. Existing-source semantic changes remain
+  outside this phase.
 
 ## Deferred
 
-- Do not implement `code_modifying` or existing-source semantic edits in Phase
-  2.
-- Do not implement Phase 5 code execution, command execution, package install,
-  Docker execution, or target-project test execution.
-- Do not apply patches to the real workspace or fetched checkout.
-- Do not connect Phase 2 to Kazusa runtime, background work, L2d, action spec,
-  adapters, dispatcher, scheduler, persistence, or consolidation.
-- Do not add compatibility shims for old Phase 2 role names, old role
-  contracts, or old programmer input shapes.
-- Do not run E2E to validate small prompt or contract edits while role-level
-  confidence remains below 90%.
-- Do not remediate the known generated-code execution security gap in Phase 2;
-  record it for Phase 2.5 and continue judging Phase 2 gates on
-  new-artifact workflow and artifact quality.
+- Do not implement existing-source semantic modification in Phase 2.
+- Do not add patch apply, command execution, package installation, or project
+  test execution in Phase 2.
+- Do not enable generated-artifact validation execution or repair loops in
+  Phase 2. Validation and repair are later-phase responsibilities.
+- Do not create compatibility shims for the flattened Writing PM contract.
+- Do not add direct worker-to-worker calls. Cross-domain needs go through the
+  top-level supervisor.
+- Do not expand PM internals into a cluster in Phase 2 unless the mono PM live
+  LLM suite proves the external PM contract is stable and the user approves a
+  separate implementation change.
+- Do not run E2E as a component-debug shortcut.
 
 ## Cutover Policy
 
@@ -172,499 +149,389 @@ Overall strategy: bigbang
 
 | Area | Policy | Instruction |
 |---|---|---|
-| Active Phase 2 plan | bigbang | Use this new-artifact plan as the only active Phase 2 execution contract. |
-| Role contracts | bigbang | Replace stale existing-source modification contracts with new-artifact writing contracts. |
-| Prompts | bigbang | Rewrite prompt wording to match the new-artifact role contracts. |
-| Tests | bigbang | Replace stale role fixtures and E2E gates with new-artifact live LLM suites and bounded deterministic support checks. |
-| E2E gates | gated | E2E runs only after role-level live LLM suites are reviewed and unresolved blockers are closed. |
+| Phase 2 PM contract | bigbang | Replace flattened artifact-list PM output with recursive PM lifecycle output. |
+| Prompts | bigbang | Rewrite prompts to the PM action contract and remove stale one-layer wording. |
+| Deterministic checks | bigbang | Check PM action shape, direct-child boundaries, prompt caps, and workspace-fact requirements. |
+| Tests | bigbang | Replace stale role/E2E assumptions with PM-first live LLM role suites and supporting deterministic checks. |
+| E2E gates | gated | E2E remains blocked until PM role suites and then downstream role suites meet readiness rules. |
 
 ## Cutover Policy Enforcement
 
-- The active agent must follow the selected policy for each area.
-- For bigbang areas, delete or rewrite stale references instead of preserving
-  old call shapes.
-- Any compatibility layer, alias module, fallback mapper, or old-role
-  translation bridge requires explicit user approval before implementation.
+- Follow the selected policy for each area.
+- If an area is `bigbang`, delete or rewrite legacy references instead of
+  preserving them.
+- Do not choose compatibility by default.
+- Any change to a cutover policy requires user approval before implementation.
 
 ## Target State
 
-The Phase 2 direct flow is:
-
-```text
-Coding supervisor
--> optional Phase 0 fetch to establish source identity or workspace safety
--> acceptance owner preserves user-visible requirements
--> code_writing PM creates new-artifact plan
--> File Agent reserves and validates new artifact paths
--> handoff evaluator validates each new-artifact contract
--> Writing programmer writes one artifact per accepted contract
--> Writing PM reconciles generated artifacts
--> code_patching materializes selected artifacts
--> Structural validator checks artifact package
--> alignment owner checks generated artifacts against preserved requirements
--> local repair loop or synthesis
--> CodingPatchProposalResponse
+```mermaid
+flowchart TD
+    U[User write request] --> S[Top-level coding supervisor]
+    S --> L[Work ledger]
+    L --> W[code_writing]
+    W --> PM[PM role: one assigned work item]
+    PM -->|request_information| L
+    L --> R[code_reading]
+    R --> WF[Workspace facts]
+    WF --> PM
+    PM -->|create_child_pm| CPM[Child PM]
+    CPM --> CPR[Child PM report]
+    CPR --> PM
+    PM -->|create_programmer_task| P[Programmer]
+    P --> A[One artifact]
+    A --> PM
+    PM -->|complete| PK[code_patching]
+    PK --> OUT[Patch or file-tree proposal]
+    OUT --> L
 ```
 
-The top-level supervisor owns the work ledger. The Writing PM owns the
-new-artifact feature picture. The acceptance and alignment owners preserve and
-check user-visible requirements. Each Writing programmer owns only the
-implementation behind one accepted new-artifact contract. The Patching worker
-owns file-tree or patch materialization.
+The PM role is an external boundary. In Phase 2 it may be implemented as one
+LLM call per PM decision. Later internal PM clustering must preserve the same
+external input/output contract.
 
 ## Design Decisions
 
 | Topic | Decision | Rationale |
 |---|---|---|
-| Phase 2 capability | `code_writing` creates new artifacts only | This isolates the part local LLMs can learn first. |
-| Existing-source edits | Assign to later `code_modifying` | Existing lifecycle preservation caused repeated Phase 2 failure. |
-| Interleaving | Top-level supervisor owns the work ledger | Mixed future requests need reading, writing, modifying, patching, and evidence in one controlled loop. |
-| Patching | Keep a separate `code_patching` boundary | Artifact materialization is file mechanics, not feature semantics. |
-| Programmer context | One new-artifact contract per programmer | Prevents peer-output dependency and context overload. |
-| Role testing | Derive every LLM role suite from every hard gate | Role weakness must be visible before expensive E2E attempts. |
-| E2E policy | Block E2E until role suites are reviewed and blockers resolved | Prevents E2E thrashing as component validation. |
+| PM hierarchy | PM recursively chooses direct child type | Fixed layer counts either overload small tasks or underfit larger tasks. |
+| PM ownership | PM owns direct child lifecycle only | Keeps boundaries clear and prevents parent PMs from managing descendant details. |
+| Workspace grounding | Dependent child instructions require supervisor-approved workspace facts | Prevents source/test or file/file disagreement caused by stale plan memory. |
+| Supervisor role | Supervisor dispatches workflows and records the ledger | Semantic decomposition stays inside PM roles. |
+| Phase 2 scope | New-artifact writing only | Existing-source modification remains a separate capability. |
+| Testing priority | PM live LLM suite first | PM consistency is the main blocker before downstream roles and E2E can be useful. |
 
 ## Contracts And Data Shapes
 
-### Supervisor Work Item
+### PM Input
 
 ```python
 {
-    "work_item_id": str,
-    "kind": "new_artifact",
-    "user_goal": str,
-    "evidence_summary": list[dict],
-    "external_evidence": list[dict],
-    "session_summary": dict,
+    "pm_id": str,
+    "domain": "reading | writing | modifying",
+    "work_item": {
+        "goal": str,
+        "scope": str,
+        "constraints": list[str],
+        "expected_result": str,
+    },
+    "available_facts": list[dict],
+    "direct_child_reports": list[dict],
+    "child_feedback": list[dict],
+    "context_limits": dict,
 }
 ```
 
-### Writing PM Decision
+`available_facts` may contain only upstream PM reports, direct child reports,
+File Agent facts, external evidence summaries, or supervisor-mediated
+`code_reading` facts.
+
+### PM Output
 
 ```python
 {
-    "status": "need_programmers | need_external_evidence | sufficient | rejected",
-    "feature_goal": str,
-    "artifact_items": [
-        {
-            "artifact_id": str,
-            "file_label": str,
-            "file_kind": "source" | "test" | "docs" | "config" | "data",
-            "content_format": "python" | "markdown" | "text" | "json" | "csv",
-            "purpose": str,
-            "imports": list[str],
-            "provided_interfaces": list[dict],
-            "consumed_interfaces": list[dict],
-            "required_behavior": list[str],
-        }
-    ],
-    "selected_artifacts": list[dict],
-    "external_evidence_requests": list[dict],
-    "limitations": list[str],
+    "status": "request_information | create_child_pm | create_programmer_task | complete | blocked",
+    "reason": str,
+    "information_request": dict | None,
+    "child_pm_task": dict | None,
+    "programmer_task": dict | None,
+    "completion_report": dict | None,
+    "blocker": dict | None,
 }
 ```
 
-### Writing Programmer Contract
+Exactly one action payload must be populated for the selected `status`.
+
+### Information Request
 
 ```python
 {
-    "artifact_id": str,
-    "file_label": str,
-    "file_kind": "source" | "test" | "docs" | "config" | "data",
-    "content_format": "python" | "markdown" | "text" | "json" | "csv",
-    "purpose": str,
-    "imports": list[str],
-    "provided_interfaces": list[dict],
-    "consumed_interfaces": list[dict],
+    "request_id": str,
+    "needed_facts": list[str],
+    "target_artifacts": list[str],
+    "reason_for_next_instruction": str,
+}
+```
+
+The supervisor maps this to `code_reading` or external evidence and resumes the
+PM with compact facts.
+
+### Child PM Task
+
+```python
+{
+    "child_pm_id": str,
+    "domain": "reading | writing | modifying",
+    "goal": str,
+    "scope": str,
+    "constraints": list[str],
+    "expected_report": list[str],
+}
+```
+
+### Programmer Task
+
+```python
+{
+    "task_id": str,
+    "artifact_purpose": str,
     "required_behavior": list[str],
+    "provided_interfaces": list[str],
+    "consumed_interfaces": list[str],
+    "imports": list[str],
+    "output_format": str,
 }
 ```
 
-The Writing programmer returns exactly one fenced code block or text block
-containing the requested artifact. It does not return JSON, diffs, file paths,
-patch anchors, command results, or peer-output commentary.
+For Phase 2 writing, one programmer task produces one new artifact.
 
-### Patching Input
+### PM Report
 
 ```python
 {
-    "artifact_package_id": str,
-    "artifacts": list[dict],
-    "reserved_paths": list[dict],
-    "max_artifact_chars": int,
-}
-```
-
-### Patching Output
-
-```python
-{
-    "status": "succeeded | failed | rejected",
-    "artifact_package": dict,
-    "created_files": list[str],
-    "changed_files": list[str],
-    "diagnostics": list[str],
-}
-```
-
-For Phase 2, `changed_files` is empty unless the path describes generated
-artifact metadata inside the managed proposal package.
-
-### AI Review Packet And Phase 3 Feedback Shape
-
-Each hard gate produces a review packet. Phase 2 records this feedback; Phase
-3 may attach the same shape to background-work integration and result-ready
-delivery.
-
-```python
-{
-    "gate_id": str,
-    "difficulty": "easy | low_medium | medium | medium_hard | hard",
-    "input_request": str,
-    "workflow_trace": {
-        "supervisor_steps": list[dict],
-        "worker_calls": list[dict],
-        "role_outputs": list[dict],
-        "validation_summaries": list[dict],
-        "loop_limit_reached": bool,
-    },
-    "artifact_manifest": {
-        "created_files": list[str],
-        "changed_files": list[str],
-        "artifact_count": int,
-        "artifact_package_path": str,
-    },
-    "ai_review": {
-        "status": "pass | fail",
-        "pass_confidence": "high | medium | low",
-        "workflow_correct": bool,
-        "request_satisfied": bool,
-        "artifact_completeness": "complete | partial | missing",
-        "phase3_feedback": list[dict],
-        "blocking_failures": list[str],
-        "acceptable_variations": list[str],
-    },
-}
-```
-
-`phase3_feedback` is the planned feedback bridge for later integration. Each
-entry names the failing stage and the kind of repair the supervisor should
-schedule:
-
-```python
-{
-    "stage": "supervisor | writing_pm | writing_programmer | patching_worker | structural_validator | synthesizer",
-    "failure_type": "wrong_workflow | missing_artifact | incomplete_behavior | inconsistent_interfaces | unsafe_output | loop_limit | unclear_final_answer",
-    "feedback": str,
-    "suggested_next_step": "rerun_same_stage | ask_for_external_evidence | repair_artifact_contract | repair_generated_artifact | repair_patch_package | fail_request",
+    "pm_id": str,
+    "status": "complete | blocked",
+    "provided_facts": list[str],
+    "created_artifacts": list[dict],
+    "consumed_facts": list[str],
+    "open_risks": list[str],
+    "next_dependency_needs": list[str],
 }
 ```
 
 ## LLM Call And Context Budget
 
-Assume a 50k-token project cap. Use conservative character estimates when an
-exact tokenizer is unavailable.
-
 | Role | Route | Context inputs | Cap rule |
 |---|---|---|---|
-| Top-level coding supervisor | `CODING_AGENT_PM_LLM` | user goal, work ledger, compact evidence state, validation summary | fail closed before invoke if over hard cap |
-| Writing PM | `CODING_AGENT_PM_LLM` | one new-artifact work item, external evidence, validation feedback | owns new-artifact decomposition |
-| Acceptance owner | `CODING_AGENT_PM_LLM` | original user request | preserves user-visible requirements before decomposition |
-| Alignment owner | `CODING_AGENT_PM_LLM` | original user request, preserved criteria, PM decision, generated artifacts, structural validation | checks final artifact/request alignment |
-| Writing programmer | `CODING_AGENT_PROGRAMMER_LLM` | one accepted new-artifact contract | no peer output, no repository source dump |
+| Top-level coding supervisor | `CODING_AGENT_PM_LLM` | user goal, work ledger, compact evidence state, review package summary | fail closed before invoke if over hard cap |
+| PM role | `CODING_AGENT_PM_LLM` | one PM input packet, direct child reports, supervisor-approved facts, direct child feedback | fail closed before invoke if over hard cap |
+| Programmer | `CODING_AGENT_PROGRAMMER_LLM` | one accepted programmer task | no peer output, no raw workspace dump |
 | Patching worker | `CODING_AGENT_PROGRAMMER_LLM` | selected generated artifacts, reserved paths, artifact caps | no feature semantics beyond assembly |
-| Synthesizer | `CODING_AGENT_PM_LLM` | selected artifacts, validation summary, public-safe limitations | no code repair |
+| Synthesizer | `CODING_AGENT_PM_LLM` | selected artifacts, review package summary, public-safe limitations | no code repair |
 
-Role-suite live LLM tests must record model route, model name, thinking state,
-prompt version, input size, and output size.
+Use a 50k context cap. PM role tests must record approximate prompt character
+size, model route, model name, thinking setting, and output size.
 
 ## Change Surface
 
 ### Modify
 
-- `development_plans/reference/designs/coding_agent_architecture.md`: align the
-  reference architecture with supervisor-owned interleaving and the split
-  between `code_writing`, `code_modifying`, and `code_patching`.
+- `development_plans/reference/designs/coding_agent_architecture.md`: source of
+  truth for recursive PM lifecycle and supervisor-mediated workspace grounding.
+- `development_plans/active/short_term/coding_agent_phase2_code_writing_plan.md`:
+  reset Phase 2 around the recursive PM contract.
 - `src/kazusa_ai_chatbot/coding_agent/code_writing/README.md`: update the ICD
-  so Phase 2 writing means new-artifact generation.
-- `src/kazusa_ai_chatbot/coding_agent/code_writing/models.py`: replace stale
-  existing-source module contracts with new-artifact contracts.
-- `src/kazusa_ai_chatbot/coding_agent/code_writing/product_manager.py`: make
-  the Writing PM emit `WritingPMDecision.artifact_items`.
-- `src/kazusa_ai_chatbot/coding_agent/code_writing/acceptance.py`: preserve
-  acceptance criteria and judge generated artifact alignment through PM-route
-  LLM calls.
-- `src/kazusa_ai_chatbot/coding_agent/code_writing/programmer.py`: align prompt
-  and parser to the one-artifact contract.
-- `src/kazusa_ai_chatbot/coding_agent/code_writing/supervisor.py`: wire the
-  new-artifact writing flow, File Agent reservation, patching boundary,
-  validation, and bounded repair loop.
-- `tests/test_coding_agent_phase2_new_artifact_contracts.py`: focused
-  deterministic support checks for Writing PM parsing, one-artifact programmer
-  parsing, new-file artifact package materialization, public redaction, and
-  existing-source edit rejection.
-- `tests/test_coding_agent_phase2_new_artifact_role_live_llm.py`: one
-  real-LLM role case per test function for Writing PM, Writing programmer,
-  Patching worker, and Synthesizer role suites. Supervisor chaining is reserved
-  for E2E.
-- `tests/test_coding_agent_phase2_new_artifact_e2e_live_llm.py`: one real-LLM
-  E2E gate per test function through `coding_agent.propose_code_change(...)`.
-- `test_artifacts/live_gate/`: replace stale existing-repo Phase 2 hard gates
-  with the five new-artifact hard gates from
-  `development_plans/reference/designs/coding_agent_phase2_new_artifact_gating_tests.md`.
-- `test_artifacts/llm_reviews/`: write new live LLM role and E2E review
-  artifacts.
+  to match the PM lifecycle and workspace-grounding loop.
+- `src/kazusa_ai_chatbot/coding_agent/code_writing/models.py`: replace flattened
+  PM artifacts with PM action contracts.
+- `src/kazusa_ai_chatbot/coding_agent/code_writing/product_manager.py`: update
+  PM prompt, parsing, review payloads, and action handling.
+- `src/kazusa_ai_chatbot/coding_agent/code_writing/supervisor.py`: enforce PM
+  lifecycle transitions and supervisor-mediated information requests.
+- `tests/test_coding_agent_phase2_new_artifact_contracts.py`: deterministic
+  support checks for PM action shapes and transition rules.
+- `tests/test_coding_agent_phase2_new_artifact_role_live_llm.py`: PM-first live
+  LLM role cases from all five gates, after the old flattened role cases are
+  refreshed.
+- `test_artifacts/llm_reviews/`: PM role and later E2E review artifacts.
+
+### Create
+
+- `tests/test_coding_agent_pm_lifecycle_role_live_llm.py`: focused live LLM PM
+  feasibility suite for the recursive PM lifecycle contract.
 
 ### Keep
 
-- Phase 0 fetching public contract.
-- Phase 1 reading public contract.
-- Existing local LLM route names:
-  `CODING_AGENT_PM_LLM` and `CODING_AGENT_PROGRAMMER_LLM`.
-- Real-workspace immutability.
-
-### Deferred Change Surface
-
-- `code_modifying` production package and prompts.
-- Existing-source owner selection.
-- Existing-file patch anchor selection beyond the generic patching boundary.
-- Target-project command execution.
-- Background-worker integration.
+- `code_fetching` and `code_reading` public contracts, except for using
+  `code_reading` as the supervisor-mediated workspace-fact provider.
+- Phase 2.5 security boundary as the owner of execution and real-world tool
+  isolation.
+- The five Phase 2 hard gates in
+  `development_plans/reference/designs/coding_agent_phase2_new_artifact_gating_tests.md`.
 
 ## Overdesign Guardrail
 
-- Actual problem: Phase 2 failed because it asked local LLMs to create new code
-  and safely modify complex existing repositories in the same phase.
-- Minimal change: narrow Phase 2 to new-artifact writing and keep supervisor
-  interleaving in the architecture for later mixed work.
-- Ownership boundaries: supervisor owns the work ledger; Writing PM owns
-  new-artifact decomposition; Writing programmer owns one artifact body;
-  Patching worker owns materialization; deterministic code owns validation and
-  path safety.
-- Rejected complexity: existing-source semantic edits, source-owner PM,
-  lifecycle-preserving modifications, execution feedback, patch apply, hidden
-  compatibility mappers, and direct worker-to-worker calls.
-- Evidence threshold: add `code_modifying` only after Phase 2 new-artifact
-  gates pass and a later plan defines role-level live LLM tests for
-  existing-source change contracts.
+- Actual problem: Phase 2 failed because dependent writing instructions were
+  created without a stable PM lifecycle boundary and without mandatory
+  workspace-grounded feedback.
+- Minimal change: replace the PM contract and tests first, then rewire Phase 2
+  to enforce recursive PM decisions and supervisor-mediated readback.
+- Ownership boundaries: supervisor owns cross-domain dispatch and ledger; PM
+  owns direct child lifecycle; `code_reading` owns workspace facts; programmer
+  owns one artifact; deterministic code owns transition checks and
+  materialization boundaries
+  enforcement.
+- Rejected complexity: PM internal cluster implementation, existing-source
+  modification, execution feedback, patch apply, compatibility mappers,
+  direct worker-to-worker calls, and E2E-driven prompt tuning.
+- Evidence threshold: PM internal clustering or additional roles require
+  PM-suite evidence showing the mono PM cannot consistently satisfy the stable
+  external PM contract.
 
 ## Agent Autonomy Boundaries
 
-- The active agent may choose local implementation mechanics only when they
-  preserve the contracts in this plan.
-- The active agent must not introduce new architecture, alternate migration
-  strategies, compatibility layers, fallback paths, or extra features.
-- The active agent must not perform unrelated cleanup, formatting churn,
-  dependency upgrades, prompt rewrites, or broad refactors unless explicitly
-  listed in Must Do or Change Surface.
-- If the plan and code disagree, the active agent must preserve the plan's
-  stated intent and report the discrepancy.
-- If a required instruction is impossible, the active agent must stop and
-  report the blocker instead of inventing a substitute.
+- The responsible agent may choose local implementation mechanics only when
+  they preserve this plan's contracts.
+- The responsible agent must not introduce alternate architecture,
+  compatibility layers, fallback paths, extra features, or unrelated cleanup.
+- The responsible agent must treat changes outside `coding_agent` Phase 2 as
+  high-scrutiny changes and justify them in `Execution Evidence`.
+- The responsible agent must not perform production-code edits unless the user
+  has explicitly commanded implementation work.
+- If the plan and code disagree, preserve the plan's stated intent and report
+  the discrepancy.
+- If a required instruction is impossible, stop and report the blocker instead
+  of inventing a substitute.
 
 ## Implementation Order
 
-1. Reread this plan, the architecture reference, and the code-writing ICD.
-2. Update the code-writing ICD and production data contracts to the
-   new-artifact shapes.
-3. Update Writing PM prompt and parser.
-4. Update Writing programmer prompt and parser.
-5. Update File Agent and patching boundary only as needed for new-file
-   artifact reservation and materialization.
-6. Update supervisor wiring so `code_writing` handles new artifacts and returns
-   existing-source edit requests as requiring `code_modifying`.
-7. Replace stale deterministic support tests.
-8. Build role-level live LLM fixtures from the five hard gates.
-9. Run role-level live LLM tests one case at a time and record reviews.
-10. Run E2E hard gates only after role-level confidence is at least 90%.
-11. Run static checks, deterministic support checks, anti-cheat greps, and
-    independent code review.
+1. Reread the architecture reference, this plan, the code-writing ICD, and the
+   supporting gate document.
+2. Update the code-writing ICD to the recursive PM lifecycle contract.
+3. Replace production PM data shapes, prompt, parser, and supervisor handling
+   with the PM action contract.
+4. Add deterministic support checks for PM action parsing, direct-child
+   boundaries, prompt caps, and workspace-fact transition enforcement.
+5. Build the PM-focused live LLM suite from all five hard gates.
+6. Run PM live LLM tests one case at a time, inspect each trace, and record
+   PM-specific RCA for failures.
+7. Only after PM role evidence reaches at least 90% readiness, update and
+   rerun downstream role suites affected by the new PM contract.
+8. Only after all role suites are reviewed and unresolved blockers are closed,
+   run E2E hard gates one at a time.
+9. Run static checks, deterministic support checks, anti-cheat greps, and final
+   independent code review before sign-off.
 
 ## Execution Model
 
-- Execute this plan single-agent because the user explicitly prohibited Codex
-  execution subagents for the current Phase 2 work.
-- The active agent owns orchestration, test code, verification, execution
-  evidence, review feedback remediation, lifecycle updates, and final sign-off.
-- The active agent establishes focused deterministic support checks and
-  role-level live LLM fixtures before production implementation.
-- The active agent runs live LLM tests one case at a time and inspects output
-  before the next live call.
-- The active agent performs independent code review from a fresh-review
-  posture after verification passes, unless the user later approves a separate
-  reviewer.
+- Single active agent owns orchestration, implementation, test code,
+  verification, execution evidence, review feedback remediation, lifecycle
+  updates, and final sign-off because the user prohibited subagents.
+- Establish or update focused PM role tests before production implementation.
+- Run live LLM tests one case at a time and inspect output before the next live
+  call.
+- Stop before E2E if PM role confidence is below 90% or any role-level blocker
+  remains unresolved.
 
 ## Progress Checklist
 
-- [x] Stage 1 - architecture and plan alignment
-  - Covers: architecture reference, this plan, registry consistency.
-  - Verify: static grep for stale role wording in architecture and plan.
-  - Evidence: record changed docs and grep results in `Execution Evidence`.
-  - Sign-off: after verification and evidence are recorded.
-- [x] Stage 2 - new-artifact contracts and ICD
-  - Covers: `code_writing/README.md`, models, PM contract, programmer contract,
-    patching boundary contract.
-  - Verify: `venv\Scripts\python -m pytest -q tests/test_coding_agent_phase2_new_artifact_contracts.py`
-    and `venv\Scripts\python -m compileall -q src/kazusa_ai_chatbot/coding_agent`.
-  - Evidence: record changed files and test output.
-  - Sign-off: after verification and evidence are recorded.
-- [x] Stage 3 - prompt and supervisor wiring
-  - Covers: Writing PM prompt, Writing programmer prompt, supervisor work flow,
-    File Agent reservation, patching boundary.
-  - Verify: rerun `venv\Scripts\python -m pytest -q tests/test_coding_agent_phase2_new_artifact_contracts.py`.
-  - Evidence: record commands and outputs.
-  - Sign-off: after verification and evidence are recorded.
-- [x] Stage 4 - role-level live LLM suite
-  - Covers: five hard-gate-derived role suites for Writing PM, Writing
-    programmer, Patching worker, and Synthesizer.
-  - Boundary: supervisor orchestration is not a role-level live LLM case
-    because it chains multiple roles. Supervisor handoff remains covered by
-    deterministic support checks and Stage 5 E2E.
-  - Verify: run one live case at a time and write agent-authored review rows.
-  - Evidence: raw traces and review artifact paths.
-  - Sign-off: only when unresolved blocker weaknesses are closed.
-  - Current state: expanded after E2E risk review; six new role cases were run
-    one at a time and reviewed. One PM contract-shape failure was fixed with a
-    general prompt rule, then rerun successfully. Current review:
-    `test_artifacts/llm_reviews/coding_agent_phase2_new_artifact_role_review.md`.
+- [x] Stage 1 - architecture, ICD, and plan alignment
+  - Covers: architecture reference, code-writing ICD, this reset plan.
+  - Verify: stale flattened PM wording grep.
+- [x] Stage 2 - PM contracts and deterministic transition checks
+  - Covers: models, PM parser, supervisor lifecycle transitions, support tests.
+  - Verify: deterministic contract tests and compile check.
+- [x] Stage 3 - PM prompt and PM live LLM suite
+  - Covers: PM prompt, PM-focused live fixtures, review artifact format.
+  - Verify: collect live role tests and run PM cases one at a time.
+- [x] Stage 4 - downstream role contract refresh
+  - Covers: programmer, patching, synthesizer, and alignment impacts from PM
+    contract changes.
+  - Verify: affected role suites rerun one case at a time.
 - [ ] Stage 5 - E2E hard gates
-  - Covers: five Phase 2 new-artifact hard gates through
-    `coding_agent.propose_code_change(...)`.
-  - Verify: run one E2E live gate at a time after Stage 4 reaches at least 90%
-    confidence.
-  - Evidence: raw traces, console logs, and agent-authored E2E review.
-  - Sign-off: only when all five gates pass by agent-authored review.
+  - Covers: five Phase 2 gates through `coding_agent.propose_code_change(...)`.
+  - Verify: run one E2E live gate at a time only after role readiness.
 - [ ] Stage 6 - final verification and independent code review
-  - Covers: deterministic support tests, anti-cheat greps, stale-vocabulary
-    greps, diff review, and final plan evidence.
-  - Verify: all listed verification gates pass and review has no unresolved
-    blockers.
-  - Evidence: record findings, fixes, reruns, residual risks, and approval.
-  - Sign-off: after review and evidence are recorded.
+  - Covers: deterministic checks, anti-cheat greps, diff review, evidence, and
+    final sign-off.
 
 ## Verification
 
 ### Static Greps
 
-- `rg "Source Ownership PM|symbols_to_modify|existing_source_anchors|Module PM|Module programmer" src/kazusa_ai_chatbot/coding_agent tests test_artifacts/live_gate`
-  - Expected: zero matches outside archived/superseded historical artifacts.
-- `rg "code_modifying" src/kazusa_ai_chatbot/coding_agent tests`
-  - Expected: matches only where Phase 2 returns or records that
-    existing-source modification is a separate capability.
-- Anti-cheat grep for hard-gate terms:
-  - Expected: no matches in production code, runtime prompts, deterministic
-    pass/fail logic, or non-live tests.
-  - Allowed: the supporting gate document, live-gate fixtures, raw LLM traces,
-    and LLM review artifacts.
+- `rg "artifact_items|Writing PM creates new-artifact plan|one Writing programmer|Module PM|Source Ownership PM" src/kazusa_ai_chatbot/coding_agent tests development_plans/reference/designs/coding_agent_architecture.md`
+  - Expected: zero matches.
+- Anti-cheat grep for the five gate challenge-specific names across production
+  code, runtime prompts, deterministic pass/fail logic, and non-live tests.
+  Challenge text is allowed only in the supporting gate document, live fixtures,
+  raw traces, and review artifacts.
 
 ### Deterministic Support Checks
 
 - `venv\Scripts\python -m pytest -q tests/test_coding_agent_phase2_new_artifact_contracts.py`
-  - Expected: passes after Stage 3.
-  - Scope: Writing PM decision parsing, one-artifact programmer output parsing,
-    new-file artifact package materialization, public response redaction, and
-    existing-source edit rejection.
 - `venv\Scripts\python -m compileall -q src/kazusa_ai_chatbot/coding_agent`
-  - Expected: touched production modules import and compile cleanly.
 
-### Real LLM Role Suites
+### PM Role Live LLM Suite
 
 - Run one live LLM case at a time with `-s`.
 - Command shape:
-  `venv\Scripts\python -m pytest -m live_llm tests/test_coding_agent_phase2_new_artifact_role_live_llm.py::<test_name> -q -s`
-- Required roles: Writing PM, Writing programmer, Patching worker,
-  Synthesizer. Supervisor chaining is reserved for E2E.
-- Required coverage: every hard gate contributes role inputs for every
-  participating LLM role.
+  `venv\Scripts\python -m pytest -m live_llm tests/test_coding_agent_pm_lifecycle_role_live_llm.py::<test_name> -q -s`
+- Required PM coverage:
+  - create child PM;
+  - create programmer task;
+  - request workspace information;
+  - handle direct child report;
+  - complete with PM report;
+  - block with specific reason;
+  - choose programmer directly for a small single-artifact task;
+  - choose child PM for multi-artifact or dependency-sensitive work;
+  - require workspace facts before dependent child instruction.
 - Required artifact: raw trace plus agent-authored review before the next live
   case starts.
-- Test code and scripts may emit raw evidence only: JSON, logs, trace paths,
-  parser results, validation summaries, and artifact manifests. The active
-  agent must author the human-readable quality review after inspecting that
-  evidence.
-- Gate definitions and AI-review criteria are owned by
-  `development_plans/reference/designs/coding_agent_phase2_new_artifact_gating_tests.md`.
 
 ### E2E Hard Gates
 
-E2E is blocked until Stage 4 is signed off.
+E2E is blocked until PM and downstream role suites are reviewed and unresolved
+blockers are closed.
 
 Run the five hard gates from
 `development_plans/reference/designs/coding_agent_phase2_new_artifact_gating_tests.md`
 one at a time through `coding_agent.propose_code_change(...)`.
 
-Command shape:
-`venv\Scripts\python -m pytest -m live_llm tests/test_coding_agent_phase2_new_artifact_e2e_live_llm.py::<test_name> -q -s`
+## Independent Plan Review
 
-Each gate must return proposed artifacts only and must not mutate the real
-workspace.
+Before implementation resumes, reread the architecture reference, this plan,
+the code-writing ICD, and the supporting gate document from a fresh-review
+posture.
 
-Known validation-time execution of generated test artifacts is a Phase 2.5
-security finding. During Phase 2 E2E review, record the finding but do not fail
-the Phase 2 gate on that issue when the requested artifacts, workflow, and
-public response are otherwise acceptable.
+Review scope:
+
+- The plan states one canonical recursive PM architecture.
+- PM role boundary, responsibility, and IO are explicit.
+- Higher PMs manage direct child lifecycle only.
+- Workspace-grounded readback is supervisor-mediated.
+- PM live LLM tests cover every supported PM action before E2E.
+- Phase 2 materializes review packages but does not run generated code,
+  generated tests, validation feedback, or repair.
+- No legacy flattened PM contract remains as executable guidance.
+
+Record findings and fixes in `Execution Evidence`.
 
 ## Independent Code Review
 
-Run this gate after all `Verification` commands and hard gates pass and before
-final sign-off. Because the user currently prohibits Codex subagents, perform
-the review from a single-agent independent-review posture unless the user later
-approves a separate reviewer.
+Run this gate after all `Verification` commands pass and before final sign-off.
+Because the user prohibited subagents, perform a fresh-pass self-review unless
+the user later approves a separate review agent.
 
 Review scope:
 
-- Alignment with this plan, especially new-artifact-only Phase 2 scope,
-  supervisor-owned interleaving, no existing-source semantic edits, role-suite
-  gating, anti-cheat, and mutation boundary.
-- Prompt and payload quality for local LLMs: concise wording, common language,
-  no hidden architecture jargon, no gate-shaped examples, and stable output
-  contracts.
-- Code quality and design: role ownership, artifact boundaries, no
-  compatibility shims, no peer subagent calls, and no hidden worker-to-worker
-  loops.
-- Test and evidence quality: every live LLM case is reviewed by an agent, not
-  accepted by deterministic schema alone.
+- Alignment with recursive PM lifecycle architecture.
+- PM contract, prompt, parser, and supervisor transition quality.
+- Role-boundary validation and absence of deterministic semantic decisions.
+- Live LLM review evidence quality and no E2E-before-role-readiness violation.
+- Anti-cheat compliance and no gate-specific runtime behavior.
 
-Record findings, fixes, rerun commands, residual risks, and approval status in
+Record findings, fixes, commands rerun, residual risks, and approval status in
 `Execution Evidence`.
-
-## Independent Plan Review
-
-Before implementation resumes from this plan, reread the architecture
-reference, `code_writing` README, this plan, and recent Phase 2 E2E failure
-records.
-
-Review scope:
-
-- The plan states one canonical Phase 2 architecture.
-- Phase 2 is new-artifact writing only.
-- The architecture still supports later supervisor interleaving between
-  reading, writing, modifying, patching, external evidence, and execution.
-- E2E is blocked until role-level live LLM diagnostics have highlighted and
-  resolved weaknesses.
-- The plan has no unresolved options, compatibility paths, or hidden future
-  enhancements.
-
-Record blockers and required edits before implementation resumes.
 
 ## Acceptance Criteria
 
 This plan is complete when:
 
-- The architecture and ICD use the new-artifact `code_writing` contract
-  consistently.
-- Existing-source semantic modification is not part of Phase 2 implementation
-  or hard-gate signoff.
-- Every participating LLM role has live LLM cases generated from every hard
-  gate.
-- Every role-suite live LLM case has a raw trace and agent-authored review.
-- E2E is not run until role suites expose and resolve blocker weaknesses and
-  the active agent records at least 90% readiness confidence from role
-  evidence.
-- All five hard E2E new-artifact gates pass by agent-authored review.
-- Any observed generated-artifact execution is recorded as Phase 2.5 security
-  scope and excluded from Phase 2 artifact-quality pass/fail.
-- Deterministic support checks and anti-cheat greps pass.
+- Architecture, ICD, production code, tests, and review artifacts use the
+  recursive PM lifecycle consistently.
+- PM external IO supports `request_information`, `create_child_pm`,
+  `create_programmer_task`, `complete`, and `blocked`.
+- Deterministic code enforces PM action shape, direct-child boundary, prompt
+  caps, and required workspace-fact transitions without making semantic
+  decomposition decisions.
+- PM role live LLM suites cover every supported PM action across the five hard
+  gates and reach at least 90% readiness by agent-authored review.
+- Downstream role suites affected by the PM contract are rerun and reviewed.
+- All five Phase 2 E2E hard gates pass by agent-authored review.
+- E2E gates are judged on sound artifact output and workflow structure. Code
+  mistakes are recorded in the review comment but do not fail a gate when the
+  artifact package is coherent, request-aligned, and structurally sound.
 - Proposed artifacts never mutate the caller's real workspace.
 - Independent code review finds no unresolved blockers.
 
@@ -672,144 +539,118 @@ This plan is complete when:
 
 | Risk | Mitigation | Verification |
 |---|---|---|
-| Writing PM emits vague artifact contracts | Require purpose, file kind, content format, imports, interfaces, and required behavior | Role-level Writing PM live LLM reviews |
-| Programmer invents surrounding project context | Give one complete new-artifact contract and no peer output | Programmer role-suite reviews |
-| Patching worker changes feature semantics | Patching input contains selected artifacts and path reservations only | Patching role-suite reviews and artifact validation |
-| E2E thrashing resumes | Hard block E2E until role suites are reviewed and blockers resolved | Stage 4 readiness gate |
-| Overfitting to hard gates | Anti-cheat grep and no gate-shaped prompt examples | Static grep plus review |
-| Local LLM context overload | Prompt-budget reports and fail-closed caps | Trace context-budget fields |
-| Deterministic validator becomes semantic keyword judge | Restrict deterministic checks to structure, paths, caps, syntax, and artifact shape | Plan review and code review |
-| Generated-artifact execution appears in validation | Record as Phase 2.5 security scope and do not expand execution in Phase 2 | Phase 2 E2E review plus Phase 2.5 plan |
+| PM chooses the wrong child type | PM live cases cover direct programmer vs child PM decisions across all gates | PM role review artifact |
+| PM creates dependent instruction without workspace facts | Deterministic transition requires information request/readback for dependent child work | Contract tests and PM live cases |
+| Parent PM manages descendant details | Validate PM-to-PM and PM-to-programmer task shapes separately | Deterministic support checks |
+| PM report loses important facts | PM report contract includes provided facts, consumed facts, artifacts, risks, and dependency needs | PM report live cases |
+| E2E thrashing resumes | E2E is blocked until PM and downstream role suites meet readiness rules | Progress checklist and review evidence |
+| Deterministic code makes semantic decisions | Deterministic code validates shape and transitions only | Code review and support tests |
+| Local LLM remains inconsistent | Expand PM role cases before changing E2E; record per-case RCA | PM role review artifact |
 
 ## Execution Evidence
 
-- 2026-06-26: Phase 2 progress reset after user review.
-  - All progress checklist stages are unchecked.
-  - The five E2E hard gates were replaced with a difficulty gradient from
-    easy single-file generation to hard multi-source project generation.
-  - Previous Stage 1 sign-off was invalidated by this reset and must be rerun
-    before implementation resumes.
-- 2026-06-26: Created supporting AI-evaluated gate specification:
-  `development_plans/reference/designs/coding_agent_phase2_new_artifact_gating_tests.md`.
-  The plan now links to that file as the authoritative source for hard-gate
-  definitions, test procedure, and AI-review pass criteria. The Phase 3
-  feedback-loop payload shape is owned by this plan's `Contracts And Data
-  Shapes` section.
-- 2026-06-26: Independent plan review performed and surfaced documentation
-  issues.
-  - Fixed registry wording so the supporting gate document is a verification
-    procedure and pass-criteria artifact, not a design artifact.
-  - Fixed hard-gate anti-cheat allowance so challenge text is allowed in the
-    supporting gate document, live-gate fixtures, raw traces, and review
-    artifacts.
-  - Fixed change-surface wording so `test_artifacts/live_gate/` derives gates
-    from the supporting gate document instead of from this plan body.
-  - Added exact planned test files and command shapes for deterministic support
-    checks, role-level live LLM tests, and E2E live LLM gates.
-  - Added the debug-LLM boundary: scripts may emit raw evidence only, and the
-    active agent authors human-readable quality reviews after inspection.
-- 2026-06-26: Implemented Stage 1 through Stage 3 for the renewed
-  new-artifact Phase 2 design.
-  - Updated architecture/plan alignment and removed stale existing-source
-    modification role wiring from the active code-writing path.
-  - Replaced legacy file/module/source-owner contracts with new-artifact
-    contracts for Writing PM, Writing programmer, File Agent reservation,
-    Patching worker, validator, synthesizer, and supervisor.
-  - Added supervisor-owned validation repair loop.
-  - Added File Agent path reservation for new artifacts, mechanical local
-    import enrichment from reserved source paths, and patch materialization for
-    new files only.
-  - Updated programmer and PM prompts for new-artifact scope, validation
-    feedback, Markdown artifact formatting, and test-contract alignment.
-  - Verification:
-    `venv\Scripts\python -m compileall -q src\kazusa_ai_chatbot\coding_agent`
-    passed.
-  - Verification:
-    `venv\Scripts\python -m pytest -q tests\test_coding_agent_phase2_new_artifact_contracts.py`
-    passed with 15 tests.
-- 2026-06-26: Stage 4 role-level live LLM suite was corrected and initially
-  signed off before E2E risk review.
-  - Chained writing-supervisor live tests were removed from the Stage 4 role
-    suite because they exercise multi-role orchestration instead of one role
-    with ideal input.
-  - Writing PM: 5/5 isolated cases passed AI role review.
-  - Writing programmer: 9/9 isolated cases passed AI role review.
-  - Patching worker: 5/5 isolated cases passed deterministic materialization
-    checks.
-  - Synthesizer: 5/5 isolated cases passed AI role review.
-  - Review artifact:
-    `test_artifacts/llm_reviews/coding_agent_phase2_new_artifact_role_review.md`.
-- 2026-06-26: Stage 4 was expanded before E2E.
-  - Added three PM repair role cases for validation-feedback repair:
-    return-shape mismatch, missing required behavior, and missing consumed
-    interface.
-  - Added three programmer role cases for E2E-risk handoffs: Markdown-link
-    tests, task-note renderer, and mocked inventory-fetch tests.
-  - Verification:
-    `venv\Scripts\python -m pytest --collect-only -q -m live_llm tests\test_coding_agent_phase2_new_artifact_role_live_llm.py`
-    collected 30 role tests.
-  - Deterministic support:
-    `venv\Scripts\python -m pytest -q tests\test_coding_agent_phase2_new_artifact_contracts.py`
-    passed with 15 tests.
-  - Expanded live LLM execution:
-    `test_live_writing_pm_repair_return_shape_mismatch` initially failed AI
-    review because the Writing PM did not fully specify shared input-file and
-    record-dictionary shapes after a return-shape repair.
-  - Fix:
-    `src/kazusa_ai_chatbot/coding_agent/code_writing/product_manager.py`
-    now instructs the Writing PM and PM reviewer to define shared file,
-    record, config, and command-line input shapes in source/test contracts.
-    File parsing contracts must state line or record format, and returned
-    record dictionaries must state required keys and value meaning.
-  - Expanded role cases rerun one at a time:
-    three PM repair cases and three Writing programmer cases passed AI role
-    review at 100 confidence.
-  - Current Stage 4 role-suite confidence is 100% from the isolated role
-    evidence in
-    `test_artifacts/llm_reviews/coding_agent_phase2_new_artifact_role_review.md`.
-  - E2E was not run.
-- 2026-06-26: Phase 2 pass wording updated for the security handoff.
-  - Known validation-time generated-code execution is tracked by
-    `development_plans/active/short_term/coding_agent_phase2_5_security_boundary_plan.md`.
-  - Phase 2 E2E review now records the security finding without failing
-    artifact-quality signoff solely on that issue.
-- 2026-06-27: Added focused synthesizer live-role coverage for generated-test
-  validation failure interpretation.
-  - Initial role test design was corrected because the reviewer was too weak.
-  - Tightened AI review reproduced the failure: the synthesizer claimed a
-    generated implementation defect from a generated-test assertion.
-  - Updated the synthesizer prompt so generated-test failures are reported as
-    validation failures and not as proven implementation defects unless
-    independent non-test evidence exists.
-  - Verification:
-    `venv\Scripts\python -m pytest -m live_llm tests/test_coding_agent_phase2_new_artifact_role_live_llm.py::test_live_synthesizer_generated_test_failure_interpretation -q -s`
-    passed.
-  - Collection:
-    `venv\Scripts\python -m pytest --collect-only -q -m live_llm tests/test_coding_agent_phase2_new_artifact_role_live_llm.py`
-    collected 31 live role tests.
-  - Compile check:
-    `venv\Scripts\python -m compileall -q src/kazusa_ai_chatbot/coding_agent/code_writing/synthesizer.py`
-    passed.
-- 2026-06-27: Added acceptance/alignment owner after Gate 04 artifact-alignment
-  failure.
-  - Reproduced the issue at role scope: the existing Writing PM role reviewer
-    accepted the faulty Gate 04 PM decision because it checked internal
-    source/test interface consistency but did not preserve the user-visible CLI
-    requirement.
-  - Implemented `code_writing.acceptance` with two PM-route LLM judgments:
-    acceptance criteria preservation before PM decomposition and artifact
-    alignment review after structural validation.
-  - Wired alignment failure into the existing repair loop as feedback to the
-    Writing PM.
-  - Initial alignment prompt still failed by treating the missing CLI entry as
-    a minor improvement. Prompt was tightened so requested user-facing access
-    method is preserved and missing access path is a blocker.
-  - Live LLM verification:
-    `venv\Scripts\python -m pytest -m live_llm tests/test_coding_agent_phase2_new_artifact_role_live_llm.py::test_live_alignment_rejects_missing_cli_entrypoint -q -s`
-    passed.
-  - Deterministic support:
-    `venv\Scripts\python -m pytest -q tests/test_coding_agent_phase2_new_artifact_contracts.py`
-    passed with 16 tests.
-  - Collection:
-    `venv\Scripts\python -m pytest --collect-only -q -m live_llm tests/test_coding_agent_phase2_new_artifact_role_live_llm.py`
-    collected 32 live role tests.
+- 2026-06-27: Phase 2 progress reset requested by the user. The active plan now
+  treats previous flattened Writing PM progress as invalidated execution
+  history rather than signed-off work for the renewed architecture.
+- 2026-06-27: Added focused PM lifecycle live LLM feasibility suite
+  `tests/test_coding_agent_pm_lifecycle_role_live_llm.py` and review artifact
+  `test_artifacts/llm_reviews/coding_agent_pm_lifecycle_role_review.md`.
+  The suite probes the recursive PM actions before production rewiring:
+  `create_programmer_task`, `create_child_pm`, `request_information`,
+  `complete`, and `blocked`.
+- 2026-06-27: PM live suite was collected and run one case at a time. Iteration
+  surfaced and corrected test-local prompt/harness issues for child report
+  boundaries, exact action selection, required null action fields, missing user
+  requirements versus supervisor-accessible facts, and prompt-rule leakage.
+  Final prompt reruns passed all covered PM cases.
+- 2026-06-27: PM feasibility is supported for the tested role actions with
+  route `CODING_AGENT_PM_LLM`, model
+  `gemma-4-31b-it-qat-uncensored-heretic-nvfp4`, thinking enabled. This is not
+  E2E sign-off; production contract rewiring and downstream role live LLM suites
+  remain required before any E2E hard gate.
+- 2026-06-27: Stage 1 complete. Re-read the architecture, this plan, the
+  code-writing ICD, and the supporting gate document. Updated
+  `src/kazusa_ai_chatbot/coding_agent/code_writing/README.md` to the recursive
+  PM lifecycle and confirmed stale flattened wording was removed by grep.
+- 2026-06-27: Stage 2 complete. Replaced flattened PM artifacts with the PM
+  lifecycle action contract in production models, PM parsing, supervisor
+  transitions, acceptance compaction, synthesis payloads, and File Agent
+  reservation inputs. Deterministic support check passed:
+  `venv\Scripts\python -m pytest -q tests/test_coding_agent_phase2_new_artifact_contracts.py`
+  reported `10 passed`.
+- 2026-06-27: Stage 3 complete. Production PM live suite collected seven cases
+  and each case was run one at a time with trace inspection:
+  `gate_01_single_file_programmer_task`,
+  `gate_02_source_and_tests_child_pm`,
+  `gate_03_package_information_request`,
+  `gate_04_child_report_followup`,
+  `gate_05_dependent_tests_information_request`,
+  `child_pm_report_complete`, and `blocked_insufficient_goal`.
+  Human-readable review was updated in
+  `test_artifacts/llm_reviews/coding_agent_pm_lifecycle_role_review.md`.
+- 2026-06-27: Stage 4 complete. Downstream role contract live tests were run
+  one case at a time and inspected:
+  `source_artifact_programmer`,
+  `markdown_artifact_programmer`, and `synthesizer_patch_proposal`. The
+  synthesizer explicitly reported that generated artifacts were not executed.
+- 2026-06-27: Final Stage 1-4 non-E2E verification passed:
+  `venv\Scripts\python -m pytest -q tests/test_coding_agent_phase2_new_artifact_contracts.py`
+  reported `10 passed`;
+  `venv\Scripts\python -m compileall -q src/kazusa_ai_chatbot/coding_agent`
+  passed; live role collection found 10 live LLM cases across the PM and
+  downstream suites; stale-contract greps returned zero matches; gate-specific
+  production/support-test grep returned zero matches. `git diff --check`
+  reported only line-ending warnings.
+- 2026-06-27: E2E hard gates were not run. Stage 5 remains blocked until the
+  user requests E2E and the Stage 1-4 role evidence is accepted as sufficient.
+- 2026-06-27: User requested E2E gates 01-03. Added the missing pytest-style
+  live LLM Gate 01 case to
+  `tests/test_coding_agent_phase2_new_artifact_e2e_live_llm.py` so execution
+  remains through `coding_agent.propose_code_change(...)` rather than ad hoc
+  Python. Gate 01 passed AI review with one materialized script:
+  `test_artifacts\coding_agent_phase2_e2e_workspace\gate_01\writing_validation\16a282fc09b942b18fecc7082329bf50\src\log_severity_counter.py`.
+  Gate 02 timed out twice and produced no fresh response after stale response
+  indexes were cleared. Gate 03 failed because the PM lifecycle step limit was
+  reached with zero patch artifacts. Human-readable review:
+  `test_artifacts/llm_reviews/coding_agent_phase2_e2e_gate_01_03_review.md`.
+  Stage 5 remains unchecked.
+- 2026-06-27: Narrowed the Phase 2 boundary after user review. Phase 2 now
+  produces new-artifact patch/file-tree proposals and materialized review
+  packages only. Generated-code execution, generated-test execution,
+  validation feedback loops, alignment repair loops, and code modification are
+  deferred outside Phase 2. Updated the code-writing ICD, PM prompt contract,
+  supervisor workflow, gating pass criteria, and role fixtures accordingly.
+- 2026-06-27: Implemented the narrowed workflow by routing the Phase 2
+  supervisor through review-package materialization instead of
+  `validate_patch_artifacts(...)` and by removing the alignment/repair loop
+  from the Phase 2 execution path. `repair_child` is no longer shown as a PM
+  action and is rejected if emitted.
+- 2026-06-27: Verification for the narrowed workflow passed:
+  `venv\Scripts\python -m pytest -q tests/test_coding_agent_phase2_new_artifact_contracts.py`
+  reported `11 passed`, and
+  `venv\Scripts\python -m compileall -q src/kazusa_ai_chatbot/coding_agent/code_writing tests/test_coding_agent_phase2_new_artifact_contracts.py tests/test_coding_agent_pm_lifecycle_role_live_llm.py tests/test_coding_agent_phase2_new_artifact_e2e_live_llm.py`
+  completed successfully. Static grep found no Phase 2 supervisor calls to
+  `validate_patch_artifacts`, `evaluate_artifact_alignment`,
+  `writing_repair`, `writing_alignment`, or `MAX_VALIDATION_REPAIR_ATTEMPTS`.
+- 2026-06-27: User requested rerun of all five Phase 2 E2E gates. Ran each
+  pytest-style live LLM gate one at a time through
+  `coding_agent.propose_code_change(...)`. Gate 01 passed AI review with fresh
+  materialized artifact
+  `test_artifacts\coding_agent_phase2_e2e_workspace\gate_01\writing_validation\a7541feaf7f14dbabc2799cf0fabd568\src\impl_log_analyzer.py`.
+  Gates 02-05 each timed out after 604 seconds and produced no fresh response
+  JSON or materialized review package for this rerun. Stale artifacts from
+  earlier runs were inspected but not counted. Human-readable review:
+  `test_artifacts/llm_reviews/coding_agent_phase2_e2e_all_gates_rerun_review_20260627.md`.
+  Stage 5 remains unchecked because not all gates passed.
+- 2026-06-27: Added durable code-writing diagnostic trace events and reran
+  Gate 02 with a one-hour development command budget. Gate 02 completed in
+  435.19 seconds. Trace review showed the timeout risk was PM over-delegation:
+  11 PM LLM calls and a four-level child-PM chain before producing two
+  artifacts. Human-readable review:
+  `test_artifacts/llm_reviews/coding_agent_phase2_gate_02_traced_run_review_20260627.md`.
+- 2026-06-27: Retuned the PM prompt and PM-focused live LLM suite so small
+  source-plus-test work starts with direct programmer tasks while child PMs are
+  reserved for genuinely broad cohesive sub-areas. Ran nine PM role live LLM
+  cases one at a time and inspected each trace. All nine passed by structural
+  harness and agent review. Human-readable review:
+  `test_artifacts/llm_reviews/coding_agent_pm_delegation_tuning_review_20260627.md`.

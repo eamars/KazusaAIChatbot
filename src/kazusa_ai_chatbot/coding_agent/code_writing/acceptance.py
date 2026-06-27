@@ -323,12 +323,13 @@ def _criteria_from_parsed(value: object) -> list[WritingAcceptanceCriterion]:
 
 
 def _compact_pm_decision(decision: WritingPMDecision) -> dict[str, object]:
-    return {
+    compact_decision = {
         "status": decision["status"],
-        "feature_goal": decision["feature_goal"],
-        "artifact_items": decision["artifact_items"],
-        "limitations": decision["limitations"],
+        "reason": decision["reason"],
+        "completion_report": decision["completion_report"],
+        "blocker": decision["blocker"],
     }
+    return compact_decision
 
 
 def _compact_generated_artifacts(

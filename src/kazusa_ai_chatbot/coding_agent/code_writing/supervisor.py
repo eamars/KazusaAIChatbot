@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import hashlib
+import json
 from pathlib import Path
 
+from kazusa_ai_chatbot.coding_agent.code_writing.acceptance import (
+    derive_acceptance_criteria,
+)
+from kazusa_ai_chatbot.coding_agent.code_writing.diagnostic_trace import (
+    WritingDiagnosticTracer,
+)
 from kazusa_ai_chatbot.coding_agent.code_writing.models import (
     ArtifactReservationResult,
     CodeWritingRequest,
@@ -15,23 +23,24 @@ from kazusa_ai_chatbot.coding_agent.code_writing.models import (
     ReservedArtifactPath,
     WritingAcceptanceCriterion,
     WritingAlignmentResult,
-    WritingArtifactItem,
+    WritingArtifactContract,
+    WritingChildPMTask,
+    WritingContentFormat,
+    WritingExternalEvidenceRequest,
+    WritingFileKind,
     WritingPatcherInput,
     WritingPatcherReport,
     WritingPMDecision,
     WritingPMInput,
     WritingProgrammerContract,
     WritingProgrammerResult,
-)
-from kazusa_ai_chatbot.coding_agent.code_writing.acceptance import (
-    derive_acceptance_criteria,
-    evaluate_artifact_alignment,
-)
-from kazusa_ai_chatbot.coding_agent.code_writing.patch_validation import (
-    validate_patch_artifacts,
+    WritingProgrammerTask,
 )
 from kazusa_ai_chatbot.coding_agent.code_writing.patcher import (
     materialize_patch_artifacts,
+)
+from kazusa_ai_chatbot.coding_agent.code_writing.patch_validation import (
+    materialize_patch_artifacts_for_review,
 )
 from kazusa_ai_chatbot.coding_agent.code_writing.product_manager import (
     decide_writing_work,
@@ -52,8 +61,21 @@ from kazusa_ai_chatbot.coding_agent.file_agent import (
 
 DEFAULT_MAX_ARTIFACT_CHARS = 48000
 MAX_PATCH_FILES = 32
-MAX_VALIDATION_REPAIR_ATTEMPTS = 1
-MAX_PREVIOUS_ARTIFACT_EXCERPT_CHARS = 1600
+MAX_PM_LIFECYCLE_STEPS = 8
+MAX_PM_DEPTH = 4
+MAX_CHILD_REPORTS = 16
+
+
+@dataclass
+class _PMNodeResult:
+    """Internal result for one PM lifecycle subtree."""
+
+    status: str
+    generated_artifacts: list[GeneratedArtifact]
+    direct_child_reports: list[dict[str, object]]
+    information_requests: list[WritingExternalEvidenceRequest]
+    limitations: list[str]
+    final_decision: WritingPMDecision | None
 
 
 async def run_writing_supervisor(
@@ -61,15 +83,16 @@ async def run_writing_supervisor(
     *,
     trace: dict[str, object] | None = None,
 ) -> CodeWritingResult:
-    """Produce a new-artifact patch proposal through the writing roles."""
+    """Produce a new-artifact patch proposal through writing roles."""
 
     question = request.get("question", "").strip()
     mode = request.get("mode_hint", "create_new_project")
     if mode != "create_new_project":
-        return _existing_source_rejected_result(mode=mode)
+        result = _existing_source_rejected_result(mode=mode)
+        return result
 
     if not question:
-        return _result(
+        result = _result(
             status="needs_user_input",
             mode="create_new_project",
             answer_text="Please provide the code-writing request.",
@@ -83,10 +106,11 @@ async def run_writing_supervisor(
             limitations=[],
             trace_summary=["writing_pm:missing question"],
         )
+        return result
 
     workspace_root = request.get("workspace_root")
     if not workspace_root:
-        return _result(
+        result = _result(
             status="failed",
             mode="create_new_project",
             answer_text="Code writing requires configured proposal storage.",
@@ -100,6 +124,7 @@ async def run_writing_supervisor(
             limitations=["Missing proposal storage root."],
             trace_summary=["writing:missing storage"],
         )
+        return result
 
     external_evidence = _external_evidence_from_request(request)
     session = prepare_writing_workspace(
@@ -108,14 +133,38 @@ async def run_writing_supervisor(
         base_identity=_base_identity(question=question),
         mode="create_new_project",
     )
+    diagnostic = WritingDiagnosticTracer(
+        workspace_root=workspace_root,
+        session_id=session["session_id"],
+    )
+    diagnostic.event(
+        stage="writing_supervisor",
+        event="session_prepared",
+        session_id=session["session_id"],
+        public_handle=session["public_handle"],
+        trace_path=diagnostic.path,
+        question_chars=len(question),
+        external_evidence_count=len(external_evidence),
+    )
     trace_summary = [
         f"writing_session:handle={session['public_handle']}",
         "writing_pm:mode=create_new_project",
     ]
     acceptance_trace: dict[str, object] = {}
+    acceptance_call = diagnostic.start(
+        stage="acceptance_llm",
+        question_chars=len(question),
+    )
     acceptance = await derive_acceptance_criteria(
         question=question,
         trace=acceptance_trace,
+    )
+    diagnostic.end(
+        stage="acceptance_llm",
+        call_id=acceptance_call,
+        status=acceptance["status"],
+        criteria_count=len(acceptance["acceptance_criteria"]),
+        raw_output_chars=_trace_text_chars(acceptance_trace, "raw_output"),
     )
     _record_internal_trace(trace, "acceptance", acceptance_trace)
     trace_summary.append(
@@ -124,7 +173,7 @@ async def run_writing_supervisor(
         f"criteria={len(acceptance['acceptance_criteria'])}"
     )
     if acceptance["status"] != "pass":
-        return _result(
+        result = _result(
             status="failed",
             mode="create_new_project",
             answer_text="Code writing could not preserve acceptance criteria.",
@@ -139,191 +188,113 @@ async def run_writing_supervisor(
             limitations=acceptance["limitations"],
             trace_summary=trace_summary,
         )
+        return result
 
     max_artifact_chars = request.get(
         "max_artifact_chars",
         DEFAULT_MAX_ARTIFACT_CHARS,
     )
-    acceptance_criteria = acceptance["acceptance_criteria"]
-    previous_artifacts: list[dict[str, object]] = []
-    validation_feedback: PatchValidationSummary | None = None
-    alignment_feedback: WritingAlignmentResult | None = None
-    reservation_feedback: ArtifactReservationResult | None = None
-    pm_decision: WritingPMDecision | None = None
-    generated_artifacts: list[GeneratedArtifact] = []
-    patcher_report: WritingPatcherReport | None = None
-    validation: PatchValidationSummary | None = None
-    alignment: WritingAlignmentResult | None = None
-
-    for attempt_index in range(MAX_VALIDATION_REPAIR_ATTEMPTS + 1):
-        repair_label = "" if attempt_index == 0 else f"_repair_{attempt_index}"
-        if attempt_index > 0:
-            trace_summary.append(f"writing_repair:attempt={attempt_index}")
-
-        pm_decision = await _decide_pm(
-            question=question,
-            acceptance_criteria=acceptance_criteria,
-            external_evidence=external_evidence,
-            previous_artifacts=previous_artifacts,
-            validation_feedback=validation_feedback,
-            alignment_feedback=alignment_feedback,
-            reservation_feedback=reservation_feedback,
-            trace=trace,
-            trace_key=f"pm_initial{repair_label}",
-        )
-        trace_summary.append(
-            "writing_pm:decision "
-            f"status={pm_decision['status']} "
-            f"artifacts={len(pm_decision['artifact_items'])}"
-        )
-
-        if pm_decision["status"] == "need_external_evidence":
-            return _pm_terminal_result(
-                pm_decision=pm_decision,
-                session=session,
-                external_evidence=external_evidence,
-                trace_summary=trace_summary,
-            )
-        if pm_decision["status"] != "need_programmers":
-            return _pm_terminal_result(
-                pm_decision=pm_decision,
-                session=session,
-                external_evidence=external_evidence,
-                trace_summary=trace_summary,
-            )
-
-        reservation = reserve_new_artifact_paths(pm_decision["artifact_items"])
-        _record_internal_trace(trace, f"file_agent{repair_label}", reservation)
-        trace_summary.append(
-            "file_agent:reservation "
-            f"status={reservation['status']} "
-            f"paths={len(reservation['reserved_paths'])}"
-        )
-        if reservation["status"] != "accepted":
-            if attempt_index < MAX_VALIDATION_REPAIR_ATTEMPTS:
-                reservation_feedback = reservation
-                validation_feedback = None
-                previous_artifacts = []
-                continue
-            return _reservation_rejected_result(
-                reservation=reservation,
-                session=session,
-                external_evidence=external_evidence,
-                trace_summary=trace_summary,
-            )
-
-        programmer_results = await _run_programmers(
-            artifact_items=pm_decision["artifact_items"],
-            reserved_paths=reservation["reserved_paths"],
-            trace=trace,
-            trace_summary=trace_summary,
-            trace_label=repair_label,
-        )
-        generated_artifacts = _generated_artifacts(
-            artifact_items=pm_decision["artifact_items"],
-            reserved_paths=reservation["reserved_paths"],
-            programmer_results=programmer_results,
-        )
-        diagnostics = _programmer_diagnostics(programmer_results)
-        if diagnostics:
-            return _programmer_failed_result(
-                diagnostics=diagnostics,
-                session=session,
-                external_evidence=external_evidence,
-                trace_summary=trace_summary,
-            )
-
-        patcher_report = _materialize_patcher_report(
-            generated_artifacts=generated_artifacts,
-            reserved_paths=reservation["reserved_paths"],
-            max_artifact_chars=max_artifact_chars,
-            trace=trace,
-            trace_summary=trace_summary,
-            trace_label=repair_label,
-        )
-        validation = validate_patch_artifacts(
-            repo_root=None,
-            workspace_root=Path(workspace_root),
-            patch_artifacts=patcher_report["patch_artifacts"],
-            max_files=MAX_PATCH_FILES,
-            max_diff_chars=max_artifact_chars,
-        )
-        validation = _validation_with_patcher_diagnostics(
-            validation,
-            patcher_report["diagnostics"],
-        )
-        trace_summary.append(f"writing_validation:status={validation['status']}")
-        if validation["status"] == "succeeded":
-            alignment_trace: dict[str, object] = {}
-            alignment = await evaluate_artifact_alignment(
-                question=question,
-                acceptance_criteria=acceptance_criteria,
-                pm_decision=pm_decision,
-                generated_artifacts=generated_artifacts,
-                validation=validation,
-                trace=alignment_trace,
-            )
-            _record_internal_trace(
-                trace,
-                f"alignment{repair_label}",
-                alignment_trace,
-            )
-            trace_summary.append(
-                "writing_alignment:"
-                f"status={alignment['status']} "
-                f"confidence={alignment['confidence']}"
-            )
-            if alignment["status"] == "pass":
-                break
-            if attempt_index < MAX_VALIDATION_REPAIR_ATTEMPTS:
-                alignment_feedback = alignment
-                validation_feedback = None
-                reservation_feedback = None
-                previous_artifacts = _previous_artifact_summaries(
-                    generated_artifacts,
-                )
-                trace_summary.append("writing_repair:alignment_feedback_to_pm")
-                continue
-            break
-        if attempt_index >= MAX_VALIDATION_REPAIR_ATTEMPTS:
-            break
-
-        validation_feedback = validation
-        alignment_feedback = None
-        reservation_feedback = None
-        previous_artifacts = _previous_artifact_summaries(generated_artifacts)
-        trace_summary.append("writing_repair:validation_feedback_to_pm")
-
-    if pm_decision is None or patcher_report is None or validation is None:
-        return _result(
-            status="failed",
-            mode="create_new_project",
-            answer_text="Code writing did not produce a patch package.",
-            patch_artifacts=[],
-            created_files=[],
-            changed_files=[],
-            external_evidence_requests=[],
-            external_evidence=external_evidence,
-            validation=_empty_validation("failed"),
+    root_input = _root_pm_input(
+        question=question,
+        acceptance_criteria=acceptance["acceptance_criteria"],
+        external_evidence=external_evidence,
+        child_feedback=[],
+    )
+    pm_result = await _run_pm_node(
+        pm_input=root_input,
+        depth=0,
+        diagnostic=diagnostic,
+        trace=trace,
+        trace_summary=trace_summary,
+        trace_label="root",
+    )
+    if pm_result.status == "need_external_evidence":
+        result = _information_request_result(
+            requests=pm_result.information_requests,
             session=session,
-            limitations=["No patch package was produced."],
+            external_evidence=external_evidence,
             trace_summary=trace_summary,
         )
+        return result
+    if pm_result.status != "succeeded":
+        result = _pm_blocked_result(
+            pm_result=pm_result,
+            session=session,
+            external_evidence=external_evidence,
+            trace_summary=trace_summary,
+        )
+        return result
+    if not pm_result.generated_artifacts:
+        result = _pm_blocked_result(
+            pm_result=_PMNodeResult(
+                status="failed",
+                generated_artifacts=[],
+                direct_child_reports=pm_result.direct_child_reports,
+                information_requests=[],
+                limitations=["PM completed without generated artifacts."],
+                final_decision=pm_result.final_decision,
+            ),
+            session=session,
+            external_evidence=external_evidence,
+            trace_summary=trace_summary,
+        )
+        return result
+
+    reserved_paths = _reserved_paths_from_artifacts(
+        pm_result.generated_artifacts,
+    )
+    patcher_report = _materialize_patcher_report(
+        generated_artifacts=pm_result.generated_artifacts,
+        reserved_paths=reserved_paths,
+        max_artifact_chars=max_artifact_chars,
+        diagnostic=diagnostic,
+        trace=trace,
+        trace_summary=trace_summary,
+    )
+    review_call = diagnostic.start(
+        stage="review_materialization",
+        patch_artifact_count=len(patcher_report["patch_artifacts"]),
+        max_artifact_chars=max_artifact_chars,
+    )
+    validation = materialize_patch_artifacts_for_review(
+        repo_root=None,
+        workspace_root=Path(workspace_root),
+        patch_artifacts=patcher_report["patch_artifacts"],
+        max_files=MAX_PATCH_FILES,
+        max_diff_chars=max_artifact_chars,
+    )
+    diagnostic.end(
+        stage="review_materialization",
+        call_id=review_call,
+        status=validation["status"],
+        file_count=len(validation["files"]),
+        error_count=len(validation["errors"]),
+    )
+    validation = _validation_with_patcher_diagnostics(
+        validation,
+        patcher_report["diagnostics"],
+    )
+    trace_summary.append(
+        f"writing_review_package:status={validation['status']}"
+    )
 
     synthesis_trace: dict[str, object] = {}
-    alignment_blockers: list[str] = []
-    if alignment is not None and alignment["status"] != "pass":
-        alignment_blockers = alignment["blockers"]
     limitations = _dedupe_strings([
-        *pm_decision["limitations"],
+        *pm_result.limitations,
         *patcher_report["diagnostics"],
         *validation["errors"],
-        *alignment_blockers,
     ])
+    final_decision = pm_result.final_decision or _fallback_pm_decision()
+    synthesis_call = diagnostic.start(
+        stage="synthesis_llm",
+        generated_artifact_count=len(pm_result.generated_artifacts),
+        patch_artifact_count=len(patcher_report["patch_artifacts"]),
+        limitation_count=len(limitations),
+    )
     answer_text, limitations = await synthesize_patch_proposal(
         question=question,
-        pm_decision=pm_decision,
-        generated_artifacts=generated_artifacts,
+        pm_decision=final_decision,
+        generated_artifacts=pm_result.generated_artifacts,
         patch_artifacts=patcher_report["patch_artifacts"],
         validation=validation,
         external_evidence=external_evidence,
@@ -332,13 +303,17 @@ async def run_writing_supervisor(
         max_answer_chars=request.get("max_answer_chars", DEFAULT_MAX_ANSWER_CHARS),
         trace=synthesis_trace,
     )
+    diagnostic.end(
+        stage="synthesis_llm",
+        call_id=synthesis_call,
+        answer_chars=len(answer_text),
+        limitation_count=len(limitations),
+        raw_output_chars=_trace_text_chars(synthesis_trace, "raw_output"),
+    )
     _record_internal_trace(trace, "synthesis", synthesis_trace)
 
-    return _result(
-        status=_status_from_validation_and_alignment(
-            validation=validation,
-            alignment=alignment,
-        ),
+    result = _result(
+        status=_status_from_validation(validation),
         mode="create_new_project",
         answer_text=answer_text,
         patch_artifacts=patcher_report["patch_artifacts"],
@@ -347,199 +322,543 @@ async def run_writing_supervisor(
         external_evidence_requests=[],
         external_evidence=external_evidence,
         validation=validation,
-        alignment=alignment,
+        alignment=None,
         session=session,
         limitations=limitations,
         trace_summary=trace_summary,
     )
+    return result
 
 
-async def _decide_pm(
+async def _run_pm_node(
+    *,
+    pm_input: WritingPMInput,
+    depth: int,
+    diagnostic: WritingDiagnosticTracer,
+    trace: dict[str, object] | None,
+    trace_summary: list[str],
+    trace_label: str,
+) -> _PMNodeResult:
+    if depth > MAX_PM_DEPTH:
+        result = _PMNodeResult(
+            status="failed",
+            generated_artifacts=[],
+            direct_child_reports=[],
+            information_requests=[],
+            limitations=["PM hierarchy exceeded the supported depth."],
+            final_decision=None,
+        )
+        return result
+
+    generated_artifacts: list[GeneratedArtifact] = []
+    direct_child_reports = list(pm_input["direct_child_reports"])
+    child_feedback = list(pm_input["child_feedback"])
+    final_decision: WritingPMDecision | None = None
+
+    for step_index in range(MAX_PM_LIFECYCLE_STEPS):
+        step_input: WritingPMInput = {
+            **pm_input,
+            "direct_child_reports": direct_child_reports[-MAX_CHILD_REPORTS:],
+            "child_feedback": child_feedback,
+        }
+        pm_trace: dict[str, object] = {}
+        pm_call = diagnostic.start(
+            stage="pm_decision_llm",
+            pm_id=pm_input["pm_id"],
+            depth=depth,
+            step=step_index + 1,
+            trace_label=trace_label,
+            input_chars=_json_char_count(step_input),
+            direct_child_report_count=len(step_input["direct_child_reports"]),
+            child_feedback_count=len(step_input["child_feedback"]),
+        )
+        decision = await decide_writing_work(step_input, trace=pm_trace)
+        diagnostic.end(
+            stage="pm_decision_llm",
+            call_id=pm_call,
+            pm_id=pm_input["pm_id"],
+            depth=depth,
+            step=step_index + 1,
+            status=decision["status"],
+            output_chars=_json_char_count(decision),
+            raw_output_chars=_trace_text_chars(pm_trace, "raw_output"),
+            attempt_count=_trace_list_count(pm_trace, "attempts"),
+        )
+        final_decision = decision
+        trace_key = f"pm_{trace_label}_{step_index + 1}"
+        _record_internal_trace(trace, trace_key, pm_trace)
+        trace_summary.append(
+            "writing_pm:decision "
+            f"pm={pm_input['pm_id']} "
+            f"status={decision['status']}"
+        )
+
+        if decision["status"] == "request_information":
+            requests = _external_requests_from_information(decision)
+            result = _PMNodeResult(
+                status="need_external_evidence",
+                generated_artifacts=generated_artifacts,
+                direct_child_reports=direct_child_reports,
+                information_requests=requests,
+                limitations=[],
+                final_decision=decision,
+            )
+            return result
+
+        if decision["status"] == "create_child_pm":
+            child_task = decision["child_pm_task"]
+            if child_task is None:
+                return _invalid_pm_result("PM child task was missing.", decision)
+            child_input = _child_pm_input(
+                parent_input=pm_input,
+                child_task=child_task,
+            )
+            child_call = diagnostic.start(
+                stage="child_pm_lifecycle",
+                parent_pm_id=pm_input["pm_id"],
+                child_pm_id=child_task["child_pm_id"],
+                depth=depth + 1,
+                trace_label=f"{trace_label}_{child_task['child_pm_id']}",
+            )
+            child_result = await _run_pm_node(
+                pm_input=child_input,
+                depth=depth + 1,
+                diagnostic=diagnostic,
+                trace=trace,
+                trace_summary=trace_summary,
+                trace_label=f"{trace_label}_{child_task['child_pm_id']}",
+            )
+            diagnostic.end(
+                stage="child_pm_lifecycle",
+                call_id=child_call,
+                parent_pm_id=pm_input["pm_id"],
+                child_pm_id=child_task["child_pm_id"],
+                status=child_result.status,
+                generated_artifact_count=len(child_result.generated_artifacts),
+                limitation_count=len(child_result.limitations),
+            )
+            if child_result.status == "need_external_evidence":
+                return child_result
+            if child_result.status != "succeeded":
+                child_feedback.append({
+                    "stage": "child_pm",
+                    "child_id": child_task["child_pm_id"],
+                    "summary": "; ".join(child_result.limitations),
+                })
+                continue
+            generated_artifacts.extend(child_result.generated_artifacts)
+            report = _child_report_from_result(
+                child_id=child_task["child_pm_id"],
+                child_result=child_result,
+            )
+            direct_child_reports.append(report)
+            continue
+
+        if decision["status"] == "create_programmer_task":
+            programmer_task = decision["programmer_task"]
+            if programmer_task is None:
+                return _invalid_pm_result("PM programmer task was missing.", decision)
+            outcome = await _run_programmer_task(
+                programmer_task=programmer_task,
+                diagnostic=diagnostic,
+                trace=trace,
+                trace_summary=trace_summary,
+                trace_label=f"{trace_label}_{programmer_task['task_id']}",
+            )
+            direct_child_reports.append(outcome["report"])
+            if outcome["diagnostics"]:
+                child_feedback.append({
+                    "stage": "programmer",
+                    "child_id": programmer_task["task_id"],
+                    "summary": "; ".join(outcome["diagnostics"]),
+                })
+                continue
+            generated_artifacts.extend(outcome["generated_artifacts"])
+            continue
+
+        if decision["status"] == "repair_child":
+            return _invalid_pm_result(
+                "PM repair action is outside the current writing scope.",
+                decision,
+            )
+
+        if decision["status"] == "complete":
+            result = _PMNodeResult(
+                status="succeeded",
+                generated_artifacts=generated_artifacts,
+                direct_child_reports=direct_child_reports,
+                information_requests=[],
+                limitations=[],
+                final_decision=decision,
+            )
+            return result
+
+        blocker = decision["blocker"]
+        limitations = [decision["reason"]]
+        if blocker is not None:
+            limitations = _dedupe_strings([
+                blocker["summary"],
+                *blocker["missing_facts"],
+                blocker["why_information_request_is_not_enough"],
+            ])
+        result = _PMNodeResult(
+            status="blocked",
+            generated_artifacts=generated_artifacts,
+            direct_child_reports=direct_child_reports,
+            information_requests=[],
+            limitations=limitations,
+            final_decision=decision,
+        )
+        return result
+
+    result = _PMNodeResult(
+        status="failed",
+        generated_artifacts=generated_artifacts,
+        direct_child_reports=direct_child_reports,
+        information_requests=[],
+        limitations=["PM lifecycle step limit was reached."],
+        final_decision=final_decision,
+    )
+    return result
+
+
+async def _run_programmer_task(
+    *,
+    programmer_task: WritingProgrammerTask,
+    diagnostic: WritingDiagnosticTracer,
+    trace: dict[str, object] | None,
+    trace_summary: list[str],
+    trace_label: str,
+) -> dict[str, object]:
+    contract = _artifact_contract_from_programmer_task(programmer_task)
+    reservation_call = diagnostic.start(
+        stage="file_agent_reservation",
+        task_id=programmer_task["task_id"],
+        trace_label=trace_label,
+        contract_chars=_json_char_count(contract),
+    )
+    reservation = reserve_new_artifact_paths([contract])
+    diagnostic.end(
+        stage="file_agent_reservation",
+        call_id=reservation_call,
+        task_id=programmer_task["task_id"],
+        status=reservation["status"],
+        reserved_path_count=len(reservation["reserved_paths"]),
+        error_count=len(reservation["errors"]),
+    )
+    _record_internal_trace(trace, f"file_agent_{trace_label}", reservation)
+    trace_summary.append(
+        "file_agent:reservation "
+        f"status={reservation['status']} "
+        f"paths={len(reservation['reserved_paths'])}"
+    )
+    if reservation["status"] != "accepted":
+        report = _programmer_report(
+            task=programmer_task,
+            generated_artifact=None,
+            diagnostics=reservation["errors"],
+        )
+        return {
+            "generated_artifacts": [],
+            "diagnostics": reservation["errors"],
+            "report": report,
+        }
+
+    programmer_contract = _programmer_contract(
+        contract,
+        reserved_path=reservation["reserved_paths"][0],
+    )
+    programmer_trace: dict[str, object] = {}
+    programmer_call = diagnostic.start(
+        stage="programmer_llm",
+        task_id=programmer_task["task_id"],
+        artifact_id=programmer_contract["artifact_id"],
+        file_kind=programmer_contract["file_kind"],
+        content_format=programmer_contract["content_format"],
+        contract_chars=_json_char_count(programmer_contract),
+    )
+    programmer_result = await run_writing_programmer_contract(
+        artifact_contract=programmer_contract,
+        trace=programmer_trace,
+    )
+    diagnostic.end(
+        stage="programmer_llm",
+        call_id=programmer_call,
+        task_id=programmer_task["task_id"],
+        artifact_id=programmer_contract["artifact_id"],
+        status=programmer_result["status"],
+        artifact_chars=len(programmer_result["code_artifact"]),
+        diagnostic_count=len(programmer_result["diagnostics"]),
+        raw_output_chars=_trace_text_chars(programmer_trace, "raw_output"),
+        attempt_count=_trace_list_count(programmer_trace, "attempts"),
+        timed_out_attempt_count=_timed_out_attempt_count(programmer_trace),
+    )
+    _record_internal_trace(
+        trace,
+        f"programmer_{programmer_contract['artifact_id']}",
+        programmer_trace,
+    )
+    trace_summary.append(
+        "programmer_report "
+        f"{programmer_contract['artifact_id']} "
+        f"status={programmer_result['status']} "
+        f"chars={len(programmer_result['code_artifact'])}"
+    )
+    diagnostics = _programmer_diagnostics([programmer_result])
+    generated_artifact: GeneratedArtifact | None = None
+    if not diagnostics:
+        generated_artifact = _generated_artifact(
+            artifact_contract=contract,
+            reserved_path=reservation["reserved_paths"][0],
+            programmer_result=programmer_result,
+        )
+    report = _programmer_report(
+        task=programmer_task,
+        generated_artifact=generated_artifact,
+        diagnostics=diagnostics,
+    )
+    generated_artifacts = []
+    if generated_artifact is not None:
+        generated_artifacts.append(generated_artifact)
+    return {
+        "generated_artifacts": generated_artifacts,
+        "diagnostics": diagnostics,
+        "report": report,
+    }
+
+
+def _root_pm_input(
     *,
     question: str,
     acceptance_criteria: list[WritingAcceptanceCriterion],
     external_evidence: list[ExternalEvidenceSummary],
-    previous_artifacts: list[dict[str, object]],
-    validation_feedback: PatchValidationSummary | None = None,
-    alignment_feedback: WritingAlignmentResult | None = None,
-    reservation_feedback: ArtifactReservationResult | None = None,
-    trace: dict[str, object] | None,
-    trace_key: str,
-) -> WritingPMDecision:
-    pm_trace: dict[str, object] = {}
+    child_feedback: list[dict[str, object]],
+) -> WritingPMInput:
+    available_facts: list[dict[str, object]] = [
+        {
+            "kind": "acceptance_criteria",
+            "summary": "Preserved user-visible requirements.",
+            "criteria": acceptance_criteria,
+        }
+    ]
+    for evidence in external_evidence:
+        available_facts.append({
+            "kind": "external_evidence",
+            "request_id": evidence["request_id"],
+            "resolved": evidence["resolved"],
+            "summary": evidence["result"],
+        })
     pm_input: WritingPMInput = {
-        "question": question,
-        "mode": "create_new_project",
-        "external_evidence": external_evidence,
-        "previous_artifacts": previous_artifacts,
-        "acceptance_criteria": acceptance_criteria,
+        "pm_id": "writing_pm_root",
+        "domain": "writing",
+        "work_item": {
+            "goal": question,
+            "scope": "new-artifact writing request",
+            "constraints": [
+                "new artifacts only",
+                "do not mutate the caller workspace",
+                "do not run commands or tests",
+            ],
+            "expected_result": "patch proposal package for new artifacts",
+        },
+        "available_facts": available_facts,
+        "direct_child_reports": [],
+        "child_feedback": child_feedback,
+        "context_limits": {"max_prompt_chars": 50000},
     }
-    if validation_feedback is not None:
-        pm_input["validation_feedback"] = validation_feedback
-    if alignment_feedback is not None:
-        pm_input["alignment_feedback"] = alignment_feedback
-    if reservation_feedback is not None:
-        pm_input["reservation_feedback"] = reservation_feedback
-    decision = await decide_writing_work(pm_input, trace=pm_trace)
-    _record_internal_trace(trace, trace_key, pm_trace)
-    return decision
+    return pm_input
 
 
-async def _run_programmers(
+def _child_pm_input(
     *,
-    artifact_items: list[WritingArtifactItem],
-    reserved_paths: list[ReservedArtifactPath],
-    trace: dict[str, object] | None,
-    trace_summary: list[str],
-    trace_label: str = "",
-) -> list[WritingProgrammerResult]:
-    results: list[WritingProgrammerResult] = []
-    local_modules = _local_python_modules_by_artifact(
-        artifact_items=artifact_items,
-        reserved_paths=reserved_paths,
-    )
-    for artifact_item in artifact_items:
-        contract = _programmer_contract(
-            artifact_item,
-            local_modules=local_modules,
-        )
-        programmer_trace: dict[str, object] = {}
-        result = await run_writing_programmer_contract(
-            artifact_contract=contract,
-            trace=programmer_trace,
-        )
-        results.append(result)
-        _record_internal_trace(
-            trace,
-            f"programmer_{contract['artifact_id']}{trace_label}",
-            programmer_trace,
-        )
-        trace_summary.append(
-            "programmer_report "
-            f"{contract['artifact_id']} status={result['status']} "
-            f"chars={len(result['code_artifact'])}"
-        )
-    return results
+    parent_input: WritingPMInput,
+    child_task: WritingChildPMTask,
+) -> WritingPMInput:
+    pm_input: WritingPMInput = {
+        "pm_id": child_task["child_pm_id"],
+        "domain": child_task["domain"],
+        "work_item": {
+            "goal": child_task["goal"],
+            "scope": child_task["scope"],
+            "constraints": child_task["constraints"],
+            "expected_result": "; ".join(child_task["expected_report"]),
+        },
+        "available_facts": parent_input["available_facts"],
+        "direct_child_reports": [],
+        "child_feedback": [],
+        "context_limits": parent_input["context_limits"],
+    }
+    return pm_input
 
 
-def _programmer_contract(
-    artifact_item: WritingArtifactItem,
-    *,
-    local_modules: dict[str, str] | None = None,
-) -> WritingProgrammerContract:
-    contract: WritingProgrammerContract = {
-        "artifact_id": artifact_item["artifact_id"],
-        "file_label": artifact_item["file_label"],
-        "file_kind": artifact_item["file_kind"],
-        "content_format": artifact_item["content_format"],
-        "purpose": artifact_item["purpose"],
-        "imports": _contract_imports(
-            artifact_item,
-            local_modules=local_modules or {},
-        ),
-        "provided_interfaces": artifact_item["provided_interfaces"],
-        "consumed_interfaces": artifact_item["consumed_interfaces"],
-        "required_behavior": artifact_item["required_behavior"],
+def _artifact_contract_from_programmer_task(
+    task: WritingProgrammerTask,
+) -> WritingArtifactContract:
+    file_kind, content_format = _kind_and_format(task["output_format"])
+    contract: WritingArtifactContract = {
+        "artifact_id": task["task_id"],
+        "file_label": task["task_id"],
+        "file_kind": file_kind,
+        "content_format": content_format,
+        "purpose": task["artifact_purpose"],
+        "imports": task["imports"],
+        "provided_interfaces": task["provided_interfaces"],
+        "consumed_interfaces": task["consumed_interfaces"],
+        "required_behavior": task["required_behavior"],
     }
     return contract
 
 
-def _local_python_modules_by_artifact(
-    *,
-    artifact_items: list[WritingArtifactItem],
-    reserved_paths: list[ReservedArtifactPath],
-) -> dict[str, str]:
-    modules: dict[str, str] = {}
-    items_by_id = {item["artifact_id"]: item for item in artifact_items}
-    for reserved_path in reserved_paths:
-        item = items_by_id.get(reserved_path["artifact_id"])
-        if item is None:
-            continue
-        if item["file_kind"] != "source" or item["content_format"] != "python":
-            continue
-        path = Path(reserved_path["path"])
-        if path.suffix.casefold() != ".py":
-            continue
-        module_name = path.stem
-        modules[item["artifact_id"]] = module_name
-        modules[item["file_label"].casefold()] = module_name
-    return modules
+def _kind_and_format(output_format: str) -> tuple[WritingFileKind, WritingContentFormat]:
+    text = output_format.casefold()
+    has_python_format = "python" in text or ".py" in text
+    if "test" in text and has_python_format:
+        return "test", "python"
+    if has_python_format:
+        return "source", "python"
+    if ".md" in text or "markdown" in text or "readme" in text:
+        return "docs", "markdown"
+    if "json" in text:
+        return "config", "json"
+    if "csv" in text:
+        return "data", "csv"
+    if "text" in text or "toml" in text or "yaml" in text:
+        return "config", "text"
+    return "source", "python"
 
 
-def _contract_imports(
-    artifact_item: WritingArtifactItem,
+def _programmer_contract(
+    artifact_contract: WritingArtifactContract,
     *,
-    local_modules: dict[str, str],
-) -> list[str]:
-    imports = list(artifact_item["imports"])
-    for consumed_interface in artifact_item["consumed_interfaces"]:
-        name = consumed_interface.get("name")
-        provider = consumed_interface.get("provider")
-        if not isinstance(name, str) or not isinstance(provider, str):
+    reserved_path: ReservedArtifactPath,
+) -> WritingProgrammerContract:
+    contract: WritingProgrammerContract = {
+        "artifact_id": artifact_contract["artifact_id"],
+        "file_label": reserved_path["file_label"],
+        "file_kind": reserved_path["file_kind"],
+        "content_format": reserved_path["content_format"],
+        "purpose": artifact_contract["purpose"],
+        "imports": artifact_contract["imports"],
+        "provided_interfaces": artifact_contract["provided_interfaces"],
+        "consumed_interfaces": artifact_contract["consumed_interfaces"],
+        "required_behavior": artifact_contract["required_behavior"],
+    }
+    return contract
+
+
+def _generated_artifact(
+    *,
+    artifact_contract: WritingArtifactContract,
+    reserved_path: ReservedArtifactPath,
+    programmer_result: WritingProgrammerResult,
+) -> GeneratedArtifact:
+    artifact: GeneratedArtifact = {
+        "artifact_id": programmer_result["artifact_id"],
+        "file_label": artifact_contract["file_label"],
+        "file_kind": reserved_path["file_kind"],
+        "content_format": programmer_result["content_format"],
+        "path": reserved_path["path"],
+        "content": programmer_result["code_artifact"],
+        "purpose": artifact_contract["purpose"],
+    }
+    return artifact
+
+
+def _programmer_report(
+    *,
+    task: WritingProgrammerTask,
+    generated_artifact: GeneratedArtifact | None,
+    diagnostics: list[str],
+) -> dict[str, object]:
+    created_artifacts: list[dict[str, object]] = []
+    if generated_artifact is not None:
+        created_artifacts.append({
+            "artifact_id": generated_artifact["artifact_id"],
+            "path": generated_artifact["path"],
+            "purpose": generated_artifact["purpose"],
+        })
+    report = {
+        "child_id": task["task_id"],
+        "status": "blocked" if diagnostics else "complete",
+        "provided_facts": [
+            *task["provided_interfaces"],
+            *task["required_behavior"],
+        ],
+        "created_artifacts": created_artifacts,
+        "open_risks": diagnostics,
+    }
+    return report
+
+
+def _child_report_from_result(
+    *,
+    child_id: str,
+    child_result: _PMNodeResult,
+) -> dict[str, object]:
+    report = {
+        "child_id": child_id,
+        "status": child_result.status,
+        "provided_facts": _reports_to_facts(child_result.direct_child_reports),
+        "created_artifacts": [
+            {
+                "artifact_id": artifact["artifact_id"],
+                "path": artifact["path"],
+                "purpose": artifact["purpose"],
+            }
+            for artifact in child_result.generated_artifacts
+        ],
+        "open_risks": child_result.limitations,
+    }
+    return report
+
+
+def _reports_to_facts(reports: list[dict[str, object]]) -> list[str]:
+    facts: list[str] = []
+    for report in reports:
+        provided = report.get("provided_facts")
+        if not isinstance(provided, list):
             continue
-        module_name = local_modules.get(provider)
-        if module_name is None:
-            module_name = local_modules.get(provider.casefold())
-        if module_name is None:
-            continue
-        imports = _without_local_interface_import(
-            imports,
-            interface_name=name,
+        for value in provided:
+            if not isinstance(value, str) or value in facts:
+                continue
+            facts.append(value)
+    return facts
+
+
+def _external_requests_from_information(
+    decision: WritingPMDecision,
+) -> list[WritingExternalEvidenceRequest]:
+    request = decision["information_request"]
+    if request is None:
+        return []
+    task_parts = [*request["needed_facts"]]
+    if request["target_artifacts"]:
+        task_parts.append(
+            "Targets: " + ", ".join(request["target_artifacts"]),
         )
-        imports.append(f"from {module_name} import {name}")
-    return _dedupe_strings(imports)
+    task = "; ".join(task_parts)
+    external_request: WritingExternalEvidenceRequest = {
+        "request_id": request["request_id"],
+        "task": task,
+        "reason": request["reason_for_next_instruction"],
+    }
+    return [external_request]
 
 
-def _without_local_interface_import(
-    imports: list[str],
-    *,
-    interface_name: str,
-) -> list[str]:
-    kept: list[str] = []
-    for import_statement in imports:
-        if _imports_interface_name(import_statement, interface_name):
-            continue
-        kept.append(import_statement)
-    return kept
-
-
-def _imports_interface_name(import_statement: str, interface_name: str) -> bool:
-    if not import_statement.startswith("from "):
-        return False
-    marker = " import "
-    if marker not in import_statement:
-        return False
-    imported = import_statement.split(marker, 1)[1]
-    names = [part.strip().split(" as ", 1)[0] for part in imported.split(",")]
-    return interface_name in names
-
-
-def _generated_artifacts(
-    *,
-    artifact_items: list[WritingArtifactItem],
-    reserved_paths: list[ReservedArtifactPath],
-    programmer_results: list[WritingProgrammerResult],
-) -> list[GeneratedArtifact]:
-    items_by_id = {item["artifact_id"]: item for item in artifact_items}
-    paths_by_id = {path["artifact_id"]: path for path in reserved_paths}
-    artifacts: list[GeneratedArtifact] = []
-    for result in programmer_results:
-        if result["status"] != "succeeded":
-            continue
-        artifact_id = result["artifact_id"]
-        artifact_item = items_by_id[artifact_id]
-        reserved_path = paths_by_id[artifact_id]
-        artifact: GeneratedArtifact = {
-            "artifact_id": artifact_id,
-            "file_label": artifact_item["file_label"],
-            "file_kind": artifact_item["file_kind"],
-            "content_format": artifact_item["content_format"],
-            "path": reserved_path["path"],
-            "content": result["code_artifact"],
-            "purpose": artifact_item["purpose"],
-        }
-        artifacts.append(artifact)
-    return artifacts
+def _reserved_paths_from_artifacts(
+    generated_artifacts: list[GeneratedArtifact],
+) -> list[ReservedArtifactPath]:
+    reserved_paths: list[ReservedArtifactPath] = []
+    for artifact in generated_artifacts:
+        reserved_paths.append({
+            "artifact_id": artifact["artifact_id"],
+            "file_label": artifact["file_label"],
+            "path": artifact["path"],
+            "file_kind": artifact["file_kind"],
+            "content_format": artifact["content_format"],
+            "purpose": artifact["purpose"],
+        })
+    return reserved_paths
 
 
 def _materialize_patcher_report(
@@ -547,6 +866,7 @@ def _materialize_patcher_report(
     generated_artifacts: list[GeneratedArtifact],
     reserved_paths: list[ReservedArtifactPath],
     max_artifact_chars: int,
+    diagnostic: WritingDiagnosticTracer,
     trace: dict[str, object] | None,
     trace_summary: list[str],
     trace_label: str = "",
@@ -558,12 +878,25 @@ def _materialize_patcher_report(
         "max_artifact_chars": max_artifact_chars,
     }
     patcher_trace: dict[str, object] = {}
+    patcher_call = diagnostic.start(
+        stage="patcher_materialization",
+        generated_artifact_count=len(generated_artifacts),
+        reserved_path_count=len(reserved_paths),
+        max_artifact_chars=max_artifact_chars,
+    )
     report = materialize_patch_artifacts(
         repo_root=None,
         patcher_input=patcher_input,
         max_files=MAX_PATCH_FILES,
         max_diff_chars=max_artifact_chars,
         trace=patcher_trace,
+    )
+    diagnostic.end(
+        stage="patcher_materialization",
+        call_id=patcher_call,
+        status=report["status"],
+        patch_artifact_count=len(report["patch_artifacts"]),
+        diagnostic_count=len(report["diagnostics"]),
     )
     _record_internal_trace(trace, f"patcher{trace_label}", patcher_trace)
     trace_summary.append(
@@ -575,80 +908,42 @@ def _materialize_patcher_report(
     return report
 
 
-def _previous_artifact_summaries(
-    generated_artifacts: list[GeneratedArtifact],
-) -> list[dict[str, object]]:
-    summaries: list[dict[str, object]] = []
-    for artifact in generated_artifacts:
-        summaries.append({
-            "artifact_id": artifact["artifact_id"],
-            "file_kind": artifact["file_kind"],
-            "content_format": artifact["content_format"],
-            "purpose": artifact["purpose"],
-            "content_excerpt": _artifact_excerpt(artifact["content"]),
-        })
-    return summaries
-
-
-def _artifact_excerpt(content: str) -> str:
-    if len(content) <= MAX_PREVIOUS_ARTIFACT_EXCERPT_CHARS:
-        return content
-    return content[:MAX_PREVIOUS_ARTIFACT_EXCERPT_CHARS].rstrip()
-
-
-def _pm_terminal_result(
+def _information_request_result(
     *,
-    pm_decision: WritingPMDecision,
+    requests: list[WritingExternalEvidenceRequest],
     session: dict[str, object],
     external_evidence: list[ExternalEvidenceSummary],
     trace_summary: list[str],
 ) -> CodeWritingResult:
-    status = "failed"
-    validation_status = "failed"
-    if pm_decision["status"] == "need_external_evidence":
-        status = "need_external_evidence"
-    elif pm_decision["status"] == "rejected":
-        status = "rejected"
-        validation_status = "rejected"
-    elif pm_decision["status"] == "sufficient":
-        status = "failed"
+    result = _result(
+        status="need_external_evidence",
+        mode="create_new_project",
+        answer_text="Supervisor-mediated information is required before writing.",
+        patch_artifacts=[],
+        created_files=[],
+        changed_files=[],
+        external_evidence_requests=requests,
+        external_evidence=external_evidence,
+        validation=_empty_validation("failed"),
+        session=session,
+        limitations=[],
+        trace_summary=trace_summary,
+    )
+    return result
 
-    answer_text = _terminal_answer(pm_decision)
-    return _result(
+
+def _pm_blocked_result(
+    *,
+    pm_result: _PMNodeResult,
+    session: dict[str, object],
+    external_evidence: list[ExternalEvidenceSummary],
+    trace_summary: list[str],
+) -> CodeWritingResult:
+    status = "needs_user_input" if pm_result.status == "blocked" else "failed"
+    result = _result(
         status=status,
         mode="create_new_project",
-        answer_text=answer_text,
-        patch_artifacts=[],
-        created_files=[],
-        changed_files=[],
-        external_evidence_requests=pm_decision["external_evidence_requests"],
-        external_evidence=external_evidence,
-        validation=_empty_validation(validation_status),
-        session=session,
-        limitations=pm_decision["limitations"],
-        trace_summary=trace_summary,
-    )
-
-
-def _terminal_answer(pm_decision: WritingPMDecision) -> str:
-    if pm_decision["status"] == "need_external_evidence":
-        return "External evidence is required before writing artifacts."
-    if pm_decision["limitations"]:
-        return "; ".join(pm_decision["limitations"])
-    return "The writing PM did not produce artifact work."
-
-
-def _reservation_rejected_result(
-    *,
-    reservation: ArtifactReservationResult,
-    session: dict[str, object],
-    external_evidence: list[ExternalEvidenceSummary],
-    trace_summary: list[str],
-) -> CodeWritingResult:
-    return _result(
-        status="failed",
-        mode="create_new_project",
-        answer_text="File reservation failed before programmer dispatch.",
+        answer_text="Code writing PM could not complete the requested work.",
         patch_artifacts=[],
         created_files=[],
         changed_files=[],
@@ -656,36 +951,29 @@ def _reservation_rejected_result(
         external_evidence=external_evidence,
         validation=_empty_validation("failed"),
         session=session,
-        limitations=reservation["errors"],
+        limitations=pm_result.limitations,
         trace_summary=trace_summary,
     )
+    return result
 
 
-def _programmer_failed_result(
-    *,
-    diagnostics: list[str],
-    session: dict[str, object],
-    external_evidence: list[ExternalEvidenceSummary],
-    trace_summary: list[str],
-) -> CodeWritingResult:
-    return _result(
+def _invalid_pm_result(
+    reason: str,
+    decision: WritingPMDecision,
+) -> _PMNodeResult:
+    result = _PMNodeResult(
         status="failed",
-        mode="create_new_project",
-        answer_text="One or more programmers did not return usable artifacts.",
-        patch_artifacts=[],
-        created_files=[],
-        changed_files=[],
-        external_evidence_requests=[],
-        external_evidence=external_evidence,
-        validation=_empty_validation("failed"),
-        session=session,
-        limitations=diagnostics,
-        trace_summary=trace_summary,
+        generated_artifacts=[],
+        direct_child_reports=[],
+        information_requests=[],
+        limitations=[reason],
+        final_decision=decision,
     )
+    return result
 
 
 def _existing_source_rejected_result(*, mode: str) -> CodeWritingResult:
-    return _result(
+    result = _result(
         status="rejected",
         mode=mode,
         answer_text=(
@@ -704,6 +992,7 @@ def _existing_source_rejected_result(*, mode: str) -> CodeWritingResult:
         ],
         trace_summary=["writing:existing_source_rejected"],
     )
+    return result
 
 
 def _programmer_diagnostics(
@@ -714,7 +1003,8 @@ def _programmer_diagnostics(
         if result["status"] == "succeeded":
             continue
         diagnostics.extend(result["diagnostics"])
-    return _dedupe_strings(diagnostics)
+    deduped_diagnostics = _dedupe_strings(diagnostics)
+    return deduped_diagnostics
 
 
 def _external_evidence_from_request(
@@ -774,7 +1064,7 @@ def _empty_validation(status: str) -> PatchValidationSummary:
     validation_status = "failed"
     if status == "rejected":
         validation_status = "rejected"
-    return {
+    validation: PatchValidationSummary = {
         "status": validation_status,
         "parsed": False,
         "sandbox_applied": False,
@@ -782,6 +1072,29 @@ def _empty_validation(status: str) -> PatchValidationSummary:
         "warnings": [],
         "files": [],
     }
+    return validation
+
+
+def _fallback_pm_decision() -> WritingPMDecision:
+    decision: WritingPMDecision = {
+        "status": "complete",
+        "reason": "Generated artifacts are ready for synthesis.",
+        "information_request": None,
+        "child_pm_task": None,
+        "programmer_task": None,
+        "repair_instruction": None,
+        "completion_report": {
+            "pm_id": "writing_pm_root",
+            "status": "complete",
+            "provided_facts": [],
+            "created_artifacts": [],
+            "consumed_facts": [],
+            "open_risks": [],
+            "next_dependency_needs": [],
+        },
+        "blocker": None,
+    }
+    return decision
 
 
 def _dedupe_strings(values: list[str]) -> list[str]:
@@ -791,6 +1104,50 @@ def _dedupe_strings(values: list[str]) -> list[str]:
             continue
         deduped.append(value)
     return deduped
+
+
+def _json_char_count(value: object) -> int:
+    """Return the rendered JSON size used for diagnostic volume tracking."""
+
+    rendered = json.dumps(value, ensure_ascii=False, default=str)
+    count = len(rendered)
+    return count
+
+
+def _trace_text_chars(trace: dict[str, object], key: str) -> int:
+    """Return the length of one text field in an internal trace dictionary."""
+
+    value = trace.get(key)
+    if not isinstance(value, str):
+        return 0
+    count = len(value)
+    return count
+
+
+def _trace_list_count(trace: dict[str, object], key: str) -> int:
+    """Return the number of rows in one list field from a trace dictionary."""
+
+    value = trace.get(key)
+    if not isinstance(value, list):
+        return 0
+    count = len(value)
+    return count
+
+
+def _timed_out_attempt_count(trace: dict[str, object]) -> int:
+    """Count recorded LLM attempts marked as timed out."""
+
+    attempts = trace.get("attempts")
+    if not isinstance(attempts, list):
+        return 0
+
+    count = 0
+    for attempt in attempts:
+        if not isinstance(attempt, dict):
+            continue
+        if attempt.get("timed_out") is True:
+            count += 1
+    return count
 
 
 def _record_internal_trace(
@@ -811,7 +1168,7 @@ def _result(
     patch_artifacts: list[dict[str, object]],
     created_files: list[dict[str, str]],
     changed_files: list[dict[str, str]],
-    external_evidence_requests,
+    external_evidence_requests: list[WritingExternalEvidenceRequest],
     external_evidence: list[ExternalEvidenceSummary],
     validation: PatchValidationSummary,
     session,

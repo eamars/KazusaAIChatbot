@@ -3,7 +3,8 @@
 `code_writing` is the standalone new-artifact writing subagent for the coding
 agent. It creates proposed files, scripts, docs, tests, config, or small
 projects from a bounded source-free request. It never applies a patch to the
-caller workspace and never runs target project commands.
+caller workspace, never runs target project commands, and does not execute
+generated code or generated tests in Phase 2.
 
 ## Public Entrypoint
 
@@ -23,8 +24,8 @@ interface.
 
 - `question`: user-visible request for new artifacts.
 - `mode_hint`: must be `create_new_project` for the Phase 2 writing path.
-- `external_evidence`: limited public evidence summaries after the supervisor
-  resolves a `need_external_evidence` outcome.
+- `external_evidence`: limited public evidence summaries after the top-level
+  supervisor resolves a PM `request_information` outcome.
 - `workspace_root`: required caller-configured storage root.
 - `session_id`: optional stable public session id.
 - `preferred_language`, `max_answer_chars`, `max_artifact_chars`: optional
@@ -49,10 +50,12 @@ capability.
   created files are expected and changed files are diagnostics only.
 - `external_evidence_requests` and `external_evidence`: supervisor-mediated
   public evidence handoff.
-- `validation`: deterministic patch validation result.
-- `alignment`: optional LLM-owned artifact/request alignment result.
+- `validation`: review-package materialization result. It proves the proposed
+  files were materialized for inspection; it is not generated-code validation.
+- `alignment`: reserved for later-phase semantic artifact review.
 - `session`: public-safe writing session handle.
-- `limitations`: missing evidence, validation failures, or unsupported scope.
+- `limitations`: missing evidence, materialization issues, or unsupported
+  scope.
 - `trace_summary`: compact stage summary for review.
 - `trace`: optional limited diagnostic output for live LLM review documents.
 
@@ -60,54 +63,58 @@ Public responses must not expose local roots, storage roots, cache keys, raw
 command output, source dumps, secret-like files, repository internals, or
 credentials.
 
-## Workflow
+## PM Lifecycle Workflow
 
 ```text
 CodeWritingRequest
 -> writing supervisor
 -> managed session preparation
 -> Acceptance owner preserves user-visible requirements
--> Writing PM on CODING_AGENT_PM_LLM
--> optional need_external_evidence returned to top-level supervisor
--> File Agent reserves safe new artifact paths
--> one Writing programmer on CODING_AGENT_PROGRAMMER_LLM per artifact contract
--> patching boundary materializes generated artifacts as new-file diffs
--> structural validation checks patch artifact shape and sandbox apply
--> Alignment owner compares generated artifacts against preserved requirements
+-> PM lifecycle decision on CODING_AGENT_PM_LLM
+-> optional request_information returned to top-level supervisor
+-> optional child PM lifecycle for smaller work item
+-> optional one programmer task for one new artifact
+-> File Agent reserves safe new artifact path
+-> Writing programmer on CODING_AGENT_PROGRAMMER_LLM
+-> patching boundary materializes generated artifact content as new-file diffs
+-> review-package materialization copies proposed files into managed storage
 -> synthesis on CODING_AGENT_PM_LLM
 -> CodeWritingResult
 ```
 
-The top-level supervisor owns cross-domain interleaving. The Writing PM owns
-the requested new-artifact feature picture and artifact decomposition.
-Acceptance and alignment owners preserve and check user-visible requirements.
-File Agent owns path mechanics. Each Writing programmer receives one artifact
-contract and returns one fenced artifact body. The patching boundary owns
-file-tree or unified-diff materialization. Deterministic code owns structural
-validation, caps, path safety, storage boundaries, and public sanitization.
+The top-level supervisor owns cross-domain interleaving. The writing PM owns
+only the semantic lifecycle of its direct children. In Phase 2 it may request
+information, create one child PM, create one programmer task, complete with a
+report, or block with a reason. Repair remains reserved for later phases.
+Acceptance preserves user-visible requirements. File Agent owns path mechanics.
+Each Writing programmer receives one PM-approved artifact contract and returns
+one fenced artifact body. The patching boundary owns file-tree or unified-diff
+materialization. Deterministic code owns caps, path safety, storage boundaries,
+review-package materialization, and public sanitization.
 
 ## Mutation Boundary
 
-Patch validation copies into a managed sandbox and checks the proposed diff
-there. The subagent does not mutate fetched repositories, caller workspaces, or
-the Kazusa source tree as part of a request.
+Review-package materialization copies proposed artifacts into managed storage
+for inspection. The subagent does not mutate fetched repositories, caller
+workspaces, or the Kazusa source tree as part of a request.
 
 Out of scope:
 
 - semantic edits to existing source files;
 - applying patches to real checkouts;
-- running target project tests, package commands, build commands, or shell
-  verification;
+- running generated code, generated tests, target project tests, package
+  commands, build commands, or shell verification;
+- validation feedback loops or repair loops;
 - dependency installation;
 - runtime integration with background work or adapter delivery.
 
 ## External Evidence
 
-External evidence is supervisor-managed. The Writing PM may request public
-evidence by returning `need_external_evidence` with limited evidence tasks.
-The top-level coding supervisor resolves those tasks through the public
-external-evidence helper, then resumes `code_writing.run(...)` with limited
-evidence summaries.
+Information requests are supervisor-managed. The writing PM may request
+workspace, generated-artifact, existing-source, provided-evidence, or public
+external facts through `request_information`. The top-level coding supervisor
+chooses the correct workflow, records the result in its ledger, then resumes
+`code_writing.run(...)` with compact evidence summaries.
 
 ## Session Storage
 

@@ -114,6 +114,59 @@ def validate_patch_artifacts(
     return summary
 
 
+def materialize_patch_artifacts_for_review(
+    *,
+    repo_root: Path | None,
+    workspace_root: Path,
+    patch_artifacts: list[PatchArtifact],
+    max_files: int,
+    max_diff_chars: int,
+) -> PatchValidationSummary:
+    """Materialize patch artifacts for review without executing generated code."""
+
+    parse_result = _parse_patch_artifacts(
+        patch_artifacts=patch_artifacts,
+        max_files=max_files,
+        max_diff_chars=max_diff_chars,
+    )
+    if parse_result["errors"]:
+        summary = _summary(
+            status="rejected",
+            parsed=False,
+            sandbox_applied=False,
+            errors=parse_result["errors"],
+            warnings=parse_result["warnings"],
+            files=parse_result["files"],
+        )
+        return summary
+
+    sandbox_result = _sandbox_materialization_check(
+        repo_root=repo_root,
+        workspace_root=workspace_root,
+        diff_text=parse_result["diff_text"],
+    )
+    if sandbox_result is not None:
+        summary = _summary(
+            status="failed",
+            parsed=True,
+            sandbox_applied=False,
+            errors=[sandbox_result],
+            warnings=parse_result["warnings"],
+            files=parse_result["files"],
+        )
+        return summary
+
+    summary = _summary(
+        status="succeeded",
+        parsed=True,
+        sandbox_applied=True,
+        errors=[],
+        warnings=parse_result["warnings"],
+        files=parse_result["files"],
+    )
+    return summary
+
+
 def _parse_patch_artifacts(
     *,
     patch_artifacts: list[PatchArtifact],
@@ -347,6 +400,45 @@ def _sandbox_check(
     )
     if markdown_error is not None:
         return markdown_error
+    return None
+
+
+def _sandbox_materialization_check(
+    *,
+    repo_root: Path | None,
+    workspace_root: Path,
+    diff_text: str,
+) -> str | None:
+    try:
+        sandbox_root = _prepare_sandbox(repo_root, workspace_root)
+    except PathSafetyError:
+        return "Patch review storage could not be prepared."
+    except OSError:
+        return "Patch review base could not be copied."
+
+    completed = _run_git_apply(sandbox_root=sandbox_root, diff_text=diff_text)
+    if completed == "git-unavailable":
+        return "git executable is unavailable for patch review."
+    if completed == "timed-out":
+        return "Patch review materialization timed out."
+    if completed.returncode != 0:
+        return _git_apply_error(completed.stderr)
+    if _git_apply_has_malformed_warning(completed.stderr):
+        return _git_apply_error(completed.stderr)
+
+    applied = _run_git_apply(
+        sandbox_root=sandbox_root,
+        diff_text=diff_text,
+        check_only=False,
+    )
+    if applied == "git-unavailable":
+        return "git executable is unavailable for patch review."
+    if applied == "timed-out":
+        return "Patch review materialization timed out."
+    if applied.returncode != 0:
+        return _git_apply_error(applied.stderr)
+    if _git_apply_has_malformed_warning(applied.stderr):
+        return _git_apply_error(applied.stderr)
     return None
 
 

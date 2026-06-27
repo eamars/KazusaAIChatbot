@@ -8,11 +8,14 @@ from kazusa_ai_chatbot.coding_agent.code_reading.models import (
 
 WritingMode = Literal["create_new_project", "edit_existing_repository"]
 WritingPMStatus = Literal[
-    "need_programmers",
-    "need_external_evidence",
-    "sufficient",
-    "rejected",
+    "request_information",
+    "create_child_pm",
+    "create_programmer_task",
+    "repair_child",
+    "complete",
+    "blocked",
 ]
+WritingDomain = Literal["reading", "writing", "modifying"]
 WritingResultStatus = Literal[
     "succeeded",
     "failed",
@@ -75,7 +78,7 @@ class ExternalEvidenceSummary(TypedDict):
 
 
 class WritingExternalEvidenceRequest(TypedDict):
-    """One PM-requested external evidence task."""
+    """One supervisor-mediated fact request from the writing PM."""
 
     request_id: str
     task: str
@@ -143,8 +146,102 @@ class CodeWritingRequest(TypedDict, total=False):
     external_evidence: list[ExternalEvidenceSummary]
 
 
-class WritingArtifactItem(TypedDict, total=False):
-    """One PM-owned new artifact contract."""
+class WritingWorkItem(TypedDict):
+    """One PM-owned unit of writing work."""
+
+    goal: str
+    scope: str
+    constraints: list[str]
+    expected_result: str
+
+
+class WritingPMInput(TypedDict):
+    """Compact model-facing input for one PM lifecycle decision."""
+
+    pm_id: str
+    domain: WritingDomain
+    work_item: WritingWorkItem
+    available_facts: list[dict[str, object]]
+    direct_child_reports: list[dict[str, object]]
+    child_feedback: list[dict[str, object]]
+    context_limits: dict[str, object]
+
+
+class WritingInformationRequest(TypedDict):
+    """Facts requested before the PM can issue the next child instruction."""
+
+    request_id: str
+    needed_facts: list[str]
+    target_artifacts: list[str]
+    reason_for_next_instruction: str
+
+
+class WritingChildPMTask(TypedDict):
+    """Direct child PM task emitted by a parent PM."""
+
+    child_pm_id: str
+    domain: WritingDomain
+    goal: str
+    scope: str
+    constraints: list[str]
+    expected_report: list[str]
+
+
+class WritingProgrammerTask(TypedDict):
+    """Direct programmer task emitted by a PM."""
+
+    task_id: str
+    artifact_purpose: str
+    required_behavior: list[str]
+    provided_interfaces: list[str]
+    consumed_interfaces: list[str]
+    imports: list[str]
+    output_format: str
+
+
+class WritingRepairInstruction(TypedDict):
+    """Repair request for one direct child."""
+
+    child_id: str
+    feedback: str
+    expected_correction: str
+
+
+class WritingCompletionReport(TypedDict):
+    """Compact report from a PM to its parent or supervisor."""
+
+    pm_id: str
+    status: Literal["complete"]
+    provided_facts: list[str]
+    created_artifacts: list[dict[str, object]]
+    consumed_facts: list[str]
+    open_risks: list[str]
+    next_dependency_needs: list[str]
+
+
+class WritingBlocker(TypedDict):
+    """Terminal blocker emitted by a PM."""
+
+    summary: str
+    missing_facts: list[str]
+    why_information_request_is_not_enough: str
+
+
+class WritingPMDecision(TypedDict):
+    """The lifecycle action returned by a writing PM."""
+
+    status: WritingPMStatus
+    reason: str
+    information_request: WritingInformationRequest | None
+    child_pm_task: WritingChildPMTask | None
+    programmer_task: WritingProgrammerTask | None
+    repair_instruction: WritingRepairInstruction | None
+    completion_report: WritingCompletionReport | None
+    blocker: WritingBlocker | None
+
+
+class WritingArtifactContract(TypedDict, total=False):
+    """Internal one-artifact contract accepted for file and programmer work."""
 
     artifact_id: str
     file_label: str
@@ -152,8 +249,8 @@ class WritingArtifactItem(TypedDict, total=False):
     content_format: WritingContentFormat
     purpose: str
     imports: list[str]
-    provided_interfaces: list[dict[str, object]]
-    consumed_interfaces: list[dict[str, object]]
+    provided_interfaces: list[str]
+    consumed_interfaces: list[str]
     required_behavior: list[str]
     preferred_name: str
 
@@ -170,36 +267,12 @@ class ReservedArtifactPath(TypedDict):
 
 
 class ArtifactReservationResult(TypedDict):
-    """File Agent result for PM artifact contracts."""
+    """File Agent result for accepted artifact contracts."""
 
     status: Literal["accepted", "repair_required"]
     reserved_paths: list[ReservedArtifactPath]
     errors: list[str]
     repair_feedback: list[str]
-
-
-class WritingPMInput(TypedDict):
-    """Compact model-facing input for the writing product manager."""
-
-    question: str
-    mode: WritingMode
-    external_evidence: list[ExternalEvidenceSummary]
-    previous_artifacts: list[dict[str, object]]
-    acceptance_criteria: NotRequired[list[WritingAcceptanceCriterion]]
-    validation_feedback: NotRequired[PatchValidationSummary]
-    alignment_feedback: NotRequired[WritingAlignmentResult]
-    reservation_feedback: NotRequired[ArtifactReservationResult]
-
-
-class WritingPMDecision(TypedDict):
-    """The decision shape returned by the writing product manager."""
-
-    status: WritingPMStatus
-    feature_goal: str
-    artifact_items: list[WritingArtifactItem]
-    selected_artifacts: list[dict[str, object]]
-    external_evidence_requests: list[WritingExternalEvidenceRequest]
-    limitations: list[str]
 
 
 class WritingProgrammerContract(TypedDict):
@@ -211,8 +284,8 @@ class WritingProgrammerContract(TypedDict):
     content_format: WritingContentFormat
     purpose: str
     imports: list[str]
-    provided_interfaces: list[dict[str, object]]
-    consumed_interfaces: list[dict[str, object]]
+    provided_interfaces: list[str]
+    consumed_interfaces: list[str]
     required_behavior: list[str]
 
 

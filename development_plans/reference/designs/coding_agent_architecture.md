@@ -83,15 +83,14 @@ The accepted architecture is explicit context partitioning:
   Cross-domain needs return to the supervisor as structured outcomes.
 - Each top-level subagent owns one domain of work and keeps its own bounded
   context memory for that domain.
-- `code_reading`, `code_writing`, and `code_modifying` use a
-  product-manager/programmer
-  structure for non-trivial tasks. Reading product managers define bounded
-  source-slice contracts and synthesize source behavior from programmer
-  evidence. Writing product managers decompose new artifacts, define
-  file-to-file interfaces, and assign one bounded new artifact to each
-  programmer. Modifying product managers use source evidence to define
-  existing-file change contracts, lifecycle ownership, consumed interfaces,
-  and source anchors before programmer work starts.
+- `code_reading`, `code_writing`, and `code_modifying` use a recursive
+  product-manager/programmer structure for non-trivial tasks. A PM owns the
+  semantic lifecycle of its direct children and chooses each direct child as
+  either another PM or a programmer. A PM manages only direct children. A
+  programmer receives one bounded contract and returns one report or artifact.
+  PM implementation may be a single LLM call or an internal PM cluster later;
+  the external PM boundary, responsibility, and input/output contract remain
+  stable.
 - `code_patching` runs after writing or modifying artifacts are selected. It
   owns edit mechanics: path targeting, anchor selection for existing files,
   full-file creation for new files, unified-diff or file-tree assembly, and
@@ -105,7 +104,7 @@ The accepted architecture is explicit context partitioning:
   structured reports that become compressed memory: evidence references,
   interface facts, behavior summaries, uncertainty, and follow-up needs. A
   programmer receives one bounded contract and returns one artifact or report
-  for that contract. The product manager reasons over those reports and cited
+  for that contract. The owning PM reasons over direct child reports and cited
   evidence. Full raw repository content stays in the private evidence store.
 - Deterministic tooling owns repository discovery, path safety, file caps,
   search execution, patch validation, execution limits, and storage boundaries.
@@ -157,24 +156,20 @@ flowchart TD
     L --> E[external evidence workflow]
 
     R --> RPM[Reading PM]
-    RPM --> RP1[Reading programmer: bounded source slice]
-    RPM --> RP2[Reading programmer: bounded source slice]
-    RP1 --> RPT[Structured reading reports]
-    RP2 --> RPT
+    RPM --> RC[Child PM or reading programmer]
+    RC --> RPT[Structured reading report]
     RPT --> RPM
     RPM --> L
 
-    W --> WPM[Writing PM: new artifact plan]
-    WPM --> WMP1[Writing programmer: one new artifact]
-    WPM --> WMP2[Writing programmer: one new artifact]
-    WMP1 --> WAR[New artifact reports]
-    WMP2 --> WAR
+    W --> WPM[Writing PM]
+    WPM --> WC[Child PM or writing programmer]
+    WC --> WAR[New artifact report]
     WAR --> WPM
     WPM --> L
 
-    M --> MPM[Modifying PM: existing-file change plan]
-    MPM --> MMP1[Modifying programmer: one existing-file contract]
-    MMP1 --> MAR[Existing-file change report]
+    M --> MPM[Modifying PM]
+    MPM --> MC[Child PM or modifying programmer]
+    MC --> MAR[Existing-file change report]
     MAR --> MPM
     MPM --> L
 
@@ -207,6 +202,7 @@ flowchart TD
     SUP[Top-level coding supervisor]
     WL[Work ledger]
     PM[Domain product manager]
+    CPM[Child product manager]
     EV[Handoff evaluator]
     FM[File Agent]
     RP[Reading programmer: one bounded read slice]
@@ -223,7 +219,9 @@ flowchart TD
     T --> PM
     PM -->|file request| FM
     FM --> PM
-    PM -->|domain contract| EV
+    PM -->|child PM task| CPM
+    CPM -->|child PM report| PM
+    PM -->|programmer contract| EV
     EV -->|accepted reading contract| RP
     EV -->|accepted new-artifact contract| WP
     EV -->|accepted existing-file contract| MP
@@ -246,9 +244,10 @@ flowchart TD
 | Role | Primary responsibility | Input contract | Output contract |
 |---|---|---|---|
 | Top-level coding supervisor | Global goal state, work ledger, cross-domain dispatch, context budget, repair sequencing, final artifact handoff. | User task, repository/source request, work ledger, prior subagent outcomes, validation outcomes. | Next workflow action, compact evidence-state summary, final public response. |
-| Reading PM | Source-question decomposition, evidence slots, reading assignment contracts, answer synthesis from Reading programmer reports. | Repository summary, source scope, repo map summary, prior reading reports. | Reading assignments, sufficiency decision, evidence-backed source answer. |
-| Writing PM | New-artifact decomposition, file-to-file interfaces, imports, artifact contracts, report reconciliation, patching packet selection. | User goal, new-artifact work item, external evidence, session summary, validation summaries, File Agent feedback. | New-artifact assignments, selected generated artifacts, patching input, sufficiency decision. |
-| Modifying PM | Existing-source change decomposition, owner/source evidence mapping, lifecycle ownership, existing-file change contracts, report reconciliation, patching packet selection. | User goal, existing-source work item, reading evidence, current file context, external evidence, validation summaries, File Agent feedback. | Existing-file change assignments, selected modification artifacts, patching input, sufficiency decision. |
+| PM role | Semantic lifecycle of one assigned work item, direct child choice, direct child instruction, information request, direct child report handling, repair, sufficiency decision, and compact report upward. | Assigned work item, available supervisor-approved facts, direct child reports, validation feedback, and context limits. | Information request, direct child task for a PM or programmer, repair instruction for a direct child, completion report, or blocked status. |
+| Reading PM | Reading-domain PM instance for source-question decomposition, evidence slots, reading child tasks, and evidence-backed answer synthesis. | Repository summary, source scope, repo map summary, supervisor-approved facts, prior direct child reports. | Reading child tasks, information requests, sufficiency decision, evidence-backed source answer, or PM report upward. |
+| Writing PM | Writing-domain PM instance for new-artifact lifecycle, dependency ordering, workspace-fact requests, child writing tasks, and selected artifact reports. | User goal or parent PM work item, new-artifact scope, supervisor-approved facts, validation summaries, direct child reports, File Agent feedback. | Child PM tasks, programmer tasks only when directly ready, workspace information requests, selected generated artifacts, patching input, sufficiency decision, or PM report upward. |
+| Modifying PM | Modifying-domain PM instance for existing-source lifecycle, source-owner evidence needs, change dependency ordering, child modifying tasks, and selected modification reports. | User goal or parent PM work item, existing-source scope, reading evidence, current file context, supervisor-approved facts, validation summaries, direct child reports, File Agent feedback. | Child PM tasks, programmer tasks only when directly ready, workspace information requests, selected modification artifacts, patching input, sufficiency decision, or PM report upward. |
 | File Agent | Repository file planning, new-file reservation, path-safety checks, current-context packaging, and owned/read-only path-map construction. | Supervisor work item, source scope, repository inventory, explicit placement data, PM file needs. | File plan with owned path map, read-only path map, current file context, file diagnostics, and repair feedback. |
 | Handoff evaluator | Structural acceptance before programmer or patching dispatch. | One domain contract, prompt budget, role-boundary rules, path contract rules, assignment limits. | Accepted contract or compact repair feedback for the owning PM. |
 | Reading programmer | Bounded local source reading behind one accepted reading assignment. | One reading assignment and selected source excerpts. | Structured evidence report with facts, evidence refs, uncertainty, and open questions. |
@@ -261,26 +260,41 @@ flowchart TD
 ### Hierarchical PM And Programmer Contract
 
 Product managers decide worker roles and boundaries through bounded
-decomposition steps. Each layer receives the smallest contract needed for its
-own decision and returns a structured memory artifact to the layer above it.
+decomposition steps. Each PM receives the smallest contract needed for its own
+decision and owns the semantic lifecycle of its direct children. A direct child
+is either another PM or one programmer. The PM chooses the child type, issues
+the direct child instruction, receives the direct child report, requests repair
+when needed, requests supervisor-mediated information when workspace facts are
+needed, and returns a structured memory artifact to its parent or to the
+top-level supervisor.
 
-For code reading, the reading PM owns evidence boundaries, source slices,
-question slots, expected interface facts, proof obligations, and final answer
-synthesis. Reading programmers perform the bounded inspection and return
-evidence reports.
+For code reading, reading PM instances own evidence boundaries, source slices,
+question slots, expected interface facts, proof obligations, direct reading
+child tasks, and final answer synthesis at their assigned layer. Reading
+programmers perform bounded inspection only when the owning PM has produced one
+accepted reading contract.
 
-For code writing, the writing PM owns new-artifact decomposition, file-to-file
-input/output contracts, cross-file import needs, final report reconciliation,
-and patching packet selection. The File Agent reserves new paths and packages
-file management metadata. Writing programmers receive one accepted
-new-artifact contract and perform the local work behind that contract.
+For code writing, writing PM instances own new-artifact lifecycle,
+dependency-aware child ordering, workspace-fact requests, direct writing child
+tasks, direct child reports, final report reconciliation, and patching packet
+selection at their assigned layer. The File Agent reserves new paths and
+packages file management metadata. Writing programmers perform local work only
+when their direct PM has produced one accepted new-artifact contract.
 
-For code modifying, the modifying PM owns existing-source decomposition,
-source evidence mapping, lifecycle ownership, source anchors, current file
-context needs, final report reconciliation, and patching packet selection. The
+For code modifying, modifying PM instances own existing-source lifecycle,
+source evidence needs, lifecycle ownership, source anchors, current file
+context needs, direct modifying child tasks, direct child reports, final report
+reconciliation, and patching packet selection at their assigned layer. The
 File Agent validates existing paths and packages current file context.
-Modifying programmers receive one accepted existing-file change contract and
-perform the local work behind that contract.
+Modifying programmers perform local work only when their direct PM has
+produced one accepted existing-file change contract.
+
+When prior generated work or existing source affects the next child
+instruction, the owning PM requests workspace facts through the top-level
+supervisor. The supervisor invokes the appropriate workflow, such as
+`code_reading`, records the result in the work ledger, and resumes the PM with
+compact evidence-backed facts. A dependent child instruction is grounded in
+those facts rather than stale plan memory.
 
 Deterministic evaluation accepts each handoff before the next worker layer
 starts. For writing, evaluation checks new-artifact ownership,
@@ -467,10 +481,9 @@ flowchart TD
     PMA[Subsystem PM A]
     PMB[Subsystem PM B]
     PMC[Subsystem PM C]
-    PA1[Programmer A1]
-    PA2[Programmer A2]
-    PB1[Programmer B1]
-    PC1[Programmer C1]
+    CA[Child PM or programmer A]
+    CB[Child PM or programmer B]
+    CC[Child PM or programmer C]
     RS[PM reports]
     OUT[Final reading answer or patch artifact]
 
@@ -478,14 +491,12 @@ flowchart TD
     MPM --> PMA
     MPM --> PMB
     MPM --> PMC
-    PMA --> PA1
-    PMA --> PA2
-    PMB --> PB1
-    PMC --> PC1
-    PA1 --> PMA
-    PA2 --> PMA
-    PB1 --> PMB
-    PC1 --> PMC
+    PMA --> CA
+    PMB --> CB
+    PMC --> CC
+    CA --> PMA
+    CB --> PMB
+    CC --> PMC
     PMA --> RS
     PMB --> RS
     PMC --> RS
@@ -495,7 +506,9 @@ flowchart TD
 ```
 
 Master PM is an escalation mechanism for work whose subsystem map, required
-facts, and report set exceed one PM's context budget. Triggers include:
+facts, and report set exceed one PM's context budget. The master PM manages
+subsystem PMs as direct children. Subsystem PMs manage their own direct
+children. Triggers include:
 
 - broad repository or multi-package architecture questions;
 - cross-runtime or cross-service feature flows;
@@ -516,13 +529,14 @@ assigned, and local risks. Modifying programmers report bounded existing-source
 change content and local risks. `code_patching` converts supervisor-selected
 writing and modifying artifacts into patch artifacts. Across these domains:
 
-- PM layers own architecture, interface consistency, decomposition, and
-  contract enforcement;
-- PM work is decomposition, interface consistency, evidence sufficiency,
-  report reconciliation, and artifact selection. Reading programmer, Writing
-  programmer, and Modifying
-  programmer reports supply source facts, implementation code, file contents,
-  and test bodies;
+- PM layers own direct-child lifecycle, interface consistency, decomposition,
+  evidence sufficiency, report reconciliation, and artifact selection at their
+  assigned layer;
+- PM work is creating direct child instructions, deciding child type, requesting
+  supervisor-mediated information, handling direct child reports, issuing
+  repairs, and reporting upward. Reading programmer, Writing programmer, and
+  Modifying programmer reports supply source facts, implementation code, file
+  contents, and test bodies to their direct PM;
 - Reading programmers, Writing programmers, and Modifying programmers own
   bounded local inspection or code, test, and documentation
   implementation behind PM-defined contracts;
@@ -601,7 +615,7 @@ CodingAgentWriteRequest
   -> coding supervisor loop
   -> code_fetching.run from Phase 0, when a repository target is present
   -> code_writing.run
-  -> if needed: supervisor runs external evidence, then resumes code_writing.run
+  -> if needed: supervisor runs code_reading or external evidence, then resumes code_writing.run
   -> code_patching materializes new-file artifacts
   -> Structural validator checks patch or file-tree artifacts
   -> CodingPatchProposalResponse
@@ -675,8 +689,11 @@ Deterministic code validates allowed transitions. Phase 0 has no top-level
 supervisor and exposes only `code_fetching.run`. Phase 1 allows
 `code_fetching`, `code_reading`, `finish`, and `fail`. Phase 2 adds
 `code_writing`, `code_patching`, and patch-proposal finish states for new
-artifacts. Existing-source modification, patch application, and project
-command execution belong to later phases.
+artifacts. Phase 2 PM work still follows the recursive PM lifecycle: a writing
+PM may create a child PM or a programmer as its direct child, and dependent
+child instructions must be grounded in supervisor-approved workspace facts.
+Existing-source modification, patch application, and project command execution
+belong to later phases.
 
 ## Phase 3 Runtime Integration Boundary
 
@@ -789,11 +806,17 @@ from a bounded request.
 
 Responsibilities:
 
-- Use the same product-manager/programmer context partitioning principle as
-  `code_reading`, with a writing PM and bounded programmer calls.
-- The writing PM owns requested behavior, new artifact decomposition,
-  file-to-file interfaces, imports, generated artifact contracts, report
-  reconciliation, and patching packet selection.
+- Use the same recursive product-manager/programmer context partitioning
+  principle as `code_reading`.
+- Writing PM instances own the semantic lifecycle of their direct children:
+  child PM or programmer choice, direct child instructions, information
+  requests, report handling, repair, sufficiency decisions, and compact reports
+  upward.
+- A writing PM sends a programmer task only when the PM can produce one
+  complete bounded new-artifact contract from supervisor-approved facts.
+- When prior generated artifacts affect later artifacts, the writing PM
+  requests supervisor-mediated `code_reading` before issuing the dependent
+  child instruction.
 - The File Agent reserves new paths and validates file mechanics before
   programmer dispatch.
 - Writing programmers own bounded implementation content for one accepted

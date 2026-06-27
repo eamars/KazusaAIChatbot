@@ -15,7 +15,7 @@ from kazusa_ai_chatbot.coding_agent.code_reading.planner import (
 from kazusa_ai_chatbot.coding_agent.code_writing.models import (
     ArtifactReservationResult,
     ReservedArtifactPath,
-    WritingArtifactItem,
+    WritingArtifactContract,
     WritingContentFormat,
     WritingFileKind,
 )
@@ -51,12 +51,12 @@ COMMON_NAME_TOKENS = {
 
 
 def reserve_new_artifact_paths(
-    artifact_items: list[WritingArtifactItem],
+    artifact_contracts: list[WritingArtifactContract],
 ) -> ArtifactReservationResult:
     """Reserve safe repo-relative paths for PM-proposed new artifacts.
 
     Args:
-        artifact_items: New-artifact contracts from the writing PM.
+        artifact_contracts: New-artifact contracts accepted for writing.
 
     Returns:
         Accepted reservations or compact repair feedback. This helper owns
@@ -68,10 +68,10 @@ def reserve_new_artifact_paths(
     seen_paths: set[str] = set()
     seen_ids: set[str] = set()
 
-    if not artifact_items:
-        errors.append("PM decision did not provide artifact items.")
+    if not artifact_contracts:
+        errors.append("PM decision did not provide artifact contracts.")
 
-    for index, artifact in enumerate(artifact_items, start=1):
+    for index, artifact in enumerate(artifact_contracts, start=1):
         reservation, artifact_errors = _reserve_one_artifact(
             artifact=artifact,
             index=index,
@@ -112,7 +112,7 @@ def reserve_new_artifact_paths(
 
 def _reserve_one_artifact(
     *,
-    artifact: WritingArtifactItem,
+    artifact: WritingArtifactContract,
     index: int,
 ) -> tuple[ReservedArtifactPath | None, list[str]]:
     artifact_id = _bounded_text(artifact.get("artifact_id")) or f"artifact-{index}"
