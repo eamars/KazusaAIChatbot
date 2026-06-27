@@ -39,7 +39,8 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [coding_agent_phase1_fetching_reading_plan.md](active/short_term/coding_agent_phase1_fetching_reading_plan.md) | Large standalone coding-agent Phase 1 plan | draft |
-| [coding_agent_phase2_code_writing_plan.md](active/short_term/coding_agent_phase2_code_writing_plan.md) | High-risk coding-agent Phase 2 code-writing replacement plan | in_progress |
+| [coding_agent_phase2_code_writing_plan.md](active/short_term/coding_agent_phase2_code_writing_plan.md) | High-risk coding-agent Phase 2 new-artifact code-writing plan | in_progress |
+| [coding_agent_phase2_5_security_boundary_plan.md](active/short_term/coding_agent_phase2_5_security_boundary_plan.md) | High-risk coding-agent Phase 2.5 security boundary plan | draft |
 | [coding_agent_phase3_background_worker_integration_plan.md](active/short_term/coding_agent_phase3_background_worker_integration_plan.md) | Large coding-agent Phase 3 background-worker integration plan | draft |
 | [control_console_auto_model_discovery_picker_plan.md](active/short_term/control_console_auto_model_discovery_picker_plan.md) | Medium control-console automatic model discovery picker plan | completed |
 | [control_console_brain_model_route_config_plan.md](active/short_term/control_console_brain_model_route_config_plan.md) | Large control-console Brain model route configuration plan | completed |
@@ -65,6 +66,7 @@ long_term/todo.md
 |---|---|
 | [action_spec_effector_expansion_architecture.md](reference/designs/action_spec_effector_expansion_architecture.md) | Architecture reference |
 | [coding_agent_architecture.md](reference/designs/coding_agent_architecture.md) | Architecture reference |
+| [coding_agent_phase2_new_artifact_gating_tests.md](reference/designs/coding_agent_phase2_new_artifact_gating_tests.md) | Supporting verification procedure and pass criteria |
 | [codex_single_agent_source_guide.md](reference/designs/codex_single_agent_source_guide.md) | Codex single-agent source reference |
 | [cognition_contracts_design.md](reference/designs/cognition_contracts_design.md) | Authoritative contract reference |
 | [cognition_core_evolution_progression.md](reference/designs/cognition_core_evolution_progression.md) | Architectural progression |

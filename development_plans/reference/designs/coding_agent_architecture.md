@@ -8,6 +8,7 @@
   - `development_plans/archive/completed/short_term/coding_agent_phase0_fetching_plan.md`
   - `development_plans/archive/completed/short_term/coding_agent_phase1_code_reading_final_plan.md`
   - `development_plans/active/short_term/coding_agent_phase2_code_writing_plan.md`
+  - `development_plans/active/short_term/coding_agent_phase2_5_security_boundary_plan.md`
   - `development_plans/active/short_term/coding_agent_phase3_background_worker_integration_plan.md`
 - Execution rule: use this document as reference context
 
@@ -16,8 +17,10 @@ code-related background work with a specialized `coding_agent`. The archived
 completed Phase 0 plan records the implemented `code_fetching` contract; the
 archived completed Phase 1 plan records the corrected `code_reading` and
 direct answer interface on top of that fetching contract. The active Phase 2
-in-progress plan defines the standalone `code_writing` stage. The active Phase
-3 draft plan defines the separate background-worker integration stage.
+in-progress plan defines the standalone new-artifact `code_writing` stage and
+the patch artifact boundary it needs. The active Phase 2.5 draft plan defines
+the agent-space security boundary before later runtime integration. The active
+Phase 3 draft plan defines the separate background-worker integration stage.
 
 ## Problem
 
@@ -41,18 +44,24 @@ tasks after the live persona turn. It returns a bounded artifact as
 `background_work_result_ready`; L3/dialog remains the only visible wording
 owner.
 
-The agent must support four top-level sub-subagents:
+The agent must support these top-level coding capabilities:
 
 - `code_fetching`: obtain or resolve repository code.
 - `code_reading`: inspect code and answer repository/source questions.
-- `code_writing`: propose and validate patches, patch-first.
+- `code_writing`: create new files, modules, scripts, tests, docs, or small
+  projects from a bounded request.
+- `code_modifying`: plan semantic changes to existing source files from
+  bounded source evidence.
+- `code_patching`: materialize new-file artifacts and existing-file
+  modifications into one patch or file-tree proposal.
 - `code_executing`: run bounded sandbox execution or delegate to Docker when a
   local sandbox is unavailable.
 
 The common architecture is a supervisor/resolver loop. The top-level
-`coding_agent` supervisor owns the goal state, chooses the next subagent, and
-evaluates whether the returned evidence is enough to finish or whether another
-bounded step is required.
+`coding_agent` supervisor owns the goal state, work ledger, context budget,
+subagent sequencing, and final handoff. A single coding request can interleave
+reading, new-code writing, existing-code modifying, external evidence, and
+patching steps through the supervisor-owned work ledger.
 
 ## Architecture Decision: Local-LLM-First Context Partitioning
 
@@ -66,56 +75,62 @@ bounded evidence, and structured memory handoff.
 The accepted architecture is explicit context partitioning:
 
 - The top-level coding supervisor owns the global coding goal, resolver state,
-  subagent selection, bounded iteration, and final artifact handoff.
+  work ledger, subagent selection, bounded iteration, and final artifact
+  handoff.
 - The top-level coding supervisor owns cross-domain dispatch. It calls
-  `code_fetching`, `code_reading`, `code_writing`, and external evidence in a
-  bounded loop. Cross-domain needs return to the supervisor as structured
-  outcomes.
+  `code_fetching`, `code_reading`, `code_writing`, `code_modifying`,
+  `code_patching`, `code_executing`, and external evidence in a bounded loop.
+  Cross-domain needs return to the supervisor as structured outcomes.
 - Each top-level subagent owns one domain of work and keeps its own bounded
   context memory for that domain.
-- `code_reading` and `code_writing` use a product-manager/programmer
+- `code_reading`, `code_writing`, and `code_modifying` use a
+  product-manager/programmer
   structure for non-trivial tasks. Reading product managers define bounded
   source-slice contracts and synthesize source behavior from programmer
-  evidence. Writing uses a top-level writing PM for whole-request
-  decomposition and the feature-level interface contract, a Source Ownership
-  PM for existing-source owner selection, and one Module PM per accepted
-  module/file assignment. Each Module PM emits a local module-boundary
-  programmer contract with provided interfaces, consumed interfaces, lifecycle
-  owner, existing source anchors, exact imports, symbols to define or modify,
-  bounded current file context, and observable behavior.
-- `code_writing` uses a dedicated Writing patcher after Module programmer reports.
-  The Writing patcher owns edit mechanics: path targeting, anchor selection,
-  full-file creation where appropriate, unified-diff assembly, and edit-shape
-  diagnostics. It receives writing-PM-selected Module programmer output and
-  returns patch artifacts plus patchability notes.
-- A Source Ownership PM chooses existing-source owner paths from bounded source
-  evidence and candidate paths. A shared File Agent validates and packages file
-  mechanics after ownership is established. The top-level writing PM describes
-  required files, purposes, placement hints, file-to-file contracts, and
-  deliverables. The File Agent owns repository inventory, repo-relative path
-  safety, new-file reservation, permission checks, source-scope checks, current
-  file context packaging, and the path map consumed by Module PMs, evaluators,
-  the Structural validator, and the Writing patcher.
-- Reading programmers and Module programmers return structured reports that
-  become compressed memory: evidence references, interface facts, behavior
-  summaries, uncertainty, and follow-up needs. For writing, a Module programmer
-  receives one module-level contract and returns one code artifact for that
-  module or symbol bundle. The product manager reasons over those reports and
-  cited evidence. Full raw repository content stays in the private evidence
-  store.
+  evidence. Writing product managers decompose new artifacts, define
+  file-to-file interfaces, and assign one bounded new artifact to each
+  programmer. Modifying product managers use source evidence to define
+  existing-file change contracts, lifecycle ownership, consumed interfaces,
+  and source anchors before programmer work starts.
+- `code_patching` runs after writing or modifying artifacts are selected. It
+  owns edit mechanics: path targeting, anchor selection for existing files,
+  full-file creation for new files, unified-diff or file-tree assembly, and
+  edit-shape diagnostics.
+- File mechanics are shared infrastructure. A File Agent validates repository
+  inventory, repo-relative path safety, new-file reservation, permission
+  checks, source-scope checks, current file context packaging, and path maps
+  consumed by modifying PMs, evaluators, the Structural validator, and
+  `code_patching`.
+- Reading programmers, Writing programmers, and Modifying programmers return
+  structured reports that become compressed memory: evidence references,
+  interface facts, behavior summaries, uncertainty, and follow-up needs. A
+  programmer receives one bounded contract and returns one artifact or report
+  for that contract. The product manager reasons over those reports and cited
+  evidence. Full raw repository content stays in the private evidence store.
 - Deterministic tooling owns repository discovery, path safety, file caps,
   search execution, patch validation, execution limits, and storage boundaries.
   LLM stages receive normalized, bounded evidence rows and task-specific
   semantic summaries.
 - Coding-agent LLM use is route-configurable. The standalone coding agent uses
   `CODING_AGENT_PM_LLM` for PM decisions and final synthesis, and
-  `CODING_AGENT_PROGRAMMER_LLM` for bounded Reading programmer, Module
-  programmer, and Writing patcher calls. Final synthesis shares the PM route.
+  `CODING_AGENT_PROGRAMMER_LLM` for bounded Reading programmer, Writing
+  programmer, Modifying programmer, and Patching worker calls. Final synthesis
+  shares the PM route.
 
 This requirement is mandatory for scalability. The coding agent must be able
 to inspect projects whose relevant implementation exceeds one prompt.
 The product-manager/programmer pattern is therefore a context and memory
 ownership architecture.
+
+### Agent-Space Security Boundary
+
+Coding agents operate in agent space. They may produce structured tool-call
+intents, proposed artifacts, traces, and review records. Tool calls target
+approved agent-space capabilities and must not carry raw executable payloads.
+Generated code, tests, commands, and scripts remain inert artifacts until a
+separate real-world execution capability is approved. Real-world effects stay
+outside agent authority unless a dedicated capability owns isolation,
+permission, and audit.
 
 ### Supervisor-Mediated Agreement
 
@@ -131,11 +146,15 @@ The accepted call graph is:
 ```mermaid
 flowchart TD
     U[User code request] --> S[Top-level coding supervisor]
+    S --> L[Supervisor work ledger]
 
-    S --> F[code_fetching]
-    S --> R[code_reading workflow]
-    S --> W[code_writing workflow]
-    S --> E[external evidence workflow]
+    L --> F[code_fetching]
+    L --> R[code_reading workflow]
+    L --> W[code_writing workflow: new artifacts]
+    L --> M[code_modifying workflow: existing source]
+    L --> P[code_patching workflow: artifact assembly]
+    L --> X[code_executing workflow]
+    L --> E[external evidence workflow]
 
     R --> RPM[Reading PM]
     RPM --> RP1[Reading programmer: bounded source slice]
@@ -143,114 +162,100 @@ flowchart TD
     RP1 --> RPT[Structured reading reports]
     RP2 --> RPT
     RPT --> RPM
-    RPM --> S
+    RPM --> L
 
-    W --> WPM[Top-level writing PM]
-    WPM --> SOPM[Source Ownership PM]
-    SOPM -->|owned/read-only path decisions| WFA[File Agent]
-    SOPM -->|ownership reading need| WPM
-    WFA --> WFPE[File plan evaluator]
-    WFA -->|file repair feedback| WPM
-    WFPE -->|accepted file contracts| FPM1[Module PM: one module/file]
-    WFPE -->|accepted file contracts| FPM2[Module PM: one module/file]
-    WFPE -->|repair feedback| WPM
-    FPM1 --> MCE1[Module contract evaluator]
-    FPM2 --> MCE2[Module contract evaluator]
-    MCE1 --> WP1[Module programmer: one module contract]
-    MCE2 --> WP2[Module programmer: one module contract]
-    WP1 --> WFPR[Accepted module artifacts]
-    WP2 --> WFPR
-    WFPR --> WPM
-    WPM --> WPA[Writing patcher: patch materialization]
-    WPA --> WV[Structural validator]
-    WV -->|local validation feedback| WPM
-    WPM -->|validated patch proposal or terminal writing status| S
-    WPM -->|need_reading| S
-    WPM -->|need_external_evidence| S
+    W --> WPM[Writing PM: new artifact plan]
+    WPM --> WMP1[Writing programmer: one new artifact]
+    WPM --> WMP2[Writing programmer: one new artifact]
+    WMP1 --> WAR[New artifact reports]
+    WMP2 --> WAR
+    WAR --> WPM
+    WPM --> L
 
-    E --> S
+    M --> MPM[Modifying PM: existing-file change plan]
+    MPM --> MMP1[Modifying programmer: one existing-file contract]
+    MMP1 --> MAR[Existing-file change report]
+    MAR --> MPM
+    MPM --> L
+
+    P --> PA[Patching worker: file tree or unified diff]
+    PA --> V[Structural validator]
+    V --> L
+
+    E --> L
+    X --> L
+    L --> S
     S --> O[Final answer or patch proposal]
 ```
 
-When writing needs systematic source understanding, the writing workflow
-returns `need_reading` to the top-level supervisor. When writing needs public
-documentation or current external facts, it returns `need_external_evidence`
-to the top-level supervisor. The supervisor records the transition in the
-global run ledger and resumes writing with bounded evidence from the selected
-workflow. The supervisor also owns the cross-domain evidence budget for one
-coding run: it records completed reading and external-evidence attempts,
-merged evidence counts, unresolved evidence needs, and remaining follow-up
-capacity, then gives the next writing PM call a compact evidence-state
+When a worker needs source understanding, public documentation, patch
+materialization, or execution feedback, it returns that need to the top-level
+supervisor. The supervisor records the transition in the work ledger, runs the
+selected workflow, and resumes the pending work item with a compact evidence
 summary. This keeps loop control and context memory at the top level while
-each PM layer keeps semantic decomposition and handoff authority inside its
-own layer.
+each worker keeps semantic ownership inside its domain.
 
-Validation is local to `code_writing` for Phase 2. The Structural validator
-blocks bad patch artifacts, but it does not terminate the full coding-agent
-workflow by itself. The code-writing supervisor owns local repair for PM,
-Module PM, Module programmer, Writing patcher, and Structural validator
-failures. It returns to the
-top-level supervisor only when writing produces a validated proposal, needs
-more source reading, needs external evidence, reaches its local repair limit,
-or rejects an unsupported request.
+Validation is supervisor-mediated. The Structural validator returns patch or
+file-tree diagnostics to the work ledger. The supervisor decides whether the
+next step is more reading, new-code writing, existing-code modifying, patching,
+execution, final synthesis, or terminal failure.
 
-The internal reading and writing shape is:
+The internal worker shape is:
 
 ```mermaid
 flowchart TD
     SUP[Top-level coding supervisor]
+    WL[Work ledger]
     PM[Domain product manager]
-    SOPM[Source Ownership PM]
     EV[Handoff evaluator]
-    FPM[Module PM for one module/file]
+    FM[File Agent]
     RP[Reading programmer: one bounded read slice]
-    MP[Module programmer: one module contract]
-    PA[Writing patcher: edit mechanics and unified diff]
+    WP[Writing programmer: one new artifact]
+    MP[Modifying programmer: one existing-file contract]
+    PA[Patching worker]
     T[Deterministic tool facade]
-    R[Structured Reading programmer and Module programmer reports]
+    R[Structured reports and artifacts]
     A[Subagent answer or patch artifact]
 
-    SUP --> PM
+    SUP --> WL
+    WL --> PM
     PM -->|search and read plan| T
     T --> PM
-    PM -->|existing-source file demands| SOPM
-    SOPM -->|owned/read-only path decisions| PM
-    SOPM -->|source-reading need| SUP
-    PM -->|file/module/source contract| EV
-    EV -->|accepted writing contract| FPM
+    PM -->|file request| FM
+    FM --> PM
+    PM -->|domain contract| EV
     EV -->|accepted reading contract| RP
+    EV -->|accepted new-artifact contract| WP
+    EV -->|accepted existing-file contract| MP
     EV -->|repair feedback| PM
-    FPM -->|module-level programmer contract| EV
-    EV -->|accepted module contract| MP
-    EV -->|repair feedback| FPM
     RP --> R
+    WP --> R
     MP --> R
-    R --> FPM
-    FPM --> PM
-    PM --> PA
-    PA --> PM
+    R --> PM
+    PM -->|selected artifacts| PA
+    PA --> R
     PM -->|bounded local tool request| T
-    PM -->|cross-domain need| SUP
+    PM -->|cross-domain need| WL
     PM --> A
-    A --> SUP
+    A --> WL
+    WL --> SUP
 ```
 
 ### Role Responsibility Matrix
 
 | Role | Primary responsibility | Input contract | Output contract |
 |---|---|---|---|
-| Top-level coding supervisor | Global goal state, cross-domain dispatch, loop ledger, context budget, final artifact handoff. | User task, repository/source request, prior subagent outcomes, writing outcomes. | Next workflow action, compact evidence-state summary, final public response. |
+| Top-level coding supervisor | Global goal state, work ledger, cross-domain dispatch, context budget, repair sequencing, final artifact handoff. | User task, repository/source request, work ledger, prior subagent outcomes, validation outcomes. | Next workflow action, compact evidence-state summary, final public response. |
 | Reading PM | Source-question decomposition, evidence slots, reading assignment contracts, answer synthesis from Reading programmer reports. | Repository summary, source scope, repo map summary, prior reading reports. | Reading assignments, sufficiency decision, evidence-backed source answer. |
-| Top-level writing PM | Writing-mode selection, full feature integration contract, whole-request file/module plan, cross-file interfaces, report reconciliation, Writing patcher packet selection. | User goal, source summary, reading evidence, external evidence, session summary, validation summaries, source-ownership feedback, File Agent feedback, Module PM reviews. | `WritingPMDecision` with `need_module_pms`, semantic `file_demands`, feature-level module slices, provided/consumed interfaces, lifecycle owners, source anchors, selected module artifacts, `WritingPatcherInput`, and sufficiency decision. |
-| Source Ownership PM | Existing-source owner selection for PM-authored file demands. | Semantic file demands, bounded source evidence, and candidate source paths. | `SourceOwnershipResolution` with owner paths, read-only paths, evidence refs, source-reading requests, or PM repair feedback. |
-| File Agent | Repository file planning, new-file reservation, path-safety checks, and owned/read-only path-map construction. | Top-level writing PM file needs after source ownership, source scope, repository inventory, and explicit placement data. | `ResolvedWritingFilePlan` with `WritingFileModuleContract` items, owned path map, read-only path map, file diagnostics, and repair feedback. |
-| File plan evaluator | Structural acceptance of file/module ownership before Module PM dispatch. | Resolved file plan, writing mode, source scope, assignment limits, path contract rules. | Accepted `WritingFileModuleContract` items or compact repair feedback for the top-level writing PM. |
-| Module PM | Local module-boundary programmer contract for one accepted module/file assignment. | `ModulePMInput` for one accepted file/module contract, module purpose, lifecycle owner, provided/consumed interfaces, existing source anchors, imports, bounded current file context, selected evidence, required behavior, compact `cross_slice_interfaces` summary (provider_slice_id, name, contract only), and evaluator feedback. | `ModulePMProgrammerContract` with lifecycle owner, provided/consumed interfaces, existing source anchors, `imports`, `symbols_to_define`, `symbols_to_modify`, `current_file_context`, required behavior, and a later Module PM review of Module programmer output. |
-| Module contract evaluator | Structural acceptance of a Module PM programmer contract before programmer dispatch. Validates `symbols_to_modify` entries are grounded in `current_file_context` or `existing_source_anchors`. | One `ModulePMProgrammerContract`, prompt budget, role-boundary rules, and assignment limits. | Accepted module contract or compact repair feedback for the Module PM. |
+| Writing PM | New-artifact decomposition, file-to-file interfaces, imports, artifact contracts, report reconciliation, patching packet selection. | User goal, new-artifact work item, external evidence, session summary, validation summaries, File Agent feedback. | New-artifact assignments, selected generated artifacts, patching input, sufficiency decision. |
+| Modifying PM | Existing-source change decomposition, owner/source evidence mapping, lifecycle ownership, existing-file change contracts, report reconciliation, patching packet selection. | User goal, existing-source work item, reading evidence, current file context, external evidence, validation summaries, File Agent feedback. | Existing-file change assignments, selected modification artifacts, patching input, sufficiency decision. |
+| File Agent | Repository file planning, new-file reservation, path-safety checks, current-context packaging, and owned/read-only path-map construction. | Supervisor work item, source scope, repository inventory, explicit placement data, PM file needs. | File plan with owned path map, read-only path map, current file context, file diagnostics, and repair feedback. |
+| Handoff evaluator | Structural acceptance before programmer or patching dispatch. | One domain contract, prompt budget, role-boundary rules, path contract rules, assignment limits. | Accepted contract or compact repair feedback for the owning PM. |
 | Reading programmer | Bounded local source reading behind one accepted reading assignment. | One reading assignment and selected source excerpts. | Structured evidence report with facts, evidence refs, uncertainty, and open questions. |
-| Module programmer | Implementation of one accepted module-boundary contract. | One accepted `ModulePMProgrammerContract` with lifecycle owner, provided/consumed interfaces, source anchors, imports, symbols to define or modify, current file context, and behavior requirements. | `WritingProgrammerReport` with one code artifact for the assigned module/symbol bundle plus risks and open questions when requested. |
-| Writing patcher | Edit mechanics and patch artifact materialization. | `WritingPatcherInput` with writing-PM-selected Module programmer content, owned path map, base file summaries, and artifact caps. | `WritingPatcherReport` with unified diff or new-project file tree, edit diagnostics, file list, and patchability notes. |
-| Structural validator | Structural validation, path safety, sandbox artifact checks, public-output safety inside `code_writing`. | Patch artifacts, source identity, workspace/session metadata, validation limits. | Validation summary, unsafe-path findings, artifact integrity result, public-safe metadata for code-writing repair or final handoff. |
+| Writing programmer | Implementation of one accepted new-artifact contract. | One new-file or new-module contract with purpose, imports, interfaces, and required behavior. | One code or text artifact plus local risks and open questions when requested. |
+| Modifying programmer | Implementation of one accepted existing-file change contract. | One existing-file contract with current file context, source anchors, lifecycle owner, imports, interfaces, symbols to modify, and required behavior. | One replacement section, symbol body, or full-file change artifact plus local risks and open questions when requested. |
+| Patching worker | Edit mechanics and artifact materialization. | Selected writing/modifying artifacts, owned path map, base file summaries, and artifact caps. | Unified diff or new-project file tree, edit diagnostics, file list, and patchability notes. |
+| Structural validator | Structural validation, path safety, sandbox artifact checks, public-output safety. | Patch artifacts, source identity, workspace/session metadata, validation limits. | Validation summary, unsafe-path findings, artifact integrity result, public-safe metadata for supervisor repair or final handoff. |
 | Synthesizer | Public explanation and handoff summary from completed artifacts. | PM decision, selected artifacts, validation summary, evidence refs, limitations. | Bounded answer text, public rationale, residual limitations, Phase 3 handoff fields. |
 
 ### Hierarchical PM And Programmer Contract
@@ -264,29 +269,34 @@ question slots, expected interface facts, proof obligations, and final answer
 synthesis. Reading programmers perform the bounded inspection and return
 evidence reports.
 
-For code writing, the top-level writing PM owns whole-request decomposition,
-file-to-file input/output contracts, cross-file import needs, final report
-reconciliation, and Writing patcher packet selection. The Source Ownership PM
-selects existing-source owner paths from bounded evidence. The File Agent validates and
-packages concrete paths, file actions, current file context, and file
-management metadata. Each Module PM owns one module-level programmer contract
-inside one assigned module or file. Module programmers receive one accepted
-module-level contract and perform the local work behind that contract.
+For code writing, the writing PM owns new-artifact decomposition, file-to-file
+input/output contracts, cross-file import needs, final report reconciliation,
+and patching packet selection. The File Agent reserves new paths and packages
+file management metadata. Writing programmers receive one accepted
+new-artifact contract and perform the local work behind that contract.
+
+For code modifying, the modifying PM owns existing-source decomposition,
+source evidence mapping, lifecycle ownership, source anchors, current file
+context needs, final report reconciliation, and patching packet selection. The
+File Agent validates existing paths and packages current file context.
+Modifying programmers receive one accepted existing-file change contract and
+perform the local work behind that contract.
 
 Deterministic evaluation accepts each handoff before the next worker layer
-starts. For writing, the Source Ownership PM establishes existing-source
-owners, the File Agent packages those decisions into a bounded file plan, the
-file plan evaluator checks file/module ownership and file-to-file contracts,
-and the module contract evaluator checks each Module PM programmer contract
-before programmer dispatch.
+starts. For writing, evaluation checks new-artifact ownership,
+file-to-file contracts, and prompt budget before programmer dispatch. For
+modifying, evaluation checks source anchors, current file grounding, lifecycle
+ownership, file-to-file contracts, and prompt budget before programmer
+dispatch.
 
 Deterministic validation also enforces the PM/programmer boundary before a PM
-may use Reading programmer or Module programmer output. For reading,
+may use Reading programmer, Writing programmer, or Modifying programmer output.
+For reading,
 validation checks that reports cite files inside the assigned read scope and
 include required evidence references.
-For writing, validation checks unit reports, patch materialization, patch
-applyability in an isolated sandbox, and touched Python test coherence when
-proposed tests are part of the patch.
+For patching, validation checks artifact shape, patch materialization, patch
+applyability in an isolated sandbox where applicable, and touched Python test
+coherence when proposed tests are part of the patch.
 
 For reading, the PM consumes a compact `PMInput`:
 
@@ -344,9 +354,9 @@ read scope:
 
 For reading assignments, `owned_paths` is empty, `scope.values` defines the
 only allowed read slice, and `evidence_contract` defines the required proof
-shape. Writing uses the Module PM and Module programmer contracts defined in
-the Phase 2 code-writing section, where file ownership stays with File Agent
-and patch materialization stays with Writing patcher.
+shape. Writing and modifying use separate contracts: writing contracts create
+new artifacts, modifying contracts change existing source, and patching
+materializes selected artifacts from either domain.
 
 The PM chooses assignment boundaries from four signals:
 
@@ -390,40 +400,32 @@ For a reading question such as "how does Kazusa respond to an image?":
   evidence. Additional flow steps require additional Reading programmer
   evidence.
 
-For a Phase 2 service health writing task:
+For a Phase 2 new-project writing task:
 
-- Top-level writing PM contract: add a bounded health-surface extension with
-  separate file work orders for runtime aggregate stats, service response
-  modeling, endpoint wiring, focused tests, and operator documentation.
-- Runtime stats Module PM: emit one module-level programmer contract with
-  imports, required stats symbols, bounded current file context, and required
-  aggregate behavior.
-- Service health Module PM: emit one module-level programmer contract for the
-  response model and endpoint integration symbols that consume the runtime
-  stats output through exact import lines.
-- Tests/docs Module PM: emit module-level programmer contracts for focused
-  contract tests and usage documentation.
-- Top-level writing PM output: reconcile Module PM reviews, select accepted
-  module artifacts that satisfy the file-to-file contracts, and build the
-  Writing patcher input packet.
+- Supervisor work ledger: create a new standalone tool with source files,
+  tests, docs, and packaging metadata.
+- Writing PM contract: split the requested tool into new artifact work items,
+  name provided interfaces, consumed interfaces, imports, and observable
+  behavior for each artifact.
+- Writing programmer A: implement one accepted source-file contract.
+- Writing programmer B: implement one accepted focused-test contract.
+- Writing programmer C: implement one accepted documentation or config
+  contract.
+- Patching worker input: selected generated artifacts plus File Agent path
+  reservations.
 
-For a Phase 2 message queue module writing task:
+For a later mixed repository change:
 
-- Top-level writing PM contract: create separate file work orders for the
-  queue module, service integration points, state-latch behavior, and focused
-  tests. The file-to-file contract names what the queue module provides and
-  what the service imports.
-- Queue module Module PM: emit one module-level programmer contract that asks
-  for the complete queue module with `QueuedChatItem`, `DequeuedChatTurn`,
-  `ChatInputQueue`, and coalescing functions.
-- Service integration Module PM: emit one module-level programmer contract for
-  the service symbols that consume the queue module through exact import
-  lines and preserve the existing service workflow.
-- Test Module PM: emit one module-level programmer contract for queue behavior
-  tests and service integration tests that consume the same imports.
-- Top-level writing PM output: reconcile the queue module, service
-  integration, state, and test Module PM reviews before sending selected
-  Module programmer content to the Writing patcher.
+- Supervisor work ledger: read the existing source, create a new helper module,
+  modify an existing service file, add tests, and assemble one patch proposal.
+- Reading workflow: return source evidence for the service lifecycle and
+  current import boundaries.
+- Writing workflow: create the new helper module and focused tests as new
+  artifacts.
+- Modifying workflow: change the existing service file using the reading
+  evidence and declared lifecycle owner.
+- Patching workflow: assemble the new files and existing-file modification
+  into one patch proposal.
 
 Each programmer returns a structured report. The report is the memory boundary
 between local reading and PM synthesis:
@@ -455,8 +457,8 @@ overload status instead of forcing one PM to pretend it read a whole project.
 
 ### Master PM Escalation
 
-For larger projects, `code_reading` and `code_writing` may use a master PM
-above subsystem PMs:
+For larger projects, `code_reading`, `code_writing`, and `code_modifying` may
+use a master PM above subsystem PMs:
 
 ```mermaid
 flowchart TD
@@ -498,33 +500,34 @@ facts, and report set exceed one PM's context budget. Triggers include:
 - broad repository or multi-package architecture questions;
 - cross-runtime or cross-service feature flows;
 - questions requiring several independent ownership domains;
-- a PM work plan whose estimated Reading programmer or Module programmer
-  reports would exceed the PM context budget;
-- conflicting Reading programmer or Module programmer reports that require
-  subsystem-level reconciliation.
+- a PM work plan whose estimated programmer reports would exceed the PM
+  context budget;
+- conflicting programmer reports that require subsystem-level reconciliation.
 
 Subsystem PMs return `PMReport` objects to the master PM. The master PM sees
 subsystem PM reports and selected evidence references by default.
 
-### Shared Reading And Writing Model
+### Shared PM And Programmer Model
 
-`code_reading` and `code_writing` share the PM/programmer hierarchy. Reading
-programmers report code behavior and interfaces. Module programmers report
-bounded implementation content, tests/docs content when assigned, local risks,
-and edit intent for their assigned unit. The Writing patcher converts
-writing-PM-selected Module programmer output into patch artifacts. In both
-reading and writing:
+`code_reading`, `code_writing`, and `code_modifying` share the PM/programmer
+hierarchy. Reading programmers report code behavior and interfaces. Writing
+programmers report bounded new-artifact content, tests/docs content when
+assigned, and local risks. Modifying programmers report bounded existing-source
+change content and local risks. `code_patching` converts supervisor-selected
+writing and modifying artifacts into patch artifacts. Across these domains:
 
 - PM layers own architecture, interface consistency, decomposition, and
   contract enforcement;
 - PM work is decomposition, interface consistency, evidence sufficiency,
-  report reconciliation, and artifact selection. Reading programmer and Module
+  report reconciliation, and artifact selection. Reading programmer, Writing
+  programmer, and Modifying
   programmer reports supply source facts, implementation code, file contents,
   and test bodies;
-- Reading programmers and Module programmers own bounded local inspection or code, test, and documentation
+- Reading programmers, Writing programmers, and Modifying programmers own
+  bounded local inspection or code, test, and documentation
   implementation behind PM-defined contracts;
-- The Writing patcher role owns unified diff and file-tree materialization
-  from selected Module programmer output;
+- The Patching worker role owns unified diff and file-tree materialization
+  from selected writing and modifying output;
 - deterministic tools own path safety, search, file caps, patch validation,
   execution limits, and output normalization;
 - reports are the durable memory artifacts passed upward;
@@ -548,6 +551,8 @@ flowchart TD
     S --> F[code_fetching]
     S --> RD[code_reading]
     S --> W[code_writing]
+    S --> M[code_modifying]
+    S --> P[code_patching]
     S --> X[code_executing]
     S --> H[limited external help via web_agent3]
     S --> OUT[bounded artifact_text + metadata]
@@ -594,38 +599,29 @@ The Phase 2 standalone path is:
 CodingAgentWriteRequest
   -> coding_agent.propose_code_change
   -> coding supervisor loop
-  -> code_fetching.run from Phase 0
+  -> code_fetching.run from Phase 0, when a repository target is present
   -> code_writing.run
-  -> if needed: supervisor runs code_reading.run, then resumes code_writing.run
   -> if needed: supervisor runs external evidence, then resumes code_writing.run
-  -> code_writing validates and locally repairs patch artifacts
+  -> code_patching materializes new-file artifacts
+  -> Structural validator checks patch or file-tree artifacts
   -> CodingPatchProposalResponse
 ```
 
-Systematic reading for code writing is supervisor-managed. The top-level
-writing PM may request additional source evidence, interface facts, or behavior
-constraints before patch design continues. The Source Ownership PM may request
-source-owner evidence for existing-source file demands. Those reports return
-to the top-level coding supervisor as `need_reading` outcomes. The supervisor
-invokes `code_reading.run(...)` through the public Phase 1 contract, passes a
-bounded reading instruction, and then supplies the resulting public reading
-evidence back into `code_writing`.
-
-External evidence for code writing follows the same supervisor-mediated rule.
-The top-level writing PM may request current public documentation or other
-bounded external facts through a `need_external_evidence` outcome. The
-top-level supervisor invokes the external-evidence workflow and passes bounded
-evidence back into `code_writing`.
+Phase 2 proves new-artifact writing first. The top-level supervisor may fetch a
+repository target to establish source identity and workspace safety, but
+existing-source semantic edits are owned by the later `code_modifying`
+capability. External evidence for code writing follows the same
+supervisor-mediated rule: the writing PM may request current public
+documentation or other bounded facts, and the supervisor resumes writing with a
+compact evidence summary.
 
 Focused Phase 2 unit tests may call `code_writing.run(...)` to prove the
 writing subagent contract. Deterministic acceptance tests and every hard live
 LLM gate must call the public top-level `coding_agent.propose_code_change(...)`
-interface so the coding supervisor owns fetch/read/write/external dispatch and
-the code-writing supervisor owns local PM, Module PM, Module programmer,
-Writing patcher, and Structural validator repair. Phase 2 test scope remains
-the direct coding-agent path;
-L2d, background-work jobs, result-ready cognition, service delivery, patch
-apply, and code execution belong to later integration phases.
+interface so the coding supervisor owns fetch/write/patch/external dispatch and
+the work ledger. Phase 2 test scope remains the direct coding-agent path; L2d,
+background-work jobs, result-ready cognition, service delivery, existing-source
+modification, patch apply, and code execution belong to later phases.
 
 ## Ownership Boundaries
 
@@ -669,7 +665,7 @@ Its next-action output is always one of:
 
 ```python
 {
-    "action": "code_fetching | code_reading | code_writing | code_executing | finish | fail",
+    "action": "code_fetching | code_reading | code_writing | code_modifying | code_patching | code_executing | finish | fail",
     "instruction": "short instruction for the selected subagent",
     "reason": "short reason for the next step"
 }
@@ -678,7 +674,8 @@ Its next-action output is always one of:
 Deterministic code validates allowed transitions. Phase 0 has no top-level
 supervisor and exposes only `code_fetching.run`. Phase 1 allows
 `code_fetching`, `code_reading`, `finish`, and `fail`. Phase 2 adds
-`code_writing` and patch-proposal finish states. Patch application and project
+`code_writing`, `code_patching`, and patch-proposal finish states for new
+artifacts. Existing-source modification, patch application, and project
 command execution belong to later phases.
 
 ## Phase 3 Runtime Integration Boundary
@@ -787,40 +784,59 @@ The reading answer must distinguish:
 
 ### `code_writing`
 
-Purpose: propose code changes. This subagent is patch-first.
+Purpose: create new files, modules, scripts, tests, docs, or small projects
+from a bounded request.
 
 Responsibilities:
 
 - Use the same product-manager/programmer context partitioning principle as
-  `code_reading`, with a top-level writing PM and one Module PM per accepted
-  module/file assignment.
-- The top-level writing PM owns requested behavior, file/module decomposition,
-  the feature-level interface contract, lifecycle ownership, file-to-file
-  provided/consumed interfaces, cross-module import consistency, Module PM
-  review reconciliation, and final patch artifact selection.
-- The Source Ownership PM chooses existing-source owner paths from bounded
-  source evidence before file mechanics run.
-- The File Agent validates accepted paths, reserves new files, packages file
-  actions, base revisions, mutex identifiers, and bounded current file context
-  before Module PM dispatch.
-- Module PMs own local module-boundary programmer contracts inside their
-  assigned file or module. Each contract preserves lifecycle owner,
-  provided/consumed interfaces, existing source anchors, exact imports,
-  symbols to define or modify, bounded current file context, and required
-  behavior.
-- Module programmers own bounded implementation content for one
-  accepted module-boundary contract and report local risks. They do not need
-  peer programmer output or the whole feature picture.
-- Run file-plan evaluation before Module PM dispatch and module-contract
-  evaluation before programmer dispatch so file ownership, interface
-  contracts, prompt budget, and programmer boundaries are accepted before
-  worker calls.
-- A Writing patcher materializes writing-PM-selected Module programmer output into a unified
-  diff or new-project file tree.
-- Run deterministic patch validation, including sandbox apply checks and
-  touched Python test checks when proposed tests are present.
-- Return patch artifacts and rationale.
+  `code_reading`, with a writing PM and bounded programmer calls.
+- The writing PM owns requested behavior, new artifact decomposition,
+  file-to-file interfaces, imports, generated artifact contracts, report
+  reconciliation, and patching packet selection.
+- The File Agent reserves new paths and validates file mechanics before
+  programmer dispatch.
+- Writing programmers own bounded implementation content for one accepted
+  new-artifact contract and report local risks.
+- Handoff evaluation runs before programmer dispatch so file ownership,
+  interface contracts, prompt budget, and programmer boundaries are accepted
+  before worker calls.
+- Return generated artifacts and rationale to the supervisor work ledger.
 - Workspace mutation belongs to a separately approved apply step.
+
+### `code_modifying`
+
+Purpose: plan and produce semantic changes to existing source files from
+bounded source evidence.
+
+Responsibilities:
+
+- Use Phase 0 fetching and Phase 1 reading evidence supplied by the top-level
+  supervisor.
+- The modifying PM owns existing-file change decomposition, source-owner
+  evidence mapping, lifecycle ownership, consumed interfaces, source anchors,
+  and final modification artifact selection.
+- The File Agent validates accepted paths, packages current file context, and
+  builds owned/read-only path maps before programmer dispatch.
+- Modifying programmers own bounded implementation content for one accepted
+  existing-file change contract.
+- Return modification artifacts and rationale to the supervisor work ledger.
+
+### `code_patching`
+
+Purpose: materialize selected generated artifacts and selected existing-file
+modifications into one patch or file-tree proposal.
+
+Responsibilities:
+
+- Consume supervisor-selected artifacts from `code_writing` and
+  `code_modifying`.
+- Own path targeting, insertion anchors, full-file creation, unified-diff or
+  file-tree assembly, edit diagnostics, and artifact caps.
+- Run deterministic structural validation with sandbox apply checks where
+  applicable.
+- Return patch artifacts, changed/created file summaries, validation results,
+  and patchability notes.
 
 ### `code_executing`
 
@@ -902,11 +918,13 @@ cases where code fetching needs a public page observation.
 |---|---|---|
 | Phase 0 | Standalone `code_fetching` package, README ICD, deterministic source-scope routing, managed storage, direct fetching tests, unsupported-input tests, and 10-source public internet smoke. | Direct callers can resolve supported repo/file/tree/raw/local sources into a safe local source contract or receive explicit unsupported/clarification results. |
 | Phase 1 | Standalone `code_reading` package, README ICD, top-level direct answer interface, supervisor over Phase 0 output and reading. | Direct callers can answer repository/codebase questions with cited local file evidence. |
-| Phase 2 | Standalone `code_writing` package, README ICD, PM/programmer patch-proposal architecture, patch artifact contract, deterministic patch validation, and direct tests. | Direct callers can request proposed code changes as bounded patch artifacts with real-workspace immutability. |
+| Phase 2 | Standalone `code_writing` for new artifacts plus the `code_patching` boundary needed to materialize new-file proposals, with README ICD, PM/programmer new-artifact architecture, deterministic artifact validation, and direct tests. | Direct callers can request new scripts, files, docs, tests, or small projects as bounded artifacts with real-workspace immutability. |
+| Phase 2.5 | Agent-space security boundary enforcement for coding-agent validation, generated artifacts, and tool-call mediation. | Coding-agent proposals remain inspectable artifacts until an approved real-world capability handles execution or mutation. |
 | Phase 3 | Background-worker integration, L2d/action-spec affordance update, result-ready delivery, placeholder removal, and standalone coding-agent response to `BackgroundWorkResult` mapping for `WORKER="coding_agent"`. | Kazusa can route implemented standalone coding-agent work through the normal background-work path. |
-| Phase 4 | Patch apply flow with explicit approval and workspace safety. | Apply approved patches in a controlled sandbox or approved workspace. |
-| Phase 5 | `code_executing` sandbox/Docker execution. | Run bounded verification commands and include results. |
-| Phase 6 | Broader repository operations and richer external help. | Handle multi-repo comparisons, docs lookups, and current dependency evidence. |
+| Phase 4 | `code_modifying` for existing-source changes, supervisor interleaving between reading, writing, modifying, and patching, and direct hard gates for mixed new-file plus existing-file work. | Direct callers can request bounded existing-repository changes as patch proposals. |
+| Phase 5 | Patch apply flow with explicit approval and workspace safety. | Apply approved patches in a controlled sandbox or approved workspace. |
+| Phase 6 | `code_executing` sandbox/Docker execution. | Run bounded verification commands and include results. |
+| Phase 7 | Broader repository operations and richer external help. | Handle multi-repo comparisons, docs lookups, and current dependency evidence. |
 
 ## Real Demand Mapping
 

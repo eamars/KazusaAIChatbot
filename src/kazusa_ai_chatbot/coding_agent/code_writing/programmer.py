@@ -1,7 +1,8 @@
-"""Programmer worker for module-level code-writing contracts."""
+"""Programmer worker for one new-artifact contract."""
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import json
 import re
@@ -13,8 +14,9 @@ from kazusa_ai_chatbot.coding_agent.context_budget import (
     prompt_budget_metadata,
 )
 from kazusa_ai_chatbot.coding_agent.code_writing.models import (
-    ModuleProgrammerContract,
-    ModuleProgrammerResult,
+    WritingContentFormat,
+    WritingProgrammerContract,
+    WritingProgrammerResult,
 )
 from kazusa_ai_chatbot.config import (
     CODING_AGENT_PROGRAMMER_LLM_API_KEY,
@@ -32,89 +34,70 @@ from kazusa_ai_chatbot.llm_interface import (
 PROGRAMMER_LLM_CALL_TIMEOUT_SECONDS = 300
 
 
-MODULE_PROGRAMMER_PROMPT = '''\
-You are a programmer for one file or one module section.
-You receive one module contract. Return the requested file content only.
+WRITING_PROGRAMMER_PROMPT = '''\
+You are a programmer writing one new artifact.
+You receive one artifact contract. Return the requested artifact content only.
 
 # Contract Fields
-- file_label: a label for the work. It is not a path.
-- edit_mode:
-  - complete_file: write the whole file.
-  - symbol_bundle: write only the requested imports and top-level symbols that
-    should be inserted or replaced.
-- content_format:
-  - python: return Python source.
-  - text: return plain text or Markdown source.
-- module_purpose: why this file or module exists.
-- lifecycle_owner: the declared runtime owner that holds state for this module.
-- provided_interfaces: public interfaces this module provides.
-- consumed_interfaces: interfaces this module consumes from other modules.
-- existing_source_anchors: existing classes, functions, or sections that must
-  be preserved or extended.
-- imports: required import lines that must appear in this output.
-- current_file_context: short description of existing names in the file.
-- symbols_to_define: new top-level symbols or text sections to create.
-- symbols_to_modify: existing classes, functions, methods, or sections to
-  extend or replace while preserving the existing runtime lifecycle.
-- required_behavior: behavior checks the code must satisfy.
+- artifact_id: stable id for this artifact.
+- file_label: human-readable label. It is not a path.
+- file_kind: source, test, docs, config, or data.
+- content_format: python, markdown, text, json, or csv.
+- purpose: what this artifact must provide.
+- imports: required imports that must be satisfied.
+- provided_interfaces: interfaces this artifact provides.
+- consumed_interfaces: interfaces this artifact may rely on from other
+  generated artifacts.
+- required_behavior: behavior this artifact must satisfy.
 
-# Rules for symbols_to_define (new code)
-- Use the names and signatures from symbols_to_define exactly.
-- Implement every listed symbol with real executable code.
-- For text, write the named sections requested by symbols_to_define.
-
-# Rules for symbols_to_modify (existing code changes)
-- Each entry references an existing class, function, method, or section.
-- Preserve the existing class or function structure and runtime lifecycle.
-- Apply only the change described in body_contract.
-- Do not rewrite the symbol from scratch unless the contract says replace.
-- Keep the existing signature unless the contract specifies a new one.
-
-# General Rules
+# Rules
 - Return one markdown fenced block and nothing else.
-- For content_format python, use a python code block and include only Python
-  source inside the block.
-- For content_format text, use a markdown or text code block and include only
-  the requested text content inside the block.
-- For complete_file, include the complete requested file content.
-- For symbol_bundle, include only the requested imports and requested symbols
-  or text sections. Do not rewrite the whole file.
-- You may add supplementary imports from the Python standard library when they
-  are needed by requested Python code.
-- For Python, implement every listed symbol with real executable Python.
-- For Python, do not copy explanatory phrases from body_contract into code
-  comments when the phrase is not valid implementation detail.
-- Do not use pass, ellipsis, NotImplementedError, TODO, placeholder comments,
-  JSON, diffs, or file path comments.
-- Treat current_file_context as the list of existing code names available in
-  the target file.
-- Call an existing helper only when its exact name appears in
-  current_file_context, imports, symbols_to_define, or symbols_to_modify.
-- Do not invent file paths, patch anchors, peer outputs, or command execution.
-- For Python, you may add private helper functions or private variables only
-  when they are needed by the requested symbols.
-- For Python, do not add project imports or third-party imports unless they
-  are listed in imports.
-- For Python, never use `except Exception` or `except BaseException`. Catch
-  specific exception types only (e.g. ValueError, KeyError, OSError,
-  json.JSONDecodeError, requests.RequestException). If no specific type is
-  known, let the exception propagate.
+- For python, use a python code block and include only Python source.
+- For markdown, use an outer tilde fence: ~~~markdown. Keep example code
+  blocks inside the Markdown as ordinary triple-backtick blocks.
+- For json, csv, or text, use a code block with that language label. For
+  config text, a precise label such as toml, yaml, ini, or env is also allowed.
+- Write the complete artifact content, not a diff.
+- Follow the artifact contract exactly. Do not replace it with a nearby
+  generic task, broader project, or different file behavior.
+- Include every required import. You may add Python standard library imports
+  when needed by the code.
+- When consumed_interfaces are listed, use imports or ordinary calls to those
+  interfaces. Do not redefine, stub, or fake consumed interfaces inside the
+  artifact unless the contract explicitly asks for a mock in test code.
+- For test artifacts, write assertions against the consumed interface contract
+  and required_behavior. Do not invent a different return shape, argument
+  shape, or interface name.
+- Do not invent file paths, patch anchors, command output, package installs,
+  peer programmer output, or JSON metadata around the artifact.
+- Do not leave unfinished placeholder comments, pass-only function/class/module
+  bodies, ellipsis-only bodies, NotImplementedError, or prose outside the
+  block.
+- When handling external uncertainty, such as network or file-system errors,
+  return an explicit fallback value or record a clear error value.
+- For Python, catch specific exception types only when handling external
+  uncertainty. Let ordinary internal bugs surface.
 
 # Output Format
-Return only one markdown fenced block. The block must contain the requested
-source content.
+Return only one markdown fenced block containing the requested artifact.
 '''
 
-MODULE_PROGRAMMER_RETRY_PROMPT = '''\
-Your previous response did not match the required output format.
-Return only one markdown fenced block containing the requested source content.
+WRITING_PROGRAMMER_RETRY_PROMPT = '''\
+Your previous response was not accepted.
+
+Problems:
+{diagnostics}
+
+Return only one markdown fenced block containing the requested artifact.
 Do not return JSON, prose outside the block, patch text, file path comments, or
 multiple code blocks.
+For markdown artifacts, wrap the whole artifact in ~~~markdown and close it
+with ~~~. Do not add any other tilde fence inside the artifact content.
 '''
 
-_module_programmer_llm = LLInterface()
-_module_programmer_llm_config = LLMCallConfig(
-    stage_name=f"{__name__}.module_programmer",
+_writing_programmer_llm = LLInterface()
+_writing_programmer_llm_config = LLMCallConfig(
+    stage_name=f"{__name__}.writing_programmer",
     route_name="CODING_AGENT_PROGRAMMER_LLM",
     base_url=CODING_AGENT_PROGRAMMER_LLM_BASE_URL,
     api_key=CODING_AGENT_PROGRAMMER_LLM_API_KEY,
@@ -130,25 +113,26 @@ _module_programmer_llm_config = LLMCallConfig(
 )
 
 
-async def run_module_programmer_contract(
+async def run_writing_programmer_contract(
     *,
-    module_contract: ModuleProgrammerContract,
+    artifact_contract: WritingProgrammerContract,
     trace: dict[str, object] | None = None,
-) -> ModuleProgrammerResult:
-    """Run one module-level programmer contract and return source content."""
+) -> WritingProgrammerResult:
+    """Run one new-artifact programmer contract and return content."""
 
-    payload_text = json.dumps(module_contract, ensure_ascii=False, indent=2)
+    payload_text = json.dumps(artifact_contract, ensure_ascii=False, indent=2)
     context_budget = prompt_budget_metadata(
-        system_prompt=MODULE_PROGRAMMER_PROMPT,
+        system_prompt=WRITING_PROGRAMMER_PROMPT,
         payload_text=payload_text,
         target_input_tokens=PROGRAMMER_TARGET_INPUT_TOKEN_CAP,
         selected_evidence_refs=[],
     )
     if context_budget["over_hard_cap"]:
-        result: ModuleProgrammerResult = {
-            "code_artifact": "",
-        }
-        _fill_module_trace(
+        result = _blocked_result(
+            artifact_contract,
+            "Programmer prompt exceeded the context budget.",
+        )
+        _fill_trace(
             trace,
             raw_output="",
             result=result,
@@ -158,16 +142,31 @@ async def run_module_programmer_contract(
         )
         return result
 
-    raw_output, attempts = await _invoke_module_programmer(payload_text)
-    content_format = _content_format(module_contract)
+    raw_output, attempts = await _invoke_programmer(payload_text)
+    content_format = artifact_contract["content_format"]
     code_artifact = _extract_single_output_block(
         raw_output,
         content_format=content_format,
     )
-    result = {
-        "code_artifact": code_artifact,
-    }
-    _fill_module_trace(
+    diagnostics = _artifact_diagnostics(
+        code_artifact,
+        content_format=content_format,
+    )
+    if code_artifact and not diagnostics:
+        result: WritingProgrammerResult = {
+            "artifact_id": artifact_contract["artifact_id"],
+            "status": "succeeded",
+            "content_format": content_format,
+            "code_artifact": code_artifact,
+            "diagnostics": [],
+        }
+    else:
+        result = _blocked_result(
+            artifact_contract,
+            diagnostics[0] if diagnostics
+            else "Programmer did not return exactly one valid fenced artifact.",
+        )
+    _fill_trace(
         trace,
         raw_output=raw_output,
         result=result,
@@ -179,24 +178,31 @@ async def run_module_programmer_contract(
     return result
 
 
-async def _invoke_module_programmer(
+async def _invoke_programmer(
     payload_text: str,
 ) -> tuple[str, list[dict[str, object]]]:
     attempts: list[dict[str, object]] = []
     raw_output = ""
-    for attempt_index in range(2):
+    previous_diagnostics: list[str] = []
+    for attempt_index in range(3):
         messages = [
-            SystemMessage(content=MODULE_PROGRAMMER_PROMPT),
+            SystemMessage(content=WRITING_PROGRAMMER_PROMPT),
             HumanMessage(content=payload_text),
         ]
         if attempt_index > 0:
-            messages.append(HumanMessage(content=MODULE_PROGRAMMER_RETRY_PROMPT))
+            diagnostics_text = "\n".join(
+                f"- {diagnostic}" for diagnostic in previous_diagnostics
+            )
+            retry_prompt = WRITING_PROGRAMMER_RETRY_PROMPT.format(
+                diagnostics=diagnostics_text,
+            )
+            messages.append(HumanMessage(content=retry_prompt))
         timed_out = False
         try:
             response = await asyncio.wait_for(
-                _module_programmer_llm.ainvoke(
+                _writing_programmer_llm.ainvoke(
                     messages,
-                    config=_module_programmer_llm_config,
+                    config=_writing_programmer_llm_config,
                 ),
                 timeout=PROGRAMMER_LLM_CALL_TIMEOUT_SECONDS,
             )
@@ -204,75 +210,204 @@ async def _invoke_module_programmer(
         except asyncio.TimeoutError:
             timed_out = True
             raw_output = ""
+        content_format = _content_format_from_payload(payload_text)
         code_artifact = _extract_single_output_block(
             raw_output,
-            content_format=_content_format_from_payload(payload_text),
+            content_format=content_format,
+        )
+        diagnostics = _artifact_diagnostics(
+            code_artifact,
+            content_format=content_format,
         )
         attempts.append({
             "attempt": attempt_index + 1,
             "raw_output": raw_output,
             "markdown_code_block_found": bool(code_artifact),
+            "diagnostics": diagnostics,
             "timed_out": timed_out,
         })
-        if code_artifact or timed_out:
+        if (code_artifact and not diagnostics) or timed_out:
             break
+        previous_diagnostics = diagnostics
     return raw_output, attempts
 
 
 def _extract_single_output_block(
     raw_output: str,
     *,
-    content_format: str,
+    content_format: WritingContentFormat,
 ) -> str:
     if not isinstance(raw_output, str):
         return ""
 
-    matches = re.findall(
-        r"```([A-Za-z0-9_-]*)\s*\n(.*?)\n```",
+    match = re.fullmatch(
+        r"\s*(?P<fence>`{3,}|~{3,})(?P<language>[A-Za-z0-9_-]*)[ \t]*"
+        r"\r?\n(?P<content>.*)\r?\n(?P=fence)[ \t]*\s*",
         raw_output,
         flags=re.IGNORECASE | re.DOTALL,
     )
-    if len(matches) != 1:
+    if match is None:
         return ""
 
-    language, content = matches[0]
+    language = match.group("language")
+    content = match.group("content")
     normalized_language = language.strip().casefold()
-    if content_format == "python" and normalized_language not in {"python", "py"}:
-        return ""
-    if content_format == "text" and normalized_language not in {
-        "markdown",
-        "md",
-        "text",
-        "txt",
-        "",
-    }:
+    if not _language_matches_format(normalized_language, content_format):
         return ""
     code_artifact = content.strip()
     return code_artifact
 
 
-def _content_format(module_contract: ModuleProgrammerContract) -> str:
-    content_format = module_contract.get("content_format", "python")
-    if content_format == "text":
-        return "text"
-    return "python"
+def _language_matches_format(
+    normalized_language: str,
+    content_format: WritingContentFormat,
+) -> bool:
+    allowed_languages = {
+        "python": {"python", "py"},
+        "markdown": {"markdown", "md"},
+        "text": {"text", "txt", "toml", "yaml", "yml", "ini", "cfg", "conf", "env", ""},
+        "json": {"json"},
+        "csv": {"csv", "text", "txt", ""},
+    }
+    allowed = allowed_languages[content_format]
+    return normalized_language in allowed
 
 
-def _content_format_from_payload(payload_text: str) -> str:
+def _artifact_diagnostics(
+    code_artifact: str,
+    *,
+    content_format: WritingContentFormat,
+) -> list[str]:
+    if not code_artifact:
+        return []
+    lowered = code_artifact.casefold()
+    if "notimplementederror" in lowered:
+        return ["Programmer output contains NotImplementedError."]
+    for line in code_artifact.splitlines():
+        stripped = line.strip().casefold()
+        if _is_unfinished_comment(stripped):
+            return ["Programmer output contains unfinished placeholder text."]
+    if content_format == "python":
+        if re.search(r"\bexcept\s+(?:Exception|BaseException)\b", code_artifact):
+            return ["Programmer output catches a broad exception type."]
+        placeholder_diagnostic = _python_placeholder_diagnostic(code_artifact)
+        if placeholder_diagnostic:
+            return [placeholder_diagnostic]
+    if content_format == "markdown" and _markdown_fences_are_unbalanced(
+        code_artifact,
+    ):
+        return ["Programmer output contains unbalanced Markdown code fences."]
+    return []
+
+
+def _is_unfinished_comment(stripped_line: str) -> bool:
+    comment_prefixes = ("#", "//", "--", "<!--")
+    if not stripped_line.startswith(comment_prefixes):
+        return False
+
+    comment_text = stripped_line
+    for prefix in comment_prefixes:
+        if comment_text.startswith(prefix):
+            comment_text = comment_text.removeprefix(prefix).strip()
+            break
+
+    unfinished_markers = (
+        "todo",
+        "fixme",
+        "placeholder",
+        "implement later",
+    )
+    has_unfinished_marker = comment_text.startswith(unfinished_markers)
+    return has_unfinished_marker
+
+
+def _python_placeholder_diagnostic(code_artifact: str) -> str:
+    """Detect empty Python stubs without rejecting valid control flow."""
+
+    try:
+        tree = ast.parse(code_artifact)
+    except SyntaxError:
+        return ""
+
+    if len(tree.body) == 1:
+        only_statement = tree.body[0]
+        if isinstance(only_statement, ast.Pass):
+            return "Programmer output contains a pass placeholder."
+        if _is_ellipsis_statement(only_statement):
+            return "Programmer output contains an ellipsis placeholder."
+
+    for node in ast.walk(tree):
+        if not isinstance(
+            node,
+            (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef),
+        ):
+            continue
+        if len(node.body) != 1:
+            continue
+        only_statement = node.body[0]
+        if isinstance(only_statement, ast.Pass):
+            return "Programmer output contains a pass placeholder."
+        if _is_ellipsis_statement(only_statement):
+            return "Programmer output contains an ellipsis placeholder."
+
+    return ""
+
+
+def _is_ellipsis_statement(node: ast.stmt) -> bool:
+    """Return whether an AST statement is a standalone ellipsis."""
+
+    if not isinstance(node, ast.Expr):
+        return False
+    value = node.value
+    is_ellipsis = isinstance(value, ast.Constant) and value.value is Ellipsis
+    return is_ellipsis
+
+
+def _markdown_fences_are_unbalanced(text: str) -> bool:
+    backtick_count = 0
+    tilde_count = 0
+    for line in text.splitlines():
+        stripped_line = line.strip()
+        if stripped_line.startswith("```"):
+            backtick_count += 1
+            continue
+        if stripped_line.startswith("~~~"):
+            tilde_count += 1
+    return backtick_count % 2 != 0 or tilde_count % 2 != 0
+
+
+def _content_format_from_payload(payload_text: str) -> WritingContentFormat:
     try:
         payload = json.loads(payload_text)
     except json.JSONDecodeError:
         return "python"
-    if isinstance(payload, dict) and payload.get("content_format") == "text":
-        return "text"
+    if not isinstance(payload, dict):
+        return "python"
+    content_format = payload.get("content_format")
+    if content_format in {"python", "markdown", "text", "json", "csv"}:
+        return content_format
     return "python"
 
 
-def _fill_module_trace(
+def _blocked_result(
+    artifact_contract: WritingProgrammerContract,
+    diagnostic: str,
+) -> WritingProgrammerResult:
+    result: WritingProgrammerResult = {
+        "artifact_id": artifact_contract["artifact_id"],
+        "status": "blocked",
+        "content_format": artifact_contract["content_format"],
+        "code_artifact": "",
+        "diagnostics": [diagnostic],
+    }
+    return result
+
+
+def _fill_trace(
     trace: dict[str, object] | None,
     *,
     raw_output: str,
-    result: ModuleProgrammerResult,
+    result: WritingProgrammerResult,
     context_budget: dict[str, object],
     blocked_before_invoke: bool,
     markdown_code_block_found: bool,
@@ -281,8 +416,8 @@ def _fill_module_trace(
     if trace is None:
         return
 
-    trace["effective_route"] = _module_programmer_llm_config.route_name
-    trace["model"] = _module_programmer_llm_config.model
+    trace["effective_route"] = _writing_programmer_llm_config.route_name
+    trace["model"] = _writing_programmer_llm_config.model
     trace["thinking_enabled"] = CODING_AGENT_PROGRAMMER_LLM_THINKING_ENABLED
     trace["context_budget"] = context_budget
     trace["blocked_before_invoke"] = blocked_before_invoke

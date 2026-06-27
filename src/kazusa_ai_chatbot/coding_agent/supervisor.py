@@ -144,6 +144,39 @@ async def propose_code_change(
         response = await _propose_new_project_change(request)
         return response
 
+    response = _write_response(
+        status="rejected",
+        mode="edit_existing_repository",
+        answer_text=(
+            "This writing stage creates new artifacts only. Existing-source "
+            "semantic edits require the code modifying capability."
+        ),
+        repository=None,
+        source_scope=None,
+        evidence=[],
+        patch_artifacts=[],
+        created_files=[],
+        changed_files=[],
+        validation={
+            "status": "rejected",
+            "parsed": False,
+            "sandbox_applied": False,
+            "errors": [
+                "Existing-source semantic edits are outside the current "
+                "writing scope."
+            ],
+            "warnings": [],
+            "files": [],
+        },
+        external_evidence=[],
+        session=None,
+        limitations=[
+            "Existing-source semantic edits are outside the current writing scope.",
+        ],
+        trace_summary=["writing:existing_source_rejected"],
+    )
+    return response
+
     fetching_result = await code_fetching.run(request)
     if fetching_result["status"] != "succeeded":
         response = _write_response(
@@ -999,6 +1032,7 @@ def _write_response_from_result(
         created_files=writing_result["created_files"],
         changed_files=writing_result.get("changed_files", []),
         validation=writing_result["validation"],
+        alignment=writing_result.get("alignment"),
         external_evidence=writing_result.get("external_evidence", []),
         session=writing_result.get("session"),
         limitations=limitations,
@@ -1025,6 +1059,7 @@ def _write_response(
     limitations: list[str],
     trace_summary: list[str],
     trace: object | None = None,
+    alignment: dict[str, object] | None = None,
 ) -> CodingPatchProposalResponse:
     answer_text = _answer_with_required_limitations(
         answer_text,
@@ -1047,6 +1082,8 @@ def _write_response(
         "limitations": limitations,
         "trace_summary": trace_summary,
     }
+    if alignment is not None:
+        response["alignment"] = alignment
     if isinstance(trace, dict):
         response["trace"] = trace
     response = _sanitize_write_response(response)

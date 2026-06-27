@@ -1,7 +1,8 @@
 # Code Writing ICD
 
-`code_writing` is the standalone patch-proposal subagent for the coding agent.
-It produces limited proposed patches only. It never applies a patch to the
+`code_writing` is the standalone new-artifact writing subagent for the coding
+agent. It creates proposed files, scripts, docs, tests, config, or small
+projects from a bounded source-free request. It never applies a patch to the
 caller workspace and never runs target project commands.
 
 ## Public Entrypoint
@@ -14,24 +15,16 @@ result = await run(request)
 
 `run(request: CodeWritingRequest) -> CodeWritingResult` is the internal Phase 2
 subagent entrypoint used by the top-level `propose_code_change(...)` direct
-interface. Existing repository requests enter this subagent after Phase 0
-fetching. When source evidence is needed, the subagent returns `need_reading`
-and the top-level supervisor runs the Phase 1 public reading contract before
-resuming writing.
+interface.
 
 ## Request
 
 `CodeWritingRequest` contains:
 
-- `question`: user-visible writing request.
-- `mode_hint`: `edit_existing_repository` or `create_new_project`.
-- `repository`: Phase 0 repository contract for existing-source work, or
-  `None` for new-project work.
-- `source_scope`: Phase 0 source scope for existing-source work.
-- `reading_result`: Phase 1 reading result after the supervisor has resolved a
-  `need_reading` outcome.
+- `question`: user-visible request for new artifacts.
+- `mode_hint`: must be `create_new_project` for the Phase 2 writing path.
 - `external_evidence`: limited public evidence summaries after the supervisor
-  has resolved a `need_external_evidence` outcome.
+  resolves a `need_external_evidence` outcome.
 - `workspace_root`: required caller-configured storage root.
 - `session_id`: optional stable public session id.
 - `preferred_language`, `max_answer_chars`, `max_artifact_chars`: optional
@@ -39,19 +32,25 @@ resuming writing.
 
 Missing `workspace_root` fails closed. The subagent does not infer storage
 paths from user text and does not fall back to a process temp directory.
+Requests that require semantic edits to existing source files are rejected by
+this writing stage and must be handled by the separate code-modifying
+capability.
 
 ## Response
 
 `CodeWritingResult` contains:
 
-- `status`: `succeeded`, `failed`, `needs_user_input`, or `rejected`.
+- `status`: `succeeded`, `failed`, `needs_user_input`, `rejected`, or
+  `need_external_evidence`.
 - `mode`: selected writing mode.
-- `answer_text`: public explanation of the proposed patch.
-- `patch_artifacts`: limited unified diff proposals.
-- `created_files` and `changed_files`: public file summaries.
-- `external_evidence`: limited summaries returned from PM-requested public
-  evidence lookups.
+- `answer_text`: public explanation of the proposed artifacts.
+- `patch_artifacts`: limited unified diff proposals for new files.
+- `created_files` and `changed_files`: public file summaries. In this stage,
+  created files are expected and changed files are diagnostics only.
+- `external_evidence_requests` and `external_evidence`: supervisor-mediated
+  public evidence handoff.
 - `validation`: deterministic patch validation result.
+- `alignment`: optional LLM-owned artifact/request alignment result.
 - `session`: public-safe writing session handle.
 - `limitations`: missing evidence, validation failures, or unsupported scope.
 - `trace_summary`: compact stage summary for review.
@@ -67,53 +66,35 @@ credentials.
 CodeWritingRequest
 -> writing supervisor
 -> managed session preparation
--> writing PM on CODING_AGENT_PM_LLM
--> optional need_reading or need_external_evidence returned to top-level supervisor
--> Source Ownership PM selects existing-source owners from bounded evidence
--> file agent validates file mechanics and builds file/module contracts
--> file-plan evaluator accepts the resolved contracts
--> one Module PM per accepted file/module contract on CODING_AGENT_PM_LLM
--> module-contract evaluator accepts each Module PM programmer contract
--> limited programmer workers on CODING_AGENT_PROGRAMMER_LLM, one module contract each
--> patcher on CODING_AGENT_PROGRAMMER_LLM builds PM-selected output
--> sandbox patch validation
--> optional validation repair loop
+-> Acceptance owner preserves user-visible requirements
+-> Writing PM on CODING_AGENT_PM_LLM
+-> optional need_external_evidence returned to top-level supervisor
+-> File Agent reserves safe new artifact paths
+-> one Writing programmer on CODING_AGENT_PROGRAMMER_LLM per artifact contract
+-> patching boundary materializes generated artifacts as new-file diffs
+-> structural validation checks patch artifact shape and sandbox apply
+-> Alignment owner compares generated artifacts against preserved requirements
 -> synthesis on CODING_AGENT_PM_LLM
 -> CodeWritingResult
 ```
 
-The top-level writing PM owns semantic decomposition, sufficiency, writing
-mode, external evidence need, file purposes, the feature-level interface
-contract, lifecycle ownership, provided/consumed interfaces across files,
-Module PM review reconciliation, and final artifact selection. The Source
-Ownership PM chooses existing-source owner paths from bounded reading evidence
-and candidate paths. The shared file agent owns file mechanics after ownership
-is known: path safety, new-file reservation, base revision checks, current file
-context packaging, and path maps. Each Module PM owns one local
-module-boundary programmer contract for an accepted file/module assignment,
-including lifecycle owner, provided/consumed interfaces, existing source
-anchors, exact imports, symbols to define or modify, a compact
-`cross_slice_interfaces` summary of consumed interfaces from other module
-slices, bounded current file context, and required behavior. The module-contract
-evaluator validates that `symbols_to_modify` entries reference names present in
-`current_file_context` or `existing_source_anchors`. Programmer workers own
-scoped implementation content for one accepted module-boundary contract and do
-not see peer programmer work or the whole feature picture. The programmer
-prompt uses separate instructions for `symbols_to_define` (write new code) and
-`symbols_to_modify` (extend or replace existing code while preserving runtime
-lifecycle). The patcher owns edit mechanics
-and converts PM-selected programmer content into unified diffs or new-project
-file trees. Deterministic code owns workspace preparation, patch parsing,
-sandbox validation, caps, and public sanitization.
+The top-level supervisor owns cross-domain interleaving. The Writing PM owns
+the requested new-artifact feature picture and artifact decomposition.
+Acceptance and alignment owners preserve and check user-visible requirements.
+File Agent owns path mechanics. Each Writing programmer receives one artifact
+contract and returns one fenced artifact body. The patching boundary owns
+file-tree or unified-diff materialization. Deterministic code owns structural
+validation, caps, path safety, storage boundaries, and public sanitization.
 
 ## Mutation Boundary
 
-Patch validation copies the base into a managed sandbox and checks the proposed
-diff there. The subagent does not mutate the fetched repository, the caller
-workspace, or the Kazusa source tree as part of a request.
+Patch validation copies into a managed sandbox and checks the proposed diff
+there. The subagent does not mutate fetched repositories, caller workspaces, or
+the Kazusa source tree as part of a request.
 
 Out of scope:
 
+- semantic edits to existing source files;
 - applying patches to real checkouts;
 - running target project tests, package commands, build commands, or shell
   verification;
@@ -122,17 +103,15 @@ Out of scope:
 
 ## External Evidence
 
-External evidence is supervisor-managed. The writing PM may request public
+External evidence is supervisor-managed. The Writing PM may request public
 evidence by returning `need_external_evidence` with limited evidence tasks.
 The top-level coding supervisor resolves those tasks through the public
-`WebAgent3().run(...)` helper, then resumes `code_writing.run(...)` with the
-limited evidence summaries. Evidence is supporting context for the PM and
-programmer stages; it does not override local source evidence or directly
-become final patch instructions.
+external-evidence helper, then resumes `code_writing.run(...)` with limited
+evidence summaries.
 
 ## Session Storage
 
 `workspace.py` stores session metadata under the caller-provided coding
 workspace. Session ids are sanitized public handles. Session metadata records
-the base identity and marks a previous session invalidated when the repository
-or new-project base identity changes.
+the new-artifact base identity and marks a previous session invalidated when
+the base identity changes.

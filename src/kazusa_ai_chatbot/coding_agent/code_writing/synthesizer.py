@@ -1,4 +1,4 @@
-"""Final answer synthesis for code-writing patch proposals."""
+"""Final answer synthesis for new-artifact patch proposals."""
 
 from __future__ import annotations
 
@@ -16,11 +16,10 @@ from kazusa_ai_chatbot.coding_agent.context_budget import (
 )
 from kazusa_ai_chatbot.coding_agent.code_writing.models import (
     ExternalEvidenceSummary,
+    GeneratedArtifact,
     PatchArtifact,
     PatchValidationSummary,
-    WritingMode,
     WritingPMDecision,
-    WritingProgrammerReport,
 )
 from kazusa_ai_chatbot.config import (
     CODING_AGENT_PM_LLM_API_KEY,
@@ -39,6 +38,7 @@ from kazusa_ai_chatbot.utils import parse_llm_json_output
 DEFAULT_MAX_ANSWER_CHARS = 4000
 MAX_TEXT_FIELD_CHARS = 6000
 MAX_LIMITATIONS_IN_ANSWER = 3
+NO_EXECUTION_LIMITATION = "Generated artifacts were not executed in the target project."
 NO_LIMITATION_CLAIM_RE = re.compile(
     r"[^.!?\n]*(?:no reported limitations|no limitations|no missing information)"
     r"[^.!?\n]*[.!?]?",
@@ -47,18 +47,25 @@ NO_LIMITATION_CLAIM_RE = re.compile(
 
 
 WRITING_SYNTHESIS_PROMPT = '''\
-You synthesize the final user-facing answer for a code-writing patch proposal.
-Use only the PM decision, programmer reports, patch artifacts, validation
-summary, external evidence summaries, limitations, and public repository
-metadata provided in the user payload.
+You synthesize the final user-facing answer for a new-artifact code-writing
+proposal. Use only the PM decision, generated artifact manifest, validation
+summary, external evidence summaries, and limitations provided in the payload.
 
 # Synthesis Rules
 - State that the output is a patch proposal, not an applied mutation.
-- Summarize the proposed change and validation status.
+- Summarize the generated artifacts and validation status.
+- Treat validation status as artifact package and structure validation only
+  unless the payload explicitly says target commands or tests were run.
+- Generated tests are proposal artifacts. If validation reports a generated
+  test failure, report it as a generated-test validation failure. Do not say
+  the implementation, source, package, logic, checker, converter, parser, or
+  CLI failed to perform a behavior unless the payload provides independent
+  non-test evidence for that defect.
+- If validation error text includes assertion wording such as "should detect"
+  or "expected", attribute that wording to the generated test assertion.
 - Mention limitations and missing information.
-- If the payload limitations list is non-empty, do not say there are no
-  limitations. Include the important limitations in the answer.
-- Mention external evidence only when it is present in the payload.
+- If limitations are present, do not say there are no limitations.
+- Mention external evidence only when it is present.
 - Do not claim that tests, package installation, Docker, or target project
   commands were run.
 - Do not expose local roots, storage roots, cache keys, API keys, raw provider
@@ -94,38 +101,17 @@ _synthesis_llm_config = LLMCallConfig(
 async def synthesize_patch_proposal(
     *,
     question: str,
-    mode: WritingMode,
     pm_decision: WritingPMDecision,
-    programmer_reports: list[WritingProgrammerReport],
+    generated_artifacts: list[GeneratedArtifact],
     patch_artifacts: list[PatchArtifact],
     validation: PatchValidationSummary,
     external_evidence: list[ExternalEvidenceSummary],
     limitations: list[str],
-    repository_summary: dict[str, object] | None,
     preferred_language: str | None,
     max_answer_chars: int,
     trace: dict[str, object] | None = None,
 ) -> tuple[str, list[str]]:
-    """Create the final answer from proposal artifacts and validation.
-
-    Args:
-        question: User-visible writing request.
-        mode: Writing mode selected by the supervisor.
-        pm_decision: PM work decision.
-        programmer_reports: Structured report memory from bounded workers.
-        patch_artifacts: Proposed unified-diff artifacts.
-        validation: Deterministic patch validation summary.
-        external_evidence: PM-requested web evidence summaries.
-        limitations: Existing deterministic and PM limitations.
-        repository_summary: Public-safe repository metadata, if any.
-        preferred_language: Optional caller language hint.
-        max_answer_chars: Public answer cap.
-        trace: Optional internal diagnostic dictionary populated with safe route
-            and model metadata plus raw and parsed model output.
-
-    Returns:
-        The public answer text and combined limitations.
-    """
+    """Create the final answer from generated artifacts and validation."""
 
     if not patch_artifacts:
         answer = "No patch proposal artifact was produced."
@@ -135,16 +121,18 @@ async def synthesize_patch_proposal(
         ]
         return answer, result_limitations
 
+    capability_limitations = _dedupe_strings([
+        *limitations,
+        NO_EXECUTION_LIMITATION,
+    ])
     payload = _synthesis_payload(
         question=question,
-        mode=mode,
         pm_decision=pm_decision,
-        programmer_reports=programmer_reports,
+        generated_artifacts=generated_artifacts,
         patch_artifacts=patch_artifacts,
         validation=validation,
         external_evidence=external_evidence,
-        limitations=limitations,
-        repository_summary=repository_summary,
+        limitations=capability_limitations,
         preferred_language=preferred_language,
         max_answer_chars=max_answer_chars,
     )
@@ -157,9 +145,12 @@ async def synthesize_patch_proposal(
         artifact_ids=collect_artifact_ids(payload),
     )
     if context_budget["over_hard_cap"]:
-        answer_text = "Patch artifacts were produced, but synthesis exceeded the context budget."
+        answer_text = (
+            "Patch artifacts were produced, but synthesis exceeded the context "
+            "budget."
+        )
         combined_limitations = _dedupe_strings([
-            *limitations,
+            *capability_limitations,
             "Synthesis prompt exceeded the context budget.",
         ])
         _fill_trace(
@@ -182,7 +173,10 @@ async def synthesize_patch_proposal(
         parsed,
         max_answer_chars=max_answer_chars,
     )
-    combined_limitations = _dedupe_strings([*limitations, *parsed_limitations])
+    combined_limitations = _dedupe_strings([
+        *capability_limitations,
+        *parsed_limitations,
+    ])
     answer_text = _answer_with_required_limitations(
         answer_text,
         combined_limitations,
@@ -210,18 +204,40 @@ def _answer_with_required_limitations(
         return answer_text
 
     cleaned_answer = NO_LIMITATION_CLAIM_RE.sub("", answer_text).strip()
-    limitation_text = "Limitations: " + "; ".join(
-        limitations[:MAX_LIMITATIONS_IN_ANSWER]
+    missing_limitations = _missing_visible_limitations(
+        cleaned_answer,
+        limitations[:MAX_LIMITATIONS_IN_ANSWER],
     )
-    if limitation_text in cleaned_answer:
+    if not missing_limitations:
         updated_answer = cleaned_answer
-    elif cleaned_answer:
-        updated_answer = f"{cleaned_answer}\n\n{limitation_text}"
     else:
-        updated_answer = limitation_text
+        limitation_text = "Limitations: " + "; ".join(missing_limitations)
+        if cleaned_answer:
+            updated_answer = f"{cleaned_answer}\n\n{limitation_text}"
+        else:
+            updated_answer = limitation_text
     if len(updated_answer) > max_answer_chars:
         updated_answer = updated_answer[:max_answer_chars].rstrip()
     return updated_answer
+
+
+def _missing_visible_limitations(
+    answer_text: str,
+    limitations: list[str],
+) -> list[str]:
+    answer_key = _visibility_key(answer_text)
+    missing_limitations: list[str] = []
+    for limitation in limitations:
+        normalized_limitation = _trim_sentence_punctuation(limitation)
+        limitation_key = _visibility_key(normalized_limitation)
+        if limitation_key and limitation_key not in answer_key:
+            missing_limitations.append(normalized_limitation)
+    return missing_limitations
+
+
+def _visibility_key(value: str) -> str:
+    key = re.sub(r"\s+", " ", value.casefold()).strip().rstrip(".;")
+    return key
 
 
 def normalize_synthesis_output(
@@ -238,7 +254,9 @@ def normalize_synthesis_output(
 
     answer_text = _bounded_text(parsed.get("answer_text"), max_answer_chars)
     if not answer_text:
-        answer_text = "Patch artifacts were produced, but no final summary was returned."
+        answer_text = (
+            "Patch artifacts were produced, but no final summary was returned."
+        )
     limitations = _string_list(parsed.get("limitations"), 8)
     return answer_text, limitations
 
@@ -246,30 +264,36 @@ def normalize_synthesis_output(
 def _synthesis_payload(
     *,
     question: str,
-    mode: WritingMode,
     pm_decision: WritingPMDecision,
-    programmer_reports: list[WritingProgrammerReport],
+    generated_artifacts: list[GeneratedArtifact],
     patch_artifacts: list[PatchArtifact],
     validation: PatchValidationSummary,
     external_evidence: list[ExternalEvidenceSummary],
     limitations: list[str],
-    repository_summary: dict[str, object] | None,
     preferred_language: str | None,
     max_answer_chars: int,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
         "question": question,
-        "mode": mode,
         "preferred_language": preferred_language,
         "max_answer_chars": max_answer_chars,
-        "repository_summary": repository_summary,
         "pm_decision": {
             "status": pm_decision["status"],
-            "mode": pm_decision["mode"],
-            "intent": pm_decision["intent"],
-            "missing_slots": pm_decision["missing_slots"],
+            "feature_goal": pm_decision["feature_goal"],
+            "limitations": pm_decision["limitations"],
         },
-        "programmer_reports": _compact_reports(programmer_reports),
+        "generated_artifacts": [
+            {
+                "artifact_id": artifact["artifact_id"],
+                "file_label": artifact["file_label"],
+                "file_kind": artifact["file_kind"],
+                "content_format": artifact["content_format"],
+                "path": artifact["path"],
+                "content_chars": len(artifact["content"]),
+                "purpose": artifact["purpose"],
+            }
+            for artifact in generated_artifacts
+        ],
         "patch_artifacts": [
             {
                 "artifact_id": artifact["artifact_id"],
@@ -284,28 +308,6 @@ def _synthesis_payload(
         "limitations": limitations,
     }
     return payload
-
-
-def _compact_reports(
-    reports: list[WritingProgrammerReport],
-) -> list[dict[str, object]]:
-    compact_reports: list[dict[str, object]] = []
-    for report in reports:
-        compact_report = {
-            "assignment_id": report["assignment_id"],
-            "file_contract_id": report.get("file_contract_id", ""),
-            "file_label": report["file_label"],
-            "edit_mode": report["edit_mode"],
-            "status": report["status"],
-            "files_considered": report["files_considered"],
-            "facts": report["facts"],
-            "open_questions": report["open_questions"],
-            "created_files": report["created_files"],
-            "changed_files": report["changed_files"],
-            "code_artifact_chars": len(report.get("code_artifact", "")),
-        }
-        compact_reports.append(compact_report)
-    return compact_reports
 
 
 def _string_list(value: object, limit: int) -> list[str]:
@@ -325,11 +327,26 @@ def _string_list(value: object, limit: int) -> list[str]:
 
 def _dedupe_strings(values: list[str]) -> list[str]:
     deduped: list[str] = []
+    seen_keys: set[str] = set()
     for value in values:
-        if value in deduped:
+        key = _dedupe_key(value)
+        if key in seen_keys:
             continue
+        seen_keys.add(key)
         deduped.append(value)
     return deduped
+
+
+def _dedupe_key(value: str) -> str:
+    normalized = _visibility_key(value)
+    if normalized.startswith("the "):
+        normalized = normalized.removeprefix("the ")
+    return normalized
+
+
+def _trim_sentence_punctuation(value: str) -> str:
+    trimmed = value.strip().rstrip(".;")
+    return trimmed
 
 
 def _bounded_text(value: object, max_chars: int) -> str:
@@ -356,6 +373,7 @@ def _fill_trace(
 
     trace["effective_route"] = _synthesis_llm_config.route_name
     trace["model"] = _synthesis_llm_config.model
+    trace["thinking_enabled"] = CODING_AGENT_PM_LLM_THINKING_ENABLED
     trace["context_budget"] = context_budget
     trace["blocked_before_invoke"] = blocked_before_invoke
     trace["raw_output"] = raw_output

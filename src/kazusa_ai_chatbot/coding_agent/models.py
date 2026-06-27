@@ -116,6 +116,7 @@ class CodingPatchProposalResponse(TypedDict):
     created_files: list[dict[str, str]]
     changed_files: list[dict[str, str]]
     validation: dict[str, object]
+    alignment: NotRequired[dict[str, object]]
     external_evidence: list[dict[str, object]]
     session: dict[str, object] | None
     limitations: list[str]

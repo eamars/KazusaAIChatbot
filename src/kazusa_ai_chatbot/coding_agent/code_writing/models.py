@@ -1,23 +1,16 @@
-"""Public and internal data contracts for code writing."""
+"""Public and internal data contracts for new-artifact code writing."""
 
 from typing import Literal, NotRequired, TypedDict
 
-from kazusa_ai_chatbot.coding_agent.code_fetching.models import (
-    CodeRepositoryRef,
-    CodeSourceScope,
-)
 from kazusa_ai_chatbot.coding_agent.code_reading.models import (
-    CodeEvidenceRow,
     CodeReadingResult,
 )
 
-WritingMode = Literal["edit_existing_repository", "create_new_project"]
+WritingMode = Literal["create_new_project", "edit_existing_repository"]
 WritingPMStatus = Literal[
-    "need_reading",
-    "need_module_pms",
-    "ready_to_write",
-    "needs_user_input",
-    "overloaded",
+    "need_programmers",
+    "need_external_evidence",
+    "sufficient",
     "rejected",
 ]
 WritingResultStatus = Literal[
@@ -25,46 +18,19 @@ WritingResultStatus = Literal[
     "failed",
     "needs_user_input",
     "rejected",
-    "need_reading",
     "need_external_evidence",
 ]
-AssignmentScopeKind = Literal["repository", "file", "directory"]
-WritingProgrammerReportStatus = Literal["succeeded", "blocked", "no_patch"]
-WritingPatcherStatus = Literal["succeeded", "blocked"]
+WritingFileKind = Literal["source", "test", "docs", "config", "data"]
+WritingContentFormat = Literal["python", "markdown", "text", "json", "csv"]
+WritingProgrammerStatus = Literal["succeeded", "blocked"]
+WritingPatcherStatus = Literal["succeeded", "failed", "rejected"]
 PatchValidationStatus = Literal["succeeded", "failed", "rejected"]
-WritingPlanEvaluationStatus = Literal["accepted", "repair_required"]
-ModuleContractEvaluationStatus = Literal["accepted", "repair_required"]
-WritingFileKind = Literal["existing", "new", "test", "docs", "config", "support"]
-WritingFileResolutionStatus = Literal["accepted", "repair_required"]
-SourceOwnershipDecisionStatus = Literal[
-    "accepted",
-    "need_reading",
-    "needs_pm_repair",
-]
-SourceOwnershipResolutionStatus = Literal[
-    "accepted",
-    "need_reading",
-    "repair_required",
-]
-ModuleProgrammerEditMode = Literal["complete_file", "symbol_bundle"]
-ModuleProgrammerContentFormat = Literal["python", "text"]
-PatchOperationKind = Literal[
-    "create_file",
-    "insert_after",
-    "insert_before",
-    "replace",
-]
-
-
-class WritingAssignmentScope(TypedDict):
-    """Internal bounded write scope used by supervisor and patcher helpers."""
-
-    kind: AssignmentScopeKind
-    values: list[str]
+PatchOperationKind = Literal["create_file"]
+WritingAlignmentStatus = Literal["pass", "fail"]
 
 
 class PatchArtifact(TypedDict):
-    """Unified-diff patch proposal."""
+    """Unified-diff patch proposal for generated artifacts."""
 
     artifact_id: str
     base: str
@@ -74,12 +40,11 @@ class PatchArtifact(TypedDict):
 
 
 class PatchOperation(TypedDict, total=False):
-    """LLM-selected structured edit compiled into a unified diff."""
+    """Structured new-file operation compiled into a unified diff."""
 
     operation_id: str
     kind: PatchOperationKind
     path: str
-    anchor: str
     content: str
     summary: str
 
@@ -109,6 +74,14 @@ class ExternalEvidenceSummary(TypedDict):
     limitation: NotRequired[str]
 
 
+class WritingExternalEvidenceRequest(TypedDict):
+    """One PM-requested external evidence task."""
+
+    request_id: str
+    task: str
+    reason: str
+
+
 class PatchValidationSummary(TypedDict):
     """Public-safe patch validation result."""
 
@@ -120,90 +93,31 @@ class PatchValidationSummary(TypedDict):
     files: list[str]
 
 
-class WritingFilePlanEvaluation(TypedDict):
-    """Structural evaluation of resolved file/module contracts."""
+class WritingAcceptanceCriterion(TypedDict):
+    """One preserved user-visible requirement for artifact alignment."""
 
-    status: WritingPlanEvaluationStatus
-    errors: list[str]
-    repair_feedback: list[str]
-
-
-class ModuleContractEvaluation(TypedDict):
-    """Structural evaluation of one Module-PM programmer contract."""
-
-    status: ModuleContractEvaluationStatus
-    file_contract_id: str
-    file_label: str
-    errors: list[str]
-    repair_feedback: list[str]
+    criterion_id: str
+    requirement: str
+    evidence_needed: str
 
 
-class SourceOwnerCandidate(TypedDict):
-    """Structural source file hint derived from limited evidence files."""
+class WritingAcceptanceResult(TypedDict):
+    """Requirement preservation result before artifact decomposition."""
 
-    path: str
-    role: str
-    line_start: int
-    line_end: int
-    symbols: list[str]
-    exception_types: list[str]
-    feature_markers: list[str]
+    status: WritingAlignmentStatus
+    acceptance_criteria: list[WritingAcceptanceCriterion]
+    limitations: list[str]
+
+
+class WritingAlignmentResult(TypedDict):
+    """Semantic artifact alignment result after artifact generation."""
+
+    status: WritingAlignmentStatus
+    confidence: int
+    request_satisfied: bool
     reasons: list[str]
-    evidence_refs: list[str]
-
-
-class WritingFileDemand(TypedDict, total=False):
-    """Semantic file need selected by the writing product manager."""
-
-    demand_id: str
-    role: str
-    purpose: str
-    file_kind: WritingFileKind
-    preferred_path: str
-    preferred_name: str
-    placement_hint: str
-    related_paths: list[str]
-    read_only_paths: list[str]
-    interface_contract: dict[str, object]
-    integration_contract: dict[str, object]
-    change_goal: str
-    work_instructions: list[str]
-    required_slots: list[str]
-    validation_expectations: list[str]
-    forbidden_paths: list[str]
-
-
-class WritingFileResolution(TypedDict):
-    """Resolved file plan returned before Module PM dispatch."""
-
-    status: WritingFileResolutionStatus
-    file_contracts: list["WritingFileModuleContract"]
-    owned_path_map: dict[str, str]
-    read_only_path_map: dict[str, list[str]]
-    errors: list[str]
-    repair_feedback: list[str]
-
-
-class SourceOwnershipDecision(TypedDict):
-    """One LLM-selected existing-source owner decision."""
-
-    demand_id: str
-    status: SourceOwnershipDecisionStatus
-    owned_path: str
-    read_only_paths: list[str]
-    reason: str
-    evidence_refs: list[str]
-    required_slots: list[str]
-
-
-class SourceOwnershipResolution(TypedDict):
-    """Source-owner decisions returned before file mechanics run."""
-
-    status: SourceOwnershipResolutionStatus
-    decisions: list[SourceOwnershipDecision]
-    errors: list[str]
-    repair_feedback: list[str]
-    reading_requests: list["WritingReadingEvidenceRequest"]
+    blockers: list[str]
+    feedback_for_pm: str
 
 
 class WritingSessionSummary(TypedDict):
@@ -219,8 +133,6 @@ class CodeWritingRequest(TypedDict, total=False):
 
     question: str
     mode_hint: WritingMode
-    repository: CodeRepositoryRef | None
-    source_scope: CodeSourceScope | None
     reading_result: CodeReadingResult | None
     supervisor_evidence_state: dict[str, object]
     workspace_root: str
@@ -231,21 +143,119 @@ class CodeWritingRequest(TypedDict, total=False):
     external_evidence: list[ExternalEvidenceSummary]
 
 
-class WritingExternalEvidenceRequest(TypedDict):
-    """One PM-requested external evidence task."""
+class WritingArtifactItem(TypedDict, total=False):
+    """One PM-owned new artifact contract."""
 
-    request_id: str
-    task: str
-    reason: str
+    artifact_id: str
+    file_label: str
+    file_kind: WritingFileKind
+    content_format: WritingContentFormat
+    purpose: str
+    imports: list[str]
+    provided_interfaces: list[dict[str, object]]
+    consumed_interfaces: list[dict[str, object]]
+    required_behavior: list[str]
+    preferred_name: str
 
 
-class WritingReadingEvidenceRequest(TypedDict):
-    """One PM-requested source-reading evidence task."""
+class ReservedArtifactPath(TypedDict):
+    """File Agent reservation for one new artifact."""
 
-    request_id: str
-    task: str
-    reason: str
-    required_slots: list[str]
+    artifact_id: str
+    file_label: str
+    path: str
+    file_kind: WritingFileKind
+    content_format: WritingContentFormat
+    purpose: str
+
+
+class ArtifactReservationResult(TypedDict):
+    """File Agent result for PM artifact contracts."""
+
+    status: Literal["accepted", "repair_required"]
+    reserved_paths: list[ReservedArtifactPath]
+    errors: list[str]
+    repair_feedback: list[str]
+
+
+class WritingPMInput(TypedDict):
+    """Compact model-facing input for the writing product manager."""
+
+    question: str
+    mode: WritingMode
+    external_evidence: list[ExternalEvidenceSummary]
+    previous_artifacts: list[dict[str, object]]
+    acceptance_criteria: NotRequired[list[WritingAcceptanceCriterion]]
+    validation_feedback: NotRequired[PatchValidationSummary]
+    alignment_feedback: NotRequired[WritingAlignmentResult]
+    reservation_feedback: NotRequired[ArtifactReservationResult]
+
+
+class WritingPMDecision(TypedDict):
+    """The decision shape returned by the writing product manager."""
+
+    status: WritingPMStatus
+    feature_goal: str
+    artifact_items: list[WritingArtifactItem]
+    selected_artifacts: list[dict[str, object]]
+    external_evidence_requests: list[WritingExternalEvidenceRequest]
+    limitations: list[str]
+
+
+class WritingProgrammerContract(TypedDict):
+    """One new-artifact contract for one programmer call."""
+
+    artifact_id: str
+    file_label: str
+    file_kind: WritingFileKind
+    content_format: WritingContentFormat
+    purpose: str
+    imports: list[str]
+    provided_interfaces: list[dict[str, object]]
+    consumed_interfaces: list[dict[str, object]]
+    required_behavior: list[str]
+
+
+class WritingProgrammerResult(TypedDict):
+    """Source content returned by one writing programmer worker."""
+
+    artifact_id: str
+    status: WritingProgrammerStatus
+    content_format: WritingContentFormat
+    code_artifact: str
+    diagnostics: list[str]
+
+
+class GeneratedArtifact(TypedDict):
+    """Generated artifact selected for patch materialization."""
+
+    artifact_id: str
+    file_label: str
+    file_kind: WritingFileKind
+    content_format: WritingContentFormat
+    path: str
+    content: str
+    purpose: str
+
+
+class WritingPatcherInput(TypedDict):
+    """PM-selected generated artifacts handed to the materializer."""
+
+    artifact_package_id: str
+    artifacts: list[GeneratedArtifact]
+    reserved_paths: list[ReservedArtifactPath]
+    max_artifact_chars: int
+
+
+class WritingPatcherReport(TypedDict):
+    """Patch materialization result from the dedicated patcher boundary."""
+
+    status: WritingPatcherStatus
+    artifact_package: dict[str, object]
+    patch_artifacts: list[PatchArtifact]
+    created_files: list[CreatedFileSummary]
+    changed_files: list[ChangedFileSummary]
+    diagnostics: list[str]
 
 
 class CodeWritingResult(TypedDict):
@@ -257,190 +267,11 @@ class CodeWritingResult(TypedDict):
     patch_artifacts: list[PatchArtifact]
     created_files: list[CreatedFileSummary]
     changed_files: list[ChangedFileSummary]
-    reading_requests: NotRequired[list[WritingReadingEvidenceRequest]]
     external_evidence_requests: list[WritingExternalEvidenceRequest]
     external_evidence: list[ExternalEvidenceSummary]
     validation: PatchValidationSummary
+    alignment: NotRequired[WritingAlignmentResult]
     session: WritingSessionSummary | None
     limitations: list[str]
     trace_summary: list[str]
     trace: NotRequired[dict[str, object]]
-
-
-class WritingPMInput(TypedDict):
-    """Compact model-facing input for the writing product manager."""
-
-    question: str
-    mode: WritingMode
-    repository_summary: dict[str, object] | None
-    reading_reports: list[dict[str, object]]
-    supervisor_evidence_state: NotRequired[dict[str, object]]
-    owner_candidates: NotRequired[list[SourceOwnerCandidate]]
-    previous_writing_reports: list["WritingProgrammerReport"]
-    validation_feedback: NotRequired[PatchValidationSummary]
-    file_resolution_feedback: NotRequired[WritingFileResolution]
-    file_plan_feedback: NotRequired[WritingFilePlanEvaluation]
-    external_evidence: NotRequired[list[ExternalEvidenceSummary]]
-
-
-class WritingProgrammerAssignment(TypedDict, total=False):
-    """Internal bounded write scope derived from a file contract."""
-
-    assignment_id: str
-    role: str
-    scope: WritingAssignmentScope
-    owned_paths: list[str]
-    read_only_paths: list[str]
-    interface_contract: dict[str, object]
-    integration_contract: dict[str, object]
-    change_goal: str
-    work_instructions: list[str]
-    required_slots: list[str]
-    validation_expectations: list[str]
-    forbidden_paths: list[str]
-
-
-class WritingFileModuleContract(TypedDict, total=False):
-    """One resolved file/module responsibility owned by a Module PM."""
-
-    file_contract_id: str
-    role: str
-    purpose: str
-    file_kind: WritingFileKind
-    owned_path: str
-    owned_paths: list[str]
-    read_only_paths: list[str]
-    interface_contract: dict[str, object]
-    integration_contract: dict[str, object]
-    change_goal: str
-    cross_file_imports: list[str]
-    work_instructions: list[str]
-    required_slots: list[str]
-    validation_expectations: list[str]
-    forbidden_paths: list[str]
-
-
-class ModuleProgrammerSymbol(TypedDict, total=False):
-    """One top-level symbol required from a module programmer."""
-
-    name: str
-    kind: str
-    signature: str
-    body_contract: str
-    children: list[object]
-
-
-class ModuleProgrammerContract(TypedDict):
-    """One module-level implementation contract for a programmer worker."""
-
-    file_label: str
-    edit_mode: ModuleProgrammerEditMode
-    content_format: ModuleProgrammerContentFormat
-    module_purpose: str
-    lifecycle_owner: str
-    provided_interfaces: list[dict[str, object]]
-    consumed_interfaces: list[dict[str, object]]
-    existing_source_anchors: list[dict[str, object]]
-    imports: list[str]
-    current_file_context: str
-    symbols_to_define: list[ModuleProgrammerSymbol]
-    symbols_to_modify: list[ModuleProgrammerSymbol]
-    required_behavior: list[str]
-
-
-class ModuleProgrammerResult(TypedDict):
-    """Source content returned by a module programmer worker."""
-
-    code_artifact: str
-
-
-class CrossSliceInterfaceSummary(TypedDict):
-    """Compact summary of one provided interface from another module slice."""
-
-    provider_slice_id: str
-    name: str
-    contract: str
-
-
-class ModulePMInput(TypedDict):
-    """Model-facing input for one Module PM module contract."""
-
-    file_label: str
-    edit_mode: ModuleProgrammerEditMode
-    content_format: ModuleProgrammerContentFormat
-    module_purpose: str
-    lifecycle_owner: str
-    provided_interfaces: list[dict[str, object]]
-    consumed_interfaces: list[dict[str, object]]
-    existing_source_anchors: list[dict[str, object]]
-    integration_behaviors: list[str]
-    imports: list[str]
-    current_file_context: str
-    source_file_chars: int
-    selected_evidence: list[dict[str, object]]
-    required_behavior: list[str]
-    cross_slice_interfaces: list[CrossSliceInterfaceSummary]
-    module_contract_feedback: NotRequired[ModuleContractEvaluation]
-
-
-class WritingPMDecision(TypedDict):
-    """The decision shape returned by the writing product manager."""
-
-    status: WritingPMStatus
-    mode: WritingMode
-    intent: str
-    file_demands: list[WritingFileDemand]
-    file_contracts: list[WritingFileModuleContract]
-    cross_module_imports: dict[str, list[str]]
-    missing_slots: list[str]
-    reading_requests: list[WritingReadingEvidenceRequest]
-    external_evidence_requests: list[WritingExternalEvidenceRequest]
-
-
-class WritingProgrammerFact(TypedDict):
-    """A compact programmer observation used by synthesis."""
-
-    kind: str
-    summary: str
-    evidence_refs: list[str]
-
-
-class WritingProgrammerReport(TypedDict):
-    """Compressed memory returned by one programmer worker."""
-
-    assignment_id: str
-    file_contract_id: str
-    file_label: str
-    edit_mode: ModuleProgrammerEditMode
-    status: WritingProgrammerReportStatus
-    files_considered: list[str]
-    facts: list[WritingProgrammerFact]
-    code_artifact: str
-    open_questions: list[str]
-    created_files: list[CreatedFileSummary]
-    changed_files: list[ChangedFileSummary]
-    evidence: list[CodeEvidenceRow]
-
-
-class WritingPatcherInput(TypedDict):
-    """PM-selected implementation packet handed to the patch materializer."""
-
-    question: str
-    mode: WritingMode
-    base_identity: str
-    owned_path_map: dict[str, str]
-    base_file_summaries: list[dict[str, object]]
-    selected_programmer_reports: list[WritingProgrammerReport]
-    pm_integration_notes: list[str]
-    artifact_limits: dict[str, int]
-
-
-class WritingPatcherReport(TypedDict):
-    """Patch materialization result from the dedicated patcher role."""
-
-    status: WritingPatcherStatus
-    patch_artifacts: list[PatchArtifact]
-    created_files: list[CreatedFileSummary]
-    changed_files: list[ChangedFileSummary]
-    edit_diagnostics: list[str]
-    unmaterialized_reports: list[str]

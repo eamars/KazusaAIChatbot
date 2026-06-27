@@ -1112,7 +1112,12 @@ def _module_names_for_python_path(safe_path: str) -> list[str]:
     if not parts:
         return []
     module_name = ".".join(parts)
-    return [module_name]
+    module_names = [module_name]
+    if len(parts) >= 2 and parts[0] == "src":
+        runtime_module_name = ".".join(parts[1:])
+        if runtime_module_name:
+            module_names.append(runtime_module_name)
+    return module_names
 
 
 def _exported_names_by_module(
