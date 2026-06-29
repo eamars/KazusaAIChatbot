@@ -614,6 +614,22 @@ This plan is complete when:
   - `venv\Scripts\python -m pytest tests\test_rag_projection.py -q`: 35 passed.
   - `venv\Scripts\python -m pytest tests\test_cognition_resolver_loop.py -q`: 33 passed.
   - Combined rerun after review fixes: `venv\Scripts\python -m pytest tests\test_internal_monologue_residue_prompt_boundaries.py tests\test_rag_projection.py tests\test_cognition_resolver_loop.py -q`: 72 passed.
+- Real LLM comparison evidence:
+  - Branch commit before comparison: `d301586 Add past dialog cognition residual context` on `feature/past-dialog-cognition-residual`.
+  - Runtime data check found retained `llm_trace_steps` had zero non-empty `parsed_output` rows across stored stages; the comparison therefore reused real visible Kazusa assistant dialog rows and seeded synthetic parsed cognition residuals in a test-only `debug` channel.
+  - Seed and comparison run id: `pdc_live_20260629T115757Z_9fc284db`.
+  - Seed metadata: `test_artifacts/past_dialog_cognition_live/pdc_live_20260629T115757Z_9fc284db_seed_metadata.json`.
+  - Human-readable review: `test_artifacts/past_dialog_cognition_live/pdc_live_20260629T115757Z_9fc284db_review.md`.
+  - Structured comparison data: `test_artifacts/past_dialog_cognition_live/pdc_live_20260629T115757Z_9fc284db_comparison_data.json`.
+  - Feature branch live runs:
+    - `case_1_reddit_strategy`: completed; response artifact `test_artifacts/past_dialog_cognition_live/pdc_live_20260629T115757Z_9fc284db_feature_case_1_reddit_strategy_response.json`; trace export `test_artifacts/past_dialog_cognition_live/pdc_live_20260629T115757Z_9fc284db_feature_case_1_trace_export.json`.
+    - `case_2_emotional_texture`: completed; response artifact `test_artifacts/past_dialog_cognition_live/pdc_live_20260629T115757Z_9fc284db_feature_case_2_emotional_texture_response.json`; trace export `test_artifacts/past_dialog_cognition_live/pdc_live_20260629T115757Z_9fc284db_feature_case_2_trace_export.json`.
+  - Main baseline live runs:
+    - `case_1_reddit_strategy`: completed; response artifact `test_artifacts/past_dialog_cognition_live/pdc_live_20260629T115757Z_9fc284db_main_case_1_reddit_strategy_response.json`; trace export `test_artifacts/past_dialog_cognition_live/pdc_live_20260629T115757Z_9fc284db_main_case_1_trace_export.json`.
+    - `case_2_emotional_texture`: completed; response artifact `test_artifacts/past_dialog_cognition_live/pdc_live_20260629T115757Z_9fc284db_main_case_2_emotional_texture_response.json`; trace export `test_artifacts/past_dialog_cognition_live/pdc_live_20260629T115757Z_9fc284db_main_case_2_trace_export.json`.
+  - One first-attempt feature request failed before model output because `local_timestamp` used ISO UTC instead of configured-local format; retry with empty `local_timestamp` completed successfully and is the recorded comparison output.
+  - The live comparison used `debug_modes.no_remember=true`; normal conversation rows were still created, but background consolidation and durable memory writes were suppressed.
+  - Qualitative read recorded in the review: case 2 improved because the branch output answered the concrete "哪里不对" question from residual context; case 1 was mixed because the branch output followed residual context more closely but ended with a sharper final line.
 - Independent code review:
   - Review subagent `Lagrange` completed review.
   - Findings: selected L3 text-surface contract carried nested `past_dialog_cognition_context`; broad exception handlers could mask non-DB bugs.
