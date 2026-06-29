@@ -26,6 +26,8 @@ interface.
 - `mode_hint`: must be `create_new_project` for the Phase 2 writing path.
 - `external_evidence`: limited public evidence summaries after the top-level
   supervisor resolves a PM `request_information` outcome.
+- `supervisor_facts`: compact facts resolved by the top-level supervisor,
+  including generated-artifact readback facts from `code_reading`.
 - `workspace_root`: required caller-configured storage root.
 - `session_id`: optional stable public session id.
 - `preferred_language`, `max_answer_chars`, `max_artifact_chars`: optional
@@ -41,8 +43,8 @@ capability.
 
 `CodeWritingResult` contains:
 
-- `status`: `succeeded`, `failed`, `needs_user_input`, `rejected`, or
-  `need_external_evidence`.
+- `status`: `succeeded`, `failed`, `needs_user_input`, `rejected`,
+  `need_external_evidence`, or `need_reading`.
 - `mode`: selected writing mode.
 - `answer_text`: public explanation of the proposed artifacts.
 - `patch_artifacts`: limited unified diff proposals for new files.
@@ -50,6 +52,8 @@ capability.
   created files are expected and changed files are diagnostics only.
 - `external_evidence_requests` and `external_evidence`: supervisor-mediated
   public evidence handoff.
+- `reading_requests` and `reading_source`: supervisor-mediated readback
+  handoff for generated artifacts that later work must consume.
 - `validation`: review-package materialization result. It proves the proposed
   files were materialized for inspection; it is not generated-code validation.
 - `alignment`: reserved for later-phase semantic artifact review.
@@ -72,6 +76,7 @@ CodeWritingRequest
 -> Acceptance owner preserves user-visible requirements
 -> PM lifecycle decision on CODING_AGENT_PM_LLM
 -> optional request_information returned to top-level supervisor
+-> optional generated-artifact readback through code_reading
 -> optional child PM lifecycle for smaller work item
 -> optional one programmer task for one new artifact
 -> File Agent reserves safe new artifact path
@@ -115,6 +120,13 @@ workspace, generated-artifact, existing-source, provided-evidence, or public
 external facts through `request_information`. The top-level coding supervisor
 chooses the correct workflow, records the result in its ledger, then resumes
 `code_writing.run(...)` with compact evidence summaries.
+
+Generated-artifact readback uses `need_reading`. The writing subagent writes
+selected generated artifacts into managed readback storage and returns a
+bounded `reading_source`. The top-level supervisor calls `code_reading`, stores
+the answer as one compact `supervisor_fact`, and calls `code_writing.run(...)`
+again. Raw source text, absolute paths, reading traces, and command results are
+not passed back into PM context.
 
 ## Session Storage
 

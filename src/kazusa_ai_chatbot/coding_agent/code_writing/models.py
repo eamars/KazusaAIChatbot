@@ -22,6 +22,7 @@ WritingResultStatus = Literal[
     "needs_user_input",
     "rejected",
     "need_external_evidence",
+    "need_reading",
 ]
 WritingFileKind = Literal["source", "test", "docs", "config", "data"]
 WritingContentFormat = Literal["python", "markdown", "text", "json", "csv"]
@@ -77,12 +78,32 @@ class ExternalEvidenceSummary(TypedDict):
     limitation: NotRequired[str]
 
 
+class SupervisorFactSummary(TypedDict):
+    """Compact facts resolved by the top-level coding supervisor."""
+
+    request_id: str
+    kind: str
+    task: str
+    resolved: bool
+    result: str
+    limitation: NotRequired[str]
+
+
 class WritingExternalEvidenceRequest(TypedDict):
     """One supervisor-mediated fact request from the writing PM."""
 
     request_id: str
     task: str
     reason: str
+
+
+class WritingReadingRequest(TypedDict):
+    """One supervisor-mediated read-only source question from the writing PM."""
+
+    request_id: str
+    task: str
+    reason: str
+    target_artifacts: list[str]
 
 
 class PatchValidationSummary(TypedDict):
@@ -144,6 +165,7 @@ class CodeWritingRequest(TypedDict, total=False):
     max_answer_chars: int
     max_artifact_chars: int
     external_evidence: list[ExternalEvidenceSummary]
+    supervisor_facts: list[SupervisorFactSummary]
 
 
 class WritingWorkItem(TypedDict):
@@ -340,8 +362,10 @@ class CodeWritingResult(TypedDict):
     patch_artifacts: list[PatchArtifact]
     created_files: list[CreatedFileSummary]
     changed_files: list[ChangedFileSummary]
+    reading_requests: NotRequired[list[WritingReadingRequest]]
     external_evidence_requests: list[WritingExternalEvidenceRequest]
     external_evidence: list[ExternalEvidenceSummary]
+    reading_source: NotRequired[dict[str, object]]
     validation: PatchValidationSummary
     alignment: NotRequired[WritingAlignmentResult]
     session: WritingSessionSummary | None

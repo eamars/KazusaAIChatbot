@@ -249,6 +249,7 @@ async def _propose_new_project_change(
     request: CodingAgentWriteRequest,
 ) -> CodingPatchProposalResponse:
     external_evidence: list[dict[str, object]] = []
+    supervisor_facts: list[dict[str, object]] = []
     trace_summary: list[str] = []
     last_writing_result: dict[str, object] | None = None
     for _ in range(WRITE_LOOP_LIMIT):
@@ -261,6 +262,8 @@ async def _propose_new_project_change(
         )
         if external_evidence:
             writing_request["external_evidence"] = external_evidence
+        if supervisor_facts:
+            writing_request["supervisor_facts"] = supervisor_facts
         writing_result = await _maybe_await(code_writing.run(writing_request))
         last_writing_result = writing_result
         trace_summary.extend(writing_result["trace_summary"])
@@ -287,17 +290,36 @@ async def _propose_new_project_change(
             continue
 
         if writing_result["status"] == "need_reading":
-            response = _write_loop_failure(
-                mode="create_new_project",
-                repository=None,
-                source_scope=None,
-                evidence=[],
-                external_evidence=external_evidence,
-                trace_summary=trace_summary,
-                reason="New-project writing requested repository reading.",
-                session=writing_result.get("session"),
+            reading_result = _run_generated_readback_for_write(
+                request=request,
+                writing_result=writing_result,
             )
-            return response
+            trace_summary.extend(reading_result["trace_summary"])
+            if (
+                reading_result["status"] != "succeeded"
+                and not _reading_has_usable_evidence(reading_result)
+            ):
+                response = _write_loop_failure(
+                    mode="create_new_project",
+                    repository=None,
+                    source_scope=None,
+                    evidence=reading_result["evidence"],
+                    external_evidence=external_evidence,
+                    trace_summary=trace_summary,
+                    reason="Generated artifact readback did not produce usable evidence.",
+                    session=writing_result.get("session"),
+                )
+                return response
+            supervisor_facts.append(
+                _supervisor_fact_from_readback(
+                    writing_result=writing_result,
+                    reading_result=reading_result,
+                )
+            )
+            trace_summary.append(
+                f"generated_readback:evidence={len(reading_result['evidence'])}"
+            )
+            continue
 
         response = _write_response_from_result(
             writing_result=writing_result,
@@ -319,6 +341,103 @@ async def _propose_new_project_change(
         last_writing_result=last_writing_result,
     )
     return response
+
+
+def _run_generated_readback_for_write(
+    *,
+    request: CodingAgentWriteRequest,
+    writing_result: dict[str, object],
+) -> dict[str, object]:
+    reading_source = writing_result.get("reading_source")
+    if not isinstance(reading_source, dict):
+        result = _missing_generated_readback_result()
+        return result
+    repository = reading_source.get("repository")
+    source_scope = reading_source.get("source_scope")
+    if not isinstance(repository, dict) or not isinstance(source_scope, dict):
+        result = _missing_generated_readback_result()
+        return result
+
+    reading_request = {
+        "question": _generated_readback_question_for_writing_result(
+            writing_result,
+        ),
+        "repository": repository,
+        "source_scope": source_scope,
+        "read_only_context_handoff": True,
+    }
+    preferred_language = request.get("preferred_language")
+    if preferred_language:
+        reading_request["preferred_language"] = preferred_language
+    max_answer_chars = request.get("max_answer_chars")
+    if max_answer_chars is not None:
+        reading_request["max_answer_chars"] = max_answer_chars
+    reading_result = code_reading.run(reading_request)
+    return reading_result
+
+
+def _missing_generated_readback_result() -> dict[str, object]:
+    result = {
+        "status": "failed",
+        "answer_text": "",
+        "evidence": [],
+        "limitations": ["Generated artifact readback source was missing."],
+        "trace_summary": ["generated_readback:missing_source"],
+    }
+    return result
+
+
+def _supervisor_fact_from_readback(
+    *,
+    writing_result: dict[str, object],
+    reading_result: dict[str, object],
+) -> dict[str, object]:
+    requests = _safe_reading_request_summaries(
+        writing_result.get("reading_requests")
+    )
+    request_id = "generated_readback"
+    task = "Generated artifact readback."
+    if requests:
+        first_request = requests[0]
+        request_id_value = first_request.get("request_id")
+        task_value = first_request.get("task")
+        if isinstance(request_id_value, str) and request_id_value.strip():
+            request_id = request_id_value
+        if isinstance(task_value, str) and task_value.strip():
+            task = task_value
+    limitations = _safe_request_list(reading_result.get("limitations"))
+    limitation_text = "; ".join(limitations)
+    fact = {
+        "request_id": request_id,
+        "kind": "generated_artifact_readback",
+        "task": task,
+        "resolved": reading_result["status"] == "succeeded",
+        "result": _readback_fact_result(reading_result),
+        "limitation": limitation_text,
+    }
+    return fact
+
+
+def _readback_fact_result(reading_result: dict[str, object]) -> str:
+    answer_text = str(reading_result.get("answer_text") or "").strip()
+    if answer_text:
+        return answer_text
+
+    evidence = reading_result.get("evidence")
+    if not isinstance(evidence, list):
+        return ""
+    evidence_paths: list[str] = []
+    for row in evidence:
+        if not isinstance(row, dict):
+            continue
+        path = row.get("path")
+        if not isinstance(path, str) or path in evidence_paths:
+            continue
+        evidence_paths.append(path)
+    if not evidence_paths:
+        return ""
+    result = "Evidence was found in: " + ", ".join(evidence_paths[:6])
+    return result
 
 
 async def _propose_existing_repo_change(
@@ -857,6 +976,24 @@ def _reading_question_for_writing_result(
     return reading_question
 
 
+def _generated_readback_question_for_writing_result(
+    writing_result: dict[str, object],
+) -> str:
+    pm_evidence_request = _pm_evidence_request_text(writing_result)
+    reading_question = (
+        "Read-only generated-artifact readback for a code-writing workflow. "
+        "Inspect only the provided generated artifacts. Report the observable "
+        "interfaces, file formats, output shapes, literals, imports, error "
+        "surfaces, and behavior details needed before later generated "
+        "artifacts such as tests, documentation, or command wrappers consume "
+        "this work. Do not propose implementation changes, do not run code, "
+        "and do not describe command results. If a requested fact is absent "
+        "from the generated artifacts, state that it is absent.\n\n"
+        f"Writing PM readback request:\n{pm_evidence_request}"
+    )
+    return reading_question
+
+
 def _initial_reading_question_for_write_request(
     request: CodingAgentWriteRequest,
 ) -> str:
@@ -891,6 +1028,7 @@ def _pm_evidence_request_text(writing_result: dict[str, object]) -> str:
             task = _safe_request_text(request.get("task"))
             reason = _safe_request_text(request.get("reason"))
             slots = _safe_request_list(request.get("required_slots"))
+            targets = _safe_request_list(request.get("target_artifacts"))
             block_lines = [f"Request {index}:"]
             if task:
                 block_lines.append(f"Task: {task}")
@@ -899,6 +1037,9 @@ def _pm_evidence_request_text(writing_result: dict[str, object]) -> str:
             if slots:
                 block_lines.append("Required evidence slots:")
                 block_lines.extend(f"- {slot}" for slot in slots)
+            if targets:
+                block_lines.append("Target artifacts:")
+                block_lines.extend(f"- {target}" for target in targets)
             blocks.append("\n".join(block_lines))
         if blocks:
             return "\n\n".join(blocks)

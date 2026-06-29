@@ -377,6 +377,137 @@ async def test_answer_code_question_reads_real_phase0_local_checkout(
     }
 
 
+async def test_propose_code_change_resolves_generated_readback_through_supervisor(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent import code_reading
+    from kazusa_ai_chatbot.coding_agent import code_writing
+    from kazusa_ai_chatbot.coding_agent import propose_code_change
+
+    writing_calls: list[dict[str, Any]] = []
+    reading_calls: list[dict[str, Any]] = []
+
+    async def fake_writing_run(request: dict[str, Any]) -> dict[str, Any]:
+        writing_calls.append(request)
+        if len(writing_calls) == 1:
+            readback_root = tmp_path / "readback"
+            readback_root.mkdir()
+            (readback_root / "runtime.py").write_text(
+                "def parse_rows(path: str) -> list[dict[str, str]]:\n"
+                "    return []\n",
+                encoding="utf-8",
+            )
+            return {
+                "status": "need_reading",
+                "mode": "create_new_project",
+                "answer_text": "Need generated source readback.",
+                "patch_artifacts": [],
+                "created_files": [],
+                "changed_files": [],
+                "reading_requests": [
+                    {
+                        "request_id": "runtime_readback",
+                        "task": "Read parse_rows signature and row shape.",
+                        "reason": "Tests must match source.",
+                        "target_artifacts": ["runtime.py"],
+                    }
+                ],
+                "reading_source": {
+                    "repository": {
+                        "provider": "github",
+                        "owner": "managed",
+                        "repo": "generated-artifacts",
+                        "source_url": "local://readback",
+                        "requested_ref": None,
+                        "resolved_ref": "generated",
+                        "current_commit": "generated-sha256:test",
+                        "default_branch": "generated",
+                        "local_root": str(readback_root),
+                        "storage_kind": "managed_download",
+                        "managed_checkout": True,
+                        "workspace_root": str(tmp_path / "workspace"),
+                        "cache_key": None,
+                        "dirty_state": "clean",
+                    },
+                    "source_scope": {
+                        "kind": "repository",
+                        "repo_relative_path": None,
+                        "source_url": "local://readback",
+                        "requested_ref": None,
+                        "interpretation": "Generated readback.",
+                    },
+                },
+                "external_evidence_requests": [],
+                "external_evidence": [],
+                "validation": {
+                    "status": "failed",
+                    "parsed": False,
+                    "sandbox_applied": False,
+                    "errors": [],
+                    "warnings": [],
+                    "files": [],
+                },
+                "session": {"session_id": "s1", "public_handle": "h1"},
+                "limitations": [],
+                "trace_summary": ["writing_pm:decision status=need_reading"],
+            }
+        assert request["supervisor_facts"][0]["request_id"] == "runtime_readback"
+        return {
+            "status": "succeeded",
+            "mode": "create_new_project",
+            "answer_text": "Generated source and tests.",
+            "patch_artifacts": [],
+            "created_files": [{"path": "runtime.py", "role": "source"}],
+            "changed_files": [],
+            "external_evidence_requests": [],
+            "external_evidence": [],
+            "validation": {
+                "status": "succeeded",
+                "parsed": True,
+                "sandbox_applied": True,
+                "errors": [],
+                "warnings": [],
+                "files": ["runtime.py"],
+            },
+            "session": {"session_id": "s1", "public_handle": "h1"},
+            "limitations": [],
+            "trace_summary": ["writing_pm:complete"],
+        }
+
+    def fake_reading_run(request: dict[str, Any]) -> dict[str, Any]:
+        reading_calls.append(request)
+        return {
+            "status": "succeeded",
+            "answer_text": "parse_rows(path: str) returns list[dict[str, str]].",
+            "evidence": [
+                {
+                    "path": "runtime.py",
+                    "line_start": 1,
+                    "line_end": 2,
+                    "symbol_or_topic": "parse_rows",
+                    "excerpt": "def parse_rows(path: str) -> list[dict[str, str]]:",
+                    "reason": "Defines the generated source interface.",
+                }
+            ],
+            "limitations": [],
+            "trace_summary": ["reading_pm:sufficiency=sufficient"],
+        }
+
+    monkeypatch.setattr(code_writing, "run", fake_writing_run)
+    monkeypatch.setattr(code_reading, "run", fake_reading_run)
+
+    response = await propose_code_change({
+        "question": "Create source and tests.",
+        "workspace_root": str(tmp_path / "workspace"),
+    })
+
+    assert response["status"] == "succeeded"
+    assert len(writing_calls) == 2
+    assert len(reading_calls) == 1
+    assert "generated_readback:evidence=1" in response["trace_summary"]
+
+
 def test_coding_agent_readme_documents_phase1_and_phase2_icd() -> None:
     readme = Path("src/kazusa_ai_chatbot/coding_agent/README.md").read_text(
         encoding="utf-8",

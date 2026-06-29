@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
+import shutil
 
 from kazusa_ai_chatbot.coding_agent.code_writing.acceptance import (
     derive_acceptance_criteria,
@@ -28,6 +29,7 @@ from kazusa_ai_chatbot.coding_agent.code_writing.models import (
     WritingContentFormat,
     WritingExternalEvidenceRequest,
     WritingFileKind,
+    WritingInformationRequest,
     WritingPatcherInput,
     WritingPatcherReport,
     WritingPMDecision,
@@ -40,6 +42,7 @@ from kazusa_ai_chatbot.coding_agent.code_writing.patcher import (
     materialize_patch_artifacts,
 )
 from kazusa_ai_chatbot.coding_agent.code_writing.patch_validation import (
+    _safe_repo_relative_path,
     materialize_patch_artifacts_for_review,
 )
 from kazusa_ai_chatbot.coding_agent.code_writing.product_manager import (
@@ -58,12 +61,14 @@ from kazusa_ai_chatbot.coding_agent.code_writing.workspace import (
 from kazusa_ai_chatbot.coding_agent.file_agent import (
     reserve_new_artifact_paths,
 )
+from kazusa_ai_chatbot.coding_agent.tools.paths import ensure_path_inside
 
 DEFAULT_MAX_ARTIFACT_CHARS = 48000
 MAX_PATCH_FILES = 32
 MAX_PM_LIFECYCLE_STEPS = 8
 MAX_PM_DEPTH = 4
 MAX_CHILD_REPORTS = 16
+READBACK_ROOT_NAME = "writing_readback"
 
 
 @dataclass
@@ -73,7 +78,7 @@ class _PMNodeResult:
     status: str
     generated_artifacts: list[GeneratedArtifact]
     direct_child_reports: list[dict[str, object]]
-    information_requests: list[WritingExternalEvidenceRequest]
+    information_requests: list[WritingInformationRequest]
     limitations: list[str]
     final_decision: WritingPMDecision | None
 
@@ -127,6 +132,7 @@ async def run_writing_supervisor(
         return result
 
     external_evidence = _external_evidence_from_request(request)
+    supervisor_facts = _supervisor_facts_from_request(request)
     session = prepare_writing_workspace(
         workspace_root=workspace_root,
         session_id=request.get("session_id"),
@@ -198,6 +204,7 @@ async def run_writing_supervisor(
         question=question,
         acceptance_criteria=acceptance["acceptance_criteria"],
         external_evidence=external_evidence,
+        supervisor_facts=supervisor_facts,
         child_feedback=[],
     )
     pm_result = await _run_pm_node(
@@ -208,10 +215,13 @@ async def run_writing_supervisor(
         trace_summary=trace_summary,
         trace_label="root",
     )
-    if pm_result.status == "need_external_evidence":
+    if pm_result.status in ("need_external_evidence", "need_reading"):
         result = _information_request_result(
+            status=pm_result.status,
             requests=pm_result.information_requests,
+            generated_artifacts=pm_result.generated_artifacts,
             session=session,
+            workspace_root=Path(workspace_root),
             external_evidence=external_evidence,
             trace_summary=trace_summary,
         )
@@ -394,12 +404,21 @@ async def _run_pm_node(
         )
 
         if decision["status"] == "request_information":
-            requests = _external_requests_from_information(decision)
+            request = decision["information_request"]
+            if request is None:
+                return _invalid_pm_result(
+                    "PM information request was missing.",
+                    decision,
+                )
+            status = _information_status_from_request(
+                request=request,
+                generated_artifacts=generated_artifacts,
+            )
             result = _PMNodeResult(
-                status="need_external_evidence",
+                status=status,
                 generated_artifacts=generated_artifacts,
                 direct_child_reports=direct_child_reports,
-                information_requests=requests,
+                information_requests=[request],
                 limitations=[],
                 final_decision=decision,
             )
@@ -437,7 +456,7 @@ async def _run_pm_node(
                 generated_artifact_count=len(child_result.generated_artifacts),
                 limitation_count=len(child_result.limitations),
             )
-            if child_result.status == "need_external_evidence":
+            if child_result.status in ("need_external_evidence", "need_reading"):
                 return child_result
             if child_result.status != "succeeded":
                 child_feedback.append({
@@ -632,6 +651,7 @@ def _root_pm_input(
     question: str,
     acceptance_criteria: list[WritingAcceptanceCriterion],
     external_evidence: list[ExternalEvidenceSummary],
+    supervisor_facts: list[dict[str, object]],
     child_feedback: list[dict[str, object]],
 ) -> WritingPMInput:
     available_facts: list[dict[str, object]] = [
@@ -647,6 +667,14 @@ def _root_pm_input(
             "request_id": evidence["request_id"],
             "resolved": evidence["resolved"],
             "summary": evidence["result"],
+        })
+    for fact in supervisor_facts:
+        available_facts.append({
+            "kind": fact["kind"],
+            "request_id": fact["request_id"],
+            "resolved": fact["resolved"],
+            "summary": fact["result"],
+            "task": fact["task"],
         })
     pm_input: WritingPMInput = {
         "pm_id": "writing_pm_root",
@@ -826,11 +854,8 @@ def _reports_to_facts(reports: list[dict[str, object]]) -> list[str]:
 
 
 def _external_requests_from_information(
-    decision: WritingPMDecision,
+    request: WritingInformationRequest,
 ) -> list[WritingExternalEvidenceRequest]:
-    request = decision["information_request"]
-    if request is None:
-        return []
     task_parts = [*request["needed_facts"]]
     if request["target_artifacts"]:
         task_parts.append(
@@ -843,6 +868,51 @@ def _external_requests_from_information(
         "reason": request["reason_for_next_instruction"],
     }
     return [external_request]
+
+
+def _reading_requests_from_information(
+    requests: list[WritingInformationRequest],
+) -> list[dict[str, object]]:
+    reading_requests: list[dict[str, object]] = []
+    for request in requests:
+        task_parts = [*request["needed_facts"]]
+        if request["target_artifacts"]:
+            task_parts.append(
+                "Targets: " + ", ".join(request["target_artifacts"]),
+            )
+        reading_requests.append({
+            "request_id": request["request_id"],
+            "task": "; ".join(task_parts),
+            "reason": request["reason_for_next_instruction"],
+            "target_artifacts": request["target_artifacts"],
+        })
+    return reading_requests
+
+
+def _information_status_from_request(
+    *,
+    request: WritingInformationRequest,
+    generated_artifacts: list[GeneratedArtifact],
+) -> str:
+    if not request["target_artifacts"] or not generated_artifacts:
+        return "need_external_evidence"
+
+    generated_refs = _generated_artifact_refs(generated_artifacts)
+    for target in request["target_artifacts"]:
+        if target in generated_refs:
+            return "need_reading"
+    return "need_external_evidence"
+
+
+def _generated_artifact_refs(
+    generated_artifacts: list[GeneratedArtifact],
+) -> set[str]:
+    refs: set[str] = set()
+    for artifact in generated_artifacts:
+        refs.add(artifact["artifact_id"])
+        refs.add(artifact["path"])
+        refs.add(artifact["file_label"])
+    return refs
 
 
 def _reserved_paths_from_artifacts(
@@ -908,26 +978,112 @@ def _materialize_patcher_report(
     return report
 
 
+def _prepare_readback_source(
+    *,
+    generated_artifacts: list[GeneratedArtifact],
+    session_id: str,
+    workspace_root: Path,
+) -> dict[str, object]:
+    """Write generated artifacts into a bounded read-only source workspace."""
+
+    root = workspace_root.expanduser().resolve(strict=False)
+    readback_root = ensure_path_inside(
+        root / READBACK_ROOT_NAME / session_id,
+        root,
+    )
+    if readback_root.exists():
+        shutil.rmtree(readback_root)
+    readback_root.mkdir(parents=True, exist_ok=True)
+    for artifact in generated_artifacts:
+        safe_path = _safe_repo_relative_path(artifact["path"])
+        if safe_path is None:
+            continue
+        target_path = ensure_path_inside(readback_root / safe_path, readback_root)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_text(artifact["content"], encoding="utf-8")
+
+    source_identity = _generated_artifact_identity(generated_artifacts)
+    repository = {
+        "provider": "github",
+        "owner": "managed",
+        "repo": "generated-artifacts",
+        "source_url": f"local://coding-agent-readback/{session_id}",
+        "requested_ref": None,
+        "resolved_ref": "generated",
+        "current_commit": source_identity,
+        "default_branch": "generated",
+        "local_root": str(readback_root),
+        "storage_kind": "managed_download",
+        "managed_checkout": True,
+        "workspace_root": str(root),
+        "cache_key": None,
+        "dirty_state": "clean",
+    }
+    source_scope = {
+        "kind": "repository",
+        "repo_relative_path": None,
+        "source_url": f"local://coding-agent-readback/{session_id}",
+        "requested_ref": None,
+        "interpretation": "Generated artifact readback workspace.",
+    }
+    readback_source = {
+        "repository": repository,
+        "source_scope": source_scope,
+    }
+    return readback_source
+
+
+def _generated_artifact_identity(
+    generated_artifacts: list[GeneratedArtifact],
+) -> str:
+    hasher = hashlib.sha256()
+    for artifact in generated_artifacts:
+        hasher.update(artifact["path"].encode("utf-8"))
+        hasher.update(b"\0")
+        hasher.update(artifact["content"].encode("utf-8"))
+        hasher.update(b"\0")
+    identity = "generated-sha256:" + hasher.hexdigest()
+    return identity
+
+
 def _information_request_result(
     *,
-    requests: list[WritingExternalEvidenceRequest],
+    status: str,
+    requests: list[WritingInformationRequest],
+    generated_artifacts: list[GeneratedArtifact],
     session: dict[str, object],
+    workspace_root: Path,
     external_evidence: list[ExternalEvidenceSummary],
     trace_summary: list[str],
 ) -> CodeWritingResult:
+    external_requests: list[WritingExternalEvidenceRequest] = []
+    reading_requests: list[dict[str, object]] = []
+    reading_source: dict[str, object] | None = None
+    if status == "need_reading":
+        reading_requests = _reading_requests_from_information(requests)
+        reading_source = _prepare_readback_source(
+            generated_artifacts=generated_artifacts,
+            session_id=session["session_id"],
+            workspace_root=workspace_root,
+        )
+    else:
+        for request in requests:
+            external_requests.extend(_external_requests_from_information(request))
     result = _result(
-        status="need_external_evidence",
+        status=status,
         mode="create_new_project",
         answer_text="Supervisor-mediated information is required before writing.",
         patch_artifacts=[],
         created_files=[],
         changed_files=[],
-        external_evidence_requests=requests,
+        external_evidence_requests=external_requests,
         external_evidence=external_evidence,
         validation=_empty_validation("failed"),
         session=session,
         limitations=[],
         trace_summary=trace_summary,
+        reading_requests=reading_requests,
+        reading_source=reading_source,
     )
     return result
 
@@ -1014,6 +1170,35 @@ def _external_evidence_from_request(
     if not isinstance(external_evidence, list):
         return []
     return external_evidence
+
+
+def _supervisor_facts_from_request(
+    request: CodeWritingRequest,
+) -> list[dict[str, object]]:
+    supervisor_facts = request.get("supervisor_facts", [])
+    if not isinstance(supervisor_facts, list):
+        return []
+    facts: list[dict[str, object]] = []
+    for fact in supervisor_facts:
+        if not isinstance(fact, dict):
+            continue
+        request_id = fact.get("request_id")
+        task = fact.get("task")
+        result = fact.get("result")
+        if not isinstance(request_id, str):
+            continue
+        if not isinstance(task, str):
+            continue
+        if not isinstance(result, str):
+            continue
+        facts.append({
+            "request_id": request_id,
+            "kind": str(fact.get("kind") or "supervisor_fact"),
+            "task": task,
+            "resolved": fact.get("resolved") is True,
+            "result": result,
+        })
+    return facts
 
 
 def _base_identity(*, question: str) -> str:
@@ -1175,6 +1360,8 @@ def _result(
     limitations: list[str],
     trace_summary: list[str],
     alignment: WritingAlignmentResult | None = None,
+    reading_requests: list[dict[str, object]] | None = None,
+    reading_source: dict[str, object] | None = None,
 ) -> CodeWritingResult:
     result: CodeWritingResult = {
         "status": status,
@@ -1192,4 +1379,8 @@ def _result(
     }
     if alignment is not None:
         result["alignment"] = alignment
+    if reading_requests is not None:
+        result["reading_requests"] = reading_requests
+    if reading_source is not None:
+        result["reading_source"] = reading_source
     return result

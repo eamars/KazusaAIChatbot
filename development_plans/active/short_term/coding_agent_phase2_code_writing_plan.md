@@ -197,6 +197,7 @@ external input/output contract.
 | PM hierarchy | PM recursively chooses direct child type | Fixed layer counts either overload small tasks or underfit larger tasks. |
 | PM ownership | PM owns direct child lifecycle only | Keeps boundaries clear and prevents parent PMs from managing descendant details. |
 | Workspace grounding | Dependent child instructions require supervisor-approved workspace facts | Prevents source/test or file/file disagreement caused by stale plan memory. |
+| Generated readback | Prior generated artifacts are read through supervisor-mediated `code_reading` before dependent artifacts consume them | Keeps PM decisions grounded in actual generated source without letting writing agents execute code or inspect peers directly. |
 | Supervisor role | Supervisor dispatches workflows and records the ledger | Semantic decomposition stays inside PM roles. |
 | Phase 2 scope | New-artifact writing only | Existing-source modification remains a separate capability. |
 | Testing priority | PM live LLM suite first | PM consistency is the main blocker before downstream roles and E2E can be useful. |
@@ -224,7 +225,8 @@ external input/output contract.
 
 `available_facts` may contain only upstream PM reports, direct child reports,
 File Agent facts, external evidence summaries, or supervisor-mediated
-`code_reading` facts.
+`code_reading` facts. Generated-artifact readback facts enter as
+`supervisor_facts` and must stay compact.
 
 ### PM Output
 
@@ -255,6 +257,49 @@ Exactly one action payload must be populated for the selected `status`.
 
 The supervisor maps this to `code_reading` or external evidence and resumes the
 PM with compact facts.
+
+For generated-artifact readback, the writing subagent returns:
+
+```python
+{
+    "status": "need_reading",
+    "reading_requests": [
+        {
+            "request_id": str,
+            "task": str,
+            "reason": str,
+            "target_artifacts": list[str],
+        }
+    ],
+    "reading_source": {
+        "repository": dict,
+        "source_scope": dict,
+    },
+}
+```
+
+The top-level coding supervisor invokes `code_reading` against
+`reading_source`, stores the answer as one `supervisor_fact`, and reruns
+`code_writing` with:
+
+```python
+{
+    "supervisor_facts": [
+        {
+            "request_id": str,
+            "kind": "generated_artifact_readback",
+            "task": str,
+            "resolved": bool,
+            "result": str,
+            "limitation": str,
+        }
+    ]
+}
+```
+
+The supervisor fact is the only readback memory passed to the next PM call.
+Raw generated source, absolute paths, reading traces, and command results must
+not be appended to PM context.
 
 ### Child PM Task
 
@@ -541,6 +586,7 @@ This plan is complete when:
 |---|---|---|
 | PM chooses the wrong child type | PM live cases cover direct programmer vs child PM decisions across all gates | PM role review artifact |
 | PM creates dependent instruction without workspace facts | Deterministic transition requires information request/readback for dependent child work | Contract tests and PM live cases |
+| Generated source and dependent tests disagree | Supervisor-mediated generated-artifact readback records actual source facts before dependent artifacts are assigned | Supervisor handoff tests and PM live readback cases |
 | Parent PM manages descendant details | Validate PM-to-PM and PM-to-programmer task shapes separately | Deterministic support checks |
 | PM report loses important facts | PM report contract includes provided facts, consumed facts, artifacts, risks, and dependency needs | PM report live cases |
 | E2E thrashing resumes | E2E is blocked until PM and downstream role suites meet readiness rules | Progress checklist and review evidence |
@@ -654,3 +700,18 @@ This plan is complete when:
   cases one at a time and inspected each trace. All nine passed by structural
   harness and agent review. Human-readable review:
   `test_artifacts/llm_reviews/coding_agent_pm_delegation_tuning_review_20260627.md`.
+- 2026-06-29: Added supervisor-mediated generated-artifact readback for
+  Phase 2 new-artifact writing. The writing subagent can now return
+  `need_reading` with `reading_requests` and a managed `reading_source`; the
+  top-level coding supervisor invokes `code_reading`, records one compact
+  `generated_artifact_readback` supervisor fact, and reruns `code_writing`.
+  Deterministic verification passed:
+  `venv\Scripts\python -m pytest tests\test_coding_agent_interface.py tests\test_coding_agent_phase2_new_artifact_contracts.py -q`
+  reported `21 passed`.
+- 2026-06-29: Added focused PM live LLM case
+  `test_live_pm_gate_02_readback_fact_tests_programmer_task` to verify that a
+  PM uses supervisor readback facts before assigning dependent tests. The case
+  was run individually with `-m live_llm`; it failed by timeout after 300
+  seconds with empty PM output. Trace:
+  `test_artifacts/llm_traces/coding_agent_pm_lifecycle_role_live_llm__gate_02_readback_fact_tests_programmer_task.json`.
+  This is a component-level readiness blocker; do not run E2E from this state.

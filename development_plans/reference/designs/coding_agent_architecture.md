@@ -190,6 +190,13 @@ selected workflow, and resumes the pending work item with a compact evidence
 summary. This keeps loop control and context memory at the top level while
 each worker keeps semantic ownership inside its domain.
 
+Generated artifacts follow the same loop. When a later artifact depends on the
+actual interface, output shape, literals, imports, or file format of prior
+generated work, the owning PM asks for workspace facts. The supervisor exposes
+only the selected generated artifacts to `code_reading` through a managed
+readback workspace, records the evidence-backed result in the ledger, and
+resumes the PM with compact supervisor-approved facts.
+
 Validation is supervisor-mediated. The Structural validator returns patch or
 file-tree diagnostics to the work ledger. The supervisor decides whether the
 next step is more reading, new-code writing, existing-code modifying, patching,
@@ -246,7 +253,7 @@ flowchart TD
 | Top-level coding supervisor | Global goal state, work ledger, cross-domain dispatch, context budget, repair sequencing, final artifact handoff. | User task, repository/source request, work ledger, prior subagent outcomes, validation outcomes. | Next workflow action, compact evidence-state summary, final public response. |
 | PM role | Semantic lifecycle of one assigned work item, direct child choice, direct child instruction, information request, direct child report handling, repair, sufficiency decision, and compact report upward. | Assigned work item, available supervisor-approved facts, direct child reports, validation feedback, and context limits. | Information request, direct child task for a PM or programmer, repair instruction for a direct child, completion report, or blocked status. |
 | Reading PM | Reading-domain PM instance for source-question decomposition, evidence slots, reading child tasks, and evidence-backed answer synthesis. | Repository summary, source scope, repo map summary, supervisor-approved facts, prior direct child reports. | Reading child tasks, information requests, sufficiency decision, evidence-backed source answer, or PM report upward. |
-| Writing PM | Writing-domain PM instance for new-artifact lifecycle, dependency ordering, workspace-fact requests, child writing tasks, and selected artifact reports. | User goal or parent PM work item, new-artifact scope, supervisor-approved facts, validation summaries, direct child reports, File Agent feedback. | Child PM tasks, programmer tasks only when directly ready, workspace information requests, selected generated artifacts, patching input, sufficiency decision, or PM report upward. |
+| Writing PM | Writing-domain PM instance for new-artifact lifecycle, dependency ordering, workspace-fact requests, child writing tasks, and selected artifact reports. | User goal or parent PM work item, new-artifact scope, supervisor-approved facts, validation summaries, direct child reports, File Agent feedback. | Child PM tasks, programmer tasks only when directly ready, workspace or generated-artifact readback requests, selected generated artifacts, patching input, sufficiency decision, or PM report upward. |
 | Modifying PM | Modifying-domain PM instance for existing-source lifecycle, source-owner evidence needs, change dependency ordering, child modifying tasks, and selected modification reports. | User goal or parent PM work item, existing-source scope, reading evidence, current file context, supervisor-approved facts, validation summaries, direct child reports, File Agent feedback. | Child PM tasks, programmer tasks only when directly ready, workspace information requests, selected modification artifacts, patching input, sufficiency decision, or PM report upward. |
 | File Agent | Repository file planning, new-file reservation, path-safety checks, current-context packaging, and owned/read-only path-map construction. | Supervisor work item, source scope, repository inventory, explicit placement data, PM file needs. | File plan with owned path map, read-only path map, current file context, file diagnostics, and repair feedback. |
 | Handoff evaluator | Structural acceptance before programmer or patching dispatch. | One domain contract, prompt budget, role-boundary rules, path contract rules, assignment limits. | Accepted contract or compact repair feedback for the owning PM. |

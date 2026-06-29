@@ -400,3 +400,106 @@ async def test_code_writing_returns_information_request(
 
     assert result["status"] == "need_external_evidence"
     assert result["external_evidence_requests"][0]["request_id"] == "read_source"
+
+
+async def test_code_writing_requests_generated_artifact_readback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_writing import supervisor
+
+    pm_calls = 0
+
+    async def fake_pm(
+        pm_input: dict[str, Any],
+        *,
+        trace: dict[str, object] | None = None,
+    ) -> dict[str, Any]:
+        nonlocal pm_calls
+        pm_calls += 1
+        if pm_calls == 1:
+            return {
+                "status": "create_programmer_task",
+                "reason": "Create source before dependent tests.",
+                "information_request": None,
+                "child_pm_task": None,
+                "programmer_task": {
+                    "task_id": "runtime",
+                    "artifact_purpose": "Provide the runtime utility.",
+                    "required_behavior": ["define parse_rows"],
+                    "provided_interfaces": [
+                        "parse_rows(path: str) -> list[dict[str, str]]"
+                    ],
+                    "consumed_interfaces": [],
+                    "imports": [],
+                    "output_format": "python source",
+                },
+                "repair_instruction": None,
+                "completion_report": None,
+                "blocker": None,
+            }
+        return {
+            "status": "request_information",
+            "reason": "Dependent tests need generated source facts.",
+            "information_request": {
+                "request_id": "runtime_readback",
+                "needed_facts": ["parse_rows signature", "returned row shape"],
+                "target_artifacts": ["src/runtime.py"],
+                "reason_for_next_instruction": "Tests must match source behavior.",
+            },
+            "child_pm_task": None,
+            "programmer_task": None,
+            "repair_instruction": None,
+            "completion_report": None,
+            "blocker": None,
+        }
+
+    async def fake_programmer(
+        *,
+        artifact_contract: dict[str, Any],
+        trace: dict[str, object] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "artifact_id": artifact_contract["artifact_id"],
+            "status": "succeeded",
+            "content_format": artifact_contract["content_format"],
+            "code_artifact": (
+                "def parse_rows(path: str) -> list[dict[str, str]]:\n"
+                "    return []\n"
+            ),
+            "diagnostics": [],
+        }
+
+    async def fake_acceptance(**kwargs: Any) -> dict[str, Any]:
+        return {
+            "status": "pass",
+            "acceptance_criteria": [
+                {
+                    "criterion_id": "tests",
+                    "requirement": "Create source and matching tests.",
+                    "evidence_needed": "Tests consume generated source.",
+                }
+            ],
+            "limitations": [],
+        }
+
+    monkeypatch.setattr(supervisor, "derive_acceptance_criteria", fake_acceptance)
+    monkeypatch.setattr(supervisor, "decide_writing_work", fake_pm)
+    monkeypatch.setattr(
+        supervisor,
+        "run_writing_programmer_contract",
+        fake_programmer,
+    )
+
+    result = await supervisor.run_writing_supervisor({
+        "question": "Create source and matching tests.",
+        "mode_hint": "create_new_project",
+        "workspace_root": str(tmp_path / "workspace"),
+    })
+
+    assert result["status"] == "need_reading"
+    assert result["reading_requests"][0]["request_id"] == "runtime_readback"
+    readback_source = result["reading_source"]
+    repository = readback_source["repository"]
+    source_path = Path(repository["local_root"]) / "src" / "runtime.py"
+    assert source_path.read_text(encoding="utf-8").startswith("def parse_rows")

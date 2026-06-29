@@ -85,6 +85,8 @@ def _assert_case_specific_contract(
     if case["case_id"] != "gate_02_source_contract_after_processing":
         if case["case_id"] == "gate_04_tests_repeat_source_literals":
             _assert_gate_04_test_contract(decision, trace_path)
+        if case["case_id"] == "gate_02_readback_fact_tests_programmer_task":
+            _assert_gate_02_readback_test_contract(decision, trace_path)
         return
 
     programmer_task = decision["programmer_task"]
@@ -131,6 +133,25 @@ def _assert_gate_04_test_contract(
     )
     assert ".txt" in task_text, f"trace={trace_path}"
     assert "Project:" in task_text, f"trace={trace_path}"
+
+
+def _assert_gate_02_readback_test_contract(
+    decision: dict[str, Any],
+    trace_path: str,
+) -> None:
+    """Check that dependent tests consume supervisor readback facts."""
+
+    programmer_task = decision["programmer_task"]
+    task_text = "\n".join(
+        [
+            programmer_task["artifact_purpose"],
+            *programmer_task["required_behavior"],
+            *programmer_task["consumed_interfaces"],
+        ]
+    )
+    assert "test" in task_text.casefold(), f"trace={trace_path}"
+    assert "header" in task_text.casefold(), f"trace={trace_path}"
+    assert "malformed" in task_text.casefold(), f"trace={trace_path}"
 
 
 PM_LIFECYCLE_CASES: dict[str, dict[str, Any]] = {
@@ -608,6 +629,78 @@ PM_LIFECYCLE_CASES: dict[str, dict[str, Any]] = {
                     ],
                     "open_risks": [],
                 },
+            ],
+            "child_feedback": [],
+            "context_limits": {"max_prompt_chars": 50000},
+        },
+    },
+    "gate_02_readback_fact_tests_programmer_task": {
+        "case_id": "gate_02_readback_fact_tests_programmer_task",
+        "behavior_contract": (
+            "After the supervisor provides generated-artifact readback facts "
+            "for CSV output shape, the PM should create a direct programmer "
+            "task for tests instead of asking for the same source facts again."
+        ),
+        "input_kind": "captured_failure_followup",
+        "expected_status_family": "create_programmer_task",
+        "pm_input": {
+            "pm_id": "writing_pm_gate_02_tests_after_readback",
+            "domain": "writing",
+            "work_item": {
+                "goal": (
+                    "Create focused tests for a Python JSONL-to-CSV utility. "
+                    "The tests must verify normal conversion, stable field "
+                    "order, blank cells for missing fields, malformed JSON "
+                    "line handling, and the command-line script."
+                ),
+                "scope": "test artifact that depends on generated source",
+                "constraints": [
+                    "tests must match generated source behavior",
+                    "use supervisor readback facts as the source contract",
+                    "do not run the generated tests",
+                ],
+                "expected_result": (
+                    "one direct programmer task for focused tests"
+                ),
+            },
+            "available_facts": [
+                {
+                    "kind": "generated_artifact_readback",
+                    "request_id": "runtime_readback",
+                    "resolved": True,
+                    "task": (
+                        "Read generated CSV conversion source and CLI output "
+                        "shape."
+                    ),
+                    "summary": (
+                        "The generated source exposes "
+                        "convert_jsonl_to_csv(input_path: str, "
+                        "output_path: str, fields: list[str] | None = None) "
+                        "-> ConversionResult. It writes one CSV header row "
+                        "before data rows. If fields is None, the header order "
+                        "comes from the first valid JSON object. Missing fields "
+                        "become blank cells. Malformed JSON lines are skipped "
+                        "and counted in ConversionResult.malformed_count."
+                    ),
+                }
+            ],
+            "direct_child_reports": [
+                {
+                    "child_id": "jsonl_to_csv_source",
+                    "status": "complete",
+                    "provided_facts": [
+                        "source artifact generated",
+                        "CLI artifact generated",
+                    ],
+                    "created_artifacts": [
+                        {
+                            "artifact_id": "jsonl_to_csv_source",
+                            "path": "src/jsonl_to_csv.py",
+                            "purpose": "JSONL to CSV source and CLI",
+                        }
+                    ],
+                    "open_risks": [],
+                }
             ],
             "child_feedback": [],
             "context_limits": {"max_prompt_chars": 50000},
@@ -1287,6 +1380,12 @@ async def test_live_pm_gate_02_tests_need_csv_shape_readback() -> None:
 async def test_live_pm_gate_02_actual_tests_need_csv_shape_readback() -> None:
     await _run_pm_lifecycle_case(
         PM_LIFECYCLE_CASES["gate_02_actual_tests_need_csv_shape_readback"],
+    )
+
+
+async def test_live_pm_gate_02_readback_fact_tests_programmer_task() -> None:
+    await _run_pm_lifecycle_case(
+        PM_LIFECYCLE_CASES["gate_02_readback_fact_tests_programmer_task"],
     )
 
 
