@@ -21,3 +21,8 @@ Retention is governed by the shared logging retention settings:
   metadata, parse status, state fields, and timing.
 - `full`: stores raw prompt messages, raw response text, and parsed output in
   the protected trace collections.
+
+Past-dialog cognition residual can only use selected `parsed_output` fields
+from protected full-capture trace steps. Metadata-mode trace steps intentionally
+store empty parsed output for this purpose, so a past dialog with only metadata
+trace rows contributes no residual context and is treated as forgotten.

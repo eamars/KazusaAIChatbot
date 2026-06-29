@@ -125,6 +125,7 @@ class ConversationContextPromptV1(TypedDict):
     conversation_progress: Mapping[str, Any] | str
     promoted_reflection_context: Mapping[str, Any] | str
     internal_monologue_residue_context: str
+    past_dialog_cognition_context: NotRequired[str]
     previous_action_summary: str
 
 

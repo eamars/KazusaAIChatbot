@@ -20,6 +20,7 @@ from contextlib import asynccontextmanager, suppress
 from typing import Any, Literal
 
 from fastapi import FastAPI, BackgroundTasks
+from pymongo.errors import PyMongoError
 
 from kazusa_ai_chatbot.action_spec.execution import execute_action_specs_for_trace
 from kazusa_ai_chatbot.action_spec.results import has_consolidatable_output
@@ -77,6 +78,10 @@ from kazusa_ai_chatbot.conversation_progress import (
 from kazusa_ai_chatbot.internal_monologue_residue import (
     load_residue_context,
     record_completed_episode_residue,
+)
+from kazusa_ai_chatbot.past_dialog_cognition import (
+    build_past_dialog_cognition_context,
+    candidate_from_conversation_row,
 )
 from kazusa_ai_chatbot.llm_interface.route_report import render_llm_route_table
 from kazusa_ai_chatbot import llm_tracing
@@ -387,12 +392,17 @@ async def load_conversation_episode_state(state: IMProcessState) -> dict:
         f'user={scope.global_user_id} status={residue_result["status"]} '
         f'selected={residue_result["selected_count"]}'
     )
+    past_dialog_cognition_context = await _load_reply_past_dialog_context(
+        state,
+        character_global_user_id=residue_scope["character_id"],
+    )
     return_value = {
         "conversation_episode_state": load_result["episode_state"],
         "conversation_progress": load_result["conversation_progress"],
         "internal_monologue_residue_context": (
             residue_result["internal_monologue_residue_context"]
         ),
+        "past_dialog_cognition_context": past_dialog_cognition_context,
     }
     return return_value
 
@@ -411,6 +421,57 @@ def _character_id_from_profile(character_profile: Mapping[str, object]) -> str:
 def _compact_reply_context(reply_context: ReplyContext) -> ReplyContext:
     compacted_context = brain_intake.compact_reply_context(reply_context)
     return compacted_context
+
+
+async def _load_reply_past_dialog_context(
+    state: Mapping[str, Any],
+    *,
+    character_global_user_id: str,
+) -> str:
+    """Return private residual for a directly replied assistant row.
+
+    Args:
+        state: Current service graph state after reply hydration.
+        character_global_user_id: Internal id of the active character.
+
+    Returns:
+        Prompt-facing private context for L2a, or an empty string.
+    """
+
+    reply_context = state["reply_context"]
+    reply_to_message_id = str(reply_context.get("reply_to_message_id") or "")
+    if not reply_to_message_id:
+        context = ""
+        return context
+
+    try:
+        row = await get_conversation_by_platform_message_id(
+            platform=state["platform"],
+            platform_channel_id=state["platform_channel_id"],
+            platform_message_id=reply_to_message_id,
+        )
+    except PyMongoError as exc:
+        logger.warning(
+            f"Past-dialog cognition reply row lookup skipped: {exc}"
+        )
+        context = ""
+        return context
+
+    if row is None:
+        context = ""
+        return context
+
+    candidate = candidate_from_conversation_row(row, source="reply_context")
+    if candidate is None:
+        context = ""
+        return context
+
+    lookup_result = await build_past_dialog_cognition_context(
+        [candidate],
+        character_global_user_id=character_global_user_id,
+    )
+    context = lookup_result["past_dialog_cognition_context"]
+    return context
 
 
 async def _hydrate_reply_context(req: ChatRequest) -> ReplyContext:

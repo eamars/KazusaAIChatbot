@@ -272,6 +272,7 @@ _COGNITION_CONSCIOUSNESS_PROMPT = '''\
 - 内部观察资料和反思资料中的标题、字段名、JSON、时间戳、semantic_labels、window_summary、transport summary、model-facing metadata 只帮助定位资料结构；不要把它们当成聊天内容，也不要复制进 `internal_monologue`。
 - 内部观察资料里的 `participant_context` 和 `thread_reference_context` 是来源证据，用来约束群聊指代解析。二人称指向按来源优先级读取：先看同一行是否明确指向当前角色，再看 `thread_reference_context` 的 `referent_status`；标为 `ambiguous_or_side_thread` 的行保持为侧线/未定对象。
 - `internal_monologue_residue_context` 是主观余波；当它与当前 `thread_reference_context` 对同一二人称行的比较、描述或身体/状态归属冲突时，当前可见行和 `thread_reference_context` 拥有事实优先级，私念残留只解释心情和迟疑。
+- `past_dialog_cognition_context` 是围绕已附着的过往我方发言生成的私有认知残余；它只帮助理解那条过往发言当时的主观连续性，弱于当前可见输入、当前事件归属和已检索到的公开证据。
 - `rag_result`、`user_memory_context`、`media_observations` 和 `promoted_reflection_context` 是当前证据、记忆、媒体观察和已提升反思背景；它们只能校准当前事实，不能替换来源归属。
 - `promoted_reflection_context.promoted_global_growth` 是全局人格成长背景，不是当前用户事实、当前承诺或当前聊天证据；可以校准我的表达倾向，但不得把它当成当前用户事实，也不得覆盖当前输入、当前证据或本轮媒体观察。
 
@@ -282,12 +283,13 @@ _COGNITION_CONSCIOUSNESS_PROMPT = '''\
 4. 内部观察资料：理解我刚看到什么群聊或私聊现场，分清资料说明、真实可见对话、群聊氛围、我是否已参与、是否有人把话题交给我。
 5. 反思资料：理解我已经沉淀出的经历意义、关系余波或后续倾向，不要把反思资料写成当前有人正在聊天。
 6. `internal_monologue_residue_context` 是我最近留下的私念残留，只能作为柔和背景解释为什么我此刻可能带着某种心情、期待、防备或迟疑；它不是事实来源、行动要求、回复指令或记忆结论。
-7. 当前事件归属、当前输入、当前媒体观察、RAG 证据、用户记忆、会话进展和已提升反思始终优先；如果它们与私念残留冲突，以当前事实和当前证据为准。
-8. RAG、记忆、关系、心情、私念残留和反思只作为背景校准；它们不能替换当前来源事实，不能把内部观察资料或反思资料改写成外部发言。
-9. 图片或音频观察是当前事实证据，不是说话者意图。只有当前文本正在讨论这些可见事实时，才把它纳入解释。
-10. 普通问候、事实分享、图片描述、日常约定、轻度闲聊和群聊玩笑，缺少明确越界证据时，保持日常或轻度社交理解。
-11. 如果当前场景给了具体理由，我可以在内心形成想说话、想吐槽、想追问或想保持旁观的判断；不要把单纯资料困惑写成要向外部频道澄清。
-12. 解释日期或相对时间时，先读取 `local_time_context.current_local_datetime`。如果证据中的绝对日期与当前本地日期相同，称为今天，不要称为明天。
+7. `past_dialog_cognition_context` 只能作为已附着过往我方发言的私有主观背景；它不是事实来源、用户命令、最终答案、回复草稿或当前立场。
+8. 当前事件归属、当前输入、当前媒体观察、RAG 证据、用户记忆、会话进展和已提升反思始终优先；如果它们与私念残留或过往认知残余冲突，以当前事实和当前证据为准。
+9. RAG、记忆、关系、心情、私念残留、过往认知残余和反思只作为背景校准；它们不能替换当前来源事实，不能把内部观察资料或反思资料改写成外部发言。
+10. 图片或音频观察是当前事实证据，不是说话者意图。只有当前文本正在讨论这些可见事实时，才把它纳入解释。
+11. 普通问候、事实分享、图片描述、日常约定、轻度闲聊和群聊玩笑，缺少明确越界证据时，保持日常或轻度社交理解。
+12. 如果当前场景给了具体理由，我可以在内心形成想说话、想吐槽、想追问或想保持旁观的判断；不要把单纯资料困惑写成要向外部频道澄清。
+13. 解释日期或相对时间时，先读取 `local_time_context.current_local_datetime`。如果证据中的绝对日期与当前本地日期相同，称为今天，不要称为明天。
 
 # 标签
 `logical_stance` 只能使用：
@@ -389,6 +391,11 @@ async def call_cognition_consciousness(state: dict[str, Any]) -> dict[str, Any]:
         "emotional_appraisal": state["emotional_appraisal"],
         "interaction_subtext": state["interaction_subtext"],
     }
+    past_dialog_cognition_context = str(
+        state.get("past_dialog_cognition_context", "")
+    ).strip()
+    if past_dialog_cognition_context:
+        msg["past_dialog_cognition_context"] = past_dialog_cognition_context
     if str(selection["variant"]).startswith("text_chat_user_message"):
         msg["current_event_grounding"] = build_current_event_grounding_for_llm(
             user_input=state["user_input"],

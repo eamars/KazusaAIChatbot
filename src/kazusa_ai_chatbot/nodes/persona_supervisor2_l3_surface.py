@@ -19,8 +19,8 @@ from kazusa_ai_chatbot.cognition_resolver.state import (
     MAX_PROJECTED_RESOLVER_OBSERVATIONS,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
-    build_cognition_chain_input_from_global_state,
     build_cognition_chain_services,
+    build_text_surface_chain_input_from_global_state,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import (
     GlobalPersonaState,
@@ -63,7 +63,7 @@ def build_text_surface_input_from_global_state(
     selected_intent = _selected_text_surface_intent_object(state)
     payload: CognitionTextSurfaceInputV1 = {
         "schema_version": "cognition_text_surface_input.v1",
-        "chain_input": build_cognition_chain_input_from_global_state(state),
+        "chain_input": build_text_surface_chain_input_from_global_state(state),
         "cognition_residue": {
             "emotional_appraisal": state["emotional_appraisal"],
             "interaction_subtext": state["interaction_subtext"],

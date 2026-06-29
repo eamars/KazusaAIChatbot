@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Sequence
 from typing import Any
+
+from bson import ObjectId
+from bson.errors import InvalidId
 
 from kazusa_ai_chatbot.config import (
     CONVERSATION_HISTORY_LIMIT,
@@ -672,6 +676,97 @@ async def get_conversation_by_platform_message_id(
     row = await db.conversation_history.find_one(query)
     return_value = row
     return return_value
+
+
+async def list_conversation_rows_by_row_ids(
+    row_ids: Sequence[str],
+    *,
+    limit: int = 3,
+) -> list[dict[str, Any]]:
+    """Load conversation rows by conversation-history row ids only.
+
+    Args:
+        row_ids: Conversation row refs from ``conversation_row_id`` or ``_id``.
+        limit: Maximum rows to load.
+
+    Returns:
+        Matching conversation rows projected to candidate-construction fields.
+    """
+
+    effective_limit = max(0, int(limit))
+    clean_row_ids = _unique_row_ids(row_ids)[:effective_limit]
+    if not clean_row_ids:
+        rows: list[dict[str, Any]] = []
+        return rows
+
+    object_ids = _object_ids_from_row_ids(clean_row_ids)
+    query_parts: list[dict[str, Any]] = [
+        {"conversation_row_id": {"$in": clean_row_ids}},
+    ]
+    if object_ids:
+        query_parts.append({"_id": {"$in": object_ids}})
+
+    projection = {
+        "_id": 1,
+        "conversation_row_id": 1,
+        "platform": 1,
+        "platform_channel_id": 1,
+        "role": 1,
+        "platform_message_id": 1,
+        "global_user_id": 1,
+        "display_name": 1,
+        "body_text": 1,
+        "llm_trace_id": 1,
+        "timestamp": 1,
+    }
+    db = await get_db()
+    cursor = (
+        db.conversation_history
+        .find({"$or": query_parts}, projection)
+        .limit(effective_limit)
+    )
+    rows = await cursor.to_list(length=effective_limit)
+    rows.sort(key=lambda row: _row_id_order(row, clean_row_ids))
+    return rows
+
+
+def _unique_row_ids(row_ids: Sequence[str]) -> list[str]:
+    """Return stripped row ids in first-seen order."""
+
+    clean_row_ids: list[str] = []
+    seen_row_ids: set[str] = set()
+    for row_id in row_ids:
+        clean_row_id = str(row_id).strip()
+        if not clean_row_id or clean_row_id in seen_row_ids:
+            continue
+        clean_row_ids.append(clean_row_id)
+        seen_row_ids.add(clean_row_id)
+    return clean_row_ids
+
+
+def _object_ids_from_row_ids(row_ids: Sequence[str]) -> list[ObjectId]:
+    """Return valid Mongo ObjectIds from row-id strings."""
+
+    object_ids: list[ObjectId] = []
+    for row_id in row_ids:
+        try:
+            object_id = ObjectId(row_id)
+        except InvalidId:
+            continue
+        object_ids.append(object_id)
+    return object_ids
+
+
+def _row_id_order(row: dict[str, Any], row_ids: Sequence[str]) -> int:
+    """Return first input-order position matching one loaded row."""
+
+    row_id = str(row.get("conversation_row_id") or "").strip()
+    object_id = str(row.get("_id") or "").strip()
+    for index, candidate_id in enumerate(row_ids):
+        if candidate_id == row_id or candidate_id == object_id:
+            return index
+    fallback_index = len(row_ids)
+    return fallback_index
 
 
 async def update_conversation_attachment_descriptions(

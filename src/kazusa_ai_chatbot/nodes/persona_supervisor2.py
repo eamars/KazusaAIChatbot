@@ -710,6 +710,10 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
             "internal_monologue_residue_context",
             "",
         ),
+        "past_dialog_cognition_context": state.get(
+            "past_dialog_cognition_context",
+            "",
+        ),
         "referents": [],
         "debug_modes": state["debug_modes"],
         "should_respond": state["should_respond"],
@@ -720,6 +724,9 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
     
     results = await persona_graph.ainvoke(initial_persona_state)
     
+    consolidation_state = dict(results)
+    consolidation_state.pop("past_dialog_cognition_context", None)
+
     return_value = {
         "should_respond": results["should_respond"],
         "final_dialog": results["final_dialog"],
@@ -727,7 +734,7 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "target_broadcast": bool(results["target_broadcast"]),
         "mention_target_user": bool(results.get("mention_target_user", False)),
         "future_promises": [],
-        "consolidation_state": results,
+        "consolidation_state": consolidation_state,
         "surface_outputs": results.get("surface_outputs", []),
         "action_results": results.get("action_results", []),
         "episode_trace": results.get("episode_trace"),

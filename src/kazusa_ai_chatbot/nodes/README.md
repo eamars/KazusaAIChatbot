@@ -355,6 +355,14 @@ RAG evidence, user memory context, current commitments, promoted reflection
 context, conversation progress, projected internal monologue residue, affinity,
 mood, and global vibe.
 
+When the current turn is structurally anchored to a prior Kazusa-authored
+dialog by reply/quote context or conversation-evidence source refs, L2a may
+also receive `past_dialog_cognition_context`. That context is private
+trace-backed cognition residual for the anchored past dialog. It is weaker
+than current visible input and public evidence, omitted when unavailable, and
+must not be consumed by L1, L2b, L2c1, L2c2, L2d, L3, dialog, consolidation,
+scheduler, reflection, adapters, or public RAG projection.
+
 On the first resolver cycle, L2a is also the join point for the bounded
 shared-memory prewarm result. If that prewarm finds confirmed shared
 `memory` rows, L2a sees them as normal `rag_result.memory_evidence`; if it

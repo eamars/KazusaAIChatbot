@@ -204,6 +204,10 @@ def _state_from_chain_input(
         "internal_monologue_residue_context": (
             context["internal_monologue_residue_context"]
         ),
+        "past_dialog_cognition_context": context.get(
+            "past_dialog_cognition_context",
+            "",
+        ),
         "decontexualized_input": current_event["decontextualized_input"],
         "referents": _mapping_list(current_event["referents"]),
         "rag_result": rag_result,

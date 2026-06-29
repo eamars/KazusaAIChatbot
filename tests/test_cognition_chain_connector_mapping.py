@@ -330,6 +330,9 @@ def test_l3_surface_connector_projects_selected_speak_without_action_spec_leak()
     )
 
     state = _global_state()
+    state["past_dialog_cognition_context"] = (
+        "Prior private cognition must stop before L3."
+    )
     state["action_specs"] = [{
         "kind": "speak",
         "reason": "direct greeting",
@@ -350,3 +353,6 @@ def test_l3_surface_connector_projects_selected_speak_without_action_spec_leak()
         "answer the user"
     )
     assert "action_specs" not in surface_input
+    serialized = json.dumps(surface_input, ensure_ascii=False)
+    assert "past_dialog_cognition_context" not in serialized
+    assert "Prior private cognition must stop before L3." not in serialized

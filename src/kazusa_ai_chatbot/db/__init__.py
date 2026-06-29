@@ -82,9 +82,13 @@ from kazusa_ai_chatbot.db.conversation import (
     get_conversation_by_platform_message_id,
     get_conversation_history,
     get_latest_private_channel_for_user,
+    list_conversation_rows_by_row_ids,
     save_conversation,
     search_conversation_history,
     update_conversation_attachment_descriptions,
+)
+from kazusa_ai_chatbot.db.llm_tracing import (
+    list_llm_trace_steps_for_trace_ids,
 )
 from kazusa_ai_chatbot.db.conversation_reflection import (
     explain_monitored_channel_query,
@@ -269,8 +273,10 @@ __all__ = [
     # Conversation
     "aggregate_conversation_by_user", "apply_assistant_delivery_receipt",
     "get_conversation_by_platform_message_id", "get_conversation_history",
-    "get_latest_private_channel_for_user", "save_conversation",
+    "get_latest_private_channel_for_user",
+    "list_conversation_rows_by_row_ids", "save_conversation",
     "search_conversation_history", "update_conversation_attachment_descriptions",
+    "list_llm_trace_steps_for_trace_ids",
     "explain_monitored_channel_query",
     "list_recent_character_message_channels",
     "list_reflection_scope_messages",

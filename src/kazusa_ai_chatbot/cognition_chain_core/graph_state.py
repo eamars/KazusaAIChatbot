@@ -41,6 +41,7 @@ class CoreStageState(TypedDict):
     interaction_subtext: str
     internal_monologue: str
     internal_monologue_residue_context: str
+    past_dialog_cognition_context: str
     judgment_note: str
     linguistic_style: str
     local_time_context: dict[str, Any]

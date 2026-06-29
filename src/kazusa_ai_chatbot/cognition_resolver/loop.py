@@ -42,6 +42,9 @@ from kazusa_ai_chatbot.cognition_resolver.state import (
     validate_resolver_state,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
+from kazusa_ai_chatbot.past_dialog_cognition import (
+    build_past_dialog_cognition_context_from_rag_result,
+)
 
 CognitionSubgraphFunc = Callable[
     [GlobalPersonaState],
@@ -142,6 +145,10 @@ async def call_cognition_resolver_loop(
         resolver_state = append_observation(resolver_state, observation)
         if "rag_result" in observation:
             cognition_state["rag_result"] = observation["rag_result"]
+            await _attach_past_dialog_cognition_from_rag_result(
+                cognition_state,
+                observation["rag_result"],
+            )
 
         trace = _build_cycle_trace(
             cognition_state,
@@ -162,6 +169,28 @@ async def call_cognition_resolver_loop(
         apply_pending_resolution_func=apply_pending_resolution_func,
     )
     return return_value
+
+
+async def _attach_past_dialog_cognition_from_rag_result(
+    cognition_state: GlobalPersonaState,
+    rag_result: object,
+) -> None:
+    """Attach private residual context from conversation-evidence source refs."""
+
+    if cognition_state.get("past_dialog_cognition_context"):
+        return
+    if not isinstance(rag_result, dict):
+        return
+
+    character_profile = cognition_state["character_profile"]
+    character_global_user_id = str(character_profile.get("global_user_id") or "")
+    lookup_result = await build_past_dialog_cognition_context_from_rag_result(
+        rag_result,
+        character_global_user_id=character_global_user_id,
+    )
+    context = lookup_result["past_dialog_cognition_context"]
+    if context:
+        cognition_state["past_dialog_cognition_context"] = context
 
 
 async def _finalize_without_capability(

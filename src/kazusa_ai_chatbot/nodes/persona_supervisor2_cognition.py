@@ -236,6 +236,10 @@ def build_cognition_chain_input_from_global_state(
                 "internal_monologue_residue_context",
                 "",
             ),
+            "past_dialog_cognition_context": state.get(
+                "past_dialog_cognition_context",
+                "",
+            ),
             "previous_action_summary": "",
         },
         "evidence": {
@@ -273,6 +277,20 @@ def build_cognition_chain_input_from_global_state(
             ),
         },
     }
+    validated_payload = validate_cognition_chain_input(payload)
+    return validated_payload
+
+
+def build_text_surface_chain_input_from_global_state(
+    state: GlobalPersonaState,
+) -> CognitionChainInputV1:
+    """Project graph state for L3 without L2a-only private residual fields."""
+
+    payload = build_cognition_chain_input_from_global_state(state)
+    payload["conversation_context"].pop(
+        "past_dialog_cognition_context",
+        None,
+    )
     validated_payload = validate_cognition_chain_input(payload)
     return validated_payload
 
@@ -443,6 +461,10 @@ def _initial_cognition_state_from_global_state(
         "promoted_reflection_context": state.get("promoted_reflection_context"),
         "internal_monologue_residue_context": state.get(
             "internal_monologue_residue_context",
+            "",
+        ),
+        "past_dialog_cognition_context": state.get(
+            "past_dialog_cognition_context",
             "",
         ),
         "decontexualized_input": state["decontexualized_input"],
