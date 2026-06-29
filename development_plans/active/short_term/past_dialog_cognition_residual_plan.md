@@ -4,7 +4,7 @@
 
 - Goal: deterministically attach compact trace-backed cognition residual to L2a when a Kazusa-authored past dialog is already attached as current-turn context, while treating missing trace data as ordinary forgetting.
 - Plan class: large.
-- Status: draft.
+- Status: completed.
 - Mandatory skills: `development-plan`, `py-style`, `test-style-and-execution`, `local-llm-architecture`, `no-prepost-user-input`.
 - Overall cutover strategy: compatible for runtime behavior; bigbang for the new residual field contract and consumer boundary.
 - Highest-risk areas: private cognition leakage into broad prompt payloads, accidental consumers outside L2a, keyword or LLM-gated retrieval, and over-broad use of raw trace data.
@@ -416,42 +416,44 @@ The L2a context budget remains below the default `50k tokens` cap by using conse
 
 ## Progress Checklist
 
-- [ ] Stage 1 - focused module contract established
+Progress note: this checklist was reconciled on 2026-06-30 from recorded execution evidence because implementation, real LLM comparison, and independent review evidence had already been captured before lifecycle status cleanup.
+
+- [x] Stage 1 - focused module contract established
   - Covers: implementation steps 1-6.
   - Verify: `venv\Scripts\python -m pytest tests\test_past_dialog_cognition_context.py -q`.
   - Evidence: record baseline failure, changed files, and final focused-test pass in `Execution Evidence`.
   - Handoff: next agent starts at Stage 2.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 2 - direct reply/quote private residual wiring complete
+  - Sign-off: `Codex/2026-06-30`; baseline failure and focused-test pass are recorded in `Execution Evidence`.
+- [x] Stage 2 - direct reply/quote private residual wiring complete
   - Covers: implementation steps 7-9.
   - Verify: `venv\Scripts\python -m pytest tests\test_past_dialog_cognition_reply_integration.py tests\test_past_dialog_cognition_context.py -q`.
   - Evidence: record test output and confirm `prompt_message_context` stayed unchanged.
   - Handoff: next agent starts at Stage 3.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 3 - conversation-evidence private side channel complete
+  - Sign-off: `Codex/2026-06-30`; reply integration tests and prompt-message boundary evidence are recorded in `Execution Evidence`.
+- [x] Stage 3 - conversation-evidence private side channel complete
   - Covers: implementation steps 10-12.
   - Verify: `venv\Scripts\python -m pytest tests\test_past_dialog_cognition_rag_integration.py tests\test_past_dialog_cognition_context.py -q`.
   - Evidence: record test output and confirm public `rag_result` has no residual text.
   - Handoff: next agent starts at Stage 4.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 4 - cognition contract and L2a-only prompt boundary complete
+  - Sign-off: `Codex/2026-06-30`; RAG integration tests and public-evidence leak checks are recorded in `Execution Evidence`.
+- [x] Stage 4 - cognition contract and L2a-only prompt boundary complete
   - Covers: implementation steps 13-15.
   - Verify: boundary tests, py_compile, and static greps listed in `Verification`.
   - Evidence: record allowed matches and zero-match checks before moving on.
   - Handoff: next agent starts at Stage 5.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 5 - docs and lifecycle evidence complete
+  - Sign-off: `Codex/2026-06-30`; boundary tests, py_compile, and static grep results are recorded in `Execution Evidence`.
+- [x] Stage 5 - docs and lifecycle evidence complete
   - Covers: implementation steps 16-17.
   - Verify: README diffs are scoped to residual ownership, trace capture caveat, and L2a-only boundary.
   - Evidence: record docs changed and final static grep output.
   - Handoff: next agent starts at Stage 6.
-  - Sign-off: `<agent/date>` after verification and evidence are recorded.
-- [ ] Stage 6 - independent code review complete
+  - Sign-off: `Codex/2026-06-30`; module README cleanup, live comparison evidence, and final static grep output are recorded in `Execution Evidence`.
+- [x] Stage 6 - independent code review complete
   - Covers: implementation steps 18-19.
   - Verify: independent review completed, findings resolved or recorded, affected checks rerun.
   - Evidence: record reviewer role, findings, fixes, rerun commands, residual risks, and approval status.
   - Handoff: plan can be completed only after user-approved execution and lifecycle update.
-  - Sign-off: `<agent/date>` after review evidence is recorded.
+  - Sign-off: `Codex/2026-06-30`; independent review by `Lagrange`, fixes, reruns, and residual risks are recorded in `Execution Evidence`.
 
 ## Verification
 
@@ -533,7 +535,7 @@ Findings addressed:
 - Blocker: direct reply residual lookup could have been skipped when adapter-supplied reply metadata was already complete. The plan now requires a separate private platform/channel-scoped row lookup when `reply_to_message_id` is present.
 - Non-blocking: static greps did not explicitly cover the real RAG projection file under `nodes/`. The verification section now includes a targeted grep for that file and the `rag` package.
 
-Approval status: review blockers are addressed in this draft. The plan remains `draft`; execution is still not authorized.
+Approval status at review time: review blockers were addressed in draft form, and execution still required explicit user authorization. Execution was later authorized by the user on 2026-06-29; lifecycle cleanup was completed on 2026-06-30.
 
 ## Independent Code Review
 
@@ -585,7 +587,8 @@ This plan is complete when:
 - Plan drafting:
   - Created while plan status is `draft`; no production code changes are authorized by this draft.
   - Registry row added under `development_plans/active/short_term/`.
-  - Execution later explicitly authorized by user request on 2026-06-29; lifecycle status remains `draft`.
+  - Execution later explicitly authorized by user request on 2026-06-29.
+  - Lifecycle cleanup performed on 2026-06-30 after deterministic verification, live comparison evidence, and independent code review were recorded.
 - Independent plan review:
   - Manual no-subagent review completed.
   - Blockers addressed: wrong RAG projection path, vague resolver integration point, unsafe resolver-observation carrier, under-specified candidate author fields, unsafe platform-message-id-only evidence lookup, and direct-reply row lookup dependency on incomplete visible metadata.
@@ -635,3 +638,7 @@ This plan is complete when:
   - Findings: selected L3 text-surface contract carried nested `past_dialog_cognition_context`; broad exception handlers could mask non-DB bugs.
   - Fixes: text-surface chain input is sanitized by `build_text_surface_chain_input_from_global_state`; residual DB-read degradation catches `PyMongoError` only.
   - Affected verification rerun and passed as listed above. Residual risk: this remains best-effort and depends on full-capture trace availability.
+- Progress reconciliation:
+  - 2026-06-30: plan status and registry status were updated to `completed`.
+  - 2026-06-30: progress checklist stages 1-6 were marked complete from the recorded evidence above.
+  - Cleanup touched only plan and development-plan registry documentation; no production code was changed during lifecycle cleanup.

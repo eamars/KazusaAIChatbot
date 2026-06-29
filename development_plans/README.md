@@ -44,7 +44,7 @@ long_term/todo.md
 | [control_console_cognition_debug_visibility_plan.md](active/short_term/control_console_cognition_debug_visibility_plan.md) | Large control-console cognition-debug visibility plan | completed |
 | [complex_task_resolver_capability_plan.md](active/short_term/complex_task_resolver_capability_plan.md) | Standalone complex-task resolver validation plan with user-gated L2d integration | draft |
 | [llm_trace_observability_and_retrieval_plan.md](active/short_term/llm_trace_observability_and_retrieval_plan.md) | Large LLM trace observability and agent retrieval-skill plan | completed |
-| [past_dialog_cognition_residual_plan.md](active/short_term/past_dialog_cognition_residual_plan.md) | Large trace-backed past-dialog cognition residual plan | draft |
+| [past_dialog_cognition_residual_plan.md](active/short_term/past_dialog_cognition_residual_plan.md) | Large trace-backed past-dialog cognition residual plan | completed |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 | [web_agent3_source_availability_bigbang_plan.md](active/short_term/web_agent3_source_availability_bigbang_plan.md) | Large web_agent3 source availability bigbang plan | completed |
 
