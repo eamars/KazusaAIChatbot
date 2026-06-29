@@ -39,6 +39,7 @@ from kazusa_ai_chatbot.rag.web_agent3.providers import (
 from kazusa_ai_chatbot.rag.web_agent3.subagent import (
     _SUBAGENT_DESCRIPTIONS,
     _SUBAGENT_NAMES,
+    _SUBAGENT_SUPPORTED_ACTIONS,
 )
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
@@ -259,6 +260,7 @@ async def _tool_call_generator(state: WebAgent3State) -> dict[str, Any]:
         raw_decision,
         fallback_query=state["task"],
         valid_sources=_SUBAGENT_NAMES,
+        source_actions=_SUBAGENT_SUPPORTED_ACTIONS,
     )
     decision_payload = _router_decision_to_dict(decision)
     decision_message = AIMessage(
@@ -282,11 +284,20 @@ async def _tool_call_executor(state: WebAgent3State) -> dict[str, Any]:
     """
     decision = _router_decision_from_state(state["router_decision"])
 
-    try:
-        observation = await _execute_source_decision(decision)
-    except Exception as exc:
-        logger.exception(f"web_agent3 source execution failed: {exc}")
-        observation = {"error": "tool execution failed"}
+    if decision.action == "stop":
+        observation = {
+            "status": "stopped",
+            "source": "web_read",
+            "action": "stop",
+            "query": "",
+            "message": "Router stopped without another web action.",
+        }
+    else:
+        try:
+            observation = await _execute_source_decision(decision)
+        except Exception as exc:
+            logger.exception(f"web_agent3 source execution failed: {exc}")
+            observation = {"error": "tool execution failed"}
 
     record = _observation_record(decision=decision, result=observation)
     observations = list(state.get("observations", []))
@@ -546,7 +557,7 @@ async def _finalize_web_agent3_result(
         "context": _web_runtime_context_for_llm(context),
         "expected_response": _DEFAULT_EXPECTED_RESPONSE,
         "messages": [ToolMessage(content=tool_content, tool_call_id="fixture-1")],
-        "router_decision": {"action": "stop", "source": "generic", "query": ""},
+        "router_decision": {"action": "stop", "source": "web_read", "query": ""},
         "observations": [],
         "evaluator_feedback": evaluator_feedback,
         "should_stop": True,
@@ -660,7 +671,7 @@ async def _run_subgraph(
         "context": llm_context,
         "expected_response": expected_response,
         "messages": [],
-        "router_decision": {"action": "stop", "source": "generic", "query": ""},
+        "router_decision": {"action": "stop", "source": "web_read", "query": ""},
         "observations": [],
         "evaluator_feedback": "",
         "should_stop": False,

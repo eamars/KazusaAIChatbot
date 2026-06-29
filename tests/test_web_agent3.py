@@ -5,7 +5,10 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -19,6 +22,117 @@ from kazusa_ai_chatbot.rag.web_agent3 import agent as agent_module
 from kazusa_ai_chatbot.rag.web_agent3 import providers as provider_module
 from kazusa_ai_chatbot.rag.web_agent3 import searxng_tools as searxng_module
 from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
+
+_WEB_AGENT3_REQUIRED_ROUTE_ENV_VARS = (
+    "RELEVANCE_AGENT_LLM_BASE_URL",
+    "RELEVANCE_AGENT_LLM_API_KEY",
+    "RELEVANCE_AGENT_LLM_MODEL",
+    "VISION_DESCRIPTOR_LLM_BASE_URL",
+    "VISION_DESCRIPTOR_LLM_API_KEY",
+    "VISION_DESCRIPTOR_LLM_MODEL",
+    "MSG_DECONTEXTUALIZER_LLM_BASE_URL",
+    "MSG_DECONTEXTUALIZER_LLM_API_KEY",
+    "MSG_DECONTEXTUALIZER_LLM_MODEL",
+    "RAG_PLANNER_LLM_BASE_URL",
+    "RAG_PLANNER_LLM_API_KEY",
+    "RAG_PLANNER_LLM_MODEL",
+    "RAG_SUBAGENT_LLM_BASE_URL",
+    "RAG_SUBAGENT_LLM_API_KEY",
+    "RAG_SUBAGENT_LLM_MODEL",
+    "WEB_SEARCH_LLM_BASE_URL",
+    "WEB_SEARCH_LLM_API_KEY",
+    "WEB_SEARCH_LLM_MODEL",
+    "COGNITION_LLM_BASE_URL",
+    "COGNITION_LLM_API_KEY",
+    "COGNITION_LLM_MODEL",
+    "BOUNDARY_CORE_LLM_BASE_URL",
+    "BOUNDARY_CORE_LLM_API_KEY",
+    "BOUNDARY_CORE_LLM_MODEL",
+    "DIALOG_GENERATOR_LLM_BASE_URL",
+    "DIALOG_GENERATOR_LLM_API_KEY",
+    "DIALOG_GENERATOR_LLM_MODEL",
+    "CONSOLIDATION_LLM_BASE_URL",
+    "CONSOLIDATION_LLM_API_KEY",
+    "CONSOLIDATION_LLM_MODEL",
+    "JSON_REPAIR_LLM_BASE_URL",
+    "JSON_REPAIR_LLM_API_KEY",
+    "JSON_REPAIR_LLM_MODEL",
+    "BACKGROUND_ARTIFACT_LLM_BASE_URL",
+    "BACKGROUND_ARTIFACT_LLM_API_KEY",
+    "BACKGROUND_ARTIFACT_LLM_MODEL",
+)
+
+
+def _web_agent3_subprocess_env(
+    *,
+    searxng_url: str | None,
+    nhentai_token: str | None,
+) -> dict[str, str]:
+    """Build an import environment for web_agent3 availability tests."""
+    env = dict(os.environ)
+    python_path = env.get("PYTHONPATH", "")
+    src_path = os.path.abspath("src")
+    env["PYTHONPATH"] = (
+        src_path if not python_path else f"{src_path}{os.pathsep}{python_path}"
+    )
+    env["PYTHON_DOTENV_DISABLED"] = "1"
+    for name in _WEB_AGENT3_REQUIRED_ROUTE_ENV_VARS:
+        env[name] = "configured"
+    env["EMBEDDING_BASE_URL"] = "configured"
+    env["EMBEDDING_API_KEY"] = "configured"
+    env["EMBEDDING_MODEL"] = "configured"
+    env["CHARACTER_GLOBAL_USER_ID"] = "character-global"
+
+    if searxng_url is None:
+        env.pop("SEARXNG_URL", None)
+    else:
+        env["SEARXNG_URL"] = searxng_url
+
+    if nhentai_token is None:
+        env.pop("NHENTAI_TOKEN", None)
+    else:
+        env["NHENTAI_TOKEN"] = nhentai_token
+
+    return env
+
+
+def _read_web_agent3_source_state(
+    tmp_path: Path,
+    *,
+    searxng_url: str | None = None,
+    nhentai_token: str | None = None,
+) -> dict[str, object]:
+    """Import web_agent3 in a subprocess and return source prompt state."""
+    env = _web_agent3_subprocess_env(
+        searxng_url=searxng_url,
+        nhentai_token=nhentai_token,
+    )
+    script = (
+        "import json; "
+        "from kazusa_ai_chatbot.rag.web_agent3 import agent; "
+        "from kazusa_ai_chatbot.rag.web_agent3 import subagent; "
+        "payload = {"
+        "'names': list(subagent._SUBAGENT_NAMES), "
+        "'descriptions': list(subagent._SUBAGENT_DESCRIPTIONS), "
+        "'actions': subagent._SUBAGENT_SUPPORTED_ACTIONS, "
+        "'source_text': agent._WEB_AGENT3_SOURCE_TOOLS_TEXT, "
+        "'prompt': agent._WEB_AGENT3_GENERATOR_PROMPT"
+        "}; "
+        "print(json.dumps(payload))"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    return payload
 
 
 class _FakeHTTPResponse:
@@ -955,6 +1069,11 @@ def test_web_agent3_router_output_parsing_is_minimal() -> None:
             "api_params": {"id": 652244},
         },
         fallback_query="fallback search",
+        valid_sources=("web_read", "nhentai"),
+        source_actions={
+            "web_read": ("read",),
+            "nhentai": ("read", "search"),
+        },
     )
 
     assert decision == web_module._RouterDecision(
@@ -999,17 +1118,14 @@ def test_web_agent3_router_prompt_uses_project_prompt_style() -> None:
 
 def test_web_agent3_router_uses_subagent_generation_rules() -> None:
     """Router query guidance should come from source subagent descriptions."""
-    generic_subagent = importlib.import_module(
-        "kazusa_ai_chatbot.rag.web_agent3.subagent.generic"
+    web_read_subagent = importlib.import_module(
+        "kazusa_ai_chatbot.rag.web_agent3.subagent.web_read"
     )
 
-    assert "search:" in generic_subagent.DESCRIPTION
-    assert "read:" in generic_subagent.DESCRIPTION
-    assert "site:" in generic_subagent.DESCRIPTION
-    assert "snippet" in generic_subagent.DESCRIPTION.lower()
-    assert "不要因为 reference_time 自动" in generic_subagent.DESCRIPTION
-    assert "先使用过窄的时间过滤" in generic_subagent.DESCRIPTION
-    assert generic_subagent.DESCRIPTION in agent_module._WEB_AGENT3_SOURCE_TOOLS_TEXT
+    assert "read:" in web_read_subagent.DESCRIPTION
+    assert "HTTP(S) URL" in web_read_subagent.DESCRIPTION
+    assert "正文读取才是强证据" in web_read_subagent.DESCRIPTION
+    assert web_read_subagent.DESCRIPTION in agent_module._WEB_AGENT3_SOURCE_TOOLS_TEXT
     assert "遵循所选来源描述" in agent_module._WEB_AGENT3_GENERATOR_PROMPT
 
 
@@ -1029,7 +1145,7 @@ def test_web_agent3_router_source_text_omits_execution_details() -> None:
 
 
 def test_web_agent3_source_subagents_are_discovered_from_subagent_package() -> None:
-    """Source subagents should be discovered from per-source modules."""
+    """Source subagents should be discovered from enabled per-source modules."""
     package_path = Path(web_module.__file__).parent
     subagent_path = package_path / "subagent"
     retired_source_file = package_path / "source_subagents.py"
@@ -1040,14 +1156,17 @@ def test_web_agent3_source_subagents_are_discovered_from_subagent_package() -> N
     source_module = importlib.import_module(
         "kazusa_ai_chatbot.rag.web_agent3.subagent"
     )
-    expected_sources = {"generic", "bilibili", "youtube", "nhentai"}
+    enabled_sources = set(source_module._SUBAGENTS)
+    allowed_sources = {"web_read", "web_search", "nhentai"}
 
     assert Path(source_module.__file__).name == "__init__.py"
-    assert set(source_module._SUBAGENTS) == expected_sources
-    assert set(source_module._SUBAGENT_DESCRIPTIONS) == expected_sources
-    assert list(source_module._SUBAGENT_DESCRIPTIONS) == sorted(expected_sources)
+    assert "web_read" in enabled_sources
+    assert enabled_sources <= allowed_sources
+    assert set(source_module._SUBAGENT_DESCRIPTIONS) == enabled_sources
+    assert set(source_module._SUBAGENT_SUPPORTED_ACTIONS) == enabled_sources
+    assert list(source_module._SUBAGENT_DESCRIPTIONS) == sorted(enabled_sources)
 
-    for source in expected_sources:
+    for source in enabled_sources:
         module_path = subagent_path / f"{source}.py"
         source_subagent = importlib.import_module(
             f"kazusa_ai_chatbot.rag.web_agent3.subagent.{source}"
@@ -1056,11 +1175,102 @@ def test_web_agent3_source_subagents_are_discovered_from_subagent_package() -> N
         assert module_path.is_file()
         assert source_subagent.SOURCE == source
         assert source_subagent.DESCRIPTION
+        assert source_subagent.SUPPORTED_ACTIONS
         assert callable(source_subagent.execute)
 
     assert not hasattr(provider_module, "_SOURCE_SUBAGENTS")
     assert not hasattr(provider_module, "_SOURCE_ADAPTER_DESCRIPTIONS")
     assert not hasattr(provider_module, "_SOURCE_ADAPTERS")
+
+
+def test_web_agent3_source_discovery_registers_only_web_read_without_optional_config(
+    tmp_path: Path,
+) -> None:
+    """Only URL read should be available when optional source config is absent."""
+    payload = _read_web_agent3_source_state(tmp_path)
+
+    assert payload["names"] == ["web_read"]
+    assert payload["descriptions"] == ["web_read"]
+    assert payload["actions"] == {"web_read": ["read"]}
+
+
+def test_web_agent3_source_discovery_registers_web_search_when_searxng_configured(
+    tmp_path: Path,
+) -> None:
+    """SearXNG config should enable the web_search source."""
+    payload = _read_web_agent3_source_state(
+        tmp_path,
+        searxng_url="http://search.test:8080",
+    )
+
+    assert set(payload["names"]) == {"web_read", "web_search"}
+    assert payload["actions"]["web_read"] == ["read"]
+    assert payload["actions"]["web_search"] == ["search"]
+
+
+def test_web_agent3_source_discovery_registers_nhentai_when_token_configured(
+    tmp_path: Path,
+) -> None:
+    """nHentai token config should enable the nhentai source."""
+    payload = _read_web_agent3_source_state(
+        tmp_path,
+        nhentai_token="secret-token",
+    )
+
+    assert set(payload["names"]) == {"web_read", "nhentai"}
+    assert payload["actions"]["web_read"] == ["read"]
+    assert payload["actions"]["nhentai"] == ["read", "search"]
+
+
+def test_web_agent3_source_discovery_registers_all_configured_sources(
+    tmp_path: Path,
+) -> None:
+    """All final sources should be available when all optional config exists."""
+    payload = _read_web_agent3_source_state(
+        tmp_path,
+        searxng_url="http://search.test:8080",
+        nhentai_token="secret-token",
+    )
+
+    assert set(payload["names"]) == {"web_read", "web_search", "nhentai"}
+    assert payload["actions"] == {
+        "nhentai": ["read", "search"],
+        "web_read": ["read"],
+        "web_search": ["search"],
+    }
+
+
+def test_web_agent3_router_prompt_lists_enabled_sources_only(
+    tmp_path: Path,
+) -> None:
+    """Router prompt source text should expose only enabled final sources."""
+    no_optional_payload = _read_web_agent3_source_state(tmp_path)
+    all_enabled_payload = _read_web_agent3_source_state(
+        tmp_path,
+        searxng_url="http://search.test:8080",
+        nhentai_token="secret-token",
+    )
+
+    no_optional_prompt = str(no_optional_payload["prompt"])
+    all_enabled_prompt = str(all_enabled_payload["prompt"])
+    assert "- web_read:" in no_optional_prompt
+    assert "- web_search:" not in no_optional_prompt
+    assert "- nhentai:" not in no_optional_prompt
+
+    assert "- web_read:" in all_enabled_prompt
+    assert "- web_search:" in all_enabled_prompt
+    assert "- nhentai:" in all_enabled_prompt
+    for removed_source in ("generic", "bilibili", "youtube"):
+        assert removed_source not in all_enabled_prompt
+
+
+def test_web_agent3_removed_source_modules_are_absent() -> None:
+    """Removed source module files should not remain importable."""
+    subagent_path = Path(web_module.__file__).parent / "subagent"
+
+    for removed_source in ("generic", "bilibili", "youtube"):
+        module_path = subagent_path / f"{removed_source}.py"
+        assert not module_path.exists()
 
 
 @pytest.mark.asyncio
@@ -1070,16 +1280,22 @@ async def test_web_agent3_generator_outputs_router_decision(
     """Generator should parse a strict action/source/query router decision."""
     fake_llm = SimpleNamespace(
         ainvoke=AsyncMock(return_value=AIMessage(
-            content='{"action": "search", "source": "youtube", "query": "demo"}',
+            content='{"action": "search", "source": "web_search", "query": "demo"}',
         )),
     )
     monkeypatch.setattr(agent_module, "_generator_llm", fake_llm)
+    monkeypatch.setattr(agent_module, "_SUBAGENT_NAMES", ("web_read", "web_search"))
+    monkeypatch.setattr(
+        agent_module,
+        "_SUBAGENT_SUPPORTED_ACTIONS",
+        {"web_read": ("read",), "web_search": ("search",)},
+    )
     state = {
-        "task": "Find a YouTube demo.",
+        "task": "Find a web demo.",
         "context": {"platform": "debug"},
         "messages": [HumanMessage(content="start")],
-        "observations": [{"action": "search", "source": "generic"}],
-        "evaluator_feedback": "read a YouTube result next",
+        "observations": [{"action": "search", "source": "web_search"}],
+        "evaluator_feedback": "read a web result next",
         "prompt_timestamp": "2026-05-25 21:30 (Monday)",
     }
 
@@ -1090,27 +1306,32 @@ async def test_web_agent3_generator_outputs_router_decision(
     payload = json.loads(messages[1].content)
     assert "2026-05-25" not in system_prompt
     assert payload["reference_time"] == "2026-05-25 21:30 (Monday)"
-    assert payload["evaluator_feedback"] == "read a YouTube result next"
+    assert payload["evaluator_feedback"] == "read a web result next"
     assert update["router_decision"] == {
         "action": "search",
-        "source": "youtube",
+        "source": "web_search",
         "query": "demo",
     }
 
 
 @pytest.mark.asyncio
-async def test_web_agent3_generic_search_receives_query_unchanged(
+async def test_web_agent3_web_search_receives_query_unchanged(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Generic search should pass router query directly to SearXNG."""
-    generic_subagent = importlib.import_module(
-        "kazusa_ai_chatbot.rag.web_agent3.subagent.generic"
+    """web_search should pass router query directly to the search tool."""
+    web_search_subagent = importlib.import_module(
+        "kazusa_ai_chatbot.rag.web_agent3.subagent.web_search"
     )
     fake_search = SimpleNamespace(ainvoke=AsyncMock(return_value="search body"))
-    monkeypatch.setattr(generic_subagent.searxng_tools, "web_search", fake_search)
+    monkeypatch.setitem(
+        provider_module._source_subagent_package._SUBAGENTS,
+        "web_search",
+        web_search_subagent,
+    )
+    monkeypatch.setattr(web_search_subagent.searxng_tools, "web_search", fake_search)
     decision = web_module._RouterDecision(
         action="search",
-        source="generic",
+        source="web_search",
         query="local tool router demo web agent architecture",
     )
 
@@ -1123,65 +1344,25 @@ async def test_web_agent3_generic_search_receives_query_unchanged(
 
 
 @pytest.mark.asyncio
-async def test_web_agent3_youtube_bilibili_keep_subagent_boundary_and_use_generic_search(
+async def test_web_agent3_web_read_receives_query_unchanged(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Bilibili and YouTube stay separate subagents while using generic search."""
-    source_module = importlib.import_module(
-        "kazusa_ai_chatbot.rag.web_agent3.subagent"
-    )
-    source_subagents = source_module._SUBAGENTS
-    generic_subagent = source_subagents["generic"]
-    fake_search = SimpleNamespace(ainvoke=AsyncMock(return_value="search body"))
-    monkeypatch.setattr(generic_subagent.searxng_tools, "web_search", fake_search)
-
-    assert source_subagents["nhentai"] is not generic_subagent
-
-    for source in ("bilibili", "youtube"):
-        assert source_subagents[source] is not generic_subagent
-        decision = web_module._RouterDecision(
-            action="search",
-            source=source,
-            query="raw-source-target",
-        )
-
-        result = await web_module._execute_source_decision(decision)
-
-        assert result == "search body"
-
-    assert fake_search.ainvoke.await_count == 2
-    first_call, second_call = fake_search.ainvoke.await_args_list
-    assert first_call.args[0] == {"query": "raw-source-target"}
-    assert second_call.args[0] == {"query": "raw-source-target"}
-
-
-@pytest.mark.asyncio
-async def test_web_agent3_youtube_bilibili_read_delegates_to_generic_web_read(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Temporary source adapters should route URL reads through generic web read."""
-    generic_subagent = importlib.import_module(
-        "kazusa_ai_chatbot.rag.web_agent3.subagent.generic"
+    """web_read should pass router query directly to the URL reader."""
+    web_read_subagent = importlib.import_module(
+        "kazusa_ai_chatbot.rag.web_agent3.subagent.web_read"
     )
     fake_read = SimpleNamespace(ainvoke=AsyncMock(return_value="page body"))
-    fake_search = SimpleNamespace(ainvoke=AsyncMock(return_value="search body"))
-    monkeypatch.setattr(generic_subagent.searxng_tools, "web_url_read", fake_read)
-    monkeypatch.setattr(generic_subagent.searxng_tools, "web_search", fake_search)
+    monkeypatch.setattr(web_read_subagent.searxng_tools, "web_url_read", fake_read)
+    decision = web_module._RouterDecision(
+        action="read",
+        source="web_read",
+        query="https://example.test/page",
+    )
 
-    for source in ("bilibili", "youtube"):
-        fake_read.ainvoke.reset_mock()
-        fake_search.ainvoke.reset_mock()
-        decision = web_module._RouterDecision(
-            action="read",
-            source=source,
-            query="652244",
-        )
+    result = await web_module._execute_source_decision(decision)
 
-        result = await web_module._execute_source_decision(decision)
-
-        fake_read.ainvoke.assert_awaited_once_with({"url": "652244"})
-        fake_search.ainvoke.assert_not_awaited()
-        assert result == "page body"
+    fake_read.ainvoke.assert_awaited_once_with({"url": "https://example.test/page"})
+    assert result == "page body"
 
 
 @pytest.mark.asyncio
@@ -1189,7 +1370,7 @@ async def test_web_agent3_executor_records_minimal_observation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Executor should keep prompt-facing state minimal."""
-    execute_decision = AsyncMock(return_value="generic page body")
+    execute_decision = AsyncMock(return_value="page body")
     monkeypatch.setattr(agent_module, "_execute_source_decision", execute_decision)
     state = {
         "router_decision": {
@@ -1212,7 +1393,7 @@ async def test_web_agent3_executor_records_minimal_observation(
         "action": "read",
         "source": "nhentai",
         "query": "652244",
-        "result": "generic page body",
+        "result": "page body",
     }
     assert update["observations"] == [record]
 
@@ -1235,7 +1416,7 @@ async def test_web_agent3_evaluator_continues_with_feedback(
         "observations": [
             {
                 "action": "search",
-                "source": "generic",
+                "source": "web_search",
                 "query": "current docs",
                 "result": "search result",
             }
@@ -1294,7 +1475,7 @@ async def test_web_agent3_run_subgraph_returns_expected_keys() -> None:
     assert sub_state["prompt_timestamp"] == "2026-04-27 12:00"
     assert sub_state["router_decision"] == {
         "action": "stop",
-        "source": "generic",
+        "source": "web_read",
         "query": "",
     }
     assert sub_state["context"] == {

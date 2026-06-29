@@ -10,6 +10,7 @@ import pytest
 
 from kazusa_ai_chatbot.rag import web_agent3 as web_module
 from kazusa_ai_chatbot.rag.web_agent3.subagent import nhentai as nhentai_subagent
+from kazusa_ai_chatbot import config
 
 
 class _FakeResponse:
@@ -194,12 +195,45 @@ def test_nhentai_extracts_gallery_ids_from_supported_targets() -> None:
         assert gallery_id == expected_id
 
 
+def test_nhentai_is_disabled_without_token_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """nHentai source availability should follow imported config state."""
+    monkeypatch.setattr(nhentai_subagent, "NHENTAI_SOURCE_ENABLED", False)
+
+    assert nhentai_subagent.is_enabled() is False
+
+
+def test_nhentai_uses_token_from_config_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Request headers should use the token imported from config.py."""
+    monkeypatch.setattr(nhentai_subagent, "NHENTAI_TOKEN", "secret-token")
+
+    headers = nhentai_subagent._headers_for_request()
+
+    assert headers == {
+        "User-Agent": nhentai_subagent._NHENTAI_USER_AGENT,
+        "Authorization": "Key secret-token",
+    }
+
+
+def test_nhentai_provider_constants_remain_source_local() -> None:
+    """Stable nHentai provider constants should stay out of config.py."""
+    assert nhentai_subagent._NHENTAI_API_BASE_URL == "https://nhentai.net/api/v2"
+    assert nhentai_subagent._NHENTAI_PUBLIC_BASE_URL == "https://nhentai.net/g"
+    assert nhentai_subagent._NHENTAI_USER_AGENT
+    assert not hasattr(config, "NHENTAI_API_BASE_URL")
+    assert not hasattr(config, "NHENTAI_PUBLIC_BASE_URL")
+    assert not hasattr(config, "NHENTAI_USER_AGENT")
+
+
 @pytest.mark.asyncio
 async def test_nhentai_read_returns_title_and_grouped_tags_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Read should call the gallery API and compact to title plus tags."""
-    monkeypatch.setenv("NHENTAI_TOKEN", "secret-token")
+    monkeypatch.setattr(nhentai_subagent, "NHENTAI_TOKEN", "secret-token")
     calls = _install_fake_client(
         monkeypatch,
         response=_FakeResponse(status_code=200, payload=_gallery_payload()),
@@ -252,7 +286,7 @@ async def test_nhentai_search_returns_bounded_gallery_candidates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Search should call the gallery search API and cap compact candidates."""
-    monkeypatch.delenv("NHENTAI_TOKEN", raising=False)
+    monkeypatch.setattr(nhentai_subagent, "NHENTAI_TOKEN", "")
     calls = _install_fake_client(
         monkeypatch,
         response=_FakeResponse(status_code=200, payload=_search_payload()),

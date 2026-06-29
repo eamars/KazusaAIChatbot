@@ -554,6 +554,8 @@ WEB_URL_READER_ACCEPT_LANGUAGE = _non_empty_string_from_env(
     "WEB_URL_READER_ACCEPT_LANGUAGE",
     "en-US,en;q=0.9",
 )
+NHENTAI_TOKEN = os.getenv("NHENTAI_TOKEN", "").strip()
+NHENTAI_SOURCE_ENABLED = bool(NHENTAI_TOKEN)
 
 # Maximum guideline strings retained for each interaction-style category in
 # persisted user or group-channel style images.

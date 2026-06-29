@@ -41,17 +41,17 @@ or new RAG supervisor fields.
 | `url_reader.py` | Process-local HTTP(S) URL reader and text extractor. |
 | `providers.py` | Thin source decision executor used by the graph executor. |
 | `subagent/__init__.py` | Auto-discovery and validation for source subagent modules. |
-| `subagent/generic.py` | Generic search/read subagent backed by direct search and URL-read tools. |
-| `subagent/bilibili.py` | Bilibili subagent with temporary generic web fallback. |
-| `subagent/youtube.py` | YouTube subagent with temporary generic web fallback. |
-| `subagent/nhentai.py` | nHentai API v2 metadata/search subagent. |
+| `subagent/web_read.py` | Direct URL-read source, always available. |
+| `subagent/web_search.py` | Direct search source, available when `SEARXNG_URL` is configured. |
+| `subagent/nhentai.py` | nHentai API v2 metadata/search source, available when `NHENTAI_TOKEN` is configured. |
 | `contracts.py` | Minimal router decision and test/comparison data contracts. |
 
 ## Direct Web Facility Rule
 
-Ordinary webpage search uses the configured direct SearXNG JSON endpoint when
-`SEARXNG_URL` is set. If `SEARXNG_URL` is empty, search returns a bounded
-unavailable observation and the graph continues.
+Ordinary webpage search is exposed through `web_search` when the direct search
+endpoint is configured by `SEARXNG_URL`. If `SEARXNG_URL` is empty,
+`web_search` is not registered and the router does not see search as an
+available source.
 
 URL-read execution is process-local HTTP(S) fetching. It does not require
 SearXNG or MCP. Localhost, loopback, private LAN addresses, and intranet
@@ -71,7 +71,8 @@ observation for the graph.
 
 Source-specific metadata/search is owned by the selected source subagent.
 Currently, only `nhentai` has an approved direct provider API path, limited to
-gallery metadata reads and gallery search through its own subagent.
+gallery metadata reads and gallery search through its own subagent. If
+`NHENTAI_TOKEN` is empty, `nhentai` is not registered.
 
 ## Prompt Rule
 
@@ -98,50 +99,70 @@ The router/generator is the first LLM stage. It returns exactly:
 ```json
 {
     "action": "search",
-    "source": "generic",
+    "source": "web_search",
     "query": "local tool router demo web agent architecture"
 }
 ```
 
-Allowed actions are `search`, `read`, and `stop`. Allowed sources are
-`generic`, `bilibili`, `youtube`, and `nhentai`. The executor dispatches only
-by `source` and `action`; it does not reinterpret `query`.
+Allowed actions are `search`, `read`, and `stop`. Allowed sources are the
+enabled source modules discovered from `subagent/*.py`. The executor dispatches
+only by `source` and `action`; it does not reinterpret `query`. `stop` is
+handled by the graph executor before source dispatch.
 
 `query` is passed unchanged to the selected source subagent. Source-specific
 ID extraction, API parameter building, credential use, and tool variants are
-subagent responsibilities. In the current stage, only `nhentai` implements
-deterministic gallery-id extraction and API parameter building.
+subagent responsibilities. `nhentai` implements deterministic gallery-id
+extraction and API parameter building.
 
 ## Source Subagents
 
-The source dispatcher selects one of:
+The source dispatcher selects from the enabled final roster:
 
-- `generic`
-- `bilibili`
-- `youtube`
-- `nhentai`
+- `web_read`: always available for direct HTTP(S) URL reads.
+- `web_search`: available when `SEARXNG_URL` is configured.
+- `nhentai`: available when `NHENTAI_TOKEN` is configured.
 
 The source subagent roster and prompt-facing descriptions are auto-discovered
-from `subagent/*.py`. Each source module exposes `SOURCE`, `DESCRIPTION`, and
-`execute(...)`. `DESCRIPTION` includes source-local `query` generation rules
-for the router prompt. `generic` uses direct SearXNG search and direct URL
-reads.
-`nhentai` uses the official API v2 for metadata-only gallery reads and bounded
-gallery searches. Bilibili and YouTube prove the dispatch point for future
-provider APIs. In this stage each source module temporarily delegates to the
-generic web subagent and carries:
+from `subagent/*.py`. Each source module exposes `SOURCE`, `DESCRIPTION`,
+`SUPPORTED_ACTIONS`, and `execute(...)`. Configuration-dependent source modules
+also expose `is_enabled()`. `DESCRIPTION` includes source-local `query`
+generation rules for the router prompt.
 
-```text
-FIXME(web_agent3): replace temporary generic web fallback with a source provider implementation inside this subagent.
-```
+`web_read` uses direct URL reads. `web_search` uses the configured direct
+search endpoint. `nhentai` uses the official API v2 for metadata-only gallery
+reads and bounded gallery searches. The nHentai subagent imports
+`NHENTAI_TOKEN` and `NHENTAI_SOURCE_ENABLED` from `config.py`; it must not put
+credentials, headers, image URLs, download URLs, comments, favorite state, or
+account data into observations.
 
-Real Bilibili, YouTube, local-tool variants, external-tool variants,
-rate-limit policy, and additional source-specific parsers require a later
-approved plan.
-The nHentai subagent may read its optional API token from the process
-environment at execution time and must not put credentials, headers, image
-URLs, download URLs, comments, favorite state, or account data into
-observations.
+## Create New Subagent
+
+New source subagents follow this interface guide:
+
+- Create one source module under `subagent/`.
+- Expose `SOURCE`, `DESCRIPTION`, and `execute(decision)`.
+- Keep source-specific execution inside the source module.
+- Keep target parsing inside the source module.
+- Keep API parameter construction inside the source module.
+- Keep request execution inside the source module.
+- Keep result compaction inside the source module.
+- Keep source limits inside the source module.
+- Keep source error observations inside the source module.
+- Keep stable provider constants inside the source module.
+- Place user-specific configuration in `config.py`.
+- Place deployment-specific configuration in `config.py`.
+- Read configuration by importing constants from `kazusa_ai_chatbot.config`.
+- Represent configuration-dependent availability with `is_enabled()`.
+- Register available subagents through package discovery.
+- Keep `DESCRIPTION` focused on user-visible capability and query-shaping
+  guidance.
+- Return prompt-safe observations with bounded source evidence.
+- Add deterministic tests for configuration-dependent registration states.
+- Add deterministic tests for source execution with injected configuration.
+- Add deterministic tests for prompt-safe observations.
+- Update this ICD when the source interface changes.
+- Update `docs/HOWTO.md` when the source adds user-specific or
+  deployment-specific configuration.
 
 ## Current Verification
 
@@ -155,8 +176,9 @@ Focused deterministic tests must cover:
 - query pass-through from executor to source subagents.
 - source subagent discovery from per-source modules under `subagent/`.
 - source-local query generation rules rendered from subagent descriptions.
-- Bilibili and YouTube source adapters keep their own modules while using the
-  temporary generic web fallback.
+- configuration-dependent source registration for `web_search` and `nhentai`.
+- graph-local stop handling before source dispatch.
+- source/action normalization for `web_read`, `web_search`, and `nhentai`.
 - nHentai `read` returns only compact title/name and grouped tags.
 - nHentai `search` returns bounded gallery candidates without image, download,
   comment, favorite, header, or token data.

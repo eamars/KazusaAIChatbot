@@ -113,6 +113,7 @@ WEB_URL_READ_MAX_CHARS=10000
 WEB_URL_READ_REDIRECT_LIMIT=5
 WEB_URL_READER_USER_AGENT=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36
 WEB_URL_READER_ACCEPT_LANGUAGE=en-US,en;q=0.9
+NHENTAI_TOKEN=
 
 # Optional generic MCP servers and timeouts
 MCP_SERVERS={}
@@ -185,16 +186,18 @@ Qwen3-family model names, and Qwen-compatible Qwopus 3.x model names.
 `00000000-0000-4000-8000-000000000001`. Set it explicitly in production so the
 active character keeps a stable first-class identity across service runs.
 
-`SEARXNG_URL` is optional. When it is empty, the web agent can still read
-HTTP(S) URLs directly from the Kazusa process, but web search returns a bounded
-unavailable observation. When it is set, search uses the configured SearXNG
-`/search?format=json` endpoint directly. URL reads do not require SearXNG or
-MCP, and local/private HTTP(S) resources reachable from the Kazusa process are
-allowed by default. URL reads always use browser-navigation headers,
-process-memory cookies, locally supported compression encodings, and common
-HTTP anti-bot challenge detection. They do not execute JavaScript, solve
-CAPTCHA, or impersonate browser TLS fingerprints. `MCP_SERVERS` remains
-available for unrelated generic MCP tools.
+`web_read` is always available and can read HTTP(S) URLs directly from the
+Kazusa process. `SEARXNG_URL` enables `web_search`; when it is empty, the
+search source is not registered as an available web_agent3 source. When it is
+set, search uses the configured SearXNG `/search?format=json` endpoint
+directly. URL reads do not require SearXNG or MCP, and local/private HTTP(S)
+resources reachable from the Kazusa process are allowed by default. URL reads
+always use browser-navigation headers, process-memory cookies, locally
+supported compression encodings, and common HTTP anti-bot challenge detection.
+They do not execute JavaScript, solve CAPTCHA, or impersonate browser TLS
+fingerprints. `NHENTAI_TOKEN` enables the nHentai metadata/search source; when
+it is empty, that source is not registered. `MCP_SERVERS` remains available for
+unrelated generic MCP tools.
 
 When LM Studio reports
 `The model has crashed without additional information.`, chat model calls made

@@ -7,7 +7,10 @@ from typing import Any, Literal, cast
 
 _DEFAULT_EXPECTED_RESPONSE = "返回能直接解决当前槽位的来源扎根网页证据。"
 _ROUTER_ACTIONS = ("search", "read", "stop")
-_ROUTER_SOURCES = ("generic", "bilibili", "youtube", "nhentai")
+_ROUTER_SOURCES = ("web_read",)
+_ROUTER_SOURCE_ACTIONS = {
+    "web_read": ("read",),
+}
 _VALID_STATUS_ORDER = {
     "not_found": 0,
     "partial": 1,
@@ -64,11 +67,43 @@ def _text_field(value: object) -> str:
     return return_value
 
 
+def _source_supports_action(
+    source: str,
+    action: str,
+    source_actions: dict[str, tuple[str, ...]],
+) -> bool:
+    """Return whether an enabled source executes the requested action."""
+    supported_actions = source_actions.get(source, ())
+    supports_action = action in supported_actions
+    return supports_action
+
+
+def _is_http_url(raw_value: str) -> bool:
+    """Return whether a router query is a direct HTTP(S) URL target."""
+    lowered_value = raw_value.lower()
+    is_http_url = (
+        lowered_value.startswith("http://")
+        or lowered_value.startswith("https://")
+    )
+    return is_http_url
+
+
+def _stop_router_decision() -> _RouterDecision:
+    """Build the graph-local stop decision placeholder."""
+    decision = _RouterDecision(
+        action="stop",
+        source="web_read",
+        query="",
+    )
+    return decision
+
+
 def _normalize_router_decision(
     raw_decision: dict[str, Any],
     *,
     fallback_query: str,
     valid_sources: tuple[str, ...] | None = None,
+    source_actions: dict[str, tuple[str, ...]] | None = None,
 ) -> _RouterDecision:
     """Validate the router LLM decision and discard unsupported fields.
 
@@ -79,7 +114,9 @@ def _normalize_router_decision(
     Returns:
         Router decision containing only action, source, and query.
     """
-    source_names = valid_sources or _ROUTER_SOURCES
+    source_names = _ROUTER_SOURCES if valid_sources is None else valid_sources
+    enabled_sources = set(source_names)
+    action_map = _ROUTER_SOURCE_ACTIONS if source_actions is None else source_actions
     raw_action = _text_field(raw_decision.get("action")).lower()
     raw_source = _text_field(raw_decision.get("source")).lower()
     query = _text_field(raw_decision.get("query"))
@@ -89,17 +126,68 @@ def _normalize_router_decision(
     else:
         action = "search"
 
-    if raw_source in source_names:
-        source = raw_source
-    else:
-        source = "generic"
-
     if action == "stop":
-        query = ""
-    elif not query:
-        source = "generic"
-        action = "search"
-        query = fallback_query.strip()
+        decision = _stop_router_decision()
+        return decision
+
+    if not query:
+        if (
+            "web_search" in enabled_sources
+            and _source_supports_action("web_search", "search", action_map)
+        ):
+            source = "web_search"
+            action = "search"
+            query = fallback_query.strip()
+        else:
+            decision = _stop_router_decision()
+            return decision
+
+    elif action == "read":
+        if (
+            raw_source in enabled_sources
+            and _source_supports_action(raw_source, "read", action_map)
+        ):
+            source = raw_source
+        elif (
+            "web_read" in enabled_sources
+            and _source_supports_action("web_read", "read", action_map)
+            and _is_http_url(query)
+        ):
+            source = "web_read"
+        else:
+            decision = _stop_router_decision()
+            return decision
+
+    elif action == "search":
+        if raw_source == "nhentai":
+            if (
+                raw_source in enabled_sources
+                and _source_supports_action(raw_source, "search", action_map)
+            ):
+                source = raw_source
+            else:
+                decision = _stop_router_decision()
+                return decision
+        elif (
+            raw_source in enabled_sources
+            and _source_supports_action(raw_source, "search", action_map)
+        ):
+            source = raw_source
+        elif (
+            "web_search" in enabled_sources
+            and _source_supports_action("web_search", "search", action_map)
+        ):
+            source = "web_search"
+        else:
+            decision = _stop_router_decision()
+            return decision
+
+    if not query:
+        if source == "web_search":
+            query = fallback_query.strip()
+        if not query:
+            decision = _stop_router_decision()
+            return decision
 
     decision = _RouterDecision(action=action, source=source, query=query)
     return decision

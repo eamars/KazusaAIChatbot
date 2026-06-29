@@ -230,6 +230,54 @@ class TestDirectWebConfig:
         assert result.returncode != 0
         assert "SEARXNG_URL must be empty or an HTTP(S) URL" in result.stderr
 
+    def test_config_allows_empty_nhentai_token(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env.pop("NHENTAI_TOKEN", None)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(repr(config.NHENTAI_TOKEN)); "
+                    "print(config.NHENTAI_SOURCE_ENABLED)"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.splitlines() == ["''", "False"]
+
+    def test_config_reads_nhentai_token_from_environment(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["NHENTAI_TOKEN"] = " secret-token "
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(config.NHENTAI_TOKEN); "
+                    "print(config.NHENTAI_SOURCE_ENABLED)"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.splitlines() == ["secret-token", "True"]
+
 
 class TestCache2Config:
     def test_cache2_max_entries_is_positive(self):

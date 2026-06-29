@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 from http import HTTPStatus
-import os
 import re
 from typing import Any
 
 import httpx
 
+from kazusa_ai_chatbot.config import NHENTAI_SOURCE_ENABLED, NHENTAI_TOKEN
 from kazusa_ai_chatbot.rag.web_agent3.contracts import _RouterDecision
 
 SOURCE = "nhentai"
+SUPPORTED_ACTIONS = ("read", "search")
 DESCRIPTION = '''nHentai 图库元数据读取和图库搜索。
 生成 query 时：
 - search: 保留用户给出的图库搜索词、标签筛选、精确短语、排除词或数字编号。
@@ -41,6 +42,11 @@ _API_GALLERY_RE = re.compile(
 )
 
 
+def is_enabled() -> bool:
+    """Return whether nHentai source registration is configured."""
+    return NHENTAI_SOURCE_ENABLED
+
+
 def _extract_gallery_id(raw_target: str) -> int | None:
     """Extract a gallery id from a bare number, gallery URL, or API URL."""
     stripped_target = raw_target.strip()
@@ -67,9 +73,8 @@ def _gallery_url(gallery_id: int) -> str:
 def _headers_for_request() -> dict[str, str]:
     """Build per-request API headers without exposing credentials to callers."""
     headers = {"User-Agent": _NHENTAI_USER_AGENT}
-    token = (os.getenv("NHENTAI_TOKEN") or "").strip()
-    if token:
-        headers["Authorization"] = f"Key {token}"
+    if NHENTAI_TOKEN:
+        headers["Authorization"] = f"Key {NHENTAI_TOKEN}"
 
     return headers
 
