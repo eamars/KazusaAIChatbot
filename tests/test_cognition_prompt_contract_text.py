@@ -542,11 +542,11 @@ def test_l2d_prompt_preserves_resolver_terminal_boundaries() -> None:
     _assert_contains_any(
         'ACTION_ROUTER_PROMPT',
         prompt_text,
-        ('不要为了给一般判断背书而启动 `web_evidence`',
-         '不要为了给一般判断背书而启动',
-         '证据能力'),
+        ('不要为了给一般判断背书而启动', '证据能力'),
         'no evidence capability for backing general judgment',
     )
+    assert 'web_evidence' not in prompt_text
+    assert 'rag_evidence' not in prompt_text
     assert '可行动标准和最后核实步骤' in prompt_text
     assert '只给阻塞说明、可行动标准和最后核实步骤' in prompt_text
     assert '不要继续换同义词重复搜索' in prompt_text

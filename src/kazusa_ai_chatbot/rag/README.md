@@ -196,7 +196,7 @@ persona_supervisor2
   -> stage_0_msg_decontexualizer
   -> stage_1_goal_resolver
        L1 -> L2 -> L2d cognition cycle
-       L2d selects `rag_evidence` or `web_evidence` only when evidence is needed
+       L2d selects `local_context_recall` only when local/private context is needed
        call_rag_supervisor(original_query, character_name, context)
        -> rag_initializer
             decomposes the query into ordered unknown_slots
@@ -589,8 +589,10 @@ Conversation retrieval is cached only for closed historical windows with both `f
 
 ## Integration With Cognition
 
-RAG 2 is called from the cognition resolver only when L2d selects an evidence
-capability.
+RAG 2 is called from the cognition resolver only when L2d selects
+`local_context_recall`. Public/current/external answer investigation is exposed
+to L2d as `public_answer_research` and handled by the complex task resolver,
+with web/source retrieval remaining an internal provider below that boundary.
 
 Cognition reads `rag_result`, not raw RAG supervisor state. The intended division is:
 

@@ -235,7 +235,7 @@ async def test_surface_collector_emits_content_plan_without_anchor_append() -> N
                 {
                     'schema_version': 'resolver_observation.v1',
                     'observation_id': 'raw-observation-id',
-                    'capability_kind': 'web_evidence',
+                    'capability_kind': 'public_answer_research',
                     'request_objective': 'Do not append.',
                     'request_reason': 'Do not append.',
                     'status': 'succeeded',

@@ -42,10 +42,10 @@ decontextualizer
   -> selected L3 surface or private/no-response finalization
 ```
 
-RAG, web/current evidence, HIL, approval preparation, and private
-self-resolution are resolver capabilities only after L2d selects them. Evidence
-does not speak as persona, and deterministic code does not decide that evidence
-is semantically needed.
+Local context recall, public answer research, HIL, approval preparation, and
+private self-resolution are resolver capabilities only after L2d selects them.
+Evidence does not speak as persona, and deterministic code does not decide that
+evidence is semantically needed.
 
 ## Ownership Boundary
 
@@ -207,8 +207,8 @@ Allowed resolver capabilities are:
 
 | Capability | Handler behavior | Notes |
 | --- | --- | --- |
-| `rag_evidence` | Runs existing RAG 2 through `run_rag_evidence_for_persona_state(...)`. | Uses the L2d objective as the fresh evidence query while preserving the original request in context. |
-| `web_evidence` | Runs the same RAG-like evidence path for current/external evidence. | It is not a direct web tool call from the resolver loop. |
+| `local_context_recall` | Runs existing RAG 2 through `run_rag_evidence_for_persona_state(...)`. | Owns local/private/persona/user/conversation memory, relationship, profile, commitment, and recall evidence. |
+| `public_answer_research` | Calls `kazusa_ai_chatbot.complex_task_resolver.resolve_complex_task(...)` through declared request/context/options IO. | Owns public, current, external, source-bound answer investigation and returns semantic knowledge sections for cognition to judge. |
 | `human_clarification` | Returns a blocked observation and creates a pending HIL row. | L3/dialog renders the actual visible question. |
 | `approval_preparation` | Returns a blocked observation and creates a pending approval row. | It never executes the side effect being previewed. |
 | `self_goal_resolution` | Allows private internal-source self-resolution; blocks user-message source. | Visible output still requires normal L2d action selection. |
@@ -223,8 +223,14 @@ cognition cycle can decide what remains necessary.
 
 ## RAG And Shared-Memory Prewarm
 
-Full RAG 2 remains demand-driven. It runs only when L2d selects `rag_evidence`
-or `web_evidence`.
+Full RAG 2 remains demand-driven. It runs only when L2d selects
+`local_context_recall`. Public/current/external investigation is exposed to L2d
+as `public_answer_research` and is handled by the complex task resolver; any
+web/source helpers stay internal to that module. The projected observation
+contains `knowledge_we_know_so_far`, `knowledge_still_lacking`,
+`recommended_next_iteration`, and `evidence_boundary_notes`. These fields are
+evidence context for the next cognition cycle, not a resolver-side judgment
+about whether the original goal is answered.
 
 There is one separate first-cycle prewarm lane implemented in
 `capabilities.py` and joined in `persona_supervisor2_cognition.py` before L2a:

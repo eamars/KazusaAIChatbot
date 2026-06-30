@@ -954,7 +954,7 @@ def _budget(
 
 
 def _resolver_evidence_call_count(cognition_output: dict[str, Any]) -> int:
-    """Count resolver-selected retrieval observations recorded by cognition."""
+    """Count resolver-selected evidence observations recorded by cognition."""
 
     resolver_state = cognition_output.get("resolver_state")
     if not isinstance(resolver_state, dict):
@@ -970,7 +970,7 @@ def _resolver_evidence_call_count(cognition_output: dict[str, Any]) -> int:
         if not isinstance(observation, dict):
             continue
         capability_kind = observation.get("capability_kind")
-        if capability_kind in {"rag_evidence", "web_evidence"}:
+        if capability_kind in {"local_context_recall", "public_answer_research"}:
             retrieval_count += 1
     return_value = retrieval_count
     return return_value

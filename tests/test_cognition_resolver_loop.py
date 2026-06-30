@@ -44,7 +44,7 @@ from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 def _resolver_request(
     *,
-    capability_kind: str = "rag_evidence",
+    capability_kind: str = "local_context_recall",
     objective: str = "检索当前用户与这个问题有关的关系和记忆证据。",
 ) -> dict:
     return {
@@ -269,7 +269,7 @@ def test_resolver_context_projects_original_goal_and_objectives() -> None:
         {
             "schema_version": RESOLVER_OBSERVATION_VERSION,
             "observation_id": "resolver_obs_web_1",
-            "capability_kind": "web_evidence",
+            "capability_kind": "public_answer_research",
             "request_objective": "检索奥克兰 CBD 餐厅当前营业状态。",
             "request_reason": "需要当前营业证据。",
             "status": "failed",
@@ -413,7 +413,7 @@ async def test_loop_runs_cognition_capability_then_cognition_again() -> None:
     assert len(resolver_state["observations"]) == 1
     assert len(resolver_state["cycle_traces"]) == 2
     assert resolver_state["cycle_traces"][0]["selected_capability_kind"] == (
-        "rag_evidence"
+        "local_context_recall"
     )
     assert resolver_state["cycle_traces"][0]["observation_ids"] == [
         "resolver_obs_trust_memory"
@@ -530,7 +530,7 @@ async def test_loop_records_timeout_observation_then_returns_to_cognition() -> N
     assert "timed out" in cognition_inputs[1]["resolver_context"]
     observation = result["resolver_state"]["observations"][0]
     assert observation["status"] == "failed"
-    assert observation["capability_kind"] == "rag_evidence"
+    assert observation["capability_kind"] == "local_context_recall"
     assert observation["request_objective"] == request["objective"]
     assert "timed out" in observation["prompt_safe_summary"]
     terminal_event = build_resolver_terminal_event(result, duration_ms=1)
@@ -546,7 +546,7 @@ async def test_loop_blocks_duplicate_capability_objective_before_execution() -> 
     """Exact repeated resolver objectives should not execute indefinitely."""
 
     request = _resolver_request(
-        capability_kind="web_evidence",
+        capability_kind="public_answer_research",
         objective="检索同一个外部证据目标。",
     )
     execute_count = 0
@@ -602,11 +602,11 @@ async def test_loop_blocks_same_capability_retry_after_timeout() -> None:
     """Timed-out capability work should not be retried with renamed objective."""
 
     first_request = _resolver_request(
-        capability_kind="web_evidence",
+        capability_kind="public_answer_research",
         objective="检索当前外部事实。",
     )
     renamed_request = _resolver_request(
-        capability_kind="web_evidence",
+        capability_kind="public_answer_research",
         objective="换一种说法再次检索当前外部事实。",
     )
     execute_count = 0
@@ -655,7 +655,7 @@ async def test_duplicate_final_cognition_repeated_request_gets_terminal_speak() 
     """Terminal duplicate handling should not leave the user with silence."""
 
     request = _resolver_request(
-        capability_kind="web_evidence",
+        capability_kind="public_answer_research",
         objective="检索同一个当前外部事实目标。",
     )
     execute_count = 0
@@ -719,11 +719,11 @@ async def test_duplicate_final_cognition_changed_request_gets_terminal_speak() -
     """Terminal duplicate handling should not run a rephrased tool request."""
 
     original_request = _resolver_request(
-        capability_kind="web_evidence",
+        capability_kind="public_answer_research",
         objective="检索同一个当前外部事实目标。",
     )
     rephrased_request = _resolver_request(
-        capability_kind="web_evidence",
+        capability_kind="public_answer_research",
         objective="Search for the same current external evidence with new words.",
     )
     cognition_call_count = 0
@@ -890,7 +890,7 @@ async def test_loop_converts_max_cycle_request_to_visible_blocker() -> None:
     """A terminal resolver request should not silently suppress final output."""
 
     request = _resolver_request(
-        capability_kind="web_evidence",
+        capability_kind="public_answer_research",
         objective="继续验证餐厅当前营业和排队情况。",
     )
     cognition_inputs: list[dict] = []
@@ -1989,7 +1989,7 @@ async def test_rag_capability_uses_objective_and_preserves_original_request(
         "Original user request about trust."
     )
     assert observation["status"] == "succeeded"
-    assert observation["capability_kind"] == "rag_evidence"
+    assert observation["capability_kind"] == "local_context_recall"
     assert observation["request_objective"] == request["objective"]
     assert observation["request_reason"] == request["reason"]
     assert observation["rag_result"]["answer"] == "找到一条关系记忆。"
@@ -2069,60 +2069,92 @@ async def test_internal_thought_rag_capability_uses_existing_rag_path(
     ]
     assert captured["character_name"] == "Kazusa"
     assert observation["status"] == "succeeded"
-    assert observation["capability_kind"] == "rag_evidence"
+    assert observation["capability_kind"] == "local_context_recall"
     assert observation["rag_result"]["answer"] == "找到一条群聊前文证据。"
     assert "conversation_evidence" in observation["rag_result"]
 
 
 @pytest.mark.asyncio
-async def test_web_evidence_uses_existing_rag_path_without_mcp_preflight(
+async def test_public_answer_research_uses_complex_resolver(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Web evidence should rely on the existing RAG supervisor boundary."""
+    """Public answer research should run the complex resolver boundary."""
 
     captured: dict = {}
 
-    async def call_rag_supervisor(
-        *,
-        fresh_query: str,
-        reply_context: dict,
-        character_name: str,
-        context: dict,
-    ) -> dict[str, object]:
-        captured["fresh_query"] = fresh_query
-        captured["reply_context"] = reply_context
-        captured["character_name"] = character_name
+    async def resolve_complex_task(request: dict, context: dict, options=None) -> dict:
+        captured["request"] = request
         captured["context"] = context
+        captured["options"] = options
         result = {
-            "answer": "找到一条网页证据。",
-            "known_facts": [
-                {
-                    "slot": "Web-evidence: current public fact",
-                    "agent": "web_agent3",
-                    "resolved": True,
-                    "summary": "网页证据显示当前事实可用。",
-                    "raw_result": {
-                        "projection_payload": {"web_rows": []},
-                    },
-                }
+            "schema_version": "complex_task_resolution_packet.v1",
+            "root_question": "查询当前公共网页事实。",
+            "investigation_summary": "找到一条网页证据。",
+            "knowledge_we_know_so_far": ["网页证据显示当前事实可用。"],
+            "knowledge_still_lacking": [],
+            "recommended_next_iteration": [
+                "由 cognition 判断是否足够进入可见回答。",
             ],
-            "unknown_slots": [],
-            "loop_count": 1,
+            "evidence_boundary_notes": [],
+            "graph": {
+                "schema_version": "complex_task_graph.v1",
+                "root_node_id": "root",
+                "active_node_id": "root",
+                "nodes": {
+                    "root": {
+                        "schema_version": "complex_task_node.v1",
+                        "node_id": "root",
+                        "parent_id": None,
+                        "depth": 0,
+                        "objective": "查询当前公共网页事实。",
+                        "node_kind": "root",
+                        "status": "resolved",
+                        "children": [],
+                        "result_summary": "找到一条网页证据。",
+                        "answer_text": "找到一条网页证据。",
+                        "cannot_answer_reason": None,
+                        "source_backed_facts": ["网页证据显示当前事实可用。"],
+                        "assumptions_or_inferences": [],
+                        "evidence_refs": [],
+                        "source_observation_ids": [],
+                        "collapsed_into": None,
+                        "attempts": [],
+                    },
+                },
+                "collapse_events": [],
+                "traversal_order": ["root"],
+                "max_nodes": 8,
+                "max_depth": 3,
+            },
+            "trace_summary": {
+                "iterations": 1,
+                "nodes_resolved": 1,
+                "nodes_blocked": 0,
+                "nodes_pending": 0,
+                "subagent_calls": [],
+                "failure_stage": "",
+            },
+            "evidence_refs": [
+                {
+                    "schema_version": "evidence_ref.v1",
+                    "evidence_kind": "tool_result",
+                    "evidence_id": "complex-task-root",
+                    "owner": "complex_task_resolver",
+                    "excerpt": "网页证据显示当前事实可用。",
+                    "observed_at": "2026-05-30T00:00:00+00:00",
+                },
+            ],
         }
         return result
 
     monkeypatch.setattr(
         capabilities_module,
-        "call_quote_aware_rag_supervisor",
-        call_rag_supervisor,
-    )
-    monkeypatch.setattr(
-        capabilities_module.event_logging,
-        "record_rag_stage_event",
-        AsyncMock(),
+        "resolve_complex_task",
+        resolve_complex_task,
+        raising=False,
     )
     request = _resolver_request(
-        capability_kind="web_evidence",
+        capability_kind="public_answer_research",
         objective="查询当前公共网页事实。",
     )
 
@@ -2131,15 +2163,24 @@ async def test_web_evidence_uses_existing_rag_path_without_mcp_preflight(
         _resolver_state(),
     )
 
-    assert captured["fresh_query"] == request["objective"]
-    assert captured["reply_context"] == _resolver_state()["reply_context"]
-    assert captured["character_name"] == "Kazusa"
-    assert captured["context"]["original_user_request"] == (
+    assert captured["request"]["objective"] == request["objective"]
+    assert captured["request"]["source"] == "l2d"
+    assert captured["context"]["conversation_summary"] == (
         "Original user request about trust."
     )
     assert observation["status"] == "succeeded"
-    assert observation["capability_kind"] == "web_evidence"
-    assert observation["rag_result"]["answer"] == "找到一条网页证据。"
+    assert observation["capability_kind"] == "public_answer_research"
+    assert observation["prompt_safe_summary"] == "找到一条网页证据。"
+    assert observation["knowledge_projection"] == {
+        "investigation_summary": "找到一条网页证据。",
+        "knowledge_we_know_so_far": ["网页证据显示当前事实可用。"],
+        "knowledge_still_lacking": [],
+        "recommended_next_iteration": [
+            "由 cognition 判断是否足够进入可见回答。",
+        ],
+        "evidence_boundary_notes": [],
+    }
+    assert observation["evidence_refs"][0]["owner"] == "complex_task_resolver"
 
 
 @pytest.mark.asyncio

@@ -69,6 +69,7 @@ ACTION_ROUTER_PROMPT = '''\
 - 每个 deliverable 的 status 只能是 pending、partial、satisfied、blocked。证据不足但可以给框架时用 partial；必要证据、权限或用户信息无法取得时用 blocked；已由本轮 action detail 要求最终文字层覆盖时才用 satisfied。
 - resolver_goal_progress.final_response_requirements 是最终文字层的交付清单。如果本轮选择可见表面动作，它必须写清最终可见回答必须覆盖什么，不得少于未满足或部分满足的主要 deliverable。
 - source_backed_facts 只能写当前 RAG、web、媒体或 resolver observation 直接支持的事实；失败、超时、空结果、只有线索或只有未确认候选时，不得把目标属性升格为已确认事实。
+- 公共答案研究 observation 是语义证据包，不是最终裁决。读取其中的 knowledge_we_know_so_far、knowledge_still_lacking、recommended_next_iteration 和 evidence_boundary_notes 后，由本层判断是否已经足够进入可见回答、是否需要更窄的证据能力，或是否需要让最终回答说明证据边界。recommended_next_iteration 只是证据方向建议，不是必须继续检索的命令。
 - 对时效性、公开来源绑定或用户明确要求核实来源的事实，必须先取得相应证据才能给具体当前断言。若 bounded 尝试后仍无足够证据，选择可见表面动作收束，并要求最终回答区分来源确认、角色推断和当前无法验证的部分。
 - 如果检索答案按来源类别、证据轨道或比较对象区分结论，必须保留这些边界。某一路径未命中、只返回邻近线索或没有覆盖目标事实时，不得改写成跨来源一致、无冲突或已确认。
 - 续轮能力目标要窄到一个能力调用可以完成。不要把多个对象、多个属性和多个证据路径塞进一次检索目标。
