@@ -188,6 +188,64 @@ async def test_l2a_and_l2c1_fields_are_projected_without_raw_or_ids(
 
 
 @pytest.mark.asyncio
+async def test_candidates_sharing_trace_project_one_residual(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Split dialog rows from one cognition should not duplicate residuals."""
+
+    from kazusa_ai_chatbot.past_dialog_cognition import runtime
+
+    captured_trace_ids: list[str] = []
+
+    async def list_steps(
+        trace_ids: Sequence[str],
+        *,
+        stage_names: Sequence[str],
+    ) -> list[dict[str, Any]]:
+        del stage_names
+        captured_trace_ids.extend(trace_ids)
+        return [{
+            "trace_id": "trace-shared",
+            "stage_name": "l2a_conscious_framing",
+            "sequence": 1,
+            "parsed_output": {
+                "internal_monologue": "shared private residual",
+            },
+            "created_at": "2026-06-01T00:00:01Z",
+        }]
+
+    monkeypatch.setattr(
+        runtime,
+        "list_llm_trace_steps_for_trace_ids",
+        list_steps,
+    )
+
+    result = await runtime.build_past_dialog_cognition_context(
+        [
+            _candidate(
+                visible_text="first split message",
+                llm_trace_id="trace-shared",
+                conversation_row_id="row-1",
+                source="conversation_evidence",
+            ),
+            _candidate(
+                visible_text="second split message",
+                llm_trace_id="trace-shared",
+                conversation_row_id="row-2",
+                source="conversation_evidence",
+            ),
+        ],
+        character_global_user_id="character-1",
+    )
+
+    context = result["past_dialog_cognition_context"]
+    assert captured_trace_ids == ["trace-shared"]
+    assert result["candidate_count"] == 2
+    assert result["selected_count"] == 1
+    assert context.count("shared private residual") == 1
+
+
+@pytest.mark.asyncio
 async def test_candidate_filtering_happens_before_trace_lookup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

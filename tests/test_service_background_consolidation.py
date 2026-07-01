@@ -1145,6 +1145,7 @@ async def test_delivery_receipt_endpoint_returns_updated_and_not_found(monkeypat
             platform="qq",
             platform_channel_id="chan-1",
             delivery_tracking_id="delivery-1",
+            logical_message_index=1,
             platform_message_id="platform-123",
             delivered_at="2026-05-07T11:00:00+00:00",
             adapter="napcat",
@@ -1155,6 +1156,7 @@ async def test_delivery_receipt_endpoint_returns_updated_and_not_found(monkeypat
             platform="qq",
             platform_channel_id="chan-1",
             delivery_tracking_id="delivery-2",
+            logical_message_index=0,
             platform_message_id="platform-456",
         )
     )
@@ -1164,6 +1166,8 @@ async def test_delivery_receipt_endpoint_returns_updated_and_not_found(monkeypat
     assert missed.status == "not_found"
     assert missed.updated is False
     assert apply_receipt.await_count == 2
+    assert apply_receipt.await_args_list[0].kwargs["logical_message_index"] == 1
+    assert apply_receipt.await_args_list[1].kwargs["logical_message_index"] == 0
 
 
 @pytest.mark.asyncio

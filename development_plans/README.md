@@ -126,6 +126,7 @@ plans.
 | [llm_semantic_descriptor_validation_bugfix_plan.md](archive/completed/bugfix/llm_semantic_descriptor_validation_bugfix_plan.md) |
 | [l3_dialog_content_plan_contract_bugfix_plan.md](archive/completed/bugfix/l3_dialog_content_plan_contract_bugfix_plan.md) |
 | [lm_studio_model_unload_retry_bugfix_plan.md](archive/completed/bugfix/lm_studio_model_unload_retry_bugfix_plan.md) |
+| [logical_dialog_message_receipt_plan.md](archive/completed/bugfix/logical_dialog_message_receipt_plan.md) |
 | [memory_lifecycle_specialist_routing_plan.md](archive/completed/bugfix/memory_lifecycle_specialist_routing_plan.md) |
 | [no_due_commitment_lifecycle_resolution_plan.md](archive/completed/bugfix/no_due_commitment_lifecycle_resolution_plan.md) |
 | [rag2_cognition_identity_evidence_content_bugfix_plan.md](archive/completed/bugfix/rag2_cognition_identity_evidence_content_bugfix_plan.md) |

@@ -3251,6 +3251,7 @@ async def delivery_receipt(
         platform=req.platform,
         platform_channel_id=req.platform_channel_id,
         delivery_tracking_id=req.delivery_tracking_id,
+        logical_message_index=req.logical_message_index,
         platform_message_id=req.platform_message_id,
         delivered_at=delivered_at,
         adapter=req.adapter,

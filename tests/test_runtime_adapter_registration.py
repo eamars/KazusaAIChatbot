@@ -567,6 +567,39 @@ class _FakeNapCatWebSocket:
         })
 
 
+class _SequencedNapCatWebSocket:
+    """Websocket double that returns a new message id for each send_msg."""
+
+    def __init__(self) -> None:
+        self.sent_payloads: list[dict] = []
+        self._send_count = 0
+
+    async def send(self, payload: str) -> None:
+        """Capture the sent websocket frame."""
+
+        self.sent_payloads.append(json.loads(payload))
+
+    async def recv(self) -> str:
+        """Return an action response matching the most recent echo id."""
+
+        request_payload = self.sent_payloads[-1]
+        echo_id = request_payload["echo"]
+        if request_payload["action"] == "send_msg":
+            self._send_count += 1
+            return_value = json.dumps({
+                "echo": echo_id,
+                "status": "ok",
+                "data": {"message_id": f"outbound-{self._send_count}"},
+            })
+            return return_value
+        return_value = json.dumps({
+            "echo": echo_id,
+            "status": "ok",
+            "data": {},
+        })
+        return return_value
+
+
 class _FakeNapCatActionWebSocket:
     """Websocket double that returns responses by OneBot action name."""
 
@@ -1310,8 +1343,9 @@ async def test_napcat_handle_event_sends_brain_messages_as_sequence_with_first_r
             "delivery_tracking_id": "delivery-1",
         }),
         _DummyResponse({"status": "updated", "updated": True}),
+        _DummyResponse({"status": "updated", "updated": True}),
     ])
-    ws = _FakeNapCatWebSocket({"message_id": "outbound-1"})
+    ws = _SequencedNapCatWebSocket()
 
     await adapter.handle_event(
         {
@@ -1339,8 +1373,18 @@ async def test_napcat_handle_event_sends_brain_messages_as_sequence_with_first_r
     ]
     assert send_payloads[1]["params"]["message"] == "second"
     sleep.assert_awaited_once_with(1.0)
-    receipt_call = adapter.brain_client.post.await_args_list[1]
-    assert receipt_call.kwargs["json"]["platform_message_id"] == "outbound-1"
+    receipt_calls = [
+        call for call in adapter.brain_client.post.await_args_list
+        if call.args[0].endswith("/delivery_receipt")
+    ]
+    assert [
+        call.kwargs["json"]["platform_message_id"]
+        for call in receipt_calls
+    ] == ["outbound-1", "outbound-2"]
+    assert [
+        call.kwargs["json"]["logical_message_index"]
+        for call in receipt_calls
+    ] == [0, 1]
     await adapter.close()
 
 
@@ -1375,8 +1419,9 @@ async def test_napcat_handle_event_replaces_inline_delivery_mentions_across_mess
             "delivery_tracking_id": "delivery-1",
         }),
         _DummyResponse({"status": "updated", "updated": True}),
+        _DummyResponse({"status": "updated", "updated": True}),
     ])
-    ws = _FakeNapCatWebSocket({"message_id": "outbound-1"})
+    ws = _SequencedNapCatWebSocket()
 
     await adapter.handle_event(
         {
@@ -1447,8 +1492,9 @@ async def test_napcat_handle_event_does_not_wait_for_followup_delay(
             "delivery_tracking_id": "delivery-1",
         }),
         _DummyResponse({"status": "updated", "updated": True}),
+        _DummyResponse({"status": "updated", "updated": True}),
     ])
-    ws = _FakeNapCatWebSocket({"message_id": "outbound-1"})
+    ws = _SequencedNapCatWebSocket()
 
     await asyncio.wait_for(
         adapter.handle_event(
@@ -1532,6 +1578,7 @@ async def test_napcat_handle_event_posts_delivery_receipt_after_send():
         "platform": "qq",
         "platform_channel_id": "905393941",
         "delivery_tracking_id": "delivery-1",
+        "logical_message_index": 0,
         "platform_message_id": "outbound-1",
         "adapter": "napcat",
     }
@@ -2338,6 +2385,7 @@ async def test_discord_handle_message_posts_first_delivery_receipt(
         "platform": "discord",
         "platform_channel_id": "12345",
         "delivery_tracking_id": "delivery-1",
+        "logical_message_index": 0,
         "platform_message_id": "discord-reply-1",
         "adapter": "discord",
     }
@@ -2400,6 +2448,7 @@ async def test_discord_handle_message_sends_brain_messages_as_sequence_with_firs
             "delivery_tracking_id": "delivery-1",
         }),
         _DummyResponse({"status": "updated", "updated": True}),
+        _DummyResponse({"status": "updated", "updated": True}),
     ])
     message = _FakeDiscordMessage()
 
@@ -2409,8 +2458,18 @@ async def test_discord_handle_message_sends_brain_messages_as_sequence_with_firs
     assert message.reply_chunks == ["first"]
     assert message.channel.sent_chunks == ["second"]
     sleep.assert_awaited_once_with(1.0)
-    receipt_call = adapter._http_client.post.await_args_list[1]
-    assert receipt_call.kwargs["json"]["platform_message_id"] == "discord-reply-1"
+    receipt_calls = [
+        call for call in adapter._http_client.post.await_args_list
+        if call.args[0].endswith("/delivery_receipt")
+    ]
+    assert [
+        call.kwargs["json"]["platform_message_id"]
+        for call in receipt_calls
+    ] == ["discord-reply-1", "discord-send-1"]
+    assert [
+        call.kwargs["json"]["logical_message_index"]
+        for call in receipt_calls
+    ] == [0, 1]
     await adapter.close()
 
 
@@ -2440,6 +2499,7 @@ async def test_discord_on_message_replaces_inline_delivery_mentions_across_messa
             ],
             "delivery_tracking_id": "delivery-1",
         }),
+        _DummyResponse({"status": "updated", "updated": True}),
         _DummyResponse({"status": "updated", "updated": True}),
     ])
     message = _FakeDiscordMessage()
@@ -2488,6 +2548,7 @@ async def test_discord_on_message_does_not_wait_for_followup_delay(
             "use_reply_feature": True,
             "delivery_tracking_id": "delivery-1",
         }),
+        _DummyResponse({"status": "updated", "updated": True}),
         _DummyResponse({"status": "updated", "updated": True}),
     ])
     message = _FakeDiscordMessage()

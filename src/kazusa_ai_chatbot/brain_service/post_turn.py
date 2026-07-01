@@ -67,31 +67,36 @@ async def save_assistant_message(
     platform_channel_id = result["platform_channel_id"]
     platform_bot_id = result["platform_bot_id"]
     character_name = result["character_name"]
-    assistant_output = result["final_dialog"]
+    assistant_output: list[str] = []
+    for fragment in result["final_dialog"]:
+        clean_fragment = str(fragment).strip()
+        if clean_fragment:
+            assistant_output.append(clean_fragment)
     del logger
 
     if not assistant_output:
         return
 
-    body_text = "\n".join(assistant_output)
-    await record_assistant_outbound_message(
-        platform=platform,
-        platform_channel_id=platform_channel_id,
-        channel_type=result["channel_type"],
-        platform_bot_id=platform_bot_id,
-        character_name=character_name,
-        body_text=body_text,
-        addressed_to_global_user_ids=result["target_addressed_user_ids"],
-        broadcast=bool(result["target_broadcast"]),
-        fallback_addressed_global_user_id=str(result["global_user_id"]),
-        delivery_tracking_id=str(result.get("delivery_tracking_id") or ""),
-        llm_trace_id=str(result.get("llm_trace_id") or ""),
-        storage_timestamp_utc=utc_timestamp(now_func),
-        ensure_character_global_identity_func=(
-            ensure_character_global_identity_func
-        ),
-        save_conversation_func=save_conversation_func,
-    )
+    for logical_message_index, body_text in enumerate(assistant_output):
+        await record_assistant_outbound_message(
+            platform=platform,
+            platform_channel_id=platform_channel_id,
+            channel_type=result["channel_type"],
+            platform_bot_id=platform_bot_id,
+            character_name=character_name,
+            body_text=body_text,
+            addressed_to_global_user_ids=result["target_addressed_user_ids"],
+            broadcast=bool(result["target_broadcast"]),
+            fallback_addressed_global_user_id=str(result["global_user_id"]),
+            delivery_tracking_id=str(result.get("delivery_tracking_id") or ""),
+            logical_message_index=logical_message_index,
+            llm_trace_id=str(result.get("llm_trace_id") or ""),
+            storage_timestamp_utc=utc_timestamp(now_func),
+            ensure_character_global_identity_func=(
+                ensure_character_global_identity_func
+            ),
+            save_conversation_func=save_conversation_func,
+        )
 
 
 async def run_post_turn_memory_lifecycle_background(

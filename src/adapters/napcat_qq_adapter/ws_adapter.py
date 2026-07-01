@@ -309,6 +309,7 @@ class NapCatWSAdapter:
         *,
         channel_id: str,
         delivery_tracking_id: str,
+        logical_message_index: int,
         platform_message_id: str,
     ) -> None:
         """Best-effort report of a delivered normal chat response."""
@@ -319,6 +320,7 @@ class NapCatWSAdapter:
             platform="qq",
             platform_channel_id=channel_id,
             delivery_tracking_id=delivery_tracking_id,
+            logical_message_index=logical_message_index,
             platform_message_id=platform_message_id,
             adapter="napcat",
             logger=logger,
@@ -378,6 +380,7 @@ class NapCatWSAdapter:
         messages: Sequence[str],
         channel_id: str,
         channel_type: str,
+        delivery_tracking_id: str,
         delivery_mentions: Sequence[dict] | None,
         ws: object,
     ) -> None:
@@ -388,7 +391,7 @@ class NapCatWSAdapter:
             if channel_type == "group"
             else None
         )
-        for message_text in messages:
+        for logical_message_index, message_text in enumerate(messages, start=1):
             await asyncio.sleep(followup_delay_seconds(message_text))
             msg_params = self._normal_chat_send_msg_params(
                 channel_id=channel_id,
@@ -418,6 +421,17 @@ class NapCatWSAdapter:
                     f"retcode={retcode} message={log_preview(message)}"
                 )
                 return
+
+            response_data = send_response.get("data") or {}
+            platform_message_id = ""
+            if isinstance(response_data, dict):
+                platform_message_id = str(response_data.get("message_id") or "")
+            await self._post_delivery_receipt(
+                channel_id=channel_id,
+                delivery_tracking_id=delivery_tracking_id,
+                logical_message_index=logical_message_index,
+                platform_message_id=platform_message_id,
+            )
 
     def _apply_replied_message_metadata(
         self,
@@ -680,6 +694,7 @@ class NapCatWSAdapter:
         await self._post_delivery_receipt(
             channel_id=channel_id,
             delivery_tracking_id=delivery_tracking_id,
+            logical_message_index=0,
             platform_message_id=platform_message_id,
         )
 
@@ -690,6 +705,7 @@ class NapCatWSAdapter:
                     messages=followup_messages,
                     channel_id=channel_id,
                     channel_type=channel_type,
+                    delivery_tracking_id=delivery_tracking_id,
                     delivery_mentions=delivery_mentions,
                     ws=ws,
                 )

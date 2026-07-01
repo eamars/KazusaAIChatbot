@@ -297,6 +297,7 @@ def _valid_candidates(
 
     valid_candidates: list[PastDialogCognitionCandidate] = []
     diagnostics: list[dict[str, str]] = []
+    seen_trace_ids: set[str] = set()
     character_id = character_global_user_id.strip()
     if max_dialogs <= 0:
         diagnostics.append({
@@ -317,6 +318,15 @@ def _valid_candidates(
                 "source": candidate.source,
             })
             continue
+        trace_id = candidate.llm_trace_id.strip()
+        if trace_id in seen_trace_ids:
+            diagnostics.append({
+                "status": "skipped",
+                "reason": "duplicate llm_trace_id",
+                "source": candidate.source,
+            })
+            continue
+        seen_trace_ids.add(trace_id)
         valid_candidates.append(candidate)
         if len(valid_candidates) >= max_dialogs:
             break

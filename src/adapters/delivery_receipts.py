@@ -19,6 +19,7 @@ async def post_delivery_receipt(
     platform: str,
     platform_channel_id: str,
     delivery_tracking_id: str,
+    logical_message_index: int,
     platform_message_id: str,
     adapter: str,
     logger: logging.Logger,
@@ -33,7 +34,9 @@ async def post_delivery_receipt(
         brain_url: Base URL of the brain service.
         platform: Platform identifier stored on the conversation row.
         platform_channel_id: Platform channel or DM identifier.
-        delivery_tracking_id: Brain-generated row tracking identifier.
+        delivery_tracking_id: Brain-generated response sequence identifier.
+        logical_message_index: Zero-based logical message position in the
+            response sequence.
         platform_message_id: Platform-generated outbound message identifier.
         adapter: Adapter implementation name to store with the receipt.
         logger: Logger used for operational receipt warnings.
@@ -57,6 +60,7 @@ async def post_delivery_receipt(
         "platform": platform,
         "platform_channel_id": platform_channel_id,
         "delivery_tracking_id": delivery_tracking_id,
+        "logical_message_index": logical_message_index,
         "platform_message_id": platform_message_id,
         "adapter": adapter,
     }

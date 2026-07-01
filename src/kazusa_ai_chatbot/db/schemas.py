@@ -93,6 +93,7 @@ class ConversationMessageDoc(TypedDict, total=False):
     attachments: list[AttachmentDoc]  # Images, voice, files
     reply_context: ReplyContextDoc     # Structured reply-to metadata when available
     delivery_tracking_id: str  # Brain-generated id for adapter delivery receipts
+    logical_message_index: int  # Zero-based logical message index in one response
     delivery_status: str       # "pending" | "delivered"
     delivered_at: str          # ISO timestamp reported by the adapter
     delivery_adapter: str      # Adapter that reported the delivery receipt

@@ -68,6 +68,11 @@ Kazusa-authored assistant rows, and derive the same residual context.
 The residual never enters public `rag_result`, public `conversation_evidence`,
 RAG worker output, or resolver observations.
 
+If multiple retrieved assistant rows share the same `llm_trace_id` because one
+cognition produced multiple logical dialog messages, this package projects that
+private residual once. The visible rows can remain separate public evidence;
+the private cognition source is the shared trace.
+
 ### Missing Data As Forgetting
 
 The package returns an empty context when:
@@ -94,6 +99,7 @@ The package owns:
 - parsed trace-step filtering;
 - prompt-safe residual text formatting;
 - max-dialog and character-budget enforcement;
+- deduplication of multiple attached rows that share one cognition trace;
 - omission behavior for unavailable data;
 - diagnostics for deterministic tests and debug inspection.
 

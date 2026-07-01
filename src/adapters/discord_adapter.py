@@ -521,6 +521,7 @@ class DiscordAdapter(discord.Client):
         *,
         channel_id: str,
         delivery_tracking_id: str,
+        logical_message_index: int,
         platform_message_id: str,
     ) -> None:
         """Best-effort report of a delivered normal chat response."""
@@ -531,6 +532,7 @@ class DiscordAdapter(discord.Client):
             platform="discord",
             platform_channel_id=channel_id,
             delivery_tracking_id=delivery_tracking_id,
+            logical_message_index=logical_message_index,
             platform_message_id=platform_message_id,
             adapter="discord",
             logger=logger,
@@ -569,6 +571,7 @@ class DiscordAdapter(discord.Client):
         channel: object,
         channel_id: str,
         channel_type: str,
+        delivery_tracking_id: str,
         delivery_mentions: Sequence[dict] | None,
     ) -> None:
         """Send delayed follow-up messages from one brain cognition."""
@@ -578,21 +581,30 @@ class DiscordAdapter(discord.Client):
             if channel_type == "group"
             else None
         )
-        for message_text in messages:
+        for logical_message_index, message_text in enumerate(messages, start=1):
             await asyncio.sleep(followup_delay_seconds(message_text))
             outbound_text = _outbound_text_with_delivery_mentions(
                 message_text,
                 mention_candidates,
             )
+            first_sent_message_id = ""
             for chunk in _split_message(outbound_text):
                 try:
-                    await channel.send(chunk)
+                    sent_message = await channel.send(chunk)
                 except discord.HTTPException as exc:
                     logger.warning(
                         f"Discord follow-up send failed: "
                         f"channel_id={channel_id} error={exc}"
                     )
                     return
+                if not first_sent_message_id:
+                    first_sent_message_id = str(sent_message.id)
+            await self._post_delivery_receipt(
+                channel_id=channel_id,
+                delivery_tracking_id=delivery_tracking_id,
+                logical_message_index=logical_message_index,
+                platform_message_id=first_sent_message_id,
+            )
 
     async def on_message(self, message: discord.Message):
         """Normalize one Discord message event and forward it to the brain.
@@ -799,6 +811,7 @@ class DiscordAdapter(discord.Client):
         await self._post_delivery_receipt(
             channel_id=channel_id_str,
             delivery_tracking_id=delivery_tracking_id,
+            logical_message_index=0,
             platform_message_id=first_sent_message_id,
         )
 
@@ -810,6 +823,7 @@ class DiscordAdapter(discord.Client):
                     channel=message.channel,
                     channel_id=channel_id_str,
                     channel_type=channel_type,
+                    delivery_tracking_id=delivery_tracking_id,
                     delivery_mentions=delivery_mentions,
                 )
             )

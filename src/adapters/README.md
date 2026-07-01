@@ -61,8 +61,11 @@ ordered sequence of platform sends:
   sequence helper, clamped to a small bounded range.
 - Apply `delivery_mentions` to each logical message before platform-specific
   chunking or segment conversion.
-- Post a delivery receipt for the first successfully sent platform message id
-  when `delivery_tracking_id` is present.
+- Post a delivery receipt for each successfully sent logical message when
+  `delivery_tracking_id` is present, using that message's zero-based
+  `logical_message_index`.
+- Treat adapter-created platform chunks as transport artifacts; only the first
+  platform id for each logical message is reported.
 
 ## Message Envelope Contract
 

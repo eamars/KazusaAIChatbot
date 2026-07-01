@@ -607,16 +607,19 @@ async def apply_assistant_delivery_receipt(
     platform: str,
     platform_channel_id: str,
     delivery_tracking_id: str,
+    logical_message_index: int,
     platform_message_id: str,
     delivered_at: str,
     adapter: str,
 ) -> bool:
-    """Record delivered platform metadata for one assistant conversation row.
+    """Record delivered platform metadata for one logical assistant row.
 
     Args:
         platform: Runtime platform that delivered the assistant row.
         platform_channel_id: Channel/group/DM id for the assistant row.
-        delivery_tracking_id: Brain-generated local row tracking id.
+        delivery_tracking_id: Brain-generated local response sequence id.
+        logical_message_index: Zero-based logical message index in the response
+            sequence.
         platform_message_id: Message id returned by the platform adapter.
         delivered_at: ISO timestamp for delivery receipt creation.
         adapter: Adapter name reporting the receipt.
@@ -630,6 +633,7 @@ async def apply_assistant_delivery_receipt(
         "platform": platform,
         "role": "assistant",
         "delivery_tracking_id": delivery_tracking_id,
+        "logical_message_index": logical_message_index,
     }
     if platform_channel_id:
         query["platform_channel_id"] = platform_channel_id

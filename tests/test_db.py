@@ -559,7 +559,7 @@ async def test_save_conversation_insert_failure_still_propagates(
 
 @pytest.mark.asyncio
 async def test_apply_assistant_delivery_receipt_updates_tracking_row() -> None:
-    """Delivery receipts should update one assistant row by local tracking ID."""
+    """Delivery receipts should update one logical assistant row."""
     db = _mock_db()
     update_result = MagicMock()
     update_result.matched_count = 1
@@ -573,6 +573,7 @@ async def test_apply_assistant_delivery_receipt_updates_tracking_row() -> None:
             platform="qq",
             platform_channel_id="chan-1",
             delivery_tracking_id="delivery-1",
+            logical_message_index=1,
             platform_message_id="platform-123",
             delivered_at="2026-05-07T11:00:00+00:00",
             adapter="napcat",
@@ -585,6 +586,7 @@ async def test_apply_assistant_delivery_receipt_updates_tracking_row() -> None:
             "platform_channel_id": "chan-1",
             "role": "assistant",
             "delivery_tracking_id": "delivery-1",
+            "logical_message_index": 1,
         },
         {
             "$set": {
@@ -613,6 +615,7 @@ async def test_apply_assistant_delivery_receipt_allows_empty_channel_scope() -> 
             platform="debug",
             platform_channel_id="",
             delivery_tracking_id="delivery-1",
+            logical_message_index=0,
             platform_message_id="platform-123",
             delivered_at="2026-05-07T11:00:00+00:00",
             adapter="debug",
@@ -624,6 +627,7 @@ async def test_apply_assistant_delivery_receipt_allows_empty_channel_scope() -> 
         "platform": "debug",
         "role": "assistant",
         "delivery_tracking_id": "delivery-1",
+        "logical_message_index": 0,
     }
 
 
@@ -643,6 +647,7 @@ async def test_apply_assistant_delivery_receipt_uses_matched_count() -> None:
             platform="qq",
             platform_channel_id="chan-1",
             delivery_tracking_id="delivery-1",
+            logical_message_index=0,
             platform_message_id="platform-123",
             delivered_at="2026-05-07T11:00:00+00:00",
             adapter="napcat",
@@ -675,6 +680,7 @@ async def test_apply_assistant_delivery_receipt_has_no_embedding_or_cache_side_e
             platform="qq",
             platform_channel_id="chan-1",
             delivery_tracking_id="delivery-1",
+            logical_message_index=0,
             platform_message_id="platform-123",
             delivered_at="2026-05-07T11:00:00+00:00",
             adapter="napcat",

@@ -177,6 +177,7 @@ async def handle_send_message(
             addressed_to_global_user_ids=addressed_to,
             broadcast=not bool(addressed_to),
             delivery_tracking_id=delivery_tracking_id,
+            logical_message_index=0,
             storage_timestamp_utc=storage_utc_now_iso(),
             ensure_character_global_identity_func=(
                 _ensure_dispatcher_character_identity
@@ -199,6 +200,7 @@ async def handle_send_message(
                 platform=target_platform,
                 platform_channel_id=target_channel,
                 delivery_tracking_id=delivery_tracking_id,
+                logical_message_index=0,
                 platform_message_id=send_result.message_id,
                 delivered_at=send_result.sent_at.isoformat(),
                 adapter=send_result.platform,

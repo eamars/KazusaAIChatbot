@@ -40,6 +40,7 @@ async def record_assistant_outbound_message(
     broadcast: bool,
     fallback_addressed_global_user_id: str = "",
     delivery_tracking_id: str = "",
+    logical_message_index: int = 0,
     llm_trace_id: str = "",
     storage_timestamp_utc: str,
     ensure_character_global_identity_func: EnsureCharacterIdentity,
@@ -59,6 +60,8 @@ async def record_assistant_outbound_message(
         fallback_addressed_global_user_id: User id used when a direct
             assistant row has no explicit addressee.
         delivery_tracking_id: Optional local id for delivery receipts.
+        logical_message_index: Zero-based position inside one logical response
+            sequence.
         llm_trace_id: Optional turn-scoped LLM trace id.
         storage_timestamp_utc: Storage UTC timestamp for the persisted row.
         ensure_character_global_identity_func: Identity resolver/backfiller.
@@ -77,6 +80,8 @@ async def record_assistant_outbound_message(
     fallback_user_id = str(fallback_addressed_global_user_id or "").strip()
     if not target_addressed_user_ids and not broadcast and fallback_user_id:
         target_addressed_user_ids = [fallback_user_id]
+    if logical_message_index < 0:
+        raise ValueError("logical_message_index must be non-negative")
 
     character_global_user_id = await ensure_character_global_identity_func(
         platform=platform,
@@ -99,6 +104,7 @@ async def record_assistant_outbound_message(
         "broadcast": broadcast,
         "attachments": [],
         "timestamp": storage_timestamp_utc,
+        "logical_message_index": logical_message_index,
     }
     clean_tracking_id = str(delivery_tracking_id or "").strip()
     if clean_tracking_id:

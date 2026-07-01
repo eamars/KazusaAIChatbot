@@ -242,6 +242,11 @@ Stores raw conversation rows plus normalized message-envelope fields,
 attachment descriptions, embeddings, addressing fields, and metadata used by
 recent-history and RAG retrieval.
 
+Assistant rows produced by one logical response sequence may share
+`delivery_tracking_id` and `llm_trace_id`. Each logical outbound message is a
+separate row with exact `body_text` and a zero-based `logical_message_index`
+used by delivery receipts.
+
 Primary owners:
 
 - write: live chat persistence through `save_conversation(...)`;
