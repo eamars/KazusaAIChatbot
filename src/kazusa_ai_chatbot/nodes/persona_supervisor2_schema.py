@@ -61,6 +61,7 @@ class GlobalPersonaState(TypedDict):
     platform: str
     platform_channel_id: str
     channel_type: str
+    channel_name: str
     platform_message_id: str
     active_turn_platform_message_ids: NotRequired[list[str]]
     active_turn_conversation_row_ids: NotRequired[list[str]]
@@ -160,6 +161,7 @@ class CognitionState(TypedDict):
     platform: str
     platform_channel_id: str
     channel_type: str
+    channel_name: str
     global_user_id: str
     user_name: str
     user_profile: UserProfileDoc

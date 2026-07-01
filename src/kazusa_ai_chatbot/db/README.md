@@ -240,7 +240,9 @@ exceptional.
 
 Stores raw conversation rows plus normalized message-envelope fields,
 attachment descriptions, embeddings, addressing fields, and metadata used by
-recent-history and RAG retrieval.
+recent-history and RAG retrieval. User rows may include optional sanitized
+`channel_name` metadata for group-review source preparation; it is not part of
+embedding text, indexing, routing, delivery, or memory target selection.
 
 Assistant rows produced by one logical response sequence may share
 `delivery_tracking_id` and `llm_trace_id`. Each logical outbound message is a
@@ -255,7 +257,8 @@ Primary owners:
 - update: attachment-description repair and approved maintenance helpers.
 
 Semantic search uses `body_text` plus attachment descriptions as the embedding
-source. `raw_wire_text` remains audit/replay data.
+source. `raw_wire_text` and `channel_name` remain audit/source-preparation
+metadata outside embedding text.
 
 ### `user_profiles`
 

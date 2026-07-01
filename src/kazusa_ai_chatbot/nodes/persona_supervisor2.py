@@ -689,6 +689,7 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "platform": state["platform"],
         "platform_channel_id": state["platform_channel_id"],
         "channel_type": state["channel_type"],
+        "channel_name": state.get("channel_name", ""),
         "platform_message_id": state["platform_message_id"],
         "platform_user_id": state["platform_user_id"],
         "global_user_id": state["global_user_id"],

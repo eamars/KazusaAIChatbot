@@ -38,11 +38,13 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [background_work_semantic_lifecycle_plan.md](active/short_term/background_work_semantic_lifecycle_plan.md) | High-risk background-work semantic lifecycle and duplicate-scheduling plan | draft |
 | [coding_agent_phase1_fetching_reading_plan.md](active/short_term/coding_agent_phase1_fetching_reading_plan.md) | Large standalone coding-agent Phase 1 plan | draft |
 | [control_console_auto_model_discovery_picker_plan.md](active/short_term/control_console_auto_model_discovery_picker_plan.md) | Medium control-console automatic model discovery picker plan | completed |
 | [control_console_brain_model_route_config_plan.md](active/short_term/control_console_brain_model_route_config_plan.md) | Large control-console Brain model route configuration plan | completed |
 | [control_console_cognition_debug_visibility_plan.md](active/short_term/control_console_cognition_debug_visibility_plan.md) | Large control-console cognition-debug visibility plan | completed |
-| [l2_affinity_willingness_boundary_plan.md](active/short_term/l2_affinity_willingness_boundary_plan.md) | Medium L2 affinity-willingness boundary plan for gut-feeling request refusal before L2d routing | draft |
+| [daily_affect_settling_plan.md](active/short_term/daily_affect_settling_plan.md) | Medium persistent daily affect-settling plan | draft |
+| [l2_affinity_willingness_boundary_plan.md](active/short_term/l2_affinity_willingness_boundary_plan.md) | Large L2 affinity-willingness boundary plan for gut-feeling task refusal before L2d routing | draft |
 | [llm_trace_observability_and_retrieval_plan.md](active/short_term/llm_trace_observability_and_retrieval_plan.md) | Large LLM trace observability and agent retrieval-skill plan | completed |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 | [web_agent3_source_availability_bigbang_plan.md](active/short_term/web_agent3_source_availability_bigbang_plan.md) | Large web_agent3 source availability bigbang plan | completed |
@@ -163,6 +165,7 @@ plans.
 | [backend_control_console_web_test_plan.md](archive/completed/short_term/backend_control_console_web_test_plan.md) |
 | [background_artifact_handoff_poc_plan.md](archive/completed/short_term/background_artifact_handoff_poc_plan.md) |
 | [cache2_agent_stats_health_plan.md](archive/completed/short_term/cache2_agent_stats_health_plan.md) |
+| [channel_name_semantic_projection_plan.md](archive/completed/short_term/channel_name_semantic_projection_plan.md) |
 | [character_local_time_context_plan.md](archive/completed/short_term/character_local_time_context_plan.md) |
 | [character_profile_runtime_state_split_plan.md](archive/completed/short_term/character_profile_runtime_state_split_plan.md) |
 | [character_reflection_cycle_stage1a_plan.md](archive/completed/short_term/character_reflection_cycle_stage1a_plan.md) |

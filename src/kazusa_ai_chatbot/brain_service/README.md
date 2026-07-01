@@ -274,7 +274,7 @@ Purpose:
 | `platform_user_id` | yes | adapter | Platform id of the inbound message author. |
 | `platform_bot_id` | no | adapter | Platform id of the active bot account, if available. |
 | `display_name` | no | adapter | Display name of the inbound author. |
-| `channel_name` | no | adapter | Human-readable channel label. |
+| `channel_name` | no | adapter | Optional human-readable channel label. The brain may use a sanitized usable group label as weak scene text, but synthetic ids or generic labels are ignored. |
 | `content_type` | no | adapter | High-level input type, currently usually `text`. |
 | `message_envelope` | yes | adapter | Typed envelope defined by the message envelope ICD. |
 | `local_timestamp` | no | adapter | Adapter event time as configured-local wall-clock text. Empty string means service receive time is used. |

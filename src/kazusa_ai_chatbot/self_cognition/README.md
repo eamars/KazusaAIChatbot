@@ -148,6 +148,11 @@ has just noticed a group scene where she has not yet joined and nobody has
 handed the topic to her. For directly addressed group windows, the source
 packet says someone has pointed the topic at her. Empty windows are skipped
 before cognition.
+When the reflection input rows carry a usable sanitized group label,
+group-review projection folds that label into the existing source-instruction
+sentence, for example `下面是我在“动画讨论群”群聊里看到的现场观察资料。`.
+The label is not rendered as a separate source-packet field and is not reused
+as cognition-scene topic.
 
 Ambient group review keeps `target_scope.user_id=None`: the semantic target is
 the observed group scene, not a fabricated latest speaker. The delivery target

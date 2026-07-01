@@ -184,6 +184,34 @@ def test_group_activity_window_direct_address_requires_character_identity(
     assert windows[1].labels["response_risk"] == "low"
 
 
+def test_group_activity_window_carries_usable_channel_name() -> None:
+    """Window metadata may carry one label without changing visible context."""
+
+    first_message = _message(
+        role="user",
+        timestamp="2026-05-18T04:01:00+00:00",
+        body_text="Please look at this group issue.",
+    )
+    first_message["channel_name"] = "Group 227608960"
+    second_message = _message(
+        role="assistant",
+        timestamp="2026-05-18T04:05:00+00:00",
+        body_text="I can help with the outline.",
+    )
+    second_message["channel_name"] = "动画讨论群"
+    scope = _group_scope([first_message, second_message])
+
+    windows = activity_windows.build_group_activity_windows(
+        scope=scope,
+        window_start=datetime(2026, 5, 18, 4, 0, tzinfo=timezone.utc),
+        window_end=datetime(2026, 5, 18, 4, 15, tzinfo=timezone.utc),
+        now=datetime(2026, 5, 18, 4, 15, tzinfo=timezone.utc),
+    )
+
+    assert windows[0].channel_name == "动画讨论群"
+    assert "channel_name" not in windows[0].visible_context[0]
+
+
 def test_build_hourly_aggregation_preview_groups_four_windows() -> None:
     """Four 15-minute windows should remain compatible with hourly reflection."""
 

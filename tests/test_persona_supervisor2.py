@@ -13,6 +13,9 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2 import (
     persona_supervisor2,
     stage_3_no_response,
 )
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
+    build_cognition_chain_input_from_global_state,
+)
 from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
 
 
@@ -501,7 +504,31 @@ async def test_persona_supervisor2_returns_final_dialog_and_consolidation_state(
     assert retired_field not in result["consolidation_state"]
     assert result["scope_users"] == result["consolidation_state"]["scope_users"]
     assert result["consolidation_state"]["reply_context"] == {}
+    assert m_decon.await_args.args[0]["channel_name"] == "general"
+    assert m_resolver.await_args.args[0]["channel_name"] == "general"
+    assert m_resolver.await_args.args[0]["channel_topic"] == "greetings"
     m_resolver.assert_awaited_once()
+
+
+def test_cognition_chain_input_projects_group_name_into_scene_topic() -> None:
+    """Cognition should receive the named group as existing scene text."""
+
+    state = _base_discord_state()
+    state.update({
+        "channel_name": "动画讨论群",
+        "channel_topic": "新番角色和剧情走向",
+        "decontexualized_input": "Hello",
+        "referents": [],
+        "rag_result": {},
+    })
+
+    chain_input = build_cognition_chain_input_from_global_state(state)
+
+    assert chain_input["scene"]["channel_topic"] == (
+        '“动画讨论群”群聊中正在讨论：新番角色和剧情走向'
+    )
+    assert "channel_name" not in chain_input["scene"]
+    assert state["channel_topic"] == "新番角色和剧情走向"
 
 
 @pytest.mark.asyncio

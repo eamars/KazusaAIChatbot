@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
+from kazusa_ai_chatbot.channel_scene_projection import usable_channel_label
 from kazusa_ai_chatbot.config import CONVERSATION_HISTORY_LIMIT
 from kazusa_ai_chatbot.reflection_cycle.models import (
     READONLY_REFLECTION_MAX_MESSAGE_CHARS,
@@ -30,6 +31,7 @@ class GroupActivityWindow:
     platform: str
     platform_channel_id: str
     channel_type: str
+    channel_name: str
     window_index: int
     window_start: datetime
     window_end: datetime
@@ -152,6 +154,7 @@ def build_group_activity_windows(
             platform=scope.platform,
             platform_channel_id=scope.platform_channel_id,
             channel_type=scope.channel_type,
+            channel_name=_window_channel_name(messages),
             window_index=_window_index(
                 base_window_start=aligned_start,
                 current_window_start=bucket_start,
@@ -479,6 +482,19 @@ def _participant_rows(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         }
         rows.append(row)
     return rows
+
+
+def _window_channel_name(messages: list[dict[str, Any]]) -> str:
+    """Return one usable group label from bounded reflection rows."""
+
+    for message in messages:
+        label = usable_channel_label(
+            channel_type='group',
+            channel_name=text_or_empty(message.get("channel_name")),
+        )
+        if label:
+            return label
+    return ''
 
 
 def _string_list(value: object) -> list[str]:

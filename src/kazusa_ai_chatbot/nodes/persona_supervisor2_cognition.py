@@ -29,6 +29,7 @@ from kazusa_ai_chatbot.action_spec.registry import (
     build_initial_action_capabilities,
     project_prompt_affordances,
 )
+from kazusa_ai_chatbot.channel_scene_projection import project_channel_topic_text
 from kazusa_ai_chatbot.cognition_chain_core.chain import run_cognition_chain
 from kazusa_ai_chatbot.cognition_chain_core.contracts import (
     CognitionChainInputV1,
@@ -154,6 +155,11 @@ def build_cognition_chain_input_from_global_state(
         cognitive_episode,
         media_observations,
     )
+    scene_channel_topic = project_channel_topic_text(
+        channel_type=state["channel_type"],
+        channel_name=state.get("channel_name", ""),
+        channel_topic=state["channel_topic"],
+    )
     payload: CognitionChainInputV1 = {
         "schema_version": "cognition_chain_input.v1",
         "llm_trace_id": state.get("llm_trace_id", ""),
@@ -216,7 +222,7 @@ def build_cognition_chain_input_from_global_state(
         "scene": {
             "platform": state["platform"],
             "channel_type": state["channel_type"],
-            "channel_topic": state["channel_topic"],
+            "channel_topic": scene_channel_topic,
             "local_time_context": _prompt_safe_mapping(
                 state["local_time_context"]
             ),
@@ -449,6 +455,7 @@ def _initial_cognition_state_from_global_state(
         "platform": state["platform"],
         "platform_channel_id": state["platform_channel_id"],
         "channel_type": state["channel_type"],
+        "channel_name": state.get("channel_name", ""),
         "global_user_id": state["global_user_id"],
         "user_name": state["user_name"],
         "user_profile": state["user_profile"],

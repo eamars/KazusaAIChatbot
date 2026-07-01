@@ -303,6 +303,56 @@ async def test_intake_save_user_message_from_item_returns_row_id() -> None:
 
 
 @pytest.mark.asyncio
+async def test_intake_persists_sanitized_channel_name_metadata() -> None:
+    """Usable group labels should persist as optional row metadata only."""
+
+    item = _item(1)
+    item.request.channel_name = "动画讨论群"
+    captured_docs = []
+
+    async def _save_conversation(doc):
+        captured_docs.append(doc)
+        return "row-1"
+
+    row_id = await brain_intake.save_user_message_from_item(
+        item,
+        global_user_id="global-user-1",
+        reply_context={},
+        save_conversation_func=_save_conversation,
+        resolve_message_envelope_identities_func=_resolved_envelope,
+        logger=logging.getLogger("tests.service_input_queue"),
+    )
+
+    assert row_id == "row-1"
+    assert captured_docs[0]["channel_name"] == "动画讨论群"
+
+
+@pytest.mark.asyncio
+async def test_intake_drops_synthetic_channel_name_metadata() -> None:
+    """Synthetic platform labels must not become durable group names."""
+
+    item = _item(1)
+    item.request.channel_name = "Group 227608960"
+    captured_docs = []
+
+    async def _save_conversation(doc):
+        captured_docs.append(doc)
+        return "row-1"
+
+    row_id = await brain_intake.save_user_message_from_item(
+        item,
+        global_user_id="global-user-1",
+        reply_context={},
+        save_conversation_func=_save_conversation,
+        resolve_message_envelope_identities_func=_resolved_envelope,
+        logger=logging.getLogger("tests.service_input_queue"),
+    )
+
+    assert row_id == "row-1"
+    assert "channel_name" not in captured_docs[0]
+
+
+@pytest.mark.asyncio
 async def test_queue_separates_storage_utc_and_local_timestamp() -> None:
     """Queue enqueue should keep storage UTC separate from configured local time."""
 

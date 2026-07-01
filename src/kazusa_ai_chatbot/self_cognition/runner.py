@@ -628,6 +628,7 @@ def _build_cognition_state(
         "platform": target_scope["platform"],
         "platform_channel_id": target_scope["platform_channel_id"],
         "channel_type": target_scope["channel_type"],
+        "channel_name": "",
         "platform_message_id": f"self_cognition:{_string_field(case, 'case_id')}",
         "platform_user_id": user_id,
         "global_user_id": user_id,
@@ -638,7 +639,7 @@ def _build_cognition_state(
         "chat_history_recent": chat_history,
         "reply_context": {},
         "indirect_speech_context": "",
-        "channel_topic": _string_field(case, "channel_topic"),
+        "channel_topic": _cognition_scene_topic(case),
         "conversation_progress": case.get("conversation_progress"),
         "promoted_reflection_context": case.get("promoted_reflection_context"),
         "internal_monologue_residue_context": residue_context,
@@ -663,6 +664,14 @@ def _build_cognition_state(
         "future_promises": [],
     }
     return state
+
+
+def _cognition_scene_topic(case: models.SelfCognitionCase) -> str:
+    """Return persona-scene topic, excluding group-review label carrier data."""
+
+    if _string_field(case, "trigger_kind") == models.TRIGGER_GROUP_CHAT_REVIEW:
+        return ""
+    return _string_field(case, "channel_topic")
 
 
 def _build_dialog_state(

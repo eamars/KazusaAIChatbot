@@ -11,6 +11,7 @@ from typing import Any
 from kazusa_ai_chatbot.calendar_scheduler import handlers as calendar_handlers
 from kazusa_ai_chatbot.calendar_scheduler import models as calendar_models
 from kazusa_ai_chatbot.calendar_scheduler import repository as calendar_repository
+from kazusa_ai_chatbot.channel_scene_projection import usable_channel_label
 from kazusa_ai_chatbot.config import (
     CALENDAR_SCHEDULER_MAX_ATTEMPTS,
     CHARACTER_GLOBAL_USER_ID,
@@ -746,6 +747,12 @@ def _build_group_review_case(
         "current_mood": text_or_empty(character_profile.get("mood")),
         "global_vibe": text_or_empty(character_profile.get("global_vibe")),
     }
+    channel_name = usable_channel_label(
+        channel_type='group',
+        channel_name=window.channel_name,
+    )
+    if channel_name:
+        case["channel_topic"] = channel_name
     return case
 
 

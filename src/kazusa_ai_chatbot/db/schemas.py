@@ -79,6 +79,7 @@ class ConversationMessageDoc(TypedDict, total=False):
     platform: str              # "discord" | "qq" | "wechat" | "whatsapp" | "telegram" | "system"
     platform_channel_id: str   # Original channel/group ID from the platform
     channel_type: str          # "group" | "private" | "system"
+    channel_name: str          # Optional sanitized human-readable group label
     role: ConversationAuthorRole  # "user" | "assistant"
     platform_message_id: str   # Original platform message ID when available
     platform_user_id: str      # Original user/bot ID from the platform
