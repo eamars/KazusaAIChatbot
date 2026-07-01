@@ -1344,6 +1344,351 @@ async def test_web_agent3_web_search_receives_query_unchanged(
 
 
 @pytest.mark.asyncio
+async def test_web_agent3_web_search_expands_dense_query_inside_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """web_search should expand dense semantic input inside the source."""
+    web_search_subagent = importlib.import_module(
+        "kazusa_ai_chatbot.rag.web_agent3.subagent.web_search"
+    )
+    generated_attempts = [
+        {
+            "query": "alpha service setup time",
+            "purpose": "Find setup-time evidence for alpha service.",
+        },
+        {
+            "query": "beta service setup time",
+            "purpose": "Find setup-time evidence for beta service.",
+        },
+        {
+            "query": "alpha beta service platform support",
+            "purpose": "Find platform-support evidence for both services.",
+        },
+    ]
+    attempt_generator = AsyncMock(return_value=generated_attempts)
+    monkeypatch.setattr(
+        web_search_subagent,
+        "_generate_search_attempts",
+        attempt_generator,
+    )
+    search_calls: list[dict[str, str]] = []
+
+    async def fake_search(payload: dict[str, str]) -> str:
+        search_calls.append(payload)
+        query = payload["query"]
+        return_value = (
+            f"Title: Result for {query}\n"
+            f"URL: https://example.test/{len(search_calls)}\n"
+            f"Snippet: Evidence snippet for {query}"
+        )
+        return return_value
+
+    fake_search_tool = SimpleNamespace(ainvoke=AsyncMock(side_effect=fake_search))
+    monkeypatch.setattr(
+        web_search_subagent.searxng_tools,
+        "web_search",
+        fake_search_tool,
+    )
+    decision = web_module._RouterDecision(
+        action="search",
+        source="web_search",
+        query=(
+            "Compare alpha service with beta service for setup time, monthly "
+            "price, and platform support."
+        ),
+    )
+
+    result = await web_search_subagent.execute(decision)
+
+    attempt_generator.assert_awaited_once_with(decision.query)
+    assert search_calls == [
+        {"query": "alpha service setup time"},
+        {"query": "beta service setup time"},
+        {"query": "alpha beta service platform support"},
+    ]
+    assert "Search attempts:" in result
+    assert "Query: alpha service setup time" in result
+    assert "Purpose: Find setup-time evidence for alpha service." in result
+    assert "Key evidence:" in result
+    assert "Missing or weak coverage:" in result
+    assert "Recommended narrower search focus:" in result
+    for forbidden_text in (
+        "schema_version",
+        "cache_name",
+        "trace_id",
+        "SearXNG params",
+    ):
+        assert forbidden_text not in result
+
+
+@pytest.mark.asyncio
+async def test_web_agent3_web_search_preserves_simple_query_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """web_search should keep a simple direct query as one source call."""
+    web_search_subagent = importlib.import_module(
+        "kazusa_ai_chatbot.rag.web_agent3.subagent.web_search"
+    )
+    attempt_generator = AsyncMock(side_effect=AssertionError(
+        "simple query should not use search attempt expansion"
+    ))
+    monkeypatch.setattr(
+        web_search_subagent,
+        "_generate_search_attempts",
+        attempt_generator,
+        raising=False,
+    )
+    fake_search = SimpleNamespace(ainvoke=AsyncMock(return_value="search body"))
+    monkeypatch.setattr(web_search_subagent.searxng_tools, "web_search", fake_search)
+    decision = web_module._RouterDecision(
+        action="search",
+        source="web_search",
+        query="local tool router demo web agent architecture",
+    )
+
+    result = await web_search_subagent.execute(decision)
+
+    fake_search.ainvoke.assert_awaited_once_with({
+        "query": "local tool router demo web agent architecture",
+    })
+    assert attempt_generator.await_count == 0
+    assert result == "search body"
+
+
+@pytest.mark.asyncio
+async def test_web_agent3_web_search_expansion_dedupes_and_caps_attempts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """web_search should validate, dedupe, and cap generated attempts."""
+    web_search_subagent = importlib.import_module(
+        "kazusa_ai_chatbot.rag.web_agent3.subagent.web_search"
+    )
+    generated_attempts = [
+        {"query": "   ", "purpose": "ignored empty"},
+        {"query": "alpha support status", "purpose": "first useful target"},
+        {"query": "alpha support status", "purpose": "duplicate target"},
+        {"query": " beta support status ", "purpose": "second useful target"},
+        {"query": "gamma support status", "purpose": "over cap target"},
+    ]
+    monkeypatch.setattr(web_search_subagent, "_MAX_SEARCH_ATTEMPTS", 2, raising=False)
+    monkeypatch.setattr(
+        web_search_subagent,
+        "_generate_search_attempts",
+        AsyncMock(return_value=generated_attempts),
+    )
+    search_calls: list[dict[str, str]] = []
+
+    async def fake_search(payload: dict[str, str]) -> str:
+        search_calls.append(payload)
+        if payload["query"] == "alpha support status":
+            return "No results found."
+        return "Title: Beta support\nURL: https://example.test/beta"
+
+    fake_search_tool = SimpleNamespace(ainvoke=AsyncMock(side_effect=fake_search))
+    monkeypatch.setattr(
+        web_search_subagent.searxng_tools,
+        "web_search",
+        fake_search_tool,
+    )
+    decision = web_module._RouterDecision(
+        action="search",
+        source="web_search",
+        query="Compare alpha, beta, and gamma support status.",
+    )
+
+    result = await web_search_subagent.execute(decision)
+
+    assert search_calls == [
+        {"query": "alpha support status"},
+        {"query": "beta support status"},
+    ]
+    assert "Query: gamma support status" not in result
+    assert "Result: no useful result" in result
+    assert "Result: source evidence returned" in result
+
+
+@pytest.mark.asyncio
+async def test_web_agent3_web_search_expansion_rejects_metadata_attempt_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Generated attempt rows must stay semantic before search or projection."""
+    web_search_subagent = importlib.import_module(
+        "kazusa_ai_chatbot.rag.web_agent3.subagent.web_search"
+    )
+    generated_attempts = [
+        {
+            "query": {"schema_version": "leaked"},
+            "purpose": "malformed query should be ignored",
+        },
+        {
+            "query": "schema_version trace_id provider params",
+            "purpose": "metadata-shaped text should be ignored",
+        },
+        {
+            "query": "cache hit true provider_params searxng_params",
+            "purpose": "metadata-shaped underscore text should be ignored",
+        },
+        {
+            "query": "node_id task_1 source_node_id task_2",
+            "purpose": "graph metadata should be ignored",
+        },
+        {
+            "query": "attempt_index stage_name route_name",
+            "purpose": "stage metadata should be ignored",
+        },
+        {
+            "query": "valid focused public source search",
+            "purpose": {"trace_id": "leaked"},
+        },
+    ]
+    monkeypatch.setattr(
+        web_search_subagent,
+        "_generate_search_attempts",
+        AsyncMock(return_value=generated_attempts),
+    )
+    search_calls: list[dict[str, str]] = []
+
+    async def fake_search(payload: dict[str, str]) -> str:
+        search_calls.append(payload)
+        return "Title: Valid source\nURL: https://example.test/source"
+
+    fake_search_tool = SimpleNamespace(ainvoke=AsyncMock(side_effect=fake_search))
+    monkeypatch.setattr(
+        web_search_subagent.searxng_tools,
+        "web_search",
+        fake_search_tool,
+    )
+    decision = web_module._RouterDecision(
+        action="search",
+        source="web_search",
+        query="Compare several public facts across sources and versions.",
+    )
+
+    result = await web_search_subagent.execute(decision)
+
+    assert search_calls == [{"query": "valid focused public source search"}]
+    assert "Search for one focused part of the request." in result
+    for forbidden_text in (
+        "schema_version",
+        "trace_id",
+        "cache hit",
+        "provider params",
+        "provider_params",
+        "searxng_params",
+        "node_id",
+        "source_node_id",
+        "attempt_index",
+        "stage_name",
+        "route_name",
+        "{'trace_id'",
+        "{'schema_version'",
+    ):
+        assert forbidden_text not in result
+
+
+@pytest.mark.asyncio
+async def test_web_agent3_web_search_reports_invalid_expansion_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fallback to the original dense query must remain visible downstream."""
+    web_search_subagent = importlib.import_module(
+        "kazusa_ai_chatbot.rag.web_agent3.subagent.web_search"
+    )
+    monkeypatch.setattr(
+        web_search_subagent,
+        "_generate_search_attempts",
+        AsyncMock(return_value=[
+            {"query": {"trace_id": "bad"}, "purpose": "bad"},
+            {"query": "schema_version cache_name", "purpose": "bad"},
+        ]),
+    )
+    search_calls: list[dict[str, str]] = []
+
+    async def fake_search(payload: dict[str, str]) -> str:
+        search_calls.append(payload)
+        return "Title: Broad source\nURL: https://example.test/broad"
+
+    fake_search_tool = SimpleNamespace(ainvoke=AsyncMock(side_effect=fake_search))
+    monkeypatch.setattr(
+        web_search_subagent.searxng_tools,
+        "web_search",
+        fake_search_tool,
+    )
+    dense_query = "Compare alpha, beta, and gamma across current docs."
+    decision = web_module._RouterDecision(
+        action="search",
+        source="web_search",
+        query=dense_query,
+    )
+
+    result = await web_search_subagent.execute(decision)
+
+    assert search_calls == [{"query": dense_query}]
+    assert "Search-attempt expansion produced no valid focused queries" in result
+    assert "No tool-level missing result was observed" not in result
+    assert "schema_version" not in result
+    assert "cache_name" not in result
+
+
+@pytest.mark.asyncio
+async def test_web_agent3_web_search_reports_attempt_parse_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Malformed attempt-planner output should become visible weak coverage."""
+    web_search_subagent = importlib.import_module(
+        "kazusa_ai_chatbot.rag.web_agent3.subagent.web_search"
+    )
+    fake_attempt_llm = SimpleNamespace(
+        ainvoke=AsyncMock(return_value=AIMessage(content="not json"))
+    )
+    monkeypatch.setattr(web_search_subagent, "_search_attempt_llm", fake_attempt_llm)
+    monkeypatch.setattr(
+        web_search_subagent,
+        "parse_llm_json_output",
+        MagicMock(side_effect=ValueError("malformed planner output")),
+    )
+    search_calls: list[dict[str, str]] = []
+
+    async def fake_search(payload: dict[str, str]) -> str:
+        search_calls.append(payload)
+        return "Title: Broad source\nURL: https://example.test/broad"
+
+    fake_search_tool = SimpleNamespace(ainvoke=AsyncMock(side_effect=fake_search))
+    monkeypatch.setattr(
+        web_search_subagent.searxng_tools,
+        "web_search",
+        fake_search_tool,
+    )
+    dense_query = "Compare alpha, beta, and gamma across current docs."
+    decision = web_module._RouterDecision(
+        action="search",
+        source="web_search",
+        query=dense_query,
+    )
+
+    result = await web_search_subagent.execute(decision)
+
+    assert search_calls == [{"query": dense_query}]
+    assert "Search-attempt expansion produced no valid focused queries" in result
+
+
+def test_web_agent3_web_search_detects_chinese_dense_query() -> None:
+    """Dense-query detection should cover Chinese-first search wording."""
+    web_search_subagent = importlib.import_module(
+        "kazusa_ai_chatbot.rag.web_agent3.subagent.web_search"
+    )
+
+    dense_queries = (
+        "比较 Alpha、Beta 和 Gamma 在价格、支持状态以及版本差异上的情况",
+        "比较Alpha和Beta的价格和支持状态",
+        "Alpha和Beta性能对比",
+        "Alpha与Beta价格对比",
+    )
+    for query in dense_queries:
+        assert web_search_subagent._query_needs_attempt_expansion(query)
+
+
+@pytest.mark.asyncio
 async def test_web_agent3_web_read_receives_query_unchanged(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1627,6 +1972,8 @@ def test_web_agent3_finalizer_prompt_covers_known_regression_rules() -> None:
     assert "当前" in prompt
     assert "读取失败" in prompt
     assert "搜索摘要" in prompt
+    assert "Search attempts" in prompt
+    assert "每次尝试" in prompt
     assert "模型知识" in prompt
     assert "某个来源类别读取失败" in prompt
     assert "不得说没有冲突或信息一致" in prompt

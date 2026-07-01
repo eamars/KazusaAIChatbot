@@ -66,6 +66,32 @@ def test_node_prompt_requires_clock_time_normalization() -> None:
     assert '"1140 + 140"' in stages._NODE_RESOLVER_PROMPT
 
 
+def test_node_prompt_splits_mixed_public_evidence_before_subagent() -> None:
+    """Keep broad public evidence needs decomposed before retrieval."""
+
+    prompt = stages._NODE_RESOLVER_PROMPT
+
+    assert "public evidence node still bundles" in prompt
+    assert "independent targets" in prompt
+    assert "fact dimensions" in prompt
+    assert "return an expand decision before using the evidence capability" in (
+        prompt
+    )
+    assert "one public_evidence child" in prompt
+    assert "source-oriented request" in prompt
+
+    forbidden_fixture_hints = (
+        "ctr_031",
+        "ctr_032",
+        "RTX5090",
+        "R9700",
+        "Qwen3.6",
+        "gemma4",
+    )
+    for fixture_hint in forbidden_fixture_hints:
+        assert fixture_hint not in prompt
+
+
 def test_semantic_output_rejects_deterministic_keys() -> None:
     """Reject deterministic fields when they appear in semantic LLM output."""
 

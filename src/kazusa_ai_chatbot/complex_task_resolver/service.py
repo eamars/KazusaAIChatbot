@@ -771,7 +771,7 @@ async def _resolve_active_node_once(
             ) + 1
             return response
     if (
-        owned_subagent_name is not None
+        owned_subagent_name == "evidence"
         and "node_expansion" in response
         and _node_expansion_would_exceed_graph_limits(
             graph,

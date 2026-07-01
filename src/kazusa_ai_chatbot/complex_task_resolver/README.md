@@ -225,6 +225,8 @@ ownership:
 - graph traversal chooses one pending node at a time;
 - node resolution decides whether to update, expand, invoke a subagent, retry
   locally, ask for user-owned input, or block;
+- public evidence node resolution expands narrower children first when one
+  node still combines independent public targets or fact dimensions;
 - evidence subagents may perform bounded search/read refinement when an
   evidence backend is available, and otherwise report dependency blockers;
 - the algorithmic subagent is deterministic single-shot and only evaluates the

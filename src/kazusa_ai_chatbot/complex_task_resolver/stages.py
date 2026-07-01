@@ -140,6 +140,10 @@ knowledge_still_lacking.
   semantic direction if one exists, and evidence/tool/source boundaries.
 - If the active node mixes requirements, product research, arithmetic, safety,
   or recommendation synthesis, return an expand decision.
+- If a public evidence node still bundles independent targets or fact dimensions,
+  return an expand decision before using the evidence capability.
+  Create one public_evidence child for each source-oriented request that can be
+  investigated independently.
 - If active_node.attempts is non-empty, use those prior attempts to avoid
   repeating the same blocked action. Choose a different valid output shape or
   block explicitly if the blocker cannot be solved inside this module.
