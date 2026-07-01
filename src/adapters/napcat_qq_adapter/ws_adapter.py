@@ -17,6 +17,7 @@ import websockets
 from websockets.exceptions import WebSocketException
 
 from adapters.delivery_receipts import post_delivery_receipt
+from adapters.outbound_sequence import followup_delay_seconds
 from kazusa_ai_chatbot.dispatcher import SendResult
 from kazusa_ai_chatbot.logging_config import configure_adapter_logging
 from kazusa_ai_chatbot.message_envelope import (
@@ -83,6 +84,7 @@ class NapCatWSAdapter:
         self._runtime_server: uvicorn.Server | None = None
         self._runtime_server_task: asyncio.Task | None = None
         self._heartbeat_task: asyncio.Task | None = None
+        self._normal_chat_delivery_tasks: set[asyncio.Task] = set()
         self._mention_display_cache: OrderedDict[tuple[str, str], str] = (
             OrderedDict()
         )
@@ -323,6 +325,100 @@ class NapCatWSAdapter:
             log_label="QQ",
         )
 
+    def _track_normal_chat_delivery_task(self, task: asyncio.Task) -> None:
+        """Track adapter-owned follow-up sends for cancellation and tests."""
+
+        self._normal_chat_delivery_tasks.add(task)
+        task.add_done_callback(self._finalize_normal_chat_delivery_task)
+
+    def _finalize_normal_chat_delivery_task(self, task: asyncio.Task) -> None:
+        """Discard completed follow-up tasks and log unexpected failures."""
+
+        self._normal_chat_delivery_tasks.discard(task)
+        if task.cancelled():
+            return
+        task_exception = task.exception()
+        if task_exception is None:
+            return
+        logger.warning(
+            f"QQ follow-up delivery task failed unexpectedly: {task_exception}",
+            exc_info=(
+                type(task_exception),
+                task_exception,
+                task_exception.__traceback__,
+            ),
+        )
+
+    def _normal_chat_send_msg_params(
+        self,
+        *,
+        channel_id: str,
+        channel_type: str,
+        text: str,
+        reply_to_msg_id: str | None,
+        delivery_mentions: Sequence[dict] | None,
+    ) -> dict[str, object]:
+        """Build a NapCat ``send_msg`` payload for one normal chat message."""
+
+        is_group = channel_type == "group"
+        params: dict[str, object] = {
+            "message_type": channel_type,
+            "group_id" if is_group else "user_id": int(channel_id),
+            "message": outbound_message_payload(
+                text,
+                reply_to_msg_id,
+                delivery_mentions if is_group else None,
+            ),
+        }
+        return params
+
+    async def _send_normal_chat_followups(
+        self,
+        *,
+        messages: Sequence[str],
+        channel_id: str,
+        channel_type: str,
+        delivery_mentions: Sequence[dict] | None,
+        ws: object,
+    ) -> None:
+        """Send delayed follow-up messages from one brain cognition."""
+
+        mention_candidates = (
+            delivery_mentions
+            if channel_type == "group"
+            else None
+        )
+        for message_text in messages:
+            await asyncio.sleep(followup_delay_seconds(message_text))
+            msg_params = self._normal_chat_send_msg_params(
+                channel_id=channel_id,
+                channel_type=channel_type,
+                text=message_text,
+                reply_to_msg_id=None,
+                delivery_mentions=mention_candidates,
+            )
+            try:
+                send_response = await self._call_api(ws, "send_msg", msg_params)
+            except (
+                asyncio.TimeoutError,
+                WebSocketException,
+            ) as exc:
+                logger.warning(
+                    f"QQ follow-up send_msg failed: "
+                    f"channel_id={channel_id} error={exc}"
+                )
+                return
+
+            send_status = send_response.get("status")
+            if send_status != "ok":
+                retcode = send_response.get("retcode")
+                message = send_response.get("message")
+                logger.warning(
+                    f"QQ follow-up send_msg returned status={send_status} "
+                    f"retcode={retcode} message={log_preview(message)}"
+                )
+                return
+
     def _apply_replied_message_metadata(
         self,
         reply_context: dict[str, str | bool],
@@ -535,7 +631,6 @@ class NapCatWSAdapter:
             )
             return
 
-        combined = "\n".join(replies)
         reply_to_msg_id = None
         if brain_data.get("use_reply_feature"):
             reply_to_msg_id = str(data["message_id"])
@@ -545,15 +640,13 @@ class NapCatWSAdapter:
             if isinstance(raw_delivery_mentions, list)
             else None
         )
-        msg_params = {
-            "message_type": channel_type,
-            "group_id" if is_group else "user_id": int(channel_id),
-            "message": outbound_message_payload(
-                combined,
-                reply_to_msg_id,
-                delivery_mentions if is_group else None,
-            ),
-        }
+        msg_params = self._normal_chat_send_msg_params(
+            channel_id=channel_id,
+            channel_type=channel_type,
+            text=replies[0],
+            reply_to_msg_id=reply_to_msg_id,
+            delivery_mentions=delivery_mentions if is_group else None,
+        )
 
         logger.debug(
             f"Sending QQ message: channel_id={channel_id} "
@@ -590,8 +683,31 @@ class NapCatWSAdapter:
             platform_message_id=platform_message_id,
         )
 
+        followup_messages = replies[1:]
+        if followup_messages:
+            followup_task = asyncio.create_task(
+                self._send_normal_chat_followups(
+                    messages=followup_messages,
+                    channel_id=channel_id,
+                    channel_type=channel_type,
+                    delivery_mentions=delivery_mentions,
+                    ws=ws,
+                )
+            )
+            self._track_normal_chat_delivery_task(followup_task)
+
     async def close(self):
         """Close adapter-owned network clients and callback server."""
+
+        normal_chat_delivery_tasks = list(self._normal_chat_delivery_tasks)
+        for task in normal_chat_delivery_tasks:
+            task.cancel()
+        if normal_chat_delivery_tasks:
+            await asyncio.gather(
+                *normal_chat_delivery_tasks,
+                return_exceptions=True,
+            )
+            self._normal_chat_delivery_tasks.clear()
 
         if self._heartbeat_task is not None:
             self._heartbeat_task.cancel()

@@ -95,7 +95,7 @@ def _record_input(
         "chat_history_recent": [],
         "content_plan": {
             "semantic_content": "Accept the clarification.",
-            "rendering": "One visible chat bubble; concise.",
+            "rendering": "One ordinary text message; concise.",
         },
         "logical_stance": "CONFIRM",
         "character_intent": "PROVIDE",

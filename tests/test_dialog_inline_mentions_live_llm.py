@@ -163,7 +163,7 @@ def _case_current_user() -> dict[str, Any]:
                 "Alex promised a harder challenge and it is overdue. Use the "
                 "exact visible tag @Alex."
             ),
-            "rendering": "One short chat bubble; include @Alex exactly once.",
+            "rendering": "One short ordinary text message; include @Alex exactly once.",
         },
     )
 
@@ -179,7 +179,7 @@ def _case_no_tag() -> dict[str, Any]:
             "semantic_content": (
                 "The group is joking about character tropes. Do not tag anyone."
             ),
-            "rendering": "One short chat bubble; no @ token.",
+            "rendering": "One short ordinary text message; no @ token.",
         },
     )
 
@@ -195,7 +195,7 @@ def _case_named_participant() -> dict[str, Any]:
             "semantic_content": (
                 "Moca solved the puzzle first. Use the exact visible tag @Moca."
             ),
-            "rendering": "One short chat bubble; include @Moca exactly once.",
+            "rendering": "One short ordinary text message; include @Moca exactly once.",
         },
         chat_history_wide=[
             {
@@ -261,7 +261,7 @@ def _case_fenced_at() -> dict[str, Any]:
                 "```"
             ),
             "rendering": (
-                "One chat bubble with the fenced code block; do not tag anyone."
+                "One ordinary text message with the fenced code block; do not tag anyone."
             ),
         },
     )

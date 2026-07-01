@@ -669,7 +669,7 @@ Shown as the combined L3 surface before L4 collection.
     "visible_goal": "Answer the user's question directly and concisely.",
     "semantic_content": "A Python virtual environment is an isolated workspace for a project, so its packages and settings do not interfere with other projects.",
     "voice": "Concise, plain, lightly conversational.",
-    "rendering": "One visible chat bubble; one short paragraph; no setup tutorial."
+    "rendering": "One ordinary text message; one short paragraph; no setup tutorial."
   },
   "accepted_user_preferences": [
     "Keep the reply to one short paragraph."
@@ -744,7 +744,7 @@ Example input:
     "visible_goal": "Answer the user's question directly and concisely.",
     "semantic_content": "A Python virtual environment is an isolated workspace for a project, so its packages and settings do not interfere with other projects.",
     "voice": "Concise, plain, lightly conversational.",
-    "rendering": "One visible chat bubble; one short paragraph; no setup tutorial."
+    "rendering": "One ordinary text message; one short paragraph; no setup tutorial."
   },
   "forbidden_phrases": [],
   "facial_expression": ["Neutral attentive expression with relaxed brows."],
@@ -773,7 +773,7 @@ Example output:
         "visible_goal": "Answer the user's question directly and concisely.",
         "semantic_content": "A Python virtual environment is an isolated workspace for a project, so its packages and settings do not interfere with other projects.",
         "voice": "Concise, plain, lightly conversational.",
-        "rendering": "One visible chat bubble; one short paragraph; no setup tutorial."
+        "rendering": "One ordinary text message; one short paragraph; no setup tutorial."
       },
       "forbidden_phrases": []
     },
@@ -898,7 +898,7 @@ Example input:
         "visible_goal": "Answer the user's question directly and concisely.",
         "semantic_content": "A Python virtual environment is an isolated workspace for a project, so its packages and settings do not interfere with other projects.",
         "voice": "Concise, plain, lightly conversational.",
-        "rendering": "One visible chat bubble; one short paragraph; no setup tutorial."
+        "rendering": "One ordinary text message; one short paragraph; no setup tutorial."
       },
       "forbidden_phrases": []
     }

@@ -102,7 +102,7 @@ platform event
   -> brain queue and persona graph
   -> selected text surface outputs
   -> ChatResponse(messages, use_reply_feature, delivery_mentions, delivery_tracking_id, cognition_graph?)
-  -> adapter platform send
+  -> adapter ordered platform send sequence
   -> platform returns outbound message id
   -> POST /delivery_receipt
   -> conversation row gains delivered platform message id
@@ -130,6 +130,14 @@ metadata: the brain keeps outbound text platform-neutral with visible
 `@display_name` tokens, and the adapter replaces matching tokens with native
 user mentions only when feasible. Missing, empty, or unrenderable mention
 metadata must not block text delivery.
+
+Normal `/chat` `messages` are ordered logical outbound chat messages. The
+adapter sends each string as a separate normal chat message in order. The first
+message is sent immediately and may use native reply rendering when requested;
+follow-up messages are adapter-owned background sends with short
+length-derived delays. Inline delivery mentions are applied per logical
+message before any platform chunking or segment conversion. Dispatcher or
+proactive callback `/send_message` remains a single-message delivery surface.
 
 Normal `/chat` responses may also include optional `cognition_graph` telemetry
 for local operator inspection. It is a bounded graph snapshot derived from the
@@ -276,7 +284,7 @@ Purpose:
 
 | Field | Owner | Meaning |
 | --- | --- | --- |
-| `messages` | brain | Text messages the adapter should render to the platform. Empty means no user-visible reply. |
+| `messages` | brain | Ordered text messages the adapter should render as separate normal chat sends. Empty means no user-visible reply. |
 | `content_type` | brain | Outbound content type. Current normal value is `text`. |
 | `attachments` | brain | Outbound attachments. Currently reserved for future use. |
 | `use_reply_feature` | brain | Adapter should use native reply rendering for the first outbound message when possible. |
@@ -297,13 +305,16 @@ Adapter responsibilities:
   identity belongs in `message_envelope.mentions`.
 - Preserve the inbound platform message id when available.
 - Treat an empty `messages` list as no outbound send.
-- Honor `use_reply_feature` for the first outbound message when the platform
-  has a native reply mechanism.
+- Send non-empty `messages` in order as separate normal chat messages.
+- Honor `use_reply_feature` only for the first outbound message when the
+  platform has a native reply mechanism.
+- Own follow-up message delay and task lifecycle without blocking the adapter
+  on the delay.
 - Render `delivery_mentions` best-effort by replacing matching authored
-  `@display_name` text inline when present and feasible; otherwise send the
-  original text unchanged.
+  `@display_name` text inline in each logical message when present and
+  feasible; otherwise send the original text unchanged.
 - Post `/delivery_receipt` after a successful platform send when both
-  `delivery_tracking_id` and an outbound platform message id exist.
+  `delivery_tracking_id` and the first outbound platform message id exist.
 
 Brain service responsibilities:
 
@@ -365,8 +376,8 @@ Current adapter policy:
 
 | Adapter | Normal `/chat` receipt behavior |
 | --- | --- |
-| NapCat QQ | Reports `send_msg.data.message_id` after successful `send_msg`; retries `not_found` with short bounded delays. |
-| Discord | Reports the first sent Discord `Message.id` after successful normal chat send; retries `not_found` with short bounded delays. |
+| NapCat QQ | Reports `send_msg.data.message_id` from the first logical outbound message after successful `send_msg`; retries `not_found` with short bounded delays. |
+| Discord | Reports the first sent Discord `Message.id` from the first logical outbound message after successful normal chat send; retries `not_found` with short bounded delays. |
 | Debug | Omits receipts because it has no durable external platform message id. |
 
 The first-message policy for Discord is a known reply-hydration limitation of
@@ -509,7 +520,8 @@ Runtime adapters own:
 - Replacing only platform mention tokens with readable mention tokens before
   `/chat`; adapters must not rewrite pronouns, aliases, or other authored
   text semantically.
-- Calling `/chat` and rendering `ChatResponse.messages`.
+- Calling `/chat` and rendering `ChatResponse.messages` as ordered normal chat
+  sends.
 - Extracting durable outbound platform message ids after successful sends.
 - Posting `/delivery_receipt` when the adapter supports durable outbound ids.
 - Registering and heartbeating runtime callback URLs when dispatcher or

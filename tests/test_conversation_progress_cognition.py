@@ -104,7 +104,7 @@ async def test_content_plan_agent_receives_conversation_progress(monkeypatch) ->
             "semantic_content": (
                 "Answer the missing third point without repeating reassurance."
             ),
-            "rendering": "One visible chat bubble; concise.",
+            "rendering": "One ordinary text message; concise.",
         },
     })
     monkeypatch.setattr(l3_module, "_content_plan_agent_llm", bind_test_llm(fake_llm, "content_plan_agent_llm"))
@@ -112,6 +112,16 @@ async def test_content_plan_agent_receives_conversation_progress(monkeypatch) ->
     result = await l3_module.call_content_plan_agent({
         "cognitive_episode": _minimal_text_chat_episode(),
         "character_profile": {"name": "Kazusa"},
+        "user_input": "what is the missing third point?",
+        "user_name": "Jigsaw",
+        "prompt_message_context": {
+            "body_text": "what is the missing third point?",
+            "addressed_to_global_user_ids": ["character-user"],
+            "broadcast": False,
+            "mentions": [],
+            "attachments": [],
+        },
+        "reply_context": {},
         "decontexualized_input": "what is the missing third point?",
         "rag_result": {},
         "internal_monologue": "answer directly",
@@ -171,10 +181,10 @@ def test_content_plan_prompt_requires_fact_based_answers_without_case_example() 
     assert "内容计划只能执行它们，不能改判" in prompt
     assert "不要在这里改写 `logical_stance`、`character_intent`、检索事实或上游意识判断" in prompt
     assert "`answer` 是最高优先级的直接检索结论" in prompt
-    assert "技术对比：`semantic_content` 应保留所有已给数值、单位和结论" in prompt
+    assert "技术对比：`semantic_content` 保留所有已给数值、单位和结论" in prompt
     assert "处理证据边界" in prompt
     assert "# 生成步骤" in prompt
-    assert "确定本轮任务" in prompt
+    assert "确定来源和任务" in prompt
     assert "收集可见语义" in prompt
     assert "[ANSWER]" not in prompt
     assert "[DECISION]" not in prompt
@@ -243,7 +253,7 @@ def _profile_conformance_state() -> dict:
         "judgment_note": "普通闲聊可以自然接住。",
         "content_plan": {
             "semantic_content": "可以说一个自然的甜食偏好。",
-            "rendering": "单个聊天气泡，约30字。",
+            "rendering": "1 条普通文字消息，约30字。",
         },
         "social_distance": "日常轻松",
         "emotional_intensity": "轻微活力",
@@ -442,8 +452,8 @@ def test_content_plan_prompt_owns_topic_admission_decision() -> None:
 
     prompt = l3_module._CONTENT_PLAN_AGENT_PROMPT
 
-    assert "你决定“本轮要说什么”" in prompt
-    assert "`semantic_content` 是本轮用户可见回复的语义载荷" in prompt
-    assert "下游只能改写它，不能替你补事实、话题、问题、结论、代码、例子或下一步" in prompt
-    assert "它们只能解释如何渲染 `semantic_content`，不能新增事实或话题" in prompt
+    assert "你决定本轮可见台词需要承载的内容" in prompt
+    assert "`semantic_content` 只承载用户可见台词需要说出的内容" in prompt
+    assert "`semantic_content` 是下游可见内容的首要来源" in prompt
+    assert "需要说出的事实、问题、代码、例子、边界、拒绝或下一步必须已经写在计划值里" in prompt
     assert "dialog" not in prompt.lower()

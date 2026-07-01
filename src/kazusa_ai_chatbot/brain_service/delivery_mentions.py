@@ -130,8 +130,9 @@ def _has_token_outside_fenced_blocks(text: str, display_name: str) -> bool:
     for start_index, end_index in _unfenced_spans(text):
         search_index = start_index
         while search_index < end_index:
-            match_index = text.find(token, search_index, end_index)
-            if match_index == -1:
+            try:
+                match_index = text.index(token, search_index, end_index)
+            except ValueError:
                 break
             after_index = match_index + len(token)
             if (
@@ -175,12 +176,14 @@ def _unfenced_spans(text: str) -> list[tuple[int, int]]:
     span_start = 0
     fence = "```"
     while search_index < len(text):
-        fence_start = text.find(fence, search_index)
-        if fence_start == -1:
+        try:
+            fence_start = text.index(fence, search_index)
+        except ValueError:
             break
         spans.append((span_start, fence_start))
-        fence_end = text.find(fence, fence_start + len(fence))
-        if fence_end == -1:
+        try:
+            fence_end = text.index(fence, fence_start + len(fence))
+        except ValueError:
             search_index = len(text)
             span_start = len(text)
             break

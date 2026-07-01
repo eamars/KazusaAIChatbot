@@ -85,14 +85,18 @@ def test_each_sidebar_page_has_connected_or_explicitly_gated_state(
         ):
             _open_page(page, "calendar", "Calendar")
         assert page.locator("#calendar-status").inner_text() != "not loaded"
-        assert page.locator("#calendar-table").inner_text().strip()
+        assert page.locator("#calendar-prompt-runs-table").inner_text().strip()
+        assert page.locator("#calendar-schedules-table").inner_text().strip()
+        assert page.locator("#calendar-due-runs-table").inner_text().strip()
 
         with page.expect_response(
             lambda response: "/api/lookups/background" in response.url
         ):
             _open_page(page, "background", "Background work")
         assert page.locator("#background-status").inner_text() != "not loaded"
-        assert page.locator("#background-table").inner_text().strip()
+        assert page.locator("#background-result-ready-table").inner_text().strip()
+        assert page.locator("#background-job-queue-table").inner_text().strip()
+        assert page.locator("#background-worker-events-table").inner_text().strip()
 
         _open_page(page, "health", "Health/cache")
         assert page.locator("#health-brain-status").inner_text() != "locked"

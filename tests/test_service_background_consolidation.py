@@ -610,6 +610,63 @@ async def test_chat_response_adds_multiple_inline_delivery_mentions(
 
 
 @pytest.mark.asyncio
+async def test_chat_response_preserves_message_sequence_for_inline_mentions(
+    monkeypatch,
+):
+    """Inline mention discovery should not collapse response messages."""
+
+    await _reset_queue_state()
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_run_conversation_progress_record_background",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_run_consolidation_background",
+        AsyncMock(),
+    )
+    graph_result = _graph_result()
+    graph_result["final_dialog"] = [
+        "@Test User first",
+        "second @Moca",
+    ]
+    graph_result["scope_users"] = [
+        {
+            "display_name": "Moca",
+            "platform_user_id": "user-2",
+            "global_user_id": "global-user-2",
+        }
+    ]
+    _patch_chat_dependencies(monkeypatch, _FakeGraph(graph_result))
+
+    response = await service_module.chat(
+        _chat_request(),
+        BackgroundTasks(),
+    )
+
+    assert response.messages == ["@Test User first", "second @Moca"]
+    assert response.delivery_mentions == [
+        {
+            "entity_kind": "user",
+            "display_name": "Test User",
+            "platform_user_id": "user-1",
+        },
+        {
+            "entity_kind": "user",
+            "display_name": "Moca",
+            "platform_user_id": "user-2",
+        },
+    ]
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
 async def test_chat_response_tracks_deliverable_assistant_row(monkeypatch):
     """Non-empty chat responses should carry the assistant row tracking ID."""
 

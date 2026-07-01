@@ -292,7 +292,7 @@ def _action_cognition_output(text: str) -> dict[str, Any]:
                 "accepted_user_preferences": [],
                 "content_plan": {
                     "semantic_content": text,
-                    "rendering": "One visible chat bubble; concise.",
+                    "rendering": "One ordinary text message; concise.",
                 },
                 "forbidden_phrases": [],
             },
@@ -488,7 +488,7 @@ def _surface_action_directives() -> dict[str, Any]:
             "accepted_user_preferences": [],
             "content_plan": {
                 "semantic_content": "Continue the GPU model topic.",
-                "rendering": "One visible chat bubble; concise.",
+                "rendering": "One ordinary text message; concise.",
             },
             "forbidden_phrases": [],
         },

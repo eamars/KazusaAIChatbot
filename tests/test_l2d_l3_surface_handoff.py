@@ -238,7 +238,7 @@ def _action_directives() -> dict:
             "accepted_user_preferences": [],
             "content_plan": {
                 "semantic_content": "Known fact.",
-                "rendering": "One visible chat bubble; concise.",
+                "rendering": "One ordinary text message; concise.",
             },
             "forbidden_phrases": [],
         },
@@ -612,7 +612,7 @@ async def test_parent_graph_preserves_social_context_for_selected_l3() -> None:
         return {
             "content_plan": {
                 "semantic_content": "Known fact.",
-                "rendering": "One visible chat bubble; concise.",
+                "rendering": "One ordinary text message; concise.",
             },
         }
 
@@ -793,7 +793,7 @@ async def test_l3_text_surface_contract_excludes_retired_response_field() -> Non
             return_value={
                 "content_plan": {
                     "semantic_content": "Known fact.",
-                    "rendering": "One visible chat bubble; concise.",
+                    "rendering": "One ordinary text message; concise.",
                 },
             },
         ),
@@ -845,7 +845,7 @@ async def test_l3_content_plan_receives_selected_speak_intent_only() -> None:
         return {
             "content_plan": {
                 "semantic_content": "Known fact.",
-                "rendering": "One visible chat bubble; concise.",
+                "rendering": "One ordinary text message; concise.",
             },
         }
 
@@ -1129,7 +1129,7 @@ async def test_l3_content_plan_receives_goal_progress_before_generation() -> Non
                     "Give the compact final plan with dinner, walking route, "
                     "time split, and verification checklist."
                 ),
-                "rendering": "One visible chat bubble; cover all deliverables.",
+                "rendering": "One ordinary text message; cover all deliverables.",
             },
         }
 
@@ -1189,7 +1189,7 @@ async def test_l3_content_plan_receives_goal_progress_before_generation() -> Non
             "Give the compact final plan with dinner, walking route, "
             "time split, and verification checklist."
         ),
-        "rendering": "One visible chat bubble; cover all deliverables.",
+        "rendering": "One ordinary text message; cover all deliverables.",
     }
 
 
@@ -1200,7 +1200,7 @@ async def test_l3_content_plan_logs_output(caplog) -> None:
     llm = _StaticContentPlanLLM({
             "content_plan": {
                 "semantic_content": "Answer directly.",
-                "rendering": "One visible chat bubble; short.",
+                "rendering": "One ordinary text message; short.",
             },
     })
 
@@ -1214,7 +1214,7 @@ async def test_l3_content_plan_logs_output(caplog) -> None:
 
     assert result["content_plan"] == {
         "semantic_content": "Answer directly.",
-        "rendering": "One visible chat bubble; short.",
+        "rendering": "One ordinary text message; short.",
     }
     assert "Content plan output: entries=2" in caplog.text
     assert "Answer directly." in caplog.text

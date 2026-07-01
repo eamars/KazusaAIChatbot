@@ -309,15 +309,16 @@ def test_action_selection_prompt_follows_cognition_prompt_structure() -> None:
 
     for required_section in (
         "# 语言政策",
+        "# 来源识别",
+        "# 上游判断的读取方式",
         "# 可选动作",
         "# 选择流程",
         "# 未来认知判断",
-        "# 输入格式",
         "# 输出格式",
     ):
         assert required_section in prompt
     assert "你是角色的语义行动路由层" in prompt
-    assert "JSON 只包含语义上下文" in prompt
+    assert "human payload 是本轮 JSON 语义上下文" in prompt
     assert "行动请求只描述我想做什么" in prompt
     assert "解析请求只描述下一步需要什么证据、事实、澄清或审批" in prompt
     assert "内心独白是证据，不是动作" in prompt
@@ -329,7 +330,7 @@ def test_action_selection_prompt_follows_cognition_prompt_structure() -> None:
     assert "不得把目标属性升格为已确认事实" in prompt
     assert "具体当前外部断言" in prompt
     assert "`send_message`" not in prompt
-    assert "用户消息是一个 JSON 对象" in prompt
+    assert "你的任务是阅读输入 JSON" in prompt
     assert "具体新信息" in prompt
     assert "具体问题、任务或承诺" in prompt
     assert "action_requests" in prompt

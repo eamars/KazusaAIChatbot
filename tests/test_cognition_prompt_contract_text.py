@@ -87,6 +87,7 @@ _EXTERNAL_SPEECH_TERMS = (
     '当前外部说话内容',
     '外部说话内容',
     '当前外部文本',
+    '外部文本消息',
 )
 _NEGATION_TERMS = (
     '不是',
@@ -615,7 +616,7 @@ def test_l3_content_plan_scope_preserves_complete_plan_deliverables() -> None:
         '写出 resolved semantic content',
         '`visible_goal` 写交互目的',
         '`voice` 写温度、分寸和情绪姿态',
-        '`rendering` 写单气泡内的布局、长短和固定格式保护',
+        '`rendering` 写出站消息序列的形状、长短和固定格式保护',
         '不能改变立场、事实或答案',
         '接梗',
         '技术对比',
@@ -839,9 +840,13 @@ def test_l2a_preserves_explicit_current_user_decision_ownership() -> None:
         '决策主体',
         '被邀请者',
         '被建议者',
-        'L1 里出现的邀请、压力、亲近感或期待感只说明我的感受强度',
-        '事实主体、动作主体和决策主体仍来自 `decontextualized_input`',
+        '`current_event_grounding`',
+        '当前材料是外部文本消息',
+        'L1 的 `emotional_appraisal` 与 `interaction_subtext` 只说明我的即时感受',
+        '不能替换当前文本里的事实主体',
+        '外部文本消息里，如果当前可见文本或 `decontextualized_input` 显式标出说话人',
         '先按来源事实复述当前真实现场和动作/决策主体',
+        '先按当前说话人、可见文本、直接称呼、提及和回复对象复述现场',
         '第一人称只承载我的感受、判断、边界和准备提供的建议',
     ):
         assert required_text in prompt_text

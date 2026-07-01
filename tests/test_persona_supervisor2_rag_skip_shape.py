@@ -178,6 +178,10 @@ async def test_content_plan_accepts_skipped_rag_result_shape(monkeypatch) -> Non
         "character_intent": "CLARIFY",
         "conversation_progress": None,
         "cognitive_episode": _minimal_text_chat_episode(),
+        "user_input": "clean body",
+        "prompt_message_context": {},
+        "reply_context": {},
+        "user_name": "User",
     })
 
     assert result["content_plan"]["semantic_content"] == "你说的这些具体是指什么？"

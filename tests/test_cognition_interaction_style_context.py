@@ -195,6 +195,10 @@ def _content_plan_state(*, channel_type: str = "group") -> dict:
         "conversation_progress": None,
         "channel_type": channel_type,
         "cognitive_episode": _cognitive_episode(channel_type=channel_type),
+        "user_input": "hello",
+        "prompt_message_context": {},
+        "reply_context": {},
+        "user_name": "User",
         "interaction_style_context": {
             "user_style": {
                 "speech_guidelines": [],

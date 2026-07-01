@@ -190,7 +190,7 @@ body[data-auth-state="authenticated"] #login-form { display: none; }
 .check-field { display: inline-flex; align-items: center; gap: 7px; min-height: 28px; color: var(--ink); font-size: 13px; font-weight: 500; }
 .check-field input { margin: 0; accent-color: var(--primary); }
 .check-field:has(input:disabled) { color: var(--muted); }
-.filter-row .field { flex: 1 1 240px; min-width: min(220px, 100%); }
+.filter-row .field { flex: 1 1 180px; min-width: min(170px, 100%); }
 .filter-row { align-items: flex-end; }
 .log-toolbar { display: flex; align-items: flex-end; gap: 10px 12px; flex-wrap: wrap; }
 .log-toolbar .field { flex: 1 1 180px; min-width: min(180px, 100%); }

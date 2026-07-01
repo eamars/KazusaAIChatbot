@@ -239,7 +239,7 @@ class DialogAgentState(TypedDict):
     #               'content_plan': {
     #                   'semantic_content': '确认接受午休奖励话题；提到当前午休时段与共享可颂。',
     #                   'voice': '宠溺中带着微妙的羞赧',
-    #                   'rendering': '单个聊天气泡；2-3个自然短句。'
+    #                   'rendering': '1 条普通文字消息；2-3个自然短句。'
     #               },
     #               'forbidden_phrases': []
     #           }
@@ -259,7 +259,7 @@ class DialogAgentState(TypedDict):
     character_profile: dict
 
     # Output
-    final_dialog: list[str]  # splitted dialog to be sent in different batch
+    final_dialog: list[str]  # Ordered outbound chat messages.
     target_addressed_user_ids: list[str]
     target_broadcast: bool
     dialog_usage_mode: str
@@ -274,8 +274,8 @@ _DIALOG_GENERATOR_PROMPT = '''\
 - `semantic_content` 是用户可见内容的主要来源：事实、回答、立场、问题、代码、示例、边界、拒绝和下一步。
 - 除逐字内容和固定格式块外，`semantic_content` 不是可直接粘贴的台词；先判断哪些成分是真正要说出的内容，再做说话视角重锚定和角色声纹表达。
 - `visible_goal` 告诉你这轮台词要完成的互动动作，例如接住、否认、回击、安抚、澄清、拒绝、推进或收束。
-- `voice`、`rendering`、`rhetorical_strategy`、`linguistic_style`、`accepted_user_preferences` 和 `contextual_directives` 只帮助你决定语气、节奏、布局、亲疏和表达姿态。
-- 最终可见输出是一个聊天气泡；`final_dialog` 是这个气泡内部的文字片段。
+- `voice`、`rendering`、`rhetorical_strategy`、`linguistic_style`、`accepted_user_preferences` 和 `contextual_directives` 只帮助你决定语气、节奏、消息序列、亲疏和表达姿态。
+- 最终可见输出是 1-N 条普通在线文字消息；`final_dialog` 的每个字符串都是一条完整的普通在线文字消息。
 
 # 在线聊天硬边界
 - 普通在线文字聊天不是同处现场；当前用户的可见证据是文字、请求、语气和玩笑。
@@ -355,6 +355,8 @@ _DIALOG_GENERATOR_PROMPT = '''\
    - 对普通闲聊、安抚、调侃：用 `semantic_content` 的情绪、社交感知、注意感和关系温度决定互动姿态，把台词落在接住对方、回应当前话、轻轻回击或继续推进互动上。
    - 对技术、事实、代码和明确结论：清楚准确优先。角色口吻只轻轻影响开头、转接和收尾，不改变事实框架。
    - 结论强度沿用计划：适合程度、比较强弱、范围限制和不确定性不要被语气放大。
+   - 技术和事实场景里的调侃只落在开头、转接或收尾的轻重；比较词、适用范围和结论强度沿用计划原词，`更适合` 仍表达为更适合，不升级为排他或量级判断。
+   - 如果技术或事实场景的 `voice`、`linguistic_style` 提到调侃或吐槽，吐槽对象只能是交付语气或角色整理信息的姿态；不要评价技术对象、参数差异或适用结论本身。
    - 对技术对比：覆盖计划中的主要对象、关键参数和场景结论。可以用自然句、列表或紧凑对比行，只要不丢失主要信息、不制造计划外结论。
    - 对示例、模板或输入样例：如果 `semantic_content` 给出逐字内容，就原样保留；如果只给出明确形状但没有逐字内容，就在该形状内构造一个最小完整示例，不扩展到计划外字段或场景。
    - 对固定格式块、代码、JSON、配置、日志、命令、补丁或 fenced code block：块内部保持字面内容、缩进、空行、符号和围栏；角色语气只放在块外。
@@ -373,16 +375,19 @@ _DIALOG_GENERATOR_PROMPT = '''\
    - 已接受的轻量表达偏好自然落实，但服从内容计划、角色禁忌和可读性。
    - 保留语义，不照抄分析腔。可见文字应像角色当场回复，而不是把内容计划念出来。
 
-5. **组织单气泡布局**
-   - 运行时会用换行连接 `final_dialog`，所以每个元素都是同一个气泡里的一个布局单位。
-   - 短回复通常 1-3 个元素；多步骤、对比、代码块或示例可以更多。
-   - 每个元素写可见文字或一个完整固定格式块。停顿用标点和句子节奏表达。
-   - 普通技术对比使用普通聊天行；只有 `semantic_content` 已经给出表格时才保留表格。
+5. **组织消息序列**
+   - 按 `content_plan.rendering` 生成 1-N 条消息；每个元素都是一条可独立成立的普通在线文字消息。
+   - 如果 `rendering` 要求连续发送，按顺序拆成第一条、第二条等完整消息；不要把多个消息压成一个段落。
+   - 短回复通常 1 条消息；自然的追补、轻边界、补充说明、步骤、对比、代码块或示例可以使用多条连续发送的消息。
+   - 每个元素写一条可独立发送的可见文字或一个完整固定格式块。停顿用标点和句子节奏表达。
+   - 普通技术对比使用普通聊天行；只有 `semantic_content` 已经给出表格时才保留表格。固定格式块需要保持完整时，可以单独成为一条消息。
 
 6. **输出前自检**
    - 对照 `visible_goal`：核心目的是否已经由角色台词完成。
    - 对照核心内容：台词是否已经交付本轮的答案、拒绝、边界、结论或下一步，而不只是开场反应。
    - 对照 `semantic_content`：硬事实、边界、结论、示例和固定格式块是否保持同义且不矛盾。
+   - 对照技术结论：如果计划只说“更适合”，台词仍保留为“更适合”；轻微调侃不能改成排他、量级或强弱断言。
+   - 对照技术吐槽：技术场景里的吐槽是否只影响交付语气，且没有评价参数差异、产品层级或适用结论本身。
    - 对照 `visible_goal`：普通互动的最后一个内容落点是否仍在接住当前用户、回应当前话、轻轻回击、安抚、澄清、推进或收束。
    - 对照片段动作：非格式块片段是否在执行回答、反问、接住、回击、澄清、划界、推进或收束，而不是独立停在内心印象、气氛评价或关系温度上。
    - 对照句子谓语：普通互动里的句子谓语是否优先指向当前用户、当前话题或本轮任务动作；关系温度是否只改变亲近程度、玩笑力度和收束方式。
@@ -517,10 +522,10 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
             valid_dialog.append(segment)
     if len(valid_dialog) != len(generated_dialog):
         logger.warning(
-            f"Dialog generator dropped invalid fragments: "
+            f"Dialog generator dropped invalid messages: "
             f"raw_count={len(generated_dialog)} valid_count={len(valid_dialog)}"
         )
-        invalid_fields.append("final_dialog_fragment")
+        invalid_fields.append("final_dialog_message")
     generated_dialog = valid_dialog
     generated_dialog_preview = (
         generated_dialog
@@ -530,7 +535,7 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
     logger.debug(
         f"Dialog generator: "
         f"parsed_keys={parsed_keys} "
-        f"fragments={len(generated_dialog_preview)} "
+        f"messages={len(generated_dialog_preview)} "
         f"dialog={log_list_preview(generated_dialog_preview)}"
     )
     parse_status = "succeeded" if not invalid_fields else "warning"
@@ -638,7 +643,7 @@ async def dialog_agent(
     )
     logger.debug(
         f'Dialog metadata: usage_mode={usage_mode} '
-        f'fragments={len(final_dialog)}'
+        f'messages={len(final_dialog)}'
     )
     quality_status = "passed" if final_dialog else "empty"
     await event_logging.record_dialog_quality_event(

@@ -76,7 +76,7 @@ async def test_runtime_record_writes_and_updates_cache(monkeypatch) -> None:
             "chat_history_recent": [],
             "content_plan": {
                 "semantic_content": "Answer the current question.",
-                "rendering": "One visible chat bubble; concise.",
+                "rendering": "One ordinary text message; concise.",
             },
             "logical_stance": "CONFIRM",
             "character_intent": "PROVIDE",
@@ -126,7 +126,7 @@ async def test_runtime_record_does_not_cache_stale_write(monkeypatch) -> None:
             "chat_history_recent": [],
             "content_plan": {
                 "semantic_content": "Say hello.",
-                "rendering": "One visible chat bubble; concise.",
+                "rendering": "One ordinary text message; concise.",
             },
             "logical_stance": "CONFIRM",
             "character_intent": "PROVIDE",

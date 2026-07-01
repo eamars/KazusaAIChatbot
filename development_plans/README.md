@@ -181,6 +181,7 @@ plans.
 | [conversation_progress_phase3_quality_plan.md](archive/completed/short_term/conversation_progress_phase3_quality_plan.md) |
 | [conversation_progress_state_plan.md](archive/completed/short_term/conversation_progress_state_plan.md) |
 | [dialog_mention_target_user_plan.md](archive/completed/short_term/dialog_mention_target_user_plan.md) |
+| [dialog_message_sequence_delivery_plan.md](archive/completed/short_term/dialog_message_sequence_delivery_plan.md) |
 | [event_logging_observability_plan.md](archive/completed/short_term/event_logging_observability_plan.md) |
 | [first_class_image_input_cognition_plan.md](archive/completed/short_term/first_class_image_input_cognition_plan.md) |
 | [get_db_private_boundary_plan.md](archive/completed/short_term/get_db_private_boundary_plan.md) |

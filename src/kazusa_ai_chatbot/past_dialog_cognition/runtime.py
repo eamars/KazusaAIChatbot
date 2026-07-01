@@ -5,8 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from pymongo.errors import PyMongoError
-
+from kazusa_ai_chatbot.db import DatabaseBackendError
 from kazusa_ai_chatbot.db.conversation import list_conversation_rows_by_row_ids
 from kazusa_ai_chatbot.db.llm_tracing import list_llm_trace_steps_for_trace_ids
 from kazusa_ai_chatbot.past_dialog_cognition.models import (
@@ -76,7 +75,7 @@ async def build_past_dialog_cognition_context(
             trace_ids,
             stage_names=PAST_DIALOG_COGNITION_STAGE_NAMES,
         )
-    except PyMongoError as exc:
+    except DatabaseBackendError as exc:
         diagnostics.append({
             "status": "skipped",
             "reason": f"trace lookup failed: {exc}",
@@ -160,7 +159,7 @@ async def build_past_dialog_cognition_context_from_rag_result(
             row_ids,
             limit=max_dialogs,
         )
-    except PyMongoError as exc:
+    except DatabaseBackendError as exc:
         result = _empty_result(
             candidate_count=0,
             status="row_lookup_failed",

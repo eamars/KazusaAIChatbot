@@ -23,6 +23,7 @@ Each runtime adapter is responsible for a clear startup and shutdown lifecycle:
   enabled.
 - Forward normalized inbound chat requests to the brain service.
 - Deliver returned `ChatResponse.messages` to the platform when allowed.
+  Each string is one logical outbound chat message, sent in order.
 - Close platform clients, HTTP clients, runtime servers, and background tasks.
 
 In normal local operation, `kazusa-control-console` starts and stops registered
@@ -40,9 +41,28 @@ runtime send surface:
 
 The runtime send interface is adapter-owned delivery validation. It must reject
 unsupported or disallowed targets before native platform send.
+This callback sends one requested message only; it does not expand a normal
+`/chat` message sequence.
 When `delivery_mentions` is present, adapters replace matching authored
 `@display_name` text inline with native platform mention syntax when feasible;
 invalid or incomplete candidates leave the original text unchanged.
+
+## Normal Chat Response Rendering
+
+For normal `/chat` responses, adapters render `ChatResponse.messages` as an
+ordered sequence of platform sends:
+
+- Send the first message immediately.
+- Use native reply rendering only on the first message when
+  `use_reply_feature` is true and the platform supports it.
+- Send follow-up messages as normal chat messages after adapter-owned
+  non-blocking delay tasks.
+- Calculate follow-up delay from message text length using the adapter shared
+  sequence helper, clamped to a small bounded range.
+- Apply `delivery_mentions` to each logical message before platform-specific
+  chunking or segment conversion.
+- Post a delivery receipt for the first successfully sent platform message id
+  when `delivery_tracking_id` is present.
 
 ## Message Envelope Contract
 
@@ -84,5 +104,7 @@ Adapter changes need deterministic tests for:
 - Platform syntax projection into `MessageEnvelope.body_text`.
 - Typed mentions, replies, attachments, addressees, and broadcast values.
 - Runtime send capability and delivery behavior.
+- Normal `/chat` ordered message sequence rendering, first-message reply
+  behavior, follow-up delays, and per-message inline mention rendering.
 - Boundary checks proving platform-specific syntax does not leak into brain
   service, cognition, RAG, dialog, persistence, or prompts.

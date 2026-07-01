@@ -31,7 +31,7 @@ def test_service_cards_start_stop_and_dependency_states(
         with page.expect_response(lambda response: "/api/services/brain/start" in response.url):
             _button(page, "brain", "start").click()
         page.wait_for_function(
-            "() => document.querySelector(\"[data-service-card='brain'] .badge\")?.textContent === 'running'"
+            "() => document.querySelector(\"[data-service-card='brain'] [data-service-status-badge]\")?.textContent === 'running'"
         )
         assert _button(page, "brain", "start").is_disabled()
         assert _button(page, "brain", "stop").is_enabled()
@@ -43,14 +43,14 @@ def test_service_cards_start_stop_and_dependency_states(
         ):
             _button(page, "adapter.debug", "start").click()
         page.wait_for_function(
-            "() => document.querySelector(\"[data-service-card='adapter.debug'] .badge\")?.textContent === 'running'"
+            "() => document.querySelector(\"[data-service-card='adapter.debug'] [data-service-status-badge]\")?.textContent === 'running'"
         )
         assert _button(page, "adapter.debug", "stop").is_enabled()
 
         with page.expect_response(lambda response: "/api/services/brain/stop" in response.url):
             _button(page, "brain", "stop").click()
         page.wait_for_function(
-            "() => document.querySelector(\"[data-service-card='brain'] .badge\")?.textContent === 'stopped'"
+            "() => document.querySelector(\"[data-service-card='brain'] [data-service-status-badge]\")?.textContent === 'stopped'"
         )
         assert _service_badge(page, "adapter.debug") == "stopped"
         assert _button(page, "adapter.debug", "start").is_disabled()
@@ -108,9 +108,10 @@ def test_service_action_click_shows_operator_feedback_while_pending(
         page.wait_for_selector("[data-service='brain'][data-action='start']:disabled")
         assert "Starting Brain service" in page.locator("#ui-notice").inner_text()
         page.wait_for_function(
-            "() => document.querySelector(\"[data-service-card='brain'] .badge\")?.textContent === 'running'",
+            "() => document.querySelector(\"[data-service-card='brain'] [data-service-status-badge]\")?.textContent === 'running'",
             timeout=10000,
         )
+        page.wait_for_selector("#ui-notice[data-tone='success']")
         assert "Brain service started" in page.locator("#ui-notice").inner_text()
 
 
@@ -181,5 +182,5 @@ def _service_badge(page, service_id: str) -> str:
     """Return the visible service badge text."""
 
     return page.locator(
-        f"[data-service-card='{service_id}'] .badge"
+        f"[data-service-card='{service_id}'] [data-service-status-badge]"
     ).inner_text()

@@ -31,7 +31,10 @@ from kazusa_ai_chatbot.db._client import (
     get_text_embedding,
     get_text_embeddings_batch,
 )
-from kazusa_ai_chatbot.db.errors import DatabaseOperationError
+from kazusa_ai_chatbot.db.errors import (
+    DatabaseBackendError,
+    DatabaseOperationError,
+)
 from kazusa_ai_chatbot.db.health import check_database_connection
 
 # ── Schemas ────────────────────────────────────────────────────────
@@ -246,7 +249,8 @@ __all__ = [
     # Config
     "AFFINITY_DEFAULT", "AFFINITY_MAX", "AFFINITY_MIN",
     # Client
-    "check_database_connection", "close_db", "DatabaseOperationError",
+    "check_database_connection", "close_db", "DatabaseBackendError",
+    "DatabaseOperationError",
     "enable_vector_index",
     "get_document_text_embedding", "get_document_text_embeddings_batch",
     "get_query_text_embedding", "get_query_text_embeddings_batch",

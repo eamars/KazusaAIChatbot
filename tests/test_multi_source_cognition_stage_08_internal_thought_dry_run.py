@@ -82,8 +82,8 @@ _PROMPT_FINGERPRINTS = (
     (
         "_COGNITION_CONSCIOUSNESS_PROMPT",
         l2_module._COGNITION_CONSCIOUSNESS_PROMPT,
-        6917,
-        "dea60e09ea50b7bc50f43af7689a269a9d96363f6082201b0cd69655113a80db",
+        7388,
+        "dcfadadd9497d84f748d11dd39899e21d20da651e90c35c6cee31fd89cf51400",
     ),
     (
         "_BOUNDARY_CORE_PROMPT",
@@ -106,8 +106,8 @@ _PROMPT_FINGERPRINTS = (
     (
         "ACTION_ROUTER_PROMPT",
         ACTION_ROUTER_PROMPT,
-        23809,
-        "e944d8c564ccd10458635da899496b877805fdbfd113499cadbde82040c4c794",
+        24246,
+        "d1f408b6c889f7ca2acf642e9db94f62e48904b634fa35a0cc4d576166231de2",
     ),
     (
         "_STYLE_AGENT_PROMPT",
@@ -118,8 +118,8 @@ _PROMPT_FINGERPRINTS = (
     (
         "_CONTENT_PLAN_AGENT_PROMPT",
         l3_module._CONTENT_PLAN_AGENT_PROMPT,
-        13343,
-        "6c5c8a67e8284413d9009d8823fe1bad7c93c23b93a270da5751dcdab7c4610d",
+        13693,
+        "5db4452a19ed08672380b119be2cf218ca9fb8572f602cd3dfa26a62f85fcb89",
     ),
     (
         "_PREFERENCE_ADAPTER_PROMPT",

@@ -127,20 +127,8 @@ async def build_trace_export(*, trace_id: str) -> dict[str, Any]:
         sort_doc={"sequence": 1, "created_at": 1},
         limit=500,
     )
-    events = await script_operations.export_collection_rows(
-        collection_name="event_log_events",
-        filter_doc={
-            "$or": [
-                {"correlation_id": trace_id},
-                {"labels.llm_trace_id": trace_id},
-                {"refs": {"$elemMatch": {
-                    "ref_type": "llm_trace",
-                    "ref_id": trace_id,
-                }}},
-            ]
-        },
-        projection={},
-        sort_doc={"occurred_at": 1},
+    events = await script_operations.export_event_log_events_for_trace_id(
+        trace_id,
         limit=500,
     )
     conversation_rows = await script_operations.export_collection_rows(

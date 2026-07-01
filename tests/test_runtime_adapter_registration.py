@@ -19,8 +19,10 @@ import adapters.delivery_receipts as delivery_receipts_module
 import adapters.discord_adapter as discord_module
 import adapters.napcat_qq_adapter as napcat_module
 import adapters.napcat_qq_adapter.mention_hydration as napcat_mentions_module
+import adapters.napcat_qq_adapter.ws_adapter as napcat_ws_module
 from adapters.discord_adapter import DiscordAdapter
 from adapters.napcat_qq_adapter import NapCatWSAdapter
+from adapters.outbound_sequence import followup_delay_seconds
 from kazusa_ai_chatbot.dispatcher import AdapterRegistry, RemoteHttpAdapter
 from kazusa_ai_chatbot import service as service_module
 
@@ -168,6 +170,14 @@ class _FakeDiscordMessage:
         message_id = f"discord-reply-{len(self.reply_chunks)}"
         return_value = _FakeDiscordSentMessage(message_id)
         return return_value
+
+
+async def _drain_normal_chat_delivery_tasks(adapter: object) -> None:
+    """Wait for adapter-owned normal chat follow-up tasks in tests."""
+
+    tasks = list(adapter._normal_chat_delivery_tasks)
+    if tasks:
+        await asyncio.gather(*tasks)
 
 
 def _target_user_mention(
@@ -1273,6 +1283,210 @@ async def test_napcat_handle_event_replaces_inline_delivery_mention_from_brain()
 
 
 @pytest.mark.asyncio
+async def test_napcat_handle_event_sends_brain_messages_as_sequence_with_first_reply_only(
+    monkeypatch,
+) -> None:
+    """Normal QQ chat should send logical messages with reply only on first."""
+
+    sleep = AsyncMock()
+    monkeypatch.setattr(napcat_ws_module.asyncio, "sleep", sleep)
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["905393941"],
+        debug_modes={},
+    )
+    adapter.bot_id = "3768713357"
+    adapter.bot_name = "Kazusa"
+    adapter.brain_client.post = AsyncMock(side_effect=[
+        _DummyResponse({
+            "messages": ["first", "second"],
+            "use_reply_feature": True,
+            "delivery_tracking_id": "delivery-1",
+        }),
+        _DummyResponse({"status": "updated", "updated": True}),
+    ])
+    ws = _FakeNapCatWebSocket({"message_id": "outbound-1"})
+
+    await adapter.handle_event(
+        {
+            "post_type": "message",
+            "message_type": "group",
+            "message_id": 1602974844,
+            "group_id": 905393941,
+            "user_id": 2787858400,
+            "sender": {"nickname": "User A"},
+            "message": [{"type": "text", "data": {"text": " hi"}}],
+        },
+        ws,
+    )
+    await _drain_normal_chat_delivery_tasks(adapter)
+
+    send_payloads = [
+        payload
+        for payload in ws.sent_payloads
+        if payload["action"] == "send_msg"
+    ]
+    assert len(send_payloads) == 2
+    assert send_payloads[0]["params"]["message"] == [
+        {"type": "reply", "data": {"id": "1602974844"}},
+        {"type": "text", "data": {"text": "first"}},
+    ]
+    assert send_payloads[1]["params"]["message"] == "second"
+    sleep.assert_awaited_once_with(1.0)
+    receipt_call = adapter.brain_client.post.await_args_list[1]
+    assert receipt_call.kwargs["json"]["platform_message_id"] == "outbound-1"
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_napcat_handle_event_replaces_inline_delivery_mentions_across_message_sequence(
+    monkeypatch,
+) -> None:
+    """Normal QQ chat should render inline tags in each logical message."""
+
+    sleep = AsyncMock()
+    monkeypatch.setattr(napcat_ws_module.asyncio, "sleep", sleep)
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["905393941"],
+        debug_modes={},
+    )
+    adapter.bot_id = "3768713357"
+    adapter.bot_name = "Kazusa"
+    adapter.brain_client.post = AsyncMock(side_effect=[
+        _DummyResponse({
+            "messages": ["@Target User first", "second @Target User"],
+            "use_reply_feature": False,
+            "delivery_mentions": [
+                _target_user_mention(platform_user_id="2787858400"),
+            ],
+            "delivery_tracking_id": "delivery-1",
+        }),
+        _DummyResponse({"status": "updated", "updated": True}),
+    ])
+    ws = _FakeNapCatWebSocket({"message_id": "outbound-1"})
+
+    await adapter.handle_event(
+        {
+            "post_type": "message",
+            "message_type": "group",
+            "message_id": 1602974844,
+            "group_id": 905393941,
+            "user_id": 2787858400,
+            "sender": {"nickname": "User A"},
+            "message": [{"type": "text", "data": {"text": " hi"}}],
+        },
+        ws,
+    )
+    await _drain_normal_chat_delivery_tasks(adapter)
+
+    send_payloads = [
+        payload
+        for payload in ws.sent_payloads
+        if payload["action"] == "send_msg"
+    ]
+    assert len(send_payloads) == 2
+    assert send_payloads[0]["params"]["message"] == [
+        {"type": "at", "data": {"qq": "2787858400"}},
+        {"type": "text", "data": {"text": " first"}},
+    ]
+    assert send_payloads[1]["params"]["message"] == [
+        {"type": "text", "data": {"text": "second "}},
+        {"type": "at", "data": {"qq": "2787858400"}},
+    ]
+    sleep.assert_awaited_once_with(
+        followup_delay_seconds("second @Target User")
+    )
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_napcat_handle_event_does_not_wait_for_followup_delay(
+    monkeypatch,
+) -> None:
+    """Normal QQ chat should return after first send, before follow-up delay."""
+
+    sleep_started = asyncio.Event()
+    release_sleep = asyncio.Event()
+
+    async def delayed_sleep(delay: float) -> None:
+        assert delay == 1.0
+        sleep_started.set()
+        await release_sleep.wait()
+
+    monkeypatch.setattr(napcat_ws_module.asyncio, "sleep", delayed_sleep)
+    adapter = NapCatWSAdapter(
+        ws_url="ws://napcat.local/ws",
+        ws_token="token",
+        brain_url="http://127.0.0.1:8000",
+        brain_response_timeout=30,
+        runtime_host="127.0.0.1",
+        runtime_port=8011,
+        runtime_public_url="http://127.0.0.1:8011",
+        channel_ids=["905393941"],
+        debug_modes={},
+    )
+    adapter.bot_id = "3768713357"
+    adapter.bot_name = "Kazusa"
+    adapter.brain_client.post = AsyncMock(side_effect=[
+        _DummyResponse({
+            "messages": ["first", "second"],
+            "use_reply_feature": True,
+            "delivery_tracking_id": "delivery-1",
+        }),
+        _DummyResponse({"status": "updated", "updated": True}),
+    ])
+    ws = _FakeNapCatWebSocket({"message_id": "outbound-1"})
+
+    await asyncio.wait_for(
+        adapter.handle_event(
+            {
+                "post_type": "message",
+                "message_type": "group",
+                "message_id": 1602974844,
+                "group_id": 905393941,
+                "user_id": 2787858400,
+                "sender": {"nickname": "User A"},
+                "message": [{"type": "text", "data": {"text": " hi"}}],
+            },
+            ws,
+        ),
+        timeout=0.5,
+    )
+    await asyncio.wait_for(sleep_started.wait(), timeout=0.5)
+
+    send_payloads = [
+        payload
+        for payload in ws.sent_payloads
+        if payload["action"] == "send_msg"
+    ]
+    assert len(send_payloads) == 1
+
+    release_sleep.set()
+    await _drain_normal_chat_delivery_tasks(adapter)
+
+    send_payloads = [
+        payload
+        for payload in ws.sent_payloads
+        if payload["action"] == "send_msg"
+    ]
+    assert len(send_payloads) == 2
+    await adapter.close()
+
+
+@pytest.mark.asyncio
 async def test_napcat_handle_event_posts_delivery_receipt_after_send():
     """Successful normal chat sends should report platform message ids."""
 
@@ -2159,6 +2373,135 @@ async def test_discord_on_message_replaces_inline_delivery_mention_from_brain():
 
     assert message.reply_chunks == []
     assert message.channel.sent_chunks == ["<@2787858400> hello there"]
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_discord_handle_message_sends_brain_messages_as_sequence_with_first_reply_only(
+    monkeypatch,
+) -> None:
+    """Normal Discord chat should send logical messages with one native reply."""
+
+    sleep = AsyncMock()
+    monkeypatch.setattr(discord_module.asyncio, "sleep", sleep)
+    adapter = DiscordAdapter(
+        brain_url="http://127.0.0.1:8000",
+        runtime_host="127.0.0.1",
+        runtime_port=8012,
+        runtime_public_url="http://127.0.0.1:8012",
+        runtime_shared_secret="secret-token",
+        channel_ids=["12345"],
+        debug_modes={},
+    )
+    adapter._http_client.post = AsyncMock(side_effect=[
+        _DummyResponse({
+            "messages": ["first", "second"],
+            "use_reply_feature": True,
+            "delivery_tracking_id": "delivery-1",
+        }),
+        _DummyResponse({"status": "updated", "updated": True}),
+    ])
+    message = _FakeDiscordMessage()
+
+    await adapter.on_message(message)
+    await _drain_normal_chat_delivery_tasks(adapter)
+
+    assert message.reply_chunks == ["first"]
+    assert message.channel.sent_chunks == ["second"]
+    sleep.assert_awaited_once_with(1.0)
+    receipt_call = adapter._http_client.post.await_args_list[1]
+    assert receipt_call.kwargs["json"]["platform_message_id"] == "discord-reply-1"
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_discord_on_message_replaces_inline_delivery_mentions_across_message_sequence(
+    monkeypatch,
+) -> None:
+    """Normal Discord chat should render inline tags in each logical message."""
+
+    sleep = AsyncMock()
+    monkeypatch.setattr(discord_module.asyncio, "sleep", sleep)
+    adapter = DiscordAdapter(
+        brain_url="http://127.0.0.1:8000",
+        runtime_host="127.0.0.1",
+        runtime_port=8012,
+        runtime_public_url="http://127.0.0.1:8012",
+        runtime_shared_secret="secret-token",
+        channel_ids=["12345"],
+        debug_modes={},
+    )
+    adapter._http_client.post = AsyncMock(side_effect=[
+        _DummyResponse({
+            "messages": ["@Target User first", "second @Target User"],
+            "use_reply_feature": False,
+            "delivery_mentions": [
+                _target_user_mention(platform_user_id="2787858400"),
+            ],
+            "delivery_tracking_id": "delivery-1",
+        }),
+        _DummyResponse({"status": "updated", "updated": True}),
+    ])
+    message = _FakeDiscordMessage()
+
+    await adapter.on_message(message)
+    await _drain_normal_chat_delivery_tasks(adapter)
+
+    assert message.reply_chunks == []
+    assert message.channel.sent_chunks == [
+        "<@2787858400> first",
+        "second <@2787858400>",
+    ]
+    sleep.assert_awaited_once_with(
+        followup_delay_seconds("second @Target User")
+    )
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_discord_on_message_does_not_wait_for_followup_delay(
+    monkeypatch,
+) -> None:
+    """Normal Discord chat should return after first send, before follow-up delay."""
+
+    sleep_started = asyncio.Event()
+    release_sleep = asyncio.Event()
+
+    async def delayed_sleep(delay: float) -> None:
+        assert delay == 1.0
+        sleep_started.set()
+        await release_sleep.wait()
+
+    monkeypatch.setattr(discord_module.asyncio, "sleep", delayed_sleep)
+    adapter = DiscordAdapter(
+        brain_url="http://127.0.0.1:8000",
+        runtime_host="127.0.0.1",
+        runtime_port=8012,
+        runtime_public_url="http://127.0.0.1:8012",
+        runtime_shared_secret="secret-token",
+        channel_ids=["12345"],
+        debug_modes={},
+    )
+    adapter._http_client.post = AsyncMock(side_effect=[
+        _DummyResponse({
+            "messages": ["first", "second"],
+            "use_reply_feature": True,
+            "delivery_tracking_id": "delivery-1",
+        }),
+        _DummyResponse({"status": "updated", "updated": True}),
+    ])
+    message = _FakeDiscordMessage()
+
+    await asyncio.wait_for(adapter.on_message(message), timeout=0.5)
+    await asyncio.wait_for(sleep_started.wait(), timeout=0.5)
+
+    assert message.reply_chunks == ["first"]
+    assert message.channel.sent_chunks == []
+
+    release_sleep.set()
+    await _drain_normal_chat_delivery_tasks(adapter)
+
+    assert message.channel.sent_chunks == ["second"]
     await adapter.close()
 
 

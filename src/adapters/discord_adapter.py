@@ -38,6 +38,7 @@ from adapters.envelope_common import (
     resolve_mentions,
 )
 from adapters.inline_mentions import InlineMention, inline_mention_parts
+from adapters.outbound_sequence import followup_delay_seconds
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.dispatcher import SendResult
 from kazusa_ai_chatbot.logging_config import configure_adapter_logging
@@ -406,6 +407,7 @@ class DiscordAdapter(discord.Client):
         self._runtime_server_task: asyncio.Task | None = None
         self._brain_registration_done = False
         self._heartbeat_task: asyncio.Task | None = None
+        self._normal_chat_delivery_tasks: set[asyncio.Task] = set()
 
     def _outbound_channel_allowed(
         self,
@@ -534,6 +536,63 @@ class DiscordAdapter(discord.Client):
             logger=logger,
             log_label="Discord",
         )
+
+    def _track_normal_chat_delivery_task(self, task: asyncio.Task) -> None:
+        """Track adapter-owned follow-up sends for cancellation and tests."""
+
+        self._normal_chat_delivery_tasks.add(task)
+        task.add_done_callback(self._finalize_normal_chat_delivery_task)
+
+    def _finalize_normal_chat_delivery_task(self, task: asyncio.Task) -> None:
+        """Discard completed follow-up tasks and log unexpected failures."""
+
+        self._normal_chat_delivery_tasks.discard(task)
+        if task.cancelled():
+            return
+        task_exception = task.exception()
+        if task_exception is None:
+            return
+        logger.warning(
+            f"Discord follow-up delivery task failed unexpectedly: "
+            f"{task_exception}",
+            exc_info=(
+                type(task_exception),
+                task_exception,
+                task_exception.__traceback__,
+            ),
+        )
+
+    async def _send_normal_chat_followups(
+        self,
+        *,
+        messages: Sequence[str],
+        channel: object,
+        channel_id: str,
+        channel_type: str,
+        delivery_mentions: Sequence[dict] | None,
+    ) -> None:
+        """Send delayed follow-up messages from one brain cognition."""
+
+        mention_candidates = (
+            delivery_mentions
+            if channel_type == "group"
+            else None
+        )
+        for message_text in messages:
+            await asyncio.sleep(followup_delay_seconds(message_text))
+            outbound_text = _outbound_text_with_delivery_mentions(
+                message_text,
+                mention_candidates,
+            )
+            for chunk in _split_message(outbound_text):
+                try:
+                    await channel.send(chunk)
+                except discord.HTTPException as exc:
+                    logger.warning(
+                        f"Discord follow-up send failed: "
+                        f"channel_id={channel_id} error={exc}"
+                    )
+                    return
 
     async def on_message(self, message: discord.Message):
         """Normalize one Discord message event and forward it to the brain.
@@ -705,26 +764,34 @@ class DiscordAdapter(discord.Client):
             return
 
         use_reply = data.get("use_reply_feature", False)
-        combined = "\n".join(messages)
         raw_delivery_mentions = data.get("delivery_mentions")
         delivery_mentions = (
             raw_delivery_mentions
             if isinstance(raw_delivery_mentions, list)
             else None
         )
-        if not use_reply:
-            combined = _outbound_text_with_delivery_mentions(
-                combined,
-                delivery_mentions if not is_dm else None,
-            )
+        channel_type = "private" if is_dm else "group"
+        mention_candidates = delivery_mentions if channel_type == "group" else None
+        first_outbound_text = _outbound_text_with_delivery_mentions(
+            messages[0],
+            mention_candidates,
+        )
         first_sent_message_id = ""
-
-        for chunk in _split_message(combined):
-            if use_reply:
-                sent_message = await message.reply(chunk)
-                use_reply = False
-            else:
-                sent_message = await message.channel.send(chunk)
+        for chunk in _split_message(first_outbound_text):
+            try:
+                if use_reply:
+                    sent_message = await message.reply(chunk)
+                    use_reply = False
+                else:
+                    sent_message = await message.channel.send(chunk)
+            except discord.HTTPException as exc:
+                logger.warning(
+                    f"Discord normal chat send failed: "
+                    f"channel_id={channel_id_str} error={exc}"
+                )
+                if not first_sent_message_id:
+                    return
+                break
             if not first_sent_message_id:
                 first_sent_message_id = str(sent_message.id)
 
@@ -735,6 +802,19 @@ class DiscordAdapter(discord.Client):
             platform_message_id=first_sent_message_id,
         )
 
+        followup_messages = messages[1:]
+        if followup_messages:
+            followup_task = asyncio.create_task(
+                self._send_normal_chat_followups(
+                    messages=followup_messages,
+                    channel=message.channel,
+                    channel_id=channel_id_str,
+                    channel_type=channel_type,
+                    delivery_mentions=delivery_mentions,
+                )
+            )
+            self._track_normal_chat_delivery_task(followup_task)
+
         # Handle multimedia attachments from the response
         for att in data.get("attachments", []):
             # TODO: send images/stickers when the brain supports it
@@ -742,6 +822,16 @@ class DiscordAdapter(discord.Client):
 
     async def close(self):
         """Close adapter-owned HTTP clients and callback server."""
+
+        normal_chat_delivery_tasks = list(self._normal_chat_delivery_tasks)
+        for task in normal_chat_delivery_tasks:
+            task.cancel()
+        if normal_chat_delivery_tasks:
+            await asyncio.gather(
+                *normal_chat_delivery_tasks,
+                return_exceptions=True,
+            )
+            self._normal_chat_delivery_tasks.clear()
 
         if self._heartbeat_task is not None:
             self._heartbeat_task.cancel()

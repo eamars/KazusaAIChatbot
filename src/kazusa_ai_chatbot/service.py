@@ -20,7 +20,6 @@ from contextlib import asynccontextmanager, suppress
 from typing import Any, Literal
 
 from fastapi import FastAPI, BackgroundTasks
-from pymongo.errors import PyMongoError
 
 from kazusa_ai_chatbot.action_spec.execution import execute_action_specs_for_trace
 from kazusa_ai_chatbot.action_spec.results import has_consolidatable_output
@@ -89,6 +88,7 @@ from kazusa_ai_chatbot.reflection_cycle.phase_scheduler import (
     REFLECTION_PHASE_GROUPS_PER_SLOT,
 )
 from kazusa_ai_chatbot.db import (
+    DatabaseBackendError,
     backfill_character_conversation_identity,
     check_database_connection,
     close_db,
@@ -453,7 +453,7 @@ async def _load_reply_past_dialog_context(
             platform_channel_id=state["platform_channel_id"],
             platform_message_id=reply_to_message_id,
         )
-    except PyMongoError as exc:
+    except DatabaseBackendError as exc:
         logger.warning(
             f"Past-dialog cognition reply row lookup skipped: {exc}"
         )

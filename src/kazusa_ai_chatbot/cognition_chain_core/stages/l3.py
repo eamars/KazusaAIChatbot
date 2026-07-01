@@ -573,7 +573,7 @@ async def call_style_agent(state: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 _CONTENT_PLAN_AGENT_PROMPT = '''\
-你现在是角色 {character_name} 的文本内容计划生成器。你负责把上游认知结果整理成一个可被下游台词生成器直接渲染的内容计划。你决定本轮可见台词需要承载的内容、互动动作、表达姿态和布局边界，但不写完整台词。
+你现在是角色 {character_name} 的文本内容计划生成器。你负责把上游认知结果整理成一个可被下游台词生成器直接渲染的内容计划。你决定本轮可见台词需要承载的内容、互动动作、表达姿态和消息序列边界，但不写完整台词。
 
 # 语言政策
 - 除结构化枚举值、schema key、用户原文中的公开标识、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。不要把内部 UUID、message id、platform id、channel id、pending/resume id 复制到自由文本字段。
@@ -613,17 +613,17 @@ _CONTENT_PLAN_AGENT_PROMPT = '''\
 7. **判断 open loop 状态**：当 `conversation_progress.open_loops`、`current_thread` 或 `current_blocker` 存在时，先判断当前输入是否解决、部分解决、答错、回避或只是社交回应。以当前输入和上游意识判断覆盖旧阻碍。
 8. **处理证据边界**：如果实时、易变或来源绑定的事实没有被 `rag_result.answer` 或已确认外部证据支持，`semantic_content` 写明无法确认的部分、可说的泛化范围、核实办法或行动骨架；不要补造具体当前对象、状态、时间或可用性。
 9. **写出 resolved semantic content**：把本轮需要说出口的可见内容压成一个内容-bearing 字符串。这个字符串只回答“台词要承载哪些可见内容”。如果当前事件有明确主体和谓语，检查 `semantic_content` 里是否保留了它；没有保留就先修正 `semantic_content`。
-10. **补充目的、声音和布局**：`visible_goal` 写交互目的和互动动作；`voice` 写温度、分寸和情绪姿态；`rendering` 写单气泡内的布局、长短和固定格式保护。
+10. **补充目的、声音和消息序列**：`visible_goal` 写交互目的和互动动作；`voice` 写温度、分寸和情绪姿态；`rendering` 写出站消息序列的形状、长短和固定格式保护。常见写法包括“1 条普通文字消息”“2 条连续发送的普通文字消息”“第一条短反应，第二条补充边界”。完整固定格式块可以单独成为一条消息。
 
 # 字段写法
 - `visible_goal`：写本轮可见回复要完成的交互目的和互动动作。
 - `semantic_content`：写需要说出口的可见内容。允许包含事实、回答、结论、具体问题、代码块、边界说明或下一步。当前事件里的明确主体和谓语必须写在这里，不能只放在 `visible_goal` 或 `voice`。
 - `voice`：写角色声音、情绪温度、关系温度和分寸。
-- `rendering`：写单个聊天气泡内的布局要求；可以要求简短、多行、保留数值单位、保留 fenced code block 或固定格式。
+- `rendering`：写出站消息序列的形状；可以要求简短、1 条普通文字消息、2 条连续发送的普通文字消息、保留数值单位、保留 fenced code block 或固定格式。完整固定格式块可以单独成为一条消息。
 
 # 内容类型分工
 - 闲聊和调侃：`semantic_content` 写需要说出口的回应点；`visible_goal` 写接话、否认、回击或收束；`voice` 写羞赧、轻快、柔软、嘴硬、社交感知或亲近程度。
-- 技术对比：`semantic_content` 保留所有已给数值、单位和结论；`rendering` 说明允许多行短句。
+- 技术对比：`semantic_content` 保留所有已给数值、单位和结论；`rendering` 说明允许多行短句或拆成连续发送的普通文字消息。
 - 固定格式代码：`semantic_content` 直接包含 fenced code block；`voice` 规定代码块外的口吻。
 - 证据不足：`semantic_content` 写当前来源未确认的部分、可说范围、核实办法或行动骨架。
  
@@ -652,7 +652,7 @@ _CONTENT_PLAN_AGENT_PROMPT = '''\
         "visible_goal": "本轮可见回复要完成的交互目的",
         "semantic_content": "本轮需要说出口的可见内容；事实、答案、问题、代码、例子、边界、拒绝或下一步",
         "voice": "角色声音、情绪温度、关系温度和分寸",
-        "rendering": "单个聊天气泡内的布局要求；固定格式块必须原样保留"
+        "rendering": "出站消息序列的形状；固定格式块必须原样保留"
     }}
 }}
 
