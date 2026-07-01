@@ -24,6 +24,11 @@ from .contracts import (
     validate_complex_task_subagent_request,
     validate_complex_task_subagent_result,
 )
+from .constants import (
+    DEFAULT_OPTION_LIMITS,
+    DEFAULT_SUBAGENT_MAX_ATTEMPTS,
+    OPTION_LIMIT_CAPS,
+)
 from .service import resolve_complex_task
 
 __all__ = [
@@ -38,6 +43,9 @@ __all__ = [
     "COMPLEX_TASK_SUBAGENT_REQUEST_VERSION",
     "COMPLEX_TASK_SUBAGENT_RESULT_VERSION",
     "ComplexTaskValidationError",
+    "DEFAULT_OPTION_LIMITS",
+    "DEFAULT_SUBAGENT_MAX_ATTEMPTS",
+    "OPTION_LIMIT_CAPS",
     "project_complex_task_packet",
     "validate_complex_task_graph",
     "validate_complex_task_followup_task",

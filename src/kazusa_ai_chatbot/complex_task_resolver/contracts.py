@@ -10,6 +10,14 @@ from kazusa_ai_chatbot.action_spec.models import (
     validate_evidence_ref,
 )
 
+from .constants import (
+    DEFAULT_OPTION_LIMITS,
+    DEFAULT_SUBAGENT_MAX_ATTEMPTS,
+    OPTION_LIMIT_CAPS,
+    REVIEW_CASE_ID_DIGIT_COUNT,
+    REVIEW_CASE_ID_PREFIX,
+)
+
 COMPLEX_TASK_GRAPH_VERSION = "complex_task_graph.v1"
 COMPLEX_TASK_FOLLOWUP_TASK_VERSION = "complex_task_followup_task.v1"
 COMPLEX_TASK_NODE_ATTEMPT_VERSION = "complex_task_node_attempt.v1"
@@ -73,13 +81,6 @@ ALLOWED_OPTION_LIMITS = frozenset((
     "max_node_attempts",
     "max_subagent_attempts",
 ))
-OPTION_LIMIT_CAPS = {
-    "max_iterations": 8,
-    "max_nodes": 8,
-    "max_depth": 3,
-    "max_node_attempts": 3,
-    "max_subagent_attempts": 1,
-}
 FORBIDDEN_OPTION_FIELDS = frozenset((
     "planner_llm",
     "node_resolver_llm",
@@ -260,7 +261,7 @@ class ComplexTaskSubagentV1(Protocol):
         self,
         task: ComplexTaskSubagentRequestV1,
         context: dict[str, object],
-        max_attempts: int = 1,
+        max_attempts: int = DEFAULT_SUBAGENT_MAX_ATTEMPTS,
     ) -> ComplexTaskSubagentResultV1:
         """Return one bounded subagent result envelope."""
 
@@ -827,8 +828,9 @@ def _reject_hint_string(value: str, path: str) -> None:
     """Reject strings that look like review fixture metadata markers."""
 
     normalized = _normalized_hint_text(value)
+    normalized_tokens = frozenset(normalized.split())
     for fragments in _FORBIDDEN_HINT_FRAGMENT_SETS:
-        if all(fragment in normalized for fragment in fragments):
+        if all(fragment in normalized_tokens for fragment in fragments):
             raise ComplexTaskValidationError(f"{path}: hidden review hint rejected")
     if _looks_like_review_case_identifier(normalized):
         raise ComplexTaskValidationError(f"{path}: hidden review hint rejected")
@@ -852,6 +854,11 @@ def _looks_like_review_case_identifier(value: str) -> bool:
     """Return whether text looks like the review-case identifier format."""
 
     compact = value.replace(" ", "")
-    prefix = "ctr" + "_"
-    return_value = compact.startswith(prefix)
+    number_start = len(REVIEW_CASE_ID_PREFIX)
+    number_end = number_start + REVIEW_CASE_ID_DIGIT_COUNT
+    return_value = (
+        len(compact) >= number_end
+        and compact.startswith(REVIEW_CASE_ID_PREFIX)
+        and compact[number_start:number_end].isdigit()
+    )
     return return_value

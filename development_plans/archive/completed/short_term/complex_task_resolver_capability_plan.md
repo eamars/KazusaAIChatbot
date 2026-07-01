@@ -6,7 +6,7 @@
   complicated questions, then bring the L2d-facing capability contract forward
   before the comprehensive real LLM review.
 - Plan class: large
-- Status: in_progress
+- Status: completed
 - Mandatory skills: `development-plan`, `local-llm-architecture`,
   `debug-llm`, `py-style`, `cjk-safety`, `test-style-and-execution`
 - Overall cutover strategy: standalone specialist first, then a narrow
@@ -1235,7 +1235,7 @@ These changes are intentionally outside Phase 1:
   - Sign-off: `Codex / 2026-06-30` after evidence was recorded and the
     independent review gate approved production readiness for this stage.
 
-- [ ] Stage 6 - live LLM inspection cases completed
+- [x] Stage 6 - live LLM inspection cases completed
   - Covers: implementation step 8.
   - Verify:
     `venv\Scripts\python -m pytest tests\test_complex_task_resolver_live_llm.py -q -k "<single_case_name>" -s`
@@ -1243,9 +1243,11 @@ These changes are intentionally outside Phase 1:
   - Evidence: record fixture case id, reviewed artifact paths, per-case
     judgment, and confirmation that fixture expected traces/final answers were
     not injected into prompts.
-  - Sign-off: `<agent/date>` after evidence is recorded.
+  - Sign-off: `Codex / 2026-07-01` after the 32-case review artifact and
+    per-case traces were recorded and the user accepted the current evidence
+    as good enough for this plan closeout.
 
-- [ ] Stage 7 - comprehensive real LLM review completed under user instruction
+- [x] Stage 7 - comprehensive real LLM review completed under user instruction
   - Covers: implementation step 9.
   - Verify:
     `test_artifacts/complex_task_resolver/comprehensive_real_llm_review.md`
@@ -1255,13 +1257,17 @@ These changes are intentionally outside Phase 1:
   - Evidence: record the user's review instruction, artifact path, per-case
     outcome, and whether the user accepted the evidence as sufficient to
     consider broad live enablement.
-  - Sign-off: `<agent/date>` after evidence is recorded.
+  - Sign-off: `Codex / 2026-07-01` after
+    `test_artifacts/complex_task_resolver/comprehensive_32_case_review.md`
+    and `test_artifacts/complex_task_resolver/failure_mode_fix_tracker.md`
+    were reviewed and accepted as sufficient for this plan closeout.
 
-- [ ] Stage 8 - docs and regression verification complete
+- [x] Stage 8 - docs and regression verification complete
   - Covers: implementation steps 10-11.
   - Verify all commands in `Verification`.
   - Evidence: record command outputs and any accepted warnings.
-  - Sign-off: `<agent/date>` after evidence is recorded.
+  - Sign-off: `Codex / 2026-07-01` after final focused regression,
+    compile, diff-check, and documentation review evidence was recorded.
 
 - [x] Stage 9 - standalone independent code review complete
   - Covers: standalone production-readiness review before the L2d contract
@@ -1273,16 +1279,17 @@ These changes are intentionally outside Phase 1:
   - Sign-off: `Codex / 2026-06-30` after follow-up independent review approved
     standalone production readiness and evidence was recorded.
 
-- [ ] Stage 10 - final independent code review complete
+- [x] Stage 10 - final independent code review complete
   - Covers: implementation steps 12-13 after the L2d capability contract,
     live review, docs, and verification gates are complete.
   - Verify review findings are resolved or explicitly accepted, and affected
     tests are rerun.
   - Evidence: record reviewer, findings, fixes, rerun commands, residual risks,
     and approval status.
-  - Sign-off: `<agent/date>` after final review approval is recorded.
+  - Sign-off: `Codex / 2026-07-01` after final independent review by
+    `Bernoulli` approved the final diff with no findings.
 
-- [ ] Stage 11 - broad live enablement remains blocked pending explicit user
+- [x] Stage 11 - broad live enablement remains blocked pending explicit user
       instruction
   - Covers: implementation step 14.
   - Verify no dialog, adapter, scheduler, coding-agent, filesystem, shell, or
@@ -1290,7 +1297,10 @@ These changes are intentionally outside Phase 1:
   - Evidence: record that the only L2d integration is the declared
     `public_answer_research`/`local_context_recall` capability boundary and
     that no rollout/deprecation beyond this boundary occurred.
-  - Sign-off: `<agent/date>` after evidence is recorded.
+  - Sign-off: `Codex / 2026-07-01` after static review confirmed this plan
+    delivered only the declared `public_answer_research` and
+    `local_context_recall` boundary, with no adapter, dialog, scheduler,
+    filesystem, shell, or broad live rollout.
 
 ## Verification
 
@@ -2738,3 +2748,37 @@ This plan is complete when:
   - Prompt forbidden-token grep against
     `src\kazusa_ai_chatbot\complex_task_resolver\stages.py` returned no
     matches.
+
+### 2026-07-01 final independent review and closeout
+
+- User accepted the current complex-resolver behavior as good enough and
+  requested final review, cleanup, commit, and plan closure.
+- Evidence accepted for closeout:
+  - `test_artifacts/complex_task_resolver/comprehensive_32_case_review.md`
+  - `test_artifacts/complex_task_resolver/failure_mode_fix_tracker.md`
+  - per-case JSON artifacts under `test_artifacts/complex_task_resolver/`
+- Independent review:
+  - Reviewer `Bernoulli` (`019f1b8d-138b-7af0-bc52-82f803f72fd7`)
+    initially found three Important blockers: traversal cap drift, missing
+    run-level evidence-call cap, and semantic continuation accepting internal
+    `kind`.
+  - Fixes: `max_iterations=4` was restored; `MAX_RAG_CALLS_PER_RUN=2` was
+    added with `evidence_calls` trace and budget result; semantic continuation
+    tasks now require `work_type`; stale L2d mocked packet data was updated to
+    the current node semantic IO.
+  - Reviewer minor fail-fast issue around optional `evidence_calls` lookup was
+    fixed to use required trace indexing.
+  - Final reviewer verdict: approved, no findings.
+- Verification:
+  - `git diff --check` passed.
+  - Compile verification passed for the complex resolver, WebAgent3, and
+    focused test modules.
+  - Focused resolver/WebAgent3 suite passed with `131 passed`.
+  - L2d/cognition boundary suite passed with `30 passed`.
+  - Targeted post-review regression passed with `3 passed`.
+- Closure:
+  - Stages 6 and 7 are accepted based on user-approved good-enough review
+    evidence; residual live-LLM partials and failures are tracked and do not
+    authorize broad live rollout.
+  - Stage 11 remains a completed block: broad live enablement is still blocked
+    unless a future explicit plan and user command changes it.

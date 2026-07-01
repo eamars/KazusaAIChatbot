@@ -22,6 +22,7 @@ from kazusa_ai_chatbot.llm_interface import (
     LLMThinkingConfig,
 )
 import kazusa_ai_chatbot.rag.web_agent3.searxng_tools as searxng_tools
+from kazusa_ai_chatbot.rag.web_agent3 import constants as web_agent3_constants
 from kazusa_ai_chatbot.rag.web_agent3.contracts import _RouterDecision
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
@@ -39,12 +40,6 @@ DESCRIPTION = '''普通网页搜索。
   来源内部会执行少量聚焦搜索尝试。
 '''
 
-_MAX_SEARCH_ATTEMPTS = 4
-_SEARCH_QUERY_CHAR_LIMIT = 180
-_SEARCH_PURPOSE_CHAR_LIMIT = 220
-_ATTEMPT_EVIDENCE_CHAR_LIMIT = 1800
-_EXPANDED_SEARCH_OUTPUT_CHAR_LIMIT = 12000
-_COMPOSITE_QUERY_WORD_THRESHOLD = 10
 _EXPANSION_FALLBACK_NOTE = (
     "Search-attempt expansion produced no valid focused queries; searched the "
     "original dense request as a fallback."
@@ -146,8 +141,8 @@ _search_attempt_llm_config = LLMCallConfig(
     base_url=WEB_SEARCH_LLM_BASE_URL,
     api_key=WEB_SEARCH_LLM_API_KEY,
     model=WEB_SEARCH_LLM_MODEL,
-    temperature=0.1,
-    top_p=0.8,
+    temperature=web_agent3_constants.SEARCH_ATTEMPT_TEMPERATURE,
+    top_p=web_agent3_constants.SEARCH_ATTEMPT_TOP_P,
     top_k=None,
     max_completion_tokens=WEB_SEARCH_LLM_MAX_COMPLETION_TOKENS,
     presence_penalty=None,
@@ -262,17 +257,23 @@ def _query_needs_attempt_expansion(query: str) -> bool:
         or "比较" in text
         or "对比" in text
     )
-    needs_expansion = (
-        signal_count >= 3
-        or (
-            signal_count >= 2
-            and word_count >= _COMPOSITE_QUERY_WORD_THRESHOLD
-        )
-        or (
-            has_comparison_signal
-            and signal_count >= 2
-        )
+    has_composite_signal_count = (
+        signal_count >= web_agent3_constants.COMPOSITE_QUERY_SIGNAL_THRESHOLD
     )
+    has_long_composite_query = (
+        signal_count
+        >= web_agent3_constants.COMPOSITE_QUERY_LONG_SIGNAL_THRESHOLD
+        and word_count >= web_agent3_constants.COMPOSITE_QUERY_WORD_THRESHOLD
+    )
+    has_comparison_query = (
+        has_comparison_signal
+        and signal_count >= web_agent3_constants.COMPARISON_QUERY_SIGNAL_THRESHOLD
+    )
+    needs_expansion = any((
+        has_composite_signal_count,
+        has_long_composite_query,
+        has_comparison_query,
+    ))
     return_value = needs_expansion
     return return_value
 
@@ -296,7 +297,7 @@ async def _execute_expanded_search(query: str) -> str:
             "status": _search_result_status(result),
             "evidence": _bounded_text(
                 result,
-                limit=_ATTEMPT_EVIDENCE_CHAR_LIMIT,
+                limit=web_agent3_constants.ATTEMPT_EVIDENCE_CHAR_LIMIT,
             ),
         }
         attempt_results.append(attempt_result)
@@ -321,7 +322,7 @@ def _normalize_search_attempts(
         raw_query = raw_attempt.get("query")
         query = _bounded_attempt_field(
             raw_query,
-            limit=_SEARCH_QUERY_CHAR_LIMIT,
+            limit=web_agent3_constants.SEARCH_QUERY_CHAR_LIMIT,
         )
         if not query:
             continue
@@ -331,20 +332,23 @@ def _normalize_search_attempts(
         raw_purpose = raw_attempt.get("purpose")
         purpose = _bounded_attempt_field(
             raw_purpose,
-            limit=_SEARCH_PURPOSE_CHAR_LIMIT,
+            limit=web_agent3_constants.SEARCH_PURPOSE_CHAR_LIMIT,
         )
         if not purpose:
             purpose = "Search for one focused part of the request."
         attempts.append({"query": query, "purpose": purpose})
         seen_queries.add(query_key)
-        if len(attempts) >= _MAX_SEARCH_ATTEMPTS:
+        if len(attempts) >= web_agent3_constants.MAX_SEARCH_ATTEMPTS:
             break
 
     if attempts:
         return attempts, []
 
     fallback_attempt = {
-        "query": _bounded_text(fallback_query, limit=_SEARCH_QUERY_CHAR_LIMIT),
+        "query": _bounded_text(
+            fallback_query,
+            limit=web_agent3_constants.SEARCH_QUERY_CHAR_LIMIT,
+        ),
         "purpose": (
             "Search the original request because no narrower attempt was "
             "available."
@@ -458,6 +462,6 @@ def _format_expanded_search_result(
     rendered_result = "\n".join(lines)
     bounded_result = _bounded_text(
         rendered_result,
-        limit=_EXPANDED_SEARCH_OUTPUT_CHAR_LIMIT,
+        limit=web_agent3_constants.EXPANDED_SEARCH_OUTPUT_CHAR_LIMIT,
     )
     return bounded_result

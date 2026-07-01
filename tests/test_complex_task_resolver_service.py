@@ -798,6 +798,110 @@ async def test_active_node_loop_blocks_after_attempt_cap(monkeypatch: pytest.Mon
 
 
 @pytest.mark.asyncio
+async def test_active_node_loop_retries_same_objective_expansion(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Retry generic nodes when expansion repeats the active objective."""
+
+    request = validate_complex_task_resolver_request({
+        "schema_version": COMPLEX_TASK_RESOLVER_REQUEST_VERSION,
+        "objective": "Draft a standalone resolver implementation plan.",
+        "reason": "service test",
+        "source": "test",
+        "priority": "review",
+    })
+    context = validate_complex_task_resolver_context({
+        "schema_version": COMPLEX_TASK_RESOLVER_CONTEXT_VERSION,
+        "conversation_summary": "",
+        "persona_context_summary": "",
+        "time_context": {"current_date": "2026-06-30"},
+        "available_evidence": [],
+    })
+    planner = _StageInvoker([{
+        "tasks": [{
+            "objective": "Define the interface contracts and data structures.",
+            "kind": "subtask",
+        }],
+    }])
+    node_resolver = _StageInvoker([
+        {
+            "node_expansion": {
+                "children": [{
+                    "objective": (
+                        "Define the interface contracts and data structures."
+                    ),
+                    "kind": "subtask",
+                }],
+            },
+        },
+        {
+            "node_update": {
+                "status": "resolved",
+                "investigation_summary": (
+                    "Interface contracts should define request, context, "
+                    "options, packet projection, graph nodes, and audit traces."
+                ),
+                "knowledge_we_know_so_far": [
+                    (
+                        "The resolver entrypoint accepts semantic objective, "
+                        "context, and limits, then returns a graph-backed "
+                        "knowledge projection."
+                    ),
+                ],
+                "knowledge_still_lacking": [],
+                "recommended_next_iteration": [],
+                "evidence_boundary_notes": [],
+            },
+        },
+    ])
+    collapse = _StageInvoker([{
+        "collapse_decision": {
+            "should_collapse": False,
+            "target_node_id": "",
+            "reason": "no match",
+        },
+    }])
+    synthesizer = _StageInvoker([{
+        "investigation_summary": "The design node resolved after retry.",
+        "knowledge_we_know_so_far": [
+            "The resolver has a standalone semantic IO contract.",
+        ],
+        "knowledge_still_lacking": [],
+        "recommended_next_iteration": [],
+        "evidence_boundary_notes": [],
+    }])
+    options = _install_stage_invokers(
+        monkeypatch,
+        planner=planner,
+        node_resolver=node_resolver,
+        collapse=collapse,
+        synthesizer=synthesizer,
+        limits={"max_iterations": 1, "max_node_attempts": 2},
+    )
+
+    packet = await resolve_complex_task(request, context, options)
+    node = packet["graph"]["nodes"]["task_1"]
+
+    assert node["status"] == "resolved"
+    assert node["children"] == []
+    assert len(node_resolver.calls) == 2
+    assert node_resolver.calls[1]["active_node"]["recent_attempts"] == [{
+        "action": "expand_node",
+        "result_summary": (
+            "The proposed expansion repeated the active node objective."
+        ),
+        "blockers": ["same-objective expansion"],
+        "next_action": (
+            "Resolve the node directly or split it into narrower executable "
+            "children."
+        ),
+    }]
+    assert [attempt["status"] for attempt in node["attempts"]] == [
+        "blocked",
+        "resolved",
+    ]
+    assert packet["trace_summary"]["node_attempt_count"] == 2
+
+
+@pytest.mark.asyncio
 async def test_resolve_complex_task_expands_active_node_and_traverses_child(monkeypatch: pytest.MonkeyPatch) -> None:
     """Expand a complicated node into bounded children and execute a leaf."""
 
@@ -964,7 +1068,11 @@ async def test_owned_evidence_node_self_expansion_uses_subagent_fallback(monkeyp
         node_resolver=node_resolver,
         collapse=collapse,
         synthesizer=synthesizer,
-        limits={"max_iterations": 1, "max_subagent_attempts": 1},
+        limits={
+            "max_iterations": 1,
+            "max_node_attempts": 1,
+            "max_subagent_attempts": 1,
+        },
         planned_graph=graph,
     )
 
@@ -979,6 +1087,112 @@ async def test_owned_evidence_node_self_expansion_uses_subagent_fallback(monkeyp
     assert subagent_call["objective"] == (
         "Identify three realistic local LLM GPU options."
     )
+
+
+@pytest.mark.asyncio
+async def test_evidence_node_records_missing_private_artifact_without_subagent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Preserve LLM-owned private-artifact gaps without public retrieval."""
+
+    request = validate_complex_task_resolver_request({
+        "schema_version": COMPLEX_TASK_RESOLVER_REQUEST_VERSION,
+        "objective": "Review a diff against the internal L2d workflow plan.",
+        "reason": "service test",
+        "source": "test",
+        "priority": "review",
+    })
+    context = validate_complex_task_resolver_context({
+        "schema_version": COMPLEX_TASK_RESOLVER_CONTEXT_VERSION,
+        "conversation_summary": "",
+        "persona_context_summary": "",
+        "time_context": {"current_date": "2026-06-30"},
+        "available_evidence": [],
+    })
+    root = resolver_service._make_graph_node(
+        node_id="root",
+        parent_id=None,
+        depth=0,
+        objective="Review a diff against the internal L2d workflow plan.",
+        node_kind="root",
+        status="expanded",
+        children=["task_1"],
+    )
+    task_1 = resolver_service._make_graph_node(
+        node_id="task_1",
+        parent_id="root",
+        depth=1,
+        objective="Retrieve the internal diff and L2d workflow plan.",
+        node_kind="evidence_need",
+        status="pending",
+        children=[],
+    )
+    graph = {
+        "schema_version": COMPLEX_TASK_GRAPH_VERSION,
+        "root_node_id": "root",
+        "active_node_id": "task_1",
+        "nodes": {
+            "root": root,
+            "task_1": task_1,
+        },
+        "traversal_order": ["root"],
+        "collapse_events": [],
+        "max_nodes": 8,
+        "max_depth": 3,
+    }
+    node_resolver = _StageInvoker([{
+        "decision": "record_knowledge",
+        "investigation_summary": (
+            "The node needs caller-supplied private project artifacts."
+        ),
+        "knowledge_we_know_so_far": [],
+        "knowledge_still_lacking": [
+            "the exact diff content",
+            "the internal L2d workflow plan",
+        ],
+        "recommended_next_iteration": [
+            "Provide the diff and workflow plan as caller-supplied evidence.",
+        ],
+        "evidence_boundary_notes": [
+            "This branch depends on private or caller-supplied artifacts.",
+        ],
+        "completion": "not_answerable",
+        "continuation_tasks": [],
+    }])
+    synthesizer = _StageInvoker([{
+        "investigation_summary": "The review is blocked by missing artifacts.",
+        "knowledge_we_know_so_far": [],
+        "knowledge_still_lacking": [
+            "the exact diff content",
+            "the internal L2d workflow plan",
+        ],
+        "recommended_next_iteration": [
+            "Provide the diff and workflow plan as caller-supplied evidence.",
+        ],
+        "evidence_boundary_notes": [
+            "Private project artifacts are outside public evidence retrieval.",
+        ],
+    }])
+    options = _install_stage_invokers(
+        monkeypatch,
+        planner=_StageInvoker([]),
+        node_resolver=node_resolver,
+        collapse=_StageInvoker([]),
+        synthesizer=synthesizer,
+        limits={"max_iterations": 1},
+        planned_graph=graph,
+    )
+
+    packet = await resolve_complex_task(request, context, options)
+    node = packet["graph"]["nodes"]["task_1"]
+
+    assert packet["trace_summary"]["subagent_call_log"] == []
+    assert node["status"] == "cannot_answer"
+    assert node["knowledge_still_lacking"] == [
+        "the exact diff content",
+        "the internal L2d workflow plan",
+    ]
+    assert node["evidence_boundary_notes"] == [
+        "This branch depends on private or caller-supplied artifacts.",
+    ]
 
 
 @pytest.mark.asyncio
@@ -1043,7 +1257,11 @@ async def test_resolve_complex_task_preserves_semantic_algorithmic_hint(monkeypa
         node_resolver=node_resolver,
         collapse=collapse,
         synthesizer=synthesizer,
-        limits={"max_iterations": 1, "max_subagent_attempts": 1},
+        limits={
+            "max_iterations": 1,
+            "max_node_attempts": 1,
+            "max_subagent_attempts": 1,
+        },
     )
 
     packet = await resolve_complex_task(request, context, options)
@@ -1138,7 +1356,11 @@ async def test_resolve_complex_task_repairs_algorithmic_node_to_subagent_request
         node_resolver=node_resolver,
         collapse=collapse,
         synthesizer=synthesizer,
-        limits={"max_iterations": 1, "max_subagent_attempts": 1},
+        limits={
+            "max_iterations": 1,
+            "max_node_attempts": 1,
+            "max_subagent_attempts": 1,
+        },
         planned_graph=_graph_with_math_node(),
     )
 
@@ -1241,7 +1463,11 @@ async def test_resolve_complex_task_repairs_algorithmic_self_expansion(monkeypat
         node_resolver=node_resolver,
         collapse=collapse,
         synthesizer=synthesizer,
-        limits={"max_iterations": 1, "max_subagent_attempts": 1},
+        limits={
+            "max_iterations": 1,
+            "max_node_attempts": 1,
+            "max_subagent_attempts": 1,
+        },
         planned_graph=_graph_with_math_node(),
     )
 
@@ -1324,7 +1550,11 @@ async def test_resolve_complex_task_blocks_algorithmic_hidden_operand(monkeypatc
         node_resolver=node_resolver,
         collapse=collapse,
         synthesizer=synthesizer,
-        limits={"max_iterations": 1, "max_subagent_attempts": 1},
+        limits={
+            "max_iterations": 1,
+            "max_node_attempts": 1,
+            "max_subagent_attempts": 1,
+        },
         planned_graph=_graph_with_math_node(),
     )
 
@@ -1429,7 +1659,11 @@ async def test_resolve_complex_task_blocks_algorithmic_recommendation_provenance
         node_resolver=node_resolver,
         collapse=collapse,
         synthesizer=synthesizer,
-        limits={"max_iterations": 1, "max_subagent_attempts": 1},
+        limits={
+            "max_iterations": 1,
+            "max_node_attempts": 1,
+            "max_subagent_attempts": 1,
+        },
         planned_graph=graph,
     )
 
@@ -1445,6 +1679,121 @@ async def test_resolve_complex_task_blocks_algorithmic_recommendation_provenance
             "algorithmic input_values[0].source_text: not found in "
             "source node projection"
         )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_resolve_complex_task_retries_invalid_calculator_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use validation feedback as a bounded local repair attempt."""
+
+    request = validate_complex_task_resolver_request({
+        "schema_version": COMPLEX_TASK_RESOLVER_REQUEST_VERSION,
+        "objective": "Calculate sourced watt hours.",
+        "reason": "service test",
+        "source": "test",
+        "priority": "review",
+    })
+    context = validate_complex_task_resolver_context({
+        "schema_version": COMPLEX_TASK_RESOLVER_CONTEXT_VERSION,
+        "conversation_summary": "",
+        "persona_context_summary": "",
+        "time_context": {"current_date": "2026-06-30"},
+        "available_evidence": [],
+    })
+    graph = _graph_with_math_node()
+    source_text = "Operand values available: 0.70, 0.6, 0.95, 0.4, 45, 6."
+    planner = _StageInvoker([])
+    node_resolver = _StageInvoker([
+        {
+            "subagent_request": {
+                "schema_version": "complex_task_subagent_request.v1",
+                "node_id": "math_1",
+                "subagent": "algorithmic",
+                "action": "evaluate_expression",
+                "objective": "Calculate watt hours.",
+                "payload": {
+                    "expression": "45 * 6",
+                    "label": "required_watt_hours",
+                },
+                "constraints": {},
+            },
+        },
+        {
+            "subagent_request": {
+                "schema_version": "complex_task_subagent_request.v1",
+                "node_id": "math_1",
+                "subagent": "algorithmic",
+                "action": "evaluate_expression",
+                "objective": "Calculate watt hours.",
+                "payload": {
+                    "expression": "45 * 6",
+                    "label": "required_watt_hours",
+                    "input_values": [
+                        {
+                            "label": "power_w",
+                            "value": "45",
+                            "source_node_id": "math_1",
+                            "source_text": source_text,
+                        },
+                        {
+                            "label": "duration_h",
+                            "value": "6",
+                            "source_node_id": "math_1",
+                            "source_text": source_text,
+                        },
+                    ],
+                    "formula_constants": [],
+                },
+                "constraints": {},
+            },
+        },
+    ])
+    collapse = _StageInvoker([{
+        "collapse_decision": {
+            "should_collapse": False,
+            "target_node_id": "",
+            "reason": "not duplicate",
+        },
+    }])
+    synthesizer = _StageInvoker([{
+        "investigation_summary": "Calculation completed after repair.",
+        "knowledge_we_know_so_far": [
+            "required_watt_hours: 45 * 6 = 270"
+        ],
+        "knowledge_still_lacking": [],
+        "recommended_next_iteration": [],
+        "evidence_boundary_notes": [],
+    }])
+    options = _install_stage_invokers(
+        monkeypatch,
+        planner=planner,
+        node_resolver=node_resolver,
+        collapse=collapse,
+        synthesizer=synthesizer,
+        limits={
+            "max_iterations": 1,
+            "max_node_attempts": 2,
+            "max_subagent_attempts": 1,
+        },
+        planned_graph=graph,
+    )
+
+    packet = await resolve_complex_task(request, context, options)
+    node = packet["graph"]["nodes"]["math_1"]
+    attempt_log = packet["trace_summary"]["node_attempt_log"]
+    subagent_calls = packet["trace_summary"]["subagent_call_log"]
+
+    assert len(node_resolver.calls) == 2
+    assert node["status"] == "resolved"
+    assert "required_watt_hours" in node["knowledge_we_know_so_far"][0]
+    assert attempt_log[0]["action"] == "revise_calculation_request"
+    assert attempt_log[0]["status"] == "blocked"
+    assert attempt_log[1]["status"] == "resolved"
+    assert [call["status"] for call in subagent_calls] == [
+        "invalid",
+        "resolved",
     ]
 
 
@@ -1500,7 +1849,11 @@ async def test_resolve_complex_task_blocks_owned_subagent_mismatch(monkeypatch: 
         node_resolver=node_resolver,
         collapse=collapse,
         synthesizer=synthesizer,
-        limits={"max_iterations": 1, "max_subagent_attempts": 1},
+        limits={
+            "max_iterations": 1,
+            "max_node_attempts": 1,
+            "max_subagent_attempts": 1,
+        },
         planned_graph=_graph_with_math_node(),
     )
 
@@ -1567,7 +1920,11 @@ async def test_resolve_complex_task_blocks_over_depth_expansion(monkeypatch: pyt
         node_resolver=node_resolver,
         collapse=collapse,
         synthesizer=synthesizer,
-        limits={"max_iterations": 1, "max_subagent_attempts": 1},
+        limits={
+            "max_iterations": 1,
+            "max_node_attempts": 1,
+            "max_subagent_attempts": 1,
+        },
         planned_graph=graph,
     )
 
@@ -1652,7 +2009,11 @@ async def test_evidence_node_uses_subagent_when_expansion_exceeds_graph_limits(
         node_resolver=node_resolver,
         collapse=collapse,
         synthesizer=synthesizer,
-        limits={"max_iterations": 1, "max_subagent_attempts": 1},
+        limits={
+            "max_iterations": 1,
+            "max_node_attempts": 1,
+            "max_subagent_attempts": 1,
+        },
         planned_graph=graph,
     )
     monkeypatch.setattr(
@@ -1672,6 +2033,95 @@ async def test_evidence_node_uses_subagent_when_expansion_exceeds_graph_limits(
     assert node["children"] == []
     assert evidence_subagent.requests[0]["subagent"] == "evidence"
     assert subagent_call["resolved"] is True
+
+
+@pytest.mark.asyncio
+async def test_public_evidence_call_budget_blocks_third_backend_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep WebAgent3/RAG evidence calls under the hard per-run cap."""
+
+    request = validate_complex_task_resolver_request({
+        "schema_version": COMPLEX_TASK_RESOLVER_REQUEST_VERSION,
+        "objective": "Collect three independent public evidence facts.",
+        "reason": "service test",
+        "source": "test",
+        "priority": "review",
+    })
+    context = validate_complex_task_resolver_context({
+        "schema_version": COMPLEX_TASK_RESOLVER_CONTEXT_VERSION,
+        "conversation_summary": "",
+        "persona_context_summary": "",
+        "time_context": {"current_date": "2026-06-30"},
+        "available_evidence": [],
+    })
+    planner = _StageInvoker([])
+    node_resolver = _StageInvoker([
+        _evidence_subagent_response("evidence_a"),
+        _evidence_subagent_response("evidence_b"),
+        _evidence_subagent_response("evidence_c"),
+    ])
+    collapse = _StageInvoker([{
+        "collapse_decision": {
+            "should_collapse": False,
+            "target_node_id": "",
+            "reason": "no duplicate",
+        },
+    }] * 3)
+    synthesizer = _StageInvoker([{
+        "investigation_summary": "Evidence branches were bounded.",
+        "knowledge_we_know_so_far": [],
+        "knowledge_still_lacking": [],
+        "recommended_next_iteration": [],
+        "evidence_boundary_notes": [],
+    }])
+    options = _install_stage_invokers(
+        monkeypatch,
+        planner=planner,
+        node_resolver=node_resolver,
+        collapse=collapse,
+        synthesizer=synthesizer,
+        limits={"max_iterations": 3, "max_nodes": 4, "max_depth": 1},
+        planned_graph=_graph_with_three_evidence_nodes(),
+    )
+    sequenced_subagent = _SequencedEvidenceSubagent([
+        _resolved_evidence_subagent_result("Evidence A resolved."),
+        _resolved_evidence_subagent_result("Evidence B resolved."),
+    ])
+    monkeypatch.setattr(
+        resolver_service,
+        "_internal_subagents",
+        lambda: {
+            "algorithmic": AlgorithmicSubagent(),
+            "evidence": sequenced_subagent,
+        },
+    )
+
+    packet = await resolve_complex_task(request, context, options)
+
+    graph = packet["graph"]
+    trace_summary = packet["trace_summary"]
+    assert len(sequenced_subagent.requests) == 2
+    assert trace_summary["evidence_calls"] == 2
+    assert trace_summary["subagent_calls"] == 3
+    assert graph["nodes"]["evidence_a"]["status"] == "resolved"
+    assert graph["nodes"]["evidence_b"]["status"] == "resolved"
+    assert graph["nodes"]["evidence_c"]["status"] == "blocked"
+    assert graph["nodes"]["evidence_c"]["knowledge_still_lacking"] == [
+        "public evidence for: Objective for evidence_c",
+    ]
+    assert graph["nodes"]["evidence_c"]["evidence_boundary_notes"] == [
+        "Resolver-local subagent could not complete this node.",
+        (
+            "The resolver stopped public evidence retrieval at its configured "
+            "per-run cap."
+        ),
+    ]
+    assert trace_summary["subagent_call_log"][-1]["status"] == "partial"
+    assert (
+        trace_summary["subagent_call_log"][-1]["trace"]["reason"]
+        == "evidence_call_budget_exhausted"
+    )
 
 
 @pytest.mark.asyncio
@@ -1735,7 +2185,11 @@ async def test_resolve_complex_task_blocks_algorithmic_node_direct_update(monkey
         node_resolver=node_resolver,
         collapse=collapse,
         synthesizer=synthesizer,
-        limits={"max_iterations": 1, "max_subagent_attempts": 1},
+        limits={
+            "max_iterations": 1,
+            "max_node_attempts": 1,
+            "max_subagent_attempts": 1,
+        },
         planned_graph=_graph_with_math_node(),
     )
 
@@ -2826,10 +3280,102 @@ async def test_synthesis_dependency_followup_tasks_are_executed(
 
 
 @pytest.mark.asyncio
-async def test_default_traversal_budget_allows_initial_trunk_followup(
+async def test_packet_preserves_resolved_subagent_trace_from_blocked_node(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep resolved subagent facts even if graph dependencies block the node."""
+
+    request = validate_complex_task_resolver_request({
+        "schema_version": COMPLEX_TASK_RESOLVER_REQUEST_VERSION,
+        "objective": "Estimate call savings from semantic collapse.",
+        "reason": "service test",
+        "source": "test",
+        "priority": "review",
+    })
+    context = validate_complex_task_resolver_context({
+        "schema_version": COMPLEX_TASK_RESOLVER_CONTEXT_VERSION,
+        "conversation_summary": "",
+        "persona_context_summary": "",
+        "time_context": {"current_date": "2026-06-30"},
+        "available_evidence": [],
+    })
+    graph = _graph_with_blocked_prerequisite_and_pending_synthesis()
+    graph["nodes"]["synthesis"]["objective"] = (
+        "Calculate total calls saved from 30 cases, 8 nodes each, and 35% "
+        "saved duplicated calls. Operand values available: 30, 8, 0.35."
+    )
+    node_resolver = _StageInvoker([{
+        "subagent_request": {
+            "schema_version": "complex_task_subagent_request.v1",
+            "node_id": "synthesis",
+            "subagent": "algorithmic",
+            "action": "evaluate_expression",
+            "objective": "Calculate total calls saved.",
+            "payload": {
+                "expression": "30 * 8 * 0.35",
+                "label": "total_calls_saved",
+                "input_values": [
+                    {
+                        "label": "case_count",
+                        "value": "30",
+                        "source_node_id": "synthesis",
+                        "source_text": (
+                            "Operand values available: 30, 8, 0.35."
+                        ),
+                    },
+                    {
+                        "label": "nodes_per_case",
+                        "value": "8",
+                        "source_node_id": "synthesis",
+                        "source_text": (
+                            "Operand values available: 30, 8, 0.35."
+                        ),
+                    },
+                    {
+                        "label": "savings_rate",
+                        "value": "0.35",
+                        "source_node_id": "synthesis",
+                        "source_text": (
+                            "Operand values available: 30, 8, 0.35."
+                        ),
+                    },
+                ],
+                "formula_constants": [],
+            },
+            "constraints": {},
+        },
+    }])
+    synthesizer = _StageInvoker([{
+        "investigation_summary": (
+            "Synthesis was blocked by an unresolved prerequisite."
+        ),
+        "knowledge_we_know_so_far": [],
+        "knowledge_still_lacking": ["prerequisite branch"],
+        "recommended_next_iteration": [],
+        "evidence_boundary_notes": [],
+    }])
+    options = _install_stage_invokers(
+        monkeypatch,
+        planner=_StageInvoker([]),
+        node_resolver=node_resolver,
+        collapse=_StageInvoker([]),
+        synthesizer=synthesizer,
+        limits={"max_iterations": 1, "max_subagent_attempts": 1},
+        planned_graph=graph,
+    )
+
+    packet = await resolve_complex_task(request, context, options)
+
+    assert packet["graph"]["nodes"]["synthesis"]["status"] == "blocked"
+    assert packet["trace_summary"]["subagent_call_log"][0]["resolved"] is True
+    assert packet["knowledge_we_know_so_far"] == [
+        "total_calls_saved: 30 * 8 * 0.35 = 84.0",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_default_traversal_budget_rejects_fifth_followup_iteration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Use node budget for default traversal so follow-up children can run."""
+    """Keep default traversal bounded to the hard Phase 1 iteration cap."""
 
     request = validate_complex_task_resolver_request({
         "schema_version": COMPLEX_TASK_RESOLVER_REQUEST_VERSION,
@@ -2940,12 +3486,16 @@ async def test_default_traversal_budget_allows_initial_trunk_followup(
     packet = await resolve_complex_task(request, context, options)
 
     graph = packet["graph"]
-    assert graph["nodes"]["task_4"]["children"] == ["task_4_1"]
-    assert graph["nodes"]["task_4_1"]["status"] == "resolved"
-    assert packet["trace_summary"]["iterations"] == 5
-    assert packet["trace_summary"]["subagent_calls"] == 1
-    assert packet["trace_summary"]["followup_created_count"] == 1
-    assert packet["trace_summary"]["followup_rejected_count"] == 0
+    assert "task_4_1" not in graph["nodes"]
+    assert graph["nodes"]["task_4"]["children"] == []
+    assert graph["nodes"]["task_4"]["status"] == "blocked"
+    assert packet["trace_summary"]["iterations"] == 4
+    assert packet["trace_summary"]["subagent_calls"] == 0
+    assert packet["trace_summary"]["followup_created_count"] == 0
+    assert packet["trace_summary"]["followup_rejected_count"] == 1
+    assert "follow-up task not created" in "\n".join(
+        packet["knowledge_still_lacking"]
+    )
 
 
 @pytest.mark.asyncio
@@ -3273,6 +3823,55 @@ def _graph_with_resolved_untraced_evidence() -> dict[str, object]:
     return graph
 
 
+def _graph_with_three_evidence_nodes() -> dict[str, object]:
+    """Build a root graph with three pending public evidence leaves."""
+
+    graph = {
+        "schema_version": COMPLEX_TASK_GRAPH_VERSION,
+        "root_node_id": "root",
+        "active_node_id": "evidence_a",
+        "nodes": {
+            "root": _node(
+                node_id="root",
+                parent_id=None,
+                depth=0,
+                node_kind="root",
+                status="expanded",
+                children=["evidence_a", "evidence_b", "evidence_c"],
+            ),
+            "evidence_a": _node(
+                node_id="evidence_a",
+                parent_id="root",
+                depth=1,
+                node_kind="evidence_need",
+                status="pending",
+                children=[],
+            ),
+            "evidence_b": _node(
+                node_id="evidence_b",
+                parent_id="root",
+                depth=1,
+                node_kind="evidence_need",
+                status="pending",
+                children=[],
+            ),
+            "evidence_c": _node(
+                node_id="evidence_c",
+                parent_id="root",
+                depth=1,
+                node_kind="evidence_need",
+                status="pending",
+                children=[],
+            ),
+        },
+        "traversal_order": ["root"],
+        "collapse_events": [],
+        "max_nodes": 4,
+        "max_depth": 1,
+    }
+    return graph
+
+
 def _graph_with_evidence_node() -> dict[str, object]:
     """Build a root graph with one pending evidence subtask."""
 
@@ -3304,6 +3903,38 @@ def _graph_with_evidence_node() -> dict[str, object]:
         "max_depth": 3,
     }
     return graph
+
+
+def _evidence_subagent_response(node_id: str) -> dict[str, object]:
+    """Build an active-node response that requests public evidence."""
+
+    response = {
+        "subagent_request": {
+            "schema_version": "complex_task_subagent_request.v1",
+            "node_id": node_id,
+            "subagent": "evidence",
+            "action": "retrieve_source_facts",
+            "objective": f"Objective for {node_id}",
+            "payload": {"query": f"query for {node_id}"},
+            "constraints": {},
+        },
+    }
+    return response
+
+
+def _resolved_evidence_subagent_result(summary: str) -> dict[str, object]:
+    """Build a resolved evidence result for sequenced subagent tests."""
+
+    result = {
+        "schema_version": "complex_task_subagent_result.v1",
+        "resolved": True,
+        "status": "resolved",
+        "result": {"summary": summary},
+        "cache": {"enabled": False},
+        "trace": {"result": summary},
+        "unresolved_items": [],
+    }
+    return result
 
 
 def _graph_with_blocked_prerequisite_and_pending_synthesis() -> dict[str, object]:

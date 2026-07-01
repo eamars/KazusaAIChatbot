@@ -5,6 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal, cast
 
+from kazusa_ai_chatbot.rag.web_agent3.constants import (
+    STATUS_RANK_NOT_FOUND,
+    STATUS_RANK_PARTIAL,
+    STATUS_RANK_SUCCESS,
+)
+
 _DEFAULT_EXPECTED_RESPONSE = "返回能直接解决当前槽位的来源扎根网页证据。"
 _ROUTER_ACTIONS = ("search", "read", "stop")
 _ROUTER_SOURCES = ("web_read",)
@@ -12,9 +18,9 @@ _ROUTER_SOURCE_ACTIONS = {
     "web_read": ("read",),
 }
 _VALID_STATUS_ORDER = {
-    "not_found": 0,
-    "partial": 1,
-    "success": 2,
+    "not_found": STATUS_RANK_NOT_FOUND,
+    "partial": STATUS_RANK_PARTIAL,
+    "success": STATUS_RANK_SUCCESS,
 }
 
 _RouterAction = Literal["search", "read", "stop"]

@@ -66,6 +66,34 @@ def test_node_prompt_requires_clock_time_normalization() -> None:
     assert '"1140 + 140"' in stages._NODE_RESOLVER_PROMPT
 
 
+def test_prompts_keep_semantic_comparison_out_of_calculator() -> None:
+    """Route semantic review work outside deterministic arithmetic."""
+
+    prompt_text = "\n".join((
+        stages._PLANNER_PROMPT,
+        stages._NODE_RESOLVER_PROMPT,
+    ))
+
+    assert "numeric expression with visible operands" in prompt_text
+    assert "Semantic comparison" in prompt_text
+    assert "source-quality judgment" in prompt_text
+    assert "not calculation work" in prompt_text
+    assert "Counting qualitative differences" in prompt_text
+    assert "record missing operands" in prompt_text
+
+
+def test_synthesizer_prompt_does_not_invent_calculation_results() -> None:
+    """Synthesis must not promote blocked calculator work into known facts."""
+
+    prompt = stages._SYNTHESIZER_PROMPT
+    folded_prompt = " ".join(prompt.split())
+
+    assert "Calculation facts are known only when they appear" in folded_prompt
+    assert "resolved calculation summaries" in folded_prompt
+    assert "blocked calculation branch" in folded_prompt
+    assert "do not calculate it during synthesis" in folded_prompt
+
+
 def test_node_prompt_splits_mixed_public_evidence_before_subagent() -> None:
     """Keep broad public evidence needs decomposed before retrieval."""
 
@@ -74,10 +102,9 @@ def test_node_prompt_splits_mixed_public_evidence_before_subagent() -> None:
     assert "public evidence node still bundles" in prompt
     assert "independent targets" in prompt
     assert "fact dimensions" in prompt
-    assert "return an expand decision before using the evidence capability" in (
-        prompt
-    )
-    assert "one public_evidence child" in prompt
+    assert "For a bounded public_evidence leaf" in prompt
+    assert "use the evidence capability" in prompt
+    assert "one narrower public_evidence child" in prompt
     assert "source-oriented request" in prompt
 
     forbidden_fixture_hints = (
@@ -90,6 +117,39 @@ def test_node_prompt_splits_mixed_public_evidence_before_subagent() -> None:
     )
     for fixture_hint in forbidden_fixture_hints:
         assert fixture_hint not in prompt
+
+
+def test_node_prompt_records_design_leaves_as_semantic_knowledge() -> None:
+    """Design leaves should produce proposals instead of dead-end blockers."""
+
+    prompt = stages._NODE_RESOLVER_PROMPT
+
+    assert "design, planning, documentation, or architecture leaves" in prompt
+    assert "record semantic knowledge directly" in prompt
+    assert "Missing implementation preferences" in prompt
+    assert "reviewable assumptions" in prompt
+    assert "rather than" in prompt
+    assert "marking the node not answerable" in prompt
+
+
+def test_prompts_preserve_private_artifact_ownership() -> None:
+    """Private or supplied artifacts should not be planned as public evidence."""
+
+    planner_prompt = stages._PLANNER_PROMPT
+    node_prompt = stages._NODE_RESOLVER_PROMPT
+
+    assert "Use \"evidence_need\" only for public external facts" in (
+        planner_prompt
+    )
+    assert "diff, repository-local code, private plan" in planner_prompt
+    assert "create a subtask that records the missing supplied artifact" in (
+        planner_prompt
+    )
+    assert "Use the evidence capability only for public external source" in (
+        node_prompt
+    )
+    assert "private or caller-supplied artifact" in node_prompt
+    assert "record the missing artifact" in node_prompt
 
 
 def test_semantic_output_rejects_deterministic_keys() -> None:
@@ -134,6 +194,23 @@ def test_production_semantic_normalizers_reject_internal_envelopes() -> None:
                     "objective": "Internal follow-up.",
                     "kind": "subtask",
                     "reason": "Internal envelope.",
+                }],
+            },
+            allow_internal_envelope=False,
+        )
+
+    with pytest.raises(ComplexTaskValidationError):
+        service._normalize_synthesis_stage_response(
+            {
+                "investigation_summary": "semantic result",
+                "knowledge_we_know_so_far": [],
+                "knowledge_still_lacking": [],
+                "recommended_next_iteration": [],
+                "evidence_boundary_notes": [],
+                "continuation_tasks": [{
+                    "objective": "Continue work.",
+                    "kind": "subtask",
+                    "reason": "Internal task vocabulary leaked.",
                 }],
             },
             allow_internal_envelope=False,

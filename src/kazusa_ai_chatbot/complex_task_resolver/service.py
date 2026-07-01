@@ -35,6 +35,25 @@ from .contracts import (
     validate_complex_task_subagent_request,
     validate_complex_task_subagent_result,
 )
+from .constants import (
+    DEFAULT_OPTION_LIMITS,
+    FAILED_PACKET_GRAPH_LIMIT,
+    FOLLOWUP_TASKS_PER_SOURCE_LIMIT,
+    MAX_RAG_CALLS_PER_RUN,
+    MIXED_PREREQUISITE_EXTRA_NODE_COUNT,
+    MIXED_PREREQUISITE_REQUIRED_DEPTH,
+    NO_ATTEMPTS_RECORDED,
+    RECENT_NODE_ATTEMPT_LIMIT,
+    ROOT_CHILD_DEPTH,
+    ROOT_DEPTH,
+    ROOT_NODE_COUNT,
+    SAFE_FAILURE_TEXT_LIMIT,
+    SYNTHESIS_TASK_INDEX_START,
+    TEXT_ELLIPSIS,
+    TRACE_DICT_LIMIT,
+    TRACE_LIST_LIMIT,
+    TRACE_TEXT_LIMIT,
+)
 from .graph import find_next_active_node
 from .stages import (
     plan_complex_task_graph as _plan_stage_handler,
@@ -99,10 +118,6 @@ _FORBIDDEN_SEMANTIC_OUTPUT_KEYS = frozenset((
     "cache",
 ))
 
-_FOLLOWUP_TASKS_PER_SOURCE_LIMIT = 2
-_TRACE_TEXT_LIMIT = 4000
-_TRACE_LIST_LIMIT = 12
-_TRACE_DICT_LIMIT = 24
 _NUMERIC_TEXT_PATTERN = re.compile(
     r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$"
 )
@@ -164,6 +179,7 @@ async def _resolve_complex_task_validated(
         "node_attempt_count": 0,
         "node_attempt_log": [],
         "subagent_calls": 0,
+        "evidence_calls": 0,
         "subagent_call_log": [],
         "followup_created_count": 0,
         "followup_rejected_count": 0,
@@ -176,12 +192,7 @@ async def _resolve_complex_task_validated(
         validated_options,
         trace_summary,
     )
-    max_nodes = _option_limit(validated_options, "max_nodes", 8)
-    max_iterations = _option_limit(
-        validated_options,
-        "max_iterations",
-        max_nodes,
-    )
+    max_iterations = _option_limit(validated_options, "max_iterations")
     await _run_graph_traversal(
         validated_request=validated_request,
         validated_context=validated_context,
@@ -293,8 +304,8 @@ def _failed_packet_from_exception(
         "nodes": {"root": root_node},
         "traversal_order": ["root"],
         "collapse_events": [],
-        "max_nodes": 1,
-        "max_depth": 1,
+        "max_nodes": FAILED_PACKET_GRAPH_LIMIT,
+        "max_depth": FAILED_PACKET_GRAPH_LIMIT,
     }
     packet = {
         "schema_version": COMPLEX_TASK_RESOLUTION_PACKET_VERSION,
@@ -318,6 +329,7 @@ def _failed_packet_from_exception(
             "collapse_count": 0,
             "node_attempt_count": 0,
             "subagent_calls": 0,
+            "evidence_calls": 0,
             "failure_stage": failure_stage,
             "failure_reason": safe_reason,
         },
@@ -344,9 +356,11 @@ def _safe_failure_text(value: str) -> str:
     collapsed = " ".join(value.strip().split())
     if not collapsed:
         return "unknown resolver failure"
-    max_length = 300
-    if len(collapsed) > max_length:
-        collapsed = collapsed[: max_length - 3].rstrip() + "..."
+    if len(collapsed) > SAFE_FAILURE_TEXT_LIMIT:
+        collapsed = (
+            collapsed[: SAFE_FAILURE_TEXT_LIMIT - len(TEXT_ELLIPSIS)].rstrip()
+            + TEXT_ELLIPSIS
+        )
     return collapsed
 
 
@@ -388,8 +402,8 @@ def _graph_from_semantic_decomposition(
     """Create strict graph nodes from explicit semantic planner tasks."""
 
     tasks = _semantic_tasks(response)
-    max_nodes = _option_limit(options, "max_nodes", 8)
-    max_depth = _option_limit(options, "max_depth", 3)
+    max_nodes = _option_limit(options, "max_nodes")
+    max_depth = _option_limit(options, "max_depth")
     if _should_group_mixed_prerequisites(tasks, max_nodes=max_nodes):
         graph = _grouped_prerequisite_graph_from_tasks(
             request=request,
@@ -398,7 +412,7 @@ def _graph_from_semantic_decomposition(
             max_depth=max_depth,
         )
         return graph
-    if len(tasks) > max_nodes - 1:
+    if len(tasks) > max_nodes - ROOT_NODE_COUNT:
         raise ComplexTaskValidationError("planner tasks: exceeds max_nodes")
     root_children = [
         _task_node_id(index)
@@ -408,7 +422,7 @@ def _graph_from_semantic_decomposition(
         "root": _make_graph_node(
             node_id="root",
             parent_id=None,
-            depth=0,
+            depth=ROOT_DEPTH,
             objective=request["objective"],
             node_kind="root",
             status="expanded",
@@ -420,7 +434,7 @@ def _graph_from_semantic_decomposition(
         nodes[node_id] = _make_graph_node(
             node_id=node_id,
             parent_id="root",
-            depth=1,
+            depth=ROOT_CHILD_DEPTH,
             objective=task["objective"],
             node_kind=_graph_node_kind_from_semantic_kind(task["kind"]),
             status="pending",
@@ -454,7 +468,7 @@ def _should_group_mixed_prerequisites(
         return False
     if not {"evidence_need", "algorithmic_task"}.issubset(task_kinds):
         return False
-    needed_nodes = len(tasks) + 2
+    needed_nodes = len(tasks) + MIXED_PREREQUISITE_EXTRA_NODE_COUNT
     return needed_nodes <= max_nodes
 
 
@@ -467,9 +481,9 @@ def _grouped_prerequisite_graph_from_tasks(
 ) -> ComplexTaskGraphV1:
     """Build a graph with one prerequisite trunk for mixed task kinds."""
 
-    if max_depth < 2:
+    if max_depth < MIXED_PREREQUISITE_REQUIRED_DEPTH:
         raise ComplexTaskValidationError(
-            "planner tasks: mixed prerequisites require max_depth >= 2"
+            "planner tasks: mixed prerequisites require sufficient max_depth"
         )
     prerequisite_tasks = [
         task
@@ -487,13 +501,16 @@ def _grouped_prerequisite_graph_from_tasks(
     ]
     root_children = ["task_1"] + [
         _task_node_id(index)
-        for index, _ in enumerate(synthesis_tasks, start=2)
+        for index, _ in enumerate(
+            synthesis_tasks,
+            start=SYNTHESIS_TASK_INDEX_START,
+        )
     ]
     nodes: dict[str, ComplexTaskNodeV1] = {
         "root": _make_graph_node(
             node_id="root",
             parent_id=None,
-            depth=0,
+            depth=ROOT_DEPTH,
             objective=request["objective"],
             node_kind="root",
             status="expanded",
@@ -502,7 +519,7 @@ def _grouped_prerequisite_graph_from_tasks(
         "task_1": _make_graph_node(
             node_id="task_1",
             parent_id="root",
-            depth=1,
+            depth=ROOT_CHILD_DEPTH,
             objective="Resolve prerequisite evidence and calculation branches.",
             node_kind="subtask",
             status="expanded",
@@ -514,18 +531,21 @@ def _grouped_prerequisite_graph_from_tasks(
         nodes[child_id] = _make_graph_node(
             node_id=child_id,
             parent_id="task_1",
-            depth=2,
+            depth=MIXED_PREREQUISITE_REQUIRED_DEPTH,
             objective=task["objective"],
             node_kind=_graph_node_kind_from_semantic_kind(task["kind"]),
             status="pending",
             children=[],
         )
-    for index, task in enumerate(synthesis_tasks, start=2):
+    for index, task in enumerate(
+        synthesis_tasks,
+        start=SYNTHESIS_TASK_INDEX_START,
+    ):
         node_id = _task_node_id(index)
         nodes[node_id] = _make_graph_node(
             node_id=node_id,
             parent_id="root",
-            depth=1,
+            depth=ROOT_CHILD_DEPTH,
             objective=task["objective"],
             node_kind=_graph_node_kind_from_semantic_kind(task["kind"]),
             status="pending",
@@ -641,7 +661,7 @@ async def _resolve_active_node(
     """Resolve one active node through a bounded local attempt loop."""
 
     active_node = graph["nodes"][active_node_id]
-    max_attempts = _option_limit(options, "max_node_attempts", 3)
+    max_attempts = _option_limit(options, "max_node_attempts")
     last_response: dict[str, object] = {}
     for _attempt_number in range(max_attempts):
         attempt_index = len(active_node["attempts"]) + 1
@@ -652,6 +672,7 @@ async def _resolve_active_node(
             graph=graph,
             active_node_id=active_node_id,
             trace_summary=trace_summary,
+            allow_subagent_retry=_attempt_number + 1 < max_attempts,
         )
         last_response = response
         attempt = _node_attempt_from_response(
@@ -674,6 +695,7 @@ async def _resolve_active_node_once(
     graph: ComplexTaskGraphV1,
     active_node_id: str,
     trace_summary: dict[str, object],
+    allow_subagent_retry: bool,
 ) -> dict[str, object]:
     """Run one active-node resolver pass and optional subagent dispatch."""
 
@@ -709,9 +731,47 @@ async def _resolve_active_node_once(
             request_payload=response["subagent_request"],
             trace_summary=trace_summary,
         )
-        response["subagent_result"] = subagent_result
         trace_summary["subagent_calls"] = int(trace_summary["subagent_calls"]) + 1
+        retry_response = _invalid_algorithmic_request_retry_response(
+            allow_retry=allow_subagent_retry,
+            subagent_name=_fallback_subagent_name(
+                response["subagent_request"],
+                active_node,
+            ),
+            subagent_result=subagent_result,
+        )
+        if retry_response is not None:
+            return retry_response
+        response["subagent_result"] = subagent_result
         return response
+    if owned_subagent_name is None and "node_expansion" in response:
+        if _is_unproductive_node_expansion(active_node, response):
+            response = _expansion_retry_attempt_response(
+                result_summary=(
+                    "The proposed expansion repeated the active node objective."
+                ),
+                blocker="same-objective expansion",
+                next_action=(
+                    "Resolve the node directly or split it into narrower "
+                    "executable children."
+                ),
+            )
+        elif _node_expansion_would_exceed_graph_limits(
+            graph,
+            active_node,
+            response["node_expansion"],
+        ):
+            response = _expansion_retry_attempt_response(
+                result_summary=(
+                    "The proposed expansion could not fit within the graph "
+                    "budget."
+                ),
+                blocker="graph budget prevents another expansion",
+                next_action=(
+                    "Record the best available knowledge for this node or "
+                    "choose a smaller executable child set."
+                ),
+            )
     if (
         owned_subagent_name == "algorithmic"
         and "node_update" in response
@@ -736,15 +796,22 @@ async def _resolve_active_node_once(
                 request_payload=response["subagent_request"],
                 trace_summary=trace_summary,
             )
-            response["subagent_result"] = subagent_result
             trace_summary["subagent_calls"] = int(
                 trace_summary["subagent_calls"]
             ) + 1
+            retry_response = _invalid_algorithmic_request_retry_response(
+                allow_retry=allow_subagent_retry,
+                subagent_name=owned_subagent_name,
+                subagent_result=subagent_result,
+            )
+            if retry_response is not None:
+                return retry_response
+            response["subagent_result"] = subagent_result
             return response
     if (
         owned_subagent_name == "algorithmic"
         and "node_expansion" in response
-        and _is_unproductive_owned_subagent_expansion(active_node, response)
+        and _is_unproductive_node_expansion(active_node, response)
     ):
         response = await _repair_subagent_owned_node(
             request=request,
@@ -765,10 +832,17 @@ async def _resolve_active_node_once(
                 request_payload=response["subagent_request"],
                 trace_summary=trace_summary,
             )
-            response["subagent_result"] = subagent_result
             trace_summary["subagent_calls"] = int(
                 trace_summary["subagent_calls"]
             ) + 1
+            retry_response = _invalid_algorithmic_request_retry_response(
+                allow_retry=allow_subagent_retry,
+                subagent_name=owned_subagent_name,
+                subagent_result=subagent_result,
+            )
+            if retry_response is not None:
+                return retry_response
+            response["subagent_result"] = subagent_result
             return response
     if (
         owned_subagent_name == "evidence"
@@ -789,12 +863,19 @@ async def _resolve_active_node_once(
             ),
             trace_summary=trace_summary,
         )
-        response = {"subagent_result": subagent_result}
         trace_summary["subagent_calls"] = int(trace_summary["subagent_calls"]) + 1
+        retry_response = _invalid_algorithmic_request_retry_response(
+            allow_retry=allow_subagent_retry,
+            subagent_name=owned_subagent_name,
+            subagent_result=subagent_result,
+        )
+        if retry_response is not None:
+            return retry_response
+        response = {"subagent_result": subagent_result}
     if (
         owned_subagent_name is not None
         and "node_expansion" in response
-        and _is_unproductive_owned_subagent_expansion(active_node, response)
+        and _is_unproductive_node_expansion(active_node, response)
     ):
         subagent_result = await _run_subagent(
             options=options,
@@ -806,12 +887,20 @@ async def _resolve_active_node_once(
             ),
             trace_summary=trace_summary,
         )
-        response = {"subagent_result": subagent_result}
         trace_summary["subagent_calls"] = int(trace_summary["subagent_calls"]) + 1
+        retry_response = _invalid_algorithmic_request_retry_response(
+            allow_retry=allow_subagent_retry,
+            subagent_name=owned_subagent_name,
+            subagent_result=subagent_result,
+        )
+        if retry_response is not None:
+            return retry_response
+        response = {"subagent_result": subagent_result}
     if (
         owned_subagent_name is not None
         and "node_update" in response
         and "followup_tasks" not in response
+        and not _is_evidence_terminal_gap_response(active_node, response)
     ):
         subagent_result = await _run_subagent(
             options=options,
@@ -823,9 +912,40 @@ async def _resolve_active_node_once(
             ),
             trace_summary=trace_summary,
         )
-        response = {"subagent_result": subagent_result}
         trace_summary["subagent_calls"] = int(trace_summary["subagent_calls"]) + 1
+        retry_response = _invalid_algorithmic_request_retry_response(
+            allow_retry=allow_subagent_retry,
+            subagent_name=owned_subagent_name,
+            subagent_result=subagent_result,
+        )
+        if retry_response is not None:
+            return retry_response
+        response = {"subagent_result": subagent_result}
     return response
+
+
+def _is_evidence_terminal_gap_response(
+    node: ComplexTaskNodeV1,
+    response: dict[str, object],
+) -> bool:
+    """Return whether an evidence node found a non-public evidence boundary."""
+
+    if node["node_kind"] != "evidence_need":
+        return False
+    update = response.get("node_update")
+    if not isinstance(update, dict):
+        return False
+    status = update.get("status")
+    if status not in ("blocked", "cannot_answer"):
+        return False
+    lacking = update.get("knowledge_still_lacking")
+    boundary_notes = update.get("evidence_boundary_notes")
+    recommended = update.get("recommended_next_iteration")
+    return_value = any(
+        isinstance(value, list) and bool(value)
+        for value in (lacking, boundary_notes, recommended)
+    )
+    return return_value
 
 
 def _node_expansion_would_exceed_graph_limits(
@@ -850,11 +970,11 @@ def _node_expansion_would_exceed_graph_limits(
     return False
 
 
-def _is_unproductive_owned_subagent_expansion(
+def _is_unproductive_node_expansion(
     active_node: ComplexTaskNodeV1,
     response: dict[str, object],
 ) -> bool:
-    """Return whether an owned node tried to expand into the same task."""
+    """Return whether expansion only reproduces the active task."""
 
     expansion = response["node_expansion"]
     if not isinstance(expansion, dict):
@@ -876,6 +996,60 @@ def _is_unproductive_owned_subagent_expansion(
         child_objective,
     )
     return return_value
+
+
+def _expansion_retry_attempt_response(
+    *,
+    result_summary: str,
+    blocker: str,
+    next_action: str,
+) -> dict[str, object]:
+    """Build a non-terminal attempt for expansion that cannot make progress."""
+
+    response: dict[str, object] = {
+        "node_attempt": {
+            "action": "expand_node",
+            "status": "blocked",
+            "result_summary": result_summary,
+            "blockers": [blocker],
+            "next_action": next_action,
+        },
+    }
+    return response
+
+
+def _invalid_algorithmic_request_retry_response(
+    *,
+    allow_retry: bool,
+    subagent_name: str | None,
+    subagent_result: ComplexTaskSubagentResultV1,
+) -> dict[str, object] | None:
+    """Turn invalid calculator IO into a bounded node repair attempt."""
+
+    if not allow_retry:
+        return None
+    if subagent_name != "algorithmic":
+        return None
+    if subagent_result["status"] != "invalid":
+        return None
+    blockers = list(subagent_result["unresolved_items"])
+    if not blockers:
+        blockers = ["calculator request was structurally invalid"]
+    response: dict[str, object] = {
+        "node_attempt": {
+            "action": "revise_calculation_request",
+            "status": "blocked",
+            "result_summary": (
+                "The calculator request was structurally invalid."
+            ),
+            "blockers": blockers,
+            "next_action": (
+                "Prepare a sourced numeric expression using visible operands, "
+                "or record missing operands as lacking knowledge."
+            ),
+        },
+    }
+    return response
 
 
 def _normalize_node_stage_response(
@@ -1087,9 +1261,11 @@ def _semantic_continuation_tasks(value: object) -> list[dict[str, object]]:
             continue
         objective = _semantic_text(item.get("objective"))
         reason = _semantic_text(item.get("reason"))
+        if "kind" in item and "work_type" not in item:
+            raise ComplexTaskValidationError(
+                "semantic continuation task: use work_type, not kind"
+            )
         work_type = item.get("work_type")
-        if not isinstance(work_type, str):
-            work_type = item.get("kind")
         if not objective or not reason:
             continue
         if not isinstance(work_type, str):
@@ -1576,7 +1752,7 @@ async def _run_subagent(
         "available_evidence": context["available_evidence"],
         "time_context": context["time_context"],
     }
-    max_attempts = _option_limit(options, "max_subagent_attempts", 1)
+    max_attempts = _option_limit(options, "max_subagent_attempts")
     validation_error = _subagent_request_validation_error(
         request=subagent_request,
         graph=graph,
@@ -1593,6 +1769,19 @@ async def _run_subagent(
             result=subagent_result,
         )
         return subagent_result
+    if (
+        subagent_name == "evidence"
+        and _evidence_call_budget_exhausted(trace_summary)
+    ):
+        subagent_result = _evidence_budget_exhausted_result(subagent_request)
+        _record_subagent_call(
+            trace_summary=trace_summary,
+            request=subagent_request,
+            result=subagent_result,
+        )
+        return subagent_result
+    if subagent_name == "evidence":
+        _increment_evidence_call_count(trace_summary)
     raw_result = await subagents[subagent_name].run(
         subagent_request,
         subagent_context,
@@ -1803,6 +1992,65 @@ def _same_structural_text(left: str, right: str) -> bool:
     return return_value
 
 
+def _evidence_call_budget_exhausted(trace_summary: dict[str, object]) -> bool:
+    """Return whether another public evidence backend call would exceed caps."""
+
+    current_count = trace_summary["evidence_calls"]
+    if not isinstance(current_count, int):
+        raise ComplexTaskValidationError("trace_summary.evidence_calls: expected int")
+    return_value = current_count >= MAX_RAG_CALLS_PER_RUN
+    return return_value
+
+
+def _increment_evidence_call_count(trace_summary: dict[str, object]) -> None:
+    """Record one actual evidence backend call under the run-level budget."""
+
+    current_count = trace_summary["evidence_calls"]
+    if not isinstance(current_count, int):
+        raise ComplexTaskValidationError("trace_summary.evidence_calls: expected int")
+    trace_summary["evidence_calls"] = current_count + 1
+
+
+def _evidence_budget_exhausted_result(
+    request: dict[str, object],
+) -> ComplexTaskSubagentResultV1:
+    """Build a semantic subagent result when the evidence cap is reached."""
+
+    summary = (
+        "The resolver did not collect additional public evidence because the "
+        "run-level evidence-call budget was exhausted."
+    )
+    result = {
+        "schema_version": COMPLEX_TASK_SUBAGENT_RESULT_VERSION,
+        "resolved": False,
+        "status": "partial",
+        "result": {
+            "summary": summary,
+            "knowledge_still_lacking": [
+                f"public evidence for: {request['objective']}"
+            ],
+            "evidence_boundary_notes": [
+                "The resolver stopped public evidence retrieval at its "
+                "configured per-run cap."
+            ],
+        },
+        "attempts": NO_ATTEMPTS_RECORDED,
+        "cache": {
+            "enabled": False,
+            "hit": False,
+            "cache_name": str(request["subagent"]),
+            "reason": "evidence_call_budget_exhausted",
+        },
+        "trace": {
+            "reason": "evidence_call_budget_exhausted",
+            "max_rag_calls": MAX_RAG_CALLS_PER_RUN,
+        },
+        "unresolved_items": [f"public evidence for: {request['objective']}"],
+    }
+    return_value = validate_complex_task_subagent_result(result)
+    return return_value
+
+
 def _invalid_subagent_result(
     *,
     request: dict[str, object],
@@ -1938,25 +2186,28 @@ def _trace_safe_value(value: object) -> object:
     """Return a bounded JSON-like value suitable for packet trace output."""
 
     if isinstance(value, str):
-        if len(value) <= _TRACE_TEXT_LIMIT:
+        if len(value) <= TRACE_TEXT_LIMIT:
             return value
-        return value[: _TRACE_TEXT_LIMIT - 3].rstrip() + "..."
+        return (
+            value[: TRACE_TEXT_LIMIT - len(TEXT_ELLIPSIS)].rstrip()
+            + TEXT_ELLIPSIS
+        )
     if isinstance(value, bool | int | float) or value is None:
         return value
     if isinstance(value, list):
         return [
             _trace_safe_value(item)
-            for item in value[:_TRACE_LIST_LIMIT]
+            for item in value[:TRACE_LIST_LIMIT]
         ]
     if isinstance(value, tuple):
         return [
             _trace_safe_value(item)
-            for item in value[:_TRACE_LIST_LIMIT]
+            for item in value[:TRACE_LIST_LIMIT]
         ]
     if isinstance(value, dict):
         safe_dict: dict[str, object] = {}
         for index, (key, item) in enumerate(value.items()):
-            if index >= _TRACE_DICT_LIMIT:
+            if index >= TRACE_DICT_LIMIT:
                 safe_dict["__truncated__"] = True
                 break
             safe_dict[str(key)] = _trace_safe_value(item)
@@ -2029,6 +2280,7 @@ def _apply_active_node_response(
             node["node_kind"] == "evidence_need"
             and not loop_exhausted
             and not has_followup_tasks
+            and not _is_evidence_terminal_gap_response(node, response)
         ):
             _block_evidence_node_without_subagent(node)
             return
@@ -2312,7 +2564,7 @@ def _create_followup_nodes(
             trace_summary,
             source_key,
         )
-        if source_created_count >= _FOLLOWUP_TASKS_PER_SOURCE_LIMIT:
+        if source_created_count >= FOLLOWUP_TASKS_PER_SOURCE_LIMIT:
             _record_followup_rejection(
                 trace_summary=trace_summary,
                 source_key=source_key,
@@ -2992,8 +3244,7 @@ async def _synthesize_packet(
         graph=graph,
         trace_summary=trace_summary,
     )
-    max_nodes = _option_limit(options, "max_nodes", 8)
-    max_iterations = _option_limit(options, "max_iterations", max_nodes)
+    max_iterations = _option_limit(options, "max_iterations")
     remaining_iterations = max_iterations - int(trace_summary["iterations"])
     created_count = _apply_synthesis_followup_tasks(
         graph=graph,
@@ -3119,6 +3370,10 @@ def _packet_from_synthesis_response(
         _resolved_node_known_rows(graph),
     )
     _append_missing_items(
+        synthesis["knowledge_we_know_so_far"],
+        _resolved_subagent_call_known_rows(trace_summary),
+    )
+    _append_missing_items(
         synthesis["evidence_boundary_notes"],
         _followup_rejection_boundary_notes(trace_summary),
     )
@@ -3193,6 +3448,29 @@ def _resolved_node_known_rows(graph: ComplexTaskGraphV1) -> list[str]:
         if node["status"] not in ("resolved", "collapsed"):
             continue
         _append_missing_items(rows, node["knowledge_we_know_so_far"])
+    return rows
+
+
+def _resolved_subagent_call_known_rows(
+    trace_summary: dict[str, object],
+) -> list[str]:
+    """Collect resolved subagent facts that did not survive graph status."""
+
+    rows: list[str] = []
+    call_log = trace_summary["subagent_call_log"]
+    if not isinstance(call_log, list):
+        return rows
+    for call in call_log:
+        if not isinstance(call, dict):
+            continue
+        if call.get("resolved") is not True:
+            continue
+        result = call.get("result")
+        if not isinstance(result, dict):
+            continue
+        summary = _summarize_result(result)
+        if summary != "subagent result resolved":
+            _append_missing_items(rows, [summary])
     return rows
 
 
@@ -3421,8 +3699,22 @@ def _subagent_boundary_notes(
 
     if subagent_result["resolved"]:
         notes = ["Resolver-local subagent produced bounded output."]
+        _append_missing_items(
+            notes,
+            _subagent_result_semantic_rows(
+                subagent_result,
+                "evidence_boundary_notes",
+            ),
+        )
         return notes
     notes = ["Resolver-local subagent could not complete this node."]
+    _append_missing_items(
+        notes,
+        _subagent_result_semantic_rows(
+            subagent_result,
+            "evidence_boundary_notes",
+        ),
+    )
     return notes
 
 
@@ -3464,17 +3756,31 @@ def _node_evidence_boundary_notes(graph: ComplexTaskGraphV1) -> list[str]:
 def _option_limit(
     options: ComplexTaskResolverOptionsV1,
     field_name: str,
-    default_value: int,
 ) -> int:
     """Read a positive integer structural option limit."""
 
     limits = options["limits"]
     if field_name not in limits:
-        return default_value
+        return _default_option_limit(options, field_name)
     value = limits[field_name]
     if not isinstance(value, int) or value < 1:
         raise ComplexTaskValidationError(f"limits.{field_name}: expected positive int")
     return value
+
+
+def _default_option_limit(
+    options: ComplexTaskResolverOptionsV1,
+    field_name: str,
+) -> int:
+    """Return the centrally managed default for one structural limit."""
+
+    if field_name == "max_iterations":
+        return_value = DEFAULT_OPTION_LIMITS[field_name]
+        return return_value
+    if field_name not in DEFAULT_OPTION_LIMITS:
+        raise ComplexTaskValidationError(f"limits.{field_name}: unknown limit")
+    return_value = DEFAULT_OPTION_LIMITS[field_name]
+    return return_value
 
 
 def _compact_context(context: ComplexTaskResolverContextV1) -> dict[str, object]:
@@ -3547,7 +3853,7 @@ def _compact_node_attempts(node: ComplexTaskNodeV1) -> list[dict[str, object]]:
     """Return bounded prompt-facing attempt observations for one node."""
 
     attempts: list[dict[str, object]] = []
-    for attempt in node["attempts"][-3:]:
+    for attempt in node["attempts"][-RECENT_NODE_ATTEMPT_LIMIT:]:
         attempts.append({
             "action": attempt["action"],
             "result_summary": attempt["result_summary"],

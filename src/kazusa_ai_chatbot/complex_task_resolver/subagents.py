@@ -6,6 +6,11 @@ import logging
 
 from kazusa_ai_chatbot.rag.web_agent3 import WebAgent3
 
+from .constants import (
+    DEFAULT_SUBAGENT_MAX_ATTEMPTS,
+    DEPENDENCY_FAILURE_ATTEMPTS,
+    NO_ATTEMPTS_RECORDED,
+)
 from .contracts import (
     COMPLEX_TASK_SUBAGENT_RESULT_VERSION,
     ComplexTaskSubagentRequestV1,
@@ -35,7 +40,7 @@ class ComplexTaskEvidenceSubagent:
         self,
         request: ComplexTaskSubagentRequestV1,
         context: dict[str, object],
-        max_attempts: int = 1,
+        max_attempts: int = DEFAULT_SUBAGENT_MAX_ATTEMPTS,
     ) -> ComplexTaskSubagentResultV1:
         """Collect bounded web evidence through the WebAgent3 public IO."""
 
@@ -64,9 +69,25 @@ class ComplexTaskEvidenceSubagent:
 
         if not isinstance(web_result, dict):
             raise ValueError("web_agent result: expected object")
-        resolved = web_result.get("resolved")
-        if not isinstance(resolved, bool):
+        raw_resolved = web_result.get("resolved")
+        if not isinstance(raw_resolved, bool):
             raise ValueError("web_agent result.resolved: expected boolean")
+        raw_status = web_result.get("status")
+        if isinstance(raw_status, str) and raw_status.strip():
+            web_status = raw_status.strip()
+        else:
+            web_status = ""
+        raw_reason = web_result.get("reason")
+        if isinstance(raw_reason, str) and raw_reason.strip():
+            web_reason = raw_reason.strip()
+        else:
+            web_reason = ""
+        raw_metadata = web_result.get("knowledge_metadata")
+        if isinstance(raw_metadata, dict):
+            knowledge_metadata = raw_metadata
+        else:
+            knowledge_metadata = {}
+        resolved = raw_resolved and web_status in ("", "success")
         raw_attempts = web_result.get("attempts", 0)
         if not isinstance(raw_attempts, int) or raw_attempts < 0:
             raise ValueError("web_agent result.attempts: expected non-negative int")
@@ -75,11 +96,22 @@ class ComplexTaskEvidenceSubagent:
             raise ValueError("web_agent result.cache: expected object")
         summary = str(web_result.get("result", ""))
         status = "resolved" if resolved else _unresolved_status(raw_attempts)
+        result_payload: dict[str, object] = {"summary": summary}
+        if web_status:
+            result_payload["source_quality"] = web_status
+        if web_reason:
+            result_payload["source_reason"] = web_reason
+        unresolved_items: list[str] = []
+        if not resolved:
+            if summary.strip():
+                unresolved_items.append(summary)
+            elif web_reason:
+                unresolved_items.append(web_reason)
         result: ComplexTaskSubagentResultV1 = {
             "schema_version": COMPLEX_TASK_SUBAGENT_RESULT_VERSION,
             "resolved": resolved,
             "status": status,
-            "result": {"summary": summary},
+            "result": result_payload,
             "attempts": raw_attempts,
             "cache": raw_cache,
             "trace": {
@@ -89,13 +121,16 @@ class ComplexTaskEvidenceSubagent:
                     "max_attempts": max_attempts,
                     "resolved": resolved,
                     "attempts": raw_attempts,
+                    "status": web_status,
+                    "reason": web_reason,
+                    "knowledge_metadata": knowledge_metadata,
                     "local_time_context": web_context.get(
                         "local_time_context",
                         {},
                     ),
                 },
             },
-            "unresolved_items": [] if resolved else [summary],
+            "unresolved_items": unresolved_items,
         }
         validated_result = validate_complex_task_subagent_result(result)
         return validated_result
@@ -115,7 +150,7 @@ class UnavailableEvidenceSubagent(ComplexTaskEvidenceSubagent):
         self,
         request: ComplexTaskSubagentRequestV1,
         context: dict[str, object],
-        max_attempts: int = 1,
+        max_attempts: int = DEFAULT_SUBAGENT_MAX_ATTEMPTS,
     ) -> ComplexTaskSubagentResultV1:
         """Return a bounded dependency-blocker envelope."""
 
@@ -257,7 +292,7 @@ def _web_context_from_resolver_context(
 def _unresolved_status(attempts: int) -> str:
     """Map unresolved WebAgent3 results into resolver subagent status."""
 
-    if attempts == 0:
+    if attempts == NO_ATTEMPTS_RECORDED:
         return "unavailable"
     return "partial"
 
@@ -272,7 +307,11 @@ def _dependency_failure_result(
 ) -> ComplexTaskSubagentResultV1:
     """Build a bounded evidence dependency failure envelope."""
 
-    attempts = 0 if max_attempts == 0 else 1
+    attempts = (
+        NO_ATTEMPTS_RECORDED
+        if max_attempts == NO_ATTEMPTS_RECORDED
+        else DEPENDENCY_FAILURE_ATTEMPTS
+    )
     result: ComplexTaskSubagentResultV1 = {
         "schema_version": COMPLEX_TASK_SUBAGENT_RESULT_VERSION,
         "resolved": False,

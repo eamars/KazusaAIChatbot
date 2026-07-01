@@ -19,6 +19,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from kazusa_ai_chatbot.rag import web_agent3 as web_module
 from kazusa_ai_chatbot.rag.web_agent3 import WebAgent3
 from kazusa_ai_chatbot.rag.web_agent3 import agent as agent_module
+from kazusa_ai_chatbot.rag.web_agent3 import constants as web_agent3_constants
 from kazusa_ai_chatbot.rag.web_agent3 import providers as provider_module
 from kazusa_ai_chatbot.rag.web_agent3 import searxng_tools as searxng_module
 from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
@@ -1470,7 +1471,7 @@ async def test_web_agent3_web_search_expansion_dedupes_and_caps_attempts(
         {"query": " beta support status ", "purpose": "second useful target"},
         {"query": "gamma support status", "purpose": "over cap target"},
     ]
-    monkeypatch.setattr(web_search_subagent, "_MAX_SEARCH_ATTEMPTS", 2, raising=False)
+    monkeypatch.setattr(web_agent3_constants, "MAX_SEARCH_ATTEMPTS", 2)
     monkeypatch.setattr(
         web_search_subagent,
         "_generate_search_attempts",
@@ -1867,8 +1868,11 @@ async def test_web_agent3_run_preserves_base_helper_contract() -> None:
     run_subgraph.assert_awaited_once()
     assert result == {
         "resolved": True,
+        "status": "success",
+        "reason": "found info",
         "result": "evidence package",
         "attempts": 1,
+        "knowledge_metadata": {},
         "cache": {
             "enabled": False,
             "hit": False,
@@ -1876,6 +1880,33 @@ async def test_web_agent3_run_preserves_base_helper_contract() -> None:
             "reason": "agent_not_cacheable",
         },
     }
+
+
+@pytest.mark.asyncio
+async def test_web_agent3_run_preserves_partial_finalizer_status() -> None:
+    """Partial finalizer output should not be promoted to resolved evidence."""
+
+    with patch(
+        "kazusa_ai_chatbot.rag.web_agent3.agent._run_subgraph",
+        new_callable=AsyncMock,
+        return_value={
+            "status": "partial",
+            "reason": "source is relevant but lacks current pricing",
+            "response": "Found an old product page but no current price.",
+            "is_empty_result": False,
+            "knowledge_metadata": {"source_fit": "partial"},
+        },
+    ):
+        result = await WebAgent3().run(
+            task="Find current public pricing.",
+            context={},
+        )
+
+    assert result["resolved"] is False
+    assert result["status"] == "partial"
+    assert result["reason"] == "source is relevant but lacks current pricing"
+    assert result["result"] == "Found an old product page but no current price."
+    assert result["knowledge_metadata"] == {"source_fit": "partial"}
 
 
 @pytest.mark.asyncio

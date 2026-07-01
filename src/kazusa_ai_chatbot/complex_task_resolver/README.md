@@ -8,7 +8,7 @@
 - Companion L2d recall capability: `local_context_recall`
 - Integration status: standalone module is implemented; L2d contract
   integration must route only through declared public IO and remains gated by
-  the active development plan before broad live enablement.
+  a future explicit rollout plan and user command before broad live enablement.
 - Related docs: [Cognition Resolver ICD](../cognition_resolver/README.md),
   [RAG 2](../rag/README.md), [web_agent3 ICD](../rag/web_agent3/README.md),
   [Action Spec](../action_spec/README.md)
@@ -258,7 +258,7 @@ Internal subagents follow the existing Kazusa helper-agent shape in spirit:
 async def run(
     task: ComplexTaskSubagentRequestV1,
     context: dict[str, object],
-    max_attempts: int = 1,
+    max_attempts: int = DEFAULT_SUBAGENT_MAX_ATTEMPTS,
 ) -> ComplexTaskSubagentResultV1:
     ...
 ```

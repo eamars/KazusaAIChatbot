@@ -48,7 +48,19 @@ from kazusa_ai_chatbot.llm_interface import (
     LLMCallConfig,
     LLMThinkingConfig,
 )
+from kazusa_ai_chatbot.rag.web_agent3.constants import (
+    DETERMINISTIC_STAGE_TEMPERATURE,
+    DETERMINISTIC_STAGE_TOP_P,
+    GENERATOR_TEMPERATURE,
+    GENERATOR_TOP_P,
+    PARTIAL_SCORE_THRESHOLD,
+    RECENT_OBSERVATION_LIMIT,
+    RUN_CONTRACT_MAX_ATTEMPTS,
+    SUCCESS_SCORE_THRESHOLD,
+)
+
 logger = logging.getLogger(__name__)
+
 
 def _prompt_timestamp_for_llm(
     local_prompt_timestamp: str,
@@ -223,8 +235,8 @@ _generator_llm_config = LLMCallConfig(
     base_url=WEB_SEARCH_LLM_BASE_URL,
     api_key=WEB_SEARCH_LLM_API_KEY,
     model=WEB_SEARCH_LLM_MODEL,
-    temperature=0.3,
-    top_p=0.9,
+    temperature=GENERATOR_TEMPERATURE,
+    top_p=GENERATOR_TOP_P,
     top_k=None,
     max_completion_tokens=WEB_SEARCH_LLM_MAX_COMPLETION_TOKENS,
     presence_penalty=None,
@@ -248,7 +260,7 @@ async def _tool_call_generator(state: WebAgent3State) -> dict[str, Any]:
         "task": state["task"],
         "context": state["context"],
         "reference_time": state["prompt_timestamp"],
-        "call_history": state["observations"][-3:],
+        "call_history": state["observations"][-RECENT_OBSERVATION_LIMIT:],
         "evaluator_feedback": state.get("evaluator_feedback", ""),
     }
     human_message = HumanMessage(
@@ -351,8 +363,8 @@ _evaluator_llm_config = LLMCallConfig(
     base_url=WEB_SEARCH_LLM_BASE_URL,
     api_key=WEB_SEARCH_LLM_API_KEY,
     model=WEB_SEARCH_LLM_MODEL,
-    temperature=0.0,
-    top_p=1.0,
+    temperature=DETERMINISTIC_STAGE_TEMPERATURE,
+    top_p=DETERMINISTIC_STAGE_TOP_P,
     top_k=None,
     max_completion_tokens=WEB_SEARCH_LLM_MAX_COMPLETION_TOKENS,
     presence_penalty=None,
@@ -448,8 +460,8 @@ _finalizer_llm_config = LLMCallConfig(
     base_url=WEB_SEARCH_LLM_BASE_URL,
     api_key=WEB_SEARCH_LLM_API_KEY,
     model=WEB_SEARCH_LLM_MODEL,
-    temperature=0.0,
-    top_p=1.0,
+    temperature=DETERMINISTIC_STAGE_TEMPERATURE,
+    top_p=DETERMINISTIC_STAGE_TOP_P,
     top_k=None,
     max_completion_tokens=WEB_SEARCH_LLM_MAX_COMPLETION_TOKENS,
     presence_penalty=None,
@@ -622,10 +634,10 @@ def _status_from_score(score: int, is_empty_result: bool) -> str:
     if is_empty_result:
         return_value = "not_found"
         return return_value
-    if score > 80:
+    if score > SUCCESS_SCORE_THRESHOLD:
         return_value = "success"
         return return_value
-    if score > 50:
+    if score > PARTIAL_SCORE_THRESHOLD:
         return_value = "partial"
         return return_value
     return_value = "not_found"
@@ -710,7 +722,7 @@ class WebAgent3(BaseRAGHelperAgent):
         self,
         task: str,
         context: dict[str, Any],
-        max_attempts: int = 3,
+        max_attempts: int = RUN_CONTRACT_MAX_ATTEMPTS,
     ) -> dict[str, Any]:
         """Retrieve web evidence while preserving the helper contract.
 
@@ -746,11 +758,31 @@ class WebAgent3(BaseRAGHelperAgent):
             expected_response=_DEFAULT_EXPECTED_RESPONSE,
             local_prompt_timestamp=local_prompt_timestamp,
         )
+        raw_status = raw.get("status")
+        if isinstance(raw_status, str) and raw_status:
+            status = raw_status
+        else:
+            status = "error"
+        raw_reason = raw.get("reason")
+        if isinstance(raw_reason, str):
+            reason = raw_reason
+        else:
+            reason = ""
+        raw_metadata = raw.get("knowledge_metadata")
+        if isinstance(raw_metadata, dict):
+            knowledge_metadata = raw_metadata
+        else:
+            knowledge_metadata = {}
+        is_empty_result = bool(raw.get("is_empty_result", False))
+        resolved = status == "success" and not is_empty_result
         result = self.with_cache_status(
             {
-                "resolved": not bool(raw.get("is_empty_result", False)),
+                "resolved": resolved,
+                "status": status,
+                "reason": reason,
                 "result": str(raw.get("response", "")),
                 "attempts": 1,
+                "knowledge_metadata": knowledge_metadata,
             },
             hit=False,
             reason="agent_not_cacheable",

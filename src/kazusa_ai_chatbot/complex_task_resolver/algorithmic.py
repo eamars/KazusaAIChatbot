@@ -8,6 +8,10 @@ import statistics
 from decimal import Decimal
 from fractions import Fraction
 
+from .constants import (
+    DEFAULT_SUBAGENT_MAX_ATTEMPTS,
+    EXECUTED_CALCULATION_ATTEMPTS,
+)
 from .contracts import (
     COMPLEX_TASK_SUBAGENT_RESULT_VERSION,
     ComplexTaskSubagentRequestV1,
@@ -110,7 +114,7 @@ class AlgorithmicSubagent:
         self,
         request: ComplexTaskSubagentRequestV1,
         context: dict[str, object],
-        max_attempts: int = 1,
+        max_attempts: int = DEFAULT_SUBAGENT_MAX_ATTEMPTS,
     ) -> ComplexTaskSubagentResultV1:
         """Dispatch one typed calculation and return an IO envelope."""
 
@@ -176,7 +180,7 @@ class AlgorithmicSubagent:
                 "result_type": type(evaluated_result).__name__,
                 "display": display,
             },
-            "attempts": 1,
+            "attempts": EXECUTED_CALCULATION_ATTEMPTS,
             "cache": {
                 "enabled": False,
                 "hit": False,
@@ -207,7 +211,7 @@ class AlgorithmicSubagent:
             "resolved": False,
             "status": "invalid",
             "result": {},
-            "attempts": 1,
+            "attempts": EXECUTED_CALCULATION_ATTEMPTS,
             "cache": {
                 "enabled": False,
                 "hit": False,

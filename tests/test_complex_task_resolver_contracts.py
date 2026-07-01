@@ -254,7 +254,7 @@ def test_options_contract_rejects_external_stage_configuration() -> None:
     assert options["limits"]["max_iterations"] == 3
 
     for limit_name, limit_value in (
-        ("max_iterations", 9),
+        ("max_iterations", 5),
         ("max_nodes", 9),
         ("max_depth", 4),
         ("max_node_attempts", 4),

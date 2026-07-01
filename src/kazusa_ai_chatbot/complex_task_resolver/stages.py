@@ -20,6 +20,7 @@ from kazusa_ai_chatbot.llm_interface import (
 )
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
+from .constants import STAGE_LLM_TEMPERATURE, STAGE_LLM_TOP_P
 from .contracts import ComplexTaskValidationError
 from .subagent import _SUBAGENT_TOOLS_TEXT
 
@@ -45,11 +46,23 @@ the question and do not cite sources.
 
 # Rules
 - Return 2 to 6 tasks.
-- Use "evidence_need" when current public facts or source comparison are needed.
-- Use "algorithmic_task" only for deterministic arithmetic or scoring.
+- Use "evidence_need" only for public external facts, public source comparison,
+  current public product/version/support facts, or source-bound public evidence.
+- When a question depends on a diff, repository-local code, private plan, prior
+  conversation, local artifact, or project-internal term that is not supplied in
+  context, create a subtask that records the missing supplied artifact and a
+  synthesis task for bounded response; keep that work outside evidence_need.
+- Use "algorithmic_task" only for deterministic arithmetic or numeric scoring
+  that can be expressed as a numeric expression with visible operands.
 - For an "algorithmic_task", include the numeric inputs and already-stated
   units needed for the calculation in the objective. Do not make later stages
   recover hidden operands from a vague label.
+- Semantic comparison, feasibility review, collapse review, recommendation,
+  route selection, and source-quality judgment are not calculation work unless
+  a concrete numeric formula with visible operands is supplied.
+- Counting qualitative differences between requirements is semantic comparison,
+  not calculation work, unless the caller supplies an explicit numeric scoring
+  formula.
 - Use "synthesis" only for final bottom-up consolidation.
 - When a question needs the same public fact, version, support detail, or source
   confirmation for several independent named targets, create one evidence_need
@@ -66,8 +79,8 @@ _planner_llm_config = LLMCallConfig(
     base_url=WEB_SEARCH_LLM_BASE_URL,
     api_key=WEB_SEARCH_LLM_API_KEY,
     model=WEB_SEARCH_LLM_MODEL,
-    temperature=0.1,
-    top_p=0.7,
+    temperature=STAGE_LLM_TEMPERATURE,
+    top_p=STAGE_LLM_TOP_P,
     top_k=None,
     max_completion_tokens=WEB_SEARCH_LLM_MAX_COMPLETION_TOKENS,
     presence_penalty=None,
@@ -132,21 +145,41 @@ present in the supplied active node, parent chain, or sibling summaries. Use
 formula_constants only for mathematical constants or formula constants such as
 100 in a percentage calculation. Do not invent missing operands. If a needed
 operand is missing from the supplied material, record it in
-knowledge_still_lacking.
+knowledge_still_lacking; record missing operands instead of asking the
+calculator to infer them.
 
 # Rules
 - Populate semantic projection fields the same way the final packet does: what
   this node investigated, what is known so far, what is still lacking, the next
   semantic direction if one exists, and evidence/tool/source boundaries.
-- If the active node mixes requirements, product research, arithmetic, safety,
-  or recommendation synthesis, return an expand decision.
-- If a public evidence node still bundles independent targets or fact dimensions,
-  return an expand decision before using the evidence capability.
-  Create one public_evidence child for each source-oriented request that can be
-  investigated independently.
+- Use expand only when the active node needs two or more narrower executable
+  child tasks. Each child objective should be more specific than the active
+  node and ready for evidence, calculation, direct semantic recording, or
+  synthesis work.
+- For a bounded public_evidence leaf, use the evidence capability. When a
+  public evidence node still bundles independent targets or fact dimensions,
+  create one narrower public_evidence child for each source-oriented request
+  that can be investigated independently.
+- Use the evidence capability only for public external source questions. For a
+  private or caller-supplied artifact such as a diff, local code, internal plan,
+  prior conversation, or project-specific interface that is absent from the
+  active node, root question, or context, record the missing artifact and the
+  specific supplied context needed for a bounded answer.
+- For design, planning, documentation, or architecture leaves answerable from
+  the supplied task and context, record semantic knowledge directly.
+  Missing implementation preferences should become reviewable assumptions,
+  knowledge_still_lacking rows, or recommended_next_iteration rows rather than
+  marking the node not answerable. Use completion "not_answerable" only when
+  the objective itself is outside resolver scope or cannot be handled safely.
 - If active_node.attempts is non-empty, use those prior attempts to avoid
   repeating the same blocked action. Choose a different valid output shape or
   block explicitly if the blocker cannot be solved inside this module.
+- Semantic comparison, feasibility review, collapse review, recommendation,
+  route selection, and source-quality judgment are not calculation work unless
+  a concrete numeric formula with visible operands is supplied.
+- Counting qualitative differences between requirements is semantic comparison,
+  not calculation work; record the differing dimensions as semantic knowledge
+  unless an explicit numeric scoring formula is supplied.
 - If the active node requires multiple independent numeric outputs, return
   an expand decision into smaller calculation children instead of forcing one
   expression to stand for every output.
@@ -207,8 +240,8 @@ _node_resolver_llm_config = LLMCallConfig(
     base_url=WEB_SEARCH_LLM_BASE_URL,
     api_key=WEB_SEARCH_LLM_API_KEY,
     model=WEB_SEARCH_LLM_MODEL,
-    temperature=0.1,
-    top_p=0.7,
+    temperature=STAGE_LLM_TEMPERATURE,
+    top_p=STAGE_LLM_TOP_P,
     top_k=None,
     max_completion_tokens=WEB_SEARCH_LLM_MAX_COMPLETION_TOKENS,
     presence_penalty=None,
@@ -280,8 +313,8 @@ _collapse_llm_config = LLMCallConfig(
     base_url=WEB_SEARCH_LLM_BASE_URL,
     api_key=WEB_SEARCH_LLM_API_KEY,
     model=WEB_SEARCH_LLM_MODEL,
-    temperature=0.1,
-    top_p=0.7,
+    temperature=STAGE_LLM_TEMPERATURE,
+    top_p=STAGE_LLM_TOP_P,
     top_k=None,
     max_completion_tokens=WEB_SEARCH_LLM_MAX_COMPLETION_TOKENS,
     presence_penalty=None,
@@ -320,6 +353,10 @@ For evidence nodes, investigation_summary may contain mixed observations,
 proxy matches, and missing coverage. Do not copy an entire prose summary into
 knowledge_we_know_so_far; preserve caveats and put missing or weak coverage in
 knowledge_still_lacking.
+Calculation facts are known only when they appear in resolved calculation
+summaries supplied to you. If a blocked calculation branch names a desired
+number or formula, do not calculate it during synthesis; preserve the missing
+numeric result in knowledge_still_lacking.
 Do not judge whether the user's full question is answered.
 Do not decide whether the character should speak, ask the user, retry, or stop.
 Only consolidate semantic knowledge for the later cognition stage to judge.
@@ -368,8 +405,8 @@ _synthesizer_llm_config = LLMCallConfig(
     base_url=WEB_SEARCH_LLM_BASE_URL,
     api_key=WEB_SEARCH_LLM_API_KEY,
     model=WEB_SEARCH_LLM_MODEL,
-    temperature=0.1,
-    top_p=0.7,
+    temperature=STAGE_LLM_TEMPERATURE,
+    top_p=STAGE_LLM_TOP_P,
     top_k=None,
     max_completion_tokens=WEB_SEARCH_LLM_MAX_COMPLETION_TOKENS,
     presence_penalty=None,

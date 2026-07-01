@@ -19,8 +19,22 @@ from kazusa_ai_chatbot.complex_task_resolver.subagents import (
 class _FakeWebAgent:
     """Capture evidence requests while returning a helper-agent envelope."""
 
-    def __init__(self) -> None:
+    def __init__(self, result: dict[str, object] | None = None) -> None:
         self.calls: list[dict[str, object]] = []
+        self._result = result or {
+            "resolved": True,
+            "status": "success",
+            "reason": "found enough source evidence",
+            "result": "Source-backed product facts found.",
+            "attempts": 1,
+            "knowledge_metadata": {},
+            "cache": {
+                "enabled": False,
+                "hit": False,
+                "cache_name": "web_agent3",
+                "reason": "agent_not_cacheable",
+            },
+        }
 
     async def run(
         self,
@@ -33,17 +47,8 @@ class _FakeWebAgent:
             "context": context,
             "max_attempts": max_attempts,
         })
-        return {
-            "resolved": True,
-            "result": "Source-backed product facts found.",
-            "attempts": 1,
-            "cache": {
-                "enabled": False,
-                "hit": False,
-                "cache_name": "web_agent3",
-                "reason": "agent_not_cacheable",
-            },
-        }
+        result = dict(self._result)
+        return result
 
 
 @pytest.mark.asyncio
@@ -112,6 +117,66 @@ async def test_evidence_subagent_calls_web_agent3_declared_io() -> None:
 
 
 @pytest.mark.asyncio
+async def test_evidence_subagent_preserves_partial_web_agent_status() -> None:
+    """Weak or incomplete web evidence should remain partial downstream."""
+
+    request = validate_complex_task_subagent_request({
+        "schema_version": COMPLEX_TASK_SUBAGENT_REQUEST_VERSION,
+        "node_id": "evidence_1",
+        "subagent": "evidence",
+        "action": "retrieve_source_facts",
+        "objective": "Fetch current product pricing.",
+        "payload": {"query": "current product pricing"},
+        "constraints": {},
+    })
+    context = {
+        "root_question": "Compare product prices.",
+        "parent_chain_summary": "",
+        "sibling_summaries": [],
+        "available_evidence": [],
+        "time_context": {"current_date": "2026-06-30"},
+    }
+    web_agent = _FakeWebAgent(result={
+        "resolved": True,
+        "status": "partial",
+        "reason": "source is relevant but lacks current pricing",
+        "result": "Found an old product page but no current price.",
+        "attempts": 1,
+        "knowledge_metadata": {"source_fit": "partial"},
+        "cache": {
+            "enabled": False,
+            "hit": False,
+            "cache_name": "web_agent3",
+            "reason": "agent_not_cacheable",
+        },
+    })
+    subagent = ComplexTaskEvidenceSubagent(web_agent=web_agent)
+
+    result = await subagent.run(request, context, max_attempts=1)
+    validated = validate_complex_task_subagent_result(result)
+
+    assert validated["resolved"] is False
+    assert validated["status"] == "partial"
+    assert validated["result"]["summary"] == (
+        "Found an old product page but no current price."
+    )
+    assert validated["result"]["source_quality"] == "partial"
+    assert validated["result"]["source_reason"] == (
+        "source is relevant but lacks current pricing"
+    )
+    assert validated["trace"]["web_agent3"]["status"] == "partial"
+    assert validated["trace"]["web_agent3"]["reason"] == (
+        "source is relevant but lacks current pricing"
+    )
+    assert validated["trace"]["web_agent3"]["knowledge_metadata"] == {
+        "source_fit": "partial",
+    }
+    assert validated["unresolved_items"] == [
+        "Found an old product page but no current price.",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_evidence_subagent_preserves_declared_source_hints() -> None:
     """Pass source hints to WebAgent3 instead of reducing them to keywords."""
 
@@ -174,3 +239,39 @@ def test_subagent_result_rejects_hidden_fixture_hints() -> None:
             "trace": {"case_id": "ctr_001_agent_harness_comparison"},
             "unresolved_items": [],
         })
+
+    with pytest.raises(ValueError):
+        validate_complex_task_subagent_result({
+            "schema_version": COMPLEX_TASK_SUBAGENT_RESULT_VERSION,
+            "resolved": True,
+            "status": "resolved",
+            "result": {
+                "summary": "ctr_027_semantic_collapse_negative",
+            },
+            "attempts": 1,
+            "cache": {"enabled": False},
+            "trace": {},
+            "unresolved_items": [],
+        })
+
+
+def test_subagent_result_allows_use_cases_and_ide_text() -> None:
+    """Do not confuse ordinary semantic evidence with fixture metadata."""
+
+    validated = validate_complex_task_subagent_result({
+        "schema_version": COMPLEX_TASK_SUBAGENT_RESULT_VERSION,
+        "resolved": True,
+        "status": "resolved",
+        "result": {
+            "summary": (
+                "GitHub Copilot has IDE assistant use cases, while Codex CLI "
+                "and OpenAI API have different operating surfaces."
+            ),
+        },
+        "attempts": 1,
+        "cache": {"enabled": False},
+        "trace": {},
+        "unresolved_items": [],
+    })
+
+    assert validated["resolved"] is True
