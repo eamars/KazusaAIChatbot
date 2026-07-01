@@ -30,12 +30,13 @@ MAX_RESOLVER_GOAL_ITEM_CHARS = 240
 MAX_RESOLVER_GOAL_ITEMS = 8
 MAX_RESOLVER_RAG_EVIDENCE_SUMMARY_CHARS = 320
 MAX_RESOLVER_RAG_EVIDENCE_ITEMS = 4
+MAX_RESOLVER_KNOWLEDGE_ITEMS = 8
 
 _RAW_MARKER_RE = re.compile(r"\braw-[A-Za-z0-9_-]+")
 
 ALLOWED_RESOLVER_CAPABILITIES = frozenset((
-    "rag_evidence",
-    "web_evidence",
+    "local_context_recall",
+    "public_answer_research",
     "human_clarification",
     "approval_preparation",
     "self_goal_resolution",
@@ -85,8 +86,8 @@ class ResolverCapabilityRequestV1(TypedDict):
 
     schema_version: Literal["resolver_capability_request.v1"]
     capability_kind: Literal[
-        "rag_evidence",
-        "web_evidence",
+        "local_context_recall",
+        "public_answer_research",
         "human_clarification",
         "approval_preparation",
         "self_goal_resolution",
@@ -107,6 +108,7 @@ class ResolverObservationV1(TypedDict):
     status: Literal["succeeded", "blocked", "failed"]
     prompt_safe_summary: str
     rag_result: NotRequired[dict]
+    knowledge_projection: NotRequired[dict[str, object]]
     pending_resume_id: NotRequired[str]
     evidence_refs: list[EvidenceRefV1]
     created_at_utc: str
@@ -282,6 +284,10 @@ def validate_resolver_observation(value: object) -> ResolverObservationV1:
     }
     if "rag_result" in data:
         normalized["rag_result"] = _normalize_rag_result(data["rag_result"])
+    if "knowledge_projection" in data:
+        normalized["knowledge_projection"] = _normalize_knowledge_projection(
+            data["knowledge_projection"],
+        )
     if pending_resume_id is not None:
         normalized["pending_resume_id"] = pending_resume_id
     return_value = normalized
@@ -541,6 +547,20 @@ def project_observations_for_cognition(
         capability_kind = validated["capability_kind"]
         status = validated["status"]
         summary = validated["prompt_safe_summary"]
+        knowledge_context = _project_knowledge_projection(validated)
+        if knowledge_context:
+            line_parts = [
+                f"{alias}: capability={capability_kind}",
+                (
+                    "objective="
+                    f"{_prompt_safe_projection_text(validated['request_objective'])}"
+                ),
+                f"summary={_prompt_safe_projection_text(summary)}",
+                knowledge_context,
+            ]
+            line = "; ".join(line_parts)
+            lines.append(line)
+            continue
         line_parts = [
             f"{alias}: capability={capability_kind}",
             f"status={status}",
@@ -559,6 +579,87 @@ def project_observations_for_cognition(
         lines.append(line)
     projection = "\n".join(lines)
     return_value = projection
+    return return_value
+
+
+def _normalize_knowledge_projection(value: object) -> dict[str, object]:
+    """Validate semantic knowledge returned by an evidence capability."""
+
+    data = _require_mapping(value, "knowledge_projection")
+    normalized = {
+        "investigation_summary": _clip_text(
+            _optional_string(data, "investigation_summary"),
+            MAX_RESOLVER_SUMMARY_CHARS,
+        ),
+        "knowledge_we_know_so_far": _normalize_knowledge_list(
+            data,
+            "knowledge_we_know_so_far",
+        ),
+        "knowledge_still_lacking": _normalize_knowledge_list(
+            data,
+            "knowledge_still_lacking",
+        ),
+        "recommended_next_iteration": _normalize_knowledge_list(
+            data,
+            "recommended_next_iteration",
+        ),
+        "evidence_boundary_notes": _normalize_knowledge_list(
+            data,
+            "evidence_boundary_notes",
+        ),
+    }
+    return_value = normalized
+    return return_value
+
+
+def _normalize_knowledge_list(data: dict, field_name: str) -> list[str]:
+    """Return bounded semantic knowledge rows from a projection field."""
+
+    raw_items = data.get(field_name, [])
+    if not isinstance(raw_items, list):
+        raise ResolverValidationError(f"{field_name}: expected list")
+    normalized_items: list[str] = []
+    for raw_item in raw_items[:MAX_RESOLVER_KNOWLEDGE_ITEMS]:
+        if not isinstance(raw_item, str):
+            raise ResolverValidationError(f"{field_name}: expected strings")
+        item = raw_item.strip()
+        if not item:
+            continue
+        normalized_items.append(_clip_text(item, MAX_RESOLVER_GOAL_ITEM_CHARS))
+    return_value = normalized_items
+    return return_value
+
+
+def _project_knowledge_projection(observation: ResolverObservationV1) -> str:
+    """Render semantic knowledge sections for the next cognition pass."""
+
+    projection = observation.get("knowledge_projection")
+    if not isinstance(projection, dict):
+        return_value = ""
+        return return_value
+    lines: list[str] = []
+    summary = projection["investigation_summary"]
+    if isinstance(summary, str) and summary:
+        lines.append(
+            "investigation_summary="
+            f"{_prompt_safe_projection_text(summary)}"
+        )
+    for field_name, label in (
+        ("knowledge_we_know_so_far", "knowledge_we_know_so_far"),
+        ("knowledge_still_lacking", "knowledge_still_lacking"),
+        ("recommended_next_iteration", "recommended_next_iteration"),
+        ("evidence_boundary_notes", "evidence_boundary_notes"),
+    ):
+        raw_items = projection[field_name]
+        if not isinstance(raw_items, list) or not raw_items:
+            continue
+        items = [
+            _prompt_safe_projection_text(str(item))
+            for item in raw_items
+        ]
+        lines.append(f"{label}: " + "；".join(items))
+    rendered_projection = "; ".join(lines)
+    return_value = rendered_projection
     return return_value
 
 
@@ -651,6 +752,16 @@ def _require_non_empty_string(data: dict, field_name: str) -> str:
     value = data.get(field_name)
     if not isinstance(value, str) or not value.strip():
         raise ResolverValidationError(f"{field_name}: expected non-empty string")
+    return_value = value
+    return return_value
+
+
+def _optional_string(data: dict, field_name: str) -> str:
+    """Read an optional string field from external structured output."""
+
+    value = data.get(field_name, "")
+    if not isinstance(value, str):
+        raise ResolverValidationError(f"{field_name}: expected string")
     return_value = value
     return return_value
 

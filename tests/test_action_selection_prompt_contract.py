@@ -13,6 +13,8 @@ def test_action_selection_prompt_uses_runtime_affordance_roster() -> None:
     assert "capabilities.resolver_affordances" in ACTION_ROUTER_PROMPT
     assert "capabilities.action_affordances" in ACTION_ROUTER_PROMPT
     for hardcoded_capability in (
+        "public_answer_research",
+        "local_context_recall",
         "rag_evidence",
         "web_evidence",
         "human_clarification",
@@ -62,7 +64,7 @@ def test_action_selection_normalizes_schema_free_resolver_requests() -> None:
     raw_model_output = {
         "resolver_capability_requests": [
             {
-                "capability_kind": "rag_evidence",
+                "capability_kind": "local_context_recall",
                 "objective": "find Fibonacci background",
                 "reason": "user asked about Fibonacci",
                 "priority": "now",
@@ -88,7 +90,7 @@ def test_action_selection_normalizes_schema_free_resolver_requests() -> None:
     assert len(requests) == 1
     request = requests[0]
     assert request["schema_version"] == "resolver_capability_request.v1"
-    assert request["capability_kind"] == "rag_evidence"
+    assert request["capability_kind"] == "local_context_recall"
     assert request["objective"] == "find Fibonacci background"
     assert "pending_row_id" not in request
 

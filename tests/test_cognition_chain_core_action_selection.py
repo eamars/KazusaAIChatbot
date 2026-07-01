@@ -9,7 +9,7 @@ def test_semantic_action_request_contract_matches_current_l2d_routes() -> None:
     raw_output = {
         "resolver_capability_requests": [{
             "schema_version": "model-supplied",
-            "capability_kind": "rag_evidence",
+            "capability_kind": "local_context_recall",
             "objective": "find prior context",
             "reason": "memory is needed",
             "priority": "now",
@@ -62,7 +62,7 @@ def test_semantic_action_request_contract_matches_current_l2d_routes() -> None:
         },
     ]
     resolver_request = normalized["resolver_capability_requests"][0]
-    assert resolver_request["capability_kind"] == "rag_evidence"
+    assert resolver_request["capability_kind"] == "local_context_recall"
     assert "pending_row_id" not in resolver_request
     assert "schema_version" in resolver_request
     assert "pending_row_id" not in normalized["resolver_pending_resolution"]

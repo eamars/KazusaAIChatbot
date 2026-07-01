@@ -987,7 +987,7 @@ def test_selected_text_surface_intent_includes_goal_progress_checklist() -> None
             ],
             "missing_user_inputs": [],
             "evidence_dependencies": ["实时营业证据"],
-            "attempted_paths": ["web_evidence: 奥克兰 CBD 晚餐"],
+            "attempted_paths": ["public_answer_research: 奥克兰 CBD 晚餐"],
             "source_backed_facts": ["用户在奥克兰 CBD"],
             "assumptions_or_inferences": ["可以给出路线骨架"],
             "blockers": ["无法确认 19:30 营业状态"],
@@ -1014,7 +1014,7 @@ def test_selected_text_surface_intent_includes_resolver_observation_summaries() 
             {
                 "schema_version": "resolver_observation.v1",
                 "observation_id": "raw-observation-id",
-                "capability_kind": "web_evidence",
+                "capability_kind": "public_answer_research",
                 "request_objective": "Find CBD walking routes.",
                 "request_reason": "The final answer needs route evidence.",
                 "status": "succeeded",
@@ -1055,7 +1055,7 @@ def test_l3_content_plan_input_includes_resolver_observation_summaries() -> None
             {
                 "schema_version": "resolver_observation.v1",
                 "observation_id": "raw-observation-id",
-                "capability_kind": "web_evidence",
+                "capability_kind": "public_answer_research",
                 "request_objective": "Find CBD walking routes.",
                 "request_reason": "The final answer needs route evidence.",
                 "status": "succeeded",
@@ -1080,7 +1080,7 @@ def test_l3_content_plan_input_includes_resolver_observation_summaries() -> None
     observation_context = l3_module._resolver_observations_for_content_plan(state)
 
     assert "resolver_obs_1" in observation_context
-    assert "capability=web_evidence" in observation_context
+    assert "capability=public_answer_research" in observation_context
     assert "status=succeeded" in observation_context
     assert "Wynyard Quarter and Britomart are CBD evening walking options" in (
         observation_context
@@ -1115,7 +1115,7 @@ async def test_l3_content_plan_receives_goal_progress_before_generation() -> Non
         ],
         "missing_user_inputs": [],
         "evidence_dependencies": ["实时营业证据"],
-        "attempted_paths": ["web_evidence: 奥克兰 CBD 晚餐"],
+        "attempted_paths": ["public_answer_research: 奥克兰 CBD 晚餐"],
         "source_backed_facts": ["用户在奥克兰 CBD"],
         "assumptions_or_inferences": ["可以给出路线骨架"],
         "blockers": ["无法确认 19:30 营业状态"],

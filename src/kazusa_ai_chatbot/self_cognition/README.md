@@ -95,11 +95,13 @@ validation, and adapter delivery are not paused by this predicate.
 
 - Every case enters the bounded cognition resolver and each resolver cycle
   invokes the shared L1/L2/L2d cognition graph.
-- If L2d selects `rag_evidence`, the resolver invokes the existing RAG2
+- If L2d selects `local_context_recall`, the resolver invokes the existing RAG2
   supervisor as a capability observation and feeds the projected result into
   the next cognition cycle. Internal RAG2 helper calls remain governed by RAG2.
-- If L2d does not select RAG, no deterministic self-cognition rule calls RAG on
-  its behalf.
+- If L2d selects `public_answer_research`, public/current/external answer
+  investigation is handled by the complex task resolver through declared IO.
+- If L2d selects neither recall nor public answer research, no deterministic
+  self-cognition rule calls either capability on its behalf.
 - If L2d selects visible `speak`, the selected L3 text handler may invoke the
   existing dialog graph once to render text.
 - When consolidation is applied without a selected visible `speak`, the runner

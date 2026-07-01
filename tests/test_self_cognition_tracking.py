@@ -1850,7 +1850,7 @@ def test_scheduled_future_cognition_starts_without_preloaded_rag(
         output["resolver_state"] = {
             "observations": [
                 {
-                    "capability_kind": "rag_evidence",
+                    "capability_kind": "local_context_recall",
                 }
             ]
         }

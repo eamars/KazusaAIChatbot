@@ -48,7 +48,19 @@ from kazusa_ai_chatbot.llm_interface import (
     LLMCallConfig,
     LLMThinkingConfig,
 )
+from kazusa_ai_chatbot.rag.web_agent3.constants import (
+    DETERMINISTIC_STAGE_TEMPERATURE,
+    DETERMINISTIC_STAGE_TOP_P,
+    GENERATOR_TEMPERATURE,
+    GENERATOR_TOP_P,
+    PARTIAL_SCORE_THRESHOLD,
+    RECENT_OBSERVATION_LIMIT,
+    RUN_CONTRACT_MAX_ATTEMPTS,
+    SUCCESS_SCORE_THRESHOLD,
+)
+
 logger = logging.getLogger(__name__)
+
 
 def _prompt_timestamp_for_llm(
     local_prompt_timestamp: str,
@@ -223,8 +235,8 @@ _generator_llm_config = LLMCallConfig(
     base_url=WEB_SEARCH_LLM_BASE_URL,
     api_key=WEB_SEARCH_LLM_API_KEY,
     model=WEB_SEARCH_LLM_MODEL,
-    temperature=0.3,
-    top_p=0.9,
+    temperature=GENERATOR_TEMPERATURE,
+    top_p=GENERATOR_TOP_P,
     top_k=None,
     max_completion_tokens=WEB_SEARCH_LLM_MAX_COMPLETION_TOKENS,
     presence_penalty=None,
@@ -248,7 +260,7 @@ async def _tool_call_generator(state: WebAgent3State) -> dict[str, Any]:
         "task": state["task"],
         "context": state["context"],
         "reference_time": state["prompt_timestamp"],
-        "call_history": state["observations"][-3:],
+        "call_history": state["observations"][-RECENT_OBSERVATION_LIMIT:],
         "evaluator_feedback": state.get("evaluator_feedback", ""),
     }
     human_message = HumanMessage(
@@ -351,8 +363,8 @@ _evaluator_llm_config = LLMCallConfig(
     base_url=WEB_SEARCH_LLM_BASE_URL,
     api_key=WEB_SEARCH_LLM_API_KEY,
     model=WEB_SEARCH_LLM_MODEL,
-    temperature=0.0,
-    top_p=1.0,
+    temperature=DETERMINISTIC_STAGE_TEMPERATURE,
+    top_p=DETERMINISTIC_STAGE_TOP_P,
     top_k=None,
     max_completion_tokens=WEB_SEARCH_LLM_MAX_COMPLETION_TOKENS,
     presence_penalty=None,
@@ -419,6 +431,8 @@ _WEB_AGENT3_FINALIZER_PROMPT = '''\
 - 时间边界：不要提及模型知识、训练数据、知识截止或真实世界当前时间；时效判断只能使用 `reference_time`、来源时间和检索内容。
 - 失败诚实：只有观察内容明确包含错误、空内容、工具失败或无数据时，才可以声称读取失败或没有检索数据。
 - 摘要诚实：如果只有搜索摘要、snippet 或搜索结果线索，或者后续正文读取为空，必须标注为搜索摘要级证据，不要写成已读取正文确认。
+- 多次搜索诚实：如果 content 中包含 Search attempts，必须按每次尝试保留哪些 query 有来源线索、
+  哪些 query 没有有用结果或工具错误、哪些目标还需要更窄检索；不要把多个尝试压成一个笼统的已找到或未找到结论。
 - 跨来源一致性：只有每个被比较的来源类别都有正文或摘要明确包含同一目标事实时，才可以说信息一致；如果某个来源类别读取失败、只有链接、只有邻近页面、或正文没有目标事实，必须写成该来源未确认，不得说没有冲突或信息一致。
 - 对象边界：不要把相邻产品、派生轨道、集成说明、镜像、扩展或非目标对象当成目标对象的直接证据；除非任务明确询问这些轨道，否则只能列为邻近线索或排除项。
 - 语言策略：提示面向下游认知，优先使用中文整理证据；URL、标题、来源文本、代码名和专有名词保持原文。
@@ -446,8 +460,8 @@ _finalizer_llm_config = LLMCallConfig(
     base_url=WEB_SEARCH_LLM_BASE_URL,
     api_key=WEB_SEARCH_LLM_API_KEY,
     model=WEB_SEARCH_LLM_MODEL,
-    temperature=0.0,
-    top_p=1.0,
+    temperature=DETERMINISTIC_STAGE_TEMPERATURE,
+    top_p=DETERMINISTIC_STAGE_TOP_P,
     top_k=None,
     max_completion_tokens=WEB_SEARCH_LLM_MAX_COMPLETION_TOKENS,
     presence_penalty=None,
@@ -620,10 +634,10 @@ def _status_from_score(score: int, is_empty_result: bool) -> str:
     if is_empty_result:
         return_value = "not_found"
         return return_value
-    if score > 80:
+    if score > SUCCESS_SCORE_THRESHOLD:
         return_value = "success"
         return return_value
-    if score > 50:
+    if score > PARTIAL_SCORE_THRESHOLD:
         return_value = "partial"
         return return_value
     return_value = "not_found"
@@ -708,7 +722,7 @@ class WebAgent3(BaseRAGHelperAgent):
         self,
         task: str,
         context: dict[str, Any],
-        max_attempts: int = 3,
+        max_attempts: int = RUN_CONTRACT_MAX_ATTEMPTS,
     ) -> dict[str, Any]:
         """Retrieve web evidence while preserving the helper contract.
 
@@ -744,11 +758,31 @@ class WebAgent3(BaseRAGHelperAgent):
             expected_response=_DEFAULT_EXPECTED_RESPONSE,
             local_prompt_timestamp=local_prompt_timestamp,
         )
+        raw_status = raw.get("status")
+        if isinstance(raw_status, str) and raw_status:
+            status = raw_status
+        else:
+            status = "error"
+        raw_reason = raw.get("reason")
+        if isinstance(raw_reason, str):
+            reason = raw_reason
+        else:
+            reason = ""
+        raw_metadata = raw.get("knowledge_metadata")
+        if isinstance(raw_metadata, dict):
+            knowledge_metadata = raw_metadata
+        else:
+            knowledge_metadata = {}
+        is_empty_result = bool(raw.get("is_empty_result", False))
+        resolved = status == "success" and not is_empty_result
         result = self.with_cache_status(
             {
-                "resolved": not bool(raw.get("is_empty_result", False)),
+                "resolved": resolved,
+                "status": status,
+                "reason": reason,
                 "result": str(raw.get("response", "")),
                 "attempts": 1,
+                "knowledge_metadata": knowledge_metadata,
             },
             hit=False,
             reason="agent_not_cacheable",

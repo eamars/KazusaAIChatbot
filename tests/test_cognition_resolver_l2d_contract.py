@@ -39,7 +39,7 @@ class _FakeLLM:
 def _resolver_request() -> dict:
     return {
         "schema_version": RESOLVER_CAPABILITY_REQUEST_VERSION,
-        "capability_kind": "rag_evidence",
+        "capability_kind": "local_context_recall",
         "objective": "检索当前用户与这个问题有关的关系和记忆证据。",
         "reason": "没有记忆证据时无法可靠判断。",
         "priority": "now",

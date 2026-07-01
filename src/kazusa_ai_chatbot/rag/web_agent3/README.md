@@ -110,9 +110,14 @@ only by `source` and `action`; it does not reinterpret `query`. `stop` is
 handled by the graph executor before source dispatch.
 
 `query` is passed unchanged to the selected source subagent. Source-specific
-ID extraction, API parameter building, credential use, and tool variants are
-subagent responsibilities. `nhentai` implements deterministic gallery-id
-extraction and API parameter building.
+ID extraction, search-attempt expansion, API parameter building, credential
+use, and tool variants are subagent responsibilities. `web_search` may
+internally split a dense search need into a bounded set of focused ordinary web
+searches before returning one prompt-safe observation. It validates generated
+search attempts as semantic strings before execution, rejects internal metadata
+terms, and marks fallback to the original dense query as weak coverage when no
+valid focused attempt is available. `nhentai` implements deterministic
+gallery-id extraction and API parameter building.
 
 ## Source Subagents
 
@@ -129,8 +134,10 @@ also expose `is_enabled()`. `DESCRIPTION` includes source-local `query`
 generation rules for the router prompt.
 
 `web_read` uses direct URL reads. `web_search` uses the configured direct
-search endpoint. `nhentai` uses the official API v2 for metadata-only gallery
-reads and bounded gallery searches. The nHentai subagent imports
+search endpoint and owns source-local dense-query expansion when a single
+router query mixes independent evidence targets. `nhentai` uses the official
+API v2 for metadata-only gallery reads and bounded gallery searches. The
+nHentai subagent imports
 `NHENTAI_TOKEN` and `NHENTAI_SOURCE_ENABLED` from `config.py`; it must not put
 credentials, headers, image URLs, download URLs, comments, favorite state, or
 account data into observations.
@@ -179,6 +186,13 @@ Focused deterministic tests must cover:
 - configuration-dependent source registration for `web_search` and `nhentai`.
 - graph-local stop handling before source dispatch.
 - source/action normalization for `web_read`, `web_search`, and `nhentai`.
+- source-local `web_search` expansion for dense semantic search needs,
+  including Chinese-first comparison wording, while simple direct search
+  queries remain a single unchanged search call.
+- `web_search` validation of generated attempts so malformed internal metadata
+  rows cannot become search queries or prompt-facing evidence text.
+- `web_search` fallback reporting when attempt expansion produces no valid
+  focused query and the original dense request is searched instead.
 - nHentai `read` returns only compact title/name and grouped tags.
 - nHentai `search` returns bounded gallery candidates without image, download,
   comment, favorite, header, or token data.

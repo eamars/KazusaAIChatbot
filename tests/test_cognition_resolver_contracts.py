@@ -41,7 +41,7 @@ from kazusa_ai_chatbot.time_boundary import build_turn_clock
 def _capability_request() -> dict:
     return {
         "schema_version": RESOLVER_CAPABILITY_REQUEST_VERSION,
-        "capability_kind": "rag_evidence",
+        "capability_kind": "local_context_recall",
         "objective": "Retrieve relationship evidence for the current question.",
         "reason": "The current cognition cycle lacks enough evidence.",
         "priority": "now",
@@ -52,7 +52,7 @@ def _observation() -> dict:
     return {
         "schema_version": RESOLVER_OBSERVATION_VERSION,
         "observation_id": "raw-tool-run-123",
-        "capability_kind": "rag_evidence",
+        "capability_kind": "local_context_recall",
         "request_objective": "Retrieve relationship evidence.",
         "request_reason": "The current cycle lacks enough evidence.",
         "status": "succeeded",
@@ -108,7 +108,7 @@ def _cycle_trace() -> dict:
         "l2_judgment_note": "Evidence is missing.",
         "l2d_resolver_capability_requests": [_capability_request()],
         "l2d_action_specs_summary": ["speak:" + ("x" * 700)],
-        "selected_capability_kind": "rag_evidence",
+        "selected_capability_kind": "local_context_recall",
         "observation_ids": ["resolver_obs_1"],
         "final_surface_decision": "continue",
         "terminal_reason": "",
@@ -162,7 +162,7 @@ def _goal_progress() -> dict:
         ],
         "missing_user_inputs": [],
         "evidence_dependencies": ["当前营业状态和路线锚点"],
-        "attempted_paths": ["web_evidence: CBD 平价晚餐"],
+        "attempted_paths": ["public_answer_research: CBD 平价晚餐"],
         "source_backed_facts": ["用户预算 20 NZD；地点奥克兰 CBD"],
         "assumptions_or_inferences": ["散步路线可以用公开海滨路线骨架给出"],
         "blockers": ["无法确认每家店 19:30 仍营业"],
@@ -228,7 +228,7 @@ def test_capability_request_validator_accepts_known_contract() -> None:
     expected_objective = "Retrieve relationship evidence for the current question."
 
     assert validated["schema_version"] == RESOLVER_CAPABILITY_REQUEST_VERSION
-    assert validated["capability_kind"] == "rag_evidence"
+    assert validated["capability_kind"] == "local_context_recall"
     assert validated["objective"] == expected_objective
 
 
@@ -278,6 +278,34 @@ def test_observation_projection_hides_raw_ids() -> None:
     assert "raw-user-id-should-stay-out" not in projection
     assert "raw-rag-id-789" not in projection
     assert "raw-external-id-321" not in projection
+
+
+def test_observation_projection_preserves_semantic_knowledge_context() -> None:
+    """Knowledge projections should read as evidence context, not judgment."""
+
+    observation = _observation()
+    observation["capability_kind"] = "public_answer_research"
+    observation["prompt_safe_summary"] = "Public research returned context."
+    observation["knowledge_projection"] = {
+        "investigation_summary": "Research found partial public evidence.",
+        "knowledge_we_know_so_far": ["The public source confirms fact A."],
+        "knowledge_still_lacking": ["Fact B remains unverified."],
+        "recommended_next_iteration": [
+            "Try a narrower public source for fact B.",
+        ],
+        "evidence_boundary_notes": ["No private memory was queried."],
+    }
+
+    projection = project_observations_for_cognition([observation])
+
+    assert "capability=public_answer_research" in projection
+    assert "status=succeeded" not in projection
+    assert "knowledge_we_know_so_far" in projection
+    assert "The public source confirms fact A." in projection
+    assert "knowledge_still_lacking" in projection
+    assert "Fact B remains unverified." in projection
+    assert "recommended_next_iteration" in projection
+    assert "Try a narrower public source for fact B." in projection
 
 
 def test_validators_strip_unknown_fields() -> None:

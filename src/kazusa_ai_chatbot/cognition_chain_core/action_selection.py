@@ -62,14 +62,18 @@ _RESOLVER_AFFORDANCE_DESCRIPTIONS = {
     "human_clarification": (
         "Ask the user for one missing piece of information they control."
     ),
-    "rag_evidence": (
-        "Retrieve chat, memory, relationship, or local knowledge evidence."
+    "local_context_recall": (
+        "Retrieve local/private context when the missing answer depends on "
+        "Kazusa state: persona, user memory, relationship, prior conversation, "
+        "commitments, profile, or a local nickname/reference."
+    ),
+    "public_answer_research": (
+        "Investigate public/current/external/source-checkable answer gaps: "
+        "public term meanings, product facts, news, docs, comparisons, or "
+        "other internet-researchable facts."
     ),
     "self_goal_resolution": (
         "Resolve or prioritize an internal self-cognition goal."
-    ),
-    "web_evidence": (
-        "Retrieve current public or external factual evidence."
     ),
 }
 

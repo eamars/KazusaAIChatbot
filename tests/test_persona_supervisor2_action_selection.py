@@ -338,6 +338,8 @@ def test_action_selection_prompt_follows_cognition_prompt_structure() -> None:
     assert "resolver_capability_request.v1" not in prompt
     assert "resolver_goal_progress.v1" not in prompt
     assert "schema_version" not in prompt
+    assert "public_answer_research" not in prompt
+    assert "local_context_recall" not in prompt
     assert "rag_evidence" not in prompt
     assert "web_evidence" not in prompt
     assert "human_clarification" not in prompt
@@ -665,7 +667,7 @@ async def test_action_selection_drops_misplaced_resolver_request(
     fake_llm = _FakeLLM(json.dumps({
         "action_requests": [
             {
-                "capability": "web_evidence",
+                "capability": "public_answer_research",
                 "decision": "retrieve current facts",
                 "detail": "检索奥克兰 CBD 预算内晚间计划需要的当前事实。",
                 "reason": "当前回答还缺少外部证据。",
@@ -716,7 +718,7 @@ async def test_action_selection_returns_valid_goal_progress(
         "resolver_capability_requests": [
             {
                 "schema_version": "resolver_capability_request.v1",
-                "capability_kind": "web_evidence",
+                "capability_kind": "public_answer_research",
                 "objective": "检索当前营业证据。",
                 "reason": "需要当前事实才能推荐。",
                 "priority": "now",
