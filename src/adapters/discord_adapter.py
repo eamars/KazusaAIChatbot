@@ -37,6 +37,7 @@ from adapters.envelope_common import (
     readable_mention_token,
     resolve_mentions,
 )
+from adapters.inline_mentions import InlineMention, inline_mention_parts
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.dispatcher import SendResult
 from kazusa_ai_chatbot.logging_config import configure_adapter_logging
@@ -854,42 +855,22 @@ def _outbound_text_with_delivery_mentions(
     text: str,
     delivery_mentions: Sequence[dict] | None,
 ) -> str:
-    """Return Discord text with a renderable prefix mention when requested."""
+    """Return Discord text with exact inline user tags rendered natively."""
 
-    mention_text = _prefix_user_mention_text(delivery_mentions)
-    if not mention_text:
-        return_value = text
-        return return_value
-    if text:
-        return_value = f"{mention_text} {text}"
-        return return_value
-    return_value = mention_text
-    return return_value
-
-
-def _prefix_user_mention_text(delivery_mentions: Sequence[dict] | None) -> str:
-    """Return one Discord native user mention for prefix placement."""
-
-    if not delivery_mentions:
-        return_value = ""
-        return return_value
-
-    for mention in delivery_mentions:
-        if not isinstance(mention, dict):
+    fragments: list[str] = []
+    for part in inline_mention_parts(text, delivery_mentions):
+        if isinstance(part, InlineMention):
+            normalized_user_id = normalize_numeric_platform_user_id(
+                part.platform_user_id
+            )
+            if normalized_user_id:
+                fragments.append(f"<@{normalized_user_id}>")
+            else:
+                fragments.append(part.token)
             continue
-        if mention.get("entity_kind") != "user":
-            continue
-        if mention.get("placement") != "prefix":
-            continue
-        normalized_user_id = normalize_numeric_platform_user_id(
-            mention.get("platform_user_id")
-        )
-        if not normalized_user_id:
-            continue
-        return_value = f"<@{normalized_user_id}>"
-        return return_value
+        fragments.append(part)
 
-    return_value = ""
+    return_value = "".join(fragments)
     return return_value
 
 

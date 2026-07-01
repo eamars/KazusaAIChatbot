@@ -191,6 +191,7 @@ plans.
 | [identity_free_memory_output_contract_plan.md](archive/completed/short_term/identity_free_memory_output_contract_plan.md) |
 | [internal_monologue_residue_lifecycle_plan.md](archive/completed/short_term/internal_monologue_residue_lifecycle_plan.md) |
 | [interaction_style_image_plan.md](archive/completed/short_term/interaction_style_image_plan.md) |
+| [inline_delivery_mentions_plan.md](archive/completed/short_term/inline_delivery_mentions_plan.md) |
 | [live_context_runtime_facts_plan.md](archive/completed/short_term/live_context_runtime_facts_plan.md) |
 | [llm_routing_migration_plan.md](archive/completed/short_term/llm_routing_migration_plan.md) |
 | [llm_interface_backend_abstraction_plan.md](archive/completed/short_term/llm_interface_backend_abstraction_plan.md) |

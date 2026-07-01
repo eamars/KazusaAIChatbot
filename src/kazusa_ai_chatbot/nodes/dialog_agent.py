@@ -262,7 +262,6 @@ class DialogAgentState(TypedDict):
     final_dialog: list[str]  # splitted dialog to be sent in different batch
     target_addressed_user_ids: list[str]
     target_broadcast: bool
-    mention_target_user: bool
     dialog_usage_mode: str
     llm_trace_id: str
 
@@ -350,6 +349,7 @@ _DIALOG_GENERATOR_PROMPT = '''\
    - 处理感受和关系温度时，先判断它是本轮要说出的内容，还是指导说法的表达姿态。表达姿态进入句子的节奏、停顿、调侃力度、软硬和收束，不单独占用一个内容落点。
    - 如果计划是在拒绝、澄清边界、承认自身感受、确认自身选择或收束关系分寸，台词必须包含角色说出口的对应句。边界句、拒绝句和承认句要从角色立场出发。
    - 如果计划描述当前用户误判、轻视或误会了角色，把它写成角色对当前用户的当场回应：先指出对方动作或语气，再给出角色的回答、边界或反击。
+   - 当 `content_plan` 或上游表达指令明确要求点名某个已在计划中出现的当前用户或参与者时，可在可见台词里写 `@display_name`；不要猜测未出现的人名，也不要写平台原生格式。
 
 3. **按内容类型渲染**
    - 对普通闲聊、安抚、调侃：用 `semantic_content` 的情绪、社交感知、注意感和关系温度决定互动姿态，把台词落在接住对方、回应当前话、轻轻回击或继续推进互动上。
@@ -393,9 +393,8 @@ _DIALOG_GENERATOR_PROMPT = '''\
    - 逐句检查表达归属：计划要求说出口的边界、拒绝、承认、自身选择或自身感受是否由角色主体承担；普通互动温度是否已经落实为语气、节奏、接话方式和收束方向。
    - 对照角色表达依据：句长、软硬、反问、停顿、情绪外露和口语化程度是否来自角色底色和声纹质感；有没有为了风格新增内容。
    - 对照顺序：是否先完成说话视角重锚定，再应用角色表达依据；声纹润色不能把角色自己的反应改回泛称表达。
-   - 可见台词是纯文字聊天内容，不含动作描写、系统说明、平台标签、用户 ID、@、占位符或内部推理。
+   - 可见台词是纯文字聊天内容，不含动作描写、系统说明、占位符或内部推理；只有上游计划明确需要点名时才使用 `@display_name`。
    - 顶层返回一个裸 JSON 对象，按输出格式填写。回答从左花括号开始，以右花括号结束。
-   - 当台词明确回答、追问、催促或安抚 `user_name` 对应的当前用户时，`mention_target_user` 为 `true`；泛泛评论、群体广播或对象不确定时为 `false`。
 
 # 输入格式
 {{
@@ -422,12 +421,12 @@ _DIALOG_GENERATOR_PROMPT = '''\
 
 # 输出格式
 返回合法 JSON 对象：
+不要使用 Markdown 代码围栏包裹最外层 JSON。
 {{
     "final_dialog": [
         "可见文字或完整固定格式块",
         "继续承载计划内容的文字"
-    ],
-    "mention_target_user": boolean
+    ]
 }}
 即使 `final_dialog` 里的某个字符串是 fenced code block、JSON 示例或配置片段，最外层也只能返回上面这个 JSON 对象。
 '''
@@ -497,17 +496,10 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
             "normalizing it into final_dialog"
         )
         generated_dialog = result
-        mention_target_user = False
         parsed_keys = ["<top-level-list>"]
         invalid_fields.append("top_level")
     else:
         generated_dialog = result.get("final_dialog", [])
-        raw_mention_target_user = result.get("mention_target_user")
-        if isinstance(raw_mention_target_user, bool):
-            mention_target_user = raw_mention_target_user
-        else:
-            mention_target_user = False
-            invalid_fields.append("mention_target_user")
         parsed_keys = list(result.keys())
 
     if not isinstance(generated_dialog, list):
@@ -530,8 +522,6 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
         )
         invalid_fields.append("final_dialog_fragment")
     generated_dialog = valid_dialog
-    if not generated_dialog:
-        mention_target_user = False
     generated_dialog_preview = (
         generated_dialog
         if isinstance(generated_dialog, list)
@@ -556,7 +546,7 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
         parse_status=parse_status,
         status="succeeded",
         duration_ms=_elapsed_ms(started_at),
-        output_state_fields=["final_dialog", "mention_target_user"],
+        output_state_fields=["final_dialog"],
     )
     await event_logging.record_llm_stage_event(
         component=DIALOG_COMPONENT,
@@ -587,7 +577,6 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
 
     return_value = {
         "final_dialog": generated_dialog,
-        "mention_target_user": mention_target_user,
     }
     return return_value
 
@@ -634,7 +623,6 @@ async def dialog_agent(
         "final_dialog": [],
         "target_addressed_user_ids": [],
         "target_broadcast": False,
-        "mention_target_user": False,
         "dialog_usage_mode": usage_mode,
         "llm_trace_id": global_state.get("llm_trace_id", ""),
     }
@@ -643,9 +631,6 @@ async def dialog_agent(
 
     # Assemble output.
     final_dialog = result["final_dialog"]
-    mention_target_user = bool(final_dialog) and bool(
-        result["mention_target_user"]
-    )
 
     logger.info(
         f"Dialog output: usage_mode={usage_mode} "
@@ -671,6 +656,5 @@ async def dialog_agent(
         "final_dialog": final_dialog,
         "target_addressed_user_ids": [global_state["global_user_id"]] if final_dialog else [],
         "target_broadcast": False,
-        "mention_target_user": mention_target_user,
     }
     return return_value

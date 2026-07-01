@@ -474,7 +474,6 @@ async def call_action_subgraph(state: GlobalPersonaState) -> dict:
         "final_dialog": final_dialog,
         "target_addressed_user_ids": result["target_addressed_user_ids"],
         "target_broadcast": result["target_broadcast"],
-        "mention_target_user": bool(result.get("mention_target_user", False)),
     }
     return_value.update(surface_update)
     return_value.update(_episode_trace_update(
@@ -499,7 +498,6 @@ async def stage_3_no_response(state: GlobalPersonaState) -> dict:
         "action_directives": _empty_action_directives(),
         "target_addressed_user_ids": [],
         "target_broadcast": False,
-        "mention_target_user": False,
     }
     action_results = await _action_results_for_state(state)
     surface_outputs = []
@@ -732,7 +730,7 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "final_dialog": results["final_dialog"],
         "target_addressed_user_ids": results["target_addressed_user_ids"],
         "target_broadcast": bool(results["target_broadcast"]),
-        "mention_target_user": bool(results.get("mention_target_user", False)),
+        "scope_users": results.get("scope_users", []),
         "future_promises": [],
         "consolidation_state": consolidation_state,
         "surface_outputs": results.get("surface_outputs", []),

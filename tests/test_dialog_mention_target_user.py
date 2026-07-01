@@ -1,4 +1,4 @@
-"""Tests for dialog-owned target mention decisions."""
+"""Tests for dialog-authored inline mention tags."""
 
 from __future__ import annotations
 
@@ -111,21 +111,19 @@ def _dialog_state() -> dict:
 
 
 @pytest.mark.asyncio
-async def test_dialog_generator_parses_true_mention_flag_without_delivery_context(
+async def test_dialog_generator_preserves_inline_tag_without_delivery_context(
     monkeypatch,
 ) -> None:
-    """Dialog generator should expose a semantic mention flag, not tag data."""
+    """Dialog generator should preserve authored tags without delivery data."""
 
     fake_llm = _CapturingLLM({
-        "final_dialog": ["answer"],
-        "mention_target_user": True,
+        "final_dialog": ["@User answer"],
     })
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", fake_llm)
 
     result = await dialog_module.dialog_generator(_dialog_state())
 
-    assert result["final_dialog"] == ["answer"]
-    assert result["mention_target_user"] is True
+    assert result == {"final_dialog": ["@User answer"]}
 
     human_payload = json.loads(fake_llm.messages[1].content)
     assert "delivery_context" not in human_payload
@@ -134,39 +132,38 @@ async def test_dialog_generator_parses_true_mention_flag_without_delivery_contex
     assert "single_target_user" not in human_payload
     assert "platform_user_id" not in human_payload
     assert "global_user_id" not in human_payload
+    assert "scope_users" not in human_payload
 
 
 @pytest.mark.asyncio
-async def test_dialog_generator_defaults_invalid_mention_flag_false(
+async def test_dialog_generator_does_not_require_mention_flag(
     monkeypatch,
 ) -> None:
-    """Malformed mention decisions should degrade to no mention."""
+    """Dialog generator output shape should only require final_dialog."""
 
     fake_llm = _CapturingLLM({
         "final_dialog": ["answer"],
-        "mention_target_user": "true",
     })
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", fake_llm)
 
     result = await dialog_module.dialog_generator(_dialog_state())
 
-    assert result["final_dialog"] == ["answer"]
-    assert result["mention_target_user"] is False
+    assert result == {"final_dialog": ["answer"]}
 
 
 @pytest.mark.asyncio
-async def test_dialog_agent_returns_false_mention_when_dialog_empty(
+async def test_dialog_agent_returns_no_mention_flag(
     monkeypatch,
 ) -> None:
-    """Empty dialog output should not claim target mention intent."""
+    """Dialog agent should not expose retired delivery trigger fields."""
 
     fake_generator = _CapturingLLM({
-        "final_dialog": [],
-        "mention_target_user": True,
+        "final_dialog": ["@User answer"],
     })
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", fake_generator)
 
     result = await dialog_module.dialog_agent(_dialog_state())
 
-    assert result["final_dialog"] == []
-    assert result["mention_target_user"] is False
+    assert result["final_dialog"] == ["@User answer"]
+    retired_field = "mention" + "_target_user"
+    assert retired_field not in result

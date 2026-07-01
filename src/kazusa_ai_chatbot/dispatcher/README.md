@@ -124,7 +124,8 @@ transport reachability and permission to deliver to that target.
 
 `delivery_mentions` requests are best-effort. If an adapter cannot render one
 or the request lacks the needed platform identity, it sends the original text.
-Prefix is the only approved placement for the current contract.
+Adapters replace matching authored `@display_name` text inline with native
+platform mention syntax; there is no separate placement field.
 
 `AdapterRegistry` maps platform keys to adapters. `RemoteHttpAdapter` bridges
 dispatcher-owned delivery to an adapter-owned HTTP endpoint when the live

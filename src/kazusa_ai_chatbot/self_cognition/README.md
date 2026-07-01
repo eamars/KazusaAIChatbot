@@ -122,7 +122,7 @@ validation, and adapter delivery are not paused by this predicate.
 - `tracking.build_route_effect(run_record, route, consumer, effect_summary, next_topic=None)`
 - `tracking.classify_route(case, cognition_output, action_attempt=None)`
 - `tracking.build_action_attempt(case, trigger_record, existing_attempts)`
-- `tracking.build_action_candidate(case, action_attempt, text, mention_target_user=False)`
+- `tracking.build_action_candidate(case, action_attempt, text)`
 - `sleep_period.is_self_cognition_sleep_period(...)`
 - `runner.build_self_cognition_case_artifacts(case, cognition_client=None, dialog_client=None, consolidation_client=None, apply_consolidation=False)`
 - `runner.build_self_cognition_case_artifacts_async(case, cognition_client=None, dialog_client=None, consolidation_client=None, apply_consolidation=False)`
@@ -267,10 +267,10 @@ prompt schemas, and model-facing records.
 
 ## Delivery Mentions
 
-Self-cognition may attach one platform-neutral `delivery_mentions` request to
-a local action candidate record when the shared dialog graph
-returns `mention_target_user=true` and the case has a semantic target user in
-`target_scope.user_id`.
+Self-cognition may attach platform-neutral `delivery_mentions` render
+candidates to a local action candidate record when the shared dialog graph
+authors exact visible `@display_name` text and the case target scope has the
+matching delivery identity.
 
 The target scope may carry delivery-only platform identity:
 
@@ -295,19 +295,16 @@ Action candidates may carry:
 "delivery_mentions": [
     {
         "entity_kind": "user",
-        "placement": "prefix",
-        "platform_user_id": str | None,
-        "global_user_id": str | None,
+        "platform_user_id": str,
         "display_name": str,
-        "requested_by": "dialog.mention_target_user",
     }
 ]
 ```
 
 Self-cognition does not decide native mention syntax. Adapter-owned channel
 capability and delivery are checked at the dispatcher boundary; self-cognition
-only carries the dialog-owned semantic mention request as local tracking
-metadata.
+only carries the minimal identity needed for adapters to replace authored
+`@display_name` text with native platform mention syntax.
 
 ## Future Cognition Handoff
 

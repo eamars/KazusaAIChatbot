@@ -243,7 +243,6 @@ async def _run_live_dialog_case(case: dict, monkeypatch) -> dict:
         'raw_result': result,
         'final_dialog': final_dialog,
         'joined_dialog': joined_dialog,
-        'mention_target_user': result.get('mention_target_user'),
         'structural_validation': structural_validation,
         'manual_inspection_notes': '',
     }

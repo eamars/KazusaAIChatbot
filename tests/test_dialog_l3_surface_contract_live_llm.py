@@ -349,11 +349,9 @@ def _assess_case(
     *,
     final_dialog: Any,
     joined_dialog: str,
-    mention_target_user: bool,
 ) -> dict[str, Any]:
     """Evaluate one live dialog output with loose contract gates."""
 
-    del mention_target_user
     failures: list[str] = []
     if not isinstance(final_dialog, list):
         failures.append('final_dialog is not a list')
@@ -460,7 +458,6 @@ async def _run_case(
         case,
         final_dialog=final_dialog,
         joined_dialog=joined_dialog,
-        mention_target_user=bool(result.get('mention_target_user')),
     )
     trace_path = write_llm_trace(
         _TRACE_SUITE,

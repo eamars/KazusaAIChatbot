@@ -126,9 +126,10 @@ this ICD.
 
 Normal `/chat` responses and dispatcher/proactive callback sends may include
 optional `delivery_mentions` metadata. This is adapter-owned rendering
-metadata: the brain keeps outbound text platform-neutral, and the adapter
-renders a native prefix user mention only when feasible. Missing, empty, or
-unrenderable mention metadata must not block text delivery.
+metadata: the brain keeps outbound text platform-neutral with visible
+`@display_name` tokens, and the adapter replaces matching tokens with native
+user mentions only when feasible. Missing, empty, or unrenderable mention
+metadata must not block text delivery.
 
 Normal `/chat` responses may also include optional `cognition_graph` telemetry
 for local operator inspection. It is a bounded graph snapshot derived from the
@@ -279,7 +280,7 @@ Purpose:
 | `content_type` | brain | Outbound content type. Current normal value is `text`. |
 | `attachments` | brain | Outbound attachments. Currently reserved for future use. |
 | `use_reply_feature` | brain | Adapter should use native reply rendering for the first outbound message when possible. |
-| `delivery_mentions` | brain then adapter | Optional platform-neutral mention requests. The brain emits these from dialog semantic intent after reply override; adapters decide native rendering, channel feasibility, and no-op fallback. |
+| `delivery_mentions` | brain then adapter | Optional platform-neutral inline mention render candidates. The brain emits these only for authored `@display_name` text with matching scoped user identity; adapters decide native rendering, channel feasibility, and no-op fallback. |
 | `scheduled_followups` | brain | Count of scheduled future-cognition follow-ups accepted during the turn. |
 | `delivery_tracking_id` | brain | Brain-generated identifier for the assistant row that should receive a delivery receipt. Empty means no receipt should be posted. |
 
@@ -298,8 +299,9 @@ Adapter responsibilities:
 - Treat an empty `messages` list as no outbound send.
 - Honor `use_reply_feature` for the first outbound message when the platform
   has a native reply mechanism.
-- Render `delivery_mentions` best-effort when present and feasible; otherwise
-  send the original text unchanged.
+- Render `delivery_mentions` best-effort by replacing matching authored
+  `@display_name` text inline when present and feasible; otherwise send the
+  original text unchanged.
 - Post `/delivery_receipt` after a successful platform send when both
   `delivery_tracking_id` and an outbound platform message id exist.
 

@@ -138,6 +138,9 @@ from kazusa_ai_chatbot.brain_service import (
     post_turn as brain_post_turn,
     runtime_adapters as brain_runtime_registry,
 )
+from kazusa_ai_chatbot.brain_service.delivery_mentions import (
+    build_inline_delivery_mentions,
+)
 from kazusa_ai_chatbot.brain_service.contracts import (
     AttachmentIn,
     AttachmentOut,
@@ -897,27 +900,83 @@ def _background_artifact_prompt_message_context(
     return context
 
 
+def _chat_delivery_mention_users(
+    *,
+    req: ChatRequest,
+    global_user_id: str,
+    message_envelope: MessageEnvelope,
+    result: Mapping[str, Any],
+) -> list[dict[str, object]]:
+    """Collect bounded user rows usable for outbound inline mention rendering."""
+
+    users: list[dict[str, object]] = [
+        {
+            "display_name": req.display_name,
+            "platform_user_id": req.platform_user_id,
+            "global_user_id": global_user_id,
+        }
+    ]
+
+    mentions = message_envelope.get("mentions", [])
+    if isinstance(mentions, list):
+        for mention in mentions:
+            if not isinstance(mention, Mapping):
+                continue
+            if mention.get("entity_kind") != "user":
+                continue
+            users.append({
+                "display_name": mention.get("display_name", ""),
+                "platform_user_id": mention.get("platform_user_id", ""),
+                "global_user_id": mention.get("global_user_id", ""),
+            })
+
+    reply = message_envelope.get("reply")
+    if isinstance(reply, Mapping):
+        users.append({
+            "display_name": reply.get("display_name", ""),
+            "platform_user_id": reply.get("platform_user_id", ""),
+            "global_user_id": reply.get("global_user_id", ""),
+        })
+
+    scope_users = result.get("scope_users", [])
+    if isinstance(scope_users, list):
+        for scope_user in scope_users:
+            if not isinstance(scope_user, Mapping):
+                continue
+            users.append({
+                "display_name": scope_user.get("display_name", ""),
+                "platform_user_id": scope_user.get("platform_user_id", ""),
+                "global_user_id": scope_user.get("global_user_id", ""),
+            })
+
+    return users
+
+
 def _background_artifact_delivery_mentions(
     *,
     result: Mapping[str, object],
     episode: CognitiveEpisode,
-) -> list[dict[str, str | None]]:
-    """Build optional mention metadata for dispatcher delivery."""
-
-    if not bool(result.get("mention_target_user", False)):
-        return []
+) -> list[dict[str, str]]:
+    """Build inline mention candidates for result-ready dispatcher delivery."""
 
     target_scope = episode["target_scope"]
-    delivery_mentions = [
+    users = [
         {
-            "entity_kind": "user",
-            "placement": "prefix",
-            "platform_user_id": target_scope["current_platform_user_id"],
             "global_user_id": target_scope["current_global_user_id"],
             "display_name": target_scope["current_display_name"],
-            "requested_by": "dialog.mention_target_user",
+            "platform_user_id": target_scope["current_platform_user_id"],
         }
     ]
+    final_dialog = [
+        fragment
+        for fragment in result.get("final_dialog", [])
+        if isinstance(fragment, str)
+    ]
+    delivery_mentions = build_inline_delivery_mentions(
+        text="\n".join(final_dialog),
+        users=users,
+        character_global_user_id=CHARACTER_GLOBAL_USER_ID,
+    )
     return delivery_mentions
 
 
@@ -1084,7 +1143,6 @@ async def _deliver_background_artifact_result_episode(
             "final_dialog": [],
             "target_addressed_user_ids": [requester_global_user_id],
             "target_broadcast": False,
-            "mention_target_user": False,
             "future_promises": [],
             "consolidation_state": {},
             "promoted_reflection_context": promoted_reflection_context,
@@ -2252,7 +2310,6 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             "final_dialog": [],
             "target_addressed_user_ids": [global_user_id],
             "target_broadcast": False,
-            "mention_target_user": False,
             "future_promises": [],
             "consolidation_state": {},
             "promoted_reflection_context": promoted_reflection_context,
@@ -2276,7 +2333,6 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
                 "final_dialog": [fallback_text],
                 "target_addressed_user_ids": [global_user_id],
                 "target_broadcast": False,
-                "mention_target_user": False,
                 "delivery_tracking_id": delivery_tracking_id,
                 "llm_trace_id": llm_trace_id,
             }
@@ -2336,22 +2392,6 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         use_reply_feature = bool(final_dialog) and bool(
             result["use_reply_feature"]
         )
-        delivery_mentions: list[dict[str, str | None]] = []
-        if (
-            bool(final_dialog)
-            and bool(result.get("mention_target_user", False))
-            and not use_reply_feature
-        ):
-            delivery_mentions = [
-                {
-                    "entity_kind": "user",
-                    "placement": "prefix",
-                    "platform_user_id": req.platform_user_id,
-                    "global_user_id": global_user_id,
-                    "display_name": req.display_name,
-                    "requested_by": "dialog.mention_target_user",
-                }
-            ]
         consolidation_state = result["consolidation_state"]
         scheduled_followup_count = len(result["future_promises"])
 
@@ -2391,6 +2431,20 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         if debug_modes.get("think_only"):
             logger.info(f'think_only active — suppressing {len(final_dialog)} dialog message(s) from user output')
             response_dialog = []
+
+        delivery_mentions: list[dict[str, str]] = []
+        if response_dialog:
+            delivery_mention_users = _chat_delivery_mention_users(
+                req=req,
+                global_user_id=global_user_id,
+                message_envelope=message_envelope,
+                result=result,
+            )
+            delivery_mentions = build_inline_delivery_mentions(
+                text="\n".join(response_dialog),
+                users=delivery_mention_users,
+                character_global_user_id=CHARACTER_GLOBAL_USER_ID,
+            )
 
         delivery_tracking_id = ""
         if response_dialog and should_save_assistant_message:

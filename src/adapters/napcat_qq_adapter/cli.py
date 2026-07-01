@@ -12,6 +12,7 @@ import sys
 from dotenv import load_dotenv
 
 from kazusa_ai_chatbot.logging_config import configure_adapter_logging
+from .ws_adapter import NapCatWSAdapter
 
 
 configure_adapter_logging()
@@ -98,8 +99,6 @@ def main() -> None:
     channel_ids = args.channels
     if channel_ids is None:
         channel_ids = _active_groups_from_env()
-
-    from .ws_adapter import NapCatWSAdapter
 
     adapter = NapCatWSAdapter(
         ws_url=ws_url,

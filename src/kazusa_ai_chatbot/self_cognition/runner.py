@@ -224,11 +224,6 @@ async def build_self_cognition_case_artifacts_async(
                 case,
                 action_attempt,
                 action_text,
-                mention_target_user=(
-                    bool(dialog_output.get("mention_target_user", False))
-                    if dialog_output is not None
-                    else False
-                ),
             )
         artifact_payloads[models.ARTIFACT_ACTION_ATTEMPT] = action_attempt
         if action_candidate is not None:
@@ -453,7 +448,6 @@ async def _build_consolidation_ready_state(
     if active_dialog_output is None:
         active_dialog_output = {
             "final_dialog": [],
-            "mention_target_user": False,
         }
 
     consolidation_state = _build_consolidation_state(
@@ -667,7 +661,6 @@ def _build_cognition_state(
         "last_relationship_insight": "",
         "new_facts": [],
         "future_promises": [],
-        "mention_target_user": False,
     }
     return state
 
@@ -683,7 +676,6 @@ def _build_dialog_state(
     dialog_state = dict(cognition_state)
     dialog_state.update(cognition_output)
     dialog_state["final_dialog"] = []
-    dialog_state["mention_target_user"] = False
     dialog_state["dialog_usage_mode"] = usage_mode
     return dialog_state
 

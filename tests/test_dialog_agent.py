@@ -234,6 +234,18 @@ def test_dialog_generator_prompt_describes_one_bubble_layout_contract() -> None:
     assert '使用 6-12 个短字符串片段是允许的' not in prompt
 
 
+def test_dialog_generator_prompt_allows_inline_tag_sign() -> None:
+    """Generator prompt should let dialog author visible inline tags."""
+
+    prompt = _DIALOG_GENERATOR_PROMPT
+    retired_field = "mention" + "_target_user"
+
+    assert '@display_name' in prompt
+    assert retired_field not in prompt
+    assert '用户 ID' not in prompt
+    assert '平台标签' not in prompt
+
+
 def test_dialog_prompts_preserve_fixed_format_blocks() -> None:
     """Dialog generator should preserve code and fixed-format block layout."""
 
@@ -263,10 +275,7 @@ async def test_dialog_agent_preserves_generator_fragment_text(
     state = _base_global_state()
     generator_llm = MagicMock()
     generator_llm.ainvoke = AsyncMock(return_value=AIMessage(
-        content=(
-            '{"final_dialog": ["raw<br>fragment"], '
-            '"mention_target_user": false}'
-        )
+        content='{"final_dialog": ["raw<br>fragment"]}'
     ))
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
 
@@ -589,7 +598,7 @@ async def test_dialog_agent_ignores_retired_response_field(monkeypatch):
     ] = "silent"
     generator_llm = MagicMock()
     generator_llm.ainvoke = AsyncMock(return_value=AIMessage(
-        content='{"final_dialog": ["Still answering."], "mention_target_user": false}'
+        content='{"final_dialog": ["Still answering."]}'
     ))
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
 
@@ -598,5 +607,7 @@ async def test_dialog_agent_ignores_retired_response_field(monkeypatch):
     assert result["final_dialog"] == ["Still answering."]
     assert result["target_addressed_user_ids"] == ["global-user-123"]
     assert result["target_broadcast"] is False
+    retired_field = "mention" + "_target_user"
+    assert retired_field not in result
     generator_llm.ainvoke.assert_awaited_once()
 

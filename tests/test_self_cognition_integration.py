@@ -356,7 +356,6 @@ def _selected_speak_artifacts(
     *,
     text: str = "Checking in now.",
     attempt_status: str = models.ACTION_ATTEMPT_STATUS_CANDIDATE,
-    mention_target_user: bool = False,
 ) -> dict[str, Any]:
     """Build in-memory runner artifacts for a selected speak route."""
 
@@ -377,7 +376,6 @@ def _selected_speak_artifacts(
         case,
         action_attempt,
         text,
-        mention_target_user=mention_target_user,
     )
     payloads: dict[str, Any] = {
         models.ARTIFACT_TRIGGER_RECORD: trigger_record,

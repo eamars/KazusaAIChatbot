@@ -39,7 +39,7 @@ def _case_with_scope(target_scope: dict[str, Any]) -> dict[str, Any]:
 def _candidate_for_scope(
     target_scope: dict[str, Any],
     *,
-    mention_target_user: bool = False,
+    text: str = "Checking in now.",
 ) -> dict[str, Any] | None:
     case = _case_with_scope(target_scope)
     trigger_record = tracking.build_trigger_record(case)
@@ -51,8 +51,7 @@ def _candidate_for_scope(
     action_candidate = tracking.build_action_candidate(
         case,
         action_attempt,
-        "Checking in now.",
-        mention_target_user=mention_target_user,
+        text,
     )
     return action_candidate
 
@@ -122,15 +121,12 @@ def _delivery_target() -> dict[str, Any]:
 def test_delivery_mention_typed_shape_is_declared() -> None:
     assert get_type_hints(models.DeliveryMention) == {
         "entity_kind": str,
-        "placement": str,
-        "platform_user_id": str | None,
-        "global_user_id": str | None,
         "display_name": str,
-        "requested_by": str,
+        "platform_user_id": str,
     }
 
 
-def test_group_delivery_scope_omits_mentions_without_dialog_flag() -> None:
+def test_group_delivery_scope_omits_mentions_without_inline_tag() -> None:
     action_candidate = _candidate_for_scope(
         {
             "platform": "qq",
@@ -145,7 +141,8 @@ def test_group_delivery_scope_omits_mentions_without_dialog_flag() -> None:
     assert "delivery_mentions" not in action_candidate
 
 
-def test_group_delivery_mention_preserves_missing_platform_user_id() -> None:
+def test_group_delivery_scope_with_missing_platform_user_id_omits_mention(
+) -> None:
     action_candidate = _candidate_for_scope(
         {
             "platform": "qq",
@@ -154,23 +151,14 @@ def test_group_delivery_mention_preserves_missing_platform_user_id() -> None:
             "user_id": "global-target-1",
             "display_name": "Target User",
         },
-        mention_target_user=True,
+        text="@Target User Checking in now.",
     )
 
     assert action_candidate is not None
-    assert action_candidate["delivery_mentions"] == [
-        {
-            "entity_kind": "user",
-            "placement": "prefix",
-            "platform_user_id": None,
-            "global_user_id": "global-target-1",
-            "display_name": "Target User",
-            "requested_by": "dialog.mention_target_user",
-        }
-    ]
+    assert "delivery_mentions" not in action_candidate
 
 
-def test_private_delivery_scope_keeps_dialog_mention_request_for_adapter_noop(
+def test_private_delivery_scope_keeps_inline_delivery_mention_for_adapter_noop(
 ) -> None:
     action_candidate = _candidate_for_scope(
         {
@@ -181,18 +169,15 @@ def test_private_delivery_scope_keeps_dialog_mention_request_for_adapter_noop(
             "platform_user_id": "qq-target",
             "display_name": "Target User",
         },
-        mention_target_user=True,
+        text="@Target User Checking in now.",
     )
 
     assert action_candidate is not None
     assert action_candidate["delivery_mentions"] == [
         {
             "entity_kind": "user",
-            "placement": "prefix",
             "platform_user_id": "qq-target",
-            "global_user_id": "global-target-1",
             "display_name": "Target User",
-            "requested_by": "dialog.mention_target_user",
         }
     ]
 
@@ -207,7 +192,7 @@ def test_group_delivery_scope_without_semantic_target_omits_mentions() -> None:
             "platform_user_id": "qq-target",
             "display_name": "Target User",
         },
-        mention_target_user=True,
+        text="@Target User Checking in now.",
     )
 
     assert action_candidate is not None
@@ -259,11 +244,8 @@ async def test_self_cognition_delivery_preserves_mentions(
     registry.register(adapter)
     mention = {
         "entity_kind": "user",
-        "placement": "prefix",
         "platform_user_id": "qq-target",
-        "global_user_id": "global-target-1",
         "display_name": "Target User",
-        "requested_by": "dialog.mention_target_user",
     }
 
     result = await deliver_selected_speak(

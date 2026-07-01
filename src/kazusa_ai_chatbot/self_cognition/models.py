@@ -136,11 +136,8 @@ class DeliveryMention(TypedDict):
     """Platform-neutral request for an adapter-rendered outbound mention."""
 
     entity_kind: str
-    placement: str
-    platform_user_id: str | None
-    global_user_id: str | None
     display_name: str
-    requested_by: str
+    platform_user_id: str
 
 
 class SelfCognitionDeliveryTarget(TypedDict):

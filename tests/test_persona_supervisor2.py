@@ -254,7 +254,6 @@ async def test_call_action_subgraph_returns_final_dialog():
         "final_dialog": ["Hello!", "How are you?"],
         "target_addressed_user_ids": ["uuid-123"],
         "target_broadcast": False,
-        "mention_target_user": True,
     }
 
     with (
@@ -276,7 +275,8 @@ async def test_call_action_subgraph_returns_final_dialog():
     assert result["final_dialog"] == ["Hello!", "How are you?"]
     assert result["target_addressed_user_ids"] == ["uuid-123"]
     assert result["target_broadcast"] is False
-    assert result["mention_target_user"] is True
+    retired_field = "mention" + "_target_user"
+    assert retired_field not in result
     assert result["surface_outputs"][0]["surface_kind"] == "text"
     assert result["episode_trace"]["surface_outputs"][0]["fragments"] == [
         "Hello!",
@@ -291,7 +291,6 @@ async def test_call_action_subgraph_empty_dialog():
         "final_dialog": [],
         "target_addressed_user_ids": [],
         "target_broadcast": False,
-        "mention_target_user": False,
     }
 
     with (
@@ -313,7 +312,8 @@ async def test_call_action_subgraph_empty_dialog():
     assert result["final_dialog"] == []
     assert result["target_addressed_user_ids"] == []
     assert result["target_broadcast"] is False
-    assert result["mention_target_user"] is False
+    retired_field = "mention" + "_target_user"
+    assert retired_field not in result
 
 
 def test_route_after_cognition_uses_l2d_speak_selection() -> None:
@@ -427,7 +427,6 @@ async def test_background_artifact_executes_before_l3_acknowledgement() -> None:
                 "final_dialog": ["I'll send it when it's ready."],
                 "target_addressed_user_ids": ["uuid-123"],
                 "target_broadcast": False,
-                "mention_target_user": True,
             },
         ),
     ):
@@ -484,7 +483,6 @@ async def test_persona_supervisor2_returns_final_dialog_and_consolidation_state(
                 "final_dialog": ["Hi there!"],
                 "target_addressed_user_ids": ["uuid-123"],
                 "target_broadcast": False,
-                "mention_target_user": True,
             },
         ) as m_dialog,
     ):
@@ -495,11 +493,13 @@ async def test_persona_supervisor2_returns_final_dialog_and_consolidation_state(
     assert result["final_dialog"] == ["Hi there!"]
     assert result["target_addressed_user_ids"] == ["uuid-123"]
     assert result["target_broadcast"] is False
-    assert result["mention_target_user"] is True
+    retired_field = "mention" + "_target_user"
+    assert retired_field not in result
     assert result["future_promises"] == []
     assert result["consolidation_state"]["decontexualized_input"] == "Hello"
     assert result["consolidation_state"]["final_dialog"] == ["Hi there!"]
-    assert result["consolidation_state"]["mention_target_user"] is True
+    assert retired_field not in result["consolidation_state"]
+    assert result["scope_users"] == result["consolidation_state"]["scope_users"]
     assert result["consolidation_state"]["reply_context"] == {}
     m_resolver.assert_awaited_once()
 

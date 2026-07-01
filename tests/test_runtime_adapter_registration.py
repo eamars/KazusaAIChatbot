@@ -176,11 +176,20 @@ def _target_user_mention(
 ) -> dict:
     return {
         "entity_kind": "user",
-        "placement": "prefix",
-        "platform_user_id": platform_user_id,
-        "global_user_id": "global-user-1",
         "display_name": "Target User",
-        "requested_by": "dialog.mention_target_user",
+        "platform_user_id": platform_user_id,
+    }
+
+
+def _inline_user_mention(
+    *,
+    display_name: str = "Target User",
+    platform_user_id: str | None = "2787858400",
+) -> dict:
+    return {
+        "entity_kind": "user",
+        "display_name": display_name,
+        "platform_user_id": platform_user_id,
     }
 
 
@@ -229,11 +238,111 @@ def test_napcat_module_cli_help_exits_successfully() -> None:
     assert "--channels" in result.stdout
 
 
+def test_discord_on_message_replaces_inline_delivery_mentions() -> None:
+    """Discord normal sends should render every exact inline user tag."""
+
+    outbound_text = discord_module._outbound_text_with_delivery_mentions(
+        "@Alex and @Moca check this",
+        [
+            _inline_user_mention(display_name="Alex", platform_user_id="1001"),
+            _inline_user_mention(display_name="Moca", platform_user_id="1002"),
+        ],
+    )
+
+    assert outbound_text == "<@1001> and <@1002> check this"
+
+
+def test_discord_runtime_send_replaces_inline_delivery_mentions() -> None:
+    """Discord runtime sends should use the same inline rendering contract."""
+
+    outbound_text = discord_module._outbound_text_with_delivery_mentions(
+        "@Alex ping @Moca",
+        [
+            _inline_user_mention(display_name="Alex", platform_user_id="1001"),
+            _inline_user_mention(display_name="Moca", platform_user_id="1002"),
+        ],
+    )
+
+    assert outbound_text == "<@1001> ping <@1002>"
+
+
+def test_discord_inline_delivery_mentions_ignore_embedded_tokens() -> None:
+    """Discord mention rendering should not replace word-embedded tags."""
+
+    outbound_text = discord_module._outbound_text_with_delivery_mentions(
+        "email@Alex and @Alex check this",
+        [
+            _inline_user_mention(display_name="Alex", platform_user_id="1001"),
+        ],
+    )
+
+    assert outbound_text == "email@Alex and <@1001> check this"
+
+
+def test_napcat_handle_event_replaces_inline_delivery_mentions() -> None:
+    """QQ normal sends should render inline user tags as OneBot segments."""
+
+    outbound_module = importlib.import_module(
+        "adapters.napcat_qq_adapter.outbound",
+    )
+
+    payload = outbound_module.outbound_message_payload(
+        "@Alex and @Moca check this",
+        None,
+        [
+            _inline_user_mention(display_name="Alex", platform_user_id="1001"),
+            _inline_user_mention(display_name="Moca", platform_user_id="1002"),
+        ],
+    )
+
+    assert payload == [
+        {"type": "at", "data": {"qq": "1001"}},
+        {"type": "text", "data": {"text": " and "}},
+        {"type": "at", "data": {"qq": "1002"}},
+        {"type": "text", "data": {"text": " check this"}},
+    ]
+
+
+def test_napcat_runtime_send_replaces_inline_delivery_mentions() -> None:
+    """QQ runtime sends should preserve reply segments before inline tags."""
+
+    outbound_module = importlib.import_module(
+        "adapters.napcat_qq_adapter.outbound",
+    )
+
+    payload = outbound_module.outbound_message_payload(
+        "@Alex ping @Moca",
+        "reply-1",
+        [
+            _inline_user_mention(display_name="Alex", platform_user_id="1001"),
+            _inline_user_mention(display_name="Moca", platform_user_id="1002"),
+        ],
+    )
+
+    assert payload == [
+        {"type": "reply", "data": {"id": "reply-1"}},
+        {"type": "at", "data": {"qq": "1001"}},
+        {"type": "text", "data": {"text": " ping "}},
+        {"type": "at", "data": {"qq": "1002"}},
+    ]
+
+
+def test_unsupported_adapter_leaves_inline_mentions_plain() -> None:
+    """Unsupported renderers can ignore mention candidates without data loss."""
+
+    text = "@Alex remains readable"
+    delivery_mentions = [
+        _inline_user_mention(display_name="Alex", platform_user_id="1001"),
+    ]
+
+    assert text == "@Alex remains readable"
+    assert delivery_mentions[0]["display_name"] == "Alex"
+
+
 def test_napcat_cli_reads_active_groups_from_environment(monkeypatch) -> None:
     """Console-launched NapCat should activate configured QQ groups."""
 
     from adapters.napcat_qq_adapter import cli as napcat_cli
-    from adapters.napcat_qq_adapter import ws_adapter as napcat_ws_module
 
     created_adapters = []
 
@@ -247,7 +356,7 @@ def test_napcat_cli_reads_active_groups_from_environment(monkeypatch) -> None:
         async def connect(self) -> None:
             return
 
-    monkeypatch.setattr(napcat_ws_module, "NapCatWSAdapter", FakeNapCatAdapter)
+    monkeypatch.setattr(napcat_cli, "NapCatWSAdapter", FakeNapCatAdapter)
     monkeypatch.setattr(sys, "argv", ["napcat"])
     monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
     monkeypatch.setenv("BRAIN_URL", "http://127.0.0.1:8000")
@@ -269,7 +378,6 @@ def test_napcat_cli_channels_argument_overrides_environment(monkeypatch) -> None
     """Explicit CLI group args should remain stronger than environment config."""
 
     from adapters.napcat_qq_adapter import cli as napcat_cli
-    from adapters.napcat_qq_adapter import ws_adapter as napcat_ws_module
 
     created_adapters = []
 
@@ -283,7 +391,7 @@ def test_napcat_cli_channels_argument_overrides_environment(monkeypatch) -> None
         async def connect(self) -> None:
             return
 
-    monkeypatch.setattr(napcat_ws_module, "NapCatWSAdapter", FakeNapCatAdapter)
+    monkeypatch.setattr(napcat_cli, "NapCatWSAdapter", FakeNapCatAdapter)
     monkeypatch.setattr(sys, "argv", ["napcat", "--channels", "123456"])
     monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
     monkeypatch.setenv("BRAIN_URL", "http://127.0.0.1:8000")
@@ -1110,7 +1218,7 @@ async def test_napcat_handle_event_sends_reply_as_message_segments():
 
 
 @pytest.mark.asyncio
-async def test_napcat_handle_event_prefixes_delivery_mention_from_brain():
+async def test_napcat_handle_event_replaces_inline_delivery_mention_from_brain():
     """Normal QQ chat sends should render brain-provided mention metadata."""
 
     adapter = NapCatWSAdapter(
@@ -1127,7 +1235,7 @@ async def test_napcat_handle_event_prefixes_delivery_mention_from_brain():
     adapter.bot_id = "3768713357"
     adapter.bot_name = "Kazusa"
     adapter.brain_client.post = AsyncMock(return_value=_DummyResponse({
-        "messages": ["hello there"],
+        "messages": ["@Target User hello there"],
         "use_reply_feature": False,
         "delivery_mentions": [
             _target_user_mention(platform_user_id="2787858400"),
@@ -1634,8 +1742,8 @@ async def test_napcat_runtime_send_message_uses_reply_segments():
 
 
 @pytest.mark.asyncio
-async def test_napcat_runtime_send_message_prefixes_delivery_mention():
-    """QQ scheduled sends should render feasible prefix mention requests."""
+async def test_napcat_runtime_send_message_replaces_inline_delivery_mention():
+    """QQ scheduled sends should render feasible inline mention requests."""
 
     adapter = NapCatWSAdapter(
         ws_url="ws://napcat.local/ws",
@@ -1653,7 +1761,7 @@ async def test_napcat_runtime_send_message_prefixes_delivery_mention():
 
     result = await adapter.send_message(
         channel_id="54369546",
-        text="scheduled hello",
+        text="@Target User scheduled hello",
         channel_type="group",
         delivery_mentions=[_target_user_mention(platform_user_id="2787858400")],
     )
@@ -1686,12 +1794,14 @@ async def test_napcat_runtime_send_message_noops_incomplete_delivery_mention():
 
     result = await adapter.send_message(
         channel_id="54369546",
-        text="scheduled hello",
+        text="@Target User scheduled hello",
         channel_type="group",
         delivery_mentions=[_target_user_mention(platform_user_id=None)],
     )
 
-    assert ws.sent_payloads[0]["params"]["message"] == "scheduled hello"
+    assert ws.sent_payloads[0]["params"]["message"] == (
+        "@Target User scheduled hello"
+    )
     assert result.message_id == "outbound-noop"
     await adapter.close()
 
@@ -1716,12 +1826,14 @@ async def test_napcat_runtime_send_message_noops_non_user_delivery_mention():
 
     result = await adapter.send_message(
         channel_id="54369546",
-        text="scheduled hello",
+        text="@Target User scheduled hello",
         channel_type="group",
         delivery_mentions=[_target_user_mention(platform_user_id="all")],
     )
 
-    assert ws.sent_payloads[0]["params"]["message"] == "scheduled hello"
+    assert ws.sent_payloads[0]["params"]["message"] == (
+        "@Target User scheduled hello"
+    )
     assert result.message_id == "outbound-noop"
     await adapter.close()
 
@@ -1758,7 +1870,7 @@ async def test_napcat_runtime_endpoint_accepts_delivery_mentions():
                 json={
                     "channel_id": "54369546",
                     "channel_type": "group",
-                    "text": "scheduled hello",
+                    "text": "@Target User scheduled hello",
                     "reply_to_msg_id": None,
                     "delivery_mentions": [
                         _target_user_mention(platform_user_id="2787858400")
@@ -2021,7 +2133,7 @@ async def test_discord_handle_message_posts_first_delivery_receipt(
 
 
 @pytest.mark.asyncio
-async def test_discord_on_message_prefixes_delivery_mention_from_brain():
+async def test_discord_on_message_replaces_inline_delivery_mention_from_brain():
     """Normal Discord chat sends should render brain-provided mentions."""
 
     adapter = DiscordAdapter(
@@ -2034,7 +2146,7 @@ async def test_discord_on_message_prefixes_delivery_mention_from_brain():
         debug_modes={},
     )
     adapter._http_client.post = AsyncMock(return_value=_DummyResponse({
-        "messages": ["hello there"],
+        "messages": ["@Target User hello there"],
         "use_reply_feature": False,
         "delivery_mentions": [
             _target_user_mention(platform_user_id="2787858400"),
@@ -2199,8 +2311,8 @@ async def test_discord_runtime_send_message_accepts_channel_type():
 
 
 @pytest.mark.asyncio
-async def test_discord_runtime_send_message_prefixes_delivery_mention():
-    """Discord scheduled sends should render feasible prefix mentions."""
+async def test_discord_runtime_send_message_replaces_inline_delivery_mention():
+    """Discord scheduled sends should render feasible inline mentions."""
 
     adapter = DiscordAdapter(
         brain_url="http://127.0.0.1:8000",
@@ -2216,7 +2328,7 @@ async def test_discord_runtime_send_message_prefixes_delivery_mention():
 
     result = await adapter.send_message(
         channel_id="12345",
-        text="scheduled hello",
+        text="@Target User scheduled hello",
         channel_type="group",
         delivery_mentions=[_target_user_mention(platform_user_id="2787858400")],
     )
@@ -2244,12 +2356,12 @@ async def test_discord_runtime_send_message_noops_incomplete_delivery_mention():
 
     result = await adapter.send_message(
         channel_id="12345",
-        text="scheduled hello",
+        text="@Target User scheduled hello",
         channel_type="group",
         delivery_mentions=[_target_user_mention(platform_user_id=None)],
     )
 
-    assert channel.sent_chunks == ["scheduled hello"]
+    assert channel.sent_chunks == ["@Target User scheduled hello"]
     assert result.message_id == "discord-send-1"
     await adapter.close()
 
@@ -2272,14 +2384,14 @@ async def test_discord_runtime_send_message_noops_malformed_delivery_mention():
 
     result = await adapter.send_message(
         channel_id="12345",
-        text="scheduled hello",
+        text="@Target User scheduled hello",
         channel_type="group",
         delivery_mentions=[
             _target_user_mention(platform_user_id="123> @everyone")
         ],
     )
 
-    assert channel.sent_chunks == ["scheduled hello"]
+    assert channel.sent_chunks == ["@Target User scheduled hello"]
     assert result.message_id == "discord-send-1"
     await adapter.close()
 
@@ -2314,7 +2426,7 @@ async def test_discord_runtime_endpoint_accepts_delivery_mentions():
                 json={
                     "channel_id": "12345",
                     "channel_type": "group",
-                    "text": "scheduled hello",
+                    "text": "@Target User scheduled hello",
                     "reply_to_msg_id": None,
                     "delivery_mentions": [
                         _target_user_mention(platform_user_id="2787858400")

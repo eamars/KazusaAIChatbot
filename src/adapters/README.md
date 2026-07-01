@@ -40,6 +40,9 @@ runtime send surface:
 
 The runtime send interface is adapter-owned delivery validation. It must reject
 unsupported or disallowed targets before native platform send.
+When `delivery_mentions` is present, adapters replace matching authored
+`@display_name` text inline with native platform mention syntax when feasible;
+invalid or incomplete candidates leave the original text unchanged.
 
 ## Message Envelope Contract
 

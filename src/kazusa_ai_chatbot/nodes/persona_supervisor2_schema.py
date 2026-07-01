@@ -130,7 +130,6 @@ class GlobalPersonaState(TypedDict):
     final_dialog: [str]  # -> Will be used for dialog end point (e.g,. Discord)
     target_addressed_user_ids: NotRequired[list[str]]
     target_broadcast: NotRequired[bool]
-    mention_target_user: NotRequired[bool]
     # Other outputs from here
 
     # Consolidation output

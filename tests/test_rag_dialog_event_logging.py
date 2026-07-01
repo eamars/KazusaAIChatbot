@@ -213,7 +213,6 @@ def _dialog_node_state() -> dict[str, object]:
             "final_dialog": ["private generated dialog"],
             "target_addressed_user_ids": [],
             "target_broadcast": False,
-            "mention_target_user": False,
         }
     )
     return state
@@ -473,8 +472,7 @@ async def test_dialog_generator_records_llm_metadata_without_generated_text(
     record_llm_stage_event = AsyncMock()
     record_model_contract_event = AsyncMock()
     llm = _StaticLLM(
-        '{"final_dialog": ["secret generated dialog"], '
-        '"mention_target_user": false}'
+        '{"final_dialog": ["secret generated dialog"]}'
     )
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", llm)
     monkeypatch.setattr(
@@ -510,8 +508,7 @@ async def test_dialog_agent_records_quality_without_dialog_text(monkeypatch) -> 
         dialog_module,
         "_dialog_generator_llm",
         _StaticLLM(
-            '{"final_dialog": ["secret full graph reply"], '
-            '"mention_target_user": false}'
+            '{"final_dialog": ["secret full graph reply"]}'
         ),
     )
     monkeypatch.setattr(

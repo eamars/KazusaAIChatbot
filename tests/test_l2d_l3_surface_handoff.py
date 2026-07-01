@@ -565,7 +565,6 @@ async def test_selected_speak_runs_l3_surface_and_dialog_once() -> None:
         "final_dialog": ["Known fact."],
         "target_addressed_user_ids": ["global-user-123"],
         "target_broadcast": False,
-        "mention_target_user": True,
     })
 
     with (
@@ -685,7 +684,6 @@ async def test_parent_graph_preserves_social_context_for_selected_l3() -> None:
                 "final_dialog": ["Known fact."],
                 "target_addressed_user_ids": ["global-user-123"],
                 "target_broadcast": False,
-                "mention_target_user": True,
             },
         ),
     ):
@@ -707,7 +705,6 @@ async def test_no_speak_skips_l3_surface_and_dialog_but_consolidates() -> None:
         "final_dialog": ["should not run"],
         "target_addressed_user_ids": ["global-user-123"],
         "target_broadcast": False,
-        "mention_target_user": False,
     })
 
     with (
