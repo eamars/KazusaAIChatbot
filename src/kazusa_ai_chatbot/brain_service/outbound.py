@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import datetime
+from typing import Any
+
+from kazusa_ai_chatbot.brain_service.delivery_mentions import (
+    build_inline_delivery_mentions,
+)
 
 
 EnsureCharacterIdentity = Callable[..., Awaitable[str]]
@@ -28,6 +33,72 @@ def _dedupe_non_empty(values: Sequence[str]) -> list[str]:
     return result
 
 
+def _mention_docs(
+    *,
+    body_text: str,
+    mentions: Sequence[Mapping[str, Any]] | None,
+) -> list[dict[str, str]]:
+    """Normalize outbound mention rows for conversation-history storage."""
+
+    if mentions is None:
+        return_value: list[dict[str, str]] = []
+        return return_value
+
+    users: list[dict[str, str]] = []
+    for mention in mentions:
+        display_name = str(mention.get("display_name") or "").strip()
+        platform_user_id = str(mention.get("platform_user_id") or "").strip()
+        if not display_name or not platform_user_id:
+            continue
+        user = {
+            "display_name": display_name,
+            "platform_user_id": platform_user_id,
+            "global_user_id": str(mention.get("global_user_id") or "").strip(),
+        }
+        users.append(user)
+
+    candidates = build_inline_delivery_mentions(text=body_text, users=users)
+    docs: list[dict[str, str]] = []
+    for candidate in candidates:
+        doc = {
+            "entity_kind": candidate["entity_kind"],
+            "display_name": candidate["display_name"],
+            "platform_user_id": candidate["platform_user_id"],
+            "raw_text": f"@{candidate['display_name']}",
+        }
+        global_user_id = _global_user_id_for_candidate(
+            candidate,
+            mentions,
+        )
+        if global_user_id:
+            doc["global_user_id"] = global_user_id
+        docs.append(doc)
+    return docs
+
+
+def _global_user_id_for_candidate(
+    candidate: Mapping[str, str],
+    mentions: Sequence[Mapping[str, Any]],
+) -> str:
+    """Return a matching internal id when the caller supplied one."""
+
+    candidate_display_name = candidate["display_name"]
+    candidate_platform_user_id = candidate["platform_user_id"]
+    for mention in mentions:
+        display_name = str(mention.get("display_name") or "").strip()
+        platform_user_id = str(mention.get("platform_user_id") or "").strip()
+        if display_name != candidate_display_name:
+            continue
+        if platform_user_id != candidate_platform_user_id:
+            continue
+        global_user_id = str(mention.get("global_user_id") or "").strip()
+        if global_user_id:
+            return_value = global_user_id
+            return return_value
+    return_value = ""
+    return return_value
+
+
 async def record_assistant_outbound_message(
     *,
     platform: str,
@@ -45,6 +116,7 @@ async def record_assistant_outbound_message(
     storage_timestamp_utc: str,
     ensure_character_global_identity_func: EnsureCharacterIdentity,
     save_conversation_func: SaveConversation,
+    mentions: Sequence[Mapping[str, Any]] | None = None,
 ) -> str:
     """Persist one assistant outbound row before it can be delivered.
 
@@ -63,6 +135,8 @@ async def record_assistant_outbound_message(
         logical_message_index: Zero-based position inside one logical response
             sequence.
         llm_trace_id: Optional turn-scoped LLM trace id.
+        mentions: Optional outbound mention rows present in this logical
+            message.
         storage_timestamp_utc: Storage UTC timestamp for the persisted row.
         ensure_character_global_identity_func: Identity resolver/backfiller.
         save_conversation_func: Conversation-history persistence function.
@@ -82,6 +156,7 @@ async def record_assistant_outbound_message(
         target_addressed_user_ids = [fallback_user_id]
     if logical_message_index < 0:
         raise ValueError("logical_message_index must be non-negative")
+    mention_docs = _mention_docs(body_text=body_text, mentions=mentions)
 
     character_global_user_id = await ensure_character_global_identity_func(
         platform=platform,
@@ -100,7 +175,7 @@ async def record_assistant_outbound_message(
         "raw_wire_text": body_text,
         "content_type": "text",
         "addressed_to_global_user_ids": target_addressed_user_ids,
-        "mentions": [],
+        "mentions": mention_docs,
         "broadcast": broadcast,
         "attachments": [],
         "timestamp": storage_timestamp_utc,

@@ -464,12 +464,20 @@ async def test_collect_group_review_cases_attaches_participant_context(
     assert case["conversation_progress"]["participant_context"]["source"] == (
         "group_review_participant_context"
     )
+    assert case["delivery_mention_users"] == [
+        {
+            "global_user_id": "user-1",
+            "platform_user_id": "qq-user-1",
+            "display_name": "user",
+        }
+    ]
     assert case["target_scope"]["user_id"] is None
     assert case["delivery_target"]["platform_channel_id"] == "group-1"
 
     source_packet = projection.build_source_packet(case)
     serialized_packet = json.dumps(source_packet, ensure_ascii=False)
     assert "participant_context" in serialized_packet
+    assert "delivery_mention_users" not in serialized_packet
     assert "delivery_target" not in serialized_packet
     assert "user-1" not in serialized_packet
 

@@ -289,6 +289,19 @@ def test_discord_inline_delivery_mentions_ignore_embedded_tokens() -> None:
     assert outbound_text == "email@Alex and <@1001> check this"
 
 
+def test_discord_split_message_does_not_split_native_user_mention() -> None:
+    """Discord chunking should preserve rendered native mention syntax."""
+
+    text = f"{'a' * 1998}<@1001>"
+
+    chunks = discord_module._split_message(text)
+
+    assert chunks == [
+        "a" * 1998,
+        "<@1001>",
+    ]
+
+
 def test_napcat_handle_event_replaces_inline_delivery_mentions() -> None:
     """QQ normal sends should render inline user tags as OneBot segments."""
 

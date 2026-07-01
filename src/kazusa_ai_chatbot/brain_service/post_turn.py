@@ -77,6 +77,12 @@ async def save_assistant_message(
     if not assistant_output:
         return
 
+    raw_delivery_mentions = result.get("delivery_mentions")
+    if isinstance(raw_delivery_mentions, list):
+        delivery_mentions = raw_delivery_mentions
+    else:
+        delivery_mentions = None
+
     for logical_message_index, body_text in enumerate(assistant_output):
         await record_assistant_outbound_message(
             platform=platform,
@@ -96,6 +102,7 @@ async def save_assistant_message(
                 ensure_character_global_identity_func
             ),
             save_conversation_func=save_conversation_func,
+            mentions=delivery_mentions,
         )
 
 

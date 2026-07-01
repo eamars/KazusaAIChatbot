@@ -2445,6 +2445,7 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
                 users=delivery_mention_users,
                 character_global_user_id=CHARACTER_GLOBAL_USER_ID,
             )
+        result["delivery_mentions"] = delivery_mentions
 
         delivery_tracking_id = ""
         if response_dialog and should_save_assistant_message:

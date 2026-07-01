@@ -269,8 +269,10 @@ prompt schemas, and model-facing records.
 
 Self-cognition may attach platform-neutral `delivery_mentions` render
 candidates to a local action candidate record when the shared dialog graph
-authors exact visible `@display_name` text and the case target scope has the
-matching delivery identity.
+authors exact visible `@display_name` text and the case carries matching
+delivery-only identity. Direct user-scoped cases can use `target_scope`;
+group-review cases can use bounded `delivery_mention_users` collected from the
+same activity window.
 
 The target scope may carry delivery-only platform identity:
 
@@ -288,6 +290,22 @@ The target scope may carry delivery-only platform identity:
 `platform_user_id` and `display_name` are not model context. They must not be
 rendered into source packets, cognition state, dialog state, or prompt text.
 They also do not participate in action-attempt idempotency.
+
+Group-review cases may also carry a delivery-only list:
+
+```python
+"delivery_mention_users": [
+    {
+        "global_user_id": str,
+        "platform_user_id": str,
+        "display_name": str,
+    }
+]
+```
+
+This list is built from internal activity-window participant rows. It is not
+rendered into source packets or prompt text; it is consumed only after dialog
+authors exact visible tags.
 
 Action candidates may carry:
 

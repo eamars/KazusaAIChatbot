@@ -720,6 +720,9 @@ def _build_group_review_case(
             "channel_type": "group",
             "user_id": None,
         },
+        "delivery_mention_users": _delivery_mention_users(
+            window.participant_rows,
+        ),
         "source_refs": [dict(source_ref) for source_ref in window.source_refs],
         "visible_context": [dict(row) for row in window.visible_context],
         "group_activity_window": {
@@ -744,6 +747,30 @@ def _build_group_review_case(
         "global_vibe": text_or_empty(character_profile.get("global_vibe")),
     }
     return case
+
+
+def _delivery_mention_users(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """Project renderable group participants for outbound mention delivery."""
+
+    users: list[dict[str, str]] = []
+    emitted_platform_user_ids: set[str] = set()
+    for row in rows:
+        if row.get("role") != "user":
+            continue
+        platform_user_id = text_or_empty(row.get("platform_user_id"))
+        display_name = text_or_empty(row.get("display_name"))
+        if not platform_user_id or not display_name:
+            continue
+        if platform_user_id in emitted_platform_user_ids:
+            continue
+        user = {
+            "global_user_id": text_or_empty(row.get("global_user_id")),
+            "platform_user_id": platform_user_id,
+            "display_name": display_name,
+        }
+        users.append(user)
+        emitted_platform_user_ids.add(platform_user_id)
+    return users
 
 
 def _is_due_future_cognition_run(

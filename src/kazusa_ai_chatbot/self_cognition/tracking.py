@@ -514,26 +514,43 @@ def _delivery_mentions_for_action(
 ) -> list[dict[str, Any]]:
     """Build optional delivery mention metadata for a self-cognition action."""
 
+    users: list[dict[str, Any]] = []
     value = case.get("target_scope")
-    if not isinstance(value, dict):
+    if isinstance(value, dict):
+        user_id = value.get("user_id")
+        if isinstance(user_id, str) and user_id:
+            user = {
+                "global_user_id": user_id,
+                "platform_user_id": _optional_string_field(
+                    value,
+                    "platform_user_id",
+                ),
+                "display_name": _string_field(value, "display_name"),
+            }
+            users.append(user)
+
+    delivery_users = case.get("delivery_mention_users")
+    if isinstance(delivery_users, list):
+        for delivery_user in delivery_users:
+            if not isinstance(delivery_user, dict):
+                continue
+            user = {
+                "global_user_id": _optional_string_field(
+                    delivery_user,
+                    "global_user_id",
+                ),
+                "platform_user_id": _optional_string_field(
+                    delivery_user,
+                    "platform_user_id",
+                ),
+                "display_name": _string_field(delivery_user, "display_name"),
+            }
+            users.append(user)
+
+    if not users:
         return_value: list[dict[str, Any]] = []
         return return_value
 
-    user_id = value.get("user_id")
-    if not isinstance(user_id, str) or not user_id:
-        return_value = []
-        return return_value
-
-    users = [
-        {
-            "global_user_id": user_id,
-            "platform_user_id": _optional_string_field(
-                value,
-                "platform_user_id",
-            ),
-            "display_name": _string_field(value, "display_name"),
-        }
-    ]
     return_value = build_inline_delivery_mentions(text=text, users=users)
     return return_value
 

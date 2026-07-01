@@ -480,10 +480,12 @@ was not committed.
 For visible assistant output, the brain writes one assistant row per logical
 `ChatResponse.messages` item before returning `ChatResponse` to the adapter.
 Rows from the same cognition share the same `delivery_tracking_id` and
-`llm_trace_id`, and each row stores its `logical_message_index`. Visible
-assistant rows are derived from selected text surface outputs. Background state
-updates such as conversation progress and consolidation may still run after the
-response has been released.
+`llm_trace_id`, and each row stores its `logical_message_index`. Row-scoped
+outbound mention metadata is persisted when a returned logical message contains
+an exact authored `@display_name` token with a matching delivery candidate.
+Visible assistant rows are derived from selected text surface outputs.
+Background state updates such as conversation progress and consolidation may
+still run after the response has been released.
 
 When an episode has no visible text surface, the brain returns an empty
 `messages` list and no delivery tracking id. That episode can still be

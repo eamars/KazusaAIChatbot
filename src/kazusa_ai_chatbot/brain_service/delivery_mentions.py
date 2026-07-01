@@ -69,17 +69,42 @@ def _display_name_counts(
     users: Sequence[Mapping[str, Any]],
     character_global_user_id: str | None,
 ) -> dict[str, int]:
-    """Count visible names before renderability filtering for ambiguity."""
+    """Count distinct visible-name identities before renderability filtering."""
 
     counts: dict[str, int] = {}
+    identity_keys_by_display_name: dict[str, set[tuple[str, str]]] = {}
     for user in users:
         if _global_user_id(user) == character_global_user_id:
             continue
         display_name = _display_name(user)
         if not display_name:
             continue
+        identity_key = _identity_key(user)
+        if identity_key is not None:
+            identity_keys = identity_keys_by_display_name.setdefault(
+                display_name,
+                set(),
+            )
+            if identity_key in identity_keys:
+                continue
+            identity_keys.add(identity_key)
         counts[display_name] = counts.get(display_name, 0) + 1
     return counts
+
+
+def _identity_key(user: Mapping[str, Any]) -> tuple[str, str] | None:
+    """Return the stable identity used to distinguish same-name candidates."""
+
+    platform_user_id = _platform_user_id(user)
+    if platform_user_id:
+        return_value = ("platform_user_id", platform_user_id)
+        return return_value
+    global_user_id = _global_user_id(user)
+    if global_user_id:
+        return_value = ("global_user_id", global_user_id)
+        return return_value
+    return_value = None
+    return return_value
 
 
 def _display_name_sort_key(user: Mapping[str, Any]) -> int:

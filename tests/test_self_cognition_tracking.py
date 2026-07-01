@@ -721,6 +721,44 @@ def test_group_action_candidate_carries_inline_delivery_mention() -> None:
     ]
 
 
+def test_group_review_action_candidate_uses_delivery_mention_users() -> None:
+    case = _commitment_case(case_name=models.CASE_GROUP_CHAT_REVIEW)
+    case["target_scope"] = {
+        "platform": "qq",
+        "platform_channel_id": "54369546",
+        "channel_type": "group",
+        "user_id": None,
+    }
+    case["delivery_mention_users"] = [
+        {
+            "global_user_id": "global-target-1",
+            "platform_user_id": "qq-target",
+            "display_name": "Target User",
+        }
+    ]
+    trigger_record = tracking.build_trigger_record(case)
+    action_attempt = tracking.build_action_attempt(
+        case,
+        trigger_record,
+        existing_attempts=[],
+    )
+
+    action_candidate = tracking.build_action_candidate(
+        case,
+        action_attempt,
+        "@Target User Checking this group thread.",
+    )
+
+    assert action_candidate is not None
+    assert action_candidate["delivery_mentions"] == [
+        {
+            "entity_kind": "user",
+            "platform_user_id": "qq-target",
+            "display_name": "Target User",
+        }
+    ]
+
+
 def test_private_action_candidate_keeps_inline_mention_for_adapter_noop(
 ) -> None:
     case = _commitment_case()

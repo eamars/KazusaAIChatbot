@@ -180,6 +180,68 @@ async def test_save_assistant_message_persists_logical_dialog_rows(
 
 
 @pytest.mark.asyncio
+async def test_save_assistant_message_persists_row_scoped_delivery_mentions(
+    monkeypatch,
+) -> None:
+    """Assistant rows should record outbound mentions present in that row."""
+
+    saved_docs: list[dict] = []
+
+    async def _save_conversation(doc: dict) -> str:
+        saved_docs.append(doc)
+        return_value = f"row-{len(saved_docs)}"
+        return return_value
+
+    monkeypatch.setattr(
+        service_module,
+        "_ensure_character_global_identity",
+        AsyncMock(return_value="character-global-id"),
+    )
+    monkeypatch.setattr(service_module, "save_conversation", _save_conversation)
+
+    await service_module._save_assistant_message({
+        "platform": "qq",
+        "platform_channel_id": "group-1",
+        "channel_type": "group",
+        "platform_bot_id": "bot-1",
+        "character_name": "Character",
+        "global_user_id": "user-a",
+        "final_dialog": ["@Alex first", "second @Moca"],
+        "target_addressed_user_ids": ["user-a"],
+        "target_broadcast": False,
+        "delivery_mentions": [
+            {
+                "entity_kind": "user",
+                "display_name": "Alex",
+                "platform_user_id": "1001",
+            },
+            {
+                "entity_kind": "user",
+                "display_name": "Moca",
+                "platform_user_id": "1002",
+            },
+        ],
+    })
+
+    assert saved_docs[0]["mentions"] == [
+        {
+            "entity_kind": "user",
+            "display_name": "Alex",
+            "platform_user_id": "1001",
+            "raw_text": "@Alex",
+        }
+    ]
+    assert saved_docs[1]["mentions"] == [
+        {
+            "entity_kind": "user",
+            "display_name": "Moca",
+            "platform_user_id": "1002",
+            "raw_text": "@Moca",
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_save_assistant_message_fails_when_history_row_not_committed(
     monkeypatch,
 ) -> None:

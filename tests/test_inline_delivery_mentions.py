@@ -78,6 +78,35 @@ def test_build_inline_delivery_mentions_omits_ambiguous_display_names() -> None:
     assert candidates == []
 
 
+def test_build_inline_delivery_mentions_keeps_duplicate_same_identity() -> None:
+    """The same user arriving through multiple context sources is not ambiguous."""
+
+    candidates = build_inline_delivery_mentions(
+        text="@Alex check this",
+        users=[
+            {
+                "display_name": "Alex",
+                "platform_user_id": "1001",
+                "global_user_id": "global-alex",
+            },
+            {
+                "display_name": "Alex",
+                "platform_user_id": "1001",
+                "global_user_id": "global-alex",
+            },
+        ],
+        character_global_user_id="character",
+    )
+
+    assert candidates == [
+        {
+            "entity_kind": "user",
+            "display_name": "Alex",
+            "platform_user_id": "1001",
+        }
+    ]
+
+
 def test_build_inline_delivery_mentions_omits_unrenderable_and_character() -> None:
     """Candidates need platform ids and must not target the active character."""
 

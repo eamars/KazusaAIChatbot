@@ -993,9 +993,28 @@ def _split_message(text: str, limit: int = 2000) -> list[str]:
             split_at = text.rfind(" ", 0, limit)
         if split_at == -1:
             split_at = limit
+        split_at = _avoid_native_mention_split(text, split_at)
         chunks.append(text[:split_at])
         text = text[split_at:].lstrip()
     return chunks
+
+
+def _avoid_native_mention_split(text: str, split_at: int) -> int:
+    """Move a chunk boundary before an unclosed Discord user mention."""
+
+    mention_start = text.rfind("<@", 0, split_at)
+    if mention_start == -1:
+        return_value = split_at
+        return return_value
+
+    mention_end = text.find(">", mention_start)
+    split_inside_mention = mention_end == -1 or mention_end >= split_at
+    if split_inside_mention and mention_start > 0:
+        return_value = mention_start
+        return return_value
+
+    return_value = split_at
+    return return_value
 
 
 def main():
