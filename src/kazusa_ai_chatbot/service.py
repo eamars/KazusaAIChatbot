@@ -833,6 +833,7 @@ def _background_artifact_result_text(episode: CognitiveEpisode) -> str:
         if percept.get("input_source") not in (
             "background_artifact_result",
             "background_work_result",
+            "accepted_task_result",
         ):
             continue
         result_percept = percept
@@ -844,11 +845,16 @@ def _background_artifact_result_text(episode: CognitiveEpisode) -> str:
         metadata = {}
     work_kind = str(metadata.get("work_kind", "")).strip()
     objective = str(metadata.get("objective_summary", "")).strip()
+    accepted_task_summary = str(
+        metadata.get("accepted_task_summary", "")
+    ).strip()
     failure_summary = str(metadata.get("failure_summary", "")).strip()
     status = "failed" if failure_summary else "completed"
     result_label = "Background artifact result"
     if input_source == "background_work_result":
         result_label = "Background work result"
+    elif input_source == "accepted_task_result":
+        result_label = "Accepted task result"
     summary_parts = [
         f"{result_label} is {status}.",
     ]
@@ -856,6 +862,8 @@ def _background_artifact_result_text(episode: CognitiveEpisode) -> str:
         summary_parts.append(f"Work kind: {work_kind}.")
     if objective:
         summary_parts.append(f"Objective: {objective}.")
+    if accepted_task_summary:
+        summary_parts.append(f"Task: {accepted_task_summary}.")
     result_text = " ".join(summary_parts)
     return result_text
 
@@ -867,6 +875,7 @@ def _background_result_metadata(episode: CognitiveEpisode) -> Mapping[str, objec
         if percept.get("input_source") not in (
             "background_artifact_result",
             "background_work_result",
+            "accepted_task_result",
         ):
             continue
         metadata = percept.get("metadata", {})
@@ -1094,9 +1103,12 @@ async def _deliver_background_artifact_result_episode(
 
         trigger_source = str(episode["trigger_source"])
         is_background_work_result = trigger_source == "background_work_result_ready"
+        is_accepted_task_result = trigger_source == "accepted_task_result_ready"
         bot_permission_role = "background_artifact_result"
         if is_background_work_result:
             bot_permission_role = "background_work_result"
+        elif is_accepted_task_result:
+            bot_permission_role = "accepted_task_result"
 
         debug_modes: DebugModes = {}
         if not COGNITION_VISUAL_DIRECTIVES_ENABLED:
@@ -1200,7 +1212,7 @@ async def _deliver_background_artifact_result_episode(
 
     consolidation_state = result.get("consolidation_state")
     if isinstance(consolidation_state, dict):
-        if not is_background_work_result:
+        if not is_background_work_result and not is_accepted_task_result:
             await _run_background_artifact_result_post_turn(
                 consolidation_state,
                 visible_response_sent=True,

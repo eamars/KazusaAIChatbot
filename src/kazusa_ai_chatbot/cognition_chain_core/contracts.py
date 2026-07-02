@@ -40,6 +40,7 @@ class ModelVisiblePerceptV1(TypedDict):
         "reflection_artifact",
         "background_artifact_result",
         "background_work_result",
+        "accepted_task_result",
     ]
     content: str
     metadata_summary: list[str]
@@ -154,7 +155,9 @@ class ActionAffordanceV1(TypedDict):
         "speak",
         "memory_lifecycle_update",
         "trigger_future_cognition",
-        "background_work_request",
+        "future_speak",
+        "accepted_task_request",
+        "accepted_task_status_check",
     ]
     available: bool
     visibility: Literal["public", "private", "internal"]
@@ -204,7 +207,9 @@ class SemanticActionRequestV1(TypedDict):
         "speak",
         "memory_lifecycle_update",
         "trigger_future_cognition",
-        "background_work_request",
+        "future_speak",
+        "accepted_task_request",
+        "accepted_task_status_check",
     ]
     decision: str
     detail: str
@@ -267,15 +272,20 @@ class SelectedTextSurfaceIntentV1(TypedDict):
 
 class PreSurfaceActionResultPromptV1(TypedDict):
     action_kind: Literal[
+        "accepted_task_request",
         "background_work_request",
         "background_artifact_request",
         "memory_lifecycle_update",
+        "future_speak",
     ]
     status: str
-    queue_state: str
+    queue_state: NotRequired[str]
     task_summary: str
     objective_summary: str
     acknowledgement_constraint: str
+    accepted_task_state: NotRequired[str]
+    accepted_task_summary: NotRequired[str]
+    wait_guidance: NotRequired[str]
 
 
 class MemoryLifecycleContextPromptV1(TypedDict):
@@ -423,6 +433,7 @@ _EPISODE_TRIGGER_SOURCES = frozenset((
     "system_probe",
     "background_artifact_result_ready",
     "background_work_result_ready",
+    "accepted_task_result_ready",
 ))
 _MODEL_VISIBLE_PERCEPT_INPUT_SOURCES = frozenset((
     "dialog_text",
@@ -432,6 +443,7 @@ _MODEL_VISIBLE_PERCEPT_INPUT_SOURCES = frozenset((
     "reflection_artifact",
     "background_artifact_result",
     "background_work_result",
+    "accepted_task_result",
 ))
 _MEDIA_MODALITIES = frozenset((
     "image",
@@ -443,8 +455,10 @@ _MEDIA_MODALITIES = frozenset((
 _ACTION_CAPABILITIES = frozenset((
     "speak",
     "memory_lifecycle_update",
+    "accepted_task_request",
+    "accepted_task_status_check",
     "trigger_future_cognition",
-    "background_work_request",
+    "future_speak",
 ))
 _ACTION_VISIBILITIES = frozenset(("public", "private", "internal"))
 _ACTION_OUTPUT_KINDS = frozenset(("semantic_action_request",))

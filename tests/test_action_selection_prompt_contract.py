@@ -23,6 +23,7 @@ def test_action_selection_prompt_uses_runtime_affordance_roster() -> None:
         "speak",
         "memory_lifecycle_update",
         "trigger_future_cognition",
+        "future_speak",
         "background_work_request",
     ):
         assert hardcoded_capability not in ACTION_ROUTER_PROMPT
@@ -95,9 +96,8 @@ def test_action_selection_normalizes_schema_free_resolver_requests() -> None:
     assert "pending_row_id" not in request
 
 
-def test_action_selection_background_work_route_rejects_task_brief() -> None:
-    """A background_work_request action must not carry task_brief, worker,
-    task_type, or other worker-facing fields from the router output."""
+def test_action_selection_accepted_task_route_rejects_internals() -> None:
+    """An accepted_task_request must not carry executor-facing fields."""
 
     from kazusa_ai_chatbot.cognition_chain_core.action_selection import (
         normalize_action_selection_output,
@@ -115,8 +115,8 @@ def test_action_selection_background_work_route_rejects_task_brief() -> None:
                 "reason": "user expects a reply",
             },
             {
-                "capability": "background_work_request",
-                "decision": "queue_async_work",
+                "capability": "accepted_task_request",
+                "decision": "accepted_delayed_task",
                 "detail": "accepted bounded text work",
                 "reason": "user asked for a code snippet",
                 "task_brief": "Generate a Fibonacci function.",
@@ -129,19 +129,19 @@ def test_action_selection_background_work_route_rejects_task_brief() -> None:
 
     normalized = normalize_action_selection_output(raw_model_output)
 
-    bw_requests = [
+    task_requests = [
         r for r in normalized["semantic_action_requests"]
-        if r["capability"] == "background_work_request"
+        if r["capability"] == "accepted_task_request"
     ]
-    assert len(bw_requests) == 1
+    assert len(task_requests) == 1
 
-    bw = bw_requests[0]
+    request = task_requests[0]
     for forbidden in ("task_brief", "worker", "task_type", "tool_args"):
-        assert forbidden not in bw, (
-            f"worker-facing field '{forbidden}' must be stripped from "
-            "background_work_request route output"
+        assert forbidden not in request, (
+            f"executor-facing field '{forbidden}' must be stripped from "
+            "accepted_task_request route output"
         )
 
-    assert bw["capability"] == "background_work_request"
-    assert bw["decision"] == "queue_async_work"
-    assert "reason" in bw
+    assert request["capability"] == "accepted_task_request"
+    assert request["decision"] == "accepted_delayed_task"
+    assert "reason" in request

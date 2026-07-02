@@ -51,6 +51,9 @@ class ActionResultV1(TypedDict):
     objective_summary: NotRequired[str]
     operational_owner: NotRequired[str]
     job_ref: NotRequired[str]
+    accepted_task_state: NotRequired[str]
+    accepted_task_summary: NotRequired[str]
+    wait_guidance: NotRequired[str]
     acknowledgement_constraint: NotRequired[str]
 
 

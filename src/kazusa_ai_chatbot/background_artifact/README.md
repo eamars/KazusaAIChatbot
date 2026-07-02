@@ -9,8 +9,8 @@ work uses `kazusa_ai_chatbot.background_work`.
 
 Background artifact rows were the earlier text-only async job format. They are
 kept so old queued, completed, or deliverable rows can still finish through the
-existing cognition and dialog boundary. New live turns should queue
-`background_work_request` jobs instead.
+existing cognition and dialog boundary. New live turns should create
+accepted-task-backed internal background-work jobs instead.
 
 ## Compatibility Scope
 
@@ -21,15 +21,16 @@ for new turns.
 
 ## Current Runtime Boundary
 
-New background work follows this path:
+New delayed work follows this path:
 
 ```text
-L2d background_work_request
-  -> action-spec validation
-  -> db.background_work_jobs queued row
+L2d accepted_task_request
+  -> accepted_task lifecycle validation and duplicate rejection
+  -> internal background_work_request
+  -> db.background_work_jobs queued row with accepted_task_id
   -> background_work.router route-only worker choice
   -> background_work.subagent.* worker execution
-  -> background_work_result_ready cognition
+  -> accepted_task_result_ready cognition
   -> L3/dialog owned final visible wording
 ```
 

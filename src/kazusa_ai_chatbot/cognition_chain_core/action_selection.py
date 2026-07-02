@@ -28,17 +28,22 @@ logger = logging.getLogger(__name__)
 ACTION_REQUEST_CAP = 3
 OPEN_GOAL_DELIVERABLE_STATUSES = ("pending", "partial", "blocked")
 BACKGROUND_WORK_REQUEST_CAPABILITY = "background_work_request"
+ACCEPTED_TASK_REQUEST_CAPABILITY = "accepted_task_request"
+ACCEPTED_TASK_STATUS_CHECK_CAPABILITY = "accepted_task_status_check"
 MEMORY_LIFECYCLE_UPDATE_CAPABILITY = "memory_lifecycle_update"
 SPEAK_CAPABILITY = "speak"
 TRIGGER_FUTURE_COGNITION_CAPABILITY = "trigger_future_cognition"
+FUTURE_SPEAK_CAPABILITY = "future_speak"
 ALLOWED_ACTION_CAPABILITIES = frozenset((
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
-    BACKGROUND_WORK_REQUEST_CAPABILITY,
+    FUTURE_SPEAK_CAPABILITY,
+    ACCEPTED_TASK_REQUEST_CAPABILITY,
+    ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
 ))
 
-_BACKGROUND_WORK_FORBIDDEN_FIELDS = frozenset((
+_ACCEPTED_TASK_FORBIDDEN_FIELDS = frozenset((
     "task_brief",
     "worker",
     "task_type",
@@ -330,8 +335,8 @@ def _normalize_semantic_action_requests(
             "decision": _text_field(raw, "decision"),
             "detail": _text_field(raw, "detail"),
         }
-        if capability == BACKGROUND_WORK_REQUEST_CAPABILITY:
-            for forbidden in _BACKGROUND_WORK_FORBIDDEN_FIELDS:
+        if capability == ACCEPTED_TASK_REQUEST_CAPABILITY:
+            for forbidden in _ACCEPTED_TASK_FORBIDDEN_FIELDS:
                 cleaned.pop(forbidden, None)
         normalized.append(cleaned)
         if len(normalized) >= max_action_requests:
@@ -588,7 +593,7 @@ def _build_work_seed_section(state: Mapping[str, object]) -> dict[str, object]:
     if not isinstance(max_output_chars, int) or max_output_chars < 1:
         max_output_chars = 4000
     section: dict[str, object] = {
-        "background_work_allowed": True,
+        "accepted_task_allowed": True,
         "source_summary": source_summary,
         "max_output_chars": max_output_chars,
     }
@@ -621,16 +626,20 @@ def _project_supplied_affordances(
     for raw in raw_affordances:
         if not isinstance(raw, Mapping):
             continue
-        capability = _safe_text(raw.get("capability"))
+        raw_capability = _safe_text(raw.get("capability"))
+        capability = _model_facing_action_capability(raw_capability)
         if capability not in ALLOWED_ACTION_CAPABILITIES or capability in seen:
             continue
+        summary = raw.get("semantic_input_summary", "")
+        if raw_capability != capability:
+            summary = _default_action_summary(capability)
         if raw.get("available") is False:
             continue
         projected.append({
             "capability": capability,
             "available": True,
             "visibility": _safe_text(raw.get("visibility")),
-            "semantic_input_summary": raw.get("semantic_input_summary", ""),
+            "semantic_input_summary": summary,
         })
         seen.add(capability)
     return projected
@@ -643,6 +652,7 @@ def _project_capability_names(
 
     projected: list[dict[str, object]] = []
     for capability in sorted(capability_names):
+        capability = _model_facing_action_capability(capability)
         if capability not in ALLOWED_ACTION_CAPABILITIES:
             continue
         projected.append({
@@ -717,12 +727,31 @@ def _default_action_summary(capability: str) -> list[str]:
             "Use when the character wants a later private cognition cycle.",
             "Provide the semantic reason and ordinary-language timing hint.",
         ],
-        BACKGROUND_WORK_REQUEST_CAPABILITY: [
-            "Use only for accepted bounded background text work.",
+        FUTURE_SPEAK_CAPABILITY: [
+            "Use when accepting a future reminder or delayed follow-up message.",
+            "Put exact configured-local YYYY-MM-DD HH:MM time in decision.",
+            "Put the semantic future-speaking objective in detail.",
+        ],
+        ACCEPTED_TASK_REQUEST_CAPABILITY: [
+            "Use when the character accepts bounded delayed text work.",
             "Pair this private request with a visible speak acknowledgement.",
+        ],
+        ACCEPTED_TASK_STATUS_CHECK_CAPABILITY: [
+            "Use when the user asks about already accepted delayed work.",
+            "Pair this private check with a visible progress answer.",
         ],
     }
     return summaries.get(capability, [])
+
+
+def _model_facing_action_capability(capability: str) -> str:
+    """Map internal executable action names to model-facing semantic names."""
+
+    if capability == BACKGROUND_WORK_REQUEST_CAPABILITY:
+        return_value = ACCEPTED_TASK_REQUEST_CAPABILITY
+        return return_value
+    return_value = capability
+    return return_value
 
 
 def _safe_text(value: object) -> str:

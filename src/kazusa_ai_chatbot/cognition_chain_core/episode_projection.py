@@ -17,6 +17,7 @@ _TRIGGER_SOURCES = frozenset((
     "system_probe",
     "background_artifact_result_ready",
     "background_work_result_ready",
+    "accepted_task_result_ready",
 ))
 _INPUT_SOURCES = frozenset((
     "dialog_text",
@@ -27,6 +28,7 @@ _INPUT_SOURCES = frozenset((
     "retrieved_memory",
     "background_artifact_result",
     "background_work_result",
+    "accepted_task_result",
 ))
 _PUBLIC_OUTPUT_MODE_MAP = {
     "live_response": "visible_reply",
@@ -160,6 +162,7 @@ def _output_mode(value: object, *, trigger_source: str) -> str:
     if trigger_source in (
         "background_artifact_result_ready",
         "background_work_result_ready",
+        "accepted_task_result_ready",
     ):
         return_value = "visible_reply"
         return return_value

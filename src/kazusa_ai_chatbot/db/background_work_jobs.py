@@ -144,13 +144,16 @@ async def complete_background_work_job(
     result_summary: str,
     worker_metadata: dict[str, object],
     completed_at: str,
+    skip_result_delivery: bool = False,
 ) -> BackgroundWorkJobDoc | None:
     """Mark one claimed job completed with bounded worker output."""
 
+    delivery_state = "delivered" if skip_result_delivery else "ready"
+    delivered_at = completed_at if skip_result_delivery else ""
     update = {
         "$set": {
             "status": "completed",
-            "delivery_state": "ready",
+            "delivery_state": delivery_state,
             "router_action": router_action,
             "worker": worker,
             "routed_task": routed_task,
@@ -161,6 +164,7 @@ async def complete_background_work_job(
             "result_summary": result_summary,
             "worker_metadata": dict(worker_metadata),
             "completed_at": completed_at,
+            "delivered_at": delivered_at,
             "updated_at": completed_at,
             "lease_owner": None,
             "lease_expires_at": None,
@@ -369,6 +373,43 @@ async def mark_background_work_delivery_failed(
     }
     result = await _update_job(job_id=job_id, update=update)
     return result
+
+
+async def recover_stale_background_work_delivery_in_progress(
+    *,
+    stale_before_utc: str,
+    recovered_at: str,
+) -> int:
+    """Return interrupted delivery claims to the retryable failed state."""
+
+    db = await get_db()
+    collection = db[BACKGROUND_WORK_JOBS_COLLECTION]
+    update = {
+        "$set": {
+            "status": "delivery_failed",
+            "delivery_state": "failed",
+            "delivery_failure_summary": (
+                "Background work delivery did not complete."
+            ),
+            "updated_at": recovered_at,
+        }
+    }
+    try:
+        update_result = await collection.update_many(
+            {
+                "status": "delivery_in_progress",
+                "delivery_state": "in_progress",
+                "updated_at": {"$lte": stale_before_utc},
+            },
+            update,
+        )
+    except PyMongoError as exc:
+        raise DatabaseOperationError(
+            f"failed to recover background work delivery: {exc}"
+        ) from exc
+
+    recovered_count = int(update_result.modified_count)
+    return recovered_count
 
 
 async def _update_job(

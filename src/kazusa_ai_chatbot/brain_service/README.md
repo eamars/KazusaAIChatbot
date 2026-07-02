@@ -39,7 +39,8 @@ both inbound and outbound state:
 - runtime adapter registration lets dispatcher/proactive sends call adapter
   callback endpoints.
 - background-work worker lifecycle is started, stopped, and reported by the
-  service runtime while result delivery still returns through cognition/dialog.
+  service runtime as an internal executor while accepted-task result delivery
+  still returns through cognition/dialog.
 
 Local process lifecycle management is owned by the separate top-level
 `control_console` package and `kazusa-control-console` command. The brain
@@ -55,8 +56,8 @@ This ICD covers:
 - Delivery tracking and delivery receipt lifecycle.
 - Runtime adapter registration and heartbeat protocol for dispatcher or
   proactive callback delivery.
-- Background-work worker enablement, liveness, and result-ready delivery
-  boundary.
+- Accepted-task delayed-work lifecycle plus internal background-work worker
+  enablement, liveness, and result-ready delivery boundary.
 - Reply-context hydration behavior when an adapter supplies only a platform
   reply message id.
 - Compatibility rules for adding service fields and endpoints.
@@ -492,12 +493,16 @@ When an episode has no visible text surface, the brain returns an empty
 consolidated when private action results, calendar-triggered action results,
 private surface outputs, or private finalization exist.
 
-When L2d selects `background_work_request`, the persona graph queues the
-durable job before selected L3 text runs and records a pending result in the
-episode trace. Completed jobs later return as `background_work_result_ready`
-cognitive episodes. Background-work workers must not call adapters, dispatcher
-delivery, or cognition directly. Legacy `background_artifact_result_ready`
-episodes remain compatibility input for old rows only.
+When L2d selects `accepted_task_request`, deterministic action execution first
+creates or reuses an accepted-task lifecycle row. New accepted tasks are then
+materialized into an internal `background_work_request`, queued durably before
+selected L3 text runs, and projected back to L3 as semantic accepted-task state.
+Status checks use `accepted_task_status_check` and never enqueue a worker job.
+Completed accepted-task-backed jobs later return as
+`accepted_task_result_ready` cognitive episodes. Background-work workers must
+not call adapters, dispatcher delivery, or cognition directly. Legacy
+`background_work_result_ready` and `background_artifact_result_ready` episodes
+remain compatibility input for old rows only.
 
 Delivery receipt adapters may still need bounded `not_found` retry behavior
 for transport timing and cross-process delivery, but a non-empty

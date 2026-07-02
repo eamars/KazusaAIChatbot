@@ -59,7 +59,7 @@ def test_action_selection_payload_is_prompt_safe_json() -> None:
     assert payload["work_seed"]["source_summary"] == (
         "Tell me about Fibonacci numbers."
     )
-    assert payload["work_seed"]["background_work_allowed"] is True
+    assert payload["work_seed"]["accepted_task_allowed"] is True
     assert payload["work_seed"]["max_output_chars"] > 0
     resolver_affordances = payload["capabilities"]["resolver_affordances"]
     assert resolver_affordances
@@ -108,11 +108,11 @@ def _minimal_cognition_state() -> dict:
                 ],
             },
             {
-                "capability": "background_work_request",
+                "capability": "accepted_task_request",
                 "available": True,
                 "visibility": "private",
                 "semantic_input_summary": [
-                    "Use only for accepted bounded background text work."
+                    "Use only for accepted bounded delayed text work."
                 ],
             },
         ],

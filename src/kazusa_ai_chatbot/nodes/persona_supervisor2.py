@@ -9,6 +9,7 @@ from kazusa_ai_chatbot.action_spec.execution import execute_action_specs_for_tra
 from kazusa_ai_chatbot.action_spec.registry import (
     BACKGROUND_ARTIFACT_REQUEST_CAPABILITY,
     BACKGROUND_WORK_REQUEST_CAPABILITY,
+    FUTURE_SPEAK_CAPABILITY,
     SPEAK_CAPABILITY,
 )
 from kazusa_ai_chatbot.action_spec.results import (
@@ -311,6 +312,7 @@ async def _action_results_for_state(
         if spec.get("kind") not in (
             BACKGROUND_ARTIFACT_REQUEST_CAPABILITY,
             BACKGROUND_WORK_REQUEST_CAPABILITY,
+            FUTURE_SPEAK_CAPABILITY,
         )
     ]
     action_results = await execute_action_specs_for_trace(
@@ -333,6 +335,7 @@ async def stage_2a_background_work_enqueue(
         if spec.get("kind") in (
             BACKGROUND_ARTIFACT_REQUEST_CAPABILITY,
             BACKGROUND_WORK_REQUEST_CAPABILITY,
+            FUTURE_SPEAK_CAPABILITY,
         )
     ]
     if not background_specs:
@@ -372,7 +375,11 @@ def _background_no_handoff_result(
     params = action_spec.get("params")
     task_summary = ""
     if isinstance(params, dict):
-        for field_name in ("task_brief", "objective_summary"):
+        for field_name in (
+            "task_brief",
+            "objective_summary",
+            "continuation_objective",
+        ):
             value = params.get(field_name)
             if isinstance(value, str) and value.strip():
                 task_summary = value.strip()

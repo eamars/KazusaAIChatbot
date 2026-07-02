@@ -81,7 +81,74 @@
           }
         },
         "decontexualized_input": "The user asks for a Fibonacci sequence generator function.",
-        "conversation_progress": {}
+        "conversation_progress": {},
+        "available_action_affordances": [
+          {
+            "capability": "accepted_task_status_check",
+            "available": true,
+            "visibility": "private",
+            "semantic_input_summary": [
+              "Use when the user asks about already accepted delayed work.",
+              "Do not include worker, queue, or job parameters.",
+              "Pair this private check with a visible speak progress answer."
+            ],
+            "execution_boundary": "durable accepted-task lifecycle status lookup"
+          },
+          {
+            "capability": "background_work_request",
+            "available": true,
+            "visibility": "private",
+            "semantic_input_summary": [
+              "Use only when the character accepts bounded delayed text work.",
+              "Provide a task reason and detail, not execution internals.",
+              "Pair this private request with a visible speak acknowledgement."
+            ],
+            "execution_boundary": "durable accepted-task lifecycle records the task before chat acknowledgement"
+          },
+          {
+            "capability": "future_speak",
+            "available": true,
+            "visibility": "private",
+            "semantic_input_summary": [
+              "Use when the character accepts a future reminder or delayed follow-up message.",
+              "Put the exact configured-local trigger time in decision as YYYY-MM-DD HH:MM.",
+              "Put only the semantic future-speaking objective in detail; do not write final message text.",
+              "Pair this private request with a visible speak acknowledgement."
+            ],
+            "execution_boundary": "durable delayed-task executor schedules a future cognition slot"
+          },
+          {
+            "capability": "memory_lifecycle_update",
+            "available": true,
+            "visibility": "private",
+            "semantic_input_summary": [
+              "Use when active commitments need semantic lifecycle review.",
+              "Provide review_kind=active_commitment_lifecycle and a short detail."
+            ],
+            "execution_boundary": "memory lifecycle specialist chooses aliases and decisions"
+          },
+          {
+            "capability": "speak",
+            "available": true,
+            "visibility": "user_visible",
+            "semantic_input_summary": [
+              "Use when the character wants a text surface to exist.",
+              "Provide the semantic surface intent, not final wording."
+            ],
+            "execution_boundary": "downstream text surface builds the surface details"
+          },
+          {
+            "capability": "trigger_future_cognition",
+            "available": true,
+            "visibility": "private",
+            "semantic_input_summary": [
+              "Use when the character wants a later private cognition cycle.",
+              "Provide the semantic reason and any ordinary-language timing hint."
+            ],
+            "execution_boundary": "downstream scheduler builds the executable request"
+          }
+        ],
+        "background_work_output_char_limit": 4000
       },
       "historical_comparison": {
         "comparison_kind": "synthetic_stage0_category",

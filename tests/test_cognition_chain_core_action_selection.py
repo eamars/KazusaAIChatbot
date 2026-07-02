@@ -34,7 +34,7 @@ def test_semantic_action_request_contract_matches_current_l2d_routes() -> None:
                 "reason": "enough context",
             },
             {
-                "capability": "background_work_request",
+                "capability": "accepted_task_request",
                 "decision": "background_task",
                 "detail": "prepare a concise note",
                 "reason": "accepted private work",
@@ -55,7 +55,7 @@ def test_semantic_action_request_contract_matches_current_l2d_routes() -> None:
             "reason": "enough context",
         },
         {
-            "capability": "background_work_request",
+                "capability": "accepted_task_request",
             "decision": "background_task",
             "detail": "prepare a concise note",
             "reason": "accepted private work",

@@ -19,15 +19,21 @@ from kazusa_ai_chatbot.action_spec.handlers.background_artifact import (
 from kazusa_ai_chatbot.action_spec.handlers.background_work import (
     BackgroundWorkEnqueueFunc,
     enqueue_background_work_action,
+    enqueue_future_speak_action,
+)
+from kazusa_ai_chatbot.action_spec.handlers.accepted_task import (
+    execute_accepted_task_status_check_action,
 )
 from kazusa_ai_chatbot.action_spec.handlers.memory_lifecycle import (
     execute_user_memory_lifecycle_action,
 )
 from kazusa_ai_chatbot.action_spec.models import ActionValidationError
 from kazusa_ai_chatbot.action_spec.registry import (
+    ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     BACKGROUND_ARTIFACT_REQUEST_CAPABILITY,
     BACKGROUND_WORK_REQUEST_CAPABILITY,
+    FUTURE_SPEAK_CAPABILITY,
     SPEAK_CAPABILITY,
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
 )
@@ -240,6 +246,63 @@ async def execute_action_specs_for_trace(
                     ),
                 }
                 result_refs = [queue_result["evidence_ref"]]
+        elif validated_spec["kind"] == FUTURE_SPEAK_CAPABILITY:
+            try:
+                queue_result = await enqueue_future_speak_action(
+                    validated_spec,
+                    storage_timestamp_utc=normalized_storage_timestamp_utc,
+                    action_attempt_id=action_attempt_id,
+                    enqueue_background_work_func=enqueue_background_work_func,
+                )
+            except ActionValidationError as exc:
+                status = "rejected"
+                result_summary = f"future_speak rejected: {exc}"
+                execution_result = {
+                    "status": status,
+                    "error": str(exc),
+                }
+            except DatabaseOperationError as exc:
+                status = "failed"
+                result_summary = f"future_speak failed: {exc}"
+                execution_result = {
+                    "status": status,
+                    "error": str(exc),
+                }
+            except ValueError as exc:
+                status = "rejected"
+                result_summary = f"future_speak rejected: {exc}"
+                execution_result = {
+                    "status": status,
+                    "error": str(exc),
+                }
+            else:
+                status = _accepted_task_execution_status(queue_result)
+                result_summary = queue_result["result_summary"]
+                execution_result = {
+                    "status": status,
+                    "accepted_task_state": (
+                        queue_result["accepted_task_state"]
+                    ),
+                    "accepted_task_summary": (
+                        queue_result["accepted_task_summary"]
+                    ),
+                    "acknowledgement_constraint": (
+                        queue_result["acknowledgement_constraint"]
+                    ),
+                    "wait_guidance": queue_result["wait_guidance"],
+                }
+                prompt_result_fields = {
+                    "accepted_task_state": (
+                        queue_result["accepted_task_state"]
+                    ),
+                    "accepted_task_summary": (
+                        queue_result["accepted_task_summary"]
+                    ),
+                    "acknowledgement_constraint": (
+                        queue_result["acknowledgement_constraint"]
+                    ),
+                    "wait_guidance": queue_result["wait_guidance"],
+                }
         elif validated_spec["kind"] == BACKGROUND_WORK_REQUEST_CAPABILITY:
             try:
                 queue_result = await enqueue_background_work_action(
@@ -270,29 +333,63 @@ async def execute_action_specs_for_trace(
                     "error": str(exc),
                 }
             else:
-                status = "pending"
-                queue_state = str(queue_result["queue_state"])
+                status = _accepted_task_execution_status(queue_result)
                 result_summary = queue_result["result_summary"]
                 execution_result = {
                     "status": status,
-                    "queue_state": queue_state,
-                    "task_summary": queue_result["task_summary"],
-                    "operational_owner": queue_result["operational_owner"],
+                    "accepted_task_state": (
+                        queue_result["accepted_task_state"]
+                    ),
+                    "accepted_task_summary": (
+                        queue_result["accepted_task_summary"]
+                    ),
                     "acknowledgement_constraint": (
                         queue_result["acknowledgement_constraint"]
                     ),
-                    "job_ref": queue_result["job_ref"],
+                    "wait_guidance": queue_result["wait_guidance"],
                 }
                 prompt_result_fields = {
-                    "queue_state": queue_state,
-                    "task_summary": queue_result["task_summary"],
-                    "operational_owner": queue_result["operational_owner"],
-                    "job_ref": queue_result["job_ref"],
+                    "accepted_task_state": (
+                        queue_result["accepted_task_state"]
+                    ),
+                    "accepted_task_summary": (
+                        queue_result["accepted_task_summary"]
+                    ),
                     "acknowledgement_constraint": (
                         queue_result["acknowledgement_constraint"]
                     ),
+                    "wait_guidance": queue_result["wait_guidance"],
                 }
-                result_refs = [queue_result["evidence_ref"]]
+        elif validated_spec["kind"] == ACCEPTED_TASK_STATUS_CHECK_CAPABILITY:
+            try:
+                status_result = await execute_accepted_task_status_check_action(
+                    validated_spec,
+                )
+            except ActionValidationError as exc:
+                status = "rejected"
+                result_summary = f"accepted_task_status_check rejected: {exc}"
+                execution_result = {
+                    "status": status,
+                    "error": str(exc),
+                }
+            except DatabaseOperationError as exc:
+                status = "failed"
+                result_summary = f"accepted_task_status_check failed: {exc}"
+                execution_result = {
+                    "status": status,
+                    "error": str(exc),
+                }
+            else:
+                status = "executed"
+                completed_at = normalized_storage_timestamp_utc
+                prompt_result_fields = _accepted_task_status_prompt_fields(
+                    status_result,
+                )
+                result_summary = prompt_result_fields.pop("result_summary")
+                execution_result = {
+                    "status": status,
+                    **prompt_result_fields,
+                }
         elif action_attempt_id in executed_attempts:
             status = "executed"
             completed_at = normalized_storage_timestamp_utc
@@ -359,3 +456,91 @@ def _normalize_storage_timestamp(storage_timestamp_utc: str) -> str:
             f"storage_timestamp_utc: invalid storage UTC timestamp: {exc}"
         ) from exc
     return normalized_storage_timestamp_utc
+
+
+def _accepted_task_execution_status(queue_result: dict[str, Any]) -> str:
+    """Map accepted-task enqueue outcome into action-result status."""
+
+    if queue_result["status"] == "failed":
+        status = "failed"
+        return status
+    status = "pending"
+    return status
+
+
+def _accepted_task_status_prompt_fields(
+    status_result: dict[str, Any],
+) -> dict[str, Any]:
+    """Project an accepted-task status lookup into prompt-safe fields."""
+
+    if status_result["status"] != "active":
+        fields = {
+            "result_summary": "No active accepted task found.",
+            "accepted_task_state": "delivered",
+            "accepted_task_summary": "",
+            "acknowledgement_constraint": "progress_report_allowed",
+            "wait_guidance": "no_wait",
+        }
+        return fields
+    task = status_result["task"]
+    accepted_task_state = _accepted_task_prompt_state(str(task["state"]))
+    fields = {
+        "result_summary": _accepted_task_result_summary(task),
+        "accepted_task_state": accepted_task_state,
+        "accepted_task_summary": str(task.get("accepted_task_summary", "")),
+        "acknowledgement_constraint": "progress_report_allowed",
+        "wait_guidance": _accepted_task_wait_guidance(accepted_task_state),
+    }
+    return fields
+
+
+def _accepted_task_prompt_state(task_state: str) -> str:
+    """Map lifecycle state to the compact prompt vocabulary."""
+
+    if task_state == "enqueueing" or task_state == "pending":
+        prompt_state = "scheduled"
+    elif task_state == "running":
+        prompt_state = "running"
+    elif task_state == "result_ready":
+        prompt_state = "result_ready"
+    elif task_state == "failure_ready":
+        prompt_state = "failed"
+    elif task_state == "delivered":
+        prompt_state = "delivered"
+    elif task_state == "enqueue_failed":
+        prompt_state = "enqueue_failed"
+    elif task_state in ("delivery_in_progress", "delivery_retryable"):
+        prompt_state = "delivery_failed"
+    else:
+        prompt_state = "failed"
+    return prompt_state
+
+
+def _accepted_task_wait_guidance(accepted_task_state: str) -> str:
+    """Return wait guidance for one prompt accepted-task state."""
+
+    if accepted_task_state in ("scheduled", "already_active", "running"):
+        guidance = "non_numeric_wait"
+    elif accepted_task_state in ("result_ready", "delivered"):
+        guidance = "no_wait"
+    else:
+        guidance = "unavailable"
+    return guidance
+
+
+def _accepted_task_result_summary(task: dict[str, Any]) -> str:
+    """Build a compact status-check summary from task state."""
+
+    state = str(task.get("state", ""))
+    summary = str(task.get("accepted_task_summary", "")).strip()
+    if state in ("result_ready", "delivered"):
+        result_summary = str(task.get("result_summary", "")).strip()
+        if result_summary:
+            return result_summary
+    if state in ("failure_ready", "enqueue_failed", "delivery_retryable"):
+        failure_summary = str(task.get("failure_summary", "")).strip()
+        if failure_summary:
+            return failure_summary
+    if summary:
+        return f"Accepted task is {state}: {summary}"
+    return f"Accepted task is {state}."

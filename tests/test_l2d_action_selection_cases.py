@@ -365,6 +365,7 @@ def _background_artifact_action(work_kind: str) -> dict[str, object]:
             "source_message_id": "message-001",
             "source_platform_bot_id": "debug-bot-001",
             "source_character_name": "Test Character",
+            "source_trigger_source": "user_message",
             "requester_global_user_id": (
                 "00000000-0000-4000-8000-000000000002"
             ),
@@ -400,6 +401,7 @@ def _background_work_action() -> dict[str, object]:
             "source_message_id": "message-001",
             "source_platform_bot_id": "debug-bot-001",
             "source_character_name": "Test Character",
+            "source_trigger_source": "user_message",
             "requester_global_user_id": (
                 "00000000-0000-4000-8000-000000000002"
             ),

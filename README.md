@@ -209,14 +209,16 @@ surface traces can still feed post-turn progress, consolidation, Cache2
 invalidation, residue recording, calendar state, reflection, and
 self-cognition without creating a platform send.
 
-Background work requests are selected by cognition as `background_work_request`,
-validated and queued by deterministic action-spec execution, and acknowledged
-only after a durable pending job exists. A route-only background-work router
-chooses the worker and semantic task after the live turn; the text-artifact
-worker has its own task router and generator stages. Completed results return
-as `background_work_result_ready` cognition rather than being sent directly by
-workers. Legacy background-artifact rows remain compatibility data, not the new
-top-level runtime contract.
+Delayed user work is selected by cognition as an accepted task. L2d sees the
+semantic `accepted_task_request` and `accepted_task_status_check` affordances;
+deterministic action-spec execution materializes new accepted tasks into the
+internal `background_work` executor only after duplicate rejection and durable
+lifecycle persistence. A route-only background-work router chooses the worker
+and semantic task after the live turn; the text-artifact worker has its own task
+router and generator stages. Completed accepted tasks return as
+`accepted_task_result_ready` cognition rather than being sent directly by
+workers. Legacy background-artifact and legacy background-work rows remain
+compatibility data, not the new model-facing runtime contract.
 
 ## Design Principles
 

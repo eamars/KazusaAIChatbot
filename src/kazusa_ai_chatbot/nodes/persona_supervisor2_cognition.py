@@ -22,12 +22,17 @@ from kazusa_ai_chatbot.config import (
     COGNITION_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.action_spec.registry import (
+    ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
     BACKGROUND_WORK_REQUEST_CAPABILITY,
+    FUTURE_SPEAK_CAPABILITY,
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
     build_initial_action_capabilities,
     project_prompt_affordances,
+)
+from kazusa_ai_chatbot.cognition_chain_core.action_selection import (
+    ACCEPTED_TASK_REQUEST_CAPABILITY,
 )
 from kazusa_ai_chatbot.channel_scene_projection import project_channel_topic_text
 from kazusa_ai_chatbot.cognition_chain_core.chain import run_cognition_chain
@@ -812,11 +817,15 @@ def _available_action_affordances() -> list[dict[str, object]]:
         SPEAK_CAPABILITY,
         MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
         TRIGGER_FUTURE_COGNITION_CAPABILITY,
-        BACKGROUND_WORK_REQUEST_CAPABILITY,
+        FUTURE_SPEAK_CAPABILITY,
+        ACCEPTED_TASK_REQUEST_CAPABILITY,
+        ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
     }
     affordances: list[dict[str, object]] = []
     for prompt_affordance in prompt_affordances:
-        capability = prompt_affordance.get("capability")
+        capability = _model_facing_action_capability(
+            prompt_affordance.get("capability"),
+        )
         if capability not in allowed_capabilities:
             continue
         visibility = prompt_affordance.get("visibility")
@@ -835,6 +844,19 @@ def _available_action_affordances() -> list[dict[str, object]]:
             "output_kind": "semantic_action_request",
         })
     return affordances
+
+
+def _model_facing_action_capability(capability: object) -> str:
+    """Map internal executable action capability to L2d semantic capability."""
+
+    if capability == BACKGROUND_WORK_REQUEST_CAPABILITY:
+        return_value = ACCEPTED_TASK_REQUEST_CAPABILITY
+        return return_value
+    if isinstance(capability, str):
+        return_value = capability
+        return return_value
+    return_value = ""
+    return return_value
 
 
 def _prompt_safe_mapping(value: object) -> dict[str, Any]:

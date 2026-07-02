@@ -305,7 +305,7 @@ def test_background_artifact_failed_enqueue_blocks_later_delivery_promise() -> N
 
 
 def test_background_work_acknowledgement_requires_pending_queue_result() -> None:
-    """L3 should see background-work promise permission only after enqueue."""
+    """L3 should see accepted-task promise permission only after enqueue."""
 
     state = _cognition_state()
     state["pre_surface_action_results"] = [
@@ -313,24 +313,27 @@ def test_background_work_acknowledgement_requires_pending_queue_result() -> None
             "action_attempt_id": "action_attempt:background-work-001",
             "action_kind": "background_work_request",
             "status": "pending",
-            "queue_state": "queued",
-            "task_summary": "Generate a Fibonacci function snippet.",
-            "operational_owner": "background_work_job",
-            "job_ref": "background_work_job:job-001",
+            "accepted_task_state": "scheduled",
+            "accepted_task_summary": (
+                "Generate a Fibonacci function snippet."
+            ),
+            "wait_guidance": "non_numeric_wait",
             "acknowledgement_constraint": "promise_allowed",
         }
     ]
 
     intent = l3_surface_module._selected_text_surface_intent(state)
 
-    assert "background_work_request" in intent
+    assert "accepted_task_request" in intent
     assert "Generate a Fibonacci function snippet." in intent
+    assert "scheduled" in intent
     assert "promise_allowed" in intent
-    assert "background_work_job:job-001" not in intent
+    assert "background_work_request" not in intent
+    assert "job-001" not in intent
 
 
 def test_background_work_failed_enqueue_blocks_later_delivery_promise() -> None:
-    """L3 should not promise later delivery when background-work enqueue failed."""
+    """L3 should not promise later delivery when accepted-task enqueue failed."""
 
     state = _cognition_state()
     state["pre_surface_action_results"] = [
@@ -338,19 +341,21 @@ def test_background_work_failed_enqueue_blocks_later_delivery_promise() -> None:
             "action_attempt_id": "action_attempt:background-work-001",
             "action_kind": "background_work_request",
             "status": "failed",
-            "queue_state": "none",
-            "task_summary": "Generate a Fibonacci function snippet.",
-            "operational_owner": "none",
-            "job_ref": "",
+            "accepted_task_state": "enqueue_failed",
+            "accepted_task_summary": (
+                "Generate a Fibonacci function snippet."
+            ),
+            "wait_guidance": "unavailable",
             "acknowledgement_constraint": "promise_forbidden_explain_failure",
         }
     ]
 
     intent = l3_surface_module._selected_text_surface_intent(state)
 
-    assert "background_work_request" in intent
+    assert "accepted_task_request" in intent
     assert "promise_forbidden_explain_failure" in intent
     assert "promise_allowed" not in intent
+    assert "background_work_request" not in intent
 
 
 @pytest.mark.asyncio

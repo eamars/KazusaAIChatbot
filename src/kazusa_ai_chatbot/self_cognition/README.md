@@ -349,6 +349,12 @@ Due-aware packets may render neutral due-state facts such as
 instructions remain tracking metadata and must not be rendered to the
 character.
 
+User-facing delayed reminders use `future_speak`, which is accepted through
+the accepted-task lifecycle before the internal worker schedules the
+`future_cognition` slot. Self-cognition source cases and future-cognition due
+cases may report or act on the scheduled semantic context, but they must not
+create a duplicate accepted delayed task for the same active work.
+
 ## Event Logging
 
 The production worker mirrors sanitized trigger, run, route, action-attempt,

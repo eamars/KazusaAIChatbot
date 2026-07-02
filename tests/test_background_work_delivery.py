@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib
 import json
-
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
 import pytest
@@ -40,6 +40,37 @@ def _completed_job() -> dict:
         "completed_at": "2026-06-06T00:01:00+00:00",
     }
     return job
+
+
+def _accepted_task_completed_job() -> dict:
+    """Build one completed job for a new accepted-task-backed request."""
+
+    job = _completed_job()
+    job["accepted_task_id"] = "task-001"
+    job["task_identity_key"] = "accepted_task:v1:abc"
+    return job
+
+
+def _patch_delivery_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+    delivery_module,
+    *,
+    background_count: int = 0,
+    accepted_task_count: int = 0,
+) -> tuple[AsyncMock, AsyncMock]:
+    recover_background = AsyncMock(return_value=background_count)
+    recover_accepted_task = AsyncMock(return_value=accepted_task_count)
+    monkeypatch.setattr(
+        delivery_module,
+        "recover_stale_background_work_delivery_in_progress",
+        recover_background,
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "recover_stale_delivery_in_progress_tasks",
+        recover_accepted_task,
+    )
+    return recover_background, recover_accepted_task
 
 
 def test_result_source_builder_creates_prompt_safe_episode() -> None:
@@ -98,6 +129,75 @@ def test_result_source_payload_uses_generic_background_work_metadata() -> None:
     assert "objective_summary" not in serialized_payload
     assert "source_platform_bot_id" not in serialized_payload
     assert "worker_metadata" not in serialized_payload
+
+
+def test_accepted_task_result_source_builder_creates_prompt_safe_episode() -> None:
+    """Accepted-task jobs should produce accepted-task result-ready cognition."""
+
+    result_source = importlib.import_module(
+        "kazusa_ai_chatbot.background_work.result_source"
+    )
+
+    episode = result_source.build_result_ready_episode_from_job(
+        _accepted_task_completed_job()
+    )
+    serialized = json.dumps(episode, ensure_ascii=False).lower()
+
+    assert episode["trigger_source"] == "accepted_task_result_ready"
+    assert episode["input_sources"] == ["accepted_task_result"]
+    assert episode["output_mode"] == "visible_reply"
+    metadata = episode["percepts"][0]["metadata"]
+    assert metadata["accepted_task_id"] == "task-001"
+    assert metadata["accepted_task_summary"] == (
+        "Generate a Fibonacci function snippet."
+    )
+    for forbidden in (
+        "background_work_result_ready",
+        "background_work_result",
+        "worker_metadata",
+        "worker",
+        "job_ref",
+        "queue_state",
+    ):
+        assert forbidden not in serialized
+
+
+def test_accepted_task_result_payload_uses_semantic_metadata() -> None:
+    """Prompt payload should expose accepted-task result fields only."""
+
+    result_source = importlib.import_module(
+        "kazusa_ai_chatbot.background_work.result_source"
+    )
+    episode = result_source.build_result_ready_episode_from_job(
+        _accepted_task_completed_job()
+    )
+    selection = select_cognition_prompt_variant(
+        episode=episode,
+        stage="l2d_action_selection",
+    )
+
+    payload = build_cognition_prompt_source_payload(
+        episode=episode,
+        selection=selection,
+    )
+
+    result_payload = payload["accepted_task_result"]
+    metadata = result_payload["metadata"]
+    assert metadata == {
+        "accepted_task_summary": "Generate a Fibonacci function snippet.",
+        "failure_summary": "",
+        "result_summary": "Generated a compact Fibonacci snippet.",
+        "source_character_name": "Test Character",
+    }
+    serialized_payload = json.dumps(payload, ensure_ascii=False).lower()
+    for forbidden in (
+        "background_work_result",
+        "worker_metadata",
+        "worker",
+        "job_ref",
+        "queue_state",
+    ):
+        assert forbidden not in serialized_payload
 
 
 @pytest.mark.asyncio
@@ -201,6 +301,145 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
     assert dispatch_context.bot_permission_role == "background_work_result"
     assert dispatch_context.source_platform_bot_id == "bot-1"
     post_turn.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_delivery_tick_syncs_accepted_task_delivery_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Accepted-task delivery should move through in-progress to delivered."""
+
+    delivery_module = importlib.import_module(
+        "kazusa_ai_chatbot.background_work.delivery"
+    )
+    job = _accepted_task_completed_job()
+    job["delivery_state"] = "ready"
+    find_jobs = AsyncMock(return_value=[job])
+    mark_job_in_progress = AsyncMock(return_value={
+        **job,
+        "delivery_state": "in_progress",
+        "delivery_tracking_id": "delivery-001",
+    })
+    mark_job_delivered = AsyncMock(return_value={**job, "status": "delivered"})
+    mark_task_in_progress = AsyncMock()
+    mark_task_delivered = AsyncMock()
+    mark_task_failed = AsyncMock()
+    _patch_delivery_recovery(monkeypatch, delivery_module)
+    deliver_episode = AsyncMock(return_value={
+        "status": "delivered",
+        "conversation_message_id": "conversation-001",
+    })
+
+    monkeypatch.setattr(
+        delivery_module,
+        "find_deliverable_background_work_jobs",
+        find_jobs,
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_background_work_delivery_in_progress",
+        mark_job_in_progress,
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_background_work_delivered",
+        mark_job_delivered,
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_accepted_task_delivery_in_progress",
+        mark_task_in_progress,
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_accepted_task_delivered",
+        mark_task_delivered,
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "mark_accepted_task_delivery_failed",
+        mark_task_failed,
+    )
+
+    result = await delivery_module.run_background_work_delivery_tick(
+        deliver_result_episode_func=deliver_episode,
+        limit=1,
+    )
+
+    assert result == {
+        "processed_count": 1,
+        "delivered_count": 1,
+        "failed_count": 0,
+        "recovered_count": 0,
+    }
+    mark_task_in_progress.assert_awaited_once()
+    assert mark_task_in_progress.await_args.kwargs["accepted_task_id"] == (
+        "task-001"
+    )
+    mark_task_delivered.assert_awaited_once()
+    assert mark_task_delivered.await_args.kwargs["accepted_task_id"] == (
+        "task-001"
+    )
+    assert mark_task_delivered.await_args.kwargs[
+        "delivered_conversation_message_id"
+    ] == "conversation-001"
+    mark_task_failed.assert_not_awaited()
+    delivered_episode = deliver_episode.await_args.args[0]
+    assert delivered_episode["trigger_source"] == "accepted_task_result_ready"
+
+
+@pytest.mark.asyncio
+async def test_delivery_tick_recovers_stale_delivery_claims_before_scan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stuck internal and accepted-task delivery claims should be retried."""
+
+    delivery_module = importlib.import_module(
+        "kazusa_ai_chatbot.background_work.delivery"
+    )
+    find_jobs = AsyncMock(return_value=[])
+    recover_background, recover_accepted_task = _patch_delivery_recovery(
+        monkeypatch,
+        delivery_module,
+        background_count=2,
+        accepted_task_count=1,
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "find_deliverable_background_work_jobs",
+        find_jobs,
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "storage_utc_now",
+        lambda: datetime(2026, 5, 16, 9, 10, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(
+        delivery_module,
+        "BACKGROUND_WORK_WORKER_LEASE_SECONDS",
+        120,
+    )
+
+    result = await delivery_module.run_background_work_delivery_tick(
+        deliver_result_episode_func=AsyncMock(),
+        limit=1,
+    )
+
+    assert result == {
+        "processed_count": 0,
+        "delivered_count": 0,
+        "failed_count": 0,
+        "recovered_count": 3,
+    }
+    recover_background.assert_awaited_once_with(
+        stale_before_utc="2026-05-16T09:08:00+00:00",
+        recovered_at="2026-05-16T09:10:00+00:00",
+    )
+    recover_accepted_task.assert_awaited_once_with(
+        stale_before_utc="2026-05-16T09:08:00+00:00",
+        recovered_at="2026-05-16T09:10:00+00:00",
+    )
+    find_jobs.assert_awaited_once_with(limit=1)
 
 
 def test_delivery_failure_summary_field_exists_in_job_schema() -> None:

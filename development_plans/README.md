@@ -38,7 +38,6 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [background_work_semantic_lifecycle_plan.md](active/short_term/background_work_semantic_lifecycle_plan.md) | High-risk background-work semantic lifecycle and duplicate-scheduling plan | draft |
 | [coding_agent_phase1_fetching_reading_plan.md](active/short_term/coding_agent_phase1_fetching_reading_plan.md) | Large standalone coding-agent Phase 1 plan | draft |
 | [control_console_auto_model_discovery_picker_plan.md](active/short_term/control_console_auto_model_discovery_picker_plan.md) | Medium control-console automatic model discovery picker plan | completed |
 | [control_console_brain_model_route_config_plan.md](active/short_term/control_console_brain_model_route_config_plan.md) | Large control-console Brain model route configuration plan | completed |
@@ -164,6 +163,7 @@ plans.
 | [backend_control_console_development_plan.md](archive/completed/short_term/backend_control_console_development_plan.md) |
 | [backend_control_console_web_test_plan.md](archive/completed/short_term/backend_control_console_web_test_plan.md) |
 | [background_artifact_handoff_poc_plan.md](archive/completed/short_term/background_artifact_handoff_poc_plan.md) |
+| [background_work_semantic_lifecycle_plan.md](archive/completed/short_term/background_work_semantic_lifecycle_plan.md) |
 | [cache2_agent_stats_health_plan.md](archive/completed/short_term/cache2_agent_stats_health_plan.md) |
 | [channel_name_semantic_projection_plan.md](archive/completed/short_term/channel_name_semantic_projection_plan.md) |
 | [character_local_time_context_plan.md](archive/completed/short_term/character_local_time_context_plan.md) |

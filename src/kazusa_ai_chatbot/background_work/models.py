@@ -45,6 +45,10 @@ class BackgroundWorkQueueRequest(TypedDict):
     idempotency_key: str
     task_brief: str
     source_context: NotRequired[str]
+    requested_worker: NotRequired[str]
+    worker_payload: NotRequired[dict[str, object]]
+    accepted_task_id: NotRequired[str]
+    task_identity_key: NotRequired[str]
     source_platform: str
     source_channel_id: str
     source_channel_type: str
@@ -59,8 +63,8 @@ class BackgroundWorkQueueRequest(TypedDict):
     storage_timestamp_utc: str
 
 
-class BackgroundWorkQueueResult(TypedDict):
-    """Prompt-safe queue result exposed to action traces and L3."""
+class BackgroundWorkQueueResult(TypedDict, total=False):
+    """Queue result with internal executor and semantic accepted-task fields."""
 
     status: Literal["pending", "rejected", "failed"]
     queue_state: str
@@ -71,9 +75,24 @@ class BackgroundWorkQueueResult(TypedDict):
     operational_owner: Literal["background_work_job"]
     acknowledgement_constraint: Literal[
         "promise_allowed",
+        "progress_report_allowed",
         "promise_forbidden_explain_failure",
     ]
     evidence_ref: NotRequired[dict[str, str]]
+    accepted_task_id: str
+    task_identity_key: str
+    accepted_task_state: Literal[
+        "scheduled",
+        "already_active",
+        "running",
+        "result_ready",
+        "delivered",
+        "failed",
+        "enqueue_failed",
+        "delivery_failed",
+    ]
+    accepted_task_summary: str
+    wait_guidance: Literal["non_numeric_wait", "no_wait", "unavailable"]
 
 
 class BackgroundWorkRouterDecision(TypedDict):
@@ -88,6 +107,7 @@ class BackgroundWorkWorkerDecision(BackgroundWorkRouterDecision, total=False):
     """Route decision plus deterministic context passed to a worker."""
 
     source_summary: str
+    worker_payload: dict[str, object]
 
 
 class BackgroundWorkResult(TypedDict):
@@ -115,6 +135,8 @@ class BackgroundWorkJobDoc(TypedDict, total=False):
     job_id: str
     idempotency_key: str
     source_action_attempt_id: str
+    accepted_task_id: str
+    task_identity_key: str
     status: BackgroundWorkJobStatus
     delivery_state: BackgroundWorkDeliveryState
     task_brief: str
@@ -140,6 +162,8 @@ class BackgroundWorkJobDoc(TypedDict, total=False):
     routed_task: str
     router_reason: str
     source_context: str
+    requested_worker: str
+    worker_payload: dict[str, object]
     artifact_text: str
     artifact_char_count: int
     failure_summary: str

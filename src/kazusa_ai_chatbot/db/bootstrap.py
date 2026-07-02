@@ -19,6 +19,8 @@ from kazusa_ai_chatbot.background_artifact.models import (
 from kazusa_ai_chatbot.background_work.models import (
     BACKGROUND_WORK_JOBS_COLLECTION,
 )
+from kazusa_ai_chatbot.accepted_task.models import ACCEPTED_TASKS_COLLECTION
+from kazusa_ai_chatbot.db.accepted_tasks import ensure_accepted_task_indexes
 from kazusa_ai_chatbot.db.background_artifact_jobs import (
     ensure_background_artifact_job_indexes,
 )
@@ -114,6 +116,7 @@ async def db_bootstrap() -> None:
         LLM_TRACE_STEPS_COLLECTION,
         SELF_COGNITION_ACTION_ATTEMPTS_COLLECTION,
         SELF_COGNITION_GROUP_REVIEW_WINDOWS_COLLECTION,
+        ACCEPTED_TASKS_COLLECTION,
         BACKGROUND_WORK_JOBS_COLLECTION,
         BACKGROUND_ARTIFACT_JOBS_COLLECTION,
         INTERNAL_MONOLOGUE_RESIDUE_COLLECTION,
@@ -247,6 +250,7 @@ async def db_bootstrap() -> None:
         name="self_cognition_group_review_window_reviewed_at",
     )
     await ensure_background_artifact_job_indexes()
+    await ensure_accepted_task_indexes()
     await ensure_background_work_job_indexes()
     await db.conversation_episode_state.create_index(
         [("platform", 1), ("platform_channel_id", 1), ("global_user_id", 1)],

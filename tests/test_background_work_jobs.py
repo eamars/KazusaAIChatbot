@@ -173,3 +173,207 @@ def test_source_context_defaults_to_empty_when_absent() -> None:
     }
     job = build(request, job_id="job-ctx-002", storage_timestamp_utc="2026-06-06T00:00:00+00:00")
     assert job["source_context"] == ""
+
+
+@pytest.mark.asyncio
+async def test_background_work_action_claims_accepted_task_before_enqueue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """New delayed work should create accepted-task state before job insert."""
+
+    from kazusa_ai_chatbot.action_spec.handlers import background_work
+
+    action_spec = _background_work_action_spec_for_handler()
+    accepted_task = {
+        "accepted_task_id": "task-001",
+        "task_identity_key": "accepted_task:v1:abc",
+        "state": "enqueueing",
+        "accepted_task_summary": "Generate a Fibonacci function snippet.",
+    }
+    create_task = AsyncMock(return_value={
+        "status": "created",
+        "task": accepted_task,
+    })
+    mark_pending = AsyncMock(return_value={
+        **accepted_task,
+        "state": "pending",
+        "executor_ref": "job-001",
+    })
+    monkeypatch.setattr(
+        background_work,
+        "create_or_return_active_accepted_task",
+        create_task,
+    )
+    monkeypatch.setattr(
+        background_work,
+        "mark_accepted_task_pending",
+        mark_pending,
+    )
+    queued_requests: list[dict[str, object]] = []
+
+    async def enqueue_background_work(request: dict[str, object]) -> dict:
+        queued_requests.append(request)
+        return {
+            "status": "pending",
+            "queue_state": "queued",
+            "job_id": "job-001",
+            "job_ref": "background_work_job:job-001",
+            "task_summary": request["task_brief"],
+            "result_summary": "Background work job queued.",
+            "operational_owner": "background_work_job",
+            "acknowledgement_constraint": "promise_allowed",
+        }
+
+    result = await background_work.enqueue_background_work_action(
+        action_spec,
+        storage_timestamp_utc="2026-06-06T00:00:00+00:00",
+        action_attempt_id="action_attempt:bg-001",
+        enqueue_background_work_func=enqueue_background_work,
+    )
+
+    assert result["accepted_task_state"] == "scheduled"
+    assert result["accepted_task_summary"] == (
+        "Generate a Fibonacci function snippet."
+    )
+    assert result["wait_guidance"] == "non_numeric_wait"
+    assert len(queued_requests) == 1
+    queued = queued_requests[0]
+    assert queued["accepted_task_id"] == "task-001"
+    assert queued["task_identity_key"] == "accepted_task:v1:abc"
+    assert queued["idempotency_key"] == "background_work:task-001"
+    mark_pending.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_background_work_duplicate_accepted_task_does_not_enqueue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Duplicate active tasks should report progress without another job."""
+
+    from kazusa_ai_chatbot.action_spec.handlers import background_work
+
+    action_spec = _background_work_action_spec_for_handler()
+    create_task = AsyncMock(return_value={
+        "status": "already_active",
+        "task": {
+            "accepted_task_id": "task-001",
+            "task_identity_key": "accepted_task:v1:abc",
+            "state": "pending",
+            "accepted_task_summary": "Generate a Fibonacci function snippet.",
+        },
+    })
+    monkeypatch.setattr(
+        background_work,
+        "create_or_return_active_accepted_task",
+        create_task,
+    )
+
+    async def enqueue_background_work(request: dict[str, object]) -> dict:
+        del request
+        raise AssertionError("duplicate task should not enqueue another job")
+
+    result = await background_work.enqueue_background_work_action(
+        action_spec,
+        storage_timestamp_utc="2026-06-06T00:00:00+00:00",
+        action_attempt_id="action_attempt:bg-001",
+        enqueue_background_work_func=enqueue_background_work,
+    )
+
+    assert result["status"] == "pending"
+    assert result["accepted_task_state"] == "already_active"
+    assert result["acknowledgement_constraint"] == "progress_report_allowed"
+    assert result["wait_guidance"] == "non_numeric_wait"
+
+
+def test_background_work_job_document_persists_accepted_task_audit_fields() -> None:
+    """Internal queue rows should carry accepted-task audit linkage."""
+
+    jobs = importlib.import_module("kazusa_ai_chatbot.background_work.jobs")
+    build = getattr(jobs, "_build_job_document")
+    request = _background_work_queue_request_for_handler()
+    request["accepted_task_id"] = "task-001"
+    request["task_identity_key"] = "accepted_task:v1:abc"
+    request["idempotency_key"] = "background_work:task-001"
+
+    job = build(
+        request,
+        job_id="job-accepted-task-001",
+        storage_timestamp_utc="2026-06-06T00:00:00+00:00",
+    )
+
+    assert job["accepted_task_id"] == "task-001"
+    assert job["task_identity_key"] == "accepted_task:v1:abc"
+    assert job["idempotency_key"] == "background_work:task-001"
+
+
+def _background_work_action_spec_for_handler() -> dict:
+    return {
+        "schema_version": "action_spec.v1",
+        "kind": "background_work_request",
+        "cognition_mode": "deliberative",
+        "source_refs": [
+            {
+                "schema_version": "action_source_ref.v1",
+                "ref_kind": "cognitive_episode",
+                "ref_id": "current_cognitive_episode",
+                "owner": "cognition_episode",
+                "relationship": "basis",
+                "evidence_refs": [],
+            }
+        ],
+        "target": {
+            "schema_version": "action_target.v1",
+            "target_kind": "current_user",
+            "target_id": None,
+            "owner": "background_work",
+            "scope": {
+                "source_platform": "debug",
+                "source_channel_id": "debug:user:test-user",
+                "source_channel_type": "private",
+                "source_message_id": "message-001",
+                "source_platform_bot_id": "debug-bot-001",
+                "source_character_name": "Test Character",
+                "source_trigger_source": "user_message",
+                "requester_global_user_id": "global-user-001",
+                "requester_platform_user_id": "debug-user-001",
+                "requester_display_name": "Test User",
+            },
+        },
+        "params": {
+            "task_brief": "Generate a Fibonacci function snippet.",
+            "requested_delivery": "send_result_when_done",
+            "max_output_chars": 3000,
+        },
+        "urgency": "background",
+        "visibility": "private",
+        "deadline": None,
+        "continuation": {
+            "schema_version": "action_continuation.v1",
+            "mode": "none",
+            "episode_type": None,
+            "max_depth": 0,
+            "include_result_as": None,
+        },
+        "reason": "The user requested bounded delayed text work.",
+    }
+
+
+def _background_work_queue_request_for_handler() -> dict:
+    return {
+        "action_attempt_id": "action_attempt:bg-001",
+        "idempotency_key": "background_work:task-001",
+        "task_brief": "Generate a Fibonacci function snippet.",
+        "source_context": "The user requested bounded delayed text work.",
+        "source_platform": "debug",
+        "source_channel_id": "debug:user:test-user",
+        "source_channel_type": "private",
+        "source_message_id": "message-001",
+        "source_platform_bot_id": "debug-bot-001",
+        "source_character_name": "Test Character",
+        "requester_global_user_id": "global-user-001",
+        "requester_platform_user_id": "debug-user-001",
+        "requester_display_name": "Test User",
+        "requested_delivery": "send_result_when_done",
+        "max_output_chars": 3000,
+        "storage_timestamp_utc": "2026-06-06T00:00:00+00:00",
+    }
