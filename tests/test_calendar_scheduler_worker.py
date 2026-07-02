@@ -18,6 +18,7 @@ class _RepositoryDouble:
         self.succeeded: list[dict[str, Any]] = []
         self.failed: list[dict[str, Any]] = []
         self.skipped: list[dict[str, Any]] = []
+        self.deferred: list[dict[str, Any]] = []
 
     async def claim_due_calendar_runs(
         self,
@@ -87,6 +88,22 @@ class _RepositoryDouble:
         })
         return True
 
+    async def mark_calendar_run_deferred(
+        self,
+        run_id: str,
+        *,
+        lease_owner: str,
+        storage_timestamp_utc: str,
+        reason: str,
+    ) -> bool:
+        self.deferred.append({
+            "run_id": run_id,
+            "lease_owner": lease_owner,
+            "storage_timestamp_utc": storage_timestamp_utc,
+            "reason": reason,
+        })
+        return True
+
 
 @pytest.mark.asyncio
 async def test_worker_tick_dispatches_claimed_runs_to_typed_handler() -> None:
@@ -127,6 +144,7 @@ async def test_worker_tick_dispatches_claimed_runs_to_typed_handler() -> None:
         "completed_count": 1,
         "failed_count": 0,
         "skipped_count": 0,
+        "deferred_count": 0,
     }
     assert handled_runs == repository.runs
     assert repository.succeeded == [
@@ -173,6 +191,7 @@ async def test_worker_tick_fails_unknown_trigger_without_running_code() -> None:
         "completed_count": 0,
         "failed_count": 1,
         "skipped_count": 0,
+        "deferred_count": 0,
     }
     assert repository.succeeded == []
     assert repository.failed == [
@@ -230,6 +249,7 @@ async def test_worker_tick_marks_skipped_handler_result_skipped() -> None:
         "completed_count": 0,
         "failed_count": 0,
         "skipped_count": 1,
+        "deferred_count": 0,
     }
     assert repository.succeeded == []
     assert repository.skipped == [
@@ -238,6 +258,65 @@ async def test_worker_tick_marks_skipped_handler_result_skipped() -> None:
             "lease_owner": "worker-a",
             "storage_timestamp_utc": NOW_UTC,
             "reason": "stale_active_commitment_due_at",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_worker_tick_requeues_deferred_handler_result() -> None:
+    """Deferred handler results should requeue instead of completing runs."""
+
+    from kazusa_ai_chatbot.calendar_scheduler import models, worker
+
+    repository = _RepositoryDouble(
+        [
+            {
+                "run_id": "run-deferred",
+                "trigger_kind": models.TRIGGER_REFLECTION_PHASE_SLOT,
+                "payload": {"reflection_phase_intent": {}},
+            }
+        ]
+    )
+
+    async def handle_reflection_phase(run: dict[str, Any]) -> dict[str, Any]:
+        assert run["run_id"] == "run-deferred"
+        return {
+            "status": "deferred",
+            "defer_reason": "same_scope_foreground_active",
+        }
+
+    registry = worker.CalendarRunHandlerRegistry()
+    registry.register(
+        models.TRIGGER_REFLECTION_PHASE_SLOT,
+        handle_reflection_phase,
+    )
+
+    result = await worker.run_calendar_worker_tick(
+        current_timestamp_utc=NOW_UTC,
+        repository=repository,
+        handler_registry=registry,
+        lease_owner="worker-a",
+        lease_duration_seconds=300,
+        claim_limit=2,
+        max_attempts=3,
+    )
+
+    assert result == {
+        "claimed_count": 1,
+        "completed_count": 0,
+        "failed_count": 0,
+        "skipped_count": 0,
+        "deferred_count": 1,
+    }
+    assert repository.succeeded == []
+    assert repository.failed == []
+    assert repository.skipped == []
+    assert repository.deferred == [
+        {
+            "run_id": "run-deferred",
+            "lease_owner": "worker-a",
+            "storage_timestamp_utc": NOW_UTC,
+            "reason": "same_scope_foreground_active",
         }
     ]
 
@@ -285,6 +364,7 @@ async def test_worker_tick_marks_handler_exception_failed() -> None:
         "completed_count": 0,
         "failed_count": 1,
         "skipped_count": 0,
+        "deferred_count": 0,
     }
     assert repository.succeeded == []
     assert repository.skipped == []
@@ -334,6 +414,7 @@ async def test_calendar_worker_loop_materializes_reflection_period_before_claims
             "completed_count": 0,
             "failed_count": 0,
             "skipped_count": 0,
+            "deferred_count": 0,
         }
 
     repository_double = repository

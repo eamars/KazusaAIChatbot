@@ -246,10 +246,10 @@ promotion records a skipped/deferred result and performs no memory mutation.
 ## Worker Schedule
 
 FastAPI lifespan owns exactly one reflection worker task when
-`REFLECTION_CYCLE_ENABLED` is true. The service passes an always-idle
-busy-probe callback so reflection and normal chat run independently; the worker
-never imports service state. Durable phase slot execution is owned by the
-calendar scheduler worker, not by a second reflection-local control plane.
+`REFLECTION_CYCLE_ENABLED` is true. The service keeps ordinary reflection
+records outside the live chat response path, and the worker never imports
+service queue state. Durable phase slot execution is owned by the calendar
+scheduler worker, not by a second reflection-local control plane.
 
 Default schedule:
 
@@ -298,6 +298,13 @@ Per phase intent:
 8. Record the selected window as `reviewed`, `target_binding_failed`,
    `review_failed`, or `stale_skipped`.
 
+Before group self-cognition review fetches profile data or builds a source
+case, it must request background admission from
+`kazusa_ai_chatbot.runtime_coordination` for the selected channel scope. A
+same-scope foreground run defers the group review with
+`defer_reason="same_scope_foreground_active"` and leaves the selected window
+unreviewed so a later phase can rebuild fresh context.
+
 Group self-cognition review is not a second scheduler and no longer runs as a
 global newest-first batch. It derives non-empty 15-minute group activity
 windows from the selected phase scope only. Group scopes are eligible when the
@@ -333,8 +340,11 @@ group-review phase handler shares the monitored activity projection only;
 hourly and daily reflection records continue to contribute to normal cognition
 only through the existing promoted, gated reflection context.
 
-The service does not serialize reflection behind `/chat`. Both paths may run at
-the same time and may contend for shared LLM or database resources.
+The service does not serialize ordinary reflection records behind `/chat`.
+Both paths may run at the same time and may contend for shared LLM or database
+resources. The exception is visible-output-capable group self-cognition review:
+it follows the shared same-channel runtime coordination rule before it can
+dispatch speech.
 
 `CHARACTER_SLEEP_LOCAL_PERIOD` is shared by self-cognition trigger policy and
 daily affect settling. When the current character-local time is inside that

@@ -497,3 +497,44 @@ async def test_mark_run_skipped_is_lease_bound() -> None:
             "lease_expires_at": None,
         }
     }
+
+
+@pytest.mark.asyncio
+async def test_mark_run_deferred_requeues_without_consuming_attempt() -> None:
+    """Deferred runs should release their lease and restore the claim attempt."""
+
+    from kazusa_ai_chatbot.calendar_scheduler import models, repository
+
+    db = _db()
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(repository, "get_db", AsyncMock(return_value=db))
+        ok = await repository.mark_calendar_run_deferred(
+            "run-1",
+            lease_owner="worker-a",
+            storage_timestamp_utc=NOW_UTC,
+            reason="same_scope_foreground_active",
+        )
+
+    assert ok is True
+    update_call = db.calendar_runs.update_one.await_args
+    assert update_call.args[0] == {
+        "run_id": "run-1",
+        "status": models.RUN_STATUS_RUNNING,
+        "lease_owner": "worker-a",
+        "attempt_count": {"$gte": 1},
+    }
+    assert update_call.args[1] == {
+        "$set": {
+            "status": models.RUN_STATUS_PENDING,
+            "updated_at": NOW_UTC,
+            "failure_summary": {
+                "deferred": True,
+                "reason": "same_scope_foreground_active",
+                "retryable": True,
+            },
+            "lease_owner": None,
+            "lease_expires_at": None,
+        },
+        "$inc": {"attempt_count": -1},
+    }

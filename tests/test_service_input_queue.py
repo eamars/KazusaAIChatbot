@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -276,6 +277,49 @@ def _patch_common_dependencies(monkeypatch, graph) -> None:
         AsyncMock(side_effect=lambda state: state),
     )
     monkeypatch.setattr(service_module, "_graph", graph)
+
+
+class _ForegroundHandle:
+    """Foreground pipeline handle double for queue lifecycle tests."""
+
+    def __init__(self) -> None:
+        self.entered = False
+        self.closed = False
+
+    async def __aenter__(self):
+        self.entered = True
+        return self
+
+    async def __aexit__(self, _exc_type, _exc, _tb) -> None:
+        self.closed = True
+
+    def cancelled(self) -> bool:
+        return_value = False
+        return return_value
+
+    def raise_if_cancelled(self, _checkpoint: str) -> None:
+        return None
+
+
+class _CoordinatorDouble:
+    """Coordinator double that records foreground queue coordination calls."""
+
+    def __init__(self) -> None:
+        self.handle = _ForegroundHandle()
+        self.cancelled: list[dict[str, object]] = []
+        self.started: list[dict[str, object]] = []
+
+    def request_cancellation(self, **kwargs) -> list[str]:
+        self.cancelled.append(kwargs)
+        return []
+
+    async def start_run(self, **kwargs):
+        self.started.append(kwargs)
+        return SimpleNamespace(
+            admitted=True,
+            handle=self.handle,
+            defer_reason=None,
+        )
 
 
 @pytest.mark.asyncio
@@ -828,6 +872,132 @@ async def test_chat_enqueue_path_does_not_save_directly(monkeypatch) -> None:
     assert response.messages == []
     save_conversation.assert_not_awaited()
     await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_enqueue_requests_same_scope_background_cancellation(
+    monkeypatch,
+) -> None:
+    """Foreground enqueue should cancel same-scope background pipelines."""
+
+    from kazusa_ai_chatbot.runtime_coordination import PipelineScope
+
+    await _reset_queue_state()
+    coordinator = _CoordinatorDouble()
+    monkeypatch.setattr(
+        service_module,
+        "_pipeline_coordinator",
+        coordinator,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_ensure_chat_input_worker_started",
+        lambda **_kwargs: None,
+    )
+
+    enqueue_task = asyncio.create_task(
+        service_module._enqueue_chat_request(_request("foreground"))
+    )
+    await asyncio.sleep(0)
+
+    queued_item = service_module._chat_input_queue.pop_left_for_test()
+
+    assert coordinator.cancelled == [
+        {
+            "scope": PipelineScope(
+                platform="qq",
+                platform_channel_id="chan-1",
+                channel_type="group",
+            ),
+            "requested_by": "service.chat_queue",
+            "reason": "same_scope_foreground_pending",
+        }
+    ]
+    assert coordinator.started[0]["scope"] == PipelineScope(
+        platform="qq",
+        platform_channel_id="chan-1",
+        channel_type="group",
+    )
+    assert coordinator.started[0]["precedence"] == "foreground"
+    assert coordinator.started[0]["run_kind"] == "chat"
+    assert getattr(queued_item, "pipeline_run_handle") is coordinator.handle
+
+    queued_item.future.set_result(service_module.ChatResponse())
+    response = await asyncio.wait_for(enqueue_task, timeout=1.0)
+
+    assert response.messages == []
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_enqueue_wait_keeps_foreground_handle(
+    monkeypatch,
+) -> None:
+    """Caller cancellation after enqueue must not reopen background admission."""
+
+    await _reset_queue_state()
+    coordinator = _CoordinatorDouble()
+    monkeypatch.setattr(
+        service_module,
+        "_pipeline_coordinator",
+        coordinator,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_ensure_chat_input_worker_started",
+        lambda **_kwargs: None,
+    )
+
+    enqueue_task = asyncio.create_task(
+        service_module._enqueue_chat_request(_request("foreground"))
+    )
+    await asyncio.sleep(0)
+
+    assert service_module._chat_input_queue.pending_count() == 1
+    enqueue_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await enqueue_task
+
+    queued_item = service_module._chat_input_queue.pop_left_for_test()
+    assert getattr(queued_item, "pipeline_run_handle") is coordinator.handle
+    assert coordinator.handle.closed is False
+
+    await queued_item.pipeline_run_handle.__aexit__(None, None, None)
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_dropped_queue_item_releases_foreground_handle(monkeypatch) -> None:
+    """Pruned foreground items must not leak same-scope coordination handles."""
+
+    await _reset_queue_state()
+    item = _item(1)
+    handle = _ForegroundHandle()
+    item.pipeline_run_handle = handle
+    monkeypatch.setattr(
+        service_module,
+        "_resolve_queued_user",
+        AsyncMock(return_value=("global-user-1", {"affinity": 500})),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_hydrate_reply_context",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_save_user_message_from_item",
+        AsyncMock(return_value="row-1"),
+    )
+
+    committed = await service_module._drop_queued_chat_item(item)
+
+    assert committed is True
+    assert item.future.done()
+    assert handle.closed is True
+
 
 @pytest.mark.asyncio
 async def test_worker_saves_dropped_messages_before_next_graph(monkeypatch) -> None:

@@ -22,6 +22,12 @@ from kazusa_ai_chatbot.config import (
 from kazusa_ai_chatbot import db, event_logging
 from kazusa_ai_chatbot.dispatcher.adapter_iface import AdapterRegistry
 from kazusa_ai_chatbot.nodes.dialog_agent import StateContractError
+from kazusa_ai_chatbot.runtime_coordination import (
+    PipelineCancelled,
+    PipelineCoordinator,
+    PipelineRunHandle,
+    PipelineScope,
+)
 from kazusa_ai_chatbot.self_cognition.delivery import (
     SelfCognitionDeliveryResult,
     deliver_selected_speak,
@@ -71,6 +77,7 @@ def start_self_cognition_worker(
     adapter_registry_provider: Callable[[], AdapterRegistry | None] | None = None,
     latest_cognition_graph_publisher: Callable[[dict[str, Any]], Any] | None = None,
     should_pause_for_affect_settling: Callable[..., Any] | None = None,
+    pipeline_coordinator: PipelineCoordinator | None = None,
 ) -> SelfCognitionWorkerHandle:
     """Start the process-local self-cognition worker loop.
 
@@ -82,6 +89,8 @@ def start_self_cognition_worker(
             the most recent self-cognition graph snapshot.
         should_pause_for_affect_settling: Optional service-level probe used to
             pause source collection while daily affect settling is pending.
+        pipeline_coordinator: Optional runtime coordinator used to admit and
+            cancel scoped background self-cognition runs.
 
     Returns:
         Worker handle used for shutdown.
@@ -96,6 +105,7 @@ def start_self_cognition_worker(
             adapter_registry_provider=adapter_registry_provider,
             latest_cognition_graph_publisher=latest_cognition_graph_publisher,
             should_pause_for_affect_settling=should_pause_for_affect_settling,
+            pipeline_coordinator=pipeline_coordinator,
         )
     )
     handle = SelfCognitionWorkerHandle(task=task, stop_event=stop_event)
@@ -132,9 +142,12 @@ async def run_self_cognition_worker_tick(
     claim_calendar_run_func: Callable[..., Any] | None = None,
     fail_calendar_run_func: Callable[..., Any] | None = None,
     skip_calendar_run_func: Callable[..., Any] | None = None,
+    defer_calendar_run_func: Callable[..., Any] | None = None,
     adapter_registry_provider: Callable[[], AdapterRegistry | None] | None = None,
     latest_cognition_graph_publisher: Callable[[dict[str, Any]], Any] | None = None,
     should_pause_for_affect_settling: Callable[..., Any] | None = None,
+    pipeline_coordinator: PipelineCoordinator | None = None,
+    pipeline_run_handle: PipelineRunHandle | None = None,
     max_cases: int = SELF_COGNITION_MAX_CASES_PER_TICK,
 ) -> SelfCognitionWorkerResult:
     """Run one bounded self-cognition worker tick.
@@ -155,11 +168,15 @@ async def run_self_cognition_worker_tick(
             failures.
         skip_calendar_run_func: Optional test seam for terminal source run
             skips.
+        defer_calendar_run_func: Optional test seam for source run deferral.
         adapter_registry_provider: Optional live adapter registry provider.
         latest_cognition_graph_publisher: Optional telemetry publisher for
             successful self-cognition artifacts.
         should_pause_for_affect_settling: Optional service-level pause probe
             called before source collection.
+        pipeline_coordinator: Optional runtime coordinator used to start
+            scoped background runs for standalone worker cases.
+        pipeline_run_handle: Optional caller-owned background run handle.
         max_cases: Maximum cases to process in this tick.
 
     Returns:
@@ -222,6 +239,10 @@ async def run_self_cognition_worker_tick(
     active_skip_calendar_run = (
         skip_calendar_run_func or calendar_repository.mark_calendar_run_skipped
     )
+    active_defer_calendar_run = (
+        defer_calendar_run_func
+        or calendar_repository.mark_calendar_run_deferred
+    )
     adapter_registry = _adapter_registry_for_tick(adapter_registry_provider)
 
     for case in cases[:max_cases]:
@@ -229,39 +250,87 @@ async def run_self_cognition_worker_tick(
             result.deferred = True
             result.defer_reason = "primary interaction busy"
             break
-        claimed = await _claim_source_calendar_run(
-            case,
-            now=now,
-            claim_calendar_run_func=active_claim_calendar_run,
-        )
-        if not claimed:
-            result.skipped_count += 1
-            continue
-        source_calendar_skip_reason = case.get("source_calendar_skip_reason")
-        if (
-            isinstance(source_calendar_skip_reason, str)
-            and source_calendar_skip_reason
-        ):
-            result.skipped_count += 1
-            await _skip_source_calendar_run(
+        active_pipeline_handle = pipeline_run_handle
+        owns_pipeline_handle = False
+        if active_pipeline_handle is None and pipeline_coordinator is not None:
+            pipeline_scope = _pipeline_scope_from_case(case)
+            if pipeline_scope is not None:
+                admission = await pipeline_coordinator.start_run(
+                    scope=pipeline_scope,
+                    owner="self_cognition.worker",
+                    precedence="background",
+                    run_kind=str(case.get("trigger_kind") or "self_cognition"),
+                )
+                if not admission.admitted:
+                    result.deferred = True
+                    result.defer_reason = admission.defer_reason or ""
+                    break
+                active_pipeline_handle = admission.handle
+                owns_pipeline_handle = active_pipeline_handle is not None
+
+        enter_run_phase = False
+        try:
+            claimed = await _claim_source_calendar_run(
                 case,
                 now=now,
-                skip_calendar_run_func=active_skip_calendar_run,
-                reason=source_calendar_skip_reason,
+                claim_calendar_run_func=active_claim_calendar_run,
+            )
+            if not claimed:
+                result.skipped_count += 1
+                continue
+            source_calendar_skip_reason = case.get(
+                "source_calendar_skip_reason"
+            )
+            if (
+                isinstance(source_calendar_skip_reason, str)
+                and source_calendar_skip_reason
+            ):
+                result.skipped_count += 1
+                await _skip_source_calendar_run(
+                    case,
+                    now=now,
+                    skip_calendar_run_func=active_skip_calendar_run,
+                    reason=source_calendar_skip_reason,
+                )
+                continue
+            if _target_binding_failed(case):
+                result.skipped_count += 1
+                await _record_target_binding_failed_event(case)
+                await _skip_source_calendar_run(
+                    case,
+                    now=now,
+                    skip_calendar_run_func=active_skip_calendar_run,
+                    reason="target_binding_failed",
+                )
+                continue
+            enter_run_phase = True
+        except Exception as exc:
+            logger.exception(
+                f"Self-cognition case pre-run failed: {exc}"
+            )
+            result.failed_count += 1
+            await event_logging.record_runtime_error_event(
+                component="self_cognition.worker",
+                error_class=type(exc).__name__,
+                error_preview=str(exc),
+                stack_fingerprint="self_cognition_case_pre_run",
+                top_frame_module=__name__,
+                recovered=True,
             )
             continue
-        if _target_binding_failed(case):
-            result.skipped_count += 1
-            await _record_target_binding_failed_event(case)
-            await _skip_source_calendar_run(
-                case,
-                now=now,
-                skip_calendar_run_func=active_skip_calendar_run,
-                reason="target_binding_failed",
+        finally:
+            await _release_owned_pipeline_handle(
+                active_pipeline_handle,
+                owns_pipeline_handle=(
+                    owns_pipeline_handle and not enter_run_phase
+                ),
             )
-            continue
         case_for_run = case
         try:
+            if active_pipeline_handle is not None:
+                active_pipeline_handle.raise_if_cancelled(
+                    "before_self_cognition_case",
+                )
             prior_attempts = await _call_maybe_async(
                 active_read_attempts,
                 limit=_ATTEMPT_HISTORY_LIMIT,
@@ -273,12 +342,18 @@ async def run_self_cognition_worker_tick(
                         case_for_run,
                         apply_consolidation=True,
                         execute_private_actions=True,
+                        pipeline_run_handle=active_pipeline_handle,
                     )
                 )
             else:
-                artifact_payloads = await _call_maybe_async(
+                artifact_payloads = await _call_run_case_func(
                     run_case_func,
                     case_for_run,
+                    pipeline_run_handle=active_pipeline_handle,
+                )
+            if active_pipeline_handle is not None:
+                active_pipeline_handle.raise_if_cancelled(
+                    "before_action_outputs",
                 )
             dispatch_status = await _handle_case_action_outputs(
                 case=case_for_run,
@@ -286,6 +361,7 @@ async def run_self_cognition_worker_tick(
                 now=now,
                 record_attempt_func=active_record_attempt,
                 adapter_registry=adapter_registry,
+                pipeline_run_handle=active_pipeline_handle,
             )
             await _record_self_cognition_event_from_artifacts(
                 case=case_for_run,
@@ -301,6 +377,16 @@ async def run_self_cognition_worker_tick(
                 now=now,
                 complete_calendar_run_func=active_complete_calendar_run,
             )
+        except PipelineCancelled as exc:
+            result.deferred = True
+            result.defer_reason = exc.cancellation.reason
+            await _defer_source_calendar_run(
+                case_for_run,
+                now=now,
+                defer_calendar_run_func=active_defer_calendar_run,
+                reason=exc.cancellation.reason,
+            )
+            break
         except StateContractError as exc:
             logger.exception(
                 f"Self-cognition case state contract failed: {exc}"
@@ -341,6 +427,11 @@ async def run_self_cognition_worker_tick(
                 recovered=True,
             )
             continue
+        finally:
+            await _release_owned_pipeline_handle(
+                active_pipeline_handle,
+                owns_pipeline_handle=owns_pipeline_handle,
+            )
         result.processed_count += 1
 
     await _record_worker_tick_event(result)
@@ -355,6 +446,7 @@ async def _self_cognition_worker_loop(
     adapter_registry_provider: Callable[[], AdapterRegistry | None] | None,
     latest_cognition_graph_publisher: Callable[[dict[str, Any]], Any] | None,
     should_pause_for_affect_settling: Callable[..., Any] | None = None,
+    pipeline_coordinator: PipelineCoordinator | None = None,
 ) -> None:
     """Run self-cognition scheduling ticks until stopped."""
 
@@ -372,6 +464,7 @@ async def _self_cognition_worker_loop(
                 should_pause_for_affect_settling=(
                     should_pause_for_affect_settling
                 ),
+                pipeline_coordinator=pipeline_coordinator,
             )
         except Exception as exc:
             logger.exception(f"Self-cognition worker tick failed: {exc}")
@@ -390,6 +483,88 @@ async def _self_cognition_worker_loop(
             )
         except TimeoutError:
             continue
+
+
+async def _release_owned_pipeline_handle(
+    pipeline_run_handle: PipelineRunHandle | None,
+    *,
+    owns_pipeline_handle: bool,
+) -> None:
+    """Release a coordinator handle only when this worker admitted it."""
+
+    if not owns_pipeline_handle or pipeline_run_handle is None:
+        return
+    await pipeline_run_handle.__aexit__(None, None, None)
+
+
+def _pipeline_scope_from_case(
+    case: models.SelfCognitionCase,
+) -> PipelineScope | None:
+    """Build a cancellation scope from a self-cognition target scope."""
+
+    target_scope = case.get("target_scope")
+    if not isinstance(target_scope, dict):
+        return_value = None
+        return return_value
+
+    platform = _optional_text(target_scope.get("platform"))
+    channel_id = _optional_text(target_scope.get("platform_channel_id"))
+    channel_type = _optional_text(target_scope.get("channel_type"))
+    if platform is None or channel_id is None or channel_type is None:
+        return_value = None
+        return return_value
+
+    scope = PipelineScope(
+        platform=platform,
+        platform_channel_id=channel_id,
+        channel_type=channel_type,
+    )
+    return scope
+
+
+async def _call_run_case_func(
+    run_case_func: Callable[..., Any],
+    case: models.SelfCognitionCase,
+    *,
+    pipeline_run_handle: PipelineRunHandle | None,
+) -> dict[str, Any]:
+    """Call a case-runner seam while preserving its declared call shape."""
+
+    signature = inspect.signature(run_case_func)
+    parameters = signature.parameters
+    accepts_var_keyword = any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters.values()
+    )
+    if accepts_var_keyword:
+        result = await _call_maybe_async(
+            run_case_func,
+            case=case,
+            pipeline_run_handle=pipeline_run_handle,
+        )
+        return result
+
+    if "pipeline_run_handle" in parameters:
+        if "case" in parameters:
+            result = await _call_maybe_async(
+                run_case_func,
+                case=case,
+                pipeline_run_handle=pipeline_run_handle,
+            )
+            return result
+        result = await _call_maybe_async(
+            run_case_func,
+            case,
+            pipeline_run_handle=pipeline_run_handle,
+        )
+        return result
+
+    if "case" in parameters:
+        result = await _call_maybe_async(run_case_func, case=case)
+        return result
+
+    result = await _call_maybe_async(run_case_func, case)
+    return result
 
 
 async def _collect_cases(
@@ -423,6 +598,7 @@ async def _handle_case_action_outputs(
     now: datetime,
     record_attempt_func: Callable[..., Any],
     adapter_registry: AdapterRegistry | None,
+    pipeline_run_handle: PipelineRunHandle | None = None,
 ) -> str:
     """Record or deliver selected action outputs for one case."""
 
@@ -433,11 +609,19 @@ async def _handle_case_action_outputs(
 
     attempt_status = str(action_attempt.get("status") or "")
     if attempt_status == models.ACTION_ATTEMPT_STATUS_DUPLICATE:
+        if pipeline_run_handle is not None:
+            pipeline_run_handle.raise_if_cancelled(
+                "before_action_attempt_persistence",
+            )
         attempt_state = _attempt_state(action_attempt, now=now)
         await _call_maybe_async(record_attempt_func, attempt_state)
         return_value = "duplicate_suppressed"
         return return_value
     if attempt_status == models.ACTION_ATTEMPT_STATUS_HELD:
+        if pipeline_run_handle is not None:
+            pipeline_run_handle.raise_if_cancelled(
+                "before_action_attempt_persistence",
+            )
         attempt_state = _attempt_state(action_attempt, now=now)
         await _call_maybe_async(record_attempt_func, attempt_state)
         return_value = "held"
@@ -457,6 +641,10 @@ async def _handle_case_action_outputs(
             "adapter_message_id": None,
             "failure_reason": "empty_text",
         }
+        if pipeline_run_handle is not None:
+            pipeline_run_handle.raise_if_cancelled(
+                "before_action_attempt_persistence",
+            )
         attempt_state = _attempt_state(
             _action_attempt_with_delivery_result(
                 action_attempt,
@@ -472,11 +660,17 @@ async def _handle_case_action_outputs(
         or not isinstance(action_candidate, dict)
         or not isinstance(delivery_target, dict)
     ):
+        if pipeline_run_handle is not None:
+            pipeline_run_handle.raise_if_cancelled(
+                "before_action_attempt_persistence",
+            )
         attempt_state = _attempt_state(action_attempt, now=now)
         await _call_maybe_async(record_attempt_func, attempt_state)
         return_value = "not_requested"
         return return_value
 
+    if pipeline_run_handle is not None:
+        pipeline_run_handle.raise_if_cancelled("before_dispatch")
     delivery_result = await deliver_selected_speak(
         text=str(action_candidate.get("text") or ""),
         delivery_target=delivery_target,
@@ -786,6 +980,36 @@ async def _skip_source_calendar_run(
 
     await _call_maybe_async(
         skip_calendar_run_func,
+        run_id,
+        lease_owner=_CALENDAR_LEASE_OWNER,
+        storage_timestamp_utc=now.isoformat(),
+        reason=reason,
+    )
+
+
+async def _defer_source_calendar_run(
+    case: models.SelfCognitionCase,
+    *,
+    now: datetime,
+    defer_calendar_run_func: Callable[..., Any],
+    reason: str,
+) -> None:
+    """Requeue a claimed source calendar run after cooperative cancellation."""
+
+    calendar_trigger_kind = (
+        _CALENDAR_TRIGGER_KIND_BY_SELF_COGNITION_TRIGGER.get(
+            case.get("trigger_kind"),
+        )
+    )
+    if calendar_trigger_kind is None:
+        return
+
+    run_id = case.get("source_calendar_run_id")
+    if not isinstance(run_id, str) or not run_id:
+        return
+
+    await _call_maybe_async(
+        defer_calendar_run_func,
         run_id,
         lease_owner=_CALENDAR_LEASE_OWNER,
         storage_timestamp_utc=now.isoformat(),

@@ -59,6 +59,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_memory_lifecycle import (
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
     empty_user_memory_context,
 )
+from kazusa_ai_chatbot.runtime_coordination import PipelineRunHandle
 from kazusa_ai_chatbot.self_cognition import models, projection, tracking
 from kazusa_ai_chatbot.time_boundary import (
     build_turn_clock_from_storage_utc,
@@ -84,6 +85,7 @@ def build_self_cognition_case_artifacts(
     *,
     apply_consolidation: bool = False,
     execute_private_actions: bool = False,
+    pipeline_run_handle: PipelineRunHandle | None = None,
 ) -> dict[str, Any]:
     """Build one self-cognition case's tracking records in memory.
 
@@ -96,6 +98,7 @@ def build_self_cognition_case_artifacts(
             with already-rendered dialog output when present.
         execute_private_actions: When true, execute selected private action
             specs through their deterministic owners.
+        pipeline_run_handle: Optional cooperative cancellation handle.
 
     Returns:
         Artifact names mapped to JSON-like payloads or Markdown text.
@@ -109,6 +112,7 @@ def build_self_cognition_case_artifacts(
             consolidation_client=consolidation_client,
             apply_consolidation=apply_consolidation,
             execute_private_actions=execute_private_actions,
+            pipeline_run_handle=pipeline_run_handle,
         )
     )
     return artifact_payloads
@@ -122,6 +126,7 @@ async def build_self_cognition_case_artifacts_async(
     *,
     apply_consolidation: bool = False,
     execute_private_actions: bool = False,
+    pipeline_run_handle: PipelineRunHandle | None = None,
 ) -> dict[str, Any]:
     """Async implementation for building self-cognition records in memory.
 
@@ -134,11 +139,14 @@ async def build_self_cognition_case_artifacts_async(
             with already-rendered dialog output when present.
         execute_private_actions: When true, execute selected private action
             specs through their deterministic owners.
+        pipeline_run_handle: Optional cooperative cancellation handle.
 
     Returns:
         Artifact names mapped to JSON-like payloads or Markdown text.
     """
 
+    if pipeline_run_handle is not None:
+        pipeline_run_handle.raise_if_cancelled("before_case_artifacts")
     case_name = projection.validate_case_name(case)
     trigger_record = tracking.build_trigger_record(case)
     artifact_payloads: dict[str, Any] = {
@@ -164,6 +172,8 @@ async def build_self_cognition_case_artifacts_async(
         )
         return artifact_payloads
 
+    if pipeline_run_handle is not None:
+        pipeline_run_handle.raise_if_cancelled("before_source_packet")
     source_packet = projection.build_source_packet(case)
     rendered_packet = projection.render_source_packet_text(source_packet)
     cognition_input = {
@@ -173,21 +183,31 @@ async def build_self_cognition_case_artifacts_async(
     artifact_payloads[models.ARTIFACT_COGNITION_INPUT] = cognition_input
 
     active_cognition_client = cognition_client or _default_cognition_client
+    if pipeline_run_handle is not None:
+        pipeline_run_handle.raise_if_cancelled("before_cognition_context")
     residue_context = await _load_residue_context_for_case(case)
     cognition_state = _build_cognition_state(
         case,
         rendered_packet,
         residue_context=residue_context,
     )
+    if pipeline_run_handle is not None:
+        pipeline_run_handle.raise_if_cancelled("before_cognition")
     cognition_output = await _call_maybe_async(
         active_cognition_client,
         cognition_state,
     )
+    if pipeline_run_handle is not None:
+        pipeline_run_handle.raise_if_cancelled("after_cognition")
     if execute_private_actions:
+        if pipeline_run_handle is not None:
+            pipeline_run_handle.raise_if_cancelled("before_private_actions")
         cognition_output = await _with_private_action_results(
             cognition_state,
             cognition_output,
         )
+        if pipeline_run_handle is not None:
+            pipeline_run_handle.raise_if_cancelled("after_private_actions")
     artifact_payloads[models.ARTIFACT_COGNITION_OUTPUT] = cognition_output
 
     existing_attempts = _existing_attempts(case)
@@ -209,6 +229,8 @@ async def build_self_cognition_case_artifacts_async(
             action_attempt=action_attempt,
         )
         if action_attempt["status"] == models.ACTION_ATTEMPT_STATUS_CANDIDATE:
+            if pipeline_run_handle is not None:
+                pipeline_run_handle.raise_if_cancelled("before_dialog")
             dialog_state = await _build_dialog_state_with_text_surface(
                 cognition_state,
                 cognition_output,
@@ -218,6 +240,8 @@ async def build_self_cognition_case_artifacts_async(
                 active_dialog_client,
                 dialog_state,
             )
+            if pipeline_run_handle is not None:
+                pipeline_run_handle.raise_if_cancelled("after_dialog")
             dialog_calls = models.DIALOG_RENDER_CALL_LIMIT
             action_text = _dialog_text(dialog_output)
             action_candidate = tracking.build_action_candidate(
@@ -232,6 +256,8 @@ async def build_self_cognition_case_artifacts_async(
             )
 
     if apply_consolidation:
+        if pipeline_run_handle is not None:
+            pipeline_run_handle.raise_if_cancelled("before_consolidation")
         consolidation_state, dialog_output, dialog_called = (
             await _build_consolidation_ready_state(
                 cognition_state,
@@ -249,6 +275,8 @@ async def build_self_cognition_case_artifacts_async(
             active_consolidation_client,
             consolidation_state,
         )
+        if pipeline_run_handle is not None:
+            pipeline_run_handle.raise_if_cancelled("after_consolidation")
         await record_completed_episode_residue(
             completed_state=consolidation_state,
             current_timestamp_utc=consolidation_state["storage_timestamp_utc"],

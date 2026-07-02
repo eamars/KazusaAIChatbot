@@ -131,6 +131,54 @@ async def test_worker_tick_defers_when_primary_interaction_is_busy() -> None:
 
 
 @pytest.mark.asyncio
+async def test_group_review_defers_for_same_scope_foreground(
+    monkeypatch,
+) -> None:
+    """Group review should not collect cases while its channel is foreground."""
+
+    from kazusa_ai_chatbot.runtime_coordination import (
+        PipelineCoordinator,
+        PipelineScope,
+    )
+
+    coordinator = PipelineCoordinator()
+    channel_scope = _channel_scope(
+        scope_ref="scope_group",
+        platform_channel_id="chan-1",
+        channel_type="group",
+    )
+    scope = PipelineScope(
+        platform="qq",
+        platform_channel_id="chan-1",
+        channel_type="group",
+    )
+    foreground = await coordinator.start_run(
+        scope=scope,
+        owner="service",
+        precedence="foreground",
+        run_kind="chat",
+    )
+    monkeypatch.setattr(
+        worker_module,
+        "get_character_profile",
+        AsyncMock(side_effect=AssertionError("deferred review should not fetch")),
+    )
+
+    assert foreground.handle is not None
+    async with foreground.handle:
+        result = await worker_module._run_group_self_cognition_review_for_scope(
+            now=datetime(2026, 5, 5, 18, 0, tzinfo=timezone.utc),
+            channel_scope=channel_scope,
+            is_primary_interaction_busy=lambda: False,
+            pipeline_coordinator=coordinator,
+        )
+
+    assert result.deferred is True
+    assert result.defer_reason == "same_scope_foreground_active"
+    assert result.processed_count == 0
+
+
+@pytest.mark.asyncio
 async def test_worker_tick_passes_busy_probe_to_promotion(monkeypatch) -> None:
     """Promotion scheduling should keep the service busy probe available."""
 

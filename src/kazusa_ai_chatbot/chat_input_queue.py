@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.time_boundary import (
@@ -32,6 +32,8 @@ class QueuedChatItem:
         collapsed_items: Later queued items collapsed into this survivor.
         conversation_row_id: Committed conversation-history row ID when the
             queued user message has already been persisted.
+        pipeline_run_handle: Optional foreground coordination handle released
+            by the service worker after this queued item is resolved.
     """
 
     sequence: int
@@ -43,6 +45,7 @@ class QueuedChatItem:
     combined_content: str | None = None
     collapsed_items: list[QueuedChatItem] = field(default_factory=list)
     conversation_row_id: str = ""
+    pipeline_run_handle: Any | None = None
 
 
 @dataclass
@@ -81,11 +84,21 @@ class ChatInputQueue:
             self._condition = asyncio.Condition()
         return self._condition
 
-    async def enqueue(self, request: Any) -> Any:
+    async def enqueue(
+        self,
+        request: Any,
+        *,
+        pipeline_run_handle: Any | None = None,
+        on_enqueued: Callable[[], None] | None = None,
+    ) -> Any:
         """Add a request to the queue and wait for its response future.
 
         Args:
             request: Incoming chat request object.
+            pipeline_run_handle: Optional active foreground coordination
+                handle attached to the queued item.
+            on_enqueued: Optional callback invoked after the item enters the
+                queue and before this coroutine waits for the response future.
 
         Returns:
             Response set by the service after processing, dropping, or collapse.
@@ -104,8 +117,11 @@ class ChatInputQueue:
                 local_timestamp=turn_clock["local_timestamp"],
                 local_time_context=turn_clock["local_time_context"],
                 future=future,
+                pipeline_run_handle=pipeline_run_handle,
             )
             self._queue.append(item)
+            if on_enqueued is not None:
+                on_enqueued()
             condition.notify()
 
         response = await future

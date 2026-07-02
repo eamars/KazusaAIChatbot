@@ -87,6 +87,10 @@ from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.reflection_cycle.phase_scheduler import (
     REFLECTION_PHASE_GROUPS_PER_SLOT,
 )
+from kazusa_ai_chatbot.runtime_coordination import (
+    PipelineCoordinator,
+    PipelineScope,
+)
 from kazusa_ai_chatbot.db import (
     DatabaseBackendError,
     backfill_character_conversation_identity,
@@ -607,6 +611,7 @@ _graph = None
 _adapter_registry: AdapterRegistry | None = None
 _character_identity_backfilled: set[tuple[str, str, str]] = set()
 _chat_input_queue = ChatInputQueue()
+_pipeline_coordinator = PipelineCoordinator()
 _chat_queue_worker_task: asyncio.Task | None = None
 _calendar_worker_handle: CalendarSchedulerWorkerHandle | None = None
 _reflection_worker_handle: ReflectionWorkerHandle | None = None
@@ -673,8 +678,9 @@ async def _handle_calendar_reflection_phase_run(
         run,
         now=storage_utc_now(),
         dry_run=False,
-        is_primary_interaction_busy=lambda: False,
+        is_primary_interaction_busy=_reflection_cycle_primary_interaction_busy,
         adapter_registry_provider=lambda: _adapter_registry,
+        pipeline_coordinator=_pipeline_coordinator,
     )
     return result
 
@@ -812,6 +818,24 @@ def _primary_interaction_busy() -> bool:
         or _chat_input_queue.pending_count() > 0
     )
     return return_value
+
+
+def _reflection_cycle_primary_interaction_busy() -> bool:
+    """Return whether the standalone reflection worker should pause for chat."""
+
+    return_value = False
+    return return_value
+
+
+async def _release_queued_pipeline_handle(item: QueuedChatItem) -> None:
+    """Release a queued item's foreground coordination handle if present."""
+
+    handle = item.pipeline_run_handle
+    if handle is None:
+        return
+
+    item.pipeline_run_handle = None
+    await handle.__aexit__(None, None, None)
 
 
 def _current_character_profile_snapshot() -> dict:
@@ -1485,6 +1509,7 @@ async def _drop_queued_chat_item(item: QueuedChatItem) -> bool:
             scope=scope,
             severity="error",
         )
+        await _release_queued_pipeline_handle(item)
         return_value = False
         return return_value
 
@@ -1519,6 +1544,7 @@ async def _drop_queued_chat_item(item: QueuedChatItem) -> bool:
         scope=scope,
         severity="warning",
     )
+    await _release_queued_pipeline_handle(item)
     return_value = True
     return return_value
 
@@ -1617,6 +1643,7 @@ async def _persist_collapsed_queued_chat_item(
             scope=scope,
             severity="error",
         )
+        await _release_queued_pipeline_handle(item)
         return_value = False
         return return_value
 
@@ -1652,6 +1679,7 @@ async def _persist_collapsed_queued_chat_item(
         listen_only=item.request.debug_modes.listen_only,
         scope=scope,
     )
+    await _release_queued_pipeline_handle(item)
     return_value = True
     return return_value
 
@@ -2603,6 +2631,8 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             final_dialog_count=0,
             delivery_tracking_id="",
         )
+    finally:
+        await _release_queued_pipeline_handle(item)
 
 
 async def _chat_input_worker() -> None:
@@ -2646,6 +2676,9 @@ async def _chat_input_worker() -> None:
                             "persistence failed"
                         ),
                     )
+                    await _release_queued_pipeline_handle(
+                        dequeued_turn.next_item,
+                    )
                 continue
 
             if dequeued_turn.next_item is not None:
@@ -2684,6 +2717,7 @@ async def _stop_chat_input_worker() -> None:
     pending_items = await _chat_input_queue.drain()
     for item in pending_items:
         _chat_input_queue.complete(item, ChatResponse())
+        await _release_queued_pipeline_handle(item)
     _chat_input_queue = ChatInputQueue()
 
 
@@ -2697,8 +2731,39 @@ async def _enqueue_chat_request(req: ChatRequest) -> ChatResponse:
         Chat response produced by the worker or drop/collapse policy.
     """
 
+    scope = PipelineScope(
+        platform=req.platform,
+        platform_channel_id=req.platform_channel_id,
+        channel_type=req.channel_type,
+    )
+    _pipeline_coordinator.request_cancellation(
+        scope=scope,
+        requested_by="service.chat_queue",
+        reason="same_scope_foreground_pending",
+    )
+    admission = await _pipeline_coordinator.start_run(
+        scope=scope,
+        owner="service.chat_queue",
+        precedence="foreground",
+        run_kind="chat",
+    )
+    handle = admission.handle
     _ensure_chat_input_worker_started()
-    response = await _chat_input_queue.enqueue(req)
+    item_enqueued = False
+
+    def _mark_item_enqueued() -> None:
+        nonlocal item_enqueued
+        item_enqueued = True
+
+    try:
+        response = await _chat_input_queue.enqueue(
+            req,
+            pipeline_run_handle=handle,
+            on_enqueued=_mark_item_enqueued,
+        )
+    finally:
+        if not item_enqueued and handle is not None:
+            await handle.__aexit__(None, None, None)
     return response
 
 
@@ -2991,6 +3056,7 @@ async def lifespan(app: FastAPI):
                 should_pause_for_affect_settling=(
                     should_pause_self_cognition_for_affect_settling
                 ),
+                pipeline_coordinator=_pipeline_coordinator,
             )
         else:
             logger.info(
@@ -3013,7 +3079,9 @@ async def lifespan(app: FastAPI):
         calendar_phase_provider = CalendarReflectionPhaseRunProvider()
         if REFLECTION_CYCLE_ENABLED:
             _reflection_worker_handle = start_reflection_cycle_worker(
-                is_primary_interaction_busy=lambda: False,
+                is_primary_interaction_busy=(
+                    _reflection_cycle_primary_interaction_busy
+                ),
                 adapter_registry_provider=lambda: _adapter_registry,
                 phase_run_provider=calendar_phase_provider,
                 character_state_refresh_callback=(

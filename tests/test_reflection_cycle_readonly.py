@@ -253,7 +253,7 @@ async def test_db_interface_lists_monitored_channel_rows_readonly(monkeypatch) -
 
 @pytest.mark.asyncio
 async def test_db_interface_uses_message_field_allowlist(monkeypatch) -> None:
-    """Reflection message reads should request only prompt-needed fields."""
+    """Reflection message reads should request only needed fields."""
 
     db = MagicMock()
     cursor = MagicMock()
@@ -284,6 +284,7 @@ async def test_db_interface_uses_message_field_allowlist(monkeypatch) -> None:
         "platform": 1,
         "platform_channel_id": 1,
         "channel_type": 1,
+        "channel_name": 1,
         "role": 1,
         "platform_user_id": 1,
         "global_user_id": 1,

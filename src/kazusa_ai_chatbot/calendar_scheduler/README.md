@@ -84,7 +84,10 @@ collection mechanics to this package. It must not read or write legacy
 `run_calendar_worker_tick(...)`. The registry is closed by trigger kind. A run
 with an unsupported trigger kind fails closed with
 `unsupported calendar trigger kind: {kind}`. A handler result with
-`status="skipped"` marks the run skipped instead of completed.
+`status="skipped"` marks the run skipped instead of completed. A handler result
+with `status="deferred"` requeues the running calendar run as pending, clears
+the lease, restores the claim-time attempt increment, and records a retryable
+deferred summary; deferral is not completion, skip, or failure.
 
 `handlers.py` exposes active-commitment helpers:
 
@@ -175,6 +178,9 @@ Lease semantics:
 - failure stores `failure_summary`;
 - skipped runs are terminal for the current run and carry a bounded skip
   reason through `failure_summary`.
+- deferred runs return to `pending`, clear lease owner and expiry to `None`,
+  store a bounded retryable deferred `failure_summary`, and decrement
+  `attempt_count` by one to restore the claim-time increment.
 
 ## Trigger Contracts
 
@@ -218,6 +224,11 @@ calendar trigger kinds. The calendar package must not introduce a
 `reflection_phase_runs` collection or any side control plane. The service
 calendar worker materializes and claims these runs, while daily readiness reads
 expected hourly work from durable calendar phase runs.
+
+If the reflection phase handler reports runtime-coordination deferral, the
+calendar worker must call the repository deferred transition and leave the
+phase run retryable. This is how same-channel foreground precedence preserves a
+fresh future group-review context without consuming retry budget.
 
 ## Migration And Cutover
 

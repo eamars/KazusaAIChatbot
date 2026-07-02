@@ -152,6 +152,15 @@ trusted local operator inspection. Normal chat/debug turns update it from the
 self-cognition artifacts. Reading this snapshot is observational only and must
 not trigger cognition.
 
+The service is one caller of the generic runtime coordination API in
+`kazusa_ai_chatbot.runtime_coordination`. For the canonical channel scope
+`(platform, platform_channel_id, channel_type)`, inbound foreground work asks
+the coordinator to cancel lower-precedence background pipelines in the same
+scope before the queued turn is admitted. This rule is scoped and generic:
+future foreground applications must call the same interface instead of
+importing `/chat` queue state or adding their own gates. Different channel
+scopes remain independent.
+
 Visible `/chat` delivery follows selected `SurfaceOutputV1` text surfaces.
 Private action results, private finalization, calendar-triggered action
 results, and no-visible-output decisions may still make an episode
@@ -323,6 +332,9 @@ Brain service responsibilities:
 - The brain service validates `ChatRequest` through Pydantic with
   `extra="forbid"`.
 - The brain service can collapse queued chat messages before graph execution.
+- The brain service owns foreground runtime-coordination admission for inbound
+  chat turns and releases the foreground handle when the queued turn is
+  processed, dropped, collapsed, rejected, or drained during shutdown.
 - The brain service returns `ChatResponse` before all post-turn background work
   has necessarily completed.
 - The brain service generates a non-empty `delivery_tracking_id` only when it

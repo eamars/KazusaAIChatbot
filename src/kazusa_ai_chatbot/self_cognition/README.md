@@ -56,6 +56,16 @@ the dispatcher persists the assistant outbound row, looks up the registered
 runtime adapter, sends to the bound target, and returns terminal delivery
 metadata for action-attempt persistence.
 
+Self-cognition participates in the generic runtime coordination contract in
+`kazusa_ai_chatbot.runtime_coordination`. When a case is running as background
+work with a concrete delivery channel, the worker must hold a background
+pipeline handle for that `PipelineScope` and checkpoint cancellation before
+source/context work that can go stale, before or after LLM stages when control
+returns to deterministic code, and immediately before dispatcher handoff. A
+cancelled case is a cooperative deferral: it must not record a successful
+action attempt, mark a group-review window as reviewed, or call dispatcher for
+the cancelled visible output.
+
 Consolidation can run even when self-cognition selects no visible action.
 Action results, episode-trace evidence, and an empty `final_dialog` are
 sufficient to make the episode consolidatable. The consolidator consumes
@@ -99,6 +109,9 @@ primary-interaction busy check and before source collection. When the probe
 returns true, the tick records a deferred worker result with
 `defer_reason="daily affect settling pending"` and does not collect source
 cases. The self-cognition package must not import reflection-cycle internals.
+The primary-interaction busy probe is process-wide scheduling pressure only;
+same-channel foreground precedence is enforced through the generic runtime
+coordination API and not through `/chat`-specific imports.
 
 ## Runtime Engine Budget
 

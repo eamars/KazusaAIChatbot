@@ -2533,6 +2533,192 @@ async def test_worker_tick_defers_when_primary_interaction_is_busy(tmp_path) -> 
 
 
 @pytest.mark.asyncio
+async def test_worker_tick_defers_pipeline_cancelled_case() -> None:
+    """Cooperative cancellation should stop before successful action records."""
+
+    from kazusa_ai_chatbot.runtime_coordination import (
+        PipelineCancellation,
+        PipelineCancelled,
+        PipelineScope,
+    )
+
+    case = _commitment_case_with_delivery_target()
+    recorded_attempts: list[dict[str, Any]] = []
+
+    async def collect_cases(
+        *,
+        now: datetime,
+        max_cases: int,
+    ) -> list[dict[str, Any]]:
+        assert now == datetime(2026, 5, 13, tzinfo=timezone.utc)
+        assert max_cases == 3
+        return [case]
+
+    async def run_case(**_kwargs) -> dict[str, Any]:
+        cancellation = PipelineCancellation(
+            run_id="pipeline-run-1",
+            scope=PipelineScope(
+                platform="qq",
+                platform_channel_id="group-1",
+                channel_type="group",
+            ),
+            requested_by="service.chat_queue",
+            reason="same_scope_foreground_pending",
+            checkpoint="before_dispatch",
+        )
+        raise PipelineCancelled(cancellation)
+
+    async def record_attempt(attempt: dict[str, Any]) -> None:
+        recorded_attempts.append(dict(attempt))
+
+    result = await worker.run_self_cognition_worker_tick(
+        now=datetime(2026, 5, 13, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        run_case_func=run_case,
+        record_attempt_func=record_attempt,
+        max_cases=3,
+    )
+
+    assert result.deferred is True
+    assert result.defer_reason == "same_scope_foreground_pending"
+    assert result.failed_count == 0
+    assert result.processed_count == 0
+    assert recorded_attempts == []
+
+
+@pytest.mark.asyncio
+async def test_worker_tick_defer_requeues_claimed_source_calendar_run() -> None:
+    """Cancelled claimed source runs should not consume retry budget."""
+
+    from kazusa_ai_chatbot.runtime_coordination import (
+        PipelineCancellation,
+        PipelineCancelled,
+        PipelineScope,
+    )
+
+    case = _commitment_case_with_delivery_target()
+    case["source_calendar_run_id"] = "calendar_run_commitment_123"
+    claimed_runs: list[str] = []
+    deferred_runs: list[dict[str, object]] = []
+    completed_runs: list[str] = []
+    failed_runs: list[str] = []
+
+    async def collect_cases(
+        *,
+        now: datetime,
+        max_cases: int,
+    ) -> list[dict[str, Any]]:
+        assert now == datetime(2026, 5, 13, tzinfo=timezone.utc)
+        assert max_cases == 3
+        return [case]
+
+    async def claim_run(run_id: str, **kwargs) -> bool:
+        assert kwargs["trigger_kind"] == (
+            calendar_models.TRIGGER_COMMITMENT_DUE_COGNITION
+        )
+        claimed_runs.append(run_id)
+        return True
+
+    async def run_case(**_kwargs) -> dict[str, Any]:
+        cancellation = PipelineCancellation(
+            run_id="pipeline-run-1",
+            scope=PipelineScope(
+                platform="qq",
+                platform_channel_id="group-1",
+                channel_type="group",
+            ),
+            requested_by="service.chat_queue",
+            reason="same_scope_foreground_pending",
+            checkpoint="before_dispatch",
+        )
+        raise PipelineCancelled(cancellation)
+
+    async def defer_run(run_id: str, **kwargs) -> bool:
+        deferred_runs.append({"run_id": run_id, **kwargs})
+        return True
+
+    async def complete_run(run_id: str, **_kwargs) -> None:
+        completed_runs.append(run_id)
+
+    async def fail_run(run_id: str, **_kwargs) -> None:
+        failed_runs.append(run_id)
+
+    result = await worker.run_self_cognition_worker_tick(
+        now=datetime(2026, 5, 13, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        run_case_func=run_case,
+        claim_calendar_run_func=claim_run,
+        complete_calendar_run_func=complete_run,
+        fail_calendar_run_func=fail_run,
+        defer_calendar_run_func=defer_run,
+        max_cases=3,
+    )
+
+    assert result.deferred is True
+    assert result.defer_reason == "same_scope_foreground_pending"
+    assert claimed_runs == ["calendar_run_commitment_123"]
+    assert deferred_runs == [
+        {
+            "run_id": "calendar_run_commitment_123",
+            "lease_owner": "self_cognition_worker",
+            "storage_timestamp_utc": "2026-05-13T00:00:00+00:00",
+            "reason": "same_scope_foreground_pending",
+        }
+    ]
+    assert completed_runs == []
+    assert failed_runs == []
+
+
+@pytest.mark.asyncio
+async def test_worker_tick_releases_pipeline_handle_when_claim_raises() -> None:
+    """Coordinator handles must release when pre-run calendar claim fails."""
+
+    from kazusa_ai_chatbot.runtime_coordination import (
+        PipelineCoordinator,
+        PipelineScope,
+    )
+
+    case = _commitment_case_with_delivery_target()
+    case["source_calendar_run_id"] = "calendar_run_commitment_123"
+    coordinator = PipelineCoordinator()
+    scope = PipelineScope(
+        platform="qq",
+        platform_channel_id="group-1",
+        channel_type="group",
+    )
+
+    async def collect_cases(
+        *,
+        now: datetime,
+        max_cases: int,
+    ) -> list[dict[str, Any]]:
+        assert max_cases == 3
+        return [case]
+
+    async def claim_run(*_args, **_kwargs) -> bool:
+        raise RuntimeError("claim failed")
+
+    result = await worker.run_self_cognition_worker_tick(
+        now=datetime(2026, 5, 13, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        claim_calendar_run_func=claim_run,
+        pipeline_coordinator=coordinator,
+        max_cases=3,
+    )
+
+    assert result.failed_count == 1
+    assert result.processed_count == 0
+    assert coordinator.request_cancellation(
+        scope=scope,
+        requested_by="test",
+        reason="probe",
+    ) == []
+
+
+@pytest.mark.asyncio
 async def test_worker_tick_pauses_before_collection_for_affect_settling() -> None:
     """Pending daily affect settling should pause self-cognition collection."""
 

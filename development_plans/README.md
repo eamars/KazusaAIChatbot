@@ -51,7 +51,14 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [character_state_lane_integrity_plan.md](active/bugfix/character_state_lane_integrity_plan.md) | High-risk character-state lane integrity and write-hardening plan | draft |
+| [conversation_episode_state_lane_lifecycle_plan.md](active/bugfix/conversation_episode_state_lane_lifecycle_plan.md) | High-risk conversation episode-state lifecycle repair plan | draft |
+| [interaction_style_images_lane_data_integrity_plan.md](active/bugfix/interaction_style_images_lane_data_integrity_plan.md) | High-risk interaction-style image lane integrity plan | draft |
+| [consolidator_lane_router_memory_pollution_bigbang_plan.md](active/bugfix/consolidator_lane_router_memory_pollution_bigbang_plan.md) | High-risk post-cleanup consolidator lane-router memory pollution prevention plan | draft |
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
+| [shared_memory_lane_data_integrity_plan.md](active/bugfix/shared_memory_lane_data_integrity_plan.md) | High-risk shared memory lane data repair and hardening plan | draft |
+| [user_memory_units_lane_data_integrity_plan.md](active/bugfix/user_memory_units_lane_data_integrity_plan.md) | High-risk user memory units lane data repair and hardening plan | draft |
+| [user_profiles_lane_data_integrity_plan.md](active/bugfix/user_profiles_lane_data_integrity_plan.md) | High-risk user profiles lane target-integrity plan | draft |
 
 ## Reference Documents
 
@@ -124,6 +131,7 @@ plans.
 | [dialog_evaluator_decommission_plan.md](archive/completed/bugfix/dialog_evaluator_decommission_plan.md) |
 | [dialog_evaluator_guess_owner_boundary_bugfix_plan.md](archive/completed/bugfix/dialog_evaluator_guess_owner_boundary_bugfix_plan.md) |
 | [dialog_one_bubble_layout_contract_bugfix_plan.md](archive/completed/bugfix/dialog_one_bubble_layout_contract_bugfix_plan.md) |
+| [generic_pipeline_cancellation_channel_guard_plan.md](archive/completed/bugfix/generic_pipeline_cancellation_channel_guard_plan.md) |
 | [generic_cognition_prompt_migration_plan.md](archive/completed/bugfix/generic_cognition_prompt_migration_plan.md) |
 | [group_scene_digest_explicit_participants_bugfix_plan.md](archive/completed/bugfix/group_scene_digest_explicit_participants_bugfix_plan.md) |
 | [history_media_projection_image_boundary_plan.md](archive/completed/bugfix/history_media_projection_image_boundary_plan.md) |

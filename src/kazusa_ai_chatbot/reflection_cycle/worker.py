@@ -37,6 +37,12 @@ from kazusa_ai_chatbot.db.schemas import (
     SelfCognitionGroupReviewWindowDoc,
 )
 from kazusa_ai_chatbot.dispatcher.adapter_iface import AdapterRegistry
+from kazusa_ai_chatbot.runtime_coordination import (
+    PipelineCancelled,
+    PipelineCoordinator,
+    PipelineRunHandle,
+    PipelineScope,
+)
 from kazusa_ai_chatbot.reflection_cycle.activity_windows import (
     GroupActivityWindow,
     build_group_activity_windows,
@@ -326,6 +332,7 @@ async def execute_reflection_phase_intent(
     dry_run: bool,
     is_primary_interaction_busy: Callable[[], bool],
     adapter_registry_provider: Callable[[], AdapterRegistry | None] | None = None,
+    pipeline_coordinator: PipelineCoordinator | None = None,
 ) -> list[ReflectionWorkerResult]:
     """Execute one reflection phase intent through the production seam."""
 
@@ -335,6 +342,7 @@ async def execute_reflection_phase_intent(
         dry_run=dry_run,
         is_primary_interaction_busy=is_primary_interaction_busy,
         adapter_registry_provider=adapter_registry_provider,
+        pipeline_coordinator=pipeline_coordinator,
     )
     return results
 
@@ -791,6 +799,7 @@ async def _run_reflection_phase_intent(
     dry_run: bool,
     is_primary_interaction_busy: Callable[[], bool],
     adapter_registry_provider: Callable[[], AdapterRegistry | None] | None = None,
+    pipeline_coordinator: PipelineCoordinator | None = None,
 ) -> list[ReflectionWorkerResult]:
     """Execute one calendar-shaped reflection phase intent."""
 
@@ -809,6 +818,7 @@ async def _run_reflection_phase_intent(
             channel_scope=channel_scope,
             is_primary_interaction_busy=is_primary_interaction_busy,
             adapter_registry_provider=adapter_registry_provider,
+            pipeline_coordinator=pipeline_coordinator,
         )
         results.append(group_result)
     return results
@@ -905,6 +915,7 @@ async def _run_group_self_cognition_review_for_scope(
     channel_scope: ReflectionScopeInput,
     is_primary_interaction_busy: Callable[[], bool],
     adapter_registry_provider: Callable[[], AdapterRegistry | None] | None = None,
+    pipeline_coordinator: PipelineCoordinator | None = None,
 ) -> ReflectionWorkerResult:
     """Run one reviewed-window group self-cognition case for a channel."""
 
@@ -923,115 +934,154 @@ async def _run_group_self_cognition_review_for_scope(
         result.defer_reason = "not a group scope"
         return result
 
-    if is_self_cognition_sleep_period(now):
-        result.skipped_count = 1
-        result.defer_reason = "self-cognition sleep period"
+    pipeline_run_handle: PipelineRunHandle | None = None
+    if pipeline_coordinator is not None:
+        pipeline_scope = PipelineScope(
+            platform=channel_scope.platform,
+            platform_channel_id=channel_scope.platform_channel_id,
+            channel_type=channel_scope.channel_type,
+        )
+        admission = await pipeline_coordinator.start_run(
+            scope=pipeline_scope,
+            owner="reflection_cycle.group_review",
+            precedence="background",
+            run_kind="group_self_cognition_review",
+        )
+        if not admission.admitted:
+            result.deferred = True
+            result.defer_reason = admission.defer_reason or ""
+            return result
+        pipeline_run_handle = admission.handle
+
+    try:
+        if pipeline_run_handle is not None:
+            pipeline_run_handle.raise_if_cancelled(
+                "before_group_review_context",
+            )
+
+        if is_self_cognition_sleep_period(now):
+            result.skipped_count = 1
+            result.defer_reason = "self-cognition sleep period"
+            return result
+
+        character_profile = await get_character_profile()
+        windows = _group_activity_windows_for_scope(
+            channel_scope=channel_scope,
+            now=now,
+            character_profile=character_profile,
+        )
+        unreviewed_windows = await _unreviewed_group_windows(windows)
+        if not unreviewed_windows:
+            result.skipped_count = 1
+            result.defer_reason = "no group review cases"
+            return result
+
+        selected_window = unreviewed_windows[0]
+        older_windows = unreviewed_windows[1:]
+        for window in older_windows:
+            await _record_group_review_window(
+                window=window,
+                now=now,
+                status="coalesced_skipped",
+                case_id=None,
+                selected_route=None,
+                dispatch_status=None,
+                skip_reason=GROUP_REVIEW_COALESCED_SKIP_REASON,
+            )
+
+        if pipeline_run_handle is not None:
+            pipeline_run_handle.raise_if_cancelled(
+                "before_group_review_cases",
+            )
+        cases = await self_cognition_sources.collect_group_review_cases(
+            now=now,
+            character_profile=character_profile,
+            windows=[selected_window],
+            max_cases=REFLECTION_PHASE_GROUPS_PER_SLOT,
+        )
+        if not cases:
+            await _record_group_review_window(
+                window=selected_window,
+                now=now,
+                status="stale_skipped",
+                case_id=None,
+                selected_route=None,
+                dispatch_status=None,
+                skip_reason=GROUP_REVIEW_STALE_SKIP_REASON,
+            )
+            result.skipped_count = 1
+            result.defer_reason = "no group review cases"
+            return result
+
+        selected_cases = cases[:REFLECTION_PHASE_GROUPS_PER_SLOT]
+
+        async def _collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
+            max_cases = int(kwargs["max_cases"])
+            limited_cases = selected_cases[:max_cases]
+            return limited_cases
+
+        self_result = await self_cognition_worker.run_self_cognition_worker_tick(
+            now=now,
+            is_primary_interaction_busy=is_primary_interaction_busy,
+            character_profile=character_profile,
+            collect_cases_func=_collect_cases,
+            adapter_registry_provider=adapter_registry_provider,
+            pipeline_run_handle=pipeline_run_handle,
+            max_cases=REFLECTION_PHASE_GROUPS_PER_SLOT,
+        )
+        result.processed_count = self_result.processed_count
+        result.succeeded_count = max(
+            0,
+            self_result.processed_count - self_result.failed_count,
+        )
+        result.failed_count = self_result.failed_count
+        result.skipped_count = self_result.skipped_count
+        result.deferred = self_result.deferred
+        result.defer_reason = self_result.defer_reason
+
+        selected_case = selected_cases[0]
+        if self_result.deferred:
+            return result
+
+        if _group_review_case_target_binding_failed(selected_case):
+            await _record_group_review_window(
+                window=selected_window,
+                now=now,
+                status="target_binding_failed",
+                case_id=str(selected_case["case_id"]),
+                selected_route=None,
+                dispatch_status="target_binding_failed",
+                skip_reason=_group_review_target_binding_skip_reason(
+                    selected_case
+                ),
+            )
+        elif self_result.failed_count > 0:
+            await _record_group_review_window(
+                window=selected_window,
+                now=now,
+                status="review_failed",
+                case_id=str(selected_case["case_id"]),
+                selected_route=None,
+                dispatch_status=None,
+                skip_reason=GROUP_REVIEW_FAILED_SKIP_REASON,
+            )
+        else:
+            await _record_group_review_window(
+                window=selected_window,
+                now=now,
+                status="reviewed",
+                case_id=str(selected_case["case_id"]),
+                selected_route=None,
+                dispatch_status=None,
+                skip_reason=None,
+            )
+    except PipelineCancelled as exc:
+        result.deferred = True
+        result.defer_reason = exc.cancellation.reason
         return result
-
-    character_profile = await get_character_profile()
-    windows = _group_activity_windows_for_scope(
-        channel_scope=channel_scope,
-        now=now,
-        character_profile=character_profile,
-    )
-    unreviewed_windows = await _unreviewed_group_windows(windows)
-    if not unreviewed_windows:
-        result.skipped_count = 1
-        result.defer_reason = "no group review cases"
-        return result
-
-    selected_window = unreviewed_windows[0]
-    older_windows = unreviewed_windows[1:]
-    for window in older_windows:
-        await _record_group_review_window(
-            window=window,
-            now=now,
-            status="coalesced_skipped",
-            case_id=None,
-            selected_route=None,
-            dispatch_status=None,
-            skip_reason=GROUP_REVIEW_COALESCED_SKIP_REASON,
-        )
-
-    cases = await self_cognition_sources.collect_group_review_cases(
-        now=now,
-        character_profile=character_profile,
-        windows=[selected_window],
-        max_cases=REFLECTION_PHASE_GROUPS_PER_SLOT,
-    )
-    if not cases:
-        await _record_group_review_window(
-            window=selected_window,
-            now=now,
-            status="stale_skipped",
-            case_id=None,
-            selected_route=None,
-            dispatch_status=None,
-            skip_reason=GROUP_REVIEW_STALE_SKIP_REASON,
-        )
-        result.skipped_count = 1
-        result.defer_reason = "no group review cases"
-        return result
-
-    selected_cases = cases[:REFLECTION_PHASE_GROUPS_PER_SLOT]
-
-    async def _collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
-        max_cases = int(kwargs["max_cases"])
-        limited_cases = selected_cases[:max_cases]
-        return limited_cases
-
-    self_result = await self_cognition_worker.run_self_cognition_worker_tick(
-        now=now,
-        is_primary_interaction_busy=is_primary_interaction_busy,
-        character_profile=character_profile,
-        collect_cases_func=_collect_cases,
-        adapter_registry_provider=adapter_registry_provider,
-        max_cases=REFLECTION_PHASE_GROUPS_PER_SLOT,
-    )
-    result.processed_count = self_result.processed_count
-    result.succeeded_count = max(
-        0,
-        self_result.processed_count - self_result.failed_count,
-    )
-    result.failed_count = self_result.failed_count
-    result.skipped_count = self_result.skipped_count
-    result.deferred = self_result.deferred
-    result.defer_reason = self_result.defer_reason
-
-    selected_case = selected_cases[0]
-    if self_result.deferred:
-        return result
-
-    if _group_review_case_target_binding_failed(selected_case):
-        await _record_group_review_window(
-            window=selected_window,
-            now=now,
-            status="target_binding_failed",
-            case_id=str(selected_case["case_id"]),
-            selected_route=None,
-            dispatch_status="target_binding_failed",
-            skip_reason=_group_review_target_binding_skip_reason(selected_case),
-        )
-    elif self_result.failed_count > 0:
-        await _record_group_review_window(
-            window=selected_window,
-            now=now,
-            status="review_failed",
-            case_id=str(selected_case["case_id"]),
-            selected_route=None,
-            dispatch_status=None,
-            skip_reason=GROUP_REVIEW_FAILED_SKIP_REASON,
-        )
-    else:
-        await _record_group_review_window(
-            window=selected_window,
-            now=now,
-            status="reviewed",
-            case_id=str(selected_case["case_id"]),
-            selected_route=None,
-            dispatch_status=None,
-            skip_reason=None,
-        )
+    finally:
+        if pipeline_run_handle is not None:
+            await pipeline_run_handle.__aexit__(None, None, None)
     return result
 
 

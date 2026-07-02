@@ -178,6 +178,49 @@ async def test_reflection_probe_ignores_chat_queue_state(monkeypatch) -> None:
     assert busy_probe() is False
 
 
+@pytest.mark.asyncio
+async def test_calendar_reflection_handler_passes_runtime_coordinator(
+    monkeypatch,
+) -> None:
+    """Calendar reflection should use the generic runtime coordinator."""
+
+    captured_kwargs: dict[str, object] = {}
+    coordinator = object()
+
+    async def _handle_calendar_run(run: dict[str, object], **kwargs):
+        captured_kwargs.update(kwargs)
+        return {
+            "status": "completed",
+            "run_id": run["run_id"],
+        }
+
+    monkeypatch.setattr(
+        service_module,
+        "_pipeline_coordinator",
+        coordinator,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "handle_reflection_phase_calendar_run",
+        _handle_calendar_run,
+    )
+
+    result = await service_module._handle_calendar_reflection_phase_run(
+        {"run_id": "phase-1"},
+    )
+
+    assert result == {
+        "status": "completed",
+        "run_id": "phase-1",
+    }
+    assert captured_kwargs["pipeline_coordinator"] is coordinator
+    assert (
+        captured_kwargs["is_primary_interaction_busy"]
+        is service_module._reflection_cycle_primary_interaction_busy
+    )
+
+
 async def _run_lifespan(
     monkeypatch,
     *,
