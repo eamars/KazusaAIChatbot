@@ -39,12 +39,7 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [coding_agent_phase1_fetching_reading_plan.md](active/short_term/coding_agent_phase1_fetching_reading_plan.md) | Large standalone coding-agent Phase 1 plan | draft |
-| [control_console_auto_model_discovery_picker_plan.md](active/short_term/control_console_auto_model_discovery_picker_plan.md) | Medium control-console automatic model discovery picker plan | completed |
-| [control_console_brain_model_route_config_plan.md](active/short_term/control_console_brain_model_route_config_plan.md) | Large control-console Brain model route configuration plan | completed |
-| [control_console_cognition_debug_visibility_plan.md](active/short_term/control_console_cognition_debug_visibility_plan.md) | Large control-console cognition-debug visibility plan | completed |
-| [llm_trace_observability_and_retrieval_plan.md](active/short_term/llm_trace_observability_and_retrieval_plan.md) | Large LLM trace observability and agent retrieval-skill plan | completed |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
-| [web_agent3_source_availability_bigbang_plan.md](active/short_term/web_agent3_source_availability_bigbang_plan.md) | Large web_agent3 source availability bigbang plan | completed |
 | [web_agent3_bilibili_source_subagent_plan.md](active/short_term/web_agent3_bilibili_source_subagent_plan.md) | Large web_agent3 Bilibili source subagent plan | draft |
 
 ## Supporting Experiment Records
@@ -94,6 +89,17 @@ superseded history.
 | Completed by actual implementation | `character_local_time_context_plan.md`, `character_self_words_retrieval_delivery_receipt_plan.md`, `conversation_progress_phase3_quality_plan.md`, `conversation_progress_state_plan.md`, `get_db_private_boundary_plan.md`, `group_chat_noise_relevance_plan.md`, `llm_routing_migration_plan.md`, `memory_evidence_scoped_user_continuity_plan.md`, `native_shape_boundary_hardening_plan.md` |
 | Still unfinished as of 2026-05-08 | `character_profile_runtime_state_split_plan.md` |
 | Superseded legacy drafts | `rag_supervisor2_inner_loop_agents_plan.md`, `short_circuit_early_stop_plan.md` |
+
+### 2026-07-02 active lifecycle cleanup
+
+This pass compared active plan statuses against plan files and source/test
+evidence, then moved completed short-term records out of `active/`.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active short-term to completed archive | `control_console_auto_model_discovery_picker_plan.md`, `control_console_brain_model_route_config_plan.md`, `control_console_cognition_debug_visibility_plan.md`, `llm_trace_observability_and_retrieval_plan.md`, `web_agent3_source_availability_bigbang_plan.md` |
+| Kept active draft because required implementation artifacts are absent | `coding_agent_phase1_fetching_reading_plan.md`, `rag3_router_interpreter_poc_experiment_plan.md`, `web_agent3_bilibili_source_subagent_plan.md` |
+| Kept active draft because the bugfix remains unexecuted | `rag2_public_output_contract_leak_bugfix_plan.md`; source still contains the planned forbidden RAG public-output phrases in `persona_supervisor2_rag_evaluator.py` |
 
 ## Archive
 
@@ -174,6 +180,9 @@ plans.
 | [cognition_state_integrity_plan.md](archive/completed/short_term/cognition_state_integrity_plan.md) |
 | [daily_affect_settling_plan.md](archive/completed/short_term/daily_affect_settling_plan.md) |
 | [complex_task_resolver_capability_plan.md](archive/completed/short_term/complex_task_resolver_capability_plan.md) |
+| [control_console_auto_model_discovery_picker_plan.md](archive/completed/short_term/control_console_auto_model_discovery_picker_plan.md) |
+| [control_console_brain_model_route_config_plan.md](archive/completed/short_term/control_console_brain_model_route_config_plan.md) |
+| [control_console_cognition_debug_visibility_plan.md](archive/completed/short_term/control_console_cognition_debug_visibility_plan.md) |
 | [control_console_entity_information_architecture_plan.md](archive/completed/short_term/control_console_entity_information_architecture_plan.md) |
 | [control_console_live_logs_plan.md](archive/completed/short_term/control_console_live_logs_plan.md) |
 | [control_console_runtime_service_config_plan.md](archive/completed/short_term/control_console_runtime_service_config_plan.md) |
@@ -198,6 +207,7 @@ plans.
 | [interaction_style_image_plan.md](archive/completed/short_term/interaction_style_image_plan.md) |
 | [inline_delivery_mentions_plan.md](archive/completed/short_term/inline_delivery_mentions_plan.md) |
 | [live_context_runtime_facts_plan.md](archive/completed/short_term/live_context_runtime_facts_plan.md) |
+| [llm_trace_observability_and_retrieval_plan.md](archive/completed/short_term/llm_trace_observability_and_retrieval_plan.md) |
 | [llm_routing_migration_plan.md](archive/completed/short_term/llm_routing_migration_plan.md) |
 | [llm_interface_backend_abstraction_plan.md](archive/completed/short_term/llm_interface_backend_abstraction_plan.md) |
 | [l2_affinity_willingness_boundary_plan.md](archive/completed/short_term/l2_affinity_willingness_boundary_plan.md) |
@@ -259,6 +269,7 @@ plans.
 | [universal_chat_history_llm_projection_plan.md](archive/completed/short_term/universal_chat_history_llm_projection_plan.md) |
 | [user_style_engagement_consumer_plan.md](archive/completed/short_term/user_style_engagement_consumer_plan.md) |
 | [user_memory_unit_rolling_window_plan.md](archive/completed/short_term/user_memory_unit_rolling_window_plan.md) |
+| [web_agent3_source_availability_bigbang_plan.md](archive/completed/short_term/web_agent3_source_availability_bigbang_plan.md) |
 | [web_agent3_search_attempt_expansion_and_resolver_evidence_decomposition_plan.md](archive/completed/short_term/web_agent3_search_attempt_expansion_and_resolver_evidence_decomposition_plan.md) |
 | [web_agent3_replacement_plan.md](archive/completed/short_term/web_agent3_replacement_plan.md) |
 
