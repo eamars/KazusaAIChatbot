@@ -680,6 +680,11 @@ COGNITION_VISUAL_DIRECTIVES_ENABLED = os.getenv(
     "true",
 ).lower() in ("1", "true", "yes")
 
+COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED = _bool_from_env(
+    "COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED",
+    "true",
+)
+
 COGNITION_RESOLVER_MAX_CYCLES = _bounded_int_from_env(
     "COGNITION_RESOLVER_MAX_CYCLES",
     "3",

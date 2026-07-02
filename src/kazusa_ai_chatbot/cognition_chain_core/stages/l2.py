@@ -541,6 +541,22 @@ _BOUNDARY_CORE_PROMPT = '''\
   "trajectory": "简体中文字符串；主语优先省略"
 }}
 '''
+
+_TASK_WILLINGNESS_BOUNDARY_PROMPT_EXTENSION = '''\
+
+# 任务承接意愿
+- 这个补充只判断我是否愿意接下当前请求，不改变普通说话意愿。
+- 读取 `affinity_context`、`character_mood`、`global_vibe`、`vibe_check` 和 `visual_vibe` 时，把它们当作关系、当前心情、当前场景和最近互动气氛的语义线索。
+- 普通说明、简短问答、日常寒暄、简单、低压力、低承诺的帮助，不要因为关系弱、心情差或场景紧而自动拒绝。
+- 当请求要求持续陪伴、替对方承担后续、过分熟悉、过于亲密、越过当前关系分寸、需要私下持续处理，或要求我在不合适时机接下承诺时，可以把它作为边界压力写进现有 `boundary_summary`、`acceptance`、`stance_bias`、`pressure_policy` 和 `trajectory`。
+- 如果我不想接下，优先让输出表现为 `guarded` / `hesitant` / `reject`、`diverge` / `challenge` / `refuse`、`reduce` / `resist`，并用自然关系理由说明；可以保留打趣、回避或更小范围帮助的余地。
+- 仍只返回上面定义的合法 JSON 字符串，不要添加解释文字。
+'''
+
+_BOUNDARY_CORE_TASK_WILLINGNESS_PROMPT = (
+    _BOUNDARY_CORE_PROMPT
+    + _TASK_WILLINGNESS_BOUNDARY_PROMPT_EXTENSION
+)
 _boundary_core_llm: LLMStageBinding | None = None
 _boundary_core_llm_context: ContextVar[LLMStageBinding | None] = ContextVar(
     "boundary_core_llm",
@@ -563,6 +579,25 @@ def reset_boundary_core_llm(token: Token[LLMStageBinding | None]) -> None:
     _boundary_core_llm_context.reset(token)
 
 
+def _add_task_willingness_context(
+    msg: dict[str, Any],
+    state: dict[str, Any],
+) -> None:
+    """Add enabled-mode semantic willingness context to an L2 prompt payload."""
+
+    character_profile = state["character_profile"]
+    msg["character_mood"] = character_profile["mood"]
+    msg["global_vibe"] = character_profile["global_vibe"]
+
+    vibe_check = state.get("vibe_check")
+    if isinstance(vibe_check, str) and vibe_check:
+        msg["vibe_check"] = vibe_check
+
+    visual_vibe = state.get("visual_vibe")
+    if isinstance(visual_vibe, list) and visual_vibe:
+        msg["visual_vibe"] = visual_vibe
+
+
 async def call_boundary_core_agent(state: dict[str, Any]) -> dict[str, Any]:
     # Get attributes
     character_profile = state["character_profile"]
@@ -583,6 +618,8 @@ async def call_boundary_core_agent(state: dict[str, Any]) -> dict[str, Any]:
             _BOUNDARY_CORE_PROMPT
         ),
     }[selection["variant"]]
+    if state.get("task_willingness_boundary_enabled") is True:
+        prompt_template = _BOUNDARY_CORE_TASK_WILLINGNESS_PROMPT
 
     self_integrity = float(boundary_profile["self_integrity"])
     control_sensitivity = float(boundary_profile["control_sensitivity"])
@@ -624,6 +661,8 @@ async def call_boundary_core_agent(state: dict[str, Any]) -> dict[str, Any]:
             "instruction": affinity_block["instruction"]
         }
     }
+    if state.get("task_willingness_boundary_enabled") is True:
+        _add_task_willingness_context(msg, state)
     msg.update(build_cognition_prompt_source_payload(
         episode=episode,
         selection=selection,
@@ -750,6 +789,21 @@ _JUDGEMENT_CORE_PROMPT = '''\
   "judgment_note": "简体中文字符串，一句话说明裁决逻辑；主语优先省略；不要复制资料结构或元数据"
 }}
 '''
+
+_TASK_WILLINGNESS_JUDGMENT_PROMPT_EXTENSION = '''\
+
+# 任务承接意愿
+- Boundary Core 已经把关系、当前心情、当前场景和最近互动气氛纳入是否愿意接下请求的判断；本层负责把这个判断落实到最终立场和意图。
+- 如果 Boundary Core 表示当前请求太熟络、太占用、太持续、太私密、太像替对方承担后续，或在此刻不好接下，就把最终结果收紧为 `REFUSE` / `DIVERGE` / `CHALLENGE`，或 `REJECT` / `EVADE` / `BANTAR`，并在 `judgment_note` 中说明自然关系理由。
+- 简单、低压力、低承诺的帮助和普通说话仍然可以正常 `CONFIRM` / `PROVIDE`；不要把心情或气氛本身当作沉默理由。
+- 如果更小范围帮助更符合当前关系和场景，可以保留提供有限回答、澄清范围、打趣带过或轻轻拒绝的意图。
+- 仍只返回上面定义的合法 JSON 字符串，不要添加解释文字。
+'''
+
+_JUDGEMENT_CORE_TASK_WILLINGNESS_PROMPT = (
+    _JUDGEMENT_CORE_PROMPT
+    + _TASK_WILLINGNESS_JUDGMENT_PROMPT_EXTENSION
+)
 _judgement_core_llm: LLMStageBinding | None = None
 _judgement_core_llm_context: ContextVar[LLMStageBinding | None] = ContextVar(
     "judgement_core_llm",
@@ -789,6 +843,8 @@ async def call_judgment_core_agent(state: dict[str, Any]) -> dict[str, Any]:
             _JUDGEMENT_CORE_PROMPT
         ),
     }[selection["variant"]]
+    if state.get("task_willingness_boundary_enabled") is True:
+        prompt_template = _JUDGEMENT_CORE_TASK_WILLINGNESS_PROMPT
 
     system_prompt = SystemMessage(content=prompt_template.format(
         character_name=state["character_profile"]["name"],
@@ -818,6 +874,8 @@ async def call_judgment_core_agent(state: dict[str, Any]) -> dict[str, Any]:
         "pressure_policy": boundary_core_assessment["pressure_policy"],
         "trajectory": boundary_core_assessment["trajectory"],
     }
+    if state.get("task_willingness_boundary_enabled") is True:
+        _add_task_willingness_context(msg, state)
     if str(selection["variant"]).startswith("text_chat_user_message"):
         msg["current_event_grounding"] = build_current_event_grounding_for_llm(
             user_input=state["user_input"],

@@ -81,6 +81,7 @@ DEBUG_LOG_TTL_DAYS=14
 LLM_TRACE_CAPTURE_MODE=metadata
 CONVERSATION_HISTORY_LIMIT=10
 COGNITION_VISUAL_DIRECTIVES_ENABLED=true
+COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED=true
 COGNITION_RESOLVER_MAX_CYCLES=3
 COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS=120.0
 SELF_COGNITION_ENABLED=true
@@ -209,6 +210,13 @@ retried by this recovery path.
 `COGNITION_VISUAL_DIRECTIVES_ENABLED` is a brain-service level switch. Set it
 to `false` to skip L3 visual-directive generation globally; adapters and
 debug-client request payloads do not control this behavior.
+
+`COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED` defaults to `true`. It enables
+the L2 task-taking willingness boundary prompt path, where
+relationship, current mood, and scene vibe can make Kazusa refuse, deflect, or
+offer smaller-scope help for task-like requests. The switch does not hide
+action affordances from L2d. Set it to `false` to restore the legacy L2/L2d
+prompt path after service restart.
 
 The live persona turn always runs the cognition-preserving resolver after
 decontextualization. Each resolver cycle still runs the shared L1 -> L2 -> L2d

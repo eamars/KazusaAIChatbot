@@ -18,6 +18,7 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
 )
 from kazusa_ai_chatbot.cognition_chain_core.action_selection_prompt import (
     ACTION_ROUTER_PROMPT,
+    ACTION_ROUTER_TASK_WILLINGNESS_PROMPT,
 )
 from kazusa_ai_chatbot.cognition_chain_core.utils import parse_llm_json_output
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig, LLMInvoker
@@ -130,8 +131,11 @@ def build_action_selection_messages(
     """Build the system and human messages for one action-selection call."""
 
     human_payload = build_action_selection_payload_text(state, capabilities)
+    system_prompt = ACTION_ROUTER_PROMPT
+    if state.get('task_willingness_boundary_enabled') is True:
+        system_prompt = ACTION_ROUTER_TASK_WILLINGNESS_PROMPT
     messages: list[BaseMessage] = [
-        SystemMessage(content=ACTION_ROUTER_PROMPT),
+        SystemMessage(content=system_prompt),
         HumanMessage(content=human_payload),
     ]
     return messages

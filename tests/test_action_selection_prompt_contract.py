@@ -8,10 +8,12 @@ def test_action_selection_prompt_uses_runtime_affordance_roster() -> None:
 
     from kazusa_ai_chatbot.cognition_chain_core.action_selection_prompt import (
         ACTION_ROUTER_PROMPT,
+        ACTION_ROUTER_TASK_WILLINGNESS_PROMPT,
     )
 
-    assert "capabilities.resolver_affordances" in ACTION_ROUTER_PROMPT
-    assert "capabilities.action_affordances" in ACTION_ROUTER_PROMPT
+    for prompt_text in (ACTION_ROUTER_PROMPT, ACTION_ROUTER_TASK_WILLINGNESS_PROMPT):
+        assert "capabilities.resolver_affordances" in prompt_text
+        assert "capabilities.action_affordances" in prompt_text
     for hardcoded_capability in (
         "public_answer_research",
         "local_context_recall",
@@ -27,6 +29,7 @@ def test_action_selection_prompt_uses_runtime_affordance_roster() -> None:
         "background_work_request",
     ):
         assert hardcoded_capability not in ACTION_ROUTER_PROMPT
+        assert hardcoded_capability not in ACTION_ROUTER_TASK_WILLINGNESS_PROMPT
 
 
 def test_action_selection_prompt_explains_upstream_handoff() -> None:
@@ -53,6 +56,53 @@ def test_action_selection_prompt_explains_upstream_handoff() -> None:
     assert "group_engagement" not in ACTION_ROUTER_PROMPT
     assert "group_scene_digest" not in ACTION_ROUTER_PROMPT
     assert "群聊话题" not in ACTION_ROUTER_PROMPT
+
+
+def test_action_selection_enabled_prompt_follows_task_refusal_outcome() -> None:
+    """Enabled L2d prompt should route settled task refusal to visible speech."""
+
+    from kazusa_ai_chatbot.cognition_chain_core.action_selection import (
+        build_action_selection_messages,
+    )
+    from kazusa_ai_chatbot.cognition_chain_core.action_selection_prompt import (
+        ACTION_ROUTER_PROMPT,
+        ACTION_ROUTER_TASK_WILLINGNESS_PROMPT,
+    )
+
+    assert ACTION_ROUTER_TASK_WILLINGNESS_PROMPT != ACTION_ROUTER_PROMPT
+    for required_text in (
+        '任务承接意愿',
+        '不重新判断关系、心情或场景是否允许接下任务',
+        '上游已经拒绝、回避、打趣带过或只愿意给更小范围帮助',
+        '通常选择可见表面动作',
+        '不要选择私有、未来或延迟任务动作',
+    ):
+        assert required_text in ACTION_ROUTER_TASK_WILLINGNESS_PROMPT
+
+    for forbidden_text in (
+        'resource heavy',
+        'tool cost',
+        'background_work',
+        'complex_task_resolution',
+        'affinity threshold',
+        'effort_score',
+        'complexity_score',
+        'willingness_score',
+        'COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED',
+    ):
+        assert forbidden_text not in ACTION_ROUTER_TASK_WILLINGNESS_PROMPT
+
+    disabled_messages = build_action_selection_messages({})
+    enabled_messages = build_action_selection_messages({
+        "task_willingness_boundary_enabled": True,
+    })
+
+    assert disabled_messages[0].content == ACTION_ROUTER_PROMPT
+    assert enabled_messages[0].content == ACTION_ROUTER_TASK_WILLINGNESS_PROMPT
+    assert (
+        "task_willingness_boundary_enabled"
+        not in enabled_messages[1].content
+    )
 
 
 def test_action_selection_normalizes_schema_free_resolver_requests() -> None:

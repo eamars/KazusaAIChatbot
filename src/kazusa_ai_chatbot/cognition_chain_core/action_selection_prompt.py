@@ -160,3 +160,18 @@ ACTION_ROUTER_PROMPT = '''\
 没有 pending_resolver_resume 时，resolver_pending_resolution 必须省略或返回空对象。
 如果不需要任何解析或动作，返回 {"resolver_capability_requests": [], "action_requests": []}。
 '''
+
+_TASK_WILLINGNESS_ACTION_ROUTER_EXTENSION = '''\
+
+# 任务承接意愿交接
+- 任务承接意愿已经由上游 cognition 决定。本层不重新判断关系、心情或场景是否允许接下任务，只把已定立场映射到可用动作。
+- 如果上游已经拒绝、回避、打趣带过或只愿意给更小范围帮助，通常选择可见表面动作，让最终文字层表达这个结果；不要选择私有、未来或延迟任务动作来替代上游的不接下。
+- 当上游已经明确接受一个有边界的任务，并且输入 affordances 提供相应能力时，才按原有规则考虑私有或延迟动作。
+- 普通说话、简短回答、澄清和轻量帮助不因这段交接而变成沉默或空动作。
+- 输出仍只使用上面定义的 JSON 形状，不要添加解释性文字。
+'''
+
+ACTION_ROUTER_TASK_WILLINGNESS_PROMPT = (
+    ACTION_ROUTER_PROMPT
+    + _TASK_WILLINGNESS_ACTION_ROUTER_EXTENSION
+)

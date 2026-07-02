@@ -168,6 +168,7 @@ class ActionAffordanceV1(TypedDict):
 class RuntimeContextV1(TypedDict):
     language_policy: str
     visual_directives_enabled: bool
+    task_willingness_boundary_enabled: bool
     max_action_requests: int
     max_resolver_requests: int
     background_work_output_char_limit: int
@@ -493,6 +494,7 @@ def validate_cognition_chain_input(
     _require_positive_int(runtime_context, "max_action_requests")
     _require_positive_int(runtime_context, "max_resolver_requests")
     _require_positive_int(runtime_context, "background_work_output_char_limit")
+    _require_bool(runtime_context, "task_willingness_boundary_enabled")
     _validate_episode(value["episode"])
     _validate_current_event(value["current_event"])
     _validate_available_actions(value["available_actions"])
@@ -645,6 +647,14 @@ def _require_positive_int(value: Mapping[str, Any], key: str) -> None:
     raw_value = value.get(key)
     if not isinstance(raw_value, int) or raw_value < 1:
         raise CognitionChainContractError(f"{key} must be a positive integer")
+
+
+def _require_bool(value: Mapping[str, Any], key: str) -> None:
+    """Require an exact boolean setting in a validated mapping."""
+
+    raw_value = value.get(key)
+    if not isinstance(raw_value, bool):
+        raise CognitionChainContractError(f"{key} must be a boolean")
 
 
 def _validate_episode(value: object) -> None:

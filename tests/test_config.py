@@ -662,6 +662,96 @@ class TestCognitionVisualDirectivesConfig:
         assert result.stdout.strip() == "False"
 
 
+class TestCognitionTaskWillingnessBoundaryConfig:
+    def test_task_willingness_boundary_defaults_to_true(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env.pop("COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED", None)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(config.COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED)"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.strip() == "True"
+
+    def test_task_willingness_boundary_parses_true(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED"] = "true"
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(config.COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED)"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.strip() == "True"
+
+    def test_task_willingness_boundary_parses_false(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED"] = "false"
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(config.COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED)"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.strip() == "False"
+
+    def test_task_willingness_boundary_rejects_invalid_value(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED"] = "sometimes"
+
+        result = subprocess.run(
+            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode != 0
+        assert (
+            "COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED must be a bool string"
+            in result.stderr
+        )
+
+
 class TestCognitionResolverConfig:
     def test_cognition_resolver_defaults_are_bounded(self, tmp_path):
         env = _configured_subprocess_env_without_dotenv()

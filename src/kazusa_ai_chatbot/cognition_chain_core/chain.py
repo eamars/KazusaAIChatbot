@@ -223,6 +223,9 @@ def _state_from_chain_input(
         "background_work_output_char_limit": (
             input_payload["runtime_context"]["background_work_output_char_limit"]
         ),
+        "task_willingness_boundary_enabled": (
+            input_payload["runtime_context"]["task_willingness_boundary_enabled"]
+        ),
     }
     group_engagement_context = action_selection_context.get(
         "group_engagement_action_context",

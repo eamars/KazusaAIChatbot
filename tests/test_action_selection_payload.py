@@ -67,6 +67,34 @@ def test_action_selection_payload_is_prompt_safe_json() -> None:
         assert affordance["semantic_input_summary"]
 
 
+def test_action_selection_payload_omits_task_willingness_gate_metadata() -> None:
+    """The willingness flag may select prompts but must not enter L2d JSON."""
+
+    from kazusa_ai_chatbot.cognition_chain_core.action_selection import (
+        build_action_selection_payload,
+    )
+
+    state = _minimal_cognition_state()
+    state["task_willingness_boundary_enabled"] = True
+
+    payload = build_action_selection_payload(state)
+    serialized = json.dumps(payload, ensure_ascii=False)
+
+    for forbidden in (
+        "task_willingness_boundary_enabled",
+        "COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED",
+        "affinity_task_gate",
+        "mood_gate",
+        "vibe_gate",
+        "feature_enabled",
+        "effort_score",
+        "complexity_score",
+        "patience_score",
+        "willingness_score",
+    ):
+        assert forbidden not in serialized
+
+
 def _minimal_cognition_state() -> dict:
     """Build a minimal CognitionState-shaped dict for payload testing."""
 

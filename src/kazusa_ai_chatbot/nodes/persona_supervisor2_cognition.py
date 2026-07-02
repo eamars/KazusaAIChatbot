@@ -20,6 +20,7 @@ from kazusa_ai_chatbot.config import (
     BOUNDARY_CORE_LLM_THINKING_ENABLED,
     COGNITION_LLM_MAX_COMPLETION_TOKENS,
     COGNITION_LLM_THINKING_ENABLED,
+    COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED,
 )
 from kazusa_ai_chatbot.action_spec.registry import (
     ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
@@ -281,6 +282,9 @@ def build_cognition_chain_input_from_global_state(
         "runtime_context": {
             "language_policy": "simplified_chinese_internal_text",
             "visual_directives_enabled": True,
+            "task_willingness_boundary_enabled": (
+                COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED
+            ),
             "max_action_requests": 3,
             "max_resolver_requests": 3,
             "background_work_output_char_limit": (
