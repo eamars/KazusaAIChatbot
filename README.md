@@ -276,6 +276,8 @@ cognition, and calendar scheduling remain in the platform-neutral core.
 | RAG 2                    | Slot-driven helper-agent retrieval and Cache2 evidence projection                       | [RAG 2](src/kazusa_ai_chatbot/rag/README.md)                                           |
 | Cognition and dialog     | Character stance, boundaries, judgment, style, visual directives, and final wording     | [Cognition Nodes](src/kazusa_ai_chatbot/nodes/README.md)                              |
 | Action spec              | L2d action residues, capability registry, evaluator, results, surfaces, and traces      | [Action Spec](src/kazusa_ai_chatbot/action_spec/README.md)                            |
+| Accepted task            | User-facing lifecycle for delayed work accepted by the character                        | [Accepted Task ICD](src/kazusa_ai_chatbot/accepted_task/README.md)                    |
+| Background work          | Internal delayed-work executor, worker routing, and result handoff                      | [Background Work ICD](src/kazusa_ai_chatbot/background_work/README.md)                |
 | Consolidation            | Durable target routing, write-intent validation, and target-specific persistence        | [Consolidation ICD](src/kazusa_ai_chatbot/consolidation/README.md)                    |
 | Database                 | MongoDB collection ownership, embeddings, indexes, public persistence helpers           | [Database ICD](src/kazusa_ai_chatbot/db/README.md)                                     |
 | Event logging            | Sanitized operational telemetry, status snapshots, statistics, and export contracts     | [Event Logging ICD](src/kazusa_ai_chatbot/event_logging/README.md)                     |
@@ -348,6 +350,8 @@ src/
     cognition_resolver/        Bounded resolver loop, capability observations, HIL state
     nodes/                     Persona, cognition, and dialog stages
     action_spec/               Modality-neutral action contracts, registry, results
+    accepted_task/             User-facing accepted delayed-work lifecycle
+    background_work/           Internal delayed-work executor and workers
     consolidation/             Durable consolidation helpers, target routing, and ICD
     rag/                       RAG 2 helper agents, hybrid retrieval, Cache2
     conversation_progress/     Short-term episode memory
@@ -398,12 +402,17 @@ permissioned preview contracts rather than production sends.
 | [README.md](README.md)                                                   | Project overview and architecture map                             |
 | [README_CN.md](README_CN.md)                                             | Simplified Chinese project overview                               |
 | [docs/HOWTO.md](docs/HOWTO.md)                                           | Local setup, environment variables, run commands, adapters, tests |
+| [Documentation Guide](docs/DOCUMENTATION_GUIDE.md)                       | Document roles, source hierarchy, module README rules, parity     |
+| [Subagent Interface Guide](docs/SUBAGENT_INTERFACES.md)                  | Cross-family subagent and worker documentation vocabulary         |
+| [Control Console ICD](src/control_console/README.md)                     | Local operator console, auth, lifecycle, logs, and static UI      |
 | [Brain Service ICD](src/kazusa_ai_chatbot/brain_service/README.md)       | HTTP endpoint contracts and adapter obligations                   |
 | [Message Envelope ICD](src/kazusa_ai_chatbot/message_envelope/README.md) | Typed inbound message contract                                    |
 | [LLM Interface ICD](src/kazusa_ai_chatbot/llm_interface/README.md)       | Chat model invocation, provider compatibility, and route diagnostics |
 | [Database ICD](src/kazusa_ai_chatbot/db/README.md)                       | Persistence ownership and collection contracts                    |
 | [Internal Monologue Residue ICD](src/kazusa_ai_chatbot/internal_monologue_residue/README.md) | Short-lived private residue lifecycle and L2a-only contract |
 | [Action Spec](src/kazusa_ai_chatbot/action_spec/README.md)               | Modality-neutral action contracts and trace handoff               |
+| [Accepted Task ICD](src/kazusa_ai_chatbot/accepted_task/README.md)        | User-facing delayed-work lifecycle                                |
+| [Background Work ICD](src/kazusa_ai_chatbot/background_work/README.md)    | Internal delayed-work executor and worker contract                |
 | [Consolidation ICD](src/kazusa_ai_chatbot/consolidation/README.md)       | Durable target routing and write-intent validation                |
 | [Event Logging ICD](src/kazusa_ai_chatbot/event_logging/README.md)        | Sanitized telemetry interface, event taxonomy, and ops statistics |
 | [Cognition Resolver ICD](src/kazusa_ai_chatbot/cognition_resolver/README.md) | Bounded resolver loop, capability observations, HIL, and traces |

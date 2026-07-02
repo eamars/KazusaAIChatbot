@@ -315,6 +315,7 @@ be used.
 ## Character Profile
 
 The brain refuses to start until a character profile exists in MongoDB.
+Load a character profile before starting the console or direct service:
 
 ```bash
 python -m scripts.load_character_profile personalities/kazusa.json
@@ -401,16 +402,21 @@ uvicorn kazusa_ai_chatbot.service:app --host 0.0.0.0 --port 8000
 
 On startup the service:
 
-1. Runs `db_bootstrap()` to create current collections and indexes.
-2. Drops legacy `rag_cache_index` and `rag_metadata_index` collections if they
-   are still present.
-3. Loads the active character profile.
-4. Compiles the top-level LangGraph pipeline.
-5. Hydrates persistent Cache2 initializer entries.
+1. Runs `db_bootstrap()` to create current collections and indexes and drop
+   legacy `rag_cache_index` and `rag_metadata_index` collections if they are
+   still present.
+2. Hydrates persistent RAG initializer cache entries into process-local
+   Cache2.
+3. Hydrates persistent media descriptor cache entries.
+4. Loads the active character profile.
+5. Compiles the top-level LangGraph pipeline.
 6. Starts configured MCP servers.
-7. Starts the durable calendar worker when `CALENDAR_SCHEDULER_ENABLED=true`.
-8. Starts the self-cognition worker when `SELF_COGNITION_ENABLED=true`.
-9. Starts the reflection worker when `REFLECTION_CYCLE_ENABLED=true`.
+7. Builds the runtime adapter registry and starts the chat input worker.
+8. Starts the durable calendar worker when `CALENDAR_SCHEDULER_ENABLED=true`.
+9. Starts the self-cognition worker when `SELF_COGNITION_ENABLED=true`.
+10. Starts the background-work runtime when
+    `BACKGROUND_WORK_WORKER_ENABLED=true`.
+11. Starts the reflection worker when `REFLECTION_CYCLE_ENABLED=true`.
 
 ## Adapters
 
@@ -743,7 +749,9 @@ is ignored by git.
 
 ## Current Notes
 
-- The supported development run path is local editable install plus `uvicorn`.
+- The supported local run path is local editable install plus
+  `kazusa-control-console`; direct `uvicorn` startup remains the development
+  fallback when bypassing the console.
 - `Dockerfile` installs from `pyproject.toml`; `docker-compose.yml` remains a
   service-oriented deployment template that expects all required environment
   variables to be supplied.
