@@ -44,6 +44,7 @@ or new RAG supervisor fields.
 | `subagent/web_read.py` | Direct URL-read source, always available. |
 | `subagent/web_search.py` | Direct search source, available when `SEARXNG_URL` is configured. |
 | `subagent/nhentai.py` | nHentai API v2 metadata/search source, available when `NHENTAI_TOKEN` is configured. |
+| `subagent/bilibili.py` | Bilibili public read/search source, available when `bilibili_api` is importable. |
 | `contracts.py` | Minimal router decision and test/comparison data contracts. |
 
 ## Direct Web Facility Rule
@@ -70,9 +71,13 @@ fingerprints; pages that require those mechanisms return a bounded blocked
 observation for the graph.
 
 Source-specific metadata/search is owned by the selected source subagent.
-Currently, only `nhentai` has an approved direct provider API path, limited to
-gallery metadata reads and gallery search through its own subagent. If
-`NHENTAI_TOKEN` is empty, `nhentai` is not registered.
+`nhentai` uses an approved direct provider API path for gallery metadata reads
+and gallery search through its own subagent. If `NHENTAI_TOKEN` is empty,
+`nhentai` is not registered. `bilibili` uses the optional
+`bilibili-api-python` SDK for public Bilibili reads and searches. Install it
+with `pip install -e .[bilibili]`; the upstream PyPI reference is
+https://pypi.org/project/bilibili-api-python/. When `bilibili_api` is not
+importable, `bilibili` is not registered.
 
 ## Prompt Rule
 
@@ -117,7 +122,9 @@ searches before returning one prompt-safe observation. It validates generated
 search attempts as semantic strings before execution, rejects internal metadata
 terms, and marks fallback to the original dense query as weak coverage when no
 valid focused attempt is available. `nhentai` implements deterministic
-gallery-id extraction and API parameter building.
+gallery-id extraction and API parameter building. `bilibili` implements
+link-family parsing, BV/av video id extraction, semantic search scope
+selection, provider API parameter building, and subtitle-body compaction.
 
 ## Source Subagents
 
@@ -126,6 +133,8 @@ The source dispatcher selects from the enabled final roster:
 - `web_read`: always available for direct HTTP(S) URL reads.
 - `web_search`: available when `SEARXNG_URL` is configured.
 - `nhentai`: available when `NHENTAI_TOKEN` is configured.
+- `bilibili`: available when the optional `bilibili_api` SDK package is
+  importable.
 
 The source subagent roster and prompt-facing descriptions are auto-discovered
 from `subagent/*.py`. Each source module exposes `SOURCE`, `DESCRIPTION`,
@@ -140,7 +149,14 @@ API v2 for metadata-only gallery reads and bounded gallery searches. The
 nHentai subagent imports
 `NHENTAI_TOKEN` and `NHENTAI_SOURCE_ENABLED` from `config.py`; it must not put
 credentials, headers, image URLs, download URLs, comments, favorite state, or
-account data into observations.
+account data into observations. `bilibili` uses `bilibili-api-python` for
+public video, article, bangumi, live, user, dynamic/opus, audio, and topic
+metadata when the SDK exposes a supported read API. Bilibili semantic search
+uses general search when the user gives only a topic, and typed search when
+the user specifies a content family such as video or article. Its observations
+include bounded public metadata, result candidates, compact stats, source
+content type, content scope, content basis, and subtitle excerpts when
+available.
 
 ## Create New Subagent
 
@@ -156,20 +172,25 @@ New source subagents follow this interface guide:
 - Keep source limits inside the source module.
 - Keep source error observations inside the source module.
 - Keep stable provider constants inside the source module.
+- Declare provider-specific optional dependencies as project extras.
 - Place user-specific configuration in `config.py`.
 - Place deployment-specific configuration in `config.py`.
 - Read configuration by importing constants from `kazusa_ai_chatbot.config`.
 - Represent configuration-dependent availability with `is_enabled()`.
+- Represent optional-dependency availability with `is_enabled()`.
 - Register available subagents through package discovery.
 - Keep `DESCRIPTION` focused on user-visible capability and query-shaping
   guidance.
 - Return prompt-safe observations with bounded source evidence.
 - Add deterministic tests for configuration-dependent registration states.
+- Add deterministic tests for optional-dependency registration states.
 - Add deterministic tests for source execution with injected configuration.
 - Add deterministic tests for prompt-safe observations.
 - Update this ICD when the source interface changes.
 - Update `docs/HOWTO.md` when the source adds user-specific or
   deployment-specific configuration.
+- Update `docs/HOWTO.md` when the source adds optional dependency
+  installation steps.
 
 ## Current Verification
 
@@ -184,8 +205,10 @@ Focused deterministic tests must cover:
 - source subagent discovery from per-source modules under `subagent/`.
 - source-local query generation rules rendered from subagent descriptions.
 - configuration-dependent source registration for `web_search` and `nhentai`.
+- optional-dependency source registration for `bilibili`.
 - graph-local stop handling before source dispatch.
-- source/action normalization for `web_read`, `web_search`, and `nhentai`.
+- source/action normalization for `web_read`, `web_search`, `nhentai`, and
+  `bilibili`.
 - source-local `web_search` expansion for dense semantic search needs,
   including Chinese-first comparison wording, while simple direct search
   queries remain a single unchanged search call.
@@ -196,5 +219,10 @@ Focused deterministic tests must cover:
 - nHentai `read` returns only compact title/name and grouped tags.
 - nHentai `search` returns bounded gallery candidates without image, download,
   comment, favorite, header, or token data.
+- Bilibili `read` supports public URL-family dispatch and BV/av video reads.
+- Bilibili `search` supports general semantic search and typed popular video
+  search.
+- Bilibili observations keep public metadata bounded and omit raw subtitle
+  URLs, binary material, account material, comments, and provider credentials.
 - generator/evaluator prompt payload placement for `reference_time`.
 - finalizer comparison helper shape used by live LLM reports.

@@ -13,6 +13,7 @@ from kazusa_ai_chatbot.rag.web_agent3.constants import (
 
 _DEFAULT_EXPECTED_RESPONSE = "返回能直接解决当前槽位的来源扎根网页证据。"
 _ROUTER_ACTIONS = ("search", "read", "stop")
+_ROUTER_NO_FALLBACK_SOURCES = ("nhentai", "bilibili")
 _ROUTER_SOURCES = ("web_read",)
 _ROUTER_SOURCE_ACTIONS = {
     "web_read": ("read",),
@@ -126,6 +127,7 @@ def _normalize_router_decision(
     raw_action = _text_field(raw_decision.get("action")).lower()
     raw_source = _text_field(raw_decision.get("source")).lower()
     query = _text_field(raw_decision.get("query"))
+    no_fallback_source = raw_source in _ROUTER_NO_FALLBACK_SOURCES
 
     if raw_action in _ROUTER_ACTIONS:
         action = raw_action
@@ -133,6 +135,10 @@ def _normalize_router_decision(
         action = "search"
 
     if action == "stop":
+        decision = _stop_router_decision()
+        return decision
+
+    if no_fallback_source and raw_source not in enabled_sources:
         decision = _stop_router_decision()
         return decision
 
@@ -149,7 +155,16 @@ def _normalize_router_decision(
             return decision
 
     elif action == "read":
-        if (
+        if no_fallback_source:
+            if (
+                raw_source in enabled_sources
+                and _source_supports_action(raw_source, "read", action_map)
+            ):
+                source = raw_source
+            else:
+                decision = _stop_router_decision()
+                return decision
+        elif (
             raw_source in enabled_sources
             and _source_supports_action(raw_source, "read", action_map)
         ):
@@ -165,7 +180,7 @@ def _normalize_router_decision(
             return decision
 
     elif action == "search":
-        if raw_source == "nhentai":
+        if no_fallback_source:
             if (
                 raw_source in enabled_sources
                 and _source_supports_action(raw_source, "search", action_map)

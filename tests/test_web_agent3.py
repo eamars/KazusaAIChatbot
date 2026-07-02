@@ -68,14 +68,33 @@ def _web_agent3_subprocess_env(
     *,
     searxng_url: str | None,
     nhentai_token: str | None,
+    bilibili_available: bool,
+    tmp_path: Path,
 ) -> dict[str, str]:
     """Build an import environment for web_agent3 availability tests."""
     env = dict(os.environ)
     python_path = env.get("PYTHONPATH", "")
     src_path = os.path.abspath("src")
-    env["PYTHONPATH"] = (
-        src_path if not python_path else f"{src_path}{os.pathsep}{python_path}"
+    import_guard_path = tmp_path / "sitecustomize.py"
+    import_guard_path.write_text(
+        "\n".join([
+            "import importlib.util",
+            "",
+            "_original_find_spec = importlib.util.find_spec",
+            "",
+            "def _web_agent3_find_spec(name, package=None):",
+            "    if name == 'bilibili_api':",
+            "        return None",
+            "    return _original_find_spec(name, package)",
+            "",
+            "importlib.util.find_spec = _web_agent3_find_spec",
+        ]),
+        encoding="utf-8",
     )
+    python_path_entries = [str(tmp_path), src_path]
+    if python_path:
+        python_path_entries.append(python_path)
+    env["PYTHONPATH"] = os.pathsep.join(python_path_entries)
     env["PYTHON_DOTENV_DISABLED"] = "1"
     for name in _WEB_AGENT3_REQUIRED_ROUTE_ENV_VARS:
         env[name] = "configured"
@@ -94,6 +113,15 @@ def _web_agent3_subprocess_env(
     else:
         env["NHENTAI_TOKEN"] = nhentai_token
 
+    if bilibili_available:
+        import_guard_path.write_text("", encoding="utf-8")
+        bilibili_package = tmp_path / "bilibili_api"
+        bilibili_package.mkdir(exist_ok=True)
+        (bilibili_package / "__init__.py").write_text(
+            "def select_client(name):\n    return None\n",
+            encoding="utf-8",
+        )
+
     return env
 
 
@@ -102,11 +130,14 @@ def _read_web_agent3_source_state(
     *,
     searxng_url: str | None = None,
     nhentai_token: str | None = None,
+    bilibili_available: bool = False,
 ) -> dict[str, object]:
     """Import web_agent3 in a subprocess and return source prompt state."""
     env = _web_agent3_subprocess_env(
         searxng_url=searxng_url,
         nhentai_token=nhentai_token,
+        bilibili_available=bilibili_available,
+        tmp_path=tmp_path,
     )
     script = (
         "import json; "
@@ -1158,7 +1189,7 @@ def test_web_agent3_source_subagents_are_discovered_from_subagent_package() -> N
         "kazusa_ai_chatbot.rag.web_agent3.subagent"
     )
     enabled_sources = set(source_module._SUBAGENTS)
-    allowed_sources = {"web_read", "web_search", "nhentai"}
+    allowed_sources = {"web_read", "web_search", "nhentai", "bilibili"}
 
     assert Path(source_module.__file__).name == "__init__.py"
     assert "web_read" in enabled_sources
@@ -1223,6 +1254,20 @@ def test_web_agent3_source_discovery_registers_nhentai_when_token_configured(
     assert payload["actions"]["nhentai"] == ["read", "search"]
 
 
+def test_web_agent3_source_discovery_registers_bilibili_when_dependency_exists(
+    tmp_path: Path,
+) -> None:
+    """Bilibili should register only when the optional SDK is importable."""
+    payload = _read_web_agent3_source_state(
+        tmp_path,
+        bilibili_available=True,
+    )
+
+    assert set(payload["names"]) == {"web_read", "bilibili"}
+    assert payload["actions"]["web_read"] == ["read"]
+    assert payload["actions"]["bilibili"] == ["read", "search"]
+
+
 def test_web_agent3_source_discovery_registers_all_configured_sources(
     tmp_path: Path,
 ) -> None:
@@ -1231,10 +1276,17 @@ def test_web_agent3_source_discovery_registers_all_configured_sources(
         tmp_path,
         searxng_url="http://search.test:8080",
         nhentai_token="secret-token",
+        bilibili_available=True,
     )
 
-    assert set(payload["names"]) == {"web_read", "web_search", "nhentai"}
+    assert set(payload["names"]) == {
+        "web_read",
+        "web_search",
+        "nhentai",
+        "bilibili",
+    }
     assert payload["actions"] == {
+        "bilibili": ["read", "search"],
         "nhentai": ["read", "search"],
         "web_read": ["read"],
         "web_search": ["search"],
@@ -1250,6 +1302,7 @@ def test_web_agent3_router_prompt_lists_enabled_sources_only(
         tmp_path,
         searxng_url="http://search.test:8080",
         nhentai_token="secret-token",
+        bilibili_available=True,
     )
 
     no_optional_prompt = str(no_optional_payload["prompt"])
@@ -1257,11 +1310,13 @@ def test_web_agent3_router_prompt_lists_enabled_sources_only(
     assert "- web_read:" in no_optional_prompt
     assert "- web_search:" not in no_optional_prompt
     assert "- nhentai:" not in no_optional_prompt
+    assert "- bilibili:" not in no_optional_prompt
 
+    assert "- bilibili:" in all_enabled_prompt
     assert "- web_read:" in all_enabled_prompt
     assert "- web_search:" in all_enabled_prompt
     assert "- nhentai:" in all_enabled_prompt
-    for removed_source in ("generic", "bilibili", "youtube"):
+    for removed_source in ("generic", "youtube"):
         assert removed_source not in all_enabled_prompt
 
 
@@ -1269,7 +1324,7 @@ def test_web_agent3_removed_source_modules_are_absent() -> None:
     """Removed source module files should not remain importable."""
     subagent_path = Path(web_module.__file__).parent / "subagent"
 
-    for removed_source in ("generic", "bilibili", "youtube"):
+    for removed_source in ("generic", "youtube"):
         module_path = subagent_path / f"{removed_source}.py"
         assert not module_path.exists()
 

@@ -5,7 +5,7 @@
 - Goal: Add Bilibili as a real read-only public-content `web_agent3` source
   subagent backed by `bilibili-api-python`.
 - Plan class: large
-- Status: draft
+- Status: completed
 - Mandatory skills: `development-plan`, `local-llm-architecture`, `py-style`,
   `cjk-safety`, and `test-style-and-execution`
 - Overall cutover strategy: bigbang for the Bilibili source. Add one final
@@ -742,4 +742,61 @@ This plan is complete when:
 
 ## Execution Evidence
 
-- No implementation evidence has been recorded. Status is `draft`.
+- Status moved from `draft` to `in_progress`, then to `completed` during the
+  user-approved execution.
+- Implemented `subagent/bilibili.py` with lazy `bilibili_api` imports, SDK
+  `httpx` client selection, public Bilibili read target parsing, video
+  metadata/subtitle compaction, generic non-video public metadata protocols,
+  semantic search scope selection, typed popular video search, and bounded
+  prompt-safe observations.
+- Added `[project.optional-dependencies].bilibili` with
+  `bilibili-api-python>=17.4.2,<18`.
+- Updated web_agent3 router normalization so disabled site-specific sources in
+  the no-fallback set, including `nhentai` and `bilibili`, stop instead of
+  silently falling back to generic web search/read.
+- Updated `docs/HOWTO.md` and the web_agent3 ICD with Bilibili optional
+  installation, availability, source behavior, source-interface guidance, and
+  verification requirements.
+- Added deterministic tests for Bilibili dependency-gated discovery,
+  video-read compaction, non-video URL-family reads, unsupported URL-family
+  handling, general semantic search, typed popular video search, and disabled
+  source no-fallback routing.
+- Initial TDD run failed as expected because `subagent/bilibili.py` did not
+  exist yet.
+- Initial verification passed:
+  `venv\Scripts\python.exe -m pytest tests/test_web_agent3.py tests/test_web_agent3_routing.py tests/test_web_agent3_bilibili.py tests/test_web_agent3_nhentai.py -q`
+  with 77 passed.
+- Syntax verification passed:
+  `venv\Scripts\python.exe -m py_compile src\kazusa_ai_chatbot\rag\web_agent3\contracts.py src\kazusa_ai_chatbot\rag\web_agent3\subagent\bilibili.py tests\test_web_agent3_bilibili.py tests\test_web_agent3.py tests\test_web_agent3_routing.py`.
+- Static hygiene passed: CJK double-quote scan, broad-exception scan,
+  direct top-level `bilibili_api` import scan, long-line scan, and
+  `git diff --check`.
+- `venv\Scripts\python.exe -m ruff check ...` was attempted; Ruff is not
+  installed in the project virtual environment.
+- Initial venv probe before optional dependency installation returned `False` for
+  `importlib.util.find_spec('bilibili_api') is not None`, so Bilibili remains
+  disabled in the current environment until the optional extra is installed.
+- Independent code review surfaced long lines and narrower-than-needed bounded
+  SDK failure handling. Both were fixed before final verification. No remaining
+  implementation issues were found in the review pass.
+- Follow-up live verification installed the optional extra into the existing
+  project venv with `venv\Scripts\python.exe -m pip install -e ".[bilibili]"`.
+  Import verification then returned `True` for
+  `importlib.util.find_spec('bilibili_api') is not None`, with
+  `bilibili-api-python` version `17.4.2`.
+- Live SDK smoke found two production gaps: `get_subtitle(cid)` can raise the
+  SDK `ApiException` credential boundary for otherwise-public video metadata,
+  and Bilibili general search returns grouped `result_type` rows with nested
+  `data`. The implementation now treats subtitle failure as metadata-only
+  evidence and flattens general-search result groups before compaction.
+- Live LLM routing found one prompt/source-contract gap: the model preserved
+  the popular-order word `最热` but omitted `视频`; the source now infers typed
+  video search from hot-order intent when no other content family is explicit.
+- Follow-up deterministic verification passed:
+  `venv\Scripts\python.exe -m pytest tests/test_web_agent3.py tests/test_web_agent3_routing.py tests/test_web_agent3_bilibili.py tests/test_web_agent3_nhentai.py -q`
+  with 78 passed.
+- Real LLM Bilibili routing cases were run one at a time with `-m live_llm -q
+  -s` and inspected after each run. Covered cases: video read, article read,
+  general semantic search, popular video search, and unsupported Bilibili URL
+  read. All final live cases passed and wrote traces under
+  `test_artifacts/llm_traces/`.

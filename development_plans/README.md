@@ -40,7 +40,6 @@ long_term/todo.md
 |---|---|---|
 | [coding_agent_phase1_fetching_reading_plan.md](active/short_term/coding_agent_phase1_fetching_reading_plan.md) | Large standalone coding-agent Phase 1 plan | draft |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
-| [web_agent3_bilibili_source_subagent_plan.md](active/short_term/web_agent3_bilibili_source_subagent_plan.md) | Large web_agent3 Bilibili source subagent plan | draft |
 
 ## Supporting Experiment Records
 
@@ -98,7 +97,8 @@ evidence, then moved completed short-term records out of `active/`.
 | Outcome | Plans |
 |---|---|
 | Moved from active short-term to completed archive | `control_console_auto_model_discovery_picker_plan.md`, `control_console_brain_model_route_config_plan.md`, `control_console_cognition_debug_visibility_plan.md`, `llm_trace_observability_and_retrieval_plan.md`, `web_agent3_source_availability_bigbang_plan.md` |
-| Kept active draft because required implementation artifacts are absent | `coding_agent_phase1_fetching_reading_plan.md`, `rag3_router_interpreter_poc_experiment_plan.md`, `web_agent3_bilibili_source_subagent_plan.md` |
+| Completed by user-approved fallback execution without subagent | `web_agent3_bilibili_source_subagent_plan.md` |
+| Kept active draft because required implementation artifacts are absent | `coding_agent_phase1_fetching_reading_plan.md`, `rag3_router_interpreter_poc_experiment_plan.md` |
 | Kept active draft because the bugfix remains unexecuted | `rag2_public_output_contract_leak_bugfix_plan.md`; source still contains the planned forbidden RAG public-output phrases in `persona_supervisor2_rag_evaluator.py` |
 
 ## Archive
@@ -269,6 +269,7 @@ plans.
 | [universal_chat_history_llm_projection_plan.md](archive/completed/short_term/universal_chat_history_llm_projection_plan.md) |
 | [user_style_engagement_consumer_plan.md](archive/completed/short_term/user_style_engagement_consumer_plan.md) |
 | [user_memory_unit_rolling_window_plan.md](archive/completed/short_term/user_memory_unit_rolling_window_plan.md) |
+| [web_agent3_bilibili_source_subagent_plan.md](archive/completed/short_term/web_agent3_bilibili_source_subagent_plan.md) |
 | [web_agent3_source_availability_bigbang_plan.md](archive/completed/short_term/web_agent3_source_availability_bigbang_plan.md) |
 | [web_agent3_search_attempt_expansion_and_resolver_evidence_decomposition_plan.md](archive/completed/short_term/web_agent3_search_attempt_expansion_and_resolver_evidence_decomposition_plan.md) |
 | [web_agent3_replacement_plan.md](archive/completed/short_term/web_agent3_replacement_plan.md) |

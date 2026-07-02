@@ -19,6 +19,7 @@ from kazusa_ai_chatbot.rag.web_agent3.subagent import web_search as web_search_s
 def test_web_agent3_router_normalizes_edge_case_decisions() -> None:
     """Router normalization should stay bounded under malformed LLM output."""
     source_actions = {
+        "bilibili": ("read", "search"),
         "web_read": ("read",),
         "web_search": ("search",),
         "nhentai": ("read", "search"),
@@ -92,11 +93,12 @@ def test_web_agent3_router_normalizes_edge_case_decisions() -> None:
 def test_web_agent3_router_normalizes_final_source_action_matrix() -> None:
     """Router normalization should enforce the final source/action matrix."""
     source_actions = {
+        "bilibili": ("read", "search"),
         "web_read": ("read",),
         "web_search": ("search",),
         "nhentai": ("read", "search"),
     }
-    enabled_sources = ("web_read", "web_search", "nhentai")
+    enabled_sources = ("web_read", "web_search", "nhentai", "bilibili")
     cases = [
         (
             {"action": "stop", "source": "nhentai", "query": "652244"},
@@ -110,6 +112,24 @@ def test_web_agent3_router_normalizes_final_source_action_matrix() -> None:
         ),
         (
             {"action": "search", "source": "nhentai", "query": "tag:demo"},
+            ("web_read", "web_search"),
+            web_module._RouterDecision("stop", "web_read", ""),
+        ),
+        (
+            {
+                "action": "search",
+                "source": "bilibili",
+                "query": "vibe coding",
+            },
+            enabled_sources,
+            web_module._RouterDecision("search", "bilibili", "vibe coding"),
+        ),
+        (
+            {
+                "action": "search",
+                "source": "bilibili",
+                "query": "vibe coding",
+            },
             ("web_read", "web_search"),
             web_module._RouterDecision("stop", "web_read", ""),
         ),
@@ -145,6 +165,28 @@ def test_web_agent3_router_normalizes_final_source_action_matrix() -> None:
         ),
         (
             {"action": "read", "source": "nhentai", "query": "652244"},
+            ("web_read", "web_search"),
+            web_module._RouterDecision("stop", "web_read", ""),
+        ),
+        (
+            {
+                "action": "read",
+                "source": "bilibili",
+                "query": "https://www.bilibili.com/video/BV1CqV266EJY/",
+            },
+            enabled_sources,
+            web_module._RouterDecision(
+                "read",
+                "bilibili",
+                "https://www.bilibili.com/video/BV1CqV266EJY/",
+            ),
+        ),
+        (
+            {
+                "action": "read",
+                "source": "bilibili",
+                "query": "https://www.bilibili.com/video/BV1CqV266EJY/",
+            },
             ("web_read", "web_search"),
             web_module._RouterDecision("stop", "web_read", ""),
         ),

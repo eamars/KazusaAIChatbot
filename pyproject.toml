@@ -42,6 +42,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+bilibili = [
+    "bilibili-api-python>=17.4.2,<18",
+]
 dev = [
     "playwright",
     "pytest",

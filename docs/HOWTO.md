@@ -197,7 +197,12 @@ always use browser-navigation headers, process-memory cookies, locally
 supported compression encodings, and common HTTP anti-bot challenge detection.
 They do not execute JavaScript, solve CAPTCHA, or impersonate browser TLS
 fingerprints. `NHENTAI_TOKEN` enables the nHentai metadata/search source; when
-it is empty, that source is not registered. `MCP_SERVERS` remains available for
+it is empty, that source is not registered. Installing the Bilibili optional
+extra enables the Bilibili public read/search source:
+`pip install -e .[bilibili]`. The referenced package is
+`bilibili-api-python` on PyPI:
+https://pypi.org/project/bilibili-api-python/. Bilibili source availability
+does not require an `.env` setting. `MCP_SERVERS` remains available for
 unrelated generic MCP tools.
 
 When LM Studio reports
@@ -304,6 +309,7 @@ You need:
 - an OpenAI-compatible chat completion endpoint
 - an OpenAI-compatible embeddings endpoint
 - optional SearXNG service for web search
+- optional `bilibili-api-python` package for Bilibili public read/search
 - optional generic MCP servers for unrelated tools
 
 Direct URL reads use the existing HTTP client dependency and do not require an
