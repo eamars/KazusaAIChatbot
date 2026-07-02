@@ -70,6 +70,7 @@ def start_self_cognition_worker(
     character_profile_provider: Callable[[], dict[str, Any]],
     adapter_registry_provider: Callable[[], AdapterRegistry | None] | None = None,
     latest_cognition_graph_publisher: Callable[[dict[str, Any]], Any] | None = None,
+    should_pause_for_affect_settling: Callable[..., Any] | None = None,
 ) -> SelfCognitionWorkerHandle:
     """Start the process-local self-cognition worker loop.
 
@@ -79,6 +80,8 @@ def start_self_cognition_worker(
         adapter_registry_provider: Callable returning the live adapter registry.
         latest_cognition_graph_publisher: Optional telemetry publisher for
             the most recent self-cognition graph snapshot.
+        should_pause_for_affect_settling: Optional service-level probe used to
+            pause source collection while daily affect settling is pending.
 
     Returns:
         Worker handle used for shutdown.
@@ -92,6 +95,7 @@ def start_self_cognition_worker(
             character_profile_provider=character_profile_provider,
             adapter_registry_provider=adapter_registry_provider,
             latest_cognition_graph_publisher=latest_cognition_graph_publisher,
+            should_pause_for_affect_settling=should_pause_for_affect_settling,
         )
     )
     handle = SelfCognitionWorkerHandle(task=task, stop_event=stop_event)
@@ -130,6 +134,7 @@ async def run_self_cognition_worker_tick(
     skip_calendar_run_func: Callable[..., Any] | None = None,
     adapter_registry_provider: Callable[[], AdapterRegistry | None] | None = None,
     latest_cognition_graph_publisher: Callable[[dict[str, Any]], Any] | None = None,
+    should_pause_for_affect_settling: Callable[..., Any] | None = None,
     max_cases: int = SELF_COGNITION_MAX_CASES_PER_TICK,
 ) -> SelfCognitionWorkerResult:
     """Run one bounded self-cognition worker tick.
@@ -153,6 +158,8 @@ async def run_self_cognition_worker_tick(
         adapter_registry_provider: Optional live adapter registry provider.
         latest_cognition_graph_publisher: Optional telemetry publisher for
             successful self-cognition artifacts.
+        should_pause_for_affect_settling: Optional service-level pause probe
+            called before source collection.
         max_cases: Maximum cases to process in this tick.
 
     Returns:
@@ -166,6 +173,19 @@ async def run_self_cognition_worker_tick(
         )
         await _record_worker_tick_event(result)
         return result
+
+    if should_pause_for_affect_settling is not None:
+        should_pause = await _call_maybe_async(
+            should_pause_for_affect_settling,
+            now=now,
+        )
+        if should_pause:
+            result = SelfCognitionWorkerResult(
+                deferred=True,
+                defer_reason="daily affect settling pending",
+            )
+            await _record_worker_tick_event(result)
+            return result
 
     active_profile = character_profile or {}
     cases = await _collect_cases(
@@ -334,6 +354,7 @@ async def _self_cognition_worker_loop(
     character_profile_provider: Callable[[], dict[str, Any]],
     adapter_registry_provider: Callable[[], AdapterRegistry | None] | None,
     latest_cognition_graph_publisher: Callable[[dict[str, Any]], Any] | None,
+    should_pause_for_affect_settling: Callable[..., Any] | None = None,
 ) -> None:
     """Run self-cognition scheduling ticks until stopped."""
 
@@ -347,6 +368,9 @@ async def _self_cognition_worker_loop(
                 adapter_registry_provider=adapter_registry_provider,
                 latest_cognition_graph_publisher=(
                     latest_cognition_graph_publisher
+                ),
+                should_pause_for_affect_settling=(
+                    should_pause_for_affect_settling
                 ),
             )
         except Exception as exc:

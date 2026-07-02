@@ -870,6 +870,100 @@ async def test_worker_tick_runs_period_maintenance_once_for_many_phase_intents(
 
 
 @pytest.mark.asyncio
+async def test_worker_tick_runs_due_daily_affect_settling_once(
+    monkeypatch,
+) -> None:
+    """The wake-window affect pass should run once per worker period."""
+
+    now = datetime(2026, 5, 5, 23, 40, tzinfo=timezone.utc)
+    provider = _FakePhaseRunProvider([
+        _phase_intent(_channel_scope(scope_ref="scope_a"), due_at=now),
+        _phase_intent(_channel_scope(scope_ref="scope_b"), due_at=now),
+    ])
+    daily_result = worker_module.ReflectionWorkerResult(
+        run_kind="daily_channel",
+        dry_run=False,
+    )
+    style_result = worker_module.ReflectionWorkerResult(
+        run_kind="daily_interaction_style_update",
+        dry_run=False,
+    )
+    promotion_result = worker_module.ReflectionPromotionResult(
+        run_kind="daily_global_promotion",
+        dry_run=False,
+    )
+    affect_result = worker_module.ReflectionWorkerResult(
+        run_kind="daily_affect_settling",
+        dry_run=False,
+        succeeded_count=1,
+    )
+    refresh = AsyncMock()
+
+    async def _run_reflection_phase_intent(**kwargs):
+        del kwargs
+        return [
+            worker_module.ReflectionWorkerResult(
+                run_kind="reflection_phase_slot",
+                dry_run=False,
+                processed_count=1,
+            )
+        ]
+
+    monkeypatch.setattr(
+        worker_module,
+        "_run_reflection_phase_intent",
+        _run_reflection_phase_intent,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        worker_module,
+        "_run_daily_channel_reflection_cycle",
+        AsyncMock(return_value=daily_result),
+    )
+    monkeypatch.setattr(
+        worker_module,
+        "_run_daily_interaction_style_update",
+        AsyncMock(return_value=style_result),
+    )
+    monkeypatch.setattr(
+        worker_module,
+        "_run_global_reflection_promotion",
+        AsyncMock(return_value=promotion_result),
+    )
+    affect = AsyncMock(return_value=affect_result)
+    monkeypatch.setattr(
+        worker_module,
+        "_run_daily_affect_settling",
+        affect,
+        raising=False,
+    )
+    monkeypatch.setattr(worker_module, "GLOBAL_CHARACTER_GROWTH_PASS_ENABLED", False)
+    monkeypatch.setattr(worker_module, "_local_time_is_after", lambda *_: True)
+    monkeypatch.setattr(
+        worker_module,
+        "settling_local_date_for_due_affect_settling",
+        lambda *_: "2026-05-06",
+    )
+
+    executed_maintenance: set[tuple[datetime, str, str]] = set()
+    results = await worker_module._run_worker_tick(
+        now=now,
+        is_primary_interaction_busy=lambda: False,
+        phase_run_provider=provider,
+        executed_period_maintenance_keys=executed_maintenance,
+        character_state_refresh_callback=refresh,
+    )
+
+    assert results.count(affect_result) == 1
+    affect.assert_awaited_once_with(
+        settling_local_date="2026-05-06",
+        dry_run=False,
+        enable_character_state_write=True,
+        character_state_refresh_callback=refresh,
+    )
+
+
+@pytest.mark.asyncio
 async def test_daily_worker_counts_failed_hourly_as_terminal(monkeypatch) -> None:
     """Failed hourly docs should not permanently block daily synthesis."""
 

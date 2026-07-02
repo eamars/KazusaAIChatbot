@@ -330,6 +330,12 @@ Stores singleton character profile/state documents and runtime self-image
 material. Character state updates are explicit persistence events owned by
 named service or promotion paths.
 
+`compare_and_upsert_character_state(...)` is the stale-write guarded runtime
+state helper. It updates mood, global vibe, reflection summary, and
+`updated_at` only when `_id="global"` and the previously read `updated_at`
+value still match. Callers use its boolean return to record a skipped stale
+operation; database code does not interpret the free-form mood or vibe text.
+
 ### `memory`
 
 Stores curated shared/world/common-sense memory and evolving-memory rows used
@@ -339,9 +345,9 @@ the facade, but new reflection memory promotion should go through the
 
 ### `character_reflection_runs`
 
-Stores hourly, daily-channel, and global-promotion reflection run documents.
-These rows are evidence and audit records for the reflection cycle. Normal
-cognition uses promoted, gated reflection context.
+Stores hourly, daily-channel, global-promotion, and daily-affect-settling
+reflection run documents. These rows are evidence and audit records for the
+reflection cycle. Normal cognition uses promoted, gated reflection context.
 
 Reflection reads and writes are split intentionally:
 
@@ -505,6 +511,8 @@ The database package provides reflection support through named helpers:
 - reflection-run index creation;
 - reflection-run upsert and lookup;
 - hourly/daily run listing by channel and date;
+- reflection-run listing by run kind and character-local date for background
+  maintenance such as daily affect settling;
 - interaction-style overlay persistence for promoted runtime guidance.
 
 Reflection packages call the database facade or the named reflection DB helpers

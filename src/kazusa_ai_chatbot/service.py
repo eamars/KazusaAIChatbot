@@ -181,6 +181,7 @@ from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
 from kazusa_ai_chatbot.reflection_cycle import (
     ReflectionWorkerHandle,
     build_promoted_reflection_context,
+    should_pause_self_cognition_for_affect_settling,
     start_reflection_cycle_worker,
     stop_reflection_cycle_worker,
 )
@@ -2987,6 +2988,9 @@ async def lifespan(app: FastAPI):
                 latest_cognition_graph_publisher=(
                     _publish_self_cognition_latest_graph
                 ),
+                should_pause_for_affect_settling=(
+                    should_pause_self_cognition_for_affect_settling
+                ),
             )
         else:
             logger.info(
@@ -3012,6 +3016,9 @@ async def lifespan(app: FastAPI):
                 is_primary_interaction_busy=lambda: False,
                 adapter_registry_provider=lambda: _adapter_registry,
                 phase_run_provider=calendar_phase_provider,
+                character_state_refresh_callback=(
+                    _refresh_runtime_character_state
+                ),
             )
         else:
             logger.info(

@@ -37,6 +37,7 @@ from kazusa_ai_chatbot.db import (
     save_memory,
     search_memory,
     split_character_profile_runtime_state,
+    compare_and_upsert_character_state,
     update_affinity,
     update_last_relationship_insight,
     upsert_character_state,
@@ -321,6 +322,58 @@ async def test_upsert_character_state():
     assert set_payload["mood"] == "happy"
     assert set_payload["global_vibe"] == "relaxed"
     assert set_payload["reflection_summary"] == "feeling good"
+
+
+@pytest.mark.asyncio
+async def test_compare_and_upsert_character_state_matches_updated_at():
+    db = _mock_db()
+    db.character_state.update_one = AsyncMock(
+        return_value=MagicMock(matched_count=1),
+    )
+
+    with _patched_get_db(db):
+        result = await compare_and_upsert_character_state(
+            expected_updated_at="t1",
+            mood="less sharp, still guarded",
+            global_vibe="tired but not hostile",
+            reflection_summary="Sleep made the irritation feel smaller.",
+            updated_at_utc="t2",
+        )
+
+    assert result is True
+    db.character_state.update_one.assert_awaited_once_with(
+        {"_id": "global", "updated_at": "t1"},
+        {
+            "$set": {
+                "mood": "less sharp, still guarded",
+                "global_vibe": "tired but not hostile",
+                "reflection_summary": (
+                    "Sleep made the irritation feel smaller."
+                ),
+                "updated_at": "t2",
+            }
+        },
+        upsert=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_compare_and_upsert_character_state_returns_false_when_stale():
+    db = _mock_db()
+    db.character_state.update_one = AsyncMock(
+        return_value=MagicMock(matched_count=0),
+    )
+
+    with _patched_get_db(db):
+        result = await compare_and_upsert_character_state(
+            expected_updated_at="t1",
+            mood="less sharp, still guarded",
+            global_vibe="tired but not hostile",
+            reflection_summary="Sleep made the irritation feel smaller.",
+            updated_at_utc="t2",
+        )
+
+    assert result is False
 
 
 # ── User profile ────────────────────────────────────────────────────

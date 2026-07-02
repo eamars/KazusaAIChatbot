@@ -105,6 +105,7 @@ from kazusa_ai_chatbot.db.reflection_cycle import (
     list_daily_channel_runs,
     list_existing_run_ids,
     list_hourly_runs_for_channel_day,
+    list_reflection_runs_for_kind_date,
     upsert_reflection_run,
 )
 from kazusa_ai_chatbot.db.global_character_growth import (
@@ -168,6 +169,7 @@ from kazusa_ai_chatbot.db.user_memory_units import (
 # ── Character state ───────────────────────────────────────────────
 from kazusa_ai_chatbot.db.character import (
     RUNTIME_CHARACTER_STATE_FIELDS,
+    compare_and_upsert_character_state,
     compose_character_profile,
     get_character_profile,
     get_character_runtime_state,
@@ -287,7 +289,8 @@ __all__ = [
     "resolve_single_private_scope_user_id",
     "ensure_reflection_run_indexes", "find_reflection_run_by_id",
     "list_daily_channel_runs", "list_existing_run_ids",
-    "list_hourly_runs_for_channel_day", "upsert_reflection_run",
+    "list_hourly_runs_for_channel_day", "list_reflection_runs_for_kind_date",
+    "upsert_reflection_run",
     "ensure_global_character_growth_indexes", "insert_growth_run_document",
     "list_active_growth_traits", "list_prompt_visible_growth_traits",
     "upsert_growth_trait_documents",
@@ -321,7 +324,8 @@ __all__ = [
     "update_user_memory_unit_semantics", "update_user_memory_unit_window",
     "validate_user_memory_unit_semantics",
     # Character
-    "RUNTIME_CHARACTER_STATE_FIELDS", "compose_character_profile",
+    "RUNTIME_CHARACTER_STATE_FIELDS", "compare_and_upsert_character_state",
+    "compose_character_profile",
     "get_character_profile", "get_character_runtime_state",
     "get_character_state", "save_character_profile",
     "split_character_profile_runtime_state",

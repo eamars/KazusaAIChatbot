@@ -418,6 +418,7 @@ class CharacterReflectionRunDoc(TypedDict, total=False):
         "hourly_slot",
         "daily_channel",
         "daily_global_promotion",
+        "daily_affect_settling",
     ]
     status: Literal["succeeded", "failed", "skipped", "dry_run"]
     prompt_version: str

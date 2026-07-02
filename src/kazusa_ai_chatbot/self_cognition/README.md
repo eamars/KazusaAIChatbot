@@ -91,6 +91,15 @@ self-cognition before case collection. Due scheduled future-cognition slots
 remain eligible. Reflection, consolidation, scheduler execution, dispatcher
 validation, and adapter delivery are not paused by this predicate.
 
+Daily affect settling is owned by `kazusa_ai_chatbot.reflection_cycle`, not by
+this module. The service may inject
+`should_pause_for_affect_settling` into `worker.start_self_cognition_worker` or
+`worker.run_self_cognition_worker_tick`. The worker calls that probe after the
+primary-interaction busy check and before source collection. When the probe
+returns true, the tick records a deferred worker result with
+`defer_reason="daily affect settling pending"` and does not collect source
+cases. The self-cognition package must not import reflection-cycle internals.
+
 ## Runtime Engine Budget
 
 - Every case enters the bounded cognition resolver and each resolver cycle

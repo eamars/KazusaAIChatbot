@@ -251,6 +251,9 @@ input.
 
 Reflection is slower sense-making work. Raw reflection output is stored for
 inspection, but normal cognition only receives bounded, promoted, gated context.
+The reflection worker also owns the daily sleep/wake affect-settling pass that
+smooths persistent character mood and global vibe outside the live response
+path.
 
 **Adapters are transport edges**
 

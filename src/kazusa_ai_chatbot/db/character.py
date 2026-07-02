@@ -186,3 +186,48 @@ async def upsert_character_state(
         raise DatabaseOperationError(
             f"failed to upsert character state: {exc}"
         ) from exc
+
+
+async def compare_and_upsert_character_state(
+    *,
+    expected_updated_at: str,
+    mood: str,
+    global_vibe: str,
+    reflection_summary: str,
+    updated_at_utc: str,
+) -> bool:
+    """Update runtime character state only if the freshness token still matches.
+
+    Args:
+        expected_updated_at: ``updated_at`` value read before the LLM proposal.
+        mood: LLM-authored replacement mood text.
+        global_vibe: LLM-authored replacement global vibe text.
+        reflection_summary: LLM-authored replacement reflection summary text.
+        updated_at_utc: New UTC freshness timestamp to persist.
+
+    Returns:
+        ``True`` when the singleton row matched the expected freshness token,
+        otherwise ``False`` so callers can record a non-retryable stale skip.
+    """
+
+    try:
+        db = await get_db()
+        result = await db.character_state.update_one(
+            {"_id": "global", "updated_at": expected_updated_at},
+            {
+                "$set": {
+                    "mood": mood,
+                    "global_vibe": global_vibe,
+                    "reflection_summary": reflection_summary,
+                    "updated_at": updated_at_utc,
+                }
+            },
+            upsert=False,
+        )
+    except PyMongoError as exc:
+        raise DatabaseOperationError(
+            f"failed to compare-and-upsert character state: {exc}"
+        ) from exc
+
+    return_value = result.matched_count > 0
+    return return_value

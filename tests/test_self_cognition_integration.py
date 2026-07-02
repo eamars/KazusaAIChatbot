@@ -2533,6 +2533,30 @@ async def test_worker_tick_defers_when_primary_interaction_is_busy(tmp_path) -> 
 
 
 @pytest.mark.asyncio
+async def test_worker_tick_pauses_before_collection_for_affect_settling() -> None:
+    """Pending daily affect settling should pause self-cognition collection."""
+
+    collect_cases = AsyncMock(
+        side_effect=AssertionError("paused tick should not collect cases"),
+    )
+    should_pause = AsyncMock(return_value=True)
+
+    result = await worker.run_self_cognition_worker_tick(
+        now=datetime(2026, 5, 13, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        should_pause_for_affect_settling=should_pause,
+        max_cases=3,
+    )
+
+    assert result.deferred is True
+    assert result.defer_reason == "daily affect settling pending"
+    assert result.processed_count == 0
+    collect_cases.assert_not_awaited()
+    should_pause.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_active_commitment_source_builds_due_case_from_memory_unit() -> None:
     """Active commitment collection should build visible/actionable case input."""
 

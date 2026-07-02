@@ -226,9 +226,28 @@ self-cognition worker runs do not invoke the L3 visual-directive LLM.
 `CHARACTER_TIME_ZONE`. During that local period, active-commitment
 self-cognition and reflection-attached group self-cognition do not trigger.
 Scheduled future cognition, durable calendar due-run handling, reflection,
-consolidation, dispatcher validation, and adapter delivery continue. Set
-`CHARACTER_SLEEP_LOCAL_PERIOD` to an empty value to disable this sleep-period
-suppression.
+consolidation, dispatcher validation, and adapter delivery continue. The same
+sleep period also schedules daily affect settling for persistent
+`character_state` mood, global vibe, and reflection summary. Set
+`CHARACTER_SLEEP_LOCAL_PERIOD` to an empty value to disable both sleep-period
+self-cognition suppression and affect settling.
+
+Daily affect settling has no separate `AFFECT_SETTLING_ENABLED` rollback flag.
+A non-empty `CHARACTER_SLEEP_LOCAL_PERIOD` enables the schedule; an empty value
+disables both sleep-period self-cognition suppression and affect settling. The
+only env-backed affect-settling knob is `AFFECT_SETTLING_WAKE_PREP_MINUTES=30`.
+
+The remaining affect-settling policy values are named constants in
+`kazusa_ai_chatbot.reflection_cycle.affect_settling`:
+
+- `AFFECT_SETTLING_PROMPT_MAX_CHARS=12000`
+- `AFFECT_SETTLING_REVIEW_PROMPT_MAX_CHARS=8000`
+- `AFFECT_SETTLING_AFTER_PROMOTION_GRACE_MINUTES=15`
+- `AFFECT_SETTLING_WAKE_DEFER_GRACE_MINUTES=15`
+
+The due local time is the later of promotion time plus grace and sleep end
+minus wake prep. The affect-settling module import fails if that due time is
+after sleep end plus wake defer grace.
 
 `BACKGROUND_WORK_WORKER_ENABLED` controls the internal background-work runtime.
 L2d sees delayed user work as accepted-task affordances:
@@ -639,6 +658,25 @@ python scripts/drop_legacy_rag_collections.py
 
 The script drops `rag_cache_index` and `rag_metadata_index` when present and is
 safe to run repeatedly.
+
+## Daily Affect Settling
+
+Manual dry-run:
+
+```bash
+python -m scripts.run_reflection_cycle affect-settle --dry-run
+```
+
+Manual apply:
+
+```bash
+python -m scripts.run_reflection_cycle affect-settle --enable-character-state-write
+```
+
+Use `--settling-local-date YYYY-MM-DD` for deterministic runs. Apply uses an
+atomic compare-and-upsert against the `character_state.updated_at` value read
+before the LLM call; a stale state records a skipped reflection run and does
+not overwrite newer state.
 
 ## Global Character Growth
 

@@ -18,6 +18,10 @@ from kazusa_ai_chatbot.reflection_cycle.runtime import (
 from kazusa_ai_chatbot.reflection_cycle.context import (
     build_promoted_reflection_context,
 )
+from kazusa_ai_chatbot.reflection_cycle.affect_settling import (
+    run_daily_affect_settling,
+    should_pause_self_cognition_for_affect_settling,
+)
 from kazusa_ai_chatbot.reflection_cycle.promotion import (
     run_global_reflection_promotion,
 )
@@ -39,11 +43,13 @@ __all__ = [
     "ReflectionWorkerResult",
     "build_promoted_reflection_context",
     "collect_reflection_inputs",
+    "run_daily_affect_settling",
     "run_daily_channel_reflection_cycle",
     "run_daily_interaction_style_update",
     "run_global_reflection_promotion",
     "run_hourly_reflection_cycle",
     "run_readonly_reflection_evaluation",
+    "should_pause_self_cognition_for_affect_settling",
     "start_reflection_cycle_worker",
     "stop_reflection_cycle_worker",
 ]

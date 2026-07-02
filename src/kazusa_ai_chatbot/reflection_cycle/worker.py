@@ -42,6 +42,10 @@ from kazusa_ai_chatbot.reflection_cycle.activity_windows import (
     build_group_activity_windows,
 )
 from kazusa_ai_chatbot.reflection_cycle import repository
+from kazusa_ai_chatbot.reflection_cycle.affect_settling import (
+    run_daily_affect_settling as _run_daily_affect_settling,
+    settling_local_date_for_due_affect_settling,
+)
 from kazusa_ai_chatbot.reflection_cycle.models import (
     DailySynthesisResult,
     PromptBuildResult,
@@ -107,6 +111,7 @@ GROUP_REVIEW_STALE_SKIP_REASON = "no_group_review_case_built"
 GROUP_REVIEW_FAILED_SKIP_REASON = "self_cognition_worker_failed"
 _DAILY_STYLE_MAINTENANCE_GATE = "daily_channel_and_style"
 _GLOBAL_PROMOTION_MAINTENANCE_GATE = "global_reflection_promotion"
+_DAILY_AFFECT_SETTLING_MAINTENANCE_GATE = "daily_affect_settling"
 
 
 @dataclass
@@ -366,6 +371,7 @@ def start_reflection_cycle_worker(
     is_primary_interaction_busy: Callable[[], bool],
     adapter_registry_provider: Callable[[], AdapterRegistry | None] | None = None,
     phase_run_provider: Any | None = None,
+    character_state_refresh_callback: Callable[[], Any] | None = None,
 ) -> ReflectionWorkerHandle:
     """Start the process-local reflection worker loop."""
 
@@ -376,6 +382,7 @@ def start_reflection_cycle_worker(
             is_primary_interaction_busy=is_primary_interaction_busy,
             adapter_registry_provider=adapter_registry_provider,
             phase_run_provider=phase_run_provider,
+            character_state_refresh_callback=character_state_refresh_callback,
         )
     )
     handle = ReflectionWorkerHandle(task=task, stop_event=stop_event)
@@ -412,6 +419,7 @@ async def _reflection_worker_loop(
     is_primary_interaction_busy: Callable[[], bool],
     adapter_registry_provider: Callable[[], AdapterRegistry | None] | None,
     phase_run_provider: Any | None = None,
+    character_state_refresh_callback: Callable[[], Any] | None = None,
 ) -> None:
     """Run reflection scheduling ticks until stopped."""
 
@@ -444,6 +452,9 @@ async def _reflection_worker_loop(
                 executed_phase_run_ids=executed_phase_run_ids,
                 executed_period_maintenance_keys=(
                     executed_period_maintenance_keys
+                ),
+                character_state_refresh_callback=(
+                    character_state_refresh_callback
                 ),
             )
         except Exception as exc:
@@ -500,6 +511,7 @@ async def _run_worker_tick(
     phase_run_provider: Any | None = None,
     executed_phase_run_ids: set[str] | None = None,
     executed_period_maintenance_keys: set[tuple[datetime, str, str]] | None = None,
+    character_state_refresh_callback: Callable[[], Any] | None = None,
 ) -> list[Any]:
     """Run one scheduled worker tick in approved priority order."""
 
@@ -656,6 +668,32 @@ async def _run_worker_tick(
                 enable_trait_writes=True,
             )
             results.append(growth_result)
+
+    settling_local_date = settling_local_date_for_due_affect_settling(
+        local_datetime,
+    )
+    affect_maintenance_key = (
+        period_start,
+        settling_local_date,
+        _DAILY_AFFECT_SETTLING_MAINTENANCE_GATE,
+    )
+    affect_maintenance_done = (
+        executed_period_maintenance_keys is not None
+        and affect_maintenance_key in executed_period_maintenance_keys
+    )
+    if settling_local_date and not affect_maintenance_done:
+        if is_primary_interaction_busy():
+            return results
+        if executed_period_maintenance_keys is not None:
+            executed_period_maintenance_keys.add(affect_maintenance_key)
+        affect_result = await _run_daily_affect_settling(
+            settling_local_date=settling_local_date,
+            dry_run=False,
+            enable_character_state_write=True,
+            character_state_refresh_callback=character_state_refresh_callback,
+        )
+        results.append(affect_result)
+        await _record_reflection_worker_result(affect_result)
     return results
 
 

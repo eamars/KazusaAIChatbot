@@ -953,6 +953,76 @@ class TestReflectionCycleConfig:
             "REFLECTION_PHASE_MIN_SLOT_SPACING_SECONDS"
         ) in result.stderr
 
+    def test_daily_affect_settling_defaults(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env.pop("AFFECT_SETTLING_WAKE_PREP_MINUTES", None)
+        env["AFFECT_SETTLING_ENABLED"] = "false"
+        env["AFFECT_SETTLING_PROMPT_MAX_CHARS"] = "not-configured"
+        env["AFFECT_SETTLING_REVIEW_PROMPT_MAX_CHARS"] = "not-configured"
+        env["AFFECT_SETTLING_AFTER_PROMOTION_GRACE_MINUTES"] = "not-configured"
+        env["AFFECT_SETTLING_WAKE_DEFER_GRACE_MINUTES"] = "not-configured"
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "removed_names = ("
+                    "'AFFECT_SETTLING_ENABLED', "
+                    "'AFFECT_SETTLING_PROMPT_MAX_CHARS', "
+                    "'AFFECT_SETTLING_REVIEW_PROMPT_MAX_CHARS', "
+                    "'AFFECT_SETTLING_AFTER_PROMOTION_GRACE_MINUTES', "
+                    "'AFFECT_SETTLING_WAKE_DEFER_GRACE_MINUTES'"
+                    "); "
+                    "print(config.AFFECT_SETTLING_WAKE_PREP_MINUTES); "
+                    "print('\\n'.join("
+                    "str(hasattr(config, name)) for name in removed_names"
+                    "))"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.splitlines() == [
+            "30",
+            "False",
+            "False",
+            "False",
+            "False",
+            "False",
+        ]
+
+    def test_daily_affect_settling_rejects_due_after_wake_defer(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["CHARACTER_SLEEP_LOCAL_PERIOD"] = "02:00-03:00"
+        env["REFLECTION_PROMOTION_RUN_AFTER_LOCAL_TIME"] = "05:00"
+        env["AFFECT_SETTLING_WAKE_PREP_MINUTES"] = "30"
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import kazusa_ai_chatbot.reflection_cycle.affect_settling",
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode != 0
+        assert (
+            "AFFECT_SETTLING due time cannot be later than sleep end plus "
+            "wake defer grace"
+        ) in result.stderr
+
 
 class TestGlobalCharacterGrowthConfig:
     def test_prompt_char_budget_defaults_to_32000(self, tmp_path):

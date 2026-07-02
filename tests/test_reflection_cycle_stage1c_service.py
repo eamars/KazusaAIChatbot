@@ -46,6 +46,7 @@ async def test_lifespan_starts_reflection_worker_by_default(monkeypatch) -> None
         service_module._adapter_registry
     )
     assert calls["reflection_phase_provider"] is calls["calendar_phase_provider"]
+    assert callable(calls["reflection_state_refresh_callback"])
 
 
 @pytest.mark.asyncio
@@ -93,6 +94,7 @@ async def test_lifespan_starts_self_cognition_worker_only_when_enabled(
     assert enabled_calls["self_cognition_stopped"] == 1
     assert callable(enabled_calls["self_cognition_busy_probe"])
     assert enabled_calls["self_cognition_busy_probe"]() is False
+    assert callable(enabled_calls["self_cognition_affect_pause_probe"])
 
 
 @pytest.mark.asyncio
@@ -193,8 +195,10 @@ async def _run_lifespan(
         "self_cognition_started": 0,
         "self_cognition_stopped": 0,
         "self_cognition_busy_probe": None,
+        "self_cognition_affect_pause_probe": None,
         "reflection_adapter_registry_provider": None,
         "reflection_phase_provider": None,
+        "reflection_state_refresh_callback": None,
         "calendar_phase_provider": object(),
         "calendar_started": 0,
         "calendar_stopped": 0,
@@ -213,11 +217,15 @@ async def _run_lifespan(
         is_primary_interaction_busy,
         adapter_registry_provider=None,
         phase_run_provider=None,
+        character_state_refresh_callback=None,
     ):
         calls["started"] = int(calls["started"]) + 1
         calls["busy_probe"] = is_primary_interaction_busy
         calls["reflection_adapter_registry_provider"] = adapter_registry_provider
         calls["reflection_phase_provider"] = phase_run_provider
+        calls["reflection_state_refresh_callback"] = (
+            character_state_refresh_callback
+        )
         return handle
 
     async def _stop_reflection_cycle_worker(_handle):
@@ -234,6 +242,9 @@ async def _run_lifespan(
             int(calls["self_cognition_started"]) + 1
         )
         calls["self_cognition_busy_probe"] = kwargs["is_primary_interaction_busy"]
+        calls["self_cognition_affect_pause_probe"] = (
+            kwargs["should_pause_for_affect_settling"]
+        )
         self_cognition_handle = SimpleNamespace(
             task=asyncio.create_task(_sleep_forever()),
             stop_event=None,
