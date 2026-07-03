@@ -7,7 +7,7 @@
 - Related execution plans:
   - `development_plans/archive/completed/short_term/coding_agent_phase0_fetching_plan.md`
   - `development_plans/archive/completed/short_term/coding_agent_phase1_code_reading_final_plan.md`
-  - `development_plans/active/short_term/coding_agent_phase2_code_writing_plan.md`
+  - `development_plans/archive/completed/short_term/coding_agent_phase2_code_writing_plan.md`
   - `development_plans/active/short_term/coding_agent_phase2_5_security_boundary_plan.md`
   - `development_plans/active/short_term/coding_agent_phase3_background_worker_integration_plan.md`
 - Execution rule: use this document as reference context
@@ -16,9 +16,9 @@ This document captures the top-level architecture for replacing placeholder
 code-related background work with a specialized `coding_agent`. The archived
 completed Phase 0 plan records the implemented `code_fetching` contract; the
 archived completed Phase 1 plan records the corrected `code_reading` and
-direct answer interface on top of that fetching contract. The active Phase 2
-in-progress plan defines the standalone new-artifact `code_writing` stage and
-the patch artifact boundary it needs. The active Phase 2.5 draft plan defines
+direct answer interface on top of that fetching contract. The archived
+completed Phase 2 plan records the standalone new-artifact `code_writing`
+stage and the patch artifact boundary it needs. The active Phase 2.5 draft plan defines
 the agent-space security boundary before later runtime integration. The active
 Phase 3 draft plan defines the separate background-worker integration stage.
 
@@ -196,6 +196,11 @@ generated work, the owning PM asks for workspace facts. The supervisor exposes
 only the selected generated artifacts to `code_reading` through a managed
 readback workspace, records the evidence-backed result in the ledger, and
 resumes the PM with compact supervisor-approved facts.
+The supervisor preserves the generated artifacts as internal pending artifacts
+while the readback runs, then passes them back as prior generated artifacts on
+resume. A dependent programmer task that consumes prior generated interfaces
+must cite the resolved supervisor readback fact id before deterministic
+handoff validation allows programmer dispatch.
 
 Validation is supervisor-mediated. The Structural validator returns patch or
 file-tree diagnostics to the work ledger. The supervisor decides whether the

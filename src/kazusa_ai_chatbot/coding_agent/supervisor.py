@@ -24,6 +24,9 @@ from kazusa_ai_chatbot.coding_agent.models import (
     CodingAgentRequest,
     CodingAgentResponse,
 )
+from kazusa_ai_chatbot.coding_agent.work_ledger import (
+    CodingSupervisorWorkLedger,
+)
 
 DIRTY_CHECKOUT_LIMITATION = (
     "Existing local checkout is dirty; evidence may include "
@@ -248,24 +251,34 @@ async def propose_code_change(
 async def _propose_new_project_change(
     request: CodingAgentWriteRequest,
 ) -> CodingPatchProposalResponse:
-    external_evidence: list[dict[str, object]] = []
-    supervisor_facts: list[dict[str, object]] = []
+    ledger = CodingSupervisorWorkLedger(
+        goal=str(request.get("question") or ""),
+    )
     trace_summary: list[str] = []
     last_writing_result: dict[str, object] | None = None
-    for _ in range(WRITE_LOOP_LIMIT):
+    for attempt_index in range(WRITE_LOOP_LIMIT):
         writing_request = _writing_request(
             request=request,
             mode="create_new_project",
             repository=None,
             source_scope=None,
             reading_result=None,
+            supervisor_evidence_state=ledger.projection(),
+            prior_generated_artifacts=ledger.generated_artifacts,
         )
-        if external_evidence:
-            writing_request["external_evidence"] = external_evidence
-        if supervisor_facts:
-            writing_request["supervisor_facts"] = supervisor_facts
+        if ledger.external_evidence:
+            writing_request["external_evidence"] = ledger.external_evidence
+        if ledger.supervisor_facts:
+            writing_request["supervisor_facts"] = ledger.supervisor_facts
         writing_result = await _maybe_await(code_writing.run(writing_request))
         last_writing_result = writing_result
+        ledger.record_writing_attempt(
+            attempt_index=attempt_index + 1,
+            writing_result=writing_result,
+        )
+        ledger.record_generated_artifacts(
+            writing_result.get("pending_artifacts"),
+        )
         trace_summary.extend(writing_result["trace_summary"])
 
         if writing_result["status"] == "need_external_evidence":
@@ -276,7 +289,7 @@ async def _propose_new_project_change(
                     repository=None,
                     source_scope=None,
                     evidence=[],
-                    external_evidence=external_evidence,
+                    external_evidence=ledger.external_evidence,
                     trace_summary=trace_summary,
                     reason="Writing requested external evidence without tasks.",
                     session=writing_result.get("session"),
@@ -286,7 +299,7 @@ async def _propose_new_project_change(
                 requests,
                 trace_summary=trace_summary,
             )
-            external_evidence.extend(collected_evidence)
+            ledger.record_external_evidence(collected_evidence)
             continue
 
         if writing_result["status"] == "need_reading":
@@ -304,17 +317,17 @@ async def _propose_new_project_change(
                     repository=None,
                     source_scope=None,
                     evidence=reading_result["evidence"],
-                    external_evidence=external_evidence,
+                    external_evidence=ledger.external_evidence,
                     trace_summary=trace_summary,
                     reason="Generated artifact readback did not produce usable evidence.",
                     session=writing_result.get("session"),
                 )
                 return response
-            supervisor_facts.append(
+            ledger.record_supervisor_fact(
                 _supervisor_fact_from_readback(
                     writing_result=writing_result,
                     reading_result=reading_result,
-                )
+                ),
             )
             trace_summary.append(
                 f"generated_readback:evidence={len(reading_result['evidence'])}"
@@ -336,7 +349,7 @@ async def _propose_new_project_change(
         repository=None,
         source_scope=None,
         evidence=[],
-        external_evidence=external_evidence,
+        external_evidence=ledger.external_evidence,
         trace_summary=trace_summary,
         last_writing_result=last_writing_result,
     )
@@ -927,6 +940,7 @@ def _writing_request(
     source_scope: dict[str, object] | None,
     reading_result: dict[str, object] | None,
     supervisor_evidence_state: dict[str, object] | None = None,
+    prior_generated_artifacts: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     writing_request: dict[str, object] = {
         "question": request.get("question", ""),
@@ -938,6 +952,8 @@ def _writing_request(
     }
     if supervisor_evidence_state is not None:
         writing_request["supervisor_evidence_state"] = supervisor_evidence_state
+    if prior_generated_artifacts:
+        writing_request["prior_generated_artifacts"] = prior_generated_artifacts
     optional_fields = (
         "preferred_language",
         "session_id",

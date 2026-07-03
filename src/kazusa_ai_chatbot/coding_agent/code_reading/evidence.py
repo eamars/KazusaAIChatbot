@@ -350,6 +350,7 @@ def _rg_files(root: Path) -> list[Path]:
                 "rg",
                 "--files",
                 "--hidden",
+                "--no-ignore-parent",
                 "-g",
                 "!.git/*",
                 "-g",

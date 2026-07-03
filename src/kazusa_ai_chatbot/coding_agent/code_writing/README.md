@@ -28,6 +28,8 @@ interface.
   supervisor resolves a PM `request_information` outcome.
 - `supervisor_facts`: compact facts resolved by the top-level supervisor,
   including generated-artifact readback facts from `code_reading`.
+- `prior_generated_artifacts`: internal generated artifacts preserved by the
+  top-level supervisor when a prior writing pass paused for readback.
 - `workspace_root`: required caller-configured storage root.
 - `session_id`: optional stable public session id.
 - `preferred_language`, `max_answer_chars`, `max_artifact_chars`: optional
@@ -50,6 +52,8 @@ capability.
 - `patch_artifacts`: limited unified diff proposals for new files.
 - `created_files` and `changed_files`: public file summaries. In this stage,
   created files are expected and changed files are diagnostics only.
+- `pending_artifacts`: internal generated artifacts held across a
+  supervisor-mediated information pause.
 - `external_evidence_requests` and `external_evidence`: supervisor-mediated
   public evidence handoff.
 - `reading_requests` and `reading_source`: supervisor-mediated readback
@@ -97,6 +101,13 @@ one fenced artifact body. The patching boundary owns file-tree or unified-diff
 materialization. Deterministic code owns caps, path safety, storage boundaries,
 review-package materialization, and public sanitization.
 
+When a programmer task consumes an interface from prior generated artifacts,
+the task must cite a resolved supervisor readback fact id in
+`consumed_fact_ids`. Deterministic handoff validation rejects the programmer
+task before dispatch when generated artifacts exist, consumed interfaces are
+declared, and no matching resolved readback fact is cited. The feedback returns
+to the owning PM inside the PM lifecycle loop.
+
 ## Mutation Boundary
 
 Review-package materialization copies proposed artifacts into managed storage
@@ -125,8 +136,9 @@ Generated-artifact readback uses `need_reading`. The writing subagent writes
 selected generated artifacts into managed readback storage and returns a
 bounded `reading_source`. The top-level supervisor calls `code_reading`, stores
 the answer as one compact `supervisor_fact`, and calls `code_writing.run(...)`
-again. Raw source text, absolute paths, reading traces, and command results are
-not passed back into PM context.
+again with the prior generated artifacts preserved internally. Raw source text,
+absolute paths, reading traces, and command results are not passed back into PM
+context.
 
 ## Session Storage
 

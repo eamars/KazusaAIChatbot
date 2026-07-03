@@ -166,6 +166,7 @@ class CodeWritingRequest(TypedDict, total=False):
     max_artifact_chars: int
     external_evidence: list[ExternalEvidenceSummary]
     supervisor_facts: list[SupervisorFactSummary]
+    prior_generated_artifacts: list["GeneratedArtifact"]
 
 
 class WritingWorkItem(TypedDict):
@@ -217,6 +218,7 @@ class WritingProgrammerTask(TypedDict):
     required_behavior: list[str]
     provided_interfaces: list[str]
     consumed_interfaces: list[str]
+    consumed_fact_ids: NotRequired[list[str]]
     imports: list[str]
     output_format: str
 
@@ -362,6 +364,7 @@ class CodeWritingResult(TypedDict):
     patch_artifacts: list[PatchArtifact]
     created_files: list[CreatedFileSummary]
     changed_files: list[ChangedFileSummary]
+    pending_artifacts: NotRequired[list[GeneratedArtifact]]
     reading_requests: NotRequired[list[WritingReadingRequest]]
     external_evidence_requests: list[WritingExternalEvidenceRequest]
     external_evidence: list[ExternalEvidenceSummary]

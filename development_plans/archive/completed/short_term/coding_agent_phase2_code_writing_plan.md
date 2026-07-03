@@ -7,7 +7,7 @@
   PM or programmer, and grounds dependent instructions through
   supervisor-mediated workspace facts.
 - Plan class: high_risk_migration.
-- Status: in_progress.
+- Status: completed.
 - Mandatory skills: `development-plan`, `local-llm-architecture`,
   `no-prepost-user-input`, `py-style`, `test-style-and-execution`, and
   `debug-llm`.
@@ -16,9 +16,10 @@
 - Highest-risk areas: PM role drift, weak workspace-grounded feedback loop,
   local-LLM inconsistency, premature E2E testing, boundary leakage between PMs
   and programmers, and deterministic code making semantic decisions.
-- Acceptance criteria: PM role live LLM suites cover every supported PM action
-  for all five Phase 2 gates before downstream role work or E2E resumes; then
-  all five hard gates pass by agent-authored review.
+- Acceptance criteria: PM role live LLM suites, deterministic workflow checks,
+  and accepted Gate 01 and Gate 02 E2E evidence establish Phase 2 new-artifact
+  writing as good enough for closure. Gates 03-05 remain future regression
+  candidates, not blockers for this completed Phase 2 record.
 
 ## Context
 
@@ -301,6 +302,13 @@ The supervisor fact is the only readback memory passed to the next PM call.
 Raw generated source, absolute paths, reading traces, and command results must
 not be appended to PM context.
 
+The writing subagent also returns internal `pending_artifacts` when it pauses
+for generated-artifact readback. The top-level supervisor stores those
+artifacts in the run ledger and supplies them back to `code_writing` as
+`prior_generated_artifacts` on resume. PM prompts receive only compact artifact
+reports and supervisor facts; the preserved artifact content is used for final
+patch-package materialization.
+
 ### Child PM Task
 
 ```python
@@ -323,12 +331,18 @@ not be appended to PM context.
     "required_behavior": list[str],
     "provided_interfaces": list[str],
     "consumed_interfaces": list[str],
+    "consumed_fact_ids": list[str],
     "imports": list[str],
     "output_format": str,
 }
 ```
 
 For Phase 2 writing, one programmer task produces one new artifact.
+When `consumed_interfaces` references prior generated work, the PM must cite a
+resolved generated-artifact readback `request_id` in `consumed_fact_ids`.
+Deterministic handoff validation rejects the task before programmer dispatch if
+prior generated artifacts exist, consumed interfaces are declared, and no
+matching resolved readback fact is cited.
 
 ### PM Report
 
@@ -363,7 +377,7 @@ size, model route, model name, thinking setting, and output size.
 
 - `development_plans/reference/designs/coding_agent_architecture.md`: source of
   truth for recursive PM lifecycle and supervisor-mediated workspace grounding.
-- `development_plans/active/short_term/coding_agent_phase2_code_writing_plan.md`:
+- `development_plans/archive/completed/short_term/coding_agent_phase2_code_writing_plan.md`:
   reset Phase 2 around the recursive PM contract.
 - `src/kazusa_ai_chatbot/coding_agent/code_writing/README.md`: update the ICD
   to match the PM lifecycle and workspace-grounding loop.
@@ -473,10 +487,10 @@ size, model route, model name, thinking setting, and output size.
   - Covers: programmer, patching, synthesizer, and alignment impacts from PM
     contract changes.
   - Verify: affected role suites rerun one case at a time.
-- [ ] Stage 5 - E2E hard gates
-  - Covers: five Phase 2 gates through `coding_agent.propose_code_change(...)`.
-  - Verify: run one E2E live gate at a time only after role readiness.
-- [ ] Stage 6 - final verification and independent code review
+- [x] Stage 5 - accepted E2E closeout gates
+  - Covers: Gate 01 and Gate 02 through `coding_agent.propose_code_change(...)`.
+  - Verify: user accepted current evidence as sufficient to close Phase 2.
+- [x] Stage 6 - final verification and independent code review
   - Covers: deterministic checks, anti-cheat greps, diff review, evidence, and
     final sign-off.
 
@@ -573,7 +587,9 @@ This plan is complete when:
 - PM role live LLM suites cover every supported PM action across the five hard
   gates and reach at least 90% readiness by agent-authored review.
 - Downstream role suites affected by the PM contract are rerun and reviewed.
-- All five Phase 2 E2E hard gates pass by agent-authored review.
+- User accepts the current Gate 01 and Gate 02 E2E evidence as sufficient for
+  Phase 2 closeout. Gates 03-05 remain future regression candidates and are
+  not blockers for this completed record.
 - E2E gates are judged on sound artifact output and workflow structure. Code
   mistakes are recorded in the review comment but do not fail a gate when the
   artifact package is coherent, request-aligned, and structurally sound.
@@ -715,3 +731,95 @@ This plan is complete when:
   seconds with empty PM output. Trace:
   `test_artifacts/llm_traces/coding_agent_pm_lifecycle_role_live_llm__gate_02_readback_fact_tests_programmer_task.json`.
   This is a component-level readiness blocker; do not run E2E from this state.
+- 2026-07-03: Implemented compact supervisor work ledger projection for the
+  new-project writing loop and deterministic child-PM delegation-depth feedback
+  inside the writing supervisor. Verification passed:
+  `venv\Scripts\python -m compileall -q src\kazusa_ai_chatbot\coding_agent tests\test_coding_agent_phase2_new_artifact_contracts.py`,
+  `venv\Scripts\python -m pytest -q tests\test_coding_agent_interface.py tests\test_coding_agent_phase2_new_artifact_contracts.py`
+  reported `23 passed`, and the single Gate 02 live E2E rerun completed in
+  `241.84s` with no child-PM lifecycle calls, compared with the prior traced
+  `435.19s` run and four-level child-PM chain. Review artifact:
+  `test_artifacts/llm_reviews/coding_agent_phase2_gate_02_after_ledger_guard_review_20260703.md`.
+- 2026-07-03: Added typed generated-artifact carryover for
+  supervisor-mediated readback. `code_writing` now returns internal
+  `pending_artifacts` when it pauses for generated-artifact readback; the
+  top-level supervisor stores them in `CodingSupervisorWorkLedger` and resumes
+  writing with `prior_generated_artifacts`. Added deterministic handoff
+  validation so a programmer task that consumes prior generated interfaces must
+  cite a resolved generated-artifact readback fact id in `consumed_fact_ids`
+  before dispatch. Focused verification passed:
+  `venv\Scripts\python -m compileall -q src\kazusa_ai_chatbot\coding_agent tests\test_coding_agent_phase2_new_artifact_contracts.py tests\test_coding_agent_pm_lifecycle_role_live_llm.py`
+  and
+  `venv\Scripts\python -m pytest -q tests\test_coding_agent_phase2_new_artifact_contracts.py`
+  reported `16 passed`. E2E remains blocked until the focused PM live LLM
+  readback cases are run one at a time and reviewed.
+- 2026-07-03: Ran the focused PM readback live LLM cases one at a time and
+  inspected each trace:
+  `gate_02_tests_need_csv_shape_readback`,
+  `gate_02_readback_fact_tests_programmer_task`,
+  `gate_02_readback_fact_cli_programmer_task`, and
+  `gate_02_conflicting_report_uses_readback_fact`. Route
+  `CODING_AGENT_PM_LLM` used model
+  `gemma-4-31b-fable-5-agent-distill` with thinking enabled. The PM requested
+  information when CSV output shape was missing, cited `runtime_readback` when
+  assigning dependent test and CLI programmer tasks, and preferred supervisor
+  readback over a conflicting stale child report. Human-readable review:
+  `test_artifacts/llm_reviews/coding_agent_phase2_pm_readback_role_review_20260703.md`.
+  This closes the PM readback component blocker and raises Gate 02 E2E
+  readiness for one controlled rerun above the 90% threshold.
+- 2026-07-03: Ran Gate 02 E2E once after PM readback role readiness. The run
+  failed because generated-artifact readback produced no usable evidence:
+  writing created the source artifact, the programmer handoff guard rejected
+  dependent tests without readback, the PM requested readback, and
+  `code_reading` reported `reading_pm:repository_map files=0`. RCA showed the
+  managed readback source existed under `test_artifacts`, but `rg --files`
+  honored the caller repository's parent `.gitignore` and hid the managed
+  source root. Fixed the deterministic code-reading scanner by adding
+  `--no-ignore-parent` and added regression coverage in
+  `tests\test_coding_agent_reading.py::test_repository_map_reads_source_under_ignored_parent`.
+  Verification passed: compile, focused repository-map checks, interface
+  checks, Phase 2 contract checks, and `git diff --check` with line-ending
+  warnings only.
+- 2026-07-03: Reran Gate 02 E2E after the scanner fix. The pytest-style live
+  gate passed the review-evidence harness in `619.34s` and materialized three
+  artifacts:
+  `test_artifacts\coding_agent_phase2_e2e_workspace\gate_02\writing_validation\2238f4cacad543599bb907b7ca10f615\src\jsonl_csv_converter.py`,
+  `test_artifacts\coding_agent_phase2_e2e_workspace\gate_02\writing_validation\2238f4cacad543599bb907b7ca10f615\tests\test_jsonl_csv_converter.py`,
+  and
+  `test_artifacts\coding_agent_phase2_e2e_workspace\gate_02\writing_validation\2238f4cacad543599bb907b7ca10f615\src\cli_jsonl_csv.py`.
+  The agent read all three artifacts. AI review judged Gate 02 passing with a
+  recorded code-level concern: one proposed malformed-line test asserts the
+  wrong line number, which later execution should expose but does not make the
+  Phase 2 artifact package structurally unreviewable. Review artifact:
+  `test_artifacts/llm_reviews/coding_agent_phase2_gate_02_readback_path_rca_20260703.md`.
+- 2026-07-03: Ran Gate 01 E2E through
+  `coding_agent.propose_code_change(...)`. The pytest-style live gate passed
+  the review-evidence harness in `397.43s` and materialized one artifact:
+  `test_artifacts\coding_agent_phase2_e2e_workspace\gate_01\writing_validation\2472717751a849c88f039b1b3f725296\src\log_counter_script.py`.
+  The agent read the script and judged Gate 01 passing by the Phase 2 rubric.
+  Recorded workflow-quality concern: the PM attempted an unrequested test
+  artifact twice before readback and completion, so future PM role coverage
+  should strengthen stopping behavior for single-artifact requests. Review
+  artifact:
+  `test_artifacts/llm_reviews/coding_agent_phase2_gate_01_review_20260703.md`.
+- 2026-07-03: User accepted the current state as good enough and requested
+  Phase 2 closeout. Closure is based on completed architecture/ICD/code/test
+  alignment, focused role and contract coverage, Gate 01 and Gate 02 E2E
+  evidence, and explicit user acceptance. Gates 03-05 are preserved in the
+  supporting gate document as future regression candidates rather than Phase 2
+  archive blockers.
+- 2026-07-03: Final closeout verification passed:
+  `venv\Scripts\python -m compileall -q src\kazusa_ai_chatbot\coding_agent tests\test_coding_agent_reading.py tests\test_coding_agent_phase2_new_artifact_contracts.py tests\test_coding_agent_pm_lifecycle_role_live_llm.py tests\test_coding_agent_phase2_new_artifact_e2e_live_llm.py`;
+  `venv\Scripts\python -m pytest -q tests\test_coding_agent_interface.py tests\test_coding_agent_reading.py::test_repository_map_reads_source_under_ignored_parent tests\test_coding_agent_reading.py::test_repository_map_excludes_secret_and_binary_files tests\test_coding_agent_reading.py::test_repository_intelligence_classifies_sources_and_symbols tests\test_coding_agent_phase2_new_artifact_contracts.py`
+  reported `28 passed`; `git diff --check` reported line-ending warnings only.
+- 2026-07-03: Final closeout greps passed: active Phase 2 plan references were
+  removed from registry, active, reference, completed-archive, source, and test
+  paths; the stale flattened-contract grep returned zero matches; targeted
+  gate-text grep returned zero production-code matches.
+- 2026-07-03: Final self-review completed because the user prohibited
+  subagents. Findings: no unresolved blocker in the recursive PM lifecycle,
+  supervisor-mediated generated-artifact readback, deterministic transition
+  checks, or Phase 2 no-execution boundary. Residual risks are recorded as
+  future work: Gate 01 showed PM stopping-behavior weakness, Gate 02 showed one
+  code-level test expectation mistake that later execution should catch, and
+  Gates 03-05 were not rerun for closeout after the user's acceptance.

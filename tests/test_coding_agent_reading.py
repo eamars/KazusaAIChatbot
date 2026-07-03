@@ -400,6 +400,55 @@ def test_repository_map_excludes_secret_and_binary_files(tmp_path: Path) -> None
     assert ".agents/skills/tool.py" not in summary["files"]
 
 
+def test_repository_map_reads_source_under_ignored_parent(
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_reading.repository_map import (
+        build_repository_map_summary,
+    )
+
+    (tmp_path / ".gitignore").write_text(
+        "ignored_source/\n",
+        encoding="utf-8",
+    )
+    repo_root = tmp_path / "ignored_source"
+    (repo_root / "src").mkdir(parents=True)
+    (repo_root / "assets").mkdir()
+    (repo_root / "src" / "runtime.py").write_text(
+        "def run() -> str:\n    return 'ok'\n",
+        encoding="utf-8",
+    )
+    (repo_root / ".env").write_text(
+        "SECRET_TOKEN=do-not-read\n",
+        encoding="utf-8",
+    )
+    (repo_root / "assets" / "logo.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00fixture"
+    )
+    repository = {
+        "provider": "github",
+        "owner": "fixture",
+        "repo": "ignored-source",
+        "source_url": "local://fixture/ignored-source",
+        "requested_ref": None,
+        "resolved_ref": "generated",
+        "current_commit": "generated-sha256:fixture",
+        "default_branch": "generated",
+        "local_root": str(repo_root),
+        "storage_kind": "managed_download",
+        "managed_checkout": True,
+        "workspace_root": str(tmp_path),
+        "cache_key": None,
+        "dirty_state": "clean",
+    }
+
+    summary = build_repository_map_summary(repository, _scope())
+
+    assert "src/runtime.py" in summary["files"]
+    assert ".env" not in summary["files"]
+    assert "assets/logo.png" not in summary["files"]
+
+
 def test_repository_intelligence_classifies_sources_and_symbols(
     tmp_path: Path,
 ) -> None:

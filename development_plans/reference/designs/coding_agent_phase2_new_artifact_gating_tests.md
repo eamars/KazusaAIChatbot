@@ -5,7 +5,7 @@
 - Type: supporting verification procedure and pass criteria
 - Status: reference evidence for Phase 2
 - Parent plan:
-  `development_plans/active/short_term/coding_agent_phase2_code_writing_plan.md`
+  `development_plans/archive/completed/short_term/coding_agent_phase2_code_writing_plan.md`
 - Scope: Phase 2 `code_writing` new-artifact gates only
 
 ## Purpose

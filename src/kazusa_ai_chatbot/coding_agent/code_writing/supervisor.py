@@ -67,6 +67,7 @@ DEFAULT_MAX_ARTIFACT_CHARS = 48000
 MAX_PATCH_FILES = 32
 MAX_PM_LIFECYCLE_STEPS = 8
 MAX_PM_DEPTH = 4
+MAX_CHILD_PM_DELEGATION_DEPTH = 1
 MAX_CHILD_REPORTS = 16
 READBACK_ROOT_NAME = "writing_readback"
 
@@ -133,6 +134,8 @@ async def run_writing_supervisor(
 
     external_evidence = _external_evidence_from_request(request)
     supervisor_facts = _supervisor_facts_from_request(request)
+    supervisor_state = _supervisor_state_from_request(request)
+    prior_generated_artifacts = _prior_generated_artifacts_from_request(request)
     session = prepare_writing_workspace(
         workspace_root=workspace_root,
         session_id=request.get("session_id"),
@@ -205,10 +208,13 @@ async def run_writing_supervisor(
         acceptance_criteria=acceptance["acceptance_criteria"],
         external_evidence=external_evidence,
         supervisor_facts=supervisor_facts,
+        supervisor_state=supervisor_state,
+        prior_generated_artifacts=prior_generated_artifacts,
         child_feedback=[],
     )
     pm_result = await _run_pm_node(
         pm_input=root_input,
+        initial_generated_artifacts=prior_generated_artifacts,
         depth=0,
         diagnostic=diagnostic,
         trace=trace,
@@ -343,6 +349,7 @@ async def run_writing_supervisor(
 async def _run_pm_node(
     *,
     pm_input: WritingPMInput,
+    initial_generated_artifacts: list[GeneratedArtifact] | None = None,
     depth: int,
     diagnostic: WritingDiagnosticTracer,
     trace: dict[str, object] | None,
@@ -360,7 +367,7 @@ async def _run_pm_node(
         )
         return result
 
-    generated_artifacts: list[GeneratedArtifact] = []
+    generated_artifacts = list(initial_generated_artifacts or [])
     direct_child_reports = list(pm_input["direct_child_reports"])
     child_feedback = list(pm_input["child_feedback"])
     final_decision: WritingPMDecision | None = None
@@ -428,9 +435,31 @@ async def _run_pm_node(
             child_task = decision["child_pm_task"]
             if child_task is None:
                 return _invalid_pm_result("PM child task was missing.", decision)
+            if depth >= MAX_CHILD_PM_DELEGATION_DEPTH:
+                child_feedback.append(
+                    _child_pm_depth_feedback(
+                        child_task=child_task,
+                        depth=depth,
+                    )
+                )
+                diagnostic.event(
+                    stage="pm_delegation_guard",
+                    event="child_pm_rejected",
+                    pm_id=pm_input["pm_id"],
+                    child_pm_id=child_task["child_pm_id"],
+                    depth=depth,
+                    max_child_pm_depth=MAX_CHILD_PM_DELEGATION_DEPTH,
+                )
+                trace_summary.append(
+                    "writing_pm:child_pm_rejected "
+                    f"pm={pm_input['pm_id']} "
+                    f"depth={depth}"
+                )
+                continue
             child_input = _child_pm_input(
                 parent_input=pm_input,
                 child_task=child_task,
+                depth=depth + 1,
             )
             child_call = diagnostic.start(
                 stage="child_pm_lifecycle",
@@ -477,6 +506,27 @@ async def _run_pm_node(
             programmer_task = decision["programmer_task"]
             if programmer_task is None:
                 return _invalid_pm_result("PM programmer task was missing.", decision)
+            dependency_feedback = _programmer_dependency_feedback(
+                programmer_task=programmer_task,
+                available_facts=step_input["available_facts"],
+                generated_artifacts=generated_artifacts,
+            )
+            if dependency_feedback is not None:
+                child_feedback.append(dependency_feedback)
+                diagnostic.event(
+                    stage="programmer_contract_guard",
+                    event="readback_fact_required",
+                    pm_id=pm_input["pm_id"],
+                    task_id=programmer_task["task_id"],
+                    generated_artifact_count=len(generated_artifacts),
+                )
+                trace_summary.append(
+                    "writing_pm:programmer_rejected "
+                    f"pm={pm_input['pm_id']} "
+                    f"task={programmer_task['task_id']} "
+                    "reason=missing_readback_fact"
+                )
+                continue
             outcome = await _run_programmer_task(
                 programmer_task=programmer_task,
                 diagnostic=diagnostic,
@@ -646,12 +696,128 @@ async def _run_programmer_task(
     }
 
 
+def _child_pm_depth_feedback(
+    *,
+    child_task: WritingChildPMTask,
+    depth: int,
+) -> dict[str, object]:
+    feedback = {
+        "stage": "child_pm",
+        "child_id": child_task["child_pm_id"],
+        "summary": (
+            "The supervisor rejected another child PM because this PM is "
+            "already at the supported delegation depth. Issue one programmer "
+            "task, request missing information, complete, or block."
+        ),
+        "pm_depth": depth,
+        "remaining_child_pm_depth": 0,
+    }
+    return feedback
+
+
+def _programmer_dependency_feedback(
+    *,
+    programmer_task: WritingProgrammerTask,
+    available_facts: list[dict[str, object]],
+    generated_artifacts: list[GeneratedArtifact],
+) -> dict[str, object] | None:
+    """Require readback evidence before generated-artifact interfaces are consumed."""
+
+    if not generated_artifacts:
+        return None
+
+    consumed_interfaces = _object_string_list(
+        programmer_task.get("consumed_interfaces"),
+    )
+    if not consumed_interfaces:
+        return None
+
+    resolved_readback_ids = _resolved_generated_readback_fact_ids(
+        available_facts,
+    )
+    consumed_fact_ids = _object_string_list(
+        programmer_task.get("consumed_fact_ids"),
+    )
+    for fact_id in consumed_fact_ids:
+        if fact_id in resolved_readback_ids:
+            return None
+
+    artifact_refs = sorted(_generated_artifact_refs(generated_artifacts))
+    if resolved_readback_ids:
+        summary = (
+            "This programmer task consumes interfaces from generated artifacts "
+            "but did not cite a resolved supervisor readback fact. Use one of "
+            "the available readback request_id values in consumed_fact_ids."
+        )
+    else:
+        summary = (
+            "This programmer task consumes interfaces from generated artifacts "
+            "before a resolved supervisor readback fact is available. Request "
+            "generated-artifact readback before assigning the dependent task."
+        )
+    feedback = {
+        "stage": "programmer_contract",
+        "child_id": programmer_task["task_id"],
+        "summary": summary,
+        "generated_artifacts": artifact_refs[:8],
+        "available_readback_fact_ids": resolved_readback_ids,
+        "consumed_fact_ids": consumed_fact_ids,
+    }
+    return feedback
+
+
+def _resolved_generated_readback_fact_ids(
+    available_facts: list[dict[str, object]],
+) -> list[str]:
+    request_ids: list[str] = []
+    for fact in available_facts:
+        kind = fact.get("kind")
+        request_id = fact.get("request_id")
+        summary = fact.get("summary")
+        if kind != "generated_artifact_readback":
+            continue
+        if fact.get("resolved") is not True:
+            continue
+        if not isinstance(request_id, str) or not request_id.strip():
+            continue
+        if not isinstance(summary, str) or not summary.strip():
+            continue
+        request_ids.append(request_id)
+    return request_ids
+
+
+def _reports_from_prior_artifacts(
+    prior_generated_artifacts: list[GeneratedArtifact],
+) -> list[dict[str, object]]:
+    reports: list[dict[str, object]] = []
+    for artifact in prior_generated_artifacts:
+        report = {
+            "child_id": f"prior_{artifact['artifact_id']}",
+            "status": "complete",
+            "provided_facts": [
+                "Generated artifact is available from an earlier supervised step.",
+            ],
+            "created_artifacts": [
+                {
+                    "artifact_id": artifact["artifact_id"],
+                    "path": artifact["path"],
+                    "purpose": artifact["purpose"],
+                }
+            ],
+            "open_risks": [],
+        }
+        reports.append(report)
+    return reports
+
+
 def _root_pm_input(
     *,
     question: str,
     acceptance_criteria: list[WritingAcceptanceCriterion],
     external_evidence: list[ExternalEvidenceSummary],
     supervisor_facts: list[dict[str, object]],
+    supervisor_state: dict[str, object],
+    prior_generated_artifacts: list[GeneratedArtifact],
     child_feedback: list[dict[str, object]],
 ) -> WritingPMInput:
     available_facts: list[dict[str, object]] = [
@@ -676,6 +842,12 @@ def _root_pm_input(
             "summary": fact["result"],
             "task": fact["task"],
         })
+    if supervisor_state:
+        available_facts.append({
+            "kind": "supervisor_work_ledger",
+            "summary": "Compact supervisor state for this coding run.",
+            "state": supervisor_state,
+        })
     pm_input: WritingPMInput = {
         "pm_id": "writing_pm_root",
         "domain": "writing",
@@ -690,9 +862,11 @@ def _root_pm_input(
             "expected_result": "patch proposal package for new artifacts",
         },
         "available_facts": available_facts,
-        "direct_child_reports": [],
+        "direct_child_reports": _reports_from_prior_artifacts(
+            prior_generated_artifacts,
+        ),
         "child_feedback": child_feedback,
-        "context_limits": {"max_prompt_chars": 50000},
+        "context_limits": _pm_context_limits(depth=0),
     }
     return pm_input
 
@@ -701,6 +875,7 @@ def _child_pm_input(
     *,
     parent_input: WritingPMInput,
     child_task: WritingChildPMTask,
+    depth: int,
 ) -> WritingPMInput:
     pm_input: WritingPMInput = {
         "pm_id": child_task["child_pm_id"],
@@ -714,9 +889,22 @@ def _child_pm_input(
         "available_facts": parent_input["available_facts"],
         "direct_child_reports": [],
         "child_feedback": [],
-        "context_limits": parent_input["context_limits"],
+        "context_limits": _pm_context_limits(depth=depth),
     }
     return pm_input
+
+
+def _pm_context_limits(*, depth: int) -> dict[str, object]:
+    remaining_depth = MAX_CHILD_PM_DELEGATION_DEPTH - depth
+    if remaining_depth < 0:
+        remaining_depth = 0
+    context_limits = {
+        "max_prompt_chars": 50000,
+        "pm_depth": depth,
+        "remaining_child_pm_depth": remaining_depth,
+        "child_pm_delegation_depth": MAX_CHILD_PM_DELEGATION_DEPTH,
+    }
+    return context_limits
 
 
 def _artifact_contract_from_programmer_task(
@@ -1084,6 +1272,7 @@ def _information_request_result(
         trace_summary=trace_summary,
         reading_requests=reading_requests,
         reading_source=reading_source,
+        pending_artifacts=generated_artifacts,
     )
     return result
 
@@ -1201,6 +1390,68 @@ def _supervisor_facts_from_request(
     return facts
 
 
+def _supervisor_state_from_request(
+    request: CodeWritingRequest,
+) -> dict[str, object]:
+    supervisor_state = request.get("supervisor_evidence_state", {})
+    if not isinstance(supervisor_state, dict):
+        return {}
+    return supervisor_state
+
+
+def _prior_generated_artifacts_from_request(
+    request: CodeWritingRequest,
+) -> list[GeneratedArtifact]:
+    prior_artifacts = request.get("prior_generated_artifacts", [])
+    if not isinstance(prior_artifacts, list):
+        return []
+
+    artifacts: list[GeneratedArtifact] = []
+    for value in prior_artifacts:
+        artifact = _valid_prior_generated_artifact(value)
+        if artifact is None:
+            continue
+        artifacts.append(artifact)
+    return artifacts
+
+
+def _valid_prior_generated_artifact(
+    value: object,
+) -> GeneratedArtifact | None:
+    if not isinstance(value, dict):
+        return None
+
+    artifact_id = value.get("artifact_id")
+    file_label = value.get("file_label")
+    file_kind = value.get("file_kind")
+    content_format = value.get("content_format")
+    path = value.get("path")
+    content = value.get("content")
+    purpose = value.get("purpose")
+    required_values = [
+        artifact_id,
+        file_label,
+        file_kind,
+        content_format,
+        path,
+        content,
+        purpose,
+    ]
+    if not all(isinstance(item, str) and item.strip() for item in required_values):
+        return None
+
+    artifact: GeneratedArtifact = {
+        "artifact_id": artifact_id,
+        "file_label": file_label,
+        "file_kind": file_kind,
+        "content_format": content_format,
+        "path": path,
+        "content": content,
+        "purpose": purpose,
+    }
+    return artifact
+
+
 def _base_identity(*, question: str) -> str:
     digest = hashlib.sha256(question.encode("utf-8")).hexdigest()[:16]
     return f"new-artifact:{digest}"
@@ -1291,6 +1542,21 @@ def _dedupe_strings(values: list[str]) -> list[str]:
     return deduped
 
 
+def _object_string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+
+    strings: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        text = item.strip()
+        if not text:
+            continue
+        strings.append(text)
+    return strings
+
+
 def _json_char_count(value: object) -> int:
     """Return the rendered JSON size used for diagnostic volume tracking."""
 
@@ -1362,6 +1628,7 @@ def _result(
     alignment: WritingAlignmentResult | None = None,
     reading_requests: list[dict[str, object]] | None = None,
     reading_source: dict[str, object] | None = None,
+    pending_artifacts: list[GeneratedArtifact] | None = None,
 ) -> CodeWritingResult:
     result: CodeWritingResult = {
         "status": status,
@@ -1383,4 +1650,6 @@ def _result(
         result["reading_requests"] = reading_requests
     if reading_source is not None:
         result["reading_source"] = reading_source
+    if pending_artifacts is not None:
+        result["pending_artifacts"] = pending_artifacts
     return result

@@ -68,6 +68,11 @@ You are the product-manager role inside a code-writing agent.
 
 Your job is to manage one assigned work item. You own only your direct
 children. A direct child can be another product manager or one programmer.
+Use context_limits as workflow limits. pm_depth is your current level.
+remaining_child_pm_depth is how many more child-product-manager levels you may
+create from this PM. If remaining_child_pm_depth is 0, choose
+create_programmer_task, request_information, complete, or blocked instead of
+create_child_pm.
 
 # Decision Rules
 1. First decide whether the next useful child can be one programmer. Choose
@@ -113,6 +118,8 @@ children. A direct child can be another product manager or one programmer.
    "write records" are not enough for exact-row tests because they do not say
    whether header rows are part of the output. If those facts are absent or
    ambiguous, request information instead of asking the next child to guess.
+   When supervisor-provided facts are present and a programmer task depends on
+   them, put the relevant request_id values in consumed_fact_ids.
 5. Choose complete when your assigned work item is satisfied and your report
    can be sent upward.
 6. Choose blocked when the work cannot proceed from the available facts, when
@@ -174,6 +181,7 @@ For programmer_task:
   "required_behavior": ["required behavior"],
   "provided_interfaces": ["interfaces this artifact provides"],
   "consumed_interfaces": ["interfaces this artifact consumes"],
+  "consumed_fact_ids": ["supervisor fact request_id values used by this task"],
   "imports": ["required imports"],
   "output_format": "expected artifact format"
 }
@@ -443,6 +451,10 @@ def _programmer_task(payload: dict[str, object]) -> WritingProgrammerTask | None
         ),
         "consumed_interfaces": _string_list(
             payload.get("consumed_interfaces"),
+            MAX_LIST_ITEMS,
+        ),
+        "consumed_fact_ids": _string_list(
+            payload.get("consumed_fact_ids"),
             MAX_LIST_ITEMS,
         ),
         "imports": _import_list(payload.get("imports")),

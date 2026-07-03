@@ -39,7 +39,6 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [coding_agent_phase1_fetching_reading_plan.md](active/short_term/coding_agent_phase1_fetching_reading_plan.md) | Large standalone coding-agent Phase 1 plan | draft |
-| [coding_agent_phase2_code_writing_plan.md](active/short_term/coding_agent_phase2_code_writing_plan.md) | High-risk coding-agent Phase 2 new-artifact code-writing plan | in_progress |
 | [coding_agent_phase2_5_security_boundary_plan.md](active/short_term/coding_agent_phase2_5_security_boundary_plan.md) | High-risk coding-agent Phase 2.5 security boundary plan | draft |
 | [coding_agent_phase3_background_worker_integration_plan.md](active/short_term/coding_agent_phase3_background_worker_integration_plan.md) | Large coding-agent Phase 3 background-worker integration plan | draft |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
@@ -189,6 +188,7 @@ plans.
 | [coding_agent_phase0_fetching_plan.md](archive/completed/short_term/coding_agent_phase0_fetching_plan.md) |
 | [coding_agent_phase1_code_reading_final_plan.md](archive/completed/short_term/coding_agent_phase1_code_reading_final_plan.md) |
 | [coding_agent_phase1_real_repo_retrieval_remediation_plan.md](archive/completed/short_term/coding_agent_phase1_real_repo_retrieval_remediation_plan.md) |
+| [coding_agent_phase2_code_writing_plan.md](archive/completed/short_term/coding_agent_phase2_code_writing_plan.md) |
 | [character_reflection_cycle_stage1a_plan.md](archive/completed/short_term/character_reflection_cycle_stage1a_plan.md) |
 | [character_self_words_retrieval_delivery_receipt_plan.md](archive/completed/short_term/character_self_words_retrieval_delivery_receipt_plan.md) |
 | [cognition_chain_module_separation_plan.md](archive/completed/short_term/cognition_chain_module_separation_plan.md) |

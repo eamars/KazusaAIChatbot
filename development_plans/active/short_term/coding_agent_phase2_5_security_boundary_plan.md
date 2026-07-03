@@ -114,7 +114,7 @@ explicit interface, isolation boundary, permission model, and audit trail.
 
 - `development_plans/reference/designs/coding_agent_architecture.md`: keep the
   security boundary as the architecture source of truth.
-- `development_plans/active/short_term/coding_agent_phase2_code_writing_plan.md`:
+- `development_plans/archive/completed/short_term/coding_agent_phase2_code_writing_plan.md`:
   keep Phase 2 pass/fail wording aligned with this Phase 2.5 handoff.
 - `src/kazusa_ai_chatbot/coding_agent/code_writing/README.md`: document the
   code-writing agent-space tool-call boundary.
