@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Mapping, Sequence
-from typing import Any
 
 from kazusa_ai_chatbot.event_logging.models import EventScopeInput
 from kazusa_ai_chatbot.event_logging.schemas import EventScopeRecord

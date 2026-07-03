@@ -16,9 +16,6 @@ from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as cognition_m
 from kazusa_ai_chatbot.cognition_chain_core.stages import l1 as l1_module
 from kazusa_ai_chatbot.cognition_chain_core.stages import l2 as l2_module
 from kazusa_ai_chatbot.cognition_chain_core.stages import l2d as l2d_module
-from kazusa_ai_chatbot.cognition_chain_core.action_selection_prompt import (
-    ACTION_ROUTER_PROMPT,
-)
 from kazusa_ai_chatbot.cognition_chain_core.stages import l3 as l3_module
 from kazusa_ai_chatbot.cognition_chain_core.stages import l2c2 as l2c2_module
 from kazusa_ai_chatbot.cognition_chain_core.prompt_selection import (

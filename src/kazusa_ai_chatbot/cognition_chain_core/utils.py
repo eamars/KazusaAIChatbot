@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 from collections.abc import Callable, Mapping
 from contextvars import ContextVar, Token
 import json

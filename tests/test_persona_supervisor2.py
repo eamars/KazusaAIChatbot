@@ -487,7 +487,7 @@ async def test_persona_supervisor2_returns_final_dialog_and_consolidation_state(
                 "target_addressed_user_ids": ["uuid-123"],
                 "target_broadcast": False,
             },
-        ) as m_dialog,
+        ),
     ):
         result = await persona_supervisor2(state)
 
@@ -868,12 +868,12 @@ async def test_persona_supervisor2_no_remember_skips_consolidation():
             "kazusa_ai_chatbot.nodes.persona_supervisor2.call_msg_decontexualizer",
             new_callable=AsyncMock,
             return_value={"decontexualized_input": "Hello"},
-        ) as m_decon,
+        ),
         patch(
             "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_resolver_loop",
             new_callable=AsyncMock,
             return_value=_resolver_update([_speak_action_spec()]),
-        ) as m_resolver,
+        ),
         patch(
             "kazusa_ai_chatbot.nodes.persona_supervisor2.call_l3_text_surface_handler",
             new_callable=AsyncMock,
@@ -887,7 +887,7 @@ async def test_persona_supervisor2_no_remember_skips_consolidation():
                 "target_addressed_user_ids": ["uuid-123"],
                 "target_broadcast": False,
             },
-        ) as m_dialog,
+        ),
     ):
         result = await persona_supervisor2(state)
 

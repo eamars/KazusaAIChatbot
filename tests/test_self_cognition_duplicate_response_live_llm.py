@@ -11,11 +11,9 @@ Run one case at a time and inspect the trace:
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import sys
-from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx

@@ -416,7 +416,10 @@ async def test_group_review_passes_adapter_registry_provider_to_self_cognition(
     captured: dict[str, object] = {}
     ledger_rows = []
     now = datetime(2026, 5, 5, 18, 15, tzinfo=timezone.utc)
-    adapter_provider = lambda: object()
+
+    def adapter_provider():
+        return object()
+
     character_profile = {"name": "Character", "platform_bot_id": "bot-1"}
     channel_scope = _group_scope_with_window_minutes(
         [1],

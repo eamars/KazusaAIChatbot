@@ -2442,7 +2442,7 @@ async def test_worker_tick_suppresses_duplicate_due_occurrence_from_prior_attemp
         payloads = {models.ARTIFACT_ACTION_ATTEMPT: duplicate}
         return payloads
 
-    result = await worker.run_self_cognition_worker_tick(
+    await worker.run_self_cognition_worker_tick(
         now=datetime(2026, 5, 13, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
         collect_cases_func=collect_cases,

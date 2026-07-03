@@ -356,7 +356,10 @@ __all__ = [
     "mark_background_work_delivery_failed",
     "mark_background_work_delivery_in_progress",
     # Persistent Cache2
-    "build_initializer_version_key", "load_initializer_entries",
-    "prune_persistent_entries", "purge_stale_initializer_entries",
-    "record_initializer_hit", "upsert_initializer_entry",
+    "build_initializer_version_key", "build_media_descriptor_version_key",
+    "load_initializer_entries", "load_media_descriptor_entries",
+    "prune_media_descriptor_entries", "prune_persistent_entries",
+    "purge_stale_initializer_entries", "purge_stale_media_descriptor_entries",
+    "record_initializer_hit", "record_media_descriptor_hit",
+    "upsert_initializer_entry", "upsert_media_descriptor_entry",
 ]

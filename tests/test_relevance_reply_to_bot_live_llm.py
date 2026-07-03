@@ -9,7 +9,6 @@ directly_addressed=true.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import os
 from unittest.mock import AsyncMock, patch
 
 import httpx

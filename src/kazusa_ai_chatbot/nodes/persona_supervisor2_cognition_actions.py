@@ -9,7 +9,6 @@ from typing import TypedDict
 from kazusa_ai_chatbot.action_spec.models import (
     ActionSourceRefV1,
     ActionSpecV1,
-    CapabilitySpecV1,
     validate_action_spec,
 )
 from kazusa_ai_chatbot.action_spec.registry import (
@@ -19,7 +18,6 @@ from kazusa_ai_chatbot.action_spec.registry import (
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
-    build_initial_action_capabilities,
 )
 from kazusa_ai_chatbot.config import (
     BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,

@@ -655,7 +655,6 @@ def test_message_row_text_uses_local_timestamp() -> None:
 def test_cognition_helpers_project_rag_and_history_times() -> None:
     """Cognition L2/L3 helper payloads should not expose stored UTC values."""
     from kazusa_ai_chatbot.cognition_chain_core.stages import l2
-    from kazusa_ai_chatbot.cognition_chain_core.stages import l2c2
     from kazusa_ai_chatbot.cognition_chain_core.stages import l3
 
     rag_result = {

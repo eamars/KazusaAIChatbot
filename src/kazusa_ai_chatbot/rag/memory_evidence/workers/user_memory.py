@@ -506,7 +506,6 @@ class UserMemoryEvidenceAgent(BaseRAGHelperAgent):
 
         rows: list[dict[str, Any]] = []
         retrieval_mode = ""
-        task_body = _task_body(task)
         literal_terms = _extract_literal_terms(task)
 
         if literal_terms:

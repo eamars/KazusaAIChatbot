@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Annotated, TypedDict
 
-from langgraph.graph.message import add_messages
 
 from kazusa_ai_chatbot.consolidation.origin import (
     ConsolidationOriginMetadata,

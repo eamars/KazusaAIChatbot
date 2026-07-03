@@ -445,7 +445,7 @@ async def apply_record(record: dict[str, Any]) -> None:
 async def _apply_character_state(after: dict[str, Any]) -> None:
     """Apply singleton character-state fields through existing helpers."""
 
-    state = await get_character_state()
+    await get_character_state()
     storage_timestamp_utc = storage_utc_now_iso()
     if 'reflection_summary' in after:
         await upsert_character_state(

@@ -19,13 +19,11 @@ from kazusa_ai_chatbot.config import (
 )
 from kazusa_ai_chatbot.rag.conversation_evidence.contracts import (
     _AGENT_NAME,
-    _ConversationProjection,
 )
 from kazusa_ai_chatbot.rag.evidence_coverage import (
     requested_coverage_items,
     task_requires_value_evidence,
 )
-from kazusa_ai_chatbot.rag.hybrid_retrieval import candidate_prompt_text
 from kazusa_ai_chatbot.rag.prompt_projection import project_selector_input_for_llm
 from kazusa_ai_chatbot.utils import parse_llm_json_output, text_or_empty
 

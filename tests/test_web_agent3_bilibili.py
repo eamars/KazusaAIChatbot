@@ -7,7 +7,6 @@ import sys
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
-import httpx
 import pytest
 
 from kazusa_ai_chatbot.rag import web_agent3 as web_module

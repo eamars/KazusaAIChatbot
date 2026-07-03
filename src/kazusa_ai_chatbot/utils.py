@@ -14,7 +14,6 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from kazusa_ai_chatbot.config import (
     AFFINITY_MAX,
     AFFINITY_MIN,
-    DEFAULT_LLM_MAX_COMPLETION_TOKENS,
     JSON_REPAIR_LLM_API_KEY,
     JSON_REPAIR_LLM_BASE_URL,
     JSON_REPAIR_LLM_MODEL,

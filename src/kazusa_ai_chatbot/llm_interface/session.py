@@ -12,7 +12,6 @@ from kazusa_ai_chatbot.llm_interface.contracts import (
 )
 from kazusa_ai_chatbot.llm_interface.detection import (
     detect_backend_descriptor,
-    normalize_base_url,
 )
 from kazusa_ai_chatbot.llm_interface.providers.openai_compatible import (
     OpenAICompatibleProvider,

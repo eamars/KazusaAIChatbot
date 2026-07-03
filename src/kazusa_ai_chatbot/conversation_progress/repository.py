@@ -9,7 +9,7 @@ from kazusa_ai_chatbot.conversation_progress.models import ConversationProgressS
 from kazusa_ai_chatbot.conversation_progress.policy import (
     ASSISTANT_MOVES_LIMIT,
     AVOID_REOPENING_LIMIT,
-    COLLECTION_NAME,
+    COLLECTION_NAME as COLLECTION_NAME,
     MAX_ENTRY_CHARS,
     MAX_GUIDANCE_CHARS,
     MAX_LABEL_CHARS,

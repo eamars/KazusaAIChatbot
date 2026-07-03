@@ -157,18 +157,19 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
         f"affinity_delta={affinity_delta}"
     )
 
+    metadata_preview = log_dict_subset(
+        metadata,
+        [
+            'lane_pipeline',
+            'affinity_before',
+            'affinity_delta_processed',
+        ],
+    )
     logger.debug(
         f"Consolidation metadata: "
         f"writes={log_dict_subset(metadata, ['write_success'])} "
         f"cache_invalidated={metadata.get('cache_invalidated', [])} "
-        f"metadata={log_dict_subset(
-            metadata,
-            [
-                'lane_pipeline',
-                'affinity_before',
-                'affinity_delta_processed',
-            ],
-        )}"
+        f"metadata={metadata_preview}"
     )
 
     return_value = {

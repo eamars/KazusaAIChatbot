@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 from pathlib import Path
-from typing import Any
 
 from scripts._db_export import (
     DEFAULT_EXCLUDED_FIELDS,

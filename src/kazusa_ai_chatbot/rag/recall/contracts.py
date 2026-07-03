@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime

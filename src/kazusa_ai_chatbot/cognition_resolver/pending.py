@@ -19,7 +19,6 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ResolverPendingResolutionV1,
     ResolverPendingResumeV1,
     ResolverValidationError,
-    project_pending_resume_for_cognition,
     validate_resolver_observation,
     validate_resolver_goal_progress,
     validate_resolver_pending_resolution,

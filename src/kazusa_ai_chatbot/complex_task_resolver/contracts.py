@@ -11,7 +11,6 @@ from kazusa_ai_chatbot.action_spec.models import (
 )
 
 from .constants import (
-    DEFAULT_OPTION_LIMITS,
     DEFAULT_SUBAGENT_MAX_ATTEMPTS,
     OPTION_LIMIT_CAPS,
     REVIEW_CASE_ID_DIGIT_COUNT,

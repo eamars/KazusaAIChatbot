@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from typing import Any
 
 from kazusa_ai_chatbot.config import RAG_SEARCH_SELECTED_SUMMARY_LIMIT
 from kazusa_ai_chatbot.rag.prompt_projection import project_tool_result_for_llm

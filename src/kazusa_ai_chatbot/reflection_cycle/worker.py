@@ -62,7 +62,7 @@ from kazusa_ai_chatbot.reflection_cycle.models import (
     REFLECTION_STATUS_SKIPPED,
     ReflectionInputSet,
     ReflectionLLMResult,
-    ReflectionPromotionResult,
+    ReflectionPromotionResult as ReflectionPromotionResult,
     ReflectionScopeInput,
     ReflectionWorkerHandle,
     ReflectionWorkerResult,
