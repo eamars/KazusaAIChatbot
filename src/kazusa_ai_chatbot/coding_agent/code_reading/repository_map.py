@@ -26,8 +26,8 @@ def build_repository_map_summary(
     """Build a compact safe file map visible to the reading PM.
 
     Args:
-        repository: Successful Phase 0 repository source contract.
-        source_scope: Successful Phase 0 source scope.
+        repository: Successful repository source contract.
+        source_scope: Successful source scope.
 
     Returns:
         Bounded repo-relative file and directory metadata safe to expose in

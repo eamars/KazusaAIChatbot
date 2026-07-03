@@ -32,7 +32,7 @@ def rejection_reason(
             "change the code",
         ]
         if any(pattern in normalized for pattern in write_patterns):
-            return "Phase 1 code reading is read-only and cannot write patches."
+            return "Code reading is read-only and cannot write patches."
 
         execution_patterns = [
             "run pytest",
@@ -44,7 +44,7 @@ def rejection_reason(
             "npm install",
         ]
         if any(pattern in normalized for pattern in execution_patterns):
-            return "Phase 1 code reading cannot execute commands or install packages."
+            return "Code reading cannot execute commands or install packages."
 
     secret_patterns = [
         r"(?<![a-z])\.env(?:\b|$)",
@@ -55,7 +55,7 @@ def rejection_reason(
         r"\bprivate[_ ]key\b",
     ]
     if any(re.search(pattern, normalized) for pattern in secret_patterns):
-        return "Phase 1 code reading cannot inspect secrets or environment files."
+        return "Code reading cannot inspect secrets or environment files."
 
     raw_dump_patterns = [
         "dump the full raw",
@@ -63,7 +63,7 @@ def rejection_reason(
         "entire raw file",
     ]
     if any(pattern in normalized for pattern in raw_dump_patterns):
-        return "Phase 1 code reading returns bounded evidence, not raw file dumps."
+        return "Code reading returns bounded evidence, not raw file dumps."
 
     binary_patterns = [
         "binary pixels",
@@ -75,10 +75,10 @@ def rejection_reason(
         ".webp",
     ]
     if any(pattern in normalized for pattern in binary_patterns):
-        return "Phase 1 code reading cannot analyze binary assets."
+        return "Code reading cannot analyze binary assets."
 
     if "git@github.com" in normalized or "private repo" in normalized:
-        return "Phase 1 supports only Phase 0 public or local source contracts."
+        return "Code reading supports only public or local source contracts."
 
     certification_patterns = [
         "certify",
@@ -86,7 +86,7 @@ def rejection_reason(
         "secure",
     ]
     if any(pattern in normalized for pattern in certification_patterns):
-        return "Phase 1 cannot certify legal or security status."
+        return "Code reading cannot certify legal or security status."
 
     external_current_patterns = [
         "latest ",
@@ -95,7 +95,7 @@ def rejection_reason(
         "cve status",
     ]
     if any(pattern in normalized for pattern in external_current_patterns):
-        return "Phase 1 cannot answer current external facts requiring web evidence."
+        return "Code reading cannot answer current external facts requiring web evidence."
 
     return None
 
@@ -111,15 +111,15 @@ def source_scope_rejection_reason(source_scope: CodeSourceScope) -> str | None:
     if path.is_absolute() or ".." in path.parts:
         return "Resolved source scope is outside the repository."
     if any(part == ".git" for part in path.parts):
-        return "Phase 1 code reading cannot inspect .git internals."
+        return "Code reading cannot inspect .git internals."
 
     lowered_name = path.name.casefold()
     if lowered_name == ".env" or lowered_name.startswith(".env."):
-        return "Phase 1 code reading cannot inspect environment files."
+        return "Code reading cannot inspect environment files."
     if is_secret_like_path(str(path)):
-        return "Phase 1 code reading cannot inspect secret-like files."
+        return "Code reading cannot inspect secret-like files."
     if is_binary_like_path(str(path)):
-        return "Phase 1 code reading cannot analyze binary assets."
+        return "Code reading cannot analyze binary assets."
 
     return None
 

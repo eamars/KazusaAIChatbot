@@ -37,11 +37,14 @@ _PATH_TOKEN_RE = re.compile(
     r"\b[A-Za-z0-9_./-]+\.(?:py|md|toml|yaml|yml|json|txt|ini|cfg)\b"
 )
 _CODE_IDENTIFIER_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\b")
+_CJK_TEXT_RE = re.compile(r"[\u3400-\u9fff]")
 _COMMON_CODE_WORDS = {
+    "AGENTS",
     "API",
     "JSON",
     "LLM",
     "PM",
+    "README",
 }
 MAX_TEXT_FIELD_CHARS = 6000
 MAX_SYNTHESIS_QUESTION_CHARS = 8000
@@ -85,7 +88,17 @@ limitations, and public repository metadata provided in the user payload.
 - Keep the answer in the user's requested language when that is clear.
 
 # Output Format
-Return strict JSON:
+Return only strict JSON. Do not write prose before or after the JSON object.
+Always put the final answer in `answer_text`. If the evidence is partial, put
+the best grounded partial answer in `answer_text` and list the missing proof in
+`limitations`.
+{
+  "answer_text": "grounded answer text",
+  "limitations": ["extra limitations or missing proof"]
+}
+'''
+
+SYNTHESIS_OUTPUT_FORMAT = '''\
 {
   "answer_text": "grounded answer text",
   "limitations": ["extra limitations or missing proof"]
@@ -196,11 +209,15 @@ def synthesize_from_programmer_reports(
             HumanMessage(content=payload_text),
         ], config=_synthesis_llm_config)
         raw_output = response.content
-        parsed = parse_llm_json_output(raw_output)
+        parsed = parse_llm_json_output(
+            raw_output,
+            expected_output_format=SYNTHESIS_OUTPUT_FORMAT,
+        )
     except TimeoutError:
         timed_out = True
     answer_text, parsed_limitations = normalize_synthesis_output(
         parsed,
+        raw_output=raw_output,
         max_answer_chars=max_answer_chars,
     )
     if timed_out:
@@ -256,17 +273,27 @@ def synthesize_from_programmer_reports(
 def normalize_synthesis_output(
     parsed: object,
     *,
+    raw_output: str = "",
     max_answer_chars: int,
 ) -> tuple[str, list[str]]:
     """Normalize synthesis JSON into answer text and limitations."""
 
     if not isinstance(parsed, dict):
+        fallback_answer = _raw_answer_fallback(raw_output, max_answer_chars)
+        if fallback_answer:
+            limitations = ["Synthesis model returned answer outside JSON schema."]
+            return fallback_answer, limitations
         answer = "The synthesis model returned malformed output."
         limitations = ["Synthesis model returned malformed output."]
         return answer, limitations
 
     answer_text = _bounded_text(parsed.get("answer_text"), max_answer_chars)
     if not answer_text:
+        answer_text = _raw_answer_fallback(raw_output, max_answer_chars)
+        if answer_text:
+            limitations = _string_list(parsed.get("limitations"), 8)
+            limitations.append("Synthesis model omitted answer_text.")
+            return answer_text, limitations
         answer_text = "The selected evidence did not support a final answer."
     limitations = _string_list(parsed.get("limitations"), 8)
     return answer_text, limitations
@@ -435,7 +462,9 @@ def _compact_evidence_rows(
 def _code_term_candidates(answer_text: str) -> list[str]:
     terms: list[str] = []
     for match in _BACKTICKED_CODE_RE.finditer(answer_text):
-        _append_unique(terms, _clean_code_candidate(match.group(1)))
+        candidate = _clean_code_candidate(match.group(1))
+        if _is_backticked_code_candidate(candidate):
+            _append_unique(terms, candidate)
     for match in _PATH_TOKEN_RE.finditer(answer_text):
         _append_unique(terms, _clean_code_candidate(match.group(0)))
     for match in _CODE_IDENTIFIER_RE.finditer(answer_text):
@@ -443,6 +472,28 @@ def _code_term_candidates(answer_text: str) -> list[str]:
         if "_" in token or any(char.isupper() for char in token[1:]):
             _append_unique(terms, _clean_code_candidate(token))
     return terms
+
+
+def _is_backticked_code_candidate(value: str) -> bool:
+    """Return whether backticked text is a single code-like token."""
+
+    if not value:
+        return False
+    if _CJK_TEXT_RE.search(value):
+        return False
+    if any(char.isspace() for char in value):
+        return False
+    if any(char in value for char in "()[]{}<>"):
+        return False
+    if "->" in value:
+        return False
+    if _PATH_TOKEN_RE.fullmatch(value):
+        return True
+    if "/" in value and "." not in value and not value.startswith("/"):
+        return False
+    if "_" in value or "." in value or "/" in value:
+        return True
+    return any(char.isupper() for char in value[1:])
 
 
 def _remove_ungrounded_code_terms(
@@ -457,6 +508,13 @@ def _remove_ungrounded_code_terms(
             repaired,
         )
         repaired = repaired.replace(f"`{violation}`", "")
+        repaired = re.sub(
+            rf"(?<![\w.]){re.escape(violation)}(?![\w.])",
+            "",
+            repaired,
+        )
+    repaired = re.sub(r"\s*\(\s*\)", "", repaired)
+    repaired = re.sub(r"\s*\uff08\s*\uff09", "", repaired)
     repaired = re.sub(r"[ \t]{2,}", " ", repaired)
     repaired = re.sub(r"\n{3,}", "\n\n", repaired)
     return repaired.strip()
@@ -520,6 +578,18 @@ def _bounded_text(value: object, max_chars: int) -> str:
     if len(text) > max_chars:
         text = text[:max_chars].rstrip()
     return text
+
+
+def _raw_answer_fallback(raw_output: str, max_answer_chars: int) -> str:
+    """Keep a prose synthesis answer when only JSON wrapping failed."""
+
+    answer_text = _bounded_text(raw_output, max_answer_chars)
+    stripped_answer = answer_text.lstrip()
+    if not stripped_answer:
+        return ""
+    if stripped_answer.startswith(("{", "[", "```")):
+        return ""
+    return answer_text
 
 
 def _append_unique(values: list[str], value: str) -> None:

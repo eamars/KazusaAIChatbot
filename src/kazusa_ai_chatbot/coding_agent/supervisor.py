@@ -1,8 +1,11 @@
 """Top-level standalone coding-agent supervisor."""
 
 import inspect
+import json
 import re
 from pathlib import Path
+
+from langchain_core.messages import HumanMessage, SystemMessage
 
 import kazusa_ai_chatbot.coding_agent.code_fetching as code_fetching
 import kazusa_ai_chatbot.coding_agent.code_reading as code_reading
@@ -18,6 +21,9 @@ from kazusa_ai_chatbot.coding_agent.code_writing.synthesizer import (
     _answer_with_required_limitations,
 )
 from kazusa_ai_chatbot.coding_agent.models import (
+    CodingAgentBackgroundOperation,
+    CodingAgentBackgroundRequest,
+    CodingAgentBackgroundResponse,
     CodingAgentWriteRequest,
     CodingPatchProposalResponse,
     CodingAgentRepositorySummary,
@@ -27,6 +33,19 @@ from kazusa_ai_chatbot.coding_agent.models import (
 from kazusa_ai_chatbot.coding_agent.work_ledger import (
     CodingSupervisorWorkLedger,
 )
+from kazusa_ai_chatbot.config import (
+    CODING_AGENT_PM_LLM_API_KEY,
+    CODING_AGENT_PM_LLM_BASE_URL,
+    CODING_AGENT_PM_LLM_MAX_COMPLETION_TOKENS,
+    CODING_AGENT_PM_LLM_MODEL,
+    CODING_AGENT_PM_LLM_THINKING_ENABLED,
+)
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
+from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 DIRTY_CHECKOUT_LIMITATION = (
     "Existing local checkout is dirty; evidence may include "
@@ -38,14 +57,327 @@ CACHE_KEY_TOKEN_RE = re.compile(r"cache_key", re.IGNORECASE)
 WRITE_EVIDENCE_EXCERPT_OMITTED = (
     "[source excerpt omitted from patch proposal response]"
 )
+BACKGROUND_CODING_ROUTER_PROMPT = '''\
+You are the top-level supervisor inside a coding agent.
+
+Choose the single supported operation that should handle the accepted coding
+task.
+
+Operations:
+- code_reading: answer a question about a codebase, project design, source
+  behavior, architecture, dependency use, tests, or repository structure.
+- code_writing: propose new-file code artifacts for source-free coding tasks.
+  The coding agent may return proposal artifacts, but it does not edit existing
+  source, apply patches, run commands, install packages, deploy, or validate by
+  executing the target project.
+- unsupported: the task is not a coding task, or it requires live execution,
+  existing-source edits, deployment, credential access, package installation,
+  adapter delivery, or real-world mutation as the primary result.
+
+Return strict JSON:
+{
+  "operation": "code_reading | code_writing | unsupported",
+  "reason": "short reason"
+}
+'''
 WRITE_LOOP_LIMIT = 6
 MAX_EXISTING_REPO_FOLLOWUP_READING_ATTEMPTS = 1
+BACKGROUND_CODING_ROUTER_TIMEOUT_SECONDS = 300
+BACKGROUND_CODING_ROUTER_INVALID_REASON = (
+    "Coding-agent background supervisor returned an invalid operation."
+)
+
+
+_background_coding_router_llm = LLInterface()
+_background_coding_router_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="CODING_AGENT_PM_LLM",
+    base_url=CODING_AGENT_PM_LLM_BASE_URL,
+    api_key=CODING_AGENT_PM_LLM_API_KEY,
+    model=CODING_AGENT_PM_LLM_MODEL,
+    temperature=0.1,
+    top_p=0.7,
+    top_k=None,
+    max_completion_tokens=CODING_AGENT_PM_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    timeout_seconds=BACKGROUND_CODING_ROUTER_TIMEOUT_SECONDS,
+    thinking=LLMThinkingConfig(
+        enabled=CODING_AGENT_PM_LLM_THINKING_ENABLED,
+    ),
+)
+
+
+async def handle_background_coding_task(
+    request: CodingAgentBackgroundRequest,
+) -> CodingAgentBackgroundResponse:
+    """Route one accepted background coding task inside the coding agent."""
+
+    question = _bounded_request_body(request.get("question"))
+    if not question:
+        response = _background_failure_response(
+            status="failed",
+            operation="unsupported",
+            limitation="Coding agent did not receive a task question.",
+            trace_summary=["background_coding:missing_question"],
+        )
+        return response
+
+    operation, reason = await _decide_background_coding_operation(request)
+    if operation == "code_reading":
+        reading_response = await answer_code_question(
+            _background_reading_request(request),
+        )
+        response = _background_response_from_reading(
+            reading_response,
+            route_reason=reason,
+        )
+        return response
+    if operation == "code_writing":
+        writing_response = await propose_code_change(
+            _background_writing_request(request),
+        )
+        response = _background_response_from_writing(
+            writing_response,
+            route_reason=reason,
+        )
+        return response
+
+    failure_status = "rejected"
+    if reason == BACKGROUND_CODING_ROUTER_INVALID_REASON:
+        failure_status = "failed"
+    response = _background_failure_response(
+        status=failure_status,
+        operation="unsupported",
+        limitation=_unsupported_background_limitation(reason),
+        trace_summary=[
+            f"background_coding:unsupported:{_safe_request_text(reason)}",
+        ],
+    )
+    return response
+
+
+async def _decide_background_coding_operation(
+    request: CodingAgentBackgroundRequest,
+) -> tuple[CodingAgentBackgroundOperation, str]:
+    """Ask the coding-agent supervisor route to choose the supported operation."""
+
+    payload = {
+        "task": _bounded_request_body(request.get("question")),
+        "source_summary": _bounded_request_body(request.get("source_summary")),
+        "available_operations": [
+            "code_reading",
+            "code_writing",
+            "unsupported",
+        ],
+        "operation_limits": [
+            "No patch application.",
+            "No shell command execution.",
+            "No package installation.",
+            "No adapter delivery.",
+        ],
+    }
+    payload_text = json.dumps(payload, ensure_ascii=False)
+    messages = [
+        SystemMessage(content=BACKGROUND_CODING_ROUTER_PROMPT),
+        HumanMessage(content=payload_text),
+    ]
+    response = await _background_coding_router_llm.ainvoke(
+        messages,
+        config=_background_coding_router_llm_config,
+    )
+    parsed = parse_llm_json_output(response.content)
+    operation = _normalize_background_coding_operation(parsed)
+    if operation == "unsupported" and not _parsed_operation_is_supported(parsed):
+        return operation, BACKGROUND_CODING_ROUTER_INVALID_REASON
+    reason = ""
+    if isinstance(parsed, dict):
+        reason = _safe_request_text(parsed.get("reason"))
+    return operation, reason
+
+
+def _parsed_operation_is_supported(parsed: object) -> bool:
+    """Return whether the LLM emitted a recognized operation field."""
+
+    if not isinstance(parsed, dict):
+        return False
+    operation = parsed.get("operation")
+    return operation in ("code_reading", "code_writing", "unsupported")
+
+
+def _normalize_background_coding_operation(
+    parsed: object,
+) -> CodingAgentBackgroundOperation:
+    """Validate the supervisor route decision without semantic fallback."""
+
+    if not isinstance(parsed, dict):
+        return "unsupported"
+    operation = parsed.get("operation")
+    if operation in ("code_reading", "code_writing", "unsupported"):
+        return operation
+    return "unsupported"
+
+
+def _unsupported_background_limitation(reason: str) -> str:
+    """Return the public limitation for an unsupported background route."""
+
+    if reason == BACKGROUND_CODING_ROUTER_INVALID_REASON:
+        return BACKGROUND_CODING_ROUTER_INVALID_REASON
+    return "Coding agent supervisor rejected the task as unsupported."
+
+
+def _background_reading_request(
+    request: CodingAgentBackgroundRequest,
+) -> CodingAgentRequest:
+    """Project a background task into the public code-reading contract."""
+
+    reading_request: CodingAgentRequest = {
+        "question": _bounded_request_body(request.get("question")),
+    }
+    _copy_coding_source_fields(request, reading_request)
+    max_answer_chars = request.get("max_answer_chars")
+    if max_answer_chars is not None:
+        reading_request["max_answer_chars"] = max_answer_chars
+    preferred_language = request.get("preferred_language")
+    if preferred_language:
+        reading_request["preferred_language"] = preferred_language
+    workspace_root = request.get("workspace_root")
+    if workspace_root:
+        reading_request["workspace_root"] = workspace_root
+    return reading_request
+
+
+def _background_writing_request(
+    request: CodingAgentBackgroundRequest,
+) -> CodingAgentWriteRequest:
+    """Project a background task into the public code-writing contract."""
+
+    writing_request: CodingAgentWriteRequest = {
+        "question": _bounded_request_body(request.get("question")),
+    }
+    _copy_coding_source_fields(request, writing_request)
+    optional_fields = (
+        "workspace_root",
+        "preferred_language",
+        "max_answer_chars",
+        "max_artifact_chars",
+        "session_id",
+    )
+    for field_name in optional_fields:
+        value = request.get(field_name)
+        if value is not None:
+            writing_request[field_name] = value
+    return writing_request
+
+
+def _copy_coding_source_fields(
+    source: CodingAgentBackgroundRequest,
+    target: CodingAgentRequest | CodingAgentWriteRequest,
+) -> None:
+    """Copy public source fields without interpreting user text."""
+
+    source_fields = (
+        "source_url",
+        "repo_url",
+        "repo_hint",
+        "local_root_hint",
+        "local_path_hint",
+        "requested_ref",
+        "source_scope_hint",
+    )
+    for field_name in source_fields:
+        value = source.get(field_name)
+        if value is not None:
+            target[field_name] = value
+
+
+def _background_response_from_reading(
+    response: CodingAgentResponse,
+    *,
+    route_reason: str,
+) -> CodingAgentBackgroundResponse:
+    """Normalize a code-reading answer for background-worker consumption."""
+
+    trace_summary = [
+        f"background_coding:code_reading:{_safe_request_text(route_reason)}",
+        *response["trace_summary"],
+    ]
+    result: CodingAgentBackgroundResponse = {
+        "status": response["status"],
+        "operation": "code_reading",
+        "answer_text": response["answer_text"],
+        "repository": response["repository"],
+        "source_scope": response["source_scope"],
+        "evidence": response["evidence"],
+        "patch_artifacts": [],
+        "created_files": [],
+        "changed_files": [],
+        "validation": None,
+        "limitations": response["limitations"],
+        "trace_summary": trace_summary,
+    }
+    return result
+
+
+def _background_response_from_writing(
+    response: CodingPatchProposalResponse,
+    *,
+    route_reason: str,
+) -> CodingAgentBackgroundResponse:
+    """Normalize a code-writing proposal for background-worker consumption."""
+
+    trace_summary = [
+        f"background_coding:code_writing:{_safe_request_text(route_reason)}",
+        *response["trace_summary"],
+    ]
+    result: CodingAgentBackgroundResponse = {
+        "status": response["status"],
+        "operation": "code_writing",
+        "answer_text": response["answer_text"],
+        "repository": response["repository"],
+        "source_scope": response["source_scope"],
+        "evidence": response["evidence"],
+        "patch_artifacts": response["patch_artifacts"],
+        "created_files": response["created_files"],
+        "changed_files": response["changed_files"],
+        "validation": response["validation"],
+        "limitations": response["limitations"],
+        "trace_summary": trace_summary,
+    }
+    return result
+
+
+def _background_failure_response(
+    *,
+    status: str,
+    operation: CodingAgentBackgroundOperation,
+    limitation: str,
+    trace_summary: list[str],
+) -> CodingAgentBackgroundResponse:
+    """Build one normalized background coding failure."""
+
+    if status not in ("failed", "needs_user_input", "rejected"):
+        status = "failed"
+    result: CodingAgentBackgroundResponse = {
+        "status": status,
+        "operation": operation,
+        "answer_text": "",
+        "repository": None,
+        "source_scope": None,
+        "evidence": [],
+        "patch_artifacts": [],
+        "created_files": [],
+        "changed_files": [],
+        "validation": None,
+        "limitations": [limitation],
+        "trace_summary": trace_summary,
+    }
+    return result
 
 
 async def answer_code_question(
     request: CodingAgentRequest,
 ) -> CodingAgentResponse:
-    """Answer a source-code question through Phase 0 fetching and Phase 1 reading."""
+    """Answer a source-code question through fetching and code reading."""
 
     fetching_result = await code_fetching.run(request)
     if fetching_result["status"] != "succeeded":

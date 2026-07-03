@@ -113,6 +113,7 @@ BACKGROUND_WORK_WORKER_LEASE_SECONDS=300
 BACKGROUND_WORK_WORKER_MAX_ATTEMPTS=3
 BACKGROUND_WORK_INPUT_CHAR_LIMIT=12000
 BACKGROUND_WORK_OUTPUT_CHAR_LIMIT=3000
+CODING_AGENT_WORKSPACE_ROOT=C:\workspace\kazusa_coding_agent
 
 # Direct web search and URL-reader behavior
 SEARXNG_URL=http://your-searxng-host:8080
@@ -285,27 +286,30 @@ work. Deterministic execution maps new accepted tasks into the internal
 background-work queue after duplicate rejection and lifecycle persistence. The
 runtime router then chooses a worker and task without receiving adapter targets,
 job refs, tool arguments, or final visible text. The current text-artifact
-worker remains text-only and does not write files, run shell commands, install
-packages, download resources, research the web, process attachments, create
-images, or send adapter text directly. `future_speak` is the deterministic
-delayed-message worker: it schedules a future cognition slot and stores only a
-semantic objective, not prewritten user-facing text. Completed accepted tasks
-re-enter the brain as `accepted_task_result_ready` cognition, then use the
-existing dialog and delivery boundary for any visible result. Legacy rows
-without an accepted-task id may still use `background_work_result_ready`.
-`BACKGROUND_ARTIFACT_*` settings are legacy aliases only for compatibility.
+worker remains text-only. The current coding-agent worker handles accepted
+coding tasks through the coding-agent supervisor using
+`CODING_AGENT_WORKSPACE_ROOT`; it may return code-reading answers or
+code-writing proposal artifacts. Neither worker applies patches, runs shell
+commands, installs packages, processes attachments, or sends adapter text
+directly. `future_speak` is the
+deterministic delayed-message worker: it schedules a future cognition slot and
+stores only a semantic objective, not prewritten user-facing text. Completed
+accepted tasks re-enter the brain as `accepted_task_result_ready` cognition,
+then use the existing dialog and delivery boundary for any visible result.
+Legacy rows without an accepted-task id may still use
+`background_work_result_ready`. `BACKGROUND_ARTIFACT_*` settings are legacy
+aliases only for compatibility.
 
 New worker types reuse the same lifecycle only after a reviewed capability and
 worker contract exists. The stable entry is accepted-task state plus an
 internal `background_work_request`; worker-local tool arguments, filesystem
 paths, shell commands, resolver internals, adapter ids, and final wording stay
-outside L2d and L3 prompts. A future coding-agent or complex-resolver worker
-must declare its semantic ownership, duplicate identity, permission and
-side-effect policy, bounded output contract, failure behavior, and verification
-before it is added to the worker registry. The queue supplies scheduling,
-duplicate rejection, execution, and result handoff mechanics; it does not by
-itself authorize repository edits, shell execution, web access, package
-installation, or direct adapter sends.
+outside L2d and L3 prompts. A new worker must declare its semantic ownership,
+duplicate identity, permission and side-effect policy, bounded output contract,
+failure behavior, and verification before it is added to the worker registry.
+The queue supplies scheduling, duplicate rejection, execution, and result
+handoff mechanics; it does not by itself authorize repository edits, shell
+execution, web access, package installation, or direct adapter sends.
 
 Reflection phase scheduling spreads monitor-eligible channels across the
 `REFLECTION_WORKER_INTERVAL_SECONDS` period instead of running all group

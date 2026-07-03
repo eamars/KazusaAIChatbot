@@ -81,7 +81,7 @@ def run_reading_supervisor(
     if repository is None or source_scope is None:
         result = _result(
             status="failed",
-            answer_text="Reading requires a successful Phase 0 repository source.",
+            answer_text="Reading requires a successful repository source.",
             evidence=[],
             limitations=["Missing repository or source scope."],
             trace_summary=["reading_pm:missing source contract"],
@@ -200,6 +200,19 @@ def run_reading_supervisor(
             )
             return result
 
+        partial_result = _synthesize_partial_result_if_possible(
+            request=request,
+            question=question,
+            repository_summary=repository_summary,
+            pm_decision=pm_decision,
+            programmer_reports=state["programmer_reports"],
+            selected_evidence=selected_evidence,
+            trace_summary=trace_summary,
+            trace=trace,
+        )
+        if partial_result is not None:
+            return partial_result
+
         if pm_decision["status"] == "overloaded":
             result = _result(
                 status="needs_user_input",
@@ -238,7 +251,7 @@ def run_reading_supervisor(
     result = _result(
         status="needs_user_input",
         answer_text=(
-            "The question needs a narrower scope before Phase 1 can answer "
+            "The question needs a narrower scope before code reading can answer "
             "from bounded programmer reports."
         ),
         evidence=selected_evidence,
@@ -298,6 +311,19 @@ def _final_pm_review(
             trace=trace,
         )
         return result
+
+    partial_result = _synthesize_partial_result_if_possible(
+        request=state["request"],
+        question=question,
+        repository_summary=repository_summary,
+        pm_decision=pm_decision,
+        programmer_reports=state["programmer_reports"],
+        selected_evidence=selected_evidence,
+        trace_summary=trace_summary,
+        trace=trace,
+    )
+    if partial_result is not None:
+        return partial_result
 
     if pm_decision["status"] == "overloaded":
         result = _result(
@@ -392,6 +418,74 @@ def _synthesize_result(
         trace_summary=[*trace_summary, "reading_pm:sufficiency=sufficient"],
     )
     return result
+
+
+def _synthesize_partial_result_if_possible(
+    *,
+    request: CodeReadingRequest,
+    question: str,
+    repository_summary: dict[str, object],
+    pm_decision: ReadingPMDecision,
+    programmer_reports: list[ReadingProgrammerReport],
+    selected_evidence: list[CodeEvidenceRow],
+    trace_summary: list[str],
+    trace: dict[str, object] | None,
+) -> CodeReadingResult | None:
+    """Synthesize a limited answer when PM gives no actionable missing slots."""
+
+    if pm_decision["missing_slots"]:
+        return None
+    if not selected_evidence:
+        return None
+    if not _has_source_backed_facts(programmer_reports):
+        return None
+
+    synthesis_decision: ReadingPMDecision = {
+        "status": "sufficient",
+        "intent": pm_decision["intent"],
+        "required_slots": pm_decision["required_slots"],
+        "assignments": [],
+        "missing_slots": [],
+    }
+    synthesis_trace: dict[str, object] = {}
+    max_answer_chars = request.get("max_answer_chars", DEFAULT_MAX_ANSWER_CHARS)
+    limitations = _report_limitations(programmer_reports)
+    for limitation in _missing_slot_limitations(pm_decision):
+        if limitation not in limitations:
+            limitations.append(limitation)
+    answer_text, synthesis_limitations = synthesize_from_programmer_reports(
+        question=question,
+        pm_decision=synthesis_decision,
+        programmer_reports=programmer_reports,
+        evidence=selected_evidence,
+        limitations=limitations,
+        repository_summary=repository_summary,
+        preferred_language=request.get("preferred_language"),
+        max_answer_chars=max_answer_chars,
+        trace=synthesis_trace,
+    )
+    _record_internal_trace(trace, "partial_synthesis", synthesis_trace)
+    result = _result(
+        status="succeeded",
+        answer_text=answer_text,
+        evidence=selected_evidence,
+        limitations=synthesis_limitations,
+        trace_summary=[*trace_summary, "reading_pm:sufficiency=partial"],
+    )
+    return result
+
+
+def _has_source_backed_facts(
+    programmer_reports: list[ReadingProgrammerReport],
+) -> bool:
+    """Return whether any successful programmer report contains cited facts."""
+
+    for report in programmer_reports:
+        if report["status"] != "succeeded":
+            continue
+        if report["facts"]:
+            return True
+    return False
 
 
 def _pm_input(

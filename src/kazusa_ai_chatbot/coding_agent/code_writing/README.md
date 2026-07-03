@@ -4,7 +4,7 @@
 agent. It creates proposed files, scripts, docs, tests, config, or small
 projects from a bounded source-free request. It never applies a patch to the
 caller workspace, never runs target project commands, and does not execute
-generated code or generated tests in Phase 2.
+generated code or generated tests.
 
 ## Public Entrypoint
 
@@ -14,7 +14,7 @@ from kazusa_ai_chatbot.coding_agent.code_writing import run
 result = await run(request)
 ```
 
-`run(request: CodeWritingRequest) -> CodeWritingResult` is the internal Phase 2
+`run(request: CodeWritingRequest) -> CodeWritingResult` is the internal writing
 subagent entrypoint used by the top-level `propose_code_change(...)` direct
 interface.
 
@@ -23,7 +23,7 @@ interface.
 `CodeWritingRequest` contains:
 
 - `question`: user-visible request for new artifacts.
-- `mode_hint`: must be `create_new_project` for the Phase 2 writing path.
+- `mode_hint`: must be `create_new_project` for the current writing path.
 - `external_evidence`: limited public evidence summaries after the top-level
   supervisor resolves a PM `request_information` outcome.
 - `supervisor_facts`: compact facts resolved by the top-level supervisor,
@@ -92,9 +92,10 @@ CodeWritingRequest
 ```
 
 The top-level supervisor owns cross-domain interleaving. The writing PM owns
-only the semantic lifecycle of its direct children. In Phase 2 it may request
-information, create one child PM, create one programmer task, complete with a
-report, or block with a reason. Repair remains reserved for later phases.
+only the semantic lifecycle of its direct children. In the current writing
+workflow, it may request information, create one child PM, create one
+programmer task, complete with a report, or block with a reason. Repair
+remains reserved for later work.
 Acceptance preserves user-visible requirements. File Agent owns path mechanics.
 Each Writing programmer receives one PM-approved artifact contract and returns
 one fenced artifact body. The patching boundary owns file-tree or unified-diff

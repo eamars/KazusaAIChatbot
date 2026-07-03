@@ -58,7 +58,10 @@ async def run_background_work_worker_tick(
         if job is None:
             break
         processed_count += 1
-        source_summary = job.get("source_context", "").strip() or job["task_brief"]
+        task_brief = _job_text(job, "task_brief")
+        source_summary = _job_text(job, "source_context")
+        if not source_summary:
+            source_summary = task_brief
         accepted_task_id = _job_text(job, "accepted_task_id")
         if accepted_task_id:
             await mark_accepted_task_running(
@@ -71,17 +74,19 @@ async def run_background_work_worker_tick(
                 router_decision = _requested_worker_decision(
                     job,
                     requested_worker=requested_worker,
+                    task_brief=task_brief,
                     source_summary=source_summary,
                 )
                 worker_decision = dict(router_decision)
             else:
                 router_decision = await route_background_work(
-                    task_brief=job["task_brief"],
+                    task_brief=task_brief,
                     source_summary=source_summary,
                     worker_descriptions=_routable_worker_descriptions(),
                     max_output_chars=int(job["max_output_chars"]),
                 )
                 worker_decision = dict(router_decision)
+                worker_decision["task_brief"] = task_brief
                 worker_decision["source_summary"] = source_summary
             worker_result = await dispatch_background_work(
                 worker_decision,
@@ -173,6 +178,7 @@ def _requested_worker_decision(
     job: Mapping[str, Any],
     *,
     requested_worker: str,
+    task_brief: str,
     source_summary: str,
 ) -> dict[str, object]:
     """Build the deterministic worker decision for bound background actions."""
@@ -192,6 +198,7 @@ def _requested_worker_decision(
         "action": "execute",
         "worker": requested_worker,
         "reason": "Validated background action requested this worker.",
+        "task_brief": task_brief,
         "source_summary": source_summary,
         "worker_payload": worker_payload,
     }

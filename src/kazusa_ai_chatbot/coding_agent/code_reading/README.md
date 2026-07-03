@@ -1,7 +1,7 @@
 # Code Reading Subagent ICD
 
-`code_reading` is the Phase 1 read-only subagent. It answers questions from a
-successful Phase 0 source contract and never fetches, clones, writes, executes
+`code_reading` is the read-only subagent. It answers questions from a
+successful source-fetching contract and never fetches, clones, writes, executes
 project commands, installs packages, or integrates with Kazusa runtime paths.
 
 Public entrypoint:
@@ -13,8 +13,8 @@ from kazusa_ai_chatbot.coding_agent.code_reading import run
 `run(request: CodeReadingRequest) -> CodeReadingResult` consumes:
 
 - `question`: the user-visible code-reading question.
-- `repository`: the successful `CodeRepositoryRef` returned by Phase 0.
-- `source_scope`: the successful `CodeSourceScope` returned by Phase 0.
+- `repository`: the successful `CodeRepositoryRef` returned by source fetching.
+- `source_scope`: the successful `CodeSourceScope` returned by source fetching.
 - `preferred_language`: optional answer language hint.
 - `max_answer_chars`: optional public answer cap.
 
@@ -89,16 +89,17 @@ Each `ReadingProgrammerReport` contains:
 - bounded evidence rows
 - open questions
 
-Phase 1 caps one PM at three programmer assignments per wave, three waves, and
-six total programmer reports. When a question exceeds those limits, the PM
-returns `overloaded`; Phase 1 reports a limitation or asks for a narrower user
-scope instead of pretending to read a whole project. Full distributed
-master/subsystem PM fan-out is not implemented in Phase 1.
+Code reading caps one PM at three programmer assignments per wave, three waves,
+and six total programmer reports. When a question exceeds those limits, the PM
+returns `overloaded`; code reading reports a limitation or asks for a narrower
+user scope instead of pretending to read a whole project. Full distributed
+master/subsystem PM fan-out is not implemented in the current code-reading
+workflow.
 
 LLM-backed PM calls use `CODING_AGENT_PM_LLM`; final synthesis intentionally
 uses the same PM route. Programmer workers use `CODING_AGENT_PROGRAMMER_LLM`.
-Both routes require base URL, API key, and model settings. Phase 1 does not
-define a separate synthesizer LLM route.
+Both routes require base URL, API key, and model settings. Code reading does
+not define a separate synthesizer LLM route.
 
 `CodeReadingResult` contains:
 

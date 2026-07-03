@@ -30,18 +30,17 @@ Do not produce worker-facing task briefs, worker-local task types, tool
 arguments, files, adapter data, delivery decisions, job ids, or final text.
 
 # Decision Procedure
+- Enabled workers are listed in the payload. Choose one worker name exactly.
 - Use action="execute" only when an enabled worker clearly owns the task.
 - Use action="needs_user_input" when the task is too ambiguous to start.
 - Use action="reject" when the task asks for unsupported execution.
 - Use action="stop" when no worker should run.
-- For this runtime, text_artifact owns bounded text artifacts such as compact
-  code snippets, rewrites, and summaries.
 
 # Output Format
 Return strict JSON with exactly these semantic fields:
 {
   "action": "execute | reject | needs_user_input | stop",
-  "worker": "text_artifact | none",
+  "worker": "enabled worker name | none",
   "reason": "short reason for the route"
 }
 '''
@@ -85,7 +84,10 @@ async def route_background_work(
         HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
     ], config=_background_work_router_llm_config)
     parsed = parse_llm_json_output(response.content)
-    decision = normalize_background_work_router_output(parsed)
+    decision = normalize_background_work_router_output(
+        parsed,
+        enabled_workers=set(worker_descriptions),
+    )
     return decision
 
 
@@ -116,8 +118,13 @@ def build_background_work_router_payload(
 
 def normalize_background_work_router_output(
     parsed: object,
+    *,
+    enabled_workers: set[str] | None = None,
 ) -> BackgroundWorkRouterDecision:
     """Normalize router output to the four allowed route fields."""
+
+    if enabled_workers is None:
+        enabled_workers = {"text_artifact"}
 
     if not isinstance(parsed, dict):
         result: BackgroundWorkRouterDecision = {
@@ -131,7 +138,7 @@ def normalize_background_work_router_output(
     if action not in ("execute", "reject", "needs_user_input", "stop"):
         action = "reject"
     worker = _bounded_text(parsed.get("worker"))
-    if worker != "text_artifact":
+    if worker not in enabled_workers:
         worker = "none"
     if action != "execute":
         worker = "none"

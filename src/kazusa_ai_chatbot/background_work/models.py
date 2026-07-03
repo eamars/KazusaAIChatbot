@@ -106,6 +106,7 @@ class BackgroundWorkRouterDecision(TypedDict):
 class BackgroundWorkWorkerDecision(BackgroundWorkRouterDecision, total=False):
     """Route decision plus deterministic context passed to a worker."""
 
+    task_brief: str
     source_summary: str
     worker_payload: dict[str, object]
 

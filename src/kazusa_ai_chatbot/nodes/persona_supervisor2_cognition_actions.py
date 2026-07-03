@@ -286,11 +286,11 @@ def _deterministic_work_seed(
     request: ActionRequestV1,
     state: CognitionState,
 ) -> str:
-    """Build a deterministic task_brief from state and route reason.
+    """Build a task brief from the source input, not route free text.
 
-    The trusted task_brief is never LLM-generated. It is built from
-    the decontextualized input and the route reason already validated
-    by the action request normalizer.
+    The coding worker should receive the user's task as the work seed. The
+    action-router detail is used for routing and acknowledgement semantics, not
+    as an executable task rewrite.
     """
 
     decontextualized = state.get("decontexualized_input")
@@ -298,9 +298,6 @@ def _deterministic_work_seed(
         work_seed = decontextualized.strip()[:2000]
     else:
         work_seed = request.get("reason", "")
-    detail = _semantic_text(request, "detail")
-    if detail:
-        work_seed = f"{work_seed} — {detail}"
     return work_seed
 
 

@@ -166,8 +166,8 @@ def collect_assignment_evidence(
     """Collect bounded source rows for one programmer assignment.
 
     Args:
-        repo_root: Resolved checkout root from Phase 0.
-        source_scope: Phase 0 source scope that bounds all reads.
+        repo_root: Resolved checkout root from source fetching.
+        source_scope: Source scope that bounds all reads.
         assignment: PM-selected file, directory, symbol, or search mission.
         max_files: Supervisor-owned maximum files one programmer may inspect.
         max_excerpt_chars: Supervisor-owned total excerpt character cap.

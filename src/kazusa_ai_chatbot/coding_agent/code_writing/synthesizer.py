@@ -177,6 +177,11 @@ async def synthesize_patch_proposal(
         combined_limitations,
         max_answer_chars=max_answer_chars,
     )
+    answer_text = _answer_with_generated_artifacts(
+        answer_text,
+        generated_artifacts,
+        max_answer_chars=max_answer_chars,
+    )
     _fill_trace(
         trace,
         raw_output=response.content,
@@ -187,6 +192,73 @@ async def synthesize_patch_proposal(
         blocked_before_invoke=False,
     )
     return answer_text, combined_limitations
+
+
+def _answer_with_generated_artifacts(
+    answer_text: str,
+    generated_artifacts: list[GeneratedArtifact],
+    *,
+    max_answer_chars: int,
+) -> str:
+    """Append bounded generated artifact content to the public answer."""
+
+    if not generated_artifacts:
+        return answer_text
+
+    base_text = answer_text.strip()
+    sections: list[str] = []
+    for artifact in generated_artifacts:
+        section = _generated_artifact_section(artifact)
+        if not section:
+            continue
+        candidate_parts = [
+            part for part in (base_text, *sections, section) if part
+        ]
+        candidate = "\n\n".join(candidate_parts)
+        if len(candidate) <= max_answer_chars:
+            sections.append(section)
+            continue
+        break
+
+    if not sections:
+        note = "Generated artifact content omitted because the answer limit was reached."
+        if base_text:
+            candidate = f"{base_text}\n\n{note}"
+        else:
+            candidate = note
+        return candidate[:max_answer_chars].rstrip()
+
+    answer_parts = [part for part in (base_text, *sections) if part]
+    updated_answer = "\n\n".join(answer_parts)
+    return updated_answer[:max_answer_chars].rstrip()
+
+
+def _generated_artifact_section(artifact: GeneratedArtifact) -> str:
+    path = _bounded_text(artifact.get("path"), 500)
+    content = str(artifact.get("content", "")).strip()
+    if not path or not content:
+        return ""
+
+    info_string = _artifact_fence_info(artifact.get("content_format"))
+    section = (
+        f"Generated artifact: {path}\n"
+        f"```{info_string}\n"
+        f"{content}\n"
+        "```"
+    )
+    return section
+
+
+def _artifact_fence_info(content_format: object) -> str:
+    if content_format == "python":
+        return "python"
+    if content_format == "json":
+        return "json"
+    if content_format == "csv":
+        return "csv"
+    if content_format == "markdown":
+        return "markdown"
+    return ""
 
 
 def _answer_with_required_limitations(

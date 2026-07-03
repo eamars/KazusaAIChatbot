@@ -15,7 +15,7 @@ WritingPMStatus = Literal[
     "complete",
     "blocked",
 ]
-WritingDomain = Literal["reading", "writing", "modifying"]
+WritingDomain = Literal["writing"]
 WritingResultStatus = Literal[
     "succeeded",
     "failed",

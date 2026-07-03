@@ -1,5 +1,7 @@
+import json
 from pathlib import Path
 import subprocess
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -150,7 +152,7 @@ def _install_fake_subagents(
     return calls
 
 
-async def test_answer_code_question_short_circuits_phase0_non_success(
+async def test_answer_code_question_short_circuits_failed_source_fetching(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from kazusa_ai_chatbot.coding_agent import answer_code_question
@@ -331,7 +333,7 @@ async def test_question_only_embedded_github_url_is_handed_to_fetching(
     ]
 
 
-async def test_answer_code_question_reads_real_phase0_local_checkout(
+async def test_answer_code_question_reads_real_local_checkout_source(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -508,12 +510,220 @@ async def test_propose_code_change_resolves_generated_readback_through_superviso
     assert "generated_readback:evidence=1" in response["trace_summary"]
 
 
-def test_coding_agent_readme_documents_phase1_and_phase2_icd() -> None:
+async def test_handle_background_coding_task_routes_to_reading(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent import supervisor
+
+    reading_calls: list[dict[str, Any]] = []
+
+    async def fake_answer_code_question(
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        reading_calls.append(dict(request))
+        return {
+            "status": "succeeded",
+            "answer_text": "Architecture summary.",
+            "repository": None,
+            "source_scope": None,
+            "evidence": [],
+            "limitations": [],
+            "trace_summary": ["reading:succeeded"],
+        }
+
+    async def fail_propose_code_change(_request: dict[str, Any]) -> dict[str, Any]:
+        raise AssertionError("writing interface should not be called")
+
+    monkeypatch.setattr(
+        supervisor,
+        "_background_coding_router_llm",
+        _StaticJsonLLM({
+            "operation": "code_reading",
+            "reason": "The task asks for a repository explanation.",
+        }),
+    )
+    monkeypatch.setattr(
+        supervisor,
+        "answer_code_question",
+        fake_answer_code_question,
+    )
+    monkeypatch.setattr(
+        supervisor,
+        "propose_code_change",
+        fail_propose_code_change,
+    )
+
+    response = await supervisor.handle_background_coding_task({
+        "question": "Summarize the project architecture.",
+        "source_summary": "Accepted delayed coding work.",
+        "workspace_root": str(tmp_path / "workspace"),
+        "max_answer_chars": 1200,
+    })
+
+    assert response["status"] == "succeeded"
+    assert response["operation"] == "code_reading"
+    assert response["answer_text"] == "Architecture summary."
+    assert reading_calls == [
+        {
+            "question": "Summarize the project architecture.",
+            "max_answer_chars": 1200,
+            "workspace_root": str(tmp_path / "workspace"),
+        }
+    ]
+
+
+async def test_handle_background_coding_task_routes_to_writing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent import supervisor
+
+    writing_calls: list[dict[str, Any]] = []
+
+    async def fail_answer_code_question(_request: dict[str, Any]) -> dict[str, Any]:
+        raise AssertionError("reading interface should not be called")
+
+    async def fake_propose_code_change(
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        writing_calls.append(dict(request))
+        return {
+            "status": "succeeded",
+            "mode": "create_new_project",
+            "answer_text": "Generated proposal.",
+            "repository": None,
+            "source_scope": None,
+            "evidence": [],
+            "patch_artifacts": [
+                {
+                    "artifact_id": "script",
+                    "files": ["src/tool.py"],
+                    "summary": "Creates source.",
+                }
+            ],
+            "created_files": [{"path": "src/tool.py", "role": "source"}],
+            "changed_files": [],
+            "validation": {
+                "status": "succeeded",
+                "parsed": True,
+                "sandbox_applied": False,
+                "errors": [],
+                "warnings": [],
+                "files": ["src/tool.py"],
+            },
+            "external_evidence": [],
+            "session": None,
+            "limitations": [],
+            "trace_summary": ["writing:succeeded"],
+        }
+
+    monkeypatch.setattr(
+        supervisor,
+        "_background_coding_router_llm",
+        _StaticJsonLLM({
+            "operation": "code_writing",
+            "reason": "The task asks for a new code artifact.",
+        }),
+    )
+    monkeypatch.setattr(
+        supervisor,
+        "answer_code_question",
+        fail_answer_code_question,
+    )
+    monkeypatch.setattr(
+        supervisor,
+        "propose_code_change",
+        fake_propose_code_change,
+    )
+
+    response = await supervisor.handle_background_coding_task({
+        "question": "Create a Python script.",
+        "workspace_root": str(tmp_path / "workspace"),
+        "max_answer_chars": 1200,
+        "max_artifact_chars": 24000,
+    })
+
+    assert response["status"] == "succeeded"
+    assert response["operation"] == "code_writing"
+    assert response["answer_text"] == "Generated proposal."
+    assert response["created_files"] == [
+        {"path": "src/tool.py", "role": "source"}
+    ]
+    assert writing_calls == [
+        {
+            "question": "Create a Python script.",
+            "workspace_root": str(tmp_path / "workspace"),
+            "max_answer_chars": 1200,
+            "max_artifact_chars": 24000,
+        }
+    ]
+
+
+async def test_handle_background_coding_task_fails_on_malformed_route(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent import supervisor
+
+    async def fail_answer_code_question(_request: dict[str, Any]) -> dict[str, Any]:
+        raise AssertionError("reading interface should not be called")
+
+    async def fail_propose_code_change(_request: dict[str, Any]) -> dict[str, Any]:
+        raise AssertionError("writing interface should not be called")
+
+    monkeypatch.setattr(
+        supervisor,
+        "_background_coding_router_llm",
+        _StaticJsonLLM({"operation": "invalid"}),
+    )
+    monkeypatch.setattr(
+        supervisor,
+        "answer_code_question",
+        fail_answer_code_question,
+    )
+    monkeypatch.setattr(
+        supervisor,
+        "propose_code_change",
+        fail_propose_code_change,
+    )
+
+    response = await supervisor.handle_background_coding_task({
+        "question": "Summarize this repository.",
+    })
+
+    assert response["status"] == "failed"
+    assert response["operation"] == "unsupported"
+    assert response["answer_text"] == ""
+    assert response["limitations"] == [
+        "Coding-agent background supervisor returned an invalid operation."
+    ]
+
+
+class _StaticJsonLLM:
+    """Return one fixed JSON payload from an LLM-shaped test double."""
+
+    def __init__(self, payload: dict[str, object]) -> None:
+        self._payload = payload
+
+    async def ainvoke(
+        self,
+        _messages: list[object],
+        *,
+        config,
+    ) -> SimpleNamespace:
+        del config
+        content = json.dumps(self._payload, ensure_ascii=False)
+        response = SimpleNamespace(content=content)
+        return response
+
+
+def test_coding_agent_readme_documents_reading_and_writing_icd() -> None:
     readme = Path("src/kazusa_ai_chatbot/coding_agent/README.md").read_text(
         encoding="utf-8",
     )
 
     assert "answer_code_question" in readme
+    assert "handle_background_coding_task" in readme
     assert "code_reading" in readme
     assert "BackgroundWorkResult" in readme
     assert "Worker name: `coding_agent`" in readme

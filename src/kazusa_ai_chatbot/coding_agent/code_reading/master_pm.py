@@ -1,7 +1,7 @@
 """Placeholder for future multi-PM reading orchestration.
 
-Phase 1 keeps one bounded reading PM. Larger questions return limitations or
-ask for a narrower scope instead of adding another orchestration layer.
+Code reading keeps one bounded reading PM. Larger questions return limitations
+or ask for a narrower scope instead of adding another orchestration layer.
 """
 
 from kazusa_ai_chatbot.coding_agent.code_reading.models import ReadingSupervisorState

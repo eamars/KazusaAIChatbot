@@ -73,9 +73,12 @@ _RESOLVER_AFFORDANCE_DESCRIPTIONS = {
         "commitments, profile, or a local nickname/reference."
     ),
     "public_answer_research": (
-        "Investigate public/current/external/source-checkable answer gaps: "
-        "public term meanings, product facts, news, docs, comparisons, or "
-        "other internet-researchable facts."
+        "Investigate public/current/external/source-checkable evidence needed "
+        "before a direct visible answer: public term meanings, product facts, "
+        "news, docs, comparisons, or other internet-researchable facts. "
+        "Do not use this for accepted source-code or repository-analysis "
+        "tasks when delayed work is available; that worker owns repository "
+        "and code evidence."
     ),
     "self_goal_resolution": (
         "Resolve or prioritize an internal self-cognition goal."
@@ -736,7 +739,14 @@ def _default_action_summary(capability: str) -> list[str]:
             "Put the semantic future-speaking objective in detail.",
         ],
         ACCEPTED_TASK_REQUEST_CAPABILITY: [
-            "Use when the character accepts bounded delayed text work.",
+            (
+                "Use when the character accepts bounded delayed text, code, "
+                "or repository-analysis work."
+            ),
+            (
+                "Repository or source-code analysis stays in this delayed "
+                "work path even when it needs public source evidence."
+            ),
             "Pair this private request with a visible speak acknowledgement.",
         ],
         ACCEPTED_TASK_STATUS_CHECK_CAPABILITY: [

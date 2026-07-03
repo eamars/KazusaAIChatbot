@@ -261,6 +261,62 @@ def test_public_run_returns_needs_user_input_for_overloaded_pm(
     assert result["evidence"] == []
 
 
+def test_public_run_synthesizes_partial_when_pm_gives_no_missing_slots(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_reading import run
+    from kazusa_ai_chatbot.coding_agent.code_reading import supervisor
+
+    assignment = _decision("need_programmers")["assignments"][0]
+    decisions = [
+        {
+            **_decision("need_programmers"),
+            "assignments": [assignment],
+            "missing_slots": ["call flow"],
+        },
+        {
+            **_decision("needs_user_input"),
+            "assignments": [],
+            "missing_slots": [],
+        },
+    ]
+    synthesis_inputs: dict[str, Any] = {}
+
+    def fake_pm(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        decision = decisions.pop(0)
+        return decision
+
+    def fake_programmer(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        report = _report()
+        return report
+
+    def fake_synthesis(*args: Any, **kwargs: Any) -> tuple[str, list[str]]:
+        synthesis_inputs["args"] = args
+        synthesis_inputs["kwargs"] = kwargs
+        limitations = kwargs["limitations"]
+        return "Partial source-backed answer.", limitations
+
+    monkeypatch.setattr(supervisor, "decide_reading_work", fake_pm)
+    monkeypatch.setattr(supervisor, "run_programmer_assignment", fake_programmer)
+    monkeypatch.setattr(
+        supervisor,
+        "synthesize_from_programmer_reports",
+        fake_synthesis,
+    )
+
+    result = run(_request(tmp_path, "How does order submission call payment?"))
+
+    assert result["status"] == "succeeded"
+    assert result["answer_text"] == "Partial source-backed answer."
+    assert "reading_pm:sufficiency=partial" in result["trace_summary"]
+    assert synthesis_inputs["kwargs"]["pm_decision"]["status"] == "sufficient"
+    assert (
+        "The PM could not identify enough bounded evidence slots."
+        in result["limitations"]
+    )
+
+
 def test_public_run_allows_third_bounded_programmer_wave(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -408,6 +464,55 @@ def test_public_run_blocks_ungrounded_identifier_in_final_answer(
     assert result["status"] == "succeeded"
     assert "ShadowLedger" not in result["answer_text"]
     assert result["limitations"]
+
+
+def test_public_run_keeps_grounded_prose_when_synthesis_omits_answer_text(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_reading import run
+
+    _patch_reading_pipeline(
+        monkeypatch,
+        decision=_decision(),
+        report=_report(),
+        patch_synthesis=False,
+    )
+    from kazusa_ai_chatbot.coding_agent.code_reading import synthesizer
+
+    monkeypatch.setattr(
+        synthesizer._synthesis_llm,
+        "invoke",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            content="OrderService.submit_order calls PaymentGateway.charge."
+        ),
+    )
+    monkeypatch.setattr(
+        synthesizer,
+        "parse_llm_json_output",
+        lambda *_args, **_kwargs: {"analysis": "Wrong JSON key."},
+    )
+
+    result = run(_request(tmp_path, "How does order submission call payment?"))
+
+    assert result["status"] == "succeeded"
+    assert "PaymentGateway.charge" in result["answer_text"]
+    assert "The selected evidence did not support" not in result["answer_text"]
+    assert "Synthesis model omitted answer_text." in result["limitations"]
+
+
+def test_ungrounded_term_removal_cleans_empty_parentheses() -> None:
+    from kazusa_ai_chatbot.coding_agent.code_reading.synthesizer import (
+        _remove_ungrounded_code_terms,
+    )
+
+    answer = "The graph is a directed acyclic graph \uff08DAG\uff09."
+
+    repaired = _remove_ungrounded_code_terms(answer, ["DAG"])
+
+    assert "DAG" not in repaired
+    assert "\uff08\uff09" not in repaired
+    assert repaired == "The graph is a directed acyclic graph."
 
 
 @pytest.mark.asyncio

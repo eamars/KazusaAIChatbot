@@ -76,7 +76,8 @@ _COGNITION_SUBCONSCIOUS_PROMPT = '''\
 # 来源识别
 - 存在 `reflection_artifact` 时，当前材料是我自己的反思资料，不是用户输入、用户发言，也不是任何人正在对我说话；只对反思中已经沉淀出的真实经历和余波产生第一反应。
 - 存在 `internal_thought_residue` 时，重点是其中的 `internal_monologue`：这是我刚看到或回顾的内部观察资料。`user_input` 只是运输摘要，不是用户输入、用户发言，也不是任何人正在对我说话。
-- 没有 `reflection_artifact` 且没有 `internal_thought_residue` 时，`user_input` 是当前外部说话内容；`indirect_speech_context` 非空时，表示当前说话者在向他人谈论我。
+- 存在 `accepted_task_result`、`background_work_result` 或 `background_artifact_result` 时，当前材料是系统回流的任务结果，不是用户新发言；第一反应围绕之前的任务现在有结果要交付。
+- 没有 `reflection_artifact`、`internal_thought_residue` 和结果字段时，`user_input` 是当前外部说话内容；`indirect_speech_context` 非空时，表示当前说话者在向他人谈论我。
 - 内部观察资料和反思资料里的标题、字段名、JSON、时间戳、semantic_labels、window_summary、transport summary、model-facing metadata 都不是聊天内容，不要对这些结构本身产生社交反应，也不要复制进输出。
 
 # 本轮语境
@@ -89,10 +90,11 @@ _COGNITION_SUBCONSCIOUS_PROMPT = '''\
 # 生成流程
 1. 先判断来源类型。
 2. 外部说话内容：对当前话语或当前媒体事实产生第一反应。
-3. 内部观察资料：只对资料中真实可见的聊天现场产生第一反应。
-4. 反思资料：只对已经发生并被沉淀的经历、关系余波或自我理解产生第一反应。
-5. 普通问候、事实分享、图片描述、轻度闲聊、群聊玩笑，缺少明确命令、羞辱、威胁、身份接管、控制或亲密索取时，保持中性或轻度社交反应。
-6. 只输出本能感受和潜台词；不要写该不该说话、是否行动、如何回复。
+3. 任务结果资料：对已完成、失败、限制或交付压力产生第一反应。
+4. 内部观察资料：只对资料中真实可见的聊天现场产生第一反应。
+5. 反思资料：只对已经发生并被沉淀的经历、关系余波或自我理解产生第一反应。
+6. 普通问候、事实分享、图片描述、轻度闲聊、群聊玩笑，缺少明确命令、羞辱、威胁、身份接管、控制或亲密索取时，保持中性或轻度社交反应。
+7. 只输出本能感受和潜台词；不要写该不该说话、是否行动、如何回复。
 
 # 输出格式
 只返回合法 JSON 字符串：
@@ -138,6 +140,12 @@ async def call_cognition_subconscious(state: dict[str, Any]) -> dict[str, Any]:
         "reflection_signal_reflection_artifact": _COGNITION_SUBCONSCIOUS_PROMPT,
         "internal_thought_internal_monologue": _COGNITION_SUBCONSCIOUS_PROMPT,
         "background_artifact_result_ready_background_artifact_result": (
+            _COGNITION_SUBCONSCIOUS_PROMPT
+        ),
+        "background_work_result_ready_background_work_result": (
+            _COGNITION_SUBCONSCIOUS_PROMPT
+        ),
+        "accepted_task_result_ready_accepted_task_result": (
             _COGNITION_SUBCONSCIOUS_PROMPT
         ),
     }[selection["variant"]]

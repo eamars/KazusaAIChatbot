@@ -21,7 +21,7 @@ class CodeEvidenceRow(TypedDict):
 
 
 class CodeReadingRequest(TypedDict, total=False):
-    """Request accepted by `code_reading.run` after Phase 0 succeeds."""
+    """Request accepted by `code_reading.run` after source fetching succeeds."""
 
     question: str
     repository: CodeRepositoryRef

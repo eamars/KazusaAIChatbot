@@ -47,7 +47,7 @@ PM_STATUSES: tuple[WritingPMStatus, ...] = (
     "complete",
     "blocked",
 )
-PM_DOMAINS: tuple[WritingDomain, ...] = ("reading", "writing", "modifying")
+PM_DOMAINS: tuple[WritingDomain, ...] = ("writing",)
 ACTION_PAYLOAD_KEYS: dict[WritingPMStatus, str] = {
     "request_information": "information_request",
     "create_child_pm": "child_pm_task",
@@ -167,7 +167,7 @@ For information_request:
 For child_pm_task:
 {
   "child_pm_id": "short id",
-  "domain": "reading | writing | modifying",
+  "domain": "writing",
   "goal": "what the child PM owns",
   "scope": "direct scope for the child PM",
   "constraints": ["constraints"],

@@ -63,7 +63,7 @@ At a high level, Kazusa provides:
 | RAG 2 evidence retrieval         | Demand-driven helper agents retrieve user profiles, memories, conversation history, live facts, web evidence, and recall state when cognition asks. |
 | Layered cognition                | Cognition decides stance, boundaries, judgment, style, action needs, and response goals before selected L3 surfaces render output. |
 | Background consolidation         | Completed episodes update durable memory, relationship state, Cache2 invalidation, images, and progress from text plus action/surface traces. |
-| Accepted delayed work            | Accepted reminders and text tasks are persisted, routed to internal background workers, and returned through cognition rather than sent directly. |
+| Accepted delayed work            | Accepted reminders, text tasks, and coding tasks are persisted, routed to internal background workers, and returned through cognition rather than sent directly. |
 | Reflection outside chat          | Hourly, daily, and promoted reflection runs are stored as audit records and only promoted context can enter normal cognition.      |
 | Idle self-cognition              | Background source cases can enter the same resolver-backed persona path, with source-bound delivery and normal consolidation rules. |
 | Calendar follow-through          | Accepted future promises and due commitments can become durable calendar triggers that run fresh cognition later.                  |
@@ -305,12 +305,14 @@ flowchart TD
         BW0["background_work runtime [LLM route only]<br/>router chooses worker only"]
         BW1["text_artifact worker [worker]<br/>task router + generator"]
         BW2["future_speak worker [deterministic worker]<br/>schedules future cognition"]
+        BW3["coding_agent worker [worker]<br/>code-reading answers / new-artifact proposals<br/>no patch apply or command execution"]
         A0 --> A1
         A1 --> A2
         A2 --> AT
         AT --> BW0
         BW0 --> BW1
         BW0 --> BW2
+        BW0 --> BW3
     end
 
     subgraph Maintenance["Background and durable subsystems"]
@@ -341,6 +343,7 @@ flowchart TD
     A0 --> P2
     P2A --> AT
     BW1 -->|accepted_task_result_ready| P1
+    BW3 -->|accepted_task_result_ready| P1
     BW2 --> CAL
     CAL -->|future or due source case| SC
     SC -->|shared cognition path| P0
@@ -371,7 +374,10 @@ The named specialist boxes are family-local subagents and workers, not one
 universal runtime abstraction. RAG helper agents retrieve local, profile,
 memory, conversation, recall, live, and web evidence; `web_agent3` owns its
 source subagents; the complex-task resolver owns resolver-local evidence and
-algorithmic subagents; background work owns delayed-work workers.
+algorithmic subagents; background work owns delayed-work workers. The
+top-level map keeps the coding-agent worker coarse; its fetching, reading,
+writing, PM, and programmer roles are owned by the
+[Coding Agent ICD](src/kazusa_ai_chatbot/coding_agent/README.md).
 
 The resolver preserves the same L1 -> L2 -> L2d cognition stack on every
 cycle. L2d may finish with selected action specs, or it may request one bounded
@@ -396,8 +402,10 @@ semantic `accepted_task_request` and `accepted_task_status_check` affordances;
 deterministic action-spec execution materializes new accepted tasks into the
 internal `background_work` executor only after duplicate rejection and durable
 lifecycle persistence. A route-only background-work router chooses the worker
-and semantic task after the live turn; the text-artifact worker has its own task
-router and generator stages. Completed accepted tasks return as
+after the live turn. Worker-local classification stays inside the selected
+worker: the text-artifact worker has its own task router/generator, and the
+coding-agent worker has its own read-versus-write supervisor before returning
+bounded answers or proposal artifacts. Completed accepted tasks return as
 `accepted_task_result_ready` cognition rather than being sent directly by
 workers. Legacy background-artifact and legacy background-work rows remain
 compatibility data, not the new model-facing runtime contract.
@@ -615,6 +623,7 @@ cognition, and calendar scheduling remain in the platform-neutral core.
 | Action spec              | L2d action residues, capability registry, evaluator, results, surfaces, and traces      | [Action Spec](src/kazusa_ai_chatbot/action_spec/README.md)                            |
 | Accepted task            | User-facing lifecycle for delayed work accepted by the character                        | [Accepted Task ICD](src/kazusa_ai_chatbot/accepted_task/README.md)                    |
 | Background work          | Internal delayed-work executor, worker routing, and result handoff                      | [Background Work ICD](src/kazusa_ai_chatbot/background_work/README.md)                |
+| Coding agent             | Standalone coding-task supervisor, source fetching, read-only answers, and new-artifact proposals | [Coding Agent ICD](src/kazusa_ai_chatbot/coding_agent/README.md)            |
 | Consolidation            | Durable target planning, lane routing/review, write-intent validation, and target-specific persistence | [Consolidation ICD](src/kazusa_ai_chatbot/consolidation/README.md)                    |
 | Database                 | MongoDB collection ownership, embeddings, indexes, public persistence helpers           | [Database ICD](src/kazusa_ai_chatbot/db/README.md)                                     |
 | Event logging            | Sanitized operational telemetry, status snapshots, statistics, and export contracts     | [Event Logging ICD](src/kazusa_ai_chatbot/event_logging/README.md)                     |
@@ -700,6 +709,7 @@ src/
     action_spec/               Modality-neutral action contracts, registry, results
     accepted_task/             User-facing accepted delayed-work lifecycle
     background_work/           Internal delayed-work executor and workers
+    coding_agent/              Standalone coding-task supervisor and subagents
     consolidation/             Durable consolidation helpers, lane routing, and ICD
     rag/                       RAG 2 helper agents, hybrid retrieval, Cache2
     conversation_progress/     Short-term episode memory

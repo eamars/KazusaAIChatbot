@@ -117,11 +117,13 @@ ids, credentials, collection names, and database internals.
 
 ## Background Work Extension Boundary
 
-Future delayed capabilities such as a coding agent or complex resolver must be
-added as first-class action capabilities before they can become live
-background work. The action-spec layer owns the model-facing capability name,
-semantic purpose, visibility, source refs, trusted target binding, validation,
-idempotency material, and prompt-safe result projection. It does not own worker
+The current coding-agent worker is exposed through the accepted delayed-work
+capability for bounded coding and repository-analysis tasks. Future delayed
+capabilities such as a complex resolver must be added as reviewed first-class
+capability contracts before they can become live background work. The
+action-spec layer owns the model-facing capability name, semantic purpose,
+visibility, source refs, trusted target binding, validation, idempotency
+material, and prompt-safe result projection. It does not own worker
 implementation details.
 
 The extension sequence is:
@@ -138,11 +140,10 @@ L2d semantic capability
 
 L2d must not select worker-local task types, tool arguments, filesystem paths,
 shell commands, resolver internals, queue ids, leases, retry policy, adapter
-delivery targets, or final artifact formatting. If a future coding-agent or
-complex-resolver worker needs those details, the worker or its deterministic
-handler owns them after accepted-task validation. L3/dialog still owns visible
-wording for acknowledgements, progress reports, failures, and completed
-results.
+delivery targets, or final artifact formatting. If a worker needs those
+details, the worker or its deterministic handler owns them after accepted-task
+validation. L3/dialog still owns visible wording for acknowledgements,
+progress reports, failures, and completed results.
 
 Adding a future background-work capability must document its capability row,
 accepted-task identity fields, worker input/output contract, permission and

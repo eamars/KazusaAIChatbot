@@ -124,9 +124,9 @@ def run_programmer_assignment(
     """Run one bounded reading assignment and return report memory.
 
     Args:
-        repository: Successful Phase 0 repository source contract.
+        repository: Successful repository source contract.
         assignment: Validated programmer assignment.
-        source_scope: Enclosing Phase 0 source scope.
+        source_scope: Enclosing source scope.
         max_files: Supervisor-owned file cap for this worker.
         max_excerpt_chars: Supervisor-owned excerpt cap for this worker.
         trace: Optional internal diagnostic dictionary populated with safe route

@@ -137,7 +137,7 @@ def test_missing_question_returns_needs_user_input(tmp_path: Path) -> None:
         ("Analyze binary pixels in assets/logo.png.", "binary assets"),
     ],
 )
-def test_rejects_unsupported_phase1_requests(
+def test_rejects_unsupported_code_reading_requests(
     tmp_path: Path,
     question: str,
     expected_fragment: str,
