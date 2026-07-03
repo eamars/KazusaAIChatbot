@@ -73,10 +73,10 @@ def _repository(tmp_path: Path) -> dict[str, Any]:
 
 def test_contracts_define_simplified_pm_programmer_shapes() -> None:
     from kazusa_ai_chatbot.coding_agent.code_reading.models import (
-        PMDecision,
-        PMInput,
-        ProgrammerAssignment,
-        ProgrammerReport,
+        ReadingPMDecision,
+        ReadingPMInput,
+        ReadingProgrammerTask,
+        ReadingProgrammerReport,
     )
 
     assert {
@@ -85,21 +85,21 @@ def test_contracts_define_simplified_pm_programmer_shapes() -> None:
         "source_scope",
         "repo_map_summary",
         "previous_reports",
-    } <= set(PMInput.__annotations__)
+    } <= set(ReadingPMInput.__annotations__)
     assert {
         "status",
         "intent",
         "required_slots",
         "assignments",
         "missing_slots",
-    } <= set(PMDecision.__annotations__)
+    } <= set(ReadingPMDecision.__annotations__)
     assert {
         "assignment_id",
         "role",
         "scope",
         "questions",
         "required_slots",
-    } == set(ProgrammerAssignment.__annotations__)
+    } == set(ReadingProgrammerTask.__annotations__)
     assert {
         "assignment_id",
         "status",
@@ -109,7 +109,7 @@ def test_contracts_define_simplified_pm_programmer_shapes() -> None:
         "open_questions",
         "discovered_symbols",
         "candidate_next_hops",
-    } == set(ProgrammerReport.__annotations__)
+    } == set(ReadingProgrammerReport.__annotations__)
 
 
 def test_reading_pm_retries_when_assignment_cap_is_exceeded(

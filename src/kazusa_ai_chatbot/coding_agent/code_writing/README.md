@@ -101,6 +101,11 @@ one fenced artifact body. The patching boundary owns file-tree or unified-diff
 materialization. Deterministic code owns caps, path safety, storage boundaries,
 review-package materialization, and public sanitization.
 
+Code-facing contract names follow the shared coding-agent role vocabulary:
+`WritingPMInput`, `WritingPMDecision`, `WritingProgrammerTask`, and
+`WritingProgrammerResult`. The model-facing writing JSON remains the workflow
+ICD; lifecycle actions and artifact fields are writing-domain fields.
+
 When a programmer task consumes an interface from prior generated artifacts,
 the task must cite a resolved supervisor readback fact id in
 `consumed_fact_ids`. Deterministic handoff validation rejects the programmer

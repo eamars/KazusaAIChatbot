@@ -91,6 +91,12 @@ The accepted architecture is explicit context partitioning:
   PM implementation may be a single LLM call or an internal PM cluster later;
   the external PM boundary, responsibility, and input/output contract remain
   stable.
+- Shared code-facing role names use the workflow prefix plus the common role
+  concept where the responsibility matches: `ReadingPMInput`,
+  `ReadingPMDecision`, `ReadingProgrammerTask`, `ReadingProgrammerReport`,
+  `WritingPMInput`, `WritingPMDecision`, `WritingProgrammerTask`, and
+  `WritingProgrammerResult`. Domain-specific fields remain owned by the
+  workflow ICD.
 - `code_patching` runs after writing or modifying artifacts are selected. It
   owns edit mechanics: path targeting, anchor selection for existing files,
   full-file creation for new files, unified-diff or file-tree assembly, and

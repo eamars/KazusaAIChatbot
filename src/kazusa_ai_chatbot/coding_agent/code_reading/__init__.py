@@ -5,19 +5,19 @@ from kazusa_ai_chatbot.coding_agent.code_reading.models import (
     CodeEvidenceRow,
     CodeReadingRequest,
     CodeReadingResult,
-    PMDecision,
-    PMInput,
-    ProgrammerAssignment,
-    ProgrammerReport,
+    ReadingPMDecision,
+    ReadingPMInput,
+    ReadingProgrammerTask,
+    ReadingProgrammerReport,
 )
 
 __all__ = [
     "CodeEvidenceRow",
     "CodeReadingRequest",
     "CodeReadingResult",
-    "PMDecision",
-    "PMInput",
-    "ProgrammerAssignment",
-    "ProgrammerReport",
+    "ReadingPMDecision",
+    "ReadingPMInput",
+    "ReadingProgrammerTask",
+    "ReadingProgrammerReport",
     "run",
 ]

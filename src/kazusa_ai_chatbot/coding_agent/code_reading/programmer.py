@@ -19,9 +19,9 @@ from kazusa_ai_chatbot.coding_agent.code_reading.evidence import (
 )
 from kazusa_ai_chatbot.coding_agent.code_reading.models import (
     CodeEvidenceRow,
-    ProgrammerAssignment,
-    ProgrammerFact,
-    ProgrammerReport,
+    ReadingProgrammerTask,
+    ReadingProgrammerFact,
+    ReadingProgrammerReport,
 )
 from kazusa_ai_chatbot.config import (
     CODING_AGENT_PROGRAMMER_LLM_API_KEY,
@@ -114,13 +114,13 @@ _programmer_llm_config = LLMCallConfig(
 
 def run_programmer_assignment(
     repository: CodeRepositoryRef,
-    assignment: ProgrammerAssignment,
+    assignment: ReadingProgrammerTask,
     source_scope: CodeSourceScope,
     *,
     max_files: int,
     max_excerpt_chars: int,
     trace: dict[str, object] | None = None,
-) -> ProgrammerReport:
+) -> ReadingProgrammerReport:
     """Run one bounded reading assignment and return report memory.
 
     Args:
@@ -185,9 +185,9 @@ def run_programmer_assignment(
 def normalize_programmer_report(
     parsed: object,
     *,
-    assignment: ProgrammerAssignment,
+    assignment: ReadingProgrammerTask,
     bundle: EvidenceBundle,
-) -> ProgrammerReport:
+) -> ReadingProgrammerReport:
     """Normalize programmer JSON into the simplified report contract."""
 
     evidence_refs = {_evidence_ref(row) for row in bundle.rows}
@@ -225,7 +225,7 @@ def normalize_programmer_report(
             open_questions = ["Evidence was found, but no supported facts were returned."]
 
     discovered_symbols = _discovered_symbols(bundle)
-    report: ProgrammerReport = {
+    report: ReadingProgrammerReport = {
         "assignment_id": assignment["assignment_id"],
         "status": status,
         "files_read": bundle.files_read,
@@ -244,7 +244,7 @@ def normalize_programmer_report(
 
 def _programmer_payload(
     *,
-    assignment: ProgrammerAssignment,
+    assignment: ReadingProgrammerTask,
     bundle: EvidenceBundle,
 ) -> dict[str, object]:
     payload = {
@@ -270,11 +270,11 @@ def _facts_from_parsed(
     parsed: object,
     *,
     evidence_refs: set[str],
-) -> list[ProgrammerFact]:
+) -> list[ReadingProgrammerFact]:
     if not isinstance(parsed, list):
         return []
 
-    facts: list[ProgrammerFact] = []
+    facts: list[ReadingProgrammerFact] = []
     for item in parsed:
         if not isinstance(item, dict):
             continue
@@ -287,7 +287,7 @@ def _facts_from_parsed(
         summary = _bounded_text(item.get("summary"))
         if not summary:
             continue
-        fact: ProgrammerFact = {
+        fact: ReadingProgrammerFact = {
             "kind": _bounded_text(item.get("kind")) or "source_fact",
             "summary": summary,
             "evidence_refs": refs,
@@ -300,12 +300,12 @@ def _facts_from_parsed(
 
 def _blocked_report(
     *,
-    assignment: ProgrammerAssignment,
+    assignment: ReadingProgrammerTask,
     bundle: EvidenceBundle,
     reason: str,
-) -> ProgrammerReport:
+) -> ReadingProgrammerReport:
     discovered_symbols = _discovered_symbols(bundle)
-    report: ProgrammerReport = {
+    report: ReadingProgrammerReport = {
         "assignment_id": assignment["assignment_id"],
         "status": "blocked",
         "files_read": bundle.files_read,
@@ -338,7 +338,7 @@ def _discovered_symbols(bundle: EvidenceBundle) -> list[str]:
 def _candidate_next_hops(
     *,
     bundle: EvidenceBundle,
-    assignment: ProgrammerAssignment,
+    assignment: ReadingProgrammerTask,
     discovered_symbols: list[str],
 ) -> list[dict[str, object]]:
     hops: list[dict[str, object]] = []
@@ -425,7 +425,7 @@ def _append_next_hop(
 
 
 def _assignment_already_targets_directory(
-    assignment: ProgrammerAssignment,
+    assignment: ReadingProgrammerTask,
     directory: str,
 ) -> bool:
     scope = assignment["scope"]
@@ -480,7 +480,7 @@ def _fill_trace(
     *,
     raw_output: str,
     parsed_output: object,
-    normalized_output: ProgrammerReport,
+    normalized_output: ReadingProgrammerReport,
     bundle: EvidenceBundle,
     timed_out: bool,
 ) -> None:

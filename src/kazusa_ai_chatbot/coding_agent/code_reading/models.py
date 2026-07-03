@@ -41,7 +41,7 @@ class CodeReadingResult(TypedDict):
     trace_summary: list[str]
 
 
-PMStatus = Literal[
+ReadingPMStatus = Literal[
     "need_programmers",
     "sufficient",
     "needs_user_input",
@@ -62,28 +62,28 @@ ReadingIntent = Literal[
     "insufficient_evidence",
     "unsupported_request",
 ]
-AssignmentScopeKind = Literal["file", "directory", "symbol", "search"]
-ProgrammerReportStatus = Literal["succeeded", "blocked", "no_evidence"]
+ReadingTaskScopeKind = Literal["file", "directory", "symbol", "search"]
+ReadingProgrammerStatus = Literal["succeeded", "blocked", "no_evidence"]
 
 
-class AssignmentScope(TypedDict):
+class ReadingTaskScope(TypedDict):
     """Bounded repository scope selected for one programmer worker."""
 
-    kind: AssignmentScopeKind
+    kind: ReadingTaskScopeKind
     values: list[str]
 
 
-class ProgrammerAssignment(TypedDict):
+class ReadingProgrammerTask(TypedDict):
     """One bounded programmer mission selected by the reading PM."""
 
     assignment_id: str
     role: str
-    scope: AssignmentScope
+    scope: ReadingTaskScope
     questions: list[str]
     required_slots: list[str]
 
 
-class ProgrammerFact(TypedDict):
+class ReadingProgrammerFact(TypedDict):
     """A source-backed fact extracted by a programmer worker."""
 
     kind: str
@@ -91,56 +91,56 @@ class ProgrammerFact(TypedDict):
     evidence_refs: list[str]
 
 
-class CandidateNextHop(TypedDict):
+class ReadingCandidateNextHop(TypedDict):
     """Generic follow-up scope discovered from bounded evidence."""
 
     reason: str
-    scope: AssignmentScope
+    scope: ReadingTaskScope
 
 
-class ProgrammerReport(TypedDict):
+class ReadingProgrammerReport(TypedDict):
     """Compressed memory artifact returned by one programmer worker."""
 
     assignment_id: str
-    status: ProgrammerReportStatus
+    status: ReadingProgrammerStatus
     files_read: list[str]
-    facts: list[ProgrammerFact]
+    facts: list[ReadingProgrammerFact]
     evidence: list[CodeEvidenceRow]
     open_questions: list[str]
     discovered_symbols: list[str]
-    candidate_next_hops: list[CandidateNextHop]
+    candidate_next_hops: list[ReadingCandidateNextHop]
 
 
-class PMInput(TypedDict):
+class ReadingPMInput(TypedDict):
     """Compact model-facing input for the reading product manager."""
 
     question: str
     repository_summary: dict[str, object]
     source_scope: dict[str, object]
     repo_map_summary: dict[str, object]
-    previous_reports: list[ProgrammerReport]
+    previous_reports: list[ReadingProgrammerReport]
     review_mode: NotRequired[str]
 
 
-class PMDecision(TypedDict):
+class ReadingPMDecision(TypedDict):
     """The only decision shape returned by the reading product manager."""
 
-    status: PMStatus
+    status: ReadingPMStatus
     intent: ReadingIntent
     required_slots: list[str]
-    assignments: list[ProgrammerAssignment]
+    assignments: list[ReadingProgrammerTask]
     missing_slots: list[str]
 
 
-class ReadingManagerState(TypedDict):
+class ReadingSupervisorState(TypedDict):
     """Bounded supervisor state for one code-reading request."""
 
     request: CodeReadingRequest
     repository_summary: dict[str, object]
     source_scope: CodeSourceScope
     repo_map_summary: dict[str, object]
-    pm_decisions: list[PMDecision]
-    programmer_reports: list[ProgrammerReport]
+    pm_decisions: list[ReadingPMDecision]
+    programmer_reports: list[ReadingProgrammerReport]
     selected_evidence: list[CodeEvidenceRow]
     limitations: list[str]
     trace_summary: list[str]

@@ -15,11 +15,11 @@ from kazusa_ai_chatbot.coding_agent.context_budget import (
 from kazusa_ai_chatbot.coding_agent.code_fetching.models import CodeSourceScope
 from kazusa_ai_chatbot.coding_agent.code_reading.models import (
     CodeEvidenceRow,
-    AssignmentScopeKind,
-    PMDecision,
-    PMInput,
-    ProgrammerAssignment,
-    ProgrammerReport,
+    ReadingTaskScopeKind,
+    ReadingPMDecision,
+    ReadingPMInput,
+    ReadingProgrammerTask,
+    ReadingProgrammerReport,
     ReadingIntent,
 )
 from kazusa_ai_chatbot.config import (
@@ -57,7 +57,7 @@ PM_STATUSES = (
     "needs_user_input",
     "overloaded",
 )
-ASSIGNMENT_SCOPE_KINDS: tuple[AssignmentScopeKind, ...] = (
+ASSIGNMENT_SCOPE_KINDS: tuple[ReadingTaskScopeKind, ...] = (
     "file",
     "directory",
     "symbol",
@@ -232,10 +232,10 @@ _reading_pm_llm_config = LLMCallConfig(
 
 
 def decide_reading_work(
-    pm_input: PMInput,
+    pm_input: ReadingPMInput,
     *,
     trace: dict[str, object] | None = None,
-) -> PMDecision:
+) -> ReadingPMDecision:
     """Ask the reading PM to choose bounded programmer work.
 
     Args:
@@ -272,7 +272,7 @@ def decide_reading_work(
         )
         return decision
     attempts: list[dict[str, object]] = []
-    decision: PMDecision | None = None
+    decision: ReadingPMDecision | None = None
     raw_output = ""
     parsed: object = {}
     for attempt_index in range(MAX_PM_DECISION_ATTEMPTS):
@@ -326,7 +326,7 @@ def decide_reading_work(
     return decision
 
 
-def normalize_pm_decision(parsed: object) -> PMDecision:
+def normalize_pm_decision(parsed: object) -> ReadingPMDecision:
     """Normalize and validate PM JSON into the simplified decision contract."""
 
     if not isinstance(parsed, dict):
@@ -357,7 +357,7 @@ def normalize_pm_decision(parsed: object) -> PMDecision:
         assignments = []
         missing_slots.append("Too many programmer assignments were requested.")
 
-    decision: PMDecision = {
+    decision: ReadingPMDecision = {
         "status": status,
         "intent": intent,
         "required_slots": required_slots,
@@ -368,7 +368,7 @@ def normalize_pm_decision(parsed: object) -> PMDecision:
 
 
 def validate_programmer_assignment(
-    assignment: ProgrammerAssignment,
+    assignment: ReadingProgrammerTask,
     source_scope: CodeSourceScope,
 ) -> None:
     """Reject PM assignment contracts that do not define a bounded read."""
@@ -397,7 +397,7 @@ def validate_programmer_assignment(
 
 
 def selected_evidence_from_reports(
-    programmer_reports: list[ProgrammerReport],
+    programmer_reports: list[ReadingProgrammerReport],
 ) -> list[CodeEvidenceRow]:
     """Flatten report evidence while preserving report-memory ordering."""
 
@@ -438,7 +438,7 @@ def _validate_assignment_path(
         raise ValueError("Programmer assignment must stay inside source scope.")
 
 
-def _pm_payload(pm_input: PMInput) -> dict[str, object]:
+def _pm_payload(pm_input: ReadingPMInput) -> dict[str, object]:
     payload: dict[str, object] = {
         "question": _bounded_multiline_text(
             pm_input["question"],
@@ -545,7 +545,7 @@ def _compact_top_symbols(value: object) -> list[dict[str, object]]:
 
 
 def _compact_reports(
-    reports: list[ProgrammerReport],
+    reports: list[ReadingProgrammerReport],
 ) -> list[dict[str, object]]:
     compact_reports: list[dict[str, object]] = []
     for report in reports[:MAX_PM_PREVIOUS_REPORTS]:
@@ -592,11 +592,11 @@ def _compact_next_hops(value: object) -> list[dict[str, object]]:
     return next_hops
 
 
-def _assignments_from_parsed(parsed: object) -> list[ProgrammerAssignment]:
+def _assignments_from_parsed(parsed: object) -> list[ReadingProgrammerTask]:
     if not isinstance(parsed, list):
         return []
 
-    assignments: list[ProgrammerAssignment] = []
+    assignments: list[ReadingProgrammerTask] = []
     for index, item in enumerate(parsed, start=1):
         if not isinstance(item, dict):
             continue
@@ -612,7 +612,7 @@ def _assignment_from_dict(
     item: dict[str, Any],
     *,
     index: int,
-) -> ProgrammerAssignment | None:
+) -> ReadingProgrammerTask | None:
     scope = item.get("scope")
     if not isinstance(scope, dict):
         return None
@@ -636,7 +636,7 @@ def _assignment_from_dict(
         questions = ["Read bounded source evidence for the requested slot."]
     required_slots = _string_list(item.get("required_slots"), MAX_REQUIRED_SLOTS)
 
-    assignment: ProgrammerAssignment = {
+    assignment: ReadingProgrammerTask = {
         "assignment_id": assignment_id,
         "role": role,
         "scope": {
@@ -682,8 +682,8 @@ def _bounded_multiline_text(value: object, max_chars: int) -> str:
     return text
 
 
-def _needs_user_input_decision(reason: str) -> PMDecision:
-    decision: PMDecision = {
+def _needs_user_input_decision(reason: str) -> ReadingPMDecision:
+    decision: ReadingPMDecision = {
         "status": "needs_user_input",
         "intent": "insufficient_evidence",
         "required_slots": [],
@@ -693,8 +693,8 @@ def _needs_user_input_decision(reason: str) -> PMDecision:
     return decision
 
 
-def _overloaded_decision(reason: str) -> PMDecision:
-    decision: PMDecision = {
+def _overloaded_decision(reason: str) -> ReadingPMDecision:
+    decision: ReadingPMDecision = {
         "status": "overloaded",
         "intent": "insufficient_evidence",
         "required_slots": [],
@@ -704,7 +704,7 @@ def _overloaded_decision(reason: str) -> PMDecision:
     return decision
 
 
-def _should_retry_pm_decision(decision: PMDecision) -> bool:
+def _should_retry_pm_decision(decision: ReadingPMDecision) -> bool:
     if decision["status"] != "overloaded":
         return False
     return "Too many programmer assignments were requested." in decision[
@@ -722,7 +722,7 @@ def _fill_trace(
     *,
     raw_output: str,
     parsed_output: object,
-    normalized_output: PMDecision,
+    normalized_output: ReadingPMDecision,
     attempts: list[dict[str, object]] | None = None,
     prompt_input_chars: int,
     context_budget: dict[str, object],

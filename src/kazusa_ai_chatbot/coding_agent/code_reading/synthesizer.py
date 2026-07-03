@@ -15,8 +15,8 @@ from kazusa_ai_chatbot.coding_agent.context_budget import (
 )
 from kazusa_ai_chatbot.coding_agent.code_reading.models import (
     CodeEvidenceRow,
-    PMDecision,
-    ProgrammerReport,
+    ReadingPMDecision,
+    ReadingProgrammerReport,
 )
 from kazusa_ai_chatbot.config import (
     CODING_AGENT_PM_LLM_API_KEY,
@@ -114,8 +114,8 @@ _synthesis_llm_config = LLMCallConfig(
 def synthesize_from_programmer_reports(
     *,
     question: str,
-    pm_decision: PMDecision,
-    programmer_reports: list[ProgrammerReport],
+    pm_decision: ReadingPMDecision,
+    programmer_reports: list[ReadingProgrammerReport],
     evidence: list[CodeEvidenceRow],
     limitations: list[str],
     repository_summary: dict[str, object],
@@ -312,8 +312,8 @@ def _candidate_is_grounded(candidate: str, grounded_text: str) -> bool:
 def _synthesis_payload(
     *,
     question: str,
-    pm_decision: PMDecision,
-    programmer_reports: list[ProgrammerReport],
+    pm_decision: ReadingPMDecision,
+    programmer_reports: list[ReadingProgrammerReport],
     evidence: list[CodeEvidenceRow],
     limitations: list[str],
     repository_summary: dict[str, object],
@@ -339,7 +339,7 @@ def _synthesis_payload(
 
 
 def _compact_reports(
-    reports: list[ProgrammerReport],
+    reports: list[ReadingProgrammerReport],
 ) -> list[dict[str, object]]:
     compact_reports: list[dict[str, object]] = []
     for report in reports[:MAX_SYNTHESIS_REPORTS]:

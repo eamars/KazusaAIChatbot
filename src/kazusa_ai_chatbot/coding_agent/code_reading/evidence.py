@@ -10,7 +10,7 @@ from pathlib import Path, PurePosixPath
 from kazusa_ai_chatbot.coding_agent.code_fetching.models import CodeSourceScope
 from kazusa_ai_chatbot.coding_agent.code_reading.models import (
     CodeEvidenceRow,
-    ProgrammerAssignment,
+    ReadingProgrammerTask,
 )
 from kazusa_ai_chatbot.coding_agent.code_reading.planner import (
     is_binary_like_path,
@@ -159,7 +159,7 @@ def collect_assignment_evidence(
     *,
     repo_root: Path,
     source_scope: CodeSourceScope,
-    assignment: ProgrammerAssignment,
+    assignment: ReadingProgrammerTask,
     max_files: int,
     max_excerpt_chars: int,
 ) -> EvidenceBundle:
@@ -387,7 +387,7 @@ def _walk_files(root: Path) -> list[Path]:
     return files
 
 
-def _bounded_scope_values(assignment: ProgrammerAssignment) -> list[str]:
+def _bounded_scope_values(assignment: ReadingProgrammerTask) -> list[str]:
     values: list[str] = []
     for value in assignment["scope"]["values"]:
         clean_value = value.strip()
@@ -644,7 +644,7 @@ def _focus_line_rank(line: str) -> int:
     return 3
 
 
-def _assignment_focus_terms(assignment: ProgrammerAssignment) -> list[str]:
+def _assignment_focus_terms(assignment: ReadingProgrammerTask) -> list[str]:
     scope = assignment["scope"]
     text_parts = [
         assignment["role"],

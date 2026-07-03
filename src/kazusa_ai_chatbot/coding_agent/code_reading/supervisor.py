@@ -9,11 +9,11 @@ from kazusa_ai_chatbot.coding_agent.code_reading.models import (
     CodeEvidenceRow,
     CodeReadingRequest,
     CodeReadingResult,
-    PMDecision,
-    PMInput,
-    ProgrammerAssignment,
-    ProgrammerReport,
-    ReadingManagerState,
+    ReadingPMDecision,
+    ReadingPMInput,
+    ReadingProgrammerTask,
+    ReadingProgrammerReport,
+    ReadingSupervisorState,
 )
 from kazusa_ai_chatbot.coding_agent.code_reading.planner import (
     rejection_reason,
@@ -115,7 +115,7 @@ def run_reading_supervisor(
     trace_summary = [
         f"reading_pm:repository_map files={repo_map_summary['total_safe_files']}",
     ]
-    state: ReadingManagerState = {
+    state: ReadingSupervisorState = {
         "request": request,
         "repository_summary": repository_summary,
         "source_scope": source_scope,
@@ -256,7 +256,7 @@ def _final_pm_review(
     repository_summary: dict[str, object],
     source_scope: dict[str, object],
     repo_map_summary: dict[str, object],
-    state: ReadingManagerState,
+    state: ReadingSupervisorState,
     trace_summary: list[str],
     trace: dict[str, object] | None,
 ) -> CodeReadingResult | None:
@@ -329,8 +329,8 @@ def _run_programmer_wave(
     *,
     repository: dict[str, object],
     source_scope: dict[str, object],
-    pm_decision: PMDecision,
-    state: ReadingManagerState,
+    pm_decision: ReadingPMDecision,
+    state: ReadingSupervisorState,
     trace: dict[str, object] | None,
 ) -> None:
     assignments = pm_decision["assignments"]
@@ -364,8 +364,8 @@ def _synthesize_result(
     request: CodeReadingRequest,
     question: str,
     repository_summary: dict[str, object],
-    pm_decision: PMDecision,
-    programmer_reports: list[ProgrammerReport],
+    pm_decision: ReadingPMDecision,
+    programmer_reports: list[ReadingProgrammerReport],
     selected_evidence: list[CodeEvidenceRow],
     trace_summary: list[str],
     trace: dict[str, object] | None,
@@ -400,9 +400,9 @@ def _pm_input(
     repository_summary: dict[str, object],
     source_scope: dict[str, object],
     repo_map_summary: dict[str, object],
-    previous_reports: list[ProgrammerReport],
-) -> PMInput:
-    pm_input: PMInput = {
+    previous_reports: list[ReadingProgrammerReport],
+) -> ReadingPMInput:
+    pm_input: ReadingPMInput = {
         "question": question,
         "repository_summary": repository_summary,
         "source_scope": dict(source_scope),
@@ -430,8 +430,8 @@ def _repository_summary(repository: dict[str, object]) -> dict[str, object]:
 
 
 def _overload_result_if_any(
-    pm_decision: PMDecision,
-    existing_reports: list[ProgrammerReport],
+    pm_decision: ReadingPMDecision,
+    existing_reports: list[ReadingProgrammerReport],
     trace_summary: list[str],
 ) -> CodeReadingResult | None:
     assignments = pm_decision["assignments"]
@@ -462,10 +462,10 @@ def _overload_result_if_any(
 
 def _trim_assignments_to_report_budget(
     *,
-    pm_decision: PMDecision,
-    existing_reports: list[ProgrammerReport],
+    pm_decision: ReadingPMDecision,
+    existing_reports: list[ReadingProgrammerReport],
     trace_summary: list[str],
-) -> PMDecision:
+) -> ReadingPMDecision:
     """Apply the supervisor-owned total report cap to PM assignments."""
 
     if pm_decision["status"] != "need_programmers":
@@ -479,7 +479,7 @@ def _trim_assignments_to_report_budget(
     if len(assignments) <= remaining_reports:
         return pm_decision
 
-    trimmed_decision: PMDecision = {
+    trimmed_decision: ReadingPMDecision = {
         "status": pm_decision["status"],
         "intent": pm_decision["intent"],
         "required_slots": pm_decision["required_slots"],
@@ -493,7 +493,7 @@ def _trim_assignments_to_report_budget(
     return trimmed_decision
 
 
-def _missing_slot_text(pm_decision: PMDecision) -> str:
+def _missing_slot_text(pm_decision: ReadingPMDecision) -> str:
     missing_slots = pm_decision["missing_slots"]
     if not missing_slots:
         return "Please narrow or clarify the code-reading question."
@@ -501,14 +501,14 @@ def _missing_slot_text(pm_decision: PMDecision) -> str:
     return text
 
 
-def _missing_slot_limitations(pm_decision: PMDecision) -> list[str]:
+def _missing_slot_limitations(pm_decision: ReadingPMDecision) -> list[str]:
     limitations = list(pm_decision["missing_slots"])
     if not limitations:
         limitations = ["The PM could not identify enough bounded evidence slots."]
     return limitations
 
 
-def _report_limitations(reports: list[ProgrammerReport]) -> list[str]:
+def _report_limitations(reports: list[ReadingProgrammerReport]) -> list[str]:
     limitations: list[str] = []
     for report in reports:
         if report["status"] == "succeeded":

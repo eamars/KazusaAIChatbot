@@ -29,9 +29,9 @@ Internally, `run(...)` is a PM/programmer reading flow:
 CodeReadingRequest
 -> reading supervisor
 -> repository-map summary
--> reading PM consumes PMInput and returns PMDecision
--> bounded ProgrammerAssignment objects
--> programmer workers return ProgrammerReport objects
+-> reading PM consumes ReadingPMInput and returns ReadingPMDecision
+-> bounded ReadingProgrammerTask objects
+-> programmer workers return ReadingProgrammerReport objects
 -> PM sufficiency check
 -> report-based final synthesis
 ```
@@ -42,7 +42,13 @@ one bounded local inspection task and return compact report memory. The final
 answer is synthesized from programmer reports and selected evidence rows, not
 from an unbounded source context or raw search output.
 
-`PMInput` contains:
+Code-facing contract names follow the shared coding-agent role vocabulary:
+`ReadingPMInput`, `ReadingPMDecision`, `ReadingProgrammerTask`, and
+`ReadingProgrammerReport`. The model-facing reading JSON remains the workflow
+ICD; fields such as `assignments` and `assignment_id` are reading-domain
+fields.
+
+`ReadingPMInput` contains:
 
 - `question`
 - `repository_summary`
@@ -50,7 +56,7 @@ from an unbounded source context or raw search output.
 - `repo_map_summary`
 - `previous_reports`
 
-`PMDecision` contains:
+`ReadingPMDecision` contains:
 
 - `status`: `need_programmers`, `sufficient`, `needs_user_input`, or
   `overloaded`
@@ -59,7 +65,7 @@ from an unbounded source context or raw search output.
 - `assignments`
 - `missing_slots`
 
-Each `ProgrammerAssignment` must declare:
+Each `ReadingProgrammerTask` must declare:
 
 - `assignment_id`
 - `role`
@@ -74,7 +80,7 @@ commands, install packages, fetch code, inspect `.env`, inspect `.git`, inspect
 secret-like paths, or inspect binary assets. File, excerpt, report, and wave
 limits are supervisor-owned deterministic policy, not PM-generated fields.
 
-Each `ProgrammerReport` contains:
+Each `ReadingProgrammerReport` contains:
 
 - assignment identity
 - status
