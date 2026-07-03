@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 from kazusa_ai_chatbot.channel_scene_projection import usable_channel_label
 from kazusa_ai_chatbot.chat_input_queue import QueuedChatItem
 from kazusa_ai_chatbot.message_envelope import MessageEnvelope
+from kazusa_ai_chatbot.message_envelope import validate_semantic_storage_fields
 from kazusa_ai_chatbot.state import ReplyContext
 
 from .contracts import ChatRequest
@@ -225,6 +226,11 @@ async def save_user_message_from_item(
     req = item.request
     if message_envelope is None:
         message_envelope = await resolve_message_envelope_identities_func(req)
+    validate_semantic_storage_fields(
+        platform=req.platform,
+        display_name=req.display_name,
+        envelope=message_envelope,
+    )
     attachment_docs = list(message_envelope["attachments"])
     conversation_doc = {
         "platform": req.platform,

@@ -195,8 +195,8 @@ def test_qq_normalizer_rewrites_cq_mentions_as_readable_tokens() -> None:
     assert envelope["addressed_to_global_user_ids"] == [CHARACTER_GLOBAL_USER_ID]
 
 
-def test_qq_normalizer_uses_occurrence_label_without_display_name() -> None:
-    """QQ fallback labels should not leak platform IDs into body text."""
+def test_qq_normalizer_uses_platform_neutral_label_without_display_name() -> None:
+    """QQ fallback labels should not leak platform ids into body text."""
 
     handlers = build_default_attachment_handler_registry()
     request = SimpleNamespace(
@@ -214,11 +214,11 @@ def test_qq_normalizer_uses_occurrence_label_without_display_name() -> None:
         handlers,
     )
 
-    assert envelope["body_text"] == "@mentioned-user-1 hello"
-    assert "673225019" not in envelope["body_text"]
+    assert envelope["body_text"] == "@user hello"
+    assert "@mentioned-user-1" not in envelope["body_text"]
     assert "[CQ:" not in envelope["body_text"]
     assert envelope["mentions"][0]["platform_user_id"] == "673225019"
-    assert envelope["mentions"][0]["display_name"] == ""
+    assert envelope["mentions"][0]["display_name"] == "user"
 
 
 def test_qq_normalizer_drops_image_only_reply_excerpt_cq() -> None:
@@ -271,6 +271,35 @@ def test_qq_normalizer_sanitizes_mixed_reply_excerpt_cq() -> None:
 
     assert envelope["reply"]["excerpt"] == "look nice"
     assert "[CQ:" not in envelope["reply"]["excerpt"]
+
+
+def test_qq_reply_excerpt_mentions_use_same_display_map() -> None:
+    """QQ reply excerpts should not create occurrence-local mention tokens."""
+
+    handlers = build_default_attachment_handler_registry()
+    request = SimpleNamespace(
+        platform="qq",
+        channel_type="group",
+        content="[CQ:reply,id=1733223276]what is this?",
+        platform_bot_id="3768713357",
+        mention_display_names={"673225019": "Other User"},
+        reply_context={
+            "reply_to_message_id": "1733223276",
+            "reply_to_platform_user_id": "673225019",
+            "reply_excerpt": "[CQ:at,qq=673225019] earlier",
+        },
+        attachments=[],
+    )
+
+    envelope = QQEnvelopeNormalizer().normalize(
+        request,
+        PassthroughMentionResolver(),
+        handlers,
+    )
+
+    assert envelope["reply"]["display_name"] == "user"
+    assert envelope["reply"]["excerpt"] == "@Other User earlier"
+    assert "@mentioned-user-1" not in envelope["reply"]["excerpt"]
 
 
 def test_qq_normalizer_projects_known_face_as_inline_image_block() -> None:
@@ -522,6 +551,65 @@ def test_discord_normalizer_rewrites_tags_as_readable_tokens() -> None:
         "channel",
         "everyone",
     }
+
+
+def test_discord_normalizer_uses_platform_neutral_unknown_fallback_tokens() -> None:
+    """Discord fallback labels should keep platform ids out of body text."""
+
+    handlers = build_default_attachment_handler_registry()
+    request = SimpleNamespace(
+        platform="discord",
+        channel_type="group",
+        content="<@12345> <@&777> <#888>",
+        platform_bot_id="99999",
+        user_mention_display_names={},
+        role_mention_display_names={},
+        channel_mention_display_names={},
+        reply_context={},
+        attachments=[],
+    )
+
+    envelope = DiscordEnvelopeNormalizer().normalize(
+        request,
+        PassthroughMentionResolver(),
+        handlers,
+    )
+
+    assert envelope["body_text"] == "@user @role #channel"
+    assert envelope["mentions"][0]["display_name"] == "user"
+    assert envelope["mentions"][1]["display_name"] == "role"
+    assert envelope["mentions"][2]["display_name"] == "channel"
+
+
+def test_discord_reply_excerpt_is_normalized_like_body_text() -> None:
+    """Discord reply excerpts should not store raw native tags."""
+
+    handlers = build_default_attachment_handler_registry()
+    request = SimpleNamespace(
+        platform="discord",
+        channel_type="group",
+        content="replying",
+        platform_bot_id="99999",
+        user_mention_display_names={"12345": "Alex"},
+        role_mention_display_names={"777": "Regulars"},
+        channel_mention_display_names={"888": "general"},
+        reply_context={
+            "reply_to_message_id": "msg-1",
+            "reply_to_platform_user_id": "12345",
+            "reply_excerpt": "<@12345> check <@&777> in <#888> <:sparkle:999>",
+        },
+        attachments=[],
+    )
+
+    envelope = DiscordEnvelopeNormalizer().normalize(
+        request,
+        PassthroughMentionResolver(),
+        handlers,
+    )
+
+    assert envelope["reply"]["excerpt"] == "@Alex check @Regulars in #general"
+    assert "<@12345>" not in envelope["reply"]["excerpt"]
+    assert "<#888>" not in envelope["reply"]["excerpt"]
 
 
 def test_group_message_without_target_is_not_inbound_broadcast() -> None:

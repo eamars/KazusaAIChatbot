@@ -30,11 +30,24 @@ NapCat string messages are treated as canonical wire text. Structured segment
 lists are converted to CQ-compatible wire text before envelope normalization so
 one parser owns mention, reply, face, and image marker projection.
 
+Reply hydration may preserve a replied message excerpt as adapter-internal CQ
+wire evidence until mention display-name hydration has completed. The final
+`MessageEnvelope.reply.excerpt` sent to the brain must be prompt-facing
+semantic text and must not contain CQ markers, occurrence placeholders, or raw
+platform ids.
+
 ## CQ Projection And Face Catalog Contract
 
 CQ mentions become readable mention tokens. CQ replies are removed from body
 text and represented through typed reply metadata. Known QQ face ids become
 `<image>{description}</image>` text through the static catalog.
+
+QQ display labels use the adapter's canonical selection order:
+`nickname -> name -> card -> user`. The `card` group alias is only used when
+profile nickname/name are unavailable. If a mentioned user lookup fails, the
+semantic fallback is platform-neutral, for example `@user`; occurrence
+placeholders such as `@mentioned-user-1` and platform-qualified labels such as
+`@qq-user:<id>` are not valid envelope text.
 
 ## Runtime API Binding Contract
 

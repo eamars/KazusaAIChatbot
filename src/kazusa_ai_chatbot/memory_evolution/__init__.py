@@ -17,6 +17,7 @@ from kazusa_ai_chatbot.memory_evolution.repository import (
     find_active_memory_units,
     insert_memory_unit,
     merge_memory_units,
+    reject_memory_unit,
     supersede_memory_unit,
 )
 from kazusa_ai_chatbot.memory_evolution.reset import reset_memory_from_seed
@@ -34,6 +35,7 @@ __all__ = [
     "find_active_memory_units",
     "insert_memory_unit",
     "merge_memory_units",
+    "reject_memory_unit",
     "reset_memory_from_seed",
     "supersede_memory_unit",
 ]

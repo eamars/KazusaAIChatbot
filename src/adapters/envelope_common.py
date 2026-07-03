@@ -114,11 +114,54 @@ def normalize_numeric_platform_user_id(value: object) -> str:
     return return_value
 
 
+def semantic_entity_fallback_label(
+    *,
+    entity_kind: str,
+    mention_context: bool,
+) -> str:
+    """Return a platform-agnostic fallback label for an unresolved entity.
+
+    Args:
+        entity_kind: Message-envelope mention kind.
+        mention_context: Whether the label will appear as a visible mention
+            token in body text.
+
+    Returns:
+        Prompt-facing semantic fallback text. Platform ids stay in typed
+        metadata and raw replay fields, not in this label.
+    """
+
+    normalized_kind = str(entity_kind or "unknown").strip()
+    if normalized_kind == "bot":
+        base_label = "character"
+        prefix = "@"
+    elif normalized_kind == "user":
+        base_label = "user"
+        prefix = "@"
+    elif normalized_kind == "platform_role":
+        base_label = "role"
+        prefix = "@"
+    elif normalized_kind == "channel":
+        base_label = "channel"
+        prefix = "#"
+    elif normalized_kind == "everyone":
+        base_label = "everyone"
+        prefix = "@"
+    else:
+        base_label = "entity"
+        prefix = "@"
+
+    if mention_context:
+        return_value = f"{prefix}{base_label}"
+    else:
+        return_value = base_label
+    return return_value
+
+
 def readable_mention_token(
     *,
     entity_kind: str,
     display_name: str,
-    occurrence_index: int,
     raw_label: str = "",
 ) -> str:
     """Format a platform-neutral visible mention token for body text.
@@ -126,13 +169,10 @@ def readable_mention_token(
     Args:
         entity_kind: Typed mention kind such as user, bot, role, or channel.
         display_name: Adapter-resolved display label, if one is available.
-        occurrence_index: One-based fallback occurrence index for the entity
-            kind in this message.
         raw_label: Safe authored broadcast label for everyone/here/all tokens.
 
     Returns:
-        A readable mention token that does not expose platform wire syntax or
-        raw platform ids.
+        A readable mention token that does not expose platform wire syntax.
     """
 
     label = normalize_mention_display_label(display_name)
@@ -141,7 +181,10 @@ def readable_mention_token(
         if label:
             return_value = f"#{label}"
         else:
-            return_value = f"#mentioned-channel-{occurrence_index}"
+            return_value = semantic_entity_fallback_label(
+                entity_kind=normalized_kind,
+                mention_context=True,
+            )
         return return_value
 
     if normalized_kind == "everyone":
@@ -149,17 +192,13 @@ def readable_mention_token(
         return_value = f"@{broadcast_label}"
         return return_value
 
-    fallback_by_kind = {
-        "bot": "mentioned-user",
-        "user": "mentioned-user",
-        "platform_role": "mentioned-role",
-        "unknown": "mentioned-entity",
-    }
     if label:
         return_value = f"@{label}"
     else:
-        fallback = fallback_by_kind.get(normalized_kind, "mentioned-entity")
-        return_value = f"@{fallback}-{occurrence_index}"
+        return_value = semantic_entity_fallback_label(
+            entity_kind=normalized_kind,
+            mention_context=True,
+        )
     return return_value
 
 

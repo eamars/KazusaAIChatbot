@@ -15,6 +15,7 @@ from kazusa_ai_chatbot.action_spec.registry import (
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
 )
 from kazusa_ai_chatbot.brain_service import post_turn as post_turn_module
+from kazusa_ai_chatbot.chat_input_queue import QueuedChatItem
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 
@@ -1298,6 +1299,66 @@ async def test_hydrate_reply_context_keeps_adapter_supplied_metadata(
         platform_channel_id="chan-1",
         platform_message_id="platform-123",
     )
+
+
+@pytest.mark.asyncio
+async def test_user_message_storage_rejects_invalid_semantic_fields(
+    monkeypatch,
+) -> None:
+    """Invalid semantic envelope fields should fail before persistence."""
+
+    save_conversation = AsyncMock()
+    monkeypatch.setattr(service_module, "save_conversation", save_conversation)
+    request = _chat_request()
+    request.message_envelope.body_text = "@mentioned-user-1 poisoned"
+    loop = asyncio.get_running_loop()
+    item = QueuedChatItem(
+        sequence=1,
+        request=request,
+        storage_timestamp_utc="2026-07-03T00:00:00+00:00",
+        local_timestamp="2026-07-03 00:00:00",
+        local_time_context=_GRAPH_TURN_CLOCK["local_time_context"],
+        future=loop.create_future(),
+    )
+
+    with pytest.raises(ValueError, match="body_text"):
+        await service_module._save_user_message_from_item(
+            item,
+            global_user_id="global-user-1",
+            reply_context={},
+        )
+
+    save_conversation.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_user_message_storage_rejects_platform_qualified_semantic_label(
+    monkeypatch,
+) -> None:
+    """Platform-qualified adapter fallbacks should fail before persistence."""
+
+    save_conversation = AsyncMock()
+    monkeypatch.setattr(service_module, "save_conversation", save_conversation)
+    request = _chat_request()
+    request.message_envelope.body_text = "@qq-user:673225019 poisoned"
+    loop = asyncio.get_running_loop()
+    item = QueuedChatItem(
+        sequence=1,
+        request=request,
+        storage_timestamp_utc="2026-07-03T00:00:00+00:00",
+        local_timestamp="2026-07-03 00:00:00",
+        local_time_context=_GRAPH_TURN_CLOCK["local_time_context"],
+        future=loop.create_future(),
+    )
+
+    with pytest.raises(ValueError, match="platform-qualified"):
+        await service_module._save_user_message_from_item(
+            item,
+            global_user_id="global-user-1",
+            reply_context={},
+        )
+
+    save_conversation.assert_not_awaited()
 
 
 @pytest.mark.asyncio

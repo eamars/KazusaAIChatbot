@@ -266,6 +266,32 @@ async def test_supersede_memory_unit_rejects_inactive_target(
 
 
 @pytest.mark.asyncio
+async def test_reject_memory_unit_marks_active_target_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Shared-memory rejection should deactivate only active rows."""
+
+    active = _document("unit-1")
+    active["embedding"] = [0.1]
+    collection = _MemoryCollection([active])
+    runtime = _patch_repository(monkeypatch, collection)
+
+    rejected = await repository_module.reject_memory_unit(
+        active_unit_id="unit-1",
+        reason="semantic_identity_pollution",
+        storage_timestamp_utc="2026-07-03T00:00:00+00:00",
+    )
+
+    assert rejected["memory_unit_id"] == "unit-1"
+    assert rejected["status"] == MemoryStatus.REJECTED
+    assert rejected["updated_at"] == "2026-07-03T00:00:00+00:00"
+    assert collection.docs["unit-1"]["status"] == MemoryStatus.REJECTED
+    event = runtime.invalidate.await_args.args[0]
+    assert event.source == "memory"
+    assert event.reason == "semantic_identity_pollution"
+
+
+@pytest.mark.asyncio
 async def test_merge_memory_units_uses_new_lineage_for_different_sources(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

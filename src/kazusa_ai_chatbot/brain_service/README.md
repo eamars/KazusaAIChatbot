@@ -307,12 +307,16 @@ Adapter responsibilities:
 - Send a valid typed `message_envelope`.
 - Represent visible platform mentions in `message_envelope.body_text` as
   readable platform-neutral tokens such as `@display name`,
-  `#channel-name`, `@everyone`, or occurrence fallbacks such as
-  `@mentioned-user-1`.
+  `#channel-name`, `@everyone`, or platform-neutral fallbacks such as
+  `@user`, `@role`, `#channel`, or `@entity`.
 - Keep native platform mention syntax, such as CQ at codes and Discord
   mention tags, only in `message_envelope.raw_wire_text`.
-- Keep raw platform ids out of `message_envelope.body_text`; typed mention
-  identity belongs in `message_envelope.mentions`.
+- Do not emit legacy occurrence placeholders such as `@mentioned-user-1` in
+  semantic fields. Brain-service intake validates semantic storage fields and
+  rejects rows containing transport markers, occurrence placeholders, or
+  platform-qualified fallback labels before persistence.
+- Keep raw platform ids out of `message_envelope.body_text`. Typed mention
+  identity belongs in `message_envelope.mentions` and reply metadata.
 - Preserve the inbound platform message id when available.
 - Treat an empty `messages` list as no outbound send.
 - Send non-empty `messages` in order as separate normal chat messages.

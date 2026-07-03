@@ -80,6 +80,12 @@ the normal runtime API.
 Maintenance scripts use `kazusa_ai_chatbot.db.script_operations` for those
 operator-only operations.
 
+Semantic identity audits and repairs are maintenance-only operations. Scripts
+under `src/scripts` use `script_operations` helpers to count, list, back up,
+repair, archive, or reject records whose persisted semantic fields contain
+transport syntax or legacy occurrence placeholders. Runtime code must not
+perform ad hoc raw-collection scans for those repairs.
+
 ### Database Package Internals
 
 The database package owns:

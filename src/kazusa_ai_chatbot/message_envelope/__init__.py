@@ -41,6 +41,9 @@ from kazusa_ai_chatbot.message_envelope.prompt_projection import (
 from kazusa_ai_chatbot.message_envelope.resolvers import (
     PassthroughMentionResolver,
 )
+from kazusa_ai_chatbot.message_envelope.semantic_validation import (
+    validate_semantic_storage_fields,
+)
 from kazusa_ai_chatbot.message_envelope.types import (
     AttachmentRef,
     ConversationAuthorRole,
@@ -87,4 +90,5 @@ __all__ = [
     "build_default_attachment_handler_registry",
     "project_prompt_message_context",
     "project_reply_attachment_summaries",
+    "validate_semantic_storage_fields",
 ]

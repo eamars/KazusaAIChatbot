@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from kazusa_ai_chatbot.db import script_operations
 from kazusa_ai_chatbot.db import user_memory_units
 
 
@@ -96,3 +97,35 @@ async def test_lifecycle_update_allows_deferred_active_audit(monkeypatch):
     assert fake_db.user_memory_units.update["$push"]["merge_history"][
         "status"
     ] == "active"
+
+
+@pytest.mark.asyncio
+async def test_semantic_identity_archive_helper_targets_any_active_unit(
+    monkeypatch,
+) -> None:
+    """Maintenance archiving should not use the active-commitment helper."""
+
+    fake_db = _FakeDb()
+
+    async def _fake_get_db():
+        return fake_db
+
+    monkeypatch.setattr(script_operations, "get_db", _fake_get_db)
+
+    result = await script_operations.archive_user_memory_unit_for_semantic_identity_repair(
+        unit_id="memory-unit-001",
+        reason="semantic_identity_pollution",
+        storage_timestamp_utc="2026-07-03T00:00:00+00:00",
+    )
+
+    assert fake_db.user_memory_units.filter == {
+        "unit_id": "memory-unit-001",
+        "status": "active",
+    }
+    assert fake_db.user_memory_units.update["$set"]["status"] == "archived"
+    assert fake_db.user_memory_units.update["$set"]["archived_at"] == (
+        "2026-07-03T00:00:00+00:00"
+    )
+    history = fake_db.user_memory_units.update["$push"]["merge_history"]
+    assert history["operation"] == "semantic_identity_repair_archive"
+    assert result["matched_count"] == 1
