@@ -125,6 +125,44 @@ def build_self_cognition_consolidation_origin(
     return metadata
 
 
+def build_reflection_consolidation_origin(
+    *,
+    episode: CognitiveEpisode,
+) -> ConsolidationOriginMetadata:
+    """Project reflection-signal episode identifiers into consolidation state.
+
+    Args:
+        episode: Source-neutral cognitive episode for a reflection dry run.
+
+    Returns:
+        Identifier-only origin metadata for reflection-source admission.
+
+    Raises:
+        CognitiveEpisodeValidationError: If the episode is structurally
+            invalid.
+        ConsolidationOriginError: If the episode is not a supported reflection
+            signal.
+    """
+    validate_cognitive_episode(episode)
+
+    if episode["trigger_source"] != "reflection_signal":
+        raise ConsolidationOriginError(
+            "consolidation origin requires trigger_source=reflection_signal"
+        )
+    input_source_profile = tuple(episode["input_sources"])
+    if input_source_profile != ("reflection_artifact",):
+        raise ConsolidationOriginError(
+            "consolidation origin requires input_sources=reflection_artifact"
+        )
+    if episode["output_mode"] not in {"think_only", "preview", "silent"}:
+        raise ConsolidationOriginError(
+            "consolidation origin requires a reflection-compatible output_mode"
+        )
+
+    metadata = _project_consolidation_origin_metadata(episode)
+    return metadata
+
+
 def project_consolidation_origin_prompt_block(
     origin: ConsolidationOriginMetadata,
 ) -> ConsolidationOriginPromptBlock:

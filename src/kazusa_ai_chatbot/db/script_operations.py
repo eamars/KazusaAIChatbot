@@ -440,6 +440,147 @@ async def export_collection_rows(
     return records
 
 
+async def load_lane_cleanup_rows(
+    *,
+    collection_name: str,
+    filter_doc: Mapping[str, Any],
+    projection: Mapping[str, Any],
+    sort_doc: Sequence[tuple[str, int]],
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """Load maintenance-cleanup rows through the DB-owned boundary.
+
+    Args:
+        collection_name: Approved collection name for a lane cleanup script.
+        filter_doc: MongoDB filter owned by the maintenance command.
+        projection: Fields to include or exclude from the export.
+        sort_doc: Stable sort fields for deterministic reports.
+        limit: Optional maximum number of rows. ``None`` loads all matches.
+
+    Returns:
+        Matching documents as dictionaries.
+    """
+
+    db = await get_db()
+    cursor = db[collection_name].find(dict(filter_doc), dict(projection))
+    if sort_doc:
+        cursor = cursor.sort(list(sort_doc))
+    if limit is not None:
+        cursor = cursor.limit(limit)
+    rows = [dict(doc) for doc in await cursor.to_list(length=limit)]
+    return rows
+
+
+async def count_lane_cleanup_rows(
+    *,
+    collection_name: str,
+    filter_doc: Mapping[str, Any],
+) -> int:
+    """Count maintenance-cleanup rows through the DB-owned boundary."""
+
+    db = await get_db()
+    row_count = await db[collection_name].count_documents(dict(filter_doc))
+    return row_count
+
+
+async def count_lane_cleanup_field_values(
+    *,
+    collection_name: str,
+    field_name: str,
+) -> dict[str, int]:
+    """Count maintenance-cleanup rows grouped by one scalar string field."""
+
+    db = await get_db()
+    pipeline = [
+        {"$match": {
+            field_name: {
+                "$exists": True,
+                "$type": "string",
+                "$ne": "",
+            }
+        }},
+        {"$group": {"_id": f"${field_name}", "count": {"$sum": 1}}},
+    ]
+    cursor = db[collection_name].aggregate(pipeline)
+    grouped_counts = {
+        str(row["_id"]): int(row["count"])
+        for row in await cursor.to_list(length=None)
+    }
+    return grouped_counts
+
+
+async def find_lane_cleanup_row(
+    *,
+    collection_name: str,
+    filter_doc: Mapping[str, Any],
+    projection: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Find one maintenance-cleanup row for drift validation."""
+
+    db = await get_db()
+    row = await db[collection_name].find_one(
+        dict(filter_doc),
+        dict(projection),
+    )
+    if row is None:
+        return_value = None
+        return return_value
+    return_value = dict(row)
+    return return_value
+
+
+async def update_lane_cleanup_row(
+    *,
+    collection_name: str,
+    filter_doc: Mapping[str, Any],
+    set_fields: Mapping[str, Any],
+    unset_fields: Sequence[str] = (),
+    push_fields: Mapping[str, Any] | None = None,
+) -> dict[str, int]:
+    """Apply one exact maintenance-cleanup row update.
+
+    Args:
+        collection_name: Approved collection name for a lane cleanup script.
+        filter_doc: Exact row selector after drift validation.
+        set_fields: Fields to set.
+        unset_fields: Optional field names to unset.
+        push_fields: Optional fields to append with ``$push``.
+
+    Returns:
+        Matched and modified counts.
+    """
+
+    update_doc: dict[str, Any] = {"$set": dict(set_fields)}
+    if unset_fields:
+        update_doc["$unset"] = {field_name: "" for field_name in unset_fields}
+    if push_fields:
+        update_doc["$push"] = dict(push_fields)
+
+    db = await get_db()
+    update_result = await db[collection_name].update_one(
+        dict(filter_doc),
+        update_doc,
+    )
+    result = {
+        "matched_count": int(update_result.matched_count),
+        "modified_count": int(update_result.modified_count),
+    }
+    return result
+
+
+async def delete_lane_cleanup_row(
+    *,
+    collection_name: str,
+    filter_doc: Mapping[str, Any],
+) -> dict[str, int]:
+    """Delete one exact maintenance-cleanup row after drift validation."""
+
+    db = await get_db()
+    delete_result = await db[collection_name].delete_one(dict(filter_doc))
+    result = {"deleted_count": int(delete_result.deleted_count)}
+    return result
+
+
 async def export_event_log_events_for_trace_id(
     trace_id: str,
     *,

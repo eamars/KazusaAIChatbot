@@ -483,6 +483,7 @@ async def update_user_memory_unit_semantics(
     storage_timestamp_utc: str | None = None,
     lifecycle_fields: dict | None = None,
     merge_history_entry: dict | None = None,
+    source_refs: list[dict] | None = None,
     increment_count: bool = True,
 ) -> None:
     """Update semantic fields and lifecycle metadata for an existing unit.
@@ -494,6 +495,8 @@ async def update_user_memory_unit_semantics(
         lifecycle_fields: Optional structural lifecycle fields to preserve
             from the extractor, such as due_at.
         merge_history_entry: Optional merge/evolve audit row.
+        source_refs: Optional source refs from the new candidate/evidence to
+            append to the durable unit.
         increment_count: Whether to increment reinforcement count.
     """
 
@@ -522,6 +525,16 @@ async def update_user_memory_unit_semantics(
         update_doc["$inc"] = {"count": 1}
     if merge_history_entry:
         update_doc["$push"] = {"merge_history": merge_history_entry}
+    append_source_refs = [
+        dict(source_ref)
+        for source_ref in source_refs or []
+        if isinstance(source_ref, dict) and source_ref
+    ]
+    if append_source_refs:
+        update_doc.setdefault("$push", {})
+        update_doc["$push"]["source_refs"] = {
+            "$each": append_source_refs,
+        }
 
     db = await get_db()
     await db.user_memory_units.update_one({"unit_id": unit_id}, update_doc)

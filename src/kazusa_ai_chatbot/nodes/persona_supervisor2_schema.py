@@ -144,7 +144,7 @@ class GlobalPersonaState(TypedDict):
     affinity_delta: int
     last_relationship_insight: str
 
-    # Facts harvester
+    # Consolidation memory rows
     new_facts: [str]
     future_promises: [str]
 

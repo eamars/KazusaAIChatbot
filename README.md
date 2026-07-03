@@ -312,7 +312,7 @@ flowchart TD
         REF["reflection_cycle worker<br/>hourly slot, daily channel, global promotion, affect settling"]
         ME["memory_evolution<br/>shared memory insert, supersede, merge, seed reset"]
         GG["global_character_growth<br/>promoted trait drift"]
-        CONS["consolidation<br/>target plan -> extraction -> write-intent validation -> persistence"]
+        CONS["consolidation<br/>target plan -> source views -> lane router -> lane review -> write-intent validation -> persistence"]
         DISP["dispatcher [deterministic]<br/>registered adapter callback delivery for trusted sends"]
         PRO["proactive_output<br/>permissioned preview/outbox contract, no production send path"]
         CAL --> SC
@@ -608,7 +608,7 @@ cognition, and calendar scheduling remain in the platform-neutral core.
 | Action spec              | L2d action residues, capability registry, evaluator, results, surfaces, and traces      | [Action Spec](src/kazusa_ai_chatbot/action_spec/README.md)                            |
 | Accepted task            | User-facing lifecycle for delayed work accepted by the character                        | [Accepted Task ICD](src/kazusa_ai_chatbot/accepted_task/README.md)                    |
 | Background work          | Internal delayed-work executor, worker routing, and result handoff                      | [Background Work ICD](src/kazusa_ai_chatbot/background_work/README.md)                |
-| Consolidation            | Durable target routing, write-intent validation, and target-specific persistence        | [Consolidation ICD](src/kazusa_ai_chatbot/consolidation/README.md)                    |
+| Consolidation            | Durable target planning, lane routing/review, write-intent validation, and target-specific persistence | [Consolidation ICD](src/kazusa_ai_chatbot/consolidation/README.md)                    |
 | Database                 | MongoDB collection ownership, embeddings, indexes, public persistence helpers           | [Database ICD](src/kazusa_ai_chatbot/db/README.md)                                     |
 | Event logging            | Sanitized operational telemetry, status snapshots, statistics, and export contracts     | [Event Logging ICD](src/kazusa_ai_chatbot/event_logging/README.md)                     |
 | Calendar scheduler       | Durable typed trigger timing for future cognition, commitment due checks, and reflection phase slots | [Calendar Scheduler ICD](src/kazusa_ai_chatbot/calendar_scheduler/README.md) |
@@ -693,7 +693,7 @@ src/
     action_spec/               Modality-neutral action contracts, registry, results
     accepted_task/             User-facing accepted delayed-work lifecycle
     background_work/           Internal delayed-work executor and workers
-    consolidation/             Durable consolidation helpers, target routing, and ICD
+    consolidation/             Durable consolidation helpers, lane routing, and ICD
     rag/                       RAG 2 helper agents, hybrid retrieval, Cache2
     conversation_progress/     Short-term episode memory
     internal_monologue_residue/ Short-lived private residue lane for L2a

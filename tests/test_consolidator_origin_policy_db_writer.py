@@ -61,7 +61,11 @@ def _origin(
     return origin
 
 
-def _state(*, origin: ConsolidationOriginMetadata | None = None) -> dict[str, Any]:
+def _state(
+    *,
+    origin: ConsolidationOriginMetadata | None = None,
+    enabled_lanes: list[str] | None = None,
+) -> dict[str, Any]:
     """Build a db_writer state that would exercise every write path.
 
     Args:
@@ -113,8 +117,21 @@ def _state(*, origin: ConsolidationOriginMetadata | None = None) -> dict[str, An
         "action_directives": {"linguistic_directives": {"content_plan": {}}},
         "consolidation_origin": origin,
     }
+    if enabled_lanes is not None:
+        state["enabled_consolidation_write_lanes"] = enabled_lanes
     state["consolidation_target_plan"] = build_consolidation_target_plan(state)
     return state
+
+
+def _all_private_lanes() -> list[str]:
+    """Return accepted private-chat lanes used by direct writer tests."""
+
+    return [
+        "character_state",
+        "relationship_profile",
+        "user_memory_units",
+        "active_commitment",
+    ]
 
 
 def _patch_allowed_write_dependencies(
@@ -387,14 +404,16 @@ async def test_db_writer_denied_origin_skips_all_durable_write_effects(
 async def test_db_writer_user_message_origin_preserves_character_and_user_writes(
     monkeypatch,
 ) -> None:
-    """Allowed user-message origins still run existing durable write paths."""
+    """Router-accepted user-message lanes run durable write paths."""
     mocks = _patch_allowed_write_dependencies(
         monkeypatch,
         memory_results=[{"kind": "fact", "id": "memory-1"}],
         character_image={"recent_window": []},
     )
 
-    result = await persistence_module.db_writer(_state())
+    result = await persistence_module.db_writer(
+        _state(enabled_lanes=_all_private_lanes())
+    )
 
     mocks["upsert_character_state"].assert_awaited_once()
     mocks["update_last_relationship_insight"].assert_awaited_once_with(
@@ -414,6 +433,36 @@ async def test_db_writer_user_message_origin_preserves_character_and_user_writes
         "affinity": True,
         "group_channel_style_image": False,
         "character_image": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_db_writer_without_router_lanes_fails_closed(
+    monkeypatch,
+) -> None:
+    """Direct writer calls must not bypass lane-router acceptance."""
+
+    mocks = _patch_allowed_write_dependencies(
+        monkeypatch,
+        memory_results=[{"kind": "fact", "id": "memory-1"}],
+        character_image={"recent_window": []},
+    )
+
+    result = await persistence_module.db_writer(_state())
+
+    mocks["upsert_character_state"].assert_not_awaited()
+    mocks["update_last_relationship_insight"].assert_not_awaited()
+    mocks["update_user_memory_units_from_state"].assert_not_awaited()
+    mocks["update_affinity"].assert_not_awaited()
+    mocks["update_character_image"].assert_not_awaited()
+    mocks["upsert_character_self_image"].assert_not_awaited()
+    assert result["metadata"]["write_success"] == {
+        "character_state": False,
+        "relationship_insight": False,
+        "user_memory_units": False,
+        "affinity": False,
+        "group_channel_style_image": False,
+        "character_image": False,
     }
 
 
@@ -448,6 +497,8 @@ async def test_db_writer_group_review_persists_group_channel_style_image(
     }
     state["consolidation_target_plan"] = build_consolidation_target_plan(state)
 
+    state["enabled_consolidation_write_lanes"] = ["interaction_style_image"]
+
     result = await persistence_module.db_writer(state)
 
     mocks["persist_group_channel_style_image"].assert_awaited_once_with(
@@ -473,7 +524,9 @@ async def test_db_writer_user_message_origin_does_not_emit_dispatch_metadata(
     """Allowed user-message origins no longer schedule user-visible text."""
     mocks = _patch_allowed_write_dependencies(monkeypatch)
 
-    result = await persistence_module.db_writer(_state())
+    result = await persistence_module.db_writer(
+        _state(enabled_lanes=["user_memory_units", "active_commitment"])
+    )
 
     assert "scheduled_event_ids" not in result["metadata"]
     assert all("dispatch" not in key for key in result["metadata"])
@@ -491,7 +544,9 @@ async def test_db_writer_user_message_origin_preserves_cache_invalidation(
         character_image={"recent_window": []},
     )
 
-    result = await persistence_module.db_writer(_state())
+    result = await persistence_module.db_writer(
+        _state(enabled_lanes=_all_private_lanes())
+    )
 
     sources = [
         call.args[0].source
@@ -535,6 +590,7 @@ async def test_db_writer_internal_thought_uses_db_current_self_image(
     )
     state["platform_channel_id"] = "private-1"
     state["channel_type"] = "private"
+    state["enabled_consolidation_write_lanes"] = ["character_state"]
     state["consolidation_target_plan"] = build_consolidation_target_plan(state)
 
     result = await persistence_module.db_writer(state)
@@ -583,6 +639,7 @@ async def test_db_writer_runtime_state_failure_fails_character_image_closed(
     )
     state["platform_channel_id"] = "private-1"
     state["channel_type"] = "private"
+    state["enabled_consolidation_write_lanes"] = ["character_state"]
     state["consolidation_target_plan"] = build_consolidation_target_plan(state)
 
     result = await persistence_module.db_writer(state)
@@ -611,6 +668,7 @@ async def test_db_writer_empty_reflection_skips_self_image_db_read(
     )
     state["platform_channel_id"] = "private-1"
     state["channel_type"] = "private"
+    state["enabled_consolidation_write_lanes"] = ["character_state"]
     state["consolidation_target_plan"] = build_consolidation_target_plan(state)
     state["reflection_summary"] = ""
 

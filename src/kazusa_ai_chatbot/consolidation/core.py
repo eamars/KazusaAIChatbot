@@ -4,34 +4,24 @@ from __future__ import annotations
 
 import logging
 
-from langgraph.graph import END, START, StateGraph
-
 from kazusa_ai_chatbot.action_spec.results import (
     project_episode_trace_for_consolidation,
 )
-from kazusa_ai_chatbot.consolidation.target import (
-    build_consolidation_target_plan,
-)
-from kazusa_ai_chatbot.consolidation.facts import (
-    fact_harvester_evaluator,
-    facts_harvester,
+from kazusa_ai_chatbot.consolidation.lane_router import (
+    run_consolidation_lane_pipeline,
 )
 from kazusa_ai_chatbot.consolidation.origin import (
     ConsolidationOriginError,
+    build_reflection_consolidation_origin,
     build_self_cognition_consolidation_origin,
     build_user_message_consolidation_origin,
-)
-from kazusa_ai_chatbot.consolidation.persistence import (
-    _normalize_future_promises,
-    db_writer,
-)
-from kazusa_ai_chatbot.consolidation.reflection import (
-    global_state_updater,
-    relationship_recorder,
 )
 from kazusa_ai_chatbot.consolidation.schema import (
     ConsolidatorState,
     normalize_subjective_appraisals,
+)
+from kazusa_ai_chatbot.consolidation.target import (
+    build_consolidation_target_plan,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import (
     GlobalPersonaState,
@@ -43,13 +33,6 @@ from kazusa_ai_chatbot.utils import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-async def _consolidator_noop(_: ConsolidatorState) -> dict:
-    """Return an empty state patch for graph synchronization barriers."""
-
-    return_value: dict = {}
-    return return_value
 
 
 def _build_consolidation_origin(
@@ -74,6 +57,8 @@ def _build_consolidation_origin(
         origin = build_user_message_consolidation_origin(episode=episode)
     elif trigger_source == "internal_thought":
         origin = build_self_cognition_consolidation_origin(episode=episode)
+    elif trigger_source == "reflection_signal":
+        origin = build_reflection_consolidation_origin(episode=episode)
     else:
         raise ConsolidationOriginError(
             f"consolidation origin does not support trigger_source={trigger_source}"
@@ -103,8 +88,7 @@ def _build_existing_dedup_keys(global_state: GlobalPersonaState) -> set[str]:
         global_state: Top-level persona-supervisor state.
 
     Returns:
-        Stable lower-cased dedup keys for known facts, milestones, and
-        commitments.
+        Stable lower-cased dedup keys for known memory rows.
     """
 
     rag_result = global_state["rag_result"]
@@ -122,7 +106,7 @@ def _build_existing_dedup_keys(global_state: GlobalPersonaState) -> set[str]:
 
 
 async def call_consolidation_subgraph(global_state: GlobalPersonaState):
-    """Run post-dialog consolidation with deterministic target validation.
+    """Run post-dialog consolidation through the lane-router pipeline.
 
     Args:
         global_state: Completed persona state after selected surfaces and
@@ -140,58 +124,73 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
     consolidation_target_plan = build_consolidation_target_plan(
         target_plan_state,
     )
-
-    sub_agent_builder = StateGraph(ConsolidatorState)
-    reflection_barrier = "reflection_done"
-    facts_barrier = "facts_done"
-
-    sub_agent_builder.add_node("global_state_updater", global_state_updater)
-    sub_agent_builder.add_node("relationship_recorder", relationship_recorder)
-    sub_agent_builder.add_node("facts_harvester", facts_harvester)
-    sub_agent_builder.add_node(
-        "fact_harvester_evaluator",
-        fact_harvester_evaluator,
+    sub_state = _build_consolidator_state(
+        global_state,
+        consolidation_origin=consolidation_origin,
+        consolidation_target_plan=consolidation_target_plan,
     )
-    sub_agent_builder.add_node(reflection_barrier, _consolidator_noop)
-    sub_agent_builder.add_node(facts_barrier, _consolidator_noop)
-    sub_agent_builder.add_node("db_writer", db_writer)
 
-    sub_agent_builder.add_edge(START, "global_state_updater")
-    sub_agent_builder.add_edge(START, "relationship_recorder")
-    sub_agent_builder.add_edge(START, "facts_harvester")
+    packet = await run_consolidation_lane_pipeline(sub_state)
+    result = packet["state"]
 
-    sub_agent_builder.add_edge(
-        ["global_state_updater", "relationship_recorder"],
-        reflection_barrier,
+    mood = result.get("mood", "")
+    global_vibe = result.get("global_vibe", "")
+    reflection_summary = result.get("reflection_summary", "")
+    subjective_appraisals = normalize_subjective_appraisals(
+        result.get("subjective_appraisals")
     )
-    sub_agent_builder.add_conditional_edges(
-        "facts_harvester",
-        lambda state: (
-            "skip_eval"
-            if not state["new_facts"] and not state["future_promises"]
-            else "evaluate"
-        ),
-        {
-            "skip_eval": facts_barrier,
-            "evaluate": "fact_harvester_evaluator",
-        },
-    )
-    sub_agent_builder.add_conditional_edges(
-        "fact_harvester_evaluator",
-        lambda state: "loop" if not state["should_stop"] else "end",
-        {
-            "loop": "facts_harvester",
-            "end": facts_barrier,
-        },
-    )
-    sub_agent_builder.add_edge([reflection_barrier, facts_barrier], "db_writer")
+    affinity_delta = result.get("affinity_delta", 0)
+    last_relationship_insight = result.get("last_relationship_insight", "")
+    new_facts = result.get("new_facts", [])
+    future_promises = result.get("future_promises", [])
+    metadata = result.get("metadata", {}) or {}
 
-    sub_agent_builder.add_edge("db_writer", END)
+    logger.info(
+        f"Consolidation output: lanes={log_list_preview(packet['router_tasks'])} "
+        f"memory_rows={log_list_preview(new_facts)} "
+        f"commitments={log_list_preview(future_promises)} "
+        f"mood={log_preview(mood)} vibe={log_preview(global_vibe)} "
+        f"reflection={log_preview(reflection_summary)} "
+        f"affinity_delta={affinity_delta}"
+    )
 
-    sub_graph = sub_agent_builder.compile()
+    logger.debug(
+        f"Consolidation metadata: "
+        f"writes={log_dict_subset(metadata, ['write_success'])} "
+        f"cache_invalidated={metadata.get('cache_invalidated', [])} "
+        f"metadata={log_dict_subset(
+            metadata,
+            [
+                'lane_pipeline',
+                'affinity_before',
+                'affinity_delta_processed',
+            ],
+        )}"
+    )
+
+    return_value = {
+        "mood": mood,
+        "global_vibe": global_vibe,
+        "reflection_summary": reflection_summary,
+        "subjective_appraisals": subjective_appraisals,
+        "affinity_delta": affinity_delta,
+        "last_relationship_insight": last_relationship_insight,
+        "new_facts": new_facts,
+        "future_promises": future_promises,
+        "consolidation_metadata": metadata,
+    }
+    return return_value
+
+
+def _build_consolidator_state(
+    global_state: GlobalPersonaState,
+    *,
+    consolidation_origin: dict,
+    consolidation_target_plan: dict,
+) -> ConsolidatorState:
+    """Build the internal state consumed by the lane pipeline."""
 
     chat_history_recent = global_state.get("chat_history_recent", [])
-
     sub_state: ConsolidatorState = {
         "storage_timestamp_utc": global_state["storage_timestamp_utc"],
         "local_time_context": global_state["local_time_context"],
@@ -221,59 +220,13 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
         "metadata": {},
         "consolidation_origin": consolidation_origin,
         "consolidation_target_plan": consolidation_target_plan,
+        "mood": "",
+        "global_vibe": "",
+        "reflection_summary": "",
+        "subjective_appraisals": [],
+        "affinity_delta": 0,
+        "last_relationship_insight": "",
+        "new_facts": [],
+        "future_promises": [],
     }  # pyright: ignore[reportAssignmentType]
-
-    result = await sub_graph.ainvoke(sub_state)
-
-    mood = result.get("mood", "")
-    global_vibe = result.get("global_vibe", "")
-    reflection_summary = result.get("reflection_summary", "")
-    subjective_appraisals = normalize_subjective_appraisals(
-        result.get("subjective_appraisals")
-    )
-    affinity_delta = result.get("affinity_delta", 0)
-    last_relationship_insight = result.get("last_relationship_insight", "")
-    new_facts = result.get("new_facts", [])
-    future_promises = _normalize_future_promises(
-        result.get("future_promises", []),
-        storage_timestamp_utc=result.get(
-            "storage_timestamp_utc",
-            global_state["storage_timestamp_utc"],
-        ),
-    )
-    metadata = result.get("metadata", {}) or {}
-
-    logger.info(
-        f"Consolidation output: facts={log_list_preview(new_facts)} "
-        f"promises={log_list_preview(future_promises)} "
-        f"mood={log_preview(mood)} vibe={log_preview(global_vibe)} "
-        f"reflection={log_preview(reflection_summary)} "
-        f"affinity_delta={affinity_delta}"
-    )
-
-    logger.debug(
-        f"Consolidation metadata: "
-        f"writes={log_dict_subset(metadata, ['write_success'])} "
-        f"cache_invalidated={metadata.get('cache_invalidated', [])} "
-        f"metadata={log_dict_subset(
-            metadata,
-            [
-                'contradiction_flags',
-                'affinity_before',
-                'affinity_delta_processed',
-            ],
-        )}"
-    )
-
-    return_value = {
-        "mood": mood,
-        "global_vibe": global_vibe,
-        "reflection_summary": reflection_summary,
-        "subjective_appraisals": subjective_appraisals,
-        "affinity_delta": affinity_delta,
-        "last_relationship_insight": last_relationship_insight,
-        "new_facts": new_facts,
-        "future_promises": future_promises,
-        "consolidation_metadata": metadata,
-    }
-    return return_value
+    return sub_state

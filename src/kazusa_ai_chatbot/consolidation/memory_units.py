@@ -126,11 +126,21 @@ def _rag_surfaced_memory_units(state: ConsolidatorState) -> list[dict]:
     return valid_units
 
 
-def _candidate_with_id(candidate: dict) -> dict:
+def _candidate_with_id(
+    candidate: dict,
+    default_source_refs: list[dict] | None = None,
+) -> dict:
     item = dict(candidate)
     item["candidate_id"] = text_or_empty(item.get("candidate_id")) or uuid4().hex
     if not isinstance(item.get("evidence_refs"), list):
         item["evidence_refs"] = []
+    if not isinstance(item.get("source_refs"), list) or not item["source_refs"]:
+        if item["evidence_refs"]:
+            item["source_refs"] = list(item["evidence_refs"])
+        elif default_source_refs:
+            item["source_refs"] = list(default_source_refs)
+        else:
+            item["source_refs"] = []
     return item
 
 
@@ -179,6 +189,23 @@ def _candidate_lifecycle_updates(candidate: dict) -> dict:
     return updates
 
 
+def _candidate_source_refs(candidate: dict) -> list[dict]:
+    """Return structurally valid source refs from one candidate."""
+
+    raw_refs = candidate.get("source_refs")
+    if not isinstance(raw_refs, list):
+        raw_refs = candidate.get("evidence_refs")
+    if not isinstance(raw_refs, list):
+        return_value: list[dict] = []
+        return return_value
+    return_value = [
+        dict(source_ref)
+        for source_ref in raw_refs
+        if isinstance(source_ref, dict) and source_ref
+    ]
+    return return_value
+
+
 def _candidate_validation_errors(candidate: dict) -> list[str]:
     """Return structural errors for an extractor-authored memory unit.
 
@@ -198,14 +225,17 @@ def _candidate_validation_errors(candidate: dict) -> list[str]:
         if not text_or_empty(candidate.get(field)):
             errors.append(f"missing field: {field}")
 
-    evidence_refs = candidate.get("evidence_refs")
-    if not isinstance(evidence_refs, list):
-        errors.append("evidence_refs must be a list")
+    source_refs = candidate.get("source_refs")
+    if not isinstance(source_refs, list) or not source_refs:
+        errors.append("source_refs must be a non-empty list")
 
     return errors
 
 
-def _validated_candidates(result: dict) -> tuple[list[dict], list[dict]]:
+def _validated_candidates(
+    result: dict,
+    default_source_refs: list[dict] | None = None,
+) -> tuple[list[dict], list[dict]]:
     """Split extractor output into usable candidates and validation errors.
 
     Args:
@@ -234,7 +264,10 @@ def _validated_candidates(result: dict) -> tuple[list[dict], list[dict]]:
             })
             continue
 
-        candidate = _candidate_with_id(raw_candidate)
+        candidate = _candidate_with_id(
+            raw_candidate,
+            default_source_refs=default_source_refs,
+        )
         candidate, lifecycle_errors = _normalize_candidate_lifecycle_fields(
             candidate
         )
@@ -253,8 +286,14 @@ def _validated_candidates(result: dict) -> tuple[list[dict], list[dict]]:
     return return_value
 
 
-def _valid_candidates(result: dict) -> list[dict]:
-    candidates, validation_errors = _validated_candidates(result)
+def _valid_candidates(
+    result: dict,
+    default_source_refs: list[dict] | None = None,
+) -> list[dict]:
+    candidates, validation_errors = _validated_candidates(
+        result,
+        default_source_refs=default_source_refs,
+    )
     if validation_errors:
         logger.warning(f"memory-unit extractor dropped invalid candidates: {validation_errors}")
     return candidates
@@ -609,7 +648,7 @@ human payload 是以下 JSON：
         "milestones": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "可选本地 YYYY-MM-DD HH:MM"}}],
         "active_commitments": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "可选本地 YYYY-MM-DD HH:MM"}}]
     }},
-    "new_facts_evidence": [{{"fact": "fact harvester output"}}],
+    "new_facts_evidence": [{{"fact": "lane specialist output"}}],
     "future_promises_evidence": [{{"action": "future promise or scheduled action", "due_time": "可选本地 YYYY-MM-DD HH:MM"}}],
     "subjective_appraisal_evidence": ["relationship/appraisal evidence text"]
 }}
@@ -677,7 +716,13 @@ async def extract_memory_unit_candidates(state: ConsolidatorState) -> list[dict]
         human_message,
     ], config=_extractor_llm_config)
     result = parse_llm_json_output(response.content)
-    candidates = _valid_candidates(result)
+    default_source_refs = state.get("user_memory_unit_source_refs")
+    if not isinstance(default_source_refs, list):
+        default_source_refs = []
+    candidates = _valid_candidates(
+        result,
+        default_source_refs=default_source_refs,
+    )
     return candidates
 
 
@@ -1087,6 +1132,7 @@ async def process_memory_unit_candidate(state: ConsolidatorState, candidate: dic
             rewrite_result,
             storage_timestamp_utc=storage_timestamp_utc,
             lifecycle_fields=lifecycle_fields,
+            source_refs=_candidate_source_refs(candidate),
             merge_history_entry={
                 "timestamp": storage_timestamp_utc,
                 "decision": merge_result["decision"],

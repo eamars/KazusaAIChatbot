@@ -15,6 +15,8 @@ WriteLane = Literal[
     "group_channel_style_image",
     "character_state",
     "character_self_image",
+    "character_self_guidance",
+    "shared_memory_promotion",
     "audit",
 ]
 
@@ -59,8 +61,12 @@ USER_WRITE_LANES = [
     "user_style_image",
 ]
 GROUP_CHANNEL_WRITE_LANES = ["group_channel_style_image"]
-CHARACTER_WRITE_LANES = ["character_state", "character_self_image"]
-INTERNAL_WRITE_LANES = ["audit"]
+CHARACTER_WRITE_LANES = [
+    "character_state",
+    "character_self_image",
+    "character_self_guidance",
+]
+INTERNAL_WRITE_LANES = ["audit", "shared_memory_promotion"]
 
 SYNTHETIC_USER_IDS = frozenset(
     (
@@ -137,7 +143,16 @@ def build_consolidation_target_plan(
             }
         )
 
-    if not targets:
+    if origin_kind.startswith("reflection"):
+        targets.append(
+            {
+                "target_alias": INTERNAL_TARGET_ALIAS,
+                "target_kind": "internal",
+                "target_id": {"scope": "internal"},
+                "write_lanes": list(INTERNAL_WRITE_LANES),
+            }
+        )
+    elif not targets:
         targets.append(
             {
                 "target_alias": INTERNAL_TARGET_ALIAS,
@@ -288,6 +303,9 @@ def _has_character_target(
 ) -> bool:
     """Return whether character-owned state is eligible for this episode."""
 
+    if origin_kind.startswith("reflection"):
+        return_value = False
+        return return_value
     if origin_kind == "user_message":
         return_value = True
         return return_value

@@ -125,11 +125,9 @@ class TestRetryLimits:
         from kazusa_ai_chatbot.config import (
             MAX_MEMORY_RETRIEVER_AGENT_RETRY,
             MAX_WEB_SEARCH_AGENT_RETRY,
-            MAX_FACT_HARVESTER_RETRY,
         )
         assert MAX_MEMORY_RETRIEVER_AGENT_RETRY > 0
         assert MAX_WEB_SEARCH_AGENT_RETRY > 0
-        assert MAX_FACT_HARVESTER_RETRY > 0
 
 
 class TestMcpServersDefault:

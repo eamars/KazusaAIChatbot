@@ -110,103 +110,43 @@ async def test_call_consolidation_subgraph_selects_self_cognition_origin(
     expected_origin = build_self_cognition_consolidation_origin(
         episode=state["cognitive_episode"],
     )
-    seen_origins = {}
+    seen_pipeline_state = {}
 
-    async def _global_state_updater(node_state: dict) -> dict:
-        """Capture origin metadata seen by the global-state updater.
+    async def _lane_pipeline(node_state: dict) -> dict:
+        """Capture origin metadata seen by the lane pipeline.
 
         Args:
-            node_state: Consolidator state passed into the patched node.
+            node_state: Consolidator state passed into the patched pipeline.
 
         Returns:
-            Deterministic global-state updater output.
+            Deterministic lane-pipeline packet.
         """
-        seen_origins["global_state_updater"] = node_state["consolidation_origin"]
-        return {
+        seen_pipeline_state.update(node_state)
+        pipeline_state = {
+            **node_state,
             "mood": "hurt",
             "global_vibe": "uneasy",
             "reflection_summary": "summary",
-        }
-
-    async def _relationship_recorder(node_state: dict) -> dict:
-        """Capture origin metadata seen by the relationship recorder.
-
-        Args:
-            node_state: Consolidator state passed into the patched node.
-
-        Returns:
-            Deterministic relationship-recorder output.
-        """
-        seen_origins["relationship_recorder"] = node_state["consolidation_origin"]
-        return {
             "subjective_appraisals": ["The silence felt disappointing."],
             "affinity_delta": -1,
             "last_relationship_insight": "unreliable",
+            "new_facts": [],
+            "future_promises": [],
+            "metadata": {"write_success": {}},
+        }
+        return {
+            "router_tasks": [],
+            "state": pipeline_state,
         }
 
-    async def _facts_harvester(node_state: dict) -> dict:
-        """Capture origin metadata seen by the facts harvester.
-
-        Args:
-            node_state: Consolidator state passed into the patched node.
-
-        Returns:
-            Empty facts and promises so the evaluator is skipped.
-        """
-        seen_origins["facts_harvester"] = node_state["consolidation_origin"]
-        return {"new_facts": [], "future_promises": []}
-
-    async def _fact_harvester_evaluator(_node_state: dict) -> dict:
-        """Fail if the evaluator runs for empty harvester output.
-
-        Args:
-            _node_state: Unused consolidator state for an unexpected call.
-
-        Returns:
-            This helper never returns on the valid test path.
-
-        Raises:
-            AssertionError: Always, because evaluator should be skipped.
-        """
-        raise AssertionError("fact evaluator should be skipped")
-
-    async def _db_writer(node_state: dict) -> dict:
-        """Capture origin metadata seen by the persistence boundary.
-
-        Args:
-            node_state: Consolidator state passed into the patched node.
-
-        Returns:
-            Deterministic persistence metadata.
-        """
-        seen_origins["db_writer"] = node_state["consolidation_origin"]
-        return {"metadata": {"write_success": {}}}
-
     monkeypatch.setattr(
         consolidator_module,
-        "global_state_updater",
-        _global_state_updater,
+        "run_consolidation_lane_pipeline",
+        _lane_pipeline,
     )
-    monkeypatch.setattr(
-        consolidator_module,
-        "relationship_recorder",
-        _relationship_recorder,
-    )
-    monkeypatch.setattr(consolidator_module, "facts_harvester", _facts_harvester)
-    monkeypatch.setattr(
-        consolidator_module,
-        "fact_harvester_evaluator",
-        _fact_harvester_evaluator,
-    )
-    monkeypatch.setattr(consolidator_module, "db_writer", _db_writer)
 
     result = await consolidator_module.call_consolidation_subgraph(state)
 
-    assert seen_origins == {
-        "global_state_updater": expected_origin,
-        "relationship_recorder": expected_origin,
-        "facts_harvester": expected_origin,
-        "db_writer": expected_origin,
-    }
+    assert seen_pipeline_state["consolidation_origin"] == expected_origin
     assert result["mood"] == "hurt"
     assert result["affinity_delta"] == -1

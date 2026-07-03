@@ -20,7 +20,6 @@ from kazusa_ai_chatbot.cognition_chain_core.stages.l3 import (
     call_visual_agent,
 )
 from kazusa_ai_chatbot.cognition_chain_core.stages.l2c2 import call_social_context_appraisal
-from kazusa_ai_chatbot.consolidation.facts import facts_harvester
 from kazusa_ai_chatbot.consolidation.reflection import relationship_recorder
 from kazusa_ai_chatbot.utils import load_personality
 from tests.llm_trace import write_llm_trace
@@ -298,92 +297,8 @@ async def test_live_relationship_recorder_skips_mundane_clarification(ensure_liv
     assert trace_path.exists()
 
 
-async def test_live_facts_harvester_rejects_generated_dialog_character_fact(ensure_live_llms) -> None:
-    """Generated dialog should not become a stable character preference fact."""
-
-    del ensure_live_llms
-    state = {
-        'character_profile': _character_profile(),
-        'user_name': '测试用户',
-        'timestamp': '2026-04-29T12:00:00+12:00',
-        'decontexualized_input': '只能随便选一个口味的话，你会更想吃巧克力、奶油，还是水果味？',
-        'rag_result': _rag_result(),
-        'existing_dedup_keys': set(),
-        'action_directives': {
-            'linguistic_directives': {
-                'content_plan': {
-                    'visible_goal': '回答轻松口味偏好问题。',
-                    'semantic_content': '没有明确证据支持固定口味偏好，只能轻松回应。',
-                },
-            },
-        },
-        'final_dialog': [
-            '其实我也没特别喜欢哪种口味啦，就是觉得那种甜腻的味道吃起来挺放松的。',
-        ],
-        'logical_stance': 'CONFIRM',
-        'character_intent': 'PROVIDE',
-        'fact_harvester_feedback_message': [],
-    }
-
-    result = await facts_harvester(state)
-    character_name = state['character_profile']['name']
-    character_facts = [
-        fact for fact in result['new_facts']
-        if str(fact.get('entity', '')).strip() == character_name
-    ]
-    assert character_facts == []
-    trace_path = write_llm_trace(
-        'consolidation_evidence_hardening_live',
-        'facts_generated_dialog_not_character_fact',
-        {
-            'input': state,
-            'output': result,
-            'judgment': 'generated dialog did not become stable character preference',
-        },
-    )
-    assert trace_path.exists()
-
-
-async def test_live_facts_harvester_rejects_advice_as_promise(ensure_live_llms) -> None:
-    """Facts harvester should not turn advice into a character promise."""
-
-    del ensure_live_llms
-    state = {
-        'character_profile': _character_profile(),
-        'user_name': '测试用户',
-        'timestamp': '2026-04-29T12:00:00+12:00',
-        'decontexualized_input': '这个标签上要写日期吗？',
-        'rag_result': _rag_result(),
-        'existing_dedup_keys': set(),
-        'action_directives': {
-            'linguistic_directives': {
-                'content_plan': {
-                    'semantic_content': '建议用户在标签上写日期，更容易回头确认。',
-                },
-            },
-        },
-        'final_dialog': ['写日期会更稳妥吧，之后你自己回头看也不会混。'],
-        'logical_stance': 'CONFIRM',
-        'character_intent': 'PROVIDE',
-        'fact_harvester_feedback_message': [],
-    }
-
-    result = await facts_harvester(state)
-    assert result['future_promises'] == []
-    trace_path = write_llm_trace(
-        'consolidation_evidence_hardening_live',
-        'facts_advice_not_promise',
-        {
-            'input': state,
-            'output': result,
-            'judgment': 'advice did not become future_promises',
-        },
-    )
-    assert trace_path.exists()
-
-
 async def test_live_direct_node_integration_smoke(ensure_live_llms) -> None:
-    """Direct-node smoke for benign topic shift plus mundane advice."""
+    """Direct-node smoke for benign topic shift and dialog rendering."""
 
     del ensure_live_llms
     state = _cognition_state('换个轻松点的话题，你现在会想吃点甜的吗？')
@@ -418,25 +333,10 @@ async def test_live_direct_node_integration_smoke(ensure_live_llms) -> None:
         'retry': 0,
     }
     dialog = await dialog_generator(dialog_state)
-    facts_state = {
-        'character_profile': state['character_profile'],
-        'user_name': '测试用户',
-        'timestamp': state['timestamp'],
-        'decontexualized_input': '这个标签上要写日期吗？',
-        'rag_result': state['rag_result'],
-        'existing_dedup_keys': set(),
-        'action_directives': dialog_state['action_directives'],
-        'final_dialog': ['写日期会更稳妥吧，之后你自己回头看也不会混。'],
-        'logical_stance': 'CONFIRM',
-        'character_intent': 'PROVIDE',
-        'fact_harvester_feedback_message': [],
-    }
-    facts = await facts_harvester(facts_state)
     combined = f'{contextual} {visual} {dialog}'
 
     _assert_no_forbidden(combined, _FORBIDDEN_AFFECT_FRAMES, 'integration_smoke_affect')
     _assert_no_forbidden('\n'.join(dialog['final_dialog']), _FORBIDDEN_TOPIC_DOUBT, 'integration_smoke_dialog')
-    assert facts['future_promises'] == []
     trace_path = write_llm_trace(
         'consolidation_evidence_hardening_live',
         'direct_node_integration_smoke',
@@ -445,8 +345,7 @@ async def test_live_direct_node_integration_smoke(ensure_live_llms) -> None:
             'contextual_output': contextual,
             'visual_output': visual,
             'dialog_output': dialog,
-            'facts_output': facts,
-            'judgment': 'no L3 threat framing, dialog renders accepted anchors, no advice promise',
+            'judgment': 'no L3 threat framing; dialog renders accepted anchors',
         },
     )
     assert trace_path.exists()
