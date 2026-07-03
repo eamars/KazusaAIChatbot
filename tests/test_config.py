@@ -44,6 +44,12 @@ REQUIRED_ROUTE_ENV_VARS = (
     "BACKGROUND_ARTIFACT_LLM_BASE_URL",
     "BACKGROUND_ARTIFACT_LLM_API_KEY",
     "BACKGROUND_ARTIFACT_LLM_MODEL",
+    "CODING_AGENT_PM_LLM_BASE_URL",
+    "CODING_AGENT_PM_LLM_API_KEY",
+    "CODING_AGENT_PM_LLM_MODEL",
+    "CODING_AGENT_PROGRAMMER_LLM_BASE_URL",
+    "CODING_AGENT_PROGRAMMER_LLM_API_KEY",
+    "CODING_AGENT_PROGRAMMER_LLM_MODEL",
 )
 REMOVED_RESOLVER_ENABLE_FLAG = "COGNITION_" + "RESOLVER_ENABLED"
 
@@ -532,6 +538,10 @@ class TestRouteLlmConfig:
         assert not hasattr(config, "LLM_BASE_URL")
         assert not hasattr(config, "LLM_API_KEY")
         assert not hasattr(config, "LLM_MODEL")
+        retired_code_route = "CODING_AGENT_" + "LLM"
+        assert not hasattr(config, f"{retired_code_route}_BASE_URL")
+        assert not hasattr(config, f"{retired_code_route}_API_KEY")
+        assert not hasattr(config, f"{retired_code_route}_MODEL")
 
     def test_all_route_config_values_are_present(self):
         import kazusa_ai_chatbot.config as config

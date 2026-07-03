@@ -28,6 +28,28 @@ def test_router_normalizer_excludes_worker_local_payload() -> None:
     }
 
 
+def test_router_normalizer_accepts_enabled_coding_agent_worker() -> None:
+    """Router validation should use enabled workers, not one hardcoded name."""
+
+    router = importlib.import_module("kazusa_ai_chatbot.background_work.router")
+    normalize = getattr(router, "normalize_background_work_router_output")
+
+    decision = normalize(
+        {
+            "action": "execute",
+            "worker": "coding_agent",
+            "reason": "The task asks for bounded source-code reading.",
+        },
+        enabled_workers={"text_artifact", "coding_agent"},
+    )
+
+    assert decision == {
+        "action": "execute",
+        "worker": "coding_agent",
+        "reason": "The task asks for bounded source-code reading.",
+    }
+
+
 def test_background_work_router_decision_is_route_only() -> None:
     """Router decisions must contain only route fields: action, worker, reason.
     No worker-facing task string or task parameters."""

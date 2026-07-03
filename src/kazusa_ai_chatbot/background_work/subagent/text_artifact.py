@@ -212,6 +212,7 @@ _text_artifact_generator_llm_config = LLMCallConfig(
 async def _generate_text_artifact(
     *,
     task_decision: TextArtifactTaskRouterDecision,
+    task: str,
     source_summary: str,
     max_output_chars: int,
 ) -> TextArtifactGeneratorResult:
@@ -219,7 +220,7 @@ async def _generate_text_artifact(
 
     payload = build_text_artifact_generator_payload(
         task_type=task_decision["task_type"],
-        task=source_summary,
+        task=task,
         source_summary=source_summary,
         max_output_chars=max_output_chars,
     )
@@ -300,9 +301,14 @@ async def execute(
 ) -> BackgroundWorkResult:
     """Run the text-artifact worker after background-work routing."""
 
-    source_summary = decision.get("source_summary", "")
+    task = _bounded_text(decision.get("task_brief"))
+    source_summary = _bounded_text(decision.get("source_summary"))
+    if not task:
+        task = source_summary
+    if not source_summary:
+        source_summary = task
     task_decision = await _route_text_artifact_task(
-        task=source_summary,
+        task=task,
         source_summary=source_summary,
         max_output_chars=max_output_chars,
     )
@@ -324,6 +330,7 @@ async def execute(
 
     generator_result = await _generate_text_artifact(
         task_decision=task_decision,
+        task=task,
         source_summary=source_summary,
         max_output_chars=max_output_chars,
     )

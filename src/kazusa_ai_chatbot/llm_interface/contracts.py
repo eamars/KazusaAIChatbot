@@ -34,6 +34,7 @@ class LLMCallConfig:
     top_k: int | None
     max_completion_tokens: int | None
     presence_penalty: float | None
+    timeout_seconds: float | None = None
     thinking: LLMThinkingConfig = field(default_factory=LLMThinkingConfig)
 
 

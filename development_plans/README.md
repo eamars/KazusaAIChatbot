@@ -39,6 +39,7 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [coding_agent_phase1_fetching_reading_plan.md](active/short_term/coding_agent_phase1_fetching_reading_plan.md) | Large standalone coding-agent Phase 1 plan | draft |
+| [coding_agent_phase2_5_security_boundary_plan.md](active/short_term/coding_agent_phase2_5_security_boundary_plan.md) | High-risk coding-agent Phase 2.5 security boundary plan | draft |
 | [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 
 ## Supporting Experiment Records
@@ -59,6 +60,8 @@ long_term/todo.md
 |---|---|
 | [action_spec_effector_expansion_architecture.md](reference/designs/action_spec_effector_expansion_architecture.md) | Architecture reference |
 | [coding_agent_architecture.md](reference/designs/coding_agent_architecture.md) | Architecture reference |
+| [coding_agent_phase2_new_artifact_gating_tests.md](reference/designs/coding_agent_phase2_new_artifact_gating_tests.md) | Supporting verification procedure and pass criteria |
+| [codex_single_agent_source_guide.md](reference/designs/codex_single_agent_source_guide.md) | Codex single-agent source reference |
 | [cognition_contracts_design.md](reference/designs/cognition_contracts_design.md) | Authoritative contract reference |
 | [cognition_core_evolution_progression.md](reference/designs/cognition_core_evolution_progression.md) | Architectural progression |
 | [kazusa_parallel_cognition_architecture.md](reference/designs/kazusa_parallel_cognition_architecture.md) | Architecture reference |
@@ -181,6 +184,11 @@ plans.
 | [channel_name_semantic_projection_plan.md](archive/completed/short_term/channel_name_semantic_projection_plan.md) |
 | [character_local_time_context_plan.md](archive/completed/short_term/character_local_time_context_plan.md) |
 | [character_profile_runtime_state_split_plan.md](archive/completed/short_term/character_profile_runtime_state_split_plan.md) |
+| [coding_agent_phase0_fetching_plan.md](archive/completed/short_term/coding_agent_phase0_fetching_plan.md) |
+| [coding_agent_phase1_code_reading_final_plan.md](archive/completed/short_term/coding_agent_phase1_code_reading_final_plan.md) |
+| [coding_agent_phase1_real_repo_retrieval_remediation_plan.md](archive/completed/short_term/coding_agent_phase1_real_repo_retrieval_remediation_plan.md) |
+| [coding_agent_phase2_code_writing_plan.md](archive/completed/short_term/coding_agent_phase2_code_writing_plan.md) |
+| [coding_agent_phase3_background_worker_integration_plan.md](archive/completed/short_term/coding_agent_phase3_background_worker_integration_plan.md) |
 | [character_reflection_cycle_stage1a_plan.md](archive/completed/short_term/character_reflection_cycle_stage1a_plan.md) |
 | [character_self_words_retrieval_delivery_receipt_plan.md](archive/completed/short_term/character_self_words_retrieval_delivery_receipt_plan.md) |
 | [cognition_chain_module_separation_plan.md](archive/completed/short_term/cognition_chain_module_separation_plan.md) |
@@ -297,5 +305,6 @@ plans.
 | [self_cognition_tracking_icd.md](archive/superseded/self_cognition_tracking_icd.md) |
 | [rag_supervisor2_inner_loop_agents_plan.md](archive/superseded/rag_supervisor2_inner_loop_agents_plan.md) |
 | [short_circuit_early_stop_plan.md](archive/superseded/short_circuit_early_stop_plan.md) |
+| [coding_agent_phase2_code_writing_plan_superseded_20260623.md](archive/superseded/coding_agent_phase2_code_writing_plan_superseded_20260623.md) |
 | [visual_descriptor_seeded_reference_images_plan.md](archive/superseded/visual_descriptor_seeded_reference_images_plan.md) |
 

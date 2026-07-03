@@ -54,7 +54,8 @@ _CONTEXTUAL_AGENT_PROMPT = '''\
 # 来源识别
 - 存在 `reflection_artifact` 时，当前材料是我自己的反思资料，不是用户输入、用户发言，也不是任何人正在对我说话。社交距离应围绕反思中已经沉淀的关系状态和经历余波。
 - 存在 `internal_thought_residue` 时，当前材料是我自己的观察资料，不是用户输入、用户发言，也不是任何人正在对我说话。社交距离应围绕我与被观察现场的关系，而不是虚构一个正在对我说话的当前用户。
-- 没有 `reflection_artifact` 且没有 `internal_thought_residue` 时，当前材料是外部说话内容，按外部说话者和我的当前互动关系判断。
+- 存在 `accepted_task_result`、`background_work_result` 或 `background_artifact_result` 时，当前材料是系统回流的任务结果，不是用户新发言。社交距离围绕完成交付、失败说明或限制说明判断。
+- 没有 `reflection_artifact`、`internal_thought_residue` 和结果字段时，当前材料是外部说话内容，按外部说话者和我的当前互动关系判断。
 - 资料标题、字段名、JSON、时间戳、semantic_labels、window_summary、transport summary、model-facing metadata 不是社交对象，不要复制进 `social_distance`、`emotional_intensity`、`vibe_check`、`relational_dynamic` 等自由文本字段。
 
 # 边界画像
@@ -72,10 +73,11 @@ _CONTEXTUAL_AGENT_PROMPT = '''\
 # 判断流程
 1. 先确定来源类型。
 2. 外部说话内容：结合 `decontexualized_input`、`boundary_core_assessment`、`affinity_context`、`chat_history` 判断当前互动距离。
-3. 内部观察资料：结合真实可见现场、我是否参与、是否有人把话题交给我、群聊噪声和氛围判断我与现场的距离。
-4. 反思资料：结合已沉淀的关系余波、情绪强度和后续倾向判断社交语境，不要虚构当前对话对象。
-5. 没有明确越界证据时，保持日常、中性或轻度互动，不要脑补对峙、调情、威胁或被审查。
-6. 玩笑式提到我、嘈杂群聊、轻度调侃，不自动构成高压关系动态；要根据现场语气和我的判断描述。
+3. 任务结果资料：结合结果状态、限制和请求者关系判断交付语境。
+4. 内部观察资料：结合真实可见现场、我是否参与、是否有人把话题交给我、群聊噪声和氛围判断我与现场的距离。
+5. 反思资料：结合已沉淀的关系余波、情绪强度和后续倾向判断社交语境，不要虚构当前对话对象。
+6. 没有明确越界证据时，保持日常、中性或轻度互动，不要脑补对峙、调情、威胁或被审查。
+7. 玩笑式提到我、嘈杂群聊、轻度调侃，不自动构成高压关系动态；要根据现场语气和我的判断描述。
 
 # 输入格式
 用户消息是 JSON，可能包含：
@@ -89,7 +91,10 @@ _CONTEXTUAL_AGENT_PROMPT = '''\
   "chat_history": [],
   "media_observations": {{"image_observations": [], "audio_observations": []}},
   "reflection_artifact": "string",
-  "internal_thought_residue": {{"residue_id": "string", "internal_monologue": "string", "action_latch": {{}}}}
+  "internal_thought_residue": {{"residue_id": "string", "internal_monologue": "string", "action_latch": {{}}}},
+  "accepted_task_result": {{"artifact_text": "string", "metadata": {{}}}},
+  "background_work_result": {{"artifact_text": "string", "metadata": {{}}}},
+  "background_artifact_result": {{"artifact_text": "string", "metadata": {{}}}}
 }}
 
 # 输出格式
@@ -139,6 +144,12 @@ async def call_social_context_appraisal(state: dict[str, Any]) -> dict[str, Any]
         "reflection_signal_reflection_artifact": _CONTEXTUAL_AGENT_PROMPT,
         "internal_thought_internal_monologue": _CONTEXTUAL_AGENT_PROMPT,
         "background_artifact_result_ready_background_artifact_result": (
+            _CONTEXTUAL_AGENT_PROMPT
+        ),
+        "background_work_result_ready_background_work_result": (
+            _CONTEXTUAL_AGENT_PROMPT
+        ),
+        "accepted_task_result_ready_accepted_task_result": (
             _CONTEXTUAL_AGENT_PROMPT
         ),
     }[selection["variant"]]

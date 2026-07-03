@@ -51,6 +51,48 @@ async def test_provider_dispatches_by_worker_and_action_only(monkeypatch) -> Non
 
 
 @pytest.mark.asyncio
+async def test_provider_passes_trusted_task_brief_to_worker(monkeypatch) -> None:
+    """Workers should receive durable task_brief separate from source summary."""
+
+    providers = importlib.import_module("kazusa_ai_chatbot.background_work.providers")
+    dispatch = getattr(providers, "dispatch_background_work")
+    worker_execute = AsyncMock(return_value={
+        "status": "succeeded",
+        "worker": "coding_agent",
+        "artifact_text": "Image reading uses attachment descriptors.",
+        "failure_summary": "",
+        "result_summary": "Answered source-code question.",
+        "worker_metadata": {},
+    })
+    worker = SimpleNamespace(execute=worker_execute)
+    monkeypatch.setattr(
+        providers,
+        "load_background_work_workers",
+        lambda: {"coding_agent": worker},
+    )
+
+    result = await dispatch(
+        {
+            "action": "execute",
+            "worker": "coding_agent",
+            "reason": "The task is bounded source-code reading.",
+            "task_brief": "Explain how image reading is implemented.",
+            "source_summary": "The user asked for a repository explanation.",
+        },
+        max_output_chars=120,
+    )
+
+    assert result["status"] == "succeeded"
+    worker_decision = worker_execute.await_args.args[0]
+    assert worker_decision["task_brief"] == (
+        "Explain how image reading is implemented."
+    )
+    assert worker_decision["source_summary"] == (
+        "The user asked for a repository explanation."
+    )
+
+
+@pytest.mark.asyncio
 async def test_provider_passes_max_output_cap_as_execution_context(
     monkeypatch,
 ) -> None:

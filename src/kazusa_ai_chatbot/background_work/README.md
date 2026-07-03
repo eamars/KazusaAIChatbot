@@ -70,10 +70,10 @@ async def execute(
 `DESCRIPTION` is router-facing and must describe only the worker's semantic
 capability. It must not mention adapter ids, persistence fields, filesystem
 paths, shell commands, credentials, or hidden operational options.
-`execute()` receives the selected route decision, optional source summary, and
-optional deterministic worker payload. It returns one `BackgroundWorkResult`
-with `status`, `worker`, bounded `artifact_text`, `failure_summary`,
-`result_summary`, and audit-only `worker_metadata`.
+`execute()` receives the selected route decision, trusted `task_brief`,
+optional source summary, and optional deterministic worker payload. It returns
+one `BackgroundWorkResult` with `status`, `worker`, bounded `artifact_text`,
+`failure_summary`, `result_summary`, and audit-only `worker_metadata`.
 
 Worker implementations own their local task classification, argument
 extraction, validation, execution, and refusal. The generic router chooses the
@@ -94,9 +94,9 @@ conversation rows, or generate prewritten proactive text.
 
 ## Future Worker Eligibility
 
-The interface can support future workers such as a coding agent or a complex
-resolver, but those integrations require their own reviewed action capability
-and worker contract before enablement. A valid future worker must define:
+The interface can support additional workers such as a complex resolver, but
+those integrations require their own reviewed action capability and worker
+contract before enablement. A valid future worker must define:
 
 - semantic ownership: the class of delayed work it owns;
 - model-facing entrypoint: accepted-task capability or trusted internal
@@ -116,12 +116,14 @@ and worker contract before enablement. A valid future worker must define:
 - verification: deterministic contract tests, integration tests, and one
   real LLM test when prompts or model-facing routing are involved.
 
-Coding-agent-style work is not automatically authorized by this interface.
-Any worker that can run shell commands, edit files, install packages, browse
-the web, call external tools, or access repository contents needs a separate
-permission and sandbox contract before it is added to the registry. The
-background-work queue supplies lifecycle and handoff mechanics; it is not a
-general tool-permission system.
+Coding-agent work enters through the registered `coding_agent` worker. That
+worker delegates read-versus-write selection to the coding-agent supervisor and
+returns either a code-reading answer or a code-writing proposal artifact. Any
+worker that can run shell commands, edit files, install packages, browse the
+web, call external tools, or apply patches needs a separate permission and
+sandbox contract before it is added to the registry. The background-work queue
+supplies lifecycle and handoff mechanics; it is not a general tool-permission
+system.
 
 ## Workers
 
@@ -139,6 +141,13 @@ worker-facing task rewrites.
 time and a semantic continuation objective, then schedules a
 `future_cognition` calendar run. It does not store final user-facing text.
 The due self-cognition cycle decides again how to speak.
+
+`subagent.coding_agent` adapts the public standalone coding-agent
+`handle_background_coding_task(...)` interface. It handles accepted coding
+tasks, requires `CODING_AGENT_WORKSPACE_ROOT` at execution time, and returns
+bounded artifact text plus sanitized repository, evidence, and proposal
+metadata. It may produce proposal artifacts, but it does not apply patches,
+run project commands, install packages, or deliver adapter text.
 
 Completed `future_speak` jobs suppress immediate background-result delivery,
 because the user-facing follow-up belongs to the scheduled self-cognition

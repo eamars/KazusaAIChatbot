@@ -399,7 +399,14 @@ def _background_work_projection() -> dict[str, object]:
         "available": True,
         "visibility": "private",
         "semantic_input_summary": [
-            "Use only when the character accepts bounded delayed text work.",
+            (
+                "Use when the character accepts bounded delayed text, code, "
+                "or repository-analysis work."
+            ),
+            (
+                "Repository or source-code analysis stays in this delayed "
+                "work path even when it needs public source evidence."
+            ),
             "Provide a task reason and detail, not execution internals.",
             "Pair this private request with a visible speak acknowledgement.",
         ],

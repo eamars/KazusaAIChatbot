@@ -354,6 +354,18 @@ def apply_cognition_chain_output_to_global_state(
     return return_value
 
 
+def _supports_first_cycle_shared_memory_prewarm(
+    state: Mapping[str, Any],
+) -> bool:
+    """Return whether the episode can enter the current RAG prewarm path."""
+
+    cognitive_episode = state.get("cognitive_episode")
+    if not isinstance(cognitive_episode, Mapping):
+        return False
+    trigger_source = cognitive_episode.get("trigger_source")
+    return trigger_source in {"user_message", "internal_thought"}
+
+
 async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaState:
     """Run the cognition-chain core for one persona turn."""
 
@@ -364,6 +376,7 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
     if (
         isinstance(resolver_state, Mapping)
         and resolver_state.get("cycle_index") == 0
+        and _supports_first_cycle_shared_memory_prewarm(state)
     ):
         prewarm_task = asyncio.create_task(
             run_first_cycle_shared_memory_prewarm(state),

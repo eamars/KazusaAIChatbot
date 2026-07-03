@@ -21,6 +21,8 @@ EXPECTED_ROUTE_TABLE_ROWS = (
     "JSON_REPAIR_LLM",
     "BACKGROUND_ARTIFACT_LLM",
     "BACKGROUND_WORK_LLM",
+    "CODING_AGENT_PM_LLM",
+    "CODING_AGENT_PROGRAMMER_LLM",
     "EMBEDDING",
 )
 
@@ -195,6 +197,8 @@ def test_llm_route_table_omits_api_keys() -> None:
         config.JSON_REPAIR_LLM_API_KEY,
         config.BACKGROUND_ARTIFACT_LLM_API_KEY,
         config.BACKGROUND_WORK_LLM_API_KEY,
+        config.CODING_AGENT_PM_LLM_API_KEY,
+        config.CODING_AGENT_PROGRAMMER_LLM_API_KEY,
         config.EMBEDDING_API_KEY,
     )
     for api_key in api_keys:

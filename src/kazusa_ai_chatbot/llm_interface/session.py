@@ -160,6 +160,7 @@ def build_diagnostic_fingerprint(
         config.top_k,
         config.max_completion_tokens,
         config.presence_penalty,
+        config.timeout_seconds,
         config.thinking.enabled,
         descriptor.thinking_strategy,
     )

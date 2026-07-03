@@ -23,6 +23,8 @@ _REQUIRED_ROUTES = frozenset((
     "DIALOG_GENERATOR_LLM",
     "CONSOLIDATION_LLM",
     "JSON_REPAIR_LLM",
+    "CODING_AGENT_PM_LLM",
+    "CODING_AGENT_PROGRAMMER_LLM",
 ))
 _FALLBACK_BACKED_ROUTES = frozenset((
     "BACKGROUND_ARTIFACT_LLM",
@@ -33,7 +35,7 @@ _FALLBACK_BACKED_ROUTES = frozenset((
 def _route_config(route_name: str) -> LLMCallConfig:
     """Build one sanitized diagnostic config from public route constants."""
 
-    return LLMCallConfig(
+    config = LLMCallConfig(
         stage_name="llm_interface.route_report",
         route_name=route_name,
         base_url=getattr(cfg, f"{route_name}_BASE_URL"),
@@ -51,6 +53,7 @@ def _route_config(route_name: str) -> LLMCallConfig:
             enabled=getattr(cfg, f"{route_name}_THINKING_ENABLED"),
         ),
     )
+    return config
 
 
 def _configured_chat_routes() -> tuple[LLMCallConfig, ...]:
@@ -70,6 +73,8 @@ def _configured_chat_routes() -> tuple[LLMCallConfig, ...]:
         "JSON_REPAIR_LLM",
         "BACKGROUND_ARTIFACT_LLM",
         "BACKGROUND_WORK_LLM",
+        "CODING_AGENT_PM_LLM",
+        "CODING_AGENT_PROGRAMMER_LLM",
     )
     routes = tuple(_route_config(route_name) for route_name in route_names)
     return routes
@@ -127,7 +132,8 @@ def _table_rows(
         for diagnostic in diagnostics
     ]
     rows.append(_embedding_row())
-    return tuple(rows)
+    table_rows = tuple(rows)
+    return table_rows
 
 
 def render_llm_route_table() -> str:

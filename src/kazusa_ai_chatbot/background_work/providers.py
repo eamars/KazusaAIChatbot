@@ -32,6 +32,9 @@ async def execute_background_work_decision(
         "worker": _decision_text(decision, "worker"),
         "reason": _decision_text(decision, "reason"),
     }
+    task_brief = _decision_text(decision, "task_brief")
+    if task_brief:
+        sanitized_decision["task_brief"] = task_brief
     source_summary = _decision_text(decision, "source_summary")
     if source_summary:
         sanitized_decision["source_summary"] = source_summary
@@ -79,6 +82,9 @@ async def dispatch_background_work(
         "worker": decision["worker"],
         "reason": decision["reason"],
     }
+    task_brief = decision.get("task_brief")
+    if isinstance(task_brief, str) and task_brief.strip():
+        worker_decision["task_brief"] = task_brief.strip()
     source_summary = decision.get("source_summary")
     if isinstance(source_summary, str) and source_summary.strip():
         worker_decision["source_summary"] = source_summary.strip()

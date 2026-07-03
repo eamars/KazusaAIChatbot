@@ -8,7 +8,11 @@ from kazusa_ai_chatbot.background_work.models import (
     BackgroundWorkResult,
     BackgroundWorkWorkerDecision,
 )
-from kazusa_ai_chatbot.background_work.subagent import future_speak, text_artifact
+from kazusa_ai_chatbot.background_work.subagent import (
+    coding_agent,
+    future_speak,
+    text_artifact,
+)
 
 
 class BackgroundWorkWorker(TypedDict):
@@ -35,7 +39,7 @@ def discover_background_work_workers() -> dict[str, BackgroundWorkWorker]:
     """Return the enabled background-work worker registry."""
 
     workers: dict[str, BackgroundWorkWorker] = {}
-    for module in (future_speak, text_artifact):
+    for module in (coding_agent, future_speak, text_artifact):
         worker_name = str(getattr(module, "WORKER"))
         description = str(getattr(module, "DESCRIPTION"))
         execute_func = getattr(module, "execute")

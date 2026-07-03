@@ -1,0 +1,45 @@
+"""Public entrypoint for the code-writing subagent."""
+
+from kazusa_ai_chatbot.coding_agent.code_writing.agent import run
+from kazusa_ai_chatbot.coding_agent.code_writing.models import (
+    ArtifactReservationResult,
+    CodeWritingRequest,
+    CodeWritingResult,
+    GeneratedArtifact,
+    PatchArtifact,
+    PatchOperation,
+    PatchValidationSummary,
+    ReservedArtifactPath,
+    WritingAcceptanceCriterion,
+    WritingAcceptanceResult,
+    WritingAlignmentResult,
+    WritingArtifactContract,
+    WritingPMDecision,
+    WritingPMInput,
+    WritingPatcherInput,
+    WritingPatcherReport,
+    WritingProgrammerContract,
+    WritingProgrammerResult,
+)
+
+__all__ = [
+    "ArtifactReservationResult",
+    "CodeWritingRequest",
+    "CodeWritingResult",
+    "GeneratedArtifact",
+    "PatchArtifact",
+    "PatchOperation",
+    "PatchValidationSummary",
+    "ReservedArtifactPath",
+    "WritingAcceptanceCriterion",
+    "WritingAcceptanceResult",
+    "WritingAlignmentResult",
+    "WritingArtifactContract",
+    "WritingPMDecision",
+    "WritingPMInput",
+    "WritingPatcherInput",
+    "WritingPatcherReport",
+    "WritingProgrammerContract",
+    "WritingProgrammerResult",
+    "run",
+]

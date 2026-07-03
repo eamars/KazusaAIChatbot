@@ -10,8 +10,11 @@ a conclusion before reading the relevant code, docs, tests, and current git
 state.
 
 Communicate before meaningful action. Tell the user what context you are
-gathering, what assumption you are making, and what concrete command or change
-you are about to run.
+gathering and what concrete command or change you are about to run. If an
+instruction, scope, target file, data source, approval, risk level, or expected
+output is unclear, stop and ask the user for clarification before acting. Do
+not fill gaps with assumptions, and do not treat a stated assumption as
+permission to proceed.
 
 Before substantive edits, and always before production-code edits, check:
 
