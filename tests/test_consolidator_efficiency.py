@@ -156,6 +156,9 @@ async def test_empty_lane_router_output_skips_persistence_work(monkeypatch) -> N
     assert calls["pipeline"] == 1
     assert result["new_facts"] == []
     assert result["future_promises"] == []
+    assert result["consolidation_metadata"]["write_success"] == {}
+    assert result["consolidation_metadata"]["cache_evicted_count"] == 0
+    assert result["consolidation_metadata"]["cache_invalidated"] == []
 
 
 @pytest.mark.asyncio

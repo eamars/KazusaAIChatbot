@@ -1122,6 +1122,28 @@ def test_runner_consolidates_no_action_cognition_without_dialog() -> None:
     ] is True
 
 
+def test_consolidation_outcome_reports_incomplete_metadata_contract() -> None:
+    """Self-cognition should diagnose incomplete producer metadata."""
+
+    consolidation_state = {
+        "cognitive_episode": {
+            "trigger_source": "internal_thought",
+            "episode_id": "self_cognition:diagnostic",
+        },
+    }
+    consolidation_result = {
+        "consolidation_metadata": {
+            "write_success": {},
+        },
+    }
+
+    with pytest.raises(ValueError, match="cache_evicted_count"):
+        tracking.build_consolidation_outcome_record(
+            consolidation_state,
+            consolidation_result,
+        )
+
+
 def test_runner_does_not_call_dialog_for_intent_only_no_speak() -> None:
     case = _commitment_case()
     captured_consolidation_state: dict[str, Any] = {}

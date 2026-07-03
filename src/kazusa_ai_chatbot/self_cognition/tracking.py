@@ -181,6 +181,18 @@ def build_consolidation_outcome_record(
     if not isinstance(metadata, dict):
         raise ValueError("consolidation_metadata must be a dict")
 
+    required_metadata_fields = ("write_success", "cache_evicted_count")
+    missing_fields = [
+        field_name
+        for field_name in required_metadata_fields
+        if field_name not in metadata
+    ]
+    if missing_fields:
+        joined_fields = ", ".join(missing_fields)
+        raise ValueError(
+            f"consolidation_metadata missing required fields: {joined_fields}"
+        )
+
     write_success = metadata["write_success"]
     if not isinstance(write_success, dict):
         raise ValueError("write_success must be a dict")

@@ -574,6 +574,11 @@ async def _run_case(case_name: str, ensure_live_llm: None) -> None:
     assert set(case.expected_lanes).issubset(lanes)
     assert lanes.issubset(set(case.allowed_lanes))
     assert lanes.isdisjoint(set(case.forbidden_lanes))
+    metadata = packet["state"]["metadata"]
+    assert isinstance(metadata["write_success"], dict)
+    assert isinstance(metadata["cache_invalidated"], list)
+    assert metadata["cache_evicted_count"] == 0
+    assert "lane_pipeline" in metadata
     if case.requires_source_refs and lanes:
         assert _packet_has_write_source_refs(packet)
 

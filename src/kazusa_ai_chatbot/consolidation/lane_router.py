@@ -26,6 +26,9 @@ from kazusa_ai_chatbot.consolidation.reflection import (
 from kazusa_ai_chatbot.consolidation.character_self_guidance import (
     character_self_guidance_specialist,
 )
+from kazusa_ai_chatbot.consolidation.metadata import (
+    finalize_consolidation_metadata,
+)
 from kazusa_ai_chatbot.consolidation.source_policy import (
     ASSISTANT_ACCEPTANCE_SOURCE_KIND,
     build_consolidation_source_views,
@@ -435,7 +438,7 @@ async def run_consolidation_lane_pipeline(
         metadata["lane_pipeline"]["router_validation_error"] = (
             router_validation_error
         )
-    working_state["metadata"] = metadata
+    working_state["metadata"] = finalize_consolidation_metadata(metadata)
 
     packet = {
         "mode": "dry_run" if dry_run else "apply",

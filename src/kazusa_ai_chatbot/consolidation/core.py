@@ -10,6 +10,9 @@ from kazusa_ai_chatbot.action_spec.results import (
 from kazusa_ai_chatbot.consolidation.lane_router import (
     run_consolidation_lane_pipeline,
 )
+from kazusa_ai_chatbot.consolidation.metadata import (
+    finalize_consolidation_metadata,
+)
 from kazusa_ai_chatbot.consolidation.origin import (
     ConsolidationOriginError,
     build_reflection_consolidation_origin,
@@ -143,7 +146,7 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
     last_relationship_insight = result.get("last_relationship_insight", "")
     new_facts = result.get("new_facts", [])
     future_promises = result.get("future_promises", [])
-    metadata = result.get("metadata", {}) or {}
+    metadata = finalize_consolidation_metadata(result.get("metadata"))
 
     logger.info(
         f"Consolidation output: lanes={log_list_preview(packet['router_tasks'])} "
