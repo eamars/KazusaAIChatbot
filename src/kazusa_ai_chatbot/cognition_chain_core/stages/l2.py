@@ -272,6 +272,7 @@ _COGNITION_CONSCIOUSNESS_PROMPT = '''\
 - 内部观察资料和反思资料中的标题、字段名、JSON、时间戳、semantic_labels、window_summary、transport summary、model-facing metadata 只帮助定位资料结构；不要把它们当成聊天内容，也不要复制进 `internal_monologue`。
 - 内部观察资料里的 `participant_context` 和 `thread_reference_context` 是来源证据，用来约束群聊指代解析。二人称指向按来源优先级读取：先看同一行是否明确指向当前角色，再看 `thread_reference_context` 的 `referent_status`；标为 `ambiguous_or_side_thread` 的行保持为侧线/未定对象。
 - `internal_monologue_residue_context` 是主观余波；当它与当前 `thread_reference_context` 对同一二人称行的比较、描述或身体/状态归属冲突时，当前可见行和 `thread_reference_context` 拥有事实优先级，私念残留只解释心情和迟疑。
+- `past_dialog_cognition_context` 是围绕已附着的过往我方发言生成的私有认知残余；它只帮助理解那条过往发言当时的主观连续性，弱于当前可见输入、当前事件归属和已检索到的公开证据。
 - `rag_result`、`user_memory_context`、`media_observations` 和 `promoted_reflection_context` 是当前证据、记忆、媒体观察和已提升反思背景；它们只能校准当前事实，不能替换来源归属。
 - `promoted_reflection_context.promoted_global_growth` 是全局人格成长背景，不是当前用户事实、当前承诺或当前聊天证据；可以校准我的表达倾向，但不得把它当成当前用户事实，也不得覆盖当前输入、当前证据或本轮媒体观察。
 
@@ -282,12 +283,13 @@ _COGNITION_CONSCIOUSNESS_PROMPT = '''\
 4. 内部观察资料：理解我刚看到什么群聊或私聊现场，分清资料说明、真实可见对话、群聊氛围、我是否已参与、是否有人把话题交给我。
 5. 反思资料：理解我已经沉淀出的经历意义、关系余波或后续倾向，不要把反思资料写成当前有人正在聊天。
 6. `internal_monologue_residue_context` 是我最近留下的私念残留，只能作为柔和背景解释为什么我此刻可能带着某种心情、期待、防备或迟疑；它不是事实来源、行动要求、回复指令或记忆结论。
-7. 当前事件归属、当前输入、当前媒体观察、RAG 证据、用户记忆、会话进展和已提升反思始终优先；如果它们与私念残留冲突，以当前事实和当前证据为准。
-8. RAG、记忆、关系、心情、私念残留和反思只作为背景校准；它们不能替换当前来源事实，不能把内部观察资料或反思资料改写成外部发言。
-9. 图片或音频观察是当前事实证据，不是说话者意图。只有当前文本正在讨论这些可见事实时，才把它纳入解释。
-10. 普通问候、事实分享、图片描述、日常约定、轻度闲聊和群聊玩笑，缺少明确越界证据时，保持日常或轻度社交理解。
-11. 如果当前场景给了具体理由，我可以在内心形成想说话、想吐槽、想追问或想保持旁观的判断；不要把单纯资料困惑写成要向外部频道澄清。
-12. 解释日期或相对时间时，先读取 `local_time_context.current_local_datetime`。如果证据中的绝对日期与当前本地日期相同，称为今天，不要称为明天。
+7. `past_dialog_cognition_context` 只能作为已附着过往我方发言的私有主观背景；它不是事实来源、用户命令、最终答案、回复草稿或当前立场。
+8. 当前事件归属、当前输入、当前媒体观察、RAG 证据、用户记忆、会话进展和已提升反思始终优先；如果它们与私念残留或过往认知残余冲突，以当前事实和当前证据为准。
+9. RAG、记忆、关系、心情、私念残留、过往认知残余和反思只作为背景校准；它们不能替换当前来源事实，不能把内部观察资料或反思资料改写成外部发言。
+10. 图片或音频观察是当前事实证据，不是说话者意图。只有当前文本正在讨论这些可见事实时，才把它纳入解释。
+11. 普通问候、事实分享、图片描述、日常约定、轻度闲聊和群聊玩笑，缺少明确越界证据时，保持日常或轻度社交理解。
+12. 如果当前场景给了具体理由，我可以在内心形成想说话、想吐槽、想追问或想保持旁观的判断；不要把单纯资料困惑写成要向外部频道澄清。
+13. 解释日期或相对时间时，先读取 `local_time_context.current_local_datetime`。如果证据中的绝对日期与当前本地日期相同，称为今天，不要称为明天。
 
 # 标签
 `logical_stance` 只能使用：
@@ -389,6 +391,11 @@ async def call_cognition_consciousness(state: dict[str, Any]) -> dict[str, Any]:
         "emotional_appraisal": state["emotional_appraisal"],
         "interaction_subtext": state["interaction_subtext"],
     }
+    past_dialog_cognition_context = str(
+        state.get("past_dialog_cognition_context", "")
+    ).strip()
+    if past_dialog_cognition_context:
+        msg["past_dialog_cognition_context"] = past_dialog_cognition_context
     if str(selection["variant"]).startswith("text_chat_user_message"):
         msg["current_event_grounding"] = build_current_event_grounding_for_llm(
             user_input=state["user_input"],
@@ -534,6 +541,22 @@ _BOUNDARY_CORE_PROMPT = '''\
   "trajectory": "简体中文字符串；主语优先省略"
 }}
 '''
+
+_TASK_WILLINGNESS_BOUNDARY_PROMPT_EXTENSION = '''\
+
+# 任务承接意愿
+- 这个补充只判断我是否愿意接下当前请求，不改变普通说话意愿。
+- 读取 `affinity_context`、`character_mood`、`global_vibe`、`vibe_check` 和 `visual_vibe` 时，把它们当作关系、当前心情、当前场景和最近互动气氛的语义线索。
+- 普通说明、简短问答、日常寒暄、简单、低压力、低承诺的帮助，不要因为关系弱、心情差或场景紧而自动拒绝。
+- 当请求要求持续陪伴、替对方承担后续、过分熟悉、过于亲密、越过当前关系分寸、需要私下持续处理，或要求我在不合适时机接下承诺时，可以把它作为边界压力写进现有 `boundary_summary`、`acceptance`、`stance_bias`、`pressure_policy` 和 `trajectory`。
+- 如果我不想接下，优先让输出表现为 `guarded` / `hesitant` / `reject`、`diverge` / `challenge` / `refuse`、`reduce` / `resist`，并用自然关系理由说明；可以保留打趣、回避或更小范围帮助的余地。
+- 仍只返回上面定义的合法 JSON 字符串，不要添加解释文字。
+'''
+
+_BOUNDARY_CORE_TASK_WILLINGNESS_PROMPT = (
+    _BOUNDARY_CORE_PROMPT
+    + _TASK_WILLINGNESS_BOUNDARY_PROMPT_EXTENSION
+)
 _boundary_core_llm: LLMStageBinding | None = None
 _boundary_core_llm_context: ContextVar[LLMStageBinding | None] = ContextVar(
     "boundary_core_llm",
@@ -556,6 +579,25 @@ def reset_boundary_core_llm(token: Token[LLMStageBinding | None]) -> None:
     _boundary_core_llm_context.reset(token)
 
 
+def _add_task_willingness_context(
+    msg: dict[str, Any],
+    state: dict[str, Any],
+) -> None:
+    """Add enabled-mode semantic willingness context to an L2 prompt payload."""
+
+    character_profile = state["character_profile"]
+    msg["character_mood"] = character_profile["mood"]
+    msg["global_vibe"] = character_profile["global_vibe"]
+
+    vibe_check = state.get("vibe_check")
+    if isinstance(vibe_check, str) and vibe_check:
+        msg["vibe_check"] = vibe_check
+
+    visual_vibe = state.get("visual_vibe")
+    if isinstance(visual_vibe, list) and visual_vibe:
+        msg["visual_vibe"] = visual_vibe
+
+
 async def call_boundary_core_agent(state: dict[str, Any]) -> dict[str, Any]:
     # Get attributes
     character_profile = state["character_profile"]
@@ -576,6 +618,8 @@ async def call_boundary_core_agent(state: dict[str, Any]) -> dict[str, Any]:
             _BOUNDARY_CORE_PROMPT
         ),
     }[selection["variant"]]
+    if state.get("task_willingness_boundary_enabled") is True:
+        prompt_template = _BOUNDARY_CORE_TASK_WILLINGNESS_PROMPT
 
     self_integrity = float(boundary_profile["self_integrity"])
     control_sensitivity = float(boundary_profile["control_sensitivity"])
@@ -617,6 +661,8 @@ async def call_boundary_core_agent(state: dict[str, Any]) -> dict[str, Any]:
             "instruction": affinity_block["instruction"]
         }
     }
+    if state.get("task_willingness_boundary_enabled") is True:
+        _add_task_willingness_context(msg, state)
     msg.update(build_cognition_prompt_source_payload(
         episode=episode,
         selection=selection,
@@ -743,6 +789,21 @@ _JUDGEMENT_CORE_PROMPT = '''\
   "judgment_note": "简体中文字符串，一句话说明裁决逻辑；主语优先省略；不要复制资料结构或元数据"
 }}
 '''
+
+_TASK_WILLINGNESS_JUDGMENT_PROMPT_EXTENSION = '''\
+
+# 任务承接意愿
+- Boundary Core 已经把关系、当前心情、当前场景和最近互动气氛纳入是否愿意接下请求的判断；本层负责把这个判断落实到最终立场和意图。
+- 如果 Boundary Core 表示当前请求太熟络、太占用、太持续、太私密、太像替对方承担后续，或在此刻不好接下，就把最终结果收紧为 `REFUSE` / `DIVERGE` / `CHALLENGE`，或 `REJECT` / `EVADE` / `BANTAR`，并在 `judgment_note` 中说明自然关系理由。
+- 简单、低压力、低承诺的帮助和普通说话仍然可以正常 `CONFIRM` / `PROVIDE`；不要把心情或气氛本身当作沉默理由。
+- 如果更小范围帮助更符合当前关系和场景，可以保留提供有限回答、澄清范围、打趣带过或轻轻拒绝的意图。
+- 仍只返回上面定义的合法 JSON 字符串，不要添加解释文字。
+'''
+
+_JUDGEMENT_CORE_TASK_WILLINGNESS_PROMPT = (
+    _JUDGEMENT_CORE_PROMPT
+    + _TASK_WILLINGNESS_JUDGMENT_PROMPT_EXTENSION
+)
 _judgement_core_llm: LLMStageBinding | None = None
 _judgement_core_llm_context: ContextVar[LLMStageBinding | None] = ContextVar(
     "judgement_core_llm",
@@ -782,6 +843,8 @@ async def call_judgment_core_agent(state: dict[str, Any]) -> dict[str, Any]:
             _JUDGEMENT_CORE_PROMPT
         ),
     }[selection["variant"]]
+    if state.get("task_willingness_boundary_enabled") is True:
+        prompt_template = _JUDGEMENT_CORE_TASK_WILLINGNESS_PROMPT
 
     system_prompt = SystemMessage(content=prompt_template.format(
         character_name=state["character_profile"]["name"],
@@ -811,6 +874,8 @@ async def call_judgment_core_agent(state: dict[str, Any]) -> dict[str, Any]:
         "pressure_policy": boundary_core_assessment["pressure_policy"],
         "trajectory": boundary_core_assessment["trajectory"],
     }
+    if state.get("task_willingness_boundary_enabled") is True:
+        _add_task_willingness_context(msg, state)
     if str(selection["variant"]).startswith("text_chat_user_message"):
         msg["current_event_grounding"] = build_current_event_grounding_for_llm(
             user_input=state["user_input"],

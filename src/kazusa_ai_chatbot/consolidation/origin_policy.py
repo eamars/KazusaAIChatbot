@@ -15,6 +15,7 @@ WritePolicyKey = Literal[
     "affinity",
     "group_channel_style_image",
     "character_image",
+    "character_self_guidance",
     "cache_invalidation",
 ]
 
@@ -35,6 +36,7 @@ class ConsolidationWritePolicy(TypedDict):
     affinity: WritePolicyDecision
     group_channel_style_image: WritePolicyDecision
     character_image: WritePolicyDecision
+    character_self_guidance: WritePolicyDecision
     cache_invalidation: WritePolicyDecision
 
 
@@ -94,6 +96,7 @@ def build_consolidation_write_policy(
         "affinity": {"allowed": allowed, "reason": reason},
         "group_channel_style_image": {"allowed": allowed, "reason": reason},
         "character_image": {"allowed": allowed, "reason": reason},
+        "character_self_guidance": {"allowed": allowed, "reason": reason},
         "cache_invalidation": {"allowed": allowed, "reason": reason},
     }
     return policy

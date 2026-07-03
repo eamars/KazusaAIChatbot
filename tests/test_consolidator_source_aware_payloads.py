@@ -9,9 +9,6 @@ from typing import Any
 import pytest
 
 from kazusa_ai_chatbot.consolidation import (
-    facts as facts_module,
-)
-from kazusa_ai_chatbot.consolidation import (
     memory_units as memory_units_module,
 )
 from kazusa_ai_chatbot.consolidation import (
@@ -231,36 +228,6 @@ async def test_reflection_payloads_include_internal_thought_origin(
     _assert_internal_origin_payload(_human_payload(relationship_llm))
     _assert_source_aware_prompt(_system_prompt(global_llm))
     _assert_source_aware_prompt(_system_prompt(relationship_llm))
-
-
-@pytest.mark.asyncio
-async def test_fact_payloads_include_internal_thought_origin(monkeypatch) -> None:
-    """Fact harvester and evaluator should expose source identity."""
-    harvester_llm = _CaptureLLM({"new_facts": [], "future_promises": []})
-    evaluator_llm = _CaptureLLM(
-        {
-            "should_stop": True,
-            "feedback": "pass",
-            "contradiction_flags": [],
-        }
-    )
-    monkeypatch.setattr(facts_module, "_facts_harvester_llm", harvester_llm)
-    monkeypatch.setattr(
-        facts_module,
-        "_fact_harvester_evaluator_llm",
-        evaluator_llm,
-    )
-
-    state = _state()
-    state["fact_harvester_retry"] = 0
-    state["fact_harvester_feedback_message"] = []
-    await facts_module.facts_harvester(state)
-    await facts_module.fact_harvester_evaluator(state)
-
-    _assert_internal_origin_payload(_human_payload(harvester_llm))
-    _assert_internal_origin_payload(_human_payload(evaluator_llm))
-    _assert_source_aware_prompt(_system_prompt(harvester_llm))
-    _assert_source_aware_prompt(_system_prompt(evaluator_llm))
 
 
 @pytest.mark.asyncio

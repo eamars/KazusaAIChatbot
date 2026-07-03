@@ -14,6 +14,7 @@ from kazusa_ai_chatbot.cognition_episode import (
 from kazusa_ai_chatbot.consolidation import core as consolidator_module
 from kazusa_ai_chatbot.consolidation.origin import (
     ConsolidationOriginError,
+    build_reflection_consolidation_origin,
     build_self_cognition_consolidation_origin,
     build_user_message_consolidation_origin,
 )
@@ -94,6 +95,49 @@ def _self_cognition_episode(
         "origin_metadata": {
             "platform": "qq",
             "platform_message_id": "self_cognition:case-1",
+            "active_turn_platform_message_ids": [],
+            "active_turn_conversation_row_ids": [],
+            "debug_modes": {"no_visual_directives": True},
+        },
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
+    }
+    return episode
+
+
+def _reflection_episode(
+    output_mode: OutputMode = "preview",
+) -> CognitiveEpisode:
+    """Build a valid reflection-signal episode for origin tests."""
+
+    turn_clock = build_turn_clock("2026-05-10 22:00:00")
+    episode: CognitiveEpisode = {
+        "episode_id": "reflection-episode-1",
+        "trigger_source": "reflection_signal",
+        "input_sources": ["reflection_artifact"],
+        "output_mode": output_mode,
+        "percepts": [
+            {
+                "percept_id": "reflection-percept-1",
+                "input_source": "reflection_artifact",
+                "content": "Promoted reflection context.",
+                "visibility": "model_visible",
+                "metadata": {"source": "reflection_cycle"},
+            }
+        ],
+        "target_scope": {
+            "platform": "qq",
+            "platform_channel_id": "channel-1",
+            "channel_type": "private",
+            "current_platform_user_id": "",
+            "current_global_user_id": "",
+            "current_display_name": "",
+            "target_addressed_user_ids": [],
+            "target_broadcast": False,
+        },
+        "origin_metadata": {
+            "platform": "qq",
+            "platform_message_id": "reflection:case-1",
             "active_turn_platform_message_ids": [],
             "active_turn_conversation_row_ids": [],
             "debug_modes": {"no_visual_directives": True},
@@ -344,6 +388,62 @@ def test_self_cognition_origin_rejects_non_preview_output_mode() -> None:
         build_self_cognition_consolidation_origin(episode=episode)
 
 
+def test_build_reflection_consolidation_origin_returns_exact_metadata() -> None:
+    episode = _reflection_episode()
+
+    metadata = build_reflection_consolidation_origin(episode=episode)
+
+    expected_metadata = {
+        "episode_id": "reflection-episode-1",
+        "trigger_source": "reflection_signal",
+        "input_sources": ["reflection_artifact"],
+        "output_mode": "preview",
+        "storage_timestamp_utc": episode["storage_timestamp_utc"],
+        "platform": "qq",
+        "platform_channel_id": "channel-1",
+        "channel_type": "private",
+        "platform_message_id": "reflection:case-1",
+        "active_turn_platform_message_ids": [],
+        "active_turn_conversation_row_ids": [],
+        "current_platform_user_id": "",
+        "current_global_user_id": "",
+        "current_display_name": "",
+    }
+    assert metadata == expected_metadata
+
+
+def test_reflection_origin_rejects_non_reflection_trigger() -> None:
+    episode = deepcopy(_reflection_episode())
+    episode["trigger_source"] = "internal_thought"
+
+    with pytest.raises(ConsolidationOriginError):
+        build_reflection_consolidation_origin(episode=episode)
+
+
+def test_reflection_origin_rejects_non_reflection_sources() -> None:
+    episode = deepcopy(_reflection_episode())
+    episode["input_sources"] = ["reflection_artifact", "retrieved_memory"]
+    episode["percepts"].append(
+        {
+            "percept_id": "reflection-percept-2",
+            "input_source": "retrieved_memory",
+            "content": "retrieved memory",
+            "visibility": "model_visible",
+            "metadata": {},
+        }
+    )
+
+    with pytest.raises(ConsolidationOriginError):
+        build_reflection_consolidation_origin(episode=episode)
+
+
+def test_reflection_origin_rejects_visible_reply_output_mode() -> None:
+    episode = _reflection_episode(output_mode="visible_reply")
+
+    with pytest.raises(ConsolidationOriginError):
+        build_reflection_consolidation_origin(episode=episode)
+
+
 @pytest.mark.asyncio
 async def test_call_consolidation_subgraph_threads_origin_to_all_nodes(
     monkeypatch,
@@ -352,108 +452,96 @@ async def test_call_consolidation_subgraph_threads_origin_to_all_nodes(
     expected_origin = build_user_message_consolidation_origin(
         episode=state["cognitive_episode"],
     )
-    seen_origins = {}
+    seen_pipeline_state = {}
 
-    async def _global_state_updater(node_state: dict) -> dict:
-        """Capture origin metadata seen by the global-state updater.
+    async def _lane_pipeline(node_state: dict) -> dict:
+        """Capture origin metadata seen by the lane pipeline.
 
         Args:
-            node_state: Consolidator state passed into the patched node.
+            node_state: Consolidator state passed into the patched pipeline.
 
         Returns:
-            Deterministic global-state updater output.
+            Deterministic lane-pipeline packet.
         """
-        seen_origins["global_state_updater"] = node_state["consolidation_origin"]
-        return {
+        seen_pipeline_state.update(node_state)
+        pipeline_state = {
+            **node_state,
             "mood": "calm",
             "global_vibe": "steady",
             "reflection_summary": "summary",
-        }
-
-    async def _relationship_recorder(node_state: dict) -> dict:
-        """Capture origin metadata seen by the relationship recorder.
-
-        Args:
-            node_state: Consolidator state passed into the patched node.
-
-        Returns:
-            Deterministic relationship-recorder output.
-        """
-        seen_origins["relationship_recorder"] = node_state["consolidation_origin"]
-        return {
             "subjective_appraisals": [],
             "affinity_delta": 0,
             "last_relationship_insight": "",
-        }
-
-    async def _facts_harvester(node_state: dict) -> dict:
-        """Capture origin metadata seen by the facts harvester.
-
-        Args:
-            node_state: Consolidator state passed into the patched node.
-
-        Returns:
-            Deterministic facts-harvester output that exercises the evaluator.
-        """
-        seen_origins["facts_harvester"] = node_state["consolidation_origin"]
-        return {
             "new_facts": [{"fact": "User likes tea"}],
             "future_promises": [],
+            "metadata": {"write_success": {}},
+        }
+        return {
+            "router_tasks": [],
+            "state": pipeline_state,
         }
 
-    async def _fact_harvester_evaluator(node_state: dict) -> dict:
-        """Capture origin metadata seen by the fact evaluator.
-
-        Args:
-            node_state: Consolidator state passed into the patched node.
-
-        Returns:
-            Deterministic evaluator output that ends the loop.
-        """
-        seen_origins["fact_harvester_evaluator"] = node_state[
-            "consolidation_origin"
-        ]
-        return {"should_stop": True}
-
-    async def _db_writer(node_state: dict) -> dict:
-        """Capture origin metadata seen by the persistence boundary.
-
-        Args:
-            node_state: Consolidator state passed into the patched node.
-
-        Returns:
-            Deterministic persistence metadata.
-        """
-        seen_origins["db_writer"] = node_state["consolidation_origin"]
-        return {"metadata": {"write_success": {}}}
-
     monkeypatch.setattr(
         consolidator_module,
-        "global_state_updater",
-        _global_state_updater,
+        "run_consolidation_lane_pipeline",
+        _lane_pipeline,
     )
-    monkeypatch.setattr(
-        consolidator_module,
-        "relationship_recorder",
-        _relationship_recorder,
-    )
-    monkeypatch.setattr(consolidator_module, "facts_harvester", _facts_harvester)
-    monkeypatch.setattr(
-        consolidator_module,
-        "fact_harvester_evaluator",
-        _fact_harvester_evaluator,
-    )
-    monkeypatch.setattr(consolidator_module, "db_writer", _db_writer)
 
     await consolidator_module.call_consolidation_subgraph(state)
 
-    assert seen_origins == {
-        "global_state_updater": expected_origin,
-        "relationship_recorder": expected_origin,
-        "facts_harvester": expected_origin,
-        "fact_harvester_evaluator": expected_origin,
-        "db_writer": expected_origin,
-    }
+    assert seen_pipeline_state["consolidation_origin"] == expected_origin
+    assert "consolidation_target_plan" in seen_pipeline_state
+
+
+@pytest.mark.asyncio
+async def test_call_consolidation_subgraph_accepts_reflection_signal_origin(
+    monkeypatch,
+) -> None:
+    state = _global_state()
+    state["cognitive_episode"] = _reflection_episode()
+    state["global_user_id"] = ""
+    state["user_name"] = ""
+    state["user_profile"] = {}
+    state["decontexualized_input"] = ""
+    state["final_dialog"] = []
+    expected_origin = build_reflection_consolidation_origin(
+        episode=state["cognitive_episode"],
+    )
+    seen_pipeline_state = {}
+
+    async def _lane_pipeline(node_state: dict) -> dict:
+        """Capture reflection origin metadata passed to the lane pipeline."""
+
+        seen_pipeline_state.update(node_state)
+        pipeline_state = {
+            **node_state,
+            "mood": "",
+            "global_vibe": "",
+            "reflection_summary": "",
+            "subjective_appraisals": [],
+            "affinity_delta": 0,
+            "last_relationship_insight": "",
+            "new_facts": [],
+            "future_promises": [],
+            "metadata": {"write_success": {}},
+        }
+        return {
+            "router_tasks": [],
+            "state": pipeline_state,
+        }
+
+    monkeypatch.setattr(
+        consolidator_module,
+        "run_consolidation_lane_pipeline",
+        _lane_pipeline,
+    )
+
+    await consolidator_module.call_consolidation_subgraph(state)
+
+    assert seen_pipeline_state["consolidation_origin"] == expected_origin
+    assert seen_pipeline_state["consolidation_target_plan"]["origin_kind"] == (
+        "reflection_signal"
+    )
 
 
 @pytest.mark.asyncio
@@ -462,124 +550,56 @@ async def test_unsupported_origin_fails_before_state_graph_construction(
 ) -> None:
     state = _global_state()
     episode = deepcopy(state["cognitive_episode"])
-    episode["trigger_source"] = "reflection_signal"
+    episode["trigger_source"] = "scheduled_recall"
     state["cognitive_episode"] = episode
-    graph_construction_calls = []
+    pipeline_calls = []
 
-    def _state_graph(_state_type: object) -> object:
-        """Record unexpected graph construction attempts.
+    async def _lane_pipeline(node_state: dict) -> dict:
+        """Record unexpected lane-pipeline attempts."""
+        pipeline_calls.append(node_state)
+        raise AssertionError("lane pipeline must not run")
 
-        Args:
-            _state_type: State type passed to the graph constructor.
-
-        Returns:
-            This helper never returns because graph construction is forbidden.
-
-        Raises:
-            AssertionError: Always, if graph construction is attempted.
-        """
-        graph_construction_calls.append(_state_type)
-        raise AssertionError("StateGraph must not be constructed")
-
-    monkeypatch.setattr(consolidator_module, "StateGraph", _state_graph)
+    monkeypatch.setattr(
+        consolidator_module,
+        "run_consolidation_lane_pipeline",
+        _lane_pipeline,
+    )
 
     with pytest.raises(ConsolidationOriginError):
         await consolidator_module.call_consolidation_subgraph(state)
 
-    assert graph_construction_calls == []
+    assert pipeline_calls == []
 
 
 @pytest.mark.asyncio
 async def test_call_consolidation_subgraph_does_not_return_origin_metadata(
     monkeypatch,
 ) -> None:
-    async def _global_state_updater(node_state: dict) -> dict:
-        """Return stable global-state output after seeing origin metadata.
-
-        Args:
-            node_state: Consolidator state passed into the patched node.
-
-        Returns:
-            Deterministic global-state updater output.
-        """
+    async def _lane_pipeline(node_state: dict) -> dict:
+        """Return durable metadata without exposing origin metadata."""
         assert node_state["consolidation_origin"]["episode_id"] == "episode-1"
-        return {
+        pipeline_state = {
+            **node_state,
             "mood": "calm",
             "global_vibe": "steady",
             "reflection_summary": "summary",
-        }
-
-    async def _relationship_recorder(node_state: dict) -> dict:
-        """Return stable relationship output after seeing origin metadata.
-
-        Args:
-            node_state: Consolidator state passed into the patched node.
-
-        Returns:
-            Deterministic relationship-recorder output.
-        """
-        assert node_state["consolidation_origin"]["episode_id"] == "episode-1"
-        return {
             "subjective_appraisals": [],
             "affinity_delta": 0,
             "last_relationship_insight": "",
+            "new_facts": [],
+            "future_promises": [],
+            "metadata": {"write_success": {"character_state": True}},
+        }
+        return {
+            "router_tasks": [],
+            "state": pipeline_state,
         }
 
-    async def _facts_harvester(node_state: dict) -> dict:
-        """Return no facts after seeing origin metadata.
-
-        Args:
-            node_state: Consolidator state passed into the patched node.
-
-        Returns:
-            Empty facts and promises so the evaluator is skipped.
-        """
-        assert node_state["consolidation_origin"]["episode_id"] == "episode-1"
-        return {"new_facts": [], "future_promises": []}
-
-    async def _fact_harvester_evaluator(_node_state: dict) -> dict:
-        """Fail if the evaluator runs for empty harvester output.
-
-        Args:
-            _node_state: Unused consolidator state for an unexpected call.
-
-        Returns:
-            This helper never returns during a valid test path.
-
-        Raises:
-            AssertionError: Always, because the evaluator should be skipped.
-        """
-        raise AssertionError("fact evaluator should be skipped")
-
-    async def _db_writer(node_state: dict) -> dict:
-        """Return durable metadata without exposing origin metadata.
-
-        Args:
-            node_state: Consolidator state passed into the patched node.
-
-        Returns:
-            Deterministic durable metadata without origin fields.
-        """
-        assert node_state["consolidation_origin"]["episode_id"] == "episode-1"
-        return {"metadata": {"write_success": {"character_state": True}}}
-
     monkeypatch.setattr(
         consolidator_module,
-        "global_state_updater",
-        _global_state_updater,
+        "run_consolidation_lane_pipeline",
+        _lane_pipeline,
     )
-    monkeypatch.setattr(
-        consolidator_module,
-        "relationship_recorder",
-        _relationship_recorder,
-    )
-    monkeypatch.setattr(consolidator_module, "facts_harvester", _facts_harvester)
-    monkeypatch.setattr(
-        consolidator_module,
-        "fact_harvester_evaluator",
-        _fact_harvester_evaluator,
-    )
-    monkeypatch.setattr(consolidator_module, "db_writer", _db_writer)
 
     result = await consolidator_module.call_consolidation_subgraph(_global_state())
 

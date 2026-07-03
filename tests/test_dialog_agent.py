@@ -53,7 +53,7 @@ def _base_global_state():
                 "linguistic_style": "warm and concise",
                 "content_plan": {
                     "semantic_content": "Greet the user warmly.",
-                    "rendering": "One visible chat bubble; concise.",
+                    "rendering": "One outbound message; concise.",
                 },
                 "forbidden_phrases": [],
             },
@@ -150,7 +150,7 @@ def test_validate_dialog_action_directives_accepts_complete_directives() -> None
 
     assert linguistic_directives["content_plan"] == {
         "semantic_content": "Greet the user warmly.",
-        "rendering": "One visible chat bubble; concise.",
+        "rendering": "One outbound message; concise.",
     }
     assert contextual_directives is state["action_directives"][
         "contextual_directives"
@@ -191,7 +191,7 @@ def test_dialog_prompts_preserve_multi_part_deliverables() -> None:
         '重锚定说话视角',
         '按内容类型渲染',
         '选择角色表达',
-        '组织单气泡布局',
+        '组织消息序列',
         '多项步骤、候选、风险、对比或时间段',
         '覆盖主要项',
         '不能改变事实或造成歧义',
@@ -216,22 +216,39 @@ def test_dialog_prompts_preserve_multi_part_deliverables() -> None:
         assert forbidden_text not in generator_prompt
 
 
-def test_dialog_generator_prompt_describes_one_bubble_layout_contract() -> None:
-    """Generator prompt should describe final_dialog as one visible bubble."""
+def test_dialog_generator_prompt_describes_message_sequence_contract() -> None:
+    """Generator prompt should describe final_dialog as outbound messages."""
 
     prompt = _DIALOG_GENERATOR_PROMPT
 
-    assert '一个聊天气泡' in prompt
-    assert '运行时会用换行连接 `final_dialog`' in prompt
-    assert '布局单位' in prompt
-    assert '每个元素写可见文字或一个完整固定格式块' in prompt
+    assert '`final_dialog` 的每个字符串都是一条完整的普通在线文字消息' in prompt
+    assert '按 `content_plan.rendering` 生成 1-N 条消息' in prompt
+    assert '连续发送' in prompt
+    assert '每个元素写一条可独立发送的可见文字' in prompt
     assert '停顿用标点和句子节奏表达' in prompt
     assert '回答从左花括号开始，以右花括号结束' in prompt
     assert '输出前自检' in prompt
+    retired_layout = ''.join(('一个', '\u804a\u5929\u6c14\u6ce1'))
+    retired_join = '运行时会用' + '换行连接 `final_dialog`'
+    retired_layout_unit = '布局' + '单位'
+    assert retired_layout not in prompt
+    assert retired_join not in prompt
+    assert retired_layout_unit not in prompt
     assert '平台分别发送' not in prompt
     assert '打一段、发一段' not in prompt
-    assert '要发送的台词片段' not in prompt
     assert '使用 6-12 个短字符串片段是允许的' not in prompt
+
+
+def test_dialog_generator_prompt_allows_inline_tag_sign() -> None:
+    """Generator prompt should let dialog author visible inline tags."""
+
+    prompt = _DIALOG_GENERATOR_PROMPT
+    retired_field = "mention" + "_target_user"
+
+    assert '@display_name' in prompt
+    assert retired_field not in prompt
+    assert '用户 ID' not in prompt
+    assert '平台标签' not in prompt
 
 
 def test_dialog_prompts_preserve_fixed_format_blocks() -> None:
@@ -263,10 +280,7 @@ async def test_dialog_agent_preserves_generator_fragment_text(
     state = _base_global_state()
     generator_llm = MagicMock()
     generator_llm.ainvoke = AsyncMock(return_value=AIMessage(
-        content=(
-            '{"final_dialog": ["raw<br>fragment"], '
-            '"mention_target_user": false}'
-        )
+        content='{"final_dialog": ["raw<br>fragment"]}'
     ))
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
 
@@ -301,6 +315,10 @@ def test_dialog_prompts_use_content_plan_as_semantic_authority() -> None:
         '叙述句和分析句先转成角色当场聊天的互动骨架',
         '角色表达依据只能作用在已经重锚定好的台词上',
         '保持同义且不矛盾',
+        '技术和事实场景里的调侃只落在开头、转接或收尾的轻重',
+        '吐槽对象只能是交付语气或角色整理信息的姿态',
+        '如果计划只说“更适合”，台词仍保留为“更适合”',
+        '技术场景里的吐槽是否只影响交付语气',
         '不丢失主要信息、不制造计划外结论',
         '固定格式块必须作为 `final_dialog` 数组里的字符串元素输出',
         '外层回复仍然必须是合法 JSON 对象',
@@ -589,7 +607,7 @@ async def test_dialog_agent_ignores_retired_response_field(monkeypatch):
     ] = "silent"
     generator_llm = MagicMock()
     generator_llm.ainvoke = AsyncMock(return_value=AIMessage(
-        content='{"final_dialog": ["Still answering."], "mention_target_user": false}'
+        content='{"final_dialog": ["Still answering."]}'
     ))
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
 
@@ -598,5 +616,7 @@ async def test_dialog_agent_ignores_retired_response_field(monkeypatch):
     assert result["final_dialog"] == ["Still answering."]
     assert result["target_addressed_user_ids"] == ["global-user-123"]
     assert result["target_broadcast"] is False
+    retired_field = "mention" + "_target_user"
+    assert retired_field not in result
     generator_llm.ainvoke.assert_awaited_once()
 

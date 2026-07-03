@@ -92,6 +92,10 @@ def _judgment_state() -> dict:
         "logical_stance": "CONFIRM",
         "character_intent": "PROVIDE",
         "cognitive_episode": _cognitive_episode(),
+        "user_input": "hello",
+        "prompt_message_context": {},
+        "reply_context": {},
+        "user_name": "User",
         "referents": [
             {"phrase": "这些", "referent_role": "object", "status": "unresolved"}
         ],
@@ -135,6 +139,10 @@ def _content_plan_state() -> dict:
         "logical_stance": "TENTATIVE",
         "character_intent": "CLARIFY",
         "cognitive_episode": _cognitive_episode(),
+        "user_input": "hello",
+        "prompt_message_context": {},
+        "reply_context": {},
+        "user_name": "User",
         "conversation_progress": None,
     }
 

@@ -4,13 +4,24 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 from uuid import uuid4
 
 from openai import OpenAIError
 
 from kazusa_ai_chatbot import event_logging
+from kazusa_ai_chatbot.complex_task_resolver import (
+    COMPLEX_TASK_RESOLVER_CONTEXT_VERSION,
+    COMPLEX_TASK_RESOLVER_OPTIONS_VERSION,
+    COMPLEX_TASK_RESOLVER_REQUEST_VERSION,
+    ComplexTaskValidationError,
+    project_complex_task_packet,
+    resolve_complex_task,
+    validate_complex_task_resolver_context,
+    validate_complex_task_resolver_options,
+    validate_complex_task_resolver_request,
+)
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_OBSERVATION_VERSION,
     ResolverCapabilityRequestV1,
@@ -333,8 +344,14 @@ async def execute_resolver_capability_request(
 
     validated_request = validate_resolver_capability_request(request)
     capability_kind = validated_request["capability_kind"]
-    if capability_kind in {"rag_evidence", "web_evidence"}:
-        observation = await _execute_rag_like_capability(
+    if capability_kind == "local_context_recall":
+        observation = await _execute_local_context_recall(
+            validated_request,
+            state,
+        )
+        return observation
+    if capability_kind == "public_answer_research":
+        observation = await _execute_public_answer_research(
             validated_request,
             state,
         )
@@ -360,11 +377,11 @@ async def execute_resolver_capability_request(
     raise ResolverValidationError(f"unsupported capability: {capability_kind}")
 
 
-async def _execute_rag_like_capability(
+async def _execute_local_context_recall(
     request: ResolverCapabilityRequestV1,
     state: GlobalPersonaState,
 ) -> ResolverObservationV1:
-    """Execute RAG or web evidence through the existing RAG supervisor path."""
+    """Execute local/private context recall through existing persona RAG."""
 
     rag_result = await run_rag_evidence_for_persona_state(
         state,
@@ -378,6 +395,77 @@ async def _execute_rag_like_capability(
         prompt_safe_summary=_rag_observation_summary(rag_result),
     )
     observation["rag_result"] = rag_result
+    return_value = validate_resolver_observation(observation)
+    return return_value
+
+
+async def _execute_public_answer_research(
+    request: ResolverCapabilityRequestV1,
+    state: GlobalPersonaState,
+) -> ResolverObservationV1:
+    """Execute public answer research through the complex resolver IO."""
+
+    resolver_request = validate_complex_task_resolver_request({
+        "schema_version": COMPLEX_TASK_RESOLVER_REQUEST_VERSION,
+        "objective": request["objective"],
+        "reason": request["reason"],
+        "source": "l2d",
+        "priority": "normal",
+    })
+    resolver_context = validate_complex_task_resolver_context({
+        "schema_version": COMPLEX_TASK_RESOLVER_CONTEXT_VERSION,
+        "conversation_summary": text_or_empty(state.get("decontexualized_input")),
+        "persona_context_summary": _complex_task_persona_context_summary(state),
+        "time_context": _complex_task_time_context(state),
+        "available_evidence": [],
+    })
+    resolver_options = validate_complex_task_resolver_options({
+        "schema_version": COMPLEX_TASK_RESOLVER_OPTIONS_VERSION,
+        "limits": {},
+    })
+
+    try:
+        packet = await resolve_complex_task(
+            resolver_request,
+            resolver_context,
+            resolver_options,
+        )
+    except ComplexTaskValidationError as exc:
+        observation = _complex_task_failure_observation(request, state, exc)
+        return observation
+
+    try:
+        packet_projection = project_complex_task_packet(packet)
+    except ComplexTaskValidationError as exc:
+        observation = _complex_task_failure_observation(request, state, exc)
+        return observation
+
+    observation = _observation_base(
+        request,
+        state,
+        status="succeeded",
+        prompt_safe_summary=_complex_task_observation_summary(
+            packet_projection,
+        ),
+    )
+    observation["evidence_refs"] = _complex_task_evidence_refs(packet)
+    observation["knowledge_projection"] = {
+        "investigation_summary": text_or_empty(
+            packet_projection["investigation_summary"],
+        ),
+        "knowledge_we_know_so_far": _string_list(
+            packet_projection["knowledge_we_know_so_far"],
+        ),
+        "knowledge_still_lacking": _string_list(
+            packet_projection["knowledge_still_lacking"],
+        ),
+        "recommended_next_iteration": _string_list(
+            packet_projection["recommended_next_iteration"],
+        ),
+        "evidence_boundary_notes": _string_list(
+            packet_projection["evidence_boundary_notes"],
+        ),
+    }
     return_value = validate_resolver_observation(observation)
     return return_value
 
@@ -441,6 +529,23 @@ def _self_goal_resolution_observation(
     return return_value
 
 
+def _complex_task_failure_observation(
+    request: ResolverCapabilityRequestV1,
+    state: GlobalPersonaState,
+    exc: ComplexTaskValidationError,
+) -> ResolverObservationV1:
+    """Build a failed observation when public research packet IO is invalid."""
+
+    observation = _observation_base(
+        request,
+        state,
+        status="failed",
+        prompt_safe_summary=f"public_answer_research failed: {exc}",
+    )
+    return_value = validate_resolver_observation(observation)
+    return return_value
+
+
 def _cognitive_episode_trigger_source(state: GlobalPersonaState) -> str:
     """Read the trigger source that owns self-resolution eligibility."""
 
@@ -477,6 +582,118 @@ def _observation_base(
         "created_at_utc": _created_at_utc(state),
     }
     return observation
+
+
+def _complex_task_persona_context_summary(state: GlobalPersonaState) -> str:
+    """Build a compact persona summary without raw platform identifiers."""
+
+    segments: list[str] = []
+    character_profile = state.get("character_profile")
+    if isinstance(character_profile, Mapping):
+        character_name = text_or_empty(character_profile.get("name"))
+        if character_name:
+            segments.append(f"active_character={character_name}")
+    user_name = text_or_empty(state.get("user_name"))
+    if user_name:
+        segments.append(f"current_user_display_name={user_name}")
+    channel_type = text_or_empty(state.get("channel_type"))
+    if channel_type:
+        segments.append(f"channel_type={channel_type}")
+    summary = "; ".join(segments)
+    return summary
+
+
+def _complex_task_time_context(state: GlobalPersonaState) -> dict[str, object]:
+    """Return prompt-safe time context for public answer research."""
+
+    raw_time_context = state.get("local_time_context")
+    if isinstance(raw_time_context, Mapping):
+        time_context = dict(raw_time_context)
+        return time_context
+    storage_timestamp = text_or_empty(state.get("storage_timestamp_utc"))
+    if storage_timestamp:
+        time_context = {"storage_timestamp_utc": storage_timestamp}
+        return time_context
+    time_context: dict[str, object] = {}
+    return time_context
+
+
+def _complex_task_observation_summary(
+    packet_projection: dict[str, object],
+) -> str:
+    """Build the prompt-safe semantic summary shown to cognition."""
+
+    summary = text_or_empty(packet_projection["investigation_summary"])
+    if summary:
+        return_value = summary
+        return return_value
+
+    segments = ["public_answer_research returned semantic knowledge"]
+    lacking_items = _string_list(packet_projection["knowledge_still_lacking"])
+    if lacking_items:
+        segments.append("lacking=" + " | ".join(lacking_items))
+    recommendations = _string_list(
+        packet_projection["recommended_next_iteration"]
+    )
+    if recommendations:
+        segments.append("next=" + " | ".join(recommendations))
+    trace_summary = packet_projection.get("trace_summary")
+    if isinstance(trace_summary, Mapping):
+        failure_reason = text_or_empty(trace_summary.get("failure_reason"))
+        if failure_reason:
+            segments.append(f"failure_reason={failure_reason}")
+    summary = "; ".join(segments)
+    return summary
+
+
+def _complex_task_evidence_refs(packet: object) -> list[dict[str, object]]:
+    """Collect typed evidence refs from a complex resolver packet."""
+
+    if not isinstance(packet, Mapping):
+        evidence_refs: list[dict[str, object]] = []
+        return evidence_refs
+
+    evidence_refs = _mapping_list_items(packet.get("evidence_refs"))
+    graph = packet.get("graph")
+    if not isinstance(graph, Mapping):
+        return evidence_refs
+    nodes = graph.get("nodes")
+    if not isinstance(nodes, Mapping):
+        return evidence_refs
+    for node in nodes.values():
+        if not isinstance(node, Mapping):
+            continue
+        node_refs = _mapping_list_items(node.get("evidence_refs"))
+        evidence_refs.extend(node_refs)
+    return evidence_refs
+
+
+def _string_list(value: object) -> list[str]:
+    """Return stripped strings from a list-like packet projection field."""
+
+    if not isinstance(value, list):
+        items: list[str] = []
+        return items
+    items = [
+        item.strip()
+        for item in value
+        if isinstance(item, str) and item.strip()
+    ]
+    return items
+
+
+def _mapping_list_items(value: object) -> list[dict[str, object]]:
+    """Return mapping items as plain dictionaries from an optional list."""
+
+    if not isinstance(value, list):
+        items: list[dict[str, object]] = []
+        return items
+    items = [
+        dict(item)
+        for item in value
+        if isinstance(item, Mapping)
+    ]
+    return items
 
 
 def _empty_projected_rag_result(state: GlobalPersonaState) -> dict[str, Any]:

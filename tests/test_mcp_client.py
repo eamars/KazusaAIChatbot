@@ -98,8 +98,6 @@ async def test_call_tool_disconnected_server_returns_error():
 async def test_call_tool_concatenates_multiple_text_blocks():
     """Tool returning multiple text blocks should be joined with newlines."""
     session = FakeSession()
-    # Override with multi-block response
-    original_call = session.call_tool
 
     async def multi_block_call(name, arguments):
         return CallToolResult(content=[

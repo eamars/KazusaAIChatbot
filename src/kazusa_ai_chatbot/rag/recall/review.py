@@ -18,11 +18,8 @@ from kazusa_ai_chatbot.config import (
 )
 from kazusa_ai_chatbot.rag.recall.contracts import (
     _ACTIVE_MODES,
-    _CANDIDATE_CLAIM_LIMIT,
     _CONFLICT_LIMIT,
-    _CONFLICT_TEXT_LIMIT,
     _SOURCE_ORDERS,
-    _clip_text,
 )
 from kazusa_ai_chatbot.utils import parse_llm_json_output, text_or_empty
 

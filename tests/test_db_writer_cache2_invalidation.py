@@ -80,6 +80,11 @@ def _state() -> dict:
         "affinity_delta": 1,
         "decontexualized_input": "remember tea",
         "consolidation_origin": _consolidation_origin(),
+        "enabled_consolidation_write_lanes": [
+            "character_state",
+            "relationship_profile",
+            "user_memory_units",
+        ],
     }
     state["consolidation_target_plan"] = build_consolidation_target_plan(state)
     return state

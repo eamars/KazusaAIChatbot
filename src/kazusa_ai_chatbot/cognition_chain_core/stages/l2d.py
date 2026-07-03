@@ -14,7 +14,7 @@ from kazusa_ai_chatbot.cognition_chain_core.contracts import (
 from kazusa_ai_chatbot.cognition_chain_core.action_selection import (
     ACTION_REQUEST_CAP,
     OPEN_GOAL_DELIVERABLE_STATUSES,
-    build_action_selection_payload_text,
+    build_action_selection_payload_text as build_action_selection_payload_text,
     route_action_requests,
 )
 from kazusa_ai_chatbot.cognition_resolver.contracts import (

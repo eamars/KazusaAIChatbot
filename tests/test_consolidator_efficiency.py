@@ -125,37 +125,40 @@ def test_build_existing_dedup_keys_ignores_memory_unit_context() -> None:
 
 
 @pytest.mark.asyncio
-async def test_empty_harvester_output_skips_evaluator(monkeypatch) -> None:
-    calls = {"evaluator": 0}
+async def test_empty_lane_router_output_skips_persistence_work(monkeypatch) -> None:
+    calls = {"pipeline": 0}
 
-    async def _global_state_updater(_state):
-        return {"mood": "", "global_vibe": "", "reflection_summary": ""}
-
-    async def _relationship_recorder(_state):
-        return {"subjective_appraisals": [], "affinity_delta": 0, "last_relationship_insight": ""}
-
-    async def _facts_harvester(state):
+    async def _lane_pipeline(state):
+        calls["pipeline"] += 1
         assert state["existing_dedup_keys"] == set()
-        return {"new_facts": [], "future_promises": []}
+        pipeline_state = {
+            **state,
+            "mood": "",
+            "global_vibe": "",
+            "reflection_summary": "",
+            "subjective_appraisals": [],
+            "affinity_delta": 0,
+            "last_relationship_insight": "",
+            "new_facts": [],
+            "future_promises": [],
+            "metadata": {"write_success": {}},
+        }
+        return {"router_tasks": [], "state": pipeline_state}
 
-    async def _fact_harvester_evaluator(_state):
-        calls["evaluator"] += 1
-        return {"should_stop": True}
-
-    async def _db_writer(_state):
-        return {"metadata": {"write_success": {}}}
-
-    monkeypatch.setattr(consolidator_module, "global_state_updater", _global_state_updater)
-    monkeypatch.setattr(consolidator_module, "relationship_recorder", _relationship_recorder)
-    monkeypatch.setattr(consolidator_module, "facts_harvester", _facts_harvester)
-    monkeypatch.setattr(consolidator_module, "fact_harvester_evaluator", _fact_harvester_evaluator)
-    monkeypatch.setattr(consolidator_module, "db_writer", _db_writer)
+    monkeypatch.setattr(
+        consolidator_module,
+        "run_consolidation_lane_pipeline",
+        _lane_pipeline,
+    )
 
     result = await consolidator_module.call_consolidation_subgraph(_global_state())
 
-    assert calls["evaluator"] == 0
+    assert calls["pipeline"] == 1
     assert result["new_facts"] == []
     assert result["future_promises"] == []
+    assert result["consolidation_metadata"]["write_success"] == {}
+    assert result["consolidation_metadata"]["cache_evicted_count"] == 0
+    assert result["consolidation_metadata"]["cache_invalidated"] == []
 
 
 @pytest.mark.asyncio
@@ -208,6 +211,7 @@ async def test_db_writer_runs_image_updaters_through_gather(monkeypatch) -> None
         "affinity_delta": 0,
         "decontexualized_input": "hello",
         "consolidation_origin": _consolidation_origin(),
+        "enabled_consolidation_write_lanes": ["character_state"],
     }
     state["consolidation_target_plan"] = build_consolidation_target_plan(state)
 

@@ -13,6 +13,8 @@ MEMORY_LIFECYCLE_UPDATE_CAPABILITY = "memory_lifecycle_update"
 APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY = "apply_memory_lifecycle_update"
 SPEAK_CAPABILITY = "speak"
 TRIGGER_FUTURE_COGNITION_CAPABILITY = "trigger_future_cognition"
+FUTURE_SPEAK_CAPABILITY = "future_speak"
+ACCEPTED_TASK_STATUS_CHECK_CAPABILITY = "accepted_task_status_check"
 BACKGROUND_ARTIFACT_REQUEST_CAPABILITY = "background_artifact_request"
 BACKGROUND_WORK_REQUEST_CAPABILITY = "background_work_request"
 
@@ -27,6 +29,10 @@ def build_initial_action_capabilities() -> dict[str, CapabilitySpecV1]:
         ),
         SPEAK_CAPABILITY: _speak_capability(),
         TRIGGER_FUTURE_COGNITION_CAPABILITY: _future_cognition_capability(),
+        FUTURE_SPEAK_CAPABILITY: _future_speak_capability(),
+        ACCEPTED_TASK_STATUS_CHECK_CAPABILITY: (
+            _accepted_task_status_check_capability()
+        ),
         BACKGROUND_ARTIFACT_REQUEST_CAPABILITY: (
             _background_artifact_capability()
         ),
@@ -50,6 +56,10 @@ def project_prompt_affordances(
             projection.append(_speak_projection())
         elif capability_kind == TRIGGER_FUTURE_COGNITION_CAPABILITY:
             projection.append(_future_cognition_projection())
+        elif capability_kind == FUTURE_SPEAK_CAPABILITY:
+            projection.append(_future_speak_projection())
+        elif capability_kind == ACCEPTED_TASK_STATUS_CHECK_CAPABILITY:
+            projection.append(_accepted_task_status_check_projection())
         elif capability_kind == BACKGROUND_ARTIFACT_REQUEST_CAPABILITY:
             continue
         elif capability_kind == BACKGROUND_WORK_REQUEST_CAPABILITY:
@@ -224,6 +234,50 @@ def _future_cognition_capability() -> CapabilitySpecV1:
     return return_value
 
 
+def _future_speak_capability() -> CapabilitySpecV1:
+    """Build the background-work-owned future-speak request capability."""
+
+    return_value: CapabilitySpecV1 = {
+        "schema_version": "capability_spec.v1",
+        "capability_kind": FUTURE_SPEAK_CAPABILITY,
+        "category": "action",
+        "owner_module": "background_work",
+        "input_schema": {
+            "type": "object",
+            "required": [
+                "trigger_at",
+                "continuation_objective",
+                "requested_delivery",
+                "max_output_chars",
+            ],
+            "properties": {
+                "trigger_at": {"type": "string"},
+                "continuation_objective": {"type": "string"},
+                "requested_delivery": {
+                    "type": "string",
+                    "enum": ["send_result_when_done"],
+                },
+                "max_output_chars": {"type": "integer"},
+            },
+        },
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string"},
+                "queue_state": {"type": "string"},
+                "task_summary": {"type": "string"},
+            },
+        },
+        "handler_id": "background_work.future_speak.enqueue.v1",
+        "lifecycle_hooks": ["validate", "enqueue_background_work"],
+        "permission_policy": "policy:background_work.future_speak.v1",
+        "rate_limit_policy": "policy:action.default_rate_limit.v1",
+        "audit_policy": "policy:action.audit.v1",
+        "prompt_projection_policy": "policy:prompt.action_safe.v1",
+    }
+    return return_value
+
+
 def _background_artifact_capability() -> CapabilitySpecV1:
     """Build the text-only background artifact request capability."""
 
@@ -338,19 +392,19 @@ def _background_artifact_projection() -> dict[str, object]:
 
 
 def _background_work_projection() -> dict[str, object]:
-    """Return prompt-safe generic background-work affordance metadata."""
+    """Return prompt-safe accepted delayed-task affordance metadata."""
 
     return_value = {
         "capability": BACKGROUND_WORK_REQUEST_CAPABILITY,
         "available": True,
         "visibility": "private",
         "semantic_input_summary": [
-            "Use only for accepted bounded background text work.",
-            "Provide a route reason and detail, not worker names or task types.",
+            "Use only when the character accepts bounded delayed text work.",
+            "Provide a task reason and detail, not execution internals.",
             "Pair this private request with a visible speak acknowledgement.",
         ],
         "execution_boundary": (
-            "durable background-work queue routes to a worker after chat"
+            "durable accepted-task lifecycle records the task before chat acknowledgement"
         ),
     }
     return return_value
@@ -368,6 +422,83 @@ def _future_cognition_projection() -> dict[str, object]:
             "Provide the semantic reason and any ordinary-language timing hint.",
         ],
         "execution_boundary": "downstream scheduler builds the executable request",
+    }
+    return return_value
+
+
+def _accepted_task_status_check_capability() -> CapabilitySpecV1:
+    """Build the accepted-task status-check capability spec."""
+
+    return_value: CapabilitySpecV1 = {
+        "schema_version": "capability_spec.v1",
+        "capability_kind": ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
+        "category": "action",
+        "owner_module": "accepted_task",
+        "input_schema": {
+            "type": "object",
+            "required": [],
+            "properties": {},
+        },
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string"},
+                "accepted_task_state": {"type": "string"},
+                "accepted_task_summary": {"type": "string"},
+            },
+        },
+        "handler_id": "accepted_task.status_check.v1",
+        "lifecycle_hooks": ["validate", "status_lookup"],
+        "permission_policy": "policy:accepted_task.status_check.v1",
+        "rate_limit_policy": "policy:action.default_rate_limit.v1",
+        "audit_policy": "policy:action.audit.v1",
+        "prompt_projection_policy": "policy:prompt.action_safe.v1",
+    }
+    return return_value
+
+
+def _future_speak_projection() -> dict[str, object]:
+    """Return prompt-safe future-speak affordance metadata."""
+
+    return_value = {
+        "capability": FUTURE_SPEAK_CAPABILITY,
+        "available": True,
+        "visibility": "private",
+        "semantic_input_summary": [
+            (
+                "Use when the character accepts a future reminder or delayed "
+                "follow-up message."
+            ),
+            (
+                "Put the exact configured-local trigger time in decision as "
+                "YYYY-MM-DD HH:MM."
+            ),
+            (
+                "Put only the semantic future-speaking objective in detail; "
+                "do not write final message text."
+            ),
+            "Pair this private request with a visible speak acknowledgement.",
+        ],
+        "execution_boundary": (
+            "durable delayed-task executor schedules a future cognition slot"
+        ),
+    }
+    return return_value
+
+
+def _accepted_task_status_check_projection() -> dict[str, object]:
+    """Return prompt-safe accepted-task status affordance metadata."""
+
+    return_value = {
+        "capability": ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
+        "available": True,
+        "visibility": "private",
+        "semantic_input_summary": [
+            "Use when the user asks about already accepted delayed work.",
+            "Do not include worker, queue, or job parameters.",
+            "Pair this private check with a visible speak progress answer.",
+        ],
+        "execution_boundary": "durable accepted-task lifecycle status lookup",
     }
     return return_value
 

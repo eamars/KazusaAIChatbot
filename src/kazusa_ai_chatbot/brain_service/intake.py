@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 
+from kazusa_ai_chatbot.channel_scene_projection import usable_channel_label
 from kazusa_ai_chatbot.chat_input_queue import QueuedChatItem
 from kazusa_ai_chatbot.message_envelope import MessageEnvelope
 from kazusa_ai_chatbot.state import ReplyContext
@@ -246,6 +247,12 @@ async def save_user_message_from_item(
         "reply_context": reply_context,
         "timestamp": item.storage_timestamp_utc,
     }
+    channel_name = usable_channel_label(
+        channel_type=req.channel_type,
+        channel_name=req.channel_name,
+    )
+    if channel_name:
+        conversation_doc["channel_name"] = channel_name
 
     try:
         inserted_row_id = await save_conversation_func(conversation_doc)

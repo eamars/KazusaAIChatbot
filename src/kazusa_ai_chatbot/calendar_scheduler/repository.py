@@ -379,6 +379,42 @@ async def mark_calendar_run_skipped(
     return matched
 
 
+async def mark_calendar_run_deferred(
+    run_id: str,
+    *,
+    lease_owner: str,
+    storage_timestamp_utc: str,
+    reason: str,
+) -> bool:
+    """Requeue a running leased run without consuming retry budget."""
+
+    db = await get_db()
+    update_result = await db.calendar_runs.update_one(
+        {
+            "run_id": run_id,
+            "status": models.RUN_STATUS_RUNNING,
+            "lease_owner": lease_owner,
+            "attempt_count": {"$gte": 1},
+        },
+        {
+            "$set": {
+                "status": models.RUN_STATUS_PENDING,
+                "updated_at": storage_timestamp_utc,
+                "failure_summary": {
+                    "deferred": True,
+                    "reason": reason,
+                    "retryable": True,
+                },
+                "lease_owner": None,
+                "lease_expires_at": None,
+            },
+            "$inc": {"attempt_count": -1},
+        },
+    )
+    matched = update_result.matched_count == 1
+    return matched
+
+
 async def cancel_calendar_schedule_by_idempotency_key(
     idempotency_key: str,
     *,

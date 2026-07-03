@@ -7,6 +7,9 @@ import json
 from typing import Any
 
 from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
+from kazusa_ai_chatbot.brain_service.delivery_mentions import (
+    build_inline_delivery_mentions,
+)
 from kazusa_ai_chatbot.self_cognition import models
 
 PRODUCTION_HANDOFF_ENABLED = False
@@ -178,6 +181,18 @@ def build_consolidation_outcome_record(
     if not isinstance(metadata, dict):
         raise ValueError("consolidation_metadata must be a dict")
 
+    required_metadata_fields = ("write_success", "cache_evicted_count")
+    missing_fields = [
+        field_name
+        for field_name in required_metadata_fields
+        if field_name not in metadata
+    ]
+    if missing_fields:
+        joined_fields = ", ".join(missing_fields)
+        raise ValueError(
+            f"consolidation_metadata missing required fields: {joined_fields}"
+        )
+
     write_success = metadata["write_success"]
     if not isinstance(write_success, dict):
         raise ValueError("write_success must be a dict")
@@ -303,8 +318,6 @@ def build_action_candidate(
     case: models.SelfCognitionCase,
     action_attempt: dict[str, Any],
     text: str,
-    *,
-    mention_target_user: bool = False,
 ) -> dict[str, Any] | None:
     """Build a send-message candidate for a non-duplicate action attempt.
 
@@ -312,8 +325,6 @@ def build_action_candidate(
         case: Self-cognition source case.
         action_attempt: Action attempt returned by `build_action_attempt`.
         text: Candidate message text emitted by the cognition output.
-        mention_target_user: Dialog-owned semantic request to address the
-            current target user explicitly.
 
     Returns:
         Handoff-shaped local candidate, or `None` when no candidate is allowed.
@@ -339,10 +350,7 @@ def build_action_candidate(
         "dispatch_shape": models.ACTION_KIND_SEND_MESSAGE,
         "production_handoff": PRODUCTION_HANDOFF_ENABLED,
     }
-    delivery_mentions = _delivery_mentions_for_action(
-        case,
-        mention_target_user=mention_target_user,
-    )
+    delivery_mentions = _delivery_mentions_for_action(case, text=clean_text)
     if delivery_mentions:
         action_candidate["delivery_mentions"] = delivery_mentions
     return action_candidate
@@ -514,35 +522,48 @@ def _case_target_scope(case: models.SelfCognitionCase) -> dict[str, Any]:
 def _delivery_mentions_for_action(
     case: models.SelfCognitionCase,
     *,
-    mention_target_user: bool,
+    text: str,
 ) -> list[dict[str, Any]]:
     """Build optional delivery mention metadata for a self-cognition action."""
 
-    if not mention_target_user:
+    users: list[dict[str, Any]] = []
+    value = case.get("target_scope")
+    if isinstance(value, dict):
+        user_id = value.get("user_id")
+        if isinstance(user_id, str) and user_id:
+            user = {
+                "global_user_id": user_id,
+                "platform_user_id": _optional_string_field(
+                    value,
+                    "platform_user_id",
+                ),
+                "display_name": _string_field(value, "display_name"),
+            }
+            users.append(user)
+
+    delivery_users = case.get("delivery_mention_users")
+    if isinstance(delivery_users, list):
+        for delivery_user in delivery_users:
+            if not isinstance(delivery_user, dict):
+                continue
+            user = {
+                "global_user_id": _optional_string_field(
+                    delivery_user,
+                    "global_user_id",
+                ),
+                "platform_user_id": _optional_string_field(
+                    delivery_user,
+                    "platform_user_id",
+                ),
+                "display_name": _string_field(delivery_user, "display_name"),
+            }
+            users.append(user)
+
+    if not users:
         return_value: list[dict[str, Any]] = []
         return return_value
 
-    value = case.get("target_scope")
-    if not isinstance(value, dict):
-        return_value = []
-        return return_value
-
-    user_id = value.get("user_id")
-    if not isinstance(user_id, str) or not user_id:
-        return_value = []
-        return return_value
-
-    platform_user_id = _optional_string_field(value, "platform_user_id")
-    display_name = _string_field(value, "display_name")
-    delivery_mention = {
-        "entity_kind": "user",
-        "placement": "prefix",
-        "platform_user_id": platform_user_id,
-        "global_user_id": user_id,
-        "display_name": display_name,
-        "requested_by": "dialog.mention_target_user",
-    }
-    return_value = [delivery_mention]
+    return_value = build_inline_delivery_mentions(text=text, users=users)
     return return_value
 
 

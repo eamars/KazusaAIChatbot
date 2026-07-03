@@ -56,6 +56,16 @@ the dispatcher persists the assistant outbound row, looks up the registered
 runtime adapter, sends to the bound target, and returns terminal delivery
 metadata for action-attempt persistence.
 
+Self-cognition participates in the generic runtime coordination contract in
+`kazusa_ai_chatbot.runtime_coordination`. When a case is running as background
+work with a concrete delivery channel, the worker must hold a background
+pipeline handle for that `PipelineScope` and checkpoint cancellation before
+source/context work that can go stale, before or after LLM stages when control
+returns to deterministic code, and immediately before dispatcher handoff. A
+cancelled case is a cooperative deferral: it must not record a successful
+action attempt, mark a group-review window as reviewed, or call dispatcher for
+the cancelled visible output.
+
 Consolidation can run even when self-cognition selects no visible action.
 Action results, episode-trace evidence, and an empty `final_dialog` are
 sufficient to make the episode consolidatable. The consolidator consumes
@@ -91,15 +101,29 @@ self-cognition before case collection. Due scheduled future-cognition slots
 remain eligible. Reflection, consolidation, scheduler execution, dispatcher
 validation, and adapter delivery are not paused by this predicate.
 
+Daily affect settling is owned by `kazusa_ai_chatbot.reflection_cycle`, not by
+this module. The service may inject
+`should_pause_for_affect_settling` into `worker.start_self_cognition_worker` or
+`worker.run_self_cognition_worker_tick`. The worker calls that probe after the
+primary-interaction busy check and before source collection. When the probe
+returns true, the tick records a deferred worker result with
+`defer_reason="daily affect settling pending"` and does not collect source
+cases. The self-cognition package must not import reflection-cycle internals.
+The primary-interaction busy probe is process-wide scheduling pressure only;
+same-channel foreground precedence is enforced through the generic runtime
+coordination API and not through `/chat`-specific imports.
+
 ## Runtime Engine Budget
 
 - Every case enters the bounded cognition resolver and each resolver cycle
   invokes the shared L1/L2/L2d cognition graph.
-- If L2d selects `rag_evidence`, the resolver invokes the existing RAG2
+- If L2d selects `local_context_recall`, the resolver invokes the existing RAG2
   supervisor as a capability observation and feeds the projected result into
   the next cognition cycle. Internal RAG2 helper calls remain governed by RAG2.
-- If L2d does not select RAG, no deterministic self-cognition rule calls RAG on
-  its behalf.
+- If L2d selects `public_answer_research`, public/current/external answer
+  investigation is handled by the complex task resolver through declared IO.
+- If L2d selects neither recall nor public answer research, no deterministic
+  self-cognition rule calls either capability on its behalf.
 - If L2d selects visible `speak`, the selected L3 text handler may invoke the
   existing dialog graph once to render text.
 - When consolidation is applied without a selected visible `speak`, the runner
@@ -120,7 +144,7 @@ validation, and adapter delivery are not paused by this predicate.
 - `tracking.build_route_effect(run_record, route, consumer, effect_summary, next_topic=None)`
 - `tracking.classify_route(case, cognition_output, action_attempt=None)`
 - `tracking.build_action_attempt(case, trigger_record, existing_attempts)`
-- `tracking.build_action_candidate(case, action_attempt, text, mention_target_user=False)`
+- `tracking.build_action_candidate(case, action_attempt, text)`
 - `sleep_period.is_self_cognition_sleep_period(...)`
 - `runner.build_self_cognition_case_artifacts(case, cognition_client=None, dialog_client=None, consolidation_client=None, apply_consolidation=False)`
 - `runner.build_self_cognition_case_artifacts_async(case, cognition_client=None, dialog_client=None, consolidation_client=None, apply_consolidation=False)`
@@ -146,6 +170,11 @@ has just noticed a group scene where she has not yet joined and nobody has
 handed the topic to her. For directly addressed group windows, the source
 packet says someone has pointed the topic at her. Empty windows are skipped
 before cognition.
+When the reflection input rows carry a usable sanitized group label,
+group-review projection folds that label into the existing source-instruction
+sentence, for example `下面是我在“动画讨论群”群聊里看到的现场观察资料。`.
+The label is not rendered as a separate source-packet field and is not reused
+as cognition-scene topic.
 
 Ambient group review keeps `target_scope.user_id=None`: the semantic target is
 the observed group scene, not a fabricated latest speaker. The delivery target
@@ -265,10 +294,12 @@ prompt schemas, and model-facing records.
 
 ## Delivery Mentions
 
-Self-cognition may attach one platform-neutral `delivery_mentions` request to
-a local action candidate record when the shared dialog graph
-returns `mention_target_user=true` and the case has a semantic target user in
-`target_scope.user_id`.
+Self-cognition may attach platform-neutral `delivery_mentions` render
+candidates to a local action candidate record when the shared dialog graph
+authors exact visible `@display_name` text and the case carries matching
+delivery-only identity. Direct user-scoped cases can use `target_scope`;
+group-review cases can use bounded `delivery_mention_users` collected from the
+same activity window.
 
 The target scope may carry delivery-only platform identity:
 
@@ -287,25 +318,38 @@ The target scope may carry delivery-only platform identity:
 rendered into source packets, cognition state, dialog state, or prompt text.
 They also do not participate in action-attempt idempotency.
 
+Group-review cases may also carry a delivery-only list:
+
+```python
+"delivery_mention_users": [
+    {
+        "global_user_id": str,
+        "platform_user_id": str,
+        "display_name": str,
+    }
+]
+```
+
+This list is built from internal activity-window participant rows. It is not
+rendered into source packets or prompt text; it is consumed only after dialog
+authors exact visible tags.
+
 Action candidates may carry:
 
 ```python
 "delivery_mentions": [
     {
         "entity_kind": "user",
-        "placement": "prefix",
-        "platform_user_id": str | None,
-        "global_user_id": str | None,
+        "platform_user_id": str,
         "display_name": str,
-        "requested_by": "dialog.mention_target_user",
     }
 ]
 ```
 
 Self-cognition does not decide native mention syntax. Adapter-owned channel
 capability and delivery are checked at the dispatcher boundary; self-cognition
-only carries the dialog-owned semantic mention request as local tracking
-metadata.
+only carries the minimal identity needed for adapters to replace authored
+`@display_name` text with native platform mention syntax.
 
 ## Future Cognition Handoff
 
@@ -326,6 +370,12 @@ Due-aware packets may render neutral due-state facts such as
 `约定状态: 已过期` as source state. Actionability strings and route
 instructions remain tracking metadata and must not be rendered to the
 character.
+
+User-facing delayed reminders use `future_speak`, which is accepted through
+the accepted-task lifecycle before the internal worker schedules the
+`future_cognition` slot. Self-cognition source cases and future-cognition due
+cases may report or act on the scheduled semantic context, but they must not
+create a duplicate accepted delayed task for the same active work.
 
 ## Event Logging
 

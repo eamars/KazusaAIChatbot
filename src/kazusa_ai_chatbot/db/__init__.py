@@ -31,7 +31,10 @@ from kazusa_ai_chatbot.db._client import (
     get_text_embedding,
     get_text_embeddings_batch,
 )
-from kazusa_ai_chatbot.db.errors import DatabaseOperationError
+from kazusa_ai_chatbot.db.errors import (
+    DatabaseBackendError,
+    DatabaseOperationError,
+)
 from kazusa_ai_chatbot.db.health import check_database_connection
 
 # ── Schemas ────────────────────────────────────────────────────────
@@ -82,9 +85,13 @@ from kazusa_ai_chatbot.db.conversation import (
     get_conversation_by_platform_message_id,
     get_conversation_history,
     get_latest_private_channel_for_user,
+    list_conversation_rows_by_row_ids,
     save_conversation,
     search_conversation_history,
     update_conversation_attachment_descriptions,
+)
+from kazusa_ai_chatbot.db.llm_tracing import (
+    list_llm_trace_steps_for_trace_ids,
 )
 from kazusa_ai_chatbot.db.conversation_reflection import (
     explain_monitored_channel_query,
@@ -98,6 +105,7 @@ from kazusa_ai_chatbot.db.reflection_cycle import (
     list_daily_channel_runs,
     list_existing_run_ids,
     list_hourly_runs_for_channel_day,
+    list_reflection_runs_for_kind_date,
     upsert_reflection_run,
 )
 from kazusa_ai_chatbot.db.global_character_growth import (
@@ -161,6 +169,7 @@ from kazusa_ai_chatbot.db.user_memory_units import (
 # ── Character state ───────────────────────────────────────────────
 from kazusa_ai_chatbot.db.character import (
     RUNTIME_CHARACTER_STATE_FIELDS,
+    compare_and_upsert_character_state,
     compose_character_profile,
     get_character_profile,
     get_character_runtime_state,
@@ -242,7 +251,8 @@ __all__ = [
     # Config
     "AFFINITY_DEFAULT", "AFFINITY_MAX", "AFFINITY_MIN",
     # Client
-    "check_database_connection", "close_db", "DatabaseOperationError",
+    "check_database_connection", "close_db", "DatabaseBackendError",
+    "DatabaseOperationError",
     "enable_vector_index",
     "get_document_text_embedding", "get_document_text_embeddings_batch",
     "get_query_text_embedding", "get_query_text_embeddings_batch",
@@ -269,15 +279,18 @@ __all__ = [
     # Conversation
     "aggregate_conversation_by_user", "apply_assistant_delivery_receipt",
     "get_conversation_by_platform_message_id", "get_conversation_history",
-    "get_latest_private_channel_for_user", "save_conversation",
+    "get_latest_private_channel_for_user",
+    "list_conversation_rows_by_row_ids", "save_conversation",
     "search_conversation_history", "update_conversation_attachment_descriptions",
+    "list_llm_trace_steps_for_trace_ids",
     "explain_monitored_channel_query",
     "list_recent_character_message_channels",
     "list_reflection_scope_messages",
     "resolve_single_private_scope_user_id",
     "ensure_reflection_run_indexes", "find_reflection_run_by_id",
     "list_daily_channel_runs", "list_existing_run_ids",
-    "list_hourly_runs_for_channel_day", "upsert_reflection_run",
+    "list_hourly_runs_for_channel_day", "list_reflection_runs_for_kind_date",
+    "upsert_reflection_run",
     "ensure_global_character_growth_indexes", "insert_growth_run_document",
     "list_active_growth_traits", "list_prompt_visible_growth_traits",
     "upsert_growth_trait_documents",
@@ -311,7 +324,8 @@ __all__ = [
     "update_user_memory_unit_semantics", "update_user_memory_unit_window",
     "validate_user_memory_unit_semantics",
     # Character
-    "RUNTIME_CHARACTER_STATE_FIELDS", "compose_character_profile",
+    "RUNTIME_CHARACTER_STATE_FIELDS", "compare_and_upsert_character_state",
+    "compose_character_profile",
     "get_character_profile", "get_character_runtime_state",
     "get_character_state", "save_character_profile",
     "split_character_profile_runtime_state",
@@ -342,7 +356,10 @@ __all__ = [
     "mark_background_work_delivery_failed",
     "mark_background_work_delivery_in_progress",
     # Persistent Cache2
-    "build_initializer_version_key", "load_initializer_entries",
-    "prune_persistent_entries", "purge_stale_initializer_entries",
-    "record_initializer_hit", "upsert_initializer_entry",
+    "build_initializer_version_key", "build_media_descriptor_version_key",
+    "load_initializer_entries", "load_media_descriptor_entries",
+    "prune_media_descriptor_entries", "prune_persistent_entries",
+    "purge_stale_initializer_entries", "purge_stale_media_descriptor_entries",
+    "record_initializer_hit", "record_media_descriptor_hit",
+    "upsert_initializer_entry", "upsert_media_descriptor_entry",
 ]

@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from kazusa_ai_chatbot.channel_scene_projection import (
+    project_group_review_instruction_preamble,
+)
 from kazusa_ai_chatbot.config import SELF_COGNITION_SOURCE_PACKET_CHAR_LIMIT
 from kazusa_ai_chatbot.self_cognition import models
 from kazusa_ai_chatbot.time_boundary import (
@@ -208,16 +211,18 @@ def _group_review_instruction(case: models.SelfCognitionCase) -> str:
     ``bot_addressing`` so the instruction never contradicts the evidence.
     """
 
-    _GROUP_REVIEW_PREAMBLE = '下面是已选中的群聊现场观察资料。'
+    group_review_preamble = project_group_review_instruction_preamble(
+        _string_field(case, "channel_topic"),
+    )
 
     digest_text = _group_scene_digest_text(case)
     if digest_text:
-        return_value = f'{_GROUP_REVIEW_PREAMBLE}\n{digest_text}'
+        return_value = f'{group_review_preamble}\n{digest_text}'
         return return_value
 
     return_value = _deterministic_group_review_instruction(
         case,
-        preamble=_GROUP_REVIEW_PREAMBLE,
+        preamble=group_review_preamble,
     )
     return return_value
 

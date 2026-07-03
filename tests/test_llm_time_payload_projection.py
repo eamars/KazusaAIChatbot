@@ -146,38 +146,40 @@ def _fake_consolidator_state(*, local_time_context: dict | None = None) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Facts harvester payload
+# Memory-unit extractor payload
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_facts_harvester_payload_uses_local_time(monkeypatch) -> None:
-    """facts_harvester payload should contain only local time strings."""
-    from kazusa_ai_chatbot.consolidation import (
-        facts as facts_module,
+def test_memory_extractor_payload_uses_local_time() -> None:
+    """Memory-unit extractor payload should contain only local time strings."""
+    from kazusa_ai_chatbot.consolidation.memory_units import (
+        _json_payload,
     )
 
-    llm = _CapturingAsyncLLM({"new_facts": [], "future_promises": []})
-    monkeypatch.setattr(facts_module, "_facts_harvester_llm", llm)
     state = _fake_consolidator_state()
     state["rag_result"] = {
         "user_image": {
-            "user_memory_context": "",
-            "updated_at": "2026-05-02T20:00:00+00:00",
+            "user_memory_context": {
+                "stable_patterns": [],
+                "recent_shifts": [],
+                "objective_facts": [],
+                "milestones": [],
+                "active_commitments": [
+                    {
+                        "fact": "Tester checks reports every morning.",
+                        "updated_at": "2026-05-02T20:00:00+00:00",
+                    }
+                ],
+            },
         },
         "user_memory_unit_candidates": [
             {"timestamp": "2026-05-02T20:01:00+00:00"},
         ],
-        "supervisor_trace": {
-            "timestamp": "2026-05-02T20:02:00+00:00",
-        },
     }
 
-    await facts_module.facts_harvester(state)
-
-    payload = json.loads(llm.messages[1].content)
+    payload = _json_payload(state)
     assert "12:00" in payload["timestamp"]
-    _assert_no_utc_leak(payload, "$.facts_harvester")
+    _assert_no_utc_leak(payload, "$.memory_extractor")
 
 
 # ---------------------------------------------------------------------------
@@ -653,7 +655,6 @@ def test_message_row_text_uses_local_timestamp() -> None:
 def test_cognition_helpers_project_rag_and_history_times() -> None:
     """Cognition L2/L3 helper payloads should not expose stored UTC values."""
     from kazusa_ai_chatbot.cognition_chain_core.stages import l2
-    from kazusa_ai_chatbot.cognition_chain_core.stages import l2c2
     from kazusa_ai_chatbot.cognition_chain_core.stages import l3
 
     rag_result = {

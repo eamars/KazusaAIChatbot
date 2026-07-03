@@ -36,6 +36,7 @@ CognitionPromptVariant = Literal[
     "internal_thought_internal_monologue",
     "background_artifact_result_ready_background_artifact_result",
     "background_work_result_ready_background_work_result",
+    "accepted_task_result_ready_accepted_task_result",
 ]
 
 
@@ -77,6 +78,9 @@ _BACKGROUND_ARTIFACT_INPUT_SOURCES: list[InputSource] = [
 ]
 _BACKGROUND_WORK_INPUT_SOURCES: list[InputSource] = [
     "background_work_result",
+]
+_ACCEPTED_TASK_INPUT_SOURCES: list[InputSource] = [
+    "accepted_task_result",
 ]
 _BACKGROUND_ARTIFACT_OUTPUT_MODES = frozenset(("visible_reply",))
 _IMAGE_OBSERVATION_PAYLOAD_FIELDS = (
@@ -155,6 +159,13 @@ def select_cognition_prompt_variant(
             stage=stage,
             trigger_source=trigger_source,
         )
+    elif trigger_source == "accepted_task_result_ready":
+        selection = _select_accepted_task_result_prompt(
+            input_sources=input_sources,
+            output_mode=output_mode,
+            stage=stage,
+            trigger_source=trigger_source,
+        )
     else:
         raise CognitionPromptSelectionError(
             f"trigger_source is not supported: {trigger_source}"
@@ -206,6 +217,10 @@ def build_cognition_prompt_source_payload(
         "background_work_result_ready_background_work_result"
     ):
         source_payload = _background_work_result_source_payload(episode)
+    elif variant == (
+        "accepted_task_result_ready_accepted_task_result"
+    ):
+        source_payload = _accepted_task_result_source_payload(episode)
     else:
         raise CognitionPromptSelectionError(
             f"variant is not supported: {variant}"
@@ -458,6 +473,37 @@ def _select_background_work_result_prompt(
     return selection
 
 
+def _select_accepted_task_result_prompt(
+    *,
+    input_sources: list[InputSource],
+    output_mode: OutputMode,
+    stage: CognitionPromptStage,
+    trigger_source: TriggerSource,
+) -> CognitionPromptSelection:
+    """Select the completed accepted-task prompt variant."""
+
+    if input_sources != _ACCEPTED_TASK_INPUT_SOURCES:
+        raise CognitionPromptSelectionError(
+            f"input_sources are not supported: {input_sources}"
+        )
+    if output_mode not in _BACKGROUND_ARTIFACT_OUTPUT_MODES:
+        raise CognitionPromptSelectionError(
+            f"output_mode is not supported: {output_mode}"
+        )
+    variant: CognitionPromptVariant = (
+        "accepted_task_result_ready_accepted_task_result"
+    )
+    selection: CognitionPromptSelection = {
+        "stage": stage,
+        "variant": variant,
+        "prompt_key": f"{stage}.{variant}",
+        "trigger_source": trigger_source,
+        "input_sources": list(input_sources),
+        "output_mode": output_mode,
+    }
+    return selection
+
+
 def _reflection_source_payload(
     episode: CognitiveEpisode,
 ) -> dict[str, object]:
@@ -641,6 +687,45 @@ def _background_work_result_source_payload(
             projected_metadata[field_name] = value
     source_payload = {
         "background_work_result": {
+            "artifact_text": percept["content"],
+            "metadata": projected_metadata,
+        },
+    }
+    return source_payload
+
+
+def _accepted_task_result_source_payload(
+    episode: CognitiveEpisode,
+) -> dict[str, object]:
+    """Project the single accepted-task result into prompt payload."""
+
+    result_percepts = [
+        percept
+        for percept in episode["percepts"]
+        if percept["input_source"] == "accepted_task_result"
+    ]
+    if len(result_percepts) != 1:
+        raise CognitionPromptSelectionError(
+            "accepted_task_result percept must be unique"
+        )
+    percept = result_percepts[0]
+    metadata = percept["metadata"]
+    if not isinstance(metadata, Mapping):
+        raise CognitionPromptSelectionError(
+            "accepted task result metadata must be a dict"
+        )
+    projected_metadata: dict[str, object] = {}
+    for field_name in (
+        "accepted_task_summary",
+        "failure_summary",
+        "result_summary",
+        "source_character_name",
+    ):
+        value = metadata.get(field_name)
+        if isinstance(value, str):
+            projected_metadata[field_name] = value
+    source_payload = {
+        "accepted_task_result": {
             "artifact_text": percept["content"],
             "metadata": projected_metadata,
         },

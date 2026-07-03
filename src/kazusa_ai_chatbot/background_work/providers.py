@@ -35,6 +35,9 @@ async def execute_background_work_decision(
     source_summary = _decision_text(decision, "source_summary")
     if source_summary:
         sanitized_decision["source_summary"] = source_summary
+    worker_payload = decision.get("worker_payload")
+    if isinstance(worker_payload, Mapping):
+        sanitized_decision["worker_payload"] = dict(worker_payload)
     result = await dispatch_background_work(sanitized_decision)
     return result
 
@@ -79,6 +82,9 @@ async def dispatch_background_work(
     source_summary = decision.get("source_summary")
     if isinstance(source_summary, str) and source_summary.strip():
         worker_decision["source_summary"] = source_summary.strip()
+    worker_payload = decision.get("worker_payload")
+    if isinstance(worker_payload, Mapping):
+        worker_decision["worker_payload"] = dict(worker_payload)
     result = await execute_func(
         worker_decision,
         max_output_chars=max_output_chars,

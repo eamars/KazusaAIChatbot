@@ -39,7 +39,8 @@ both inbound and outbound state:
 - runtime adapter registration lets dispatcher/proactive sends call adapter
   callback endpoints.
 - background-work worker lifecycle is started, stopped, and reported by the
-  service runtime while result delivery still returns through cognition/dialog.
+  service runtime as an internal executor while accepted-task result delivery
+  still returns through cognition/dialog.
 
 Local process lifecycle management is owned by the separate top-level
 `control_console` package and `kazusa-control-console` command. The brain
@@ -55,8 +56,8 @@ This ICD covers:
 - Delivery tracking and delivery receipt lifecycle.
 - Runtime adapter registration and heartbeat protocol for dispatcher or
   proactive callback delivery.
-- Background-work worker enablement, liveness, and result-ready delivery
-  boundary.
+- Accepted-task delayed-work lifecycle plus internal background-work worker
+  enablement, liveness, and result-ready delivery boundary.
 - Reply-context hydration behavior when an adapter supplies only a platform
   reply message id.
 - Compatibility rules for adding service fields and endpoints.
@@ -102,7 +103,7 @@ platform event
   -> brain queue and persona graph
   -> selected text surface outputs
   -> ChatResponse(messages, use_reply_feature, delivery_mentions, delivery_tracking_id, cognition_graph?)
-  -> adapter platform send
+  -> adapter ordered platform send sequence
   -> platform returns outbound message id
   -> POST /delivery_receipt
   -> conversation row gains delivered platform message id
@@ -126,9 +127,18 @@ this ICD.
 
 Normal `/chat` responses and dispatcher/proactive callback sends may include
 optional `delivery_mentions` metadata. This is adapter-owned rendering
-metadata: the brain keeps outbound text platform-neutral, and the adapter
-renders a native prefix user mention only when feasible. Missing, empty, or
-unrenderable mention metadata must not block text delivery.
+metadata: the brain keeps outbound text platform-neutral with visible
+`@display_name` tokens, and the adapter replaces matching tokens with native
+user mentions only when feasible. Missing, empty, or unrenderable mention
+metadata must not block text delivery.
+
+Normal `/chat` `messages` are ordered logical outbound chat messages. The
+adapter sends each string as a separate normal chat message in order. The first
+message is sent immediately and may use native reply rendering when requested;
+follow-up messages are adapter-owned background sends with short
+length-derived delays. Inline delivery mentions are applied per logical
+message before any platform chunking or segment conversion. Dispatcher or
+proactive callback `/send_message` remains a single-message delivery surface.
 
 Normal `/chat` responses may also include optional `cognition_graph` telemetry
 for local operator inspection. It is a bounded graph snapshot derived from the
@@ -141,6 +151,15 @@ trusted local operator inspection. Normal chat/debug turns update it from the
 `/chat` response graph. Completed self-cognition cases update it from bounded
 self-cognition artifacts. Reading this snapshot is observational only and must
 not trigger cognition.
+
+The service is one caller of the generic runtime coordination API in
+`kazusa_ai_chatbot.runtime_coordination`. For the canonical channel scope
+`(platform, platform_channel_id, channel_type)`, inbound foreground work asks
+the coordinator to cancel lower-precedence background pipelines in the same
+scope before the queued turn is admitted. This rule is scoped and generic:
+future foreground applications must call the same interface instead of
+importing `/chat` queue state or adding their own gates. Different channel
+scopes remain independent.
 
 Visible `/chat` delivery follows selected `SurfaceOutputV1` text surfaces.
 Private action results, private finalization, calendar-triggered action
@@ -265,7 +284,7 @@ Purpose:
 | `platform_user_id` | yes | adapter | Platform id of the inbound message author. |
 | `platform_bot_id` | no | adapter | Platform id of the active bot account, if available. |
 | `display_name` | no | adapter | Display name of the inbound author. |
-| `channel_name` | no | adapter | Human-readable channel label. |
+| `channel_name` | no | adapter | Optional human-readable channel label. The brain may use a sanitized usable group label as weak scene text, but synthetic ids or generic labels are ignored. |
 | `content_type` | no | adapter | High-level input type, currently usually `text`. |
 | `message_envelope` | yes | adapter | Typed envelope defined by the message envelope ICD. |
 | `local_timestamp` | no | adapter | Adapter event time as configured-local wall-clock text. Empty string means service receive time is used. |
@@ -275,13 +294,13 @@ Purpose:
 
 | Field | Owner | Meaning |
 | --- | --- | --- |
-| `messages` | brain | Text messages the adapter should render to the platform. Empty means no user-visible reply. |
+| `messages` | brain | Ordered text messages the adapter should render as separate normal chat sends. Empty means no user-visible reply. |
 | `content_type` | brain | Outbound content type. Current normal value is `text`. |
 | `attachments` | brain | Outbound attachments. Currently reserved for future use. |
 | `use_reply_feature` | brain | Adapter should use native reply rendering for the first outbound message when possible. |
-| `delivery_mentions` | brain then adapter | Optional platform-neutral mention requests. The brain emits these from dialog semantic intent after reply override; adapters decide native rendering, channel feasibility, and no-op fallback. |
+| `delivery_mentions` | brain then adapter | Optional platform-neutral inline mention render candidates. The brain emits these only for authored `@display_name` text with matching scoped user identity; adapters decide native rendering, channel feasibility, and no-op fallback. |
 | `scheduled_followups` | brain | Count of scheduled future-cognition follow-ups accepted during the turn. |
-| `delivery_tracking_id` | brain | Brain-generated identifier for the assistant row that should receive a delivery receipt. Empty means no receipt should be posted. |
+| `delivery_tracking_id` | brain | Brain-generated identifier for the ordered assistant response sequence. Empty means no receipt should be posted. |
 
 Adapter responsibilities:
 
@@ -296,18 +315,26 @@ Adapter responsibilities:
   identity belongs in `message_envelope.mentions`.
 - Preserve the inbound platform message id when available.
 - Treat an empty `messages` list as no outbound send.
-- Honor `use_reply_feature` for the first outbound message when the platform
-  has a native reply mechanism.
-- Render `delivery_mentions` best-effort when present and feasible; otherwise
-  send the original text unchanged.
-- Post `/delivery_receipt` after a successful platform send when both
-  `delivery_tracking_id` and an outbound platform message id exist.
+- Send non-empty `messages` in order as separate normal chat messages.
+- Honor `use_reply_feature` only for the first outbound message when the
+  platform has a native reply mechanism.
+- Own follow-up message delay and task lifecycle without blocking the adapter
+  on the delay.
+- Render `delivery_mentions` best-effort by replacing matching authored
+  `@display_name` text inline in each logical message when present and
+  feasible; otherwise send the original text unchanged.
+- Post `/delivery_receipt` after each successful logical message send when
+  `delivery_tracking_id` and that logical message's outbound platform id
+  exist.
 
 Brain service responsibilities:
 
 - The brain service validates `ChatRequest` through Pydantic with
   `extra="forbid"`.
 - The brain service can collapse queued chat messages before graph execution.
+- The brain service owns foreground runtime-coordination admission for inbound
+  chat turns and releases the foreground handle when the queued turn is
+  processed, dropped, collapsed, rejected, or drained during shutdown.
 - The brain service returns `ChatResponse` before all post-turn background work
   has necessarily completed.
 - The brain service generates a non-empty `delivery_tracking_id` only when it
@@ -326,8 +353,8 @@ Response model: `DeliveryReceiptResponse`.
 
 Purpose:
 
-- Let an adapter report the platform-generated outbound message id for a
-  previously returned normal `/chat` response.
+- Let an adapter report the platform-generated outbound message id for one
+  logical message in a previously returned normal `/chat` response.
 - Enable later native replies that carry only a platform reply message id to be
   resolved against the assistant conversation row.
 
@@ -338,6 +365,7 @@ Purpose:
 | `platform` | yes | adapter | Same platform key used in the original `/chat` request. |
 | `platform_channel_id` | no | adapter | Same channel id used in the original `/chat` request. |
 | `delivery_tracking_id` | yes | brain then adapter | Value returned by `ChatResponse.delivery_tracking_id`. |
+| `logical_message_index` | yes | adapter | Zero-based index of the `ChatResponse.messages` item whose platform id is being reported. |
 | `platform_message_id` | yes | adapter | Outbound message id returned by the platform send API. |
 | `delivered_at` | no | adapter/brain | Delivery timestamp. Empty string means the brain uses current UTC time. |
 | `adapter` | no | adapter | Adapter implementation name, such as `napcat` or `discord`. |
@@ -351,7 +379,8 @@ Purpose:
 
 Adapter delivery receipt responsibilities:
 
-- Send the receipt after the platform send succeeds.
+- Send one receipt after each logical message platform send succeeds.
+- Set `logical_message_index` to the index in `ChatResponse.messages`.
 - Use the platform's durable outbound message id.
 - Keep the user-visible platform send delivered when a receipt post fails.
 - Retry `not_found` briefly because `/chat` can return before assistant-row
@@ -363,21 +392,21 @@ Current adapter policy:
 
 | Adapter | Normal `/chat` receipt behavior |
 | --- | --- |
-| NapCat QQ | Reports `send_msg.data.message_id` after successful `send_msg`; retries `not_found` with short bounded delays. |
-| Discord | Reports the first sent Discord `Message.id` after successful normal chat send; retries `not_found` with short bounded delays. |
+| NapCat QQ | Reports `send_msg.data.message_id` for each logical outbound message after successful `send_msg`; retries `not_found` with short bounded delays. |
+| Discord | Reports the first sent Discord `Message.id` for each logical outbound message after successful normal chat send; retries `not_found` with short bounded delays. |
 | Debug | Omits receipts because it has no durable external platform message id. |
 
-The first-message policy for Discord is a known reply-hydration limitation of
-the current one-id receipt contract. Until multi-chunk receipts are wired,
-native replies to non-first Discord chunks use adapter-provided metadata only.
-Multi-id delivery receipts require an updated service and DB contract.
+Only the first platform id for each logical message is reported. Adapter- or
+platform-created chunks beyond that first id are transport artifacts and are
+not separate reply-hydration targets in this contract.
 
 Brain service delivery receipt responsibilities:
 
 - The brain service updates assistant rows by generated
-  `delivery_tracking_id` and platform. Non-empty channel scope is added as an
-  optional disambiguator.
-- Delivery receipts match generated tracking ids and platform scope.
+  `delivery_tracking_id`, `logical_message_index`, and platform. Non-empty
+  channel scope is added as an optional disambiguator.
+- Delivery receipts match generated tracking ids, logical message indexes, and
+  platform scope.
 - The receipt update leaves embeddings and RAG cache state unchanged.
 - A `not_found` response is a retryable race signal for adapters.
 
@@ -461,28 +490,36 @@ released. Pruned, listen-only, and collapsed queued inputs follow the same
 rule; a survivor turn is not allowed to run on collapsed text whose source row
 was not committed.
 
-For visible assistant output, the brain writes the assistant row before
-returning `ChatResponse` to the adapter. Visible assistant rows are derived
-from selected text surface outputs. Background state updates such as
-conversation progress and consolidation may still run after the response has
-been released.
+For visible assistant output, the brain writes one assistant row per logical
+`ChatResponse.messages` item before returning `ChatResponse` to the adapter.
+Rows from the same cognition share the same `delivery_tracking_id` and
+`llm_trace_id`, and each row stores its `logical_message_index`. Row-scoped
+outbound mention metadata is persisted when a returned logical message contains
+an exact authored `@display_name` token with a matching delivery candidate.
+Visible assistant rows are derived from selected text surface outputs.
+Background state updates such as conversation progress and consolidation may
+still run after the response has been released.
 
 When an episode has no visible text surface, the brain returns an empty
 `messages` list and no delivery tracking id. That episode can still be
 consolidated when private action results, calendar-triggered action results,
 private surface outputs, or private finalization exist.
 
-When L2d selects `background_work_request`, the persona graph queues the
-durable job before selected L3 text runs and records a pending result in the
-episode trace. Completed jobs later return as `background_work_result_ready`
-cognitive episodes. Background-work workers must not call adapters, dispatcher
-delivery, or cognition directly. Legacy `background_artifact_result_ready`
-episodes remain compatibility input for old rows only.
+When L2d selects `accepted_task_request`, deterministic action execution first
+creates or reuses an accepted-task lifecycle row. New accepted tasks are then
+materialized into an internal `background_work_request`, queued durably before
+selected L3 text runs, and projected back to L3 as semantic accepted-task state.
+Status checks use `accepted_task_status_check` and never enqueue a worker job.
+Completed accepted-task-backed jobs later return as
+`accepted_task_result_ready` cognitive episodes. Background-work workers must
+not call adapters, dispatcher delivery, or cognition directly. Legacy
+`background_work_result_ready` and `background_artifact_result_ready` episodes
+remain compatibility input for old rows only.
 
 Delivery receipt adapters may still need bounded `not_found` retry behavior
 for transport timing and cross-process delivery, but a non-empty
-`delivery_tracking_id` means the assistant row was committed before the
-response was returned.
+`delivery_tracking_id` means the logical assistant rows for that response were
+committed before the response was returned.
 
 ## Debug Modes
 
@@ -507,8 +544,10 @@ Runtime adapters own:
 - Replacing only platform mention tokens with readable mention tokens before
   `/chat`; adapters must not rewrite pronouns, aliases, or other authored
   text semantically.
-- Calling `/chat` and rendering `ChatResponse.messages`.
-- Extracting durable outbound platform message ids after successful sends.
+- Calling `/chat` and rendering `ChatResponse.messages` as ordered normal chat
+  sends.
+- Extracting durable outbound platform message ids after successful logical
+  message sends.
 - Posting `/delivery_receipt` when the adapter supports durable outbound ids.
 - Registering and heartbeating runtime callback URLs when dispatcher or
   proactive callback delivery is enabled.
@@ -520,7 +559,8 @@ The brain service owns:
 - Global identity resolution.
 - Reply context hydration from typed metadata and delivered conversation rows.
 - Persona graph invocation.
-- Assistant row persistence and delivery receipt updates.
+- Assistant row persistence, logical message indexes, and delivery receipt
+  updates.
 - Runtime adapter registry integration for dispatcher/proactive callback
   dispatch.
 - Health response composition.
@@ -541,9 +581,9 @@ The database package owns:
   adapter registration is breaking and requires coordinated adapter updates.
 - Changing the meaning of `platform`, `platform_channel_id`,
   `platform_message_id`, or `delivery_tracking_id` is breaking.
-- Changing delivery receipts from one platform id to multiple ids is breaking
-  for reply hydration semantics unless this ICD and the DB contract are updated
-  first.
+- Changing delivery receipts beyond one platform id per logical message is
+  breaking for reply hydration semantics unless this ICD and the DB contract
+  are updated first.
 - Existing adapters may ignore `delivery_tracking_id`; this preserves chat
   delivery but disables delivered-id reply fallback for their outbound rows.
 

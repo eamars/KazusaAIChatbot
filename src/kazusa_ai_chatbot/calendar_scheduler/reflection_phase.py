@@ -15,6 +15,7 @@ from kazusa_ai_chatbot.config import (
 from kazusa_ai_chatbot.calendar_scheduler import models
 from kazusa_ai_chatbot.calendar_scheduler import repository as calendar_repository
 from kazusa_ai_chatbot.dispatcher.adapter_iface import AdapterRegistry
+from kazusa_ai_chatbot.runtime_coordination import PipelineCoordinator
 from kazusa_ai_chatbot.reflection_cycle import phase_scheduler
 from kazusa_ai_chatbot.reflection_cycle.models import (
     READONLY_REFLECTION_MONITOR_ELIGIBILITY_HOURS,
@@ -147,9 +148,12 @@ async def handle_reflection_phase_calendar_run(
     is_primary_interaction_busy: Callable[[], bool],
     adapter_registry_provider: Callable[[], AdapterRegistry | None] | None = None,
     execute_phase_intent_func: Callable[..., Any] | None = None,
+    pipeline_coordinator: PipelineCoordinator,
 ) -> dict[str, Any]:
     """Execute a claimed phase slot through the reflection worker seam."""
 
+    if pipeline_coordinator is None:
+        raise ValueError("pipeline_coordinator is required")
     intent = calendar_run_to_reflection_phase_intent(run)
     phase_executor = execute_phase_intent_func
     if phase_executor is None:
@@ -160,6 +164,7 @@ async def handle_reflection_phase_calendar_run(
         dry_run=dry_run,
         is_primary_interaction_busy=is_primary_interaction_busy,
         adapter_registry_provider=adapter_registry_provider,
+        pipeline_coordinator=pipeline_coordinator,
     )
     summary = _reflection_phase_result_summary(phase_results)
     return summary
@@ -256,15 +261,20 @@ def _reflection_phase_result_summary(
     failed_count = 0
     skipped_count = 0
     run_ids: list[str] = []
+    deferred = False
+    defer_reason = ""
     for result in results:
         processed_count += result.processed_count
         succeeded_count += result.succeeded_count
         failed_count += result.failed_count
         skipped_count += result.skipped_count
         run_ids.extend(result.run_ids)
+        if result.deferred and not deferred:
+            deferred = True
+            defer_reason = result.defer_reason
 
     summary = {
-        "status": "completed",
+        "status": "deferred" if deferred else "completed",
         "run_kind": models.TRIGGER_REFLECTION_PHASE_SLOT,
         "processed_count": processed_count,
         "succeeded_count": succeeded_count,
@@ -272,4 +282,6 @@ def _reflection_phase_result_summary(
         "skipped_count": skipped_count,
         "run_ids": run_ids,
     }
+    if deferred:
+        summary["defer_reason"] = defer_reason
     return summary

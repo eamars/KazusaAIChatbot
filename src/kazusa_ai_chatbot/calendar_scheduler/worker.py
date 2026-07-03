@@ -158,6 +158,7 @@ async def run_calendar_worker_tick(
     completed_count = 0
     failed_count = 0
     skipped_count = 0
+    deferred_count = 0
     for run in claimed_runs:
         trigger_kind = run["trigger_kind"]
         handler = handler_registry.get(trigger_kind)
@@ -197,6 +198,15 @@ async def run_calendar_worker_tick(
             )
             skipped_count += 1
             continue
+        if result.get("status") == "deferred":
+            await repository.mark_calendar_run_deferred(
+                run["run_id"],
+                lease_owner=lease_owner,
+                storage_timestamp_utc=current_timestamp_utc,
+                reason=str(result.get("defer_reason") or "deferred"),
+            )
+            deferred_count += 1
+            continue
 
         await repository.mark_calendar_run_completed(
             run["run_id"],
@@ -211,6 +221,7 @@ async def run_calendar_worker_tick(
         "completed_count": completed_count,
         "failed_count": failed_count,
         "skipped_count": skipped_count,
+        "deferred_count": deferred_count,
     }
     return tick_result
 

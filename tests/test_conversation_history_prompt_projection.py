@@ -11,7 +11,6 @@ These tests verify:
 - no internal id leakage in output lines
 """
 
-import pytest
 
 from kazusa_ai_chatbot.conversation_history_prompt_projection import (
     project_conversation_history_for_llm,

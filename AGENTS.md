@@ -1,5 +1,7 @@
 # AGENTS.md
 
+DO NOT send optional commentary.
+
 ## How To Work Here
 
 Work as a senior system engineer. Start with the system-level picture, identify

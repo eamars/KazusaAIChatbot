@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -147,7 +147,7 @@ def test_dialog_validation_normalizes_freeform_content_plan_keys() -> None:
         'linguistic_style': 'brief',
         'content_plan': {
             ' semantic_content ': ' 只表达被逗乐和舒服，不补新话题。 ',
-            'rendering ': ' 单个聊天气泡；2-3个自然短句。 ',
+            'rendering ': ' 1 条普通文字消息；2-3个自然短句。 ',
             'weaker_model_key_drift': '允许自由键名，只要值是字符串。',
             'empty_value': '   ',
         },
@@ -161,9 +161,22 @@ def test_dialog_validation_normalizes_freeform_content_plan_keys() -> None:
 
     assert linguistic_directives['content_plan'] == {
         'semantic_content': '只表达被逗乐和舒服，不补新话题。',
-        'rendering': '单个聊天气泡；2-3个自然短句。',
+        'rendering': '1 条普通文字消息；2-3个自然短句。',
         'weaker_model_key_drift': '允许自由键名，只要值是字符串。',
     }
+
+
+def test_content_plan_prompt_describes_message_sequence_rendering() -> None:
+    """L3 should describe rendering as an outbound message sequence."""
+
+    prompt = l3_module._CONTENT_PLAN_AGENT_PROMPT
+    retired_layout = ''.join(('单个', '\u804a\u5929\u6c14\u6ce1'))
+
+    assert '`rendering` 写出站消息序列的形状' in prompt
+    assert '1 条普通文字消息' in prompt
+    assert '2 条连续发送的普通文字消息' in prompt
+    assert '完整固定格式块可以单独成为一条消息' in prompt
+    assert retired_layout not in prompt
 
 
 @pytest.mark.asyncio
@@ -175,7 +188,7 @@ async def test_content_plan_agent_returns_native_dict_with_string_values() -> No
                 ' visible_goal ': '接住轻松调侃。',
                 'semantic_content': '被对方逗乐了，这种相处方式很舒服。',
                 'voice': '轻快随和。',
-                'rendering': '约35字；单个聊天气泡；2-3个自然短句。',
+                'rendering': '约35字；1 条普通文字消息；2-3个自然短句。',
             },
     })
 
@@ -191,7 +204,7 @@ async def test_content_plan_agent_returns_native_dict_with_string_values() -> No
             'visible_goal': '接住轻松调侃。',
             'semantic_content': '被对方逗乐了，这种相处方式很舒服。',
             'voice': '轻快随和。',
-            'rendering': '约35字；单个聊天气泡；2-3个自然短句。',
+            'rendering': '约35字；1 条普通文字消息；2-3个自然短句。',
         },
     }
 
@@ -210,7 +223,7 @@ async def test_surface_collector_emits_content_plan_without_anchor_append() -> N
         'accepted_user_preferences': [],
         'content_plan': {
             'semantic_content': '被对方逗乐了，这种相处方式很舒服。',
-            'rendering': '单个聊天气泡；2-3个自然短句。',
+            'rendering': '1 条普通文字消息；2-3个自然短句。',
         },
         'forbidden_phrases': [],
         'facial_expression': [],
@@ -235,7 +248,7 @@ async def test_surface_collector_emits_content_plan_without_anchor_append() -> N
                 {
                     'schema_version': 'resolver_observation.v1',
                     'observation_id': 'raw-observation-id',
-                    'capability_kind': 'web_evidence',
+                    'capability_kind': 'public_answer_research',
                     'request_objective': 'Do not append.',
                     'request_reason': 'Do not append.',
                     'status': 'succeeded',

@@ -136,11 +136,8 @@ class DeliveryMention(TypedDict):
     """Platform-neutral request for an adapter-rendered outbound mention."""
 
     entity_kind: str
-    placement: str
-    platform_user_id: str | None
-    global_user_id: str | None
     display_name: str
-    requested_by: str
+    platform_user_id: str
 
 
 class SelfCognitionDeliveryTarget(TypedDict):
@@ -218,6 +215,7 @@ class SelfCognitionCase(TypedDict, total=False):
     semantic_due_state: str | None
     actionability: str
     visible_context: list[dict[str, Any]]
+    delivery_mention_users: list[dict[str, str]]
     conversation_progress: dict[str, Any]
     group_activity_window: dict[str, Any]
     current_mood: str

@@ -100,6 +100,7 @@ class DeliveryReceiptRequest(BaseModel):
     platform: str = Field(min_length=1)
     platform_channel_id: str = ""
     delivery_tracking_id: str = Field(min_length=1)
+    logical_message_index: int = Field(ge=0)
     platform_message_id: str = Field(min_length=1)
     delivered_at: str = ""
     adapter: str = ""

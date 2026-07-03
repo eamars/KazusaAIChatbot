@@ -20,6 +20,7 @@ class MemoryAuthority:
 
     SEED = "seed"
     REFLECTION_PROMOTED = "reflection_promoted"
+    CONVERSATION_ACCEPTED = "conversation_accepted"
     MANUAL = "manual"
 
 
@@ -43,6 +44,7 @@ VALID_MEMORY_STATUSES = {
 VALID_MEMORY_AUTHORITIES = {
     MemoryAuthority.SEED,
     MemoryAuthority.REFLECTION_PROMOTED,
+    MemoryAuthority.CONVERSATION_ACCEPTED,
     MemoryAuthority.MANUAL,
 }
 VALID_MEMORY_SOURCE_KINDS = {

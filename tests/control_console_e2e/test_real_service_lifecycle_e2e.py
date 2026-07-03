@@ -28,7 +28,7 @@ def test_real_brain_and_debug_adapter_start_stop_from_ui(
 
         _click_service_action(page, service_id="brain", action="start")
         page.wait_for_function(
-            "() => document.querySelector(\"[data-service-card='brain'] .badge\")?.textContent === 'running'",
+            "() => document.querySelector(\"[data-service-card='brain'] [data-service-status-badge]\")?.textContent === 'running'",
             timeout=90000,
         )
         assert _http_status("http://127.0.0.1:8000/health") == 200
@@ -42,7 +42,7 @@ def test_real_brain_and_debug_adapter_start_stop_from_ui(
         if napcat_state == "running":
             _click_service_action(page, service_id="adapter.napcat", action="stop")
             page.wait_for_function(
-                "() => document.querySelector(\"[data-service-card='adapter.napcat'] .badge\")?.textContent === 'stopped'",
+                "() => document.querySelector(\"[data-service-card='adapter.napcat'] [data-service-status-badge]\")?.textContent === 'stopped'",
                 timeout=60000,
             )
         else:
@@ -53,7 +53,7 @@ def test_real_brain_and_debug_adapter_start_stop_from_ui(
 
         _click_service_action(page, service_id="adapter.debug", action="start")
         page.wait_for_function(
-            "() => document.querySelector(\"[data-service-card='adapter.debug'] .badge\")?.textContent === 'running'",
+            "() => document.querySelector(\"[data-service-card='adapter.debug'] [data-service-status-badge]\")?.textContent === 'running'",
             timeout=60000,
         )
         assert _http_status("http://127.0.0.1:8080/api/health") == 200
@@ -69,12 +69,12 @@ def test_real_brain_and_debug_adapter_start_stop_from_ui(
         page.locator("[data-page-link='services']").click()
         _click_service_action(page, service_id="adapter.debug", action="stop")
         page.wait_for_function(
-            "() => document.querySelector(\"[data-service-card='adapter.debug'] .badge\")?.textContent === 'stopped'",
+            "() => document.querySelector(\"[data-service-card='adapter.debug'] [data-service-status-badge]\")?.textContent === 'stopped'",
             timeout=60000,
         )
         _click_service_action(page, service_id="brain", action="stop")
         page.wait_for_function(
-            "() => document.querySelector(\"[data-service-card='brain'] .badge\")?.textContent === 'stopped'",
+            "() => document.querySelector(\"[data-service-card='brain'] [data-service-status-badge]\")?.textContent === 'stopped'",
             timeout=60000,
         )
 
@@ -123,14 +123,16 @@ def _wait_for_service_terminal_or_running(
     page.wait_for_function(
         """({serviceId}) => {
           const text = document.querySelector(
-            `[data-service-card="${serviceId}"] .badge`
+            `[data-service-card="${serviceId}"] [data-service-status-badge]`
           )?.textContent;
           return ['running', 'crashed', 'unavailable', 'conflict'].includes(text);
         }""",
         arg={"serviceId": service_id},
         timeout=timeout,
     )
-    state = page.locator(f"[data-service-card='{service_id}'] .badge").inner_text()
+    state = page.locator(
+        f"[data-service-card='{service_id}'] [data-service-status-badge]"
+    ).inner_text()
     return state
 
 

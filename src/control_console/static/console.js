@@ -1051,7 +1051,7 @@ function renderBrainServiceCard(service) {
       <div class="service-card-header">
         <div><strong>${escapeHtml(service.display_name)}</strong><br><code>${escapeHtml(service.id)}</code></div>
         <div class="badge-stack">
-          <span class="${badgeClass(service.actual_state)}">${escapeHtml(service.actual_state)}</span>
+          <span class="${badgeClass(service.actual_state)}" data-service-status-badge>${escapeHtml(service.actual_state)}</span>
           ${configBadge}
           <span class="badge">${escapeHtml(routes.length)} routes</span>
         </div>
@@ -1384,7 +1384,7 @@ function renderGenericServiceCard(service) {
       <div class="service-card-header">
         <div><strong>${escapeHtml(service.display_name)}</strong><br><code>${escapeHtml(service.id)}</code></div>
         <div class="badge-stack">
-          <span class="${badgeClass(service.actual_state)}">${escapeHtml(service.actual_state)}</span>
+          <span class="${badgeClass(service.actual_state)}" data-service-status-badge>${escapeHtml(service.actual_state)}</span>
           ${configBadge}
         </div>
       </div>

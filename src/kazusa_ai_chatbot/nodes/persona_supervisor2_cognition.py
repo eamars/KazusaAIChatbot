@@ -20,15 +20,22 @@ from kazusa_ai_chatbot.config import (
     BOUNDARY_CORE_LLM_THINKING_ENABLED,
     COGNITION_LLM_MAX_COMPLETION_TOKENS,
     COGNITION_LLM_THINKING_ENABLED,
+    COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED,
 )
 from kazusa_ai_chatbot.action_spec.registry import (
+    ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
     BACKGROUND_WORK_REQUEST_CAPABILITY,
+    FUTURE_SPEAK_CAPABILITY,
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
     build_initial_action_capabilities,
     project_prompt_affordances,
 )
+from kazusa_ai_chatbot.cognition_chain_core.action_selection import (
+    ACCEPTED_TASK_REQUEST_CAPABILITY,
+)
+from kazusa_ai_chatbot.channel_scene_projection import project_channel_topic_text
 from kazusa_ai_chatbot.cognition_chain_core.chain import run_cognition_chain
 from kazusa_ai_chatbot.cognition_chain_core.contracts import (
     CognitionChainInputV1,
@@ -154,6 +161,11 @@ def build_cognition_chain_input_from_global_state(
         cognitive_episode,
         media_observations,
     )
+    scene_channel_topic = project_channel_topic_text(
+        channel_type=state["channel_type"],
+        channel_name=state.get("channel_name", ""),
+        channel_topic=state["channel_topic"],
+    )
     payload: CognitionChainInputV1 = {
         "schema_version": "cognition_chain_input.v1",
         "llm_trace_id": state.get("llm_trace_id", ""),
@@ -216,7 +228,7 @@ def build_cognition_chain_input_from_global_state(
         "scene": {
             "platform": state["platform"],
             "channel_type": state["channel_type"],
-            "channel_topic": state["channel_topic"],
+            "channel_topic": scene_channel_topic,
             "local_time_context": _prompt_safe_mapping(
                 state["local_time_context"]
             ),
@@ -234,6 +246,10 @@ def build_cognition_chain_input_from_global_state(
             ),
             "internal_monologue_residue_context": state.get(
                 "internal_monologue_residue_context",
+                "",
+            ),
+            "past_dialog_cognition_context": state.get(
+                "past_dialog_cognition_context",
                 "",
             ),
             "previous_action_summary": "",
@@ -266,6 +282,9 @@ def build_cognition_chain_input_from_global_state(
         "runtime_context": {
             "language_policy": "simplified_chinese_internal_text",
             "visual_directives_enabled": True,
+            "task_willingness_boundary_enabled": (
+                COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED
+            ),
             "max_action_requests": 3,
             "max_resolver_requests": 3,
             "background_work_output_char_limit": (
@@ -273,6 +292,20 @@ def build_cognition_chain_input_from_global_state(
             ),
         },
     }
+    validated_payload = validate_cognition_chain_input(payload)
+    return validated_payload
+
+
+def build_text_surface_chain_input_from_global_state(
+    state: GlobalPersonaState,
+) -> CognitionChainInputV1:
+    """Project graph state for L3 without L2a-only private residual fields."""
+
+    payload = build_cognition_chain_input_from_global_state(state)
+    payload["conversation_context"].pop(
+        "past_dialog_cognition_context",
+        None,
+    )
     validated_payload = validate_cognition_chain_input(payload)
     return validated_payload
 
@@ -431,6 +464,7 @@ def _initial_cognition_state_from_global_state(
         "platform": state["platform"],
         "platform_channel_id": state["platform_channel_id"],
         "channel_type": state["channel_type"],
+        "channel_name": state.get("channel_name", ""),
         "global_user_id": state["global_user_id"],
         "user_name": state["user_name"],
         "user_profile": state["user_profile"],
@@ -443,6 +477,10 @@ def _initial_cognition_state_from_global_state(
         "promoted_reflection_context": state.get("promoted_reflection_context"),
         "internal_monologue_residue_context": state.get(
             "internal_monologue_residue_context",
+            "",
+        ),
+        "past_dialog_cognition_context": state.get(
+            "past_dialog_cognition_context",
             "",
         ),
         "decontexualized_input": state["decontexualized_input"],
@@ -783,11 +821,15 @@ def _available_action_affordances() -> list[dict[str, object]]:
         SPEAK_CAPABILITY,
         MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
         TRIGGER_FUTURE_COGNITION_CAPABILITY,
-        BACKGROUND_WORK_REQUEST_CAPABILITY,
+        FUTURE_SPEAK_CAPABILITY,
+        ACCEPTED_TASK_REQUEST_CAPABILITY,
+        ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
     }
     affordances: list[dict[str, object]] = []
     for prompt_affordance in prompt_affordances:
-        capability = prompt_affordance.get("capability")
+        capability = _model_facing_action_capability(
+            prompt_affordance.get("capability"),
+        )
         if capability not in allowed_capabilities:
             continue
         visibility = prompt_affordance.get("visibility")
@@ -806,6 +848,19 @@ def _available_action_affordances() -> list[dict[str, object]]:
             "output_kind": "semantic_action_request",
         })
     return affordances
+
+
+def _model_facing_action_capability(capability: object) -> str:
+    """Map internal executable action capability to L2d semantic capability."""
+
+    if capability == BACKGROUND_WORK_REQUEST_CAPABILITY:
+        return_value = ACCEPTED_TASK_REQUEST_CAPABILITY
+        return return_value
+    if isinstance(capability, str):
+        return_value = capability
+        return return_value
+    return_value = ""
+    return return_value
 
 
 def _prompt_safe_mapping(value: object) -> dict[str, Any]:

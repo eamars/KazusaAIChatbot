@@ -7,9 +7,8 @@ from typing import Any
 
 from kazusa_ai_chatbot.db import memory_evolution as memory_store
 from kazusa_ai_chatbot.memory_evolution.identity import (
-    deterministic_memory_unit_id,
     memory_embedding_source_text,
-    seed_memory_unit_id,
+    seed_memory_unit_id as seed_memory_unit_id,
 )
 from kazusa_ai_chatbot.memory_evolution.models import (
     EvolvingMemoryDoc,

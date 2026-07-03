@@ -17,8 +17,12 @@ from kazusa_ai_chatbot.config import (
     DIALOG_GENERATOR_LLM_MODEL,
 )
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
+from kazusa_ai_chatbot.cognition_chain_core.contracts import LLMStageBinding
 from kazusa_ai_chatbot.cognition_chain_core.stages import l3 as l3_module
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
+    build_cognition_chain_services,
+)
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 from tests.llm_trace import write_llm_trace
 
@@ -199,6 +203,7 @@ def _l3_state(case: dict) -> dict:
             'attachments': [],
             'broadcast': case.get('channel_type', 'group') == 'group',
         },
+        'reply_context': {},
         'decontexualized_input': case['decontexualized_input'],
         'referents': [],
         'rag_result': {
@@ -228,6 +233,7 @@ def _l3_state(case: dict) -> dict:
         'platform': 'qq',
         'platform_channel_id': 'group-123',
         'global_user_id': 'fa874545-02e6-4127-a24e-30819f941d83',
+        'user_name': 'Jigsaw',
     }
     return state
 
@@ -235,14 +241,25 @@ def _l3_state(case: dict) -> dict:
 async def _run_l3_case(case: dict) -> dict:
     """Run one live L3 content-plan case and write a trace."""
 
-    content_plan_agent = getattr(l3_module, 'call_content_plan_agent')
-    result = await content_plan_agent(_l3_state(case))
+    services = build_cognition_chain_services()
+    calls: list[dict] = []
+    token = l3_module.set_content_plan_agent_llm(
+        LLMStageBinding(
+            _CapturingLiveLLM('content_plan_agent', services.llm, calls),
+            services.content_plan_config,
+        )
+    )
+    try:
+        result = await l3_module.call_content_plan_agent(_l3_state(case))
+    finally:
+        l3_module.reset_content_plan_agent_llm(token)
     content_plan = result.get('content_plan')
     trace_payload = {
         'case_id': case['case_id'],
         'model': COGNITION_LLM_MODEL,
         'base_url': COGNITION_LLM_BASE_URL,
         'input': case,
+        'model_calls': calls,
         'parsed_output': result,
         'content_plan': content_plan,
         'structural_validation': {
@@ -391,7 +408,7 @@ def _l3_technical_case() -> dict:
         'character_intent': 'PROVIDE',
         'judgment_note': '可以回答，但不要补充未给出的技术判断。',
         'selected_text_surface_intent': (
-            '覆盖 GB300/Pro6000 数值和结论；允许多行，但单气泡。'
+            '覆盖 GB300/Pro6000 数值和结论；允许多行或拆成连续发送的普通文字消息。'
         ),
         'rag_answer': (
             'GB300: FP16 2250 TFLOPS, FP8 4500 TFLOPS, 288GB HBM3e, '
@@ -436,7 +453,7 @@ def _dialog_casual_case() -> dict:
             'visible_goal': '接住轻松调侃，让对方感到角色被逗乐且相处舒服。',
             'semantic_content': '被对方逗乐了，有一点小窃喜；这种轻松相处方式让人觉得舒服。',
             'voice': '轻快、随和，不深究具体指代。',
-            'rendering': '约35字；单个聊天气泡；2-3个自然短句；可自然改写 semantic_content，但不得补充 semantic_content 没有的事实、话题、问题或结论。',
+            'rendering': '约35字；1 条普通文字消息；2-3个自然短句；可自然改写 semantic_content，但不得补充 semantic_content 没有的事实、话题、问题或结论。',
         },
         'contextual_directives': {
             'social_distance': '熟悉群友，轻松但不黏',
@@ -454,12 +471,12 @@ def _dialog_technical_case() -> dict:
         'case_id': 'live_dialog_content_plan_technical_golden',
         'internal_monologue': 'Preserve the numeric comparison exactly enough.',
         'rhetorical_strategy': '先给结论，再列关键数值依据。',
-        'linguistic_style': '信息密度优先，可以轻微吐槽。',
+        'linguistic_style': '信息密度优先，轻口语，但不评价参数差异。',
         'content_plan': {
             'visible_goal': '回答用户对 GB300 和 Pro6000 的性能对比请求，并给出适用场景结论。',
             'semantic_content': 'GB300: FP16 2250 TFLOPS, FP8 4500 TFLOPS, 288GB HBM3e, 带宽 12000 GB/s, TDP 1400W, FP32 90 TFLOPS。Pro6000: FP16 125 TFLOPS, FP8 2000 TFLOPS, 96GB GDDR7, 带宽约1792 GB/s, TDP 400W, FP32 125 TFLOPS。结论：GB300 更适合超大规模训练和推理；Pro6000 更适合较小规模推理。',
-            'voice': '可以轻微调侃，但信息密度优先。',
-            'rendering': '单个聊天气泡；允许多行短句；保留数值和单位；不得补充 semantic_content 没有的技术判断。',
+            'voice': '语气轻一点，但信息密度和结论强度优先。',
+            'rendering': '2 条连续发送的普通文字消息；第一条给结论，第二条保留数值和单位；不得补充 semantic_content 没有的技术判断。',
         },
         'contextual_directives': {
             'social_distance': '熟悉群友技术讨论',
@@ -482,7 +499,7 @@ def _dialog_code_case() -> dict:
             'visible_goal': '交付用户要求的 Python 函数。',
             'semantic_content': f'请给出以下 fenced python code block，代码内容、缩进和空行不得改变：\n```python\n{_CODE_BLOCK}```',
             'voice': '代码块外可以轻微调侃；代码块内不得出现角色语气。',
-            'rendering': '单个聊天气泡；保留 fenced code block；不要改写代码。',
+            'rendering': '1-2 条普通文字消息；保留 fenced code block；不要改写代码。',
         },
         'contextual_directives': {
             'social_distance': '私聊技术协作',
@@ -505,7 +522,7 @@ def _dialog_private_case() -> dict:
             'visible_goal': '在私聊里接住对方的不确定感，并给出一个小而明确的结论。',
             'semantic_content': '今晚可以先按这个版本执行；明早再复查一次就够了。',
             'voice': '比群聊稍暖一点，但不要撒娇过度。',
-            'rendering': '单个聊天气泡；2-3个自然短句；不得新增承诺、任务或追问。',
+            'rendering': '1 条普通文字消息；2-3个自然短句；不得新增承诺、任务或追问。',
         },
         'contextual_directives': {
             'social_distance': '较熟的私聊距离',

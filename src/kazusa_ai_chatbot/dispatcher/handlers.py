@@ -167,6 +167,7 @@ async def handle_send_message(
         platform_bot_id = _platform_bot_id(ctx, adapter)
         character_name = _character_name(ctx, adapter)
         addressed_to = [ctx.source_user_id] if ctx.source_user_id.strip() else []
+        delivery_mentions = _delivery_mentions(args)
         conversation_message_id = await record_assistant_outbound_message(
             platform=target_platform,
             platform_channel_id=target_channel,
@@ -177,11 +178,13 @@ async def handle_send_message(
             addressed_to_global_user_ids=addressed_to,
             broadcast=not bool(addressed_to),
             delivery_tracking_id=delivery_tracking_id,
+            logical_message_index=0,
             storage_timestamp_utc=storage_utc_now_iso(),
             ensure_character_global_identity_func=(
                 _ensure_dispatcher_character_identity
             ),
             save_conversation_func=save_conversation,
+            mentions=delivery_mentions,
         )
         delivery_attempted = True
         send_kwargs = {
@@ -190,7 +193,6 @@ async def handle_send_message(
             "channel_type": channel_type,
             "reply_to_msg_id": args.get("reply_to_msg_id"),
         }
-        delivery_mentions = _delivery_mentions(args)
         if delivery_mentions is not None:
             send_kwargs["delivery_mentions"] = delivery_mentions
         send_result = await adapter.send_message(**send_kwargs)
@@ -199,6 +201,7 @@ async def handle_send_message(
                 platform=target_platform,
                 platform_channel_id=target_channel,
                 delivery_tracking_id=delivery_tracking_id,
+                logical_message_index=0,
                 platform_message_id=send_result.message_id,
                 delivered_at=send_result.sent_at.isoformat(),
                 adapter=send_result.platform,

@@ -9,15 +9,15 @@ from typing import TypedDict
 from kazusa_ai_chatbot.action_spec.models import (
     ActionSourceRefV1,
     ActionSpecV1,
-    CapabilitySpecV1,
     validate_action_spec,
 )
 from kazusa_ai_chatbot.action_spec.registry import (
+    ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
     BACKGROUND_WORK_REQUEST_CAPABILITY,
+    FUTURE_SPEAK_CAPABILITY,
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
-    build_initial_action_capabilities,
 )
 from kazusa_ai_chatbot.config import (
     BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
@@ -28,11 +28,14 @@ logger = logging.getLogger(__name__)
 
 ACTION_SPEC_CAP = 3
 OPEN_GOAL_DELIVERABLE_STATUSES = ("pending", "partial", "blocked")
+ACCEPTED_TASK_REQUEST_CAPABILITY = "accepted_task_request"
 ALLOWED_ACTION_CAPABILITIES = frozenset((
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
-    BACKGROUND_WORK_REQUEST_CAPABILITY,
+    FUTURE_SPEAK_CAPABILITY,
+    ACCEPTED_TASK_REQUEST_CAPABILITY,
+    ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
 ))
 
 
@@ -121,8 +124,25 @@ def _materialize_action_request(
             state,
             continuation_objective=continuation_objective,
         )
-    elif capability == BACKGROUND_WORK_REQUEST_CAPABILITY:
+    elif capability == FUTURE_SPEAK_CAPABILITY:
+        if not _can_create_delayed_task_from_source(state):
+            logger.warning(
+                "L2d dropped future-speak request from non-user source"
+            )
+            return None
+        action_spec = _build_future_speak_action_spec(request, state)
+    elif capability == ACCEPTED_TASK_REQUEST_CAPABILITY:
+        if not _can_create_delayed_task_from_source(state):
+            logger.warning(
+                "L2d dropped accepted-task request from non-user source"
+            )
+            return None
         action_spec = _build_background_work_action_spec(request, state)
+    elif capability == ACCEPTED_TASK_STATUS_CHECK_CAPABILITY:
+        action_spec = _build_accepted_task_status_check_action_spec(
+            request,
+            state,
+        )
     else:
         logger.warning(f"L2d dropped unsupported action capability: {capability}")
         return None
@@ -315,6 +335,65 @@ def _build_background_work_action_spec(
     return action_spec
 
 
+def _build_future_speak_action_spec(
+    request: ActionRequestV1,
+    state: CognitionState,
+) -> dict[str, object]:
+    """Build the background-work handoff for a future speak request."""
+
+    trigger_at = _semantic_text(request, "decision")
+    continuation_objective = _semantic_text(request, "detail")
+    if not continuation_objective:
+        continuation_objective = request["reason"]
+    action_spec = _build_action_spec(
+        kind=FUTURE_SPEAK_CAPABILITY,
+        source_refs=[_current_episode_source_ref()],
+        target={
+            "schema_version": "action_target.v1",
+            "target_kind": "current_user",
+            "target_id": None,
+            "owner": "background_work",
+            "scope": _background_work_target_scope(state),
+        },
+        params={
+            "trigger_at": trigger_at,
+            "continuation_objective": continuation_objective,
+            "requested_delivery": "send_result_when_done",
+            "max_output_chars": BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
+        },
+        urgency="background",
+        visibility="private",
+        deadline=None,
+        reason=request["reason"],
+    )
+    return action_spec
+
+
+def _build_accepted_task_status_check_action_spec(
+    request: ActionRequestV1,
+    state: CognitionState,
+) -> dict[str, object]:
+    """Build the private accepted-task status lookup action."""
+
+    action_spec = _build_action_spec(
+        kind=ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
+        source_refs=[_current_episode_source_ref()],
+        target={
+            "schema_version": "action_target.v1",
+            "target_kind": "current_user",
+            "target_id": None,
+            "owner": "accepted_task",
+            "scope": _background_work_target_scope(state),
+        },
+        params={},
+        urgency="now",
+        visibility="private",
+        deadline=None,
+        reason=request["reason"],
+    )
+    return action_spec
+
+
 def _background_work_target_scope(
     state: CognitionState,
 ) -> dict[str, object]:
@@ -364,6 +443,7 @@ def _background_work_target_scope(
             origin_metadata,
         ),
         "source_character_name": source_character_name,
+        "source_trigger_source": _trigger_source_for_scope(state),
         "requester_global_user_id": _state_or_mapping_text(
             state,
             "global_user_id",
@@ -502,6 +582,8 @@ def _character_name_for_scope(state: CognitionState) -> str:
 def _is_scheduled_future_cognition_source(state: CognitionState) -> bool:
     """Return whether this cycle was itself started by a future-cognition slot."""
 
+    if _trigger_source_for_scope(state) == "scheduled_future_cognition":
+        return True
     conversation_progress = state.get("conversation_progress")
     if not isinstance(conversation_progress, dict):
         return False
@@ -509,6 +591,32 @@ def _is_scheduled_future_cognition_source(state: CognitionState) -> bool:
     source = conversation_progress.get("source")
     is_scheduled_source = source == "scheduled_future_cognition"
     return is_scheduled_source
+
+
+def _can_create_delayed_task_from_source(state: CognitionState) -> bool:
+    """Return whether this source may create a new accepted delayed task."""
+
+    trigger_source = _trigger_source_for_scope(state)
+    can_create = trigger_source == "user_message"
+    return can_create
+
+
+def _trigger_source_for_scope(state: CognitionState) -> str:
+    """Return the trusted source case for accepted-task creation policy."""
+
+    episode = state.get("cognitive_episode")
+    if isinstance(episode, Mapping):
+        trigger_source = _mapping_text(episode, "trigger_source")
+        if trigger_source:
+            return trigger_source
+
+    conversation_progress = state.get("conversation_progress")
+    if isinstance(conversation_progress, Mapping):
+        source = _mapping_text(conversation_progress, "source")
+        if source:
+            return source
+
+    return "user_message"
 
 
 def _build_action_spec(

@@ -12,6 +12,7 @@ from scripts._db_export import configure_logging, configure_stdout, load_project
 
 from kazusa_ai_chatbot.db import close_db
 from kazusa_ai_chatbot.reflection_cycle import (
+    run_daily_affect_settling,
     run_daily_channel_reflection_cycle,
     run_global_reflection_promotion,
     run_hourly_reflection_cycle,
@@ -44,6 +45,11 @@ def _build_parser() -> argparse.ArgumentParser:
     promote.add_argument("--character-local-date", default="")
     promote.add_argument("--enable-memory-writes", action="store_true")
 
+    affect = subparsers.add_parser("affect-settle")
+    affect.add_argument("--dry-run", action="store_true")
+    affect.add_argument("--settling-local-date", default="")
+    affect.add_argument("--enable-character-state-write", action="store_true")
+
     parser.add_argument("--verbose", action="store_true")
     return parser
 
@@ -68,11 +74,19 @@ async def main() -> None:
                 character_local_date=_date_or_previous(args.character_local_date),
                 dry_run=args.dry_run,
             )
-        else:
+        elif args.command == "promote":
             result = await run_global_reflection_promotion(
                 character_local_date=_date_or_previous(args.character_local_date),
                 dry_run=args.dry_run,
                 enable_memory_writes=args.enable_memory_writes,
+            )
+        else:
+            result = await run_daily_affect_settling(
+                settling_local_date=_date_or_current(args.settling_local_date),
+                dry_run=args.dry_run,
+                enable_character_state_write=(
+                    args.enable_character_state_write
+                ),
             )
         print(f"run kind: {result.run_kind}")
         print(f"dry run: {result.dry_run}")
@@ -108,6 +122,20 @@ def _date_or_previous(value: str) -> str:
     )
     previous_date = current_local_date - timedelta(days=1)
     return_value = previous_date.isoformat()
+    return return_value
+
+
+def _date_or_current(value: str) -> str:
+    """Return the supplied date or today in character-local time."""
+
+    if value:
+        return value
+    storage_timestamp_utc = storage_utc_now_iso()
+    local_time_context = local_time_context_from_storage_utc(
+        storage_timestamp_utc,
+    )
+    current_local_date = local_time_context["current_local_datetime"][:10]
+    return_value = current_local_date
     return return_value
 
 

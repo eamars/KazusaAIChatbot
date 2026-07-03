@@ -32,6 +32,25 @@ another adapter that speaks the service API. Adapters stay thin. The brain
 service consumes typed message-envelope fields instead of parsing raw Discord,
 QQ, or debug-wire syntax.
 
+For local setup, jump to [Quick Start](#quick-start) and the
+[HOWTO](docs/HOWTO.md). For subsystem ownership, use
+[Runtime Layers](#runtime-layers).
+
+Core terms used throughout this README:
+
+- **Adapter**: platform transport that normalizes Discord, QQ, debug UI, or
+  future events into the brain service API.
+- **MessageEnvelope**: the typed inbound message contract consumed by the
+  brain, RAG, and cognition stages.
+- **RAG 2**: retrieval helper agents that return evidence; they do not decide
+  persona stance or final wording.
+- **Cognition resolver**: the bounded L1/L2/L2d loop that decides stance,
+  action needs, and whether more evidence is needed.
+- **L3/dialog**: the final visible wording stage after cognition has decided
+  what kind of surface should exist.
+- **Accepted task/background work**: durable delayed work accepted by the
+  character, persisted by deterministic code, and re-entered through cognition.
+
 At a high level, Kazusa provides:
 
 | Capability                       | What it means                                                                                                                      |
@@ -41,10 +60,10 @@ At a high level, Kazusa provides:
 | Bounded live response path       | Queueing, relevance, the cognition resolver, selected evidence capabilities, action routing, and L3 surfaces are explicit stages with caps and inspectable payloads. |
 | Multi-horizon memory             | Recent chat, short-term conversation flow, retrieved evidence, durable memory, and scheduled commitments remain separate.          |
 | Internal monologue residue       | A short private residue lane carries bounded first-person reasons from completed episodes into the next L2a cognition pass.       |
-| RAG 2 evidence retrieval         | Demand-driven helper agents retrieve user profiles, memories, conversation history, live facts, web evidence, and recall state.   |
+| RAG 2 evidence retrieval         | Demand-driven helper agents retrieve user profiles, memories, conversation history, live facts, web evidence, and recall state when cognition asks. |
 | Layered cognition                | Cognition decides stance, boundaries, judgment, style, action needs, and response goals before selected L3 surfaces render output. |
 | Background consolidation         | Completed episodes update durable memory, relationship state, Cache2 invalidation, images, and progress from text plus action/surface traces. |
-| Background artifact handoff      | Bounded text-only artifact work can be queued during a live turn and later re-enter cognition as a source-bound result episode.                |
+| Accepted delayed work            | Accepted reminders and text tasks are persisted, routed to internal background workers, and returned through cognition rather than sent directly. |
 | Reflection outside chat          | Hourly, daily, and promoted reflection runs are stored as audit records and only promoted context can enter normal cognition.      |
 | Idle self-cognition              | Background source cases can enter the same resolver-backed persona path, with source-bound delivery and normal consolidation rules. |
 | Calendar follow-through          | Accepted future promises and due commitments can become durable calendar triggers that run fresh cognition later.                  |
@@ -121,81 +140,226 @@ Tested chat model families:
 
 Kazusa also requires an OpenAI-compatible embeddings endpoint for conversation
 history, memory retrieval, and vector search features. Local deployments
-commonly use LM Studio or another OpenAI-compatible end points.
+commonly use LM Studio or another OpenAI-compatible endpoint.
 
 ## Architecture At A Glance
 
+This is the complete top-level map, not the shortest path through one chat
+turn. Read the solid live path first:
+`adapter -> brain service -> queue/intake -> evidence -> cognition -> dialog -> persistence/scheduler`.
+Then use the subgraphs as ownership maps for helper agents, resolver
+capabilities, web sources, complex-task research, accepted tasks, background
+workers, and durable maintenance systems.
+
+Ownership tags in node labels are intentional: `[LLM]` nodes make semantic
+judgments, `[deterministic]` nodes validate or move state, and `[worker]` nodes
+execute bounded delayed work. Exact subagent naming and documentation
+vocabulary are covered by the
+[Subagent Interface Guide](docs/SUBAGENT_INTERFACES.md).
+
 ```mermaid
 flowchart TD
-    A[Discord, NapCat QQ, debug UI, future adapters]
-    B[FastAPI brain service]
-    C[Process-local chat queue]
-    D[Intake and typed episode assembly]
-    E{Service graph}
-    F[Media descriptor]
-    G[Relevance gate]
-    H[Conversation progress, promoted reflection context, L2a residue]
-    J[Adapter delivery and delivery receipts]
-    K[Post-turn memory, progress, residue, consolidation]
-    L[(MongoDB, model routes, Cache2, web/MCP runtimes)]
-    M[Calendar scheduler, reflection, self-cognition workers]
-    N[No persona turn / empty ChatResponse]
+    A["Adapters<br/>Discord, NapCat QQ, debug UI, future adapters"]
+    B["FastAPI brain service<br/>/chat, health, ops snapshots, delivery receipts, runtime adapter registry"]
+    C["Process-local chat queue<br/>drop/collapse policy, inbound persistence"]
+    D["Intake and typed episode assembly<br/>MessageEnvelope, reply hydration, history, media, source scope"]
+    E{"Service graph"}
+    F["Media descriptor<br/>image/audio observations"]
+    G["Relevance gate"]
+    H["Prompt-safe context lanes<br/>conversation_progress<br/>internal_monologue_residue<br/>past_dialog_cognition<br/>promoted reflection and growth context"]
+    N["No persona turn<br/>empty ChatResponse"]
+    J["Adapter delivery boundary<br/>ChatResponse messages, mentions, delivery receipts"]
+    K["Post-turn state work<br/>conversation progress, residue, consolidation, Cache2 invalidation"]
+    DB[("MongoDB through DB facade<br/>conversation, profiles, user memory, shared memory, calendar, reflection, traces, event logs")]
+    SUP["Shared support<br/>LLM interface and route configs<br/>Cache2 and embeddings<br/>web/MCP runtimes<br/>sanitized event logging and protected LLM tracing"]
 
     A -->|ChatRequest + MessageEnvelope| B
     B --> C
-    C -->|drop/collapse policy, persist inbound rows| D
+    C --> D
     D --> E
     E -->|attachments| F
     F --> G
-    E -->|text only| G
+    E -->|text-only or described media| G
     G -->|should respond| H
     G -->|should not respond| N
     H --> P0
     P3 -->|visible text surfaces| J
-    P4 -->|private actions or no visible surface| K
+    P4 -->|private action or no visible surface| K
     J --> K
-    K --> L
-    M -->|calendar-triggered source cases| P1
-    M --> L
+    K --> CONS
+    K --> DB
+    SUP -.-> B
 
     subgraph Persona["Persona turn"]
-        P0[Message decontextualizer]
-        P1[Bounded cognition resolver]
-        P2[Memory lifecycle specialist]
-        P3[L3 text surface and dialog]
-        P4[Private no-response/action trace]
+        P0["Stage 0<br/>message decontextualizer"]
+        P1["Stage 1<br/>bounded cognition resolver"]
+        P2["Stage 2<br/>memory lifecycle specialist"]
+        P2A["Stage 2a<br/>accepted-task and background-work enqueue"]
+        P3["Stage 3<br/>L3 text surface and dialog"]
+        P4["Private finalization<br/>no-response/action trace"]
+        PT["EpisodeTrace<br/>action results and surface outputs"]
         P0 --> P1
         P1 --> P2
-        P2 -->|speak action selected| P3
-        P2 -->|no visible surface| P4
+        P2 --> P2A
+        P2A -->|speak selected| P3
+        P2A -->|no visible text surface| P4
+        P3 --> PT
+        P4 --> PT
     end
 
-    subgraph Resolver["Resolver recurrence"]
-        R1[L1 affect and subtext]
-        R2[L2a consciousness + L2b boundary]
-        R3[L2c1 judgment + L2c2 social context]
-        R4[L2d action and capability selection]
+    subgraph Resolver["Cognition resolver recurrence"]
+        R0["Resolver state<br/>goal progress, observations, pending resume"]
+        R1["L1<br/>affect and interaction subtext"]
+        R2["L2a<br/>consciousness"]
+        R3["L2b<br/>boundary appraisal"]
+        R4["L2c1 + L2c2<br/>judgment and social context"]
+        R5["L2d [LLM]<br/>action and capability selection"]
+        R0 --> R1
         R1 --> R2
         R2 --> R3
         R3 --> R4
+        R4 --> R5
     end
 
-    subgraph Capabilities["Cognition-selected capabilities"]
-        C0[Deterministic capability executor]
-        C1[RAG 2 or web/current evidence]
-        C2[Human clarification or approval blocker]
-        C3[Private self-goal resolution]
-        C0 --> C1
-        C0 --> C2
-        C0 --> C3
+    subgraph ResolverCaps["Cognition-selected resolver capabilities"]
+        RC0["Deterministic capability executor [deterministic]<br/>one immediate request per cycle"]
+        RC1["local_context_recall<br/>RAG 2 evidence"]
+        RC2["public_answer_research<br/>complex task resolver"]
+        RC3["human_clarification<br/>pending HIL row"]
+        RC4["approval_preparation<br/>pending approval row"]
+        RC5["self_goal_resolution<br/>private internal-source handling"]
+        RC6["Resolver observation<br/>prompt-safe result for next cycle"]
+        RC0 --> RC1
+        RC0 --> RC2
+        RC0 --> RC3
+        RC0 --> RC4
+        RC0 --> RC5
+        RC1 --> RC6
+        RC2 --> RC6
+        RC3 --> RC6
+        RC4 --> RC6
+        RC5 --> RC6
     end
 
-    P1 --> R1
-    R4 -->|capability requested| C0
-    C1 -->|observation| R1
-    C2 -->|observation or pending resume| R1
-    C3 -->|observation| R1
-    R4 -->|terminal action specs| P2
+    subgraph RAG2["RAG 2 helper-agent family"]
+        RG0["call_quote_aware_rag_supervisor"]
+        RG1["rag_initializer<br/>slot planning"]
+        RG2["rag_dispatcher / executor / evaluator<br/>drains unknown slots"]
+        RG3["rag_finalizer<br/>compact evidence answer"]
+        RA1["live_context_agent<br/>runtime_context_provider, target resolver, web delegation"]
+        RA2["conversation_evidence_agent<br/>conversation_search_agent<br/>conversation_filter_agent<br/>conversation_aggregate_agent<br/>conversation_keyword_agent"]
+        RA3["memory_evidence_agent<br/>persistent_memory_search_agent<br/>persistent_memory_keyword_agent<br/>user_memory_evidence_agent"]
+        RA4["person_context_agent<br/>user_lookup_agent<br/>user_list_agent<br/>user_profile_agent<br/>relationship_agent<br/>user_image_retriever_agent"]
+        RA5["web_agent3"]
+        RA6["recall_agent<br/>ProgressCollector<br/>ActiveCommitmentCollector<br/>CalendarRunCollector<br/>HistoryEvidenceCollector"]
+        RG0 --> RG1
+        RG1 --> RG2
+        RG2 --> RA1
+        RG2 --> RA2
+        RG2 --> RA3
+        RG2 --> RA4
+        RG2 --> RA5
+        RG2 --> RA6
+        RA1 --> RG3
+        RA2 --> RG3
+        RA3 --> RG3
+        RA4 --> RG3
+        RA5 --> RG3
+        RA6 --> RG3
+    end
+
+    subgraph Web3["web_agent3 source subagents"]
+        W0["router/generator -> executor -> evaluator -> finalizer"]
+        W1["web_read<br/>direct HTTP(S) URL read"]
+        W2["web_search<br/>SearXNG search when configured"]
+        W3["nhentai<br/>metadata/search when token enabled"]
+        W4["bilibili<br/>public read/search when SDK available"]
+        W0 --> W1
+        W0 --> W2
+        W0 --> W3
+        W0 --> W4
+    end
+
+    subgraph Complex["Complex task resolver"]
+        X0["Public IO<br/>resolve_complex_task request/context/options"]
+        X1["graph planner"]
+        X2["active node resolver"]
+        X3["collapse review"]
+        X4["bottom-up synthesis<br/>knowledge packet"]
+        X5["evidence subagent<br/>collect_evidence"]
+        X6["algorithmic subagent<br/>evaluate_expression / missing_expression"]
+        X0 --> X1
+        X1 --> X2
+        X2 --> X5
+        X2 --> X6
+        X2 --> X3
+        X3 --> X2
+        X2 --> X4
+    end
+
+    subgraph Actions["Action spec, accepted tasks, and background workers"]
+        A0["ActionSpec materialization and evaluator [deterministic]"]
+        A1["Visible/private capabilities<br/>speak<br/>memory_lifecycle_update<br/>accepted_task_request<br/>accepted_task_status_check<br/>future_speak<br/>trigger_future_cognition"]
+        A2["Internal executable actions<br/>apply_memory_lifecycle_update<br/>background_work_request"]
+        AT["accepted_task lifecycle<br/>identity, duplicate rejection, result-ready state"]
+        BW0["background_work runtime [LLM route only]<br/>router chooses worker only"]
+        BW1["text_artifact worker [worker]<br/>task router + generator"]
+        BW2["future_speak worker [deterministic worker]<br/>schedules future cognition"]
+        A0 --> A1
+        A1 --> A2
+        A2 --> AT
+        AT --> BW0
+        BW0 --> BW1
+        BW0 --> BW2
+    end
+
+    subgraph Maintenance["Background and durable subsystems"]
+        CAL["calendar_scheduler<br/>future_cognition, commitment_due_cognition, reflection_phase_slot, recurring_self_check"]
+        SC["self_cognition worker<br/>active commitment, recent dialog, topic follow-up, group review cases"]
+        REF["reflection_cycle worker<br/>hourly slot, daily channel, global promotion, affect settling"]
+        ME["memory_evolution<br/>shared memory insert, supersede, merge, seed reset"]
+        GG["global_character_growth<br/>promoted trait drift"]
+        CONS["consolidation<br/>target plan -> source views -> lane router -> lane review -> write-intent validation -> persistence"]
+        DISP["dispatcher [deterministic]<br/>registered adapter callback delivery for trusted sends"]
+        PRO["proactive_output<br/>permissioned preview/outbox contract, no production send path"]
+        CAL --> SC
+        CAL --> REF
+        REF --> ME
+        REF --> GG
+        REF --> SC
+        SC --> DISP
+        SC --> CONS
+        CONS --> ME
+        GG --> H
+        ME --> H
+    end
+
+    P1 --> R0
+    R5 -->|capability requested| RC0
+    RC6 -->|observation or pending resume| R0
+    R5 -->|terminal semantic action requests| A0
+    A0 --> P2
+    P2A --> AT
+    BW1 -->|accepted_task_result_ready| P1
+    BW2 --> CAL
+    CAL -->|future or due source case| SC
+    SC -->|shared cognition path| P0
+    RC1 --> RG0
+    RG3 --> RC6
+    RC2 --> X0
+    X4 --> RC6
+    RA5 --> W0
+    X5 --> W0
+    CONS --> DB
+    AT --> DB
+    BW0 --> DB
+    CAL --> DB
+    REF --> DB
+    ME --> DB
+    GG --> DB
+    SUP -.-> R1
+    SUP -.-> RG0
+    SUP -.-> K
 ```
 
 Kazusa's live response path is a cognition core, not a chatbot shell or a
@@ -203,12 +367,23 @@ generic tool harness. Adapters normalize platform events into the typed service
 contract; the brain service owns queueing, identity, reply hydration, history,
 episode construction, and graph execution.
 
+The named specialist boxes are family-local subagents and workers, not one
+universal runtime abstraction. RAG helper agents retrieve local, profile,
+memory, conversation, recall, live, and web evidence; `web_agent3` owns its
+source subagents; the complex-task resolver owns resolver-local evidence and
+algorithmic subagents; background work owns delayed-work workers.
+
 The resolver preserves the same L1 -> L2 -> L2d cognition stack on every
 cycle. L2d may finish with selected action specs, or it may request one bounded
-capability observation such as RAG 2 evidence, web/current evidence, human
-clarification, approval preparation, or private self-goal resolution. The
+capability observation through `local_context_recall`, `public_answer_research`,
+`human_clarification`, `approval_preparation`, or `self_goal_resolution`. The
 observation is projected into the next cognition cycle; evidence never speaks
 as persona by itself.
+
+Full RAG 2 runs only when L2d selects `local_context_recall`. The separate
+first-cycle shared-memory prewarm may project confirmed shared-memory rows into
+L2a before the first cognition pass; it is not a resolver capability
+observation and it does not let retrieved evidence become persona.
 
 Selected visible text surfaces go back to adapters through `ChatResponse` and
 delivery receipts. Private action results, no-visible-output decisions, and
@@ -216,14 +391,171 @@ surface traces can still feed post-turn progress, consolidation, Cache2
 invalidation, residue recording, calendar state, reflection, and
 self-cognition without creating a platform send.
 
-Background work requests are selected by cognition as `background_work_request`,
-validated and queued by deterministic action-spec execution, and acknowledged
-only after a durable pending job exists. A route-only background-work router
-chooses the worker and semantic task after the live turn; the text-artifact
-worker has its own task router and generator stages. Completed results return
-as `background_work_result_ready` cognition rather than being sent directly by
-workers. Legacy background-artifact rows remain compatibility data, not the new
-top-level runtime contract.
+Delayed user work is selected by cognition as an accepted task. L2d sees the
+semantic `accepted_task_request` and `accepted_task_status_check` affordances;
+deterministic action-spec execution materializes new accepted tasks into the
+internal `background_work` executor only after duplicate rejection and durable
+lifecycle persistence. A route-only background-work router chooses the worker
+and semantic task after the live turn; the text-artifact worker has its own task
+router and generator stages. Completed accepted tasks return as
+`accepted_task_result_ready` cognition rather than being sent directly by
+workers. Legacy background-artifact and legacy background-work rows remain
+compatibility data, not the new model-facing runtime contract.
+
+## Real Debug Example Flows
+
+The first three examples below were captured through the real debug `/chat`
+interface, a local/debug path that sends the same typed chat request shape into
+the brain service as runtime adapters. Example 4 was captured through the
+complex-task resolver entry point, which returns a research packet rather than
+visible chat text. The examples were captured on July 2, 2026, then translated
+to English and condensed for a README audience. They are not full trace dumps.
+Internal ids, cache keys, raw database rows, and implementation field names are
+intentionally omitted. The diagrams render typed payloads as readable prose.
+
+Read each diagram from left to right. Every example uses the same five
+checkpoints:
+
+1. **Message / Request** is what the chat platform, debug client, or resolver
+   entry point receives.
+2. **Extract** is a human-readable summary of the typed, platform-neutral
+   message envelope and hydrated context the brain receives.
+3. **Context / Evidence** is retrieved conversation evidence, reply context, or
+   structured task state used for the decision.
+4. **Decision** is the character-level judgment for chat turns, or the
+   resolver-level synthesis rule for non-chat task packets.
+5. **Output** is what the user sees, the durable handoff created for later
+   work, or the semantic packet returned to the next stage.
+
+This mirrors the system boundary: adapters normalize platform events, RAG
+returns evidence, cognition decides the character stance, dialog owns visible
+wording, and deterministic subsystems own validation, persistence, scheduling,
+adapter delivery, and durable task lifecycle.
+
+### Example 1: Private Continuity Recall
+
+This private-chat example shows how the system answers a follow-up question by
+using recent conversation context instead of treating the message as isolated.
+
+```mermaid
+flowchart TD
+    A["1. Message<br/>Kazusa, do you remember what I was worried about for tomorrow?"]
+    B["2. Extract<br/>Private follow-up. The user is checking whether Kazusa remembers a specific prior worry."]
+    C["3. Context / Evidence<br/>Recent conversation: the user was worried about going blank during technical interview questions."]
+    D["4. Decision<br/>Treat this as a continuity and trust check. Answer from remembered context, then lightly check on the user."]
+    E["5. Output<br/>I remember. You were worried you might go blank when technical questions come up in tomorrow's interview, and that was making you nervous. Are you okay right now?"]
+
+    A --> B --> C --> D --> E
+```
+
+The important transfer is the remembered concern. The adapter only needs to
+send a clean private message into the brain. RAG/retrieval supplies the earlier
+interview worry as evidence, but it does not write the reply. Cognition decides
+that the user is testing continuity, so the dialog response confirms the memory
+and adds a small emotional check-in.
+
+### Example 2: Group Reply And Mention Grounding
+
+This group-chat example shows how a reply target and a direct mention become
+semantic context. The character understands both the technical question and
+the social pressure of being asked to take sides.
+
+```mermaid
+flowchart TD
+    A["1. Message<br/>@Kazusa do you agree with Alex, or is the quality drop too risky?"]
+    B["2. Extract<br/>Group message. The user directly mentions Kazusa and replies to Alex's proposal."]
+    C["3. Context / Evidence<br/>Reply context: Alex suggested deploying the smaller model first."]
+    D["4. Decision<br/>Answer the direct question, but avoid casually choosing sides in a group disagreement."]
+    E["5. Output<br/>About what Alex said... starting with a smaller model, I am not sure I can say which is better. A quality drop is definitely something to worry about, but I should not casually pick a side."]
+
+    A --> B --> C --> D --> E
+```
+
+The important transfer is the combination of direct address and reply context.
+The adapter normalizes platform-specific mention and reply syntax into typed
+envelope fields; the README diagram renders those fields as readable prose.
+Cognition can then judge the social situation: Kazusa was invited into a
+disagreement, so the visible answer acknowledges the quality risk without
+pretending to have enough basis to overrule either person.
+
+### Example 3: Accepted Future Reminder Handoff
+
+This example shows a user-facing delayed task. The character accepts the
+reminder in the live chat, while deterministic subsystems create durable work
+for the future.
+
+```mermaid
+flowchart TD
+    A["1. Message<br/>Kazusa, please remind me on 2026-07-04 at 09:00 to review my interview notes."]
+    B["2. Extract<br/>Future reminder request. Time: 2026-07-04 09:00. Reminder: review interview notes."]
+    C["3. Context / Evidence<br/>Structured task state: requester, future time, reminder objective, and chat scope."]
+    D["4. Decision<br/>Accept the low-pressure request and acknowledge the exact time and objective."]
+    E["5. Output<br/>Visible reply: Got it. July 4, 2026 at 9 AM, I will remind you to review your interview notes.<br/>Durable handoff: accepted task persisted; future_speak/background_work schedules future cognition.<br/>At due time, self-cognition, dialog, and dispatcher decide the actual send."]
+
+    A --> B --> C --> D --> E
+```
+
+The important transfer is the future task, not the queue machinery. Cognition
+decides whether Kazusa should accept the reminder. After that decision,
+deterministic code stores the accepted task and queues the internal future
+work. In implementation terms, cognition selects an `accepted_task_request`
+action spec; deterministic execution persists it, creates the internal
+`background_work` request, and `future_speak` schedules a `future_cognition`
+calendar run. At due time, self-cognition, dialog, and dispatcher decide
+whether and how to send the reminder. The background worker does not write
+final chat text directly.
+
+### Example 4: Complex Public Research Packet
+
+This non-chat resolver case shows how a broad benchmark request is decomposed
+into source-bound evidence and a comparison packet. It does not produce visible
+dialog; it returns the packet for later cognition, inspection, or answer
+synthesis. The benchmark numbers are captured trace content from July 2, 2026,
+not current hardware guidance.
+
+```mermaid
+flowchart TD
+    A["1. Message<br/>Compare RTX5090 with R9700 in terms of Qwen3.6 27B and 35B, and Gemma4 31/26B performance, with Q4 if possible."]
+    B["2. Extract<br/>Public benchmark task. Treat R9700 as the AMD 32GB GPU target used by the collected evidence. Compare RTX 5090 and R9700 across Qwen3.6 27B/35B and Gemma4 31B/26B. Include Q4 quantization when evidence exists."]
+    C["3. Context / Evidence<br/>RTX 5090 branch: Qwen3.6 27B about 130 tokens/s on dual RTX 5090 FP8; Gemma4 31B about 231 tokens/s in a coding task; Gemma4 26B Q4_K_M runnable with about 16GB VRAM.<br/>R9700 branch: source-reported Qwen3.6 35B and 27B throughput in the low-40 tokens/s range; Gemma4 31B about 39 tokens/s; Gemma4 26B availability noted, exact R9700 throughput unclear."]
+    D["4. Decision<br/>Return a bounded knowledge packet. Compare only source-supported values, preserve caveats, and mark missing same-prompt head-to-head data."]
+    E["5. Output<br/>Investigation packet: captured source snippets favored RTX 5090 for speed and setup maturity, while R9700 remained viable but backend-sensitive. Direct same-prompt Q4 comparisons and several model-specific throughputs were still missing."]
+
+    A --> B --> C --> D --> E
+```
+
+The captured resolver tree shows how the task is broken down. The planner first
+separates evidence collection from comparison. Evidence branches collect facts
+for each GPU, model-availability checks reuse already-collected evidence, and
+the final packet keeps unsupported comparisons explicit.
+
+```mermaid
+flowchart TD
+    R["Root<br/>Compare RTX5090 vs R9700 for Qwen3.6 27B/35B and Gemma4 31B/26B, Q4 if possible"]
+    P["Planner split<br/>Collect benchmark evidence first, then compare metrics"]
+    A["RTX 5090 evidence<br/>Qwen3.6 27B: about 130 tokens/s on dual RTX 5090 FP8<br/>Gemma4 31B: about 231 tokens/s in a coding task<br/>Gemma4 26B: Q4_K_M runnable, about 16GB VRAM<br/>Qwen3.6 35B: viable, no precise throughput found"]
+    B["R9700 evidence<br/>Qwen3.6 35B and 27B: source-reported low-40 tokens/s range<br/>Gemma4 31B: about 39 tokens/s<br/>Gemma4 26B: related availability found, exact R9700 throughput unclear"]
+    C["Model availability check<br/>Reuse the RTX 5090 and R9700 benchmark branches because they already carry Qwen3.6 and Gemma4 evidence"]
+    D["Comparison packet<br/>Captured evidence favored RTX 5090 for speed and setup maturity<br/>Still needed: same prompt and hardware setup, RTX 5090 Qwen3.6 35B number, R9700 Gemma4 26B number"]
+
+    R --> P
+    R --> D
+    P --> A
+    P --> B
+    P --> C
+    C -. reuses .-> A
+    C -. reuses .-> B
+    A --> D
+    B --> D
+```
+
+The important transfer is the boundary between evidence and conclusion. The
+resolver turns one broad request into smaller evidence jobs. Each job returns a
+short source-bound summary plus caveats. When a later branch asks something
+already answered, the tree points back to that existing evidence instead of
+treating it as a new fact. The final packet is useful to an AI developer
+because it separates what the system can say now from what still needs
+verification before making a confident public comparison.
 
 ## Design Principles
 
@@ -256,6 +588,9 @@ input.
 
 Reflection is slower sense-making work. Raw reflection output is stored for
 inspection, but normal cognition only receives bounded, promoted, gated context.
+The reflection worker also owns the daily sleep/wake affect-settling pass that
+smooths persistent character mood and global vibe outside the live response
+path.
 
 **Adapters are transport edges**
 
@@ -267,7 +602,7 @@ cognition, and calendar scheduling remain in the platform-neutral core.
 
 | Layer                    | Owns                                                                                    | Key docs                                                                               |
 | ------------------------ | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Adapters                 | Discord, NapCat QQ, debug UI transport and platform rendering                           | [HOWTO](docs/HOWTO.md)                                                                 |
+| Adapters                 | Discord, NapCat QQ, debug UI transport and platform rendering                           | [Adapter ICD](src/adapters/README.md), [HOWTO](docs/HOWTO.md#adapters)                |
 | Control console          | Local operator auth, service lifecycle, process logs, audit, static UI, debug-chat handoff | [Control Console ICD](src/control_console/README.md)                                  |
 | Brain service            | HTTP API, queue, graph startup, health, delivery receipts, runtime adapter registration | [Brain Service ICD](src/kazusa_ai_chatbot/brain_service/README.md)                     |
 | Message envelope         | Typed inbound content, mentions, replies, attachments, addressees, broadcast state      | [Message Envelope ICD](src/kazusa_ai_chatbot/message_envelope/README.md)               |
@@ -278,7 +613,9 @@ cognition, and calendar scheduling remain in the platform-neutral core.
 | RAG 2                    | Slot-driven helper-agent retrieval and Cache2 evidence projection                       | [RAG 2](src/kazusa_ai_chatbot/rag/README.md)                                           |
 | Cognition and dialog     | Character stance, boundaries, judgment, style, visual directives, and final wording     | [Cognition Nodes](src/kazusa_ai_chatbot/nodes/README.md)                              |
 | Action spec              | L2d action residues, capability registry, evaluator, results, surfaces, and traces      | [Action Spec](src/kazusa_ai_chatbot/action_spec/README.md)                            |
-| Consolidation            | Durable target routing, write-intent validation, and target-specific persistence        | [Consolidation ICD](src/kazusa_ai_chatbot/consolidation/README.md)                    |
+| Accepted task            | User-facing lifecycle for delayed work accepted by the character                        | [Accepted Task ICD](src/kazusa_ai_chatbot/accepted_task/README.md)                    |
+| Background work          | Internal delayed-work executor, worker routing, and result handoff                      | [Background Work ICD](src/kazusa_ai_chatbot/background_work/README.md)                |
+| Consolidation            | Durable target planning, lane routing/review, write-intent validation, and target-specific persistence | [Consolidation ICD](src/kazusa_ai_chatbot/consolidation/README.md)                    |
 | Database                 | MongoDB collection ownership, embeddings, indexes, public persistence helpers           | [Database ICD](src/kazusa_ai_chatbot/db/README.md)                                     |
 | Event logging            | Sanitized operational telemetry, status snapshots, statistics, and export contracts     | [Event Logging ICD](src/kazusa_ai_chatbot/event_logging/README.md)                     |
 | Calendar scheduler       | Durable typed trigger timing for future cognition, commitment due checks, and reflection phase slots | [Calendar Scheduler ICD](src/kazusa_ai_chatbot/calendar_scheduler/README.md) |
@@ -289,12 +626,23 @@ cognition, and calendar scheduling remain in the platform-neutral core.
 | Global character growth  | Slow promoted-trait drift from approved reflection memory                               | [Global Character Growth ICD](src/kazusa_ai_chatbot/global_character_growth/README.md) |
 | Proactive output         | Permissioned preview/outbox contracts for future autonomous contact paths               | [Proactive Output ICD](src/kazusa_ai_chatbot/proactive_output/README.md)               |
 
+Other project documents:
+
+| Document                                                | Purpose                                                           |
+| ------------------------------------------------------- | ----------------------------------------------------------------- |
+| [README_CN.md](README_CN.md)                            | Simplified Chinese project overview                               |
+| [docs/HOWTO.md](docs/HOWTO.md)                          | Local setup, environment variables, run commands, adapters, tests |
+| [Documentation Guide](docs/DOCUMENTATION_GUIDE.md)      | Document roles, source hierarchy, module README rules, parity     |
+| [Subagent Interface Guide](docs/SUBAGENT_INTERFACES.md) | Cross-family subagent and worker documentation vocabulary         |
+| [Development Plans Registry](development_plans/README.md) | Active, archived, reference, and roadmap documents              |
+
 ## Quick Start
 
 Kazusa expects MongoDB plus OpenAI-compatible chat and embedding endpoints. LM
 Studio works for local development, but any compatible endpoint can be used.
-All route-specific model environment variables are documented in
-[docs/HOWTO.md](docs/HOWTO.md).
+Before starting the service, create a local `.env` with MongoDB, chat route,
+and embedding settings. All route-specific model environment variables are
+documented in [docs/HOWTO.md](docs/HOWTO.md#local-setup).
 
 ```powershell
 python -m venv venv
@@ -350,7 +698,9 @@ src/
     cognition_resolver/        Bounded resolver loop, capability observations, HIL state
     nodes/                     Persona, cognition, and dialog stages
     action_spec/               Modality-neutral action contracts, registry, results
-    consolidation/             Durable consolidation helpers, target routing, and ICD
+    accepted_task/             User-facing accepted delayed-work lifecycle
+    background_work/           Internal delayed-work executor and workers
+    consolidation/             Durable consolidation helpers, lane routing, and ICD
     rag/                       RAG 2 helper agents, hybrid retrieval, Cache2
     conversation_progress/     Short-term episode memory
     internal_monologue_residue/ Short-lived private residue lane for L2a
@@ -378,7 +728,6 @@ Default test runs exclude live DB and live LLM tests through `pytest.ini`.
 
 ```powershell
 venv\Scripts\python -m pytest -q
-venv\Scripts\python -m pytest -m "not live_db and not live_llm" -q
 ```
 
 Live LLM tests must be run one case at a time with output inspected. Live DB
@@ -392,27 +741,6 @@ persistent digital character. The main runtime is usable as a local brain
 service with adapters, memory, retrieval, self-cognition, reflection, and
 scheduling, but some autonomous-contact surfaces intentionally remain
 permissioned preview contracts rather than production sends.
-
-## Documentation Index
-
-| Document                                                                 | Purpose                                                           |
-| ------------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| [README.md](README.md)                                                   | Project overview and architecture map                             |
-| [README_CN.md](README_CN.md)                                             | Simplified Chinese project overview                               |
-| [docs/HOWTO.md](docs/HOWTO.md)                                           | Local setup, environment variables, run commands, adapters, tests |
-| [Brain Service ICD](src/kazusa_ai_chatbot/brain_service/README.md)       | HTTP endpoint contracts and adapter obligations                   |
-| [Message Envelope ICD](src/kazusa_ai_chatbot/message_envelope/README.md) | Typed inbound message contract                                    |
-| [LLM Interface ICD](src/kazusa_ai_chatbot/llm_interface/README.md)       | Chat model invocation, provider compatibility, and route diagnostics |
-| [Database ICD](src/kazusa_ai_chatbot/db/README.md)                       | Persistence ownership and collection contracts                    |
-| [Internal Monologue Residue ICD](src/kazusa_ai_chatbot/internal_monologue_residue/README.md) | Short-lived private residue lifecycle and L2a-only contract |
-| [Action Spec](src/kazusa_ai_chatbot/action_spec/README.md)               | Modality-neutral action contracts and trace handoff               |
-| [Consolidation ICD](src/kazusa_ai_chatbot/consolidation/README.md)       | Durable target routing and write-intent validation                |
-| [Event Logging ICD](src/kazusa_ai_chatbot/event_logging/README.md)        | Sanitized telemetry interface, event taxonomy, and ops statistics |
-| [Cognition Resolver ICD](src/kazusa_ai_chatbot/cognition_resolver/README.md) | Bounded resolver loop, capability observations, HIL, and traces |
-| [RAG 2](src/kazusa_ai_chatbot/rag/README.md)                             | Retrieval architecture and evidence projection                    |
-| [Cognition Nodes](src/kazusa_ai_chatbot/nodes/README.md)                 | Layered cognition, dialog, and node-package design contracts      |
-| [Self-Cognition](src/kazusa_ai_chatbot/self_cognition/README.md)          | Idle cognition source collection, tracking, and delivery          |
-| [Development Plans Registry](development_plans/README.md)                | Active, archived, reference, and roadmap documents                |
 
 ## License
 

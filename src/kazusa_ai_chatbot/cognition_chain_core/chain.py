@@ -204,6 +204,10 @@ def _state_from_chain_input(
         "internal_monologue_residue_context": (
             context["internal_monologue_residue_context"]
         ),
+        "past_dialog_cognition_context": context.get(
+            "past_dialog_cognition_context",
+            "",
+        ),
         "decontexualized_input": current_event["decontextualized_input"],
         "referents": _mapping_list(current_event["referents"]),
         "rag_result": rag_result,
@@ -218,6 +222,9 @@ def _state_from_chain_input(
         ),
         "background_work_output_char_limit": (
             input_payload["runtime_context"]["background_work_output_char_limit"]
+        ),
+        "task_willingness_boundary_enabled": (
+            input_payload["runtime_context"]["task_willingness_boundary_enabled"]
         ),
     }
     group_engagement_context = action_selection_context.get(

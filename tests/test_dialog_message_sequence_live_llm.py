@@ -1,4 +1,4 @@
-"""Live LLM checks for dialog one-bubble layout behavior."""
+"""Live LLM checks for dialog message-sequence behavior."""
 
 from __future__ import annotations
 
@@ -218,17 +218,29 @@ async def _run_live_dialog_case(case: dict, monkeypatch) -> dict:
     state = _base_dialog_state(case)
     result = await dialog_agent(state)
     final_dialog = result.get('final_dialog')
+    visible_segments: list[str] = []
+    if isinstance(final_dialog, list):
+        visible_segments = [
+            segment.strip()
+            for segment in final_dialog
+            if isinstance(segment, str) and segment.strip()
+        ]
+    expected_message_count = case.get('expected_message_count')
     structural_validation = {
         'final_dialog_is_list': isinstance(final_dialog, list),
         'final_dialog_all_strings': (
             isinstance(final_dialog, list)
             and all(isinstance(segment, str) for segment in final_dialog)
         ),
-        'final_dialog_non_empty': bool(final_dialog),
+        'final_dialog_non_empty': bool(visible_segments),
+        'visible_message_count': len(visible_segments),
+        'expected_message_count': expected_message_count,
+        'matches_expected_message_count': (
+            expected_message_count is None
+            or len(visible_segments) == expected_message_count
+        ),
     }
-    joined_dialog = ''
-    if structural_validation['final_dialog_all_strings']:
-        joined_dialog = '\n'.join(final_dialog)
+    joined_dialog = '\n'.join(visible_segments)
 
     trace_payload = {
         'case_id': case['case_id'],
@@ -243,12 +255,11 @@ async def _run_live_dialog_case(case: dict, monkeypatch) -> dict:
         'raw_result': result,
         'final_dialog': final_dialog,
         'joined_dialog': joined_dialog,
-        'mention_target_user': result.get('mention_target_user'),
         'structural_validation': structural_validation,
         'manual_inspection_notes': '',
     }
     trace_path = write_llm_trace(
-        'dialog_one_bubble_layout_live_llm',
+        'dialog_message_sequence_live_llm',
         case['case_id'],
         trace_payload,
     )
@@ -257,6 +268,7 @@ async def _run_live_dialog_case(case: dict, monkeypatch) -> dict:
     assert structural_validation['final_dialog_is_list'], trace_path
     assert structural_validation['final_dialog_all_strings'], trace_path
     assert structural_validation['final_dialog_non_empty'], trace_path
+    assert structural_validation['matches_expected_message_count'], trace_path
     assert joined_dialog.strip(), trace_path
 
     return trace_payload
@@ -352,6 +364,40 @@ def _private_soft_case() -> dict:
         'chat_history': _chat_history(
             ('user', '我这样安排今晚是不是有点乱？'),
         ),
+    })
+    return case
+
+
+def _two_message_followup_case() -> dict:
+    """Build the two-message follow-up scenario."""
+
+    case = _base_case('two_message_followup_boundary')
+    case.update({
+        'internal_monologue': '先稳住对方，再补一句清楚边界，不要压成一大段。',
+        'rhetorical_strategy': '第一条短反应接住焦虑，第二条给明确边界和下一步。',
+        'linguistic_style': '在线聊天语气，短消息，像连续发两条。',
+        'content_plan': {
+            'visible_goal': '接住用户焦虑，同时说明今晚只处理最关键的一项。',
+            'semantic_content': (
+                '先告诉用户不用一下子全做完；今晚只处理备份这一项。'
+                '配置调整等明天精神清楚时再看，避免越改越乱。'
+            ),
+            'voice': '克制但有一点关心。',
+            'rendering': (
+                '2 条连续发送的普通文字消息；'
+                '第一条短反应，第二条补充边界和下一步。'
+            ),
+        },
+        'contextual_directives': {
+            'social_distance': '较熟的技术协作距离',
+            'emotional_intensity': '中低，对方有一点急',
+            'vibe_check': '深夜排障前的降速',
+            'relational_dynamic': '用户想把所有风险操作今晚一次做完',
+        },
+        'chat_history': _chat_history(
+            ('user', '我今晚是不是把备份和配置都一口气改完比较好？'),
+        ),
+        'expected_message_count': 2,
     })
     return case
 
@@ -462,11 +508,11 @@ def _fenced_block(joined_dialog: str, language: str) -> str:
     return block
 
 
-async def test_live_dialog_one_bubble_group_casual_reply(
+async def test_live_dialog_message_sequence_group_casual_reply(
     ensure_live_dialog_llms,
     monkeypatch,
 ) -> None:
-    """Group casual reply should stay direct and one-bubble readable."""
+    """Group casual reply should stay direct and readable."""
 
     del ensure_live_dialog_llms
     trace_payload = await _run_live_dialog_case(_group_casual_case(), monkeypatch)
@@ -486,7 +532,7 @@ async def test_live_dialog_one_bubble_group_casual_reply(
     assert not stripped_dialog.endswith(('?', '？')), trace_payload['trace_path']
 
 
-async def test_live_dialog_one_bubble_private_soft_reply(
+async def test_live_dialog_message_sequence_private_soft_reply(
     ensure_live_dialog_llms,
     monkeypatch,
 ) -> None:
@@ -507,7 +553,29 @@ async def test_live_dialog_one_bubble_private_soft_reply(
     ), trace_payload['trace_path']
 
 
-async def test_live_dialog_one_bubble_group_technical_comparison(
+async def test_live_dialog_message_sequence_two_message_followup(
+    ensure_live_dialog_llms,
+    monkeypatch,
+) -> None:
+    """Explicit follow-up instructions should produce two outbound messages."""
+
+    del ensure_live_dialog_llms
+    trace_payload = await _run_live_dialog_case(
+        _two_message_followup_case(),
+        monkeypatch,
+    )
+    final_dialog = trace_payload['final_dialog']
+    joined_dialog = trace_payload['joined_dialog']
+
+    assert len(final_dialog) == 2, trace_payload['trace_path']
+    assert '备份' in joined_dialog, trace_payload['trace_path']
+    assert (
+        '明天' in joined_dialog
+        or '明早' in joined_dialog
+    ), trace_payload['trace_path']
+
+
+async def test_live_dialog_message_sequence_group_technical_comparison(
     ensure_live_dialog_llms,
     monkeypatch,
 ) -> None:
@@ -547,7 +615,7 @@ async def test_live_dialog_one_bubble_group_technical_comparison(
         assert not dialog_line.lstrip().startswith('|'), trace_payload['trace_path']
 
 
-async def test_live_dialog_one_bubble_python_code_block_preserved(
+async def test_live_dialog_message_sequence_python_code_block_preserved(
     ensure_live_dialog_llms,
     monkeypatch,
 ) -> None:
@@ -577,7 +645,7 @@ async def test_live_dialog_one_bubble_python_code_block_preserved(
         assert voice_text not in code_block, trace_payload['trace_path']
 
 
-async def test_live_dialog_one_bubble_json_example_preserved(
+async def test_live_dialog_message_sequence_json_example_preserved(
     ensure_live_dialog_llms,
     monkeypatch,
 ) -> None:

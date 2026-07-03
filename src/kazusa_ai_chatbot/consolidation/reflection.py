@@ -8,7 +8,6 @@ import logging
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.config import (
-
     AFFINITY_DEFAULT,
     CONSOLIDATION_LLM_API_KEY,
     CONSOLIDATION_LLM_BASE_URL,
@@ -32,6 +31,7 @@ from kazusa_ai_chatbot.utils import (
     log_list_preview,
     log_preview,
     parse_llm_json_output,
+    text_or_empty,
 )
 
 from kazusa_ai_chatbot.llm_interface import (
@@ -39,6 +39,7 @@ from kazusa_ai_chatbot.llm_interface import (
     LLMCallConfig,
     LLMThinkingConfig,
 )
+
 logger = logging.getLogger(__name__)
 
 
@@ -135,6 +136,8 @@ _GLOBAL_STATE_UPDATER_PROMPT = """\
 _llm_interface = LLInterface()
 _global_state_updater_llm = LLInterface()
 _relationship_recorder_llm = LLInterface()
+_character_state_reviewer_llm = LLInterface()
+_relationship_profile_reviewer_llm = LLInterface()
 _global_state_updater_llm_config = LLMCallConfig(
     stage_name=__name__,
     route_name="CONSOLIDATION_LLM",
@@ -150,6 +153,67 @@ _global_state_updater_llm_config = LLMCallConfig(
         enabled=CONSOLIDATION_LLM_THINKING_ENABLED,
     ),
 )
+
+_lane_reviewer_llm_config = LLMCallConfig(
+    stage_name=__name__,
+    route_name="CONSOLIDATION_LLM",
+    base_url=CONSOLIDATION_LLM_BASE_URL,
+    api_key=CONSOLIDATION_LLM_API_KEY,
+    model=CONSOLIDATION_LLM_MODEL,
+    temperature=0.0,
+    top_p=1.0,
+    top_k=None,
+    max_completion_tokens=CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=CONSOLIDATION_LLM_THINKING_ENABLED,
+    ),
+)
+
+_CHARACTER_STATE_REVIEW_PROMPT = '''\
+You are the reviewer for one character_state consolidation candidate.
+
+Review only this lane.
+
+# Review Procedure
+1. Accept when the candidate describes durable character mood, vibe, or
+   self-state grounded in the supplied evidence.
+2. Revise only wording so the same state is clearer and better grounded.
+3. Reject when the candidate is unsupported or belongs to another memory lane.
+
+Return only valid JSON:
+{
+  "decision": "accept | revise | reject",
+  "mood": "short mood when accepted or revised",
+  "global_vibe": "short vibe when accepted or revised",
+  "reflection_summary": "one grounded summary when accepted or revised",
+  "reason": "short reason"
+}
+'''
+
+_RELATIONSHIP_PROFILE_REVIEW_PROMPT = '''\
+You are the reviewer for one relationship_profile consolidation candidate.
+
+Review only this lane.
+
+# Review Procedure
+1. Accept when the candidate describes a grounded relationship appraisal for
+   the current user.
+2. Revise only wording or affinity_delta so the same appraisal matches the
+   supplied evidence.
+3. Reject when the candidate is unsupported or belongs to another memory lane.
+
+Return only valid JSON:
+{
+  "decision": "accept | revise | reject",
+  "subjective_appraisals": ["short appraisal"],
+  "affinity_delta": 0,
+  "last_relationship_insight": "short insight",
+  "reason": "short reason"
+}
+'''
+
+
 async def global_state_updater(state: ConsolidatorState) -> dict:
     character_name = state["character_profile"]["name"]
     system_prompt = SystemMessage(content=_GLOBAL_STATE_UPDATER_PROMPT.format(
@@ -182,6 +246,66 @@ async def global_state_updater(state: ConsolidatorState) -> dict:
         "global_vibe": result.get("global_vibe"),
         "reflection_summary": result.get("reflection_summary"),
     }
+    return return_value
+
+
+async def character_state_reviewer(
+    state: ConsolidatorState,
+    candidate: dict,
+) -> dict:
+    """Review one character_state specialist candidate."""
+
+    payload = {
+        "evidence": _character_state_payload(state),
+        "candidate": {
+            "mood": text_or_empty(candidate.get("mood")),
+            "global_vibe": text_or_empty(candidate.get("global_vibe")),
+            "reflection_summary": text_or_empty(
+                candidate.get("reflection_summary")
+            ),
+        },
+    }
+    response = await _character_state_reviewer_llm.ainvoke(
+        [
+            SystemMessage(content=_CHARACTER_STATE_REVIEW_PROMPT),
+            HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
+        ],
+        config=_lane_reviewer_llm_config,
+    )
+    result = parse_llm_json_output(response.content)
+    return_value = _normalize_character_state_review(result, candidate)
+    return return_value
+
+
+async def relationship_profile_reviewer(
+    state: ConsolidatorState,
+    candidate: dict,
+) -> dict:
+    """Review one relationship_profile specialist candidate."""
+
+    payload = {
+        "evidence": _relationship_profile_payload(state),
+        "candidate": {
+            "subjective_appraisals": normalize_subjective_appraisals(
+                candidate.get("subjective_appraisals")
+            ),
+            "affinity_delta": _normalize_affinity_delta(
+                candidate.get("affinity_delta", 0)
+            ),
+            "last_relationship_insight": text_or_empty(
+                candidate.get("last_relationship_insight")
+            ),
+        },
+    }
+    response = await _relationship_profile_reviewer_llm.ainvoke(
+        [
+            SystemMessage(content=_RELATIONSHIP_PROFILE_REVIEW_PROMPT),
+            HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
+        ],
+        config=_lane_reviewer_llm_config,
+    )
+    result = parse_llm_json_output(response.content)
+    return_value = _normalize_relationship_profile_review(result, candidate)
     return return_value
 
 
@@ -369,4 +493,155 @@ async def relationship_recorder(state: ConsolidatorState) -> dict:
         "affinity_delta": raw_affinity_delta,
         "last_relationship_insight": last_relationship_insight,
     }
+    return return_value
+
+
+def _character_state_payload(state: ConsolidatorState) -> dict:
+    """Build compact reviewer evidence for character_state output."""
+
+    character_name = state["character_profile"]["name"]
+    payload = {
+        "consolidation_origin": project_consolidation_origin_prompt_block(
+            state["consolidation_origin"]
+        ),
+        "internal_monologue": state["internal_monologue"],
+        "emotional_appraisal": state["emotional_appraisal"],
+        "interaction_subtext": state["interaction_subtext"],
+        "character_intent": state["character_intent"],
+        "logical_stance": state["logical_stance"],
+        "decontexualized_input": state["decontexualized_input"],
+        "final_dialog": state["final_dialog"],
+    }
+    return_value = project_relationship_prompt_payload(
+        payload,
+        character_name=character_name,
+    )
+    return return_value
+
+
+def _relationship_profile_payload(state: ConsolidatorState) -> dict:
+    """Build compact reviewer evidence for relationship_profile output."""
+
+    character_name = state["character_profile"]["name"]
+    user_profile = state.get("user_profile", {}) or {}
+    affinity_score = user_profile.get("affinity", AFFINITY_DEFAULT)
+    affinity_block = build_affinity_block(affinity_score)
+    payload = {
+        "consolidation_origin": project_consolidation_origin_prompt_block(
+            state["consolidation_origin"]
+        ),
+        "internal_monologue": state["internal_monologue"],
+        "emotional_appraisal": state["emotional_appraisal"],
+        "interaction_subtext": state["interaction_subtext"],
+        "affinity_context": {
+            "level": affinity_block["level"],
+            "instruction": affinity_block["instruction"],
+        },
+        "logical_stance": state["logical_stance"],
+        "character_intent": state["character_intent"],
+        "decontexualized_input": state["decontexualized_input"],
+        "final_dialog": state["final_dialog"],
+        "content_plan": content_plan_from_action_directives(
+            state.get("action_directives"),
+        ),
+    }
+    return_value = project_relationship_prompt_payload(
+        payload,
+        character_name=character_name,
+    )
+    return return_value
+
+
+def _normalize_character_state_review(
+    result: dict,
+    candidate: dict,
+) -> dict:
+    """Normalize a character_state reviewer decision."""
+
+    decision = text_or_empty(result.get("decision")).lower()
+    if decision not in {"accept", "correct", "revise"}:
+        return {
+            "mood": "",
+            "global_vibe": "",
+            "reflection_summary": "",
+        }
+
+    corrected = result.get("corrected_candidate")
+    if not isinstance(corrected, dict):
+        corrected = result
+    return_value = {
+        "mood": (
+            text_or_empty(corrected.get("mood"))
+            or text_or_empty(candidate.get("mood"))
+        ),
+        "global_vibe": (
+            text_or_empty(corrected.get("global_vibe"))
+            or text_or_empty(candidate.get("global_vibe"))
+        ),
+        "reflection_summary": (
+            text_or_empty(corrected.get("reflection_summary"))
+            or text_or_empty(candidate.get("reflection_summary"))
+        ),
+    }
+    return return_value
+
+
+def _normalize_relationship_profile_review(
+    result: dict,
+    candidate: dict,
+) -> dict:
+    """Normalize a relationship_profile reviewer decision."""
+
+    decision = text_or_empty(result.get("decision")).lower()
+    if decision not in {"accept", "correct", "revise"}:
+        return {
+            "subjective_appraisals": [],
+            "affinity_delta": 0,
+            "last_relationship_insight": "",
+        }
+
+    corrected = result.get("corrected_candidate")
+    if not isinstance(corrected, dict):
+        corrected = result
+    candidate_appraisals = normalize_subjective_appraisals(
+        candidate.get("subjective_appraisals")
+    )
+    reviewed_appraisals = normalize_subjective_appraisals(
+        corrected.get("subjective_appraisals")
+    )
+    reviewed_delta = _normalize_affinity_delta(
+        corrected.get("affinity_delta", candidate.get("affinity_delta", 0))
+    )
+    return_value = {
+        "subjective_appraisals": reviewed_appraisals or candidate_appraisals,
+        "affinity_delta": reviewed_delta,
+        "last_relationship_insight": (
+            text_or_empty(corrected.get("last_relationship_insight"))
+            or text_or_empty(candidate.get("last_relationship_insight"))
+        ),
+    }
+    return return_value
+
+
+def _normalize_affinity_delta(value: object) -> int:
+    """Normalize affinity delta to the persistence-safe range."""
+
+    if isinstance(value, bool):
+        normalized = 0
+    elif isinstance(value, str):
+        try:
+            normalized = int(value.strip() or 0)
+        except ValueError as exc:
+            logger.debug(f"Defaulting invalid string affinity_delta to 0: {exc}")
+            normalized = 0
+    elif isinstance(value, int):
+        normalized = value
+    else:
+        try:
+            normalized = int(value)
+        except (TypeError, ValueError) as exc:
+            logger.debug(f"Defaulting invalid affinity_delta to 0: {exc}")
+            normalized = 0
+
+    return_value = max(-5, min(5, normalized))
     return return_value

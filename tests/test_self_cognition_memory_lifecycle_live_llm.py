@@ -8,7 +8,6 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from pymongo.errors import PyMongoError
 
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
 from kazusa_ai_chatbot.db import close_db, get_character_profile

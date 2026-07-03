@@ -41,6 +41,7 @@ class CoreStageState(TypedDict):
     interaction_subtext: str
     internal_monologue: str
     internal_monologue_residue_context: str
+    past_dialog_cognition_context: str
     judgment_note: str
     linguistic_style: str
     local_time_context: dict[str, Any]
@@ -79,6 +80,7 @@ class CoreStageState(TypedDict):
     surface_outputs: list[dict[str, Any]]
     target_addressed_user_ids: list[str]
     target_broadcast: bool
+    task_willingness_boundary_enabled: bool
     use_reply_feature: bool
     user_input: str
     user_multimedia_input: NotRequired[list[dict[str, Any]]]

@@ -199,6 +199,7 @@ async def test_reflection_phase_calendar_handler_uses_execution_seam() -> None:
     """Claimed calendar runs should execute through the reflection seam."""
 
     from kazusa_ai_chatbot.calendar_scheduler import reflection_phase
+    from kazusa_ai_chatbot.runtime_coordination import PipelineCoordinator
 
     intent = _phase_intent()
     run = reflection_phase.build_reflection_phase_calendar_runs(
@@ -226,6 +227,7 @@ async def test_reflection_phase_calendar_handler_uses_execution_seam() -> None:
         is_primary_interaction_busy=lambda: False,
         adapter_registry_provider=None,
         execute_phase_intent_func=_execute_phase_intent,
+        pipeline_coordinator=PipelineCoordinator(),
     )
 
     assert captured["intent"] == intent
@@ -240,6 +242,84 @@ async def test_reflection_phase_calendar_handler_uses_execution_seam() -> None:
         "skipped_count": 0,
         "run_ids": ["hourly-run-1"],
     }
+
+
+@pytest.mark.asyncio
+async def test_reflection_phase_calendar_handler_returns_deferred_summary() -> None:
+    """Any deferred phase result should defer the claimed calendar run."""
+
+    from kazusa_ai_chatbot.calendar_scheduler import reflection_phase
+    from kazusa_ai_chatbot.runtime_coordination import PipelineCoordinator
+
+    intent = _phase_intent()
+    run = reflection_phase.build_reflection_phase_calendar_runs(
+        [intent],
+        storage_timestamp_utc=STORAGE_NOW,
+    )[0]
+
+    async def _execute_phase_intent(**_kwargs) -> list[ReflectionWorkerResult]:
+        hourly_result = ReflectionWorkerResult(
+            run_kind="hourly_slot",
+            dry_run=False,
+            processed_count=1,
+            succeeded_count=1,
+            run_ids=["hourly-run-1"],
+        )
+        group_result = ReflectionWorkerResult(
+            run_kind="group_self_cognition_review",
+            dry_run=False,
+            deferred=True,
+            defer_reason="same_scope_foreground_active",
+        )
+        return [hourly_result, group_result]
+
+    handler_result = await reflection_phase.handle_reflection_phase_calendar_run(
+        run,
+        now=PERIOD_START,
+        dry_run=False,
+        is_primary_interaction_busy=lambda: False,
+        adapter_registry_provider=None,
+        execute_phase_intent_func=_execute_phase_intent,
+        pipeline_coordinator=PipelineCoordinator(),
+    )
+
+    assert handler_result == {
+        "status": "deferred",
+        "run_kind": "reflection_phase_slot",
+        "defer_reason": "same_scope_foreground_active",
+        "processed_count": 1,
+        "succeeded_count": 1,
+        "failed_count": 0,
+        "skipped_count": 0,
+        "run_ids": ["hourly-run-1"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_reflection_phase_calendar_handler_requires_coordinator() -> None:
+    """Calendar reflection must not keep an unguarded execution fallback."""
+
+    from kazusa_ai_chatbot.calendar_scheduler import reflection_phase
+
+    intent = _phase_intent()
+    run = reflection_phase.build_reflection_phase_calendar_runs(
+        [intent],
+        storage_timestamp_utc=STORAGE_NOW,
+    )[0]
+
+    async def _execute_phase_intent(**_kwargs) -> list[ReflectionWorkerResult]:
+        return []
+
+    with pytest.raises(ValueError, match="pipeline_coordinator"):
+        await reflection_phase.handle_reflection_phase_calendar_run(
+            run,
+            now=PERIOD_START,
+            dry_run=False,
+            is_primary_interaction_busy=lambda: False,
+            adapter_registry_provider=None,
+            execute_phase_intent_func=_execute_phase_intent,
+            pipeline_coordinator=None,
+        )
 
 
 @pytest.mark.asyncio

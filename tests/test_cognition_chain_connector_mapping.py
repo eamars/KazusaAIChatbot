@@ -111,16 +111,29 @@ def _chain_output() -> dict:
     }
 
 
-def test_persona_connector_maps_global_state_to_chain_input() -> None:
-    from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
-        build_cognition_chain_input_from_global_state,
+def test_persona_connector_maps_global_state_to_chain_input(
+    monkeypatch,
+) -> None:
+    from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition
+
+    monkeypatch.setattr(
+        persona_supervisor2_cognition,
+        "COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED",
+        True,
     )
 
-    chain_input = build_cognition_chain_input_from_global_state(_global_state())
+    build_chain_input = (
+        persona_supervisor2_cognition.build_cognition_chain_input_from_global_state
+    )
+    chain_input = build_chain_input(_global_state())
 
     assert chain_input["schema_version"] == "cognition_chain_input.v1"
     assert chain_input["current_event"]["decontextualized_input"] == "hello"
     assert chain_input["scene"]["platform"] == "debug"
+    assert (
+        chain_input["runtime_context"]["task_willingness_boundary_enabled"]
+        is True
+    )
     assert "platform_channel_id" not in chain_input["scene"]
     assert "action_specs" not in chain_input
 
@@ -330,6 +343,9 @@ def test_l3_surface_connector_projects_selected_speak_without_action_spec_leak()
     )
 
     state = _global_state()
+    state["past_dialog_cognition_context"] = (
+        "Prior private cognition must stop before L3."
+    )
     state["action_specs"] = [{
         "kind": "speak",
         "reason": "direct greeting",
@@ -350,3 +366,6 @@ def test_l3_surface_connector_projects_selected_speak_without_action_spec_leak()
         "answer the user"
     )
     assert "action_specs" not in surface_input
+    serialized = json.dumps(surface_input, ensure_ascii=False)
+    assert "past_dialog_cognition_context" not in serialized
+    assert "Prior private cognition must stop before L3." not in serialized

@@ -209,8 +209,8 @@ The current backend kind is `openai_compatible`. Future native provider
 support must extend the provider adapter boundary rather than leaking provider
 fields into stage modules.
 
-The detection module intentionally contains a TODO for future provider
-capability probing. Runtime probing is not part of the current contract.
+The detection module intentionally keeps future provider capability probing
+outside the current runtime contract.
 
 ## Thinking Contract
 

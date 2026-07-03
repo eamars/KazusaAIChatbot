@@ -126,7 +126,119 @@ async def test_save_assistant_message_persists_delivery_tracking(monkeypatch) ->
     })
 
     assert saved_docs[0]["delivery_tracking_id"] == "delivery-1"
+    assert saved_docs[0]["logical_message_index"] == 0
     assert saved_docs[0]["delivery_status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_save_assistant_message_persists_logical_dialog_rows(
+    monkeypatch,
+) -> None:
+    """Each logical dialog message should persist as its own exact row."""
+
+    saved_docs: list[dict] = []
+
+    async def _save_conversation(doc: dict) -> str:
+        saved_docs.append(doc)
+        return_value = f"row-{len(saved_docs)}"
+        return return_value
+
+    monkeypatch.setattr(
+        service_module,
+        "_ensure_character_global_identity",
+        AsyncMock(return_value="character-global-id"),
+    )
+    monkeypatch.setattr(service_module, "save_conversation", _save_conversation)
+
+    await service_module._save_assistant_message({
+        "platform": "qq",
+        "platform_channel_id": "group-1",
+        "channel_type": "group",
+        "platform_bot_id": "bot-1",
+        "character_name": "Character",
+        "global_user_id": "user-a",
+        "final_dialog": ["first bubble", "second bubble"],
+        "target_addressed_user_ids": ["user-a"],
+        "target_broadcast": False,
+        "delivery_tracking_id": "delivery-1",
+        "llm_trace_id": "trace-1",
+    })
+
+    assert [doc["body_text"] for doc in saved_docs] == [
+        "first bubble",
+        "second bubble",
+    ]
+    assert [doc["logical_message_index"] for doc in saved_docs] == [0, 1]
+    assert [doc["delivery_tracking_id"] for doc in saved_docs] == [
+        "delivery-1",
+        "delivery-1",
+    ]
+    assert [doc["llm_trace_id"] for doc in saved_docs] == [
+        "trace-1",
+        "trace-1",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_save_assistant_message_persists_row_scoped_delivery_mentions(
+    monkeypatch,
+) -> None:
+    """Assistant rows should record outbound mentions present in that row."""
+
+    saved_docs: list[dict] = []
+
+    async def _save_conversation(doc: dict) -> str:
+        saved_docs.append(doc)
+        return_value = f"row-{len(saved_docs)}"
+        return return_value
+
+    monkeypatch.setattr(
+        service_module,
+        "_ensure_character_global_identity",
+        AsyncMock(return_value="character-global-id"),
+    )
+    monkeypatch.setattr(service_module, "save_conversation", _save_conversation)
+
+    await service_module._save_assistant_message({
+        "platform": "qq",
+        "platform_channel_id": "group-1",
+        "channel_type": "group",
+        "platform_bot_id": "bot-1",
+        "character_name": "Character",
+        "global_user_id": "user-a",
+        "final_dialog": ["@Alex first", "second @Moca"],
+        "target_addressed_user_ids": ["user-a"],
+        "target_broadcast": False,
+        "delivery_mentions": [
+            {
+                "entity_kind": "user",
+                "display_name": "Alex",
+                "platform_user_id": "1001",
+            },
+            {
+                "entity_kind": "user",
+                "display_name": "Moca",
+                "platform_user_id": "1002",
+            },
+        ],
+    })
+
+    assert saved_docs[0]["mentions"] == [
+        {
+            "entity_kind": "user",
+            "display_name": "Alex",
+            "platform_user_id": "1001",
+            "raw_text": "@Alex",
+        }
+    ]
+    assert saved_docs[1]["mentions"] == [
+        {
+            "entity_kind": "user",
+            "display_name": "Moca",
+            "platform_user_id": "1002",
+            "raw_text": "@Moca",
+        }
+    ]
 
 
 @pytest.mark.asyncio

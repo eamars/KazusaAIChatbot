@@ -13,6 +13,9 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2 import (
     persona_supervisor2,
     stage_3_no_response,
 )
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
+    build_cognition_chain_input_from_global_state,
+)
 from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
 
 
@@ -254,7 +257,6 @@ async def test_call_action_subgraph_returns_final_dialog():
         "final_dialog": ["Hello!", "How are you?"],
         "target_addressed_user_ids": ["uuid-123"],
         "target_broadcast": False,
-        "mention_target_user": True,
     }
 
     with (
@@ -276,7 +278,8 @@ async def test_call_action_subgraph_returns_final_dialog():
     assert result["final_dialog"] == ["Hello!", "How are you?"]
     assert result["target_addressed_user_ids"] == ["uuid-123"]
     assert result["target_broadcast"] is False
-    assert result["mention_target_user"] is True
+    retired_field = "mention" + "_target_user"
+    assert retired_field not in result
     assert result["surface_outputs"][0]["surface_kind"] == "text"
     assert result["episode_trace"]["surface_outputs"][0]["fragments"] == [
         "Hello!",
@@ -291,7 +294,6 @@ async def test_call_action_subgraph_empty_dialog():
         "final_dialog": [],
         "target_addressed_user_ids": [],
         "target_broadcast": False,
-        "mention_target_user": False,
     }
 
     with (
@@ -313,7 +315,8 @@ async def test_call_action_subgraph_empty_dialog():
     assert result["final_dialog"] == []
     assert result["target_addressed_user_ids"] == []
     assert result["target_broadcast"] is False
-    assert result["mention_target_user"] is False
+    retired_field = "mention" + "_target_user"
+    assert retired_field not in result
 
 
 def test_route_after_cognition_uses_l2d_speak_selection() -> None:
@@ -427,7 +430,6 @@ async def test_background_artifact_executes_before_l3_acknowledgement() -> None:
                 "final_dialog": ["I'll send it when it's ready."],
                 "target_addressed_user_ids": ["uuid-123"],
                 "target_broadcast": False,
-                "mention_target_user": True,
             },
         ),
     ):
@@ -484,9 +486,8 @@ async def test_persona_supervisor2_returns_final_dialog_and_consolidation_state(
                 "final_dialog": ["Hi there!"],
                 "target_addressed_user_ids": ["uuid-123"],
                 "target_broadcast": False,
-                "mention_target_user": True,
             },
-        ) as m_dialog,
+        ),
     ):
         result = await persona_supervisor2(state)
 
@@ -495,13 +496,39 @@ async def test_persona_supervisor2_returns_final_dialog_and_consolidation_state(
     assert result["final_dialog"] == ["Hi there!"]
     assert result["target_addressed_user_ids"] == ["uuid-123"]
     assert result["target_broadcast"] is False
-    assert result["mention_target_user"] is True
+    retired_field = "mention" + "_target_user"
+    assert retired_field not in result
     assert result["future_promises"] == []
     assert result["consolidation_state"]["decontexualized_input"] == "Hello"
     assert result["consolidation_state"]["final_dialog"] == ["Hi there!"]
-    assert result["consolidation_state"]["mention_target_user"] is True
+    assert retired_field not in result["consolidation_state"]
+    assert result["scope_users"] == result["consolidation_state"]["scope_users"]
     assert result["consolidation_state"]["reply_context"] == {}
+    assert m_decon.await_args.args[0]["channel_name"] == "general"
+    assert m_resolver.await_args.args[0]["channel_name"] == "general"
+    assert m_resolver.await_args.args[0]["channel_topic"] == "greetings"
     m_resolver.assert_awaited_once()
+
+
+def test_cognition_chain_input_projects_group_name_into_scene_topic() -> None:
+    """Cognition should receive the named group as existing scene text."""
+
+    state = _base_discord_state()
+    state.update({
+        "channel_name": "动画讨论群",
+        "channel_topic": "新番角色和剧情走向",
+        "decontexualized_input": "Hello",
+        "referents": [],
+        "rag_result": {},
+    })
+
+    chain_input = build_cognition_chain_input_from_global_state(state)
+
+    assert chain_input["scene"]["channel_topic"] == (
+        '“动画讨论群”群聊中正在讨论：新番角色和剧情走向'
+    )
+    assert "channel_name" not in chain_input["scene"]
+    assert state["channel_topic"] == "新番角色和剧情走向"
 
 
 @pytest.mark.asyncio
@@ -841,12 +868,12 @@ async def test_persona_supervisor2_no_remember_skips_consolidation():
             "kazusa_ai_chatbot.nodes.persona_supervisor2.call_msg_decontexualizer",
             new_callable=AsyncMock,
             return_value={"decontexualized_input": "Hello"},
-        ) as m_decon,
+        ),
         patch(
             "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_resolver_loop",
             new_callable=AsyncMock,
             return_value=_resolver_update([_speak_action_spec()]),
-        ) as m_resolver,
+        ),
         patch(
             "kazusa_ai_chatbot.nodes.persona_supervisor2.call_l3_text_surface_handler",
             new_callable=AsyncMock,
@@ -860,7 +887,7 @@ async def test_persona_supervisor2_no_remember_skips_consolidation():
                 "target_addressed_user_ids": ["uuid-123"],
                 "target_broadcast": False,
             },
-        ) as m_dialog,
+        ),
     ):
         result = await persona_supervisor2(state)
 

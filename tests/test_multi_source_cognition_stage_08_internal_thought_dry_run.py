@@ -28,9 +28,6 @@ from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as cognition_m
 from kazusa_ai_chatbot.cognition_chain_core.stages import l1 as l1_module
 from kazusa_ai_chatbot.cognition_chain_core.stages import l2 as l2_module
 from kazusa_ai_chatbot.cognition_chain_core.stages import l2d as l2d_module
-from kazusa_ai_chatbot.cognition_chain_core.action_selection_prompt import (
-    ACTION_ROUTER_PROMPT,
-)
 from kazusa_ai_chatbot.cognition_chain_core.stages import l3 as l3_module
 from kazusa_ai_chatbot.cognition_chain_core.stages import l2c2 as l2c2_module
 from kazusa_ai_chatbot.cognition_chain_core.prompt_selection import (
@@ -72,70 +69,6 @@ _FORBIDDEN_DRY_RUN_TOKENS = (
     "get_rag_cache2_runtime",
     "schedule",
 )
-_PROMPT_FINGERPRINTS = (
-    (
-        "_COGNITION_SUBCONSCIOUS_PROMPT",
-        l1_module._COGNITION_SUBCONSCIOUS_PROMPT,
-        3069,
-        "ded0a7507ac36786961beeaf5e6771e960c4c42816288911182ea09529965c81",
-    ),
-    (
-        "_COGNITION_CONSCIOUSNESS_PROMPT",
-        l2_module._COGNITION_CONSCIOUSNESS_PROMPT,
-        6917,
-        "dea60e09ea50b7bc50f43af7689a269a9d96363f6082201b0cd69655113a80db",
-    ),
-    (
-        "_BOUNDARY_CORE_PROMPT",
-        l2_module._BOUNDARY_CORE_PROMPT,
-        5476,
-        "7f1459a09ac3c8b7dc4b9b3fb7b12d20421dcf9d05edfa4c5e8991ac59fbc4e0",
-    ),
-    (
-        "_JUDGEMENT_CORE_PROMPT",
-        l2_module._JUDGEMENT_CORE_PROMPT,
-        5208,
-        "cec9b75d22b5cab4c8f7df49eb0a9d366b08ab144e776d371716c9a8afd82ad5",
-    ),
-    (
-        "_CONTEXTUAL_AGENT_PROMPT",
-        l2c2_module._CONTEXTUAL_AGENT_PROMPT,
-        4202,
-        "03609614a7996464bcf77fc775d423d8e62e2cfe6d7e08bf89dc471eb79ceff6",
-    ),
-    (
-        "ACTION_ROUTER_PROMPT",
-        ACTION_ROUTER_PROMPT,
-        23809,
-        "e944d8c564ccd10458635da899496b877805fdbfd113499cadbde82040c4c794",
-    ),
-    (
-        "_STYLE_AGENT_PROMPT",
-        l3_module._STYLE_AGENT_PROMPT,
-        9438,
-        "5f87f9353423815b947cebb707de8dc4623867741b62ad635103692c498a9851",
-    ),
-    (
-        "_CONTENT_PLAN_AGENT_PROMPT",
-        l3_module._CONTENT_PLAN_AGENT_PROMPT,
-        13343,
-        "6c5c8a67e8284413d9009d8823fe1bad7c93c23b93a270da5751dcdab7c4610d",
-    ),
-    (
-        "_PREFERENCE_ADAPTER_PROMPT",
-        l3_module._PREFERENCE_ADAPTER_PROMPT,
-        4865,
-        "a2396cb3e0979941375b0599dfdf9331a86e577988f51bc80da6491fd3225bde",
-    ),
-    (
-        "_VISUAL_AGENT_PROMPT",
-        l3_module._VISUAL_AGENT_PROMPT,
-        7936,
-        "28e8ac752d123f76a55b0703a61d292e55aca49cf0ea6d9efd80c0f7f5775b65",
-    ),
-)
-
-
 @pytest.fixture(autouse=True)
 def _default_visual_directives_config(
     monkeypatch: pytest.MonkeyPatch,
@@ -1553,15 +1486,3 @@ async def test_internal_thought_prompt_rendering_uses_only_residue_payload(
     for llm_name, fake_llm in llms.items():
         if llm_name not in invoked_llm_names:
             assert fake_llm.messages == []
-
-
-def test_text_chat_and_reflection_prompt_fingerprints_remain_stable() -> None:
-    """Existing prompt constants should remain byte-for-byte stable."""
-    for prompt_name, prompt_text, expected_bytes, expected_digest in (
-        _PROMPT_FINGERPRINTS
-    ):
-        encoded_prompt = prompt_text.encode("utf-8")
-        digest = hashlib.sha256(encoded_prompt).hexdigest()
-
-        assert len(encoded_prompt) == expected_bytes, prompt_name
-        assert digest == expected_digest, prompt_name

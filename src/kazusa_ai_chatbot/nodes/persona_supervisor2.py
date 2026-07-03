@@ -9,6 +9,7 @@ from kazusa_ai_chatbot.action_spec.execution import execute_action_specs_for_tra
 from kazusa_ai_chatbot.action_spec.registry import (
     BACKGROUND_ARTIFACT_REQUEST_CAPABILITY,
     BACKGROUND_WORK_REQUEST_CAPABILITY,
+    FUTURE_SPEAK_CAPABILITY,
     SPEAK_CAPABILITY,
 )
 from kazusa_ai_chatbot.action_spec.results import (
@@ -36,7 +37,6 @@ from kazusa_ai_chatbot.cognition_resolver.pending import (
 from kazusa_ai_chatbot.cognition_resolver.state import ensure_initial_resolver_inputs
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import call_cognition_subgraph
-from kazusa_ai_chatbot.consolidation.core import call_consolidation_subgraph
 from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
     call_l3_text_surface_handler,
 )
@@ -311,6 +311,7 @@ async def _action_results_for_state(
         if spec.get("kind") not in (
             BACKGROUND_ARTIFACT_REQUEST_CAPABILITY,
             BACKGROUND_WORK_REQUEST_CAPABILITY,
+            FUTURE_SPEAK_CAPABILITY,
         )
     ]
     action_results = await execute_action_specs_for_trace(
@@ -333,6 +334,7 @@ async def stage_2a_background_work_enqueue(
         if spec.get("kind") in (
             BACKGROUND_ARTIFACT_REQUEST_CAPABILITY,
             BACKGROUND_WORK_REQUEST_CAPABILITY,
+            FUTURE_SPEAK_CAPABILITY,
         )
     ]
     if not background_specs:
@@ -372,7 +374,11 @@ def _background_no_handoff_result(
     params = action_spec.get("params")
     task_summary = ""
     if isinstance(params, dict):
-        for field_name in ("task_brief", "objective_summary"):
+        for field_name in (
+            "task_brief",
+            "objective_summary",
+            "continuation_objective",
+        ):
             value = params.get(field_name)
             if isinstance(value, str) and value.strip():
                 task_summary = value.strip()
@@ -474,7 +480,6 @@ async def call_action_subgraph(state: GlobalPersonaState) -> dict:
         "final_dialog": final_dialog,
         "target_addressed_user_ids": result["target_addressed_user_ids"],
         "target_broadcast": result["target_broadcast"],
-        "mention_target_user": bool(result.get("mention_target_user", False)),
     }
     return_value.update(surface_update)
     return_value.update(_episode_trace_update(
@@ -499,7 +504,6 @@ async def stage_3_no_response(state: GlobalPersonaState) -> dict:
         "action_directives": _empty_action_directives(),
         "target_addressed_user_ids": [],
         "target_broadcast": False,
-        "mention_target_user": False,
     }
     action_results = await _action_results_for_state(state)
     surface_outputs = []
@@ -691,6 +695,7 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "platform": state["platform"],
         "platform_channel_id": state["platform_channel_id"],
         "channel_type": state["channel_type"],
+        "channel_name": state.get("channel_name", ""),
         "platform_message_id": state["platform_message_id"],
         "platform_user_id": state["platform_user_id"],
         "global_user_id": state["global_user_id"],
@@ -710,6 +715,10 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
             "internal_monologue_residue_context",
             "",
         ),
+        "past_dialog_cognition_context": state.get(
+            "past_dialog_cognition_context",
+            "",
+        ),
         "referents": [],
         "debug_modes": state["debug_modes"],
         "should_respond": state["should_respond"],
@@ -720,14 +729,17 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
     
     results = await persona_graph.ainvoke(initial_persona_state)
     
+    consolidation_state = dict(results)
+    consolidation_state.pop("past_dialog_cognition_context", None)
+
     return_value = {
         "should_respond": results["should_respond"],
         "final_dialog": results["final_dialog"],
         "target_addressed_user_ids": results["target_addressed_user_ids"],
         "target_broadcast": bool(results["target_broadcast"]),
-        "mention_target_user": bool(results.get("mention_target_user", False)),
+        "scope_users": results.get("scope_users", []),
         "future_promises": [],
-        "consolidation_state": results,
+        "consolidation_state": consolidation_state,
         "surface_outputs": results.get("surface_outputs", []),
         "action_results": results.get("action_results", []),
         "episode_trace": results.get("episode_trace"),

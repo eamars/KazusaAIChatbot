@@ -314,12 +314,15 @@ missing, null, or later than the query time.
 ```python
 seed
 reflection_promoted
+conversation_accepted
 manual
 ```
 
 `seed` is for repository-managed JSONL rows. `manual` is for direct human or
 admin insertion. `reflection_promoted` is for extracted or inferred memory that
-has passed the caller's promotion and privacy gate.
+has passed the caller's promotion and privacy gate. `conversation_accepted` is
+for conversation-derived character self-guidance that the character explicitly
+accepted and that carries conversation source refs.
 
 ### Source-Kind Values
 
@@ -474,6 +477,8 @@ not construct vector-only state.
 Authority inference for legacy calls:
 
 - explicit `authority` is preserved,
+- `conversation_extracted` with explicit `authority="conversation_accepted"`
+  is preserved,
 - `conversation_extracted`, `reflection_inferred`, and
   `relationship_inferred` default to `reflection_promoted`,
 - other legacy calls default to `manual`.

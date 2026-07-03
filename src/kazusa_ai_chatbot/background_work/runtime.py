@@ -71,6 +71,7 @@ async def run_background_work_runtime_tick(
         "delivery_processed_count": delivery_result["processed_count"],
         "delivery_delivered_count": delivery_result["delivered_count"],
         "delivery_failed_count": delivery_result["failed_count"],
+        "delivery_recovered_count": delivery_result.get("recovered_count", 0),
     }
     return result
 

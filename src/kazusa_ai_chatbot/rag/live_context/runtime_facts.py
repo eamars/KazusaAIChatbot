@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any
 
-from kazusa_ai_chatbot.utils import text_or_empty
 
 _RUNTIME_DATETIME_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
 

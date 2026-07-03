@@ -584,6 +584,8 @@ WEB_URL_READER_ACCEPT_LANGUAGE = _non_empty_string_from_env(
     "WEB_URL_READER_ACCEPT_LANGUAGE",
     "en-US,en;q=0.9",
 )
+NHENTAI_TOKEN = os.getenv("NHENTAI_TOKEN", "").strip()
+NHENTAI_SOURCE_ENABLED = bool(NHENTAI_TOKEN)
 
 # Maximum guideline strings retained for each interaction-style category in
 # persisted user or group-channel style images.
@@ -662,7 +664,6 @@ AFFINITY_RAW_DEAD_ZONE = int(os.getenv("AFFINITY_RAW_DEAD_ZONE", "1"))
 # Loop counts
 MAX_MEMORY_RETRIEVER_AGENT_RETRY = int(os.getenv("MAX_MEMORY_RETRIEVER_AGENT_RETRY", "2"))
 MAX_WEB_SEARCH_AGENT_RETRY = int(os.getenv("MAX_WEB_SEARCH_AGENT_RETRY", "2"))
-MAX_FACT_HARVESTER_RETRY = int(os.getenv("MAX_FACT_HARVESTER_RETRY", "3"))
 
 # RAG Cache2
 RAG_CACHE2_MAX_ENTRIES = int(os.getenv("RAG_CACHE2_MAX_ENTRIES", "5000"))
@@ -707,6 +708,11 @@ COGNITION_VISUAL_DIRECTIVES_ENABLED = os.getenv(
     "COGNITION_VISUAL_DIRECTIVES_ENABLED",
     "true",
 ).lower() in ("1", "true", "yes")
+
+COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED = _bool_from_env(
+    "COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED",
+    "true",
+)
 
 COGNITION_RESOLVER_MAX_CYCLES = _bounded_int_from_env(
     "COGNITION_RESOLVER_MAX_CYCLES",
@@ -865,6 +871,10 @@ REFLECTION_DAILY_RUN_AFTER_LOCAL_TIME = os.getenv(
 REFLECTION_PROMOTION_RUN_AFTER_LOCAL_TIME = os.getenv(
     "REFLECTION_PROMOTION_RUN_AFTER_LOCAL_TIME",
     "05:00",
+)
+AFFECT_SETTLING_WAKE_PREP_MINUTES = _positive_int_from_env(
+    "AFFECT_SETTLING_WAKE_PREP_MINUTES",
+    "30",
 )
 GLOBAL_CHARACTER_GROWTH_PASS_ENABLED = os.getenv(
     "GLOBAL_CHARACTER_GROWTH_PASS_ENABLED",

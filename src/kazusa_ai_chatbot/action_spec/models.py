@@ -58,6 +58,7 @@ ALLOWED_CAPABILITY_OWNERS = frozenset(
         "orchestrator",
         "l3_text",
         "l3_image",
+        "accepted_task",
         "background_artifact",
         "background_work",
     )
@@ -164,6 +165,7 @@ class CapabilitySpecV1(TypedDict):
         "orchestrator",
         "l3_text",
         "l3_image",
+        "accepted_task",
         "background_artifact",
         "background_work",
     ]
@@ -233,6 +235,15 @@ class TriggerFutureCognitionParamsV1(TypedDict):
     episode_type: Literal["self_cognition"]
     trigger_at: str | None
     continuation_objective: str
+
+
+class FutureSpeakParamsV1(TypedDict):
+    """Params for a background request to schedule a later speak cognition."""
+
+    trigger_at: str
+    continuation_objective: str
+    requested_delivery: Literal["send_result_when_done"]
+    max_output_chars: int
 
 
 def validate_evidence_ref(value: object) -> EvidenceRefV1:

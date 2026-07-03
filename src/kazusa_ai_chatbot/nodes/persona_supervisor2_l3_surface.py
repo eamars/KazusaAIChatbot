@@ -19,8 +19,8 @@ from kazusa_ai_chatbot.cognition_resolver.state import (
     MAX_PROJECTED_RESOLVER_OBSERVATIONS,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
-    build_cognition_chain_input_from_global_state,
     build_cognition_chain_services,
+    build_text_surface_chain_input_from_global_state,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import (
     GlobalPersonaState,
@@ -63,7 +63,7 @@ def build_text_surface_input_from_global_state(
     selected_intent = _selected_text_surface_intent_object(state)
     payload: CognitionTextSurfaceInputV1 = {
         "schema_version": "cognition_text_surface_input.v1",
-        "chain_input": build_cognition_chain_input_from_global_state(state),
+        "chain_input": build_text_surface_chain_input_from_global_state(state),
         "cognition_residue": {
             "emotional_appraisal": state["emotional_appraisal"],
             "interaction_subtext": state["interaction_subtext"],
@@ -155,23 +155,32 @@ def _pre_surface_action_result_prompts(
         if not isinstance(row, dict):
             continue
         action_kind = _row_text(row, "action_kind")
-        if action_kind not in (
+        prompt_action_kind = _pre_surface_prompt_action_kind(action_kind)
+        if prompt_action_kind not in (
+            "accepted_task_request",
             "background_work_request",
             "background_artifact_request",
+            "future_speak",
             "memory_lifecycle_update",
         ):
             continue
-        rows.append({
-            "action_kind": action_kind,
+        prompt_row = {
+            "action_kind": prompt_action_kind,
             "status": _row_text(row, "status"),
-            "queue_state": _row_text(row, "queue_state"),
-            "task_summary": _row_text(row, "task_summary"),
+            "task_summary": _task_summary_for_prompt(row),
             "objective_summary": _row_text(row, "objective_summary"),
             "acknowledgement_constraint": _row_text(
                 row,
                 "acknowledgement_constraint",
             ),
-        })
+            "accepted_task_state": _row_text(row, "accepted_task_state"),
+            "accepted_task_summary": _row_text(row, "accepted_task_summary"),
+            "wait_guidance": _row_text(row, "wait_guidance"),
+        }
+        queue_state = _queue_state_for_prompt(row, prompt_action_kind)
+        if queue_state:
+            prompt_row["queue_state"] = queue_state
+        rows.append(prompt_row)
     return rows
 
 
@@ -292,7 +301,7 @@ def _background_artifact_acknowledgement_parts(
 def _background_work_acknowledgement_parts(
     state: GlobalPersonaState,
 ) -> list[str]:
-    """Return prompt-safe background-work acknowledgement constraints."""
+    """Return prompt-safe accepted-task acknowledgement constraints."""
 
     raw_results = state.get("pre_surface_action_results")
     if not isinstance(raw_results, list):
@@ -303,9 +312,13 @@ def _background_work_acknowledgement_parts(
     for row in raw_results:
         if not isinstance(row, dict):
             continue
-        if row.get("action_kind") != "background_work_request":
+        action_kind = row.get("action_kind")
+        if action_kind not in ("background_work_request", "future_speak"):
             continue
-        task_summary = _row_text(row, "task_summary")
+        prompt_action_kind = _pre_surface_prompt_action_kind(str(action_kind))
+        task_summary = _task_summary_for_prompt(row)
+        accepted_task_state = _row_text(row, "accepted_task_state")
+        wait_guidance = _row_text(row, "wait_guidance")
         acknowledgement_constraint = _row_text(
             row,
             "acknowledgement_constraint",
@@ -318,12 +331,44 @@ def _background_work_acknowledgement_parts(
             else:
                 acknowledgement_constraint = "promise_forbidden_explain_failure"
         part = (
-            "background_work_request："
+            f"{prompt_action_kind}："
             f"task={task_summary or 'unknown'}，"
-            f"acknowledgement_constraint={acknowledgement_constraint}"
+            f"accepted_task_state={accepted_task_state or 'unknown'}，"
+            f"acknowledgement_constraint={acknowledgement_constraint}，"
+            f"wait_guidance={wait_guidance or 'unknown'}"
         )
         parts.append(part)
     return parts
+
+
+def _pre_surface_prompt_action_kind(action_kind: str) -> str:
+    """Map internal delayed-work action kind to prompt semantic kind."""
+
+    if action_kind == "background_work_request":
+        return_value = "accepted_task_request"
+        return return_value
+    return_value = action_kind
+    return return_value
+
+
+def _task_summary_for_prompt(row: dict) -> str:
+    """Return accepted-task summary before legacy task summary."""
+
+    accepted_summary = _row_text(row, "accepted_task_summary")
+    if accepted_summary:
+        return accepted_summary
+    return_value = _row_text(row, "task_summary")
+    return return_value
+
+
+def _queue_state_for_prompt(row: dict, prompt_action_kind: str) -> str:
+    """Hide queue state for accepted-task prompt rows."""
+
+    if prompt_action_kind in ("accepted_task_request", "future_speak"):
+        return_value = ""
+        return return_value
+    return_value = _row_text(row, "queue_state")
+    return return_value
 
 
 def _row_text(row: dict, field_name: str) -> str:

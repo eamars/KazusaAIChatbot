@@ -54,10 +54,24 @@ async def run_global_reflection_promotion(
     enable_memory_writes: bool,
 ) -> ReflectionPromotionResult: ...
 
+async def run_daily_affect_settling(
+    *,
+    settling_local_date: str,
+    dry_run: bool,
+    enable_character_state_write: bool,
+    character_state_refresh_callback: Callable[[], Any] | None = None,
+) -> ReflectionWorkerResult: ...
+
+async def should_pause_self_cognition_for_affect_settling(
+    *,
+    now: datetime,
+) -> bool: ...
+
 def start_reflection_cycle_worker(
     *,
     is_primary_interaction_busy: Callable[[], bool],
     adapter_registry_provider: Callable[[], AdapterRegistry | None] | None = None,
+    character_state_refresh_callback: Callable[[], Any] | None = None,
 ) -> ReflectionWorkerHandle: ...
 
 async def stop_reflection_cycle_worker(
@@ -117,6 +131,9 @@ Run kinds:
 - `daily_channel`: stores one per-channel synthesis for a character-local day.
 - `daily_global_promotion`: stores the global daily promotion prompt output and
   promotion decisions.
+- `daily_affect_settling`: stores one daily sleep/wake affect-settling audit
+  row for persistent `character_state` mood, global vibe, and reflection
+  summary updates.
 
 `daily_global_promotion` uses a synthetic system scope:
 `scope_ref="daily_global"`, `platform="system"`,
@@ -124,6 +141,14 @@ Run kinds:
 Its deterministic run id is the idempotency key for a character-local day and
 prompt version: an existing `succeeded` global promotion is not rerun, while
 `skipped`, `failed`, and `dry_run` rows remain retryable.
+
+`daily_affect_settling` uses a synthetic system scope:
+`scope_ref="daily_affect"`, `platform="system"`,
+`platform_channel_id="global"`, and `channel_type="system"`. Its deterministic
+run id is keyed by the sleep-ending character-local date and prompt version.
+Existing `succeeded` rows and `skipped` rows with `output.retryable=false` are
+terminal for that date. `failed` and `dry_run` rows remain retryable; dry-run
+output never blocks a later apply run.
 
 Statuses:
 
@@ -221,10 +246,10 @@ promotion records a skipped/deferred result and performs no memory mutation.
 ## Worker Schedule
 
 FastAPI lifespan owns exactly one reflection worker task when
-`REFLECTION_CYCLE_ENABLED` is true. The service passes an always-idle
-busy-probe callback so reflection and normal chat run independently; the worker
-never imports service state. Durable phase slot execution is owned by the
-calendar scheduler worker, not by a second reflection-local control plane.
+`REFLECTION_CYCLE_ENABLED` is true. The service keeps ordinary reflection
+records outside the live chat response path, and the worker never imports
+service queue state. Durable phase slot execution is owned by the calendar
+scheduler worker, not by a second reflection-local control plane.
 
 Default schedule:
 
@@ -236,9 +261,20 @@ Default schedule:
 - `REFLECTION_PHASE_GROUPS_PER_SLOT=1`
 - `REFLECTION_DAILY_RUN_AFTER_LOCAL_TIME=04:30`
 - `REFLECTION_PROMOTION_RUN_AFTER_LOCAL_TIME=05:00`
+- `AFFECT_SETTLING_WAKE_PREP_MINUTES=30`
 
 Gates use `CHARACTER_TIME_ZONE`. Stage 1a hourly slots remain UTC, while daily
 grouping uses the character-local date of each hourly slot.
+
+The only env-backed affect-settling setting is
+`AFFECT_SETTLING_WAKE_PREP_MINUTES`. Other affect-settling policy values are
+named constants in `kazusa_ai_chatbot.reflection_cycle.affect_settling`, not
+deployment settings:
+
+- `AFFECT_SETTLING_PROMPT_MAX_CHARS=12000`
+- `AFFECT_SETTLING_REVIEW_PROMPT_MAX_CHARS=8000`
+- `AFFECT_SETTLING_AFTER_PROMOTION_GRACE_MINUTES=15`
+- `AFFECT_SETTLING_WAKE_DEFER_GRACE_MINUTES=15`
 
 The calendar scheduler snapshots monitor-eligible channels as of
 `period_start_utc`, materializes deterministic `reflection_phase_slot`
@@ -261,6 +297,13 @@ Per phase intent:
 7. Pass one selected group-review case to the normal self-cognition runner.
 8. Record the selected window as `reviewed`, `target_binding_failed`,
    `review_failed`, or `stale_skipped`.
+
+Before group self-cognition review fetches profile data or builds a source
+case, it must request background admission from
+`kazusa_ai_chatbot.runtime_coordination` for the selected channel scope. A
+same-scope foreground run defers the group review with
+`defer_reason="same_scope_foreground_active"` and leaves the selected window
+unreviewed so a later phase can rebuild fresh context.
 
 Group self-cognition review is not a second scheduler and no longer runs as a
 global newest-first batch. It derives non-empty 15-minute group activity
@@ -297,14 +340,48 @@ group-review phase handler shares the monitored activity projection only;
 hourly and daily reflection records continue to contribute to normal cognition
 only through the existing promoted, gated reflection context.
 
-The service does not serialize reflection behind `/chat`. Both paths may run at
-the same time and may contend for shared LLM or database resources.
+The service does not serialize ordinary reflection records behind `/chat`.
+Both paths may run at the same time and may contend for shared LLM or database
+resources. The exception is visible-output-capable group self-cognition review:
+it follows the shared same-channel runtime coordination rule before it can
+dispatch speech.
 
-`CHARACTER_SLEEP_LOCAL_PERIOD` is owned by self-cognition trigger policy. When
-the current character-local time is inside that period, hourly, daily, style,
-promotion, and global reflection still run; only the group self-cognition
-review phase handler is skipped before profile fetch, case collection, or
-self-cognition worker tick.
+`CHARACTER_SLEEP_LOCAL_PERIOD` is shared by self-cognition trigger policy and
+daily affect settling. When the current character-local time is inside that
+period, hourly, daily, style, promotion, global reflection, and character
+growth still run; only group self-cognition review is skipped before profile
+fetch, case collection, or self-cognition worker tick.
+
+Daily affect settling runs near the sleep-period wake edge when
+`CHARACTER_SLEEP_LOCAL_PERIOD` is non-empty. There is no separate
+`AFFECT_SETTLING_ENABLED` switch; setting the sleep period to an empty value
+disables both the self-cognition sleep-period suppression and the affect
+settling schedule. Its due local time is the later of:
+
+- `REFLECTION_PROMOTION_RUN_AFTER_LOCAL_TIME`
+  + `AFFECT_SETTLING_AFTER_PROMOTION_GRACE_MINUTES`
+- sleep-period end - `AFFECT_SETTLING_WAKE_PREP_MINUTES`
+
+The self-cognition pause window closes at sleep-period end +
+`AFFECT_SETTLING_WAKE_DEFER_GRACE_MINUTES`. The affect-settling module import
+fails if the due time would land after that close time. The worker uses the
+sleep-ending local date as `settling_local_date`, can catch up after the due
+time if the service missed the narrow wake window, and runs at most once per
+reflection phase period.
+
+The affect prompt consumes current `character_state` text plus sanitized
+previous-day `daily_channel` cards and sleep-window `hourly_slot` cards.
+Prompt-facing payloads exclude run ids, scheduler ids, leases, freshness
+tokens, raw DB timestamps, and source message refs. The proposal LLM owns the
+free-form semantic transition; the reviewer LLM accepts or rejects that exact
+proposal. Deterministic code validates only required strings, reviewer decision
+shape, stale-write freshness, status idempotency, and persistence.
+
+After a successful affect write, the service-provided
+`character_state_refresh_callback` refreshes the process-local runtime
+character state before future prompt snapshots. The standalone self-cognition
+worker receives the public pause probe and defers source collection while a
+pending affect run is still inside the wake window.
 
 Terminal hourly statuses are `succeeded`, `failed`, `skipped`, and `dry_run`;
 a failed hourly slot does not block daily synthesis forever.
@@ -325,6 +402,11 @@ document.
 
 Feature flags are process-loaded from config. Changing them requires a process
 restart unless a test monkeypatches the module value directly.
+
+Daily affect settling intentionally is not behind a feature flag. It is active
+whenever `CHARACTER_SLEEP_LOCAL_PERIOD` is non-empty and the wake-window gate
+opens. Empty `CHARACTER_SLEEP_LOCAL_PERIOD` disables the schedule through the
+shared sleep-period contract.
 
 All Stage 1c LLM calls use the existing consolidation route:
 
@@ -375,10 +457,16 @@ display names, and private details stay out of normal log output.
 python src\scripts\run_reflection_cycle.py hourly --dry-run
 python src\scripts\run_reflection_cycle.py daily --dry-run
 python src\scripts\run_reflection_cycle.py promote --dry-run
+python src\scripts\run_reflection_cycle.py affect-settle --dry-run
+python src\scripts\run_reflection_cycle.py affect-settle --enable-character-state-write
 ```
 
 `daily` and `promote` default to the previous character-local date. Use
 `--character-local-date YYYY-MM-DD` for deterministic runs.
+`affect-settle` defaults to the current character-local date. Use
+`--settling-local-date YYYY-MM-DD` for deterministic runs. It writes
+`character_state` only when `--enable-character-state-write` is supplied and
+`--dry-run` is not supplied.
 
 ## Integration Boundaries
 

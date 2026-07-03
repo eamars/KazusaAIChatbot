@@ -76,6 +76,7 @@ def _chain_input() -> dict:
             "conversation_progress": {},
             "promoted_reflection_context": {},
             "internal_monologue_residue_context": "",
+            "past_dialog_cognition_context": "",
             "previous_action_summary": "",
         },
         "evidence": {
@@ -106,6 +107,7 @@ def _chain_input() -> dict:
         "runtime_context": {
             "language_policy": "simplified_chinese_internal_text",
             "visual_directives_enabled": True,
+            "task_willingness_boundary_enabled": False,
             "max_action_requests": 3,
             "max_resolver_requests": 3,
             "background_work_output_char_limit": 4000,
@@ -207,6 +209,45 @@ def test_cognition_chain_input_rejects_unknown_action_capability() -> None:
 
     with pytest.raises(CognitionChainContractError):
         validate_cognition_chain_input(payload)
+
+
+def test_chain_input_projects_past_dialog_cognition_context_to_core_state() -> None:
+    from kazusa_ai_chatbot.cognition_chain_core.chain import _state_from_chain_input
+
+    payload = _chain_input()
+    payload["conversation_context"]["past_dialog_cognition_context"] = (
+        "Prior private context: she was tentative."
+    )
+
+    state = _state_from_chain_input(payload)
+
+    assert state["past_dialog_cognition_context"] == (
+        "Prior private context: she was tentative."
+    )
+
+
+def test_cognition_chain_input_rejects_non_bool_task_willingness_flag() -> None:
+    from kazusa_ai_chatbot.cognition_chain_core.contracts import (
+        CognitionChainContractError,
+        validate_cognition_chain_input,
+    )
+
+    payload = _chain_input()
+    payload["runtime_context"]["task_willingness_boundary_enabled"] = "false"
+
+    with pytest.raises(CognitionChainContractError):
+        validate_cognition_chain_input(payload)
+
+
+def test_chain_input_projects_task_willingness_flag_to_core_state() -> None:
+    from kazusa_ai_chatbot.cognition_chain_core.chain import _state_from_chain_input
+
+    payload = _chain_input()
+    payload["runtime_context"]["task_willingness_boundary_enabled"] = True
+
+    state = _state_from_chain_input(payload)
+
+    assert state["task_willingness_boundary_enabled"] is True
 
 
 def test_text_surface_input_accepts_prompt_safe_projection() -> None:

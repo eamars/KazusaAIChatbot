@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from kazusa_ai_chatbot.db._client import get_db
@@ -86,3 +86,60 @@ async def insert_trace_step(document: Mapping[str, Any]) -> str:
     await db[LLM_TRACE_STEPS_COLLECTION].insert_one(dict(document))
     step_id = str(document["step_id"])
     return step_id
+
+
+async def list_llm_trace_steps_for_trace_ids(
+    trace_ids: Sequence[str],
+    *,
+    stage_names: Sequence[str],
+) -> list[dict[str, Any]]:
+    """Return selected parsed trace steps for trace-backed context.
+
+    Args:
+        trace_ids: Trace run ids to inspect.
+        stage_names: Approved stage names to include.
+
+    Returns:
+        Trace-step rows with only parsed output and ordering metadata.
+    """
+
+    clean_trace_ids = _unique_strings(trace_ids)
+    clean_stage_names = _unique_strings(stage_names)
+    if not clean_trace_ids or not clean_stage_names:
+        rows: list[dict[str, Any]] = []
+        return rows
+
+    db = await get_db()
+    query = {
+        "trace_id": {"$in": clean_trace_ids},
+        "stage_name": {"$in": clean_stage_names},
+    }
+    projection = {
+        "_id": 0,
+        "trace_id": 1,
+        "stage_name": 1,
+        "sequence": 1,
+        "parsed_output": 1,
+        "created_at": 1,
+    }
+    cursor = (
+        db[LLM_TRACE_STEPS_COLLECTION]
+        .find(query, projection)
+        .sort([("trace_id", 1), ("sequence", 1)])
+    )
+    rows = await cursor.to_list(length=None)
+    return rows
+
+
+def _unique_strings(values: Sequence[str]) -> list[str]:
+    """Return stripped string values in first-seen order."""
+
+    clean_values: list[str] = []
+    seen_values: set[str] = set()
+    for value in values:
+        clean_value = str(value).strip()
+        if not clean_value or clean_value in seen_values:
+            continue
+        clean_values.append(clean_value)
+        seen_values.add(clean_value)
+    return clean_values

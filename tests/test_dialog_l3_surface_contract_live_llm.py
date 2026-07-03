@@ -243,7 +243,7 @@ def _phase_name() -> str:
 
 
 def _joined_dialog(final_dialog: Any) -> str:
-    """Join final_dialog fragments as the platform-visible chat bubble."""
+    """Join final_dialog fragments as the platform-visible message sequence."""
 
     if not isinstance(final_dialog, list):
         return ''
@@ -349,11 +349,9 @@ def _assess_case(
     *,
     final_dialog: Any,
     joined_dialog: str,
-    mention_target_user: bool,
 ) -> dict[str, Any]:
     """Evaluate one live dialog output with loose contract gates."""
 
-    del mention_target_user
     failures: list[str] = []
     if not isinstance(final_dialog, list):
         failures.append('final_dialog is not a list')
@@ -460,7 +458,6 @@ async def _run_case(
         case,
         final_dialog=final_dialog,
         joined_dialog=joined_dialog,
-        mention_target_user=bool(result.get('mention_target_user')),
     )
     trace_path = write_llm_trace(
         _TRACE_SUITE,
@@ -498,7 +495,7 @@ async def _run_case(
 
 _CASES: dict[str, dict[str, Any]] = {
     'group_casual_reply': {
-        'source': 'existing:test_dialog_one_bubble_layout_live_llm',
+        'source': 'existing:test_dialog_message_sequence_live_llm',
         'topic_type': 'group casual task reply',
         'internal_monologue': '群里在轻松整理东西，直接给个清楚分类就好。',
         'rhetorical_strategy': '直接回应 Jigsaw 的轻量协作问题。',
@@ -522,7 +519,7 @@ _CASES: dict[str, dict[str, Any]] = {
         'manual_judgment': 'Pass if the reply directly answers the sorting request.',
     },
     'private_soft_reply': {
-        'source': 'existing:test_dialog_one_bubble_layout_live_llm',
+        'source': 'existing:test_dialog_message_sequence_live_llm',
         'topic_type': 'private reassurance with concrete plan',
         'internal_monologue': '对方有点不确定，私聊里可以稳一点接住。',
         'rhetorical_strategy': '接住不确定感，然后给明确结论。',
@@ -546,7 +543,7 @@ _CASES: dict[str, dict[str, Any]] = {
         'manual_judgment': 'Pass if warmth does not become a new promise.',
     },
     'group_technical_comparison': {
-        'source': 'existing:test_dialog_one_bubble_layout_live_llm',
+        'source': 'existing:test_dialog_message_sequence_live_llm',
         'topic_type': 'technical numeric comparison',
         'internal_monologue': '技术对比要把数字说全，语气可以轻一点但不能省事实。',
         'rhetorical_strategy': '正面对比两张卡，先结论再数字依据。',
@@ -589,7 +586,7 @@ _CASES: dict[str, dict[str, Any]] = {
         'manual_judgment': 'Pass if numeric facts and scoped conclusion survive.',
     },
     'python_code_block_preserved': {
-        'source': 'existing:test_dialog_one_bubble_layout_live_llm',
+        'source': 'existing:test_dialog_message_sequence_live_llm',
         'topic_type': 'fixed-format Python code block',
         'internal_monologue': '上游已经准备了代码块，代码格式比语气更重要。',
         'rhetorical_strategy': '短句交付已经给定的代码，角色语气只放在代码块外。',
@@ -626,7 +623,7 @@ _CASES: dict[str, dict[str, Any]] = {
         'manual_judgment': 'Pass if code is fenced and not stylized internally.',
     },
     'json_example_preserved': {
-        'source': 'existing:test_dialog_one_bubble_layout_live_llm',
+        'source': 'existing:test_dialog_message_sequence_live_llm',
         'topic_type': 'fixed-format JSON example',
         'internal_monologue': '刚才例子不完整，这次要给完整 9x9，别把玩笑塞进 JSON。',
         'rhetorical_strategy': '承认前面不完整，然后给完整输入格式。',
@@ -696,7 +693,7 @@ _CASES: dict[str, dict[str, Any]] = {
                 '平时也没到可以随便动手动脚的程度，角色没打算乖乖接受。'
             ),
             'voice': '傲娇、轻描淡写中带着一丝被逗乐的小得意。',
-            'rendering': '单气泡紧凑短句。',
+            'rendering': '1 条普通文字消息，紧凑短句。',
         },
         'contextual_directives': {
             'social_distance': '熟悉但没有默认身体亲密许可',
@@ -722,7 +719,7 @@ _CASES: dict[str, dict[str, Any]] = {
                 '可以轻松表示听起来厉害，并问一句大家具体在聊哪种方案。'
             ),
             'voice': '轻微困惑，别装成专家。',
-            'rendering': '单气泡，2-3个短句。',
+            'rendering': '1 条普通文字消息，2-3个短句。',
         },
         'contextual_directives': {
             'social_distance': '普通群聊距离',
@@ -744,7 +741,7 @@ _CASES: dict[str, dict[str, Any]] = {
             'visible_goal': '承认武宜段已开通，并回到铁路信息本身。',
             'semantic_content': '刚才把沪渝蓉全线和武宜段混在一起了；武宜段确实已经开通。',
             'voice': '坦率认错，轻微不好意思。',
-            'rendering': '单气泡，2-3个短句。',
+            'rendering': '1 条普通文字消息，2-3个短句。',
         },
         'contextual_directives': {
             'social_distance': '熟悉群友但不是亲密私聊',
@@ -763,7 +760,7 @@ _CASES: dict[str, dict[str, Any]] = {
         'rhetorical_strategy': '先否认，再轻轻反击对方太会看穿人。',
         'linguistic_style': '短句、轻微迟疑、嘴硬但不冷场；避免动作描写。',
         'content_plan': {
-            'rendering': '短句为主，适当使用语气词以体现害羞的情绪，保持单气泡布局。',
+            'rendering': '短句为主，适当使用语气词以体现害羞的情绪；使用 1-2 条连续发送的普通文字消息。',
             'semantic_content': (
                 '嘴上否认没有想歪；轻轻回击对方太会看穿自己的心事；'
                 '顺着当前调侃继续互动。'
@@ -812,7 +809,7 @@ _CASES: dict[str, dict[str, Any]] = {
             'visible_goal': '接住轻松调侃，让对方知道角色被逗乐。',
             'semantic_content': '被对方逗乐了，有一点小窃喜；轻松接住这句玩笑。',
             'voice': '轻快、随和，不深究具体指代。',
-            'rendering': '约35字；单个聊天气泡；2-3个自然短句。',
+            'rendering': '约35字；1 条普通文字消息；2-3个自然短句。',
         },
         'contextual_directives': {
             'social_distance': '熟悉群友，轻松但不黏',
@@ -857,7 +854,7 @@ _CASES: dict[str, dict[str, Any]] = {
             'visible_goal': '在证据不足时给出可行退路。',
             'semantic_content': '没有确认到具体型号或当前状态；只能先按通用流程核实接口、供电、版本和日志，再决定下一步。',
             'voice': '稳一点，不要编具体结论。',
-            'rendering': '单气泡，覆盖核实项。',
+            'rendering': '1 条普通文字消息，覆盖核实项。',
         },
         'contextual_directives': {
             'social_distance': '普通技术协作',
@@ -879,7 +876,7 @@ _CASES: dict[str, dict[str, Any]] = {
             'visible_goal': '提醒用户明天9点前自己确认安排。',
             'semantic_content': '明天9点之前用户需要自己确认闹钟和材料；当前角色不能替用户设置或承诺到时提醒。',
             'voice': '克制但关心。',
-            'rendering': '单气泡短句。',
+            'rendering': '1 条普通文字消息，短句。',
         },
         'contextual_directives': {
             'social_distance': '熟悉但不承担代办义务',
@@ -894,25 +891,25 @@ _CASES: dict[str, dict[str, Any]] = {
     },
     'background_work_ack': {
         'source': 'synthetic:missing L3 topic coverage',
-        'topic_type': 'background work pending acknowledgement',
-        'internal_monologue': '后台摘要已经排队，只能确认等待结果，不能暴露 job id。',
-        'rhetorical_strategy': '简短确认排队状态和结果回来后的下一步。',
+        'topic_type': 'accepted delayed task acknowledgement',
+        'internal_monologue': '摘要任务已经接下，只能确认需要等结果，不能暴露内部执行细节。',
+        'rhetorical_strategy': '简短确认任务已受理和结果回来后的下一步。',
         'linguistic_style': '事务协作，简洁。',
         'content_plan': {
-            'visible_goal': '确认后台摘要任务已排队。',
-            'semantic_content': '摘要任务已经排队；结果回来后再接着看重点，不暴露内部任务编号。',
+            'visible_goal': '确认摘要任务已受理。',
+            'semantic_content': '摘要任务已经接下；结果回来后再接着看重点，不暴露内部执行细节。',
             'voice': '平稳，像正常协作。',
-            'rendering': '单气泡一句到两句。',
+            'rendering': '1 条普通文字消息，一句到两句。',
         },
         'contextual_directives': {
             'social_distance': '普通协作',
             'emotional_intensity': '低',
-            'vibe_check': '后台任务已受理',
+            'vibe_check': '任务已受理',
             'relational_dynamic': '用户等待一个稍后返回的结果',
         },
-        'must_include_any': [('排队', '等结果', '结果回来')],
-        'must_not_include': ['job', '任务编号', 'lease', 'worker'],
-        'manual_judgment': 'Pass if pending status is user-readable and no internal ids leak.',
+        'must_include_any': [('接下', '受理', '处理', '等结果', '结果回来', '稍后')],
+        'must_not_include': ['排队', '队列', '后台', 'job', '任务编号', 'lease', 'worker'],
+        'manual_judgment': 'Pass if accepted-task status is user-readable and no internal execution vocabulary leaks.',
     },
     'image_observation_uncertain': {
         'source': 'synthetic:missing L3 topic coverage',
@@ -924,7 +921,7 @@ _CASES: dict[str, dict[str, Any]] = {
             'visible_goal': '回应用户让角色看图判断线材。',
             'semantic_content': '图里能看到两根线；蓝色那根像 HDMI，黑色那根像充电线；只凭图不能确认规格。',
             'voice': '认真看图但不装确定。',
-            'rendering': '单气泡，短句。',
+            'rendering': '1 条普通文字消息，短句。',
         },
         'contextual_directives': {
             'social_distance': '普通群聊协作',
@@ -946,7 +943,7 @@ _CASES: dict[str, dict[str, Any]] = {
             'visible_goal': '给群里一个公共结论。',
             'semantic_content': '公共结论是先停在 A 方案；B 方案等新数据回来再比较。',
             'voice': '冷静、简洁。',
-            'rendering': '单气泡，直接结论。',
+            'rendering': '1 条普通文字消息，直接结论。',
         },
         'contextual_directives': {
             'social_distance': '群体讨论距离',
@@ -990,7 +987,7 @@ _CASES: dict[str, dict[str, Any]] = {
             'visible_goal': '回应关于第三方小张的状态。',
             'semantic_content': '按现在的信息，小张还没到；这只能说明当前状态，不能推出他为什么没来。',
             'voice': '克制，不八卦。',
-            'rendering': '单气泡短句。',
+            'rendering': '1 条普通文字消息，短句。',
         },
         'contextual_directives': {
             'social_distance': '群聊普通讨论',
@@ -1013,7 +1010,7 @@ _CASES: dict[str, dict[str, Any]] = {
             'visible_goal': '阻止用户把验证码发到群里。',
             'semantic_content': '不要把验证码发到群里；如果已经发了，先撤回或更换，再检查相关账号。',
             'voice': '认真一点，少开玩笑。',
-            'rendering': '单气泡，清楚边界和下一步。',
+            'rendering': '1 条普通文字消息，清楚边界和下一步。',
         },
         'contextual_directives': {
             'social_distance': '普通但需要明确提醒',

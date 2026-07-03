@@ -20,7 +20,6 @@ from kazusa_ai_chatbot.config import (
     RELEVANCE_AGENT_LLM_API_KEY,
     RELEVANCE_AGENT_LLM_BASE_URL,
     RELEVANCE_AGENT_LLM_MODEL,
-    RELEVANCE_USER_ENGAGEMENT_GUIDELINES_LIMIT,
     RELEVANCE_AGENT_LLM_MAX_COMPLETION_TOKENS,
     RELEVANCE_AGENT_LLM_THINKING_ENABLED,
 )
@@ -550,15 +549,27 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
     )
     group_attention = group_attention_context.get("group_attention", _GROUP_ATTENTION_LOW)
 
-    logger.debug(f'Relevance input: user={user_name} platform_user={platform_user_id} channel={channel_name or "<dm>"} channel_type={channel_type or "<unknown>"} noisy={is_noisy_environment} history={len(state.get("chat_history_wide") or [])} directly_addressed={directly_addressed} group_attention={group_attention} reply_context={log_dict_subset(
-            reply_context,
-            [
-                "reply_to_message_id",
-                "reply_to_platform_user_id",
-                "reply_to_display_name",
-                "reply_excerpt",
-            ],
-        )} content={log_preview(user_input)}')
+    reply_context_preview = log_dict_subset(
+        reply_context,
+        [
+            "reply_to_message_id",
+            "reply_to_platform_user_id",
+            "reply_to_display_name",
+            "reply_excerpt",
+        ],
+    )
+    logger.debug(
+        f'Relevance input: user={user_name} '
+        f'platform_user={platform_user_id} '
+        f'channel={channel_name or "<dm>"} '
+        f'channel_type={channel_type or "<unknown>"} '
+        f'noisy={is_noisy_environment} '
+        f'history={len(state.get("chat_history_wide") or [])} '
+        f'directly_addressed={directly_addressed} '
+        f'group_attention={group_attention} '
+        f'reply_context={reply_context_preview} '
+        f'content={log_preview(user_input)}'
+    )
 
     if _should_ignore_third_party_reply(
         reply_context=reply_context,

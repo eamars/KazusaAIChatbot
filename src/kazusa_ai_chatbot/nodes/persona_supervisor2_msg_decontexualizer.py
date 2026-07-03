@@ -30,6 +30,7 @@ from kazusa_ai_chatbot.cognition_episode import (
     build_text_chat_media_description_rows,
     replace_text_chat_media_percepts,
 )
+from kazusa_ai_chatbot.channel_scene_projection import project_channel_topic_text
 from kazusa_ai_chatbot.db import (
     record_media_descriptor_hit,
     update_conversation_attachment_descriptions,
@@ -532,7 +533,11 @@ async def call_msg_decontexualizer(state: GlobalPersonaState) -> dict:
             state["chat_history_recent"],
             character_name=character_name,
         ),
-        "channel_topic": state["channel_topic"],
+        "channel_topic": project_channel_topic_text(
+            channel_type=state.get("channel_type", ""),
+            channel_name=state.get("channel_name", ""),
+            channel_topic=state["channel_topic"],
+        ),
         "indirect_speech_context": state["indirect_speech_context"],
         "reply_context": state["reply_context"],
     }

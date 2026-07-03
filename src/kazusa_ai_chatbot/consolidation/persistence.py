@@ -22,6 +22,9 @@ from kazusa_ai_chatbot.consolidation.target import (
 from kazusa_ai_chatbot.consolidation.group_channel import (
     persist_group_channel_style_image,
 )
+from kazusa_ai_chatbot.consolidation.character_self_guidance import (
+    persist_character_self_guidance_from_state,
+)
 from kazusa_ai_chatbot.db import (
     DatabaseOperationError,
     get_character_runtime_state,
@@ -88,6 +91,49 @@ def _write_intent_is_allowed(
         return_value = False
     else:
         return_value = True
+    return return_value
+
+
+def _consolidation_lane_is_enabled(
+    state: ConsolidatorState,
+    lane: str,
+) -> bool:
+    """Return whether a lane-router-selected lane should write."""
+
+    enabled_lanes = state.get("enabled_consolidation_write_lanes")
+    if not isinstance(enabled_lanes, (list, tuple, set)):
+        return_value = False
+        return return_value
+    return_value = lane in enabled_lanes
+    return return_value
+
+
+def _consolidation_lane_was_routed(
+    state: ConsolidatorState,
+    lane: str,
+) -> bool:
+    """Return whether the lane-router explicitly accepted a lane."""
+
+    enabled_lanes = state.get("enabled_consolidation_write_lanes")
+    if not isinstance(enabled_lanes, (list, tuple, set)):
+        return_value = False
+        return return_value
+    return_value = lane in enabled_lanes
+    return return_value
+
+
+def _any_consolidation_lane_enabled(
+    state: ConsolidatorState,
+    lanes: set[str],
+) -> bool:
+    """Return whether any one lane from a group is enabled."""
+
+    enabled_lanes = state.get("enabled_consolidation_write_lanes")
+    if not isinstance(enabled_lanes, (list, tuple, set)):
+        return_value = False
+        return return_value
+    enabled_lane_set = set(enabled_lanes)
+    return_value = bool(enabled_lane_set & lanes)
     return return_value
 
 
@@ -199,7 +245,7 @@ def _normalize_due_time_to_utc(value: str) -> str:
     """Normalize a structured promise time into storage UTC format.
 
     Args:
-        value: Exact local ``YYYY-MM-DD HH:MM`` from the harvester.
+        value: Exact local ``YYYY-MM-DD HH:MM`` from a lane specialist.
 
     Returns:
         Storage UTC string for persistence.
@@ -222,7 +268,7 @@ def _normalize_future_promises(
     """Normalize actionable promise due times into UTC storage format.
 
     Args:
-        future_promises: Raw promise rows from the harvester.
+        future_promises: Raw promise rows from lane specialist output.
         storage_timestamp_utc: Turn storage timestamp used to resolve
             immediate fallbacks.
 
@@ -291,7 +337,11 @@ async def db_writer(state: ConsolidatorState) -> dict:
             "reflection_summary": reflection_summary,
         },
     )
-    if origin_policy["character_state"]["allowed"] and character_state_allowed:
+    if (
+        origin_policy["character_state"]["allowed"]
+        and character_state_allowed
+        and _consolidation_lane_is_enabled(state, "character_state")
+    ):
         try:
             await upsert_character_state(
                 mood=mood,
@@ -318,6 +368,7 @@ async def db_writer(state: ConsolidatorState) -> dict:
         if (
             origin_policy["relationship_insight"]["allowed"]
             and relationship_insight_allowed
+            and _consolidation_lane_is_enabled(state, "relationship_profile")
         ):
             try:
                 await update_last_relationship_insight(
@@ -343,7 +394,15 @@ async def db_writer(state: ConsolidatorState) -> dict:
             "future_promises": state.get("future_promises") or [],
         },
     )
-    if origin_policy["user_memory_units"]["allowed"] and user_memory_units_allowed:
+    user_memory_lane_enabled = _any_consolidation_lane_enabled(
+        state,
+        {"user_memory_units", "active_commitment"},
+    )
+    if (
+        origin_policy["user_memory_units"]["allowed"]
+        and user_memory_units_allowed
+        and user_memory_lane_enabled
+    ):
         future_promises = _normalize_future_promises(
             state.get("future_promises") or [],
             storage_timestamp_utc=storage_timestamp_utc,
@@ -356,7 +415,11 @@ async def db_writer(state: ConsolidatorState) -> dict:
         future_promises = []
         normalized_state = state
 
-    if origin_policy["user_memory_units"]["allowed"] and user_memory_units_allowed:
+    if (
+        origin_policy["user_memory_units"]["allowed"]
+        and user_memory_units_allowed
+        and user_memory_lane_enabled
+    ):
         try:
             memory_unit_results = await update_user_memory_units_from_state(
                 normalized_state
@@ -382,7 +445,11 @@ async def db_writer(state: ConsolidatorState) -> dict:
     user_affinity_score: int | None = None
     processed_affinity_delta = 0
     if global_user_id:
-        if origin_policy["affinity"]["allowed"] and affinity_allowed:
+        if (
+            origin_policy["affinity"]["allowed"]
+            and affinity_allowed
+            and _consolidation_lane_is_enabled(state, "relationship_profile")
+        ):
             user_profile = state["user_profile"]
             user_affinity_score = int(user_profile["affinity"])
             processed_affinity_delta = process_affinity_delta(
@@ -427,6 +494,7 @@ async def db_writer(state: ConsolidatorState) -> dict:
         group_channel_style_payload is not None
         and origin_policy["group_channel_style_image"]["allowed"]
         and group_channel_style_allowed
+        and _consolidation_lane_is_enabled(state, "interaction_style_image")
     ):
         try:
             await persist_group_channel_style_image(
@@ -454,7 +522,11 @@ async def db_writer(state: ConsolidatorState) -> dict:
         write_lane="character_self_image",
         payload={"reflection_summary": state.get("reflection_summary", "")},
     )
-    if origin_policy["character_image"]["allowed"] and character_image_allowed:
+    if (
+        origin_policy["character_image"]["allowed"]
+        and character_image_allowed
+        and _consolidation_lane_is_enabled(state, "character_state")
+    ):
         async def _update_character_image_from_runtime_state() -> dict | None:
             """Build character image using the DB-current self-image base."""
 
@@ -504,7 +576,53 @@ async def db_writer(state: ConsolidatorState) -> dict:
     else:
         write_log["character_image"] = False
 
-    # ── Step 7: Cache2 invalidation events (after persistence) ──────
+    # ── Step 7: character self-guidance memory ──────────────────────
+    character_self_guidance_payload = state.get("character_self_guidance")
+    has_character_self_guidance_payload = isinstance(
+        character_self_guidance_payload,
+        dict,
+    ) and bool(character_self_guidance_payload)
+    character_self_guidance_routed = _consolidation_lane_was_routed(
+        state,
+        "character_self_guidance",
+    )
+    if has_character_self_guidance_payload:
+        character_self_guidance_allowed = _write_intent_is_allowed(
+            state,
+            target_alias=CHARACTER_TARGET_ALIAS,
+            write_lane="character_self_guidance",
+            payload=character_self_guidance_payload,
+        )
+    else:
+        character_self_guidance_allowed = False
+
+    if (
+        has_character_self_guidance_payload
+        and origin_policy["character_self_guidance"]["allowed"]
+        and character_self_guidance_allowed
+        and _consolidation_lane_is_enabled(state, "character_self_guidance")
+    ):
+        try:
+            character_self_guidance_result = (
+                await persist_character_self_guidance_from_state(state)
+            )
+        except Exception as exc:
+            logger.exception(
+                f"db_writer: failed to persist character_self_guidance: {exc}"
+            )
+            write_log["character_self_guidance"] = False
+        else:
+            write_log["character_self_guidance"] = (
+                character_self_guidance_result is not None
+            )
+            if character_self_guidance_result is not None:
+                metadata["character_self_guidance_result"] = (
+                    character_self_guidance_result
+                )
+    elif character_self_guidance_routed:
+        write_log["character_self_guidance"] = False
+
+    # ── Step 8: Cache2 invalidation events (after persistence) ──────
     evicted_total = 0
     if origin_policy["cache_invalidation"]["allowed"]:
         runtime = get_rag_cache2_runtime()

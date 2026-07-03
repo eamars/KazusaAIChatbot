@@ -118,6 +118,30 @@ async def list_daily_channel_runs(
     return return_value
 
 
+async def list_reflection_runs_for_kind_date(
+    *,
+    run_kind: str,
+    character_local_date: str,
+) -> list[CharacterReflectionRunDoc]:
+    """Return reflection runs for one kind and character-local date."""
+
+    db = await get_db()
+    cursor = (
+        db[REFLECTION_RUN_COLLECTION]
+        .find({
+            "run_kind": run_kind,
+            "character_local_date": character_local_date,
+        })
+        .sort([("scope.scope_ref", 1), ("hour_start", 1), ("run_id", 1)])
+    )
+    documents = await cursor.to_list(length=None)
+    return_value: list[CharacterReflectionRunDoc] = [
+        dict(document)
+        for document in documents
+    ]
+    return return_value
+
+
 async def list_existing_run_ids(run_ids: list[str]) -> set[str]:
     """Return the subset of run ids that already has persisted documents."""
 

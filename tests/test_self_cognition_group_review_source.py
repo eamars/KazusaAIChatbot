@@ -464,14 +464,58 @@ async def test_collect_group_review_cases_attaches_participant_context(
     assert case["conversation_progress"]["participant_context"]["source"] == (
         "group_review_participant_context"
     )
+    assert case["delivery_mention_users"] == [
+        {
+            "global_user_id": "user-1",
+            "platform_user_id": "qq-user-1",
+            "display_name": "user",
+        }
+    ]
     assert case["target_scope"]["user_id"] is None
     assert case["delivery_target"]["platform_channel_id"] == "group-1"
 
     source_packet = projection.build_source_packet(case)
     serialized_packet = json.dumps(source_packet, ensure_ascii=False)
     assert "participant_context" in serialized_packet
+    assert "delivery_mention_users" not in serialized_packet
     assert "delivery_target" not in serialized_packet
     assert "user-1" not in serialized_packet
+
+
+@pytest.mark.asyncio
+async def test_collect_group_review_cases_carries_channel_label() -> None:
+    """Source collection should carry a usable group label for instruction text."""
+
+    now = datetime(2026, 5, 18, 4, 15, tzinfo=timezone.utc)
+    scope = _group_scope()
+    for message in scope.messages:
+        message["channel_name"] = "动画讨论群"
+    windows = build_group_activity_windows(
+        scope=scope,
+        window_start=datetime(2026, 5, 18, 4, 0, tzinfo=timezone.utc),
+        window_end=datetime(2026, 5, 18, 4, 30, tzinfo=timezone.utc),
+        now=now,
+        character_global_user_id="character-global",
+        platform_bot_id="bot-1",
+    )
+
+    async def participant_context_builder(**kwargs: Any) -> None:
+        del kwargs
+        return None
+
+    cases = await sources.collect_group_review_cases(
+        now=now,
+        character_profile={
+            "name": "Character",
+            "global_user_id": "character-global",
+            "platform_bot_id": "bot-1",
+        },
+        windows=windows,
+        max_cases=1,
+        participant_context_builder=participant_context_builder,
+    )
+
+    assert cases[0]["channel_topic"] == "动画讨论群"
 
 
 @pytest.mark.asyncio
@@ -784,6 +828,25 @@ def test_group_review_source_packet_uses_active_group_review_contract() -> None:
     assert "self_cognition_delivery_target" not in serialized_packet
 
 
+def test_group_review_source_packet_projects_channel_label_in_instruction(
+) -> None:
+    """A carried group label should replace the generic preamble text."""
+
+    case = _group_review_case()
+    case["channel_topic"] = "动画讨论群"
+
+    source_packet = projection.build_source_packet(case)
+    rendered_packet = projection.render_source_packet_text(source_packet)
+
+    assert source_packet["instruction"].startswith(
+        '下面是我在“动画讨论群”群聊里看到的现场观察资料。'
+    )
+    assert rendered_packet.startswith(
+        '下面是我在“动画讨论群”群聊里看到的现场观察资料。'
+    )
+    assert "channel_topic" not in json.dumps(source_packet, ensure_ascii=False)
+
+
 def test_group_review_source_packet_uses_ambient_sentence_when_not_addressed(
 ) -> None:
     """Ambient group review should not imply anyone addressed the character."""
@@ -1023,6 +1086,21 @@ def test_group_review_cognition_state_does_not_invent_target_user() -> None:
     assert episode_target_scope["current_platform_user_id"] == ""
     assert episode_target_scope["current_display_name"] == "group audience"
     assert episode_target_scope["target_addressed_user_ids"] == []
+
+
+def test_group_review_channel_label_stays_source_instruction_only() -> None:
+    """The carried group label should not also become cognition scene topic."""
+
+    case = _group_review_case()
+    case["channel_topic"] = "动画讨论群"
+
+    cognition_state = runner._build_cognition_state(
+        case,
+        "rendered group source packet",
+    )
+
+    assert cognition_state["channel_topic"] == ""
+    assert cognition_state["channel_name"] == ""
 
 
 def test_non_group_source_packet_omits_group_window_section() -> None:

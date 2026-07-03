@@ -91,6 +91,7 @@ DEBUG_LOG_TTL_DAYS=14
 LLM_TRACE_CAPTURE_MODE=metadata
 CONVERSATION_HISTORY_LIMIT=10
 COGNITION_VISUAL_DIRECTIVES_ENABLED=true
+COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED=true
 COGNITION_RESOLVER_MAX_CYCLES=3
 COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS=120.0
 SELF_COGNITION_ENABLED=true
@@ -123,6 +124,7 @@ WEB_URL_READ_MAX_CHARS=10000
 WEB_URL_READ_REDIRECT_LIMIT=5
 WEB_URL_READER_USER_AGENT=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36
 WEB_URL_READER_ACCEPT_LANGUAGE=en-US,en;q=0.9
+NHENTAI_TOKEN=
 
 # Optional generic MCP servers and timeouts
 MCP_SERVERS={}
@@ -132,7 +134,6 @@ MCP_CONNECT_TIMEOUT=10
 # Agent retry limits
 MAX_MEMORY_RETRIEVER_AGENT_RETRY=2
 MAX_WEB_SEARCH_AGENT_RETRY=2
-MAX_FACT_HARVESTER_RETRY=3
 
 # Cache2
 RAG_CACHE2_MAX_ENTRIES=5000
@@ -201,16 +202,23 @@ Qwen-compatible Qwopus 3.x model names.
 `00000000-0000-4000-8000-000000000001`. Set it explicitly in production so the
 active character keeps a stable first-class identity across service runs.
 
-`SEARXNG_URL` is optional. When it is empty, the web agent can still read
-HTTP(S) URLs directly from the Kazusa process, but web search returns a bounded
-unavailable observation. When it is set, search uses the configured SearXNG
-`/search?format=json` endpoint directly. URL reads do not require SearXNG or
-MCP, and local/private HTTP(S) resources reachable from the Kazusa process are
-allowed by default. URL reads always use browser-navigation headers,
-process-memory cookies, locally supported compression encodings, and common
-HTTP anti-bot challenge detection. They do not execute JavaScript, solve
-CAPTCHA, or impersonate browser TLS fingerprints. `MCP_SERVERS` remains
-available for unrelated generic MCP tools.
+`web_read` is always available and can read HTTP(S) URLs directly from the
+Kazusa process. `SEARXNG_URL` enables `web_search`; when it is empty, the
+search source is not registered as an available web_agent3 source. When it is
+set, search uses the configured SearXNG `/search?format=json` endpoint
+directly. URL reads do not require SearXNG or MCP, and local/private HTTP(S)
+resources reachable from the Kazusa process are allowed by default. URL reads
+always use browser-navigation headers, process-memory cookies, locally
+supported compression encodings, and common HTTP anti-bot challenge detection.
+They do not execute JavaScript, solve CAPTCHA, or impersonate browser TLS
+fingerprints. `NHENTAI_TOKEN` enables the nHentai metadata/search source; when
+it is empty, that source is not registered. Installing the Bilibili optional
+extra enables the Bilibili public read/search source:
+`pip install -e .[bilibili]`. The referenced package is
+`bilibili-api-python` on PyPI:
+https://pypi.org/project/bilibili-api-python/. Bilibili source availability
+does not require an `.env` setting. `MCP_SERVERS` remains available for
+unrelated generic MCP tools.
 
 When LM Studio reports
 `The model has crashed without additional information.`, chat model calls made
@@ -222,6 +230,13 @@ retried by this recovery path.
 `COGNITION_VISUAL_DIRECTIVES_ENABLED` is a brain-service level switch. Set it
 to `false` to skip L3 visual-directive generation globally; adapters and
 debug-client request payloads do not control this behavior.
+
+`COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED` defaults to `true`. It enables
+the L2 task-taking willingness boundary prompt path, where
+relationship, current mood, and scene vibe can make Kazusa refuse, deflect, or
+offer smaller-scope help for task-like requests. The switch does not hide
+action affordances from L2d. Set it to `false` to restore the legacy L2/L2d
+prompt path after service restart.
 
 The live persona turn always runs the cognition-preserving resolver after
 decontextualization. Each resolver cycle still runs the shared L1 -> L2 -> L2d
@@ -239,20 +254,58 @@ self-cognition worker runs do not invoke the L3 visual-directive LLM.
 `CHARACTER_TIME_ZONE`. During that local period, active-commitment
 self-cognition and reflection-attached group self-cognition do not trigger.
 Scheduled future cognition, durable calendar due-run handling, reflection,
-consolidation, dispatcher validation, and adapter delivery continue. Set
-`CHARACTER_SLEEP_LOCAL_PERIOD` to an empty value to disable this sleep-period
-suppression.
+consolidation, dispatcher validation, and adapter delivery continue. The same
+sleep period also schedules daily affect settling for persistent
+`character_state` mood, global vibe, and reflection summary. Set
+`CHARACTER_SLEEP_LOCAL_PERIOD` to an empty value to disable both sleep-period
+self-cognition suppression and affect settling.
 
-`BACKGROUND_WORK_WORKER_ENABLED` controls the generic background-work runtime.
-L2d may only queue a semantic `background_work_request`; the runtime router then
-chooses a worker and task without receiving adapter targets, job refs, tool
-arguments, or final visible text. The current text-artifact worker remains
-text-only and does not write files, run shell commands, install packages,
-download resources, research the web, process attachments, create images, or
-send adapter text directly. Completed jobs re-enter the brain as
-`background_work_result_ready` cognition, then use the existing dialog and
-delivery boundary for any visible result. `BACKGROUND_ARTIFACT_*` settings are
-legacy aliases only for compatibility.
+Daily affect settling has no separate `AFFECT_SETTLING_ENABLED` rollback flag.
+A non-empty `CHARACTER_SLEEP_LOCAL_PERIOD` enables the schedule; an empty value
+disables both sleep-period self-cognition suppression and affect settling. The
+only env-backed affect-settling knob is `AFFECT_SETTLING_WAKE_PREP_MINUTES=30`.
+
+The remaining affect-settling policy values are named constants in
+`kazusa_ai_chatbot.reflection_cycle.affect_settling`:
+
+- `AFFECT_SETTLING_PROMPT_MAX_CHARS=12000`
+- `AFFECT_SETTLING_REVIEW_PROMPT_MAX_CHARS=8000`
+- `AFFECT_SETTLING_AFTER_PROMOTION_GRACE_MINUTES=15`
+- `AFFECT_SETTLING_WAKE_DEFER_GRACE_MINUTES=15`
+
+The due local time is the later of promotion time plus grace and sleep end
+minus wake prep. The affect-settling module import fails if that due time is
+after sleep end plus wake defer grace.
+
+`BACKGROUND_WORK_WORKER_ENABLED` controls the internal background-work runtime.
+L2d sees delayed user work as accepted-task affordances:
+`accepted_task_request` creates or reuses an active accepted task, and
+`accepted_task_status_check` reports active task state without enqueueing new
+work. Deterministic execution maps new accepted tasks into the internal
+background-work queue after duplicate rejection and lifecycle persistence. The
+runtime router then chooses a worker and task without receiving adapter targets,
+job refs, tool arguments, or final visible text. The current text-artifact
+worker remains text-only and does not write files, run shell commands, install
+packages, download resources, research the web, process attachments, create
+images, or send adapter text directly. `future_speak` is the deterministic
+delayed-message worker: it schedules a future cognition slot and stores only a
+semantic objective, not prewritten user-facing text. Completed accepted tasks
+re-enter the brain as `accepted_task_result_ready` cognition, then use the
+existing dialog and delivery boundary for any visible result. Legacy rows
+without an accepted-task id may still use `background_work_result_ready`.
+`BACKGROUND_ARTIFACT_*` settings are legacy aliases only for compatibility.
+
+New worker types reuse the same lifecycle only after a reviewed capability and
+worker contract exists. The stable entry is accepted-task state plus an
+internal `background_work_request`; worker-local tool arguments, filesystem
+paths, shell commands, resolver internals, adapter ids, and final wording stay
+outside L2d and L3 prompts. A future coding-agent or complex-resolver worker
+must declare its semantic ownership, duplicate identity, permission and
+side-effect policy, bounded output contract, failure behavior, and verification
+before it is added to the worker registry. The queue supplies scheduling,
+duplicate rejection, execution, and result handoff mechanics; it does not by
+itself authorize repository edits, shell execution, web access, package
+installation, or direct adapter sends.
 
 Reflection phase scheduling spreads monitor-eligible channels across the
 `REFLECTION_WORKER_INTERVAL_SECONDS` period instead of running all group
@@ -271,6 +324,7 @@ You need:
 - an OpenAI-compatible chat completion endpoint
 - an OpenAI-compatible embeddings endpoint
 - optional SearXNG service for web search
+- optional `bilibili-api-python` package for Bilibili public read/search
 - optional generic MCP servers for unrelated tools
 
 Direct URL reads use the existing HTTP client dependency and do not require an
@@ -282,6 +336,7 @@ be used.
 ## Character Profile
 
 The brain refuses to start until a character profile exists in MongoDB.
+Load a character profile before starting the console or direct service:
 
 ```bash
 python -m scripts.load_character_profile personalities/kazusa.json
@@ -368,16 +423,21 @@ uvicorn kazusa_ai_chatbot.service:app --host 0.0.0.0 --port 8000
 
 On startup the service:
 
-1. Runs `db_bootstrap()` to create current collections and indexes.
-2. Drops legacy `rag_cache_index` and `rag_metadata_index` collections if they
-   are still present.
-3. Loads the active character profile.
-4. Compiles the top-level LangGraph pipeline.
-5. Hydrates persistent Cache2 initializer entries.
+1. Runs `db_bootstrap()` to create current collections and indexes and drop
+   legacy `rag_cache_index` and `rag_metadata_index` collections if they are
+   still present.
+2. Hydrates persistent RAG initializer cache entries into process-local
+   Cache2.
+3. Hydrates persistent media descriptor cache entries.
+4. Loads the active character profile.
+5. Compiles the top-level LangGraph pipeline.
 6. Starts configured MCP servers.
-7. Starts the durable calendar worker when `CALENDAR_SCHEDULER_ENABLED=true`.
-8. Starts the self-cognition worker when `SELF_COGNITION_ENABLED=true`.
-9. Starts the reflection worker when `REFLECTION_CYCLE_ENABLED=true`.
+7. Builds the runtime adapter registry and starts the chat input worker.
+8. Starts the durable calendar worker when `CALENDAR_SCHEDULER_ENABLED=true`.
+9. Starts the self-cognition worker when `SELF_COGNITION_ENABLED=true`.
+10. Starts the background-work runtime when
+    `BACKGROUND_WORK_WORKER_ENABLED=true`.
+11. Starts the reflection worker when `REFLECTION_CYCLE_ENABLED=true`.
 
 ## Adapters
 
@@ -634,6 +694,25 @@ python scripts/drop_legacy_rag_collections.py
 The script drops `rag_cache_index` and `rag_metadata_index` when present and is
 safe to run repeatedly.
 
+## Daily Affect Settling
+
+Manual dry-run:
+
+```bash
+python -m scripts.run_reflection_cycle affect-settle --dry-run
+```
+
+Manual apply:
+
+```bash
+python -m scripts.run_reflection_cycle affect-settle --enable-character-state-write
+```
+
+Use `--settling-local-date YYYY-MM-DD` for deterministic runs. Apply uses an
+atomic compare-and-upsert against the `character_state.updated_at` value read
+before the LLM call; a stale state records a skipped reflection run and does
+not overwrite newer state.
+
 ## Global Character Growth
 
 Global character growth runs after daily global reflection promotion when the
@@ -691,7 +770,9 @@ is ignored by git.
 
 ## Current Notes
 
-- The supported development run path is local editable install plus `uvicorn`.
+- The supported local run path is local editable install plus
+  `kazusa-control-console`; direct `uvicorn` startup remains the development
+  fallback when bypassing the console.
 - `Dockerfile` installs from `pyproject.toml`; `docker-compose.yml` remains a
   service-oriented deployment template that expects all required environment
   variables to be supplied.

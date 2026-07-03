@@ -179,15 +179,17 @@ def _strip_gemma4_thought_channels(raw_content: str) -> str:
 
     content = raw_content
     while True:
-        start_index = content.find(GEMMA4_THOUGHT_CHANNEL_START)
-        if start_index == -1:
+        try:
+            start_index = content.index(GEMMA4_THOUGHT_CHANNEL_START)
+        except ValueError:
             return content
 
-        end_index = content.find(
-            GEMMA4_THOUGHT_CHANNEL_END,
-            start_index + len(GEMMA4_THOUGHT_CHANNEL_START),
-        )
-        if end_index == -1:
+        try:
+            end_index = content.index(
+                GEMMA4_THOUGHT_CHANNEL_END,
+                start_index + len(GEMMA4_THOUGHT_CHANNEL_START),
+            )
+        except ValueError:
             stripped_content = content[:start_index].rstrip()
             return stripped_content
 
@@ -200,15 +202,17 @@ def _strip_qwen_think_tags(raw_content: str) -> str:
 
     content = raw_content
     while True:
-        start_index = content.find(QWEN_THINK_TAG_START)
-        if start_index == -1:
+        try:
+            start_index = content.index(QWEN_THINK_TAG_START)
+        except ValueError:
             return content
 
-        end_index = content.find(
-            QWEN_THINK_TAG_END,
-            start_index + len(QWEN_THINK_TAG_START),
-        )
-        if end_index == -1:
+        try:
+            end_index = content.index(
+                QWEN_THINK_TAG_END,
+                start_index + len(QWEN_THINK_TAG_START),
+            )
+        except ValueError:
             stripped_content = content[:start_index].rstrip()
             return stripped_content
 

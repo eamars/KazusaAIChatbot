@@ -37,6 +37,7 @@ from kazusa_ai_chatbot.db import (
     save_memory,
     search_memory,
     split_character_profile_runtime_state,
+    compare_and_upsert_character_state,
     update_affinity,
     update_last_relationship_insight,
     upsert_character_state,
@@ -323,6 +324,58 @@ async def test_upsert_character_state():
     assert set_payload["reflection_summary"] == "feeling good"
 
 
+@pytest.mark.asyncio
+async def test_compare_and_upsert_character_state_matches_updated_at():
+    db = _mock_db()
+    db.character_state.update_one = AsyncMock(
+        return_value=MagicMock(matched_count=1),
+    )
+
+    with _patched_get_db(db):
+        result = await compare_and_upsert_character_state(
+            expected_updated_at="t1",
+            mood="less sharp, still guarded",
+            global_vibe="tired but not hostile",
+            reflection_summary="Sleep made the irritation feel smaller.",
+            updated_at_utc="t2",
+        )
+
+    assert result is True
+    db.character_state.update_one.assert_awaited_once_with(
+        {"_id": "global", "updated_at": "t1"},
+        {
+            "$set": {
+                "mood": "less sharp, still guarded",
+                "global_vibe": "tired but not hostile",
+                "reflection_summary": (
+                    "Sleep made the irritation feel smaller."
+                ),
+                "updated_at": "t2",
+            }
+        },
+        upsert=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_compare_and_upsert_character_state_returns_false_when_stale():
+    db = _mock_db()
+    db.character_state.update_one = AsyncMock(
+        return_value=MagicMock(matched_count=0),
+    )
+
+    with _patched_get_db(db):
+        result = await compare_and_upsert_character_state(
+            expected_updated_at="t1",
+            mood="less sharp, still guarded",
+            global_vibe="tired but not hostile",
+            reflection_summary="Sleep made the irritation feel smaller.",
+            updated_at_utc="t2",
+        )
+
+    assert result is False
+
+
 # ── User profile ────────────────────────────────────────────────────
 
 
@@ -559,7 +612,7 @@ async def test_save_conversation_insert_failure_still_propagates(
 
 @pytest.mark.asyncio
 async def test_apply_assistant_delivery_receipt_updates_tracking_row() -> None:
-    """Delivery receipts should update one assistant row by local tracking ID."""
+    """Delivery receipts should update one logical assistant row."""
     db = _mock_db()
     update_result = MagicMock()
     update_result.matched_count = 1
@@ -573,6 +626,7 @@ async def test_apply_assistant_delivery_receipt_updates_tracking_row() -> None:
             platform="qq",
             platform_channel_id="chan-1",
             delivery_tracking_id="delivery-1",
+            logical_message_index=1,
             platform_message_id="platform-123",
             delivered_at="2026-05-07T11:00:00+00:00",
             adapter="napcat",
@@ -585,6 +639,7 @@ async def test_apply_assistant_delivery_receipt_updates_tracking_row() -> None:
             "platform_channel_id": "chan-1",
             "role": "assistant",
             "delivery_tracking_id": "delivery-1",
+            "logical_message_index": 1,
         },
         {
             "$set": {
@@ -613,6 +668,7 @@ async def test_apply_assistant_delivery_receipt_allows_empty_channel_scope() -> 
             platform="debug",
             platform_channel_id="",
             delivery_tracking_id="delivery-1",
+            logical_message_index=0,
             platform_message_id="platform-123",
             delivered_at="2026-05-07T11:00:00+00:00",
             adapter="debug",
@@ -624,6 +680,7 @@ async def test_apply_assistant_delivery_receipt_allows_empty_channel_scope() -> 
         "platform": "debug",
         "role": "assistant",
         "delivery_tracking_id": "delivery-1",
+        "logical_message_index": 0,
     }
 
 
@@ -643,6 +700,7 @@ async def test_apply_assistant_delivery_receipt_uses_matched_count() -> None:
             platform="qq",
             platform_channel_id="chan-1",
             delivery_tracking_id="delivery-1",
+            logical_message_index=0,
             platform_message_id="platform-123",
             delivered_at="2026-05-07T11:00:00+00:00",
             adapter="napcat",
@@ -675,6 +733,7 @@ async def test_apply_assistant_delivery_receipt_has_no_embedding_or_cache_side_e
             platform="qq",
             platform_channel_id="chan-1",
             delivery_tracking_id="delivery-1",
+            logical_message_index=0,
             platform_message_id="platform-123",
             delivered_at="2026-05-07T11:00:00+00:00",
             adapter="napcat",

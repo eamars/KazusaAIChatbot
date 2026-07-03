@@ -15,6 +15,7 @@ _REFLECTION_MESSAGE_PROJECTION = {
     "platform": 1,
     "platform_channel_id": 1,
     "channel_type": 1,
+    "channel_name": 1,
     "role": 1,
     "platform_user_id": 1,
     "global_user_id": 1,

@@ -20,9 +20,7 @@ Typical Use Cases:
 
 import asyncio
 import logging
-from datetime import datetime
 
-from kazusa_ai_chatbot.config import EMBEDDING_MODEL
 
 from kazusa_ai_chatbot.db import (
     close_db,

@@ -141,7 +141,7 @@ def _touch_refusal_payload() -> dict:
             'linguistic_style': '克制短句，带一点被逗到但不接受的嘴硬。',
             'accepted_user_preferences': [],
             'content_plan': {
-                'rendering': '单气泡内保持紧凑短句，适当使用省略号和破折号体现内心犹豫和转折',
+                'rendering': '1 条普通文字消息内保持紧凑短句，适当使用省略号和破折号体现内心犹豫和转折',
                 'semantic_content': (
                     '突然伸手过来？连铺垫都没有就这么理所当然地碰上来。'
                     '说实话第一反应想躲开——不是讨厌他这个人，'
@@ -328,7 +328,7 @@ async def test_live_dialog_generator_keeps_uncertainty_reply_on_topic() -> None:
                     '可以轻松表示听起来厉害，并问一句大家具体在聊哪种方案。'
                 ),
                 'voice': '轻微困惑，别装成专家。',
-                'rendering': '单气泡，2-3个短句。',
+                'rendering': '1 条普通文字消息，2-3个短句。',
             },
             'forbidden_phrases': [],
         },
@@ -380,7 +380,7 @@ async def test_live_dialog_generator_does_not_invent_relationship_reading() -> N
                     '可以问用户平时是否经常坐这条线。'
                 ),
                 'voice': '坦率认错，轻微不好意思。',
-                'rendering': '单气泡，2-3个短句。',
+                'rendering': '1 条普通文字消息，2-3个短句。',
             },
             'forbidden_phrases': [],
         },

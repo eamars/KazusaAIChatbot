@@ -20,7 +20,8 @@ L2d semantic action request
   -> owner handler
        l3_text / l3_image surface handler
        memory_lifecycle private handler
-       background_work queue handler
+       accepted_task lifecycle resolver
+       background_work internal queue handler
        orchestrator future-cognition request
   -> ActionResultV1 and SurfaceOutputV1
   -> EpisodeTraceV1
@@ -83,28 +84,71 @@ internal executable capabilities stay hidden from L2d prompts.
 | `speak` | `l3_text` | `user_visible` | Selects a text surface. L2d provides surface intent, not final wording. |
 | `memory_lifecycle_update` | `memory_lifecycle_specialist` | `private` | Selects specialist review for active-commitment lifecycle changes. L2d does not choose a memory target or lifecycle decision. |
 | `apply_memory_lifecycle_update` | `memory_lifecycle` | `private` | Internal executable DB update produced after specialist alias validation. It is not projected to L2d. |
-| `background_work_request` | `background_work` | `private` | Queues bounded private background work and returns a pending result trace after durable persistence. |
+| `accepted_task_request` | `accepted_task` | `private` | Model-facing delayed-work request. Deterministic code creates or reuses an accepted task, then queues the internal executor for new work. |
+| `accepted_task_status_check` | `accepted_task` | `private` | Reports active accepted-task state without enqueueing new work. |
+| `background_work_request` | `background_work` | `private` | Internal executable queue request produced after accepted-task lifecycle validation. It is not projected to L2d as the public delayed-work contract. |
+| `future_speak` | `background_work` | `private` | Queues a deterministic accepted-task-backed worker that schedules a later self-cognition message from an exact trigger time and semantic objective. |
 | `trigger_future_cognition` | `orchestrator` | `private` | Requests a later cognition cycle contract; it does not call cognition directly. |
 
 `send_message` is intentionally absent from the L2d registry. User-visible
 text is represented as `speak`, routed through the selected L3 text surface,
-and delivered only through the normal live response path. Delayed user-visible
-contact must be represented as `trigger_future_cognition`, so the character can
-decide again at execution time whether to speak.
+and delivered only through the normal live response path. User-requested
+future reminders or delayed follow-up messages use `future_speak`: L2d selects
+the semantic private action, deterministic execution queues the background
+worker, and the worker schedules `trigger_future_cognition` so the character
+decides again at execution time how to speak. Private future self-checks that
+are not user-facing reminders may still use `trigger_future_cognition`
+directly.
 
-Background work handoff is different from delayed contact. L2d may request
-`background_work_request` only as a semantic, private, route-only background
-action with a route reason and surface intent. Deterministic materialization
-builds the trusted `task_brief` from prompt-safe state before queue validation
-and persistence. A later background-work router chooses only the worker; worker
-subagents own task classification and artifact generation. L2d never chooses
-worker-local parameters. L3 sees only semantic pending or failure
-acknowledgement state. Raw job ids, adapter ids, target ids, leases, retries,
-filesystem paths, credentials, worker choices, and worker state stay out of L2d
-and L3 prompts.
+Delayed accepted work is different from delayed contact. L2d may request
+`accepted_task_request` as a semantic, private, route-only delayed task with a
+route reason and surface intent. Deterministic materialization builds the
+trusted task seed from prompt-safe state, rejects duplicate active tasks, and
+then creates the internal `background_work_request` for new work. A later
+background-work router chooses only the worker; worker subagents own task
+classification and artifact generation. L2d never chooses worker-local
+parameters. L3 sees only accepted-task pending, already-active, result-ready,
+delivered, or failure acknowledgement state. Raw job ids, adapter ids, target
+ids, leases, retries, filesystem paths, credentials, worker choices, and worker
+state stay out of L2d and L3 prompts.
 
 Prompt-safe capability projection hides `handler_id`, adapter ids, raw channel
 ids, credentials, collection names, and database internals.
+
+## Background Work Extension Boundary
+
+Future delayed capabilities such as a coding agent or complex resolver must be
+added as first-class action capabilities before they can become live
+background work. The action-spec layer owns the model-facing capability name,
+semantic purpose, visibility, source refs, trusted target binding, validation,
+idempotency material, and prompt-safe result projection. It does not own worker
+implementation details.
+
+The extension sequence is:
+
+```text
+L2d semantic capability
+  -> deterministic action-spec materialization
+  -> accepted-task lifecycle and duplicate rejection
+  -> internal background_work_request
+  -> background-work router or deterministic requested_worker handoff
+  -> worker-owned execution
+  -> accepted_task_result_ready or durable scheduled follow-up
+```
+
+L2d must not select worker-local task types, tool arguments, filesystem paths,
+shell commands, resolver internals, queue ids, leases, retry policy, adapter
+delivery targets, or final artifact formatting. If a future coding-agent or
+complex-resolver worker needs those details, the worker or its deterministic
+handler owns them after accepted-task validation. L3/dialog still owns visible
+wording for acknowledgements, progress reports, failures, and completed
+results.
+
+Adding a future background-work capability must document its capability row,
+accepted-task identity fields, worker input/output contract, permission and
+side-effect policy, result-delivery policy, failure behavior, and verification
+gates. The shared queue mechanics are reusable; the semantic ownership and
+permission contract are not implicit.
 
 ## Target Binding
 

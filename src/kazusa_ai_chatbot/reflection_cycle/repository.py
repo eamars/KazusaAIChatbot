@@ -16,8 +16,10 @@ from kazusa_ai_chatbot.db.schemas import (
     ReflectionScopeDoc,
 )
 from kazusa_ai_chatbot.reflection_cycle.models import (
+    AFFECT_SETTLING_PROMPT_VERSION,
     DailySynthesisResult,
     READONLY_REFLECTION_PROMPT_VERSION,
+    REFLECTION_RUN_KIND_DAILY_AFFECT_SETTLING,
     REFLECTION_RUN_KIND_DAILY_CHANNEL,
     REFLECTION_RUN_KIND_DAILY_GLOBAL_PROMOTION,
     REFLECTION_RUN_KIND_HOURLY,
@@ -101,6 +103,21 @@ def daily_global_promotion_run_id(
     run_id = deterministic_run_id([
         REFLECTION_RUN_KIND_DAILY_GLOBAL_PROMOTION,
         character_local_date,
+        prompt_version,
+    ])
+    return run_id
+
+
+def daily_affect_settling_run_id(
+    *,
+    settling_local_date: str,
+    prompt_version: str = AFFECT_SETTLING_PROMPT_VERSION,
+) -> str:
+    """Return the deterministic id for one daily affect-settling pass."""
+
+    run_id = deterministic_run_id([
+        REFLECTION_RUN_KIND_DAILY_AFFECT_SETTLING,
+        settling_local_date,
         prompt_version,
     ])
     return run_id
@@ -358,6 +375,50 @@ def build_global_promotion_run_document(
     return document
 
 
+def build_daily_affect_settling_run_document(
+    *,
+    settling_local_date: str,
+    prompt_version: str,
+    source_run_ids: list[str],
+    output: dict[str, Any],
+    status: str,
+    attempt_count: int,
+    validation_warnings: list[str],
+    error: str = "",
+) -> CharacterReflectionRunDoc:
+    """Build one daily affect-settling reflection-run document."""
+
+    timestamp = now_iso()
+    run_id = daily_affect_settling_run_id(
+        settling_local_date=settling_local_date,
+        prompt_version=prompt_version,
+    )
+    document: CharacterReflectionRunDoc = {
+        "_id": run_id,
+        "run_id": run_id,
+        "run_kind": REFLECTION_RUN_KIND_DAILY_AFFECT_SETTLING,
+        "status": status,
+        "prompt_version": prompt_version,
+        "attempt_count": attempt_count,
+        "scope": {
+            "scope_ref": "daily_affect",
+            "platform": "system",
+            "platform_channel_id": "global",
+            "channel_type": "system",
+        },
+        "character_local_date": settling_local_date,
+        "source_message_refs": [],
+        "source_reflection_run_ids": source_run_ids,
+        "output": output,
+        "promotion_decisions": [],
+        "validation_warnings": validation_warnings,
+        "error": error,
+        "created_at": timestamp,
+        "updated_at": timestamp,
+    }
+    return document
+
+
 async def upsert_run(document: CharacterReflectionRunDoc) -> None:
     """Persist one reflection-run document through the DB interface."""
 
@@ -392,6 +453,20 @@ async def daily_channel_runs(
     """Load daily channel runs for one character-local date."""
 
     docs = await reflection_store.list_daily_channel_runs(
+        character_local_date=character_local_date,
+    )
+    return docs
+
+
+async def reflection_runs_for_kind_date(
+    *,
+    run_kind: str,
+    character_local_date: str,
+) -> list[CharacterReflectionRunDoc]:
+    """Load reflection runs for one kind and character-local date."""
+
+    docs = await reflection_store.list_reflection_runs_for_kind_date(
+        run_kind=run_kind,
         character_local_date=character_local_date,
     )
     return docs

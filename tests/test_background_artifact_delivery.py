@@ -63,10 +63,9 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
         "adapter_message_id": "adapter-001",
     })
     persona_supervisor2 = AsyncMock(return_value={
-        "final_dialog": ["Here is the requested result."],
-        "mention_target_user": True,
+        "final_dialog": ["@Test User Here is the requested result."],
         "consolidation_state": {
-            "final_dialog": ["Here is the requested result."],
+            "final_dialog": ["@Test User Here is the requested result."],
         },
     })
     post_turn = AsyncMock()
@@ -140,9 +139,15 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
         "Background artifact result is completed."
     )
     send_args = handle_send_message.await_args.args[0]
-    assert send_args["text"] == "Here is the requested result."
+    assert send_args["text"] == "@Test User Here is the requested result."
     assert send_args["target_channel"] == "debug-private-1"
-    assert send_args["delivery_mentions"][0]["global_user_id"] == "global-user-1"
+    assert send_args["delivery_mentions"] == [
+        {
+            "entity_kind": "user",
+            "display_name": "Test User",
+            "platform_user_id": "platform-user-1",
+        }
+    ]
     dispatch_context = handle_send_message.await_args.args[1]
     assert dispatch_context.bot_permission_role == "background_artifact_result"
     assert dispatch_context.source_platform_bot_id == "bot-1"
@@ -206,10 +211,9 @@ async def test_service_result_ready_delivery_requires_source_bot_identity(
         service_module,
         "persona_supervisor2",
         AsyncMock(return_value={
-            "final_dialog": ["Here is the requested result."],
-            "mention_target_user": True,
+            "final_dialog": ["@Test User Here is the requested result."],
             "consolidation_state": {
-                "final_dialog": ["Here is the requested result."],
+                "final_dialog": ["@Test User Here is the requested result."],
             },
         }),
     )

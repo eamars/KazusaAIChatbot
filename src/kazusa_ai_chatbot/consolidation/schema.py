@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Annotated, TypedDict
 
-from langgraph.graph.message import add_messages
 
 from kazusa_ai_chatbot.consolidation.origin import (
     ConsolidationOriginMetadata,
@@ -132,9 +131,7 @@ class ConsolidatorState(TypedDict):
     affinity_delta: int
     last_relationship_insight: str
 
-    # Facts harvester
+    # Consolidation memory rows
     new_facts: list[dict]
     future_promises: list[dict]
-    fact_harvester_retry: int
-    fact_harvester_feedback_message: Annotated[list, add_messages]
     should_stop: bool

@@ -8,8 +8,10 @@ import pytest
 
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
 from kazusa_ai_chatbot.action_spec.registry import (
+    ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     BACKGROUND_WORK_REQUEST_CAPABILITY,
+    FUTURE_SPEAK_CAPABILITY,
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
@@ -169,6 +171,7 @@ def _background_artifact_action_spec() -> dict:
                 "source_message_id": "message-001",
                 "source_platform_bot_id": "debug-bot-001",
                 "source_character_name": "Test Character",
+                "source_trigger_source": "user_message",
                 "requester_global_user_id": (
                     "00000000-0000-4000-8000-000000000002"
                 ),
@@ -209,6 +212,7 @@ def _background_work_action_spec() -> dict:
                 "source_message_id": "message-001",
                 "source_platform_bot_id": "debug-bot-001",
                 "source_character_name": "Test Character",
+                "source_trigger_source": "user_message",
                 "requester_global_user_id": (
                     "00000000-0000-4000-8000-000000000002"
                 ),
@@ -235,8 +239,10 @@ def test_initial_registry_contains_only_approved_runtime_capabilities() -> None:
     capabilities = build_initial_action_capabilities()
 
     assert set(capabilities) == {
+        ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
         BACKGROUND_ARTIFACT_REQUEST_CAPABILITY,
         BACKGROUND_WORK_REQUEST_CAPABILITY,
+        FUTURE_SPEAK_CAPABILITY,
         MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
         APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
         SPEAK_CAPABILITY,
@@ -250,6 +256,11 @@ def test_initial_registry_contains_only_approved_runtime_capabilities() -> None:
         capabilities[BACKGROUND_WORK_REQUEST_CAPABILITY]["owner_module"]
         == "background_work"
     )
+    assert (
+        capabilities[ACCEPTED_TASK_STATUS_CHECK_CAPABILITY]["owner_module"]
+        == "accepted_task"
+    )
+    assert capabilities[FUTURE_SPEAK_CAPABILITY]["owner_module"] == "background_work"
     assert (
         capabilities[MEMORY_LIFECYCLE_UPDATE_CAPABILITY]["owner_module"]
         == "memory_lifecycle_specialist"
@@ -352,6 +363,7 @@ def test_prompt_affordance_projection_excludes_runtime_internals() -> None:
     assert "memory_lifecycle_update" in serialized
     assert "apply_memory_lifecycle_update" not in serialized
     assert "background_work_request" in serialized
+    assert "future_speak" in serialized
     assert "background_artifact_request" not in serialized
     assert "speak" in serialized
     assert "trigger_future_cognition" in serialized
@@ -538,6 +550,19 @@ def test_background_work_request_validates_route_only_params() -> None:
     assert "task_type" not in result["action_spec"]["params"]
 
 
+def test_background_work_request_rejects_non_user_message_source() -> None:
+    """Autonomous/result-ready sources must not create new delayed work."""
+
+    evaluator = ActionSpecEvaluator(build_initial_action_capabilities())
+    action_spec = _background_work_action_spec()
+    action_spec["target"]["scope"]["source_trigger_source"] = "internal_thought"
+
+    result = evaluator.evaluate(action_spec)
+
+    assert result["ok"] is False
+    assert any("source_trigger_source" in error for error in result["errors"])
+
+
 def test_background_work_request_rejects_worker_local_params() -> None:
     """L2d-routed background work must not smuggle worker-local choices."""
 
@@ -571,6 +596,22 @@ def test_background_work_request_rejects_missing_delivery_target_scope(
 
     assert result["ok"] is False
     assert any(scope_field in error for error in result["errors"])
+
+
+def test_accepted_task_status_check_validates_without_queue_params() -> None:
+    """Progress checks should bind accepted-task scope, not worker payloads."""
+
+    evaluator = ActionSpecEvaluator(build_initial_action_capabilities())
+    action_spec = _background_work_action_spec()
+    action_spec["kind"] = ACCEPTED_TASK_STATUS_CHECK_CAPABILITY
+    action_spec["target"]["owner"] = "accepted_task"
+    action_spec["params"] = {}
+    action_spec["reason"] = "The user asked how the active task is going."
+
+    result = evaluator.evaluate(action_spec)
+
+    assert result["ok"] is True
+    assert result["handler_owner"] == "accepted_task"
 
 
 def test_evaluator_validates_continuation_contract() -> None:

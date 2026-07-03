@@ -79,6 +79,7 @@ class ConversationMessageDoc(TypedDict, total=False):
     platform: str              # "discord" | "qq" | "wechat" | "whatsapp" | "telegram" | "system"
     platform_channel_id: str   # Original channel/group ID from the platform
     channel_type: str          # "group" | "private" | "system"
+    channel_name: str          # Optional sanitized human-readable group label
     role: ConversationAuthorRole  # "user" | "assistant"
     platform_message_id: str   # Original platform message ID when available
     platform_user_id: str      # Original user/bot ID from the platform
@@ -93,6 +94,7 @@ class ConversationMessageDoc(TypedDict, total=False):
     attachments: list[AttachmentDoc]  # Images, voice, files
     reply_context: ReplyContextDoc     # Structured reply-to metadata when available
     delivery_tracking_id: str  # Brain-generated id for adapter delivery receipts
+    logical_message_index: int  # Zero-based logical message index in one response
     delivery_status: str       # "pending" | "delivered"
     delivered_at: str          # ISO timestamp reported by the adapter
     delivery_adapter: str      # Adapter that reported the delivery receipt
@@ -416,6 +418,7 @@ class CharacterReflectionRunDoc(TypedDict, total=False):
         "hourly_slot",
         "daily_channel",
         "daily_global_promotion",
+        "daily_affect_settling",
     ]
     status: Literal["succeeded", "failed", "skipped", "dry_run"]
     prompt_version: str

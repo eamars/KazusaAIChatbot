@@ -15,6 +15,7 @@ TriggerSource = Literal[
     "system_probe",
     "background_artifact_result_ready",
     "background_work_result_ready",
+    "accepted_task_result_ready",
 ]
 
 InputSource = Literal[
@@ -26,6 +27,7 @@ InputSource = Literal[
     "retrieved_memory",
     "background_artifact_result",
     "background_work_result",
+    "accepted_task_result",
 ]
 
 Visibility = Literal[
@@ -638,6 +640,80 @@ def build_background_work_result_ready_cognitive_episode(
         "episode_id": episode_id,
         "trigger_source": "background_work_result_ready",
         "input_sources": ["background_work_result"],
+        "output_mode": "visible_reply",
+        "percepts": [percept],
+        "target_scope": target_scope,
+        "origin_metadata": origin_metadata,
+        "storage_timestamp_utc": storage_timestamp_utc,
+        "local_time_context": local_time_context,
+    }
+    validate_cognitive_episode(episode)
+    return episode
+
+
+def build_accepted_task_result_ready_cognitive_episode(
+    *,
+    episode_id: str,
+    percept_id: str,
+    storage_timestamp_utc: str,
+    local_time_context: LocalTimeContextDoc,
+    accepted_task_id: str,
+    accepted_task_summary: str,
+    artifact_text: str,
+    failure_summary: str,
+    result_summary: str,
+    platform: str,
+    platform_channel_id: str,
+    channel_type: str,
+    platform_message_id: str,
+    requester_platform_user_id: str,
+    requester_global_user_id: str,
+    requester_display_name: str,
+    source_platform_bot_id: str,
+    source_character_name: str,
+) -> CognitiveEpisode:
+    """Build a source-bound episode for a completed accepted task."""
+
+    metadata = {
+        "accepted_task_id": accepted_task_id,
+        "accepted_task_summary": accepted_task_summary,
+        "failure_summary": failure_summary,
+        "result_summary": result_summary,
+        "source_platform_bot_id": source_platform_bot_id,
+        "source_character_name": source_character_name,
+    }
+    percept: CognitivePercept = {
+        "percept_id": percept_id,
+        "input_source": "accepted_task_result",
+        "content": artifact_text or failure_summary,
+        "visibility": "model_visible",
+        "metadata": metadata,
+    }
+    target_scope: TargetScope = {
+        "platform": platform,
+        "platform_channel_id": platform_channel_id,
+        "channel_type": channel_type,
+        "current_platform_user_id": requester_platform_user_id,
+        "current_global_user_id": requester_global_user_id,
+        "current_display_name": requester_display_name,
+        "target_addressed_user_ids": (
+            [requester_global_user_id] if requester_global_user_id else []
+        ),
+        "target_broadcast": False,
+    }
+    origin_metadata: OriginMetadata = {
+        "platform": platform,
+        "platform_message_id": platform_message_id,
+        "active_turn_platform_message_ids": [platform_message_id]
+        if platform_message_id
+        else [],
+        "active_turn_conversation_row_ids": [],
+        "debug_modes": {},
+    }
+    episode: CognitiveEpisode = {
+        "episode_id": episode_id,
+        "trigger_source": "accepted_task_result_ready",
+        "input_sources": ["accepted_task_result"],
         "output_mode": "visible_reply",
         "percepts": [percept],
         "target_scope": target_scope,

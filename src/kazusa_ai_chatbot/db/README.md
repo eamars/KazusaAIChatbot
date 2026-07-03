@@ -240,7 +240,14 @@ exceptional.
 
 Stores raw conversation rows plus normalized message-envelope fields,
 attachment descriptions, embeddings, addressing fields, and metadata used by
-recent-history and RAG retrieval.
+recent-history and RAG retrieval. User rows may include optional sanitized
+`channel_name` metadata for group-review source preparation; it is not part of
+embedding text, indexing, routing, delivery, or memory target selection.
+
+Assistant rows produced by one logical response sequence may share
+`delivery_tracking_id` and `llm_trace_id`. Each logical outbound message is a
+separate row with exact `body_text` and a zero-based `logical_message_index`
+used by delivery receipts.
 
 Primary owners:
 
@@ -250,7 +257,8 @@ Primary owners:
 - update: attachment-description repair and approved maintenance helpers.
 
 Semantic search uses `body_text` plus attachment descriptions as the embedding
-source. `raw_wire_text` remains audit/replay data.
+source. `raw_wire_text` and `channel_name` remain audit/source-preparation
+metadata outside embedding text.
 
 ### `user_profiles`
 
@@ -322,6 +330,12 @@ Stores singleton character profile/state documents and runtime self-image
 material. Character state updates are explicit persistence events owned by
 named service or promotion paths.
 
+`compare_and_upsert_character_state(...)` is the stale-write guarded runtime
+state helper. It updates mood, global vibe, reflection summary, and
+`updated_at` only when `_id="global"` and the previously read `updated_at`
+value still match. Callers use its boolean return to record a skipped stale
+operation; database code does not interpret the free-form mood or vibe text.
+
 ### `memory`
 
 Stores curated shared/world/common-sense memory and evolving-memory rows used
@@ -331,9 +345,9 @@ the facade, but new reflection memory promotion should go through the
 
 ### `character_reflection_runs`
 
-Stores hourly, daily-channel, and global-promotion reflection run documents.
-These rows are evidence and audit records for the reflection cycle. Normal
-cognition uses promoted, gated reflection context.
+Stores hourly, daily-channel, global-promotion, and daily-affect-settling
+reflection run documents. These rows are evidence and audit records for the
+reflection cycle. Normal cognition uses promoted, gated reflection context.
 
 Reflection reads and writes are split intentionally:
 
@@ -497,6 +511,8 @@ The database package provides reflection support through named helpers:
 - reflection-run index creation;
 - reflection-run upsert and lookup;
 - hourly/daily run listing by channel and date;
+- reflection-run listing by run kind and character-local date for background
+  maintenance such as daily affect settling;
 - interaction-style overlay persistence for promoted runtime guidance.
 
 Reflection packages call the database facade or the named reflection DB helpers

@@ -78,12 +78,21 @@ from kazusa_ai_chatbot.internal_monologue_residue import (
     load_residue_context,
     record_completed_episode_residue,
 )
+from kazusa_ai_chatbot.past_dialog_cognition import (
+    build_past_dialog_cognition_context,
+    candidate_from_conversation_row,
+)
 from kazusa_ai_chatbot.llm_interface.route_report import render_llm_route_table
 from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.reflection_cycle.phase_scheduler import (
     REFLECTION_PHASE_GROUPS_PER_SLOT,
 )
+from kazusa_ai_chatbot.runtime_coordination import (
+    PipelineCoordinator,
+    PipelineScope,
+)
 from kazusa_ai_chatbot.db import (
+    DatabaseBackendError,
     backfill_character_conversation_identity,
     check_database_connection,
     close_db,
@@ -133,26 +142,29 @@ from kazusa_ai_chatbot.brain_service import (
     post_turn as brain_post_turn,
     runtime_adapters as brain_runtime_registry,
 )
+from kazusa_ai_chatbot.brain_service.delivery_mentions import (
+    build_inline_delivery_mentions,
+)
 from kazusa_ai_chatbot.brain_service.contracts import (
-    AttachmentIn,
-    AttachmentOut,
-    AttachmentRefIn,
-    Cache2AgentStatsResponse,
-    Cache2HealthResponse,
+    AttachmentIn as AttachmentIn,
+    AttachmentOut as AttachmentOut,
+    AttachmentRefIn as AttachmentRefIn,
+    Cache2AgentStatsResponse as Cache2AgentStatsResponse,
+    Cache2HealthResponse as Cache2HealthResponse,
     ChatRequest,
     ChatResponse,
-    DebugModesIn,
+    DebugModesIn as DebugModesIn,
     DeliveryReceiptRequest,
     DeliveryReceiptResponse,
     EventRequest,
     HealthResponse,
-    MentionIn,
-    MessageEnvelopeIn,
+    MentionIn as MentionIn,
+    MessageEnvelopeIn as MessageEnvelopeIn,
     OpsLatestCognitionGraphResponse,
     OpsRuntimeStatusResponse,
     OpsSelfCognitionStatsResponse,
     OpsStatsResponse,
-    ReplyTargetIn,
+    ReplyTargetIn as ReplyTargetIn,
     RuntimeAdapterRegistrationRequest,
     RuntimeAdapterRegistrationResponse,
 )
@@ -173,6 +185,7 @@ from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
 from kazusa_ai_chatbot.reflection_cycle import (
     ReflectionWorkerHandle,
     build_promoted_reflection_context,
+    should_pause_self_cognition_for_affect_settling,
     start_reflection_cycle_worker,
     stop_reflection_cycle_worker,
 )
@@ -387,12 +400,17 @@ async def load_conversation_episode_state(state: IMProcessState) -> dict:
         f'user={scope.global_user_id} status={residue_result["status"]} '
         f'selected={residue_result["selected_count"]}'
     )
+    past_dialog_cognition_context = await _load_reply_past_dialog_context(
+        state,
+        character_global_user_id=residue_scope["character_id"],
+    )
     return_value = {
         "conversation_episode_state": load_result["episode_state"],
         "conversation_progress": load_result["conversation_progress"],
         "internal_monologue_residue_context": (
             residue_result["internal_monologue_residue_context"]
         ),
+        "past_dialog_cognition_context": past_dialog_cognition_context,
     }
     return return_value
 
@@ -411,6 +429,57 @@ def _character_id_from_profile(character_profile: Mapping[str, object]) -> str:
 def _compact_reply_context(reply_context: ReplyContext) -> ReplyContext:
     compacted_context = brain_intake.compact_reply_context(reply_context)
     return compacted_context
+
+
+async def _load_reply_past_dialog_context(
+    state: Mapping[str, Any],
+    *,
+    character_global_user_id: str,
+) -> str:
+    """Return private residual for a directly replied assistant row.
+
+    Args:
+        state: Current service graph state after reply hydration.
+        character_global_user_id: Internal id of the active character.
+
+    Returns:
+        Prompt-facing private context for L2a, or an empty string.
+    """
+
+    reply_context = state["reply_context"]
+    reply_to_message_id = str(reply_context.get("reply_to_message_id") or "")
+    if not reply_to_message_id:
+        context = ""
+        return context
+
+    try:
+        row = await get_conversation_by_platform_message_id(
+            platform=state["platform"],
+            platform_channel_id=state["platform_channel_id"],
+            platform_message_id=reply_to_message_id,
+        )
+    except DatabaseBackendError as exc:
+        logger.warning(
+            f"Past-dialog cognition reply row lookup skipped: {exc}"
+        )
+        context = ""
+        return context
+
+    if row is None:
+        context = ""
+        return context
+
+    candidate = candidate_from_conversation_row(row, source="reply_context")
+    if candidate is None:
+        context = ""
+        return context
+
+    lookup_result = await build_past_dialog_cognition_context(
+        [candidate],
+        character_global_user_id=character_global_user_id,
+    )
+    context = lookup_result["past_dialog_cognition_context"]
+    return context
 
 
 async def _hydrate_reply_context(req: ChatRequest) -> ReplyContext:
@@ -542,6 +611,7 @@ _graph = None
 _adapter_registry: AdapterRegistry | None = None
 _character_identity_backfilled: set[tuple[str, str, str]] = set()
 _chat_input_queue = ChatInputQueue()
+_pipeline_coordinator = PipelineCoordinator()
 _chat_queue_worker_task: asyncio.Task | None = None
 _calendar_worker_handle: CalendarSchedulerWorkerHandle | None = None
 _reflection_worker_handle: ReflectionWorkerHandle | None = None
@@ -608,8 +678,9 @@ async def _handle_calendar_reflection_phase_run(
         run,
         now=storage_utc_now(),
         dry_run=False,
-        is_primary_interaction_busy=lambda: False,
+        is_primary_interaction_busy=_reflection_cycle_primary_interaction_busy,
         adapter_registry_provider=lambda: _adapter_registry,
+        pipeline_coordinator=_pipeline_coordinator,
     )
     return result
 
@@ -749,6 +820,24 @@ def _primary_interaction_busy() -> bool:
     return return_value
 
 
+def _reflection_cycle_primary_interaction_busy() -> bool:
+    """Return whether the standalone reflection worker should pause for chat."""
+
+    return_value = False
+    return return_value
+
+
+async def _release_queued_pipeline_handle(item: QueuedChatItem) -> None:
+    """Release a queued item's foreground coordination handle if present."""
+
+    handle = item.pipeline_run_handle
+    if handle is None:
+        return
+
+    item.pipeline_run_handle = None
+    await handle.__aexit__(None, None, None)
+
+
 def _current_character_profile_snapshot() -> dict:
     """Return the current composed character profile for background workers."""
 
@@ -769,6 +858,7 @@ def _background_artifact_result_text(episode: CognitiveEpisode) -> str:
         if percept.get("input_source") not in (
             "background_artifact_result",
             "background_work_result",
+            "accepted_task_result",
         ):
             continue
         result_percept = percept
@@ -780,11 +870,16 @@ def _background_artifact_result_text(episode: CognitiveEpisode) -> str:
         metadata = {}
     work_kind = str(metadata.get("work_kind", "")).strip()
     objective = str(metadata.get("objective_summary", "")).strip()
+    accepted_task_summary = str(
+        metadata.get("accepted_task_summary", "")
+    ).strip()
     failure_summary = str(metadata.get("failure_summary", "")).strip()
     status = "failed" if failure_summary else "completed"
     result_label = "Background artifact result"
     if input_source == "background_work_result":
         result_label = "Background work result"
+    elif input_source == "accepted_task_result":
+        result_label = "Accepted task result"
     summary_parts = [
         f"{result_label} is {status}.",
     ]
@@ -792,6 +887,8 @@ def _background_artifact_result_text(episode: CognitiveEpisode) -> str:
         summary_parts.append(f"Work kind: {work_kind}.")
     if objective:
         summary_parts.append(f"Objective: {objective}.")
+    if accepted_task_summary:
+        summary_parts.append(f"Task: {accepted_task_summary}.")
     result_text = " ".join(summary_parts)
     return result_text
 
@@ -803,6 +900,7 @@ def _background_result_metadata(episode: CognitiveEpisode) -> Mapping[str, objec
         if percept.get("input_source") not in (
             "background_artifact_result",
             "background_work_result",
+            "accepted_task_result",
         ):
             continue
         metadata = percept.get("metadata", {})
@@ -836,27 +934,83 @@ def _background_artifact_prompt_message_context(
     return context
 
 
+def _chat_delivery_mention_users(
+    *,
+    req: ChatRequest,
+    global_user_id: str,
+    message_envelope: MessageEnvelope,
+    result: Mapping[str, Any],
+) -> list[dict[str, object]]:
+    """Collect bounded user rows usable for outbound inline mention rendering."""
+
+    users: list[dict[str, object]] = [
+        {
+            "display_name": req.display_name,
+            "platform_user_id": req.platform_user_id,
+            "global_user_id": global_user_id,
+        }
+    ]
+
+    mentions = message_envelope.get("mentions", [])
+    if isinstance(mentions, list):
+        for mention in mentions:
+            if not isinstance(mention, Mapping):
+                continue
+            if mention.get("entity_kind") != "user":
+                continue
+            users.append({
+                "display_name": mention.get("display_name", ""),
+                "platform_user_id": mention.get("platform_user_id", ""),
+                "global_user_id": mention.get("global_user_id", ""),
+            })
+
+    reply = message_envelope.get("reply")
+    if isinstance(reply, Mapping):
+        users.append({
+            "display_name": reply.get("display_name", ""),
+            "platform_user_id": reply.get("platform_user_id", ""),
+            "global_user_id": reply.get("global_user_id", ""),
+        })
+
+    scope_users = result.get("scope_users", [])
+    if isinstance(scope_users, list):
+        for scope_user in scope_users:
+            if not isinstance(scope_user, Mapping):
+                continue
+            users.append({
+                "display_name": scope_user.get("display_name", ""),
+                "platform_user_id": scope_user.get("platform_user_id", ""),
+                "global_user_id": scope_user.get("global_user_id", ""),
+            })
+
+    return users
+
+
 def _background_artifact_delivery_mentions(
     *,
     result: Mapping[str, object],
     episode: CognitiveEpisode,
-) -> list[dict[str, str | None]]:
-    """Build optional mention metadata for dispatcher delivery."""
-
-    if not bool(result.get("mention_target_user", False)):
-        return []
+) -> list[dict[str, str]]:
+    """Build inline mention candidates for result-ready dispatcher delivery."""
 
     target_scope = episode["target_scope"]
-    delivery_mentions = [
+    users = [
         {
-            "entity_kind": "user",
-            "placement": "prefix",
-            "platform_user_id": target_scope["current_platform_user_id"],
             "global_user_id": target_scope["current_global_user_id"],
             "display_name": target_scope["current_display_name"],
-            "requested_by": "dialog.mention_target_user",
+            "platform_user_id": target_scope["current_platform_user_id"],
         }
     ]
+    final_dialog = [
+        fragment
+        for fragment in result.get("final_dialog", [])
+        if isinstance(fragment, str)
+    ]
+    delivery_mentions = build_inline_delivery_mentions(
+        text="\n".join(final_dialog),
+        users=users,
+        character_global_user_id=CHARACTER_GLOBAL_USER_ID,
+    )
     return delivery_mentions
 
 
@@ -974,9 +1128,12 @@ async def _deliver_background_artifact_result_episode(
 
         trigger_source = str(episode["trigger_source"])
         is_background_work_result = trigger_source == "background_work_result_ready"
+        is_accepted_task_result = trigger_source == "accepted_task_result_ready"
         bot_permission_role = "background_artifact_result"
         if is_background_work_result:
             bot_permission_role = "background_work_result"
+        elif is_accepted_task_result:
+            bot_permission_role = "accepted_task_result"
 
         debug_modes: DebugModes = {}
         if not COGNITION_VISUAL_DIRECTIVES_ENABLED:
@@ -1023,7 +1180,6 @@ async def _deliver_background_artifact_result_episode(
             "final_dialog": [],
             "target_addressed_user_ids": [requester_global_user_id],
             "target_broadcast": False,
-            "mention_target_user": False,
             "future_promises": [],
             "consolidation_state": {},
             "promoted_reflection_context": promoted_reflection_context,
@@ -1081,7 +1237,7 @@ async def _deliver_background_artifact_result_episode(
 
     consolidation_state = result.get("consolidation_state")
     if isinstance(consolidation_state, dict):
-        if not is_background_work_result:
+        if not is_background_work_result and not is_accepted_task_result:
             await _run_background_artifact_result_post_turn(
                 consolidation_state,
                 visible_response_sent=True,
@@ -1353,6 +1509,7 @@ async def _drop_queued_chat_item(item: QueuedChatItem) -> bool:
             scope=scope,
             severity="error",
         )
+        await _release_queued_pipeline_handle(item)
         return_value = False
         return return_value
 
@@ -1387,6 +1544,7 @@ async def _drop_queued_chat_item(item: QueuedChatItem) -> bool:
         scope=scope,
         severity="warning",
     )
+    await _release_queued_pipeline_handle(item)
     return_value = True
     return return_value
 
@@ -1485,6 +1643,7 @@ async def _persist_collapsed_queued_chat_item(
             scope=scope,
             severity="error",
         )
+        await _release_queued_pipeline_handle(item)
         return_value = False
         return return_value
 
@@ -1520,6 +1679,7 @@ async def _persist_collapsed_queued_chat_item(
         listen_only=item.request.debug_modes.listen_only,
         scope=scope,
     )
+    await _release_queued_pipeline_handle(item)
     return_value = True
     return return_value
 
@@ -2191,7 +2351,6 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             "final_dialog": [],
             "target_addressed_user_ids": [global_user_id],
             "target_broadcast": False,
-            "mention_target_user": False,
             "future_promises": [],
             "consolidation_state": {},
             "promoted_reflection_context": promoted_reflection_context,
@@ -2215,7 +2374,6 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
                 "final_dialog": [fallback_text],
                 "target_addressed_user_ids": [global_user_id],
                 "target_broadcast": False,
-                "mention_target_user": False,
                 "delivery_tracking_id": delivery_tracking_id,
                 "llm_trace_id": llm_trace_id,
             }
@@ -2275,22 +2433,6 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         use_reply_feature = bool(final_dialog) and bool(
             result["use_reply_feature"]
         )
-        delivery_mentions: list[dict[str, str | None]] = []
-        if (
-            bool(final_dialog)
-            and bool(result.get("mention_target_user", False))
-            and not use_reply_feature
-        ):
-            delivery_mentions = [
-                {
-                    "entity_kind": "user",
-                    "placement": "prefix",
-                    "platform_user_id": req.platform_user_id,
-                    "global_user_id": global_user_id,
-                    "display_name": req.display_name,
-                    "requested_by": "dialog.mention_target_user",
-                }
-            ]
         consolidation_state = result["consolidation_state"]
         scheduled_followup_count = len(result["future_promises"])
 
@@ -2330,6 +2472,21 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         if debug_modes.get("think_only"):
             logger.info(f'think_only active — suppressing {len(final_dialog)} dialog message(s) from user output')
             response_dialog = []
+
+        delivery_mentions: list[dict[str, str]] = []
+        if response_dialog:
+            delivery_mention_users = _chat_delivery_mention_users(
+                req=req,
+                global_user_id=global_user_id,
+                message_envelope=message_envelope,
+                result=result,
+            )
+            delivery_mentions = build_inline_delivery_mentions(
+                text="\n".join(response_dialog),
+                users=delivery_mention_users,
+                character_global_user_id=CHARACTER_GLOBAL_USER_ID,
+            )
+        result["delivery_mentions"] = delivery_mentions
 
         delivery_tracking_id = ""
         if response_dialog and should_save_assistant_message:
@@ -2474,6 +2631,8 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             final_dialog_count=0,
             delivery_tracking_id="",
         )
+    finally:
+        await _release_queued_pipeline_handle(item)
 
 
 async def _chat_input_worker() -> None:
@@ -2517,6 +2676,9 @@ async def _chat_input_worker() -> None:
                             "persistence failed"
                         ),
                     )
+                    await _release_queued_pipeline_handle(
+                        dequeued_turn.next_item,
+                    )
                 continue
 
             if dequeued_turn.next_item is not None:
@@ -2555,6 +2717,7 @@ async def _stop_chat_input_worker() -> None:
     pending_items = await _chat_input_queue.drain()
     for item in pending_items:
         _chat_input_queue.complete(item, ChatResponse())
+        await _release_queued_pipeline_handle(item)
     _chat_input_queue = ChatInputQueue()
 
 
@@ -2568,8 +2731,39 @@ async def _enqueue_chat_request(req: ChatRequest) -> ChatResponse:
         Chat response produced by the worker or drop/collapse policy.
     """
 
+    scope = PipelineScope(
+        platform=req.platform,
+        platform_channel_id=req.platform_channel_id,
+        channel_type=req.channel_type,
+    )
+    _pipeline_coordinator.request_cancellation(
+        scope=scope,
+        requested_by="service.chat_queue",
+        reason="same_scope_foreground_pending",
+    )
+    admission = await _pipeline_coordinator.start_run(
+        scope=scope,
+        owner="service.chat_queue",
+        precedence="foreground",
+        run_kind="chat",
+    )
+    handle = admission.handle
     _ensure_chat_input_worker_started()
-    response = await _chat_input_queue.enqueue(req)
+    item_enqueued = False
+
+    def _mark_item_enqueued() -> None:
+        nonlocal item_enqueued
+        item_enqueued = True
+
+    try:
+        response = await _chat_input_queue.enqueue(
+            req,
+            pipeline_run_handle=handle,
+            on_enqueued=_mark_item_enqueued,
+        )
+    finally:
+        if not item_enqueued and handle is not None:
+            await handle.__aexit__(None, None, None)
     return response
 
 
@@ -2859,6 +3053,10 @@ async def lifespan(app: FastAPI):
                 latest_cognition_graph_publisher=(
                     _publish_self_cognition_latest_graph
                 ),
+                should_pause_for_affect_settling=(
+                    should_pause_self_cognition_for_affect_settling
+                ),
+                pipeline_coordinator=_pipeline_coordinator,
             )
         else:
             logger.info(
@@ -2881,9 +3079,14 @@ async def lifespan(app: FastAPI):
         calendar_phase_provider = CalendarReflectionPhaseRunProvider()
         if REFLECTION_CYCLE_ENABLED:
             _reflection_worker_handle = start_reflection_cycle_worker(
-                is_primary_interaction_busy=lambda: False,
+                is_primary_interaction_busy=(
+                    _reflection_cycle_primary_interaction_busy
+                ),
                 adapter_registry_provider=lambda: _adapter_registry,
                 phase_run_provider=calendar_phase_provider,
+                character_state_refresh_callback=(
+                    _refresh_runtime_character_state
+                ),
             )
         else:
             logger.info(
@@ -3136,6 +3339,7 @@ async def delivery_receipt(
         platform=req.platform,
         platform_channel_id=req.platform_channel_id,
         delivery_tracking_id=req.delivery_tracking_id,
+        logical_message_index=req.logical_message_index,
         platform_message_id=req.platform_message_id,
         delivered_at=delivered_at,
         adapter=req.adapter,

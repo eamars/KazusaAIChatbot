@@ -58,6 +58,8 @@ def _base_state():
         "chat_history_recent": [
             {"name": "<speaker>", "user_id": "u1", "body_text": "The person mentioned earlier is cooking", "role": "user", "timestamp": "t1"},
         ],
+        "channel_type": "group",
+        "channel_name": "",
         "channel_topic": "general chat",
         "indirect_speech_context": "",
         "reply_context": {},
@@ -628,6 +630,33 @@ def test_decontexualizer_prompt_explains_reply_ellipsis_decision_owner() -> None
     assert '要不要 / 该不该 / 值不值得' in system_prompt
     assert '第三方向当前用户发出邀请、通知、请求或建议' in system_prompt
     assert '附件描述、回复摘录和相邻历史可提供动作对象' in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_decontexualizer_projects_group_name_into_channel_topic_text():
+    """The LLM payload should receive scene text, not a new group-name field."""
+
+    llm_response = MagicMock()
+    llm_response.content = (
+        '{"output": "他在干啥？", "reasoning": "read scene", '
+        '"is_modified": false, "referents": []}'
+    )
+    state = _base_state()
+    state['channel_type'] = 'group'
+    state['channel_name'] = '动画讨论群'
+    state['channel_topic'] = '新番角色和剧情走向'
+
+    with patch("kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer._msg_decontexualizer_llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
+
+        await call_msg_decontexualizer(state)
+
+    payload = json.loads(mock_llm.ainvoke.await_args.args[0][1].content)
+    assert payload['channel_topic'] == (
+        '“动画讨论群”群聊中正在讨论：新番角色和剧情走向'
+    )
+    assert 'channel_name' not in payload
+    assert state['channel_topic'] == '新番角色和剧情走向'
 
 
 @pytest.mark.asyncio

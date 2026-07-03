@@ -292,7 +292,7 @@ def _action_cognition_output(text: str) -> dict[str, Any]:
                 "accepted_user_preferences": [],
                 "content_plan": {
                     "semantic_content": text,
-                    "rendering": "One visible chat bubble; concise.",
+                    "rendering": "One ordinary text message; concise.",
                 },
                 "forbidden_phrases": [],
             },
@@ -488,7 +488,7 @@ def _surface_action_directives() -> dict[str, Any]:
             "accepted_user_preferences": [],
             "content_plan": {
                 "semantic_content": "Continue the GPU model topic.",
-                "rendering": "One visible chat bubble; concise.",
+                "rendering": "One ordinary text message; concise.",
             },
             "forbidden_phrases": [],
         },
@@ -550,8 +550,6 @@ def _read_json(payload: Any) -> dict[str, Any]:
 
 def _dialog_client_with_text(
     text: str,
-    *,
-    mention_target_user: bool = False,
 ):
     """Build a deterministic dialog seam for selected speak tests."""
 
@@ -559,7 +557,6 @@ def _dialog_client_with_text(
         del state
         result = {
             "final_dialog": [text],
-            "mention_target_user": mention_target_user,
         }
         return result
 
@@ -664,7 +661,7 @@ def test_active_commitment_case_retains_target_platform_identity() -> None:
     assert case["target_scope"]["display_name"] == "Target User"
 
 
-def test_group_action_candidate_omits_delivery_mention_without_dialog_flag() -> None:
+def test_group_action_candidate_omits_delivery_mention_without_inline_tag() -> None:
     case = _commitment_case()
     case["target_scope"] = {
         "platform": "qq",
@@ -691,7 +688,7 @@ def test_group_action_candidate_omits_delivery_mention_without_dialog_flag() -> 
     assert "delivery_mentions" not in action_candidate
 
 
-def test_group_action_candidate_carries_dialog_delivery_mention_request() -> None:
+def test_group_action_candidate_carries_inline_delivery_mention() -> None:
     case = _commitment_case()
     case["target_scope"] = {
         "platform": "qq",
@@ -711,26 +708,34 @@ def test_group_action_candidate_carries_dialog_delivery_mention_request() -> Non
     action_candidate = tracking.build_action_candidate(
         case,
         action_attempt,
-        "Checking in now.",
-        mention_target_user=True,
+        "@Target User Checking in now.",
     )
 
     assert action_candidate is not None
     assert action_candidate["delivery_mentions"] == [
         {
             "entity_kind": "user",
-            "placement": "prefix",
             "platform_user_id": "qq-target",
-            "global_user_id": "global-target-1",
             "display_name": "Target User",
-            "requested_by": "dialog.mention_target_user",
         }
     ]
 
 
-def test_private_action_candidate_keeps_dialog_mention_request_for_adapter_noop(
-) -> None:
-    case = _commitment_case()
+def test_group_review_action_candidate_uses_delivery_mention_users() -> None:
+    case = _commitment_case(case_name=models.CASE_GROUP_CHAT_REVIEW)
+    case["target_scope"] = {
+        "platform": "qq",
+        "platform_channel_id": "54369546",
+        "channel_type": "group",
+        "user_id": None,
+    }
+    case["delivery_mention_users"] = [
+        {
+            "global_user_id": "global-target-1",
+            "platform_user_id": "qq-target",
+            "display_name": "Target User",
+        }
+    ]
     trigger_record = tracking.build_trigger_record(case)
     action_attempt = tracking.build_action_attempt(
         case,
@@ -741,19 +746,49 @@ def test_private_action_candidate_keeps_dialog_mention_request_for_adapter_noop(
     action_candidate = tracking.build_action_candidate(
         case,
         action_attempt,
-        "Checking in now.",
-        mention_target_user=True,
+        "@Target User Checking this group thread.",
     )
 
     assert action_candidate is not None
     assert action_candidate["delivery_mentions"] == [
         {
             "entity_kind": "user",
-            "placement": "prefix",
-            "platform_user_id": None,
-            "global_user_id": "673225019",
-            "display_name": "",
-            "requested_by": "dialog.mention_target_user",
+            "platform_user_id": "qq-target",
+            "display_name": "Target User",
+        }
+    ]
+
+
+def test_private_action_candidate_keeps_inline_mention_for_adapter_noop(
+) -> None:
+    case = _commitment_case()
+    case["target_scope"] = {
+        "platform": "qq",
+        "platform_channel_id": "673225019",
+        "channel_type": "private",
+        "user_id": "global-target-1",
+        "platform_user_id": "qq-target",
+        "display_name": "Target User",
+    }
+    trigger_record = tracking.build_trigger_record(case)
+    action_attempt = tracking.build_action_attempt(
+        case,
+        trigger_record,
+        existing_attempts=[],
+    )
+
+    action_candidate = tracking.build_action_candidate(
+        case,
+        action_attempt,
+        "@Target User Checking in now.",
+    )
+
+    assert action_candidate is not None
+    assert action_candidate["delivery_mentions"] == [
+        {
+            "entity_kind": "user",
+            "platform_user_id": "qq-target",
+            "display_name": "Target User",
         }
     ]
 
@@ -1085,6 +1120,28 @@ def test_runner_consolidates_no_action_cognition_without_dialog() -> None:
     assert artifact_payloads[models.ARTIFACT_CONSOLIDATION_OUTCOME][
         "consolidation_called"
     ] is True
+
+
+def test_consolidation_outcome_reports_incomplete_metadata_contract() -> None:
+    """Self-cognition should diagnose incomplete producer metadata."""
+
+    consolidation_state = {
+        "cognitive_episode": {
+            "trigger_source": "internal_thought",
+            "episode_id": "self_cognition:diagnostic",
+        },
+    }
+    consolidation_result = {
+        "consolidation_metadata": {
+            "write_success": {},
+        },
+    }
+
+    with pytest.raises(ValueError, match="cache_evicted_count"):
+        tracking.build_consolidation_outcome_record(
+            consolidation_state,
+            consolidation_result,
+        )
 
 
 def test_runner_does_not_call_dialog_for_intent_only_no_speak() -> None:
@@ -1544,7 +1601,6 @@ def test_selected_speak_self_cognition_runs_l3_before_dialog(
         assert state["action_directives"] == action_directives
         result = {
             "final_dialog": ["Continuing the GPU model topic now."],
-            "mention_target_user": False,
         }
         return result
 
@@ -1572,7 +1628,7 @@ def test_selected_speak_self_cognition_runs_l3_before_dialog(
     assert run_record["budget"]["dialog_calls"] == 1
 
 
-def test_dialog_false_mention_flag_suppresses_group_action_delivery_mention(
+def test_dialog_output_without_inline_tag_omits_group_action_delivery_mention(
     monkeypatch,
     tmp_path,
 ) -> None:
@@ -1589,7 +1645,6 @@ def test_dialog_false_mention_flag_suppresses_group_action_delivery_mention(
     async def fake_dialog_client(state: dict[str, Any]) -> dict[str, Any]:
         return_value = {
             "final_dialog": ["Checking in after the missed promise."],
-            "mention_target_user": False,
         }
         return return_value
 
@@ -1611,7 +1666,7 @@ def test_dialog_false_mention_flag_suppresses_group_action_delivery_mention(
     assert "delivery_mentions" not in action_candidate
 
 
-def test_dialog_true_mention_flag_builds_group_action_delivery_mention(
+def test_dialog_inline_tag_builds_group_action_delivery_mention(
     monkeypatch,
     tmp_path,
 ) -> None:
@@ -1627,8 +1682,7 @@ def test_dialog_true_mention_flag_builds_group_action_delivery_mention(
 
     async def fake_dialog_client(state: dict[str, Any]) -> dict[str, Any]:
         return_value = {
-            "final_dialog": ["Checking in after the missed promise."],
-            "mention_target_user": True,
+            "final_dialog": ["@Target User Checking in after the missed promise."],
         }
         return return_value
 
@@ -1649,11 +1703,8 @@ def test_dialog_true_mention_flag_builds_group_action_delivery_mention(
     assert action_candidate["delivery_mentions"] == [
         {
             "entity_kind": "user",
-            "placement": "prefix",
             "platform_user_id": "qq-target",
-            "global_user_id": "global-target-1",
             "display_name": "Target User",
-            "requested_by": "dialog.mention_target_user",
         }
     ]
 
@@ -1850,7 +1901,7 @@ def test_scheduled_future_cognition_starts_without_preloaded_rag(
         output["resolver_state"] = {
             "observations": [
                 {
-                    "capability_kind": "rag_evidence",
+                    "capability_kind": "local_context_recall",
                 }
             ]
         }

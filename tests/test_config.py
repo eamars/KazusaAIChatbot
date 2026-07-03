@@ -131,11 +131,9 @@ class TestRetryLimits:
         from kazusa_ai_chatbot.config import (
             MAX_MEMORY_RETRIEVER_AGENT_RETRY,
             MAX_WEB_SEARCH_AGENT_RETRY,
-            MAX_FACT_HARVESTER_RETRY,
         )
         assert MAX_MEMORY_RETRIEVER_AGENT_RETRY > 0
         assert MAX_WEB_SEARCH_AGENT_RETRY > 0
-        assert MAX_FACT_HARVESTER_RETRY > 0
 
 
 class TestMcpServersDefault:
@@ -235,6 +233,54 @@ class TestDirectWebConfig:
 
         assert result.returncode != 0
         assert "SEARXNG_URL must be empty or an HTTP(S) URL" in result.stderr
+
+    def test_config_allows_empty_nhentai_token(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env.pop("NHENTAI_TOKEN", None)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(repr(config.NHENTAI_TOKEN)); "
+                    "print(config.NHENTAI_SOURCE_ENABLED)"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.splitlines() == ["''", "False"]
+
+    def test_config_reads_nhentai_token_from_environment(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["NHENTAI_TOKEN"] = " secret-token "
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(config.NHENTAI_TOKEN); "
+                    "print(config.NHENTAI_SOURCE_ENABLED)"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.splitlines() == ["secret-token", "True"]
 
 
 class TestCache2Config:
@@ -624,6 +670,96 @@ class TestCognitionVisualDirectivesConfig:
         assert result.stdout.strip() == "False"
 
 
+class TestCognitionTaskWillingnessBoundaryConfig:
+    def test_task_willingness_boundary_defaults_to_true(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env.pop("COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED", None)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(config.COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED)"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.strip() == "True"
+
+    def test_task_willingness_boundary_parses_true(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED"] = "true"
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(config.COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED)"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.strip() == "True"
+
+    def test_task_willingness_boundary_parses_false(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED"] = "false"
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "print(config.COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED)"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.strip() == "False"
+
+    def test_task_willingness_boundary_rejects_invalid_value(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED"] = "sometimes"
+
+        result = subprocess.run(
+            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode != 0
+        assert (
+            "COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED must be a bool string"
+            in result.stderr
+        )
+
+
 class TestCognitionResolverConfig:
     def test_cognition_resolver_defaults_are_bounded(self, tmp_path):
         env = _configured_subprocess_env_without_dotenv()
@@ -913,6 +1049,76 @@ class TestReflectionCycleConfig:
             "REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD cannot fit inside "
             "REFLECTION_WORKER_INTERVAL_SECONDS with "
             "REFLECTION_PHASE_MIN_SLOT_SPACING_SECONDS"
+        ) in result.stderr
+
+    def test_daily_affect_settling_defaults(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env.pop("AFFECT_SETTLING_WAKE_PREP_MINUTES", None)
+        env["AFFECT_SETTLING_ENABLED"] = "false"
+        env["AFFECT_SETTLING_PROMPT_MAX_CHARS"] = "not-configured"
+        env["AFFECT_SETTLING_REVIEW_PROMPT_MAX_CHARS"] = "not-configured"
+        env["AFFECT_SETTLING_AFTER_PROMOTION_GRACE_MINUTES"] = "not-configured"
+        env["AFFECT_SETTLING_WAKE_DEFER_GRACE_MINUTES"] = "not-configured"
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import kazusa_ai_chatbot.config as config; "
+                    "removed_names = ("
+                    "'AFFECT_SETTLING_ENABLED', "
+                    "'AFFECT_SETTLING_PROMPT_MAX_CHARS', "
+                    "'AFFECT_SETTLING_REVIEW_PROMPT_MAX_CHARS', "
+                    "'AFFECT_SETTLING_AFTER_PROMOTION_GRACE_MINUTES', "
+                    "'AFFECT_SETTLING_WAKE_DEFER_GRACE_MINUTES'"
+                    "); "
+                    "print(config.AFFECT_SETTLING_WAKE_PREP_MINUTES); "
+                    "print('\\n'.join("
+                    "str(hasattr(config, name)) for name in removed_names"
+                    "))"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.splitlines() == [
+            "30",
+            "False",
+            "False",
+            "False",
+            "False",
+            "False",
+        ]
+
+    def test_daily_affect_settling_rejects_due_after_wake_defer(self, tmp_path):
+        env = _configured_subprocess_env_without_dotenv()
+        env["CHARACTER_SLEEP_LOCAL_PERIOD"] = "02:00-03:00"
+        env["REFLECTION_PROMOTION_RUN_AFTER_LOCAL_TIME"] = "05:00"
+        env["AFFECT_SETTLING_WAKE_PREP_MINUTES"] = "30"
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import kazusa_ai_chatbot.reflection_cycle.affect_settling",
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode != 0
+        assert (
+            "AFFECT_SETTLING due time cannot be later than sleep end plus "
+            "wake defer grace"
         ) in result.stderr
 
 

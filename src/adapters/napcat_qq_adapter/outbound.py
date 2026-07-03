@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from adapters.envelope_common import normalize_numeric_platform_user_id
+from adapters.inline_mentions import InlineMention, inline_mention_parts
 
 
 def outbound_message_payload(
@@ -25,55 +26,64 @@ def outbound_message_payload(
         array for reply or native mention sends.
     """
 
-    mention_segments = prefix_user_mention_segments(delivery_mentions)
-    outbound_text = text
-    if mention_segments and text and not text[0].isspace():
-        outbound_text = f" {text}"
-    if not reply_to_msg_id and not mention_segments:
+    message_segments = inline_user_mention_segments(text, delivery_mentions)
+    has_native_mention = any(
+        segment.get("type") == "at" for segment in message_segments
+    )
+    if not reply_to_msg_id and not has_native_mention:
         return_value = text
-    else:
-        return_value = []
-        if reply_to_msg_id:
-            return_value.append({
-                "type": "reply",
-                "data": {"id": str(reply_to_msg_id)},
-            })
-        return_value.extend(mention_segments)
-        return_value.append({
-            "type": "text",
-            "data": {"text": outbound_text},
-        })
-    return return_value
-
-
-def prefix_user_mention_segments(
-    delivery_mentions: Sequence[dict] | None,
-) -> list[dict[str, dict[str, str] | str]]:
-    """Return QQ native prefix mention segments when metadata is renderable."""
-
-    if not delivery_mentions:
-        return_value: list[dict[str, dict[str, str] | str]] = []
-        return return_value
-
-    for mention in delivery_mentions:
-        if not isinstance(mention, dict):
-            continue
-        if mention.get("entity_kind") != "user":
-            continue
-        if mention.get("placement") != "prefix":
-            continue
-        normalized_user_id = normalize_numeric_platform_user_id(
-            mention.get("platform_user_id")
-        )
-        if not normalized_user_id:
-            continue
-        return_value = [
-            {
-                "type": "at",
-                "data": {"qq": normalized_user_id},
-            }
-        ]
         return return_value
 
     return_value = []
+    if reply_to_msg_id:
+        return_value.append({
+            "type": "reply",
+            "data": {"id": str(reply_to_msg_id)},
+        })
+    return_value.extend(message_segments)
     return return_value
+
+
+def inline_user_mention_segments(
+    text: str,
+    delivery_mentions: Sequence[dict] | None,
+) -> list[dict[str, dict[str, str] | str]]:
+    """Return OneBot segments with exact inline user tags rendered natively."""
+
+    segments: list[dict[str, dict[str, str] | str]] = []
+    for part in inline_mention_parts(text, delivery_mentions):
+        if isinstance(part, InlineMention):
+            normalized_user_id = normalize_numeric_platform_user_id(
+                part.platform_user_id
+            )
+            if normalized_user_id:
+                segments.append({
+                    "type": "at",
+                    "data": {"qq": normalized_user_id},
+                })
+            else:
+                _append_text_segment(segments, part.token)
+            continue
+        _append_text_segment(segments, part)
+
+    return segments
+
+
+def _append_text_segment(
+    segments: list[dict[str, dict[str, str] | str]],
+    text: str,
+) -> None:
+    """Append non-empty text, merging adjacent text segments."""
+
+    if not text:
+        return
+    if segments and segments[-1].get("type") == "text":
+        data = segments[-1]["data"]
+        if isinstance(data, dict):
+            current_text = data["text"]
+            data["text"] = f"{current_text}{text}"
+        return
+    segments.append({
+        "type": "text",
+        "data": {"text": text},
+    })

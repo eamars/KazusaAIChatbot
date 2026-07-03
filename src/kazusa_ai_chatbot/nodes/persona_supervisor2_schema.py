@@ -61,6 +61,7 @@ class GlobalPersonaState(TypedDict):
     platform: str
     platform_channel_id: str
     channel_type: str
+    channel_name: str
     platform_message_id: str
     active_turn_platform_message_ids: NotRequired[list[str]]
     active_turn_conversation_row_ids: NotRequired[list[str]]
@@ -79,6 +80,7 @@ class GlobalPersonaState(TypedDict):
     conversation_progress: NotRequired[ConversationProgressPromptDoc]
     promoted_reflection_context: NotRequired[dict]
     internal_monologue_residue_context: NotRequired[str]
+    past_dialog_cognition_context: NotRequired[str]
 
     # Debug
     debug_modes: DebugModes
@@ -129,7 +131,6 @@ class GlobalPersonaState(TypedDict):
     final_dialog: [str]  # -> Will be used for dialog end point (e.g,. Discord)
     target_addressed_user_ids: NotRequired[list[str]]
     target_broadcast: NotRequired[bool]
-    mention_target_user: NotRequired[bool]
     # Other outputs from here
 
     # Consolidation output
@@ -143,7 +144,7 @@ class GlobalPersonaState(TypedDict):
     affinity_delta: int
     last_relationship_insight: str
 
-    # Facts harvester
+    # Consolidation memory rows
     new_facts: [str]
     future_promises: [str]
 
@@ -160,6 +161,7 @@ class CognitionState(TypedDict):
     platform: str
     platform_channel_id: str
     channel_type: str
+    channel_name: str
     global_user_id: str
     user_name: str
     user_profile: UserProfileDoc
@@ -171,6 +173,7 @@ class CognitionState(TypedDict):
     conversation_progress: NotRequired[ConversationProgressPromptDoc]
     promoted_reflection_context: NotRequired[dict]
     internal_monologue_residue_context: NotRequired[str]
+    past_dialog_cognition_context: NotRequired[str]
     interaction_style_context: NotRequired[dict]
     group_engagement_action_context: NotRequired[dict]
     selected_text_surface_intent: NotRequired[str]

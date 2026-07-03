@@ -87,6 +87,7 @@ _EXTERNAL_SPEECH_TERMS = (
     '当前外部说话内容',
     '外部说话内容',
     '当前外部文本',
+    '外部文本消息',
 )
 _NEGATION_TERMS = (
     '不是',
@@ -438,6 +439,166 @@ def test_l2d_prompt_defines_speak_and_scene_grounded_detail() -> None:
     )
 
 
+def test_task_willingness_prompts_avoid_operational_gate_language() -> None:
+    """Enabled willingness prompts must stay character-native, not tool-native."""
+
+    for prompt_name, prompt_text in (
+        (
+            '_BOUNDARY_CORE_TASK_WILLINGNESS_PROMPT',
+            l2_module._BOUNDARY_CORE_TASK_WILLINGNESS_PROMPT,
+        ),
+        (
+            '_JUDGEMENT_CORE_TASK_WILLINGNESS_PROMPT',
+            l2_module._JUDGEMENT_CORE_TASK_WILLINGNESS_PROMPT,
+        ),
+    ):
+        for required_text in (
+            '任务承接意愿',
+            '关系',
+            '当前心情',
+            '当前场景',
+            '简单、低压力、低承诺',
+        ):
+            assert required_text in prompt_text, prompt_name
+
+        for forbidden_text in (
+            'resource heavy',
+            'tool cost',
+            'background_work',
+            'complex_task_resolution',
+            'affinity threshold',
+            'effort_score',
+            'complexity_score',
+            'mood_gate',
+            'vibe_gate',
+            'willingness_score',
+            'COGNITION_TASK_WILLINGNESS_BOUNDARY_ENABLED',
+        ):
+            assert forbidden_text not in prompt_text, prompt_name
+
+
+@pytest.mark.asyncio
+async def test_l2b_task_willingness_payload_is_enabled_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """L2b receives mood/vibe descriptors only under the opt-in prompt."""
+
+    disabled_fake = SimpleNamespace(
+        ainvoke=AsyncMock(
+            return_value=AIMessage(content=json.dumps(
+                _boundary_core_response(),
+                ensure_ascii=False,
+            )),
+        ),
+    )
+    monkeypatch.setattr(
+        l2_module,
+        '_boundary_core_llm',
+        bind_test_llm(disabled_fake, 'boundary_core_llm'),
+    )
+
+    disabled_state = _task_willingness_l2_state(enabled=False)
+    await l2_module.call_boundary_core_agent(disabled_state)
+    disabled_messages = disabled_fake.ainvoke.await_args.args[0]
+    disabled_payload = json.loads(disabled_messages[1].content)
+
+    assert '任务承接意愿' not in disabled_messages[0].content
+    for field_name in (
+        'character_mood',
+        'global_vibe',
+        'vibe_check',
+        'visual_vibe',
+    ):
+        assert field_name not in disabled_payload
+
+    enabled_fake = SimpleNamespace(
+        ainvoke=AsyncMock(
+            return_value=AIMessage(content=json.dumps(
+                _boundary_core_response(),
+                ensure_ascii=False,
+            )),
+        ),
+    )
+    monkeypatch.setattr(
+        l2_module,
+        '_boundary_core_llm',
+        bind_test_llm(enabled_fake, 'boundary_core_llm'),
+    )
+
+    enabled_state = _task_willingness_l2_state(enabled=True)
+    await l2_module.call_boundary_core_agent(enabled_state)
+    enabled_messages = enabled_fake.ainvoke.await_args.args[0]
+    enabled_payload = json.loads(enabled_messages[1].content)
+
+    assert '任务承接意愿' in enabled_messages[0].content
+    assert enabled_payload['character_mood'] == 'guarded and tired'
+    assert enabled_payload['global_vibe'] == 'tense after-school quiet'
+    assert enabled_payload['vibe_check'] == 'strained but still conversational'
+    assert enabled_payload['visual_vibe'] == ['low energy', 'closed posture']
+    assert 'task_willingness_boundary_enabled' not in enabled_messages[1].content
+
+
+@pytest.mark.asyncio
+async def test_l2c_task_willingness_payload_is_enabled_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """L2c gets the same semantic descriptors only in enabled mode."""
+
+    disabled_fake = SimpleNamespace(
+        ainvoke=AsyncMock(
+            return_value=AIMessage(content=json.dumps(
+                _judgment_core_response(),
+                ensure_ascii=False,
+            )),
+        ),
+    )
+    monkeypatch.setattr(
+        l2_module,
+        '_judgement_core_llm',
+        bind_test_llm(disabled_fake, 'judgement_core_llm'),
+    )
+
+    disabled_state = _task_willingness_l2_state(enabled=False)
+    await l2_module.call_judgment_core_agent(disabled_state)
+    disabled_messages = disabled_fake.ainvoke.await_args.args[0]
+    disabled_payload = json.loads(disabled_messages[1].content)
+
+    assert '任务承接意愿' not in disabled_messages[0].content
+    for field_name in (
+        'character_mood',
+        'global_vibe',
+        'vibe_check',
+        'visual_vibe',
+    ):
+        assert field_name not in disabled_payload
+
+    enabled_fake = SimpleNamespace(
+        ainvoke=AsyncMock(
+            return_value=AIMessage(content=json.dumps(
+                _judgment_core_response(),
+                ensure_ascii=False,
+            )),
+        ),
+    )
+    monkeypatch.setattr(
+        l2_module,
+        '_judgement_core_llm',
+        bind_test_llm(enabled_fake, 'judgement_core_llm'),
+    )
+
+    enabled_state = _task_willingness_l2_state(enabled=True)
+    await l2_module.call_judgment_core_agent(enabled_state)
+    enabled_messages = enabled_fake.ainvoke.await_args.args[0]
+    enabled_payload = json.loads(enabled_messages[1].content)
+
+    assert '任务承接意愿' in enabled_messages[0].content
+    assert enabled_payload['character_mood'] == 'guarded and tired'
+    assert enabled_payload['global_vibe'] == 'tense after-school quiet'
+    assert enabled_payload['vibe_check'] == 'strained but still conversational'
+    assert enabled_payload['visual_vibe'] == ['low energy', 'closed posture']
+    assert 'task_willingness_boundary_enabled' not in enabled_messages[1].content
+
+
 def test_l2d_prompt_preserves_resolver_terminal_boundaries() -> None:
     """L2d should keep resolver selection inside source and terminal limits.
 
@@ -542,11 +703,11 @@ def test_l2d_prompt_preserves_resolver_terminal_boundaries() -> None:
     _assert_contains_any(
         'ACTION_ROUTER_PROMPT',
         prompt_text,
-        ('不要为了给一般判断背书而启动 `web_evidence`',
-         '不要为了给一般判断背书而启动',
-         '证据能力'),
+        ('不要为了给一般判断背书而启动', '证据能力'),
         'no evidence capability for backing general judgment',
     )
+    assert 'web_evidence' not in prompt_text
+    assert 'rag_evidence' not in prompt_text
     assert '可行动标准和最后核实步骤' in prompt_text
     assert '只给阻塞说明、可行动标准和最后核实步骤' in prompt_text
     assert '不要继续换同义词重复搜索' in prompt_text
@@ -615,7 +776,7 @@ def test_l3_content_plan_scope_preserves_complete_plan_deliverables() -> None:
         '写出 resolved semantic content',
         '`visible_goal` 写交互目的',
         '`voice` 写温度、分寸和情绪姿态',
-        '`rendering` 写单气泡内的布局、长短和固定格式保护',
+        '`rendering` 写出站消息序列的形状、长短和固定格式保护',
         '不能改变立场、事实或答案',
         '接梗',
         '技术对比',
@@ -839,9 +1000,13 @@ def test_l2a_preserves_explicit_current_user_decision_ownership() -> None:
         '决策主体',
         '被邀请者',
         '被建议者',
-        'L1 里出现的邀请、压力、亲近感或期待感只说明我的感受强度',
-        '事实主体、动作主体和决策主体仍来自 `decontextualized_input`',
+        '`current_event_grounding`',
+        '当前材料是外部文本消息',
+        'L1 的 `emotional_appraisal` 与 `interaction_subtext` 只说明我的即时感受',
+        '不能替换当前文本里的事实主体',
+        '外部文本消息里，如果当前可见文本或 `decontextualized_input` 显式标出说话人',
         '先按来源事实复述当前真实现场和动作/决策主体',
+        '先按当前说话人、可见文本、直接称呼、提及和回复对象复述现场',
         '第一人称只承载我的感受、判断、边界和准备提供的建议',
     ):
         assert required_text in prompt_text
@@ -871,3 +1036,102 @@ def test_l2d_prompt_uses_thread_reference_context_before_visible_action() -> Non
         '可见动作',
     ):
         assert required_text in prompt_text
+
+
+def _boundary_core_response() -> dict[str, str]:
+    """Build one valid L2b response fixture."""
+
+    return {
+        'boundary_issue': 'none',
+        'boundary_summary': '没有身份或控制越界。',
+        'behavior_primary': 'comply',
+        'behavior_secondary': 'none',
+        'acceptance': 'allow',
+        'stance_bias': 'confirm',
+        'identity_policy': 'accept',
+        'pressure_policy': 'absorb',
+        'trajectory': '普通请求可以正常处理。',
+    }
+
+
+def _judgment_core_response() -> dict[str, str]:
+    """Build one valid L2c response fixture."""
+
+    return {
+        'logical_stance': 'CONFIRM',
+        'character_intent': 'PROVIDE',
+        'judgment_note': '边界允许，正常回应即可。',
+    }
+
+
+def _task_willingness_l2_state(*, enabled: bool) -> dict[str, object]:
+    """Build a minimal state for L2 willingness prompt payload checks."""
+
+    turn_clock = build_turn_clock_from_storage_utc(
+        '2026-05-25T09:30:00+00:00',
+    )
+    episode = build_text_chat_cognitive_episode(
+        episode_id='task-willingness-episode',
+        percept_id='task-willingness-percept',
+        storage_timestamp_utc=turn_clock['storage_timestamp_utc'],
+        local_time_context=turn_clock['local_time_context'],
+        user_input='Can you handle this long plan for me later?',
+        platform='debug',
+        platform_channel_id='debug-private-1',
+        channel_type='private',
+        platform_message_id='message-task-1',
+        platform_user_id='user-task-1',
+        global_user_id='global-user-1',
+        user_name='Ran',
+        active_turn_platform_message_ids=['message-task-1'],
+        active_turn_conversation_row_ids=[],
+        debug_modes={},
+        target_addressed_user_ids=['character-1'],
+        target_broadcast=False,
+    )
+    boundary_assessment = _boundary_core_response()
+    state: dict[str, object] = {
+        'task_willingness_boundary_enabled': enabled,
+        'character_profile': {
+            'name': 'Kazusa',
+            'global_user_id': 'character-1',
+            'mood': 'guarded and tired',
+            'global_vibe': 'tense after-school quiet',
+            'boundary_profile': {
+                'self_integrity': 0.8,
+                'control_sensitivity': 0.7,
+                'compliance_strategy': 'resist',
+                'relational_override': 0.3,
+                'control_intimacy_misread': 0.2,
+                'boundary_recovery': 'rebound',
+                'authority_skepticism': 0.8,
+            },
+        },
+        'user_profile': {
+            'affinity': 240,
+            'last_relationship_insight': 'The relationship is still distant.',
+        },
+        'cognitive_episode': episode,
+        'user_input': 'Can you handle this long plan for me later?',
+        'prompt_message_context': {},
+        'reply_context': {},
+        'user_name': 'Ran',
+        'decontexualized_input': (
+            'The user asks the character to take on a sustained later task.'
+        ),
+        'reason_to_respond': 'direct request',
+        'channel_topic': 'quiet private chat',
+        'indirect_speech_context': '',
+        'interaction_subtext': 'the user is asking for sustained help',
+        'emotional_appraisal': 'tired and reluctant',
+        'referents': [],
+        'internal_monologue': (
+            '关系还不够近，而且现在有点累；不想直接接下长期任务。'
+        ),
+        'logical_stance': 'TENTATIVE',
+        'character_intent': 'BANTAR',
+        'boundary_core_assessment': boundary_assessment,
+        'vibe_check': 'strained but still conversational',
+        'visual_vibe': ['low energy', 'closed posture'],
+    }
+    return state

@@ -65,7 +65,12 @@ def test_valid_candidates_drops_incomplete_memory_unit_rows(caplog) -> None:
                 "fact": "User asked the extractor to keep valid rows.",
                 "subjective_appraisal": "The character reads this as schema discipline.",
                 "relationship_signal": "Future memory extraction should keep all required fields.",
-                "evidence_refs": [],
+                "source_refs": [
+                    {
+                        "source": "user_message",
+                        "conversation_row_id": "row-valid-candidate",
+                    }
+                ],
             },
         ],
     }
@@ -87,7 +92,12 @@ def test_valid_candidates_normalizes_extractor_due_at() -> None:
                 "subjective_appraisal": "The character treats the date as operational.",
                 "relationship_signal": "Use the date when continuing this thread.",
                 "due_at": "2026-05-07 00:00",
-                "evidence_refs": [],
+                "source_refs": [
+                    {
+                        "source": "assistant_final_dialog",
+                        "conversation_row_id": "row-dated-commitment",
+                    }
+                ],
             }
         ],
     }
@@ -351,7 +361,12 @@ async def test_process_memory_unit_candidate_merges_memory_evidence_surfaced_sco
         "fact": "冰淇淋摊老板是千纱的初中学姐，还会给双倍抹茶酱。",
         "subjective_appraisal": "Kazusa now treats this as reinforced continuity.",
         "relationship_signal": "Keep this scoped lore available for the same user.",
-        "evidence_refs": [],
+        "source_refs": [
+            {
+                "source": "user_message",
+                "conversation_row_id": "row-source-ref-1",
+            }
+        ],
     }
 
     async def _retrieve_memory_unit_merge_candidates(global_user_id, **kwargs):
@@ -363,6 +378,7 @@ async def test_process_memory_unit_candidate_merges_memory_evidence_surfaced_sco
         captured["updated_unit_id"] = unit_id
         captured["updated_semantics"] = semantics
         captured["merge_history"] = kwargs["merge_history_entry"]
+        captured["source_refs"] = kwargs["source_refs"]
 
     async def _insert_user_memory_units(*args, **kwargs):
         raise AssertionError("duplicate insert should not run when a surfaced scoped unit is merged")
@@ -417,6 +433,7 @@ async def test_process_memory_unit_candidate_merges_memory_evidence_surfaced_sco
         "relationship_signal": "Keep this scoped lore available for the same user.",
     }
     assert captured["merge_history"]["candidate_id"] == "candidate-scoped-1"
+    assert captured["source_refs"] == candidate["source_refs"]
     assert result["decision"] == "merge"
     assert result["unit_id"] == "existing-scoped-1"
 

@@ -13,9 +13,7 @@ from kazusa_ai_chatbot.rag.live_context.runtime_facts import (
 )
 from kazusa_ai_chatbot.rag.live_context.selector import (
     _deterministic_plan,
-    _extract_fact_type,
     _select_external_live_plan,
-    _strip_live_prefix,
 )
 from kazusa_ai_chatbot.rag.live_context.target_resolution import (
     _extract_worker_text,
