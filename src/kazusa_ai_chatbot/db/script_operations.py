@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
+import re
 from typing import Any
 
 from kazusa_ai_chatbot.config import AUDIT_LOG_TTL_DAYS, DEBUG_LOG_TTL_DAYS
@@ -53,6 +54,12 @@ TEXT_VECTOR_REEMBEDDING_COLLECTIONS = (
     "conversation_history",
     "memory",
     "user_memory_units",
+)
+SEMANTIC_IDENTITY_FORBIDDEN_PATTERN = (
+    r"(@mentioned-(?:user|role|entity)-\d+|#mentioned-channel-\d+|"
+    r"(?<![A-Za-z0-9_])[@#]?(?:qq|discord|platform)-"
+    r"(?:user|bot|role|channel|entity):[^\s]+|"
+    r"\[CQ:|<@!?\d+>|<@&\d+>|<#\d+>|<a?:[A-Za-z0-9_]+:\d+>)"
 )
 SYNTHETIC_CONSOLIDATION_USER_ID = "self_cognition"
 SYNTHETIC_CONSOLIDATION_CLEANUP_REASON = (
@@ -1160,6 +1167,46 @@ async def update_conversation_history_row(
     await db.conversation_history.update_one({"_id": row_id}, update)
 
 
+async def update_conversation_history_row_for_semantic_identity_repair(
+    *,
+    row_id: Any,
+    set_fields: Mapping[str, Any],
+    unset_fields: Sequence[str],
+    recompute_embedding: bool,
+) -> None:
+    """Apply one conversation-history identity repair with optional embedding.
+
+    Args:
+        row_id: MongoDB row identifier.
+        set_fields: Fields to set on the conversation row.
+        unset_fields: Fields to remove from the conversation row.
+        recompute_embedding: Whether to recompute the document embedding from
+            the repaired semantic text.
+    """
+
+    fields = dict(set_fields)
+    db = await get_db()
+    if recompute_embedding:
+        existing = await db.conversation_history.find_one({"_id": row_id})
+        if existing is None:
+            return
+        repaired_row = {
+            **dict(existing),
+            **fields,
+        }
+        fields["embedding"] = await get_document_text_embedding(
+            _embedding_source_text(repaired_row),
+        )
+
+    update: dict[str, Any] = {"$set": fields}
+    if unset_fields:
+        update["$unset"] = {
+            field_name: ""
+            for field_name in unset_fields
+        }
+    await db.conversation_history.update_one({"_id": row_id}, update)
+
+
 async def drop_legacy_rag_collections(
     collection_names: Sequence[str],
 ) -> list[str]:
@@ -1401,6 +1448,64 @@ async def find_persistent_memory_without_embedding(
     return return_value
 
 
+async def archive_user_memory_unit_for_semantic_identity_repair(
+    *,
+    unit_id: str,
+    reason: str,
+    storage_timestamp_utc: str,
+) -> dict[str, object]:
+    """Archive an active user-memory row during identity-pollution repair.
+
+    Args:
+        unit_id: Stable ``user_memory_units.unit_id`` to archive.
+        reason: Maintenance reason recorded in merge history.
+        storage_timestamp_utc: Storage UTC timestamp for update fields.
+
+    Returns:
+        Update counters and the merge-history row.
+    """
+
+    clean_unit_id = str(unit_id or "").strip()
+    clean_reason = str(reason or "").strip()
+    clean_timestamp = str(storage_timestamp_utc or "").strip()
+    if not clean_unit_id:
+        raise ValueError("unit_id is required")
+    if not clean_reason:
+        raise ValueError("reason is required")
+    if not clean_timestamp:
+        raise ValueError("storage_timestamp_utc is required")
+
+    merge_history_entry = {
+        "operation": "semantic_identity_repair_archive",
+        "status": "archived",
+        "reason": clean_reason,
+        "timestamp": clean_timestamp,
+    }
+    db = await get_db()
+    result = await db.user_memory_units.update_one(
+        {
+            "unit_id": clean_unit_id,
+            "status": "active",
+        },
+        {
+            "$set": {
+                "status": "archived",
+                "archived_at": clean_timestamp,
+                "updated_at": clean_timestamp,
+            },
+            "$push": {"merge_history": merge_history_entry},
+        },
+    )
+    return_value = {
+        "unit_id": clean_unit_id,
+        "status": "archived",
+        "matched_count": result.matched_count,
+        "modified_count": result.modified_count,
+        "merge_history_entry": merge_history_entry,
+    }
+    return return_value
+
+
 def _legacy_conversation_query(
     *,
     semantic_text_pattern: str = "",
@@ -1431,6 +1536,216 @@ def _legacy_conversation_query(
             {"reply_context.reply_excerpt": {"$regex": semantic_text_pattern}},
         ])
     return query
+
+
+def _semantic_identity_conversation_query() -> dict[str, Any]:
+    """Build selector for conversation rows with polluted semantic fields."""
+
+    pattern = SEMANTIC_IDENTITY_FORBIDDEN_PATTERN
+    query = {
+        "$or": [
+            {"display_name": {"$regex": pattern}},
+            {"body_text": {"$regex": pattern}},
+            {"mentions.display_name": {"$regex": pattern}},
+            {"reply_context.reply_to_display_name": {"$regex": pattern}},
+            {"reply_context.reply_excerpt": {"$regex": pattern}},
+        ]
+    }
+    return query
+
+
+def _semantic_identity_user_memory_query() -> dict[str, Any]:
+    """Build selector for active user-memory rows with polluted text."""
+
+    pattern = SEMANTIC_IDENTITY_FORBIDDEN_PATTERN
+    query = {
+        "status": "active",
+        "$or": [
+            {"fact": {"$regex": pattern}},
+            {"subjective_appraisal": {"$regex": pattern}},
+            {"relationship_signal": {"$regex": pattern}},
+        ],
+    }
+    return query
+
+
+def _semantic_identity_user_profile_query() -> dict[str, Any]:
+    """Build selector for profile platform accounts with polluted labels."""
+
+    pattern = SEMANTIC_IDENTITY_FORBIDDEN_PATTERN
+    query = {
+        "platform_accounts.display_name": {"$regex": pattern},
+    }
+    return query
+
+
+def _semantic_identity_shared_memory_query() -> dict[str, Any]:
+    """Build selector for active shared-memory rows with polluted text."""
+
+    pattern = SEMANTIC_IDENTITY_FORBIDDEN_PATTERN
+    query = {
+        "status": "active",
+        "$or": [
+            {"memory_name": {"$regex": pattern}},
+            {"content": {"$regex": pattern}},
+            {"confidence_note": {"$regex": pattern}},
+        ],
+    }
+    return query
+
+
+async def count_semantic_identity_conversation_rows() -> int:
+    """Count conversation rows with polluted semantic identity fields."""
+
+    db = await get_db()
+    count = await db.conversation_history.count_documents(
+        _semantic_identity_conversation_query(),
+    )
+    return count
+
+
+async def list_semantic_identity_conversation_rows(
+    *,
+    batch_size: int,
+) -> list[dict[str, Any]]:
+    """Load conversation rows with polluted semantic identity fields."""
+
+    db = await get_db()
+    cursor = (
+        db.conversation_history
+        .find(_semantic_identity_conversation_query())
+        .sort("timestamp", 1)
+        .limit(batch_size)
+    )
+    rows = [dict(row) for row in await cursor.to_list(length=batch_size)]
+    return rows
+
+
+async def count_semantic_identity_user_memory_units() -> int:
+    """Count active user-memory rows with polluted semantic identity fields."""
+
+    db = await get_db()
+    count = await db.user_memory_units.count_documents(
+        _semantic_identity_user_memory_query(),
+    )
+    return count
+
+
+async def count_semantic_identity_user_profile_accounts() -> int:
+    """Count profiles containing polluted platform-account display labels."""
+
+    db = await get_db()
+    cursor = db.user_profiles.find(
+        _semantic_identity_user_profile_query(),
+        {"platform_accounts": 1},
+    )
+    dirty_count = 0
+    pattern = SEMANTIC_IDENTITY_FORBIDDEN_PATTERN
+    async for row in cursor:
+        accounts = row.get("platform_accounts")
+        if not isinstance(accounts, list):
+            continue
+        for account in accounts:
+            if not isinstance(account, dict):
+                continue
+            display_name = account.get("display_name")
+            if isinstance(display_name, str) and re.search(pattern, display_name):
+                dirty_count += 1
+    return dirty_count
+
+
+async def list_semantic_identity_user_profile_rows(
+    *,
+    batch_size: int,
+) -> list[dict[str, Any]]:
+    """Load user profiles with polluted platform-account display labels."""
+
+    db = await get_db()
+    cursor = (
+        db.user_profiles
+        .find(_semantic_identity_user_profile_query(), {"embedding": 0})
+        .sort("global_user_id", 1)
+        .limit(batch_size)
+    )
+    rows = [dict(row) for row in await cursor.to_list(length=batch_size)]
+    return rows
+
+
+async def update_user_profile_platform_account_display_name(
+    *,
+    global_user_id: str,
+    platform: str,
+    platform_user_id: str,
+    display_name: str,
+) -> dict[str, int]:
+    """Update one exact linked platform-account display label."""
+
+    db = await get_db()
+    result = await db.user_profiles.update_one(
+        {
+            "global_user_id": global_user_id,
+            "platform_accounts": {
+                "$elemMatch": {
+                    "platform": platform,
+                    "platform_user_id": platform_user_id,
+                }
+            },
+        },
+        {
+            "$set": {
+                "platform_accounts.$.display_name": display_name,
+            }
+        },
+    )
+    return_value = {
+        "matched_count": int(result.matched_count),
+        "modified_count": int(result.modified_count),
+    }
+    return return_value
+
+
+async def list_semantic_identity_user_memory_units(
+    *,
+    batch_size: int,
+) -> list[dict[str, Any]]:
+    """Load active user-memory rows with polluted semantic identity fields."""
+
+    db = await get_db()
+    cursor = (
+        db.user_memory_units
+        .find(_semantic_identity_user_memory_query(), {"embedding": 0})
+        .sort("updated_at", 1)
+        .limit(batch_size)
+    )
+    rows = [dict(row) for row in await cursor.to_list(length=batch_size)]
+    return rows
+
+
+async def count_semantic_identity_shared_memory_units() -> int:
+    """Count active shared-memory rows with polluted semantic identity fields."""
+
+    db = await get_db()
+    count = await db.memory.count_documents(
+        _semantic_identity_shared_memory_query(),
+    )
+    return count
+
+
+async def list_semantic_identity_shared_memory_units(
+    *,
+    batch_size: int,
+) -> list[dict[str, Any]]:
+    """Load active shared-memory rows with polluted semantic identity fields."""
+
+    db = await get_db()
+    cursor = (
+        db.memory
+        .find(_semantic_identity_shared_memory_query(), {"embedding": 0})
+        .sort("updated_at", 1)
+        .limit(batch_size)
+    )
+    rows = [dict(row) for row in await cursor.to_list(length=batch_size)]
+    return rows
 
 
 def _user_state_conversation_history_filter(

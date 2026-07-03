@@ -83,6 +83,13 @@ Adapters must keep raw platform ids, CQ markers, Discord mentions, and other
 transport syntax out of `body_text` except when the syntax has been translated
 into prompt-facing semantic text such as image descriptions.
 
+When a visible mention cannot be resolved to a human-readable label, adapters
+must use platform-neutral fallback tokens such as `@user`, `@role`,
+`#channel`, or `@entity`. Occurrence placeholders such as `@mentioned-user-1`
+and platform-qualified labels such as `@qq-user:<id>` are not valid semantic
+storage text. Raw platform syntax belongs only in `raw_wire_text`, and typed
+identity belongs in `mentions` and `reply` metadata.
+
 ## Runtime Registration Contract
 
 Cross-process runtime adapters register their callback URL with the brain

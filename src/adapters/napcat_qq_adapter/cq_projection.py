@@ -84,22 +84,15 @@ def project_qq_semantic_text(
         `MessageEnvelope.reply.excerpt`.
     """
 
-    occurrence_counts: dict[str, int] = {}
-
     def replacement(match: re.Match[str]) -> str:
         platform_user_id = match.group(1)
         entity_kind = qq_mention_entity_kind(
             platform_user_id,
             platform_bot_id,
         )
-        fallback_kind = "user" if entity_kind == "bot" else entity_kind
-        occurrence_counts[fallback_kind] = (
-            occurrence_counts.get(fallback_kind, 0) + 1
-        )
         token = readable_mention_token(
             entity_kind=entity_kind,
             display_name=display_names.get(platform_user_id, ""),
-            occurrence_index=occurrence_counts[fallback_kind],
             raw_label=platform_user_id if entity_kind == "everyone" else "",
         )
         return_value = f" {token} "

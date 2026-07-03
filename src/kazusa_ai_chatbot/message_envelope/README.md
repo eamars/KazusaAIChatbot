@@ -151,11 +151,12 @@ readable platform-neutral tokens:
 
 | Mention kind | Readable token when label is known | Fallback token when label is unknown |
 | --- | --- | --- |
-| `bot` or `user` | `@display name` | `@mentioned-user-N` |
-| `platform_role` | `@role name` | `@mentioned-role-N` |
-| `channel` | `#channel-name` | `#mentioned-channel-N` |
+| `bot` | `@display name` | `@character` |
+| `user` | `@display name` | `@user` |
+| `platform_role` | `@role name` | `@role` |
+| `channel` | `#channel-name` | `#channel` |
 | `everyone` | `@everyone`, `@here`, or `@all` | same raw broadcast word without platform wrapper |
-| `unknown` | `@display name` | `@mentioned-entity-N` |
+| `unknown` | `@display name` | `@entity` |
 
 Adapter normalization removes or replaces platform transport syntax,
 including:
@@ -170,11 +171,14 @@ including:
 - Custom emoji tags.
 - Platform-only synthetic markers are represented through typed metadata.
 
-`body_text` must not contain CQ codes, Discord mention tags, raw platform ids,
-or platform names as lookup-failure stand-ins. Raw ids and raw tokens belong in
-typed metadata and `raw_wire_text`. `body_text` can be an empty string when the
-message is attachment-only or when the authored content is only non-mention
-transport syntax.
+`body_text` must not contain CQ codes, Discord mention tags, occurrence
+fallbacks such as `@mentioned-user-1`, raw platform ids by themselves, or
+platform-qualified lookup-failure stand-ins such as `@qq-user:<id>`.
+When a visible mention has no human-readable label, the fallback token must be
+platform-neutral. Platform ids belong in typed metadata and `raw_wire_text`.
+`body_text` can be an empty string when the message is
+attachment-only or when the authored content is only non-mention transport
+syntax.
 
 The brain service derives `user_input`, RAG queries, cognition input, dialog
 context, conversation progress input, and search text from `body_text` plus
@@ -444,6 +448,11 @@ Invalid adapter payloads fail at the service boundary. Examples:
 - Extra fields in the `/chat` request.
 - Non-list `mentions`, `attachments`, or `addressed_to_global_user_ids`.
 - Non-boolean `broadcast`.
+- Semantic storage fields containing transport markers or legacy occurrence
+  placeholders. The storage validator checks `display_name`, `body_text`,
+  mention display labels, and reply display/excerpt fields before conversation
+  rows are written. It deliberately does not validate `raw_wire_text`, which is
+  audit/replay data.
 
 The brain service logs enough request scope to identify the adapter and message
 id.

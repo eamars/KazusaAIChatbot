@@ -36,6 +36,7 @@ from adapters.envelope_common import (
     normalize_numeric_platform_user_id,
     readable_mention_token,
     resolve_mentions,
+    semantic_entity_fallback_label,
 )
 from adapters.inline_mentions import InlineMention, inline_mention_parts
 from adapters.outbound_sequence import followup_delay_seconds
@@ -112,7 +113,13 @@ class DiscordEnvelopeNormalizer:
             role_display_names,
             channel_display_names,
         )
-        reply = self._reply_target(reply_context, platform_bot_id)
+        reply = self._reply_target(
+            reply_context,
+            platform_bot_id,
+            user_display_names,
+            role_display_names,
+            channel_display_names,
+        )
         body_text = self._body_text(
             raw_wire_text,
             platform_bot_id,
@@ -150,53 +157,39 @@ class DiscordEnvelopeNormalizer:
     ) -> str:
         """Replace Discord mention wire tags with readable body tokens."""
 
-        occurrence_counts: dict[str, int] = {}
-
-        def next_occurrence(kind: str) -> int:
-            occurrence_counts[kind] = occurrence_counts.get(kind, 0) + 1
-            return occurrence_counts[kind]
-
         def replace_user(match: re.Match[str]) -> str:
             platform_user_id = match.group(1)
             entity_kind = "bot" if platform_user_id == platform_bot_id else "user"
-            occurrence_index = next_occurrence("user")
             token = readable_mention_token(
                 entity_kind=entity_kind,
                 display_name=user_display_names.get(platform_user_id, ""),
-                occurrence_index=occurrence_index,
             )
             return_value = f" {token} "
             return return_value
 
         def replace_role(match: re.Match[str]) -> str:
             platform_role_id = match.group(1)
-            occurrence_index = next_occurrence("platform_role")
             token = readable_mention_token(
                 entity_kind="platform_role",
                 display_name=role_display_names.get(platform_role_id, ""),
-                occurrence_index=occurrence_index,
             )
             return_value = f" {token} "
             return return_value
 
         def replace_channel(match: re.Match[str]) -> str:
             platform_channel_id = match.group(1)
-            occurrence_index = next_occurrence("channel")
             token = readable_mention_token(
                 entity_kind="channel",
                 display_name=channel_display_names.get(platform_channel_id, ""),
-                occurrence_index=occurrence_index,
             )
             return_value = f" {token} "
             return return_value
 
         def replace_everyone(match: re.Match[str]) -> str:
             raw_label = match.group(1)
-            occurrence_index = next_occurrence("everyone")
             token = readable_mention_token(
                 entity_kind="everyone",
                 display_name="",
-                occurrence_index=occurrence_index,
                 raw_label=raw_label,
             )
             return_value = f" {token} "
@@ -229,7 +222,13 @@ class DiscordEnvelopeNormalizer:
                 "platform_user_id": platform_user_id,
                 "entity_kind": entity_kind,
                 "raw_text": match.group(0),
-                "display_name": user_display_names.get(platform_user_id, ""),
+                "display_name": (
+                    user_display_names.get(platform_user_id, "")
+                    or semantic_entity_fallback_label(
+                        entity_kind=entity_kind,
+                        mention_context=False,
+                    )
+                ),
             })
 
         for match in _ROLE_MENTION_PATTERN.finditer(raw_wire_text):
@@ -239,7 +238,13 @@ class DiscordEnvelopeNormalizer:
                 "platform_user_id": platform_role_id,
                 "entity_kind": "platform_role",
                 "raw_text": match.group(0),
-                "display_name": role_display_names.get(platform_role_id, ""),
+                "display_name": (
+                    role_display_names.get(platform_role_id, "")
+                    or semantic_entity_fallback_label(
+                        entity_kind="platform_role",
+                        mention_context=False,
+                    )
+                ),
             })
 
         for match in _CHANNEL_MENTION_PATTERN.finditer(raw_wire_text):
@@ -249,7 +254,13 @@ class DiscordEnvelopeNormalizer:
                 "platform_user_id": platform_channel_id,
                 "entity_kind": "channel",
                 "raw_text": match.group(0),
-                "display_name": channel_display_names.get(platform_channel_id, ""),
+                "display_name": (
+                    channel_display_names.get(platform_channel_id, "")
+                    or semantic_entity_fallback_label(
+                        entity_kind="channel",
+                        mention_context=False,
+                    )
+                ),
             })
 
         for match in _EVERYONE_PATTERN.finditer(raw_wire_text):
@@ -267,6 +278,9 @@ class DiscordEnvelopeNormalizer:
         self,
         reply_context: dict,
         platform_bot_id: str,
+        user_display_names: dict[str, str],
+        role_display_names: dict[str, str],
+        channel_display_names: dict[str, str],
     ) -> ReplyTarget:
         """Project Discord reply metadata into a typed reply target."""
 
@@ -282,7 +296,13 @@ class DiscordEnvelopeNormalizer:
         if reply_context.get("reply_to_display_name"):
             reply["display_name"] = str(reply_context["reply_to_display_name"])
         if reply_context.get("reply_excerpt"):
-            reply["excerpt"] = str(reply_context["reply_excerpt"])
+            reply["excerpt"] = self._body_text(
+                str(reply_context["reply_excerpt"]),
+                platform_bot_id,
+                user_display_names,
+                role_display_names,
+                channel_display_names,
+            )
         return reply
 
 

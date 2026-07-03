@@ -78,6 +78,7 @@ from kazusa_ai_chatbot.memory_evolution import (
     find_active_memory_units,
     insert_memory_unit,
     merge_memory_units,
+    reject_memory_unit,
     reset_memory_from_seed,
     supersede_memory_unit,
 )
@@ -130,6 +131,23 @@ The repository sets:
 - source row `status` to `superseded`.
 
 Inactive, expired, missing, or lineage-mismatched sources are rejected.
+
+### `reject_memory_unit`
+
+```python
+async def reject_memory_unit(
+    *,
+    active_unit_id: str,
+    reason: str,
+    storage_timestamp_utc: str,
+) -> EvolvingMemoryDoc
+```
+
+Marks one active, non-expired memory unit as `rejected` without creating a
+replacement. This is reserved for maintenance and promotion-review paths where
+the existing content is unsafe to keep active, for example semantic identity
+pollution. The repository updates `updated_at`, invalidates Cache2, and refuses
+inactive, expired, or missing targets.
 
 ### `merge_memory_units`
 

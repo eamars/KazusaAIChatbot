@@ -7,6 +7,7 @@ from adapters.envelope_common import (
     attachment_refs,
     normalize_mention_display_map,
     resolve_mentions,
+    semantic_entity_fallback_label,
 )
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.message_envelope import (
@@ -112,7 +113,13 @@ class QQEnvelopeNormalizer:
                 "platform_user_id": platform_user_id,
                 "entity_kind": entity_kind,
                 "raw_text": match.group(0),
-                "display_name": display_names.get(platform_user_id, ""),
+                "display_name": (
+                    display_names.get(platform_user_id, "")
+                    or semantic_entity_fallback_label(
+                        entity_kind=entity_kind,
+                        mention_context=False,
+                    )
+                ),
             })
 
         return raw_mentions
@@ -140,7 +147,15 @@ class QQEnvelopeNormalizer:
             reply["platform_user_id"] = platform_user_id
             if platform_user_id == platform_bot_id:
                 reply["global_user_id"] = CHARACTER_GLOBAL_USER_ID
-        if reply_context.get("reply_to_display_name"):
+            display_name = str(reply_context.get("reply_to_display_name") or "")
+            if not display_name:
+                display_name = semantic_entity_fallback_label(
+                    entity_kind="user",
+                    mention_context=False,
+                )
+            if display_name:
+                reply["display_name"] = display_name
+        elif reply_context.get("reply_to_display_name"):
             reply["display_name"] = str(reply_context["reply_to_display_name"])
         if reply_context.get("reply_excerpt"):
             reply_excerpt = project_qq_semantic_text(

@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 import json
 import logging
 from types import SimpleNamespace
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 import uvicorn
@@ -17,6 +17,10 @@ import websockets
 from websockets.exceptions import WebSocketException
 
 from adapters.delivery_receipts import post_delivery_receipt
+from adapters.envelope_common import (
+    normalize_mention_display_map,
+    semantic_entity_fallback_label,
+)
 from adapters.outbound_sequence import followup_delay_seconds
 from kazusa_ai_chatbot.dispatcher import SendResult
 from kazusa_ai_chatbot.logging_config import configure_adapter_logging
@@ -435,7 +439,7 @@ class NapCatWSAdapter:
 
     def _apply_replied_message_metadata(
         self,
-        reply_context: dict[str, str | bool],
+        reply_context: dict[str, Any],
         message_data: dict,
     ) -> None:
         """Populate reply target fields from a NapCat message document."""
@@ -448,7 +452,7 @@ class NapCatWSAdapter:
 
     async def _hydrate_reply_context_from_platform(
         self,
-        reply_context: dict[str, str | bool],
+        reply_context: dict[str, Any],
         ws,
     ) -> None:
         """Resolve reply target metadata from NapCat before brain forwarding."""
@@ -527,6 +531,57 @@ class NapCatWSAdapter:
         )
         return display_names
 
+    async def _hydrate_reply_display_names(
+        self,
+        *,
+        reply_context: dict[str, Any],
+        mention_display_names: dict[str, str],
+        channel_id: str,
+        is_group: bool,
+        group_id: object,
+        ws: object,
+    ) -> dict[str, str]:
+        """Hydrate mention labels that appear only in replied-message text."""
+
+        reply_excerpt = reply_context.get("reply_excerpt")
+        target_user_id = str(
+            reply_context.get("reply_to_platform_user_id") or "",
+        ).strip()
+        target_display_name = reply_context.get("reply_to_display_name")
+        raw_wire_parts: list[str] = []
+        if isinstance(reply_excerpt, str) and reply_excerpt.strip():
+            raw_wire_parts.append(reply_excerpt)
+        if target_user_id and not target_display_name:
+            raw_wire_parts.append(f"[CQ:at,qq={target_user_id}]")
+
+        raw_reply_display_names = reply_context.pop(
+            "reply_mention_display_names",
+            {},
+        )
+        reply_display_names = normalize_mention_display_map(
+            raw_reply_display_names,
+        )
+        initial_display_names = dict(reply_display_names)
+        initial_display_names.update(mention_display_names)
+        if not raw_wire_parts:
+            return_value = initial_display_names
+            return return_value
+
+        hydrated_display_names = await self._hydrate_mention_display_names(
+            raw_wire_text=" ".join(raw_wire_parts),
+            initial_display_names=initial_display_names,
+            channel_id=channel_id,
+            is_group=is_group,
+            group_id=group_id,
+            ws=ws,
+        )
+        hydrated_target_name = hydrated_display_names.get(target_user_id, "")
+        if hydrated_target_name:
+            reply_context["reply_to_display_name"] = hydrated_target_name
+
+        return_value = hydrated_display_names
+        return return_value
+
     async def handle_event(self, data: dict, ws):
         """Normalize one NapCat event and forward message events to the brain."""
 
@@ -553,8 +608,23 @@ class NapCatWSAdapter:
             group_id=group_id,
             ws=ws,
         )
+        mention_display_names = await self._hydrate_reply_display_names(
+            reply_context=reply_context,
+            mention_display_names=mention_display_names,
+            channel_id=channel_id,
+            is_group=is_group,
+            group_id=group_id,
+            ws=ws,
+        )
         sender = data.get("sender", {})
-        sender_name = sender.get("nickname", f"User {user_id}")
+        if not isinstance(sender, dict):
+            sender = {}
+        sender_name = self._select_qq_display_name(sender)
+        if not sender_name:
+            sender_name = semantic_entity_fallback_label(
+                entity_kind="user",
+                mention_context=False,
+            )
 
         message_debug_modes = dict(self.debug_modes)
         is_active = (

@@ -5,6 +5,8 @@ from __future__ import annotations
 import typing
 from pathlib import Path
 
+import pytest
+
 from kazusa_ai_chatbot.db.schemas import ConversationMessageDoc
 from kazusa_ai_chatbot.message_envelope import (
     AttachmentHandlerRegistry,
@@ -13,6 +15,7 @@ from kazusa_ai_chatbot.message_envelope import (
     NormalizerRegistry,
     RawMention,
     ResolvedMention,
+    validate_semantic_storage_fields,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import (
     CognitionState,
@@ -225,3 +228,82 @@ def test_envelope_normalizer_protocol_builds_message_contract() -> None:
     assert envelope["raw_wire_text"] == "<@bot> hello"
     assert envelope["mentions"][0]["global_user_id"] == "user-1"
     assert envelope["attachments"][0]["description"] == "portrait"
+
+
+def test_semantic_storage_validator_rejects_legacy_placeholder() -> None:
+    """Occurrence-local mention placeholders should fail before persistence."""
+
+    envelope: MessageEnvelope = {
+        "body_text": "@mentioned-user-1 hello",
+        "raw_wire_text": "[CQ:at,qq=673225019] hello",
+        "mentions": [],
+        "attachments": [],
+        "addressed_to_global_user_ids": [],
+        "broadcast": False,
+    }
+
+    with pytest.raises(ValueError, match="body_text"):
+        validate_semantic_storage_fields(
+            platform="qq",
+            display_name="Tester",
+            envelope=envelope,
+        )
+
+
+def test_semantic_storage_validator_rejects_platform_qualified_label() -> None:
+    """Adapter fallbacks must be platform-neutral before the brain boundary."""
+
+    envelope: MessageEnvelope = {
+        "body_text": "@qq-user:673225019 hello",
+        "raw_wire_text": "[CQ:at,qq=673225019] hello",
+        "mentions": [{
+            "platform_user_id": "673225019",
+            "display_name": "qq-user:673225019",
+            "entity_kind": "user",
+        }],
+        "reply": {
+            "platform_message_id": "msg-1",
+            "platform_user_id": "673225019",
+            "display_name": "qq-user:673225019",
+            "excerpt": "@qq-user:673225019 earlier",
+        },
+        "attachments": [],
+        "addressed_to_global_user_ids": [],
+        "broadcast": False,
+    }
+
+    with pytest.raises(ValueError, match="platform-qualified"):
+        validate_semantic_storage_fields(
+            platform="qq",
+            display_name="Tester",
+            envelope=envelope,
+        )
+
+
+def test_semantic_storage_validator_allows_raw_wire_text_transport() -> None:
+    """Raw wire replay text may retain platform syntax for audit."""
+
+    envelope: MessageEnvelope = {
+        "body_text": "@user hello",
+        "raw_wire_text": "[CQ:at,qq=673225019] hello",
+        "mentions": [{
+            "platform_user_id": "673225019",
+            "display_name": "user",
+            "entity_kind": "user",
+        }],
+        "reply": {
+            "platform_message_id": "msg-1",
+            "platform_user_id": "673225019",
+            "display_name": "user",
+            "excerpt": "@user earlier",
+        },
+        "attachments": [],
+        "addressed_to_global_user_ids": [],
+        "broadcast": False,
+    }
+
+    validate_semantic_storage_fields(
+        platform="qq",
+        display_name="Tester",
+        envelope=envelope,
+    )

@@ -10,6 +10,7 @@ from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.db import bootstrap as bootstrap_module
 from kazusa_ai_chatbot.db import script_operations as script_operations_module
 from scripts import migrate_conversation_history_envelope as migration_module
+from scripts import repair_semantic_identity_pollution as identity_repair_module
 
 
 def test_runtime_bootstrap_does_not_expose_migration_path() -> None:
@@ -86,6 +87,84 @@ def test_migration_sanitizes_dirty_reply_excerpt() -> None:
         "reply_to_message_id": "1733223276",
         "reply_excerpt": "look nice",
     }
+
+
+def test_semantic_identity_repair_replaces_legacy_placeholder() -> None:
+    """Repair should use typed mention metadata instead of guessing text."""
+
+    result = identity_repair_module.repair_conversation_row({
+        "_id": "dirty-identity",
+        "platform": "qq",
+        "platform_user_id": "sender-1",
+        "display_name": "Sender",
+        "body_text": "@mentioned-user-1 hello",
+        "raw_wire_text": "[CQ:at,qq=673225019] hello",
+        "mentions": [{
+            "platform_user_id": "673225019",
+            "display_name": "Oyster",
+            "entity_kind": "user",
+        }],
+        "reply_context": {
+            "reply_to_message_id": "reply-1",
+            "reply_to_platform_user_id": "673225019",
+            "reply_to_display_name": "@mentioned-user-1",
+            "reply_excerpt": "@mentioned-user-1 earlier",
+        },
+    })
+
+    assert result.repairable is True
+    assert result.requires_reembedding is True
+    assert result.set_fields["body_text"] == "@Oyster hello"
+    assert result.set_fields["reply_context"]["reply_to_display_name"] == "user"
+    assert result.set_fields["reply_context"]["reply_excerpt"] == "@Oyster earlier"
+
+
+def test_semantic_identity_repair_replaces_platform_qualified_fallbacks() -> None:
+    """Repair should sanitize platform-qualified labels written by bad adapters."""
+
+    result = identity_repair_module.repair_conversation_row({
+        "_id": "dirty-platform-fallback",
+        "platform": "qq",
+        "platform_user_id": "sender-1",
+        "display_name": "qq-user:sender-1",
+        "body_text": "@qq-user:673225019 hello #discord-channel:888",
+        "raw_wire_text": "[CQ:at,qq=673225019] hello",
+        "mentions": [{
+            "platform_user_id": "673225019",
+            "display_name": "qq-user:673225019",
+            "entity_kind": "user",
+        }],
+        "reply_context": {
+            "reply_to_message_id": "reply-1",
+            "reply_to_platform_user_id": "673225019",
+            "reply_to_display_name": "discord-user:673225019",
+            "reply_excerpt": "@discord-user:673225019 earlier",
+        },
+    })
+
+    assert result.repairable is True
+    assert result.requires_reembedding is True
+    assert result.set_fields["display_name"] == "user"
+    assert result.set_fields["body_text"] == "@user hello #channel"
+    assert result.set_fields["mentions"][0]["display_name"] == "user"
+    assert result.set_fields["reply_context"]["reply_to_display_name"] == "user"
+    assert result.set_fields["reply_context"]["reply_excerpt"] == "@user earlier"
+
+
+def test_semantic_identity_repair_strips_unmapped_placeholder() -> None:
+    """Rows without typed identity evidence should drop the unsafe token."""
+
+    result = identity_repair_module.repair_conversation_row({
+        "_id": "ambiguous-identity",
+        "platform": "qq",
+        "body_text": "@mentioned-user-1 hello",
+        "mentions": [],
+    })
+
+    assert result.repairable is True
+    assert result.requires_reembedding is True
+    assert result.ambiguous_fields == []
+    assert result.set_fields["body_text"] == "hello"
 
 
 @pytest.mark.asyncio

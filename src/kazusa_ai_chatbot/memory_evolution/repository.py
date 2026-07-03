@@ -336,6 +336,66 @@ async def supersede_memory_unit(
         await memory_store.release_memory_write_lock()
 
 
+async def reject_memory_unit(
+    *,
+    active_unit_id: str,
+    reason: str,
+    storage_timestamp_utc: str,
+) -> EvolvingMemoryDoc:
+    """Reject one active shared-memory unit while preserving audit content.
+
+    Args:
+        active_unit_id: ``memory_unit_id`` of the active row to reject.
+        reason: Cache invalidation and audit reason for the rejection.
+        storage_timestamp_utc: Storage UTC timestamp for the lifecycle update.
+
+    Returns:
+        The rejected memory document after the lifecycle transition.
+    """
+
+    clean_reason = str(reason or "").strip()
+    if not active_unit_id.strip():
+        raise ValueError("active_unit_id is required")
+    if not clean_reason:
+        raise ValueError("reason is required")
+    if not storage_timestamp_utc.strip():
+        raise ValueError("storage_timestamp_utc is required")
+
+    await _acquire_memory_write_guard(
+        "reject_memory_unit",
+        storage_timestamp_utc,
+    )
+    try:
+        target = await memory_store.find_memory_unit_by_id(active_unit_id)
+        if target is None:
+            raise ValueError(f"memory unit not found: {active_unit_id!r}")
+        _active_source_or_raise(
+            target,
+            "reject target",
+            now_timestamp_utc=storage_timestamp_utc,
+        )
+
+        await memory_store.update_memory_unit_fields(
+            active_unit_id,
+            {
+                "status": MemoryStatus.REJECTED,
+                "updated_at": storage_timestamp_utc,
+            },
+        )
+        rejected = await memory_store.find_memory_unit_by_id(active_unit_id)
+        if rejected is None:
+            raise ValueError(f"memory unit not found after reject: {active_unit_id!r}")
+
+        await invalidate_memory_cache(
+            document=rejected,
+            reason=clean_reason,
+        )
+        return_value: EvolvingMemoryDoc = dict(rejected)
+        return return_value
+    finally:
+        await memory_store.release_memory_write_lock()
+
+
 async def merge_memory_units(
     *,
     source_unit_ids: list[str],
