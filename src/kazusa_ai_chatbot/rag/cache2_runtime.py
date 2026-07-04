@@ -9,10 +9,11 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from collections import OrderedDict
 from copy import deepcopy
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from kazusa_ai_chatbot.config import RAG_CACHE2_MAX_ENTRIES
@@ -25,6 +26,7 @@ from kazusa_ai_chatbot.time_boundary import storage_utc_now
 logger = logging.getLogger(__name__)
 
 DEFAULT_CACHE2_MAX_ENTRIES = RAG_CACHE2_MAX_ENTRIES
+_WHITESPACE_RE = re.compile(r"\s+")
 
 
 def stable_cache_key(namespace: str, payload: dict[str, Any]) -> str:
@@ -44,6 +46,19 @@ def stable_cache_key(namespace: str, payload: dict[str, Any]) -> str:
         default=str,
     )
     return_value = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return return_value
+
+
+def normalize_cache_text(value: object) -> str:
+    """Normalize free-form text for stable cache keys.
+
+    Args:
+        value: Any value that should be represented as cache-key text.
+
+    Returns:
+        A stripped, whitespace-collapsed, case-folded string.
+    """
+    return_value = _WHITESPACE_RE.sub(" ", str(value or "").strip()).casefold()
     return return_value
 
 
@@ -127,6 +142,8 @@ class Cache2Entry:
         dependencies: Data scopes that can invalidate this entry.
         metadata: Optional trace metadata for debugging.
         created_at: Entry creation timestamp.
+        expires_at: Optional expiry timestamp. ``None`` means the entry is
+            valid until dependency invalidation or LRU eviction removes it.
         last_hit_at: Most recent cache-hit timestamp.
         hit_count: Number of times this entry has been served.
     """
@@ -137,6 +154,7 @@ class Cache2Entry:
     dependencies: list[CacheDependency]
     metadata: dict[str, Any] = field(default_factory=dict)
     created_at: datetime = field(default_factory=_now_utc)
+    expires_at: datetime | None = None
     last_hit_at: datetime | None = None
     hit_count: int = 0
 
@@ -186,6 +204,7 @@ class RAGCache2Runtime:
         self._misses = 0
         self._invalidations = 0
         self._evictions = 0
+        self._expirations = 0
         self._agent_stats: dict[str, AgentCacheStats] = {}
 
     async def get(
@@ -219,6 +238,20 @@ class RAGCache2Runtime:
             )
             return None
 
+        if self._entry_is_expired(entry):
+            self._entries.pop(cache_key, None)
+            self._misses += 1
+            self._expirations += 1
+            self._record_agent_lookup(
+                agent_name=self._resolve_agent_name(
+                    agent_name=agent_name,
+                    cache_name=cache_name,
+                    entry=entry,
+                ),
+                hit=False,
+            )
+            return None
+
         entry.hit_count += 1
         entry.last_hit_at = _now_utc()
         self._entries.move_to_end(cache_key)
@@ -242,6 +275,7 @@ class RAGCache2Runtime:
         result: Any,
         dependencies: list[CacheDependency],
         metadata: dict[str, Any] | None = None,
+        ttl_seconds: int | None = None,
     ) -> None:
         """Store or replace a cache entry.
 
@@ -251,13 +285,17 @@ class RAGCache2Runtime:
             result: JSON-like payload to serve on future hits.
             dependencies: Data scopes that can invalidate this entry.
             metadata: Optional trace metadata.
+            ttl_seconds: Optional positive lifetime in seconds. ``None`` means
+                no time-based expiry.
         """
+        expires_at = _expires_at_from_ttl(ttl_seconds)
         self._entries[cache_key] = Cache2Entry(
             cache_key=cache_key,
             cache_name=cache_name,
             result=deepcopy(result),
             dependencies=list(dependencies),
             metadata=dict(metadata or {}),
+            expires_at=expires_at,
         )
         self._entries.move_to_end(cache_key)
         self._evict_if_needed()
@@ -312,6 +350,7 @@ class RAGCache2Runtime:
             "hit_rate": self._hits / total if total else 0.0,
             "invalidations": self._invalidations,
             "evictions": self._evictions,
+            "expirations": self._expirations,
         }
         return return_value
 
@@ -351,6 +390,15 @@ class RAGCache2Runtime:
         else:
             stats.miss_count += 1
 
+    def _entry_is_expired(self, entry: Cache2Entry) -> bool:
+        """Return whether a cache entry has passed its optional expiry."""
+
+        expires_at = entry.expires_at
+        if expires_at is None:
+            return False
+        return_value = _now_utc() >= expires_at
+        return return_value
+
     def _resolve_agent_name(
         self,
         *,
@@ -389,6 +437,20 @@ class RAGCache2Runtime:
         while len(self._entries) > self._max_entries:
             self._entries.popitem(last=False)
             self._evictions += 1
+
+
+def _expires_at_from_ttl(ttl_seconds: int | None) -> datetime | None:
+    """Return the expiry timestamp for a positive TTL, or ``None``."""
+
+    if ttl_seconds is None:
+        return_value = None
+        return return_value
+    if not isinstance(ttl_seconds, int) or isinstance(ttl_seconds, bool):
+        raise TypeError("ttl_seconds must be an integer or None")
+    if ttl_seconds < 1:
+        raise ValueError("ttl_seconds must be positive")
+    return_value = _now_utc() + timedelta(seconds=ttl_seconds)
+    return return_value
 
 
 _runtime: RAGCache2Runtime | None = None

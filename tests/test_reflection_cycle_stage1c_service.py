@@ -404,7 +404,7 @@ async def _run_lifespan(
     monkeypatch.setattr(service_module, "db_bootstrap", AsyncMock())
     monkeypatch.setattr(
         service_module,
-        "_hydrate_rag_initializer_cache",
+        "_hydrate_media_descriptor_cache",
         AsyncMock(return_value=0),
     )
     monkeypatch.setattr(

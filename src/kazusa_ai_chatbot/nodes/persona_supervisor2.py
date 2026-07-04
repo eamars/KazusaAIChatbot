@@ -18,7 +18,6 @@ from kazusa_ai_chatbot.action_spec.results import (
     build_private_surface_output,
     build_text_surface_output,
 )
-from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.config import (
     CHAT_HISTORY_RECENT_LIMIT,
     COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS,
@@ -50,12 +49,6 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import (
     GlobalPersonaState,
     ScopeUser,
 )
-from kazusa_ai_chatbot.rag.quote_aware_sequence import (
-    call_quote_aware_rag_supervisor,
-)
-from kazusa_ai_chatbot.rag.cognitive_episode_adapter import (
-    build_text_chat_rag_request,
-)
 from kazusa_ai_chatbot.state import IMProcessState
 from kazusa_ai_chatbot.time_boundary import format_storage_utc_history_for_llm
 from kazusa_ai_chatbot.utils import (
@@ -64,8 +57,6 @@ from kazusa_ai_chatbot.utils import (
 )
 
 logger = logging.getLogger(__name__)
-
-PERSONA_RAG_COMPONENT = "nodes.persona_supervisor2"
 
 
 def _find_scope_user_index(
@@ -534,10 +525,6 @@ async def run_rag_evidence_for_persona_state(
         state,
         agent_name=agent_name,
         objective=objective,
-        call_rag_supervisor_func=call_quote_aware_rag_supervisor,
-        record_rag_stage_event_func=event_logging.record_rag_stage_event,
-        build_rag_request_func=build_text_chat_rag_request,
-        component=PERSONA_RAG_COMPONENT,
     )
     return_value = rag_result
     return return_value

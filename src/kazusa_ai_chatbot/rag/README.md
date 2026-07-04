@@ -1,23 +1,31 @@
-# RAG 2
+# Retired RAG 2 Helper Layer
 
-`kazusa_ai_chatbot.rag` is the helper-agent and Cache 2 layer for the current RAG 2 retrieval system.
+`kazusa_ai_chatbot.rag` is the helper-agent and Cache 2 layer for the retired
+RAG 2 retrieval system. Production `local_context_recall` is owned by
+`kazusa_ai_chatbot.local_context_resolver` (RAG3). This package remains in the
+repository for historical coverage, reusable helper code, comparison tests,
+and source-level evidence experiments.
 
-RAG 2 turns a user query into bounded factual evidence for persona cognition. It resolves identities, searches conversation history and persistent memory, reads profile-like state, performs narrow factual reductions, and can delegate to web search when external information is needed.
+RAG 2 turned a user query into bounded factual evidence for persona cognition.
+It resolved identities, searched conversation history and persistent memory,
+read profile-like state, performed narrow factual reductions, and could
+delegate to web search when external information was needed.
 
 It transforms data into evidence for cognition. Cognition decides what that
 evidence means for Kazusa's stance, tone, and final response.
 
 ## System Boundary
 
-The live persona graph reaches RAG through the cognition resolver's evidence
-capability. The retained helper boundary is:
+The live persona graph no longer reaches the retired RAG2 supervisor for
+`local_context_recall`. The production recall boundary is RAG3:
 
 ```python
 from kazusa_ai_chatbot.nodes.persona_supervisor2 import run_rag_evidence_for_persona_state
 ```
 
-That helper wraps the quote-aware RAG supervisor and projects the result into
-the compact persona payload. The lower-level supervisor returns:
+That helper now calls `resolve_local_context(...)` and projects the returned
+packet into the compact persona payload. The retired lower-level RAG2
+supervisor returned:
 
 ```python
 {
@@ -189,7 +197,7 @@ split inside its capability package first. Do not add global auto-discovery,
 compatibility import shims, fallback import paths, new helper modes, or prompt
 behavior changes as part of a structural split.
 
-## Runtime Lifecycle
+## Retired Runtime Lifecycle
 
 ```text
 persona_supervisor2
@@ -218,20 +226,18 @@ persona_supervisor2
   -> stage_3_action
 ```
 
-The RAG loop is slot-driven. `unknown_slots` is the work queue and the stop
+This retired RAG loop is slot-driven. `unknown_slots` is the work queue and the stop
 condition: slots are drained one at a time, and each completed attempt appends
 a fact row to `known_facts`. The persona graph decides whether to enter this
 loop through L2d action selection, not through a mandatory pre-cognition full
 RAG step.
 
-The first resolver cycle has one narrower prewarm lane: it may start a
-shared-memory-only lookup through the existing persona RAG request intake,
-call only `PersistentMemorySearchAgent`, project through
-`project_known_facts(...)`, and merge confirmed shared `memory` rows into
-`rag_result.memory_evidence` before L2a reads `rag_result`. This lane does not
-run `MemoryEvidenceAgent`, does not read `user_memory_units`, does not populate
-`rag_result.answer`, and does not create a resolver observation. Full RAG 2
-remains L2d-selected.
+The current first resolver cycle has one narrower prewarm lane implemented
+through RAG3 with `source="prewarm"`. It may merge confirmed shared `memory`
+rows into `rag_result.memory_evidence` before L2a reads `rag_result`. This
+lane does not run `MemoryEvidenceAgent`, does not read `user_memory_units`,
+does not populate `rag_result.answer`, and does not create a resolver
+observation.
 
 The default loop cap is four dispatch iterations. This prevents open-ended
 agentic search and keeps normal chatbot latency bounded. Future RAG
@@ -549,29 +555,39 @@ Long-term global lore promotion remains future work. The current implementation 
 
 ## Cache 2
 
-Cache 2 is the only RAG cache. Its hot serving layer is a process-local LRU used by the helper-agent layer and initializer strategy lookup.
+Cache 2 remains the shared process-local cache runtime for retrieval/evidence
+helpers and selected RAG3 stage results. Its hot serving layer is a
+process-local LRU used by retained helper agents, media descriptor hydration,
+retired initializer strategy tests, and RAG3 graph-planner / active-node stage
+lookups. Service startup no longer hydrates the retired initializer strategy
+cache into production memory.
 
-Helper-agent result cache entries are intentionally session-local:
+Helper-agent and RAG3 stage-result cache entries are intentionally
+session-local unless a separate persistent owner explicitly writes a durable
+row, such as the media descriptor cache:
 
 - helper-agent entries disappear on service restart,
+- RAG3 planner and active-node entries disappear on service restart,
 - helper-agent results are not written through to MongoDB,
+- RAG3 stage entries are not written through to MongoDB,
 - correctness depends on dependency-based invalidation rather than long TTLs,
 - web search and final answers are not cached.
 
-Top-level capability agents are not cached. Their cache metadata reports
-`enabled=false` and `reason="capability_orchestrator_uncached"`. They may call
-existing cacheable workers, whose Cache 2 policies remain source-aware.
+Top-level retained RAG2 capability agents are not cached. Their cache metadata
+reports `enabled=false` and
+`reason="capability_orchestrator_uncached"`. They may call existing cacheable
+workers, whose Cache 2 policies remain source-aware. Production RAG3 does not
+cache the top-level `LocalContextResolutionPacketV1`; it caches only planner
+task-list output and active-node evidence output.
 
-The `rag_initializer` strategy cache is the one durable exception. Current-version
-initializer rows are persisted in `rag_cache2_persistent_entries`, loaded into
-the Python LRU during service startup, and ranked by `hit_count desc,
-updated_at desc` so the most useful paths survive restart. Normal request-path
-cache reads still check only the Python LRU. A new cacheable initializer path
-stores in memory first and then schedules a best-effort MongoDB upsert; an
-initializer memory hit schedules a best-effort hit-count update. LRU eviction
-does not delete the persistent row.
+The retired `rag_initializer` strategy cache may still be exercised by legacy
+tests or experiments, but it is not hydrated by the production service startup
+path after the RAG3 cutover.
 
-Cache entries declare the data scopes they depend on, such as `user_profile`, `character_state`, or `conversation_history`. Durable write paths emit invalidation events after successful writes. The runtime evicts cached entries whose dependencies overlap the event scope.
+Cache entries declare the data scopes they depend on, such as `user_profile`,
+`character_state`, `memory`, or `conversation_history`. Durable write paths
+emit invalidation events after successful writes. The runtime evicts cached
+entries whose dependencies overlap the event scope.
 
 ```text
 helper agent result
@@ -585,18 +601,35 @@ Cache 2 runtime
   -> evict stale entries
 ```
 
-Conversation retrieval is cached only for closed historical windows with both `from_timestamp` and `to_timestamp`. Recent or open-ended conversation queries are deliberately not cached because new messages can make them stale immediately.
+Retained RAG2 conversation retrieval is cached only for closed historical
+windows with both `from_timestamp` and `to_timestamp`. Recent or open-ended
+conversation queries are deliberately not cached because new messages can make
+them stale immediately.
+
+RAG3 takes a different stage-level approach:
+
+- planner cache keys are aggressive and long-lived because the cached value is
+  only source-domain decomposition, not evidence;
+- active-node cache keys are exact over compact prompt-safe context,
+  dependency context, node kind, objective, option limits, prompt digest, and
+  model identity;
+- stable local domains use no TTL and rely on key versioning plus dependency
+  invalidation;
+- live-context node entries have a short TTL;
+- external-evidence node entries have a longer TTL;
+- final packets, `rag_result`, and final dialog wording are not cached.
 
 ## Integration With Cognition
 
-RAG 2 is called from the cognition resolver only when L2d selects
-`local_context_recall`. Public/current/external answer investigation is exposed
-to L2d as `public_answer_research` and handled by the complex task resolver,
-with web/source retrieval remaining an internal provider below that boundary.
+RAG2 is not called from the cognition resolver after the RAG3 cutover.
+Production `local_context_recall` calls the local-context resolver. Public,
+current, and external answer investigation is exposed to L2d as
+`public_answer_research` and handled by the complex task resolver, with
+web/source retrieval remaining an internal provider below that boundary.
 
 Cognition reads `rag_result`, not raw RAG supervisor state. The intended division is:
 
-- RAG 2 answers "what evidence exists?"
+- RAG3 answers "what evidence exists?"
 - Cognition answers "what does this mean for Kazusa right now?"
 - Dialog generation answers "how should Kazusa say it?"
 
@@ -611,7 +644,7 @@ and response goals from the wider cognition state.
 
 The consolidator also reads the projected `rag_result`.
 
-RAG 2 retrieval produces evidence. Durable writes happen later in the
+RAG-style retrieval produces evidence. Durable writes happen later in the
 background consolidation path after cognition and dialog have completed. Cache
 invalidation is tied to successful durable writes.
 
@@ -653,8 +686,9 @@ policy, and structural validation.
 
 ## Operational Notes
 
-RAG 2 replaced the legacy RAG 1 / Cache 1 path. The current downstream payload
-is `rag_result`.
+RAG 2 replaced the legacy RAG 1 / Cache 1 path, and RAG3 has now replaced RAG2
+as the production local-context recall path. The current downstream payload is
+still `rag_result`.
 
 Cache 2 exposes per-agent hit/miss statistics through service health data.
 These counters are operational telemetry for operators and dashboards.

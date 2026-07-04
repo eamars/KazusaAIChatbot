@@ -117,9 +117,9 @@ coordination API and not through `/chat`-specific imports.
 
 - Every case enters the bounded cognition resolver and each resolver cycle
   invokes the shared L1/L2/L2d cognition graph.
-- If L2d selects `local_context_recall`, the resolver invokes the existing RAG2
-  supervisor as a capability observation and feeds the projected result into
-  the next cognition cycle. Internal RAG2 helper calls remain governed by RAG2.
+- If L2d selects `local_context_recall`, the resolver invokes RAG3 local
+  context resolution as a capability observation and feeds the projected result
+  into the next cognition cycle.
 - If L2d selects `public_answer_research`, public/current/external answer
   investigation is handled by the complex task resolver through declared IO.
 - If L2d selects neither recall nor public answer research, no deterministic

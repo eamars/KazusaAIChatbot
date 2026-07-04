@@ -5,12 +5,15 @@
 - Owning package: `kazusa_ai_chatbot.cognition_resolver`
 - Runtime owner: `kazusa_ai_chatbot.nodes.persona_supervisor2.stage_1_goal_resolver`
 - Primary caller: persona graph after message decontextualization
-- Primary consumers: cognition chain core, RAG 2, action-spec ledger, L3 text
-  surface, consolidation, and resolver telemetry helpers
+- Primary consumers: cognition chain core, RAG3 local-context evidence,
+  action-spec ledger, L3 text surface, consolidation, and resolver telemetry
+  helpers
 - Contract owners: `contracts.py`, `state.py`, `loop.py`,
   `capabilities.py`, `pending.py`, and `telemetry.py`
 - Related docs: [Cognition Nodes](../nodes/README.md),
-  [Action Spec](../action_spec/README.md), [RAG 2](../rag/README.md),
+  [Action Spec](../action_spec/README.md),
+  [Local Context Resolver ICD](../local_context_resolver/README.md),
+  [Retired RAG 2](../rag/README.md),
   [Brain Service ICD](../brain_service/README.md)
 
 This ICD defines the bounded recurrence boundary between the persona graph and
@@ -207,7 +210,7 @@ Allowed resolver capabilities are:
 
 | Capability | Handler behavior | Notes |
 | --- | --- | --- |
-| `local_context_recall` | Runs existing RAG 2 through `run_rag_evidence_for_persona_state(...)`. | Owns local/private/persona/user/conversation memory, relationship, profile, commitment, and recall evidence. |
+| `local_context_recall` | Runs RAG3 local-context resolution through `run_rag_evidence_for_persona_state(...)`. | Owns local/private/persona/user/conversation memory, relationship, profile, commitment, and recall evidence. |
 | `public_answer_research` | Calls `kazusa_ai_chatbot.complex_task_resolver.resolve_complex_task(...)` through declared request/context/options IO. | Owns public, current, external, source-bound answer investigation and returns semantic knowledge sections for cognition to judge. |
 | `human_clarification` | Returns a blocked observation and creates a pending HIL row. | L3/dialog renders the actual visible question. |
 | `approval_preparation` | Returns a blocked observation and creates a pending approval row. | It never executes the side effect being previewed. |
@@ -223,10 +226,10 @@ cognition cycle can decide what remains necessary.
 
 ## RAG And Shared-Memory Prewarm
 
-Full RAG 2 remains demand-driven. It runs only when L2d selects
-`local_context_recall`. Public/current/external investigation is exposed to L2d
-as `public_answer_research` and is handled by the complex task resolver; any
-web/source helpers stay internal to that module. The projected observation
+RAG3 local context remains demand-driven. It runs only when L2d selects
+`local_context_recall`. Public/current/external investigation is exposed to
+L2d as `public_answer_research` and is handled by the complex task resolver;
+any web/source helpers stay internal to that module. The projected observation
 contains `knowledge_we_know_so_far`, `knowledge_still_lacking`,
 `recommended_next_iteration`, and `evidence_boundary_notes`. These fields are
 evidence context for the next cognition cycle, not a resolver-side judgment
@@ -243,9 +246,9 @@ first resolver cycle
   -> L2b remains independent of the prewarm join
 ```
 
-This prewarm is not a resolver capability observation. It may add confirmed
-shared `memory` collection evidence to `rag_result.memory_evidence`, but it
-must not:
+This prewarm is not a resolver capability observation. It calls RAG3 with
+`source="prewarm"` and may add confirmed shared `memory` collection evidence
+to `rag_result.memory_evidence`, but it must not:
 
 - call full `MemoryEvidenceAgent`
 - read scoped `user_memory_units`

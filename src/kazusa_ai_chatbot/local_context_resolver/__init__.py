@@ -1,0 +1,57 @@
+"""Public API for the standalone local-context resolver package."""
+
+from .constants import (
+    DEFAULT_OPTION_LIMITS,
+    DEFAULT_SUBAGENT_MAX_ATTEMPTS,
+    OPTION_LIMIT_CAPS,
+)
+from .contracts import (
+    LOCAL_CONTEXT_ARTIFACT_VERSION,
+    LOCAL_CONTEXT_GRAPH_VERSION,
+    LOCAL_CONTEXT_NODE_VERSION,
+    LOCAL_CONTEXT_RESOLUTION_PACKET_VERSION,
+    LOCAL_CONTEXT_RESOLVER_CONTEXT_VERSION,
+    LOCAL_CONTEXT_RESOLVER_OPTIONS_VERSION,
+    LOCAL_CONTEXT_RESOLVER_REQUEST_VERSION,
+    LOCAL_CONTEXT_SUBAGENT_REQUEST_VERSION,
+    LOCAL_CONTEXT_SUBAGENT_RESULT_VERSION,
+    LocalContextValidationError,
+    project_local_context_packet,
+    validate_local_context_artifact,
+    validate_local_context_graph,
+    validate_local_context_node,
+    validate_local_context_resolution_packet,
+    validate_local_context_resolver_context,
+    validate_local_context_resolver_options,
+    validate_local_context_resolver_request,
+    validate_local_context_subagent_request,
+    validate_local_context_subagent_result,
+)
+from .service import resolve_local_context
+
+__all__ = [
+    "DEFAULT_OPTION_LIMITS",
+    "DEFAULT_SUBAGENT_MAX_ATTEMPTS",
+    "LOCAL_CONTEXT_ARTIFACT_VERSION",
+    "LOCAL_CONTEXT_GRAPH_VERSION",
+    "LOCAL_CONTEXT_NODE_VERSION",
+    "LOCAL_CONTEXT_RESOLUTION_PACKET_VERSION",
+    "LOCAL_CONTEXT_RESOLVER_CONTEXT_VERSION",
+    "LOCAL_CONTEXT_RESOLVER_OPTIONS_VERSION",
+    "LOCAL_CONTEXT_RESOLVER_REQUEST_VERSION",
+    "LOCAL_CONTEXT_SUBAGENT_REQUEST_VERSION",
+    "LOCAL_CONTEXT_SUBAGENT_RESULT_VERSION",
+    "LocalContextValidationError",
+    "OPTION_LIMIT_CAPS",
+    "project_local_context_packet",
+    "resolve_local_context",
+    "validate_local_context_artifact",
+    "validate_local_context_graph",
+    "validate_local_context_node",
+    "validate_local_context_resolution_packet",
+    "validate_local_context_resolver_context",
+    "validate_local_context_resolver_options",
+    "validate_local_context_resolver_request",
+    "validate_local_context_subagent_request",
+    "validate_local_context_subagent_result",
+]

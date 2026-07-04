@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 from langchain_core.messages import AIMessage
 
+from kazusa_ai_chatbot.cognition_resolver import capabilities as capabilities_module
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as supervisor_module
@@ -218,21 +219,76 @@ def _dialog_node_state() -> dict[str, object]:
     return state
 
 
+def _local_context_packet(rag_result: dict[str, object]) -> dict[str, object]:
+    """Build the minimal packet shape consumed by the capability wrapper."""
+
+    return {
+        "rag_result": rag_result,
+        "graph": {
+            "nodes": {
+                "root": {},
+                "task_1": {},
+            },
+        },
+        "trace_summary": {
+            "cache_hits": 0,
+        },
+    }
+
+
+def _rag3_result(
+    *,
+    answer: str = "",
+    memory_evidence: list[dict[str, object]] | None = None,
+    supervisor_trace: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Build a retained RAG3 result payload for event tests."""
+
+    return {
+        "answer": answer,
+        "user_image": {
+            "user_memory_context": {
+                "stable_patterns": [],
+                "recent_shifts": [],
+                "objective_facts": [],
+                "milestones": [],
+                "active_commitments": [],
+            },
+        },
+        "user_memory_unit_candidates": [],
+        "character_image": {},
+        "third_party_profiles": [],
+        "memory_evidence": list(memory_evidence or []),
+        "recall_evidence": [],
+        "conversation_evidence": [],
+        "external_evidence": [],
+        "supervisor_trace": supervisor_trace or {
+            "resolver": "local_context_resolver",
+            "node_count": 2,
+        },
+    }
+
+
 @pytest.mark.asyncio
 async def test_rag_evidence_skip_records_event_without_query_text(monkeypatch) -> None:
     """Unresolved referent skips should record only sanitized RAG metadata."""
 
     record_rag_stage_event = AsyncMock()
-    call_rag_supervisor = AsyncMock()
+    resolve_local_context = AsyncMock()
     monkeypatch.setattr(
-        supervisor_module.event_logging,
+        capabilities_module.event_logging,
         "record_rag_stage_event",
         record_rag_stage_event,
     )
     monkeypatch.setattr(
-        supervisor_module,
-        "call_quote_aware_rag_supervisor",
-        call_rag_supervisor,
+        capabilities_module,
+        "resolve_local_context",
+        resolve_local_context,
+    )
+    monkeypatch.setattr(
+        capabilities_module,
+        "project_local_context_packet",
+        lambda packet: packet["rag_result"],
     )
 
     state = _stage_1_state(
@@ -251,7 +307,7 @@ async def test_rag_evidence_skip_records_event_without_query_text(monkeypatch) -
     )
 
     assert rag_result["answer"] == ""
-    call_rag_supervisor.assert_not_awaited()
+    resolve_local_context.assert_not_awaited()
     record_rag_stage_event.assert_awaited_once()
     kwargs = record_rag_stage_event.await_args.kwargs
     assert kwargs["status"] == "skipped"
@@ -266,51 +322,35 @@ async def test_rag_evidence_success_records_counts_without_evidence(monkeypatch)
 
     record_rag_stage_event = AsyncMock()
     monkeypatch.setattr(
-        supervisor_module.event_logging,
+        capabilities_module.event_logging,
         "record_rag_stage_event",
         record_rag_stage_event,
     )
 
-    async def call_rag_supervisor(
-        *,
-        fresh_query: str,
-        reply_context: dict,
-        character_name: str,
-        context: dict,
+    async def resolve_local_context(
+        *_args: object,
+        **_kwargs: object,
     ) -> dict[str, object]:
-        """Return one projected memory evidence fact."""
+        """Return one projected memory evidence row."""
 
-        del fresh_query, reply_context, character_name, context
-        result = {
-            "answer": "private synthesized answer",
-            "known_facts": [
-                {
-                    "slot": "Memory-evidence: private slot",
-                    "agent": "memory_evidence_agent",
-                    "resolved": True,
-                    "summary": "private memory summary",
-                    "raw_result": {
-                        "projection_payload": {
-                            "memory_rows": [
-                                {
-                                    "content": "secret retrieved evidence",
-                                    "source_system": "memory",
-                                }
-                            ],
-                        },
-                    },
-                    "attempts": 1,
-                }
-            ],
-            "unknown_slots": [],
-            "loop_count": 1,
-        }
-        return result
+        rag_result = _rag3_result(
+            answer="private synthesized answer",
+            memory_evidence=[{
+                "content": "secret retrieved evidence",
+                "source_system": "memory",
+            }],
+        )
+        return _local_context_packet(rag_result)
 
     monkeypatch.setattr(
-        supervisor_module,
-        "call_quote_aware_rag_supervisor",
-        call_rag_supervisor,
+        capabilities_module,
+        "resolve_local_context",
+        resolve_local_context,
+    )
+    monkeypatch.setattr(
+        capabilities_module,
+        "project_local_context_packet",
+        lambda packet: packet["rag_result"],
     )
 
     state = _stage_1_state(referents=[])
@@ -336,33 +376,37 @@ async def test_rag_evidence_success_records_safety_recovery_count(monkeypatch) -
 
     record_rag_stage_event = AsyncMock()
     monkeypatch.setattr(
-        supervisor_module.event_logging,
+        capabilities_module.event_logging,
         "record_rag_stage_event",
         record_rag_stage_event,
     )
 
-    async def call_rag_supervisor(
-        *,
-        fresh_query: str,
-        reply_context: dict,
-        character_name: str,
-        context: dict,
+    async def resolve_local_context(
+        *_args: object,
+        **_kwargs: object,
     ) -> dict[str, object]:
-        """Return an unsafe answer that should be dropped at projection."""
+        """Return a projected result with one safety recovery incident."""
 
-        del fresh_query, reply_context, character_name, context
-        result = {
-            "answer": "[CQ:image,file=abc]",
-            "known_facts": [],
-            "unknown_slots": [],
-            "loop_count": 1,
-        }
-        return result
+        rag_result = _rag3_result(
+            supervisor_trace={
+                "resolver": "local_context_resolver",
+                "node_count": 2,
+                "safety_recovery": [
+                    "dropped_text_line:rag_result.answer",
+                ],
+            },
+        )
+        return _local_context_packet(rag_result)
 
     monkeypatch.setattr(
-        supervisor_module,
-        "call_quote_aware_rag_supervisor",
-        call_rag_supervisor,
+        capabilities_module,
+        "resolve_local_context",
+        resolve_local_context,
+    )
+    monkeypatch.setattr(
+        capabilities_module,
+        "project_local_context_packet",
+        lambda packet: packet["rag_result"],
     )
 
     state = _stage_1_state(referents=[])

@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
+from kazusa_ai_chatbot.cognition_resolver import capabilities
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as supervisor_module
 from kazusa_ai_chatbot.cognition_chain_core.stages import l3 as l3_module
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
@@ -102,18 +103,15 @@ def _minimal_text_chat_episode() -> dict:
 async def test_rag_evidence_skip_preserves_projected_shape(monkeypatch) -> None:
     """Skipped RAG should still return the full cognition-consumed payload."""
 
-    async def _call_rag_supervisor(
-        *,
-        fresh_query: str,
-        character_name: str,
-        context: dict,
-    ) -> dict:
-        raise AssertionError("RAG supervisor should not run when clarification is needed")
+    async def _resolve_local_context(*_args: object, **_kwargs: object) -> dict:
+        raise AssertionError(
+            "local-context resolver should not run when clarification is needed"
+        )
 
     monkeypatch.setattr(
-        supervisor_module,
-        "call_quote_aware_rag_supervisor",
-        _call_rag_supervisor,
+        capabilities,
+        "resolve_local_context",
+        _resolve_local_context,
     )
 
     rag_result = await supervisor_module.run_rag_evidence_for_persona_state(
@@ -132,16 +130,18 @@ async def test_rag_evidence_skip_preserves_projected_shape(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_skip_branch_does_not_call_adapter(monkeypatch) -> None:
-    """Skipped RAG should not invoke the cognitive episode adapter."""
+    """Skipped RAG should not invoke the local-context resolver."""
 
-    def _build_text_chat_rag_request(**_kwargs: object) -> dict:
-        """Fail if the skip branch reaches request construction."""
-        raise AssertionError("RAG adapter should not run when clarification is needed")
+    async def _resolve_local_context(*_args: object, **_kwargs: object) -> dict:
+        """Fail if the skip branch reaches resolver execution."""
+        raise AssertionError(
+            "local-context resolver should not run when clarification is needed"
+        )
 
     monkeypatch.setattr(
-        supervisor_module,
-        "build_text_chat_rag_request",
-        _build_text_chat_rag_request,
+        capabilities,
+        "resolve_local_context",
+        _resolve_local_context,
     )
 
     rag_result = await supervisor_module.run_rag_evidence_for_persona_state(

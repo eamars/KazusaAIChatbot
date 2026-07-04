@@ -39,6 +39,14 @@ from kazusa_ai_chatbot.cognition_resolver.telemetry import (
     build_resolver_terminal_event,
     write_human_readable_resolver_trace,
 )
+from kazusa_ai_chatbot.local_context_resolver import (
+    LOCAL_CONTEXT_GRAPH_VERSION,
+    LOCAL_CONTEXT_NODE_VERSION,
+    LOCAL_CONTEXT_RESOLUTION_PACKET_VERSION,
+)
+from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
+    empty_user_memory_context,
+)
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 
@@ -137,6 +145,102 @@ def _internal_thought_resolver_state() -> dict:
     state["channel_type"] = "group"
     return_value = state
     return return_value
+
+
+def _local_context_node(
+    *,
+    node_id: str,
+    node_kind: str,
+    parent_id: str | None,
+    children: list[str],
+) -> dict:
+    """Build a minimal valid local-context node for capability tests."""
+
+    node = {
+        "schema_version": LOCAL_CONTEXT_NODE_VERSION,
+        "node_id": node_id,
+        "node_kind": node_kind,
+        "objective": "Resolve local context evidence.",
+        "parent_id": parent_id,
+        "children": children,
+        "depends_on": [],
+        "consumes": {},
+        "produces": [],
+        "status": "resolved",
+        "investigation_summary": [],
+        "knowledge_we_know_so_far": [],
+        "knowledge_still_lacking": [],
+        "recommended_next_iteration": [],
+        "evidence_boundary_notes": [],
+        "attempts": [],
+        "collapsed_into": None,
+    }
+    return node
+
+
+def _local_context_packet(
+    *,
+    answer: str,
+    memory_evidence: list[dict] | None = None,
+    conversation_evidence: list[dict] | None = None,
+) -> dict:
+    """Build a minimal valid RAG3 packet for capability tests."""
+
+    root = _local_context_node(
+        node_id="root",
+        node_kind="synthesis",
+        parent_id=None,
+        children=["task_1"],
+    )
+    task = _local_context_node(
+        node_id="task_1",
+        node_kind="memory_evidence",
+        parent_id="root",
+        children=[],
+    )
+    packet = {
+        "schema_version": LOCAL_CONTEXT_RESOLUTION_PACKET_VERSION,
+        "investigation_summary": ["RAG3 resolved local context."],
+        "knowledge_we_know_so_far": ["RAG3 resolved local context."],
+        "knowledge_still_lacking": [],
+        "recommended_next_iteration": [],
+        "evidence_boundary_notes": [],
+        "rag_result": {
+            "answer": answer,
+            "user_image": {
+                "user_memory_context": empty_user_memory_context(),
+            },
+            "user_memory_unit_candidates": [],
+            "character_image": {},
+            "third_party_profiles": [],
+            "memory_evidence": list(memory_evidence or []),
+            "recall_evidence": [],
+            "conversation_evidence": list(conversation_evidence or []),
+            "external_evidence": [],
+            "supervisor_trace": {
+                "resolver": "local_context_resolver",
+                "node_count": 2,
+            },
+        },
+        "graph": {
+            "schema_version": LOCAL_CONTEXT_GRAPH_VERSION,
+            "root_node_id": "root",
+            "active_node_id": "task_1",
+            "nodes": {
+                "root": root,
+                "task_1": task,
+            },
+            "traversal_order": ["root", "task_1"],
+            "collapse_events": [],
+            "max_nodes": 8,
+            "max_depth": 3,
+        },
+        "trace_summary": {
+            "iterations": 1,
+            "node_count": 2,
+        },
+    }
+    return packet
 
 
 def _cognition_result(
@@ -1934,43 +2038,31 @@ async def test_pending_resume_load_restores_original_goal_progress() -> None:
 async def test_rag_capability_uses_objective_and_preserves_original_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """RAG resolver execution should use objective while preserving context."""
+    """RAG3 execution should use objective while preserving original context."""
 
     captured: dict = {}
 
-    async def call_rag_supervisor(
-        *,
-        fresh_query: str,
-        reply_context: dict,
-        character_name: str,
+    async def resolve_local_context(
+        request: dict,
         context: dict,
+        options: dict,
     ) -> dict[str, object]:
-        captured["fresh_query"] = fresh_query
-        captured["reply_context"] = reply_context
-        captured["character_name"] = character_name
+        captured["request"] = request
         captured["context"] = context
-        result = {
-            "answer": "找到一条关系记忆。",
-            "known_facts": [
-                {
-                    "slot": "memory",
-                    "agent": "memory_evidence_agent",
-                    "resolved": True,
-                    "summary": "存在一条信任相关记忆。",
-                    "raw_result": {
-                        "projection_payload": {"memory_rows": []},
-                    },
-                }
-            ],
-            "unknown_slots": [],
-            "loop_count": 1,
-        }
+        captured["options"] = options
+        result = _local_context_packet(
+            answer="找到一条关系记忆。",
+            memory_evidence=[{
+                "summary": "存在一条信任相关记忆。",
+                "source_system": "memory",
+            }],
+        )
         return result
 
     monkeypatch.setattr(
         capabilities_module,
-        "call_quote_aware_rag_supervisor",
-        call_rag_supervisor,
+        "resolve_local_context",
+        resolve_local_context,
     )
     monkeypatch.setattr(
         capabilities_module.event_logging,
@@ -1984,9 +2076,17 @@ async def test_rag_capability_uses_objective_and_preserves_original_request(
         _resolver_state(),
     )
 
-    assert captured["fresh_query"] == request["objective"]
+    assert captured["request"]["source"] == "l2d"
+    assert captured["request"]["objective"] == request["objective"]
+    assert captured["request"]["reason"] == request["reason"]
     assert captured["context"]["original_user_request"] == (
         "Original user request about trust."
+    )
+    assert captured["context"]["prompt_message_context"]["body_text"] == (
+        "Need an evidence-backed answer."
+    )
+    assert captured["context"]["conversation_progress"]["current_thread"] == (
+        "trust question"
     )
     assert observation["status"] == "succeeded"
     assert observation["capability_kind"] == "local_context_recall"
@@ -2001,47 +2101,30 @@ async def test_rag_capability_uses_objective_and_preserves_original_request(
 async def test_internal_thought_rag_capability_uses_existing_rag_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Selected internal-thought RAG should execute through existing RAG."""
+    """Selected internal-thought RAG should execute through RAG3."""
 
     captured: dict = {}
 
-    async def call_rag_supervisor(
-        *,
-        fresh_query: str,
-        reply_context: dict,
-        character_name: str,
+    async def resolve_local_context(
+        request: dict,
         context: dict,
+        options: dict,
     ) -> dict[str, object]:
-        captured["fresh_query"] = fresh_query
-        captured["reply_context"] = reply_context
-        captured["character_name"] = character_name
+        captured["request"] = request
         captured["context"] = context
-        result = {
-            "answer": "找到一条群聊前文证据。",
-            "known_facts": [
-                {
-                    "slot": "Conversation-evidence: prior group context",
-                    "agent": "conversation_evidence_agent",
-                    "resolved": True,
-                    "summary": "前文显示这是一段延续中的群聊话题。",
-                    "raw_result": {
-                        "projection_payload": {
-                            "conversation_rows": [{
-                                "content": "前文提到同一个话题。",
-                            }],
-                        },
-                    },
-                }
-            ],
-            "unknown_slots": [],
-            "loop_count": 1,
-        }
+        captured["options"] = options
+        result = _local_context_packet(
+            answer="找到一条群聊前文证据。",
+            conversation_evidence=[{
+                "content": "前文提到同一个话题。",
+            }],
+        )
         return result
 
     monkeypatch.setattr(
         capabilities_module,
-        "call_quote_aware_rag_supervisor",
-        call_rag_supervisor,
+        "resolve_local_context",
+        resolve_local_context,
     )
     monkeypatch.setattr(
         capabilities_module.event_logging,
@@ -2057,17 +2140,17 @@ async def test_internal_thought_rag_capability_uses_existing_rag_path(
         _internal_thought_resolver_state(),
     )
 
-    assert captured["fresh_query"] == request["objective"]
+    assert captured["request"]["objective"] == request["objective"]
+    assert captured["request"]["source"] == "l2d"
     assert captured["context"]["original_user_request"] == (
         "Original user request about trust."
     )
     assert captured["context"]["platform"] == "debug"
-    assert captured["context"]["channel_type"] == "private"
     assert captured["context"]["global_user_id"] == "global-user-123"
-    assert captured["context"]["active_turn_conversation_row_ids"] == [
-        "row-123",
-    ]
-    assert captured["character_name"] == "Kazusa"
+    assert captured["context"]["character_name"] == "Kazusa"
+    assert captured["context"]["prompt_message_context"]["body_text"] == (
+        "Need an evidence-backed answer."
+    )
     assert observation["status"] == "succeeded"
     assert observation["capability_kind"] == "local_context_recall"
     assert observation["rag_result"]["answer"] == "找到一条群聊前文证据。"
@@ -2193,11 +2276,11 @@ async def test_empty_resolver_objective_fails_before_rag_dispatch(
 ) -> None:
     """Malformed resolver requests must fail before invoking RAG."""
 
-    call_rag_supervisor = AsyncMock()
+    resolve_local_context = AsyncMock()
     monkeypatch.setattr(
         capabilities_module,
-        "call_quote_aware_rag_supervisor",
-        call_rag_supervisor,
+        "resolve_local_context",
+        resolve_local_context,
     )
     request = _resolver_request(objective=" ")
 
@@ -2207,7 +2290,7 @@ async def test_empty_resolver_objective_fails_before_rag_dispatch(
             _resolver_state(),
         )
 
-    call_rag_supervisor.assert_not_awaited()
+    resolve_local_context.assert_not_awaited()
 
 
 @pytest.mark.asyncio

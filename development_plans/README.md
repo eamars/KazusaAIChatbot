@@ -40,7 +40,6 @@ long_term/todo.md
 |---|---|---|
 | [coding_agent_phase1_fetching_reading_plan.md](active/short_term/coding_agent_phase1_fetching_reading_plan.md) | Large standalone coding-agent Phase 1 plan | draft |
 | [coding_agent_phase2_5_security_boundary_plan.md](active/short_term/coding_agent_phase2_5_security_boundary_plan.md) | High-risk coding-agent Phase 2.5 security boundary plan | draft |
-| [rag3_router_interpreter_poc_experiment_plan.md](active/short_term/rag3_router_interpreter_poc_experiment_plan.md) | Medium experiment and POC design plan | draft |
 
 ## Supporting Experiment Records
 
@@ -101,8 +100,30 @@ evidence, then moved completed short-term records out of `active/`.
 |---|---|
 | Moved from active short-term to completed archive | `control_console_auto_model_discovery_picker_plan.md`, `control_console_brain_model_route_config_plan.md`, `control_console_cognition_debug_visibility_plan.md`, `llm_trace_observability_and_retrieval_plan.md`, `web_agent3_source_availability_bigbang_plan.md` |
 | Completed by user-approved fallback execution without subagent | `web_agent3_bilibili_source_subagent_plan.md` |
-| Kept active draft because required implementation artifacts are absent | `coding_agent_phase1_fetching_reading_plan.md`, `rag3_router_interpreter_poc_experiment_plan.md` |
+| Kept active draft because required implementation artifacts are absent | `coding_agent_phase1_fetching_reading_plan.md` |
 | Kept active draft because the bugfix remains unexecuted | `rag2_public_output_contract_leak_bugfix_plan.md`; source still contains the planned forbidden RAG public-output phrases in `persona_supervisor2_rag_evaluator.py` |
+
+### 2026-07-04 RAG3 active plan refresh
+
+The active RAG3 router/interpreter POC draft was removed after the user chose a
+bigbang RAG 3 local-context resolver direction aligned with the complex task
+resolver architecture.
+
+| Outcome | Plans |
+|---|---|
+| Removed from active short-term | `rag3_router_interpreter_poc_experiment_plan.md` |
+| Added to active short-term | `rag3_local_context_resolver_bigbang_plan.md` |
+
+### 2026-07-04 RAG3 production cutover completion
+
+The approved RAG3 local-context resolver bigbang plan completed after source
+hydration, Cache2 integration, one-at-a-time real LLM verification, full
+non-live regression, independent review remediation, and documentation
+closeout.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active short-term to completed archive | `rag3_local_context_resolver_bigbang_plan.md` |
 
 ## Archive
 
@@ -261,6 +282,7 @@ plans.
 | [rag2_cognition_ready_evidence_plan.md](archive/completed/short_term/rag2_cognition_ready_evidence_plan.md) |
 | [rag2_mainline_fusion_recall_quality_plan.md](archive/completed/short_term/rag2_mainline_fusion_recall_quality_plan.md) |
 | [rag2_phase4_continuation_plan.md](archive/completed/short_term/rag2_phase4_continuation_plan.md) |
+| [rag3_local_context_resolver_bigbang_plan.md](archive/completed/short_term/rag3_local_context_resolver_bigbang_plan.md) |
 | [rag_agent_package_reorganization_plan.md](archive/completed/short_term/rag_agent_package_reorganization_plan.md) |
 | [rag_cache2_persistent_initializer_plan.md](archive/completed/short_term/rag_cache2_persistent_initializer_plan.md) |
 | [rag_current_turn_exclusion_plan.md](archive/completed/short_term/rag_current_turn_exclusion_plan.md) |

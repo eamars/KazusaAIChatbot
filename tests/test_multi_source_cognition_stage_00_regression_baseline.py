@@ -13,6 +13,7 @@ import pytest
 from fastapi import BackgroundTasks
 
 from kazusa_ai_chatbot import service as service_module
+from kazusa_ai_chatbot.cognition_resolver import capabilities as capabilities_module
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as supervisor_module
@@ -1217,13 +1218,13 @@ async def test_rag_skip_preserves_full_projected_shape(
         }
     ]
 
-    async def _fail_rag_supervisor(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
-        raise AssertionError("RAG supervisor should not run")
+    async def _fail_local_context(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise AssertionError("RAG3 resolver should not run")
 
     monkeypatch.setattr(
-        supervisor_module,
-        "call_quote_aware_rag_supervisor",
-        _fail_rag_supervisor,
+        capabilities_module,
+        "resolve_local_context",
+        _fail_local_context,
     )
 
     rag_result = await supervisor_module.run_rag_evidence_for_persona_state(

@@ -10,7 +10,6 @@ import logging
 
 from kazusa_ai_chatbot.config import (
     MEDIA_DESCRIPTOR_CACHE_MAX_PERSISTENT_ENTRIES,
-    RAG_CACHE2_MAX_ENTRIES,
 )
 from kazusa_ai_chatbot.db._client import enable_vector_index, get_db
 from kazusa_ai_chatbot.background_artifact.models import (
@@ -55,13 +54,10 @@ from kazusa_ai_chatbot.db.llm_tracing import (
 )
 from kazusa_ai_chatbot.db.reflection_cycle import ensure_reflection_run_indexes
 from kazusa_ai_chatbot.db.rag_cache2_persistent import (
-    INITIALIZER_CACHE_NAME,
     PERSISTENT_CACHE_COLLECTION,
     PERSISTENT_CACHE_LOOKUP_INDEX,
     PERSISTENT_CACHE_LOOKUP_KEYS,
     prune_media_descriptor_entries,
-    prune_persistent_entries,
-    purge_stale_initializer_entries,
     purge_stale_media_descriptor_entries,
 )
 from kazusa_ai_chatbot.db.self_cognition import (
@@ -311,11 +307,6 @@ async def db_bootstrap() -> None:
     await ensure_llm_trace_indexes()
     await ensure_internal_monologue_residue_indexes()
 
-    await purge_stale_initializer_entries()
-    await prune_persistent_entries(
-        cache_name=INITIALIZER_CACHE_NAME,
-        max_entries=5 * RAG_CACHE2_MAX_ENTRIES,
-    )
     await purge_stale_media_descriptor_entries()
     await prune_media_descriptor_entries(
         max_entries=MEDIA_DESCRIPTOR_CACHE_MAX_PERSISTENT_ENTRIES,

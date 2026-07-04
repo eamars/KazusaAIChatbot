@@ -15,25 +15,37 @@ _DB_ROOT = _SOURCE_ROOT / "db"
 _RAW_BACKEND_TOKENS = (
     "db.client",
     ".admin.command",
-    ".insert_one(",
-    ".insert_many(",
-    ".update_one(",
-    ".update_many(",
-    ".replace_one(",
-    ".find(",
-    ".find_one(",
-    ".delete_one(",
-    ".delete_many(",
-    ".aggregate(",
-    ".count_documents(",
-    ".distinct(",
-    ".bulk_write(",
-    ".create_index(",
-    ".list_indexes(",
     ".list_collection_names(",
-    ".drop(",
     "db[",
 )
+
+_RAW_MONGO_METHODS = frozenset({
+    "aggregate",
+    "bulk_write",
+    "count_documents",
+    "create_index",
+    "delete_many",
+    "delete_one",
+    "distinct",
+    "drop",
+    "find",
+    "find_one",
+    "insert_many",
+    "insert_one",
+    "list_collection_names",
+    "list_indexes",
+    "replace_one",
+    "update_many",
+    "update_one",
+})
+
+_COLLECTION_RECEIVER_TERMS = frozenset({
+    "coll",
+    "collection",
+    "database",
+    "db",
+    "mongo",
+})
 
 
 _REPOSITORY_MODULES = frozenset({
@@ -57,11 +69,51 @@ def _relative(path: Path) -> str:
     return value
 
 
+def _attribute_call_receiver_names(node: ast.AST) -> list[str]:
+    if isinstance(node, ast.Name):
+        return [node.id.lower()]
+    if isinstance(node, ast.Attribute):
+        names = _attribute_call_receiver_names(node.value)
+        names.append(node.attr.lower())
+        return names
+    return []
+
+
+def _looks_like_database_find_call(node: ast.Attribute) -> bool:
+    receiver_names = _attribute_call_receiver_names(node.value)
+    if not receiver_names:
+        return True
+    for term in _COLLECTION_RECEIVER_TERMS:
+        if any(term in receiver_name for receiver_name in receiver_names):
+            return True
+    return False
+
+
 def test_db_facade_does_not_export_raw_database_handle() -> None:
     """The public db facade must not expose get_db."""
 
     assert "get_db" not in db_facade.__all__
     assert not hasattr(db_facade, "get_db")
+
+
+def test_raw_mongo_find_detector_catches_nested_db_collection_receiver() -> None:
+    """Static detector must catch db.collection.find() chains."""
+
+    tree = ast.parse("db.user_memory_units.find({})")
+    call = next(node for node in ast.walk(tree) if isinstance(node, ast.Call))
+
+    assert isinstance(call.func, ast.Attribute)
+    assert _looks_like_database_find_call(call.func)
+
+
+def test_raw_mongo_find_detector_allows_string_find_calls() -> None:
+    """Static detector must not reject ordinary string ``find`` calls."""
+
+    tree = ast.parse("message_text.find('#napcat')")
+    call = next(node for node in ast.walk(tree) if isinstance(node, ast.Call))
+
+    assert isinstance(call.func, ast.Attribute)
+    assert not _looks_like_database_find_call(call.func)
 
 
 def test_production_code_outside_db_does_not_import_private_db_boundary() -> None:
@@ -108,5 +160,17 @@ def test_production_code_outside_db_has_no_raw_mongo_operations() -> None:
         for token in _RAW_BACKEND_TOKENS:
             if token in text:
                 violations.append(f"{_relative(path)} contains {token}")
+        tree = ast.parse(text, filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if not isinstance(node.func, ast.Attribute):
+                continue
+            method_name = node.func.attr
+            if method_name not in _RAW_MONGO_METHODS:
+                continue
+            if method_name == "find" and not _looks_like_database_find_call(node.func):
+                continue
+            violations.append(f"{_relative(path)} calls .{method_name}(")
 
     assert violations == []

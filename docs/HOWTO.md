@@ -430,18 +430,16 @@ On startup the service:
 1. Runs `db_bootstrap()` to create current collections and indexes and drop
    legacy `rag_cache_index` and `rag_metadata_index` collections if they are
    still present.
-2. Hydrates persistent RAG initializer cache entries into process-local
-   Cache2.
-3. Hydrates persistent media descriptor cache entries.
-4. Loads the active character profile.
-5. Compiles the top-level LangGraph pipeline.
-6. Starts configured MCP servers.
-7. Builds the runtime adapter registry and starts the chat input worker.
-8. Starts the durable calendar worker when `CALENDAR_SCHEDULER_ENABLED=true`.
-9. Starts the self-cognition worker when `SELF_COGNITION_ENABLED=true`.
-10. Starts the background-work runtime when
+2. Hydrates persistent media descriptor cache entries.
+3. Loads the active character profile.
+4. Compiles the top-level LangGraph pipeline.
+5. Starts configured MCP servers.
+6. Builds the runtime adapter registry and starts the chat input worker.
+7. Starts the durable calendar worker when `CALENDAR_SCHEDULER_ENABLED=true`.
+8. Starts the self-cognition worker when `SELF_COGNITION_ENABLED=true`.
+9. Starts the background-work runtime when
     `BACKGROUND_WORK_WORKER_ENABLED=true`.
-11. Starts the reflection worker when `REFLECTION_CYCLE_ENABLED=true`.
+10. Starts the reflection worker when `REFLECTION_CYCLE_ENABLED=true`.
 
 ## Adapters
 

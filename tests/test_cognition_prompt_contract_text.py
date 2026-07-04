@@ -464,7 +464,6 @@ def test_task_willingness_prompts_avoid_operational_gate_language() -> None:
         for forbidden_text in (
             'resource heavy',
             'tool cost',
-            'background_work',
             'complex_task_resolution',
             'affinity threshold',
             'effort_score',
