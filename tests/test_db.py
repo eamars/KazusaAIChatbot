@@ -1049,17 +1049,6 @@ async def test_db_bootstrap_creates_platform_message_lookup_index(monkeypatch) -
         "ensure_event_log_indexes",
         AsyncMock(),
     )
-    monkeypatch.setattr(
-        db_bootstrap_module,
-        "purge_stale_initializer_entries",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        db_bootstrap_module,
-        "prune_persistent_entries",
-        AsyncMock(),
-    )
-
     await db_bootstrap_module.db_bootstrap()
 
     index_specs = db.conversation_history.indexes
@@ -1071,6 +1060,8 @@ async def test_db_bootstrap_creates_platform_message_lookup_index(monkeypatch) -
         ],
         "kwargs": {"name": "conv_platform_channel_message_id"},
     } in index_specs
+    assert not hasattr(db_bootstrap_module, "purge_stale_initializer_entries")
+    assert not hasattr(db_bootstrap_module, "prune_persistent_entries")
 
 
 @pytest.mark.asyncio
@@ -1107,17 +1098,6 @@ async def test_db_bootstrap_creates_calendar_collections_and_indexes(
         "ensure_internal_monologue_residue_indexes",
         AsyncMock(),
     )
-    monkeypatch.setattr(
-        db_bootstrap_module,
-        "purge_stale_initializer_entries",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        db_bootstrap_module,
-        "prune_persistent_entries",
-        AsyncMock(),
-    )
-
     await db_bootstrap_module.db_bootstrap()
 
     schedule_indexes = db.calendar_schedules.indexes
@@ -1187,17 +1167,6 @@ async def test_db_bootstrap_creates_background_artifact_collection_and_indexes(
         "ensure_background_artifact_job_indexes",
         ensure_background_artifact,
     )
-    monkeypatch.setattr(
-        db_bootstrap_module,
-        "purge_stale_initializer_entries",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        db_bootstrap_module,
-        "prune_persistent_entries",
-        AsyncMock(),
-    )
-
     await db_bootstrap_module.db_bootstrap()
 
     assert "background_artifact_jobs" in db.collections
@@ -1321,17 +1290,6 @@ async def test_db_bootstrap_creates_self_cognition_attempt_indexes(
         "ensure_internal_monologue_residue_indexes",
         AsyncMock(),
     )
-    monkeypatch.setattr(
-        db_bootstrap_module,
-        "purge_stale_initializer_entries",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        db_bootstrap_module,
-        "prune_persistent_entries",
-        AsyncMock(),
-    )
-
     await db_bootstrap_module.db_bootstrap()
 
     index_specs = db.self_cognition_action_attempts.indexes
@@ -1382,17 +1340,6 @@ async def test_db_bootstrap_creates_group_review_window_indexes(
         "ensure_internal_monologue_residue_indexes",
         AsyncMock(),
     )
-    monkeypatch.setattr(
-        db_bootstrap_module,
-        "purge_stale_initializer_entries",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        db_bootstrap_module,
-        "prune_persistent_entries",
-        AsyncMock(),
-    )
-
     await db_bootstrap_module.db_bootstrap()
 
     index_specs = db.self_cognition_group_review_windows.indexes
@@ -1443,17 +1390,6 @@ async def test_db_bootstrap_delegates_global_character_growth_indexes(
         "ensure_event_log_indexes",
         AsyncMock(),
     )
-    monkeypatch.setattr(
-        db_bootstrap_module,
-        "purge_stale_initializer_entries",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        db_bootstrap_module,
-        "prune_persistent_entries",
-        AsyncMock(),
-    )
-
     await db_bootstrap_module.db_bootstrap()
 
     ensure_global_growth.assert_awaited_once()
@@ -1489,17 +1425,6 @@ async def test_db_bootstrap_delegates_event_log_indexes(
         "ensure_event_log_indexes",
         ensure_event_log,
     )
-    monkeypatch.setattr(
-        db_bootstrap_module,
-        "purge_stale_initializer_entries",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        db_bootstrap_module,
-        "prune_persistent_entries",
-        AsyncMock(),
-    )
-
     await db_bootstrap_module.db_bootstrap()
 
     ensure_event_log.assert_awaited_once()
@@ -1539,17 +1464,6 @@ async def test_db_bootstrap_configures_conversation_vector_filter_paths(
         "ensure_event_log_indexes",
         AsyncMock(),
     )
-    monkeypatch.setattr(
-        db_bootstrap_module,
-        "purge_stale_initializer_entries",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        db_bootstrap_module,
-        "prune_persistent_entries",
-        AsyncMock(),
-    )
-
     await db_bootstrap_module.db_bootstrap()
 
     enable_vector_index.assert_any_await(

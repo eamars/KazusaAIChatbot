@@ -8,11 +8,20 @@ from unittest.mock import AsyncMock
 import pytest
 
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
+from kazusa_ai_chatbot.cognition_resolver import capabilities as capabilities_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as supervisor_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_supervisor2 as rag2_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_initializer as rag_initializer_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_evaluator as rag_evaluator_module
+from kazusa_ai_chatbot.local_context_resolver import (
+    LOCAL_CONTEXT_GRAPH_VERSION,
+    LOCAL_CONTEXT_NODE_VERSION,
+    LOCAL_CONTEXT_RESOLUTION_PACKET_VERSION,
+)
 from kazusa_ai_chatbot.rag.cache2_runtime import RAGCache2Runtime
+from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
+    empty_user_memory_context,
+)
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 
@@ -324,6 +333,104 @@ def _minimal_text_chat_episode() -> dict:
         target_broadcast=False,
     )
     return episode
+
+
+def _local_context_node(
+    *,
+    node_id: str,
+    node_kind: str,
+    parent_id: str | None,
+    children: list[str],
+) -> dict:
+    """Build a minimal valid local-context resolver graph node."""
+
+    node = {
+        "schema_version": LOCAL_CONTEXT_NODE_VERSION,
+        "node_id": node_id,
+        "node_kind": node_kind,
+        "objective": "Resolve production RAG evidence.",
+        "parent_id": parent_id,
+        "children": children,
+        "depends_on": [],
+        "consumes": {},
+        "produces": [],
+        "status": "resolved",
+        "investigation_summary": [],
+        "knowledge_we_know_so_far": [],
+        "knowledge_still_lacking": [],
+        "recommended_next_iteration": [],
+        "evidence_boundary_notes": [],
+        "attempts": [],
+        "collapsed_into": None,
+    }
+    return node
+
+
+def _local_context_packet(
+    *,
+    answer: str,
+    user_image: dict | None = None,
+    memory_evidence: list[dict] | None = None,
+) -> dict:
+    """Build a minimal valid RAG3 packet for production-helper tests."""
+
+    root = _local_context_node(
+        node_id="root",
+        node_kind="synthesis",
+        parent_id=None,
+        children=["task_1"],
+    )
+    task = _local_context_node(
+        node_id="task_1",
+        node_kind="memory_evidence",
+        parent_id="root",
+        children=[],
+    )
+    if user_image is None:
+        user_image = {
+            "user_memory_context": empty_user_memory_context(),
+        }
+    packet = {
+        "schema_version": LOCAL_CONTEXT_RESOLUTION_PACKET_VERSION,
+        "investigation_summary": ["RAG3 resolved production context."],
+        "knowledge_we_know_so_far": ["RAG3 resolved production context."],
+        "knowledge_still_lacking": [],
+        "recommended_next_iteration": [],
+        "evidence_boundary_notes": [],
+        "rag_result": {
+            "answer": answer,
+            "user_image": user_image,
+            "user_memory_unit_candidates": [],
+            "character_image": {},
+            "third_party_profiles": [],
+            "memory_evidence": list(memory_evidence or []),
+            "recall_evidence": [],
+            "conversation_evidence": [],
+            "external_evidence": [],
+            "supervisor_trace": {
+                "resolver": "local_context_resolver",
+                "node_count": 2,
+            },
+        },
+        "graph": {
+            "schema_version": LOCAL_CONTEXT_GRAPH_VERSION,
+            "root_node_id": "root",
+            "active_node_id": "task_1",
+            "nodes": {
+                "root": root,
+                "task_1": task,
+            },
+            "traversal_order": ["root", "task_1"],
+            "collapse_events": [],
+            "max_nodes": 8,
+            "max_depth": 3,
+        },
+        "trace_summary": {
+            "iterations": 1,
+            "node_count": 2,
+        },
+    }
+    return packet
 
 
 def _memory_observation_result() -> dict:
@@ -917,50 +1024,36 @@ async def test_call_rag_supervisor_continues_remaining_slots_after_unresolved_st
 
 
 @pytest.mark.asyncio
-async def test_rag_evidence_helper_calls_rag2_and_projects_payload(monkeypatch) -> None:
+async def test_rag_evidence_helper_calls_rag3_and_projects_payload(monkeypatch) -> None:
     captured: dict = {}
 
-    async def _call_quote_aware_rag_supervisor(
-        *,
-        fresh_query: str,
-        reply_context: dict,
-        character_name: str,
+    async def _resolve_local_context(
+        request: dict,
         context: dict,
+        options: dict,
     ) -> dict:
-        captured["fresh_query"] = fresh_query
-        captured["reply_context"] = reply_context
-        captured["character_name"] = character_name
+        captured["request"] = request
         captured["context"] = context
-        return {
-            "answer": "resolved",
-            "known_facts": [
-                {
-                    "slot": "profile",
-                    "agent": "user_profile_agent",
-                    "resolved": True,
-                    "summary": "profile",
-                    "raw_result": {
-                        "global_user_id": "user-1",
-                        "user_memory_context": {
-                            "objective_facts": [
-                                {
-                                    "fact": "User likes tea",
-                                    "subjective_appraisal": "Kazusa sees this as a stable preference.",
-                                    "relationship_signal": "Offer tea-related continuity.",
-                                }
-                            ]
-                        },
-                    },
-                }
-            ],
-            "unknown_slots": [],
-            "loop_count": 1,
+        captured["options"] = options
+        user_image = {
+            "user_memory_context": empty_user_memory_context(),
         }
+        user_image["user_memory_context"]["objective_facts"] = [{
+            "fact": "User likes tea",
+            "subjective_appraisal": (
+                "Kazusa sees this as a stable preference."
+            ),
+            "relationship_signal": "Offer tea-related continuity.",
+        }]
+        return _local_context_packet(
+            answer="resolved",
+            user_image=user_image,
+        )
 
     monkeypatch.setattr(
-        supervisor_module,
-        "call_quote_aware_rag_supervisor",
-        _call_quote_aware_rag_supervisor,
+        capabilities_module,
+        "resolve_local_context",
+        _resolve_local_context,
     )
 
     turn_clock = build_turn_clock("2026-04-27 00:00:00")
@@ -1012,22 +1105,17 @@ async def test_rag_evidence_helper_calls_rag2_and_projects_payload(monkeypatch) 
         },
     }, agent_name="resolver_rag_evidence")
 
-    assert captured["fresh_query"] == "你记得我喜欢什么吗？"
-    assert captured["reply_context"] == {
-        "platform_message_id": "reply-1",
-        "reply_excerpt": "BYD Shark 6 uses a 1.5T hybrid system.",
-    }
-    assert captured["character_name"] == "Kazusa"
-    assert captured["context"]["channel_type"] == "group"
-    assert "message_envelope" not in captured["context"]
-    assert captured["context"]["character_profile"] == {
-        "global_user_id": "character-1",
-        "name": "Kazusa",
-    }
+    assert captured["request"]["objective"] == "你记得我喜欢什么吗？"
+    assert captured["request"]["source"] == "l2d"
+    assert captured["context"]["character_name"] == "Kazusa"
+    assert captured["context"]["platform"] == "qq"
+    assert captured["context"]["platform_channel_id"] == "chan-1"
+    assert captured["context"]["global_user_id"] == "user-1"
+    assert captured["context"]["user_name"] == "User"
+    assert captured["context"]["original_user_request"] == "你记得我喜欢什么吗？"
     assert captured["context"]["prompt_message_context"]["body_text"] == "clean body"
     assert captured["context"]["chat_history_recent"] == []
     assert captured["context"]["conversation_progress"]["current_thread"] == "Pickup plan is active."
-    assert captured["context"]["conversation_episode_state"]["turn_count"] == 7
     assert rag_result["answer"] == "resolved"
     objective_facts = rag_result["user_image"]["user_memory_context"][
         "objective_facts"
@@ -1037,34 +1125,26 @@ async def test_rag_evidence_helper_calls_rag2_and_projects_payload(monkeypatch) 
 
 @pytest.mark.asyncio
 async def test_rag_evidence_request_shape_snapshot(monkeypatch) -> None:
-    """Current RAG request shape should stay stable across adapter extraction."""
+    """Current RAG3 request shape should stay stable across adapter extraction."""
     captured: dict = {}
 
-    async def _call_quote_aware_rag_supervisor(
-        *,
-        fresh_query: str,
-        reply_context: dict,
-        character_name: str,
+    async def _resolve_local_context(
+        request: dict,
         context: dict,
+        options: dict,
     ) -> dict:
         captured["request"] = {
-            "fresh_query": fresh_query,
-            "reply_context": reply_context,
-            "character_name": character_name,
+            "resolver_request": request,
             "context": context,
+            "options": options,
         }
-        return_value = {
-            "answer": "snapshot answer",
-            "known_facts": [],
-            "unknown_slots": [],
-            "loop_count": 1,
-        }
+        return_value = _local_context_packet(answer="snapshot answer")
         return return_value
 
     monkeypatch.setattr(
-        supervisor_module,
-        "call_quote_aware_rag_supervisor",
-        _call_quote_aware_rag_supervisor,
+        capabilities_module,
+        "resolve_local_context",
+        _resolve_local_context,
     )
 
     state = _rag_evidence_snapshot_state()
@@ -1073,25 +1153,28 @@ async def test_rag_evidence_request_shape_snapshot(monkeypatch) -> None:
         agent_name="resolver_rag_evidence",
     )
 
+    expected_time_context = dict(state["local_time_context"])
+    expected_time_context.update({
+        "local_date": "2026-04-27",
+        "local_time": "2026-04-27 00:00:00",
+        "local_weekday": "Monday",
+    })
     expected_request = {
-        "fresh_query": "Need current evidence.",
-        "reply_context": {"platform_message_id": "reply-1"},
-        "character_name": "Kazusa",
+        "resolver_request": {
+            "schema_version": "local_context_resolver_request.v1",
+            "objective": "Need current evidence.",
+            "source": "l2d",
+            "reason": "Cognition requested local context evidence.",
+            "priority": "normal",
+        },
         "context": {
+            "schema_version": "local_context_resolver_context.v1",
+            "character_name": "Kazusa",
             "platform": "qq",
             "platform_channel_id": "chan-1",
-            "channel_type": "group",
-            "character_profile": {
-                "global_user_id": "character-1",
-                "name": "Kazusa",
-            },
-            "active_turn_platform_message_ids": ["msg-1", "msg-2"],
-            "active_turn_conversation_row_ids": ["row-1", "row-2"],
             "global_user_id": "user-1",
             "user_name": "User",
-            "user_profile": {"affinity": 500},
-            "current_timestamp_utc": state["storage_timestamp_utc"],
-            "local_time_context": state["local_time_context"],
+            "local_time_context": expected_time_context,
             "prompt_message_context": {
                 "body_text": "Need current evidence.",
                 "mentions": [],
@@ -1099,21 +1182,22 @@ async def test_rag_evidence_request_shape_snapshot(monkeypatch) -> None:
                 "addressed_to_global_user_ids": ["character-1"],
                 "broadcast": False,
             },
-            "channel_topic": "test",
             "chat_history_recent": [{"role": "user", "content": "previous turn"}],
             "chat_history_wide": [{"role": "assistant", "content": "older turn"}],
-            "reply_context": {"platform_message_id": "reply-1"},
-            "indirect_speech_context": "No indirect speech.",
             "conversation_progress": {
                 "status": "active",
                 "continuity": "same_episode",
                 "current_thread": "Pickup plan is active.",
             },
-            "conversation_episode_state": {
-                "updated_at": "2026-04-26T23:00:00+00:00",
-                "turn_count": 7,
-            },
-            "promoted_reflection_context": {"summary": "recent reflection"},
+            "original_user_request": "Need current evidence.",
+        },
+        "options": {
+            "schema_version": "local_context_resolver_options.v1",
+            "max_iterations": 3,
+            "max_nodes": 8,
+            "max_depth": 3,
+            "max_node_attempts": 2,
+            "max_subagent_attempts": 1,
         },
     }
     assert captured["request"] == expected_request
@@ -1124,30 +1208,23 @@ async def test_rag_evidence_request_shape_snapshot(monkeypatch) -> None:
 async def test_rag_evidence_passes_empty_reply_context_to_wrapper(
     monkeypatch,
 ) -> None:
-    """Empty reply metadata should reach the quote-aware wrapper unchanged."""
+    """Empty reply metadata should not be required by the RAG3 boundary."""
     captured: dict = {}
 
-    async def _call_quote_aware_rag_supervisor(
-        *,
-        fresh_query: str,
-        reply_context: dict,
-        character_name: str,
+    async def _resolve_local_context(
+        request: dict,
         context: dict,
+        options: dict,
     ) -> dict:
-        del fresh_query, character_name, context
-        captured["reply_context"] = reply_context
-        return_value = {
-            "answer": "empty reply answer",
-            "known_facts": [],
-            "unknown_slots": [],
-            "loop_count": 1,
-        }
+        del request, options
+        captured["context"] = context
+        return_value = _local_context_packet(answer="empty reply answer")
         return return_value
 
     monkeypatch.setattr(
-        supervisor_module,
-        "call_quote_aware_rag_supervisor",
-        _call_quote_aware_rag_supervisor,
+        capabilities_module,
+        "resolve_local_context",
+        _resolve_local_context,
     )
     state = _rag_evidence_snapshot_state()
     state["reply_context"] = {}
@@ -1157,31 +1234,18 @@ async def test_rag_evidence_passes_empty_reply_context_to_wrapper(
         agent_name="resolver_rag_evidence",
     )
 
-    assert captured["reply_context"] == {}
+    assert "reply_context" not in captured["context"]
     assert rag_result["answer"] == "empty reply answer"
 
 
 @pytest.mark.asyncio
 async def test_rag_evidence_skips_for_unresolved_referents(monkeypatch) -> None:
     """Unresolved required references should skip RAG and preserve payload shape."""
-    called = False
-
-    async def _call_quote_aware_rag_supervisor(
-        *,
-        fresh_query: str,
-        reply_context: dict,
-        character_name: str,
-        context: dict,
-    ) -> dict:
-        del fresh_query, reply_context, character_name, context
-        nonlocal called
-        called = True
-        return {}
-
+    resolve_local_context = AsyncMock()
     monkeypatch.setattr(
-        supervisor_module,
-        "call_quote_aware_rag_supervisor",
-        _call_quote_aware_rag_supervisor,
+        capabilities_module,
+        "resolve_local_context",
+        resolve_local_context,
     )
 
     turn_clock = build_turn_clock("2026-04-27 00:00:00")
@@ -1223,7 +1287,7 @@ async def test_rag_evidence_skips_for_unresolved_referents(monkeypatch) -> None:
         "cognitive_episode": _minimal_text_chat_episode(),
     }, agent_name="resolver_rag_evidence")
 
-    assert called is False
+    resolve_local_context.assert_not_awaited()
     assert rag_result["answer"] == ""
     assert rag_result["user_image"]["user_memory_context"]["stable_patterns"] == []
     assert rag_result["user_image"]["user_memory_context"]["active_commitments"] == []
@@ -1237,29 +1301,14 @@ async def test_rag_evidence_skips_for_unresolved_referents(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_rag_evidence_runs_for_mixed_referents(monkeypatch) -> None:
     """Mixed referents should not trigger the old binary RAG skip cliff."""
-    called = False
 
-    async def _call_quote_aware_rag_supervisor(
-        *,
-        fresh_query: str,
-        reply_context: dict,
-        character_name: str,
-        context: dict,
-    ) -> dict:
-        del fresh_query, reply_context, character_name, context
-        nonlocal called
-        called = True
-        return {
-            "answer": "partial evidence",
-            "known_facts": [],
-            "unknown_slots": [],
-            "loop_count": 1,
-        }
-
+    resolve_local_context = AsyncMock(
+        return_value=_local_context_packet(answer="partial evidence"),
+    )
     monkeypatch.setattr(
-        supervisor_module,
-        "call_quote_aware_rag_supervisor",
-        _call_quote_aware_rag_supervisor,
+        capabilities_module,
+        "resolve_local_context",
+        resolve_local_context,
     )
 
     turn_clock = build_turn_clock("2026-04-27 00:00:00")
@@ -1302,31 +1351,18 @@ async def test_rag_evidence_runs_for_mixed_referents(monkeypatch) -> None:
         "cognitive_episode": _minimal_text_chat_episode(),
     }, agent_name="resolver_rag_evidence")
 
-    assert called is True
+    resolve_local_context.assert_awaited_once()
     assert rag_result["answer"] == "partial evidence"
 
 
 @pytest.mark.asyncio
 async def test_rag_evidence_skips_when_referents_are_all_unresolved(monkeypatch) -> None:
     """Structured unresolved referents should be authoritative."""
-    called = False
-
-    async def _call_quote_aware_rag_supervisor(
-        *,
-        fresh_query: str,
-        reply_context: dict,
-        character_name: str,
-        context: dict,
-    ) -> dict:
-        del fresh_query, reply_context, character_name, context
-        nonlocal called
-        called = True
-        return {}
-
+    resolve_local_context = AsyncMock()
     monkeypatch.setattr(
-        supervisor_module,
-        "call_quote_aware_rag_supervisor",
-        _call_quote_aware_rag_supervisor,
+        capabilities_module,
+        "resolve_local_context",
+        resolve_local_context,
     )
 
     turn_clock = build_turn_clock("2026-04-27 00:00:00")
@@ -1367,5 +1403,5 @@ async def test_rag_evidence_skips_when_referents_are_all_unresolved(monkeypatch)
         "indirect_speech_context": "",
     }, agent_name="resolver_rag_evidence")
 
-    assert called is False
+    resolve_local_context.assert_not_awaited()
     assert rag_result["answer"] == ""

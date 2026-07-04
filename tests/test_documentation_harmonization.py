@@ -123,7 +123,6 @@ def test_howto_startup_order_matches_service_lifespan() -> None:
         content,
         (
             "db_bootstrap()",
-            "Hydrates persistent RAG initializer cache",
             "Hydrates persistent media descriptor cache",
             "Loads the active character profile",
             "Compiles the top-level LangGraph pipeline",

@@ -42,8 +42,9 @@ Core terms used throughout this README:
   future events into the brain service API.
 - **MessageEnvelope**: the typed inbound message contract consumed by the
   brain, RAG, and cognition stages.
-- **RAG 2**: retrieval helper agents that return evidence; they do not decide
-  persona stance or final wording.
+- **RAG3 local context resolver**: cognition-selected local/private context
+  evidence resolver; it returns evidence and does not decide persona stance or
+  final wording.
 - **Cognition resolver**: the bounded L1/L2/L2d loop that decides stance,
   action needs, and whether more evidence is needed.
 - **L3/dialog**: the final visible wording stage after cognition has decided
@@ -60,7 +61,7 @@ At a high level, Kazusa provides:
 | Bounded live response path       | Queueing, relevance, the cognition resolver, selected evidence capabilities, action routing, and L3 surfaces are explicit stages with caps and inspectable payloads. |
 | Multi-horizon memory             | Recent chat, short-term conversation flow, retrieved evidence, durable memory, and scheduled commitments remain separate.          |
 | Internal monologue residue       | A short private residue lane carries bounded first-person reasons from completed episodes into the next L2a cognition pass.       |
-| RAG 2 evidence retrieval         | Demand-driven helper agents retrieve user profiles, memories, conversation history, live facts, web evidence, and recall state when cognition asks. |
+| RAG3 local context recall        | Demand-driven graph resolver retrieves and projects local/private evidence when cognition asks through `local_context_recall`. |
 | Layered cognition                | Cognition decides stance, boundaries, judgment, style, action needs, and response goals before selected L3 surfaces render output. |
 | Background consolidation         | Completed episodes update durable memory, relationship state, Cache2 invalidation, images, and progress from text plus action/surface traces. |
 | Accepted delayed work            | Accepted reminders, text tasks, and coding tasks are persisted, routed to internal background workers, and returned through cognition rather than sent directly. |
@@ -76,7 +77,7 @@ At a high level, Kazusa provides:
 | Persistent character companion       | The runtime keeps relationship memory, short-term flow, character state, and reflection separate but connected.                  |
 | Group-chat character bot             | Queue pruning, typed addressees, native reply hydration, and adapter-specific delivery let the brain survive noisy channels.     |
 | Local model character lab            | Route-specific OpenAI-compatible model settings let weaker local models handle narrower, staged prompts.                         |
-| Memory and RAG experiments           | RAG 2, Cache2, scoped user memory, shared memory evolution, and conversation search are modular enough to inspect independently. |
+| Memory and RAG experiments           | RAG3, Cache2, retired RAG2 helper coverage, scoped user memory, shared memory evolution, and conversation search are modular enough to inspect independently. |
 | Cross-platform adapter experiments   | New adapters only need to normalize platform events into the service contract and render returned messages.                      |
 | Idle cognition and reflection labs   | Self-cognition and reflection use bounded source packets and shared cognition boundaries without turning adapters into agents.   |
 | Promise and follow-through workflows | Accepted future commitments can be validated, persisted, deduplicated, and revisited later through durable calendar triggers.    |
@@ -223,7 +224,7 @@ flowchart TD
 
     subgraph ResolverCaps["Cognition-selected resolver capabilities"]
         RC0["Deterministic capability executor [deterministic]<br/>one immediate request per cycle"]
-        RC1["local_context_recall<br/>RAG 2 evidence"]
+        RC1["local_context_recall<br/>RAG3 local context evidence"]
         RC2["public_answer_research<br/>complex task resolver"]
         RC3["human_clarification<br/>pending HIL row"]
         RC4["approval_preparation<br/>pending approval row"]
@@ -241,31 +242,19 @@ flowchart TD
         RC5 --> RC6
     end
 
-    subgraph RAG2["RAG 2 helper-agent family"]
-        RG0["call_quote_aware_rag_supervisor"]
-        RG1["rag_initializer<br/>slot planning"]
-        RG2["rag_dispatcher / executor / evaluator<br/>drains unknown slots"]
-        RG3["rag_finalizer<br/>compact evidence answer"]
-        RA1["live_context_agent<br/>runtime_context_provider, target resolver, web delegation"]
-        RA2["conversation_evidence_agent<br/>conversation_search_agent<br/>conversation_filter_agent<br/>conversation_aggregate_agent<br/>conversation_keyword_agent"]
-        RA3["memory_evidence_agent<br/>persistent_memory_search_agent<br/>persistent_memory_keyword_agent<br/>user_memory_evidence_agent"]
-        RA4["person_context_agent<br/>user_lookup_agent<br/>user_list_agent<br/>user_profile_agent<br/>relationship_agent<br/>user_image_retriever_agent"]
-        RA5["web_agent3"]
-        RA6["recall_agent<br/>ProgressCollector<br/>ActiveCommitmentCollector<br/>CalendarRunCollector<br/>HistoryEvidenceCollector"]
-        RG0 --> RG1
-        RG1 --> RG2
-        RG2 --> RA1
-        RG2 --> RA2
-        RG2 --> RA3
-        RG2 --> RA4
-        RG2 --> RA5
-        RG2 --> RA6
-        RA1 --> RG3
-        RA2 --> RG3
-        RA3 --> RG3
-        RA4 --> RG3
-        RA5 --> RG3
-        RA6 --> RG3
+    subgraph RAG3["RAG3 local context resolver"]
+        LC0["resolve_local_context<br/>stable public IO"]
+        LC1["graph planner<br/>bounded semantic tasks"]
+        LC2["active node resolver<br/>one dependency-ready node"]
+        LC3["collapse review<br/>optional duplicate node merge"]
+        LC4["bottom-up synthesis<br/>known/lacking/boundary packet"]
+        LC5["rag_result projection<br/>retained prompt-facing evidence"]
+        LC0 --> LC1
+        LC1 --> LC2
+        LC2 --> LC3
+        LC3 --> LC2
+        LC2 --> LC4
+        LC4 --> LC5
     end
 
     subgraph Web3["web_agent3 source subagents"]
@@ -347,11 +336,10 @@ flowchart TD
     BW2 --> CAL
     CAL -->|future or due source case| SC
     SC -->|shared cognition path| P0
-    RC1 --> RG0
-    RG3 --> RC6
+    RC1 --> LC0
+    LC5 --> RC6
     RC2 --> X0
     X4 --> RC6
-    RA5 --> W0
     X5 --> W0
     CONS --> DB
     AT --> DB
@@ -361,7 +349,7 @@ flowchart TD
     ME --> DB
     GG --> DB
     SUP -.-> R1
-    SUP -.-> RG0
+    SUP -.-> LC0
     SUP -.-> K
 ```
 
@@ -371,8 +359,10 @@ contract; the brain service owns queueing, identity, reply hydration, history,
 episode construction, and graph execution.
 
 The named specialist boxes are family-local subagents and workers, not one
-universal runtime abstraction. RAG helper agents retrieve local, profile,
-memory, conversation, recall, live, and web evidence; `web_agent3` owns its
+universal runtime abstraction. RAG3 resolves local context through
+resolver-local stage agents and projects retained `rag_result` evidence;
+retired RAG2 helper modules remain source-level evidence tooling and tests.
+`web_agent3` owns its
 source subagents; the complex-task resolver owns resolver-local evidence and
 algorithmic subagents; background work owns delayed-work workers. The
 top-level map keeps the coding-agent worker coarse; its fetching, reading,
@@ -386,10 +376,11 @@ capability observation through `local_context_recall`, `public_answer_research`,
 observation is projected into the next cognition cycle; evidence never speaks
 as persona by itself.
 
-Full RAG 2 runs only when L2d selects `local_context_recall`. The separate
-first-cycle shared-memory prewarm may project confirmed shared-memory rows into
-L2a before the first cognition pass; it is not a resolver capability
-observation and it does not let retrieved evidence become persona.
+RAG3 local context recall runs only when L2d selects
+`local_context_recall`. The separate first-cycle shared-memory prewarm may
+project confirmed shared-memory rows into L2a before the first cognition pass;
+it is not a resolver capability observation and it does not let retrieved
+evidence become persona.
 
 Selected visible text surfaces go back to adapters through `ChatResponse` and
 delivery receipts. Private action results, no-visible-output decisions, and
@@ -618,7 +609,8 @@ cognition, and calendar scheduling remain in the platform-neutral core.
 | Conversation progress    | Short-term episode state used by cognition to avoid loops and stale reopenings          | [Conversation Progress](src/kazusa_ai_chatbot/conversation_progress/README.md)         |
 | Internal monologue residue | Short-lived private first-person residue loaded only into L2a cognition               | [Internal Monologue Residue ICD](src/kazusa_ai_chatbot/internal_monologue_residue/README.md) |
 | Cognition resolver       | Bounded recurrence state, capability observations, HIL/pending resume, and cycle traces | [Cognition Resolver ICD](src/kazusa_ai_chatbot/cognition_resolver/README.md)            |
-| RAG 2                    | Slot-driven helper-agent retrieval and Cache2 evidence projection                       | [RAG 2](src/kazusa_ai_chatbot/rag/README.md)                                           |
+| Local context resolver   | RAG3 local/private evidence graph, projection, and production `local_context_recall`    | [Local Context Resolver ICD](src/kazusa_ai_chatbot/local_context_resolver/README.md)   |
+| Retired RAG 2 helpers    | Historical slot-driven helper-agent retrieval and Cache2 evidence projection           | [Retired RAG 2](src/kazusa_ai_chatbot/rag/README.md)                                  |
 | Cognition and dialog     | Character stance, boundaries, judgment, style, visual directives, and final wording     | [Cognition Nodes](src/kazusa_ai_chatbot/nodes/README.md)                              |
 | Action spec              | L2d action residues, capability registry, evaluator, results, surfaces, and traces      | [Action Spec](src/kazusa_ai_chatbot/action_spec/README.md)                            |
 | Accepted task            | User-facing lifecycle for delayed work accepted by the character                        | [Accepted Task ICD](src/kazusa_ai_chatbot/accepted_task/README.md)                    |
@@ -711,7 +703,8 @@ src/
     background_work/           Internal delayed-work executor and workers
     coding_agent/              Standalone coding-task supervisor and subagents
     consolidation/             Durable consolidation helpers, lane routing, and ICD
-    rag/                       RAG 2 helper agents, hybrid retrieval, Cache2
+    local_context_resolver/    RAG3 local/private evidence graph and retained projection
+    rag/                       Retired RAG2 helper agents, hybrid retrieval, Cache2
     conversation_progress/     Short-term episode memory
     internal_monologue_residue/ Short-lived private residue lane for L2a
     db/                        MongoDB facade, schemas, collection owners

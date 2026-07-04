@@ -21,10 +21,10 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     validate_resolver_observation,
     validate_resolver_pending_resume,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_projection import (
-    project_known_facts,
-)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
+from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
+    empty_user_memory_context,
+)
 
 MAX_PROJECTED_RESOLVER_OBSERVATIONS = 4
 
@@ -115,14 +115,24 @@ def build_empty_rag_result(
 
     _require_non_empty_text(current_user_id, "current_user_id")
     _require_non_empty_text(character_user_id, "character_user_id")
-    rag_result = project_known_facts(
-        [],
-        current_user_id=current_user_id,
-        character_user_id=character_user_id,
-        answer="",
-        unknown_slots=[],
-        loop_count=0,
-    )
+    rag_result = {
+        "answer": "",
+        "user_image": {
+            "user_memory_context": empty_user_memory_context(),
+        },
+        "user_memory_unit_candidates": [],
+        "character_image": {},
+        "third_party_profiles": [],
+        "memory_evidence": [],
+        "recall_evidence": [],
+        "conversation_evidence": [],
+        "external_evidence": [],
+        "supervisor_trace": {
+            "loop_count": 0,
+            "unknown_slots": [],
+            "dispatched": [],
+        },
+    }
     return_value = rag_result
     return return_value
 

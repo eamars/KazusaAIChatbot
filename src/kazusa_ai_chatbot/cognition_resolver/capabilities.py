@@ -30,23 +30,26 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     validate_resolver_capability_request,
     validate_resolver_observation,
 )
-from kazusa_ai_chatbot.db.errors import DatabaseBackendError
-from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_projection import (
-    project_known_facts,
+from kazusa_ai_chatbot.local_context_resolver import (
+    DEFAULT_OPTION_LIMITS,
+    LOCAL_CONTEXT_RESOLVER_CONTEXT_VERSION,
+    LOCAL_CONTEXT_RESOLVER_OPTIONS_VERSION,
+    LOCAL_CONTEXT_RESOLVER_REQUEST_VERSION,
+    project_local_context_packet,
+    resolve_local_context,
+)
+from kazusa_ai_chatbot.local_context_resolver.contracts import (
+    LocalContextResolverContextV1,
+    LocalContextResolverOptionsV1,
+    LocalContextResolverRequestV1,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.nodes.referent_resolution import (
     should_skip_rag_for_unresolved_referents,
     unresolved_referent_reason,
 )
-from kazusa_ai_chatbot.rag.cognitive_episode_adapter import (
-    build_text_chat_rag_request,
-)
-from kazusa_ai_chatbot.rag.memory_evidence.workers.persistent_search import (
-    PersistentMemorySearchAgent,
-)
-from kazusa_ai_chatbot.rag.quote_aware_sequence import (
-    call_quote_aware_rag_supervisor,
+from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
+    empty_user_memory_context,
 )
 from kazusa_ai_chatbot.utils import log_preview, text_or_empty
 
@@ -56,19 +59,10 @@ SELF_GOAL_ALLOWED_TRIGGER_SOURCES = frozenset((
     "internal_thought",
     "self_cognition",
 ))
-SHARED_MEMORY_SUMMARY_FIELDS = (
-    "content",
-    "description",
-    "text",
-    "summary",
-    "fact",
-)
 
 logger = logging.getLogger(__name__)
 
-RagSupervisorFunc = Callable[..., Awaitable[dict[str, Any]]]
 RecordRagEventFunc = Callable[..., Awaitable[None]]
-BuildRagRequestFunc = Callable[..., dict[str, Any]]
 
 
 async def run_rag_evidence_for_persona_state(
@@ -76,31 +70,26 @@ async def run_rag_evidence_for_persona_state(
     *,
     agent_name: str,
     objective: str | None = None,
-    call_rag_supervisor_func: RagSupervisorFunc | None = None,
+    reason: str | None = None,
     record_rag_stage_event_func: RecordRagEventFunc | None = None,
-    build_rag_request_func: BuildRagRequestFunc | None = None,
     component: str = PERSONA_RAG_COMPONENT,
 ) -> dict[str, Any]:
-    """Run the existing persona RAG path for one resolver objective."""
+    """Run local-context resolver evidence for one persona objective."""
 
     started_at = time.perf_counter()
     correlation_id = _rag_correlation_id(state)
-    if call_rag_supervisor_func is None:
-        call_rag_supervisor_func = call_quote_aware_rag_supervisor
     if record_rag_stage_event_func is None:
         record_rag_stage_event_func = event_logging.record_rag_stage_event
-    if build_rag_request_func is None:
-        build_rag_request_func = build_text_chat_rag_request
 
     referents = state["referents"]
     if should_skip_rag_for_unresolved_referents(referents):
         referent_reason = unresolved_referent_reason(referents)
         rag_result = _empty_projected_rag_result(state)
         logger.info(
-            f"RAG2 skipped output: reason={log_preview(referent_reason)}"
+            f"Local context recall skipped: reason={log_preview(referent_reason)}"
         )
         logger.debug(
-            f'RAG2 skipped metadata: platform={state["platform"]} '
+            f'Local context recall skipped metadata: platform={state["platform"]} '
             f'channel={state["platform_channel_id"] or "<dm>"} '
             f'user={state["global_user_id"]} '
             f'query={log_preview(state["decontexualized_input"])} '
@@ -119,54 +108,40 @@ async def run_rag_evidence_for_persona_state(
         return_value = rag_result
         return return_value
 
-    rag_request = build_rag_request_func(
-        episode=state["cognitive_episode"],
-        decontexualized_input=state["decontexualized_input"],
-        character_profile=state["character_profile"],
-        user_profile=state["user_profile"],
-        prompt_message_context=state["prompt_message_context"],
-        channel_topic=state["channel_topic"],
-        chat_history_recent=state["chat_history_recent"],
-        chat_history_wide=state["chat_history_wide"],
-        reply_context=state["reply_context"],
-        indirect_speech_context=state["indirect_speech_context"],
-        conversation_progress=state.get("conversation_progress"),
-        conversation_episode_state=state.get("conversation_episode_state"),
-        promoted_reflection_context=state.get("promoted_reflection_context"),
-        llm_trace_id=str(state.get("llm_trace_id", "")),
-    )
     fresh_query = _fresh_query_for_objective(
         objective,
-        fallback_query=rag_request["original_query"],
+        fallback_query=state["decontexualized_input"],
     )
-    rag_context = dict(rag_request["context"])
-    if objective is not None:
-        rag_context["original_user_request"] = rag_request["original_query"]
-
-    rag_supervisor_result = await call_rag_supervisor_func(
-        fresh_query=fresh_query,
-        reply_context=state["reply_context"],
-        character_name=rag_request["character_name"],
-        context=rag_context,
+    request_reason = text_or_empty(reason)
+    if not request_reason:
+        request_reason = "Cognition requested local context evidence."
+    resolver_request: LocalContextResolverRequestV1 = {
+        "schema_version": LOCAL_CONTEXT_RESOLVER_REQUEST_VERSION,
+        "objective": fresh_query,
+        "source": "l2d",
+        "reason": request_reason,
+        "priority": "normal",
+    }
+    resolver_context = _local_context_resolver_context_from_state(state)
+    resolver_options: LocalContextResolverOptionsV1 = {
+        "schema_version": LOCAL_CONTEXT_RESOLVER_OPTIONS_VERSION,
+        **DEFAULT_OPTION_LIMITS,
+    }
+    packet = await resolve_local_context(
+        resolver_request,
+        resolver_context,
+        resolver_options,
     )
-    rag_result = project_known_facts(
-        rag_supervisor_result["known_facts"],
-        current_user_id=rag_request["current_user_id"],
-        character_user_id=rag_request["character_user_id"],
-        answer=str(rag_supervisor_result["answer"]),
-        unknown_slots=rag_supervisor_result["unknown_slots"],
-        loop_count=int(rag_supervisor_result["loop_count"] or 0),
-    )
+    rag_result = project_local_context_packet(packet)
     trace = rag_result["supervisor_trace"]
     logger.info(
-        f'RAG2 projection output: answer={log_preview(rag_result["answer"])}'
+        f'Local context projection output: answer={log_preview(rag_result["answer"])}'
     )
     logger.debug(
-        f'RAG2 projection metadata: platform={state["platform"]} '
+        f'Local context projection metadata: platform={state["platform"]} '
         f'channel={state["platform_channel_id"] or "<dm>"} '
         f'user={state["global_user_id"]} '
         f'query={log_preview(fresh_query)} '
-        f'dispatched={len(trace["dispatched"])} '
         f'user_image={bool(rag_result["user_image"])} '
         f'character_image={bool(rag_result["character_image"])} '
         f'third_party_profiles={len(rag_result["third_party_profiles"])} '
@@ -174,6 +149,7 @@ async def run_rag_evidence_for_persona_state(
         f'recall_evidence={len(rag_result["recall_evidence"])} '
         f'conversation_evidence={len(rag_result["conversation_evidence"])} '
         f'external_evidence={len(rag_result["external_evidence"])} '
+        f'trace={log_preview(trace)} '
         f"rag_result={log_preview(rag_result)}"
     )
     retrieval_count = _retrieval_count(rag_result)
@@ -189,7 +165,7 @@ async def run_rag_evidence_for_persona_state(
         correlation_id=correlation_id,
         agent_name=agent_name,
         status="succeeded",
-        slot_count=len(rag_supervisor_result["unknown_slots"]),
+        slot_count=_local_context_evidence_node_count(packet),
         retrieval_count=retrieval_count,
         latency_ms=_elapsed_ms(started_at),
         safety_recovery_count=len(safety_recovery_incidents),
@@ -215,78 +191,41 @@ async def run_first_cycle_shared_memory_prewarm(
     """
 
     empty_rag_result = _empty_projected_rag_result(state)
-    rag_request = build_text_chat_rag_request(
-        episode=state["cognitive_episode"],
-        decontexualized_input=state["decontexualized_input"],
-        character_profile=state["character_profile"],
-        user_profile=state["user_profile"],
-        prompt_message_context=state["prompt_message_context"],
-        channel_topic=state["channel_topic"],
-        chat_history_recent=state["chat_history_recent"],
-        chat_history_wide=state["chat_history_wide"],
-        reply_context=state["reply_context"],
-        indirect_speech_context=state["indirect_speech_context"],
-        conversation_progress=state.get("conversation_progress"),
-        conversation_episode_state=state.get("conversation_episode_state"),
-        promoted_reflection_context=state.get("promoted_reflection_context"),
-        llm_trace_id=str(state.get("llm_trace_id", "")),
-    )
+    resolver_request: LocalContextResolverRequestV1 = {
+        "schema_version": LOCAL_CONTEXT_RESOLVER_REQUEST_VERSION,
+        "objective": state["decontexualized_input"],
+        "source": "prewarm",
+        "reason": "First-cycle shared memory prewarm.",
+        "priority": "normal",
+    }
+    resolver_context = _local_context_resolver_context_from_state(state)
+    resolver_options: LocalContextResolverOptionsV1 = {
+        "schema_version": LOCAL_CONTEXT_RESOLVER_OPTIONS_VERSION,
+        **DEFAULT_OPTION_LIMITS,
+    }
 
     try:
-        worker_result = await PersistentMemorySearchAgent().run(
-            task=rag_request["original_query"],
-            context=rag_request["context"],
-            max_attempts=1,
+        packet = await resolve_local_context(
+            resolver_request,
+            resolver_context,
+            resolver_options,
         )
-    except (OpenAIError, DatabaseBackendError, TimeoutError) as exc:
-        logger.warning(f"Shared memory prewarm worker failed: {exc}")
+    except (OpenAIError, TimeoutError) as exc:
+        logger.warning(f"Shared memory prewarm resolver failed: {exc}")
         return_value = empty_rag_result
         return return_value
 
-    if not isinstance(worker_result, dict):
-        return_value = empty_rag_result
-        return return_value
-    if worker_result.get("resolved") is not True:
-        return_value = empty_rag_result
-        return return_value
-
-    raw_rows = worker_result.get("result")
-    if not isinstance(raw_rows, list):
-        return_value = empty_rag_result
-        return return_value
-
-    shared_rows = _shared_memory_prewarm_rows(raw_rows)
-    if not shared_rows:
-        return_value = empty_rag_result
-        return return_value
-
-    summary = _shared_memory_prewarm_summary(shared_rows)
-    if not summary:
-        return_value = empty_rag_result
-        return return_value
-
-    known_facts = [
-        {
-            "slot": rag_request["original_query"],
-            "agent": "persistent_memory_search_agent",
-            "resolved": True,
-            "summary": summary,
-            "raw_result": shared_rows,
-        }
-    ]
-    rag_result = project_known_facts(
-        known_facts,
-        current_user_id=rag_request["current_user_id"],
-        character_user_id=rag_request["character_user_id"],
-        answer="",
-        unknown_slots=[],
-        loop_count=0,
+    projected_rag_result = project_local_context_packet(packet)
+    shared_memory_evidence = _shared_memory_evidence_from_rag_result(
+        projected_rag_result,
     )
-    rag_result["user_memory_unit_candidates"] = []
-    rag_result["recall_evidence"] = []
-    rag_result["conversation_evidence"] = []
-    rag_result["external_evidence"] = []
-    return_value = rag_result
+    if not shared_memory_evidence:
+        return_value = empty_rag_result
+        return return_value
+
+    prewarm_rag_result = dict(empty_rag_result)
+    prewarm_rag_result["memory_evidence"] = shared_memory_evidence
+    return_value = prewarm_rag_result
     return return_value
 
 
@@ -306,19 +245,9 @@ def merge_shared_memory_prewarm_result(
         shallow copy with valid prewarm memory evidence appended.
     """
 
-    raw_memory_evidence = prewarm_rag_result.get("memory_evidence")
-    if not isinstance(raw_memory_evidence, list):
-        return_value = base_rag_result
-        return return_value
-
-    prewarm_memory_evidence = [
-        dict(item)
-        for item in raw_memory_evidence
-        if (
-            isinstance(item, dict)
-            and text_or_empty(item.get("source_system")) != "user_memory_units"
-        )
-    ]
+    prewarm_memory_evidence = _shared_memory_evidence_from_rag_result(
+        prewarm_rag_result,
+    )
     if not prewarm_memory_evidence:
         return_value = base_rag_result
         return return_value
@@ -381,12 +310,13 @@ async def _execute_local_context_recall(
     request: ResolverCapabilityRequestV1,
     state: GlobalPersonaState,
 ) -> ResolverObservationV1:
-    """Execute local/private context recall through existing persona RAG."""
+    """Execute local/private context recall through the local-context resolver."""
 
     rag_result = await run_rag_evidence_for_persona_state(
         state,
         agent_name=f"resolver_{request['capability_kind']}",
         objective=request["objective"],
+        reason=request["reason"],
     )
     observation = _observation_base(
         request,
@@ -696,45 +626,33 @@ def _mapping_list_items(value: object) -> list[dict[str, object]]:
     return items
 
 
-def _empty_projected_rag_result(state: GlobalPersonaState) -> dict[str, Any]:
+def _empty_projected_rag_result(_state: GlobalPersonaState) -> dict[str, Any]:
     """Build the normal projected empty RAG payload."""
 
-    rag_result = project_known_facts(
-        [],
-        current_user_id=state["global_user_id"],
-        character_user_id=state["character_profile"]["global_user_id"],
-        answer="",
-        unknown_slots=[],
-        loop_count=0,
-    )
+    rag_result = {
+        "answer": "",
+        "user_image": {
+            "user_memory_context": empty_user_memory_context(),
+        },
+        "user_memory_unit_candidates": [],
+        "character_image": {},
+        "third_party_profiles": [],
+        "memory_evidence": [],
+        "recall_evidence": [],
+        "conversation_evidence": [],
+        "external_evidence": [],
+        "supervisor_trace": {
+            "resolver": "local_context_resolver",
+            "iterations": 0,
+            "node_count": 0,
+            "resolved_node_count": 0,
+            "blocked_node_count": 0,
+            "loop_count": 0,
+            "unknown_slots": [],
+            "dispatched": [],
+        },
+    }
     return rag_result
-
-
-def _shared_memory_prewarm_rows(rows: list[Any]) -> list[dict[str, Any]]:
-    """Return worker rows that belong to shared persistent memory."""
-
-    shared_rows: list[dict[str, Any]] = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        if text_or_empty(row.get("source_system")) == "user_memory_units":
-            continue
-        shared_rows.append(dict(row))
-    return_value = shared_rows
-    return return_value
-
-
-def _shared_memory_prewarm_summary(rows: list[dict[str, Any]]) -> str:
-    """Return the first prompt-safe summary text from shared memory rows."""
-
-    for row in rows:
-        for field in SHARED_MEMORY_SUMMARY_FIELDS:
-            summary = text_or_empty(row.get(field))
-            if summary:
-                return_value = summary
-                return return_value
-    return_value = ""
-    return return_value
 
 
 def _fresh_query_for_objective(
@@ -771,18 +689,22 @@ def _rag_observation_summary(rag_result: dict[str, Any]) -> str:
     )
     if retrieval_count == 0 and has_no_confirmed_facts:
         summary = (
-            "RAG evidence returned no projected rows and no confirmed facts; "
+            "Local context evidence returned no projected rows and no "
+            "confirmed facts; "
             f"treat as evidence_missing, not source-backed truth; "
             f"answer={log_preview(answer)}"
         )
         return summary
     if answer:
         summary = (
-            f"RAG evidence succeeded with {retrieval_count} projected rows; "
+            "Local context evidence succeeded with "
+            f"{retrieval_count} projected rows; "
             f"answer={log_preview(answer)}"
         )
         return summary
-    summary = f"RAG evidence succeeded with {retrieval_count} projected rows."
+    summary = (
+        f"Local context evidence succeeded with {retrieval_count} projected rows."
+    )
     return summary
 
 
@@ -795,8 +717,104 @@ def _retrieval_count(rag_result: dict[str, Any]) -> int:
         + len(rag_result["conversation_evidence"])
         + len(rag_result["external_evidence"])
         + len(rag_result["third_party_profiles"])
+        + len(rag_result["user_memory_unit_candidates"])
     )
     return retrieval_count
+
+
+def _local_context_evidence_node_count(packet: object) -> int:
+    """Count non-root graph nodes for RAG stage telemetry."""
+
+    if not isinstance(packet, Mapping):
+        count = 0
+        return count
+    graph = packet.get("graph")
+    if not isinstance(graph, Mapping):
+        count = 0
+        return count
+    nodes = graph.get("nodes")
+    if not isinstance(nodes, Mapping):
+        count = 0
+        return count
+    count = max(0, len(nodes) - 1)
+    return count
+
+
+def _local_context_resolver_context_from_state(
+    state: GlobalPersonaState,
+) -> LocalContextResolverContextV1:
+    """Build the public local-context resolver context from persona state."""
+
+    character_profile = state["character_profile"]
+    character_name = text_or_empty(character_profile["name"])
+    if not character_name:
+        raise ResolverValidationError("character_profile.name: expected string")
+    conversation_progress = state.get("conversation_progress")
+    if isinstance(conversation_progress, Mapping):
+        progress_context = dict(conversation_progress)
+    else:
+        progress_context = {}
+    context: LocalContextResolverContextV1 = {
+        "schema_version": LOCAL_CONTEXT_RESOLVER_CONTEXT_VERSION,
+        "character_name": character_name,
+        "platform": state["platform"],
+        "platform_channel_id": state["platform_channel_id"],
+        "global_user_id": state["global_user_id"],
+        "user_name": state["user_name"],
+        "local_time_context": _local_context_time_context_from_state(state),
+        "prompt_message_context": dict(state["prompt_message_context"]),
+        "chat_history_recent": list(state["chat_history_recent"]),
+        "chat_history_wide": list(state["chat_history_wide"]),
+        "conversation_progress": progress_context,
+        "original_user_request": state["decontexualized_input"],
+    }
+    return context
+
+
+def _local_context_time_context_from_state(
+    state: GlobalPersonaState,
+) -> dict[str, object]:
+    """Project persona local-time fields into the RAG3 context vocabulary."""
+
+    time_context = dict(state["local_time_context"])
+    current_local_datetime = text_or_empty(
+        time_context.get("current_local_datetime")
+    )
+    if current_local_datetime:
+        if "local_date" not in time_context:
+            time_context["local_date"] = current_local_datetime[:10]
+        if "local_time" not in time_context:
+            if len(current_local_datetime) == 16:
+                local_time = f"{current_local_datetime}:00"
+            else:
+                local_time = current_local_datetime
+            time_context["local_time"] = local_time
+    current_local_weekday = text_or_empty(
+        time_context.get("current_local_weekday")
+    )
+    if current_local_weekday and "local_weekday" not in time_context:
+        time_context["local_weekday"] = current_local_weekday
+    return time_context
+
+
+def _shared_memory_evidence_from_rag_result(
+    rag_result: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Return only shared memory evidence from a projected RAG payload."""
+
+    raw_memory_evidence = rag_result.get("memory_evidence")
+    if not isinstance(raw_memory_evidence, list):
+        memory_evidence: list[dict[str, Any]] = []
+        return memory_evidence
+    memory_evidence = [
+        dict(item)
+        for item in raw_memory_evidence
+        if (
+            isinstance(item, dict)
+            and text_or_empty(item.get("source_system")) != "user_memory_units"
+        )
+    ]
+    return memory_evidence
 
 
 def _safety_recovery_incidents(rag_result: dict[str, Any]) -> list[str]:

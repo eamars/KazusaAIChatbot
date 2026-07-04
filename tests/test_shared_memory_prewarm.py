@@ -9,12 +9,19 @@ from openai import OpenAIError
 
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.cognition_resolver import capabilities
-from kazusa_ai_chatbot.cognition_resolver.state import build_empty_rag_result
+from kazusa_ai_chatbot.local_context_resolver import (
+    LOCAL_CONTEXT_GRAPH_VERSION,
+    LOCAL_CONTEXT_NODE_VERSION,
+    LOCAL_CONTEXT_RESOLUTION_PACKET_VERSION,
+)
+from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
+    empty_user_memory_context,
+)
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 
 def _minimal_persona_state() -> dict[str, Any]:
-    """Build the smallest persona state accepted by the RAG intake boundary."""
+    """Build the smallest persona state accepted by the prewarm boundary."""
 
     turn_clock = build_turn_clock("2026-06-08 09:00:00")
     episode = build_text_chat_cognitive_episode(
@@ -36,6 +43,7 @@ def _minimal_persona_state() -> dict[str, Any]:
     state = {
         "cognitive_episode": episode,
         "decontexualized_input": "Need a memory-backed stance.",
+        "referents": [],
         "character_profile": {
             "name": "Kazusa",
             "global_user_id": "character-1",
@@ -57,147 +65,207 @@ def _minimal_persona_state() -> dict[str, Any]:
         "conversation_episode_state": None,
         "promoted_reflection_context": None,
         "global_user_id": "user-1",
+        "user_name": "Test User",
         "platform": "debug",
         "platform_channel_id": "prewarm-channel",
+        "platform_message_id": "prewarm-message",
+        "platform_bot_id": "bot-1",
         "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
     }
     return state
 
 
-def _rag_request() -> dict[str, Any]:
-    """Return the RAG intake output used by helper-contract tests."""
-
-    request = {
-        "original_query": "Need a memory-backed stance.",
-        "character_name": "Kazusa",
-        "context": {
-            "platform": "debug",
-            "platform_channel_id": "prewarm-channel",
-            "prompt_message_context": {
-                "body_text": "Need a memory-backed stance.",
-                "mentions": [],
-                "attachments": [],
-                "addressed_to_global_user_ids": ["character-1"],
-                "broadcast": False,
-            },
-        },
-        "current_user_id": "user-1",
-        "character_user_id": "character-1",
-    }
-    return request
-
-
 def _empty_result() -> dict[str, Any]:
-    """Build the standard empty RAG result for merge helper tests."""
+    """Build the expected empty prewarm RAG result."""
 
-    rag_result = build_empty_rag_result(
-        current_user_id="user-1",
-        character_user_id="character-1",
-    )
+    rag_result = {
+        "answer": "",
+        "user_image": {
+            "user_memory_context": empty_user_memory_context(),
+        },
+        "user_memory_unit_candidates": [],
+        "character_image": {},
+        "third_party_profiles": [],
+        "memory_evidence": [],
+        "recall_evidence": [],
+        "conversation_evidence": [],
+        "external_evidence": [],
+        "supervisor_trace": {
+            "resolver": "local_context_resolver",
+            "iterations": 0,
+            "node_count": 0,
+            "resolved_node_count": 0,
+            "blocked_node_count": 0,
+            "loop_count": 0,
+            "unknown_slots": [],
+            "dispatched": [],
+        },
+    }
     return rag_result
 
 
-class _FakePersistentMemorySearchAgent:
-    """Patch target that records the persistent-memory worker call."""
+def _graph_node(
+    *,
+    node_id: str,
+    node_kind: str,
+    parent_id: str | None,
+    children: list[str],
+) -> dict[str, Any]:
+    """Build a minimal valid local-context graph node."""
 
-    next_result: dict[str, Any] | BaseException = {
-        "resolved": False,
-        "result": [],
+    node = {
+        "schema_version": LOCAL_CONTEXT_NODE_VERSION,
+        "node_id": node_id,
+        "node_kind": node_kind,
+        "objective": "Find prewarm memory evidence.",
+        "parent_id": parent_id,
+        "children": children,
+        "depends_on": [],
+        "consumes": {},
+        "produces": [],
+        "status": "resolved",
+        "investigation_summary": [],
+        "knowledge_we_know_so_far": [],
+        "knowledge_still_lacking": [],
+        "recommended_next_iteration": [],
+        "evidence_boundary_notes": [],
+        "attempts": [],
+        "collapsed_into": None,
     }
-    calls: list[dict[str, Any]] = []
+    return node
 
-    async def run(
-        self,
-        task: str,
-        context: dict[str, Any] | None = None,
-        max_attempts: int = 0,
+
+def _packet(
+    *,
+    answer: str = "",
+    memory_evidence: list[dict[str, Any]] | None = None,
+    user_memory_unit_candidates: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build a minimal valid RAG3 packet for patched prewarm tests."""
+
+    root = _graph_node(
+        node_id="root",
+        node_kind="synthesis",
+        parent_id=None,
+        children=["memory_1"],
+    )
+    memory_node = _graph_node(
+        node_id="memory_1",
+        node_kind="memory_evidence",
+        parent_id="root",
+        children=[],
+    )
+    packet = {
+        "schema_version": LOCAL_CONTEXT_RESOLUTION_PACKET_VERSION,
+        "investigation_summary": [],
+        "knowledge_we_know_so_far": [],
+        "knowledge_still_lacking": [],
+        "recommended_next_iteration": [],
+        "evidence_boundary_notes": [],
+        "rag_result": {
+            "answer": answer,
+            "user_image": {
+                "user_memory_context": empty_user_memory_context(),
+            },
+            "user_memory_unit_candidates": list(user_memory_unit_candidates or []),
+            "character_image": {},
+            "third_party_profiles": [],
+            "memory_evidence": list(memory_evidence or []),
+            "recall_evidence": [],
+            "conversation_evidence": [],
+            "external_evidence": [],
+            "supervisor_trace": {
+                "resolver": "local_context_resolver",
+                "node_count": 2,
+            },
+        },
+        "graph": {
+            "schema_version": LOCAL_CONTEXT_GRAPH_VERSION,
+            "root_node_id": "root",
+            "active_node_id": "memory_1",
+            "nodes": {
+                "root": root,
+                "memory_1": memory_node,
+            },
+            "traversal_order": ["root", "memory_1"],
+            "collapse_events": [],
+            "max_nodes": 8,
+            "max_depth": 3,
+        },
+        "trace_summary": {
+            "iterations": 1,
+            "node_count": 2,
+        },
+    }
+    return packet
+
+
+def _patch_resolver(
+    monkeypatch: pytest.MonkeyPatch,
+    result: dict[str, Any] | BaseException,
+) -> list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]]:
+    """Patch the local-context resolver and return captured calls."""
+
+    calls: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = []
+
+    async def resolve_local_context(
+        request: dict[str, Any],
+        context: dict[str, Any],
+        options: dict[str, Any],
     ) -> dict[str, Any]:
-        """Record the worker invocation and return or raise the configured result."""
+        """Record the resolver invocation and return or raise configured output."""
 
-        call = {
-            "task": task,
-            "context": context,
-            "max_attempts": max_attempts,
-        }
-        self.calls.append(call)
-        if isinstance(self.next_result, BaseException):
-            raise self.next_result
-        return_value = self.next_result
+        calls.append((request, context, options))
+        if isinstance(result, BaseException):
+            raise result
+        return_value = result
         return return_value
 
-
-def _patch_worker(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Install the fake persistent-memory worker into the capabilities module."""
-
-    _FakePersistentMemorySearchAgent.calls = []
-    _FakePersistentMemorySearchAgent.next_result = {
-        "resolved": False,
-        "result": [],
-    }
     monkeypatch.setattr(
         capabilities,
-        "PersistentMemorySearchAgent",
-        _FakePersistentMemorySearchAgent,
-        raising=False,
+        "resolve_local_context",
+        resolve_local_context,
     )
-
-
-def _patch_rag_intake(
-    monkeypatch: pytest.MonkeyPatch,
-    captured: dict[str, Any],
-) -> None:
-    """Patch the existing RAG intake builder and capture its call shape."""
-
-    def build_rag_request(**kwargs: Any) -> dict[str, Any]:
-        captured["kwargs"] = kwargs
-        request = _rag_request()
-        return request
-
-    monkeypatch.setattr(
-        capabilities,
-        "build_text_chat_rag_request",
-        build_rag_request,
-    )
+    return calls
 
 
 @pytest.mark.asyncio
-async def test_first_cycle_prewarm_uses_existing_rag_intake_and_persistent_worker(
+async def test_first_cycle_prewarm_uses_rag3_public_io(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Prewarm should reuse persona RAG intake and only call the shared worker."""
+    """Prewarm should use the RAG3 public IO with source ``prewarm``."""
 
-    captured: dict[str, Any] = {}
-    _patch_rag_intake(monkeypatch, captured)
-    _patch_worker(monkeypatch)
-    _FakePersistentMemorySearchAgent.next_result = {
-        "resolved": True,
-        "result": [
-            {
+    calls = _patch_resolver(
+        monkeypatch,
+        _packet(
+            memory_evidence=[{
                 "content": "Shared policy: respond lightly to image-only turns.",
                 "source_system": "memory",
-                "timestamp": "2026-05-24T07:41:21+00:00",
-            }
-        ],
-    }
+            }],
+        ),
+    )
 
     rag_result = await capabilities.run_first_cycle_shared_memory_prewarm(
         _minimal_persona_state(),
     )
 
-    assert captured["kwargs"]["decontexualized_input"] == (
+    assert len(calls) == 1
+    request, context, options = calls[0]
+    assert request["source"] == "prewarm"
+    assert request["objective"] == "Need a memory-backed stance."
+    assert request["reason"] == "First-cycle shared memory prewarm."
+    assert context["prompt_message_context"]["body_text"] == (
         "Need a memory-backed stance."
     )
-    assert captured["kwargs"]["prompt_message_context"]["body_text"] == (
-        "Need a memory-backed stance."
-    )
-    assert len(_FakePersistentMemorySearchAgent.calls) == 1
-    worker_call = _FakePersistentMemorySearchAgent.calls[0]
-    assert worker_call["task"] == "Need a memory-backed stance."
-    assert worker_call["context"] == _rag_request()["context"]
-    assert worker_call["max_attempts"] == 1
+    assert context["character_name"] == "Kazusa"
+    assert options["max_subagent_attempts"] >= 1
     assert rag_result["answer"] == ""
     assert rag_result["user_memory_unit_candidates"] == []
-    assert rag_result["memory_evidence"]
+    assert rag_result["memory_evidence"] == [{
+        "content": "Shared policy: respond lightly to image-only turns.",
+        "source_system": "memory",
+    }]
 
 
 @pytest.mark.asyncio
@@ -206,38 +274,43 @@ async def test_first_cycle_prewarm_projects_memory_without_answer_or_user_units(
 ) -> None:
     """Only accepted shared-memory rows should reach projected memory evidence."""
 
-    captured: dict[str, Any] = {}
-    _patch_rag_intake(monkeypatch, captured)
-    _patch_worker(monkeypatch)
-    _FakePersistentMemorySearchAgent.next_result = {
-        "resolved": True,
-        "result": [
-            {
-                "content": "Shared nonverbal input policy.",
-                "source_system": "memory",
-                "timestamp": "2026-05-24T07:41:21+00:00",
-            },
-            {
-                "content": "Private current-user continuity must not prewarm.",
+    calls = _patch_resolver(
+        monkeypatch,
+        _packet(
+            answer="Prewarm answer must not copy.",
+            memory_evidence=[
+                {
+                    "content": "Shared nonverbal input policy.",
+                    "source_system": "memory",
+                    "timestamp": "2026-05-24T07:41:21+00:00",
+                },
+                {
+                    "content": "Private current-user continuity must not prewarm.",
+                    "source_system": "user_memory_units",
+                    "scope_type": "user_continuity",
+                    "scope_global_user_id": "user-1",
+                },
+            ],
+            user_memory_unit_candidates=[{
+                "content": "Candidate must not prewarm.",
                 "source_system": "user_memory_units",
-                "scope_type": "user_continuity",
-                "scope_global_user_id": "user-1",
-            },
-        ],
-    }
+            }],
+        ),
+    )
 
     rag_result = await capabilities.run_first_cycle_shared_memory_prewarm(
         _minimal_persona_state(),
     )
 
     rendered = repr(rag_result)
+    assert len(calls) == 1
     assert rag_result["answer"] == ""
     assert rag_result["user_memory_unit_candidates"] == []
     assert len(rag_result["memory_evidence"]) == 1
     assert "Shared nonverbal input policy." in rendered
     assert "Private current-user continuity must not prewarm." not in rendered
+    assert "Candidate must not prewarm." not in rendered
     assert "user_memory_units" not in rendered
-    assert "memory_evidence_agent" not in rendered
 
 
 def test_merge_shared_memory_prewarm_result_filters_user_memory_source() -> None:
@@ -282,23 +355,27 @@ def test_merge_shared_memory_prewarm_result_filters_user_memory_source() -> None
 
 
 @pytest.mark.asyncio
-async def test_first_cycle_prewarm_returns_empty_on_unresolved_or_worker_failure(
+async def test_first_cycle_prewarm_returns_empty_without_shared_evidence_or_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Unresolved and failed worker calls should degrade to the empty RAG shape."""
+    """Missing shared evidence and resolver failures should degrade to empty."""
 
-    captured: dict[str, Any] = {}
-    _patch_rag_intake(monkeypatch, captured)
-    _patch_worker(monkeypatch)
+    _patch_resolver(
+        monkeypatch,
+        _packet(
+            memory_evidence=[{
+                "content": "Private current-user continuity must not prewarm.",
+                "source_system": "user_memory_units",
+            }],
+        ),
+    )
     unresolved = await capabilities.run_first_cycle_shared_memory_prewarm(
         _minimal_persona_state(),
     )
 
     assert unresolved == _empty_result()
 
-    _FakePersistentMemorySearchAgent.next_result = OpenAIError(
-        "worker unavailable",
-    )
+    _patch_resolver(monkeypatch, OpenAIError("resolver unavailable"))
     failed = await capabilities.run_first_cycle_shared_memory_prewarm(
         _minimal_persona_state(),
     )

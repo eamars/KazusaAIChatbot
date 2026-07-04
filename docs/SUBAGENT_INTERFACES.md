@@ -3,9 +3,9 @@
 ## Document Control
 
 - Owning area: project documentation
-- Applies to: RAG helper agents, `web_agent3` source subagents,
-  `complex_task_resolver` resolver-local subagents, and `background_work`
-  workers
+- Applies to: RAG3 local-context stage agents, retired RAG helper agents,
+  `web_agent3` source subagents, `complex_task_resolver` resolver-local
+  subagents, and `background_work` workers
 - Source evidence: family-specific registries, protocols, and module ICDs
 - Change policy: harmonize documentation categories, not runtime interfaces
 
@@ -45,6 +45,10 @@ Every family-specific ICD should describe the relevant fields below:
 
 ## RAG Helper Agents
 
+RAG helper agents are retained source-level helper modules and historical
+coverage. Production `local_context_recall` uses the RAG3 local-context
+resolver described below.
+
 | Field | Contract |
 |---|---|
 | Owning package | `kazusa_ai_chatbot.rag` |
@@ -63,6 +67,26 @@ RAG helper agents may use different internal algorithms. Some use
 generator-tool-judge loops, some call deterministic retrieval helpers, and some
 delegate to web providers. The stable public contract is the helper-agent
 surface and projected evidence, not one internal implementation path.
+
+## RAG3 Local-Context Stage Agents
+
+| Field | Contract |
+|---|---|
+| Owning package | `kazusa_ai_chatbot.local_context_resolver` |
+| Discovery | None; four resolver-local stages are called directly by `resolve_local_context(...)`. |
+| Runtime purpose | Resolve one bounded local/private context objective into a prompt-safe evidence packet. |
+| Stage identifiers | Graph planner, active node resolver, collapse reviewer, bottom-up synthesizer. |
+| Input | `LocalContextResolverRequestV1`, `LocalContextResolverContextV1`, and `LocalContextResolverOptionsV1`. |
+| Output | `LocalContextResolutionPacketV1` plus retained `rag_result` projection. |
+| Validation owner | Local-context contract validators, graph traversal, artifact normalizers, and packet projection. |
+| Cache behavior | No resolver-owned cache; source artifacts and stage traces are bounded process-local review material. |
+| Side effects | Return evidence only. No adapter delivery, persistence writes, shell/tool execution, or persona stance. |
+| Required tests | Contract, graph, projection, cognition integration, prewarm integration, production-wired live LLM, and E2E persona tests. |
+
+`LocalContextSubagentV1` is a future source-handler protocol in the local
+context resolver contract. It is not a dynamic registry today, and docs must
+not claim that RAG3 dispatches to concrete conversation, memory, person,
+recall, live, or web modules until those handlers exist with tests.
 
 ## web_agent3 Source Subagents
 

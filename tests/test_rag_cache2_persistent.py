@@ -388,27 +388,31 @@ async def test_helpers_swallow_pymongo_error(monkeypatch: pytest.MonkeyPatch) ->
 
 
 @pytest.mark.asyncio
-async def test_service_hydration_inserts_rows_in_reverse_mru_order(
+async def test_service_media_hydration_inserts_rows_in_reverse_mru_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Startup hydration should leave the highest-hit row at the LRU MRU end."""
     rows = [
         {
             "_id": "high",
-            "result": {"unknown_slots": ["high"], "confidence": 1.0},
-            "metadata": {"stage": "rag_initializer"},
+            "result": {"description": "high-priority media descriptor"},
+            "metadata": {"stage": "media_descriptor"},
         },
         {
             "_id": "low",
-            "result": {"unknown_slots": ["low"], "confidence": 1.0},
-            "metadata": {"stage": "rag_initializer"},
+            "result": {"description": "low-priority media descriptor"},
+            "metadata": {"stage": "media_descriptor"},
         },
     ]
     runtime = RAGCache2Runtime(max_entries=10)
-    monkeypatch.setattr(service_module, "load_initializer_entries", AsyncMock(return_value=rows))
+    monkeypatch.setattr(
+        service_module,
+        "load_media_descriptor_entries",
+        AsyncMock(return_value=rows),
+    )
     monkeypatch.setattr(service_module, "get_rag_cache2_runtime", lambda: runtime)
 
-    loaded_count = await service_module._hydrate_rag_initializer_cache()
+    loaded_count = await service_module._hydrate_media_descriptor_cache()
 
     assert loaded_count == 2
     assert list(runtime._entries.keys()) == ["low", "high"]
