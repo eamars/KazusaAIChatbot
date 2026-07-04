@@ -233,11 +233,13 @@ loop through L2d action selection, not through a mandatory pre-cognition full
 RAG step.
 
 The current first resolver cycle has one narrower prewarm lane implemented
-through RAG3 with `source="prewarm"`. It may merge confirmed shared `memory`
-rows into `rag_result.memory_evidence` before L2a reads `rag_result`. This
-lane does not run `MemoryEvidenceAgent`, does not read `user_memory_units`,
-does not populate `rag_result.answer`, and does not create a resolver
-observation.
+through the existing RAG intake projection and the shared
+`PersistentMemorySearchAgent` worker with one attempt. It may merge confirmed
+shared `memory` rows into `rag_result.memory_evidence` before L2a reads
+`rag_result`. This lane does not run the RAG2 supervisor, does not run RAG3
+planner or active-node stages, does not run `MemoryEvidenceAgent`, does not
+read `user_memory_units`, does not populate `rag_result.answer`, and does not
+create a resolver observation.
 
 The default loop cap is four dispatch iterations. This prevents open-ended
 agentic search and keeps normal chatbot latency bounded. Future RAG
@@ -621,9 +623,11 @@ RAG3 takes a different stage-level approach:
 
 ## Integration With Cognition
 
-RAG2 is not called from the cognition resolver after the RAG3 cutover.
-Production `local_context_recall` calls the local-context resolver. Public,
-current, and external answer investigation is exposed to L2d as
+The RAG2 supervisor is not called from the cognition resolver after the RAG3
+cutover. Production `local_context_recall` calls the local-context resolver.
+The first-cycle prewarm exception may call the retained shared persistent-memory
+worker directly, but it is not a full RAG supervisor run. Public, current, and
+external answer investigation is exposed to L2d as
 `public_answer_research` and handled by the complex task resolver, with
 web/source retrieval remaining an internal provider below that boundary.
 

@@ -278,37 +278,55 @@ async def test_local_context_recall_uses_rag3_public_io(
     assert event_kwargs["retrieval_count"] == 2
 
 
-async def test_first_cycle_prewarm_uses_rag3_public_io_without_scoped_rows(
+async def test_first_cycle_prewarm_uses_memory_worker_without_rag3_resolver(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """First-cycle prewarm should use RAG3 and keep only shared memory evidence."""
+    """First-cycle prewarm should stay outside the full RAG3 resolver."""
 
-    calls: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = []
+    calls: list[dict[str, Any]] = []
 
     async def resolve_local_context(
-        request: dict[str, Any],
-        context: dict[str, Any],
-        options: dict[str, Any],
+        _request: dict[str, Any],
+        _context: dict[str, Any],
+        _options: dict[str, Any],
     ) -> dict[str, Any]:
-        """Capture the prewarm RAG3 request and return one packet."""
+        """Fail when prewarm enters the full local-context resolver."""
 
-        calls.append((request, context, options))
-        return_value = _packet(answer="Prewarm answer must not copy.")
-        return return_value
+        raise AssertionError("prewarm must not call resolve_local_context")
 
-    class ForbiddenPersistentMemorySearchAgent:
-        """Patch target that fails if the old prewarm worker is still used."""
+    class FakePersistentMemorySearchAgent:
+        """Capture the direct shared-memory prewarm worker call."""
 
         async def run(
             self,
             task: str,
-            context: dict[str, Any] | None = None,
-            max_attempts: int = 0,
+            context: dict[str, Any],
+            max_attempts: int = 3,
         ) -> dict[str, Any]:
-            """Fail when the retired prewarm source is used."""
+            """Return one shared memory row and one forbidden scoped row."""
 
-            del task, context, max_attempts
-            raise AssertionError("RAG2 persistent memory prewarm was called")
+            calls.append({
+                "task": task,
+                "context": context,
+                "max_attempts": max_attempts,
+            })
+            result = {
+                "resolved": True,
+                "result": [
+                    {
+                        "content": "Shared memory evidence from prewarm.",
+                        "source_system": "memory",
+                    },
+                    {
+                        "content": "Scoped user memory must not enter prewarm.",
+                        "source_system": "user_memory_units",
+                        "scope_type": "user_continuity",
+                        "scope_global_user_id": "global-user-123",
+                    },
+                ],
+                "attempts": 1,
+            }
+            return result
 
     monkeypatch.setattr(
         capabilities,
@@ -319,7 +337,7 @@ async def test_first_cycle_prewarm_uses_rag3_public_io_without_scoped_rows(
     monkeypatch.setattr(
         capabilities,
         "PersistentMemorySearchAgent",
-        ForbiddenPersistentMemorySearchAgent,
+        FakePersistentMemorySearchAgent,
         raising=False,
     )
 
@@ -328,16 +346,15 @@ async def test_first_cycle_prewarm_uses_rag3_public_io_without_scoped_rows(
     )
 
     assert rag_result["answer"] == ""
-    assert rag_result["memory_evidence"] == [
-        {
-            "summary": "Shared memory evidence from RAG3.",
-            "source_system": "memory",
-        },
-    ]
+    assert "Shared memory evidence from prewarm." in repr(
+        rag_result["memory_evidence"]
+    )
     assert rag_result["user_memory_unit_candidates"] == []
     assert "Scoped user memory" not in repr(rag_result)
     assert len(calls) == 1
-    request, context, options = calls[0]
-    assert request["source"] == "prewarm"
-    assert request["objective"] == "Please check the local evidence."
-    _assert_common_local_context_io(request, context, options)
+    worker_call = calls[0]
+    assert worker_call["task"] == "Please check the local evidence."
+    assert worker_call["max_attempts"] == 1
+    assert worker_call["context"]["prompt_message_context"]["body_text"] == (
+        "Please check the local evidence."
+    )

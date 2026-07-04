@@ -7,11 +7,13 @@
   as RAG3
 - Interface boundary: stable public IO around
   `resolve_local_context(request, context, options=None)`
-- Current integration status: production `local_context_recall` and
-  shared-memory prewarm are wired through the stable public IO
+- Current integration status: production `local_context_recall` is wired
+  through the stable public IO. First-cycle shared-memory prewarm stays outside
+  this resolver and uses the bounded shared persistent-memory worker lane.
 - Production caller status: cognition resolver capability execution and
-  first-cycle shared-memory prewarm call `resolve_local_context(...)`; dialog,
-  adapters, and persistence consume only the retained projected evidence
+  standalone/local review paths call `resolve_local_context(...)`; dialog,
+  adapters, prewarm, and persistence consume only the retained projected
+  evidence
 - Source evidence: `contracts.py`, `service.py`, `stages.py`, `graph.py`,
   `constants.py`, and the focused `tests/test_local_context_resolver_*.py`
   suites
@@ -120,7 +122,7 @@ fixed bridge, not a dynamic subagent registry.
 
 ```mermaid
 flowchart TD
-    C0["Caller<br/>l2d local_context_recall, prewarm,<br/>standalone eval, live LLM review"]
+    C0["Caller<br/>l2d local_context_recall,<br/>standalone eval, live LLM review"]
     C1["resolve_local_context(...)<br/>public stable IO"]
     C2["contract validation<br/>request/context/options"]
     C3["blocked packet builder<br/>input or local-resolution failure"]
@@ -312,6 +314,10 @@ prompt-safe context and active-node LLM resolution.
     "priority": "normal|high",
 }
 ```
+
+`prewarm` remains a validated source value for historical trace compatibility
+and local review fixtures. Production first-cycle shared-memory prewarm does
+not call this resolver.
 
 ### `LocalContextResolverContextV1`
 

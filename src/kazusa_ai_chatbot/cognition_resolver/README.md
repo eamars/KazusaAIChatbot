@@ -246,10 +246,12 @@ first resolver cycle
   -> L2b remains independent of the prewarm join
 ```
 
-This prewarm is not a resolver capability observation. It calls RAG3 with
-`source="prewarm"` and may add confirmed shared `memory` collection evidence
-to `rag_result.memory_evidence`, but it must not:
+This prewarm is not a resolver capability observation. It uses the existing
+RAG intake projection plus the shared `PersistentMemorySearchAgent` worker with
+one attempt, then may add confirmed shared `memory` collection evidence to
+`rag_result.memory_evidence`, but it must not:
 
+- call `resolve_local_context(...)` or run the RAG3 planner/active-node stages
 - call full `MemoryEvidenceAgent`
 - read scoped `user_memory_units`
 - populate `rag_result.answer`

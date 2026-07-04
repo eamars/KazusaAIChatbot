@@ -30,6 +30,7 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     validate_resolver_capability_request,
     validate_resolver_observation,
 )
+from kazusa_ai_chatbot.db.errors import DatabaseBackendError
 from kazusa_ai_chatbot.local_context_resolver import (
     DEFAULT_OPTION_LIMITS,
     LOCAL_CONTEXT_RESOLVER_CONTEXT_VERSION,
@@ -43,10 +44,19 @@ from kazusa_ai_chatbot.local_context_resolver.contracts import (
     LocalContextResolverOptionsV1,
     LocalContextResolverRequestV1,
 )
+from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_projection import (
+    project_known_facts,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.nodes.referent_resolution import (
     should_skip_rag_for_unresolved_referents,
     unresolved_referent_reason,
+)
+from kazusa_ai_chatbot.rag.cognitive_episode_adapter import (
+    build_text_chat_rag_request,
+)
+from kazusa_ai_chatbot.rag.memory_evidence.workers.persistent_search import (
+    PersistentMemorySearchAgent,
 )
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
     empty_user_memory_context,
@@ -59,6 +69,13 @@ SELF_GOAL_ALLOWED_TRIGGER_SOURCES = frozenset((
     "internal_thought",
     "self_cognition",
 ))
+SHARED_MEMORY_SUMMARY_FIELDS = (
+    "content",
+    "description",
+    "text",
+    "summary",
+    "fact",
+)
 
 logger = logging.getLogger(__name__)
 
@@ -192,41 +209,78 @@ async def run_first_cycle_shared_memory_prewarm(
     """
 
     empty_rag_result = _empty_projected_rag_result(state)
-    resolver_request: LocalContextResolverRequestV1 = {
-        "schema_version": LOCAL_CONTEXT_RESOLVER_REQUEST_VERSION,
-        "objective": state["decontexualized_input"],
-        "source": "prewarm",
-        "reason": "First-cycle shared memory prewarm.",
-        "priority": "normal",
-    }
-    resolver_context = _local_context_resolver_context_from_state(state)
-    resolver_options: LocalContextResolverOptionsV1 = {
-        "schema_version": LOCAL_CONTEXT_RESOLVER_OPTIONS_VERSION,
-        **DEFAULT_OPTION_LIMITS,
-    }
+    rag_request = build_text_chat_rag_request(
+        episode=state["cognitive_episode"],
+        decontexualized_input=state["decontexualized_input"],
+        character_profile=state["character_profile"],
+        user_profile=state["user_profile"],
+        prompt_message_context=state["prompt_message_context"],
+        channel_topic=state["channel_topic"],
+        chat_history_recent=state["chat_history_recent"],
+        chat_history_wide=state["chat_history_wide"],
+        reply_context=state["reply_context"],
+        indirect_speech_context=state["indirect_speech_context"],
+        conversation_progress=state.get("conversation_progress"),
+        conversation_episode_state=state.get("conversation_episode_state"),
+        promoted_reflection_context=state.get("promoted_reflection_context"),
+        llm_trace_id=str(state.get("llm_trace_id", "")),
+    )
 
     try:
-        packet = await resolve_local_context(
-            resolver_request,
-            resolver_context,
-            resolver_options,
+        worker_result = await PersistentMemorySearchAgent().run(
+            task=rag_request["original_query"],
+            context=rag_request["context"],
+            max_attempts=1,
         )
-    except (OpenAIError, TimeoutError) as exc:
-        logger.warning(f"Shared memory prewarm resolver failed: {exc}")
+    except (OpenAIError, DatabaseBackendError, TimeoutError) as exc:
+        logger.warning(f"Shared memory prewarm worker failed: {exc}")
         return_value = empty_rag_result
         return return_value
 
-    projected_rag_result = project_local_context_packet(packet)
-    shared_memory_evidence = _shared_memory_evidence_from_rag_result(
-        projected_rag_result,
+    if not isinstance(worker_result, dict):
+        return_value = empty_rag_result
+        return return_value
+    if worker_result.get("resolved") is not True:
+        return_value = empty_rag_result
+        return return_value
+
+    raw_rows = worker_result.get("result")
+    if not isinstance(raw_rows, list):
+        return_value = empty_rag_result
+        return return_value
+
+    shared_rows = _shared_memory_prewarm_rows(raw_rows)
+    if not shared_rows:
+        return_value = empty_rag_result
+        return return_value
+
+    summary = _shared_memory_prewarm_summary(shared_rows)
+    if not summary:
+        return_value = empty_rag_result
+        return return_value
+
+    known_facts = [
+        {
+            "slot": rag_request["original_query"],
+            "agent": "persistent_memory_search_agent",
+            "resolved": True,
+            "summary": summary,
+            "raw_result": shared_rows,
+        }
+    ]
+    rag_result = project_known_facts(
+        known_facts,
+        current_user_id=rag_request["current_user_id"],
+        character_user_id=rag_request["character_user_id"],
+        answer="",
+        unknown_slots=[],
+        loop_count=0,
     )
-    if not shared_memory_evidence:
-        return_value = empty_rag_result
-        return return_value
-
-    prewarm_rag_result = dict(empty_rag_result)
-    prewarm_rag_result["memory_evidence"] = shared_memory_evidence
-    return_value = prewarm_rag_result
+    rag_result["user_memory_unit_candidates"] = []
+    rag_result["recall_evidence"] = []
+    rag_result["conversation_evidence"] = []
+    rag_result["external_evidence"] = []
+    return_value = rag_result
     return return_value
 
 
@@ -839,6 +893,33 @@ def _shared_memory_evidence_from_rag_result(
         )
     ]
     return memory_evidence
+
+
+def _shared_memory_prewarm_rows(rows: list[Any]) -> list[dict[str, Any]]:
+    """Return worker rows that belong to shared persistent memory."""
+
+    shared_rows: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if text_or_empty(row.get("source_system")) == "user_memory_units":
+            continue
+        shared_rows.append(dict(row))
+    return_value = shared_rows
+    return return_value
+
+
+def _shared_memory_prewarm_summary(rows: list[dict[str, Any]]) -> str:
+    """Return the first prompt-safe summary text from shared memory rows."""
+
+    for row in rows:
+        for field in SHARED_MEMORY_SUMMARY_FIELDS:
+            summary = text_or_empty(row.get(field))
+            if summary:
+                return_value = summary
+                return return_value
+    return_value = ""
+    return return_value
 
 
 def _safety_recovery_incidents(rag_result: dict[str, Any]) -> list[str]:
