@@ -14,6 +14,14 @@ from .constants import (
     SAFE_FAILURE_TEXT_LIMIT,
     TEXT_ELLIPSIS,
 )
+from .cache import (
+    RAG3_ACTIVE_NODE_CACHE_NAME,
+    RAG3_PLANNER_CACHE_NAME,
+    active_node_cache_ttl_seconds,
+    build_active_node_cache_dependencies,
+    build_active_node_cache_key,
+    build_planner_cache_key,
+)
 from .contracts import (
     ALLOWED_NODE_KINDS,
     ALLOWED_NODE_STATUSES,
@@ -39,12 +47,16 @@ from .contracts import (
     validate_local_context_resolver_request,
 )
 from .graph import find_next_active_node
+from .source_hydration import hydrate_source_for_node
 from .stages import (
+    active_node_stage_cache_identity,
     plan_local_context_graph as _planner_stage_handler,
+    planner_stage_cache_identity,
     resolve_local_context_node as _node_stage_handler,
     review_local_context_collapse as _collapse_stage_handler,
     synthesize_local_context_packet as _synthesizer_stage_handler,
 )
+from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
     empty_user_memory_context,
 )
@@ -203,9 +215,37 @@ async def _plan_graph(
         "context": _compact_context(context),
         "limits": _option_limits(options),
     }
+    cache_key = build_planner_cache_key(
+        request=request,
+        context=context,
+        options=options,
+        stage_identity=planner_stage_cache_identity(),
+    )
+    runtime = get_rag_cache2_runtime()
+    cached_response = await runtime.get(
+        cache_key,
+        cache_name=RAG3_PLANNER_CACHE_NAME,
+        agent_name=RAG3_PLANNER_CACHE_NAME,
+    )
+    if isinstance(cached_response, dict):
+        trace_summary["planner_cache_hits"] = (
+            int(trace_summary["planner_cache_hits"]) + 1
+        )
+        trace_summary["cache_hits"] = int(trace_summary["cache_hits"]) + 1
+        graph = _graph_from_planner_response(request, cached_response, options)
+        _refresh_trace_counts(graph, trace_summary)
+        return graph
+
     response = await _planner_stage_handler(payload)
     trace_summary["planner_calls"] = int(trace_summary["planner_calls"]) + 1
     graph = _graph_from_planner_response(request, response, options)
+    await runtime.store(
+        cache_key=cache_key,
+        cache_name=RAG3_PLANNER_CACHE_NAME,
+        result=response,
+        dependencies=[],
+        metadata={"agent_name": RAG3_PLANNER_CACHE_NAME},
+    )
     _refresh_trace_counts(graph, trace_summary)
     return graph
 
@@ -363,19 +403,144 @@ async def _resolve_active_node(
     """Call the active-node stage for one graph node."""
 
     active_node = graph["nodes"][active_node_id]
+    compact_context = _compact_context(context)
+    dependency_context = _dependency_context(graph, active_node)
+    cache_key = build_active_node_cache_key(
+        request=request,
+        context=context,
+        compact_context=compact_context,
+        active_node=active_node,
+        dependency_context=dependency_context,
+        options=options,
+        stage_identity=active_node_stage_cache_identity(),
+    )
+    runtime = get_rag_cache2_runtime()
+    cached_response = await runtime.get(
+        cache_key,
+        cache_name=RAG3_ACTIVE_NODE_CACHE_NAME,
+        agent_name=RAG3_ACTIVE_NODE_CACHE_NAME,
+    )
+    if isinstance(cached_response, dict):
+        trace_summary["active_node_cache_hits"] = (
+            int(trace_summary["active_node_cache_hits"]) + 1
+        )
+        trace_summary["cache_hits"] = int(trace_summary["cache_hits"]) + 1
+        return cached_response
+
+    source_hydration = await hydrate_source_for_node(
+        active_node=active_node,
+        context=context,
+        dependency_context=dependency_context,
+        max_attempts=options["max_subagent_attempts"],
+    )
+    if source_hydration.get("called") is True:
+        trace_summary["subagent_calls"] = int(trace_summary["subagent_calls"]) + 1
+    prompt_context = dict(compact_context)
+    source_records = source_hydration.get("source_records")
+    if isinstance(source_records, list) and source_records:
+        prompt_context["source_context"] = _sanitized_prompt_payload(
+            source_records
+        )
     payload = {
         "stage": "active_node_resolver",
         "request": request,
-        "context": _compact_context(context),
+        "context": prompt_context,
         "active_node": _compact_node(active_node),
-        "dependency_context": _dependency_context(graph, active_node),
+        "dependency_context": dependency_context,
         "limits": _option_limits(options),
     }
     response = await _node_stage_handler(payload)
+    response = _merge_source_hydration_response(
+        response,
+        source_hydration,
+    )
+    cacheable_response = _cacheable_active_node_response(
+        response,
+        active_node_id,
+    )
     trace_summary["active_node_calls"] = int(
         trace_summary["active_node_calls"]
     ) + 1
-    return response
+    await runtime.store(
+        cache_key=cache_key,
+        cache_name=RAG3_ACTIVE_NODE_CACHE_NAME,
+        result=cacheable_response,
+        dependencies=build_active_node_cache_dependencies(
+            node_kind=active_node["node_kind"],
+            context=context,
+        ),
+        metadata={
+            "agent_name": RAG3_ACTIVE_NODE_CACHE_NAME,
+            "node_kind": active_node["node_kind"],
+        },
+        ttl_seconds=active_node_cache_ttl_seconds(active_node["node_kind"]),
+    )
+    return cacheable_response
+
+
+def _merge_source_hydration_response(
+    response: dict[str, object],
+    source_hydration: dict[str, object],
+) -> dict[str, object]:
+    """Merge deterministic source evidence into an active-node response."""
+
+    source_update = source_hydration.get("node_update")
+    source_artifacts = source_hydration.get("artifacts")
+    if not isinstance(source_update, dict):
+        source_update = {}
+    if not isinstance(source_artifacts, list):
+        source_artifacts = []
+    if not source_update and not source_artifacts:
+        return response
+
+    merged_response = dict(response)
+    raw_node_update = response.get("node_update")
+    if isinstance(raw_node_update, dict):
+        node_update = dict(raw_node_update)
+    else:
+        node_update = {}
+    _merge_source_node_update(node_update, source_update)
+    merged_response["node_update"] = node_update
+
+    raw_artifacts = response.get("artifacts")
+    if isinstance(raw_artifacts, list):
+        artifacts = list(raw_artifacts)
+    else:
+        artifacts = []
+    artifacts.extend(source_artifacts)
+    merged_response["artifacts"] = artifacts
+    return merged_response
+
+
+def _merge_source_node_update(
+    node_update: dict[str, object],
+    source_update: dict[str, object],
+) -> None:
+    """Merge source-owned node rows while preserving model-authored rows."""
+
+    if source_update.get("status") == "resolved":
+        node_update["status"] = "resolved"
+        node_update["knowledge_still_lacking"] = []
+    for field_name in (
+        "investigation_summary",
+        "knowledge_we_know_so_far",
+        "recommended_next_iteration",
+        "evidence_boundary_notes",
+        "produces",
+    ):
+        source_rows = source_update.get(field_name)
+        if not isinstance(source_rows, list):
+            continue
+        target_rows = node_update.get(field_name)
+        if not isinstance(target_rows, list):
+            target_rows = []
+        for row in source_rows:
+            if not isinstance(row, str) or not row.strip():
+                continue
+            if row in target_rows:
+                continue
+            target_rows.append(row)
+        node_update[field_name] = target_rows
 
 
 def _apply_active_node_response(
@@ -407,6 +572,74 @@ def _apply_active_node_response(
         artifact = _validated_artifact_for_node(raw_artifact, active_node_id)
         artifacts.append(artifact)
     _refresh_trace_counts(graph, trace_summary)
+
+
+def _cacheable_active_node_response(
+    response: dict[str, object],
+    active_node_id: str,
+) -> dict[str, object]:
+    """Return the normalized active-node response safe to store in Cache2."""
+
+    node_update = response.get("node_update")
+    if not isinstance(node_update, dict):
+        raise LocalContextValidationError("node_update: expected object")
+    normalized_update: dict[str, object] = {}
+    for field_name, value in node_update.items():
+        if field_name not in _NODE_UPDATE_FIELDS:
+            continue
+        normalized_update[field_name] = _node_update_value(field_name, value)
+    _validate_cacheable_node_update(normalized_update)
+
+    raw_artifacts = response.get("artifacts")
+    if raw_artifacts is None:
+        raw_artifacts = []
+    if not isinstance(raw_artifacts, list):
+        raise LocalContextValidationError("artifacts: expected list")
+    normalized_artifacts: list[LocalContextArtifactV1] = []
+    for raw_artifact in raw_artifacts:
+        artifact = _validated_artifact_for_node(raw_artifact, active_node_id)
+        normalized_artifacts.append(artifact)
+
+    cacheable_response = {
+        "node_update": normalized_update,
+        "artifacts": normalized_artifacts,
+    }
+    return cacheable_response
+
+
+def _validate_cacheable_node_update(node_update: dict[str, object]) -> None:
+    """Validate normalized active-node rows before Cache2 storage."""
+
+    status = node_update.get("status")
+    if status is not None and status not in ALLOWED_NODE_STATUSES:
+        raise LocalContextValidationError("node_update.status: unknown status")
+    for field_name in (
+        "investigation_summary",
+        "knowledge_we_know_so_far",
+        "knowledge_still_lacking",
+        "recommended_next_iteration",
+        "evidence_boundary_notes",
+        "produces",
+    ):
+        value = node_update.get(field_name)
+        if value is None:
+            continue
+        if not isinstance(value, list):
+            raise LocalContextValidationError(f"{field_name}: expected list")
+        for item in value:
+            if not isinstance(item, str) or not item.strip():
+                raise LocalContextValidationError(
+                    f"{field_name}: expected non-empty strings"
+                )
+    attempts = node_update.get("attempts")
+    if attempts is not None and not isinstance(attempts, list):
+        raise LocalContextValidationError("attempts: expected list")
+    collapsed_into = node_update.get("collapsed_into")
+    if collapsed_into is not None:
+        if not isinstance(collapsed_into, str) or not collapsed_into.strip():
+            raise LocalContextValidationError(
+                "collapsed_into: expected non-empty string"
+            )
 
 
 def _node_update_value(field_name: str, value: object) -> object:
@@ -447,9 +680,7 @@ def _validated_artifact_for_node(
     if not isinstance(raw_artifact, dict):
         raise LocalContextValidationError("artifact: expected object")
     artifact_data = dict(raw_artifact)
-    producer_node_id = artifact_data.get("producer_node_id")
-    if producer_node_id is None or producer_node_id == "active_node":
-        artifact_data["producer_node_id"] = active_node_id
+    artifact_data["producer_node_id"] = active_node_id
     if "schema_version" not in artifact_data:
         artifact_data["schema_version"] = LOCAL_CONTEXT_ARTIFACT_VERSION
     artifact_type = artifact_data.get("artifact_type")
@@ -1177,11 +1408,14 @@ def _initial_trace_summary() -> dict[str, object]:
         "resolved_node_count": 0,
         "blocked_node_count": 0,
         "planner_calls": 0,
+        "planner_cache_hits": 0,
         "active_node_calls": 0,
+        "active_node_cache_hits": 0,
         "collapse_calls": 0,
         "synthesis_calls": 0,
         "subagent_calls": 0,
         "collapse_count": 0,
+        "cache_hits": 0,
     }
     return trace_summary
 
@@ -1290,6 +1524,15 @@ def _artifact_type_from_semantic_text(value: str) -> str:
         "memory": "memory_ref",
         "memory_evidence": "memory_ref",
         "memory_ref": "memory_ref",
+        "scoped_memory": "memory_ref",
+        "scoped_memory_ref": "memory_ref",
+        "user_memory": "memory_ref",
+        "user_memory_ref": "memory_ref",
+        "user_memory_unit": "memory_ref",
+        "user_memory_unit_candidate": "memory_ref",
+        "user_memory_units": "memory_ref",
+        "user_memory_unit_recall": "memory_ref",
+        "user_memory_unit_candidates": "memory_ref",
         "person": "person_ref",
         "person_context": "person_ref",
         "person_ref": "person_ref",
@@ -1301,7 +1544,6 @@ def _artifact_type_from_semantic_text(value: str) -> str:
         "recall": "recall_ref",
         "recall_evidence": "recall_ref",
         "recall_ref": "recall_ref",
-        "scoped_memory": "memory_ref",
         "semantic_packet": "semantic_packet",
     }
     artifact_type = aliases.get(normalized, normalized)

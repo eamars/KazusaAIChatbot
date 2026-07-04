@@ -6,7 +6,7 @@
   local-context resolver aligned with the `complex_task_resolver` architecture
   while preserving cognition's prompt-facing `rag_result` evidence contract.
 - Plan class: high_risk_migration
-- Status: in_progress
+- Status: completed
 - Mandatory skills: `development-plan`, `local-llm-architecture`,
   `debug-llm`, `py-style`, `cjk-safety`, and `test-style-and-execution`.
 - Overall cutover strategy: two-step execution. Step 1 implements and
@@ -1626,3 +1626,158 @@ This plan is complete when:
   while full browser/control-console E2E tests in the default suite also
   passed during the final run. The two opt-in live-service/database E2E tests
   remain skipped by repository markers.
+
+### 2026-07-04 Stage 8 Cache2 integration
+
+- Implemented process-local Cache2 reuse for RAG3 planner and active-node
+  stages without caching final RAG packets, dialog text, or raw graph ids.
+- Cache policy:
+  - Planner entries are long-lived and keyed by prompt/model stage identity,
+    capability scope, normalized objective, request source, limits, and coarse
+    context shape. Exact live time and exact chat-history text are excluded so
+    repeated resolver sequences can reuse the plan when the prompt and
+    capability contract have not changed.
+  - Active-node entries are exact evidence-stage entries keyed by prompt/model
+    identity, node contract, compact context digest, dependency digest, scope,
+    and limits.
+  - Stable local evidence domains use no TTL and rely on Cache2 dependency
+    invalidation, LRU eviction, or process restart. Live-context entries use a
+    short TTL. External-evidence entries use a longer but finite TTL.
+- Runtime support:
+  - Cache2 entries now support optional TTL expiration. Missing TTL means no
+    time-based expiry.
+  - Cache2 stats include expiration count.
+  - Shared cache-key text normalization moved to the Cache2 runtime layer for
+    RAG3 and retained helper reuse.
+- Production telemetry now marks local-context recall events as cache hits when
+  the RAG3 trace summary reports planner or active-node cache reuse.
+- Validation:
+  - `venv\Scripts\python -m pytest tests\test_cache2_agent_stats.py tests\test_persistent_memory_cache_invalidation.py tests\test_media_descriptor_cache.py tests\test_local_context_resolver_cache.py tests\test_local_context_resolver_standalone.py -q`
+    -> 37 passed.
+  - `venv\Scripts\python -m pytest tests\test_local_context_resolver_contracts.py tests\test_local_context_resolver_graph.py tests\test_local_context_resolver_projection.py tests\test_local_context_resolver_standalone.py tests\test_local_context_resolver_integration.py tests\test_local_context_resolver_cache.py -q`
+    -> 28 passed.
+  - `venv\Scripts\python -m pytest tests\test_cognition_resolver_contracts.py tests\test_cognition_resolver_loop.py tests\test_cognition_resolver_persona_graph.py tests\test_cognition_resolver_l2d_contract.py tests\test_shared_memory_prewarm.py tests\test_persona_supervisor2_cognition_prewarm.py tests\test_service_health.py -q`
+    -> 70 passed.
+  - `venv\Scripts\python -m py_compile` over changed production and test
+    Python files -> passed.
+  - `git diff --check` -> passed with line-ending normalization warnings only.
+- Live LLM cache-performance validation:
+  - Added `tests/test_local_context_resolver_cache_live_llm.py`, a one-case
+    live harness that clears Cache2, runs the same production local-context
+    recall input cold, reruns it warm in the same Python process, and writes
+    raw JSON evidence.
+  - Ran five production-wired cases individually with `-m live_llm`: current
+    time, exact phrase, current-user URL, scoped memory, and `#napcat`.
+  - The two prior production sign-off cases, `production_exact_phrase` and
+    `production_scoped_memory`, both passed with identical cold/warm
+    `rag_result` output.
+  - Aggregate cold runtime was 39.539342s across 11 LLM stage calls. Aggregate
+    warm runtime was 0.003271s across 0 LLM stage calls. Warm cache-hit
+    telemetry was true for all five cases.
+  - Human-readable report:
+    `test_artifacts/local_context_resolver/rag3_cache2_live_llm_review.md`.
+
+### 2026-07-04 Stage 9 source-backed gap closure and final verification
+
+- Final gap closure scope:
+  - RAG3 production active nodes now hydrate source-backed evidence on cache
+    misses through the existing source-owned helpers:
+    `MemoryEvidenceAgent`, `ConversationEvidenceAgent`,
+    `PersonContextAgent`, and `RecallAgent`.
+  - `source_hydration.py` projects sanitized `source_context` rows and
+    deterministic artifacts into the active-node resolver path. Prompt-visible
+    memory rows keep semantic content, memory name, source kind/type/status,
+    and scoped-memory provenance only; retrieval scores, cache keys,
+    embeddings, raw rows, and platform ids are stripped.
+  - `cognition_resolver.capabilities` passes current timestamp, optional
+    current platform message id, active-turn platform message ids,
+    active-turn conversation row ids, and `source_hydration_enabled=True` to
+    RAG3 production calls.
+  - Active-node Cache2 keys include the source-hydration enablement flag.
+    Warm active-node cache hits skip both source hydration and the active-node
+    LLM for that node.
+  - Cache invalidation dependencies for scoped memory, recall, and person
+    context were broadened to match global user-profile and character-state
+    invalidation events.
+  - Artifact alias normalization now accepts scoped/user-memory aliases emitted
+    by live local LLM runs and rebinds `producer_node_id` to the active node.
+  - `tests/test_db_public_boundary.py` now detects nested raw Mongo patterns
+    such as `db.collection.find(...)`.
+  - The persona RAG helper context builder now tolerates missing
+    `platform_message_id` in narrow helper-test states while preserving
+    production ids when present.
+- Independent review:
+  - Review subagent: `019f2c92-324f-74f1-9e30-7a89cb39c5b3` (`Kant`),
+    review-only.
+  - Review result before remediation: not approved.
+  - Findings addressed:
+    - Critical: production RAG3 active nodes were source-context-only and had
+      no path to DB-backed memory/conversation/person/recall source agents.
+      Fixed with static source hydration and source-backed artifacts.
+    - High: Cache2 invalidation dependencies for user-global data were too
+      channel scoped. Fixed scoped memory, recall, and person-context
+      dependency scopes.
+    - Low: DB public-boundary tests missed nested raw Mongo calls. Fixed the
+      detector and added direct coverage.
+  - Review status after remediation: no unresolved RAG3 production blockers.
+- One-at-a-time live LLM verification:
+  - Standalone RAG3 cases all passed: current time, exact phrase,
+    current-user URL, scoped memory, and `#napcat` command anchor.
+  - Production RAG3 cases all passed: current time, exact phrase,
+    current-user URL, scoped memory, and `#napcat` command anchor.
+  - RAG2-vs-RAG3 comparison cases all passed: current time, active agreement
+    recall, exact phrase provenance, active-character self words,
+    current-user URL recall, scoped current-user memory, named person
+    impression, official address memory, and `#napcat` command anchor.
+  - Cache2 production live cases all passed: current time, exact phrase,
+    current-user URL, scoped memory, and `#napcat` command anchor. Warm runs
+    produced identical `rag_result` outputs, zero LLM traces, and cache-hit
+    telemetry.
+  - Latest `#napcat` cache artifact shows cold source hydration retrieved the
+    real durable memory entry named `napcat`; warm run returned in
+    0.000705s with planner and active-node cache hits.
+- Focused deterministic verification after remediation:
+  - Local-context contract/graph/projection/integration/standalone/cache/source
+    hydration bundle:
+    `venv\Scripts\python -m pytest tests/test_local_context_resolver_contracts.py tests/test_local_context_resolver_graph.py tests/test_local_context_resolver_projection.py tests/test_local_context_resolver_integration.py tests/test_local_context_resolver_standalone.py tests/test_local_context_resolver_cache.py tests/test_local_context_resolver_source_hydration.py -q`
+    -> 31 passed.
+  - Cognition, prewarm, and event boundary bundle:
+    `venv\Scripts\python -m pytest tests/test_cognition_resolver_l2d_contract.py tests/test_cognition_resolver_contracts.py tests/test_cognition_resolver_loop.py tests/test_persona_supervisor2_cognition_prewarm.py tests/test_persona_supervisor2_rag_skip_shape.py tests/test_rag_dialog_event_logging.py -q`
+    -> 72 passed.
+  - Cache2 focused bundle:
+    `venv\Scripts\python -m pytest tests/test_cache2_agent_stats.py tests/test_db_writer_cache2_invalidation.py tests/test_rag_cache2_persistent.py -q`
+    -> 13 passed.
+  - Former full-suite failures were isolated and resolved or classified:
+    coding-agent image-reading acceptance passed in isolation and in the
+    final exact failed-set rerun; RAG helper integration failures were fixed
+    by the optional message-id boundary change and snapshot update.
+  - Exact failed-set rerun:
+    `venv\Scripts\python -m pytest tests/test_coding_agent_image_reading_acceptance.py::test_target_image_reading_question_returns_evidence_backed_answer tests/test_persona_supervisor2_rag2_integration.py::test_rag_evidence_helper_calls_rag3_and_projects_payload tests/test_persona_supervisor2_rag2_integration.py::test_rag_evidence_request_shape_snapshot tests/test_persona_supervisor2_rag2_integration.py::test_rag_evidence_passes_empty_reply_context_to_wrapper tests/test_persona_supervisor2_rag2_integration.py::test_rag_evidence_runs_for_mixed_referents -q`
+    -> 5 passed.
+- Final deterministic regression:
+  - `venv\Scripts\python -m pytest -m "not live_db and not live_llm and not live_internet" -q`
+    -> 2860 passed, 2 skipped, 501 deselected.
+- Static verification:
+  - `venv\Scripts\python -m py_compile` over changed and untracked Python
+    files -> passed.
+  - `git diff --check` -> passed with line-ending normalization warnings only.
+  - Production-path grep for RAG2 initializer/supervisor/refined-query symbols
+    across cognition resolver, persona supervisor, service, DB bootstrap, and
+    local-context resolver returned no matches.
+- Documentation closeout:
+  - `src/kazusa_ai_chatbot/local_context_resolver/README.md` now documents the
+    implemented static source-hydration bridge, optional source-hydration
+    context fields, cache behavior, and distinction from future dynamic
+    subagent protocols.
+  - `src/kazusa_ai_chatbot/rag/README.md` continues to identify RAG2 as
+    retired from production while documenting retained helper/source-cache
+    ownership.
+- Residual risk:
+  - No known RAG3 cutover blockers remain.
+  - Opt-in live DB/service E2E tests remain skipped by repository markers in
+    the default non-live suite.
+  - RAG2 helper modules remain in the repository for retained source helpers,
+    historical tests, and comparison coverage, but production
+    `local_context_recall` no longer uses the RAG2 initializer/supervisor
+    path.
+- Final plan status: completed and ready for archive.

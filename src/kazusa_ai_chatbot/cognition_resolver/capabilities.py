@@ -168,6 +168,7 @@ async def run_rag_evidence_for_persona_state(
         slot_count=_local_context_evidence_node_count(packet),
         retrieval_count=retrieval_count,
         latency_ms=_elapsed_ms(started_at),
+        cache_hit=_local_context_cache_hit(packet),
         safety_recovery_count=len(safety_recovery_incidents),
         safety_recovery_first=safety_recovery_first,
     )
@@ -767,8 +768,31 @@ def _local_context_resolver_context_from_state(
         "chat_history_wide": list(state["chat_history_wide"]),
         "conversation_progress": progress_context,
         "original_user_request": state["decontexualized_input"],
+        "current_timestamp_utc": state["storage_timestamp_utc"],
+        "current_platform_message_id": text_or_empty(
+            state.get("platform_message_id")
+        ),
+        "active_turn_platform_message_ids": _active_turn_platform_message_ids(
+            state,
+        ),
+        "active_turn_conversation_row_ids": _string_list(
+            state.get("active_turn_conversation_row_ids"),
+        ),
+        "source_hydration_enabled": True,
     }
     return context
+
+
+def _active_turn_platform_message_ids(
+    state: GlobalPersonaState,
+) -> list[str]:
+    """Return active-turn message ids, including the current platform message."""
+
+    message_ids = _string_list(state.get("active_turn_platform_message_ids"))
+    current_message_id = text_or_empty(state.get("platform_message_id"))
+    if current_message_id and current_message_id not in message_ids:
+        message_ids.append(current_message_id)
+    return message_ids
 
 
 def _local_context_time_context_from_state(
@@ -863,6 +887,7 @@ async def _record_rag_event(
     slot_count: int,
     retrieval_count: int,
     latency_ms: int,
+    cache_hit: bool = False,
     safety_recovery_count: int = 0,
     safety_recovery_first: str = "",
 ) -> None:
@@ -875,12 +900,21 @@ async def _record_rag_event(
         status=status,
         slot_count=slot_count,
         retrieval_count=retrieval_count,
-        cache_hit=False,
+        cache_hit=cache_hit,
         no_evidence=retrieval_count == 0,
         latency_ms=latency_ms,
         safety_recovery_count=safety_recovery_count,
         safety_recovery_first=safety_recovery_first,
     )
+
+
+def _local_context_cache_hit(packet: dict[str, Any]) -> bool:
+    """Return whether any RAG3 resolver stage was served from Cache2."""
+
+    trace_summary = packet["trace_summary"]
+    cache_hits = trace_summary.get("cache_hits")
+    return_value = isinstance(cache_hits, int) and cache_hits > 0
+    return return_value
 
 
 def _created_at_utc(state: GlobalPersonaState) -> str:

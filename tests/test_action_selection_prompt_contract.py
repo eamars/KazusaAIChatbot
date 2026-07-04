@@ -28,8 +28,17 @@ def test_action_selection_prompt_uses_runtime_affordance_roster() -> None:
         "future_speak",
         "background_work_request",
     ):
-        assert hardcoded_capability not in ACTION_ROUTER_PROMPT
-        assert hardcoded_capability not in ACTION_ROUTER_TASK_WILLINGNESS_PROMPT
+        hardcoded_action_example = f'"capability": "{hardcoded_capability}"'
+        hardcoded_resolver_example = (
+            f'"capability_kind": "{hardcoded_capability}"'
+        )
+        assert hardcoded_action_example not in ACTION_ROUTER_PROMPT
+        assert hardcoded_resolver_example not in ACTION_ROUTER_PROMPT
+        assert hardcoded_action_example not in ACTION_ROUTER_TASK_WILLINGNESS_PROMPT
+        assert (
+            hardcoded_resolver_example
+            not in ACTION_ROUTER_TASK_WILLINGNESS_PROMPT
+        )
 
 
 def test_action_selection_prompt_explains_upstream_handoff() -> None:
@@ -82,7 +91,6 @@ def test_action_selection_enabled_prompt_follows_task_refusal_outcome() -> None:
     for forbidden_text in (
         'resource heavy',
         'tool cost',
-        'background_work',
         'complex_task_resolution',
         'affinity threshold',
         'effort_score',

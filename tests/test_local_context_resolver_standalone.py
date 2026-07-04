@@ -739,6 +739,45 @@ def test_artifact_type_accepts_stage_semantic_aliases() -> None:
     assert artifact["artifact_type"] == "person_ref"
     assert artifact["producer_node_id"] == "task_1"
 
+    scoped_artifact = resolver_service._validated_artifact_for_node(
+        {
+            "artifact_id": "scoped_memory_1",
+            "artifact_type": "user_memory_unit_recall",
+            "producer_node_id": "model_generated_node_name",
+            "summary": "Scoped user-memory evidence.",
+            "projection_payload": {
+                "user_memory_unit_candidates": [{
+                    "content": "Scoped continuity row.",
+                }],
+            },
+            "source_policy": "user_memory_units",
+            "prompt_visible": True,
+        },
+        "task_2",
+    )
+
+    assert scoped_artifact["artifact_type"] == "memory_ref"
+    assert scoped_artifact["producer_node_id"] == "task_2"
+
+    singular_candidate = resolver_service._validated_artifact_for_node(
+        {
+            "artifact_id": "scoped_memory_2",
+            "artifact_type": "user_memory_unit_candidate",
+            "summary": "Scoped user-memory candidate.",
+            "projection_payload": {
+                "user_memory_unit_candidates": [{
+                    "content": "Another scoped row.",
+                }],
+            },
+            "source_policy": "user memory units",
+            "prompt_visible": True,
+        },
+        "task_3",
+    )
+
+    assert singular_candidate["artifact_type"] == "memory_ref"
+    assert singular_candidate["producer_node_id"] == "task_3"
+
 
 def _trace_summary() -> dict[str, object]:
     """Build a minimal trace summary for prompt-facing RAG result tests."""

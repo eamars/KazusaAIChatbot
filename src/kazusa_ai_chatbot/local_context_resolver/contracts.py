@@ -115,6 +115,11 @@ class LocalContextResolverContextV1(TypedDict):
     chat_history_wide: list[dict[str, object]]
     conversation_progress: dict[str, object]
     original_user_request: NotRequired[str]
+    current_timestamp_utc: NotRequired[str]
+    current_platform_message_id: NotRequired[str]
+    active_turn_platform_message_ids: NotRequired[list[str]]
+    active_turn_conversation_row_ids: NotRequired[list[str]]
+    source_hydration_enabled: NotRequired[bool]
 
 
 class LocalContextResolverOptionsV1(TypedDict):
@@ -290,6 +295,29 @@ def validate_local_context_resolver_context(
         _require_dict(data, field_name)
     for field_name in ("chat_history_recent", "chat_history_wide"):
         _require_list(data, field_name)
+    for field_name in (
+        "current_timestamp_utc",
+        "current_platform_message_id",
+        "original_user_request",
+    ):
+        if field_name in data:
+            _require_string(data, field_name)
+    for field_name in (
+        "active_turn_platform_message_ids",
+        "active_turn_conversation_row_ids",
+    ):
+        if field_name in data:
+            _validate_string_list(
+                _require_list(data, field_name),
+                field_name,
+                allow_empty_strings=False,
+            )
+    if "source_hydration_enabled" in data:
+        source_hydration_enabled = data.get("source_hydration_enabled")
+        if not isinstance(source_hydration_enabled, bool):
+            raise LocalContextValidationError(
+                "source_hydration_enabled: expected boolean"
+            )
     return_value = data
     return return_value
 

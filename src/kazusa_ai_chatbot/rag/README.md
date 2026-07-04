@@ -555,27 +555,39 @@ Long-term global lore promotion remains future work. The current implementation 
 
 ## Cache 2
 
-Cache 2 remains the cache for retained RAG helper code. Its hot serving layer
-is a process-local LRU used by helper agents and retired initializer strategy
-tests. Service startup no longer hydrates the retired initializer strategy
+Cache 2 remains the shared process-local cache runtime for retrieval/evidence
+helpers and selected RAG3 stage results. Its hot serving layer is a
+process-local LRU used by retained helper agents, media descriptor hydration,
+retired initializer strategy tests, and RAG3 graph-planner / active-node stage
+lookups. Service startup no longer hydrates the retired initializer strategy
 cache into production memory.
 
-Helper-agent result cache entries are intentionally session-local:
+Helper-agent and RAG3 stage-result cache entries are intentionally
+session-local unless a separate persistent owner explicitly writes a durable
+row, such as the media descriptor cache:
 
 - helper-agent entries disappear on service restart,
+- RAG3 planner and active-node entries disappear on service restart,
 - helper-agent results are not written through to MongoDB,
+- RAG3 stage entries are not written through to MongoDB,
 - correctness depends on dependency-based invalidation rather than long TTLs,
 - web search and final answers are not cached.
 
-Top-level capability agents are not cached. Their cache metadata reports
-`enabled=false` and `reason="capability_orchestrator_uncached"`. They may call
-existing cacheable workers, whose Cache 2 policies remain source-aware.
+Top-level retained RAG2 capability agents are not cached. Their cache metadata
+reports `enabled=false` and
+`reason="capability_orchestrator_uncached"`. They may call existing cacheable
+workers, whose Cache 2 policies remain source-aware. Production RAG3 does not
+cache the top-level `LocalContextResolutionPacketV1`; it caches only planner
+task-list output and active-node evidence output.
 
 The retired `rag_initializer` strategy cache may still be exercised by legacy
 tests or experiments, but it is not hydrated by the production service startup
 path after the RAG3 cutover.
 
-Cache entries declare the data scopes they depend on, such as `user_profile`, `character_state`, or `conversation_history`. Durable write paths emit invalidation events after successful writes. The runtime evicts cached entries whose dependencies overlap the event scope.
+Cache entries declare the data scopes they depend on, such as `user_profile`,
+`character_state`, `memory`, or `conversation_history`. Durable write paths
+emit invalidation events after successful writes. The runtime evicts cached
+entries whose dependencies overlap the event scope.
 
 ```text
 helper agent result
@@ -589,7 +601,23 @@ Cache 2 runtime
   -> evict stale entries
 ```
 
-Conversation retrieval is cached only for closed historical windows with both `from_timestamp` and `to_timestamp`. Recent or open-ended conversation queries are deliberately not cached because new messages can make them stale immediately.
+Retained RAG2 conversation retrieval is cached only for closed historical
+windows with both `from_timestamp` and `to_timestamp`. Recent or open-ended
+conversation queries are deliberately not cached because new messages can make
+them stale immediately.
+
+RAG3 takes a different stage-level approach:
+
+- planner cache keys are aggressive and long-lived because the cached value is
+  only source-domain decomposition, not evidence;
+- active-node cache keys are exact over compact prompt-safe context,
+  dependency context, node kind, objective, option limits, prompt digest, and
+  model identity;
+- stable local domains use no TTL and rely on key versioning plus dependency
+  invalidation;
+- live-context node entries have a short TTL;
+- external-evidence node entries have a longer TTL;
+- final packets, `rag_result`, and final dialog wording are not cached.
 
 ## Integration With Cognition
 

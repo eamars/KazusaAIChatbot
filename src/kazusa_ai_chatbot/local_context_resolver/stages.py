@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -169,6 +170,36 @@ def _record_failed_stage_trace(
         parsed_output={"parse_error": str(error)},
     )
 
+
+def _prompt_digest(prompt: str) -> str:
+    """Return a stable digest for one runtime prompt contract."""
+
+    digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+    return digest
+
+
+def _stage_cache_identity(
+    *,
+    prompt: str,
+    route_name: str,
+    model: str,
+    max_completion_tokens: int,
+    thinking_enabled: bool,
+) -> dict[str, object]:
+    """Return stage identity fields that make cached LLM output reusable."""
+
+    identity = {
+        "prompt_digest": _prompt_digest(prompt),
+        "route_name": route_name,
+        "model": model,
+        "temperature": STAGE_LLM_TEMPERATURE,
+        "top_p": STAGE_LLM_TOP_P,
+        "max_completion_tokens": max_completion_tokens,
+        "thinking_enabled": thinking_enabled,
+    }
+    return identity
+
+
 _PLANNER_PROMPT = '''\
 You split one local-context recall objective into a small semantic task list.
 Return one JSON object only.
@@ -237,6 +268,19 @@ _planner_llm_config = LLMCallConfig(
     presence_penalty=None,
     thinking=LLMThinkingConfig(enabled=RAG_PLANNER_LLM_THINKING_ENABLED),
 )
+
+
+def planner_stage_cache_identity() -> dict[str, object]:
+    """Return the graph-planner prompt and model cache identity."""
+
+    identity = _stage_cache_identity(
+        prompt=_PLANNER_PROMPT,
+        route_name="RAG_PLANNER_LLM",
+        model=RAG_PLANNER_LLM_MODEL,
+        max_completion_tokens=RAG_PLANNER_LLM_MAX_COMPLETION_TOKENS,
+        thinking_enabled=RAG_PLANNER_LLM_THINKING_ENABLED,
+    )
+    return identity
 
 
 async def plan_local_context_graph(
@@ -318,6 +362,9 @@ prompt-safe local evidence. Do not write final character dialog.
 
 # Rules
 - Use provided context rows as source material. Do not invent storage results.
+- If context.source_context is present, treat those rows as source-agent
+  retrieval evidence for this node and prefer them over inference from
+  supplied chat/history rows.
 - A resolved node means the local evidence step completed, not that the whole
   user goal is fully answered.
 - Put graph ids, trace details, raw message ids, adapter ids, database ids,
@@ -382,6 +429,19 @@ _node_llm_config = LLMCallConfig(
     presence_penalty=None,
     thinking=LLMThinkingConfig(enabled=RAG_SUBAGENT_LLM_THINKING_ENABLED),
 )
+
+
+def active_node_stage_cache_identity() -> dict[str, object]:
+    """Return the active-node prompt and model cache identity."""
+
+    identity = _stage_cache_identity(
+        prompt=_NODE_PROMPT,
+        route_name="RAG_SUBAGENT_LLM",
+        model=RAG_SUBAGENT_LLM_MODEL,
+        max_completion_tokens=RAG_SUBAGENT_LLM_MAX_COMPLETION_TOKENS,
+        thinking_enabled=RAG_SUBAGENT_LLM_THINKING_ENABLED,
+    )
+    return identity
 
 
 async def resolve_local_context_node(

@@ -1190,6 +1190,11 @@ async def test_rag_evidence_request_shape_snapshot(monkeypatch) -> None:
                 "current_thread": "Pickup plan is active.",
             },
             "original_user_request": "Need current evidence.",
+            "current_timestamp_utc": "2026-04-26T12:00:00+00:00",
+            "current_platform_message_id": "",
+            "active_turn_platform_message_ids": ["msg-1", "msg-2"],
+            "active_turn_conversation_row_ids": ["row-1", "row-2"],
+            "source_hydration_enabled": True,
         },
         "options": {
             "schema_version": "local_context_resolver_options.v1",

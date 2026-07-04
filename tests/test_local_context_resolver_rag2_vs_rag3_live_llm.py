@@ -48,13 +48,13 @@ _RAG3_TARGET_ALIASES = {
     'playful': ('playful', 'invent', '编造'),
     'reliable': ('reliable', '可靠'),
     'runtime_local_time': ('09:30', 'pacific/auckland'),
-    'scoped_memory': ('memory_evidence',),
+    'scoped_memory': ('user_memory_unit_candidates',),
     'today_agreement': ('09:30', '九点半', 'agreement', '约定'),
 }
 _RAG3_TARGET_ALLOWED_FIELDS = {
     'person_context': ('third_party_profiles',),
     'runtime_local_time': ('conversation_evidence',),
-    'scoped_memory': ('memory_evidence',),
+    'scoped_memory': ('user_memory_unit_candidates',),
     'today_agreement': ('recall_evidence',),
 }
 _RAG3_FORBIDDEN_PROMPT_FRAGMENTS = (

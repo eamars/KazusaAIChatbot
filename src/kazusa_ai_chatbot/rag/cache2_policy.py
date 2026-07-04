@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from kazusa_ai_chatbot.rag.cache2_events import CacheDependency
-from kazusa_ai_chatbot.rag.cache2_runtime import stable_cache_key
+from kazusa_ai_chatbot.rag.cache2_runtime import (
+    normalize_cache_text,
+    stable_cache_key,
+)
 
 # ---------------------------------------------------------------------------
 # Cache name and version constants
@@ -56,26 +58,6 @@ PERSISTENT_MEMORY_SEARCH_POLICY_VERSION = "persistent_memory_search:v3"
 MEDIA_DESCRIPTOR_CACHE_NAME = "media_descriptor"
 MEDIA_DESCRIPTOR_PROMPT_VERSION = "vision_descriptor:v1"
 MEDIA_DESCRIPTOR_MODEL_VERSION = "vision_model:v1"
-
-# ---------------------------------------------------------------------------
-# Shared utilities
-# ---------------------------------------------------------------------------
-
-_WHITESPACE_RE = re.compile(r"\s+")
-
-
-def normalize_cache_text(value: object) -> str:
-    """Normalize free-form text for stable cache keys.
-
-    Args:
-        value: Any value that should be represented as cache-key text.
-
-    Returns:
-        A stripped, whitespace-collapsed, case-folded string.
-    """
-    return_value = _WHITESPACE_RE.sub(" ", str(value or "").strip()).casefold()
-    return return_value
-
 
 def _context_scope(context: dict[str, Any]) -> dict[str, str]:
     """Extract platform/channel scope from an agent context.

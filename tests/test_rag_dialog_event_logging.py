@@ -230,6 +230,9 @@ def _local_context_packet(rag_result: dict[str, object]) -> dict[str, object]:
                 "task_1": {},
             },
         },
+        "trace_summary": {
+            "cache_hits": 0,
+        },
     }
 
 

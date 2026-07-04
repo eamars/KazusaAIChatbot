@@ -48,17 +48,21 @@ This package owns:
 - structural validation for all public IO and graph objects;
 - graph planning, deterministic graph construction, bounded traversal, and
   dependency-safe active-node selection;
+- static source hydration for supported local evidence node kinds through
+  existing source-owned RAG helper agents;
 - active-node semantic evidence extraction from prompt-safe supplied context;
 - optional duplicate-node collapse review;
 - deterministic or LLM-backed bottom-up packet synthesis;
 - prompt-safe `rag_result` projection and metadata redaction;
+- process-local Cache2 policy for graph-planner and active-node stage results;
 - live review trace records and raw efficiency counters.
 
 This package does not own:
 
 - platform adapter syntax, mention parsing, delivery receipts, or rendering;
-- MongoDB query construction, embeddings, cache invalidation, or persistence
-  writes;
+- MongoDB query construction, embeddings, or persistence writes;
+- durable write-origin cache invalidation events, which remain owned by the
+  data writers that changed conversation, memory, profile, or character state;
 - cognition stance, action selection, response-gating judgment, or final
   dialog wording;
 - consolidation, scheduler, reflection, or accepted-task lifecycle;
@@ -107,11 +111,12 @@ The package also exports validators for each public contract:
 
 ## Architecture
 
-The implemented resolver has a direct standalone interface and four
-resolver-local LLM stages. These are stage agents inside `stages.py`, not a
-package-discovered source-subagent registry. `LocalContextSubagentV1` is a
-typed future handler protocol; no current service path dispatches to dynamic
-subagent modules.
+The implemented resolver has a direct standalone interface, a static
+source-hydration bridge, and four resolver-local LLM stages. The LLM stages
+are stage agents inside `stages.py`, not a package-discovered source-subagent
+registry. `source_hydration.py` may call existing source-owned RAG helper
+agents for supported node kinds before active-node LLM resolution. It is a
+fixed bridge, not a dynamic subagent registry.
 
 ```mermaid
 flowchart TD
@@ -139,6 +144,9 @@ flowchart TD
         T0["find_next_active_node(...)<br/>child order plus dependency status"]
         T1{"pending node exists<br/>and iteration cap remains?"}
         T2["active_node_id selected"]
+        H0{"source_hydration_enabled<br/>and supported node kind?"}
+        H1["source_hydration.py<br/>call existing source-owned helper<br/>memory, conversation, person, recall"]
+        H2["source_context rows + deterministic artifacts<br/>sanitized semantic fields only"]
         T3["Active Node Resolver LLM<br/>resolve_local_context_node(...)<br/>RAG_SUBAGENT_LLM"]
         T4["node_update applier<br/>status and semantic rows"]
         T5["artifact validator<br/>bind active_node alias<br/>normalize artifact_type aliases"]
@@ -147,7 +155,10 @@ flowchart TD
         T8["deterministic collapse applier<br/>candidate_ref -> internal node id"]
         T9["trace counters refresh<br/>iterations, node counts, collapse counts"]
         P3 --> T0 --> T1
-        T1 -->|yes| T2 --> T3 --> T4 --> T5 --> T6
+        T1 -->|yes| T2 --> H0
+        H0 -->|yes| H1 --> H2 --> T3
+        H0 -->|no| T3
+        T3 --> T4 --> T5 --> T6
         T6 -->|no| T9 --> T0
         T6 -->|yes| T7 --> T8 --> T9 --> T0
         T1 -->|no| S0
@@ -185,21 +196,23 @@ The normal optimized path for a single-source resolved objective is:
 
 ```text
 planner LLM
+  -> optional source hydration on production cache miss
   -> active-node LLM
   -> deterministic synthesis and projection
 ```
 
-That path is two LLM calls. Collapse review runs only when a resolved
-same-kind candidate exists. Bottom-up synthesis LLM runs only when deterministic
-node-row synthesis is not sufficient, such as unresolved or blocked graph
-state.
+That path is two RAG3 LLM calls, plus at most one source-owned helper call for
+supported hydrated node kinds. Collapse review runs only when a resolved
+same-kind candidate exists. Bottom-up synthesis LLM runs only when
+deterministic node-row synthesis is not sufficient, such as unresolved or
+blocked graph state.
 
 ## Resolver-Local Stage Agents
 
 | Stage agent | Function | Route | Input | Output | Validation owner | Side effects |
 |---|---|---|---|---|---|---|
-| Graph planner | `plan_local_context_graph(payload)` | `RAG_PLANNER_LLM` | Request, compact context, option limits | JSON `tasks` with objective and node kind | `_planner_tasks`, `_graph_from_planner_response`, graph validators | None beyond stage trace capture |
-| Active node resolver | `resolve_local_context_node(payload)` | `RAG_SUBAGENT_LLM` | Request, compact context, active node, dependency context, limits | `node_update` plus source-owned artifacts | `_apply_active_node_response`, `_validated_artifact_for_node`, artifact validators | None beyond stage trace capture |
+| Graph planner | `plan_local_context_graph(payload)` | `RAG_PLANNER_LLM` | Request, compact context, option limits | JSON `tasks` with objective and node kind | `_planner_tasks`, `_graph_from_planner_response`, graph validators | Process-local Cache2 lookup/store plus stage trace capture on LLM misses |
+| Active node resolver | `resolve_local_context_node(payload)` | `RAG_SUBAGENT_LLM` | Request, compact context, optional `source_context`, active node, dependency context, limits | `node_update` plus source-owned artifacts | `_cacheable_active_node_response`, `_merge_source_hydration_response`, `_apply_active_node_response`, `_validated_artifact_for_node`, artifact validators | Process-local Cache2 lookup/store plus static source hydration and stage trace capture on cache misses |
 | Collapse reviewer | `review_local_context_collapse(payload)` | `RAG_SUBAGENT_LLM` | Active node and prompt-safe same-kind candidates | `collapse_decision` with `target_candidate_ref` | `_apply_collapse_response` maps prompt ref to internal node id | None beyond stage trace capture |
 | Bottom-up synthesizer | `synthesize_local_context_packet(payload)` | `RAG_SUBAGENT_LLM` | Resolved/unresolved node summaries and limits | Packet semantic row fields | `_semantic_synthesis_response`, packet validators | None beyond stage trace capture |
 
@@ -208,12 +221,58 @@ Raw control characters inside JSON strings are escaped deterministically after
 normal parsing fails. If parsing still fails, the stage records a failed trace
 row with raw model output and raises a bounded validation error.
 
+## Source Hydration
+
+Production `local_context_recall` sets `source_hydration_enabled=True` in the
+resolver context. On an active-node Cache2 miss, `_resolve_active_node(...)`
+first asks `hydrate_source_for_node(...)` for source-backed evidence when the
+node kind is supported:
+
+| Node kind | Source helper |
+|---|---|
+| `memory_evidence` | `MemoryEvidenceAgent` |
+| `scoped_memory` | `MemoryEvidenceAgent` with a current-user continuity task prefix |
+| `conversation_evidence` | `ConversationEvidenceAgent` |
+| `person_context` | `PersonContextAgent` |
+| `recall_evidence` | `RecallAgent` |
+
+Unsupported node kinds such as `live_context`, `external_evidence`,
+`subtask`, and `synthesis` continue through the LLM-only active-node path.
+Source hydration is disabled by default for standalone callers unless the
+context explicitly enables it.
+
+The hydration bridge builds trusted source-agent context from the public
+resolver context: platform/channel scope, current global user, local time,
+active-turn message and conversation row ids, recent/wide chat history,
+original query, current node objective, dependency summaries, and the active
+character name. This trusted context is not passed directly to LLM prompts.
+
+Hydration output is converted into:
+
+- `source_context` rows for the active-node LLM prompt;
+- deterministic `LocalContextArtifactV1` artifacts;
+- a deterministic node update merged before the active-node LLM update.
+
+`source_context` rows keep only semantic evidence fields. Memory rows project
+content, memory names, source kind/type/status, and scoped-memory provenance.
+Conversation rows project bounded speaker/text/summary/url/relation/context
+fields. Retrieval scores, cache keys, embeddings, raw DB rows, and platform
+ids are stripped before prompt use. Prompt-visible `rag_result` projection
+still applies the normal sanitizer after artifact merge.
+
+The active-node Cache2 entry stores the merged source-hydration plus active
+LLM result. A warm active-node cache hit skips both source hydration and the
+active-node LLM for that node. Cache dependencies are source-aware so durable
+memory, user-profile, character-state, and conversation-history writes can
+invalidate stale stage entries.
+
 ## Future Subagent Protocol
 
 `contracts.py` defines `LocalContextSubagentV1`,
 `LocalContextSubagentRequestV1`, and `LocalContextSubagentResultV1` for future
-source-owned handlers. This is a resolver-local protocol, not a shared
-subagent abstraction and not a current registry.
+first-class source-owned handlers. This protocol is not used by the current
+static hydration bridge. It remains a resolver-local future contract, not a
+shared subagent abstraction and not a current registry.
 
 Current contract fields:
 
@@ -221,7 +280,7 @@ Current contract fields:
 |---|---|
 | Family name | Local-context resolver source handler |
 | Owning package | `kazusa_ai_chatbot.local_context_resolver` |
-| Runtime purpose | Future bounded source-owned retrieval for one local-context node |
+| Runtime purpose | Future first-class bounded source-owned retrieval for one local-context node |
 | Registry or discovery | None implemented today |
 | Identifier | `subagent` in `LocalContextSubagentRequestV1` |
 | Supported actions | `action` string, validated as a non-empty semantic action |
@@ -229,15 +288,16 @@ Current contract fields:
 | Output contract | `resolved`, `status`, `result`, `attempts`, `cache`, `trace`, `unresolved_items` |
 | Validation owner | `validate_local_context_subagent_request` and `validate_local_context_subagent_result` |
 | Enablement | None implemented today |
-| Cache behavior | Result envelope has `cache`; no current source handler uses it |
+| Cache behavior | Result envelope has `cache`; no current `LocalContextSubagentV1` implementation uses it. Resolver stage caching happens above this protocol through Cache2. |
 | Trace or audit | Result envelope has bounded `trace`; service `subagent_calls` counter exists |
 | Side-effect boundary | Future source handlers may return evidence only; no stance, dialog, adapter delivery, arbitrary persistence, or shell/tool execution |
 | Required tests | Contract tests plus source-handler tests before any implementation is wired |
 
 Until a source-handler registry is implemented, diagrams and callers must not
-claim that RAG3 dispatches to concrete conversation, memory, person, recall,
-live, or web subagent modules. Today, active-node LLM resolution reads supplied
-prompt-safe context and emits source-owned artifacts.
+claim dynamic discovery or generic source-subagent dispatch. Today, RAG3 uses
+only the fixed `source_hydration.py` bridge for memory, scoped memory,
+conversation, person, and recall evidence; other node kinds rely on supplied
+prompt-safe context and active-node LLM resolution.
 
 ## Input And Output Contracts
 
@@ -269,13 +329,20 @@ prompt-safe context and emits source-owned artifacts.
     "chat_history_wide": list[dict],
     "conversation_progress": dict,
     "original_user_request": str,  # optional
+    "current_timestamp_utc": str,  # optional, trusted source context
+    "current_platform_message_id": str,  # optional, trusted source context
+    "active_turn_platform_message_ids": list[str],  # optional
+    "active_turn_conversation_row_ids": list[str],  # optional
+    "source_hydration_enabled": bool,  # optional, default false
 }
 ```
 
 The caller may carry platform and user ids in the public context envelope for
-validation and future integration, but `_compact_context(...)` strips
-prompt-unsafe ids, raw timestamps, storage rows, embeddings, cache keys, and
-trace fields before any LLM stage sees the context.
+validation and source integration. `_compact_context(...)` strips prompt-unsafe
+ids, raw timestamps, storage rows, embeddings, cache keys, and trace fields
+before the graph planner sees the context. Source hydration may use trusted
+ids internally for filtering and active-turn exclusion, but its projected
+`source_context` rows are sanitized before the active-node LLM sees them.
 
 ### `LocalContextResolverOptionsV1`
 
@@ -400,16 +467,22 @@ and mapped to the internal active node id before validation.
 2. `_plan_graph(...)` calls the graph planner LLM and maps semantic task rows
    into a strict `LocalContextGraphV1`.
 3. `_run_graph_traversal(...)` repeatedly selects the next dependency-ready
-   pending node through `find_next_active_node(...)`, resolves it, applies
-   artifacts, and optionally reviews same-kind collapse candidates.
-4. `_synthesize_packet(...)` uses deterministic synthesis when resolved
+   pending node through `find_next_active_node(...)`.
+4. On an active-node cache miss, supported node kinds may run static source
+   hydration through existing source-owned helpers. The resulting
+   `source_context`, artifacts, and node update are merged into the active
+   resolution path.
+5. The active-node LLM resolves the node from compact context, optional
+   source context, and dependency summaries; the service applies artifacts and
+   optionally reviews same-kind collapse candidates.
+6. `_synthesize_packet(...)` uses deterministic synthesis when resolved
    node-owned rows are sufficient. Otherwise it calls the bottom-up synthesis
    LLM and normalizes the result.
-5. `_rag_result_from_artifacts(...)` builds a fresh retained `rag_result`,
+7. `_rag_result_from_artifacts(...)` builds a fresh retained `rag_result`,
    merges prompt-visible artifacts, normalizes source fields, projects
    structured live context, sanitizes prompt-facing rows, and deduplicates
    repeated payload items.
-6. `validate_local_context_resolution_packet(...)` validates the final packet
+8. `validate_local_context_resolution_packet(...)` validates the final packet
    before returning it.
 
 ## Projection Rules
@@ -461,9 +534,32 @@ is imported through `kazusa_ai_chatbot.config`.
 
 ## Persistence And Side Effects
 
-The standalone resolver has no direct persistence writes. It does not upsert
-memory, update conversation history, write scheduler rows, send adapter
-messages, mutate Cache2, or execute external tools.
+The resolver has no direct persistence writes. It does not upsert memory,
+update conversation history, write scheduler rows, send adapter messages,
+write persistent Cache2 rows, or execute shell tools. Source hydration may
+call existing read-only retrieval helpers, which can read MongoDB-backed
+memory, conversation, profile, and recall sources and may use their own
+process-local Cache2 worker caches.
+
+It does use the process-local Cache2 runtime for stage result reuse:
+
+- planner-stage entries cache validated task-list JSON and are long-lived
+  until LRU eviction, prompt/model/cache-policy changes, or process restart;
+- active-node entries cache normalized validated node-update/artifact JSON;
+- active-node keys include the exact compact prompt-safe context digest,
+  dependency-context digest, source-hydration enablement flag, node kind,
+  objective, prompt/model identity, scope, and limits, so changed supplied
+  evidence or source mode naturally misses;
+- stable local data domains such as memory, conversation, person, scoped
+  memory, and recall use no TTL and rely on key versioning plus Cache2
+  dependency invalidation;
+- live-context node entries use a short TTL;
+- external-evidence node entries use a longer TTL because supplied URL/content
+  evidence is usually less volatile than live clock data;
+- final `LocalContextResolutionPacketV1` and final dialog are not cached.
+
+Cache keys and Cache2 metadata remain operational state. They must not enter
+`rag_result`, resolver observations, cognition prompts, or dialog prompts.
 
 Stage trace records are process-local review material returned by
 `drain_stage_trace_records()` in `stages.py`. They are used by live LLM review
@@ -502,6 +598,9 @@ tests and are not part of prompt-facing `rag_result`.
 - `synthesis_calls`
 - `subagent_calls`
 - `collapse_count`
+- `planner_cache_hits`
+- `active_node_cache_hits`
+- `cache_hits`
 
 Stage trace records include:
 
@@ -548,6 +647,7 @@ context, and cascaded phrase/person/link dependency.
 - Do not expose graph ids, raw stage traces, raw database ids, adapter ids,
   platform ids, cache keys, embeddings, prompt text, raw wire syntax, or raw
   timestamps in `rag_result`.
+- Do not cache final packets or final dialog text as a production shortcut.
 - Do not ask LLM stages to generate MongoDB filters, index names, embedding
   settings, adapter delivery behavior, persistence decisions, or final visible
   dialog.

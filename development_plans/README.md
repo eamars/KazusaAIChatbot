@@ -40,7 +40,6 @@ long_term/todo.md
 |---|---|---|
 | [coding_agent_phase1_fetching_reading_plan.md](active/short_term/coding_agent_phase1_fetching_reading_plan.md) | Large standalone coding-agent Phase 1 plan | draft |
 | [coding_agent_phase2_5_security_boundary_plan.md](active/short_term/coding_agent_phase2_5_security_boundary_plan.md) | High-risk coding-agent Phase 2.5 security boundary plan | draft |
-| [rag3_local_context_resolver_bigbang_plan.md](active/short_term/rag3_local_context_resolver_bigbang_plan.md) | High-risk RAG 3 local-context resolver bigbang plan | in_progress |
 
 ## Supporting Experiment Records
 
@@ -114,6 +113,17 @@ resolver architecture.
 |---|---|
 | Removed from active short-term | `rag3_router_interpreter_poc_experiment_plan.md` |
 | Added to active short-term | `rag3_local_context_resolver_bigbang_plan.md` |
+
+### 2026-07-04 RAG3 production cutover completion
+
+The approved RAG3 local-context resolver bigbang plan completed after source
+hydration, Cache2 integration, one-at-a-time real LLM verification, full
+non-live regression, independent review remediation, and documentation
+closeout.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active short-term to completed archive | `rag3_local_context_resolver_bigbang_plan.md` |
 
 ## Archive
 
@@ -272,6 +282,7 @@ plans.
 | [rag2_cognition_ready_evidence_plan.md](archive/completed/short_term/rag2_cognition_ready_evidence_plan.md) |
 | [rag2_mainline_fusion_recall_quality_plan.md](archive/completed/short_term/rag2_mainline_fusion_recall_quality_plan.md) |
 | [rag2_phase4_continuation_plan.md](archive/completed/short_term/rag2_phase4_continuation_plan.md) |
+| [rag3_local_context_resolver_bigbang_plan.md](archive/completed/short_term/rag3_local_context_resolver_bigbang_plan.md) |
 | [rag_agent_package_reorganization_plan.md](archive/completed/short_term/rag_agent_package_reorganization_plan.md) |
 | [rag_cache2_persistent_initializer_plan.md](archive/completed/short_term/rag_cache2_persistent_initializer_plan.md) |
 | [rag_current_turn_exclusion_plan.md](archive/completed/short_term/rag_current_turn_exclusion_plan.md) |
