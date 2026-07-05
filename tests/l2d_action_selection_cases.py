@@ -13,7 +13,7 @@ L2D_ROUTING_CASE_SCHEMA_VERSION = "l2d_routing_case.v1"
 L2D_ROUTING_SOURCE_KINDS = frozenset((
     "qq_history",
     "self_cognition",
-    "background_artifact_poc",
+    "background_work_poc",
 ))
 
 

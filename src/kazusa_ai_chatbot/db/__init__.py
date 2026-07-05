@@ -186,17 +186,6 @@ from kazusa_ai_chatbot.db.self_cognition import (
     upsert_self_cognition_group_review_window,
     upsert_self_cognition_action_attempt,
 )
-from kazusa_ai_chatbot.db.background_artifact_jobs import (
-    claim_background_artifact_job,
-    complete_background_artifact_job,
-    ensure_background_artifact_job_indexes,
-    fail_background_artifact_job,
-    find_deliverable_background_artifact_jobs,
-    insert_background_artifact_job,
-    mark_background_artifact_delivered,
-    mark_background_artifact_delivery_failed,
-    mark_background_artifact_delivery_in_progress,
-)
 from kazusa_ai_chatbot.db.background_work_jobs import (
     claim_background_work_job,
     complete_background_work_job,
@@ -337,15 +326,6 @@ __all__ = [
     "list_self_cognition_action_attempts",
     "upsert_self_cognition_group_review_window",
     "upsert_self_cognition_action_attempt",
-    "claim_background_artifact_job",
-    "complete_background_artifact_job",
-    "ensure_background_artifact_job_indexes",
-    "fail_background_artifact_job",
-    "find_deliverable_background_artifact_jobs",
-    "insert_background_artifact_job",
-    "mark_background_artifact_delivered",
-    "mark_background_artifact_delivery_failed",
-    "mark_background_artifact_delivery_in_progress",
     "claim_background_work_job",
     "complete_background_work_job",
     "ensure_background_work_job_indexes",

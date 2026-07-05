@@ -131,10 +131,10 @@ def _speak_action_spec() -> dict:
     }
 
 
-def _background_artifact_action_spec() -> dict:
+def _background_work_action_spec() -> dict:
     return {
         "schema_version": "action_spec.v1",
-        "kind": "background_artifact_request",
+        "kind": "background_work_request",
         "cognition_mode": "deliberative",
         "source_refs": [
             {
@@ -150,13 +150,11 @@ def _background_artifact_action_spec() -> dict:
             "schema_version": "action_target.v1",
             "target_kind": "current_user",
             "target_id": None,
-            "owner": "background_artifact",
+            "owner": "background_work",
             "scope": {"requester_display_name": "TestUser"},
         },
         "params": {
-            "work_kind": "coding_snippet",
-            "objective": "Generate a Fibonacci function snippet.",
-            "input_summary": "The user asked for a simple Fibonacci generator.",
+            "task_brief": "Generate a Fibonacci function snippet.",
             "requested_delivery": "send_result_when_done",
             "max_output_chars": 3000,
         },
@@ -170,26 +168,26 @@ def _background_artifact_action_spec() -> dict:
             "max_depth": 0,
             "include_result_as": None,
         },
-        "reason": "The character accepted bounded async snippet work.",
+        "reason": "The character accepted bounded async background work.",
     }
 
 
-def _background_artifact_pending_result() -> dict:
+def _background_work_pending_result() -> dict:
     return {
         "schema_version": "action_result.v1",
-        "action_attempt_id": "action_attempt:background-artifact-001",
-        "action_kind": "background_artifact_request",
-        "handler_owner": "background_artifact",
+        "action_attempt_id": "action_attempt:background-work-001",
+        "action_kind": "background_work_request",
+        "handler_owner": "background_work",
         "status": "pending",
         "visibility": "private",
-        "result_summary": "Background artifact job queued.",
+        "result_summary": "Background work job queued.",
         "result_refs": [
             {
                 "schema_version": "evidence_ref.v1",
                 "evidence_kind": "system_event",
-                "evidence_id": "background_artifact_job:job-001",
-                "owner": "background_artifact_job",
-                "excerpt": "queued coding_snippet artifact request",
+                "evidence_id": "background_work_job:job-001",
+                "owner": "background_work_job",
+                "excerpt": "queued accepted task background work",
                 "observed_at": "2024-01-01T00:00:00+00:00",
             }
         ],
@@ -340,11 +338,11 @@ def test_route_after_cognition_allows_no_visible_action() -> None:
 
 
 @pytest.mark.asyncio
-async def test_background_artifact_executes_before_l3_acknowledgement() -> None:
+async def test_background_work_executes_before_l3_acknowledgement() -> None:
     """L3 acknowledgements should be based on pre-surface enqueue results."""
 
     state = _base_discord_state()
-    action_specs = [_background_artifact_action_spec(), _speak_action_spec()]
+    action_specs = [_background_work_action_spec(), _speak_action_spec()]
     l3_states = []
 
     async def _execute_action_specs(
@@ -353,18 +351,16 @@ async def test_background_artifact_executes_before_l3_acknowledgement() -> None:
         storage_timestamp_utc,
         executed_action_attempt_ids=None,
         record_attempt_func=None,
-        enqueue_background_artifact_func=None,
     ):
         del (
             storage_timestamp_utc,
             executed_action_attempt_ids,
             record_attempt_func,
-            enqueue_background_artifact_func,
         )
         results = []
         for selected_spec in selected_specs:
-            if selected_spec["kind"] == "background_artifact_request":
-                results.append(_background_artifact_pending_result())
+            if selected_spec["kind"] == "background_work_request":
+                results.append(_background_work_pending_result())
             elif selected_spec["kind"] == "speak":
                 results.append({
                     "schema_version": "action_result.v1",
@@ -436,10 +432,10 @@ async def test_background_artifact_executes_before_l3_acknowledgement() -> None:
         result = await persona_supervisor2(state)
 
     assert l3_states[0]["pre_surface_action_results"] == [
-        _background_artifact_pending_result()
+        _background_work_pending_result()
     ]
     assert result["episode_trace"]["action_results"][0]["action_kind"] == (
-        "background_artifact_request"
+        "background_work_request"
     )
 
 

@@ -54,7 +54,7 @@ _CONTEXTUAL_AGENT_PROMPT = '''\
 # 来源识别
 - 存在 `reflection_artifact` 时，当前材料是我自己的反思资料，不是用户输入、用户发言，也不是任何人正在对我说话。社交距离应围绕反思中已经沉淀的关系状态和经历余波。
 - 存在 `internal_thought_residue` 时，当前材料是我自己的观察资料，不是用户输入、用户发言，也不是任何人正在对我说话。社交距离应围绕我与被观察现场的关系，而不是虚构一个正在对我说话的当前用户。
-- 存在 `accepted_task_result`、`background_work_result` 或 `background_artifact_result` 时，当前材料是系统回流的任务结果，不是用户新发言。社交距离围绕完成交付、失败说明或限制说明判断。
+- 存在 `accepted_task_result` 时，当前材料是系统回流的任务结果，不是用户新发言。社交距离围绕完成交付、失败说明或限制说明判断。
 - 没有 `reflection_artifact`、`internal_thought_residue` 和结果字段时，当前材料是外部说话内容，按外部说话者和我的当前互动关系判断。
 - 资料标题、字段名、JSON、时间戳、semantic_labels、window_summary、transport summary、model-facing metadata 不是社交对象，不要复制进 `social_distance`、`emotional_intensity`、`vibe_check`、`relational_dynamic` 等自由文本字段。
 
@@ -92,9 +92,7 @@ _CONTEXTUAL_AGENT_PROMPT = '''\
   "media_observations": {{"image_observations": [], "audio_observations": []}},
   "reflection_artifact": "string",
   "internal_thought_residue": {{"residue_id": "string", "internal_monologue": "string", "action_latch": {{}}}},
-  "accepted_task_result": {{"artifact_text": "string", "metadata": {{}}}},
-  "background_work_result": {{"artifact_text": "string", "metadata": {{}}}},
-  "background_artifact_result": {{"artifact_text": "string", "metadata": {{}}}}
+  "accepted_task_result": {{"artifact_text": "string", "metadata": {{}}}}
 }}
 
 # 输出格式
@@ -143,12 +141,6 @@ async def call_social_context_appraisal(state: dict[str, Any]) -> dict[str, Any]
         "text_chat_user_message_image_audio_observation": _CONTEXTUAL_AGENT_PROMPT,
         "reflection_signal_reflection_artifact": _CONTEXTUAL_AGENT_PROMPT,
         "internal_thought_internal_monologue": _CONTEXTUAL_AGENT_PROMPT,
-        "background_artifact_result_ready_background_artifact_result": (
-            _CONTEXTUAL_AGENT_PROMPT
-        ),
-        "background_work_result_ready_background_work_result": (
-            _CONTEXTUAL_AGENT_PROMPT
-        ),
         "accepted_task_result_ready_accepted_task_result": (
             _CONTEXTUAL_AGENT_PROMPT
         ),

@@ -15,8 +15,6 @@ _TRIGGER_SOURCES = frozenset((
     "internal_thought",
     "scheduled_recall",
     "system_probe",
-    "background_artifact_result_ready",
-    "background_work_result_ready",
     "accepted_task_result_ready",
 ))
 _INPUT_SOURCES = frozenset((
@@ -26,8 +24,6 @@ _INPUT_SOURCES = frozenset((
     "internal_monologue",
     "reflection_artifact",
     "retrieved_memory",
-    "background_artifact_result",
-    "background_work_result",
     "accepted_task_result",
 ))
 _PUBLIC_OUTPUT_MODE_MAP = {
@@ -159,11 +155,7 @@ def _output_mode(value: object, *, trigger_source: str) -> str:
         "silent",
     ):
         return mapped_value
-    if trigger_source in (
-        "background_artifact_result_ready",
-        "background_work_result_ready",
-        "accepted_task_result_ready",
-    ):
+    if trigger_source == "accepted_task_result_ready":
         return_value = "visible_reply"
         return return_value
     if trigger_source == "user_message":

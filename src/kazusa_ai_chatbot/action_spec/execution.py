@@ -12,10 +12,6 @@ from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
 from kazusa_ai_chatbot.action_spec.handlers.future_cognition import (
     execute_future_cognition_action,
 )
-from kazusa_ai_chatbot.action_spec.handlers.background_artifact import (
-    BackgroundArtifactEnqueueFunc,
-    enqueue_background_artifact_action,
-)
 from kazusa_ai_chatbot.action_spec.handlers.background_work import (
     BackgroundWorkEnqueueFunc,
     enqueue_background_work_action,
@@ -31,7 +27,6 @@ from kazusa_ai_chatbot.action_spec.models import ActionValidationError
 from kazusa_ai_chatbot.action_spec.registry import (
     ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
-    BACKGROUND_ARTIFACT_REQUEST_CAPABILITY,
     BACKGROUND_WORK_REQUEST_CAPABILITY,
     FUTURE_SPEAK_CAPABILITY,
     SPEAK_CAPABILITY,
@@ -54,8 +49,6 @@ async def execute_action_specs_for_trace(
     storage_timestamp_utc: str,
     executed_action_attempt_ids: set[str] | None = None,
     record_attempt_func: ActionAttemptRecorder | None = None,
-    enqueue_background_artifact_func: BackgroundArtifactEnqueueFunc
-    | None = None,
     enqueue_background_work_func: BackgroundWorkEnqueueFunc | None = None,
 ) -> list[ActionResultV1]:
     """Validate and execute selected actions into auditable trace rows.
@@ -69,8 +62,6 @@ async def execute_action_specs_for_trace(
         record_attempt_func: Optional existing-ledger writer. When omitted,
             the function remains a deterministic trace builder for tests and
             preview paths.
-        enqueue_background_artifact_func: Optional queue helper seam for
-            background artifact requests.
         enqueue_background_work_func: Optional queue helper seam for generic
             background-work requests.
 
@@ -189,63 +180,6 @@ async def execute_action_specs_for_trace(
                     "scheduled_count": scheduled_count,
                     "future_result": future_result,
                 }
-        elif validated_spec["kind"] == BACKGROUND_ARTIFACT_REQUEST_CAPABILITY:
-            try:
-                queue_result = await enqueue_background_artifact_action(
-                    validated_spec,
-                    storage_timestamp_utc=normalized_storage_timestamp_utc,
-                    action_attempt_id=action_attempt_id,
-                    enqueue_background_artifact_func=(
-                        enqueue_background_artifact_func
-                    ),
-                )
-            except ActionValidationError as exc:
-                status = "rejected"
-                result_summary = f"background_artifact_request rejected: {exc}"
-                execution_result = {
-                    "status": status,
-                    "error": str(exc),
-                }
-            except DatabaseOperationError as exc:
-                status = "failed"
-                result_summary = f"background_artifact_request failed: {exc}"
-                execution_result = {
-                    "status": status,
-                    "error": str(exc),
-                }
-            except ValueError as exc:
-                status = "rejected"
-                result_summary = f"background_artifact_request rejected: {exc}"
-                execution_result = {
-                    "status": status,
-                    "error": str(exc),
-                }
-            else:
-                status = "pending"
-                queue_state = str(queue_result["queue_state"])
-                result_summary = queue_result["result_summary"]
-                execution_result = {
-                    "status": status,
-                    "queue_state": queue_state,
-                    "work_kind": queue_result["work_kind"],
-                    "objective_summary": queue_result["objective_summary"],
-                    "operational_owner": queue_result["operational_owner"],
-                    "acknowledgement_constraint": (
-                        queue_result["acknowledgement_constraint"]
-                    ),
-                    "job_ref": queue_result["job_ref"],
-                }
-                prompt_result_fields = {
-                    "queue_state": queue_state,
-                    "work_kind": queue_result["work_kind"],
-                    "objective_summary": queue_result["objective_summary"],
-                    "operational_owner": queue_result["operational_owner"],
-                    "job_ref": queue_result["job_ref"],
-                    "acknowledgement_constraint": (
-                        queue_result["acknowledgement_constraint"]
-                    ),
-                }
-                result_refs = [queue_result["evidence_ref"]]
         elif validated_spec["kind"] == FUTURE_SPEAK_CAPABILITY:
             try:
                 queue_result = await enqueue_future_speak_action(

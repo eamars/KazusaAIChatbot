@@ -28,8 +28,8 @@ from kazusa_ai_chatbot.cognition_chain_core.stages import l3 as l3_module
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 
-_BACKGROUND_ARTIFACT_RESULT_VARIANT = (
-    "background_artifact_result_ready_background_artifact_result"
+_ACCEPTED_TASK_RESULT_VARIANT = (
+    "accepted_task_result_ready_accepted_task_result"
 )
 
 _APPROVED_STAGES: tuple[CognitionPromptStage, ...] = (
@@ -184,26 +184,25 @@ def _reflection_episode(
     return episode
 
 
-def _background_artifact_result_episode() -> CognitiveEpisode:
-    """Build a completed-artifact source episode fixture."""
+def _accepted_task_result_episode() -> CognitiveEpisode:
+    """Build a completed accepted-task source episode fixture."""
 
     turn_clock = build_turn_clock("2026-05-01 09:00:00")
     episode = _text_chat_episode(output_mode="visible_reply")
-    episode["episode_id"] = "background_artifact_result_ready:job-001"
-    episode["trigger_source"] = "background_artifact_result_ready"
-    episode["input_sources"] = ["background_artifact_result"]
+    episode["episode_id"] = "accepted_task_result_ready:task-001"
+    episode["trigger_source"] = "accepted_task_result_ready"
+    episode["input_sources"] = ["accepted_task_result"]
     episode["storage_timestamp_utc"] = turn_clock["storage_timestamp_utc"]
     episode["local_time_context"] = turn_clock["local_time_context"]
     episode["percepts"] = [
         {
-            "percept_id": "background_artifact_result_ready:job-001:result:0",
-            "input_source": "background_artifact_result",
+            "percept_id": "accepted_task_result_ready:task-001:result:0",
+            "input_source": "accepted_task_result",
             "content": "Artifact ready: Fibonacci function snippet.",
             "visibility": "model_visible",
             "metadata": {
-                "job_id": "job-001",
-                "work_kind": "coding_snippet",
-                "objective_summary": "Generate a Fibonacci function snippet.",
+                "accepted_task_id": "task-001",
+                "accepted_task_summary": "Generate a Fibonacci function snippet.",
                 "failure_summary": "",
             },
         },
@@ -266,10 +265,10 @@ def test_selector_returns_text_chat_variant_for_every_stage() -> None:
         }
 
 
-def test_selector_returns_background_artifact_result_variant_for_every_stage() -> None:
-    """Completed background artifacts should use their own prompt variant."""
+def test_selector_returns_accepted_task_result_variant_for_every_stage() -> None:
+    """Completed accepted tasks should use their own prompt variant."""
 
-    episode = _background_artifact_result_episode()
+    episode = _accepted_task_result_episode()
 
     for stage in _APPROVED_STAGES:
         selection = select_cognition_prompt_variant(
@@ -280,14 +279,14 @@ def test_selector_returns_background_artifact_result_variant_for_every_stage() -
         assert selection == {
             "stage": stage,
             "variant": (
-                "background_artifact_result_ready_background_artifact_result"
+                "accepted_task_result_ready_accepted_task_result"
             ),
             "prompt_key": (
                 f"{stage}."
-                "background_artifact_result_ready_background_artifact_result"
+                "accepted_task_result_ready_accepted_task_result"
             ),
-            "trigger_source": "background_artifact_result_ready",
-            "input_sources": ["background_artifact_result"],
+            "trigger_source": "accepted_task_result_ready",
+            "input_sources": ["accepted_task_result"],
             "output_mode": "visible_reply",
         }
 
@@ -298,9 +297,9 @@ def test_result_ready_variant_is_registered_in_stage_prompt_maps() -> None:
     for module, handler_name in _RESULT_READY_PROMPT_HANDLERS:
         handler_source = inspect.getsource(getattr(module, handler_name))
 
-        assert _BACKGROUND_ARTIFACT_RESULT_VARIANT in handler_source, (
+        assert _ACCEPTED_TASK_RESULT_VARIANT in handler_source, (
             f"{module.__name__}.{handler_name} does not register "
-            f"{_BACKGROUND_ARTIFACT_RESULT_VARIANT}"
+            f"{_ACCEPTED_TASK_RESULT_VARIANT}"
         )
 
 

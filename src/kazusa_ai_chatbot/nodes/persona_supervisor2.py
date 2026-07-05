@@ -7,7 +7,6 @@ from langgraph.graph import END, START, StateGraph
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
 from kazusa_ai_chatbot.action_spec.execution import execute_action_specs_for_trace
 from kazusa_ai_chatbot.action_spec.registry import (
-    BACKGROUND_ARTIFACT_REQUEST_CAPABILITY,
     BACKGROUND_WORK_REQUEST_CAPABILITY,
     FUTURE_SPEAK_CAPABILITY,
     SPEAK_CAPABILITY,
@@ -300,7 +299,6 @@ async def _action_results_for_state(
         spec
         for spec in _selected_action_specs(state)
         if spec.get("kind") not in (
-            BACKGROUND_ARTIFACT_REQUEST_CAPABILITY,
             BACKGROUND_WORK_REQUEST_CAPABILITY,
             FUTURE_SPEAK_CAPABILITY,
         )
@@ -323,7 +321,6 @@ async def stage_2a_background_work_enqueue(
         spec
         for spec in _selected_action_specs(state)
         if spec.get("kind") in (
-            BACKGROUND_ARTIFACT_REQUEST_CAPABILITY,
             BACKGROUND_WORK_REQUEST_CAPABILITY,
             FUTURE_SPEAK_CAPABILITY,
         )
@@ -344,7 +341,6 @@ async def stage_2a_background_work_enqueue(
     action_results = await execute_action_specs_for_trace(
         background_specs,
         storage_timestamp_utc=state["storage_timestamp_utc"],
-        enqueue_background_artifact_func=None,
     )
     return_value = {
         "pre_surface_action_results": action_results,
@@ -374,14 +370,11 @@ def _background_no_handoff_result(
             if isinstance(value, str) and value.strip():
                 task_summary = value.strip()
                 break
-    handler_owner = "background_work"
-    if action_kind == BACKGROUND_ARTIFACT_REQUEST_CAPABILITY:
-        handler_owner = "background_artifact"
     result = {
         "schema_version": "action_result.v1",
         "action_attempt_id": action_attempt_id,
         "action_kind": action_kind,
-        "handler_owner": handler_owner,
+        "handler_owner": "background_work",
         "status": "failed",
         "result_summary": (
             f"{action_kind} failed: visible acknowledgement missing"

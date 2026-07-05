@@ -59,7 +59,6 @@ ALLOWED_CAPABILITY_OWNERS = frozenset(
         "l3_text",
         "l3_image",
         "accepted_task",
-        "background_artifact",
         "background_work",
     )
 )
@@ -166,7 +165,6 @@ class CapabilitySpecV1(TypedDict):
         "l3_text",
         "l3_image",
         "accepted_task",
-        "background_artifact",
         "background_work",
     ]
     input_schema: dict[str, object]

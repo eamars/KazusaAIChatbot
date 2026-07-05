@@ -176,7 +176,6 @@ def test_completed_coding_task_delivers_as_accepted_task_result_ready() -> None:
     assert percept["metadata"]["accepted_task_id"] == "accepted-task-001"
     assert percept["metadata"]["accepted_task_summary"] == CODE_TASK
     assert "coding_agent" not in repr(percept["metadata"])
-    assert "background_work_result_ready" not in repr(episode)
     assert "workspace_root" not in repr(episode)
     assert "local_root" not in repr(episode)
     assert "cache_key" not in repr(episode)

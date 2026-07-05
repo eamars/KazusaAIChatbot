@@ -12,17 +12,11 @@ from kazusa_ai_chatbot.config import (
     MEDIA_DESCRIPTOR_CACHE_MAX_PERSISTENT_ENTRIES,
 )
 from kazusa_ai_chatbot.db._client import enable_vector_index, get_db
-from kazusa_ai_chatbot.background_artifact.models import (
-    BACKGROUND_ARTIFACT_JOBS_COLLECTION,
-)
 from kazusa_ai_chatbot.background_work.models import (
     BACKGROUND_WORK_JOBS_COLLECTION,
 )
 from kazusa_ai_chatbot.accepted_task.models import ACCEPTED_TASKS_COLLECTION
 from kazusa_ai_chatbot.db.accepted_tasks import ensure_accepted_task_indexes
-from kazusa_ai_chatbot.db.background_artifact_jobs import (
-    ensure_background_artifact_job_indexes,
-)
 from kazusa_ai_chatbot.db.background_work_jobs import (
     ensure_background_work_job_indexes,
 )
@@ -85,7 +79,11 @@ async def db_bootstrap() -> None:
     db = await get_db()
     existing = set(await db.list_collection_names())
 
-    for legacy in ("rag_cache_index", "rag_metadata_index"):
+    for legacy in (
+        "rag_cache_index",
+        "rag_metadata_index",
+        "background_artifact_jobs",
+    ):
         if legacy in existing:
             await db.drop_collection(legacy)
             logger.info(f'Dropped legacy collection \'{legacy}\'')
@@ -114,7 +112,6 @@ async def db_bootstrap() -> None:
         SELF_COGNITION_GROUP_REVIEW_WINDOWS_COLLECTION,
         ACCEPTED_TASKS_COLLECTION,
         BACKGROUND_WORK_JOBS_COLLECTION,
-        BACKGROUND_ARTIFACT_JOBS_COLLECTION,
         INTERNAL_MONOLOGUE_RESIDUE_COLLECTION,
     ]
     for name in required_collections:
@@ -245,7 +242,6 @@ async def db_bootstrap() -> None:
         "reviewed_at",
         name="self_cognition_group_review_window_reviewed_at",
     )
-    await ensure_background_artifact_job_indexes()
     await ensure_accepted_task_indexes()
     await ensure_background_work_job_indexes()
     await db.conversation_episode_state.create_index(

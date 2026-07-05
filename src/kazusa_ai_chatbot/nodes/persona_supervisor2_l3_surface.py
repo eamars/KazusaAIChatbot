@@ -159,7 +159,6 @@ def _pre_surface_action_result_prompts(
         if prompt_action_kind not in (
             "accepted_task_request",
             "background_work_request",
-            "background_artifact_request",
             "future_speak",
             "memory_lifecycle_update",
         ):
@@ -239,7 +238,6 @@ def _text_surface_intent_parts(
     observation_context = _resolver_observations_text(state)
     if observation_context:
         intent_parts.append(f"证据观察：{observation_context}")
-    intent_parts.extend(_background_artifact_acknowledgement_parts(state))
     intent_parts.extend(_background_work_acknowledgement_parts(state))
 
     for field_name, label in (
@@ -257,45 +255,6 @@ def _text_surface_intent_parts(
         intent_parts.append(f"理由：{reason.strip()}")
 
     return intent_parts
-
-
-def _background_artifact_acknowledgement_parts(
-    state: GlobalPersonaState,
-) -> list[str]:
-    """Return prompt-safe artifact queue acknowledgement constraints."""
-
-    raw_results = state.get("pre_surface_action_results")
-    if not isinstance(raw_results, list):
-        return_value: list[str] = []
-        return return_value
-
-    parts: list[str] = []
-    for row in raw_results:
-        if not isinstance(row, dict):
-            continue
-        if row.get("action_kind") != "background_artifact_request":
-            continue
-        work_kind = _row_text(row, "work_kind")
-        objective_summary = _row_text(row, "objective_summary")
-        acknowledgement_constraint = _row_text(
-            row,
-            "acknowledgement_constraint",
-        )
-        if not acknowledgement_constraint:
-            status = _row_text(row, "status")
-            queue_state = _row_text(row, "queue_state")
-            if status == "pending" and queue_state == "queued":
-                acknowledgement_constraint = "promise_allowed"
-            else:
-                acknowledgement_constraint = "promise_forbidden_explain_failure"
-        part = (
-            "background_artifact_request："
-            f"work_kind={work_kind or 'unknown'}，"
-            f"objective={objective_summary or 'unknown'}，"
-            f"acknowledgement_constraint={acknowledgement_constraint}"
-        )
-        parts.append(part)
-    return parts
 
 
 def _background_work_acknowledgement_parts(

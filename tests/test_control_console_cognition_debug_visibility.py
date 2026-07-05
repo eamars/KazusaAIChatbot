@@ -458,8 +458,8 @@ async def test_background_lookup_uses_result_ready_episode_projection() -> None:
     def build_result_ready_episode_from_job(job: dict[str, Any]):
         assert job["job_id"] == "job-1"
         return {
-            "episode_id": "background_work_result_ready:job-1",
-            "trigger_source": "background_work_result_ready",
+            "episode_id": "accepted_task_result_ready:task-1",
+            "trigger_source": "accepted_task_result_ready",
             "output_mode": "visible_reply",
             "target_scope": {
                 "platform": "qq",
@@ -469,14 +469,15 @@ async def test_background_lookup_uses_result_ready_episode_projection() -> None:
             },
             "percepts": [
                 {
-                    "input_source": "background_work_result",
+                    "input_source": "accepted_task_result",
                     "content": "model-visible artifact",
                     "metadata": {
-                        "task_brief": "summarize the benchmark notes",
+                        "accepted_task_id": "task-1",
+                        "accepted_task_summary": (
+                            "summarize the benchmark notes"
+                        ),
                         "failure_summary": "",
                         "result_summary": "summary ready",
-                        "worker": "text_artifact",
-                        "worker_metadata": {"task_type": "summary"},
                     },
                 },
             ],
@@ -515,10 +516,10 @@ async def test_background_lookup_uses_result_ready_episode_projection() -> None:
         "background_work.result_source.build_result_ready_episode_from_job"
     )
     assert prompt_panel["items"][0]["episode_id"] == (
-        "background_work_result_ready:job-1"
+        "accepted_task_result_ready:task-1"
     )
     assert prompt_panel["items"][0]["content"] == "model-visible artifact"
-    assert prompt_panel["items"][0]["metadata"]["task_brief"] == (
+    assert prompt_panel["items"][0]["metadata"]["accepted_task_summary"] == (
         "summarize the benchmark notes"
     )
     assert panels["job_queue"]["prompt_view"] is False

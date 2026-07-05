@@ -1961,28 +1961,22 @@ def _project_background_result_ready_episode(
         },
         "input_source": percept.get("input_source", ""),
         "content": percept.get("content", ""),
-        "metadata": _project_background_result_metadata(metadata),
+        "metadata": _project_accepted_task_result_metadata(metadata),
     }
     projected_row = redact_mapping(row)
     return projected_row
 
 
-def _project_background_result_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
-    """Project prompt-visible scalar background result metadata."""
+def _project_accepted_task_result_metadata(
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    """Project prompt-visible scalar accepted-task result metadata."""
 
-    worker_metadata = metadata.get("worker_metadata")
-    if not isinstance(worker_metadata, dict):
-        worker_metadata = {}
     row = {
-        "task_brief": metadata.get("task_brief", ""),
+        "accepted_task_summary": metadata.get("accepted_task_summary", ""),
         "failure_summary": metadata.get("failure_summary", ""),
         "result_summary": metadata.get("result_summary", ""),
-        "worker": metadata.get("worker", ""),
-        "worker_metadata": {
-            key: value
-            for key, value in worker_metadata.items()
-            if isinstance(value, (str, int, float, bool)) and value not in ("", None)
-        },
+        "source_character_name": metadata.get("source_character_name", ""),
     }
     projected_row = {
         key: value

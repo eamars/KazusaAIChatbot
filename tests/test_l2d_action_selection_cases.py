@@ -109,35 +109,6 @@ def test_compare_requires_specific_action_params() -> None:
     assert report["errors"] == []
 
 
-def test_compare_accepts_background_artifact_request_params() -> None:
-    """Background artifact fixtures can require bounded work-kind params."""
-
-    case = _case(
-        source_kind="background_artifact_poc",
-        expectations={
-            "required_action_kinds": ["background_artifact_request"],
-            "required_visibility_by_kind": {
-                "background_artifact_request": "private",
-            },
-            "required_params_by_kind": {
-                "background_artifact_request": {
-                    "work_kind": "coding_snippet",
-                    "requested_delivery": "send_result_when_done",
-                }
-            },
-            "forbidden_action_kinds": ["send_message", "trigger_future_cognition"],
-        },
-    )
-
-    report = compare_action_specs_to_expectations(
-        case,
-        [_background_artifact_action("coding_snippet")],
-    )
-
-    assert report["ok"] is True
-    assert report["errors"] == []
-
-
 def test_compare_accepts_background_work_route_only_request() -> None:
     """New background-work fixtures should require route-only params."""
 
@@ -157,7 +128,6 @@ def test_compare_accepts_background_work_route_only_request() -> None:
             "forbidden_action_kinds": [
                 "send_message",
                 "trigger_future_cognition",
-                "background_artifact_request",
             ],
         },
     )
@@ -245,25 +215,6 @@ def test_select_case_returns_requested_fixture(tmp_path) -> None:
     assert selected["source_kind"] == "self_cognition"
 
 
-def test_background_artifact_fixture_file_loads() -> None:
-    """Historical artifact POC inputs should expect generic background work."""
-
-    case_set = load_l2d_routing_case_set(
-        Path("tests/fixtures/l2d_background_artifact_cases.json"),
-    )
-
-    selected = select_l2d_routing_case(
-        case_set,
-        "coding_snippet_accept_fibonacci",
-    )
-
-    assert selected["source_kind"] == "background_artifact_poc"
-    assert selected["expectations"]["required_action_kinds"] == [
-        "speak",
-        "background_work_request",
-    ]
-
-
 def _case(
     *,
     case_id: str = "qq_001",
@@ -346,42 +297,6 @@ def _action_spec(kind: str, visibility: str) -> dict[str, object]:
         },
         "reason": "routing test",
     }
-    return action
-
-
-def _background_artifact_action(work_kind: str) -> dict[str, object]:
-    """Build a background artifact route action for comparison tests."""
-
-    action = _action_spec("background_artifact_request", "private")
-    action["target"] = {
-        "schema_version": "action_target.v1",
-        "target_kind": "current_user",
-        "target_id": None,
-        "owner": "background_artifact",
-        "scope": {
-            "source_platform": "debug",
-            "source_channel_id": "debug:user:test-user",
-            "source_channel_type": "private",
-            "source_message_id": "message-001",
-            "source_platform_bot_id": "debug-bot-001",
-            "source_character_name": "Test Character",
-            "source_trigger_source": "user_message",
-            "requester_global_user_id": (
-                "00000000-0000-4000-8000-000000000002"
-            ),
-            "requester_platform_user_id": "debug-user-001",
-            "requester_display_name": "Test User",
-        },
-    }
-    action["params"] = {
-        "work_kind": work_kind,
-        "objective": "Generate a Fibonacci function snippet.",
-        "input_summary": "The user asked for a simple Fibonacci generator.",
-        "requested_delivery": "send_result_when_done",
-        "max_output_chars": 3000,
-    }
-    action["urgency"] = "background"
-    action["reason"] = "The character accepted bounded async snippet work."
     return action
 
 

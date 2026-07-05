@@ -101,6 +101,7 @@ class _BootstrapDb:
             name: _BootstrapCollection()
             for name in collection_names
         }
+        self.dropped_collections: list[str] = []
         for name, collection in self.collections.items():
             setattr(self, name, collection)
 
@@ -116,6 +117,14 @@ class _BootstrapDb:
         collection = _BootstrapCollection()
         self.collections[name] = collection
         setattr(self, name, collection)
+
+    async def drop_collection(self, name: str) -> None:
+        """Drop a collection in the fake DB."""
+
+        self.dropped_collections.append(name)
+        self.collections.pop(name, None)
+        if hasattr(self, name):
+            delattr(self, name)
 
     def __getitem__(self, name: str) -> _BootstrapCollection:
         """Return a collection by Mongo-style item access."""
@@ -1128,13 +1137,14 @@ async def test_db_bootstrap_creates_calendar_collections_and_indexes(
 
 
 @pytest.mark.asyncio
-async def test_db_bootstrap_creates_background_artifact_collection_and_indexes(
+async def test_db_bootstrap_drops_legacy_background_artifact_collection(
     monkeypatch,
 ) -> None:
-    """Bootstrap should prepare durable background artifact job storage."""
+    """Bootstrap should decommission removed background artifact storage."""
 
     db = _BootstrapDb()
-    ensure_background_artifact = AsyncMock()
+    db.collections["background_artifact_jobs"] = _BootstrapCollection()
+    db.background_artifact_jobs = db.collections["background_artifact_jobs"]
     monkeypatch.setattr(db_bootstrap_module, "get_db", AsyncMock(return_value=db))
     monkeypatch.setattr(db_bootstrap_module, "enable_vector_index", AsyncMock())
     monkeypatch.setattr(
@@ -1162,15 +1172,10 @@ async def test_db_bootstrap_creates_background_artifact_collection_and_indexes(
         "ensure_internal_monologue_residue_indexes",
         AsyncMock(),
     )
-    monkeypatch.setattr(
-        db_bootstrap_module,
-        "ensure_background_artifact_job_indexes",
-        ensure_background_artifact,
-    )
     await db_bootstrap_module.db_bootstrap()
 
-    assert "background_artifact_jobs" in db.collections
-    ensure_background_artifact.assert_awaited_once()
+    assert "background_artifact_jobs" not in db.collections
+    assert "background_artifact_jobs" in db.dropped_collections
 
 
 def test_db_facade_exports_calendar_schema_docs() -> None:

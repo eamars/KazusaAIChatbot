@@ -34,7 +34,6 @@ ACTION_ROUTER_PROMPT = '''\
 - reflection_signal + reflection_artifact 表示我自己的反思资料，不是用户输入、用户发言，也不是任何人正在对我说话。
 - internal_thought + internal_monologue 表示我自己的内部观察资料，不是用户输入、用户发言，也不是任何人正在对我说话。
 - accepted_task_result_ready + accepted_task_result 表示之前已经接下的任务现在有结果，需要按 output_mode 交付给请求者。
-- background_work_result_ready + background_work_result 表示后台工作现在有结果，需要按 output_mode 交付给请求者。
 - 当前输入摘要、资料标题、字段名、JSON、时间戳、semantic_labels、window_summary、transport summary、model-facing metadata 不是可见发言对象；不要围绕这些结构选择可见动作，也不要复制进 decision、detail、reason 等自由文本字段。
 - 对 internal_thought 的群聊观察，`participant_context` 和 `thread_reference_context` 是来源证据；`semantic_labels` 只是粗粒度窗口标签。二人称动作目标按来源优先级读取：同一行明确指向当前角色的内容可以作为当前角色相关对象；`thread_reference_context.referent_status` 标为 `ambiguous_or_side_thread` 或 side-thread 的内容保持为侧线/未定对象。
 - 如果上游 action detail、reason 或 residue 提到围绕侧线二人称产生的比较、描述、评价或身体/状态归属，则把可见动作目标对齐到来源优先级事实：同一行明确指向当前角色的内容，或另一个已经被上游明确推进到动作层的当前可见对象。
@@ -108,7 +107,7 @@ ACTION_ROUTER_PROMPT = '''\
 16. 当前活动承诺可能被本轮输入或已形成决定影响时，选择对应的私有生命周期 affordance，并在 detail 写清需要复核的语义原因。
 17. 当前回合存在具体未完成问题，且继续处理依赖未来新信息时，选择对应的未来私有 affordance。
 18. 如果当前用户目标是有边界的代码阅读、仓库分析、新代码草案、文件化文本或其他需要延迟交付的任务，且前序判断没有拒绝或回避这项工作，选择对应的私有延迟任务 affordance。对这类任务，单独选择可见 speak 直接交付成品是不完整的；同轮还要选择一个可见 speak 作为接下任务的确认。配对 speak 的 decision 使用 acknowledge_task，detail 只写任务已接下、完成后再交付结果。私有延迟任务的 detail 只写任务的普通语义摘要，reason 写为什么角色愿意接下；不要写执行方、内部分类、内部字段、工具参数、文件路径、发送目标、数据库字段、最终可见文本或任何执行细节。
-19. 如果 trigger_source 是 accepted_task_result_ready 或 background_work_result_ready，且 output_mode 是 visible_reply，当前结果就是需要可见处理的具体对象。选择可见 speak 交付结果；detail 写成把任务结果、失败原因、限制或交付物摘要清楚转交给请求者。不熟悉技术内容只影响语气，动作目标仍是交付结果，不重新接单，也不再创建延迟任务。
+19. 如果 trigger_source 是 accepted_task_result_ready，且 output_mode 是 visible_reply，当前结果就是需要可见处理的具体对象。选择可见 speak 交付结果；detail 写成把任务结果、失败原因、限制或交付物摘要清楚转交给请求者。不熟悉技术内容只影响语气，动作目标仍是交付结果，不重新接单，也不再创建延迟任务。
 20. 没有需要解析或动作层处理的真实对象时，返回空数组。
 21. 同一轮可以选择多个彼此独立的请求，最多 3 个。
 

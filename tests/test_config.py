@@ -41,9 +41,9 @@ REQUIRED_ROUTE_ENV_VARS = (
     "JSON_REPAIR_LLM_BASE_URL",
     "JSON_REPAIR_LLM_API_KEY",
     "JSON_REPAIR_LLM_MODEL",
-    "BACKGROUND_ARTIFACT_LLM_BASE_URL",
-    "BACKGROUND_ARTIFACT_LLM_API_KEY",
-    "BACKGROUND_ARTIFACT_LLM_MODEL",
+    "BACKGROUND_WORK_LLM_BASE_URL",
+    "BACKGROUND_WORK_LLM_API_KEY",
+    "BACKGROUND_WORK_LLM_MODEL",
     "CODING_AGENT_PM_LLM_BASE_URL",
     "CODING_AGENT_PM_LLM_API_KEY",
     "CODING_AGENT_PM_LLM_MODEL",
@@ -549,16 +549,16 @@ class TestRouteLlmConfig:
         for name in REQUIRED_ROUTE_ENV_VARS:
             assert getattr(config, name)
 
-    def test_background_artifact_worker_config_values_are_present(self):
+    def test_background_work_worker_config_values_are_present(self):
         import kazusa_ai_chatbot.config as config
 
-        assert isinstance(config.BACKGROUND_ARTIFACT_WORKER_ENABLED, bool)
-        assert config.BACKGROUND_ARTIFACT_WORKER_INTERVAL_SECONDS > 0
-        assert config.BACKGROUND_ARTIFACT_WORKER_CLAIM_LIMIT >= 1
-        assert config.BACKGROUND_ARTIFACT_WORKER_LEASE_SECONDS > 0
-        assert config.BACKGROUND_ARTIFACT_WORKER_MAX_ATTEMPTS >= 1
-        assert config.BACKGROUND_ARTIFACT_INPUT_CHAR_LIMIT >= 1
-        assert config.BACKGROUND_ARTIFACT_OUTPUT_CHAR_LIMIT >= 1
+        assert isinstance(config.BACKGROUND_WORK_WORKER_ENABLED, bool)
+        assert config.BACKGROUND_WORK_WORKER_INTERVAL_SECONDS > 0
+        assert config.BACKGROUND_WORK_WORKER_CLAIM_LIMIT >= 1
+        assert config.BACKGROUND_WORK_WORKER_LEASE_SECONDS > 0
+        assert config.BACKGROUND_WORK_WORKER_MAX_ATTEMPTS >= 1
+        assert config.BACKGROUND_WORK_INPUT_CHAR_LIMIT >= 1
+        assert config.BACKGROUND_WORK_OUTPUT_CHAR_LIMIT >= 1
 
     def test_missing_route_config_crashes_import(self, tmp_path):
         env = _subprocess_env_without_dotenv()

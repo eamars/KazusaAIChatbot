@@ -163,20 +163,6 @@ def test_capability_spec_accepts_l3_surface_owner() -> None:
     assert validated["owner_module"] == "l3_text"
 
 
-def test_capability_spec_accepts_background_artifact_owner() -> None:
-    """Background artifact requests should have a dedicated action owner."""
-
-    capability = _capability_spec()
-    capability["capability_kind"] = "background_artifact_request"
-    capability["owner_module"] = "background_artifact"
-    capability["handler_id"] = "background_artifact.enqueue.v1"
-    capability["permission_policy"] = "policy:background_artifact.enqueue.v1"
-
-    validated = validate_capability_spec(capability)
-
-    assert validated["owner_module"] == "background_artifact"
-
-
 def test_capability_spec_rejects_removed_delivery_owner() -> None:
     """User-visible text must be routed through cognition-owned surface actions."""
 

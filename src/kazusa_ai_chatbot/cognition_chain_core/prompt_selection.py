@@ -34,8 +34,6 @@ CognitionPromptVariant = Literal[
     "text_chat_user_message_image_audio_observation",
     "reflection_signal_reflection_artifact",
     "internal_thought_internal_monologue",
-    "background_artifact_result_ready_background_artifact_result",
-    "background_work_result_ready_background_work_result",
     "accepted_task_result_ready_accepted_task_result",
 ]
 
@@ -73,16 +71,10 @@ _REFLECTION_INPUT_SOURCES: list[InputSource] = ["reflection_artifact"]
 _REFLECTION_OUTPUT_MODES = frozenset(("think_only", "preview", "silent"))
 _INTERNAL_THOUGHT_INPUT_SOURCES: list[InputSource] = ["internal_monologue"]
 _INTERNAL_THOUGHT_OUTPUT_MODES = frozenset(("think_only", "preview", "silent"))
-_BACKGROUND_ARTIFACT_INPUT_SOURCES: list[InputSource] = [
-    "background_artifact_result",
-]
-_BACKGROUND_WORK_INPUT_SOURCES: list[InputSource] = [
-    "background_work_result",
-]
 _ACCEPTED_TASK_INPUT_SOURCES: list[InputSource] = [
     "accepted_task_result",
 ]
-_BACKGROUND_ARTIFACT_OUTPUT_MODES = frozenset(("visible_reply",))
+_ACCEPTED_TASK_OUTPUT_MODES = frozenset(("visible_reply",))
 _IMAGE_OBSERVATION_PAYLOAD_FIELDS = (
     "observation_origin",
     "media_kind",
@@ -145,20 +137,6 @@ def select_cognition_prompt_variant(
             stage=stage,
             trigger_source=trigger_source,
         )
-    elif trigger_source == "background_artifact_result_ready":
-        selection = _select_background_artifact_result_prompt(
-            input_sources=input_sources,
-            output_mode=output_mode,
-            stage=stage,
-            trigger_source=trigger_source,
-        )
-    elif trigger_source == "background_work_result_ready":
-        selection = _select_background_work_result_prompt(
-            input_sources=input_sources,
-            output_mode=output_mode,
-            stage=stage,
-            trigger_source=trigger_source,
-        )
     elif trigger_source == "accepted_task_result_ready":
         selection = _select_accepted_task_result_prompt(
             input_sources=input_sources,
@@ -209,14 +187,6 @@ def build_cognition_prompt_source_payload(
         source_payload = _reflection_source_payload(episode)
     elif variant == "internal_thought_internal_monologue":
         source_payload = _internal_thought_source_payload(episode)
-    elif variant == (
-        "background_artifact_result_ready_background_artifact_result"
-    ):
-        source_payload = _background_artifact_result_source_payload(episode)
-    elif variant == (
-        "background_work_result_ready_background_work_result"
-    ):
-        source_payload = _background_work_result_source_payload(episode)
     elif variant == (
         "accepted_task_result_ready_accepted_task_result"
     ):
@@ -411,68 +381,6 @@ def _select_internal_thought_prompt(
     return selection
 
 
-def _select_background_artifact_result_prompt(
-    *,
-    input_sources: list[InputSource],
-    output_mode: OutputMode,
-    stage: CognitionPromptStage,
-    trigger_source: TriggerSource,
-) -> CognitionPromptSelection:
-    """Select the completed background artifact prompt variant."""
-
-    if input_sources != _BACKGROUND_ARTIFACT_INPUT_SOURCES:
-        raise CognitionPromptSelectionError(
-            f"input_sources are not supported: {input_sources}"
-        )
-    if output_mode not in _BACKGROUND_ARTIFACT_OUTPUT_MODES:
-        raise CognitionPromptSelectionError(
-            f"output_mode is not supported: {output_mode}"
-        )
-    variant: CognitionPromptVariant = (
-        "background_artifact_result_ready_background_artifact_result"
-    )
-    selection: CognitionPromptSelection = {
-        "stage": stage,
-        "variant": variant,
-        "prompt_key": f"{stage}.{variant}",
-        "trigger_source": trigger_source,
-        "input_sources": list(input_sources),
-        "output_mode": output_mode,
-    }
-    return selection
-
-
-def _select_background_work_result_prompt(
-    *,
-    input_sources: list[InputSource],
-    output_mode: OutputMode,
-    stage: CognitionPromptStage,
-    trigger_source: TriggerSource,
-) -> CognitionPromptSelection:
-    """Select the completed background-work prompt variant."""
-
-    if input_sources != _BACKGROUND_WORK_INPUT_SOURCES:
-        raise CognitionPromptSelectionError(
-            f"input_sources are not supported: {input_sources}"
-        )
-    if output_mode not in _BACKGROUND_ARTIFACT_OUTPUT_MODES:
-        raise CognitionPromptSelectionError(
-            f"output_mode is not supported: {output_mode}"
-        )
-    variant: CognitionPromptVariant = (
-        "background_work_result_ready_background_work_result"
-    )
-    selection: CognitionPromptSelection = {
-        "stage": stage,
-        "variant": variant,
-        "prompt_key": f"{stage}.{variant}",
-        "trigger_source": trigger_source,
-        "input_sources": list(input_sources),
-        "output_mode": output_mode,
-    }
-    return selection
-
-
 def _select_accepted_task_result_prompt(
     *,
     input_sources: list[InputSource],
@@ -486,7 +394,7 @@ def _select_accepted_task_result_prompt(
         raise CognitionPromptSelectionError(
             f"input_sources are not supported: {input_sources}"
         )
-    if output_mode not in _BACKGROUND_ARTIFACT_OUTPUT_MODES:
+    if output_mode not in _ACCEPTED_TASK_OUTPUT_MODES:
         raise CognitionPromptSelectionError(
             f"output_mode is not supported: {output_mode}"
         )
@@ -614,84 +522,6 @@ def _internal_thought_source_payload(
         },
     }
     return internal_payload
-
-
-def _background_artifact_result_source_payload(
-    episode: CognitiveEpisode,
-) -> dict[str, object]:
-    """Project the single artifact result percept into prompt payload."""
-
-    result_percepts = [
-        percept
-        for percept in episode["percepts"]
-        if percept["input_source"] == "background_artifact_result"
-    ]
-    if len(result_percepts) != 1:
-        raise CognitionPromptSelectionError(
-            "background_artifact_result percept must be unique"
-        )
-    percept = result_percepts[0]
-    metadata = percept["metadata"]
-    if not isinstance(metadata, Mapping):
-        raise CognitionPromptSelectionError(
-            "background artifact result metadata must be a dict"
-        )
-    projected_metadata: dict[str, object] = {}
-    for field_name in (
-        "work_kind",
-        "objective_summary",
-        "failure_summary",
-        "source_character_name",
-    ):
-        value = metadata.get(field_name)
-        if isinstance(value, str):
-            projected_metadata[field_name] = value
-    source_payload = {
-        "background_artifact_result": {
-            "artifact_text": percept["content"],
-            "metadata": projected_metadata,
-        },
-    }
-    return source_payload
-
-
-def _background_work_result_source_payload(
-    episode: CognitiveEpisode,
-) -> dict[str, object]:
-    """Project the single generic background-work result into prompt payload."""
-
-    result_percepts = [
-        percept
-        for percept in episode["percepts"]
-        if percept["input_source"] == "background_work_result"
-    ]
-    if len(result_percepts) != 1:
-        raise CognitionPromptSelectionError(
-            "background_work_result percept must be unique"
-        )
-    percept = result_percepts[0]
-    metadata = percept["metadata"]
-    if not isinstance(metadata, Mapping):
-        raise CognitionPromptSelectionError(
-            "background work result metadata must be a dict"
-        )
-    projected_metadata: dict[str, object] = {}
-    for field_name in (
-        "task_brief",
-        "failure_summary",
-        "result_summary",
-        "source_character_name",
-    ):
-        value = metadata.get(field_name)
-        if isinstance(value, str):
-            projected_metadata[field_name] = value
-    source_payload = {
-        "background_work_result": {
-            "artifact_text": percept["content"],
-            "metadata": projected_metadata,
-        },
-    }
-    return source_payload
 
 
 def _accepted_task_result_source_payload(

@@ -73,62 +73,15 @@ def _patch_delivery_recovery(
     return recover_background, recover_accepted_task
 
 
-def test_result_source_builder_creates_prompt_safe_episode() -> None:
-    """Completed background work should become source-bound cognition."""
+def test_result_source_builder_requires_accepted_task_identity() -> None:
+    """Completed result delivery must be tied to an accepted task."""
 
     result_source = importlib.import_module(
         "kazusa_ai_chatbot.background_work.result_source"
     )
-    builder = getattr(result_source, "build_result_ready_episode_from_job")
 
-    episode = builder(_completed_job())
-    serialized = json.dumps(episode, ensure_ascii=False).lower()
-
-    assert episode["trigger_source"] == "background_work_result_ready"
-    assert episode["input_sources"] == ["background_work_result"]
-    assert episode["output_mode"] == "visible_reply"
-    assert "fibonacci" in serialized
-    assert episode["percepts"][0]["metadata"]["source_platform_bot_id"] == "bot-1"
-    for forbidden in (
-        "lease",
-        "retry",
-        "job_ref",
-        "adapter_id",
-        "mongodb",
-    ):
-        assert forbidden not in serialized
-
-
-def test_result_source_payload_uses_generic_background_work_metadata() -> None:
-    """Prompt payload should keep task/result context without legacy labels."""
-
-    result_source = importlib.import_module(
-        "kazusa_ai_chatbot.background_work.result_source"
-    )
-    episode = result_source.build_result_ready_episode_from_job(_completed_job())
-    selection = select_cognition_prompt_variant(
-        episode=episode,
-        stage="l2d_action_selection",
-    )
-
-    payload = build_cognition_prompt_source_payload(
-        episode=episode,
-        selection=selection,
-    )
-
-    result_payload = payload["background_work_result"]
-    metadata = result_payload["metadata"]
-    assert metadata == {
-        "task_brief": "Generate a Fibonacci function snippet.",
-        "failure_summary": "",
-        "result_summary": "Generated a compact Fibonacci snippet.",
-        "source_character_name": "Test Character",
-    }
-    serialized_payload = json.dumps(payload, ensure_ascii=False)
-    assert "work_kind" not in serialized_payload
-    assert "objective_summary" not in serialized_payload
-    assert "source_platform_bot_id" not in serialized_payload
-    assert "worker_metadata" not in serialized_payload
+    with pytest.raises(ValueError):
+        result_source.build_result_ready_episode_from_job(_completed_job())
 
 
 def test_accepted_task_result_source_builder_creates_prompt_safe_episode() -> None:
@@ -151,14 +104,9 @@ def test_accepted_task_result_source_builder_creates_prompt_safe_episode() -> No
     assert metadata["accepted_task_summary"] == (
         "Generate a Fibonacci function snippet."
     )
-    for forbidden in (
-        "background_work_result_ready",
-        "background_work_result",
-        "worker_metadata",
-        "worker",
-        "job_ref",
-        "queue_state",
-    ):
+    assert "accepted_task_result_ready" in serialized
+    assert "accepted_task_result" in serialized
+    for forbidden in ("worker_metadata", "worker", "job_ref", "queue_state"):
         assert forbidden not in serialized
 
 
@@ -190,13 +138,8 @@ def test_accepted_task_result_payload_uses_semantic_metadata() -> None:
         "source_character_name": "Test Character",
     }
     serialized_payload = json.dumps(payload, ensure_ascii=False).lower()
-    for forbidden in (
-        "background_work_result",
-        "worker_metadata",
-        "worker",
-        "job_ref",
-        "queue_state",
-    ):
+    assert "accepted_task_result" in serialized_payload
+    for forbidden in ("worker_metadata", "worker", "job_ref", "queue_state"):
         assert forbidden not in serialized_payload
 
 
@@ -210,7 +153,9 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
     result_source = importlib.import_module(
         "kazusa_ai_chatbot.background_work.result_source"
     )
-    episode = result_source.build_result_ready_episode_from_job(_completed_job())
+    episode = result_source.build_result_ready_episode_from_job(
+        _accepted_task_completed_job()
+    )
     handle_send_message = AsyncMock(return_value={
         "conversation_message_id": "conversation-001",
         "delivery_tracking_id": "delivery-001",
@@ -267,11 +212,11 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
     monkeypatch.setattr(service_module, "handle_send_message", handle_send_message)
     monkeypatch.setattr(
         service_module,
-        "_run_background_work_result_post_turn",
+        "_run_accepted_task_result_post_turn",
         post_turn,
     )
 
-    result = await service_module._deliver_background_work_result_episode(
+    result = await service_module._deliver_accepted_task_result_episode(
         episode,
     )
 
@@ -283,9 +228,9 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
     }
     persona_state = persona_supervisor2.await_args.args[0]
     assert persona_state["cognitive_episode"] == episode
-    assert persona_state["reason_to_respond"] == "background_work_result_ready"
+    assert persona_state["reason_to_respond"] == "accepted_task_result_ready"
     assert persona_state["user_input"].startswith(
-        "Background work result is completed."
+        "Accepted task result is completed."
     )
     send_args = handle_send_message.await_args.args[0]
     assert send_args["text"] == "@Test User Here is the requested result."
@@ -298,9 +243,57 @@ async def test_service_result_ready_delivery_uses_dispatcher_boundary(
         }
     ]
     dispatch_context = handle_send_message.await_args.args[1]
-    assert dispatch_context.bot_permission_role == "background_work_result"
+    assert dispatch_context.bot_permission_role == "accepted_task_result"
     assert dispatch_context.source_platform_bot_id == "bot-1"
     post_turn.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_accepted_task_result_post_turn_skips_consolidation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Result-ready accepted tasks must not enter consolidation origin routing."""
+
+    service_module = importlib.import_module("kazusa_ai_chatbot.service")
+    lifecycle = AsyncMock(return_value={
+        "final_dialog": ["@Test User Here is the requested result."],
+    })
+    progress = AsyncMock()
+    consolidation = AsyncMock()
+    residue = AsyncMock()
+    monkeypatch.setattr(
+        service_module,
+        "_run_post_turn_memory_lifecycle_background",
+        lifecycle,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_run_conversation_progress_record_background",
+        progress,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_run_consolidation_background",
+        consolidation,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_run_internal_monologue_residue_record_background",
+        residue,
+    )
+
+    await service_module._run_accepted_task_result_post_turn(
+        {
+            "final_dialog": ["@Test User Here is the requested result."],
+            "episode_trace": {},
+        },
+        visible_response_sent=True,
+    )
+
+    lifecycle.assert_awaited_once()
+    progress.assert_awaited_once()
+    consolidation.assert_not_awaited()
+    residue.assert_awaited_once()
 
 
 @pytest.mark.asyncio

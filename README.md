@@ -105,7 +105,6 @@ HOWTO. One working-style configuration looks like this:
 | `WEB_SEARCH_LLM`           | `local-model`                            | `http://localhost:1234/v1` |
 | `COGNITION_LLM`            | `local-model`                            | `http://localhost:1234/v1` |
 | `BOUNDARY_CORE_LLM`        | `local-model`                            | `http://localhost:1234/v1` |
-| `BACKGROUND_ARTIFACT_LLM`  | `local-model`                            | `http://localhost:1234/v1` |
 | `BACKGROUND_WORK_LLM`      | `local-model`                            | `http://localhost:1234/v1` |
 | `CODING_AGENT_PM_LLM`      | `local-model`                            | `http://localhost:1234/v1` |
 | `CODING_AGENT_PROGRAMMER_LLM` | `local-model`                          | `http://localhost:1234/v1` |

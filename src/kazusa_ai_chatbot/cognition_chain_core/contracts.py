@@ -38,8 +38,6 @@ class ModelVisiblePerceptV1(TypedDict):
         "audio_observation",
         "internal_monologue",
         "reflection_artifact",
-        "background_artifact_result",
-        "background_work_result",
         "accepted_task_result",
     ]
     content: str
@@ -275,7 +273,6 @@ class PreSurfaceActionResultPromptV1(TypedDict):
     action_kind: Literal[
         "accepted_task_request",
         "background_work_request",
-        "background_artifact_request",
         "memory_lifecycle_update",
         "future_speak",
     ]
@@ -432,8 +429,6 @@ _EPISODE_TRIGGER_SOURCES = frozenset((
     "internal_thought",
     "scheduled_recall",
     "system_probe",
-    "background_artifact_result_ready",
-    "background_work_result_ready",
     "accepted_task_result_ready",
 ))
 _MODEL_VISIBLE_PERCEPT_INPUT_SOURCES = frozenset((
@@ -442,8 +437,6 @@ _MODEL_VISIBLE_PERCEPT_INPUT_SOURCES = frozenset((
     "audio_observation",
     "internal_monologue",
     "reflection_artifact",
-    "background_artifact_result",
-    "background_work_result",
     "accepted_task_result",
 ))
 _MEDIA_MODALITIES = frozenset((

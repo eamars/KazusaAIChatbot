@@ -469,12 +469,6 @@ async def call_style_agent(state: dict[str, Any]) -> dict[str, Any]:
         "text_chat_user_message_image_audio_observation": _STYLE_AGENT_PROMPT,
         "reflection_signal_reflection_artifact": _STYLE_AGENT_PROMPT,
         "internal_thought_internal_monologue": _STYLE_AGENT_PROMPT,
-        "background_artifact_result_ready_background_artifact_result": (
-            _STYLE_AGENT_PROMPT
-        ),
-        "background_work_result_ready_background_work_result": (
-            _STYLE_AGENT_PROMPT
-        ),
         "accepted_task_result_ready_accepted_task_result": (
             _STYLE_AGENT_PROMPT
         ),
@@ -650,7 +644,7 @@ _CONTENT_PLAN_AGENT_PROMPT = '''\
 - `conversation_progress` 是短期进展摘要；重点读取 `continuity`、`current_thread`、`current_blocker`、`open_loops`、`resolved_threads`、`avoid_reopening`、`overused_moves`、`next_affordances` 和 `progression_guidance`，并以当前输入覆盖旧阻碍。
 - `reflection_artifact` 若存在，表示本轮材料来自角色自己的反思资料，不是用户正在说话；只根据上游判断和反思中真实沉淀的经历生成计划内容。
 - `internal_thought_residue` 若存在，表示本轮材料来自内部观察残留，不是外部命令或当前用户发言；只把其中真实可见的观察作为来源背景。
-- `accepted_task_result`、`background_work_result` 或 `background_artifact_result` 若存在，表示本轮材料是已经完成或失败的任务结果。`artifact_text` 是要转交的结果正文，`metadata` 提供任务摘要、结果摘要、失败原因和限制；内容计划必须围绕交付这些结果。如果 `artifact_text` 已包含 fenced code block、JSON、配置或其他固定格式块，`semantic_content` 必须保留该固定格式块，不要替换成新写的近似内容。
+- `accepted_task_result` 若存在，表示本轮材料是已经完成或失败的任务结果。`artifact_text` 是要转交的结果正文，`metadata` 提供任务摘要、结果摘要、失败原因和限制；内容计划必须围绕交付这些结果。如果 `artifact_text` 已包含 fenced code block、JSON、配置或其他固定格式块，`semantic_content` 必须保留该固定格式块，不要替换成新写的近似内容。
 
 # 输出格式 (JSON)
 请务必返回合法的 JSON 字符串，仅包含以下字段：
@@ -823,12 +817,6 @@ async def call_content_plan_agent(state: dict[str, Any]) -> dict[str, Any]:
         "text_chat_user_message_image_audio_observation": _CONTENT_PLAN_AGENT_PROMPT,
         "reflection_signal_reflection_artifact": _CONTENT_PLAN_AGENT_PROMPT,
         "internal_thought_internal_monologue": _CONTENT_PLAN_AGENT_PROMPT,
-        "background_artifact_result_ready_background_artifact_result": (
-            _CONTENT_PLAN_AGENT_PROMPT
-        ),
-        "background_work_result_ready_background_work_result": (
-            _CONTENT_PLAN_AGENT_PROMPT
-        ),
         "accepted_task_result_ready_accepted_task_result": (
             _CONTENT_PLAN_AGENT_PROMPT
         ),
@@ -1019,12 +1007,6 @@ async def call_preference_adapter(state: dict[str, Any]) -> dict[str, Any]:
         "text_chat_user_message_image_audio_observation": _PREFERENCE_ADAPTER_PROMPT,
         "reflection_signal_reflection_artifact": _PREFERENCE_ADAPTER_PROMPT,
         "internal_thought_internal_monologue": _PREFERENCE_ADAPTER_PROMPT,
-        "background_artifact_result_ready_background_artifact_result": (
-            _PREFERENCE_ADAPTER_PROMPT
-        ),
-        "background_work_result_ready_background_work_result": (
-            _PREFERENCE_ADAPTER_PROMPT
-        ),
         "accepted_task_result_ready_accepted_task_result": (
             _PREFERENCE_ADAPTER_PROMPT
         ),
@@ -1270,12 +1252,6 @@ async def call_visual_agent(state: dict[str, Any]) -> dict[str, Any]:
         "text_chat_user_message_image_audio_observation": _VISUAL_AGENT_PROMPT,
         "reflection_signal_reflection_artifact": _VISUAL_AGENT_PROMPT,
         "internal_thought_internal_monologue": _VISUAL_AGENT_PROMPT,
-        "background_artifact_result_ready_background_artifact_result": (
-            _VISUAL_AGENT_PROMPT
-        ),
-        "background_work_result_ready_background_work_result": (
-            _VISUAL_AGENT_PROMPT
-        ),
         "accepted_task_result_ready_accepted_task_result": (
             _VISUAL_AGENT_PROMPT
         ),

@@ -97,8 +97,7 @@ resolve to the same active task.
 ## Result Delivery
 
 Accepted-task-backed worker rows emit `accepted_task_result_ready` cognition
-episodes when complete. Legacy worker rows without an accepted-task id may
-still emit `background_work_result_ready` for compatibility.
+episodes when complete.
 
 Dispatcher delivery synchronizes the accepted-task row to delivered or a
 retryable delivery-failure state. Operators diagnose executor details through

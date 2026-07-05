@@ -265,7 +265,7 @@ _COGNITION_CONSCIOUSNESS_PROMPT = '''\
 - human payload 是本轮 JSON 语义上下文。`character_mood`、`global_vibe`、`affinity_context` 和 `last_relationship_insight` 只校准情绪、环境氛围和关系背景；`emotional_appraisal` 与 `interaction_subtext` 是 L1 的即时感受候选。
 - 存在 `reflection_artifact` 时，当前材料是我自己的反思资料，不是用户输入、用户发言，也不是任何人正在对我说话。重点读取反思中已经沉淀的经历、关系余波、承诺状态或自我理解。
 - 存在 `internal_thought_residue` 时，当前材料是我自己的内部观察资料。重点读取 `internal_thought_residue.internal_monologue` 中的真实可见现场；`decontextualized_input` 和 `user_input` 只是运输摘要，不是用户输入、用户发言，也不是任何人正在对我说话。
-- 存在 `accepted_task_result`、`background_work_result` 或 `background_artifact_result` 时，当前材料是系统回流的任务结果，不是用户新发言。重点读取任务摘要、结果正文、失败原因和限制，把本轮理解为结果交付。
+- 存在 `accepted_task_result` 时，当前材料是系统回流的任务结果，不是用户新发言。重点读取任务摘要、结果正文、失败原因和限制，把本轮理解为结果交付。
 - 存在 `current_event_grounding` 时，当前材料是外部文本消息。先读取它来固定可见事实归属：谁说了当前文本、文本里明确写了什么、点名或提到了谁、正在回复谁。再用 `decontextualized_input` 和 `conversation_progress` 理解这句话的意图、上下文和正在延续的话题。
 - `current_event_grounding` 只校正可见主体、对象、收件人和回复锚点；它不直接决定我的最终立场、动作意图或情绪强度。L1 的 `emotional_appraisal` 与 `interaction_subtext` 只说明我的即时感受，不能替换当前文本里的事实主体。
 - 外部文本消息里，如果当前可见文本或 `decontextualized_input` 显式标出说话人、被回复对象、被提及对象、动作主体、决策主体、被邀请者或被建议者，`internal_monologue` 必须按这个主体复述事实；第一人称只承载我的感受、判断、边界和准备提供的建议。
@@ -356,12 +356,6 @@ async def call_cognition_consciousness(state: dict[str, Any]) -> dict[str, Any]:
         "text_chat_user_message_image_audio_observation": _COGNITION_CONSCIOUSNESS_PROMPT,
         "reflection_signal_reflection_artifact": _COGNITION_CONSCIOUSNESS_PROMPT,
         "internal_thought_internal_monologue": _COGNITION_CONSCIOUSNESS_PROMPT,
-        "background_artifact_result_ready_background_artifact_result": (
-            _COGNITION_CONSCIOUSNESS_PROMPT
-        ),
-        "background_work_result_ready_background_work_result": (
-            _COGNITION_CONSCIOUSNESS_PROMPT
-        ),
         "accepted_task_result_ready_accepted_task_result": (
             _COGNITION_CONSCIOUSNESS_PROMPT
         ),
@@ -500,7 +494,7 @@ _BOUNDARY_CORE_PROMPT = '''\
 - `interaction_subtext` 与 `emotional_appraisal` 是 L1 对压力和意图的候选判断；`affinity_context` 只校准关系强度，`media_observations` 只提供图片或音频事实对象。
 - 存在 `reflection_artifact` 时，当前材料是我自己的反思资料，不是用户输入、用户发言，也不是任何人正在对我说话；只允许根据反思中真实沉淀出的关系压力、身份余波或控制痕迹判断边界。
 - 存在 `internal_thought_residue` 时，当前材料是我自己的观察资料，不是用户输入、用户发言，也不是任何人正在对我说话；也不是外部命令、权威要求或关系压力。只允许根据 `internal_thought_residue.internal_monologue` 中真实可见的聊天内容判断边界。
-- 存在 `accepted_task_result`、`background_work_result` 或 `background_artifact_result` 时，当前材料是系统回流的任务结果，不是外部命令或新关系压力；边界判断只围绕结果是否安全、是否失败、是否需要说明限制。
+- 存在 `accepted_task_result` 时，当前材料是系统回流的任务结果，不是外部命令或新关系压力；边界判断只围绕结果是否安全、是否失败、是否需要说明限制。
 - 没有 `reflection_artifact`、`internal_thought_residue` 和结果字段时，按外部说话内容判断边界。
 - 资料标题、字段名、JSON、时间戳、semantic_labels、window_summary、transport summary、model-facing metadata 不构成边界压力，不要复制进 `boundary_summary`、`trajectory` 等自由文本字段。
 - 内部观察资料里的 `participant_context` 和 `thread_reference_context` 是来源证据，不是边界压力本身。边界对象按来源优先级读取：同一行明确指向当前角色的内容优先，其次读取 `thread_reference_context` 的 `referent_status`；标为 `ambiguous_or_side_thread` 的二人称内容保持为侧线/未定对象。
@@ -623,12 +617,6 @@ async def call_boundary_core_agent(state: dict[str, Any]) -> dict[str, Any]:
         "text_chat_user_message_image_audio_observation": _BOUNDARY_CORE_PROMPT,
         "reflection_signal_reflection_artifact": _BOUNDARY_CORE_PROMPT,
         "internal_thought_internal_monologue": _BOUNDARY_CORE_PROMPT,
-        "background_artifact_result_ready_background_artifact_result": (
-            _BOUNDARY_CORE_PROMPT
-        ),
-        "background_work_result_ready_background_work_result": (
-            _BOUNDARY_CORE_PROMPT
-        ),
         "accepted_task_result_ready_accepted_task_result": (
             _BOUNDARY_CORE_PROMPT
         ),
@@ -763,7 +751,7 @@ _JUDGEMENT_CORE_PROMPT = '''\
 - `internal_monologue_candidate`、`logical_stance_candidate` 和 `character_intent_candidate` 是 Consciousness 的候选判断；Boundary Core 的 `boundary_issue`、`boundary_summary`、`behavior_primary`、`behavior_secondary`、`acceptance`、`stance_bias`、`identity_policy`、`pressure_policy` 和 `trajectory` 是边界上限。
 - 存在 `reflection_artifact` 时，当前材料是我自己的反思资料，不是用户输入、用户发言，也不是任何人正在对我说话。
 - 存在 `internal_thought_residue` 时，当前材料是我自己的观察资料，不是用户输入、用户发言，也不是任何人正在对我说话。
-- 存在 `accepted_task_result`、`background_work_result` 或 `background_artifact_result` 时，当前材料是系统回流的任务结果，不是用户新发言；裁决对象是如何把结果、失败原因或限制交付给请求者。
+- 存在 `accepted_task_result` 时，当前材料是系统回流的任务结果，不是用户新发言；裁决对象是如何把结果、失败原因或限制交付给请求者。
 - 没有 `reflection_artifact`、`internal_thought_residue` 或 `current_event_grounding` 时，按本轮 source payload 中的真实可见材料裁决，不要假设一定有人正在对我说话。
 - 外部文本消息里，如果 Consciousness 候选把当前说话人、被回复对象、被提及对象、事实主体或动作主体读反，而 `current_event_grounding` 给出了更直接的可见依据，裁决时必须修正事实归属，并在 `judgment_note` 中用一句话说明修正后的判断。
 - 如果上游把内部观察资料或反思资料的运输摘要、标题、字段名、JSON、时间戳、semantic_labels、window_summary、transport summary 或 model-facing metadata 当成聊天内容，你必须回到来源事实，只围绕真实可见现场或已沉淀经历裁决。
@@ -855,12 +843,6 @@ async def call_judgment_core_agent(state: dict[str, Any]) -> dict[str, Any]:
         "text_chat_user_message_image_audio_observation": _JUDGEMENT_CORE_PROMPT,
         "reflection_signal_reflection_artifact": _JUDGEMENT_CORE_PROMPT,
         "internal_thought_internal_monologue": _JUDGEMENT_CORE_PROMPT,
-        "background_artifact_result_ready_background_artifact_result": (
-            _JUDGEMENT_CORE_PROMPT
-        ),
-        "background_work_result_ready_background_work_result": (
-            _JUDGEMENT_CORE_PROMPT
-        ),
         "accepted_task_result_ready_accepted_task_result": (
             _JUDGEMENT_CORE_PROMPT
         ),

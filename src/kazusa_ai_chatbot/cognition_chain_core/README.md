@@ -47,8 +47,7 @@ Accepted source labels include:
 | `dialog_text` | Live user-message turns. |
 | `internal_monologue` | Self-cognition or scheduled internal packets. |
 | `reflection_artifact` | Promoted reflection dry runs. |
-| `background_artifact_result` | Legacy completed background-artifact returns. |
-| `background_work_result` | Completed background-work returns. |
+| `accepted_task_result` | Completed or failed accepted-task returns. |
 | `image_observation` | Current-turn image observations. |
 | `audio_observation` | Current-turn audio observations. |
 

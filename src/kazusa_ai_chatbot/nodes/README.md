@@ -190,7 +190,6 @@ Current supported cognition prompt variants are selected by
 | --- | --- | --- | --- |
 | `user_message` | `dialog_text` plus optional `image_observation` and `audio_observation` | `visible_reply`, `think_only`, `silent` | Normal live chat. |
 | `accepted_task_result_ready` | `accepted_task_result` | `visible_reply`, `think_only`, `silent` | Completed or failed accepted task returning through cognition and dialog. |
-| `background_work_result_ready` | `background_work_result` | `visible_reply`, `think_only`, `silent` | Legacy completed or failed background-work row without accepted-task identity. |
 | `reflection_signal` | `reflection_artifact` | `think_only`, `preview`, `silent` | Reflection dry-run cognition. |
 | `internal_thought` | `internal_monologue` | `think_only`, `preview`, `silent` | Legacy prompt-variant label used by current self-cognition worker paths. Architecturally this is a self-cognition trigger, not a downstream action consumer. |
 
@@ -198,8 +197,7 @@ The selector validates the episode and exposes only prompt-safe fields:
 
 - current-turn media observations are bounded and structured,
 - accepted-task result sources expose only task/result/failure summaries and
-  semantic request context; legacy background-work and artifact result sources
-  keep their old summary projections,
+  semantic request context,
 - reflection artifacts are passed as one visible artifact,
 - internal-thought dry runs pass a residue id, an internal monologue, and an
   audit-only action latch,

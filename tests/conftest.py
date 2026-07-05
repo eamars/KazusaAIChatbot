@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import os
 import pytest
+from dotenv import load_dotenv
 
 
+load_dotenv(override=False)
 os.environ.setdefault("CHARACTER_GLOBAL_USER_ID", "character-global")
 
 

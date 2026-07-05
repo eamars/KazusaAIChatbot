@@ -53,9 +53,6 @@ COGNITION_LLM_MODEL=your-chat-model
 BOUNDARY_CORE_LLM_BASE_URL=http://localhost:1234/v1
 BOUNDARY_CORE_LLM_API_KEY=lm-studio
 BOUNDARY_CORE_LLM_MODEL=your-chat-model
-BACKGROUND_ARTIFACT_LLM_BASE_URL=http://localhost:1234/v1
-BACKGROUND_ARTIFACT_LLM_API_KEY=lm-studio
-BACKGROUND_ARTIFACT_LLM_MODEL=your-chat-model
 BACKGROUND_WORK_LLM_BASE_URL=http://localhost:1234/v1
 BACKGROUND_WORK_LLM_API_KEY=lm-studio
 BACKGROUND_WORK_LLM_MODEL=your-chat-model
@@ -296,9 +293,6 @@ deterministic delayed-message worker: it schedules a future cognition slot and
 stores only a semantic objective, not prewritten user-facing text. Completed
 accepted tasks re-enter the brain as `accepted_task_result_ready` cognition,
 then use the existing dialog and delivery boundary for any visible result.
-Legacy rows without an accepted-task id may still use
-`background_work_result_ready`. `BACKGROUND_ARTIFACT_*` settings are legacy
-aliases only for compatibility.
 
 New worker types reuse the same lifecycle only after a reviewed capability and
 worker contract exists. The stable entry is accepted-task state plus an

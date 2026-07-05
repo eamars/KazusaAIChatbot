@@ -846,59 +846,41 @@ def _current_character_profile_snapshot() -> dict:
     return character_profile
 
 
-def _background_artifact_result_text(episode: CognitiveEpisode) -> str:
-    """Build a compact current-source summary for result-ready cognition."""
+def _accepted_task_result_text(episode: CognitiveEpisode) -> str:
+    """Build a compact source summary for accepted-task result cognition."""
 
     percepts = episode.get("percepts", [])
     result_percept = {}
     for percept in percepts:
-        if percept.get("input_source") not in (
-            "background_artifact_result",
-            "background_work_result",
-            "accepted_task_result",
-        ):
+        if percept.get("input_source") != "accepted_task_result":
             continue
         result_percept = percept
         break
 
-    input_source = str(result_percept.get("input_source", "")).strip()
     metadata = result_percept.get("metadata", {})
     if not isinstance(metadata, Mapping):
         metadata = {}
-    work_kind = str(metadata.get("work_kind", "")).strip()
-    objective = str(metadata.get("objective_summary", "")).strip()
     accepted_task_summary = str(
         metadata.get("accepted_task_summary", "")
     ).strip()
     failure_summary = str(metadata.get("failure_summary", "")).strip()
     status = "failed" if failure_summary else "completed"
-    result_label = "Background artifact result"
-    if input_source == "background_work_result":
-        result_label = "Background work result"
-    elif input_source == "accepted_task_result":
-        result_label = "Accepted task result"
     summary_parts = [
-        f"{result_label} is {status}.",
+        f"Accepted task result is {status}.",
     ]
-    if work_kind:
-        summary_parts.append(f"Work kind: {work_kind}.")
-    if objective:
-        summary_parts.append(f"Objective: {objective}.")
     if accepted_task_summary:
         summary_parts.append(f"Task: {accepted_task_summary}.")
     result_text = " ".join(summary_parts)
     return result_text
 
 
-def _background_result_metadata(episode: CognitiveEpisode) -> Mapping[str, object]:
-    """Return metadata from the background result percept."""
+def _accepted_task_result_metadata(
+    episode: CognitiveEpisode,
+) -> Mapping[str, object]:
+    """Return metadata from the accepted-task result percept."""
 
     for percept in episode["percepts"]:
-        if percept.get("input_source") not in (
-            "background_artifact_result",
-            "background_work_result",
-            "accepted_task_result",
-        ):
+        if percept.get("input_source") != "accepted_task_result":
             continue
         metadata = percept.get("metadata", {})
         if isinstance(metadata, Mapping):
@@ -909,10 +891,10 @@ def _background_result_metadata(episode: CognitiveEpisode) -> Mapping[str, objec
     return return_value
 
 
-def _background_artifact_prompt_message_context(
+def _accepted_task_prompt_message_context(
     episode: CognitiveEpisode,
 ) -> dict[str, object]:
-    """Build prompt-safe message context for a result-ready source packet."""
+    """Build prompt-safe message context for an accepted-task result."""
 
     target_scope = episode["target_scope"]
     raw_addressed_ids = target_scope.get("target_addressed_user_ids", [])
@@ -922,7 +904,7 @@ def _background_artifact_prompt_message_context(
         if isinstance(value, str) and value.strip()
     ]
     context = {
-        "body_text": _background_artifact_result_text(episode),
+        "body_text": _accepted_task_result_text(episode),
         "addressed_to_global_user_ids": addressed_ids,
         "broadcast": bool(target_scope.get("target_broadcast", False)),
         "mentions": [],
@@ -983,12 +965,12 @@ def _chat_delivery_mention_users(
     return users
 
 
-def _background_artifact_delivery_mentions(
+def _accepted_task_delivery_mentions(
     *,
     result: Mapping[str, object],
     episode: CognitiveEpisode,
 ) -> list[dict[str, str]]:
-    """Build inline mention candidates for result-ready dispatcher delivery."""
+    """Build inline mention candidates for accepted-task result delivery."""
 
     target_scope = episode["target_scope"]
     users = [
@@ -1011,12 +993,12 @@ def _background_artifact_delivery_mentions(
     return delivery_mentions
 
 
-async def _run_background_artifact_result_post_turn(
+async def _run_accepted_task_result_post_turn(
     consolidation_state: dict,
     *,
     visible_response_sent: bool,
 ) -> None:
-    """Run non-blocking post-turn consumers for delivered artifact results."""
+    """Run non-consolidation post-turn consumers after accepted-task delivery."""
 
     try:
         has_consolidation_state = bool(consolidation_state)
@@ -1029,39 +1011,30 @@ async def _run_background_artifact_result_post_turn(
                 consolidation_state,
             )
         if is_consolidatable:
-            await _run_consolidation_background(consolidation_state)
             await _run_internal_monologue_residue_record_background(
                 consolidation_state,
             )
     except Exception as exc:
         logger.exception(
-            f"Background artifact post-turn handling failed after delivery: {exc}"
+            f"Accepted task post-turn handling failed after delivery: {exc}"
         )
 
 
-async def _run_background_work_result_post_turn(
-    consolidation_state: dict,
-    *,
-    visible_response_sent: bool,
-) -> None:
-    """Run non-blocking post-turn consumers for delivered background work."""
-
-    await _run_background_artifact_result_post_turn(
-        consolidation_state,
-        visible_response_sent=visible_response_sent,
-    )
-
-
-async def _deliver_background_artifact_result_episode(
+async def _deliver_accepted_task_result_episode(
     episode: CognitiveEpisode,
 ) -> dict[str, Any]:
-    """Run result-ready cognition and deliver selected text through dispatcher."""
+    """Run accepted-task result cognition and deliver selected dispatcher text."""
 
     adapter_registry = _adapter_registry
     if adapter_registry is None:
         return {
             "status": "failed",
             "reason": "adapter registry is unavailable",
+        }
+    if episode["trigger_source"] != "accepted_task_result_ready":
+        return {
+            "status": "failed",
+            "reason": "trigger_source must be accepted_task_result_ready",
         }
 
     target_scope = episode["target_scope"]
@@ -1086,7 +1059,7 @@ async def _deliver_background_artifact_result_episode(
         await _refresh_runtime_character_state()
         user_profile = await get_user_profile(requester_global_user_id)
         character_name = _static_character_profile.get("name", "Character")
-        result_metadata = _background_result_metadata(episode)
+        result_metadata = _accepted_task_result_metadata(episode)
         source_name = str(
             result_metadata.get("source_character_name", "")
         ).strip()
@@ -1119,18 +1092,11 @@ async def _deliver_background_artifact_result_episode(
         except Exception as exc:
             logger.exception(
                 f"Promoted reflection context load failed for background "
-                f"artifact result: {exc}"
+                f"work result: {exc}"
             )
             promoted_reflection_context = {}
 
         trigger_source = str(episode["trigger_source"])
-        is_background_work_result = trigger_source == "background_work_result_ready"
-        is_accepted_task_result = trigger_source == "accepted_task_result_ready"
-        bot_permission_role = "background_artifact_result"
-        if is_background_work_result:
-            bot_permission_role = "background_work_result"
-        elif is_accepted_task_result:
-            bot_permission_role = "accepted_task_result"
 
         debug_modes: DebugModes = {}
         if not COGNITION_VISUAL_DIRECTIVES_ENABLED:
@@ -1152,9 +1118,9 @@ async def _deliver_background_artifact_result_episode(
             "platform_user_id": requester_platform_user_id,
             "global_user_id": requester_global_user_id,
             "user_name": requester_display_name,
-            "user_input": _background_artifact_result_text(episode),
+            "user_input": _accepted_task_result_text(episode),
             "prompt_message_context": (
-                _background_artifact_prompt_message_context(episode)
+                _accepted_task_prompt_message_context(episode)
             ),
             "cognitive_episode": episode,
             "user_multimedia_input": [],
@@ -1202,7 +1168,7 @@ async def _deliver_background_artifact_result_episode(
                 "target_channel_type": channel_type,
                 "text": "\n".join(final_dialog),
                 "reply_to_msg_id": None,
-                "delivery_mentions": _background_artifact_delivery_mentions(
+                "delivery_mentions": _accepted_task_delivery_mentions(
                     result=result,
                     episode=episode,
                 ),
@@ -1215,7 +1181,7 @@ async def _deliver_background_artifact_result_episode(
                     "platform_message_id"
                 ],
                 guild_id=None,
-                bot_permission_role=bot_permission_role,
+                bot_permission_role="accepted_task_result",
                 now=storage_utc_now(),
                 source_channel_type=channel_type,
                 source_platform_bot_id=source_platform_bot_id,
@@ -1225,7 +1191,7 @@ async def _deliver_background_artifact_result_episode(
         )
     except Exception as exc:
         logger.exception(
-            f"Background artifact result delivery failed: {exc}"
+            f"Accepted task result delivery failed: {exc}"
         )
         return {
             "status": "failed",
@@ -1234,16 +1200,10 @@ async def _deliver_background_artifact_result_episode(
 
     consolidation_state = result.get("consolidation_state")
     if isinstance(consolidation_state, dict):
-        if not is_background_work_result and not is_accepted_task_result:
-            await _run_background_artifact_result_post_turn(
-                consolidation_state,
-                visible_response_sent=True,
-            )
-        else:
-            await _run_background_work_result_post_turn(
-                consolidation_state,
-                visible_response_sent=True,
-            )
+        await _run_accepted_task_result_post_turn(
+            consolidation_state,
+            visible_response_sent=True,
+        )
     delivery_result = {
         "status": "delivered",
         "conversation_message_id": dispatch_result["conversation_message_id"],
@@ -1251,16 +1211,6 @@ async def _deliver_background_artifact_result_episode(
         "adapter_message_id": dispatch_result["adapter_message_id"],
     }
     return delivery_result
-
-
-async def _deliver_background_work_result_episode(
-    episode: CognitiveEpisode,
-) -> dict[str, Any]:
-    """Run background-work result cognition and dispatcher delivery."""
-
-    delivery_result = await _deliver_background_artifact_result_episode(episode)
-    return delivery_result
-
 
 def _active_turn_platform_message_ids(item: QueuedChatItem) -> list[str]:
     """Build the platform message ID list answered by one graph turn.
@@ -3034,7 +2984,7 @@ async def lifespan(app: FastAPI):
                 start_background_work_runtime(
                     is_primary_interaction_busy=_primary_interaction_busy,
                     deliver_result_episode_func=(
-                        _deliver_background_work_result_episode
+                        _deliver_accepted_task_result_episode
                     ),
                 )
             )

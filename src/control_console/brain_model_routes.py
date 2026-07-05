@@ -131,20 +131,12 @@ _ROUTES: tuple[BrainModelRouteDescriptor, ...] = (
         fallback_backed=False,
     ),
     BrainModelRouteDescriptor(
-        route_key="BACKGROUND_ARTIFACT_LLM",
-        env_prefix="BACKGROUND_ARTIFACT_LLM",
-        label="Background artifact",
-        group="Background",
-        required=False,
-        fallback_backed=True,
-    ),
-    BrainModelRouteDescriptor(
         route_key="BACKGROUND_WORK_LLM",
         env_prefix="BACKGROUND_WORK_LLM",
         label="Background work",
         group="Background",
-        required=False,
-        fallback_backed=True,
+        required=True,
+        fallback_backed=False,
     ),
 )
 _ROUTE_BY_KEY = {route.route_key: route for route in _ROUTES}
@@ -209,13 +201,6 @@ def route_default_fallback_env(
     if field_name not in {"model", "base_url", "api_key"}:
         return []
 
-    if route.env_prefix == "BACKGROUND_ARTIFACT_LLM":
-        return [f"COGNITION_LLM_{_env_suffix(field_name)}"]
-    if route.env_prefix == "BACKGROUND_WORK_LLM":
-        return [
-            f"BACKGROUND_ARTIFACT_LLM_{_env_suffix(field_name)}",
-            f"COGNITION_LLM_{_env_suffix(field_name)}",
-        ]
     return []
 
 

@@ -52,7 +52,6 @@ _CASE_FILE_ENV = "L2D_LIVE_CASE_FILE"
 _CASE_ID_ENV = "L2D_LIVE_CASE_ID"
 REAL_COMMITMENT_CASE_LIMIT = 1
 _FORBIDDEN_ACTION_SPEC_FRAGMENTS = (
-    "background_artifact_request",
     "handler_id",
     "credentials",
     "api_key",

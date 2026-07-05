@@ -516,9 +516,7 @@ selected L3 text runs, and projected back to L3 as semantic accepted-task state.
 Status checks use `accepted_task_status_check` and never enqueue a worker job.
 Completed accepted-task-backed jobs later return as
 `accepted_task_result_ready` cognitive episodes. Background-work workers must
-not call adapters, dispatcher delivery, or cognition directly. Legacy
-`background_work_result_ready` and `background_artifact_result_ready` episodes
-remain compatibility input for old rows only.
+not call adapters, dispatcher delivery, or cognition directly.
 
 Delivery receipt adapters may still need bounded `not_found` retry behavior
 for transport timing and cross-process delivery, but a non-empty

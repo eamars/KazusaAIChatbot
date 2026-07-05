@@ -650,7 +650,6 @@ instrumentation surface is:
 |---|---|
 | `service.py` | `process`, `resource_health`, `queue_intake`, `pipeline_turn`, `runtime_error`, `database_operation` |
 | `background_work.runtime` | `worker`, `runtime_error` |
-| `background_artifact.runtime` | `worker`, `runtime_error` for legacy compatibility rows only |
 | `reflection_cycle.worker` | `worker`, `llm_stage`, `model_contract`, `database_operation`, `runtime_error` |
 | `self_cognition.worker` | `worker`, `self_cognition`, `dispatcher`, `runtime_error` |
 | `self_cognition.runner` | `self_cognition`, `llm_stage`, `model_contract` |

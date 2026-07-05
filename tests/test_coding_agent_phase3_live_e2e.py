@@ -151,12 +151,12 @@ async def _run_live_case(
 
     async def deliver_result_episode(episode: dict[str, Any]) -> dict[str, str]:
         result_state = _live_persona_state_for_input(
-            user_input=service_module._background_artifact_result_text(episode),
+            user_input=service_module._accepted_task_result_text(episode),
             platform_message_id=f"{case_id}-result-message",
             cognitive_episode=episode,
         )
         result_state["prompt_message_context"] = (
-            service_module._background_artifact_prompt_message_context(episode)
+            service_module._accepted_task_prompt_message_context(episode)
         )
         final_response = await persona_supervisor2(result_state)
         final_persona_result = _public_persona_result(final_response)

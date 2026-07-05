@@ -163,11 +163,3 @@ progress, delivered, and delivery failed states.
 Accepted-task ids and identity keys are copied into new internal job rows for
 audit and lifecycle synchronization only. Prompt-facing progress and result
 state comes from `accepted_task`, not from job ids or queue state.
-
-## Compatibility
-
-`background_artifact` remains only as legacy text-artifact support for old
-rows. New live-turn background requests use `background_work`.
-Rows without an accepted-task id may still deliver through the legacy
-`background_work_result_ready` source. New accepted-task rows deliver through
-`accepted_task_result_ready`.
