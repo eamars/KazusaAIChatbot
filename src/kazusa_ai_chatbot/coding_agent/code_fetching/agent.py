@@ -1,13 +1,12 @@
 """Orchestration for the code-fetching subagent."""
 
-from dataclasses import dataclass
 from pathlib import Path
 
 from kazusa_ai_chatbot.coding_agent.code_fetching import github
 from kazusa_ai_chatbot.coding_agent.code_fetching import local_checkout
 from kazusa_ai_chatbot.coding_agent.code_fetching import managed_clone
 from kazusa_ai_chatbot.coding_agent.code_fetching import managed_download
-from kazusa_ai_chatbot.coding_agent.code_fetching import source_scope
+from kazusa_ai_chatbot.coding_agent.code_fetching import source_resolver
 from kazusa_ai_chatbot.coding_agent.code_fetching.github import GitHubSource
 from kazusa_ai_chatbot.coding_agent.code_fetching.models import (
     CodeFetchingRequest,
@@ -20,14 +19,6 @@ from kazusa_ai_chatbot.coding_agent.tools.paths import (
     PathSafetyError,
     ensure_path_inside,
 )
-
-
-@dataclass(frozen=True)
-class _SourceSelection:
-    status: ResultStatus
-    message: str
-    source: GitHubSource | None
-    limitations: list[str]
 
 
 async def run(request: CodeFetchingRequest) -> CodeFetchingResult:
@@ -52,14 +43,17 @@ async def run(request: CodeFetchingRequest) -> CodeFetchingResult:
         result = _resolve_local_root(local_root_hint, trace_summary)
         return result
 
-    source_selection = _select_github_source(request, trace_summary)
+    source_selection = await source_resolver.select_source_for_request(
+        request,
+        trace_summary,
+    )
     if source_selection.status != "succeeded":
         result = _result(
             status=source_selection.status,
             message=source_selection.message,
             repository=None,
             source_scope=None,
-            limitations=source_selection.limitations,
+            limitations=list(source_selection.limitations),
             trace_summary=trace_summary,
         )
         return result
@@ -87,15 +81,8 @@ async def run(request: CodeFetchingRequest) -> CodeFetchingResult:
                 source,
                 workspace_root,
             )
-        except managed_download.ManagedDownloadError:
-            result = _result(
-                status="failed",
-                message="Unable to prepare managed raw file download.",
-                repository=None,
-                source_scope=None,
-                limitations=["Managed raw file download failed."],
-                trace_summary=trace_summary,
-            )
+        except managed_download.ManagedDownloadError as exc:
+            result = _managed_download_failure_result(exc, trace_summary)
             return result
     else:
         try:
@@ -103,22 +90,15 @@ async def run(request: CodeFetchingRequest) -> CodeFetchingResult:
                 source,
                 workspace_root,
             )
-        except managed_clone.ManagedCloneError:
-            result = _result(
-                status="failed",
-                message="Unable to prepare managed checkout.",
-                repository=None,
-                source_scope=None,
-                limitations=["Managed checkout preparation failed."],
-                trace_summary=trace_summary,
-            )
+        except managed_clone.ManagedCloneError as exc:
+            result = _managed_clone_failure_result(exc, trace_summary)
             return result
 
     source_scope_error = _source_scope_validation_error(repository, source)
     if source_scope_error:
         limitations = [source_scope_error, *source_selection.limitations]
         result = _result(
-            status="rejected",
+            status="needs_user_input",
             message=source_scope_error,
             repository=None,
             source_scope=None,
@@ -137,10 +117,89 @@ async def run(request: CodeFetchingRequest) -> CodeFetchingResult:
         message="Code source resolved.",
         repository=repository,
         source_scope=source_scope_result,
-        limitations=source_selection.limitations,
+        limitations=list(source_selection.limitations),
         trace_summary=trace_summary,
     )
     return result
+
+
+def _managed_clone_failure_result(
+    exc: managed_clone.ManagedCloneError,
+    trace_summary: list[str],
+) -> CodeFetchingResult:
+    if _managed_clone_error_is_source_access_failure(exc):
+        result = _result(
+            status="needs_user_input",
+            message="Unable to access requested GitHub source.",
+            repository=None,
+            source_scope=None,
+            limitations=[
+                "GitHub source is unavailable or the requested ref is invalid.",
+            ],
+            trace_summary=trace_summary,
+        )
+        return result
+
+    result = _result(
+        status="failed",
+        message="Unable to prepare managed checkout.",
+        repository=None,
+        source_scope=None,
+        limitations=["Managed checkout preparation failed."],
+        trace_summary=trace_summary,
+    )
+    return result
+
+
+def _managed_download_failure_result(
+    exc: managed_download.ManagedDownloadError,
+    trace_summary: list[str],
+) -> CodeFetchingResult:
+    if _managed_download_error_is_source_access_failure(exc):
+        result = _result(
+            status="needs_user_input",
+            message="Unable to access requested raw GitHub file.",
+            repository=None,
+            source_scope=None,
+            limitations=[
+                "Raw GitHub file is unavailable or exceeds the download limit.",
+            ],
+            trace_summary=trace_summary,
+        )
+        return result
+
+    result = _result(
+        status="failed",
+        message="Unable to prepare managed raw file download.",
+        repository=None,
+        source_scope=None,
+        limitations=["Managed raw file download failed."],
+        trace_summary=trace_summary,
+    )
+    return result
+
+
+def _managed_clone_error_is_source_access_failure(
+    exc: managed_clone.ManagedCloneError,
+) -> bool:
+    message = str(exc)
+    prefixes = (
+        "managed git clone failed:",
+        "managed requested ref fetch failed:",
+        "managed requested ref checkout failed:",
+    )
+    return message.startswith(prefixes)
+
+
+def _managed_download_error_is_source_access_failure(
+    exc: managed_download.ManagedDownloadError,
+) -> bool:
+    message = str(exc)
+    prefixes = (
+        "raw GitHub file download failed:",
+        "raw GitHub file exceeds managed download size limit.",
+    )
+    return message.startswith(prefixes)
 
 
 def _resolve_local_path(
@@ -206,121 +265,6 @@ def _resolve_local_root(
         trace_summary=trace_summary,
     )
     return result
-
-
-def _select_github_source(
-    request: CodeFetchingRequest,
-    trace_summary: list[str],
-) -> _SourceSelection:
-    candidates: list[GitHubSource] = []
-    unsupported_reasons: list[str] = []
-
-    explicit_values = _explicit_source_values(request)
-    for source_text in explicit_values:
-        _collect_source_text(
-            source_text,
-            candidates=candidates,
-            unsupported_reasons=unsupported_reasons,
-        )
-
-    question = request.get("question")
-    if question:
-        for url in github.extract_http_urls(question):
-            _collect_source_text(
-                url,
-                candidates=candidates,
-                unsupported_reasons=unsupported_reasons,
-            )
-
-    repo_hint = request.get("repo_hint")
-    if repo_hint:
-        source = github.parse_repo_hint(repo_hint)
-        if source is None:
-            unsupported_reasons.append("repo_hint must use owner/repo format.")
-        else:
-            candidates.append(source)
-
-    requested_ref = request.get("requested_ref")
-    if requested_ref:
-        candidates = [
-            github.with_requested_ref(candidate, requested_ref)
-            for candidate in candidates
-        ]
-
-    if not candidates and unsupported_reasons:
-        return _SourceSelection(
-            status="rejected",
-            message=unsupported_reasons[0],
-            source=None,
-            limitations=unsupported_reasons,
-        )
-
-    selection = source_scope.choose_source(candidates)
-    if selection.status == "needs_user_input":
-        return _SourceSelection(
-            status="needs_user_input",
-            message=selection.message,
-            source=None,
-            limitations=unsupported_reasons,
-        )
-
-    if selection.source is None:
-        return _SourceSelection(
-            status="failed",
-            message="Source selection failed unexpectedly.",
-            source=None,
-            limitations=["Source selection returned no source."],
-        )
-
-    source_scope_hint = request.get("source_scope_hint")
-    if source_scope_hint and selection.source.source_kind != source_scope_hint:
-        return _SourceSelection(
-            status="needs_user_input",
-            message=(
-                "source_scope_hint conflicts with the resolved source shape; "
-                "provide a matching source URL or local path."
-            ),
-            source=None,
-            limitations=unsupported_reasons,
-        )
-
-    trace_summary.append("Selected one supported GitHub source.")
-    return _SourceSelection(
-        status="succeeded",
-        message="Source candidate selected.",
-        source=selection.source,
-        limitations=unsupported_reasons,
-    )
-
-
-def _explicit_source_values(request: CodeFetchingRequest) -> list[str]:
-    values: list[str] = []
-    source_url = request.get("source_url")
-    if source_url:
-        values.append(source_url)
-
-    repo_url = request.get("repo_url")
-    if repo_url:
-        values.append(repo_url)
-
-    return values
-
-
-def _collect_source_text(
-    source_text: str,
-    *,
-    candidates: list[GitHubSource],
-    unsupported_reasons: list[str],
-) -> None:
-    source = github.parse_github_source(source_text)
-    if source is not None:
-        candidates.append(source)
-        return
-
-    reason = github.unsupported_source_reason(source_text)
-    if reason:
-        redacted_text = github.redact_source_text(source_text)
-        unsupported_reasons.append(f"{reason} Source: {redacted_text}")
 
 
 def _source_scope_from_github_source(source: GitHubSource) -> CodeSourceScope:

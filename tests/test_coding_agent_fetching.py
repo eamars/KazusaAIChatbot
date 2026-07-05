@@ -165,6 +165,88 @@ async def test_run_downloads_raw_github_file_without_clone(
     assert downloaded_path.read_bytes() == downloaded
 
 
+async def test_run_resolves_captured_question_url_through_source_intake(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_fetching import managed_clone
+    from kazusa_ai_chatbot.coding_agent.code_fetching import source_intake
+    from kazusa_ai_chatbot.coding_agent.code_fetching.source_intake import (
+        SourceIntakeResult,
+        SourceMention,
+    )
+
+    task_text = (
+        '@杏山千纱 千纱千纱，能不能帮我分析一下这个项目'
+        'https://github.com/sdyzjx/open-yachiyo，辛苦你了'
+    )
+
+    async def fake_run_source_intake(
+        task_text_arg: str,
+        *,
+        retry_feedback: list[str] | None = None,
+    ) -> SourceIntakeResult:
+        assert task_text_arg == task_text
+        assert retry_feedback is None
+        result = SourceIntakeResult(
+            task_source_mode='single_primary',
+            source_mentions=(
+                SourceMention(
+                    raw_text='https://github.com/sdyzjx/open-yachiyo',
+                    role='primary_code_source',
+                    family_hint='github_repository',
+                ),
+            ),
+        )
+        return result
+
+    def fake_ensure_managed_checkout(source, workspace_root: str):
+        checkout_root = tmp_path / 'managed_checkout'
+        checkout_root.mkdir()
+        repository = {
+            'provider': 'github',
+            'owner': source.owner,
+            'repo': source.repo,
+            'source_url': source.source_url,
+            'requested_ref': source.requested_ref,
+            'resolved_ref': source.requested_ref or 'main',
+            'current_commit': 'a' * 40,
+            'default_branch': 'main',
+            'local_root': str(checkout_root),
+            'storage_kind': 'managed_clone',
+            'managed_checkout': True,
+            'workspace_root': workspace_root,
+            'cache_key': 'github-sdyzjx-open-yachiyo-main',
+            'dirty_state': 'clean',
+        }
+        return repository
+
+    monkeypatch.setattr(
+        source_intake,
+        'run_source_intake',
+        fake_run_source_intake,
+    )
+    monkeypatch.setattr(
+        managed_clone,
+        'ensure_managed_checkout',
+        fake_ensure_managed_checkout,
+    )
+
+    result = await run(
+        {
+            'question': task_text,
+            'workspace_root': str(tmp_path / 'coding_workspace'),
+        }
+    )
+
+    assert result['status'] == 'succeeded'
+    assert result['repository'] is not None
+    assert result['repository']['owner'] == 'sdyzjx'
+    assert result['repository']['repo'] == 'open-yachiyo'
+    assert result['source_scope'] is not None
+    assert result['source_scope']['kind'] == 'repository'
+
+
 @pytest.mark.parametrize(
     "source_url",
     [
@@ -203,7 +285,7 @@ async def test_run_rejects_unsupported_source_classes(
         ("https://github.com/owner/repo/tree/main/missing_dir", "directory"),
     ],
 )
-async def test_run_rejects_missing_scoped_github_paths(
+async def test_run_needs_input_for_missing_scoped_github_paths(
     monkeypatch: pytest.MonkeyPatch,
     source_url: str,
     expected_kind: str,
@@ -247,7 +329,7 @@ async def test_run_rejects_missing_scoped_github_paths(
         }
     )
 
-    assert result["status"] == "rejected"
+    assert result["status"] == "needs_user_input"
     assert result["repository"] is None
     assert result["source_scope"] is None
     assert expected_kind in result["message"]
@@ -268,7 +350,7 @@ async def test_run_returns_needs_user_input_without_source(
     assert result["source_scope"] is None
 
 
-async def test_run_returns_needs_user_input_for_ambiguous_repositories(
+async def test_run_rejects_multi_repository_compare_requests(
     tmp_path: Path,
 ) -> None:
     result = await run(
@@ -281,10 +363,11 @@ async def test_run_returns_needs_user_input_for_ambiguous_repositories(
         }
     )
 
-    assert result["status"] == "needs_user_input"
+    assert result["status"] == "rejected"
+    assert result["limitations"]
     assert result["repository"] is None
     assert result["source_scope"] is None
-    assert "Multiple repository sources" in result["message"]
+    assert "Multiple-source code reading" in result["message"]
 
 
 async def test_run_uses_most_specific_same_repo_source(
@@ -425,6 +508,70 @@ async def test_run_sanitizes_managed_checkout_failure_result(
     assert "github-owner-repo-main" not in rendered_result
 
 
+async def test_run_needs_input_for_managed_clone_source_access_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_fetching import managed_clone
+
+    def fake_ensure_managed_checkout(source, workspace_root: str):
+        raise ManagedCloneError(
+            "managed git clone failed: git command failed with exit code 128"
+        )
+
+    monkeypatch.setattr(
+        managed_clone,
+        "ensure_managed_checkout",
+        fake_ensure_managed_checkout,
+    )
+
+    result = await run(
+        {
+            "source_url": "https://github.com/owner/repo",
+            "workspace_root": str(tmp_path / "coding_workspace"),
+        }
+    )
+
+    rendered_result = repr(result)
+    assert result["status"] == "needs_user_input"
+    assert result["message"] == "Unable to access requested GitHub source."
+    assert "exit code 128" not in rendered_result
+    assert str(tmp_path) not in rendered_result
+
+
+async def test_run_needs_input_for_raw_download_source_access_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_fetching import managed_download
+
+    source_url = "https://raw.githubusercontent.com/owner/repo/main/src/app.py"
+
+    def fake_ensure_managed_raw_file_download(source, workspace_root: str):
+        raise managed_download.ManagedDownloadError(
+            "raw GitHub file download failed: HTTP Error 404"
+        )
+
+    monkeypatch.setattr(
+        managed_download,
+        "ensure_managed_raw_file_download",
+        fake_ensure_managed_raw_file_download,
+    )
+
+    result = await run(
+        {
+            "source_url": source_url,
+            "workspace_root": str(tmp_path / "coding_workspace"),
+        }
+    )
+
+    rendered_result = repr(result)
+    assert result["status"] == "needs_user_input"
+    assert result["message"] == "Unable to access requested raw GitHub file."
+    assert "HTTP Error 404" not in rendered_result
+    assert str(tmp_path) not in rendered_result
+
+
 async def test_run_sanitizes_managed_raw_download_cleanup_failure(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -482,7 +629,11 @@ async def test_run_resolves_existing_local_checkout_without_mutation(
 
     result = await run(
         {
-            "question": '[eamars/KazusaAIChatbot](https://github.com/eamars/KazusaAIChatbot) 项目是怎么实现读图的',
+            "question": (
+                '[eamars/KazusaAIChatbot]'
+                '(https://github.com/eamars/KazusaAIChatbot) '
+                '项目是怎么实现读图的'
+            ),
             "local_root_hint": str(repo_root),
             "workspace_root": str(tmp_path / "coding_workspace"),
         }

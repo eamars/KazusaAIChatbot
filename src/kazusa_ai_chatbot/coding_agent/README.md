@@ -39,7 +39,8 @@ here, not in L2d or the generic background-work router.
 
 Implemented subagents:
 
-- `code_fetching`: resolves public GitHub and explicit local-checkout sources.
+- `code_fetching`: resolves public GitHub, question-text source mentions, and
+  explicit local-checkout sources.
 - `code_reading`: reads safe text files inside the resolved source scope and
   synthesizes evidence-backed answers.
 - `code_writing`: creates source-free new-artifact patch proposals in managed
@@ -90,10 +91,13 @@ flowchart TD
 
     subgraph Fetching["code_fetching"]
         F0["code_fetching.run(...)"]
-        F1["source selection<br/>GitHub URL, repo_hint,<br/>local checkout, or local path"]
-        F2["managed clone / managed raw download<br/>or existing checkout resolution"]
-        F3["CodeRepositoryRef + CodeSourceScope<br/>internal local_root, public source scope"]
-        F0 --> F1 --> F2 --> F3
+        F1["explicit local/source fast path<br/>local checkout, local path,<br/>source_url, repo_url, repo_hint"]
+        F2["source-intake specialist<br/>CODING_AGENT_PM_LLM<br/>visible source mentions, roles, families"]
+        F3["deterministic source resolver<br/>anchoring, provider grammar,<br/>cardinality, issue codes"]
+        F4["managed clone / managed raw download<br/>or existing checkout resolution"]
+        F5["CodeRepositoryRef + CodeSourceScope<br/>internal local_root, public source scope"]
+        F0 --> F1 --> F4
+        F0 --> F2 --> F3 --> F4 --> F5
     end
 
     subgraph Reading["code_reading"]
@@ -136,15 +140,19 @@ flowchart TD
         W4 -->|complete| W11 --> W12 --> W13 --> W14
     end
 
-    F3 -->|succeeded| R0
+    F5 -->|succeeded| R0
     F0 -->|failed, rejected, or needs input| O1
 ```
 
-`code_fetching` is the only source-resolution owner. `code_reading` is
-read-only and evidence-backed. `code_writing` currently owns source-free
-new-artifact proposals only. Generated-artifact readback deliberately reuses
-`code_reading` through a managed read-only source so later writing work
-consumes compact supervisor facts instead of raw generated files.
+`code_fetching` is the only source-resolution owner. Question-text sources are
+extracted by the PM-route source-intake specialist inside `code_fetching`; the
+deterministic resolver validates anchoring, provider grammar, cardinality,
+explicit-field precedence, and public issue/status mapping before any checkout
+or download. `code_reading` is read-only and evidence-backed. `code_writing`
+currently owns source-free new-artifact proposals only. Generated-artifact
+readback deliberately reuses `code_reading` through a managed read-only source
+so later writing work consumes compact supervisor facts instead of raw generated
+files.
 
 The deferred `code_executing` subagent is not shown because no implemented
 runtime path dispatches to it.

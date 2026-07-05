@@ -1,0 +1,350 @@
+{
+  "schema_version": "coding_agent_source_intake_signoff_cases.v1",
+  "purpose": "Final sign-off matrix for source-intake LLM plus deterministic source resolver integration.",
+  "execution_contract": {
+    "real_llm_intake_required": true,
+    "deterministic_resolver_required": true,
+    "run_cases_one_at_a_time": true,
+    "trace_artifact_required": true,
+    "unsupported_hosts_must_not_be_probed": true,
+    "supported_provider_access_may_be_stubbed_only_when_the_case_declares_access_stub": true
+  },
+  "anti_cheat_contract": {
+    "fixture_is_review_metadata_only": true,
+    "do_not_inject_into_prompts": [
+      "case_id",
+      "category",
+      "coverage_tags",
+      "expected",
+      "forbidden_failure_modes"
+    ],
+    "deterministic_code_must_not": [
+      "branch on case_id",
+      "branch on fixture category",
+      "rewrite LLM source roles from fixture expectations",
+      "promote deterministic visible spans into semantic roles",
+      "substitute a question-text source after an explicit source field fails",
+      "probe unsupported hosts to discover whether they redirect"
+    ],
+    "allowed_deterministic_checks": [
+      "schema validation",
+      "literal preservation for source text present in task_text or trusted request fields",
+      "provider grammar validation",
+      "local path trust validation",
+      "source cardinality validation",
+      "public status and limitation mapping",
+      "trace and error sanitization"
+    ]
+  },
+  "cases": [
+    {
+      "case_id": "csi_001_github_trailing_cjk_prose",
+      "category": "supported_github_messy_text",
+      "task_text": "@杏山千纱 千纱老师能帮我总结一下这个项目么 https://github.com/sdyzjx/open-yachiyo，辛苦你了",
+      "request_fields": {},
+      "coverage_tags": ["captured_failure", "cjk_punctuation", "trailing_prose", "github_repository"],
+      "expected": {
+        "public_status": "succeeded",
+        "issue_code": null,
+        "task_source_mode": "single_primary",
+        "primary": {"provider": "github", "owner": "sdyzjx", "repo": "open-yachiyo", "scope_kind": "repository", "repo_relative_path": null},
+        "required_source_literals": ["https://github.com/sdyzjx/open-yachiyo"],
+        "forbidden_source_literals": ["https://github.com/sdyzjx/open-yachiyo，辛苦你了"]
+      },
+      "forbidden_failure_modes": ["swallowing trailing CJK prose into the URL", "generic no_source_found", "asking for clarification"]
+    },
+    {
+      "case_id": "csi_002_markdown_repo_link",
+      "category": "supported_github_markdown",
+      "task_text": "Please inspect [Open Yachiyo](https://github.com/sdyzjx/open-yachiyo) and summarize the architecture.",
+      "request_fields": {},
+      "coverage_tags": ["markdown_link", "github_repository"],
+      "expected": {
+        "public_status": "succeeded",
+        "issue_code": null,
+        "task_source_mode": "single_primary",
+        "primary": {"provider": "github", "owner": "sdyzjx", "repo": "open-yachiyo", "scope_kind": "repository", "repo_relative_path": null},
+        "required_source_literals": ["https://github.com/sdyzjx/open-yachiyo"]
+      },
+      "forbidden_failure_modes": ["treating link text as the source", "dropping the markdown URL"]
+    },
+    {
+      "case_id": "csi_003_github_tree_directory_scope",
+      "category": "supported_github_scope",
+      "task_text": "Focus only on this directory: https://github.com/pallets/flask/tree/main/src/flask and explain the module layout.",
+      "request_fields": {},
+      "coverage_tags": ["github_tree", "directory_scope", "requested_ref"],
+      "expected": {
+        "public_status": "succeeded",
+        "issue_code": null,
+        "task_source_mode": "single_primary",
+        "primary": {"provider": "github", "owner": "pallets", "repo": "flask", "scope_kind": "directory", "repo_relative_path": "src/flask", "requested_ref": "main"},
+        "required_source_literals": ["https://github.com/pallets/flask/tree/main/src/flask"]
+      },
+      "forbidden_failure_modes": ["downgrading to repository scope", "dropping the requested ref"]
+    },
+    {
+      "case_id": "csi_004_github_blob_file_anchor",
+      "category": "supported_github_scope",
+      "task_text": "Explain this file, especially the first part: https://github.com/pallets/flask/blob/main/src/flask/app.py#L1-L80",
+      "request_fields": {},
+      "coverage_tags": ["github_blob", "file_scope", "url_fragment"],
+      "expected": {
+        "public_status": "succeeded",
+        "issue_code": null,
+        "task_source_mode": "single_primary",
+        "primary": {"provider": "github", "owner": "pallets", "repo": "flask", "scope_kind": "file", "repo_relative_path": "src/flask/app.py", "requested_ref": "main"},
+        "required_source_literals": ["https://github.com/pallets/flask/blob/main/src/flask/app.py#L1-L80"]
+      },
+      "forbidden_failure_modes": ["treating the line fragment as part of the file path", "downgrading to repository scope"]
+    },
+    {
+      "case_id": "csi_005_raw_github_file",
+      "category": "supported_raw_file",
+      "task_text": "Can you analyze the raw file at https://raw.githubusercontent.com/pallets/flask/main/src/flask/__init__.py?",
+      "request_fields": {},
+      "coverage_tags": ["raw_github", "managed_download", "file_scope"],
+      "expected": {
+        "public_status": "succeeded",
+        "issue_code": null,
+        "task_source_mode": "single_primary",
+        "primary": {"provider": "github", "owner": "pallets", "repo": "flask", "scope_kind": "file", "repo_relative_path": "src/flask/__init__.py", "requested_ref": "main"},
+        "required_source_literals": ["https://raw.githubusercontent.com/pallets/flask/main/src/flask/__init__.py"]
+      },
+      "forbidden_failure_modes": ["rejecting raw GitHub as generic web", "losing file scope"]
+    },
+    {
+      "case_id": "csi_006_owner_repo_hint",
+      "category": "supported_repo_hint",
+      "task_text": "Please analyze sdyzjx/open-yachiyo and tell me what kind of project it is.",
+      "request_fields": {},
+      "coverage_tags": ["owner_repo_hint", "github_repository"],
+      "expected": {
+        "public_status": "succeeded",
+        "issue_code": null,
+        "task_source_mode": "single_primary",
+        "primary": {"provider": "github", "owner": "sdyzjx", "repo": "open-yachiyo", "scope_kind": "repository", "repo_relative_path": null},
+        "required_source_literals": ["sdyzjx/open-yachiyo"]
+      },
+      "forbidden_failure_modes": ["treating owner/repo as plain prose", "requiring a full URL"]
+    },
+    {
+      "case_id": "csi_007_percent_encoded_non_github_url",
+      "category": "unsupported_provider",
+      "task_text": "Can you analyze this source? https://zh.moegirl.org.cn/%E6%9D%8F%E5%B1%B1%E5%8D%83%E7%BA%B1",
+      "request_fields": {},
+      "coverage_tags": ["percent_encoding", "unicode_related_url", "unsupported_provider", "no_probe"],
+      "expected": {
+        "public_status": "rejected",
+        "issue_code": "unsupported_provider",
+        "task_source_mode": "single_primary",
+        "primary": null,
+        "required_source_literals": ["https://zh.moegirl.org.cn/%E6%9D%8F%E5%B1%B1%E5%8D%83%E7%BA%B1"],
+        "must_not_probe_hosts": ["zh.moegirl.org.cn"]
+      },
+      "forbidden_failure_modes": ["marking the URL malformed because of Chinese content", "language-specific stripping", "probing unsupported host"]
+    },
+    {
+      "case_id": "csi_008_unsupported_hosts_no_probe",
+      "category": "unsupported_provider",
+      "task_text": "Review this mirror if possible: https://gitlab.com/gitlab-org/gitlab, and this short link https://bit.ly/example-repo.",
+      "request_fields": {},
+      "coverage_tags": ["gitlab", "url_shortener", "unsupported_provider", "no_probe", "multiple_unsupported_sources"],
+      "expected": {
+        "public_status": "rejected",
+        "issue_code": "unsupported_provider",
+        "task_source_mode": "single_primary",
+        "primary": null,
+        "required_source_literals": ["https://gitlab.com/gitlab-org/gitlab", "https://bit.ly/example-repo"],
+        "must_not_probe_hosts": ["gitlab.com", "bit.ly"]
+      },
+      "forbidden_failure_modes": ["following the short link", "treating GitLab as GitHub", "generic no_source_found"]
+    },
+    {
+      "case_id": "csi_009_explicit_package_reference",
+      "category": "unsupported_source_family",
+      "task_text": "Analyze the code for npm:react and explain how the reconciler is organized.",
+      "request_fields": {},
+      "coverage_tags": ["package_reference", "explicit_package_syntax"],
+      "expected": {
+        "public_status": "rejected",
+        "issue_code": "unsupported_source_family",
+        "task_source_mode": "single_primary",
+        "primary": null,
+        "required_source_literals": ["npm:react"]
+      },
+      "forbidden_failure_modes": ["searching npm registry", "guessing a GitHub repository", "generic no_source_found"]
+    },
+    {
+      "case_id": "csi_010_bare_package_word_not_source",
+      "category": "no_source",
+      "task_text": "Can you explain how React hooks usually affect component structure in this codebase?",
+      "request_fields": {},
+      "coverage_tags": ["bare_package_word", "no_source_found"],
+      "expected": {
+        "public_status": "needs_user_input",
+        "issue_code": "no_source_found",
+        "task_source_mode": "unclear",
+        "primary": null,
+        "forbidden_source_literals": ["React"]
+      },
+      "forbidden_failure_modes": ["turning bare React into a package source", "guessing github.com/facebook/react"]
+    },
+    {
+      "case_id": "csi_011_github_issue_target_content",
+      "category": "unsupported_source_family",
+      "task_text": "Can you analyze this issue and tell me what the bug is? https://github.com/sdyzjx/open-yachiyo/issues/12",
+      "request_fields": {},
+      "coverage_tags": ["github_issue", "target_content", "unsupported_source_family"],
+      "expected": {
+        "public_status": "rejected",
+        "issue_code": "unsupported_source_family",
+        "task_source_mode": "single_primary",
+        "primary": null,
+        "required_source_literals": ["https://github.com/sdyzjx/open-yachiyo/issues/12"]
+      },
+      "forbidden_failure_modes": ["silently converting issue analysis into repository analysis", "fetching issue content"]
+    },
+    {
+      "case_id": "csi_012_github_issue_ancillary_repo_analysis",
+      "category": "supported_github_issue_repo_derivation",
+      "task_text": "Use the repository behind this issue for a project-level summary, not the issue thread: https://github.com/sdyzjx/open-yachiyo/issues/12",
+      "request_fields": {},
+      "coverage_tags": ["github_issue", "ancillary_issue", "repo_derivation"],
+      "expected": {
+        "public_status": "succeeded",
+        "issue_code": null,
+        "task_source_mode": "single_primary",
+        "primary": {"provider": "github", "owner": "sdyzjx", "repo": "open-yachiyo", "scope_kind": "repository", "repo_relative_path": null},
+        "required_source_literals": ["https://github.com/sdyzjx/open-yachiyo/issues/12"]
+      },
+      "forbidden_failure_modes": ["trying to fetch the issue thread", "rejecting repository analysis when the task explicitly asks for it"]
+    },
+    {
+      "case_id": "csi_013_multi_repo_compare_unsupported",
+      "category": "unsupported_multi_source",
+      "task_text": "Compare the architecture of https://github.com/sdyzjx/open-yachiyo and https://github.com/pallets/flask.",
+      "request_fields": {},
+      "coverage_tags": ["multiple_repositories", "compare_sources"],
+      "expected": {
+        "public_status": "rejected",
+        "issue_code": "unsupported_multi_source",
+        "task_source_mode": "compare_sources",
+        "primary": null,
+        "required_source_literals": ["https://github.com/sdyzjx/open-yachiyo", "https://github.com/pallets/flask"]
+      },
+      "forbidden_failure_modes": ["choosing one repository silently", "pretending multi-source reading is supported"]
+    },
+    {
+      "case_id": "csi_014_multi_repo_ambiguous_primary",
+      "category": "ambiguous_primary_source",
+      "task_text": "Look at these and summarize the design: https://github.com/sdyzjx/open-yachiyo https://github.com/pallets/flask",
+      "request_fields": {},
+      "coverage_tags": ["multiple_repositories", "ambiguous_primary"],
+      "expected": {
+        "public_status": "needs_user_input",
+        "issue_code": "ambiguous_primary_source",
+        "task_source_mode": "unclear",
+        "primary": null,
+        "required_source_literals": ["https://github.com/sdyzjx/open-yachiyo", "https://github.com/pallets/flask"]
+      },
+      "forbidden_failure_modes": ["choosing the first URL silently", "using unsupported_multi_source for unclear non-compare wording"]
+    },
+    {
+      "case_id": "csi_015_same_repo_nested_scope",
+      "category": "same_repo_scope_selection",
+      "task_text": "Analyze https://github.com/pallets/flask, especially the package directory https://github.com/pallets/flask/tree/main/src/flask.",
+      "request_fields": {},
+      "coverage_tags": ["same_repository", "nested_scope", "scope_modifier"],
+      "expected": {
+        "public_status": "succeeded",
+        "issue_code": null,
+        "task_source_mode": "single_primary",
+        "primary": {"provider": "github", "owner": "pallets", "repo": "flask", "scope_kind": "directory", "repo_relative_path": "src/flask", "requested_ref": "main"},
+        "required_source_literals": ["https://github.com/pallets/flask", "https://github.com/pallets/flask/tree/main/src/flask"]
+      },
+      "forbidden_failure_modes": ["reporting same-repo nested scope as ambiguous", "ignoring the especially-scoped directory"]
+    },
+    {
+      "case_id": "csi_016_same_repo_conflicting_files",
+      "category": "same_repo_scope_conflict",
+      "task_text": "Analyze these two files: https://github.com/pallets/flask/blob/main/src/flask/app.py and https://github.com/pallets/flask/blob/main/src/flask/cli.py.",
+      "request_fields": {},
+      "coverage_tags": ["same_repository", "conflicting_file_scopes", "ambiguous_primary"],
+      "expected": {
+        "public_status": "needs_user_input",
+        "issue_code": "ambiguous_primary_source",
+        "task_source_mode": "single_primary",
+        "primary": null,
+        "required_source_literals": ["https://github.com/pallets/flask/blob/main/src/flask/app.py", "https://github.com/pallets/flask/blob/main/src/flask/cli.py"]
+      },
+      "forbidden_failure_modes": ["choosing one file silently", "downgrading to repository scope"]
+    },
+    {
+      "case_id": "csi_017_required_supporting_docs_unsupported",
+      "category": "required_supporting_source_unsupported",
+      "task_text": "Using the API docs at https://docs.github.com/en/rest as required context, analyze https://github.com/sdyzjx/open-yachiyo.",
+      "request_fields": {},
+      "coverage_tags": ["required_supporting_context", "documentation_url", "supported_primary"],
+      "expected": {
+        "public_status": "needs_user_input",
+        "issue_code": "required_supporting_source_unsupported",
+        "task_source_mode": "single_primary",
+        "primary": null,
+        "required_source_literals": ["https://docs.github.com/en/rest", "https://github.com/sdyzjx/open-yachiyo"],
+        "must_not_probe_hosts": ["docs.github.com"]
+      },
+      "forbidden_failure_modes": ["silently ignoring required docs", "probing generic docs URL", "fetching the repo and answering anyway"]
+    },
+    {
+      "case_id": "csi_018_optional_supporting_docs_limitation",
+      "category": "optional_supporting_source_limitation",
+      "task_text": "Analyze https://github.com/sdyzjx/open-yachiyo. The docs link https://docs.github.com/en/rest is only optional background.",
+      "request_fields": {},
+      "coverage_tags": ["optional_supporting_context", "documentation_url", "limitation_propagation"],
+      "expected": {
+        "public_status": "succeeded",
+        "issue_code": null,
+        "task_source_mode": "single_primary",
+        "primary": {"provider": "github", "owner": "sdyzjx", "repo": "open-yachiyo", "scope_kind": "repository", "repo_relative_path": null},
+        "required_source_literals": ["https://github.com/sdyzjx/open-yachiyo", "https://docs.github.com/en/rest"],
+        "must_not_probe_hosts": ["docs.github.com"],
+        "required_limitations": ["optional supporting source unsupported"]
+      },
+      "forbidden_failure_modes": ["dropping optional docs from limitations", "blocking on optional docs"]
+    },
+    {
+      "case_id": "csi_019_raw_local_path_in_chat",
+      "category": "unsafe_untrusted_local_path",
+      "task_text": "Please analyze C:\\workspace\\secret_project\\app.py and explain what it does.",
+      "request_fields": {},
+      "coverage_tags": ["raw_local_path", "untrusted_user_text", "unsafe_source"],
+      "expected": {
+        "public_status": "rejected",
+        "issue_code": "unsupported_source_family",
+        "task_source_mode": "single_primary",
+        "primary": null,
+        "required_source_literals": ["C:\\workspace\\secret_project\\app.py"]
+      },
+      "forbidden_failure_modes": ["treating raw chat path as local_path_hint", "reading local filesystem", "generic no_source_found"]
+    },
+    {
+      "case_id": "csi_020_explicit_invalid_source_authoritative",
+      "category": "explicit_field_authoritative",
+      "task_text": "If that does not work, analyze https://github.com/sdyzjx/open-yachiyo instead.",
+      "request_fields": {
+        "source_url": "https://github.com/not a valid/repo"
+      },
+      "coverage_tags": ["explicit_source_url", "malformed_source", "no_silent_substitution"],
+      "expected": {
+        "public_status": "needs_user_input",
+        "issue_code": "malformed_source",
+        "task_source_mode": "single_primary",
+        "primary": null,
+        "required_source_literals": ["https://github.com/not a valid/repo", "https://github.com/sdyzjx/open-yachiyo"],
+        "must_not_select": {"provider": "github", "owner": "sdyzjx", "repo": "open-yachiyo"}
+      },
+      "forbidden_failure_modes": ["silently switching to the question URL", "dropping explicit-field failure", "reporting success"]
+    }
+  ]
+}

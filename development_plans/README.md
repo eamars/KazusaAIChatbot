@@ -143,6 +143,7 @@ plans.
 | [control_console_information_architecture_remediation_plan.md](archive/completed/bugfix/control_console_information_architecture_remediation_plan.md) |
 | [control_console_ui_e2e_acceptance_test_plan.md](archive/completed/bugfix/control_console_ui_e2e_acceptance_test_plan.md) |
 | [cognition_silence_short_circuit_and_dialog_evaluator_quality_plan.md](archive/completed/bugfix/cognition_silence_short_circuit_and_dialog_evaluator_quality_plan.md) |
+| [coding_agent_source_intake_resolution_plan.md](archive/completed/bugfix/coding_agent_source_intake_resolution_plan.md) |
 | [consolidation_module_boundary_migration_bugfix_plan.md](archive/completed/bugfix/consolidation_module_boundary_migration_bugfix_plan.md) |
 | [consolidator_facts_prompt_budget_bugfix_plan.md](archive/completed/bugfix/consolidator_facts_prompt_budget_bugfix_plan.md) |
 | [consolidator_lane_router_memory_pollution_bigbang_plan.md](archive/completed/bugfix/consolidator_lane_router_memory_pollution_bigbang_plan.md) |
