@@ -203,6 +203,24 @@ def test_static_surface_adds_existing_widget_prompt_panels(tmp_path) -> None:
     assert 'id="character-growth-prompt-table"' in html
     assert 'id="character-carry-over-table"' in html
     assert 'id="character-growth-runs-table"' in html
+    assert 'class="card-content prompt-panel"' in html
+    assert 'class="card-content operational-list"' in html
+    assert 'class="card-content record-list"' in html
+    high_volume_targets = [
+        "user-memory-table",
+        "calendar-schedules-table",
+        "calendar-due-runs-table",
+        "background-job-queue-table",
+        "background-worker-events-table",
+    ]
+    for target in high_volume_targets:
+        assert re.search(
+            rf'<article class="card span-two"[^>]*>(?:(?!</article>).)*id="{target}"',
+            html,
+            re.DOTALL,
+        )
+    assert "<thead>" in html
+    assert "Brain stopped" not in html
     assert "Prompt View" in html
     assert "Operational Backing" in html
     assert 'data-component="Card"' in html
@@ -215,6 +233,9 @@ def test_static_surface_adds_existing_widget_prompt_panels(tmp_path) -> None:
     assert "renderOperationalPanel" in script_text
     assert "panel_contract" in script_text
     assert "scope_summary" in script_text
+    assert "record-card" in script_text
+    assert "prompt-body" in script_text
+    assert "setSummaryMetric" in script_text
     assert "platform_channel_id" in script_text
     assert "participant_platform_user_id" in script_text
     assert "calendar-prompt-runs-table" in script_text
@@ -225,6 +246,9 @@ def test_static_surface_adds_existing_widget_prompt_panels(tmp_path) -> None:
     assert stylesheet.status_code == 200
     css = stylesheet.text
     assert ".prompt-content" in css
+    assert ".prompt-panel" in css
+    assert ".record-card" in css
+    assert ".operational-list" in css
     assert "background: var(--panel)" in css
     assert "color: var(--ink)" in css
 
@@ -249,6 +273,8 @@ def test_static_renderers_tolerate_missing_optional_panel_targets(tmp_path) -> N
         "renderCharacterGrowthPanel",
         "renderMemoryUnitRows",
         "renderStyleOverlayRows",
+        "renderPromptPanelCards",
+        "renderOperationalCards",
     ]
 
     for function_name in guarded_renderers:

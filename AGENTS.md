@@ -1,6 +1,9 @@
 # AGENTS.md
 
-DO NOT send optional commentary.
+## Agent Rules
+- DO NOT send optional commentary.
+- DO NOT assume, always require explicit instructions.
+- Avoid describing action in negative statements (i.e,. I will NOT ...). Always state your action in positive statement only (i.e,. I will ...).
 
 ## How To Work Here
 

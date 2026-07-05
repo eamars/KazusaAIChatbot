@@ -1422,9 +1422,13 @@ function renderServices() {
 
 function auditRows(events) {
   if (!events.length) {
-    return "<tr><td>No audit events</td><td>local JSONL is ready</td><td>redacted</td></tr>";
+    return "<tr><td>No audit events</td><td>local JSONL is ready</td><td>redacted</td><td>-</td></tr>";
   }
-  return events.map((event) => `<tr><td><code>${escapeHtml(event.created_at)}</code></td><td>${escapeHtml(event.operator_id)}</td><td>${escapeHtml(event.event_type)}</td><td>${escapeHtml(event.service_id || "-")}</td><td>${escapeHtml(event.reason || "-")}</td></tr>`).join("");
+  return events.map((event) => {
+    const target = event.service_id || event.target || event.operator_id || "-";
+    const status = event.status || event.reason || "-";
+    return `<tr><td><code>${escapeHtml(event.created_at || "-")}</code></td><td>${escapeHtml(event.event_type || "-")}</td><td>${escapeHtml(target)}</td><td>${escapeHtml(status)}</td></tr>`;
+  }).join("");
 }
 
 function renderAudit(events) {
@@ -1938,7 +1942,12 @@ function renderPanelState(target, panel) {
   const status = panel?.status || "unavailable";
   const reason = panel?.reason || "No rows are available for this panel.";
   const generatedAt = panel?.generated_at || "";
-  setHtml(element, `<tr><td>Status</td><td>${escapeHtml(status)}</td></tr><tr><td>Reason</td><td>${escapeHtml(reason)}</td></tr>${generatedAt ? `<tr><td>Generated</td><td>${escapeHtml(generatedAt)}</td></tr>` : ""}`);
+  if (isTableBody(element)) {
+    setHtml(element, `<tr><td>Status</td><td>${escapeHtml(status)}</td></tr><tr><td>Reason</td><td>${escapeHtml(reason)}</td></tr>${generatedAt ? `<tr><td>Generated</td><td>${escapeHtml(generatedAt)}</td></tr>` : ""}`);
+    return;
+  }
+  const generated = generatedAt ? ` Generated ${formatLookupValue(generatedAt)}.` : "";
+  setHtml(element, `<p class="panel-empty"><strong>${escapeHtml(formatLookupValue(status))}</strong>: ${escapeHtml(reason)}${escapeHtml(generated)}</p>`);
 }
 
 function renderLookupTable(target, {items = [], emptyText = "No rows available.", redaction = {}} = {}) {
@@ -1946,6 +1955,10 @@ function renderLookupTable(target, {items = [], emptyText = "No rows available."
   if (!element) return;
   if (!items.length) {
     const redactionNote = redaction.model_inputs ? ` Model inputs ${redaction.model_inputs}.` : "";
+    if (!isTableBody(element)) {
+      setHtml(element, `<p class="panel-empty">${escapeHtml(emptyText + redactionNote)}</p>`);
+      return;
+    }
     setHtml(element, `<tr><td>Status</td><td>${escapeHtml(emptyText + redactionNote)}</td></tr>`);
     return;
   }
@@ -1963,9 +1976,116 @@ function renderLookupTable(target, {items = [], emptyText = "No rows available."
   }).join(""));
 }
 
+function isTableBody(element) {
+  return element?.tagName === "TBODY";
+}
+
+function setSummaryMetric(selector, value, note) {
+  const element = optionalElement(selector);
+  if (!element) return;
+  const valueElement = element.querySelector(".metric-value");
+  const labelElements = element.querySelectorAll(".metric-label");
+  if (valueElement) valueElement.textContent = formatLookupValue(value);
+  if (labelElements.length > 1) labelElements[labelElements.length - 1].textContent = formatLookupValue(note);
+}
+
+function firstPresentValue(item, keys) {
+  for (const key of keys) {
+    const value = item?.[key];
+    if (value !== null && value !== undefined && value !== "") return value;
+  }
+  return "";
+}
+
+function recordTitle(item, fallback = "record") {
+  const title = firstPresentValue(item, [
+    "run_id",
+    "job_id",
+    "schedule_id",
+    "event_id",
+    "episode_id",
+    "trigger_kind",
+    "event_type",
+    "unit_type",
+    "source",
+  ]);
+  return formatLookupValue(title || fallback);
+}
+
+function recordDetailEntries(item, hiddenKeys = []) {
+  const hidden = new Set(hiddenKeys);
+  return Object.entries(item || {}).filter(([key, value]) => (
+    !hidden.has(key) && value !== null && value !== undefined && value !== ""
+  ));
+}
+
+function renderRecordCard(item, {title = "", status = "", hiddenKeys = [], body = "", chips = []} = {}) {
+  const cardTitle = title || recordTitle(item);
+  const statusText = status || item?.status || item?.delivery_state || "";
+  const details = renderDetailGrid(recordDetailEntries(item, hiddenKeys));
+  const chipRow = chips.length ? detailChipRow(chips) : "";
+  return `
+    <article class="record-card">
+      <div class="record-card-header">
+        <div><h4>${escapeHtml(formatLookupValue(cardTitle))}</h4></div>
+        ${statusText ? `<span class="badge success">${escapeHtml(formatLookupValue(statusText))}</span>` : ""}
+      </div>
+      ${body ? `<p class="character-prose">${escapeHtml(formatCharacterProse(body))}</p>` : ""}
+      ${chipRow}
+      ${details}
+    </article>
+  `;
+}
+
+function promptBodyBlock(label, value) {
+  return `
+    <section class="prompt-body">
+      <h4>${escapeHtml(formatLookupLabel(label))}</h4>
+      <pre class="prompt-content">${escapeHtml(formatLookupValue(value))}</pre>
+    </section>
+  `;
+}
+
+function renderPromptPanelCards(target, panel, {emptyText = "No prompt context is available."} = {}) {
+  const element = typeof target === "string" ? qs(target) : target;
+  if (!element) return;
+  if (!panel || panel.status === "needs_input" || panel.status === "unavailable") {
+    renderPanelState(element, panel || {status: "needs_input", reason: emptyText});
+    return;
+  }
+  const bodies = [];
+  const content = panel.content;
+  if (content !== null && content !== undefined && content !== "") {
+    if (typeof content === "object" && !Array.isArray(content)) {
+      Object.entries(content).forEach(([key, value]) => {
+        bodies.push(promptBodyBlock(key, value));
+      });
+    } else {
+      bodies.push(promptBodyBlock("content", content));
+    }
+  }
+  panelItems(panel).forEach((item, index) => {
+    const label = item?.source || item?.episode_id || item?.claim || `item ${index + 1}`;
+    bodies.push(promptBodyBlock(label, item));
+  });
+  const metadataEntries = ["panel_contract", "source", "turn_count", "continuity", "selected_count", "candidate_count", "scope_order", "scope_summary", "projection_owner"]
+    .map((key) => [key, panel[key]])
+    .filter(([, value]) => value !== null && value !== undefined && value !== "");
+  if (!bodies.length && !metadataEntries.length) {
+    renderPanelState(element, {status: panel.status || "empty", reason: panel.reason || emptyText, generated_at: panel.generated_at || ""});
+    return;
+  }
+  const metadata = metadataEntries.length ? `<section class="prompt-meta">${renderDetailGrid(metadataEntries)}</section>` : "";
+  setHtml(element, `${bodies.join("")}${metadata}`);
+}
+
 function renderPromptPanel(target, panel, {emptyText = "No prompt context is available."} = {}) {
   const element = typeof target === "string" ? qs(target) : target;
   if (!element) return;
+  if (!isTableBody(element)) {
+    renderPromptPanelCards(element, panel, {emptyText});
+    return;
+  }
   if (!panel || panel.status === "needs_input" || panel.status === "unavailable") {
     renderPanelState(element, panel || {status: "needs_input", reason: emptyText});
     return;
@@ -2001,9 +2121,32 @@ function renderPromptPanel(target, panel, {emptyText = "No prompt context is ava
   setHtml(element, rows.join(""));
 }
 
+function renderOperationalCards(target, panel, {emptyText = "No backing rows are available."} = {}) {
+  const element = typeof target === "string" ? qs(target) : target;
+  if (!element) return;
+  const items = panelItems(panel);
+  const metadataEntries = ["panel_contract", "projection_owner"]
+    .map((key) => [key, panel ? panel[key] : ""])
+    .filter(([, value]) => value !== null && value !== undefined && value !== "");
+  const metadata = metadataEntries.length ? `<section class="prompt-meta">${renderDetailGrid(metadataEntries)}</section>` : "";
+  if (!items.length) {
+    const reason = panelEmptyText(panel, emptyText);
+    setHtml(element, `${metadata}<p class="panel-empty">${escapeHtml(reason)}</p>`);
+    return;
+  }
+  const cards = items.map((item) => renderRecordCard(item, {
+    hiddenKeys: ["raw_llm_output", "source_memory_ids", "source_context", "payload", "idempotency_key", "artifact_text", "task_brief"],
+  }));
+  setHtml(element, `${metadata}${cards.join("")}`);
+}
+
 function renderOperationalPanel(target, panel, {emptyText = "No backing rows are available."} = {}) {
   const element = typeof target === "string" ? qs(target) : target;
   if (!element) return;
+  if (!isTableBody(element)) {
+    renderOperationalCards(element, panel, {emptyText});
+    return;
+  }
   const items = panelItems(panel);
   const metadataRows = ["panel_contract", "projection_owner"].map((key) => {
     const value = panel ? panel[key] : "";
@@ -2266,7 +2409,37 @@ function renderMemoryUnitRows(target, {items = [], emptyText = "No memory rows a
   const element = typeof target === "string" ? qs(target) : target;
   if (!element) return;
   if (!items.length) {
-    renderLookupTable(element, {items, emptyText, redaction});
+    if (isTableBody(element)) {
+      renderLookupTable(element, {items, emptyText, redaction});
+    } else {
+      renderPanelEmptyContent(element, {emptyText, redaction});
+    }
+    return;
+  }
+  if (!isTableBody(element)) {
+    setHtml(element, items.map((item) => {
+      const typeText = formatLookupLabel(item.unit_type || "memory");
+      const factText = formatLookupValue(item.fact || item.subjective_appraisal || item.relationship_signal);
+      const chips = [
+        ["status", item.status],
+        ["updated", item.updated_at],
+        ["last seen", item.last_seen_at && !item.updated_at ? item.last_seen_at : ""],
+        ["relationship", item.relationship_signal ? "present" : ""],
+        ["appraisal", item.subjective_appraisal ? "present" : ""],
+        ["due", item.due_at],
+      ];
+      const details = {
+        relationship_signal: item.relationship_signal,
+        subjective_appraisal: item.subjective_appraisal,
+      };
+      return renderRecordCard(details, {
+        title: typeText || "memory",
+        status: item.status || "",
+        hiddenKeys: [],
+        body: factText,
+        chips,
+      });
+    }).join(""));
     return;
   }
   setHtml(element, items.map((item) => {
@@ -2387,6 +2560,9 @@ async function refreshUsers(showNeedsInput = true) {
   const query = getValue("#user-query").trim();
   if (!platform || !platformUserId) {
     setEntityStatus("#users-status", "needs input");
+    setSummaryMetric("#user-summary-identity", "needs input", "enter platform user");
+    setSummaryMetric("#user-summary-memory", "0", "rows loaded");
+    setSummaryMetric("#user-summary-style", "needs input", "guidance status");
     if (showNeedsInput) {
       renderPanelState("#user-profile-table", {status: "needs_input", reason: "Enter platform and platform user ID to load user profile and relationship."});
       renderPanelState("#user-memory-table", {status: "needs_input", reason: "Enter platform and platform user ID to load user memory."});
@@ -2404,6 +2580,9 @@ async function refreshUsers(showNeedsInput = true) {
   const payload = await api(`/api/entities/user?${params.toString()}`);
   setEntityStatus("#users-status", payload.status || "unavailable");
   const panels = payload.panels || {};
+  setSummaryMetric("#user-summary-identity", platform, platformUserId);
+  setSummaryMetric("#user-summary-memory", panelItems(panels.memory).length, "recent rows");
+  setSummaryMetric("#user-summary-style", panels.style?.status || "empty", panelEmptyText(panels.style, "guidance status"));
   renderPromptPanel("#user-conversation-progress-table", panels.conversation_progress_prompt, {
     emptyText: "No conversation-progress prompt context.",
   });
@@ -2440,6 +2619,9 @@ async function refreshGroups(showNeedsInput = true) {
   const participantPlatformUserId = getValue("#group-participant-platform-user-id").trim();
   if (!platform || !groupId) {
     setEntityStatus("#groups-status", "needs input");
+    setSummaryMetric("#group-summary-identity", "needs input", "enter group id");
+    setSummaryMetric("#group-summary-carry-over", "0", "selected rows");
+    setSummaryMetric("#group-summary-participant", "needs input", "progress status");
     if (showNeedsInput) {
       renderPanelState("#group-style-table", {status: "needs_input", reason: "Enter platform and group ID to load group style."});
       renderPanelState("#group-carry-over-table", {status: "needs_input", reason: "Enter platform and group ID to load group carry-over."});
@@ -2455,6 +2637,9 @@ async function refreshGroups(showNeedsInput = true) {
   const payload = await api(`/api/entities/group?${params.toString()}`);
   setEntityStatus("#groups-status", payload.status || "unavailable");
   const panels = payload.panels || {};
+  setSummaryMetric("#group-summary-identity", platform, groupId);
+  setSummaryMetric("#group-summary-carry-over", panels.group_carry_over?.selected_count || panelItems(panels.group_carry_over).length || "0", "selected rows");
+  setSummaryMetric("#group-summary-participant", panels.participant_conversation_progress_prompt?.status || "empty", participantPlatformUserId || "participant id missing");
   renderPromptPanel("#group-carry-over-table", panels.group_carry_over, {
     emptyText: "No group carry-over.",
   });
@@ -2518,7 +2703,7 @@ async function refreshEvents() {
   if (trackingId) params.set("tracking_id", trackingId);
   const payload = await api(`/api/events?${params.toString()}`);
   if (!payload.items.length) {
-    setHtml("#event-table", "<tr><td>No events</td><td>no rows for the selected source and filters</td><td>redacted</td></tr>");
+    setHtml("#event-table", "<tr><td>No events</td><td>no rows for the selected source and filters</td><td>redacted</td><td>-</td><td>-</td></tr>");
     return;
   }
   setHtml("#event-table", payload.items.map((event) => `

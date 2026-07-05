@@ -587,12 +587,12 @@ def test_style_overlay_rows_use_readable_two_column_layout(
     assert summary.exists()
 
 
-def test_owner_tables_use_panel_specific_readable_layouts(
+def test_owner_panels_use_panel_specific_readable_layouts(
     e2e_console,
     e2e_browser_page,
     e2e_summary_writer,
 ) -> None:
-    """Owner tables should format state and memory rows by their meaning."""
+    """Owner panels should format state and memory rows by their meaning."""
 
     with e2e_console() as console:
         page = e2e_browser_page(console.base_url)
@@ -708,32 +708,253 @@ def test_owner_tables_use_panel_specific_readable_layouts(
             "element => getComputedStyle(element).whiteSpace",
         ) == "pre-line"
 
-        memory_rows = page.locator("#user-memory-table tr")
-        assert memory_rows.count() == 2
-        for index in range(memory_rows.count()):
-            assert memory_rows.nth(index).locator("td").count() == 2
-        first_memory_cells = memory_rows.nth(0).locator("td")
-        first_memory_left = first_memory_cells.nth(0).inner_text()
-        first_memory_right = first_memory_cells.nth(1).inner_text()
-        assert "active" in first_memory_left
-        assert "updated: 2026-06-19T00:00:00+00:00" in first_memory_left
-        assert "updated: 2026-06-19T00:00:00+00:00" not in first_memory_right
-        assert "relationship: prefers direct review" in first_memory_right
-        assert "appraisal: high operator trust" in first_memory_right
+        memory_cards = page.locator("#user-memory-table .record-card")
+        assert memory_cards.count() == 2
+        assert page.locator("#user-memory-table tr").count() == 0
+        first_memory_card = memory_cards.nth(0)
+        first_memory_text = first_memory_card.inner_text()
+        assert "active" in first_memory_text
+        assert "updated" in first_memory_text
+        assert "2026-06-19T00:00:00+00:00" in first_memory_text
+        assert "relationship" in first_memory_text
+        assert "prefers direct review" in first_memory_text
+        assert "appraisal" in first_memory_text
+        assert "high operator trust" in first_memory_text
         memory_text = page.locator("#user-memory-table").inner_text()
         assert "stable pattern" in memory_text
         assert "prefers direct review" in memory_text
         assert "unit_id" not in memory_text
         assert "unit-1" not in memory_text
+        assert page.locator("#user-summary-memory .metric-value").inner_text() == "2"
+        assert page.locator("#user-summary-identity .metric-label").last.inner_text() == (
+            "platform-user-1"
+        )
 
         summary = e2e_summary_writer(
-            name="owner_table_panel_specific_layouts",
+            name="owner_panel_specific_layouts",
             conclusion="pass",
             details={
                 "console_url": console.base_url,
                 "checked": [
                     "key-value state rows use field labels",
-                    "memory units render one row per unit",
+                    "memory units render one card per unit",
+                ],
+            },
+        )
+
+    assert summary.exists()
+
+
+def test_prompt_operational_and_tabular_surfaces_use_right_structures(
+    e2e_console,
+    e2e_browser_page,
+    e2e_summary_writer,
+) -> None:
+    """Prompt panels, typed records, and real tables should use distinct layouts."""
+
+    with e2e_console() as console:
+        page = e2e_browser_page(console.base_url)
+        _login(page)
+        page.evaluate(
+            """() => {
+              const originalFetch = window.fetch.bind(window);
+              window.fetch = (input, init) => {
+                const url = String(input);
+                if (url.includes('/api/entities/character')) {
+                  return Promise.resolve(new Response(JSON.stringify({
+                    status: 'available',
+                    owner: 'character',
+                    panels: {
+                      profile: {
+                        status: 'available',
+                        items: [{name: 'Panel Order', description: 'Static profile'}]
+                      },
+                      self_image: {status: 'empty', items: [], reason: 'none'},
+                      state: {status: 'available', items: [{key: 'mood', value: 'steady'}]},
+                      growth: {status: 'empty', items: [], reason: 'none'},
+                      learning: {status: 'empty', items: [], reason: 'none'},
+                      promoted_global_growth_prompt: {
+                        status: 'available',
+                        content: {global_character_growth: ['growth prompt row']},
+                        prompt_view: true,
+                        panel_contract: 'production prompt input',
+                        selected_count: 1
+                      },
+                      current_carry_over: {
+                        status: 'available',
+                        content: 'character-global carry-over',
+                        prompt_view: true,
+                        panel_contract: 'production prompt input',
+                        selected_count: 1,
+                        scope_order: ['character_global']
+                      },
+                      growth_runs_audit: {
+                        status: 'available',
+                        panel_contract: 'operational backing; not prompt input',
+                        items: [{
+                          run_id: 'run-1',
+                          status: 'applied',
+                          mode: 'apply',
+                          accepted_count: 1,
+                          promoted_count: 1,
+                          updated_at: '2026-06-19T00:00:00+00:00'
+                        }]
+                      }
+                    },
+                    redaction: {model_inputs: 'excluded'}
+                  }), {
+                    status: 200,
+                    headers: {'Content-Type': 'application/json'}
+                  }));
+                }
+                if (url.includes('/api/lookups/calendar')) {
+                  return Promise.resolve(new Response(JSON.stringify({
+                    status: 'available',
+                    panels: {
+                      cognition_pending_runs: {
+                        status: 'available',
+                        prompt_view: true,
+                        items: [{claim: 'pending cognition', source: 'calendar_runs'}],
+                        panel_contract: 'production prompt input'
+                      },
+                      schedule_definitions: {
+                        status: 'available',
+                        panel_contract: 'operational backing; not prompt input',
+                        items: [{
+                          schedule_id: 'schedule-1',
+                          trigger_kind: 'future_cognition',
+                          status: 'active',
+                          next_run_at: '2026-06-20T00:00:00+00:00'
+                        }]
+                      },
+                      due_runs: {
+                        status: 'available',
+                        panel_contract: 'operational backing; not prompt input',
+                        items: [{
+                          run_id: 'due-1',
+                          status: 'pending',
+                          due_at: '2026-06-20T00:00:00+00:00'
+                        }]
+                      }
+                    }
+                  }), {
+                    status: 200,
+                    headers: {'Content-Type': 'application/json'}
+                  }));
+                }
+                if (url.includes('/api/lookups/background')) {
+                  return Promise.resolve(new Response(JSON.stringify({
+                    status: 'available',
+                    panels: {
+                      result_ready_cognition_deliveries: {
+                        status: 'available',
+                        prompt_view: true,
+                        items: [{episode_id: 'episode-1', content: 'ready result'}],
+                        panel_contract: 'production prompt input'
+                      },
+                      job_queue: {
+                        status: 'available',
+                        panel_contract: 'operational backing; not prompt input',
+                        items: [{
+                          job_id: 'job-1',
+                          worker: 'coding_agent',
+                          status: 'completed',
+                          delivery_state: 'ready',
+                          updated_at: '2026-06-19T00:00:00+00:00'
+                        }]
+                      },
+                      worker_events: {
+                        status: 'available',
+                        panel_contract: 'operational backing; not prompt input',
+                        items: [{
+                          event_id: 'event-1',
+                          event_type: 'background_work.worker',
+                          status: 'ok',
+                          created_at: '2026-06-19T00:00:00+00:00'
+                        }]
+                      }
+                    }
+                  }), {
+                    status: 200,
+                    headers: {'Content-Type': 'application/json'}
+                  }));
+                }
+                if (url.includes('/api/events')) {
+                  return Promise.resolve(new Response(JSON.stringify({
+                    items: [{
+                      source: 'console',
+                      component: 'brain',
+                      event_type: 'service_start',
+                      status: 'ok',
+                      created_at: '2026-06-19T00:00:00+00:00'
+                    }]
+                  }), {
+                    status: 200,
+                    headers: {'Content-Type': 'application/json'}
+                  }));
+                }
+                return originalFetch(input, init);
+              };
+            }"""
+        )
+
+        _open_page(page, "character", "Character")
+        page.locator("#character-carry-over-table .prompt-body").wait_for()
+        assert page.locator("#character-growth-runs-table .record-card").count() == 1
+        assert page.locator("#character-growth-runs-table tr").count() == 0
+        order = page.evaluate(
+            """() => {
+              const carry = document.querySelector('#character-carry-over-table');
+              const profile = document.querySelector('#character-profile-table');
+              return carry.compareDocumentPosition(profile);
+            }"""
+        )
+        assert order & 4
+
+        _open_page(page, "calendar", "Calendar")
+        page.locator("#refresh-calendar").click()
+        page.locator("#calendar-prompt-runs-table .prompt-body").wait_for()
+        assert page.locator("#calendar-prompt-runs-table .prompt-body").count() >= 1
+        assert page.locator("#calendar-schedules-table .record-card").count() == 1
+        assert page.locator("#calendar-due-runs-table .record-card").count() == 1
+        assert page.locator("#calendar-schedules-table tr").count() == 0
+
+        _open_page(page, "background", "Background work")
+        page.locator("#refresh-background").click()
+        page.locator("#background-result-ready-table .prompt-body").wait_for()
+        assert page.locator("#background-result-ready-table .prompt-body").count() >= 1
+        assert page.locator("#background-job-queue-table .record-card").count() == 1
+        assert page.locator("#background-worker-events-table .record-card").count() == 1
+        assert page.locator("#background-job-queue-table tr").count() == 0
+
+        _open_page(page, "events", "Event monitor")
+        page.locator("#refresh-events").click()
+        page.locator("#event-table").get_by_text("service_start").wait_for()
+        assert page.locator("[data-page='events'] thead th").all_inner_texts() == [
+            "SOURCE",
+            "COMPONENT",
+            "EVENT",
+            "STATUS",
+            "CREATED",
+        ]
+
+        _open_page(page, "audit", "Audit")
+        assert page.locator("[data-page='audit'] thead th").all_inner_texts() == [
+            "TIME",
+            "EVENT",
+            "TARGET",
+            "STATUS",
+        ]
+
+        summary = e2e_summary_writer(
+            name="prompt_operational_and_tabular_structures",
+            conclusion="pass",
+            details={
+                "console_url": console.base_url,
+                "checked": [
+                    "prompt panels use prompt-body",
+                    "operational records use record-card",
+                    "event and audit tables expose headers",
                 ],
             },
         )

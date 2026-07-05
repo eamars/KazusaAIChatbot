@@ -140,6 +140,7 @@ plans.
 | [character_self_image_rolling_state_bugfix_plan.md](archive/completed/bugfix/character_self_image_rolling_state_bugfix_plan.md) |
 | [conversation_episode_state_lane_lifecycle_plan.md](archive/completed/bugfix/conversation_episode_state_lane_lifecycle_plan.md) |
 | [control_console_functional_remediation_plan.md](archive/completed/bugfix/control_console_functional_remediation_plan.md) |
+| [control_console_information_architecture_remediation_plan.md](archive/completed/bugfix/control_console_information_architecture_remediation_plan.md) |
 | [control_console_ui_e2e_acceptance_test_plan.md](archive/completed/bugfix/control_console_ui_e2e_acceptance_test_plan.md) |
 | [cognition_silence_short_circuit_and_dialog_evaluator_quality_plan.md](archive/completed/bugfix/cognition_silence_short_circuit_and_dialog_evaluator_quality_plan.md) |
 | [consolidation_module_boundary_migration_bugfix_plan.md](archive/completed/bugfix/consolidation_module_boundary_migration_bugfix_plan.md) |

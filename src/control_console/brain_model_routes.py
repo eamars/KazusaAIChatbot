@@ -138,6 +138,22 @@ _ROUTES: tuple[BrainModelRouteDescriptor, ...] = (
         required=True,
         fallback_backed=False,
     ),
+    BrainModelRouteDescriptor(
+        route_key="CODING_AGENT_PM_LLM",
+        env_prefix="CODING_AGENT_PM_LLM",
+        label="Coding agent PM",
+        group="Coding agent",
+        required=True,
+        fallback_backed=False,
+    ),
+    BrainModelRouteDescriptor(
+        route_key="CODING_AGENT_PROGRAMMER_LLM",
+        env_prefix="CODING_AGENT_PROGRAMMER_LLM",
+        label="Coding agent programmer",
+        group="Coding agent",
+        required=True,
+        fallback_backed=False,
+    ),
 )
 _ROUTE_BY_KEY = {route.route_key: route for route in _ROUTES}
 _ROUTE_BY_UI_KEY = {route.env_prefix.lower(): route for route in _ROUTES}

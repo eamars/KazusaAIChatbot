@@ -21,6 +21,8 @@ def _route_environment() -> dict[str, str]:
         "CONSOLIDATION_LLM",
         "JSON_REPAIR_LLM",
         "BACKGROUND_WORK_LLM",
+        "CODING_AGENT_PM_LLM",
+        "CODING_AGENT_PROGRAMMER_LLM",
     ]
     environment = {
         "DEFAULT_LLM_MAX_COMPLETION_TOKENS": "8192",
@@ -52,6 +54,8 @@ def test_route_catalog_matches_configured_chat_routes() -> None:
         "CONSOLIDATION_LLM",
         "JSON_REPAIR_LLM",
         "BACKGROUND_WORK_LLM",
+        "CODING_AGENT_PM_LLM",
+        "CODING_AGENT_PROGRAMMER_LLM",
     ]
     assert all(route.editable_fields == (
         "model",
@@ -79,10 +83,10 @@ def test_brain_descriptor_projects_routes_and_environment_overlay() -> None:
         environment=environment,
         overrides=overrides,
     )
-    assert len(snapshot.fields) == 36
+    assert len(snapshot.fields) == 42
 
     routes = project_brain_model_routes(snapshot=snapshot, environment=environment)
-    assert len(routes) == 12
+    assert len(routes) == 14
     cognition = next(route for route in routes if route["route_key"] == "cognition_llm")
     assert cognition["effective"]["model"] == "cognition_llm-qwen3"
     assert cognition["effective"]["max_completion_tokens"] == 8192
