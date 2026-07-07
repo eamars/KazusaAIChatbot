@@ -176,6 +176,7 @@ cognition, or mutate persistence.
 
 # Generation Rules
 - For coding_snippet, return code text only when the request is bounded.
+- For coding_snippet, put the code inside artifact_text as a JSON string.
 - For text_rewrite, return the rewritten text only.
 - For summary, return the summary only.
 - If the validated task is unsupported or missing required source text, return
@@ -228,9 +229,12 @@ async def _generate_text_artifact(
         SystemMessage(content=TEXT_ARTIFACT_GENERATOR_PROMPT),
         HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
     ], config=_text_artifact_generator_llm_config)
-    parsed = parse_llm_json_output(response.content)
+    raw_output = response.content
+    parsed = parse_llm_json_output(raw_output)
     result = normalize_text_artifact_generator_output(
         parsed,
+        task_type=task_decision["task_type"],
+        raw_output=raw_output,
         max_output_chars=max_output_chars,
     )
     return result
@@ -257,11 +261,21 @@ def build_text_artifact_generator_payload(
 def normalize_text_artifact_generator_output(
     parsed: object,
     *,
+    task_type: TextArtifactTaskType | None = None,
+    raw_output: str = "",
     max_output_chars: int = BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
 ) -> TextArtifactGeneratorResult:
     """Normalize artifact generation without task-type selection fields."""
 
-    if not isinstance(parsed, dict):
+    if not isinstance(parsed, dict) or not parsed:
+        fallback_result = _raw_text_artifact_result(
+            task_type=task_type,
+            raw_output=raw_output,
+            max_output_chars=max_output_chars,
+        )
+        if fallback_result is not None:
+            return fallback_result
+
         result: TextArtifactGeneratorResult = {
             "status": "failed",
             "artifact_text": "",
@@ -292,6 +306,59 @@ def normalize_text_artifact_generator_output(
         "result_summary": result_summary,
     }
     return result
+
+
+def _raw_text_artifact_result(
+    *,
+    task_type: TextArtifactTaskType | None,
+    raw_output: str,
+    max_output_chars: int,
+) -> TextArtifactGeneratorResult | None:
+    """Accept bounded direct artifact text for artifact-producing tasks."""
+
+    if task_type not in {"coding_snippet", "text_rewrite", "summary"}:
+        return None
+
+    artifact_text = _bounded_text(
+        _strip_optional_markdown_fence(raw_output),
+        limit=max_output_chars,
+    )
+    if not artifact_text:
+        return None
+
+    result_summary = _raw_artifact_result_summary(task_type)
+    result: TextArtifactGeneratorResult = {
+        "status": "succeeded",
+        "artifact_text": artifact_text,
+        "failure_summary": "",
+        "result_summary": result_summary,
+    }
+    return result
+
+
+def _strip_optional_markdown_fence(raw_output: str) -> str:
+    """Remove a single surrounding Markdown fence from direct artifact text."""
+
+    text = raw_output.strip()
+    lines = text.splitlines()
+    if len(lines) >= 2 and lines[0].strip().startswith("```"):
+        if lines[-1].strip() == "```":
+            text = "\n".join(lines[1:-1]).strip()
+    return text
+
+
+def _raw_artifact_result_summary(
+    task_type: TextArtifactTaskType,
+) -> str:
+    """Describe a recovered direct artifact without inspecting its content."""
+
+    if task_type == "coding_snippet":
+        result_summary = "Generated a bounded code snippet."
+    elif task_type == "text_rewrite":
+        result_summary = "Generated a bounded text rewrite."
+    else:
+        result_summary = "Generated a bounded summary."
+    return result_summary
 
 
 async def execute(

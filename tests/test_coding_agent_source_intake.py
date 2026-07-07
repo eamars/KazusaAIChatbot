@@ -50,6 +50,35 @@ def test_normalize_source_intake_output_bounds_unknown_values() -> None:
     assert len(result.source_mentions[1].raw_text) == 512
 
 
+def test_normalize_source_intake_output_accepts_inline_source_fields() -> None:
+    result = source_intake.normalize_source_intake_output(
+        {
+            'task_source_mode': 'inline_bundle',
+            'source_mentions': [
+                {
+                    'raw_text': 'def solve():\n    return 1',
+                    'role': 'primary_code_source',
+                    'family_hint': 'inline_code',
+                    'language_hint': 'python',
+                    'filename_hint': 'solver.py',
+                },
+                {
+                    'raw_text': 'Traceback (most recent call last):',
+                    'role': 'supporting_context',
+                    'family_hint': 'log_or_trace',
+                },
+            ],
+        }
+    )
+
+    assert result.task_source_mode == 'inline_bundle'
+    assert len(result.source_mentions) == 2
+    assert result.source_mentions[0].family_hint == 'inline_code'
+    assert result.source_mentions[0].language_hint == 'python'
+    assert result.source_mentions[0].filename_hint == 'solver.py'
+    assert result.source_mentions[1].family_hint == 'log_or_trace'
+
+
 @pytest.mark.asyncio
 async def test_run_source_intake_uses_pm_llm_and_visible_spans(
     monkeypatch: pytest.MonkeyPatch,

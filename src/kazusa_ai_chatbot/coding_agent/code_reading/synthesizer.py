@@ -57,7 +57,16 @@ MAX_SYNTHESIS_NEXT_HOPS = 6
 MAX_SYNTHESIS_EVIDENCE_REFS = 12
 MAX_SYNTHESIS_EVIDENCE_ROWS = 18
 MAX_SYNTHESIS_EVIDENCE_EXCERPT_CHARS = 450
+MAX_LIMITATIONS_IN_ANSWER = 3
 SYNTHESIS_LLM_CALL_TIMEOUT_SECONDS = 300
+UNGROUNDED_CODE_TERMS_LIMITATION = "Synthesis included ungrounded code terms."
+PUBLIC_SYNTHESIS_DIAGNOSTIC_LIMITATIONS = {
+    "Reading synthesis LLM call timed out.",
+    "Reading synthesis prompt exceeded the context budget.",
+    "Synthesis model omitted answer_text.",
+    "Synthesis model returned answer outside JSON schema.",
+    "Synthesis model returned malformed output.",
+}
 
 
 SYNTHESIS_PROMPT = '''\
@@ -227,47 +236,49 @@ def synthesize_from_programmer_reports(
         )
         parsed_limitations = ["Reading synthesis LLM call timed out."]
     combined_limitations = _dedupe_strings([*limitations, *parsed_limitations])
-    grounding_violations = ungrounded_code_terms(
-        answer_text,
-        question=question,
+    public_limitations = _public_grounded_limitations(
+        combined_limitations,
         evidence=evidence,
         repository_summary=repository_summary,
     )
-    if grounding_violations:
-        combined_limitations.append(
-            "Synthesis included ungrounded code terms: "
-            + ", ".join(grounding_violations[:8])
-        )
-        repaired_answer = _remove_ungrounded_code_terms(
-            answer_text,
-            grounding_violations,
-        )
-        remaining_violations = ungrounded_code_terms(
-            repaired_answer,
-            question=question,
-            evidence=evidence,
-            repository_summary=repository_summary,
-        )
-        if repaired_answer and not remaining_violations:
-            answer_text = repaired_answer
-        else:
-            answer_text = (
-                "I cannot provide a grounded answer from the selected evidence "
-                "without inventing concrete code identifiers."
-            )
+    answer_text, repaired_grounding = _repair_ungrounded_answer_terms(
+        answer_text,
+        evidence=evidence,
+        repository_summary=repository_summary,
+    )
+    if repaired_grounding:
+        public_limitations = _dedupe_strings([
+            *public_limitations,
+            UNGROUNDED_CODE_TERMS_LIMITATION,
+        ])
+    answer_text = _answer_with_required_limitations(
+        answer_text,
+        public_limitations,
+        max_answer_chars=max_answer_chars,
+    )
+    answer_text, repaired_limitations = _repair_ungrounded_answer_terms(
+        answer_text,
+        evidence=evidence,
+        repository_summary=repository_summary,
+    )
+    if repaired_limitations:
+        public_limitations = _dedupe_strings([
+            *public_limitations,
+            UNGROUNDED_CODE_TERMS_LIMITATION,
+        ])
 
     _fill_trace(
         trace,
         raw_output=raw_output,
         parsed_output=parsed,
         normalized_answer=answer_text,
-        limitations=combined_limitations,
+        limitations=public_limitations,
         prompt_input_chars=prompt_input_chars,
         context_budget=context_budget,
         blocked_before_invoke=False,
         timed_out=timed_out,
     )
-    return answer_text, combined_limitations
+    return answer_text, public_limitations
 
 
 def normalize_synthesis_output(
@@ -306,10 +317,14 @@ def ungrounded_code_terms(
     evidence: list[CodeEvidenceRow],
     repository_summary: dict[str, object],
 ) -> list[str]:
-    """Return concrete code terms in the answer that are not in evidence."""
+    """Return concrete code terms in the answer that are not in evidence.
+
+    The user question can mention an identifier that the selected evidence
+    never proves. Treat selected evidence and public repository metadata as
+    grounding sources; the question text is task context, not proof.
+    """
 
     grounded_text = _grounded_text(
-        question=question,
         evidence=evidence,
         repository_summary=repository_summary,
     )
@@ -528,11 +543,10 @@ def _clean_code_candidate(value: str) -> str:
 
 def _grounded_text(
     *,
-    question: str = "",
     evidence: list[CodeEvidenceRow],
     repository_summary: dict[str, object],
 ) -> str:
-    parts: list[str] = [question]
+    parts: list[str] = []
     for row in evidence:
         parts.extend([
             row["path"],
@@ -569,6 +583,117 @@ def _dedupe_strings(values: list[str]) -> list[str]:
             continue
         deduped.append(value)
     return deduped
+
+
+def _public_grounded_limitations(
+    limitations: list[str],
+    *,
+    evidence: list[CodeEvidenceRow],
+    repository_summary: dict[str, object],
+) -> list[str]:
+    """Return limitations safe to repeat in public answer text."""
+
+    public_limitations: list[str] = []
+    for limitation in limitations:
+        if limitation in PUBLIC_SYNTHESIS_DIAGNOSTIC_LIMITATIONS:
+            public_limitations.append(limitation)
+            continue
+        grounding_violations = ungrounded_code_terms(
+            limitation,
+            evidence=evidence,
+            repository_summary=repository_summary,
+        )
+        if grounding_violations:
+            continue
+        public_limitations.append(limitation)
+    return public_limitations
+
+
+def _repair_ungrounded_answer_terms(
+    answer_text: str,
+    *,
+    evidence: list[CodeEvidenceRow],
+    repository_summary: dict[str, object],
+) -> tuple[str, bool]:
+    """Remove ungrounded code identifiers from public answer text."""
+
+    grounding_violations = ungrounded_code_terms(
+        answer_text,
+        evidence=evidence,
+        repository_summary=repository_summary,
+    )
+    if not grounding_violations:
+        return answer_text, False
+
+    repaired_answer = _remove_ungrounded_code_terms(
+        answer_text,
+        grounding_violations,
+    )
+    remaining_violations = ungrounded_code_terms(
+        repaired_answer,
+        evidence=evidence,
+        repository_summary=repository_summary,
+    )
+    if repaired_answer and not remaining_violations:
+        return repaired_answer, True
+
+    fallback_answer = (
+        "I cannot provide a grounded answer from the selected evidence "
+        "without inventing concrete code identifiers."
+    )
+    return fallback_answer, True
+
+
+def _answer_with_required_limitations(
+    answer_text: str,
+    limitations: list[str],
+    *,
+    max_answer_chars: int,
+) -> str:
+    """Append required limitations that the model left out of answer text."""
+
+    if not limitations:
+        return answer_text
+
+    missing_limitations = _missing_visible_limitations(
+        answer_text,
+        limitations[:MAX_LIMITATIONS_IN_ANSWER],
+    )
+    if not missing_limitations:
+        return answer_text
+
+    limitation_text = "Limitations: " + "; ".join(missing_limitations)
+    if answer_text:
+        updated_answer = f"{answer_text}\n\n{limitation_text}"
+    else:
+        updated_answer = limitation_text
+    if len(updated_answer) > max_answer_chars:
+        updated_answer = updated_answer[:max_answer_chars].rstrip()
+    return updated_answer
+
+
+def _missing_visible_limitations(
+    answer_text: str,
+    limitations: list[str],
+) -> list[str]:
+    answer_key = _visibility_key(answer_text)
+    missing_limitations: list[str] = []
+    for limitation in limitations:
+        normalized_limitation = _trim_sentence_punctuation(limitation)
+        limitation_key = _visibility_key(normalized_limitation)
+        if limitation_key and limitation_key not in answer_key:
+            missing_limitations.append(normalized_limitation)
+    return missing_limitations
+
+
+def _trim_sentence_punctuation(value: str) -> str:
+    trimmed_value = value.strip().rstrip(".;")
+    return trimmed_value
+
+
+def _visibility_key(value: str) -> str:
+    key = re.sub(r"\s+", " ", value.casefold()).strip().rstrip(".;")
+    return key
 
 
 def _bounded_text(value: object, max_chars: int) -> str:

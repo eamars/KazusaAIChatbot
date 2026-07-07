@@ -1,6 +1,10 @@
 """Public entrypoint for the code-fetching subagent."""
 
 from kazusa_ai_chatbot.coding_agent.code_fetching.agent import run
+from kazusa_ai_chatbot.coding_agent.code_fetching.managed_inline import (
+    InlineSourceBundle,
+    InlineSourceFragment,
+)
 from kazusa_ai_chatbot.coding_agent.code_fetching.models import (
     CodeFetchingRequest,
     CodeFetchingResult,
@@ -13,5 +17,7 @@ __all__ = [
     "CodeFetchingResult",
     "CodeRepositoryRef",
     "CodeSourceScope",
+    "InlineSourceBundle",
+    "InlineSourceFragment",
     "run",
 ]

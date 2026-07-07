@@ -35,7 +35,7 @@ _HARD_GATE_WORKSPACE_ROOT = (
     / "managed_checkout_area"
 )
 _REMEDIATION_PLAN_PATH = Path(
-    "development_plans/active/short_term/"
+    "development_plans/archive/completed/short_term/"
     "coding_agent_phase1_real_repo_retrieval_remediation_plan.md"
 )
 

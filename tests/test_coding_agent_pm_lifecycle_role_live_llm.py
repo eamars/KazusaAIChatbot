@@ -288,7 +288,25 @@ PM_LIFECYCLE_CASES: dict[str, dict[str, Any]] = {
                     "provided_facts": [
                         "function convert_jsonl_to_csv(input_path, output_path, fields=None)",
                         "CLI accepts input path, output path, and optional comma-separated fields",
-                        "malformed JSON lines are reported to stderr and skipped",
+                        "convert_jsonl_to_csv returns None after writing the CSV output",
+                        "CSV output includes one header row before data rows",
+                        (
+                            "When fields is provided, the header row and data "
+                            "columns follow that field list exactly"
+                        ),
+                        (
+                            "When fields is None, the header row follows the "
+                            "key order from the first valid JSON object"
+                        ),
+                        (
+                            "Data rows follow valid input line order and use "
+                            "the selected header fields"
+                        ),
+                        (
+                            "malformed JSON lines are reported to stderr as "
+                            "'Malformed JSON on line <line_number>: <error>' "
+                            "and skipped"
+                        ),
                         "missing fields are written as blank CSV cells",
                     ],
                     "created_artifacts": [
@@ -1182,11 +1200,26 @@ PM_LIFECYCLE_CASES: dict[str, dict[str, Any]] = {
                             "included_projects: List[str]) -> "
                             "Dict[str, List[NoteEntry]]"
                         ),
+                        (
+                            "NoteEntry is a dataclass with fields project: "
+                            "str, date: str, and text: str."
+                        ),
                         "Iterate through all .txt files in the input directory.",
                         "Extract the date from YYYY-MM-DD.txt filenames.",
                         (
                             "Parse entries that begin with the exact marker "
                             "'Project: <project_name>'."
+                        ),
+                        (
+                            "The note text is the content after the Project "
+                            "marker up to the next Project marker or file end, "
+                            "stripped of surrounding blank lines."
+                        ),
+                        (
+                            "The returned dictionary is keyed by project name; "
+                            "included_projects filters to those names, and an "
+                            "empty included_projects list includes all parsed "
+                            "projects."
                         ),
                     ],
                     "created_artifacts": [
@@ -1212,6 +1245,10 @@ PM_LIFECYCLE_CASES: dict[str, dict[str, Any]] = {
                         (
                             "For each note, write a bullet prefixed with the "
                             "note date."
+                        ),
+                        (
+                            "The exact bullet line format is "
+                            "'- <date>: <text>'."
                         ),
                     ],
                     "created_artifacts": [

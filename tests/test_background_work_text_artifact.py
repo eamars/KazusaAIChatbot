@@ -94,6 +94,34 @@ def test_generator_normalizer_excludes_task_type_selection() -> None:
     }
 
 
+def test_generator_normalizer_accepts_direct_bounded_artifact_text() -> None:
+    """Artifact generation may recover direct text after task classification."""
+
+    module = importlib.import_module(
+        "kazusa_ai_chatbot.background_work.subagent.text_artifact"
+    )
+    normalize = getattr(module, "normalize_text_artifact_generator_output")
+
+    result = normalize(
+        {},
+        task_type="coding_snippet",
+        raw_output=(
+            "```python\n"
+            "def fibonacci(n):\n"
+            "    return list(range(n))\n"
+            "```"
+        ),
+        max_output_chars=200,
+    )
+
+    assert result == {
+        "status": "succeeded",
+        "artifact_text": "def fibonacci(n):\n    return list(range(n))",
+        "failure_summary": "",
+        "result_summary": "Generated a bounded code snippet.",
+    }
+
+
 @pytest.mark.asyncio
 async def test_execute_uses_job_max_output_cap_for_worker_stages(
     monkeypatch,

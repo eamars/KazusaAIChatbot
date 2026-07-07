@@ -37,14 +37,19 @@ The resolver currently supports one public GitHub code source:
 - github.com blob file URLs
 - raw.githubusercontent.com file URLs
 - owner/repo GitHub shorthand when it is visibly written as a source
+- inline code or diff text pasted in the task
 
 Other visible source forms must still be extracted when they are the user's
 target, but label their family accurately. Examples include package references,
 documentation URLs, generic web pages, GitHub issues or pull requests, local
-paths, and unknown source-like text.
+paths, stack traces, logs, attachments, and unknown source-like text.
 
 Choose task_source_mode:
 - single_primary: one primary code source is intended.
+- inline_bundle: one or more inline code fragments form the source for one task.
+- mixed_primary_with_context: inline code and another code source are both
+  presented as possible primary targets, or one primary source has supporting
+  context.
 - compare_sources: the user asks to compare or jointly analyze multiple code
   sources.
 - source_free: the task has no source to fetch.
@@ -86,9 +91,16 @@ Choose each source mention role:
 - primary_code_source: the source to fetch as code.
 - scope_modifier: narrows or modifies another source in the same repository.
 - supporting_context: required external material needed to perform the task.
-- reference_only: optional context or an unsupported clue that should not become
-  the primary fetched content by itself.
+- reference_only: optional background, optional context, or an unsupported clue
+  that should not become the primary fetched content by itself.
 - unknown: visible source-like text whose role is unclear.
+
+For pasted code blocks, inline snippets, or diffs, set family_hint to
+inline_code or inline_diff and return a short exact anchor visible inside the
+fragment. Do not copy long code into the JSON. When a language fence or safe
+filename hint is visible, include language_hint and filename_hint. Stack traces,
+logs, and command output are supporting_context unless the user explicitly asks
+to analyze that log as the source artifact.
 
 For GitHub issues, pull requests, and discussions, distinguish the requested
 target carefully. If the user asks to analyze the issue, thread, bug report, or
@@ -110,16 +122,22 @@ Choose each source mention family_hint:
 - documentation_url
 - web_page
 - local_path
+- inline_code
+- inline_diff
+- log_or_trace
+- attachment
 - unknown
 
 Return strict JSON:
 {
-  "task_source_mode": "single_primary | compare_sources | source_free | unclear",
+  "task_source_mode": "single_primary | inline_bundle | mixed_primary_with_context | compare_sources | source_free | unclear",
   "source_mentions": [
     {
       "raw_text": "exact visible source text",
       "role": "one allowed role",
-      "family_hint": "one allowed family hint"
+      "family_hint": "one allowed family hint",
+      "language_hint": "short optional language name",
+      "filename_hint": "short optional safe filename"
     }
   ]
 }
@@ -129,9 +147,14 @@ _SOURCE_INTAKE_TIMEOUT_SECONDS = 300
 _MAX_TASK_TEXT_CHARS = 12000
 _MAX_VISIBLE_SPANS = 40
 _MAX_SPAN_CHARS = 512
+_MAX_HINT_CHARS = 80
 _MAX_RETRY_FEEDBACK_ITEMS = 8
 _MAX_RETRY_FEEDBACK_CHARS = 240
 _HTTP_CANDIDATE_RE = re.compile(r"https?://[^\s<>\[\]]+")
+_FENCED_CODE_BLOCK_RE = re.compile(
+    r"```[A-Za-z0-9_+.#-]*[^\n]*\n.*?(?:\n```|```)",
+    re.DOTALL,
+)
 _GITHUB_REPO_RE = re.compile(
     r"https?://(?:www\.)?github\.com/"
     r"(?P<owner>[A-Za-z0-9_.-]+)/(?P<repo>[A-Za-z0-9_.-]+(?:\.git)?)"
@@ -151,6 +174,8 @@ _WINDOWS_PATH_RE = re.compile(r"[A-Za-z]:\\[^\s]+")
 _TRAILING_URL_PUNCTUATION = ".,;:!?)]}\"'"
 _SOURCE_MODES = {
     "single_primary",
+    "inline_bundle",
+    "mixed_primary_with_context",
     "compare_sources",
     "source_free",
     "unclear",
@@ -174,6 +199,10 @@ _SOURCE_FAMILIES = {
     "documentation_url",
     "web_page",
     "local_path",
+    "inline_code",
+    "inline_diff",
+    "log_or_trace",
+    "attachment",
     "unknown",
 }
 
@@ -185,6 +214,8 @@ class SourceMention:
     raw_text: str
     role: str
     family_hint: str
+    language_hint: str = ""
+    filename_hint: str = ""
 
 
 @dataclass(frozen=True)
@@ -245,6 +276,7 @@ def build_visible_source_spans(task_text: str) -> list[str]:
 
     spans: list[str] = []
     for regex in (
+        _FENCED_CODE_BLOCK_RE,
         _HTTP_CANDIDATE_RE,
         _GITHUB_REPO_RE,
         _OWNER_REPO_RE,
@@ -293,6 +325,8 @@ def source_intake_result_to_dict(
                 "raw_text": mention.raw_text,
                 "role": mention.role,
                 "family_hint": mention.family_hint,
+                "language_hint": mention.language_hint,
+                "filename_hint": mention.filename_hint,
             }
             for mention in result.source_mentions
         ],
@@ -314,10 +348,20 @@ def _normalize_source_mentions(raw_mentions: object) -> list[SourceMention]:
         role = raw_role if raw_role in _SOURCE_ROLES else "unknown"
         raw_family = raw_mention.get("family_hint")
         family_hint = raw_family if raw_family in _SOURCE_FAMILIES else "unknown"
+        language_hint = _bounded_text(
+            raw_mention.get("language_hint"),
+            _MAX_HINT_CHARS,
+        )
+        filename_hint = _bounded_text(
+            raw_mention.get("filename_hint"),
+            _MAX_HINT_CHARS,
+        )
         mention = SourceMention(
             raw_text=raw_text,
             role=role,
             family_hint=family_hint,
+            language_hint=language_hint,
+            filename_hint=filename_hint,
         )
         mentions.append(mention)
         if len(mentions) >= _MAX_VISIBLE_SPANS:

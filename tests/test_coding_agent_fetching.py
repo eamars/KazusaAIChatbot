@@ -247,6 +247,78 @@ async def test_run_resolves_captured_question_url_through_source_intake(
     assert result['source_scope']['kind'] == 'repository'
 
 
+async def test_run_materializes_inline_source_bundle(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_fetching import source_intake
+    from kazusa_ai_chatbot.coding_agent.code_fetching.source_intake import (
+        SourceIntakeResult,
+        SourceMention,
+    )
+
+    task_text = (
+        'Please inspect this code:\n'
+        '```python\n'
+        'def normalize(value):\n'
+        '    return value.strip().lower()\n'
+        '```\n'
+    )
+
+    async def fake_run_source_intake(
+        task_text_arg: str,
+        *,
+        retry_feedback: list[str] | None = None,
+    ) -> SourceIntakeResult:
+        assert task_text_arg == task_text
+        assert retry_feedback is None
+        result = SourceIntakeResult(
+            task_source_mode='inline_bundle',
+            source_mentions=(
+                SourceMention(
+                    raw_text='def normalize(value):',
+                    role='primary_code_source',
+                    family_hint='inline_code',
+                    language_hint='python',
+                    filename_hint='normalizer.py',
+                ),
+            ),
+        )
+        return result
+
+    monkeypatch.setattr(
+        source_intake,
+        'run_source_intake',
+        fake_run_source_intake,
+    )
+
+    result = await run(
+        {
+            'question': task_text,
+            'workspace_root': str(tmp_path / 'coding_workspace'),
+        }
+    )
+
+    assert result['status'] == 'succeeded'
+    assert result['repository'] is not None
+    assert result['repository']['provider'] == 'inline'
+    assert result['repository']['owner'] == 'inline'
+    assert result['repository']['storage_kind'] == 'managed_inline_bundle'
+    assert result['repository']['current_commit'].startswith('inline-sha256:')
+    assert result['source_scope'] is not None
+    assert result['source_scope']['kind'] == 'file'
+    assert result['source_scope']['repo_relative_path'] == 'normalizer.py'
+    assert 'managed_inline:materialized:1' in result['trace_summary']
+
+    local_root = Path(result['repository']['local_root'])
+    materialized_file = local_root / 'normalizer.py'
+    assert materialized_file.read_text(encoding='utf-8') == (
+        'def normalize(value):\n'
+        '    return value.strip().lower()\n'
+    )
+    assert (local_root / 'manifest.json').exists()
+
+
 @pytest.mark.parametrize(
     "source_url",
     [

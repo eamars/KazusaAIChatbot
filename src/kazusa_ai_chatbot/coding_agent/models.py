@@ -9,6 +9,7 @@ TRACE_ITEM_LIMIT = 12
 
 SourceKind = Literal["repository", "directory", "file"]
 ResultStatus = Literal["succeeded", "failed", "needs_user_input", "rejected"]
+ProviderKind = Literal["github", "inline"]
 CodingAgentBackgroundOperation = Literal[
     "code_reading",
     "code_writing",
@@ -24,6 +25,15 @@ class CodingAgentSourceScope(TypedDict):
     source_url: str
     requested_ref: str | None
     interpretation: str
+
+
+class InlineSourceInput(TypedDict):
+    """Trusted inline source material supplied by a direct caller."""
+
+    content: str
+    filename_hint: str | None
+    language_hint: str | None
+    source_label: str
 
 
 class CodingAgentRequest(TypedDict, total=False):
@@ -45,6 +55,7 @@ class CodingAgentRequest(TypedDict, total=False):
     workspace_root: str
     preferred_language: str
     max_answer_chars: int
+    inline_sources: list[InlineSourceInput]
 
 
 class CodingAgentWriteRequest(TypedDict, total=False):
@@ -92,7 +103,7 @@ class CodingAgentBackgroundRequest(TypedDict, total=False):
 class CodingAgentRepositorySummary(TypedDict):
     """Public-safe repository metadata for direct callers and future workers."""
 
-    provider: Literal["github"]
+    provider: ProviderKind
     owner: str
     repo: str
     source_url: str

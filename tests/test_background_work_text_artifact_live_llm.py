@@ -82,6 +82,8 @@ async def test_background_work_text_artifact_live_case() -> None:
     parsed_generator_output = parse_llm_json_output(raw_generator_output)
     generator_result = normalize_text_artifact_generator_output(
         parsed_generator_output,
+        task_type=task_decision["task_type"],
+        raw_output=raw_generator_output,
         max_output_chars=max_output_chars,
     )
     trace_path = write_llm_trace(

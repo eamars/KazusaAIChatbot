@@ -4,10 +4,14 @@ from pathlib import Path
 
 from kazusa_ai_chatbot.coding_agent.code_fetching import github
 from kazusa_ai_chatbot.coding_agent.code_fetching import local_checkout
+from kazusa_ai_chatbot.coding_agent.code_fetching import managed_inline
 from kazusa_ai_chatbot.coding_agent.code_fetching import managed_clone
 from kazusa_ai_chatbot.coding_agent.code_fetching import managed_download
 from kazusa_ai_chatbot.coding_agent.code_fetching import source_resolver
 from kazusa_ai_chatbot.coding_agent.code_fetching.github import GitHubSource
+from kazusa_ai_chatbot.coding_agent.code_fetching.managed_inline import (
+    InlineSourceBundle,
+)
 from kazusa_ai_chatbot.coding_agent.code_fetching.models import (
     CodeFetchingRequest,
     CodeFetchingResult,
@@ -74,6 +78,41 @@ async def run(request: CodeFetchingRequest) -> CodeFetchingResult:
     if not workspace_root:
         workspace_root = managed_clone.default_workspace_root()
         trace_summary.append("Using standalone temp coding workspace.")
+
+    if isinstance(source, InlineSourceBundle):
+        try:
+            repository, source_scope_result = (
+                managed_inline.materialize_inline_source_bundle(
+                    source,
+                    workspace_root,
+                )
+            )
+        except managed_inline.ManagedInlineSourceError:
+            result = _managed_inline_failure_result(trace_summary)
+            return result
+        trace_summary.append(
+            f"managed_inline:materialized:{len(source.fragments)}"
+        )
+        result = _result(
+            status="succeeded",
+            message="Inline code source resolved.",
+            repository=repository,
+            source_scope=source_scope_result,
+            limitations=list(source_selection.limitations),
+            trace_summary=trace_summary,
+        )
+        return result
+
+    if not isinstance(source, GitHubSource):
+        result = _result(
+            status="failed",
+            message="Source selection returned an unsupported source type.",
+            repository=None,
+            source_scope=None,
+            limitations=["Source selection returned an unsupported source type."],
+            trace_summary=trace_summary,
+        )
+        return result
 
     if github.is_raw_github_source(source):
         try:
@@ -174,6 +213,20 @@ def _managed_download_failure_result(
         repository=None,
         source_scope=None,
         limitations=["Managed raw file download failed."],
+        trace_summary=trace_summary,
+    )
+    return result
+
+
+def _managed_inline_failure_result(
+    trace_summary: list[str],
+) -> CodeFetchingResult:
+    result = _result(
+        status="failed",
+        message="Unable to prepare managed inline source bundle.",
+        repository=None,
+        source_scope=None,
+        limitations=["Managed inline source preparation failed."],
         trace_summary=trace_summary,
     )
     return result

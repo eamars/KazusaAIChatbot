@@ -290,6 +290,7 @@
         "public_status": "needs_user_input",
         "issue_code": "required_supporting_source_unsupported",
         "task_source_mode": "single_primary",
+        "accepted_task_source_modes": ["single_primary", "mixed_primary_with_context"],
         "primary": null,
         "required_source_literals": ["https://docs.github.com/en/rest", "https://github.com/sdyzjx/open-yachiyo"],
         "must_not_probe_hosts": ["docs.github.com"]

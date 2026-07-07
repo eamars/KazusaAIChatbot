@@ -8,8 +8,19 @@ StorageKind = Literal[
     "existing_local_checkout",
     "managed_clone",
     "managed_download",
+    "managed_inline_bundle",
 ]
 DirtyState = Literal["clean", "dirty", "unknown"]
+ProviderKind = Literal["github", "inline"]
+
+
+class InlineSourceInput(TypedDict):
+    """Trusted inline source material supplied by a caller or extractor."""
+
+    content: str
+    filename_hint: str | None
+    language_hint: str | None
+    source_label: str
 
 
 class CodeFetchingRequest(TypedDict, total=False):
@@ -26,10 +37,11 @@ class CodeFetchingRequest(TypedDict, total=False):
         source_scope_hint: Optional desired scope when the source is otherwise
             repository-level.
         workspace_root: Managed checkout workspace root.
+        inline_sources: Trusted inline source fragments.
 
     Returns:
         A source-resolution request. At least one source field or embedded
-        GitHub URL is required.
+        GitHub URL, or one inline source fragment, is required.
     """
 
     question: str
@@ -41,6 +53,7 @@ class CodeFetchingRequest(TypedDict, total=False):
     requested_ref: str
     source_scope_hint: SourceKind
     workspace_root: str
+    inline_sources: list[InlineSourceInput]
 
 
 class CodeSourceScope(TypedDict):
@@ -56,7 +69,7 @@ class CodeSourceScope(TypedDict):
 class CodeRepositoryRef(TypedDict):
     """Resolved repository checkout contract."""
 
-    provider: Literal["github"]
+    provider: ProviderKind
     owner: str
     repo: str
     source_url: str

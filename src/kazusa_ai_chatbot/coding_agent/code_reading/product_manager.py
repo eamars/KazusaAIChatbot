@@ -96,6 +96,19 @@ facts until programmer workers read bounded source evidence.
 - Choose one generic intent from the allowed list.
 - If the question is too broad for at most three bounded workers, return
   overloaded with missing_slots explaining the narrower scope needed.
+- Judge broadness from the user's requested scope, not from how small or easy
+  the current repository map looks. Requests to explain, inspect, summarize, or
+  analyze everything, the whole repository, every file, all behavior, or the
+  entire project are unbounded unless the user names a specific workflow,
+  subsystem, API, symbol, state transition, or bounded evidence question.
+- For unbounded whole-project requests, do not create representative
+  architecture-overview assignments. Return overloaded or needs_user_input and
+  ask for a narrower target instead.
+- A high-level architecture or responsibility-boundary question is bounded
+  when the user names the product, subsystem, workflow, interface, or symbol to
+  explain. For that case, choose representative entry points, interfaces, and
+  core orchestration slices rather than treating every repository file or every
+  behavior as required evidence.
 - If the request asks to rewrite, edit, modify, patch, implement, or otherwise
   change code, return needs_user_input with intent unsupported_request and no
   assignments.
@@ -151,6 +164,13 @@ facts until programmer workers read bounded source evidence.
   logic, and downstream output or response construction when those scopes are
   visible or searchable. Do not mark sufficient if a named middle transition
   remains ungrounded.
+- Preserve evidence-owned component boundaries. If programmer reports show
+  that a requested effect belongs to a different component, client, adapter,
+  browser/desktop app, worker, or external service, treat that boundary as the
+  source-backed answer for that segment. Record any absent same-component path
+  as a limitation instead of a missing slot. Do not add server-side,
+  client-side, worker-side, or adapter-side ownership constraints unless the
+  user explicitly asks for that ownership or source evidence establishes it.
 - For control_or_feedback_flow questions, include bounded work for both the
   control calculation and the caller or output application when those files or
   symbols are visible in the repository map.
@@ -281,7 +301,10 @@ def decide_reading_work(
             HumanMessage(content=payload_text),
         ]
         if attempt_index:
-            messages.append(HumanMessage(content=READING_PM_ASSIGNMENT_CAP_RETRY_PROMPT))
+            retry_message = HumanMessage(
+                content=READING_PM_ASSIGNMENT_CAP_RETRY_PROMPT,
+            )
+            messages.append(retry_message)
         timed_out = False
         try:
             response = _reading_pm_llm.invoke(

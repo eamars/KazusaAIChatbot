@@ -9,6 +9,7 @@ from kazusa_ai_chatbot.coding_agent.code_fetching import source_resolver
 from tests.llm_trace import write_llm_trace
 
 
+_EXPLICIT_SOURCE_FIELDS = ('source_url', 'repo_url', 'repo_hint')
 _FIXTURE_PATH = (
     Path(__file__).resolve().parent
     / 'fixtures'
@@ -40,6 +41,10 @@ def test_source_intake_signoff_fixture_contract() -> None:
         assert 'expected' in case
         assert 'public_status' in case['expected']
         assert 'task_source_mode' in case['expected']
+        accepted_modes = case['expected'].get('accepted_task_source_modes')
+        if accepted_modes is not None:
+            assert isinstance(accepted_modes, list)
+            assert case['expected']['task_source_mode'] in accepted_modes
         assert 'forbidden_failure_modes' in case
 
 
@@ -62,6 +67,21 @@ async def test_source_intake_signoff_case_live_llm() -> None:
 
     intake_result = await source_intake.run_source_intake(case['task_text'])
     resolution = source_resolver.resolve_source_request(request, intake_result)
+    retry_intake_result = None
+    if (
+        not _has_explicit_source(request)
+        and resolution.retry_feedback
+    ):
+        retry_intake_result = await source_intake.run_source_intake(
+            case['task_text'],
+            retry_feedback=list(resolution.retry_feedback),
+        )
+        resolution = source_resolver.resolve_source_request(
+            request,
+            retry_intake_result,
+        )
+
+    final_intake_result = retry_intake_result or intake_result
 
     trace_path = write_llm_trace(
         'coding_agent_source_intake_signoff',
@@ -69,8 +89,17 @@ async def test_source_intake_signoff_case_live_llm() -> None:
         {
             'task_text': case['task_text'],
             'request_fields': case.get('request_fields', {}),
-            'intake_result': source_intake.source_intake_result_to_dict(
+            'first_intake_result': source_intake.source_intake_result_to_dict(
                 intake_result
+            ),
+            'retry_intake_result': (
+                None if retry_intake_result is None
+                else source_intake.source_intake_result_to_dict(
+                    retry_intake_result
+                )
+            ),
+            'intake_result': source_intake.source_intake_result_to_dict(
+                final_intake_result
             ),
             'resolution': source_resolver.source_resolution_to_dict(
                 resolution
@@ -81,7 +110,11 @@ async def test_source_intake_signoff_case_live_llm() -> None:
 
     assert trace_path.exists()
     assert resolution.status == expected['public_status']
-    assert intake_result.task_source_mode == expected['task_source_mode']
+    accepted_modes = expected.get(
+        'accepted_task_source_modes',
+        [expected['task_source_mode']],
+    )
+    assert final_intake_result.task_source_mode in accepted_modes
     assert resolution.issue_code == expected['issue_code']
 
     primary = expected.get('primary')
@@ -96,3 +129,7 @@ async def test_source_intake_signoff_case_live_llm() -> None:
     assert resolution.source.repo_relative_path == primary['repo_relative_path']
     if 'requested_ref' in primary:
         assert resolution.source.requested_ref == primary['requested_ref']
+
+
+def _has_explicit_source(request: dict) -> bool:
+    return any(request.get(field_name) for field_name in _EXPLICIT_SOURCE_FIELDS)

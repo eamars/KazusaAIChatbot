@@ -4,10 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+import re
 from urllib.parse import urlparse
 from typing import Any
 
 from kazusa_ai_chatbot.coding_agent.code_fetching import github
+from kazusa_ai_chatbot.coding_agent.code_fetching.managed_inline import (
+    InlineSourceBundle,
+    InlineSourceFragment,
+    inline_source_bundle_to_dict,
+)
 from kazusa_ai_chatbot.coding_agent.code_fetching import source_intake
 from kazusa_ai_chatbot.coding_agent.code_fetching.github import GitHubSource
 from kazusa_ai_chatbot.coding_agent.code_fetching.models import (
@@ -24,6 +30,7 @@ _SOURCE_PRIORITY = {
     "directory": 1,
     "file": 2,
 }
+_INLINE_SOURCE_FAMILIES = {"inline_code", "inline_diff"}
 _EXPLICIT_SOURCE_FIELDS = ("source_url", "repo_url", "repo_hint")
 _SOURCE_FAMILY_ISSUE_CODES = {
     "github_issue",
@@ -35,10 +42,28 @@ _SOURCE_FAMILY_ISSUE_CODES = {
 _RETRYABLE_INTAKE_ISSUES = {
     "source_not_visible_in_request",
     "malformed_source",
+    "inline_source_anchor_failed",
+    "required_supporting_source_unsupported",
+    "unsupported_multi_source",
 }
 _NO_SOURCE_LIMITATION = (
-    "Provide a public GitHub repository, tree, blob, raw file, or owner/repo "
-    "source."
+    "Provide a public GitHub repository, tree, blob, raw file, owner/repo "
+    "source, or pasted code text."
+)
+_MAX_INLINE_FRAGMENTS = 8
+_MAX_INLINE_FRAGMENT_CHARS = 12000
+_MAX_INLINE_TOTAL_CHARS = 24000
+_MAX_INLINE_LABEL_CHARS = 120
+_SECRET_LIKE_RE = re.compile(
+    r"(?i)(api[_-]?key|secret|token|password|private[_-]?key)\s*[:=]"
+)
+_INCOMPLETE_INLINE_RE = re.compile(
+    r"(?i)(<snip>|<truncated>|rest omitted|code omitted|truncated here)"
+)
+_FENCED_CODE_BLOCK_RE = re.compile(
+    r"```(?P<language>[A-Za-z0-9_+.#-]*)[^\n]*\n"
+    r"(?P<body>.*?)(?:\n```|```)",
+    re.DOTALL,
 )
 
 
@@ -48,7 +73,7 @@ class SourceResolution:
 
     status: ResultStatus
     message: str
-    source: GitHubSource | None
+    source: GitHubSource | InlineSourceBundle | None
     limitations: tuple[str, ...]
     trace_summary: tuple[str, ...]
     issue_code: str | None
@@ -57,7 +82,7 @@ class SourceResolution:
 
 @dataclass(frozen=True)
 class _ResolvedCandidate:
-    source: GitHubSource
+    source: GitHubSource | InlineSourceBundle
     raw_text: str
     role: str
 
@@ -77,6 +102,10 @@ async def select_source_for_request(
     """Resolve request source fields, invoking source intake when needed."""
 
     if _has_explicit_remote_source(request):
+        resolution = resolve_source_request(request, None)
+        trace_summary.extend(resolution.trace_summary)
+        return resolution
+    if request.get("inline_sources"):
         resolution = resolve_source_request(request, None)
         trace_summary.extend(resolution.trace_summary)
         return resolution
@@ -131,6 +160,9 @@ def resolve_source_request(
     if _has_explicit_remote_source(request):
         resolution = _resolve_explicit_sources(request)
         return resolution
+    if request.get("inline_sources"):
+        resolution = _resolve_trusted_inline_sources(request)
+        return resolution
     if intake_result is None:
         resolution = _problem_resolution(
             status="needs_user_input",
@@ -149,7 +181,7 @@ def source_resolution_to_dict(resolution: SourceResolution) -> dict[str, Any]:
     """Serialize a source resolution for trace artifacts."""
 
     source = None
-    if resolution.source is not None:
+    if isinstance(resolution.source, GitHubSource):
         source = {
             "owner": resolution.source.owner,
             "repo": resolution.source.repo,
@@ -158,6 +190,8 @@ def source_resolution_to_dict(resolution: SourceResolution) -> dict[str, Any]:
             "requested_ref": resolution.source.requested_ref,
             "repo_relative_path": resolution.source.repo_relative_path,
         }
+    elif isinstance(resolution.source, InlineSourceBundle):
+        source = inline_source_bundle_to_dict(resolution.source)
     return {
         "status": resolution.status,
         "message": resolution.message,
@@ -217,6 +251,57 @@ def _resolve_explicit_sources(
     return resolution
 
 
+def _resolve_trusted_inline_sources(
+    request: CodeFetchingRequest,
+) -> SourceResolution:
+    raw_sources = request.get("inline_sources")
+    if not isinstance(raw_sources, list):
+        resolution = _problem_resolution(
+            status="needs_user_input",
+            issue_code="no_source_found",
+            message="No inline source fragments were provided.",
+            limitations=[_NO_SOURCE_LIMITATION],
+            trace_summary=["source_resolver:no_source_found"],
+        )
+        return resolution
+
+    fragments: list[InlineSourceFragment] = []
+    problems: list[_SourceProblem] = []
+    for index, raw_source in enumerate(raw_sources, start=1):
+        if not isinstance(raw_source, dict):
+            continue
+        content = raw_source.get("content")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        fragment = InlineSourceFragment(
+            content=_ensure_trailing_newline(content),
+            filename_hint=_bounded_text(raw_source.get("filename_hint")),
+            language_hint=_bounded_text(raw_source.get("language_hint")),
+            source_label=_trusted_source_label(raw_source, index),
+        )
+        fragments.append(fragment)
+
+    bundle = _inline_bundle_from_fragments(fragments, problems)
+    candidates: list[_ResolvedCandidate] = []
+    if bundle is not None:
+        candidates.append(
+            _ResolvedCandidate(
+                source=bundle,
+                raw_text="trusted inline_sources",
+                role="primary_code_source",
+            )
+        )
+
+    resolution = _resolution_from_candidates(
+        request=request,
+        task_source_mode="inline_bundle",
+        candidates=candidates,
+        problems=problems,
+        block_primary_problems=True,
+    )
+    return resolution
+
+
 def _resolve_intake_sources(
     request: CodeFetchingRequest,
     intake_result: SourceIntakeResult,
@@ -224,6 +309,7 @@ def _resolve_intake_sources(
     question = request.get("question", "")
     visible_spans = source_intake.build_visible_source_spans(question)
     candidates: list[_ResolvedCandidate] = []
+    inline_fragments: list[InlineSourceFragment] = []
     problems: list[_SourceProblem] = []
 
     for mention in intake_result.source_mentions:
@@ -244,12 +330,30 @@ def _resolve_intake_sources(
                 )
             )
             continue
+        if mention.family_hint in _INLINE_SOURCE_FAMILIES:
+            _collect_inline_source_mention(
+                question=question,
+                mention=mention,
+                fragments=inline_fragments,
+                problems=problems,
+            )
+            continue
         _collect_source_text(
             mention.raw_text,
             role=mention.role,
             family_hint=mention.family_hint,
             candidates=candidates,
             problems=problems,
+        )
+
+    inline_bundle = _inline_bundle_from_fragments(inline_fragments, problems)
+    if inline_bundle is not None:
+        candidates.append(
+            _ResolvedCandidate(
+                source=inline_bundle,
+                raw_text="inline source bundle",
+                role="primary_code_source",
+            )
         )
 
     resolution = _resolution_from_candidates(
@@ -341,6 +445,141 @@ def _collect_non_primary_source_text(
     problems.append(problem)
 
 
+def _collect_inline_source_mention(
+    *,
+    question: str,
+    mention: SourceMention,
+    fragments: list[InlineSourceFragment],
+    problems: list[_SourceProblem],
+) -> None:
+    if mention.role != "primary_code_source":
+        problem = _source_problem(
+            mention.raw_text,
+            role=mention.role,
+            family_hint=mention.family_hint,
+        )
+        problems.append(problem)
+        return
+
+    content = _inline_fragment_content(question, mention.raw_text)
+    if not content:
+        problem = _SourceProblem(
+            issue_code="inline_source_anchor_failed",
+            message="Inline source anchor could not be matched to a code fragment.",
+            raw_text=mention.raw_text,
+            role=mention.role,
+        )
+        problems.append(problem)
+        return
+
+    fragment = InlineSourceFragment(
+        content=content,
+        filename_hint=mention.filename_hint,
+        language_hint=mention.language_hint,
+        source_label=_inline_source_label(mention),
+    )
+    fragments.append(fragment)
+
+
+def _inline_fragment_content(question: str, raw_text: str) -> str:
+    anchor = raw_text.strip()
+    if not anchor:
+        return ""
+
+    for match in _FENCED_CODE_BLOCK_RE.finditer(question):
+        whole_block = match.group(0)
+        block_body = match.group("body")
+        if anchor in whole_block or anchor in block_body:
+            content = _ensure_trailing_newline(block_body)
+            return content
+
+    if anchor in question:
+        content = _ensure_trailing_newline(anchor)
+        return content
+
+    return ""
+
+
+def _inline_bundle_from_fragments(
+    fragments: list[InlineSourceFragment],
+    problems: list[_SourceProblem],
+) -> InlineSourceBundle | None:
+    if not fragments:
+        return None
+
+    unique_fragments = _unique_inline_fragments(fragments)
+    if len(unique_fragments) > _MAX_INLINE_FRAGMENTS:
+        _append_inline_problem(
+            problems,
+            issue_code="inline_source_too_many_fragments",
+        )
+        return None
+
+    total_chars = sum(len(fragment.content) for fragment in unique_fragments)
+    if total_chars > _MAX_INLINE_TOTAL_CHARS:
+        _append_inline_problem(
+            problems,
+            issue_code="inline_source_too_large",
+        )
+        return None
+
+    for fragment in unique_fragments:
+        if len(fragment.content) > _MAX_INLINE_FRAGMENT_CHARS:
+            _append_inline_problem(
+                problems,
+                issue_code="inline_source_too_large",
+            )
+            return None
+        if _SECRET_LIKE_RE.search(fragment.content):
+            _append_inline_problem(
+                problems,
+                issue_code="inline_source_unsafe_content",
+            )
+            return None
+        if _INCOMPLETE_INLINE_RE.search(fragment.content):
+            _append_inline_problem(
+                problems,
+                issue_code="inline_source_incomplete",
+            )
+            return None
+
+    bundle = InlineSourceBundle(fragments=tuple(unique_fragments))
+    return bundle
+
+
+def _unique_inline_fragments(
+    fragments: list[InlineSourceFragment],
+) -> list[InlineSourceFragment]:
+    seen_contents: set[str] = set()
+    unique_fragments: list[InlineSourceFragment] = []
+    for fragment in fragments:
+        if fragment.content in seen_contents:
+            continue
+        seen_contents.add(fragment.content)
+        unique_fragments.append(fragment)
+    return unique_fragments
+
+
+def _append_inline_problem(
+    problems: list[_SourceProblem],
+    *,
+    issue_code: str,
+) -> None:
+    message = _message_for_source_problem(
+        "inline source",
+        issue_code=issue_code,
+        family_hint="inline_code",
+        role="primary_code_source",
+    )
+    problem = _SourceProblem(
+        issue_code=issue_code,
+        message=message,
+        raw_text="inline source",
+        role="primary_code_source",
+    )
+    problems.append(problem)
+
+
 def _resolution_from_candidates(
     *,
     request: CodeFetchingRequest,
@@ -359,6 +598,10 @@ def _resolution_from_candidates(
             trace_summary=[
                 "source_resolver:required_supporting_source_unsupported",
             ],
+            retry_feedback=_required_supporting_retry_feedback(
+                request.get("question", ""),
+                required_problem,
+            ),
         )
         return resolution
 
@@ -368,8 +611,45 @@ def _resolution_from_candidates(
             resolution = _resolution_without_candidates([primary_problem])
             return resolution
 
+    inline_candidates = [
+        candidate for candidate in candidates
+        if isinstance(candidate.source, InlineSourceBundle)
+    ]
+    github_candidates = [
+        candidate for candidate in candidates
+        if isinstance(candidate.source, GitHubSource)
+    ]
+    if inline_candidates and github_candidates:
+        resolution = _problem_resolution(
+            status="needs_user_input",
+            issue_code="mixed_primary_sources",
+            message=(
+                "Both inline code and another code source were provided as "
+                "primary sources; choose one."
+            ),
+            limitations=[
+                "Both inline code and another code source were provided as "
+                "primary sources; choose one.",
+            ],
+            trace_summary=["source_resolver:mixed_primary_sources"],
+        )
+        return resolution
+    if inline_candidates:
+        selected_inline = inline_candidates[0].source
+        limitations = _optional_problem_limitations(problems)
+        resolution = SourceResolution(
+            status="succeeded",
+            message="Inline source bundle selected.",
+            source=selected_inline,
+            limitations=tuple(limitations),
+            trace_summary=("source_resolver:inline_bundle_resolved",),
+            issue_code=None,
+            retry_feedback=(),
+        )
+        return resolution
+
     normalized_candidates = _apply_requested_ref(
-        candidates,
+        github_candidates,
         request.get("requested_ref"),
     )
     if not normalized_candidates:
@@ -438,6 +718,7 @@ def _source_selection_problem(
             message="Multiple-source code reading is not supported.",
             limitations=["Multiple-source code reading is not supported."],
             trace_summary=["source_resolver:unsupported_multi_source"],
+            retry_feedback=_multi_source_mode_retry_feedback(),
         )
         return resolution
 
@@ -512,7 +793,17 @@ def _resolution_without_candidates(
 
     first_problem = problems[0]
     status: ResultStatus = "rejected"
-    if first_problem.issue_code == "malformed_source":
+    needs_input_issues = {
+        "malformed_source",
+        "inline_source_anchor_failed",
+        "inline_source_too_large",
+        "inline_source_too_many_fragments",
+        "inline_source_unsafe_content",
+        "inline_source_incomplete",
+        "supporting_context_only",
+        "image_only_source",
+    }
+    if first_problem.issue_code in needs_input_issues:
         status = "needs_user_input"
     resolution = _problem_resolution(
         status=status,
@@ -548,6 +839,10 @@ def _source_problem(
 
 
 def _issue_code_for_source_text(source_text: str, family_hint: str) -> str:
+    if family_hint == "attachment":
+        return "image_only_source"
+    if family_hint == "log_or_trace":
+        return "supporting_context_only"
     if family_hint in _SOURCE_FAMILY_ISSUE_CODES:
         return "unsupported_source_family"
 
@@ -586,6 +881,20 @@ def _message_for_source_problem(
     role: str,
 ) -> str:
     redacted_text = github.redact_source_text(source_text)
+    if issue_code == "image_only_source":
+        return "Image-only code sources require pasted text source."
+    if issue_code == "supporting_context_only":
+        return "Only logs or supporting context were provided; provide code source."
+    if issue_code == "inline_source_anchor_failed":
+        return "Inline source anchor could not be matched to a code fragment."
+    if issue_code == "inline_source_too_large":
+        return "Inline source is too large; provide a smaller snippet or repository."
+    if issue_code == "inline_source_too_many_fragments":
+        return "Too many inline source fragments were provided; narrow the task."
+    if issue_code == "inline_source_unsafe_content":
+        return "Inline source appears to contain secrets; provide redacted code."
+    if issue_code == "inline_source_incomplete":
+        return "Inline source appears incomplete; provide the complete code text."
     if role == "supporting_context":
         return f"Required supporting source is not supported: {redacted_text}"
     if issue_code == "unsupported_provider":
@@ -666,7 +975,10 @@ def _required_supporting_problem(
     problems: Sequence[_SourceProblem],
 ) -> _SourceProblem | None:
     for problem in problems:
-        if problem.role == "supporting_context":
+        if (
+            problem.role == "supporting_context"
+            and problem.issue_code != "supporting_context_only"
+        ):
             return problem
     return None
 
@@ -702,6 +1014,30 @@ def _retry_feedback_for_problem(problem: _SourceProblem) -> list[str]:
     feedback = [
         "Return a source that matches supported provider grammar. "
         f"Rejected: {problem.raw_text}"
+    ]
+    return feedback
+
+
+def _required_supporting_retry_feedback(
+    question: str,
+    problem: _SourceProblem,
+) -> list[str]:
+    context = _source_context(question, problem.raw_text)
+    feedback = [
+        "Re-check the role for this supporting source using only its "
+        f"surrounding task text: {context}. Keep supporting_context when "
+        "the user says it is required, must be used, or needed. Use "
+        "reference_only only when the user says it is optional, background, "
+        "reference, or not required."
+    ]
+    return feedback
+
+
+def _multi_source_mode_retry_feedback() -> list[str]:
+    feedback = [
+        "Use compare_sources only when the task explicitly asks to compare "
+        "or jointly analyze multiple code sources. If multiple repositories "
+        "are visible but no primary is clear, use unclear."
     ]
     return feedback
 
@@ -742,3 +1078,48 @@ def _looks_like_local_path(source_text: str) -> bool:
     if len(source_text) >= 3 and source_text[1:3] == ":\\":
         return True
     return source_text.startswith(("./", "../", "/", "~"))
+
+
+def _bounded_text(value: object, max_chars: int = _MAX_INLINE_LABEL_CHARS) -> str:
+    if not isinstance(value, str):
+        return_value = ""
+        return return_value
+    return_value = value.strip()[:max_chars]
+    return return_value
+
+
+def _source_context(question: str, source_text: str) -> str:
+    if not question:
+        return source_text[:240]
+    source_index = question.find(source_text)
+    if source_index < 0:
+        return source_text[:240]
+    start_index = max(0, source_index - 120)
+    end_index = min(len(question), source_index + len(source_text) + 120)
+    context = question[start_index:end_index].strip()
+    return context[:240]
+
+
+def _ensure_trailing_newline(value: str) -> str:
+    if value.endswith("\n"):
+        return value
+    updated_value = value + "\n"
+    return updated_value
+
+
+def _inline_source_label(mention: SourceMention) -> str:
+    if mention.filename_hint:
+        label = mention.filename_hint[:_MAX_INLINE_LABEL_CHARS]
+        return label
+    if mention.language_hint:
+        label = f"inline {mention.language_hint}"[:_MAX_INLINE_LABEL_CHARS]
+        return label
+    return "inline source"
+
+
+def _trusted_source_label(raw_source: dict[str, object], index: int) -> str:
+    source_label = _bounded_text(raw_source.get("source_label"))
+    if source_label:
+        return source_label
+    fallback_label = f"inline source {index}"
+    return fallback_label

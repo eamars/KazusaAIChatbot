@@ -316,6 +316,71 @@ def test_reading_synthesis_payload_compacts_large_evidence() -> None:
     )
 
 
+def test_reading_synthesis_answer_includes_required_limitations() -> None:
+    from kazusa_ai_chatbot.coding_agent.code_reading.synthesizer import (
+        _answer_with_required_limitations,
+    )
+
+    answer = "Order creation calls PaymentGateway."
+    limitations = ["No selected evidence showed retry backoff configuration."]
+
+    updated = _answer_with_required_limitations(
+        answer,
+        limitations,
+        max_answer_chars=500,
+    )
+    repeated = _answer_with_required_limitations(
+        updated,
+        limitations,
+        max_answer_chars=500,
+    )
+
+    assert "retry backoff" in updated.casefold()
+    assert repeated == updated
+
+
+def test_reading_synthesis_limitations_do_not_leak_ungrounded_identifiers() -> None:
+    from kazusa_ai_chatbot.coding_agent.code_reading.synthesizer import (
+        _answer_with_required_limitations,
+        _public_grounded_limitations,
+    )
+
+    evidence = [
+        {
+            "path": "src/order_gateway/service.py",
+            "line_start": 5,
+            "line_end": 8,
+            "symbol_or_topic": "OrderService.create_order",
+            "excerpt": (
+                "payment = PaymentGateway().charge_order(payload)\n"
+                "LedgerWriter().record_payment(payment)"
+            ),
+            "reason": "order payment flow",
+        }
+    ]
+    limitations = [
+        "No selected evidence matched the requested identifier.",
+        (
+            "The specific identifier 'ShadowLedger' does not appear in the "
+            "provided code snippets or reports."
+        ),
+    ]
+
+    public_limitations = _public_grounded_limitations(
+        limitations,
+        evidence=evidence,
+        repository_summary={},
+    )
+    updated = _answer_with_required_limitations(
+        "Order creation calls PaymentGateway and LedgerWriter.",
+        public_limitations,
+        max_answer_chars=500,
+    )
+
+    assert "No selected evidence matched the requested identifier" in updated
+    assert "ShadowLedger" not in updated
+
+
 @pytest.mark.parametrize(
     ("repo_relative_path", "expected_fragment"),
     [
@@ -611,6 +676,82 @@ def test_search_evidence_uses_assignment_questions_to_rank_broad_terms(
     )
 
     assert bundle.files_read[0] == "src/orders/flow/z_decision.py"
+
+
+def test_search_evidence_preserves_dotted_callsite_terms_in_large_repos(
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_reading.evidence import (
+        collect_assignment_evidence,
+    )
+
+    repository = _make_repository(tmp_path)
+    repo_root = Path(repository["local_root"])
+    noisy_root = repo_root / "src" / "integrations"
+    noisy_root.mkdir()
+    for index in range(40):
+        (noisy_root / f"noise_{index:02d}.py").write_text(
+            "\n".join(
+                [
+                    "async def async_call_service(service):",
+                    "    await service.device.dispatch()",
+                    "",
+                    "def call_service(service):",
+                    "    return service.name",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    endpoint_root = repo_root / "src" / "websocket_api"
+    endpoint_root.mkdir()
+    (endpoint_root / "commands.py").write_text(
+        "\n".join(
+            [
+                "@websocket_command({'type': 'call_service'})",
+                "async def handle_call_service(hass, connection, msg):",
+                "    response = await hass.services.async_call(",
+                "        domain=msg['domain'],",
+                "        service=msg['service'],",
+                "    )",
+                "    connection.send_result(msg['id'], response)",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    assignment = {
+        "assignment_id": "api-ingress",
+        "role": "ingress analyst",
+        "scope": {
+            "kind": "search",
+            "values": [
+                "call_service",
+                "async_call_service",
+                "websocket service call",
+            ],
+        },
+        "questions": [
+            "How are UI or API requests routed to the "
+            "`hass.services.async_call` method?"
+        ],
+        "required_slots": ["ingress_to_service_dispatch"],
+    }
+
+    bundle = collect_assignment_evidence(
+        repo_root=repo_root,
+        source_scope=_scope(),
+        assignment=assignment,
+        max_files=6,
+        max_excerpt_chars=12000,
+    )
+
+    assert "src/websocket_api/commands.py" in bundle.files_read
+    assert any(
+        "handle_call_service" in row["excerpt"]
+        and "hass.services.async_call" in row["excerpt"]
+        for row in bundle.rows
+    )
 
 
 def test_search_evidence_keeps_distinct_regions_from_same_file(
@@ -968,6 +1109,275 @@ def test_search_evidence_keeps_nearby_branch_inside_excerpt_window(
     )
 
     assert any("final_action" in row["excerpt"] for row in bundle.rows)
+
+
+def test_search_evidence_includes_base_symbol_for_variant_scope(
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_reading.evidence import (
+        collect_assignment_evidence,
+    )
+
+    repo_root = tmp_path / "variant_symbol_repo"
+    (repo_root / "src").mkdir(parents=True)
+    source_lines = [
+        "def missedmessage_hook(data):",
+        "    return maybe_enqueue_notifications(data.notifications, data.idle)",
+        "",
+    ]
+    source_lines.extend(f"# hook filler {index}" for index in range(30))
+    source_lines.extend([
+        "def maybe_enqueue_notifications(user_notifications_data, idle):",
+        "    if user_notifications_data.is_push_notifiable(idle):",
+        "        queue_mobile_push()",
+    ])
+    source_lines.extend(f"    # body filler {index}" for index in range(30))
+    source_lines.extend([
+        "    if user_notifications_data.is_email_notifiable(idle):",
+        "        queue_missedmessage_email()",
+        "",
+    ])
+    source_lines.extend(f"# filler {index}" for index in range(50))
+    source_lines.extend([
+        "def maybe_enqueue_notifications_for_message_update(data):",
+        "    if data.was_newly_mentioned:",
+        "        return maybe_enqueue_notifications(data.notifications, data.idle)",
+        "    return {}",
+    ])
+    (repo_root / "src" / "events.py").write_text(
+        "\n".join(source_lines) + "\n",
+        encoding="utf-8",
+    )
+    assignment = {
+        "assignment_id": "notification-flow",
+        "role": "notification flow reader",
+        "scope": {
+            "kind": "symbol",
+            "values": ["maybe_enqueue_notifications_for_message_update"],
+        },
+        "questions": [
+            "How does the normal message notification path enqueue push and email?"
+        ],
+        "required_slots": ["base notification dispatch"],
+    }
+
+    bundle = collect_assignment_evidence(
+        repo_root=repo_root,
+        source_scope=_scope(),
+        assignment=assignment,
+        max_files=1,
+        max_excerpt_chars=12000,
+    )
+
+    assert any(
+        "def maybe_enqueue_notifications(" in row["excerpt"]
+        for row in bundle.rows
+    )
+    assert any("queue_missedmessage_email" in row["excerpt"] for row in bundle.rows)
+
+
+def test_search_evidence_finds_server_unread_mention_flag(
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_reading.evidence import (
+        collect_assignment_evidence,
+    )
+
+    repo_root = tmp_path / "unread_mention_repo"
+    (repo_root / "zerver" / "actions").mkdir(parents=True)
+    (repo_root / "web" / "src").mkdir(parents=True)
+    (repo_root / "web" / "tests").mkdir(parents=True)
+    (repo_root / "locale" / "ar").mkdir(parents=True)
+    source_lines = [
+        "def mention_metadata():",
+    ]
+    source_lines.extend(
+        f"    possibly_mentioned_user_ids_{index} = set()"
+        for index in range(60)
+    )
+    source_lines.extend([
+        "",
+        "def create_user_messages(mentioned_user_ids, um_eligible_user_ids):",
+        "    user_messages = []",
+        "    for user_profile_id in um_eligible_user_ids:",
+        "        flags = 0",
+        "        if user_profile_id in mentioned_user_ids:",
+        "            flags |= UserMessage.flags.mentioned",
+        "        user_messages.append(flags)",
+        "    return user_messages",
+    ])
+    (repo_root / "zerver" / "actions" / "message_send.py").write_text(
+        "\n".join(source_lines) + "\n",
+        encoding="utf-8",
+    )
+    (repo_root / "web" / "src" / "unread.ts").write_text(
+        "\n".join([
+            "export const unread_mentions_counter = new Set<number>();",
+            "export const unread_mention_topics = new Map<string, Set<number>>();",
+            "export function render_unread_mentions(): void {",
+            "    unread_mentions_counter.add(1);",
+            "}",
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    (repo_root / "web" / "tests" / "message_events.test.cjs").write_text(
+        "\n".join([
+            "test('unread mention counters update', () => {",
+            "    unread_mentions_counter.add(message.id);",
+            "    unread_mention_topics.set(topic_key, new Set([message.id]));",
+            "});",
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    (repo_root / "locale" / "ar" / "translations.json").write_text(
+        "\n".join([
+            "{",
+            '  "unread mention": "mentioned unread message",',
+            '  "message mentioned user": "unread mention status"',
+            "}",
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    assignment = {
+        "assignment_id": "find-unread-mention",
+        "role": "notification flow reader",
+        "scope": {
+            "kind": "search",
+            "values": [
+                "mark as unread mention",
+                "update unread counts mentions",
+            ],
+        },
+        "questions": [
+            "How does the system decide if a message is an unread mention?",
+            "Where is the server-side state update during message sending?",
+        ],
+        "required_slots": ["unread_mention_logic"],
+    }
+
+    bundle = collect_assignment_evidence(
+        repo_root=repo_root,
+        source_scope=_scope(),
+        assignment=assignment,
+        max_files=2,
+        max_excerpt_chars=12000,
+    )
+
+    assert any("UserMessage.flags.mentioned" in row["excerpt"] for row in bundle.rows)
+
+
+def test_search_evidence_uses_flag_attribute_terms_past_generic_caps(
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_reading.evidence import (
+        collect_assignment_evidence,
+    )
+
+    repo_root = tmp_path / "flag_attribute_repo"
+    (repo_root / "src").mkdir(parents=True)
+    source_lines = [
+        "def mention_index():",
+    ]
+    source_lines.extend(
+        f"    possibly_mentioned_user_ids_{index} = set()"
+        for index in range(80)
+    )
+    source_lines.extend([
+        "",
+        "def apply_flags(user_profile_id, mentioned_user_ids):",
+        "    flags = 0",
+        "    if user_profile_id in mentioned_user_ids:",
+        "        flags |= UserMessage.flags.mentioned",
+        "    return flags",
+    ])
+    (repo_root / "src" / "message_send.py").write_text(
+        "\n".join(source_lines) + "\n",
+        encoding="utf-8",
+    )
+    assignment = {
+        "assignment_id": "flag-attribute",
+        "role": "flag reader",
+        "scope": {
+            "kind": "search",
+            "values": ["unread mention"],
+        },
+        "questions": ["Where is the mention flag assigned?"],
+        "required_slots": ["mention flag"],
+    }
+
+    bundle = collect_assignment_evidence(
+        repo_root=repo_root,
+        source_scope=_scope(),
+        assignment=assignment,
+        max_files=1,
+        max_excerpt_chars=12000,
+    )
+
+    assert any("UserMessage.flags.mentioned" in row["excerpt"] for row in bundle.rows)
+
+
+def test_search_evidence_preserves_high_relevance_docs(
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_reading.evidence import (
+        collect_assignment_evidence,
+    )
+
+    repo_root = tmp_path / "notification_docs_repo"
+    (repo_root / "docs" / "subsystems").mkdir(parents=True)
+    (repo_root / "web" / "src").mkdir(parents=True)
+    (repo_root / "zerver" / "models").mkdir(parents=True)
+    (repo_root / "docs" / "subsystems" / "notifications.md").write_text(
+        "\n".join([
+            "# Notifications",
+            "",
+            "Desktop notifications are implemented client-side by the web",
+            "and desktop app notification logic inspecting message flags",
+            "and the user's notification settings.",
+            "Mobile push and email notifications are queued server-side.",
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    (repo_root / "web" / "src" / "settings.ts").write_text(
+        "\n".join([
+            "export const enable_desktop_notifications = true;",
+            "export const desktop_notification_setting = 'enabled';",
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    (repo_root / "zerver" / "models" / "streams.py").write_text(
+        "\n".join([
+            "class StreamNotificationSettings:",
+            "    desktop_notifications = True",
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    assignment = {
+        "assignment_id": "find-desktop-notification-boundary",
+        "role": "notification channel reader",
+        "scope": {
+            "kind": "search",
+            "values": ["desktop notification logic"],
+        },
+        "questions": [
+            "What logic determines if a desktop notification is sent versus a push notification?"
+        ],
+        "required_slots": ["desktop_notification_decision"],
+    }
+
+    bundle = collect_assignment_evidence(
+        repo_root=repo_root,
+        source_scope=_scope(),
+        assignment=assignment,
+        max_files=2,
+        max_excerpt_chars=12000,
+    )
+
+    assert any(
+        row["path"] == "docs/subsystems/notifications.md"
+        and "client-side" in row["excerpt"]
+        for row in bundle.rows
+    )
 
 
 def test_answer_cap_is_enforced_when_public_run_succeeds(

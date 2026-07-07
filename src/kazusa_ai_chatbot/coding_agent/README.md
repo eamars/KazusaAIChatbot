@@ -15,8 +15,10 @@ from kazusa_ai_chatbot.coding_agent.code_writing import run as run_code_writing
 ```
 
 `code_fetching.run(...)` resolves a supported code source into a local source
-contract. It does not read files to answer questions, write patches, execute
-project commands, or integrate with Kazusa service/background-worker runtime.
+contract. Supported sources include GitHub/local/raw inputs and managed inline
+source bundles created from pasted code text. It does not read files to answer
+questions, write patches, execute project commands, or integrate with Kazusa
+service/background-worker runtime.
 
 `answer_code_question(...)` is the direct code-reading interface. It calls
 source fetching first, short-circuits non-success fetching results, then calls
@@ -94,7 +96,7 @@ flowchart TD
         F1["explicit local/source fast path<br/>local checkout, local path,<br/>source_url, repo_url, repo_hint"]
         F2["source-intake specialist<br/>CODING_AGENT_PM_LLM<br/>visible source mentions, roles, families"]
         F3["deterministic source resolver<br/>anchoring, provider grammar,<br/>cardinality, issue codes"]
-        F4["managed clone / managed raw download<br/>or existing checkout resolution"]
+        F4["managed clone / managed raw download<br/>managed inline bundle<br/>or existing checkout resolution"]
         F5["CodeRepositoryRef + CodeSourceScope<br/>internal local_root, public source scope"]
         F0 --> F1 --> F4
         F0 --> F2 --> F3 --> F4 --> F5
@@ -146,13 +148,13 @@ flowchart TD
 
 `code_fetching` is the only source-resolution owner. Question-text sources are
 extracted by the PM-route source-intake specialist inside `code_fetching`; the
-deterministic resolver validates anchoring, provider grammar, cardinality,
-explicit-field precedence, and public issue/status mapping before any checkout
-or download. `code_reading` is read-only and evidence-backed. `code_writing`
-currently owns source-free new-artifact proposals only. Generated-artifact
-readback deliberately reuses `code_reading` through a managed read-only source
-so later writing work consumes compact supervisor facts instead of raw generated
-files.
+deterministic resolver validates anchoring, provider grammar, inline-code
+cardinality and size, explicit-field precedence, and public issue/status
+mapping before any checkout, download, or inline materialization. `code_reading`
+is read-only and evidence-backed. `code_writing` currently owns source-free
+new-artifact proposals only. Generated-artifact readback deliberately reuses
+`code_reading` through a managed read-only source so later writing work consumes
+compact supervisor facts instead of raw generated files.
 
 The deferred `code_executing` subagent is not shown because no implemented
 runtime path dispatches to it.
@@ -170,6 +172,7 @@ runtime path dispatches to it.
 - `requested_ref`
 - `source_scope_hint`
 - `workspace_root`
+- `inline_sources`
 
 It also accepts code-reading hints:
 
@@ -254,9 +257,11 @@ the worker:
 - `managed_checkout`
 - `dirty_state`
 
-`storage_kind` is `existing_local_checkout`, `managed_clone`, or
-`managed_download`. For `managed_download`, `current_commit` is a
-`raw-sha256:<hash>` content identity rather than a Git commit.
+`storage_kind` is `existing_local_checkout`, `managed_clone`,
+`managed_download`, or `managed_inline_bundle`. For `managed_download`,
+`current_commit` is a `raw-sha256:<hash>` content identity rather than a Git
+commit. For `managed_inline_bundle`, `current_commit` is an
+`inline-sha256:<hash>` identity over exact pasted source content.
 
 The direct response and worker metadata must not include `local_root`,
 `workspace_root`, `cache_key`, raw command output, full source files, `.env`

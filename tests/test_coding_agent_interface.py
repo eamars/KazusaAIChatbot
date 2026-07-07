@@ -269,6 +269,79 @@ async def test_answer_code_question_sanitizes_repository_metadata(
     assert calls["reading"]
 
 
+async def test_answer_code_question_sanitizes_inline_repository_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent import answer_code_question
+
+    inline_root = tmp_path / 'inline_bundle'
+    inline_root.mkdir()
+    (inline_root / 'snippet.py').write_text(
+        'def solve():\n'
+        '    return 1\n',
+        encoding='utf-8',
+    )
+    fetching_result = {
+        'status': 'succeeded',
+        'message': 'resolved',
+        'repository': {
+            'provider': 'inline',
+            'owner': 'inline',
+            'repo': 'bundle-abc123',
+            'source_url': 'inline://accepted-task/bundle-abc123',
+            'requested_ref': None,
+            'resolved_ref': 'inline',
+            'current_commit': 'inline-sha256:' + 'a' * 64,
+            'default_branch': '',
+            'local_root': str(inline_root),
+            'storage_kind': 'managed_inline_bundle',
+            'managed_checkout': True,
+            'workspace_root': str(tmp_path / 'workspace'),
+            'cache_key': None,
+            'dirty_state': 'clean',
+        },
+        'source_scope': {
+            'kind': 'file',
+            'repo_relative_path': 'snippet.py',
+            'source_url': 'inline://accepted-task/bundle-abc123/snippet.py',
+            'requested_ref': None,
+            'interpretation': 'managed inline source fragment',
+        },
+        'limitations': [],
+        'trace_summary': ['managed_inline:materialized:1'],
+    }
+    calls = _install_fake_subagents(
+        monkeypatch,
+        fetching_result,
+        reading_result=_successful_reading_result(),
+    )
+
+    response = await answer_code_question({
+        'question': 'Please review the inline snippet.',
+        'workspace_root': str(tmp_path / 'workspace'),
+    })
+
+    assert response['status'] == 'succeeded'
+    assert response['repository'] == {
+        'provider': 'inline',
+        'owner': 'inline',
+        'repo': 'bundle-abc123',
+        'source_url': 'inline://accepted-task/bundle-abc123',
+        'requested_ref': None,
+        'resolved_ref': 'inline',
+        'current_commit': 'inline-sha256:' + 'a' * 64,
+        'default_branch': '',
+        'storage_kind': 'managed_inline_bundle',
+        'managed_checkout': True,
+        'dirty_state': 'clean',
+    }
+    assert calls['reading'][0]['repository']['local_root'] == str(inline_root)
+    assert str(inline_root) not in repr(response)
+    assert str(tmp_path / 'workspace') not in repr(response)
+    assert 'cache_key' not in repr(response)
+
+
 async def test_answer_code_question_carries_ordered_limitations(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

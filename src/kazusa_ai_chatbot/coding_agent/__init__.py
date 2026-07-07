@@ -9,6 +9,7 @@ from kazusa_ai_chatbot.coding_agent.models import (
     CodingAgentRepositorySummary,
     CodingAgentRequest,
     CodingAgentResponse,
+    InlineSourceInput,
 )
 from kazusa_ai_chatbot.coding_agent.supervisor import (
     answer_code_question,
@@ -25,6 +26,7 @@ __all__ = [
     "CodingAgentRepositorySummary",
     "CodingAgentRequest",
     "CodingAgentResponse",
+    "InlineSourceInput",
     "answer_code_question",
     "handle_background_coding_task",
     "propose_code_change",
