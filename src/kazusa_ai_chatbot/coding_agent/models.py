@@ -13,6 +13,7 @@ ProviderKind = Literal["github", "inline"]
 CodingAgentBackgroundOperation = Literal[
     "code_reading",
     "code_writing",
+    "code_modifying",
     "unsupported",
 ]
 

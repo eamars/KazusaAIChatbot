@@ -11,6 +11,7 @@ from kazusa_ai_chatbot.coding_agent import handle_background_coding_task
 from kazusa_ai_chatbot.coding_agent import propose_code_change
 from kazusa_ai_chatbot.coding_agent.code_fetching import run as run_code_fetching
 from kazusa_ai_chatbot.coding_agent.code_reading import run as run_code_reading
+from kazusa_ai_chatbot.coding_agent.code_modifying import run as run_code_modifying
 from kazusa_ai_chatbot.coding_agent.code_writing import run as run_code_writing
 ```
 
@@ -26,17 +27,18 @@ source fetching first, short-circuits non-success fetching results, then calls
 Responses use a public-safe repository summary and bounded repo-relative source
 evidence.
 
-`propose_code_change(...)` is the direct code-writing interface. It requires an
-explicit `workspace_root`, returns proposed patch artifacts only, and never
-applies patches or runs target project commands. Existing-repository writing
-is rejected by the current implementation because semantic edits to existing
-source belong to a future code-modifying capability. Source-free requests use
-the managed new-project writing workspace.
+`propose_code_change(...)` is the direct patch-proposal interface. It requires
+an explicit `workspace_root`, returns proposed patch artifacts only, and never
+applies patches or runs target project commands. Source-free requests use the
+managed new-project `code_writing` workspace. Explicit source requests resolve
+the source, run read-only evidence collection, ask `code_modifying` for
+structured existing-file operations, and materialize review-only patch
+artifacts through `code_patching`.
 
 `handle_background_coding_task(...)` is the accepted-task background interface.
 It receives one background coding task, asks the coding-agent supervisor route
-to choose reading, writing, or unsupported, and then calls the public
-code-reading or code-writing interface. The read-versus-write decision belongs
+to choose reading, writing, modifying, or unsupported, and then calls the
+public code-reading or patch-proposal interface. The operation decision belongs
 here, not in L2d or the generic background-work router.
 
 Implemented subagents:
@@ -45,6 +47,10 @@ Implemented subagents:
   explicit local-checkout sources.
 - `code_reading`: reads safe text files inside the resolved source scope and
   synthesizes evidence-backed answers.
+- `code_modifying`: converts source evidence and bounded file context into
+  structured existing-file modification operations.
+- `code_patching`: converts selected writing/modifying artifacts into
+  review-only patch artifacts and sandbox materialization checks.
 - `code_writing`: creates source-free new-artifact patch proposals in managed
   storage.
 
@@ -73,15 +79,16 @@ flowchart TD
     B1["background_work router LLM<br/>selects worker only"]
     B2["providers.dispatch_background_work<br/>worker registry dispatch"]
     B3["background_work.subagent.coding_agent.execute<br/>injects CODING_AGENT_WORKSPACE_ROOT<br/>maps sanitized result metadata"]
-    B4["handle_background_coding_task(...)<br/>coding-agent supervisor LLM<br/>operation: code_reading / code_writing / unsupported"]
+    B4["handle_background_coding_task(...)<br/>coding-agent supervisor LLM<br/>operation: code_reading / code_writing / code_modifying / unsupported"]
     O0["unsupported or failed response<br/>no coding subagent call"]
     O1["CodingAgentResponse<br/>public-safe answer and evidence"]
-    O2["CodingPatchProposalResponse<br/>new-artifact proposal only"]
+    O2["CodingPatchProposalResponse<br/>review-only patch proposal"]
     O3["CodingAgentBackgroundResponse<br/>worker-facing common shape"]
 
     B0 --> B1 --> B2 --> B3 --> B4
     B4 -->|code_reading| D0
     B4 -->|code_writing| D1
+    B4 -->|code_modifying| D1
     B4 -->|unsupported| O0
     D0 --> F0
     D1 --> W0
@@ -118,7 +125,7 @@ flowchart TD
     end
 
     subgraph Writing["code_writing"]
-        W0["source gate<br/>existing-source writes rejected<br/>source-free create_new_project only"]
+        W0["source-free create_new_project request"]
         W1["code_writing.run(...)"]
         W2["writing supervisor<br/>session + ledger + loop budget"]
         W3["Acceptance owner LLM<br/>preserve user-visible requirements"]
@@ -129,7 +136,7 @@ flowchart TD
         W8["generated-artifact readback source<br/>managed read-only workspace"]
         W9["supervisor fact<br/>generated_artifact_readback"]
         W10["external evidence collector<br/>web_agent3 summaries"]
-        W11["patcher boundary<br/>new-file patch artifacts only"]
+        W11["code_patching boundary<br/>new-file patch artifacts"]
         W12["review-package materialization<br/>inspection storage, not execution"]
         W13["writing synthesis LLM<br/>proposal answer + limitations"]
         W14["public proposal sanitizer<br/>no local roots, diffs in metadata,<br/>commands, or applied mutations"]
@@ -142,8 +149,19 @@ flowchart TD
         W4 -->|complete| W11 --> W12 --> W13 --> W14
     end
 
+    subgraph Modifying["code_modifying"]
+        M0["explicit source request<br/>fetch then read evidence"]
+        M1["bounded source context<br/>safe text files only"]
+        M2["modifying programmer LLM<br/>structured operations only"]
+        M3["code_patching boundary<br/>existing-file patch artifacts"]
+        M4["review-package materialization<br/>inspection storage, not execution"]
+        M0 --> R0
+        R7 --> M1 --> M2 --> M3 --> M4 --> O2
+    end
+
     F5 -->|succeeded| R0
     F0 -->|failed, rejected, or needs input| O1
+    F5 -->|explicit source write| M0
 ```
 
 `code_fetching` is the only source-resolution owner. Question-text sources are
@@ -151,10 +169,12 @@ extracted by the PM-route source-intake specialist inside `code_fetching`; the
 deterministic resolver validates anchoring, provider grammar, inline-code
 cardinality and size, explicit-field precedence, and public issue/status
 mapping before any checkout, download, or inline materialization. `code_reading`
-is read-only and evidence-backed. `code_writing` currently owns source-free
-new-artifact proposals only. Generated-artifact readback deliberately reuses
-`code_reading` through a managed read-only source so later writing work consumes
-compact supervisor facts instead of raw generated files.
+is read-only and evidence-backed. `code_writing` owns source-free new-artifact
+proposals. `code_modifying` owns existing-source semantic patch proposals from
+read evidence and bounded file context. `code_patching` owns deterministic diff
+assembly and review materialization for both flows. Generated-artifact readback
+deliberately reuses `code_reading` through a managed read-only source so later
+writing work consumes compact supervisor facts instead of raw generated files.
 
 The deferred `code_executing` subagent is not shown because no implemented
 runtime path dispatches to it.
@@ -192,10 +212,10 @@ The supervisor passes all source-fetching fields through unchanged to
 - `max_artifact_chars`
 - `session_id`
 
-`workspace_root` is required for writing. If source fields are present, the
-request is rejected because existing-source modification belongs to a separate
-code-modifying capability. If no source fields are present, the request is
-handled as a new-project proposal in a managed writing workspace.
+`workspace_root` is required for patch proposals. If source fields are present,
+the request is handled as an existing-source patch proposal through fetching,
+reading, modifying, and patching. If no source fields are present, the request
+is handled as a new-project proposal in a managed writing workspace.
 
 ## Direct Response
 

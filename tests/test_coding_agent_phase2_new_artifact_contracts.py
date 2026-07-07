@@ -5,7 +5,7 @@ import pytest
 
 
 def test_patch_validation_exposes_only_review_materialization_boundary() -> None:
-    from kazusa_ai_chatbot.coding_agent.code_writing import patch_validation
+    from kazusa_ai_chatbot.coding_agent.code_patching import patch_validation
 
     assert hasattr(patch_validation, "materialize_patch_artifacts_for_review")
     assert not hasattr(patch_validation, "validate_patch_artifacts")
@@ -14,7 +14,7 @@ def test_patch_validation_exposes_only_review_materialization_boundary() -> None
 
 
 def test_patch_validation_does_not_run_generated_python_tests() -> None:
-    from kazusa_ai_chatbot.coding_agent.code_writing import patch_validation
+    from kazusa_ai_chatbot.coding_agent.code_patching import patch_validation
 
     source_path = Path(patch_validation.__file__)
     source_text = source_path.read_text(encoding="utf-8")
@@ -280,7 +280,7 @@ def test_coding_supervisor_work_ledger_projects_compact_state() -> None:
 
 
 def test_patcher_materializes_generated_new_files(tmp_path: Path) -> None:
-    from kazusa_ai_chatbot.coding_agent.code_writing.patcher import (
+    from kazusa_ai_chatbot.coding_agent.code_patching.patcher import (
         materialize_patch_artifacts,
     )
 

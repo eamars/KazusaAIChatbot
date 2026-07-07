@@ -8,8 +8,18 @@ from pathlib import Path
 from langchain_core.messages import HumanMessage, SystemMessage
 
 import kazusa_ai_chatbot.coding_agent.code_fetching as code_fetching
+import kazusa_ai_chatbot.coding_agent.code_modifying as code_modifying
 import kazusa_ai_chatbot.coding_agent.code_reading as code_reading
 import kazusa_ai_chatbot.coding_agent.code_writing as code_writing
+from kazusa_ai_chatbot.coding_agent.code_modifying.models import (
+    artifact_to_patch_operation,
+)
+from kazusa_ai_chatbot.coding_agent.code_patching.patch_operations import (
+    compile_patch_operations,
+)
+from kazusa_ai_chatbot.coding_agent.code_patching.patch_validation import (
+    materialize_patch_artifacts_for_review,
+)
 from kazusa_ai_chatbot.coding_agent.external_evidence import (
     collect_external_evidence,
 )
@@ -70,18 +80,19 @@ Operations:
   The coding agent may return proposal artifacts, but it does not edit existing
   source, apply patches, run commands, install packages, deploy, or validate by
   executing the target project.
+- code_modifying: propose reviewable existing-source patch artifacts when the
+  task includes an explicit source structure.
 - unsupported: the task is not a coding task, or it requires live execution,
-  existing-source edits, deployment, credential access, package installation,
-  adapter delivery, or real-world mutation as the primary result.
+  deployment, credential access, package installation, adapter delivery, or
+  real-world mutation as the primary result.
 
 Return strict JSON:
 {
-  "operation": "code_reading | code_writing | unsupported",
+  "operation": "code_reading | code_writing | code_modifying | unsupported",
   "reason": "short reason"
 }
 '''
 WRITE_LOOP_LIMIT = 6
-MAX_EXISTING_REPO_FOLLOWUP_READING_ATTEMPTS = 1
 BACKGROUND_CODING_ROUTER_TIMEOUT_SECONDS = 300
 BACKGROUND_CODING_ROUTER_INVALID_REASON = (
     "Coding-agent background supervisor returned an invalid operation."
@@ -132,12 +143,13 @@ async def handle_background_coding_task(
             route_reason=reason,
         )
         return response
-    if operation == "code_writing":
+    if operation in ("code_writing", "code_modifying"):
         writing_response = await propose_code_change(
             _background_writing_request(request),
         )
         response = _background_response_from_writing(
             writing_response,
+            operation=operation,
             route_reason=reason,
         )
         return response
@@ -167,6 +179,7 @@ async def _decide_background_coding_operation(
         "available_operations": [
             "code_reading",
             "code_writing",
+            "code_modifying",
             "unsupported",
         ],
         "operation_limits": [
@@ -201,7 +214,12 @@ def _parsed_operation_is_supported(parsed: object) -> bool:
     if not isinstance(parsed, dict):
         return False
     operation = parsed.get("operation")
-    return operation in ("code_reading", "code_writing", "unsupported")
+    return operation in (
+        "code_reading",
+        "code_writing",
+        "code_modifying",
+        "unsupported",
+    )
 
 
 def _normalize_background_coding_operation(
@@ -212,7 +230,12 @@ def _normalize_background_coding_operation(
     if not isinstance(parsed, dict):
         return "unsupported"
     operation = parsed.get("operation")
-    if operation in ("code_reading", "code_writing", "unsupported"):
+    if operation in (
+        "code_reading",
+        "code_writing",
+        "code_modifying",
+        "unsupported",
+    ):
         return operation
     return "unsupported"
 
@@ -321,17 +344,18 @@ def _background_response_from_reading(
 def _background_response_from_writing(
     response: CodingPatchProposalResponse,
     *,
+    operation: CodingAgentBackgroundOperation,
     route_reason: str,
 ) -> CodingAgentBackgroundResponse:
     """Normalize a code-writing proposal for background-worker consumption."""
 
     trace_summary = [
-        f"background_coding:code_writing:{_safe_request_text(route_reason)}",
+        f"background_coding:{operation}:{_safe_request_text(route_reason)}",
         *response["trace_summary"],
     ]
     result: CodingAgentBackgroundResponse = {
         "status": response["status"],
-        "operation": "code_writing",
+        "operation": operation,
         "answer_text": response["answer_text"],
         "repository": response["repository"],
         "source_scope": response["source_scope"],
@@ -478,39 +502,6 @@ async def propose_code_change(
     if not _has_explicit_source(request):
         response = await _propose_new_project_change(request)
         return response
-
-    response = _write_response(
-        status="rejected",
-        mode="edit_existing_repository",
-        answer_text=(
-            "This writing stage creates new artifacts only. Existing-source "
-            "semantic edits require the code modifying capability."
-        ),
-        repository=None,
-        source_scope=None,
-        evidence=[],
-        patch_artifacts=[],
-        created_files=[],
-        changed_files=[],
-        validation={
-            "status": "rejected",
-            "parsed": False,
-            "sandbox_applied": False,
-            "errors": [
-                "Existing-source semantic edits are outside the current "
-                "writing scope."
-            ],
-            "warnings": [],
-            "files": [],
-        },
-        external_evidence=[],
-        session=None,
-        limitations=[
-            "Existing-source semantic edits are outside the current writing scope.",
-        ],
-        trace_summary=["writing:existing_source_rejected"],
-    )
-    return response
 
     fetching_result = await code_fetching.run(request)
     if fetching_result["status"] != "succeeded":
@@ -793,25 +784,12 @@ async def _propose_existing_repo_change(
     fetching_limitations: list[str],
     fetching_trace_summary: list[str],
 ) -> CodingPatchProposalResponse:
-    reading_result: dict[str, object] | None = None
-    external_evidence: list[dict[str, object]] = []
     trace_summary = [*fetching_trace_summary]
-    last_writing_result: dict[str, object] | None = None
-    reading_attempts: list[dict[str, object]] = []
-    completed_reading_requests: list[dict[str, object]] = []
-    remaining_reading_attempts = MAX_EXISTING_REPO_FOLLOWUP_READING_ATTEMPTS
 
     reading_result = _run_initial_reading_for_write(
         request=request,
         repository=repository,
         source_scope=source_scope,
-    )
-    reading_attempts.append(
-        _reading_attempt_summary(
-            attempt_kind="initial",
-            reading_result=reading_result,
-            reading_requests=[],
-        )
     )
     trace_summary.extend(reading_result["trace_summary"])
     if (
@@ -842,7 +820,7 @@ async def _propose_existing_repo_change(
                 "warnings": [],
                 "files": [],
             },
-            external_evidence=external_evidence,
+            external_evidence=[],
             session=None,
             limitations=limitations,
             trace_summary=trace_summary,
@@ -856,163 +834,185 @@ async def _propose_existing_repo_change(
         )
     trace_summary.append(f"reading_merge:evidence={len(reading_result['evidence'])}")
 
-    for _ in range(WRITE_LOOP_LIMIT):
-        writing_request = _writing_request(
-            request=request,
-            mode="edit_existing_repository",
-            repository=repository,
-            source_scope=source_scope,
-            reading_result=reading_result,
-            supervisor_evidence_state=_supervisor_evidence_state(
-                reading_attempts=reading_attempts,
-                completed_reading_requests=completed_reading_requests,
-                remaining_reading_attempts=remaining_reading_attempts,
-                reading_result=reading_result,
-            ),
-        )
-        if external_evidence:
-            writing_request["external_evidence"] = external_evidence
-        writing_result = await _maybe_await(code_writing.run(writing_request))
-        last_writing_result = writing_result
-        trace_summary.extend(writing_result["trace_summary"])
-
-        if writing_result["status"] == "need_reading":
-            requested_reading = _safe_reading_request_summaries(
-                writing_result.get("reading_requests")
-            )
-            if remaining_reading_attempts <= 0:
-                reason = (
-                    "Writing PM requested source reading after supervisor "
-                    "reading budget was exhausted."
-                )
-                response = _write_loop_failure(
-                    mode="edit_existing_repository",
-                    repository=_repository_summary(repository),
-                    source_scope=source_scope,
-                    evidence=_evidence_from_reading_result(reading_result),
-                    external_evidence=external_evidence,
-                    trace_summary=[
-                        *trace_summary,
-                        "reading_budget:exhausted "
-                        f"evidence={len(_evidence_from_reading_result(reading_result))}",
-                    ],
-                    reason=reason,
-                    session=writing_result.get("session"),
-                    trace=writing_result.get("trace"),
-                )
-                return response
-            next_reading_result = _run_reading_for_write(
-                request=request,
-                repository=repository,
-                source_scope=source_scope,
-                writing_result=writing_result,
-            )
-            remaining_reading_attempts -= 1
-            completed_reading_requests.extend(requested_reading)
-            reading_attempts.append(
-                _reading_attempt_summary(
-                    attempt_kind="followup",
-                    reading_result=next_reading_result,
-                    reading_requests=requested_reading,
-                )
-            )
-            trace_summary.extend(next_reading_result["trace_summary"])
-            if (
-                next_reading_result["status"] != "succeeded"
-                and not _reading_has_usable_evidence(next_reading_result)
-            ):
-                limitations = _existing_repo_limitations(
-                    fetching_limitations=fetching_limitations,
-                    repository=repository,
-                    reading_result=next_reading_result,
-                    writing_result=writing_result,
-                )
-                response = _write_response(
-                    status=next_reading_result["status"],
-                    mode="edit_existing_repository",
-                    answer_text=next_reading_result["answer_text"],
-                    repository=_repository_summary(repository),
-                    source_scope=source_scope,
-                    evidence=next_reading_result["evidence"],
-                    patch_artifacts=[],
-                    created_files=[],
-                    changed_files=[],
-                    validation={
-                        "status": "failed",
-                        "parsed": False,
-                        "sandbox_applied": False,
-                        "errors": ["Source reading did not produce usable evidence."],
-                        "warnings": [],
-                        "files": [],
-                    },
-                    external_evidence=external_evidence,
-                    session=writing_result.get("session"),
-                    limitations=limitations,
-                    trace_summary=trace_summary,
-                )
-                return response
-            if next_reading_result["status"] != "succeeded":
-                trace_summary.append(
-                    "reading_partial:"
-                    f"status={next_reading_result['status']} "
-                    f"evidence={len(next_reading_result['evidence'])}"
-                )
-            reading_result = _merge_reading_results(
-                current_result=reading_result,
-                next_result=next_reading_result,
-            )
-            trace_summary.append(
-                f"reading_merge:evidence={len(reading_result['evidence'])}"
-            )
-            continue
-
-        if writing_result["status"] == "need_external_evidence":
-            requests = writing_result["external_evidence_requests"]
-            if not requests:
-                response = _write_loop_failure(
-                    mode="edit_existing_repository",
-                    repository=_repository_summary(repository),
-                    source_scope=source_scope,
-                    evidence=_evidence_from_reading_result(reading_result),
-                    external_evidence=external_evidence,
-                    trace_summary=trace_summary,
-                    reason="Writing requested external evidence without tasks.",
-                    session=writing_result.get("session"),
-                )
-                return response
-            collected_evidence = await collect_external_evidence(
-                requests,
-                trace_summary=trace_summary,
-            )
-            external_evidence.extend(collected_evidence)
-            continue
-
-        limitations = _existing_repo_limitations(
-            fetching_limitations=fetching_limitations,
-            repository=repository,
-            reading_result=reading_result,
-            writing_result=writing_result,
-        )
-        response = _write_response_from_result(
-            writing_result=writing_result,
-            repository=_repository_summary(repository),
-            source_scope=source_scope,
-            evidence=_evidence_from_reading_result(reading_result),
-            limitations=limitations,
-            trace_summary=trace_summary,
-        )
-        return response
-
-    response = _write_loop_limit_response(
-        mode="edit_existing_repository",
-        repository=_repository_summary(repository),
+    modifying_request = _modifying_request(
+        request=request,
+        repository=repository,
+        source_scope=source_scope,
+        reading_result=reading_result,
+    )
+    modifying_result = await _maybe_await(code_modifying.run(modifying_request))
+    trace_summary.extend(modifying_result["trace_summary"])
+    limitations = _existing_repo_limitations(
+        fetching_limitations=fetching_limitations,
+        repository=repository,
+        reading_result=reading_result,
+        writing_result=modifying_result,
+    )
+    response = _write_response_from_modifying_result(
+        request=request,
+        modifying_result=modifying_result,
+        repository=repository,
         source_scope=source_scope,
         evidence=_evidence_from_reading_result(reading_result),
-        external_evidence=external_evidence,
+        limitations=limitations,
         trace_summary=trace_summary,
-        last_writing_result=last_writing_result,
     )
     return response
+
+
+def _modifying_request(
+    *,
+    request: CodingAgentWriteRequest,
+    repository: CodeRepositoryRef,
+    source_scope: dict[str, object],
+    reading_result: dict[str, object],
+) -> dict[str, object]:
+    modifying_request: dict[str, object] = {
+        "question": request.get("question", ""),
+        "reading_result": reading_result,
+        "repository": repository,
+        "source_scope": source_scope,
+        "workspace_root": request["workspace_root"],
+        "supervisor_facts": [],
+    }
+    optional_fields = (
+        "preferred_language",
+        "max_answer_chars",
+        "max_artifact_chars",
+    )
+    for field in optional_fields:
+        value = request.get(field)
+        if value is not None:
+            modifying_request[field] = value
+    return modifying_request
+
+
+def _write_response_from_modifying_result(
+    *,
+    request: CodingAgentWriteRequest,
+    modifying_result: dict[str, object],
+    repository: CodeRepositoryRef,
+    source_scope: dict[str, object],
+    evidence: list[dict[str, object]],
+    limitations: list[str],
+    trace_summary: list[str],
+) -> CodingPatchProposalResponse:
+    max_artifact_chars = _max_artifact_chars_from_request(request)
+    repo_root = Path(repository["local_root"])
+    workspace_root = Path(str(request["workspace_root"]))
+    validation = {
+        "status": "failed",
+        "parsed": False,
+        "sandbox_applied": False,
+        "errors": [],
+        "warnings": [],
+        "files": [],
+    }
+    patch_artifacts = []
+    created_files = []
+    changed_files = []
+
+    if modifying_result["status"] == "succeeded":
+        patch_operations = _patch_operations_from_modifying_result(
+            modifying_result,
+        )
+        patch_artifacts, created_files, changed_files, operation_errors = (
+            compile_patch_operations(
+                repo_root=repo_root,
+                patch_operations=patch_operations,
+                max_files=32,
+                max_diff_chars=max_artifact_chars,
+            )
+        )
+        if operation_errors:
+            validation["errors"] = operation_errors
+            trace_summary.append(
+                f"patch_operations:failed errors={len(operation_errors)}"
+            )
+        else:
+            validation = materialize_patch_artifacts_for_review(
+                repo_root=repo_root,
+                workspace_root=workspace_root,
+                patch_artifacts=patch_artifacts,
+                max_files=32,
+                max_diff_chars=max_artifact_chars,
+            )
+            trace_summary.append(f"patch_validation:{validation['status']}")
+
+    response_status = str(modifying_result["status"])
+    if modifying_result["status"] == "succeeded":
+        response_status = validation["status"]
+
+    response = _write_response(
+        status=response_status,
+        mode="edit_existing_repository",
+        answer_text=str(modifying_result.get("answer_text") or ""),
+        repository=_repository_summary(repository),
+        source_scope=source_scope,
+        evidence=evidence,
+        patch_artifacts=patch_artifacts,
+        created_files=_result_file_summaries(
+            modifying_result.get("created_files"),
+            created_files,
+        ),
+        changed_files=_result_file_summaries(
+            modifying_result.get("changed_files"),
+            changed_files,
+        ),
+        validation=validation,
+        external_evidence=[],
+        session=None,
+        limitations=limitations,
+        trace_summary=trace_summary,
+        trace=modifying_result.get("trace"),
+    )
+    return response
+
+
+def _patch_operations_from_modifying_result(
+    modifying_result: dict[str, object],
+) -> list[dict[str, object]]:
+    operations: list[dict[str, object]] = []
+    artifacts = modifying_result.get("modification_artifacts")
+    if not isinstance(artifacts, list):
+        return operations
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            continue
+        operation = artifact_to_patch_operation(artifact)
+        if operation is None:
+            continue
+        operations.append(operation)
+    return operations
+
+
+def _result_file_summaries(
+    value: object,
+    fallback: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    if not isinstance(value, list) or not value:
+        return fallback
+    summaries: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        summary: dict[str, str] = {}
+        for key, item_value in item.items():
+            if not isinstance(key, str) or not isinstance(item_value, str):
+                continue
+            summary[key] = item_value
+        if summary:
+            summaries.append(summary)
+    if not summaries:
+        return fallback
+    return summaries
+
+
+def _max_artifact_chars_from_request(request: CodingAgentWriteRequest) -> int:
+    value = request.get("max_artifact_chars")
+    if isinstance(value, int) and value > 0:
+        return value
+    return 64000
 
 
 def _run_initial_reading_for_write(
@@ -1023,30 +1023,6 @@ def _run_initial_reading_for_write(
 ) -> dict[str, object]:
     reading_request = {
         "question": _initial_reading_question_for_write_request(request),
-        "repository": repository,
-        "source_scope": source_scope,
-        "read_only_context_handoff": True,
-    }
-    preferred_language = request.get("preferred_language")
-    if preferred_language is not None:
-        reading_request["preferred_language"] = preferred_language
-    max_answer_chars = request.get("max_answer_chars")
-    if max_answer_chars is not None:
-        reading_request["max_answer_chars"] = max_answer_chars
-
-    reading_result = code_reading.run(reading_request)
-    return reading_result
-
-
-def _run_reading_for_write(
-    *,
-    request: CodingAgentWriteRequest,
-    repository: CodeRepositoryRef,
-    source_scope: dict[str, object],
-    writing_result: dict[str, object],
-) -> dict[str, object]:
-    reading_request = {
-        "question": _reading_question_for_writing_result(writing_result),
         "repository": repository,
         "source_scope": source_scope,
         "read_only_context_handoff": True,
@@ -1097,57 +1073,6 @@ def _evidence_from_reading_result(
 def _reading_has_usable_evidence(reading_result: dict[str, object]) -> bool:
     evidence = reading_result.get("evidence")
     return isinstance(evidence, list) and bool(evidence)
-
-
-def _merge_reading_results(
-    *,
-    current_result: dict[str, object] | None,
-    next_result: dict[str, object],
-) -> dict[str, object]:
-    if current_result is None:
-        return next_result
-
-    evidence_rows: list[dict[str, object]] = []
-    seen_evidence: set[tuple[object, object, object, object]] = set()
-    for result in (current_result, next_result):
-        for row in result["evidence"]:
-            key = (
-                row.get("path"),
-                row.get("line_start"),
-                row.get("line_end"),
-                row.get("excerpt"),
-            )
-            if key in seen_evidence:
-                continue
-            seen_evidence.add(key)
-            evidence_rows.append(row)
-
-    limitations: list[str] = []
-    for result in (current_result, next_result):
-        for limitation in result["limitations"]:
-            if limitation not in limitations:
-                limitations.append(limitation)
-
-    answer_texts = [
-        str(current_result["answer_text"]),
-        str(next_result["answer_text"]),
-    ]
-    if answer_texts[0] == answer_texts[1]:
-        answer_text = answer_texts[0]
-    else:
-        answer_text = "\n\nFollow-up reading:\n".join(answer_texts)
-
-    merged_result = {
-        "status": next_result["status"],
-        "answer_text": answer_text,
-        "evidence": evidence_rows,
-        "limitations": limitations,
-        "trace_summary": [
-            *current_result["trace_summary"],
-            *next_result["trace_summary"],
-        ],
-    }
-    return merged_result
 
 
 def _write_loop_failure(
@@ -1299,31 +1224,6 @@ def _writing_request(
     return writing_request
 
 
-def _reading_question_for_writing_result(
-    writing_result: dict[str, object],
-) -> str:
-    pm_evidence_request = _pm_evidence_request_text(writing_result)
-    reading_question = (
-        "Read-only repository evidence survey for future implementation "
-        "workflow. Identify existing files, symbols, contracts, validation "
-        "paths, documentation entry points, tests, and behavior boundaries "
-        "needed by the writing PM. For each requested runtime behavior, find "
-        "the code owner that currently enforces similar behavior or report "
-        "that no owner was found. Include tests or test patterns that verify "
-        "behavior when they are visible. Documentation entry points are "
-        "supporting evidence, not proof of runtime behavior. For "
-        "error-reporting requests, identify existing raise sites, error "
-        "message branches, exception handlers, and import locations. When "
-        "the request adds reporting, counters, summaries, routing, labels, "
-        "or other stateful dimensions, identify whether the current runtime "
-        "method receives that dimension and include caller/import sites "
-        "needed for a limited interface update. Do not create or describe "
-        "implementation changes; only report current evidence.\n\n"
-        f"Writing PM evidence request:\n{pm_evidence_request}"
-    )
-    return reading_question
-
-
 def _generated_readback_question_for_writing_result(
     writing_result: dict[str, object],
 ) -> str:
@@ -1403,50 +1303,6 @@ def _pm_evidence_request_text(writing_result: dict[str, object]) -> str:
         "Collect current repository evidence needed before limited "
         "implementation planning."
     )
-
-
-def _supervisor_evidence_state(
-    *,
-    reading_attempts: list[dict[str, object]],
-    completed_reading_requests: list[dict[str, object]],
-    remaining_reading_attempts: int,
-    reading_result: dict[str, object] | None,
-) -> dict[str, object]:
-    evidence_count = 0
-    last_status = "not_started"
-    last_limitations: list[str] = []
-    if reading_result is not None:
-        evidence_count = len(_evidence_from_reading_result(reading_result))
-        status = reading_result.get("status")
-        if isinstance(status, str):
-            last_status = status
-        last_limitations = _safe_request_list(reading_result.get("limitations"))
-
-    evidence_state = {
-        "reading_attempts": reading_attempts,
-        "completed_reading_requests": completed_reading_requests[-6:],
-        "remaining_reading_attempts": max(remaining_reading_attempts, 0),
-        "merged_reading_evidence_count": evidence_count,
-        "last_reading_status": last_status,
-        "last_reading_limitations": last_limitations[:6],
-    }
-    return evidence_state
-
-
-def _reading_attempt_summary(
-    *,
-    attempt_kind: str,
-    reading_result: dict[str, object],
-    reading_requests: list[dict[str, object]],
-) -> dict[str, object]:
-    summary = {
-        "kind": attempt_kind,
-        "status": _safe_request_text(reading_result.get("status")),
-        "evidence_count": len(_evidence_from_reading_result(reading_result)),
-        "requests": reading_requests[:3],
-        "limitations": _safe_request_list(reading_result.get("limitations"))[:4],
-    }
-    return summary
 
 
 def _safe_reading_request_summaries(value: object) -> list[dict[str, object]]:

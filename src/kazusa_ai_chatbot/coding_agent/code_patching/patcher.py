@@ -10,18 +10,20 @@ from kazusa_ai_chatbot.coding_agent.context_budget import (
     collect_selected_evidence_refs,
     prompt_budget_metadata,
 )
-from kazusa_ai_chatbot.coding_agent.code_writing.models import (
+from kazusa_ai_chatbot.coding_agent.code_patching.models import (
     ChangedFileSummary,
     CreatedFileSummary,
-    GeneratedArtifact,
     PatchOperation,
-    WritingPatcherInput,
-    WritingPatcherReport,
+    PatchProposalReport,
 )
-from kazusa_ai_chatbot.coding_agent.code_writing.patch_operations import (
+from kazusa_ai_chatbot.coding_agent.code_writing.models import (
+    GeneratedArtifact,
+    WritingPatcherInput,
+)
+from kazusa_ai_chatbot.coding_agent.code_patching.patch_operations import (
     compile_patch_operations,
 )
-from kazusa_ai_chatbot.coding_agent.code_writing.patch_validation import (
+from kazusa_ai_chatbot.coding_agent.code_patching.patch_validation import (
     _safe_repo_relative_path,
 )
 from kazusa_ai_chatbot.config import (
@@ -44,7 +46,7 @@ def materialize_patch_artifacts(
     max_files: int,
     max_diff_chars: int,
     trace: dict[str, object] | None = None,
-) -> WritingPatcherReport:
+) -> PatchProposalReport:
     """Build selected generated artifacts into new-file patch output."""
 
     payload = _patcher_payload(patcher_input)
@@ -207,8 +209,8 @@ def _report(
     patch_artifacts: list[dict[str, object]] | None = None,
     created_files: list[CreatedFileSummary] | None = None,
     changed_files: list[ChangedFileSummary] | None = None,
-) -> WritingPatcherReport:
-    report: WritingPatcherReport = {
+) -> PatchProposalReport:
+    report: PatchProposalReport = {
         "status": status,
         "artifact_package": artifact_package,
         "patch_artifacts": patch_artifacts or [],
@@ -223,7 +225,7 @@ def _fill_trace(
     trace: dict[str, object] | None,
     *,
     patcher_input: dict[str, object],
-    report: WritingPatcherReport,
+    report: PatchProposalReport,
     context_budget: dict[str, object],
 ) -> None:
     if trace is None:

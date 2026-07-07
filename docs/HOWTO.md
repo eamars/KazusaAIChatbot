@@ -286,9 +286,10 @@ job refs, tool arguments, or final visible text. The current text-artifact
 worker remains text-only. The current coding-agent worker handles accepted
 coding tasks through the coding-agent supervisor using
 `CODING_AGENT_WORKSPACE_ROOT`; it may return code-reading answers or
-code-writing proposal artifacts. Neither worker applies patches, runs shell
-commands, installs packages, processes attachments, or sends adapter text
-directly. `future_speak` is the
+review-only patch proposal artifacts for source-free writing or explicit
+existing-source modification requests. Neither worker applies patches, runs
+shell commands, installs packages, processes attachments, or sends adapter
+text directly. `future_speak` is the
 deterministic delayed-message worker: it schedules a future cognition slot and
 stores only a semantic objective, not prewritten user-facing text. Completed
 accepted tasks re-enter the brain as `accepted_task_result_ready` cognition,

@@ -38,10 +38,10 @@ from kazusa_ai_chatbot.coding_agent.code_writing.models import (
     WritingProgrammerResult,
     WritingProgrammerTask,
 )
-from kazusa_ai_chatbot.coding_agent.code_writing.patcher import (
+from kazusa_ai_chatbot.coding_agent.code_patching.patcher import (
     materialize_patch_artifacts,
 )
-from kazusa_ai_chatbot.coding_agent.code_writing.patch_validation import (
+from kazusa_ai_chatbot.coding_agent.code_patching.patch_validation import (
     _safe_repo_relative_path,
     materialize_patch_artifacts_for_review,
 )

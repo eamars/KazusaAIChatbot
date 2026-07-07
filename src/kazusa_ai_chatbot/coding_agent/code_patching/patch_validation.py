@@ -18,7 +18,7 @@ from kazusa_ai_chatbot.coding_agent.code_reading.planner import (
     is_binary_like_path,
     is_secret_like_path,
 )
-from kazusa_ai_chatbot.coding_agent.code_writing.models import (
+from kazusa_ai_chatbot.coding_agent.code_patching.models import (
     PatchArtifact,
     PatchValidationSummary,
 )
@@ -27,7 +27,7 @@ from kazusa_ai_chatbot.coding_agent.tools.paths import (
     ensure_path_inside,
 )
 
-VALIDATION_ROOT_NAME = "writing_validation"
+VALIDATION_ROOT_NAME = "patch_validation"
 MAX_VALIDATION_SECONDS = 20
 MAX_SYMBOL_ERROR_ITEMS = 8
 MAX_IMPORT_ERROR_ITEMS = 8
@@ -336,10 +336,17 @@ def _run_git_apply(
     diff_text: str,
     check_only: bool = True,
 ) -> subprocess.CompletedProcess[str] | str:
-    args = ["git", "apply"]
+    args = [
+        "git",
+        "-c",
+        "core.autocrlf=false",
+        "-c",
+        "core.eol=lf",
+        "apply",
+    ]
     if check_only:
         args.append("--check")
-    args.extend(["--recount", "--"])
+    args.extend(["--ignore-space-change", "--"])
     env = _sandbox_git_env(sandbox_root)
     try:
         completed = subprocess.run(
@@ -1376,6 +1383,9 @@ class _ModuleReferenceVisitor(ast.NodeVisitor):
     def visit_Attribute(self, node: ast.Attribute) -> None:
         if isinstance(node.value, ast.Name):
             root_name = node.value.id
+            if root_name in ("self", "cls"):
+                self.generic_visit(node)
+                return
             if not self._is_defined(root_name):
                 self.missing_references.add(f"{root_name}.{node.attr}")
         self.generic_visit(node)

@@ -641,10 +641,11 @@ CodingAgentWriteRequest
   -> CodingPatchProposalResponse
 ```
 
-Phase 2 proves new-artifact writing first. The top-level supervisor may fetch a
-repository target to establish source identity and workspace safety, but
-existing-source semantic edits are owned by the later `code_modifying`
-capability. External evidence for code writing follows the same
+Phase 2 proved new-artifact writing first. Phase 4 adds explicit-source
+modification: the top-level supervisor fetches a repository target, gathers
+read-only source evidence, calls `code_modifying`, and then delegates diff
+assembly and review materialization to `code_patching`. External evidence for
+code writing follows the same
 supervisor-mediated rule: the writing PM may request current public
 documentation or other bounded facts, and the supervisor resumes writing with a
 compact evidence summary.
@@ -653,9 +654,9 @@ Focused Phase 2 unit tests may call `code_writing.run(...)` to prove the
 writing subagent contract. Deterministic acceptance tests and every hard live
 LLM gate must call the public top-level `coding_agent.propose_code_change(...)`
 interface so the coding supervisor owns fetch/write/patch/external dispatch and
-the work ledger. Phase 2 test scope remains the direct coding-agent path; L2d,
-background-work jobs, result-ready cognition, service delivery, existing-source
-modification, patch apply, and code execution belong to later phases.
+the work ledger. Phase 4 keeps the same direct coding-agent path for
+existing-source modification. L2d, result-ready cognition, service delivery,
+patch apply, and code execution remain separate integration phases.
 
 ## Ownership Boundaries
 

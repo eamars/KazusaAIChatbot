@@ -6,17 +6,18 @@ import difflib
 import re
 from pathlib import Path
 
-from kazusa_ai_chatbot.coding_agent.code_writing.models import (
+from kazusa_ai_chatbot.coding_agent.code_patching.models import (
     ChangedFileSummary,
     CreatedFileSummary,
     PatchArtifact,
     PatchOperation,
 )
-from kazusa_ai_chatbot.coding_agent.code_writing.patch_validation import (
+from kazusa_ai_chatbot.coding_agent.code_patching.patch_validation import (
     _safe_repo_relative_path,
 )
 from kazusa_ai_chatbot.coding_agent.tools.paths import ensure_path_inside
 
+REPLACE_FILE_SMALL_MAX_CHARS = 20000
 TEXT_DOCUMENT_SUFFIXES = {".md", ".markdown", ".rst", ".txt"}
 PYTHON_SUFFIXES = {".py", ".pyi"}
 STRUCTURAL_TEXT_LINE_RE = re.compile(
@@ -43,6 +44,7 @@ def compile_patch_operations(
 
     originals: dict[str, str] = {}
     modified: dict[str, str] = {}
+    existing_paths: set[str] = set()
     created_files: list[CreatedFileSummary] = []
     changed_files: list[ChangedFileSummary] = []
     errors: list[str] = []
@@ -64,12 +66,14 @@ def compile_patch_operations(
         kind = operation.get("kind")
         current = modified.get(safe_path)
         if current is None:
-            original = _read_original(repo_root=repo_root, safe_path=safe_path)
+            original, exists = _read_original(repo_root=repo_root, safe_path=safe_path)
             originals[safe_path] = original
+            if exists:
+                existing_paths.add(safe_path)
             current = original
 
         if kind == "create_file":
-            if originals[safe_path]:
+            if safe_path in existing_paths:
                 errors.append("Create-file operation targets an existing file.")
                 continue
             modified[safe_path] = _with_trailing_newline(content)
@@ -84,15 +88,29 @@ def compile_patch_operations(
             errors.append("Existing-file operation requires repository context.")
             continue
 
-        anchor = operation.get("anchor", "")
-        if not isinstance(anchor, str) or not anchor:
-            errors.append("Existing-file operation omitted an exact anchor.")
+        if kind == "replace_file_small":
+            if repo_root is None:
+                errors.append("full-file replacement requires repository context.")
+                continue
+            if len(current) > REPLACE_FILE_SMALL_MAX_CHARS:
+                errors.append("full-file replacement target exceeds the cap.")
+                continue
+            if len(content) > REPLACE_FILE_SMALL_MAX_CHARS:
+                errors.append("full-file replacement content exceeds the cap.")
+                continue
+            modified[safe_path] = _with_trailing_newline(content)
+            changed_files.append(_changed_file(safe_path, "modify", operation))
             continue
-        if anchor not in current:
-            errors.append(
-                f"{_operation_label(operation, safe_path)} anchor was not found."
-            )
+
+        anchor_error = _exact_anchor_error(
+            current=current,
+            operation=operation,
+            safe_path=safe_path,
+        )
+        if anchor_error:
+            errors.append(anchor_error)
             continue
+        anchor = operation["anchor"]
         anchor = _anchor_with_existing_line_ending(current, anchor)
 
         if kind == "insert_after":
@@ -141,6 +159,9 @@ def compile_patch_operations(
 
         errors.append("Patch operation kind is unsupported.")
 
+    if errors:
+        return [], [], [], _dedupe_strings(errors)
+
     artifacts: list[PatchArtifact] = []
     total_chars = 0
     for safe_path, new_text in modified.items():
@@ -165,20 +186,40 @@ def compile_patch_operations(
             "summary": "Compiled from structured patch operations.",
         })
 
-    return artifacts, created_files, _dedupe_changed_files(changed_files), errors
+    if errors:
+        return [], [], [], _dedupe_strings(errors)
+
+    return artifacts, created_files, _dedupe_changed_files(changed_files), []
 
 
-def _read_original(*, repo_root: Path | None, safe_path: str) -> str:
+def _read_original(*, repo_root: Path | None, safe_path: str) -> tuple[str, bool]:
     if repo_root is None:
-        return ""
+        return "", False
     root = repo_root.expanduser().resolve(strict=True)
     file_path = ensure_path_inside(root / safe_path, root)
     if not file_path.exists():
-        return ""
+        return "", False
     if not file_path.is_file():
-        return ""
+        return "", False
     text = file_path.read_text(encoding="utf-8", errors="replace")
-    return text
+    return text, True
+
+
+def _exact_anchor_error(
+    *,
+    current: str,
+    operation: PatchOperation,
+    safe_path: str,
+) -> str:
+    anchor = operation.get("anchor", "")
+    if not isinstance(anchor, str) or not anchor:
+        return "Existing-file operation omitted an exact anchor."
+    match_count = current.count(anchor)
+    if match_count == 1:
+        return ""
+    if match_count == 0:
+        return f"{_operation_label(operation, safe_path)} anchor was not found."
+    return f"{_operation_label(operation, safe_path)} anchor matched multiple locations."
 
 
 def _text_insert_splits_paragraph(
@@ -401,4 +442,13 @@ def _dedupe_changed_files(
             continue
         seen.add(path)
         deduped.append(changed_file)
+    return deduped
+
+
+def _dedupe_strings(values: list[str]) -> list[str]:
+    deduped: list[str] = []
+    for value in values:
+        if value in deduped:
+            continue
+        deduped.append(value)
     return deduped

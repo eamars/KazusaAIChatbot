@@ -38,7 +38,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| _None_ | No active short-term plans currently classified | n/a |
+| _None_ | _None_ | _none_ |
 
 ## Supporting Experiment Records
 
@@ -136,6 +136,18 @@ codebase, completed Phase 2 and Phase 3 records, and the coding-agent ICDs.
 | Moved from active short-term to completed archive | `coding_agent_phase2_chat_input_queue_role_io_contract.md`; this was Gate 02 supporting role-contract evidence for completed Phase 2, not an executable active plan |
 | Removed stale active registry row | `coding_agent_phase1_fetching_reading_plan.md`; the file is absent from active short-term and Phase 1 implementation records are already archived as completed |
 
+### 2026-07-08 coding-agent Phase 4 completion
+
+The coding-agent Phase 4 code modifying and patching plan completed after the
+no-subagent execution path added the `code_modifying` and `code_patching`
+boundaries, deterministic contract tests, role-level live LLM evidence, five
+public E2E live LLM gates, final review remediation, and documentation
+closeout.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active short-term to completed archive | `coding_agent_phase4_code_modifying_and_patching_plan.md` |
+
 ## Archive
 
 Completed and superseded records live under `archive/`. Use them for historical
@@ -226,6 +238,7 @@ plans.
 | [coding_agent_phase2_5_security_boundary_plan.md](archive/completed/short_term/coding_agent_phase2_5_security_boundary_plan.md) |
 | [coding_agent_phase2_code_writing_plan.md](archive/completed/short_term/coding_agent_phase2_code_writing_plan.md) |
 | [coding_agent_phase3_background_worker_integration_plan.md](archive/completed/short_term/coding_agent_phase3_background_worker_integration_plan.md) |
+| [coding_agent_phase4_code_modifying_and_patching_plan.md](archive/completed/short_term/coding_agent_phase4_code_modifying_and_patching_plan.md) |
 | [character_reflection_cycle_stage1a_plan.md](archive/completed/short_term/character_reflection_cycle_stage1a_plan.md) |
 | [character_self_words_retrieval_delivery_receipt_plan.md](archive/completed/short_term/character_self_words_retrieval_delivery_receipt_plan.md) |
 | [cognition_chain_module_separation_plan.md](archive/completed/short_term/cognition_chain_module_separation_plan.md) |
