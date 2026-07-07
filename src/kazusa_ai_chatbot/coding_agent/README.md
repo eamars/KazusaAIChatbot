@@ -54,8 +54,8 @@ Deferred subagents:
 
 Managed checkouts and managed raw-file downloads live under the caller-supplied
 coding workspace root. Writing requests require an explicit configured
-workspace root so proposal storage, validation sandboxes, and session memory
-remain inspectable.
+workspace root so proposal storage, review materialization directories, and
+session memory remain inspectable.
 
 ## Architecture
 

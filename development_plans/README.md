@@ -38,8 +38,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [coding_agent_phase1_fetching_reading_plan.md](active/short_term/coding_agent_phase1_fetching_reading_plan.md) | Large standalone coding-agent Phase 1 plan | draft |
-| [coding_agent_phase2_5_security_boundary_plan.md](active/short_term/coding_agent_phase2_5_security_boundary_plan.md) | High-risk coding-agent Phase 2.5 security boundary plan | draft |
+| _None_ | No active short-term plans currently classified | n/a |
 
 ## Supporting Experiment Records
 
@@ -100,7 +99,7 @@ evidence, then moved completed short-term records out of `active/`.
 |---|---|
 | Moved from active short-term to completed archive | `control_console_auto_model_discovery_picker_plan.md`, `control_console_brain_model_route_config_plan.md`, `control_console_cognition_debug_visibility_plan.md`, `llm_trace_observability_and_retrieval_plan.md`, `web_agent3_source_availability_bigbang_plan.md` |
 | Completed by user-approved fallback execution without subagent | `web_agent3_bilibili_source_subagent_plan.md` |
-| Kept active draft because required implementation artifacts are absent | `coding_agent_phase1_fetching_reading_plan.md` |
+| At that time, kept active draft because required implementation artifacts were absent | `coding_agent_phase1_fetching_reading_plan.md`; superseded by the 2026-07-07 coding-agent active plan refresh |
 | Kept active draft because the bugfix remains unexecuted | `rag2_public_output_contract_leak_bugfix_plan.md`; source still contains the planned forbidden RAG public-output phrases in `persona_supervisor2_rag_evaluator.py` |
 
 ### 2026-07-04 RAG3 active plan refresh
@@ -124,6 +123,18 @@ closeout.
 | Outcome | Plans |
 |---|---|
 | Moved from active short-term to completed archive | `rag3_local_context_resolver_bigbang_plan.md` |
+
+### 2026-07-07 coding-agent active plan refresh
+
+This pass compared the active coding-agent short-term files against the current
+codebase, completed Phase 2 and Phase 3 records, and the coding-agent ICDs.
+
+| Outcome | Plans |
+|---|---|
+| Refreshed active draft against current codebase | `coding_agent_phase2_5_security_boundary_plan.md`; current production flow uses review-package materialization, while legacy validation helper code still exposes generated-test execution |
+| Completed by user-approved fallback execution without subagent | `coding_agent_phase2_5_security_boundary_plan.md`; removed the generated-test execution helper boundary, aligned coding-agent architecture/ICDs, and verified the inert review-materialization boundary |
+| Moved from active short-term to completed archive | `coding_agent_phase2_chat_input_queue_role_io_contract.md`; this was Gate 02 supporting role-contract evidence for completed Phase 2, not an executable active plan |
+| Removed stale active registry row | `coding_agent_phase1_fetching_reading_plan.md`; the file is absent from active short-term and Phase 1 implementation records are already archived as completed |
 
 ## Archive
 
@@ -211,6 +222,8 @@ plans.
 | [coding_agent_phase0_fetching_plan.md](archive/completed/short_term/coding_agent_phase0_fetching_plan.md) |
 | [coding_agent_phase1_code_reading_final_plan.md](archive/completed/short_term/coding_agent_phase1_code_reading_final_plan.md) |
 | [coding_agent_phase1_real_repo_retrieval_remediation_plan.md](archive/completed/short_term/coding_agent_phase1_real_repo_retrieval_remediation_plan.md) |
+| [coding_agent_phase2_chat_input_queue_role_io_contract.md](archive/completed/short_term/coding_agent_phase2_chat_input_queue_role_io_contract.md) |
+| [coding_agent_phase2_5_security_boundary_plan.md](archive/completed/short_term/coding_agent_phase2_5_security_boundary_plan.md) |
 | [coding_agent_phase2_code_writing_plan.md](archive/completed/short_term/coding_agent_phase2_code_writing_plan.md) |
 | [coding_agent_phase3_background_worker_integration_plan.md](archive/completed/short_term/coding_agent_phase3_background_worker_integration_plan.md) |
 | [character_reflection_cycle_stage1a_plan.md](archive/completed/short_term/character_reflection_cycle_stage1a_plan.md) |

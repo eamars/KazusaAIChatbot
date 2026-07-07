@@ -4,6 +4,37 @@ from typing import Any
 import pytest
 
 
+def test_patch_validation_exposes_only_review_materialization_boundary() -> None:
+    from kazusa_ai_chatbot.coding_agent.code_writing import patch_validation
+
+    assert hasattr(patch_validation, "materialize_patch_artifacts_for_review")
+    assert not hasattr(patch_validation, "validate_patch_artifacts")
+    assert not hasattr(patch_validation, "_python_test_execution_error")
+    assert not hasattr(patch_validation, "_sandbox_test_env")
+
+
+def test_patch_validation_does_not_run_generated_python_tests() -> None:
+    from kazusa_ai_chatbot.coding_agent.code_writing import patch_validation
+
+    source_path = Path(patch_validation.__file__)
+    source_text = source_path.read_text(encoding="utf-8")
+
+    assert "_python_test_execution_error" not in source_text
+    assert "sys.executable" not in source_text
+    assert '"pytest"' not in source_text
+    assert "Patched Python tests" not in source_text
+
+
+def test_writing_supervisor_uses_review_materialization_boundary_only() -> None:
+    from kazusa_ai_chatbot.coding_agent.code_writing import supervisor
+
+    source_path = Path(supervisor.__file__)
+    source_text = source_path.read_text(encoding="utf-8")
+
+    assert "materialize_patch_artifacts_for_review" in source_text
+    assert "validate_patch_artifacts" not in source_text
+
+
 def test_writing_pm_normalizes_programmer_task_action() -> None:
     from kazusa_ai_chatbot.coding_agent.code_writing.product_manager import (
         normalize_writing_pm_decision,

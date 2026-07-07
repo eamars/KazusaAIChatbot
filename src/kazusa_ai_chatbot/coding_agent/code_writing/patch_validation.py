@@ -1,4 +1,4 @@
-"""Unified-diff safety and sandbox validation for patch proposals."""
+"""Unified-diff safety and review materialization for patch proposals."""
 
 from __future__ import annotations
 
@@ -29,7 +29,6 @@ from kazusa_ai_chatbot.coding_agent.tools.paths import (
 
 VALIDATION_ROOT_NAME = "writing_validation"
 MAX_VALIDATION_SECONDS = 20
-MAX_VALIDATION_TEST_OUTPUT_CHARS = 1600
 MAX_SYMBOL_ERROR_ITEMS = 8
 MAX_IMPORT_ERROR_ITEMS = 8
 _DIFF_HEADER_RE = re.compile(r"^diff --git (?P<old>\S+) (?P<new>\S+)$")
@@ -46,72 +45,6 @@ _RESPONSE_TEXT_ASSERT_RE = re.compile(
     r"assert\s+(?P<quote>[\"'])(?P<value>.*?)(?P=quote)\s+in\s+"
     r"(?:str\()?response\.text"
 )
-
-
-def validate_patch_artifacts(
-    *,
-    repo_root: Path | None,
-    workspace_root: Path,
-    patch_artifacts: list[PatchArtifact],
-    max_files: int,
-    max_diff_chars: int,
-) -> PatchValidationSummary:
-    """Validate patch artifacts without mutating the target repository.
-
-    Args:
-        repo_root: Optional existing repository root used as the validation
-            base. New-project proposals may pass `None`.
-        workspace_root: Caller-configured storage root for isolated validation.
-        patch_artifacts: Unified-diff artifacts to parse and check.
-        max_files: Maximum distinct repo-relative paths allowed.
-        max_diff_chars: Maximum combined diff text accepted.
-
-    Returns:
-        Public-safe validation status with no filesystem paths.
-    """
-
-    parse_result = _parse_patch_artifacts(
-        patch_artifacts=patch_artifacts,
-        max_files=max_files,
-        max_diff_chars=max_diff_chars,
-    )
-    if parse_result["errors"]:
-        summary = _summary(
-            status="rejected",
-            parsed=False,
-            sandbox_applied=False,
-            errors=parse_result["errors"],
-            warnings=parse_result["warnings"],
-            files=parse_result["files"],
-        )
-        return summary
-
-    sandbox_result = _sandbox_check(
-        repo_root=repo_root,
-        workspace_root=workspace_root,
-        diff_text=parse_result["diff_text"],
-        files=parse_result["files"],
-    )
-    if sandbox_result is not None:
-        summary = _summary(
-            status="failed",
-            parsed=True,
-            sandbox_applied=False,
-            errors=[sandbox_result],
-            warnings=parse_result["warnings"],
-            files=parse_result["files"],
-        )
-        return summary
-
-    summary = _summary(
-        status="succeeded",
-        parsed=True,
-        sandbox_applied=True,
-        errors=[],
-        warnings=parse_result["warnings"],
-        files=parse_result["files"],
-    )
-    return summary
 
 
 def materialize_patch_artifacts_for_review(
@@ -144,6 +77,7 @@ def materialize_patch_artifacts_for_review(
         repo_root=repo_root,
         workspace_root=workspace_root,
         diff_text=parse_result["diff_text"],
+        files=parse_result["files"],
     )
     if sandbox_result is not None:
         summary = _summary(
@@ -276,7 +210,7 @@ def _safe_repo_relative_path(path_text: str) -> str | None:
     return safe_path
 
 
-def _sandbox_check(
+def _sandbox_materialization_check(
     *,
     repo_root: Path | None,
     workspace_root: Path,
@@ -286,15 +220,15 @@ def _sandbox_check(
     try:
         sandbox_root = _prepare_sandbox(repo_root, workspace_root)
     except PathSafetyError:
-        return "Patch validation storage could not be prepared."
+        return "Patch review storage could not be prepared."
     except OSError:
-        return "Patch validation base could not be copied."
+        return "Patch review base could not be copied."
 
     completed = _run_git_apply(sandbox_root=sandbox_root, diff_text=diff_text)
     if completed == "git-unavailable":
-        return "git executable is unavailable for patch validation."
+        return "git executable is unavailable for patch review."
     if completed == "timed-out":
-        return "Patch validation timed out."
+        return "Patch review materialization timed out."
     if completed.returncode != 0:
         return _git_apply_error(completed.stderr)
     if _git_apply_has_malformed_warning(completed.stderr):
@@ -306,9 +240,9 @@ def _sandbox_check(
         check_only=False,
     )
     if applied == "git-unavailable":
-        return "git executable is unavailable for patch validation."
+        return "git executable is unavailable for patch review."
     if applied == "timed-out":
-        return "Patch validation timed out."
+        return "Patch review materialization timed out."
     if applied.returncode != 0:
         return _git_apply_error(applied.stderr)
     if _git_apply_has_malformed_warning(applied.stderr):
@@ -387,58 +321,12 @@ def _sandbox_check(
     if module_reference_error is not None:
         return module_reference_error
 
-    test_execution_error = _python_test_execution_error(
-        sandbox_root=sandbox_root,
-        files=files,
-    )
-    if test_execution_error is not None:
-        return test_execution_error
-
     markdown_error = _markdown_content_error(
         sandbox_root=sandbox_root,
         files=files,
     )
     if markdown_error is not None:
         return markdown_error
-    return None
-
-
-def _sandbox_materialization_check(
-    *,
-    repo_root: Path | None,
-    workspace_root: Path,
-    diff_text: str,
-) -> str | None:
-    try:
-        sandbox_root = _prepare_sandbox(repo_root, workspace_root)
-    except PathSafetyError:
-        return "Patch review storage could not be prepared."
-    except OSError:
-        return "Patch review base could not be copied."
-
-    completed = _run_git_apply(sandbox_root=sandbox_root, diff_text=diff_text)
-    if completed == "git-unavailable":
-        return "git executable is unavailable for patch review."
-    if completed == "timed-out":
-        return "Patch review materialization timed out."
-    if completed.returncode != 0:
-        return _git_apply_error(completed.stderr)
-    if _git_apply_has_malformed_warning(completed.stderr):
-        return _git_apply_error(completed.stderr)
-
-    applied = _run_git_apply(
-        sandbox_root=sandbox_root,
-        diff_text=diff_text,
-        check_only=False,
-    )
-    if applied == "git-unavailable":
-        return "git executable is unavailable for patch review."
-    if applied == "timed-out":
-        return "Patch review materialization timed out."
-    if applied.returncode != 0:
-        return _git_apply_error(applied.stderr)
-    if _git_apply_has_malformed_warning(applied.stderr):
-        return _git_apply_error(applied.stderr)
     return None
 
 
@@ -498,135 +386,6 @@ def _python_syntax_error_message(*, safe_path: str, error: SyntaxError) -> str:
         "Patched Python content is not syntactically valid: "
         f"{safe_path} line {line_number}: {detail}."
     )
-
-
-def _python_test_execution_error(
-    *,
-    sandbox_root: Path,
-    files: list[str],
-) -> str | None:
-    test_files = _existing_test_python_files(
-        sandbox_root=sandbox_root,
-        files=files,
-    )
-    if not test_files:
-        return None
-
-    config_path = ensure_path_inside(
-        sandbox_root / ".writing_validation_pytest.ini",
-        sandbox_root,
-    )
-    try:
-        config_path.write_text("[pytest]\naddopts =\n", encoding="utf-8")
-    except OSError:
-        return "Patched Python tests could not be prepared."
-
-    args = [
-        sys.executable,
-        "-m",
-        "pytest",
-        "-q",
-        "--tb=short",
-        "-c",
-        config_path.name,
-        *test_files,
-    ]
-    try:
-        completed = subprocess.run(
-            args,
-            cwd=sandbox_root,
-            env=_sandbox_test_env(sandbox_root=sandbox_root),
-            check=False,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=MAX_VALIDATION_SECONDS,
-        )
-    except subprocess.TimeoutExpired:
-        return "Patched Python tests timed out in isolated validation."
-
-    if completed.returncode == 0:
-        return None
-    return _python_test_failure_error(
-        completed=completed,
-        sandbox_root=sandbox_root,
-    )
-
-
-def _existing_test_python_files(
-    *,
-    sandbox_root: Path,
-    files: list[str],
-) -> list[str]:
-    test_files: list[str] = []
-    for safe_path in files:
-        if Path(safe_path).suffix.casefold() != ".py":
-            continue
-        if not _is_test_path(safe_path):
-            continue
-        file_path = ensure_path_inside(sandbox_root / safe_path, sandbox_root)
-        if not file_path.exists() or not file_path.is_file():
-            continue
-        test_files.append(safe_path)
-    return sorted(test_files)
-
-
-def _sandbox_test_env(*, sandbox_root: Path) -> dict[str, str]:
-    env: dict[str, str] = {}
-    for key in (
-        "COMSPEC",
-        "PATH",
-        "PATHEXT",
-        "SystemRoot",
-        "SYSTEMROOT",
-        "TEMP",
-        "TMP",
-    ):
-        value = os.environ.get(key)
-        if value:
-            env[key] = value
-    env["PYTHONIOENCODING"] = "utf-8"
-    env["PYTHONUTF8"] = "1"
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
-    src_root = ensure_path_inside(sandbox_root / "src", sandbox_root)
-    env["PYTHONPATH"] = os.pathsep.join(
-        [str(src_root), str(sandbox_root)]
-    )
-    return env
-
-
-def _python_test_failure_error(
-    *,
-    completed: subprocess.CompletedProcess[str],
-    sandbox_root: Path,
-) -> str:
-    output = "\n".join(
-        part
-        for part in (completed.stdout, completed.stderr)
-        if part
-    )
-    compact_output = _compact_validation_output(
-        output,
-        sandbox_root=sandbox_root,
-    )
-    if not compact_output:
-        compact_output = f"pytest exited with code {completed.returncode}"
-    return (
-        "Patched Python tests fail in isolated validation: "
-        f"{compact_output}"
-    )
-
-
-def _compact_validation_output(text: str, *, sandbox_root: Path) -> str:
-    root_text = str(sandbox_root)
-    normalized_root = root_text.replace("\\", "/")
-    compact = text.replace(root_text, "[validation-root]")
-    compact = compact.replace(normalized_root, "[validation-root]")
-    compact = " ".join(compact.split())
-    if len(compact) > MAX_VALIDATION_TEST_OUTPUT_CHARS:
-        compact = compact[:MAX_VALIDATION_TEST_OUTPUT_CHARS].rstrip()
-    return compact
 
 
 def _sandbox_git_env(sandbox_root: Path) -> dict[str, str]:

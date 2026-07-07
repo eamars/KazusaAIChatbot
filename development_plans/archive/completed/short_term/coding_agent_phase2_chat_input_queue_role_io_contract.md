@@ -1,6 +1,10 @@
 # Chat Input Queue Role IO Contract
 
-Status: Phase 2 gate_02 final role-boundary contract.
+Status: closed historical Phase 2 gate_02 final role-boundary contract.
+
+Lifecycle: moved from `active/short_term/` to `archive/completed/short_term/`
+on 2026-07-07 because Phase 2 is completed and this file is supporting
+Gate 02 role-contract evidence, not an executable active plan.
 
 This document records the expected role IO flow for the chat input queue task.
 It is the target contract for prompt and workflow development. The flow uses

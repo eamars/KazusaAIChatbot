@@ -9,7 +9,7 @@
   - `development_plans/archive/completed/short_term/coding_agent_phase1_code_reading_final_plan.md`
   - `development_plans/archive/completed/short_term/coding_agent_phase2_code_writing_plan.md`
   - `development_plans/active/short_term/coding_agent_phase2_5_security_boundary_plan.md`
-  - `development_plans/active/short_term/coding_agent_phase3_background_worker_integration_plan.md`
+  - `development_plans/archive/completed/short_term/coding_agent_phase3_background_worker_integration_plan.md`
 - Execution rule: use this document as reference context
 
 This document captures the top-level architecture for replacing placeholder
@@ -18,9 +18,9 @@ completed Phase 0 plan records the implemented `code_fetching` contract; the
 archived completed Phase 1 plan records the corrected `code_reading` and
 direct answer interface on top of that fetching contract. The archived
 completed Phase 2 plan records the standalone new-artifact `code_writing`
-stage and the patch artifact boundary it needs. The active Phase 2.5 draft plan defines
-the agent-space security boundary before later runtime integration. The active
-Phase 3 draft plan defines the separate background-worker integration stage.
+stage and the patch artifact boundary it needs. The active Phase 2.5 plan
+defines the agent-space security boundary for generated artifacts. The archived
+completed Phase 3 plan records the background-worker integration stage.
 
 ## Problem
 
@@ -113,9 +113,9 @@ The accepted architecture is explicit context partitioning:
   for that contract. The owning PM reasons over direct child reports and cited
   evidence. Full raw repository content stays in the private evidence store.
 - Deterministic tooling owns repository discovery, path safety, file caps,
-  search execution, patch validation, execution limits, and storage boundaries.
-  LLM stages receive normalized, bounded evidence rows and task-specific
-  semantic summaries.
+  search execution, non-executing patch review materialization, and storage
+  boundaries. LLM stages receive normalized, bounded evidence rows and
+  task-specific semantic summaries.
 - Coding-agent LLM use is route-configurable. The standalone coding agent uses
   `CODING_AGENT_PM_LLM` for PM decisions and final synthesis, and
   `CODING_AGENT_PROGRAMMER_LLM` for bounded Reading programmer, Writing
@@ -208,10 +208,11 @@ resume. A dependent programmer task that consumes prior generated interfaces
 must cite the resolved supervisor readback fact id before deterministic
 handoff validation allows programmer dispatch.
 
-Validation is supervisor-mediated. The Structural validator returns patch or
-file-tree diagnostics to the work ledger. The supervisor decides whether the
-next step is more reading, new-code writing, existing-code modifying, patching,
-execution, final synthesis, or terminal failure.
+Review materialization is supervisor-mediated. The structural review boundary
+returns patch or file-tree diagnostics to the work ledger without running
+generated code, generated tests, generated commands, or target project tests.
+The supervisor decides whether the next step is more reading, new-code writing,
+existing-code modifying, patching, final synthesis, or terminal failure.
 
 The internal worker shape is:
 
@@ -272,7 +273,7 @@ flowchart TD
 | Writing programmer | Implementation of one accepted new-artifact contract. | One new-file or new-module contract with purpose, imports, interfaces, and required behavior. | One code or text artifact plus local risks and open questions when requested. |
 | Modifying programmer | Implementation of one accepted existing-file change contract. | One existing-file contract with current file context, source anchors, lifecycle owner, imports, interfaces, symbols to modify, and required behavior. | One replacement section, symbol body, or full-file change artifact plus local risks and open questions when requested. |
 | Patching worker | Edit mechanics and artifact materialization. | Selected writing/modifying artifacts, owned path map, base file summaries, and artifact caps. | Unified diff or new-project file tree, edit diagnostics, file list, and patchability notes. |
-| Structural validator | Structural validation, path safety, sandbox artifact checks, public-output safety. | Patch artifacts, source identity, workspace/session metadata, validation limits. | Validation summary, unsafe-path findings, artifact integrity result, public-safe metadata for supervisor repair or final handoff. |
+| Structural review boundary | Patch-shape review, path safety, non-executing sandbox materialization, static artifact inspection, public-output safety. | Patch artifacts, source identity, workspace/session metadata, review limits. | Review summary, unsafe-path findings, artifact integrity result, public-safe metadata for supervisor repair or final handoff. |
 | Synthesizer | Public explanation and handoff summary from completed artifacts. | PM decision, selected artifacts, validation summary, evidence refs, limitations. | Bounded answer text, public rationale, residual limitations, Phase 3 handoff fields. |
 
 ### Hierarchical PM And Programmer Contract
@@ -326,9 +327,10 @@ may use Reading programmer, Writing programmer, or Modifying programmer output.
 For reading,
 validation checks that reports cite files inside the assigned read scope and
 include required evidence references.
-For patching, validation checks artifact shape, patch materialization, patch
-applyability in an isolated sandbox where applicable, and touched Python test
-coherence when proposed tests are part of the patch.
+For patching, review checks artifact shape, patch materialization, patch
+applyability in an isolated review directory, Python syntax through
+`ast.parse`, static import/reference coherence, Markdown environment-assignment
+placement, and touched Python test coherence without running proposed tests.
 
 For reading, the PM consumes a compact `PMInput`:
 
@@ -635,7 +637,7 @@ CodingAgentWriteRequest
   -> code_writing.run
   -> if needed: supervisor runs code_reading or external evidence, then resumes code_writing.run
   -> code_patching materializes new-file artifacts
-  -> Structural validator checks patch or file-tree artifacts
+  -> review materialization checks patch or file-tree artifacts without execution
   -> CodingPatchProposalResponse
 ```
 
@@ -664,7 +666,7 @@ modification, patch apply, and code execution belong to later phases.
 | Background-work router | Route-only worker choice. | `coding_agent` worker for code-task execution. |
 | `coding_agent` supervisor | Coding goal state, cross-domain subagent selection, bounded iteration, global context ledger, final artifact. | Code subagents, deterministic tool facade, external evidence workflow, and Phase 3 result mapping. |
 | Code subagents | Domain-specific low-level planning and tool use behind the supervisor-selected domain. | Supervisor-managed evidence, assignments, and result handoff. |
-| Deterministic tool facade | Path safety, command allowlists, size caps, timeouts, filesystem mutation controls. | LLM stages through normalized evidence rows and validation summaries. |
+| Deterministic tool facade | Path safety, command allowlists, size caps, timeouts, filesystem mutation controls. | LLM stages through normalized evidence rows and review summaries. |
 | L3/dialog | Final visible wording from result-ready cognition. | Background-work result-ready cognition. |
 
 ## Top-Level Supervisor Contract
@@ -874,10 +876,10 @@ Responsibilities:
   `code_modifying`.
 - Own path targeting, insertion anchors, full-file creation, unified-diff or
   file-tree assembly, edit diagnostics, and artifact caps.
-- Run deterministic structural validation with sandbox apply checks where
-  applicable.
-- Return patch artifacts, changed/created file summaries, validation results,
-  and patchability notes.
+- Run deterministic structural review with non-executing sandbox apply checks
+  where applicable.
+- Return patch artifacts, changed/created file summaries, review results, and
+  patchability notes.
 
 ### `code_executing`
 
@@ -913,7 +915,7 @@ Tool candidates for Phases 0 and 1:
 Future tool candidates:
 
 - `git diff`, `git apply --check`, and `git apply --reverse --check`.
-- Patch sandbox apply.
+- Non-executing patch sandbox apply.
 - Bounded test/command execution.
 - Docker-backed execution.
 
@@ -959,7 +961,7 @@ cases where code fetching needs a public page observation.
 |---|---|---|
 | Phase 0 | Standalone `code_fetching` package, README ICD, deterministic source-scope routing, managed storage, direct fetching tests, unsupported-input tests, and 10-source public internet smoke. | Direct callers can resolve supported repo/file/tree/raw/local sources into a safe local source contract or receive explicit unsupported/clarification results. |
 | Phase 1 | Standalone `code_reading` package, README ICD, top-level direct answer interface, supervisor over Phase 0 output and reading. | Direct callers can answer repository/codebase questions with cited local file evidence. |
-| Phase 2 | Standalone `code_writing` for new artifacts plus the `code_patching` boundary needed to materialize new-file proposals, with README ICD, PM/programmer new-artifact architecture, deterministic artifact validation, and direct tests. | Direct callers can request new scripts, files, docs, tests, or small projects as bounded artifacts with real-workspace immutability. |
+| Phase 2 | Standalone `code_writing` for new artifacts plus the `code_patching` boundary needed to materialize new-file proposals, with README ICD, PM/programmer new-artifact architecture, deterministic artifact review materialization, and direct tests. | Direct callers can request new scripts, files, docs, tests, or small projects as bounded artifacts with real-workspace immutability. |
 | Phase 2.5 | Agent-space security boundary enforcement for coding-agent validation, generated artifacts, and tool-call mediation. | Coding-agent proposals remain inspectable artifacts until an approved real-world capability handles execution or mutation. |
 | Phase 3 | Background-worker integration, L2d/action-spec affordance update, result-ready delivery, placeholder removal, and standalone coding-agent response to `BackgroundWorkResult` mapping for `WORKER="coding_agent"`. | Kazusa can route implemented standalone coding-agent work through the normal background-work path. |
 | Phase 4 | `code_modifying` for existing-source changes, supervisor interleaving between reading, writing, modifying, and patching, and direct hard gates for mixed new-file plus existing-file work. | Direct callers can request bounded existing-repository changes as patch proposals. |
