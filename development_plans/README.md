@@ -38,7 +38,8 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| _None_ | _None_ | _none_ |
+| [coding_agent_phase5_patch_apply_plan.md](active/short_term/coding_agent_phase5_patch_apply_plan.md) | High-risk migration | draft |
+| [coding_agent_phase6_code_executing_plan.md](active/short_term/coding_agent_phase6_code_executing_plan.md) | High-risk migration | draft |
 
 ## Supporting Experiment Records
 
