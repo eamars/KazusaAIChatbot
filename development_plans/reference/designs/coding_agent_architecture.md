@@ -636,9 +636,21 @@ CodingAgentWriteRequest
   -> code_fetching.run from Phase 0, when a repository target is present
   -> code_writing.run
   -> if needed: supervisor runs code_reading or external evidence, then resumes code_writing.run
-  -> code_patching materializes new-file artifacts
+  -> code_patching materializes new-file or existing-file patch artifacts
   -> review materialization checks patch or file-tree artifacts without execution
   -> CodingPatchProposalResponse
+```
+
+The Phase 5 apply flow is a separate direct trusted API:
+
+```text
+CodingPatchApplyRequest
+  -> coding_agent.apply_approved_patch
+  -> structured approval and clean source identity checks
+  -> existing patch review validation
+  -> managed source copy under patch_apply/<apply_package_id>/source
+  -> git apply --check and git apply inside that managed copy
+  -> CodingPatchApplyResponse
 ```
 
 Phase 2 proved new-artifact writing first. Phase 4 adds explicit-source
@@ -650,13 +662,23 @@ supervisor-mediated rule: the writing PM may request current public
 documentation or other bounded facts, and the supervisor resumes writing with a
 compact evidence summary.
 
+For source-backed patch proposals, the supervisor may use deterministic bounded
+source/test/doc evidence fallback only when the read-only PM returns no usable
+evidence for a concrete patch request. It may also run one validation-feedback
+modifying retry after patch review validation fails. The retry receives the
+validation errors and prior artifacts, then must return a full corrected
+artifact list. This keeps failed artifacts out of patch apply while giving the
+local LLM one bounded repair opportunity.
+
 Focused Phase 2 unit tests may call `code_writing.run(...)` to prove the
 writing subagent contract. Deterministic acceptance tests and every hard live
 LLM gate must call the public top-level `coding_agent.propose_code_change(...)`
 interface so the coding supervisor owns fetch/write/patch/external dispatch and
 the work ledger. Phase 4 keeps the same direct coding-agent path for
 existing-source modification. L2d, result-ready cognition, service delivery,
-patch apply, and code execution remain separate integration phases.
+and code execution remain separate integration phases. Phase 5 patch apply is
+available only through the direct trusted API and does not run through the
+background worker or adapter delivery path.
 
 ## Ownership Boundaries
 
@@ -869,7 +891,8 @@ Responsibilities:
 ### `code_patching`
 
 Purpose: materialize selected generated artifacts and selected existing-file
-modifications into one patch or file-tree proposal.
+modifications into one patch or file-tree proposal, and apply explicitly
+approved patch artifacts into a managed source copy.
 
 Responsibilities:
 
@@ -881,6 +904,10 @@ Responsibilities:
   where applicable.
 - Return patch artifacts, changed/created file summaries, review results, and
   patchability notes.
+- Require structured approval and matching clean source identity before managed
+  patch apply.
+- Preserve the original source root by applying only under
+  `patch_apply/<apply_package_id>/source`.
 
 ### `code_executing`
 
@@ -915,10 +942,14 @@ Tool candidates for Phases 0 and 1:
 
 Future tool candidates:
 
-- `git diff`, `git apply --check`, and `git apply --reverse --check`.
-- Non-executing patch sandbox apply.
+- `git diff` and `git apply --reverse --check`.
 - Bounded test/command execution.
 - Docker-backed execution.
+
+Implemented patch tools:
+
+- `git apply --check` and `git apply` inside managed review/apply workspaces.
+- Non-executing patch sandbox apply.
 
 Tool output must be normalized before it enters an LLM prompt. The model should
 see short evidence rows. Raw command output and unbounded source files stay in
@@ -966,7 +997,7 @@ cases where code fetching needs a public page observation.
 | Phase 2.5 | Agent-space security boundary enforcement for coding-agent validation, generated artifacts, and tool-call mediation. | Coding-agent proposals remain inspectable artifacts until an approved real-world capability handles execution or mutation. |
 | Phase 3 | Background-worker integration, L2d/action-spec affordance update, result-ready delivery, placeholder removal, and standalone coding-agent response to `BackgroundWorkResult` mapping for `WORKER="coding_agent"`. | Kazusa can route implemented standalone coding-agent work through the normal background-work path. |
 | Phase 4 | `code_modifying` for existing-source changes, supervisor interleaving between reading, writing, modifying, and patching, and direct hard gates for mixed new-file plus existing-file work. | Direct callers can request bounded existing-repository changes as patch proposals. |
-| Phase 5 | Patch apply flow with explicit approval and workspace safety. | Apply approved patches in a controlled sandbox or approved workspace. |
+| Phase 5 | Direct `apply_approved_patch(...)` flow with explicit structured approval, clean source identity validation, review validation before apply-copy creation, managed source-copy apply, public-safe apply response, source-backed evidence fallback, one validation-feedback modifying repair retry, and original-source immutability tests. | Trusted callers can apply approved and review-valid patch artifacts into a controlled managed workspace without mutating the original checkout or running commands. |
 | Phase 6 | `code_executing` sandbox/Docker execution. | Run bounded verification commands and include results. |
 | Phase 7 | Broader repository operations and richer external help. | Handle multi-repo comparisons, docs lookups, and current dependency evidence. |
 

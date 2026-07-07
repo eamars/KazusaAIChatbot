@@ -57,6 +57,7 @@ async def run(request: CodeModificationRequest) -> CodeModificationResult:
         "reading_answer": reading_result.get("answer_text", ""),
         "evidence": evidence_with_ids,
         "file_contexts": file_contexts,
+        "ownership_guidance": _ownership_guidance(file_contexts),
         "output_contract": {
             "operation_kinds": [
                 "replace",
@@ -68,6 +69,9 @@ async def run(request: CodeModificationRequest) -> CodeModificationResult:
             "command_execution_allowed": False,
         },
     }
+    repair_feedback = request.get("repair_feedback")
+    if isinstance(repair_feedback, dict):
+        payload["repair_feedback"] = repair_feedback
     programmer_result = await run_modifying_programmer(payload)
     artifacts = _successful_artifacts(programmer_result.get("artifacts"))
     if not artifacts:
@@ -152,6 +156,40 @@ def _safe_text_path(path_text: str) -> str | None:
     if is_binary_like_path(normalized) or is_secret_like_path(normalized):
         return None
     return normalized
+
+
+def _ownership_guidance(
+    file_contexts: list[dict[str, object]],
+) -> dict[str, object]:
+    source_owner_paths: list[str] = []
+    test_or_doc_paths: list[str] = []
+    for context in file_contexts:
+        path_value = context.get("path")
+        if not isinstance(path_value, str):
+            continue
+        lowered_path = path_value.casefold()
+        if _is_test_or_doc_path(lowered_path):
+            test_or_doc_paths.append(path_value)
+            continue
+        source_owner_paths.append(path_value)
+    guidance = {
+        "source_owner_paths": source_owner_paths,
+        "test_or_doc_paths": test_or_doc_paths,
+        "rule": (
+            "When requested behavior maps to a helper/source owner path, "
+            "modify that owner path and its focused tests instead of only "
+            "changing a caller or wrapper."
+        ),
+    }
+    return guidance
+
+
+def _is_test_or_doc_path(lowered_path: str) -> bool:
+    if lowered_path.startswith("tests/") or "/tests/" in lowered_path:
+        return True
+    if lowered_path.endswith(".md") or lowered_path.endswith(".rst"):
+        return True
+    return False
 
 
 def _successful_artifacts(value: object) -> list[ModificationArtifact]:

@@ -1,8 +1,9 @@
 # Code Patching ICD
 
-`code_patching` is the canonical inert patch assembly boundary for the coding
-agent. It consumes structured operations selected by writing or modifying
-workflows and returns reviewable patch artifacts.
+`code_patching` is the canonical patch mechanics boundary for the coding agent.
+It consumes structured operations selected by writing or modifying workflows,
+returns reviewable patch artifacts, and applies explicitly approved artifacts
+only into managed apply copies.
 
 ## Ownership
 
@@ -10,13 +11,18 @@ workflows and returns reviewable patch artifacts.
 - Compiles `create_file`, `insert_before`, `insert_after`, `replace`, and
   `replace_file_small` operations into unified-diff artifacts.
 - Materializes review packages under a managed coding-agent workspace.
+- Applies approved patch artifacts into
+  `<workspace_root>/patch_apply/<apply_package_id>/source`.
 - Returns patchability diagnostics and public-safe file summaries.
 
 ## Boundaries
 
-- It does not apply patches to the caller workspace.
+- It does not apply patches to the caller source root or arbitrary target
+  directories.
 - It does not run target project commands, generated tests, package
   installation, or network calls.
+- It requires structured approval and matching clean source identity before
+  creating any managed apply workspace.
 - It rejects missing or ambiguous existing-file anchors instead of guessing.
 - It rejects mixed packages atomically when any operation is invalid.
 - It rejects delete, rename, chmod, binary writes, unsafe paths, and secret-like
@@ -27,6 +33,9 @@ workflows and returns reviewable patch artifacts.
 ```python
 from kazusa_ai_chatbot.coding_agent.code_patching.patch_operations import (
     compile_patch_operations,
+)
+from kazusa_ai_chatbot.coding_agent.code_patching.apply import (
+    apply_approved_patch,
 )
 from kazusa_ai_chatbot.coding_agent.code_patching.patch_validation import (
     materialize_patch_artifacts_for_review,
@@ -40,3 +49,9 @@ from kazusa_ai_chatbot.coding_agent.code_patching.patcher import (
 `materialize_patch_artifacts_for_review(...)` writes only to managed review
 storage and uses git patch checks plus static artifact inspection. Generated or
 target-project code remains inert.
+`apply_approved_patch(...)` first runs the existing review validation against
+the source root. Only patch artifacts that pass parsing, sandbox patchability,
+and static review checks are copied to a managed apply workspace. It then runs
+git patch checks plus git apply only inside that copy. Its public response
+reports relative paths and an opaque managed workspace reference, not absolute
+filesystem roots or command output.

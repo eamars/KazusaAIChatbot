@@ -3,6 +3,7 @@
 from typing import Literal, TypedDict
 
 PatchValidationStatus = Literal["succeeded", "failed", "rejected"]
+PatchApplyStatus = Literal["succeeded", "failed", "rejected"]
 PatchOperationKind = Literal[
     "create_file",
     "insert_before",
@@ -60,6 +61,69 @@ class PatchValidationSummary(TypedDict):
     errors: list[str]
     warnings: list[str]
     files: list[str]
+
+
+class PatchSourceIdentity(TypedDict, total=False):
+    """Public source identity used to reject stale apply requests."""
+
+    provider: str
+    owner: str | None
+    repo: str | None
+    current_commit: str
+    dirty_state: str
+
+
+class PatchApplyApproval(TypedDict):
+    """Trusted structured approval required for patch application."""
+
+    approved: bool
+    approved_by: str
+    approved_at: str
+    approval_reason: str
+
+
+class ApplyWorkspaceRef(TypedDict):
+    """Opaque public reference to a managed patch apply workspace."""
+
+    kind: str
+    apply_package_id: str
+    source_identity: dict[str, object]
+    applied_files: list[str]
+
+
+class PatchApplyValidation(TypedDict):
+    """Public-safe patch apply validation result."""
+
+    status: PatchApplyStatus
+    errors: list[str]
+    warnings: list[str]
+
+
+class CodingPatchApplyRequest(TypedDict, total=False):
+    """Trusted direct request to apply approved patch artifacts."""
+
+    workspace_root: str
+    source_root: str
+    source_identity: PatchSourceIdentity
+    expected_source_identity: PatchSourceIdentity
+    patch_artifacts: list[PatchArtifact]
+    approval: PatchApplyApproval
+    max_files: int
+    max_diff_chars: int
+
+
+class CodingPatchApplyResponse(TypedDict):
+    """Public-safe response for approved patch application."""
+
+    status: PatchApplyStatus
+    apply_package_id: str
+    source_identity: dict[str, object]
+    apply_workspace_ref: ApplyWorkspaceRef
+    applied_files: list[str]
+    changed_files: list[ChangedFileSummary]
+    validation: PatchApplyValidation
+    limitations: list[str]
+    trace_summary: list[str]
 
 
 class PatchProposalInput(TypedDict):

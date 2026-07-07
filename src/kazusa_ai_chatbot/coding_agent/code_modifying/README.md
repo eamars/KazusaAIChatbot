@@ -16,6 +16,9 @@ Runtime ownership:
 - The top-level coding-agent supervisor resolves source and gathers evidence
   before calling `code_modifying.run(...)`.
 - `code_modifying` loads bounded safe text context for evidence paths only.
+- When the top-level supervisor supplies `repair_feedback`, `code_modifying`
+  must return a corrected complete artifact list that addresses the validation
+  errors rather than repeating the failed artifact shape.
 - The modifying programmer returns structured operations:
   `replace`, `insert_before`, `insert_after`, or `replace_file_small`.
 - Raw unified diffs and command-output-based repair feedback are rejected at

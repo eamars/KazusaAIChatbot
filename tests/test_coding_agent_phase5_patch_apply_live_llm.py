@@ -482,21 +482,44 @@ async def _run_patch_apply_gate(
 
     from kazusa_ai_chatbot.coding_agent import apply_approved_patch
 
-    apply_response = apply_approved_patch({
-        "workspace_root": str(workspace_root),
-        "source_root": str(source_root),
-        "source_identity": source_identity,
-        "expected_source_identity": source_identity,
-        "patch_artifacts": proposal_response["patch_artifacts"],
-        "approval": {
-            "approved": True,
-            "approved_by": "phase5_live_llm_gate",
-            "approved_at": "2026-07-08T00:00:00Z",
-            "approval_reason": gate["objective"],
-        },
-        "max_files": MAX_APPLY_FILES,
-        "max_diff_chars": MAX_ARTIFACT_CHARS,
-    })
+    apply_response: dict[str, Any]
+    if _proposal_is_apply_eligible(proposal_response):
+        apply_response = apply_approved_patch({
+            "workspace_root": str(workspace_root),
+            "source_root": str(source_root),
+            "source_identity": source_identity,
+            "expected_source_identity": source_identity,
+            "patch_artifacts": proposal_response["patch_artifacts"],
+            "approval": {
+                "approved": True,
+                "approved_by": "phase5_live_llm_gate",
+                "approved_at": "2026-07-08T00:00:00Z",
+                "approval_reason": gate["objective"],
+            },
+            "max_files": MAX_APPLY_FILES,
+            "max_diff_chars": MAX_ARTIFACT_CHARS,
+        })
+    else:
+        apply_response = {
+            "status": "not_run",
+            "apply_package_id": "",
+            "source_identity": source_identity,
+            "apply_workspace_ref": {
+                "kind": "",
+                "apply_package_id": "",
+                "source_identity": source_identity,
+                "applied_files": [],
+            },
+            "applied_files": [],
+            "changed_files": [],
+            "validation": {
+                "status": "not_run",
+                "errors": ["Proposal review validation did not pass."],
+                "warnings": [],
+            },
+            "limitations": ["Proposal review validation did not pass."],
+            "trace_summary": ["patch_apply:not_run:proposal_failed"],
+        }
     after_hashes = _hash_tree(source_root)
     applied_paths = _managed_applied_paths(
         workspace_root=workspace_root,
@@ -524,6 +547,18 @@ async def _run_patch_apply_gate(
         print(f"managed_applied_file={path}")
 
     return proposal_response, apply_response
+
+
+def _proposal_is_apply_eligible(proposal_response: dict[str, Any]) -> bool:
+    """Return whether a proposal can be approved for live apply."""
+
+    if proposal_response.get("status") != "succeeded":
+        return False
+    validation = proposal_response.get("validation")
+    if isinstance(validation, dict) and validation.get("status") != "succeeded":
+        return False
+    patch_artifacts = proposal_response.get("patch_artifacts")
+    return isinstance(patch_artifacts, list) and bool(patch_artifacts)
 
 
 def _source_identity_from_proposal(

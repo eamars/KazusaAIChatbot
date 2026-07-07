@@ -7,6 +7,7 @@ Current implemented surfaces:
 
 ```python
 from kazusa_ai_chatbot.coding_agent import answer_code_question
+from kazusa_ai_chatbot.coding_agent import apply_approved_patch
 from kazusa_ai_chatbot.coding_agent import handle_background_coding_task
 from kazusa_ai_chatbot.coding_agent import propose_code_change
 from kazusa_ai_chatbot.coding_agent.code_fetching import run as run_code_fetching
@@ -33,13 +34,24 @@ applies patches or runs target project commands. Source-free requests use the
 managed new-project `code_writing` workspace. Explicit source requests resolve
 the source, run read-only evidence collection, ask `code_modifying` for
 structured existing-file operations, and materialize review-only patch
-artifacts through `code_patching`.
+artifacts through `code_patching`. If the initial read-only PM returns no
+usable evidence for a concrete source-backed patch request, the supervisor may
+fall back to bounded safe source/test/doc file evidence. If patch review
+validation fails, the supervisor may perform one validation-feedback modifying
+retry before returning the proposal result.
 
 `handle_background_coding_task(...)` is the accepted-task background interface.
 It receives one background coding task, asks the coding-agent supervisor route
 to choose reading, writing, modifying, or unsupported, and then calls the
 public code-reading or patch-proposal interface. The operation decision belongs
 here, not in L2d or the generic background-work router.
+
+`apply_approved_patch(...)` is the direct trusted patch-apply interface. It
+requires structured approval, verifies source identity, copies the source tree
+into `<workspace_root>/patch_apply/<apply_package_id>/source` only after the
+patch artifacts pass review validation, and applies the patch only inside that
+managed copy. It does not mutate the original source root and does not run
+tests, build tools, package managers, or arbitrary shell commands.
 
 Implemented subagents:
 
@@ -50,7 +62,8 @@ Implemented subagents:
 - `code_modifying`: converts source evidence and bounded file context into
   structured existing-file modification operations.
 - `code_patching`: converts selected writing/modifying artifacts into
-  review-only patch artifacts and sandbox materialization checks.
+  review-only patch artifacts, sandbox materialization checks, and explicitly
+  approved managed-copy apply results.
 - `code_writing`: creates source-free new-artifact patch proposals in managed
   storage.
 
@@ -315,6 +328,40 @@ not parse workspace paths from user text, fall back to worker-local temp paths,
 apply patches, run project commands, apply generated files, or send
 adapter-visible text directly. Generated code proposals are returned as
 artifacts only.
+
+## Direct Patch Apply Request
+
+`CodingPatchApplyRequest` accepts:
+
+- `workspace_root`
+- `source_root`
+- `source_identity`
+- `expected_source_identity`
+- `patch_artifacts`
+- `approval`
+- `max_files`
+- `max_diff_chars`
+
+`approval` must be trusted structured runtime data with `approved=True`,
+`approved_by`, `approved_at`, and `approval_reason`. The apply boundary does
+not infer approval from chat text, accepted-task prose, LLM rationale, or
+proposal answer text.
+
+`CodingPatchApplyResponse` contains only public-safe metadata:
+
+- `status`
+- `apply_package_id`
+- `source_identity`
+- `apply_workspace_ref`
+- `applied_files`
+- `changed_files`
+- `validation`
+- `limitations`
+- `trace_summary`
+
+`apply_workspace_ref.kind` is `managed_apply_workspace`. The response omits the
+resolved source root, workspace root, raw diff text, raw command output, and
+the physical managed apply path.
 
 ## Change Control
 

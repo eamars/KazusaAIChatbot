@@ -38,7 +38,6 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [coding_agent_phase5_patch_apply_plan.md](active/short_term/coding_agent_phase5_patch_apply_plan.md) | High-risk migration | draft |
 | [coding_agent_phase6_code_executing_plan.md](active/short_term/coding_agent_phase6_code_executing_plan.md) | High-risk migration | draft |
 
 ## Supporting Experiment Records
@@ -240,6 +239,7 @@ plans.
 | [coding_agent_phase2_code_writing_plan.md](archive/completed/short_term/coding_agent_phase2_code_writing_plan.md) |
 | [coding_agent_phase3_background_worker_integration_plan.md](archive/completed/short_term/coding_agent_phase3_background_worker_integration_plan.md) |
 | [coding_agent_phase4_code_modifying_and_patching_plan.md](archive/completed/short_term/coding_agent_phase4_code_modifying_and_patching_plan.md) |
+| [coding_agent_phase5_patch_apply_plan.md](archive/completed/short_term/coding_agent_phase5_patch_apply_plan.md) |
 | [character_reflection_cycle_stage1a_plan.md](archive/completed/short_term/character_reflection_cycle_stage1a_plan.md) |
 | [character_self_words_retrieval_delivery_receipt_plan.md](archive/completed/short_term/character_self_words_retrieval_delivery_receipt_plan.md) |
 | [cognition_chain_module_separation_plan.md](archive/completed/short_term/cognition_chain_module_separation_plan.md) |

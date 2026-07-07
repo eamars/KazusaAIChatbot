@@ -6,7 +6,7 @@
   patch application into a controlled managed apply workspace, without running
   commands, installing packages, or mutating the original source checkout.
 - Plan class: high_risk_migration.
-- Status: draft.
+- Status: completed.
 - Mandatory skills: `development-plan`, `local-llm-architecture`,
   `no-prepost-user-input`, `py-style`, and `test-style-and-execution`.
 - Overall cutover strategy: bigbang for the new apply boundary; existing
@@ -385,40 +385,40 @@ remains unchanged.
 
 ## Progress Checklist
 
-- [ ] Stage 1 - focused test contract established.
+- [x] Stage 1 - focused test contract established.
   - Covers: implementation steps 1, 2, and 3.
   - Verify: focused Phase 5 tests fail for missing API or missing behavior.
   - Evidence: record test commands and expected failures.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage 2 - patch apply module implemented.
+  - Sign-off: `codex/2026-07-08`.
+- [x] Stage 2 - patch apply module implemented.
   - Covers: implementation steps 4 and 5.
   - Verify:
     `venv\Scripts\python -m pytest tests\test_coding_agent_phase5_patch_apply_contracts.py -q`.
   - Evidence: record changed production files and passing focused test output.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage 3 - background metadata and docs updated.
+  - Sign-off: `codex/2026-07-08`.
+- [x] Stage 3 - background metadata and docs updated.
   - Covers: implementation steps 6 and 7.
   - Verify:
     `venv\Scripts\python -m pytest tests\test_coding_agent_phase5_interface.py tests\test_background_work_coding_agent.py -q`.
   - Evidence: record test output and documentation files changed.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage 4 - regression verification complete.
+  - Sign-off: `codex/2026-07-08`.
+- [x] Stage 4 - regression verification complete.
   - Covers: implementation step 8.
   - Verify: all commands in `Verification`.
   - Evidence: record command outputs and accepted static grep results.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage 5 - independent code review complete.
+  - Sign-off: `codex/2026-07-08`.
+- [x] Stage 5 - independent code review complete.
   - Covers: implementation step 9.
   - Verify: review findings are recorded, fixes are applied, and affected
     verification commands pass again.
   - Evidence: record review result, remediation, residual risk, and approval.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage 6 - lifecycle closure complete.
+  - Sign-off: `codex/2026-07-08`.
+- [x] Stage 6 - lifecycle closure complete.
   - Covers: implementation step 10.
   - Verify: plan status and registry are updated, active plan moved to
     completed archive, and `git status --short` is reviewed.
   - Evidence: record final commit or handoff state.
-  - Sign-off: `<agent/date>`.
+  - Sign-off: `codex/2026-07-08`.
 
 ## Live LLM Gating Tests
 
@@ -600,8 +600,8 @@ Review findings and remediation:
   Accepted because Phase 5 intentionally consumes patch artifacts and the plan
   keeps Phase 4 regression tests in scope.
 
-Approval status: draft strengthened for user review. It is not executable until
-the user approves or commands implementation.
+Approval status: user commanded fallback execution without subagent on
+2026-07-08. The plan is executable as an in-progress implementation record.
 
 ## Independent Code Review
 
@@ -649,11 +649,58 @@ This plan is complete when:
 
 ## Execution Evidence
 
-- Focused test baseline:
+- Self-audit finding, 2026-07-08: live-gate remediation had drifted into
+  gate-shaped prompt examples and the apply boundary could apply artifacts from
+  a proposal whose review validation had failed. Rework removed gate-specific
+  prompt examples, added pre-apply review validation to `apply_approved_patch`,
+  added deterministic invalid-Python rejection coverage, updated the live
+  harness to skip apply when proposal review validation does not pass, added
+  bounded source-backed evidence fallback for concrete patch requests, and
+  added one validation-feedback modifying repair retry for failed patch review.
+- Focused test baseline: missing API and background metadata enum failures
+  observed with
+  `venv\Scripts\python -m pytest tests\test_coding_agent_phase5_patch_apply_contracts.py tests\test_coding_agent_phase5_interface.py -q`.
 - Implementation files changed:
+  `src/kazusa_ai_chatbot/coding_agent/code_patching/apply.py`,
+  `src/kazusa_ai_chatbot/coding_agent/code_patching/models.py`,
+  `src/kazusa_ai_chatbot/coding_agent/__init__.py`,
+  `src/kazusa_ai_chatbot/background_work/subagent/coding_agent.py`,
+  `src/kazusa_ai_chatbot/coding_agent/code_modifying/programmer.py`,
+  `src/kazusa_ai_chatbot/coding_agent/code_modifying/supervisor.py`,
+  docs, and focused tests.
 - Focused test pass:
+  `venv\Scripts\python -m pytest tests\test_coding_agent_phase5_patch_apply_contracts.py tests\test_coding_agent_phase5_interface.py -q`
+  passed 14 tests after self-audit rework.
 - Regression test pass:
+  `venv\Scripts\python -m pytest tests\test_coding_agent_phase5_interface.py tests\test_background_work_coding_agent.py -q`
+  passed 10 tests.
+  `venv\Scripts\python -m pytest tests\test_coding_agent_phase4_code_patching_contracts.py tests\test_coding_agent_phase4_interface.py tests\test_coding_agent_phase2_new_artifact_contracts.py -q`
+  passed 25 tests.
 - Static check results:
+  `venv\Scripts\python -m compileall src\kazusa_ai_chatbot\coding_agent src\kazusa_ai_chatbot\background_work tests\test_coding_agent_phase5_patch_apply_contracts.py tests\test_coding_agent_phase5_interface.py tests\test_coding_agent_phase5_patch_apply_live_llm.py`
+  passed. `git diff --check` passed. Stale `code_modifying` metadata enum
+  grep returned no matches. Command grep matched only existing patch validation
+  `git apply` and static pytest-pattern scanner code.
+- Live LLM gates:
+  Gate 01, Gate 02, Gate 03, Gate 04, and Gate 05 passed one at a time after
+  self-audit rework. Final raw evidence files are under
+  `test_artifacts/llm_traces/coding_agent_phase5_patch_apply/`. All final
+  gates reported proposal status `succeeded`, proposal validation `succeeded`,
+  apply status `succeeded`, and unchanged source hashes.
 - Manual review:
+  Gate evidence summaries were inspected for proposal/apply status, validation
+  status, applied files, and original source hash preservation. Failed proposal
+  attempts were used as audit inputs, and final harness behavior skips apply
+  when proposal review validation does not pass.
 - Independent code review:
-- Lifecycle closure:
+- Self-review after no-subagent rework found one consistency issue: failed
+  live proposal evidence used a `not_run` apply response without the full
+  public apply response shape. Fixed by adding `source_identity` and
+  `apply_workspace_ref` to that evidence response, then reran focused tests,
+  compile check, and `git diff --check`.
+- Independent code review: no-subagent self-review completed per user
+  instruction. Finding fixed and reverified. Residual risk: Phase 5 live gates
+  still depend on live local LLM proposal quality; failed proposals now cannot
+  reach apply because the harness and apply boundary require successful review
+  validation.
+- Lifecycle closure: status set to completed and moved to completed archive.

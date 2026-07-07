@@ -20,6 +20,9 @@ from kazusa_ai_chatbot.coding_agent.code_patching.patch_operations import (
 from kazusa_ai_chatbot.coding_agent.code_patching.patch_validation import (
     materialize_patch_artifacts_for_review,
 )
+from kazusa_ai_chatbot.coding_agent.code_reading.evidence import (
+    list_scoped_safe_files,
+)
 from kazusa_ai_chatbot.coding_agent.external_evidence import (
     collect_external_evidence,
 )
@@ -67,6 +70,8 @@ CACHE_KEY_TOKEN_RE = re.compile(r"cache_key", re.IGNORECASE)
 WRITE_EVIDENCE_EXCERPT_OMITTED = (
     "[source excerpt omitted from patch proposal response]"
 )
+MAX_WRITE_FALLBACK_EVIDENCE_FILES = 10
+MAX_WRITE_FALLBACK_EXCERPT_CHARS = 1200
 BACKGROUND_CODING_ROUTER_PROMPT = '''\
 You are the top-level supervisor inside a coding agent.
 
@@ -792,6 +797,16 @@ async def _propose_existing_repo_change(
         source_scope=source_scope,
     )
     trace_summary.extend(reading_result["trace_summary"])
+    if not _reading_has_usable_evidence(reading_result):
+        fallback_reading_result = _fallback_reading_result_for_write(
+            request=request,
+            repository=repository,
+            source_scope=source_scope,
+            prior_reading_result=reading_result,
+        )
+        if _reading_has_usable_evidence(fallback_reading_result):
+            reading_result = fallback_reading_result
+            trace_summary.extend(fallback_reading_result["trace_summary"])
     if (
         reading_result["status"] != "succeeded"
         and not _reading_has_usable_evidence(reading_result)
@@ -857,7 +872,56 @@ async def _propose_existing_repo_change(
         limitations=limitations,
         trace_summary=trace_summary,
     )
+    if _write_response_needs_modifying_repair(response):
+        repair_request = _modifying_request(
+            request=request,
+            repository=repository,
+            source_scope=source_scope,
+            reading_result=reading_result,
+        )
+        repair_request["repair_feedback"] = {
+            "validation": response["validation"],
+            "previous_modification_artifacts": modifying_result.get(
+                "modification_artifacts",
+                [],
+            ),
+            "instruction": (
+                "Return a corrected complete artifact list that fixes the "
+                "validation errors. Do not repeat invalid syntax, missing "
+                "imports, unsafe paths, or no-op artifacts."
+            ),
+        }
+        trace_summary.append("modifying:repair_retry")
+        modifying_result = await _maybe_await(code_modifying.run(repair_request))
+        trace_summary.extend(modifying_result["trace_summary"])
+        limitations = _existing_repo_limitations(
+            fetching_limitations=fetching_limitations,
+            repository=repository,
+            reading_result=reading_result,
+            writing_result=modifying_result,
+        )
+        response = _write_response_from_modifying_result(
+            request=request,
+            modifying_result=modifying_result,
+            repository=repository,
+            source_scope=source_scope,
+            evidence=_evidence_from_reading_result(reading_result),
+            limitations=limitations,
+            trace_summary=trace_summary,
+        )
     return response
+
+
+def _write_response_needs_modifying_repair(
+    response: CodingPatchProposalResponse,
+) -> bool:
+    if response["status"] != "failed":
+        return False
+    validation = response.get("validation")
+    if not isinstance(validation, dict):
+        return False
+    errors = validation.get("errors")
+    return isinstance(errors, list) and bool(errors)
 
 
 def _modifying_request(
@@ -1073,6 +1137,126 @@ def _evidence_from_reading_result(
 def _reading_has_usable_evidence(reading_result: dict[str, object]) -> bool:
     evidence = reading_result.get("evidence")
     return isinstance(evidence, list) and bool(evidence)
+
+
+def _fallback_reading_result_for_write(
+    *,
+    request: CodingAgentWriteRequest,
+    repository: CodeRepositoryRef,
+    source_scope: dict[str, object],
+    prior_reading_result: dict[str, object],
+) -> dict[str, object]:
+    """Build bounded source evidence when the reading PM returns none."""
+
+    repo_root = Path(repository["local_root"]).expanduser().resolve(strict=True)
+    safe_files = list_scoped_safe_files(
+        repo_root=repo_root,
+        source_scope=source_scope,  # type: ignore[arg-type]
+    )
+    ranked_paths = _rank_fallback_write_paths(
+        safe_files=safe_files,
+        question=str(request.get("question") or ""),
+    )
+    evidence: list[dict[str, object]] = []
+    for safe_path in ranked_paths[:MAX_WRITE_FALLBACK_EVIDENCE_FILES]:
+        file_path = repo_root / safe_path
+        try:
+            content = file_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        excerpt = _bounded_fallback_excerpt(content)
+        if not excerpt:
+            continue
+        evidence.append({
+            "path": safe_path,
+            "line_start": 1,
+            "line_end": _fallback_line_count(excerpt),
+            "symbol_or_topic": "write evidence fallback",
+            "excerpt": excerpt,
+            "reason": (
+                "Deterministic fallback selected this safe source file for "
+                "a source-backed patch proposal."
+            ),
+        })
+    if not evidence:
+        result = dict(prior_reading_result)
+        result["trace_summary"] = ["reading_fallback:evidence=0"]
+        return result
+    limitations = list(prior_reading_result.get("limitations") or [])
+    limitations.append(
+        "Initial reading PM returned no evidence; deterministic bounded "
+        "source evidence fallback was used for the patch proposal."
+    )
+    result = {
+        "status": "succeeded",
+        "answer_text": (
+            "Deterministic bounded source evidence fallback selected safe "
+            "source, test, and documentation files for the patch proposal."
+        ),
+        "evidence": evidence,
+        "limitations": limitations,
+        "trace_summary": [f"reading_fallback:evidence={len(evidence)}"],
+    }
+    return result
+
+
+def _rank_fallback_write_paths(
+    *,
+    safe_files: list[str],
+    question: str,
+) -> list[str]:
+    terms = _fallback_terms(question)
+    ranked = sorted(
+        safe_files,
+        key=lambda path: (
+            -_fallback_path_score(path, terms),
+            _fallback_path_rank(path),
+            path.casefold(),
+        ),
+    )
+    return ranked
+
+
+def _fallback_terms(question: str) -> set[str]:
+    terms: set[str] = set()
+    for raw_term in re.findall(r"[A-Za-z][A-Za-z0-9_]{2,}", question):
+        terms.add(raw_term.casefold())
+    return terms
+
+
+def _fallback_path_score(path: str, terms: set[str]) -> int:
+    lowered_path = path.casefold()
+    score = 0
+    for term in terms:
+        if term in lowered_path:
+            score += 3
+    if lowered_path.startswith("tests/") or "/tests/" in lowered_path:
+        score += 2
+    if lowered_path.endswith((".md", ".rst")):
+        score += 1
+    return score
+
+
+def _fallback_path_rank(path: str) -> int:
+    lowered_path = path.casefold()
+    if lowered_path.endswith(".py") and not lowered_path.startswith("tests/"):
+        return 0
+    if lowered_path.startswith("tests/") or "/tests/" in lowered_path:
+        return 1
+    if lowered_path.endswith((".md", ".rst")):
+        return 2
+    return 3
+
+
+def _bounded_fallback_excerpt(content: str) -> str:
+    excerpt = content[:MAX_WRITE_FALLBACK_EXCERPT_CHARS].strip()
+    return excerpt
+
+
+def _fallback_line_count(excerpt: str) -> int:
+    if not excerpt:
+        return 1
+    return excerpt.count("\n") + 1
 
 
 def _write_loop_failure(

@@ -306,6 +306,13 @@ The queue supplies scheduling, duplicate rejection, execution, and result
 handoff mechanics; it does not by itself authorize repository edits, shell
 execution, web access, package installation, or direct adapter sends.
 
+The coding-agent direct API also exposes `apply_approved_patch(...)` for
+trusted callers that already have patch artifacts, a structured approval
+object, and matching clean source identity. This flow creates a managed apply
+copy under the configured coding workspace only after patch review validation
+passes, and leaves the original source root unchanged. It remains outside
+background-worker, L2d, dialog, and adapter delivery paths.
+
 Reflection phase scheduling spreads monitor-eligible channels across the
 `REFLECTION_WORKER_INTERVAL_SECONDS` period instead of running all group
 review work in one burst. `REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD` defaults to

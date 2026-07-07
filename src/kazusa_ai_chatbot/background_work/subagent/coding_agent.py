@@ -82,7 +82,12 @@ def _map_coding_agent_response(
         response.get("operation"),
         limit=80,
     )
-    if coding_operation not in ("code_reading", "code_writing", "unsupported"):
+    if coding_operation not in (
+        "code_reading",
+        "code_writing",
+        "code_modifying",
+        "unsupported",
+    ):
         coding_operation = "unsupported"
     failure_summary = ""
     if status != "succeeded":
