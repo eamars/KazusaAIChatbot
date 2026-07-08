@@ -71,8 +71,12 @@ def test_modifying_programmer_prompt_requires_requested_tests_docs() -> None:
     assert "matching test or document" in prompt
     assert "repair_feedback" in prompt
     assert "validation error" in prompt
+    assert "artifact for every target path" in prompt
+    assert "source-only artifacts" in prompt
     assert "files are present in file_contexts" in prompt
     assert "instead of reporting it as a limitation" in prompt
+    assert "existing test file shows a local mocking pattern" in prompt
+    assert "do not block only because the exact new" in prompt
     assert "same as the current file text" in prompt
     assert "update a provided cli test file" in prompt
     assert "preserve existing ownership boundaries" in prompt
@@ -88,6 +92,15 @@ def test_modifying_programmer_prompt_requires_requested_tests_docs() -> None:
     assert "required import" in prompt
     assert "local definition" in prompt
     assert "escaped \"\\n\" sequences" in prompt
+    assert "do not duplicate an" in prompt
+    assert "existing import block" in prompt
+    assert "module top level" in prompt
+    assert "never insert a python import after" in prompt
+    assert "prefer replace_file_small" in prompt
+    assert "never include an indented import line" in prompt
+    assert "preserve method receivers" in prompt
+    assert "self" in prompt
+    assert "cls" in prompt
 
 
 def test_modifying_payload_projects_owner_path_guidance() -> None:

@@ -15,7 +15,15 @@ Runtime ownership:
 
 - The top-level coding-agent supervisor resolves source and gathers evidence
   before calling `code_modifying.run(...)`.
-- `code_modifying` loads bounded safe text context for evidence paths only.
+- The shared File Agent loads bounded safe text context for evidence paths,
+  ranks source-owner candidates, and separates focused test/document companion
+  paths from runtime owner paths.
+- The modifying PM chooses one lifecycle action from the File Agent plan:
+  create a programmer task, request information, repair a child handoff,
+  complete, or block.
+- The supervisor validates the PM handoff before programmer dispatch. The first
+  programmer task must include a source-owner path when one is available, and
+  target paths must stay inside the bounded File Agent context.
 - When the top-level supervisor supplies `repair_feedback`, `code_modifying`
   must return a corrected complete artifact list that addresses the validation
   errors rather than repeating the failed artifact shape.

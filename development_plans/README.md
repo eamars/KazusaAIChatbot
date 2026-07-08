@@ -38,7 +38,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| No active short-term plans | - | - |
+| [coding_agent_phase8_verify_repair_loop_plan.md](active/short_term/coding_agent_phase8_verify_repair_loop_plan.md) | Coding-agent controlled verify/repair execution plan | draft |
 
 ## Supporting Experiment Records
 
@@ -58,6 +58,8 @@ long_term/todo.md
 |---|---|
 | [action_spec_effector_expansion_architecture.md](reference/designs/action_spec_effector_expansion_architecture.md) | Architecture reference |
 | [coding_agent_architecture.md](reference/designs/coding_agent_architecture.md) | Architecture reference |
+| [coding_agent_phase9_run_supervisor_architecture.md](reference/designs/coding_agent_phase9_run_supervisor_architecture.md) | Directional architecture reference |
+| [coding_agent_phase10_repository_scale_reading_architecture.md](reference/designs/coding_agent_phase10_repository_scale_reading_architecture.md) | Directional architecture reference |
 | [coding_agent_phase2_new_artifact_gating_tests.md](reference/designs/coding_agent_phase2_new_artifact_gating_tests.md) | Supporting verification procedure and pass criteria |
 | [codex_single_agent_source_guide.md](reference/designs/codex_single_agent_source_guide.md) | Codex single-agent source reference |
 | [cognition_contracts_design.md](reference/designs/cognition_contracts_design.md) | Authoritative contract reference |
@@ -253,6 +255,7 @@ plans.
 | [coding_agent_phase4_code_modifying_and_patching_plan.md](archive/completed/short_term/coding_agent_phase4_code_modifying_and_patching_plan.md) |
 | [coding_agent_phase5_patch_apply_plan.md](archive/completed/short_term/coding_agent_phase5_patch_apply_plan.md) |
 | [coding_agent_phase6_code_executing_plan.md](archive/completed/short_term/coding_agent_phase6_code_executing_plan.md) |
+| [coding_agent_phase7_existing_source_planning_plan.md](archive/completed/short_term/coding_agent_phase7_existing_source_planning_plan.md) |
 | [character_reflection_cycle_stage1a_plan.md](archive/completed/short_term/character_reflection_cycle_stage1a_plan.md) |
 | [character_self_words_retrieval_delivery_receipt_plan.md](archive/completed/short_term/character_self_words_retrieval_delivery_receipt_plan.md) |
 | [cognition_chain_module_separation_plan.md](archive/completed/short_term/cognition_chain_module_separation_plan.md) |

@@ -1,5 +1,6 @@
 """Contracts and validators for existing-source modification proposals."""
 
+import re
 from typing import Literal, NotRequired, TypedDict
 
 from kazusa_ai_chatbot.coding_agent.code_fetching.github import (
@@ -43,6 +44,7 @@ ALLOWED_REPAIR_FEEDBACK_SOURCES = {
     "contract_validation",
 }
 RAW_DIFF_MARKERS = ("diff --git ", "--- a/", "+++ b/")
+INDENTED_DEF_RE = re.compile(r"^\s+def\s+\w+\(([^)]*)\)\s*(?:->[^:]+)?:")
 
 
 class CodeModificationRequest(TypedDict, total=False):
@@ -57,6 +59,9 @@ class CodeModificationRequest(TypedDict, total=False):
     max_answer_chars: int
     max_artifact_chars: int
     supervisor_facts: list[dict[str, object]]
+    repair_feedback: dict[str, object]
+    required_behavior: list[str]
+    forbidden_changes: list[str]
 
 
 class ModificationArtifact(TypedDict, total=False):
@@ -282,11 +287,42 @@ def _artifact_blocker(
         return "replacement or insertion content is required"
     if _contains_raw_diff(content):
         return "raw diff content is not accepted"
+    if target_path.endswith(".py") and _contains_indented_import(content):
+        return "python imports must be top-level"
+    if target_path.endswith(".py") and _contains_method_without_receiver(content):
+        return "indented instance methods must keep self or cls"
     return ""
 
 
 def _contains_raw_diff(text: str) -> bool:
     return any(marker in text for marker in RAW_DIFF_MARKERS)
+
+
+def _contains_indented_import(text: str) -> bool:
+    lines = text.splitlines()
+    for line in lines:
+        stripped = line.lstrip(" ")
+        if line == stripped:
+            continue
+        if stripped.startswith("import ") or stripped.startswith("from "):
+            return True
+    return False
+
+
+def _contains_method_without_receiver(text: str) -> bool:
+    lines = text.splitlines()
+    for line in lines:
+        match = INDENTED_DEF_RE.match(line)
+        if match is None:
+            continue
+        arguments = match.group(1).strip()
+        if not arguments:
+            return True
+        first_argument = arguments.split(",", 1)[0].strip()
+        if first_argument in {"self", "cls"}:
+            continue
+        return True
+    return False
 
 
 def _allowed_pm_statuses() -> set[str]:

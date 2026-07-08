@@ -34,13 +34,13 @@ evidence.
 an explicit `workspace_root`, returns proposed patch artifacts only, and never
 applies patches or runs target project commands. Source-free requests use the
 managed new-project `code_writing` workspace. Explicit source requests resolve
-the source, run read-only evidence collection, ask `code_modifying` for
-structured existing-file operations, and materialize review-only patch
-artifacts through `code_patching`. If the initial read-only PM returns no
-usable evidence for a concrete source-backed patch request, the supervisor may
-fall back to bounded safe source/test/doc file evidence. If patch review
-validation fails, the supervisor may perform one validation-feedback modifying
-retry before returning the proposal result.
+the source, run read-only evidence collection, ask `code_modifying` to plan
+existing-source ownership and produce structured existing-file operations, and
+materialize review-only patch artifacts through `code_patching`. If the
+initial read-only PM returns no usable evidence for a concrete source-backed
+patch request, the supervisor may fall back to bounded safe source/test/doc
+file evidence. If patch review validation fails, the supervisor may perform
+one validation-feedback modifying retry before returning the proposal result.
 
 `handle_background_coding_task(...)` is the accepted-task background interface.
 It receives one background coding task, asks the coding-agent supervisor route
@@ -70,8 +70,9 @@ Implemented subagents:
   explicit local-checkout sources.
 - `code_reading`: reads safe text files inside the resolved source scope and
   synthesizes evidence-backed answers.
-- `code_modifying`: converts source evidence and bounded file context into
-  structured existing-file modification operations.
+- `code_modifying`: plans bounded existing-source ownership, asks a modifying
+  PM for one programmer handoff, and converts source evidence plus bounded
+  file context into structured existing-file modification operations.
 - `code_patching`: converts selected writing/modifying artifacts into
   review-only patch artifacts, sandbox materialization checks, and explicitly
   approved managed-copy apply results.
@@ -175,12 +176,14 @@ flowchart TD
 
     subgraph Modifying["code_modifying"]
         M0["explicit source request<br/>fetch then read evidence"]
-        M1["bounded source context<br/>safe text files only"]
-        M2["modifying programmer LLM<br/>structured operations only"]
-        M3["code_patching boundary<br/>existing-file patch artifacts"]
-        M4["review-package materialization<br/>inspection storage, not execution"]
+        M1["File Agent<br/>safe context loading,<br/>source-owner ranking,<br/>test/doc companion map"]
+        M2["Modifying PM LLM<br/>owned/read-only paths,<br/>programmer task, sufficiency"]
+        M3["handoff validator<br/>source-owner first task,<br/>bounded target paths"]
+        M4["modifying programmer LLM<br/>structured operations only"]
+        M5["code_patching boundary<br/>existing-file patch artifacts"]
+        M6["review-package materialization<br/>inspection storage, not execution"]
         M0 --> R0
-        R7 --> M1 --> M2 --> M3 --> M4 --> O2
+        R7 --> M1 --> M2 --> M3 --> M4 --> M5 --> M6 --> O2
     end
 
     subgraph Executing["code_executing"]
@@ -204,10 +207,11 @@ cardinality and size, explicit-field precedence, and public issue/status
 mapping before any checkout, download, or inline materialization. `code_reading`
 is read-only and evidence-backed. `code_writing` owns source-free new-artifact
 proposals. `code_modifying` owns existing-source semantic patch proposals from
-read evidence and bounded file context. `code_patching` owns deterministic diff
-assembly and review materialization for both flows. Generated-artifact readback
-deliberately reuses `code_reading` through a managed read-only source so later
-writing work consumes compact supervisor facts instead of raw generated files.
+read evidence, deterministic source-owner planning, PM handoff decisions, and
+bounded file context. `code_patching` owns deterministic diff assembly and
+review materialization for both flows. Generated-artifact readback deliberately
+reuses `code_reading` through a managed read-only source so later writing work
+consumes compact supervisor facts instead of raw generated files.
 `code_executing` is available only through the trusted direct execution API.
 The background worker, L2d, action spec, and dialog path do not dispatch to it.
 

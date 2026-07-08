@@ -287,7 +287,10 @@ worker remains text-only. The current coding-agent worker handles accepted
 coding tasks through the coding-agent supervisor using
 `CODING_AGENT_WORKSPACE_ROOT`; it may return code-reading answers or
 review-only patch proposal artifacts for source-free writing or explicit
-existing-source modification requests. Neither worker applies patches, runs
+existing-source modification requests. Existing-source modification proposals
+use read-only source evidence, deterministic File Agent source-owner planning,
+a modifying PM handoff, and structured programmer operations before
+review-only patch materialization. Neither worker applies patches, runs
 project commands, installs packages, processes attachments, or sends adapter
 text directly. `future_speak` is the
 deterministic delayed-message worker: it schedules a future cognition slot and

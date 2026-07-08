@@ -49,6 +49,59 @@ def test_modifying_programmer_artifact_rejects_raw_diff() -> None:
     assert "raw diff" in artifact["blocker"]
 
 
+def test_modifying_programmer_artifact_rejects_indented_python_import() -> None:
+    from kazusa_ai_chatbot.coding_agent.code_modifying.models import (
+        normalize_modification_artifact,
+    )
+
+    artifact = normalize_modification_artifact({
+        "artifact_id": "artifact-1",
+        "status": "succeeded",
+        "task_id": "task-1",
+        "target_path": "tests/test_app.py",
+        "evidence_ids": ["ev-1"],
+        "operation_kind": "replace",
+        "exact_anchor": "def test_app():\n    assert True\n",
+        "replacement_or_insert_content": (
+            "def test_app():\n"
+            "    import json\n"
+            "    assert json.loads('{}') == {}\n"
+        ),
+        "operation_summary": "Add JSON assertion.",
+        "risk_notes": [],
+        "tests_or_docs_to_update": [],
+    })
+
+    assert artifact["status"] == "blocked"
+    assert "top-level" in artifact["blocker"]
+
+
+def test_modifying_programmer_artifact_rejects_method_without_receiver() -> None:
+    from kazusa_ai_chatbot.coding_agent.code_modifying.models import (
+        normalize_modification_artifact,
+    )
+
+    artifact = normalize_modification_artifact({
+        "artifact_id": "artifact-1",
+        "status": "succeeded",
+        "task_id": "task-1",
+        "target_path": "store.py",
+        "evidence_ids": ["ev-1"],
+        "operation_kind": "replace",
+        "exact_anchor": "    def list_items(self) -> list[str]:\n        return []\n",
+        "replacement_or_insert_content": (
+            "    def list_items(*, include_archived: bool = False) -> list[str]:\n"
+            "        return list(self._items)\n"
+        ),
+        "operation_summary": "Update method.",
+        "risk_notes": [],
+        "tests_or_docs_to_update": [],
+    })
+
+    assert artifact["status"] == "blocked"
+    assert "self or cls" in artifact["blocker"]
+
+
 def test_modifying_pm_repair_rejects_executed_output_source() -> None:
     from kazusa_ai_chatbot.coding_agent.code_modifying.models import (
         normalize_modifying_pm_decision,
