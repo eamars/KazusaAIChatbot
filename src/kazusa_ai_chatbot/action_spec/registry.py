@@ -15,6 +15,7 @@ SPEAK_CAPABILITY = "speak"
 TRIGGER_FUTURE_COGNITION_CAPABILITY = "trigger_future_cognition"
 FUTURE_SPEAK_CAPABILITY = "future_speak"
 ACCEPTED_TASK_STATUS_CHECK_CAPABILITY = "accepted_task_status_check"
+ACCEPTED_CODING_TASK_REQUEST_CAPABILITY = "accepted_coding_task_request"
 BACKGROUND_WORK_REQUEST_CAPABILITY = "background_work_request"
 
 
@@ -29,6 +30,9 @@ def build_initial_action_capabilities() -> dict[str, CapabilitySpecV1]:
         SPEAK_CAPABILITY: _speak_capability(),
         TRIGGER_FUTURE_COGNITION_CAPABILITY: _future_cognition_capability(),
         FUTURE_SPEAK_CAPABILITY: _future_speak_capability(),
+        ACCEPTED_CODING_TASK_REQUEST_CAPABILITY: (
+            _accepted_coding_task_capability()
+        ),
         ACCEPTED_TASK_STATUS_CHECK_CAPABILITY: (
             _accepted_task_status_check_capability()
         ),
@@ -54,6 +58,8 @@ def project_prompt_affordances(
             projection.append(_future_cognition_projection())
         elif capability_kind == FUTURE_SPEAK_CAPABILITY:
             projection.append(_future_speak_projection())
+        elif capability_kind == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY:
+            projection.append(_accepted_coding_task_projection())
         elif capability_kind == ACCEPTED_TASK_STATUS_CHECK_CAPABILITY:
             projection.append(_accepted_task_status_check_projection())
         elif capability_kind == BACKGROUND_WORK_REQUEST_CAPABILITY:
@@ -314,6 +320,61 @@ def _background_work_capability() -> CapabilitySpecV1:
     return return_value
 
 
+def _accepted_coding_task_capability() -> CapabilitySpecV1:
+    """Build the accepted coding-task durable-run request capability."""
+
+    return_value: CapabilitySpecV1 = {
+        "schema_version": "capability_spec.v1",
+        "capability_kind": ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
+        "category": "action",
+        "owner_module": "background_work",
+        "input_schema": {
+            "type": "object",
+            "required": [
+                "task_brief",
+                "coding_action",
+                "requested_delivery",
+                "max_output_chars",
+            ],
+            "properties": {
+                "task_brief": {"type": "string"},
+                "coding_action": {
+                    "type": "string",
+                    "enum": [
+                        "start",
+                        "status",
+                        "approve_and_verify",
+                        "cancel",
+                    ],
+                },
+                "coding_run_ref": {"type": "string"},
+                "execution_request": {"type": "string"},
+                "requested_delivery": {
+                    "type": "string",
+                    "enum": ["send_result_when_done"],
+                },
+                "max_output_chars": {"type": "integer"},
+            },
+        },
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string"},
+                "queue_state": {"type": "string"},
+                "task_summary": {"type": "string"},
+                "coding_run_ref": {"type": "string"},
+            },
+        },
+        "handler_id": "background_work.accepted_coding_task.enqueue.v1",
+        "lifecycle_hooks": ["validate", "enqueue_background_work"],
+        "permission_policy": "policy:background_work.accepted_coding_task.v1",
+        "rate_limit_policy": "policy:action.default_rate_limit.v1",
+        "audit_policy": "policy:action.audit.v1",
+        "prompt_projection_policy": "policy:prompt.action_safe.v1",
+    }
+    return return_value
+
+
 def _background_work_projection() -> dict[str, object]:
     """Return prompt-safe accepted delayed-task affordance metadata."""
 
@@ -335,6 +396,41 @@ def _background_work_projection() -> dict[str, object]:
         ],
         "execution_boundary": (
             "durable accepted-task lifecycle records the task before chat acknowledgement"
+        ),
+    }
+    return return_value
+
+
+def _accepted_coding_task_projection() -> dict[str, object]:
+    """Return prompt-safe durable coding-run affordance metadata."""
+
+    return_value = {
+        "capability": ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
+        "available": True,
+        "visibility": "private",
+        "semantic_input_summary": [
+            (
+                "Use for accepted coding-agent work that should be managed "
+                "as a durable run."
+            ),
+            (
+                "Use decision=start for a new coding task, decision=status "
+                "for a specific run progress check, decision=approve_and_verify "
+                "only after explicit approval, and decision=cancel only when "
+                "the user asks to stop that run."
+            ),
+            (
+                "For status, approval, or cancellation, include the "
+                "prompt-safe coding_run_ref if the conversation provides it."
+            ),
+            (
+                "For approval, put requested checks such as focused pytest "
+                "or Python compile verification in detail."
+            ),
+            "Pair this private request with a visible speak acknowledgement.",
+        ],
+        "execution_boundary": (
+            "durable accepted-task lifecycle queues the coding-run worker"
         ),
     }
     return return_value

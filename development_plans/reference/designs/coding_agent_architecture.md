@@ -119,8 +119,10 @@ records. Real-world effects require dedicated deterministic owners:
   managed apply copy;
 - command execution requires structured execution specs and targets only a
   managed apply copy;
-- background-worker coding tasks remain review-only unless a later approved
-  plan adds structured continuation through `coding_run`.
+- generic background-worker coding tasks remain review-only;
+- durable accepted coding tasks may continue through `coding_run` only through
+  `accepted_coding_task_request`, a prompt-safe `coding_run:<run_id>` reference,
+  structured approval, and allowlisted execution specs.
 
 Generated code, generated tests, shell text, and package-install instructions
 remain inert proposal material until a deterministic approved boundary acts on
@@ -168,6 +170,19 @@ start_coding_run(...)
 -> completed, blocked, rejected, failed, or cancelled
 ```
 
+The accepted-task/background-worker entrypoint after pre-integration
+hardening is:
+
+```text
+L2d accepted_coding_task_request
+-> deterministic action-spec validation
+-> accepted-task lifecycle
+-> requested_worker="coding_agent" with coding_agent_worker_payload.v1
+-> coding_agent worker
+-> start/get/continue coding_run
+-> accepted_task_result_ready delivery
+```
+
 Repository-scale reading after Phase 10 is:
 
 ```text
@@ -196,6 +211,7 @@ CodeReadingRequest
 | Phase 7 | Existing-source planning upgrade: active modifying PM plus File Agent existing-source path maps and context planning. | Source-backed proposals gain explicit source-owner planning before programmer edits. |
 | Phase 8 | Controlled verify-and-repair loop. | Trusted callers can apply, execute, repair from redacted execution feedback, and rerun within hard caps. |
 | Phase 9 | Durable coding run supervisor. | Kazusa gains a self-contained coding-agent session with state, continuation, blockers, attempts, completion, and post-phase E2E readiness for supported workflows. |
+| Post-Phase 9 hardening | L2d accepted-task/background-worker binding for durable coding runs. | Supported coding runs can start, report status, approve-and-verify, and cancel through the real background entrypoint. |
 | Phase 10 | Repository-scale reading through master/subsystem PMs and evidence graph synthesis. | Kazusa can answer broad architecture, impact, ownership, and migration questions from bounded evidence. |
 
 ## Phase Closure Gate Policy
@@ -233,11 +249,13 @@ phase contract.
 
 ## Current Implementation Alignment
 
-As of the Phase 9 executable plan:
+As of the Phase 9 executable plan and pre-integration hardening:
 
 - Phases 0 through 8 are implemented and archived as completed records.
-- Phase 9 is the active approved short-term implementation step where the
-  coding agent becomes a self-contained session loop.
+- Phase 9 is implemented and archived as the direct durable run supervisor.
+- Pre-integration hardening binds that session loop to L2d
+  `accepted_coding_task_request` and background-work `requested_worker`
+  execution.
 - After Phase 9, supported read-only, proposal, approval, apply, execution,
   repair, cancellation, reload, sanitization, and source-immutability
   workflows must be E2E-testable without Phase 10 or later plans.

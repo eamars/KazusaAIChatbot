@@ -155,6 +155,7 @@ class ActionAffordanceV1(TypedDict):
         "trigger_future_cognition",
         "future_speak",
         "accepted_task_request",
+        "accepted_coding_task_request",
         "accepted_task_status_check",
     ]
     available: bool
@@ -208,11 +209,14 @@ class SemanticActionRequestV1(TypedDict):
         "trigger_future_cognition",
         "future_speak",
         "accepted_task_request",
+        "accepted_coding_task_request",
         "accepted_task_status_check",
     ]
     decision: str
     detail: str
     reason: str
+    coding_run_ref: NotRequired[str]
+    execution_request: NotRequired[str]
 
 
 class ResolverCapabilityRequestV1(TypedDict):
@@ -272,6 +276,7 @@ class SelectedTextSurfaceIntentV1(TypedDict):
 class PreSurfaceActionResultPromptV1(TypedDict):
     action_kind: Literal[
         "accepted_task_request",
+        "accepted_coding_task_request",
         "background_work_request",
         "memory_lifecycle_update",
         "future_speak",
@@ -450,6 +455,7 @@ _ACTION_CAPABILITIES = frozenset((
     "speak",
     "memory_lifecycle_update",
     "accepted_task_request",
+    "accepted_coding_task_request",
     "accepted_task_status_check",
     "trigger_future_cognition",
     "future_speak",

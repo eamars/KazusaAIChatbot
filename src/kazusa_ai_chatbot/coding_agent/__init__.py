@@ -50,6 +50,7 @@ from kazusa_ai_chatbot.coding_agent.coding_run import (
 )
 from kazusa_ai_chatbot.coding_agent.supervisor import (
     answer_code_question,
+    decide_background_coding_operation,
     handle_background_coding_task,
     propose_code_change,
 )
@@ -88,6 +89,7 @@ __all__ = [
     "answer_code_question",
     "apply_approved_patch",
     "continue_coding_run",
+    "decide_background_coding_operation",
     "execute_code_check",
     "get_coding_run",
     "handle_background_coding_task",

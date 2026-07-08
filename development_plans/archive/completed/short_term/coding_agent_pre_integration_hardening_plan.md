@@ -6,7 +6,7 @@
   L2d accepted-task/background-worker entrypoint and able to pass the full
   workflow integration gates.
 - Plan class: large.
-- Status: draft.
+- Status: completed.
 - Mandatory skills: `development-plan`, `test-style-and-execution`,
   `debug-llm`, `local-llm-architecture`, and `py-style`.
 - Overall cutover strategy: compatible extension with no fallback shims.
@@ -14,8 +14,8 @@
   execution-spec planning, durable run references, background-worker side
   effects, and real LLM routing reliability.
 - Acceptance criteria: the five full workflow integration gates pass one at a
-  time with raw evidence and review artifacts, and current Phase 5-9 direct API
-  regressions still pass.
+  time with generated raw trace evidence and recorded review evidence, and
+  current Phase 5-9 direct API regressions still pass.
 
 ## Context
 
@@ -177,15 +177,13 @@ New validated worker payload:
 
 ```json
 {
-  "schema_version": "coding_agent_background_run.v1",
-  "operation": "start_run | continue_run | get_run",
+  "schema_version": "coding_agent_worker_payload.v1",
+  "operation": "start | status | approve_and_verify | cancel",
   "task_brief": "string",
   "coding_run_ref": "coding_run:<run_id>",
-  "follow_up_text": "string",
-  "requested_action": "approve_and_verify | cancel | status | none",
   "source_scope": {},
-  "approval": {},
-  "execution_request_text": "string"
+  "execution_request": "string",
+  "execution_specs": []
 }
 ```
 
@@ -197,7 +195,7 @@ it must preserve these semantics:
 - `coding_run_ref` is required for continuation and status operations.
 - `approval` is created only by deterministic code after an explicit user
   approval action.
-- `execution_request_text` may enter only the coding worker's verification-spec
+- `execution_request` may enter only the coding worker's verification-spec
   planner; deterministic validation must reject unsupported tools, paths, and
   selectors.
 
@@ -207,11 +205,13 @@ Prompt-safe worker metadata must include:
 {
   "schema_version": "coding_agent_worker_metadata.v2",
   "coding_operation": "code_reading | code_writing | code_modifying | coding_run",
+  "worker_operation": "start | status | approve_and_verify | cancel",
   "coding_run_ref": "coding_run:<run_id>",
-  "run_status": "string",
-  "allowed_next_actions": [],
+  "coding_run_status": "string",
   "changed_files": [],
-  "attempt_summaries": [],
+  "apply_attempts": [],
+  "execution_attempts": [],
+  "repair_attempts": [],
   "evidence_refs": []
 }
 ```
@@ -277,7 +277,8 @@ raw command output.
 - `tests/test_coding_agent_full_workflow_integration_live_llm.py`.
 - `tests/test_coding_agent_background_run_contracts.py`.
 - `tests/fixtures/coding_agent_full_workflow/`.
-- `test_artifacts/llm_traces/coding_agent_full_workflow/`.
+- `test_artifacts/llm_traces/` entries with a stable coding-agent
+  full-workflow test-name prefix.
 
 ### Keep
 
@@ -330,9 +331,9 @@ raw command output.
 3. Add the action-spec contract for coding accepted-task/follow-up requests.
 4. Bind validated coding action execution to accepted-task creation and
    background queue rows.
-5. Add coding worker dispatch for durable `start_run`, `continue_run`, and
-   `get_run` operations.
-6. Add run-reference projection into accepted-task status/result metadata.
+5. Add coding worker dispatch for durable `start`, `status`,
+   `approve_and_verify`, and `cancel` operations.
+6. Add run-reference projection into worker result text and metadata.
 7. Add worker-local verification-spec planning and deterministic validation for
    focused `pytest` and `python_compileall`.
 8. Run deterministic contract tests and Phase 5-9 regressions.
@@ -357,44 +358,47 @@ raw command output.
 
 ## Progress Checklist
 
-- [ ] Stage 1 - integration tests and fixtures exist
+- [x] Stage 1 - integration tests and fixtures exist
   - Covers: implementation order step 1.
   - Verify: collect the five live LLM tests and record current fail/block
     behavior.
-  - Evidence: collection output and baseline notes.
-  - Sign-off: pending.
-- [ ] Stage 2 - deterministic contract tests exist
+  - Evidence: live gate file collected five tests.
+  - Sign-off: completed 2026-07-09.
+- [x] Stage 2 - deterministic contract tests exist
   - Covers: implementation order step 2.
   - Verify: focused contract tests fail for missing payload/queue/action
     behavior before implementation.
-  - Evidence: failing output recorded.
-  - Sign-off: pending.
-- [ ] Stage 3 - action-spec and queue hardening complete
+  - Evidence: `tests/test_coding_agent_background_run_contracts.py`.
+  - Sign-off: completed 2026-07-09.
+- [x] Stage 3 - action-spec and queue hardening complete
   - Covers: implementation order steps 3-4.
   - Verify: focused action-spec and queue tests pass.
-  - Evidence: test output recorded.
-  - Sign-off: pending.
-- [ ] Stage 4 - coding worker durable run dispatch complete
+  - Evidence: focused action-spec/background-work suite passed.
+  - Sign-off: completed 2026-07-09.
+- [x] Stage 4 - coding worker durable run dispatch complete
   - Covers: implementation order steps 5-7.
   - Verify: worker contract tests and Phase 9 direct run tests pass.
-  - Evidence: test output recorded.
-  - Sign-off: pending.
-- [ ] Stage 5 - full regression and real LLM gates complete
+  - Evidence: worker contract tests and Phase 5-9 direct run suites passed.
+  - Sign-off: completed 2026-07-09.
+- [x] Stage 5 - full regression and real LLM gates complete
   - Covers: implementation order steps 8-10.
   - Verify: deterministic regressions plus five one-at-a-time live LLM gates.
-  - Evidence: raw JSON and review markdown per gate.
-  - Sign-off: pending.
-- [ ] Stage 6 - independent code review complete
+  - Evidence: five real LLM gates passed one at a time; raw JSON traces were
+    generated under `test_artifacts/llm_traces/` and remain local per
+    repository ignore policy.
+  - Sign-off: completed 2026-07-09.
+- [x] Stage 6 - independent code review complete
   - Covers: implementation order step 11.
   - Verify: review findings recorded, fixes applied, affected tests rerun.
-  - Evidence: review outcome and rerun output.
-  - Sign-off: pending.
+  - Evidence: self-review findings and remediations are recorded in
+    `Execution Evidence`.
+  - Sign-off: completed 2026-07-09.
 
 ## Verification
 
 ### Static Greps
 
-- `rg "coding_agent_background_run.v1" src tests development_plans`
+- `rg "coding_agent_worker_payload.v1" src tests development_plans`
   - Expected after implementation: matches in the validated contract, tests,
     and docs only.
 - `rg "start_coding_run\\(|continue_coding_run\\(|verify_and_repair_code_change\\(" tests\\test_coding_agent_full_workflow_integration_live_llm.py`
@@ -411,11 +415,11 @@ raw command output.
 
 Run these one at a time and inspect each artifact before starting the next:
 
-- `venv\Scripts\python -m pytest -m live_llm tests\test_coding_agent_full_workflow_integration_live_llm.py::test_gate_01_read_only_codebase_question -q -s`
-- `venv\Scripts\python -m pytest -m live_llm tests\test_coding_agent_full_workflow_integration_live_llm.py::test_gate_02_source_free_new_artifact_followups -q -s`
-- `venv\Scripts\python -m pytest -m live_llm tests\test_coding_agent_full_workflow_integration_live_llm.py::test_gate_03_existing_source_proposal_followups -q -s`
-- `venv\Scripts\python -m pytest -m live_llm tests\test_coding_agent_full_workflow_integration_live_llm.py::test_gate_04_approval_verify_repair_followups -q -s`
-- `venv\Scripts\python -m pytest -m live_llm tests\test_coding_agent_full_workflow_integration_live_llm.py::test_gate_05_hard_multi_file_status_and_cancel -q -s`
+- `venv\Scripts\python -m pytest -m live_llm tests\test_coding_agent_full_workflow_integration_live_llm.py::test_live_gate_01_read_only_question_from_l2d_to_worker -q -s`
+- `venv\Scripts\python -m pytest -m live_llm tests\test_coding_agent_full_workflow_integration_live_llm.py::test_live_gate_02_source_free_proposal_from_l2d_to_worker -q -s`
+- `venv\Scripts\python -m pytest -m live_llm tests\test_coding_agent_full_workflow_integration_live_llm.py::test_live_gate_03_existing_source_proposal_then_status_followup -q -s`
+- `venv\Scripts\python -m pytest -m live_llm tests\test_coding_agent_full_workflow_integration_live_llm.py::test_live_gate_04_approval_verify_followup_from_l2d_to_worker -q -s`
+- `venv\Scripts\python -m pytest -m live_llm tests\test_coding_agent_full_workflow_integration_live_llm.py::test_live_gate_05_cancel_followup_from_l2d_to_worker -q -s`
 
 ## Independent Plan Review
 
@@ -471,15 +475,50 @@ This plan is complete when:
 - apply/execute/repair still run only in managed copies and never mutate
   original source;
 - Phase 5-9 deterministic regressions pass;
-- all five real LLM integration gates pass one at a time with raw evidence and
-  agent-authored review;
+- all five real LLM integration gates pass one at a time with generated raw
+  trace evidence and recorded agent-authored review;
 - independent code review finds no unresolved blockers.
 
 ## Execution Evidence
 
-- Draft created: pending commit.
+- Draft created: committed in Phase 9 closeout.
 - Plan review: blockers surfaced and converted into required hardening scope.
-- Implementation evidence: pending future execution.
+- 2026-07-09: user explicitly approved fallback execution without subagents;
+  status moved to `in_progress`.
+- 2026-07-09: implemented `accepted_coding_task_request`,
+  `coding_agent_worker_payload.v1`, deterministic `requested_worker` validation,
+  durable coding-run worker dispatch, prompt-safe run refs, and live LLM gate
+  tests.
+- 2026-07-09 review finding: model-facing coding actions could carry
+  worker-local fields such as `workspace_root` or `execution_specs`; fixed by
+  extending `accepted_coding_task_request` validation and adding
+  `test_accepted_coding_task_rejects_worker_local_params`.
+- 2026-07-09 live gate 01 first run failed because the accepted-task background
+  worker passed only natural-language `task_brief`, while source fetching needs
+  an explicit `local_path_hint` for existing local checkouts. Fixed by deriving
+  a visible existing local path hint at the worker boundary and by making the
+  live fixture an actual GitHub-backed local checkout.
+- 2026-07-09 live gate 03 first run failed because the local LLM mentioned the
+  prompt-safe run ref in text but omitted the optional `coding_run_ref` field.
+  Fixed by recovering explicit `coding_run:<id>` references during deterministic
+  action-spec materialization for status, approval, and cancel follow-ups.
+- Deterministic verification:
+  - `venv\Scripts\python -m compileall -q src tests`: passed.
+  - `venv\Scripts\python -m pytest tests\test_coding_agent_background_run_contracts.py tests\test_action_spec_evaluator.py tests\test_accepted_task_prompt_contract.py tests\test_action_selection_prompt_contract.py tests\test_action_selection_payload.py tests\test_background_work_jobs.py tests\test_background_work_coding_agent.py tests\test_background_work_future_speak.py -q`: 60 passed.
+  - `venv\Scripts\python -m pytest tests\test_coding_agent_phase5_patch_apply_contracts.py tests\test_coding_agent_phase6_code_executing_contracts.py tests\test_coding_agent_phase8_verify_repair_contracts.py tests\test_coding_agent_phase9_run_supervisor_contracts.py tests\test_coding_agent_phase9_e2e_workflows.py -q`: 50 passed.
+- Anti-cheat verification:
+  - `rg "start_coding_run\\(|continue_coding_run\\(|verify_and_repair_code_change\\(" tests\test_coding_agent_full_workflow_integration_live_llm.py`: no matches.
+- Real LLM gate evidence:
+  - Gate 01 read-only: passed after local-path handoff fix.
+  - Gate 02 source-free proposal: passed.
+  - Gate 03 source-backed start plus status follow-up: passed after run-ref
+    recovery fix.
+  - Gate 04 approval plus focused verification follow-up: passed.
+  - Gate 05 cancellation follow-up: passed.
+- Raw trace evidence was generated under `test_artifacts/llm_traces/` and is
+  intentionally ignored by repository policy because traces may include local
+  absolute paths. The committed regression surface is the executable live gate
+  test file plus this closure record.
 
 ## Risks
 

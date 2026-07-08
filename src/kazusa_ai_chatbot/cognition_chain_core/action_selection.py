@@ -30,6 +30,7 @@ OPEN_GOAL_DELIVERABLE_STATUSES = ("pending", "partial", "blocked")
 BACKGROUND_WORK_REQUEST_CAPABILITY = "background_work_request"
 ACCEPTED_TASK_REQUEST_CAPABILITY = "accepted_task_request"
 ACCEPTED_TASK_STATUS_CHECK_CAPABILITY = "accepted_task_status_check"
+ACCEPTED_CODING_TASK_REQUEST_CAPABILITY = "accepted_coding_task_request"
 MEMORY_LIFECYCLE_UPDATE_CAPABILITY = "memory_lifecycle_update"
 SPEAK_CAPABILITY = "speak"
 TRIGGER_FUTURE_COGNITION_CAPABILITY = "trigger_future_cognition"
@@ -40,6 +41,7 @@ ALLOWED_ACTION_CAPABILITIES = frozenset((
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
     FUTURE_SPEAK_CAPABILITY,
     ACCEPTED_TASK_REQUEST_CAPABILITY,
+    ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
     ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
 ))
 
@@ -51,6 +53,18 @@ _ACCEPTED_TASK_FORBIDDEN_FIELDS = frozenset((
     "work_kind",
     "artifact_text",
     "file_path",
+))
+
+_ACCEPTED_CODING_TASK_FORBIDDEN_FIELDS = frozenset((
+    "worker",
+    "task_type",
+    "tool_args",
+    "work_kind",
+    "artifact_text",
+    "workspace_root",
+    "local_root",
+    "command",
+    "shell",
 ))
 
 _RESOLVER_FORBIDDEN_FIELDS = frozenset((
@@ -343,6 +357,11 @@ def _normalize_semantic_action_requests(
         }
         if capability == ACCEPTED_TASK_REQUEST_CAPABILITY:
             for forbidden in _ACCEPTED_TASK_FORBIDDEN_FIELDS:
+                cleaned.pop(forbidden, None)
+        if capability == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY:
+            cleaned["coding_run_ref"] = _text_field(raw, "coding_run_ref")
+            cleaned["execution_request"] = _text_field(raw, "execution_request")
+            for forbidden in _ACCEPTED_CODING_TASK_FORBIDDEN_FIELDS:
                 cleaned.pop(forbidden, None)
         normalized.append(cleaned)
         if len(normalized) >= max_action_requests:
@@ -746,6 +765,23 @@ def _default_action_summary(capability: str) -> list[str]:
             (
                 "Repository or source-code analysis stays in this delayed "
                 "work path even when it needs public source evidence."
+            ),
+            "Pair this private request with a visible speak acknowledgement.",
+        ],
+        ACCEPTED_CODING_TASK_REQUEST_CAPABILITY: [
+            (
+                "Use when the character accepts coding-agent work that needs "
+                "durable run state and follow-up."
+            ),
+            (
+                "Use decision=start, status, approve_and_verify, or cancel."
+            ),
+            (
+                "For status, approval, and cancellation, include the "
+                "prompt-safe coding_run_ref when it is visible in context."
+            ),
+            (
+                "For approval, put requested verification checks in detail."
             ),
             "Pair this private request with a visible speak acknowledgement.",
         ],

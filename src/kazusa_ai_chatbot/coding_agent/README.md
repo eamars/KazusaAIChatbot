@@ -9,6 +9,7 @@ Current implemented surfaces:
 from kazusa_ai_chatbot.coding_agent import answer_code_question
 from kazusa_ai_chatbot.coding_agent import apply_approved_patch
 from kazusa_ai_chatbot.coding_agent import continue_coding_run
+from kazusa_ai_chatbot.coding_agent import decide_background_coding_operation
 from kazusa_ai_chatbot.coding_agent import execute_code_check
 from kazusa_ai_chatbot.coding_agent import get_coding_run
 from kazusa_ai_chatbot.coding_agent import handle_background_coding_task
@@ -52,6 +53,12 @@ to choose reading, writing, modifying, or unsupported, and then calls the
 public code-reading or patch-proposal interface. The operation decision belongs
 here, not in L2d or the generic background-work router.
 
+`decide_background_coding_operation(...)` exposes the same supervisor route
+decision without running the legacy one-shot task. The background-work
+`accepted_coding_task_request` path uses it to choose the durable
+`start_coding_run(...)` objective, so durable accepted coding work does not
+double-run the legacy background task before creating a ledger.
+
 `apply_approved_patch(...)` is the direct trusted patch-apply interface. It
 requires structured approval, verifies source identity, copies the source tree
 into `<workspace_root>/patch_apply/<apply_package_id>/source` only after the
@@ -83,6 +90,18 @@ require closed `objective_type` and `action` values, pause proposals before
 approval, and route approved verification only through the existing
 verify/repair primitive. They do not introduce a new global planning LLM or
 background-worker side effects.
+
+The background-work `coding_agent` adapter has two modes:
+
+- Legacy generic delayed coding work receives no worker payload and calls
+  `handle_background_coding_task(...)`.
+- Durable coding-run work receives `coding_agent_worker_payload.v1` from the
+  `accepted_coding_task_request` action handler. It supports only `start`,
+  `status`, `approve_and_verify`, and `cancel`, maps them to the durable run
+  APIs, and returns `coding_agent_worker_metadata.v2` with a prompt-safe
+  `coding_run:<run_id>` reference. Approval verification accepts only
+  structured `python_compileall` or focused `pytest` specs, or has the coding
+  PM route plan those same bounded specs from the approval detail.
 
 Implemented subagents:
 
@@ -130,12 +149,16 @@ flowchart TD
     B2["providers.dispatch_background_work<br/>worker registry dispatch"]
     B3["background_work.subagent.coding_agent.execute<br/>injects CODING_AGENT_WORKSPACE_ROOT<br/>maps sanitized result metadata"]
     B4["handle_background_coding_task(...)<br/>coding-agent supervisor LLM<br/>operation: code_reading / code_writing / code_modifying / unsupported"]
+    B5["accepted_coding_task_request<br/>deterministic requested_worker payload"]
+    B6["coding_agent_worker_payload.v1<br/>start / status / approve_and_verify / cancel"]
     O0["unsupported or failed response<br/>no coding subagent call"]
     O1["CodingAgentResponse<br/>public-safe answer and evidence"]
     O2["CodingPatchProposalResponse<br/>review-only patch proposal"]
     O3["CodingAgentBackgroundResponse<br/>worker-facing common shape"]
 
     B0 --> B1 --> B2 --> B3 --> B4
+    B0 --> B5 --> B6 --> B2 --> B3
+    B3 -->|versioned durable payload| CR0
     B4 -->|code_reading| D0
     B4 -->|code_writing| D1
     B4 -->|code_modifying| D1

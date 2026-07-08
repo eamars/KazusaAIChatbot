@@ -27,7 +27,13 @@ _WORKER_LOCAL_QUEUE_FIELDS = frozenset((
     "tool_args",
     "artifact_text",
 ))
-_SUPPORTED_REQUESTED_WORKERS = frozenset(("future_speak",))
+_SUPPORTED_REQUESTED_WORKERS = frozenset(("future_speak", "coding_agent"))
+_SUPPORTED_CODING_AGENT_OPERATIONS = frozenset((
+    "start",
+    "status",
+    "approve_and_verify",
+    "cancel",
+))
 
 
 async def enqueue_background_work_request(
@@ -96,6 +102,36 @@ def _validate_requested_worker(request: BackgroundWorkQueueRequest) -> None:
     worker_payload = request.get("worker_payload")
     if not isinstance(worker_payload, dict):
         raise ValueError("worker_payload is required for requested_worker")
+    if requested_worker == "coding_agent":
+        _validate_coding_agent_worker_payload(worker_payload)
+
+
+def _validate_coding_agent_worker_payload(
+    worker_payload: dict[str, object],
+) -> None:
+    """Validate the durable coding-run worker payload."""
+
+    if worker_payload.get("schema_version") != "coding_agent_worker_payload.v1":
+        raise ValueError("coding_agent worker_payload schema_version is invalid")
+    operation = worker_payload.get("operation")
+    if operation not in _SUPPORTED_CODING_AGENT_OPERATIONS:
+        raise ValueError("coding_agent worker_payload operation is unsupported")
+    task_brief = worker_payload.get("task_brief")
+    if not isinstance(task_brief, str) or not task_brief.strip():
+        raise ValueError("coding_agent worker_payload task_brief is required")
+    if operation in ("status", "approve_and_verify", "cancel"):
+        coding_run_ref = worker_payload.get("coding_run_ref")
+        if (
+            not isinstance(coding_run_ref, str)
+            or not coding_run_ref.startswith("coding_run:")
+        ):
+            raise ValueError("coding_agent worker_payload coding_run_ref is required")
+    execution_request = worker_payload.get("execution_request")
+    if execution_request is not None and not isinstance(execution_request, str):
+        raise ValueError("coding_agent worker_payload execution_request is invalid")
+    execution_specs = worker_payload.get("execution_specs")
+    if execution_specs is not None and not isinstance(execution_specs, list):
+        raise ValueError("coding_agent worker_payload execution_specs is invalid")
 
 
 def _build_job_document(

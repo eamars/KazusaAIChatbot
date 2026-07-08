@@ -21,6 +21,9 @@ and delivery bookkeeping out of cognition and dialog prompts.
 - L2d may request `future_speak` for accepted future reminders or delayed
   follow-up messages; deterministic action execution binds it to an accepted
   task and then to the `future_speak` worker.
+- L2d may request `accepted_coding_task_request` for durable coding-agent
+  runs; deterministic action execution validates the coding action and queues
+  the `coding_agent` worker with a versioned payload.
 - The background-work router emits only `action`, `worker`, and `reason`.
 - Worker subagents own worker-local semantic parameters and artifacts.
 - L3/dialog remain the only visible wording owners and receive accepted-task
@@ -49,7 +52,8 @@ and requester scope, `requested_delivery="send_result_when_done"`,
 `task_identity_key` are lifecycle audit fields, not worker routing inputs.
 `requested_worker` plus `worker_payload` are allowed only for deterministic
 handoffs where an upstream handler already validated the worker-specific
-contract, such as `future_speak`. Generic delayed work should leave the worker
+contract, such as `future_speak` or durable coding-run follow-up through
+`accepted_coding_task_request`. Generic delayed work should leave the worker
 unset so the background-work router can choose a worker from prompt-safe worker
 descriptions.
 
@@ -116,14 +120,29 @@ contract before enablement. A valid future worker must define:
 - verification: deterministic contract tests, integration tests, and one
   real LLM test when prompts or model-facing routing are involved.
 
-Coding-agent work enters through the registered `coding_agent` worker. That
-worker delegates read-versus-write selection to the coding-agent supervisor and
-returns either a code-reading answer or a code-writing proposal artifact. Any
-worker that can run shell commands, edit files, install packages, browse the
-web, call external tools, or apply patches needs a separate permission and
-sandbox contract before it is added to the registry. The background-work queue
-supplies lifecycle and handoff mechanics; it is not a general tool-permission
-system.
+Coding-agent work enters through the registered `coding_agent` worker in two
+ways. Generic delayed coding tasks still route through the legacy
+`background_work_request` path, where the coding-agent supervisor chooses
+read-versus-write and returns a read answer or review-only proposal. Durable
+coding-run work enters through `accepted_coding_task_request`, which queues
+`requested_worker="coding_agent"` with `coding_agent_worker_payload.v1`.
+That payload supports only `start`, `status`, `approve_and_verify`, and
+`cancel`. The worker maps those actions to the coding-run supervisor and
+records `coding_agent_worker_metadata.v2` with the prompt-safe
+`coding_run:<run_id>` reference.
+
+The durable coding path may run allowlisted verification only after explicit
+structured approval. It accepts structured `python_compileall` or focused
+`pytest` specs, or asks the coding PM route to plan those same bounded specs
+from an approval detail. It still uses managed apply copies and does not run
+arbitrary shell commands, install packages, mutate original source checkouts,
+or deliver adapter text.
+
+Any future worker that can run shell commands, edit files, install packages,
+browse the web, call external tools, or apply patches needs a separate
+permission and sandbox contract before it is added to the registry. The
+background-work queue supplies lifecycle and handoff mechanics; it is not a
+general tool-permission system.
 
 ## Workers
 

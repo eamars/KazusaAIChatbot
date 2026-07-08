@@ -8,6 +8,7 @@ import pytest
 
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
 from kazusa_ai_chatbot.action_spec.registry import (
+    ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
     ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     BACKGROUND_WORK_REQUEST_CAPABILITY,
@@ -196,6 +197,7 @@ def test_initial_registry_contains_only_approved_runtime_capabilities() -> None:
     capabilities = build_initial_action_capabilities()
 
     assert set(capabilities) == {
+        ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
         ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
         BACKGROUND_WORK_REQUEST_CAPABILITY,
         FUTURE_SPEAK_CAPABILITY,
@@ -204,6 +206,10 @@ def test_initial_registry_contains_only_approved_runtime_capabilities() -> None:
         SPEAK_CAPABILITY,
         TRIGGER_FUTURE_COGNITION_CAPABILITY,
     }
+    assert (
+        capabilities[ACCEPTED_CODING_TASK_REQUEST_CAPABILITY]["owner_module"]
+        == "background_work"
+    )
     assert (
         capabilities[BACKGROUND_WORK_REQUEST_CAPABILITY]["owner_module"]
         == "background_work"

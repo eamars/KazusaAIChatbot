@@ -16,6 +16,7 @@ from kazusa_ai_chatbot.action_spec.models import (
     validate_action_spec,
 )
 from kazusa_ai_chatbot.action_spec.registry import (
+    ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
     BACKGROUND_WORK_REQUEST_CAPABILITY,
     FUTURE_SPEAK_CAPABILITY,
 )
@@ -52,6 +53,21 @@ _FORBIDDEN_WORKER_LOCAL_PARAMS = frozenset((
     "task_type",
     "tool_args",
     "artifact_text",
+))
+_CODING_FORBIDDEN_WORKER_LOCAL_PARAMS = (
+    _FORBIDDEN_WORKER_LOCAL_PARAMS | frozenset((
+        "approval",
+        "command",
+        "execution_specs",
+        "local_root",
+        "shell",
+        "workspace_root",
+    ))
+)
+_CODING_ACTIONS_REQUIRING_RUN_REF = frozenset((
+    "status",
+    "approve_and_verify",
+    "cancel",
 ))
 
 
@@ -152,6 +168,70 @@ def validate_future_speak_action(
     return validated
 
 
+def validate_accepted_coding_task_action(
+    action_spec: dict[str, Any],
+) -> dict[str, Any]:
+    """Validate one private durable coding-run background action."""
+
+    validated = validate_action_spec(action_spec)
+    if validated["kind"] != ACCEPTED_CODING_TASK_REQUEST_CAPABILITY:
+        raise ActionValidationError("kind: expected accepted_coding_task_request")
+    if validated["visibility"] != "private":
+        raise ActionValidationError("visibility: expected private")
+    if validated["urgency"] != "background":
+        raise ActionValidationError("urgency: expected background")
+
+    target = validated["target"]
+    if target["owner"] != "background_work":
+        raise ActionValidationError("owner: expected background_work")
+    if target["target_kind"] != "current_user":
+        raise ActionValidationError("target_kind: expected current_user")
+    if target["target_id"] is not None:
+        raise ActionValidationError("target_id: expected null")
+    scope = target["scope"]
+    for field_name in _REQUIRED_DELIVERY_TARGET_SCOPE_FIELDS:
+        _require_non_empty_scope(scope, field_name)
+    _require_user_message_source(scope)
+
+    params = validated["params"]
+    forbidden_params = sorted(
+        field_name
+        for field_name in params
+        if field_name in _CODING_FORBIDDEN_WORKER_LOCAL_PARAMS
+    )
+    if forbidden_params:
+        raise ActionValidationError(
+            "params: worker-local fields are not allowed: "
+            f"{', '.join(forbidden_params)}"
+        )
+    requested_delivery = params.get("requested_delivery")
+    if requested_delivery != BACKGROUND_WORK_REQUESTED_DELIVERY:
+        raise ActionValidationError("requested_delivery: unsupported value")
+    _require_non_empty_param(params, "task_brief")
+    coding_action = _param_text(params, "coding_action")
+    if coding_action not in (
+        "start",
+        "status",
+        "approve_and_verify",
+        "cancel",
+    ):
+        raise ActionValidationError("coding_action: unsupported value")
+    if coding_action in _CODING_ACTIONS_REQUIRING_RUN_REF:
+        coding_run_ref = _optional_param_text(params, "coding_run_ref")
+        if not coding_run_ref.startswith("coding_run:"):
+            raise ActionValidationError(
+                "coding_run_ref: expected prompt-safe coding_run:<run_id>"
+            )
+    max_output_chars = params.get("max_output_chars")
+    if not isinstance(max_output_chars, int):
+        raise ActionValidationError("max_output_chars: expected integer")
+    if max_output_chars < 1:
+        raise ActionValidationError("max_output_chars: expected positive integer")
+    if max_output_chars > BACKGROUND_WORK_OUTPUT_CHAR_LIMIT:
+        raise ActionValidationError("max_output_chars: exceeds configured limit")
+    return validated
+
+
 async def enqueue_background_work_action(
     action_spec: dict[str, Any],
     *,
@@ -174,6 +254,54 @@ async def enqueue_background_work_action(
         accepted_task_summary=task_brief,
         requested_worker="",
         worker_payload={},
+        enqueue_background_work_func=enqueue_background_work_func,
+    )
+    return result
+
+
+async def enqueue_accepted_coding_task_action(
+    action_spec: dict[str, Any],
+    *,
+    storage_timestamp_utc: str,
+    action_attempt_id: str,
+    enqueue_background_work_func: BackgroundWorkEnqueueFunc | None = None,
+) -> BackgroundWorkQueueResult:
+    """Persist one validated durable coding-run background action."""
+
+    validated = validate_accepted_coding_task_action(action_spec)
+    params = validated["params"]
+    task_brief = _param_text(params, "task_brief")
+    coding_action = _param_text(params, "coding_action")
+    coding_run_ref = _optional_param_text(params, "coding_run_ref")
+    execution_request = _optional_param_text(params, "execution_request")
+    result = await _create_or_queue_accepted_task(
+        validated,
+        storage_timestamp_utc=storage_timestamp_utc,
+        action_attempt_id=action_attempt_id,
+        action_kind=ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
+        accepted_task_seed=_coding_accepted_task_seed(
+            coding_action=coding_action,
+            coding_run_ref=coding_run_ref,
+            task_brief=task_brief,
+        ),
+        accepted_task_detail=_coding_accepted_task_detail(
+            coding_action=coding_action,
+            coding_run_ref=coding_run_ref,
+            task_brief=task_brief,
+        ),
+        accepted_task_summary=_coding_accepted_task_summary(
+            coding_action=coding_action,
+            coding_run_ref=coding_run_ref,
+            task_brief=task_brief,
+        ),
+        requested_worker="coding_agent",
+        worker_payload={
+            "schema_version": "coding_agent_worker_payload.v1",
+            "operation": coding_action,
+            "task_brief": task_brief,
+            "coding_run_ref": coding_run_ref,
+            "execution_request": execution_request,
+        },
         enqueue_background_work_func=enqueue_background_work_func,
     )
     return result
@@ -213,6 +341,53 @@ async def enqueue_future_speak_action(
         task_brief=task_summary,
     )
     return result
+
+
+def _coding_accepted_task_seed(
+    *,
+    coding_action: str,
+    coding_run_ref: str,
+    task_brief: str,
+) -> str:
+    """Build duplicate-suppression seed for one coding task request."""
+
+    if coding_action == "start":
+        return task_brief
+    return_value = f"{coding_action}:{coding_run_ref}:{task_brief}"
+    return return_value
+
+
+def _coding_accepted_task_detail(
+    *,
+    coding_action: str,
+    coding_run_ref: str,
+    task_brief: str,
+) -> str:
+    """Build prompt-safe accepted coding task detail."""
+
+    if coding_run_ref:
+        return_value = f"{coding_action} {coding_run_ref}: {task_brief}"
+        return return_value
+    return_value = f"{coding_action}: {task_brief}"
+    return return_value
+
+
+def _coding_accepted_task_summary(
+    *,
+    coding_action: str,
+    coding_run_ref: str,
+    task_brief: str,
+) -> str:
+    """Build prompt-safe accepted coding task summary."""
+
+    if coding_action == "start":
+        return_value = f"Coding task: {task_brief}"
+        return return_value
+    if coding_run_ref:
+        return_value = f"Coding run {coding_run_ref}: {coding_action}"
+        return return_value
+    return_value = f"Coding run: {coding_action}"
+    return return_value
 
 
 async def _create_or_queue_accepted_task(
@@ -446,6 +621,17 @@ def _param_text(params: dict[str, Any], field_name: str) -> str:
     value = params[field_name]
     if not isinstance(value, str):
         raise ActionValidationError(f"{field_name}: expected string")
+    return_value = value.strip()
+    return return_value
+
+
+def _optional_param_text(params: dict[str, Any], field_name: str) -> str:
+    """Return one optional text param."""
+
+    value = params.get(field_name)
+    if not isinstance(value, str):
+        return_value = ""
+        return return_value
     return_value = value.strip()
     return return_value
 

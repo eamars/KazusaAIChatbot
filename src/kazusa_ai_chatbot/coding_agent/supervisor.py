@@ -175,6 +175,15 @@ async def handle_background_coding_task(
     return response
 
 
+async def decide_background_coding_operation(
+    request: CodingAgentBackgroundRequest,
+) -> tuple[CodingAgentBackgroundOperation, str]:
+    """Choose the durable coding-run objective for accepted coding work."""
+
+    operation, reason = await _decide_background_coding_operation(request)
+    return operation, reason
+
+
 async def _decide_background_coding_operation(
     request: CodingAgentBackgroundRequest,
 ) -> tuple[CodingAgentBackgroundOperation, str]:

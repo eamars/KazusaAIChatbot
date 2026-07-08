@@ -346,6 +346,16 @@ history, and public sanitization inspectable without relying on background
 worker delivery, MongoDB run persistence, Phase 10 repository-scale reading,
 or UI work.
 
+Accepted durable coding work enters through L2d
+`accepted_coding_task_request`, not through direct API calls. Deterministic
+action execution validates a closed coding action, persists accepted-task
+state, queues `requested_worker="coding_agent"` with
+`coding_agent_worker_payload.v1`, and the worker maps that payload to the
+durable run APIs. Approval follow-ups require a prompt-safe
+`coding_run:<run_id>` reference and can run only structured
+`python_compileall` or focused `pytest` verification inside the managed coding
+workspace.
+
 Reflection phase scheduling spreads monitor-eligible channels across the
 `REFLECTION_WORKER_INTERVAL_SECONDS` period instead of running all group
 review work in one burst. `REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD` defaults to
@@ -794,6 +804,7 @@ Live LLM tests must be run and inspected one at a time:
 
 ```bash
 pytest -m live_llm tests/test_cognition_live_llm.py::test_live_msg_decontexualizer_returns_non_empty_output -q -s
+pytest -m live_llm tests/test_coding_agent_full_workflow_integration_live_llm.py::test_live_gate_01_read_only_question_from_l2d_to_worker -q -s
 ```
 
 Live DB tests can be run explicitly when MongoDB is available:

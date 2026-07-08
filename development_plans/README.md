@@ -38,8 +38,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [coding_agent_full_workflow_integration_test_plan.md](active/short_term/coding_agent_full_workflow_integration_test_plan.md) | Large coding-agent real LLM integration test plan | draft |
-| [coding_agent_pre_integration_hardening_plan.md](active/short_term/coding_agent_pre_integration_hardening_plan.md) | Large coding-agent pre-integration hardening plan | draft |
+| None | No active short-term plans are currently classified | n/a |
 
 ## Supporting Experiment Records
 
@@ -200,6 +199,20 @@ closeout.
 | Outcome | Plans |
 |---|---|
 | Moved from active short-term to completed archive | `coding_agent_phase9_run_supervisor_plan.md` |
+
+### 2026-07-09 coding-agent pre-integration hardening completion
+
+The coding-agent full workflow integration test plan and pre-integration
+hardening plan completed after user-approved execution without subagents. The
+implementation made the Phase 5-9 workflow reachable from the L2d
+accepted-task/background-worker entrypoint, added five executable real LLM
+workflow gates, remediated live-gate failures around local source hints and
+prompt-safe run reference recovery, reran deterministic regressions, and updated
+architecture and ICD documents.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active short-term to completed archive | `coding_agent_full_workflow_integration_test_plan.md`, `coding_agent_pre_integration_hardening_plan.md` |
 
 ## Archive
 

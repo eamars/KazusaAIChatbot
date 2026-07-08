@@ -158,6 +158,7 @@ def _pre_surface_action_result_prompts(
         prompt_action_kind = _pre_surface_prompt_action_kind(action_kind)
         if prompt_action_kind not in (
             "accepted_task_request",
+            "accepted_coding_task_request",
             "background_work_request",
             "future_speak",
             "memory_lifecycle_update",
@@ -272,7 +273,11 @@ def _background_work_acknowledgement_parts(
         if not isinstance(row, dict):
             continue
         action_kind = row.get("action_kind")
-        if action_kind not in ("background_work_request", "future_speak"):
+        if action_kind not in (
+            "accepted_coding_task_request",
+            "background_work_request",
+            "future_speak",
+        ):
             continue
         prompt_action_kind = _pre_surface_prompt_action_kind(str(action_kind))
         task_summary = _task_summary_for_prompt(row)

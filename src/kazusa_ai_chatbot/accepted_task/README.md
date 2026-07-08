@@ -4,8 +4,8 @@
 
 - Owning package: `kazusa_ai_chatbot.accepted_task`
 - Runtime role: user-facing delayed-work lifecycle
-- Model-facing actions: `accepted_task_request` and
-  `accepted_task_status_check`
+- Model-facing actions: `accepted_task_request`,
+  `accepted_coding_task_request`, and `accepted_task_status_check`
 - Internal executor: `kazusa_ai_chatbot.background_work`
 - Related docs: [Action Spec](../action_spec/README.md),
   [Background Work](../background_work/README.md),
@@ -27,12 +27,15 @@ ids, workers, leases, retry counters, or adapter callback details.
 - `background_work` remains the internal executor for queued work.
 - Workers never send adapter messages directly. Completed accepted tasks return
   through source-bound cognition and normal dialog/delivery boundaries.
-- L2d sees `accepted_task_request` and `accepted_task_status_check`.
-  `background_work_request` remains an internal executable action produced by
-  deterministic materialization.
+- L2d sees `accepted_task_request`, `accepted_coding_task_request`, and
+  `accepted_task_status_check`. `background_work_request` remains an internal
+  executable action produced by deterministic materialization.
 - New accepted tasks may be executed by text-artifact workers or deterministic
   workers such as `future_speak`; cognition still reasons only over the
   accepted-task lifecycle.
+- Durable coding tasks use a coding-specific action that exposes only closed
+  semantic actions and prompt-safe `coding_run:<run_id>` references. The
+  accepted-task layer still hides queue rows and worker internals.
 
 ## Public Interfaces
 
@@ -41,10 +44,10 @@ brain-service flow:
 
 ```text
 L2d selected action
-  -> accepted_task_request or accepted_task_status_check
+  -> accepted_task_request, accepted_coding_task_request, or accepted_task_status_check
   -> deterministic action-spec materialization
   -> accepted-task lifecycle row
-  -> optional internal background_work_request
+  -> optional internal background_work_request or requested-worker handoff
   -> accepted_task_result_ready cognition episode
 ```
 
@@ -121,6 +124,8 @@ Tests for this boundary should verify:
 
 - accepted-task identity and duplicate suppression;
 - materialization into `background_work_request`;
+- materialization into validated requested-worker payloads for first-class
+  deterministic worker handoffs;
 - status-check behavior that does not enqueue new work;
 - `accepted_task_result_ready` handoff into cognition;
 - prompt projection that excludes queue, worker, lease, adapter, and database

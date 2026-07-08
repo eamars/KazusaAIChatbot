@@ -159,7 +159,12 @@ def _normalize_action_requests(
             "capability": capability,
             "reason": reason,
         }
-        for optional_field in ("decision", "detail"):
+        for optional_field in (
+            "decision",
+            "detail",
+            "coding_run_ref",
+            "execution_request",
+        ):
             field_value = _semantic_text(raw_request, optional_field)
             if field_value:
                 normalized_request[optional_field] = field_value

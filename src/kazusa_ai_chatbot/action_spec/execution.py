@@ -14,6 +14,7 @@ from kazusa_ai_chatbot.action_spec.handlers.future_cognition import (
 )
 from kazusa_ai_chatbot.action_spec.handlers.background_work import (
     BackgroundWorkEnqueueFunc,
+    enqueue_accepted_coding_task_action,
     enqueue_background_work_action,
     enqueue_future_speak_action,
 )
@@ -26,6 +27,7 @@ from kazusa_ai_chatbot.action_spec.handlers.memory_lifecycle import (
 from kazusa_ai_chatbot.action_spec.models import ActionValidationError
 from kazusa_ai_chatbot.action_spec.registry import (
     ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
+    ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     BACKGROUND_WORK_REQUEST_CAPABILITY,
     FUTURE_SPEAK_CAPABILITY,
@@ -205,6 +207,63 @@ async def execute_action_specs_for_trace(
             except ValueError as exc:
                 status = "rejected"
                 result_summary = f"future_speak rejected: {exc}"
+                execution_result = {
+                    "status": status,
+                    "error": str(exc),
+                }
+            else:
+                status = _accepted_task_execution_status(queue_result)
+                result_summary = queue_result["result_summary"]
+                execution_result = {
+                    "status": status,
+                    "accepted_task_state": (
+                        queue_result["accepted_task_state"]
+                    ),
+                    "accepted_task_summary": (
+                        queue_result["accepted_task_summary"]
+                    ),
+                    "acknowledgement_constraint": (
+                        queue_result["acknowledgement_constraint"]
+                    ),
+                    "wait_guidance": queue_result["wait_guidance"],
+                }
+                prompt_result_fields = {
+                    "accepted_task_state": (
+                        queue_result["accepted_task_state"]
+                    ),
+                    "accepted_task_summary": (
+                        queue_result["accepted_task_summary"]
+                    ),
+                    "acknowledgement_constraint": (
+                        queue_result["acknowledgement_constraint"]
+                    ),
+                    "wait_guidance": queue_result["wait_guidance"],
+                }
+        elif validated_spec["kind"] == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY:
+            try:
+                queue_result = await enqueue_accepted_coding_task_action(
+                    validated_spec,
+                    storage_timestamp_utc=normalized_storage_timestamp_utc,
+                    action_attempt_id=action_attempt_id,
+                    enqueue_background_work_func=enqueue_background_work_func,
+                )
+            except ActionValidationError as exc:
+                status = "rejected"
+                result_summary = f"accepted_coding_task_request rejected: {exc}"
+                execution_result = {
+                    "status": status,
+                    "error": str(exc),
+                }
+            except DatabaseOperationError as exc:
+                status = "failed"
+                result_summary = f"accepted_coding_task_request failed: {exc}"
+                execution_result = {
+                    "status": status,
+                    "error": str(exc),
+                }
+            except ValueError as exc:
+                status = "rejected"
+                result_summary = f"accepted_coding_task_request rejected: {exc}"
                 execution_result = {
                     "status": status,
                     "error": str(exc),

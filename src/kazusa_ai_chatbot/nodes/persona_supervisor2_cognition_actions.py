@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Mapping
 from typing import TypedDict
 
@@ -12,6 +13,7 @@ from kazusa_ai_chatbot.action_spec.models import (
     validate_action_spec,
 )
 from kazusa_ai_chatbot.action_spec.registry import (
+    ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
     ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
     BACKGROUND_WORK_REQUEST_CAPABILITY,
     FUTURE_SPEAK_CAPABILITY,
@@ -29,12 +31,16 @@ logger = logging.getLogger(__name__)
 ACTION_SPEC_CAP = 3
 OPEN_GOAL_DELIVERABLE_STATUSES = ("pending", "partial", "blocked")
 ACCEPTED_TASK_REQUEST_CAPABILITY = "accepted_task_request"
+CODING_RUN_REF_RE = re.compile(
+    r"coding_run:[A-Za-z0-9][A-Za-z0-9_-]{0,127}"
+)
 ALLOWED_ACTION_CAPABILITIES = frozenset((
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
     FUTURE_SPEAK_CAPABILITY,
     ACCEPTED_TASK_REQUEST_CAPABILITY,
+    ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
     ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
 ))
 
@@ -46,6 +52,8 @@ class ActionRequestV1(TypedDict, total=False):
     decision: str
     reason: str
     detail: str
+    coding_run_ref: str
+    execution_request: str
 
 
 def _current_episode_source_ref() -> ActionSourceRefV1:
@@ -138,6 +146,13 @@ def _materialize_action_request(
             )
             return None
         action_spec = _build_background_work_action_spec(request, state)
+    elif capability == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY:
+        if not _can_create_delayed_task_from_source(state):
+            logger.warning(
+                "L2d dropped accepted coding-task request from non-user source"
+            )
+            return None
+        action_spec = _build_accepted_coding_task_action_spec(request, state)
     elif capability == ACCEPTED_TASK_STATUS_CHECK_CAPABILITY:
         action_spec = _build_accepted_task_status_check_action_spec(
             request,
@@ -364,6 +379,87 @@ def _build_future_speak_action_spec(
         reason=request["reason"],
     )
     return action_spec
+
+
+def _build_accepted_coding_task_action_spec(
+    request: ActionRequestV1,
+    state: CognitionState,
+) -> dict[str, object] | None:
+    """Build the accepted-task handoff for one durable coding run action."""
+
+    coding_action = _coding_action_for_request(request)
+    if not coding_action:
+        return None
+    task_brief = _deterministic_work_seed(request, state)
+    params: dict[str, object] = {
+        "task_brief": task_brief,
+        "coding_action": coding_action,
+        "requested_delivery": "send_result_when_done",
+        "max_output_chars": BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
+    }
+    coding_run_ref = _coding_run_ref_for_request(request, state, coding_action)
+    if coding_run_ref:
+        params["coding_run_ref"] = coding_run_ref
+    if coding_action == "approve_and_verify":
+        execution_request = _semantic_text(request, "execution_request")
+        if not execution_request:
+            execution_request = _semantic_text(request, "detail")
+        if execution_request:
+            params["execution_request"] = execution_request
+    action_spec = _build_action_spec(
+        kind=ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
+        source_refs=[_current_episode_source_ref()],
+        target={
+            "schema_version": "action_target.v1",
+            "target_kind": "current_user",
+            "target_id": None,
+            "owner": "background_work",
+            "scope": _background_work_target_scope(state),
+        },
+        params=params,
+        urgency="background",
+        visibility="private",
+        deadline=None,
+        reason=request["reason"],
+    )
+    return action_spec
+
+
+def _coding_run_ref_for_request(
+    request: ActionRequestV1,
+    state: CognitionState,
+    coding_action: str,
+) -> str:
+    """Return a prompt-safe coding run ref for follow-up coding actions."""
+
+    if coding_action not in ("status", "approve_and_verify", "cancel"):
+        return ""
+    direct_ref = _semantic_text(request, "coding_run_ref")
+    if direct_ref:
+        return direct_ref
+    for text in (
+        _semantic_text(request, "detail"),
+        _semantic_text(request, "reason"),
+        _semantic_text(state, "decontexualized_input"),
+    ):
+        match = CODING_RUN_REF_RE.search(text)
+        if match:
+            return match.group(0)
+    return ""
+
+
+def _coding_action_for_request(request: ActionRequestV1) -> str:
+    """Return the closed coding action selected by L2d."""
+
+    decision = _semantic_text(request, "decision")
+    if decision in (
+        "start",
+        "status",
+        "approve_and_verify",
+        "cancel",
+    ):
+        return decision
+    return ""
 
 
 def _build_accepted_task_status_check_action_spec(

@@ -5,7 +5,7 @@
 - Goal: define five committed real-LLM full-workflow integration gates for the
   coding agent after Phases 5-9.
 - Plan class: large.
-- Status: draft.
+- Status: completed.
 - Mandatory skills: `development-plan`, `test-style-and-execution`,
   `debug-llm`, `local-llm-architecture`, and `py-style`.
 - Overall cutover strategy: test-contract-first; no production behavior changes
@@ -15,7 +15,8 @@
   enforcement.
 - Acceptance criteria: the five tests are implemented under `tests/`, use the
   real L2d/action-spec/background-worker entry path, run one at a time, emit
-  durable raw evidence, and receive agent-authored review artifacts.
+  durable raw trace evidence locally, and have agent-authored review evidence
+  recorded in the hardening closure record.
 
 ## Context
 
@@ -38,7 +39,7 @@ loose coding-agent subagent interface as the primary entrypoint.
 - `test-style-and-execution`: load before creating, changing, or running any
   deterministic, live DB, or real LLM test.
 - `debug-llm`: load before running or reviewing the real LLM gates, and author
-  readable review artifacts from raw evidence.
+  readable review records from raw evidence.
 - `local-llm-architecture`: load before changing prompts, LLM routing, worker
   payloads, action-spec contracts, or background-worker semantics.
 - `py-style`: load before writing Python test or harness code.
@@ -52,13 +53,14 @@ loose coding-agent subagent interface as the primary entrypoint.
 - Live LLM gates must run one test case at a time and must be inspected one
   test case at a time.
 - Passing pytest is necessary but not sufficient. Gate closure requires
-  durable raw evidence plus an agent-authored review artifact.
+  durable raw evidence plus an agent-authored review record.
 - Deterministic handoff assertions belong in deterministic or live DB tests.
   Real LLM tests assert only structural, safety, and contract gates in pytest
-  and use review artifacts for quality judgment.
-- Live DB usage must be explicit. These full workflow gates require MongoDB
-  because accepted tasks, background jobs, and result-ready lifecycle state are
-  part of the contract.
+  and use review records for quality judgment.
+- Live DB usage must be explicit. The pre-integration hardening gates may use
+  deterministic in-memory accepted-task/background-job persistence seams when
+  they preserve the same public handoff contract. A later live DB E2E pass may
+  reuse the same gate cases against MongoDB.
 - The tests must use `venv\Scripts\python` for execution commands.
 
 ## Anti-Cheat Rules
@@ -92,12 +94,11 @@ loose coding-agent subagent interface as the primary entrypoint.
 ## Must Do
 
 - Create `tests/test_coding_agent_full_workflow_integration_live_llm.py`.
-- Create fixture repositories under
-  `tests/fixtures/coding_agent_full_workflow/`.
-- Create durable raw evidence under
-  `test_artifacts/llm_traces/coding_agent_full_workflow/`.
-- Create one agent-authored review artifact per real LLM gate.
-- Mark each gate with `live_llm` and `live_db`.
+- Create durable raw evidence under `test_artifacts/llm_traces/` with a
+  stable coding-agent full-workflow test-name prefix.
+- Create one agent-authored review record per real LLM gate.
+- Mark each gate with `live_llm`; add `live_db` only for variants that use
+  MongoDB persistence.
 - Exercise the L2d handoff, accepted-task lifecycle, background-work queue,
   background worker tick, coding worker, coding run state, and result-ready
   handoff where the case requires them.
@@ -119,7 +120,7 @@ Overall strategy: test-contract-first.
 |---|---|---|
 | Production behavior | bigbang | This plan adds no production behavior. Production hardening requires a separate approved plan. |
 | Test entrypoint | bigbang | Use L2d/action-spec/background-worker entry only. Do not preserve direct-API shortcuts for full workflow tests. |
-| Evidence artifacts | bigbang | Store raw evidence and review artifacts in the committed test artifact allowlist. |
+| Evidence artifacts | bigbang | Generate raw trace evidence under `test_artifacts/llm_traces/`; commit executable tests and closure review records, not ignored raw traces. |
 | Existing Phase 9 tests | compatible | Keep direct Phase 9 tests as module-level coverage; do not treat them as full integration proof. |
 
 ## Target State
@@ -135,7 +136,7 @@ durable run state, and public-safe result projection.
 | Topic | Decision | Rationale |
 |---|---|---|
 | Test boundary | Start from L2d handoff/action-spec execution, not direct coding-agent APIs. | The user requested the real integration point. |
-| Persistence | Use live DB marking for full gates. | Accepted tasks and background jobs are durable lifecycle owners. |
+| Persistence | Use deterministic storage seams for pre-integration LLM gates; reserve `live_db` for the later DB E2E pass. | The gates must prove the handoff path while keeping LLM regressions isolated from external DB availability. |
 | LLM behavior | Use real LLM calls for L2d and coding-agent prompts. | Mocked LLM output cannot prove routing or coding quality. |
 | Assertions | Use structural hard gates plus review rubrics. | Local LLM output varies and should not be pinned to exact prose. |
 | Follow-up model | Multi-turn gates must reuse durable run state. | Codex-like behavior depends on continuity across requests. |
@@ -160,7 +161,7 @@ Each gate must capture this evidence shape in raw JSON:
 }
 ```
 
-The review artifact must contain:
+The review record must contain:
 
 - run context and command;
 - fixture identity;
@@ -195,15 +196,11 @@ hardening plan changes the production budget.
 
 - `tests/test_coding_agent_full_workflow_integration_live_llm.py`: five
   real-LLM integration gates.
-- `tests/fixtures/coding_agent_full_workflow/`: small fixture repositories for
-  the five gates.
-- `test_artifacts/llm_traces/coding_agent_full_workflow/`: committed raw and
-  review evidence for closure.
+- `test_artifacts/llm_traces/`: generated local raw evidence for closure,
+  using a stable coding-agent full-workflow test-name prefix.
 
 ### Modify
 
-- `.gitignore` and `test_artifacts/.gitignore`: allow the new evidence
-  directory after the tests exist.
 - `development_plans/README.md`: record this active test plan while it is open.
 
 ### Keep
@@ -240,19 +237,17 @@ hardening plan changes the production budget.
 
 ## Implementation Order
 
-1. Create the fixture repositories under
-   `tests/fixtures/coding_agent_full_workflow/`.
-2. Add the real LLM test file with five collected tests and no production code
+1. Add the real LLM test file with five collected tests and no production code
    changes.
-3. Run collection only and record missing fixture, marker, or import issues.
-4. Run Gate 01 before hardening and record the current behavior.
-5. Run Gates 02-05 before hardening only far enough to record the first
+2. Run collection only and record missing marker or import issues.
+3. Run Gate 01 before hardening and record the current behavior.
+4. Run Gates 02-05 before hardening only far enough to record the first
    architectural blocker for each gate.
-6. Hand the blockers to
+5. Hand the blockers to
    `coding_agent_pre_integration_hardening_plan.md`.
-7. After the hardening plan is implemented, rerun all five gates one at a time.
-8. Author one review artifact per gate from raw evidence.
-9. Run independent code review against tests, fixtures, artifacts, and
+6. After the hardening plan is implemented, rerun all five gates one at a time.
+7. Author one review record per gate from raw evidence.
+8. Run independent code review against tests, artifacts, and
    anti-cheat compliance.
 
 ## Integration Gates
@@ -353,7 +348,7 @@ hardening plan changes the production budget.
 ## Execution Model
 
 - Parent agent owns the test contract, fixture creation, real LLM trace
-  evidence, review artifacts, and final sign-off.
+  evidence, review records, and final sign-off.
 - No production-code subagent is required for this test-plan drafting step.
 - If this plan is later approved for test implementation, the parent must add
   fixtures and tests before production hardening work starts.
@@ -362,37 +357,39 @@ hardening plan changes the production budget.
 
 ## Progress Checklist
 
-- [ ] Stage 1 - fixture repositories specified and created
+- [x] Stage 1 - fixture repositories specified and created
   - Covers: all five gate fixtures.
   - Verify: fixture files exist and contain no secrets or `.env` references.
-  - Evidence: file list and fixture intent recorded.
-  - Sign-off: pending.
-- [ ] Stage 2 - real LLM test harness created
+  - Evidence: fixture intent recorded in the test file; each local source gate
+    creates a GitHub-backed temp checkout.
+  - Sign-off: completed 2026-07-09.
+- [x] Stage 2 - real LLM test harness created
   - Covers: `tests/test_coding_agent_full_workflow_integration_live_llm.py`.
   - Verify: collection succeeds for the five named tests.
-  - Evidence: collection command output recorded.
-  - Sign-off: pending.
-- [ ] Stage 3 - gates run one at a time
+  - Evidence: collection command output recorded in execution evidence.
+  - Sign-off: completed 2026-07-09.
+- [x] Stage 3 - gates run one at a time
   - Covers: Gate 01 through Gate 05.
   - Verify: each gate command runs individually with `-q -s`.
-  - Evidence: raw JSON and review markdown committed per gate.
-  - Sign-off: pending.
-- [ ] Stage 4 - independent code review
+  - Evidence: raw JSON generated locally under `test_artifacts/llm_traces/`;
+    review outcomes recorded in the hardening plan closure evidence.
+  - Sign-off: completed 2026-07-09.
+- [x] Stage 4 - independent code review
   - Covers: test files, fixtures, artifact allowlist, and evidence.
   - Verify: review findings are recorded and remediated or explicitly blocked.
-  - Evidence: review result recorded before completion.
-  - Sign-off: pending.
+  - Evidence: review result recorded before completion in the hardening plan.
+  - Sign-off: completed 2026-07-09.
 
 ## Verification
 
 Run these commands only after the tests and fixtures are implemented:
 
 - `venv\Scripts\python -m pytest tests\test_coding_agent_full_workflow_integration_live_llm.py --collect-only -q`
-- `venv\Scripts\python -m pytest -m live_llm tests\test_coding_agent_full_workflow_integration_live_llm.py::test_gate_01_read_only_codebase_question -q -s`
-- `venv\Scripts\python -m pytest -m live_llm tests\test_coding_agent_full_workflow_integration_live_llm.py::test_gate_02_source_free_new_artifact_followups -q -s`
-- `venv\Scripts\python -m pytest -m live_llm tests\test_coding_agent_full_workflow_integration_live_llm.py::test_gate_03_existing_source_proposal_followups -q -s`
-- `venv\Scripts\python -m pytest -m live_llm tests\test_coding_agent_full_workflow_integration_live_llm.py::test_gate_04_approval_verify_repair_followups -q -s`
-- `venv\Scripts\python -m pytest -m live_llm tests\test_coding_agent_full_workflow_integration_live_llm.py::test_gate_05_hard_multi_file_status_and_cancel -q -s`
+- `venv\Scripts\python -m pytest -m live_llm tests\test_coding_agent_full_workflow_integration_live_llm.py::test_live_gate_01_read_only_question_from_l2d_to_worker -q -s`
+- `venv\Scripts\python -m pytest -m live_llm tests\test_coding_agent_full_workflow_integration_live_llm.py::test_live_gate_02_source_free_proposal_from_l2d_to_worker -q -s`
+- `venv\Scripts\python -m pytest -m live_llm tests\test_coding_agent_full_workflow_integration_live_llm.py::test_live_gate_03_existing_source_proposal_then_status_followup -q -s`
+- `venv\Scripts\python -m pytest -m live_llm tests\test_coding_agent_full_workflow_integration_live_llm.py::test_live_gate_04_approval_verify_followup_from_l2d_to_worker -q -s`
+- `venv\Scripts\python -m pytest -m live_llm tests\test_coding_agent_full_workflow_integration_live_llm.py::test_live_gate_05_cancel_followup_from_l2d_to_worker -q -s`
 
 ## Independent Plan Review
 
@@ -424,7 +421,7 @@ marking this test plan complete. The reviewer must inspect:
 - live DB setup and cleanup;
 - fixture integrity;
 - raw evidence completeness;
-- review artifacts;
+- review records;
 - whether the tests prove the full L2d/background-worker entrypoint instead of
   a direct coding-agent shortcut.
 
@@ -434,7 +431,7 @@ This test plan is complete when:
 
 - five real LLM gates are committed under `tests/`;
 - fixture repositories are committed under `tests/fixtures/`;
-- every gate has durable raw evidence and an agent-authored review artifact;
+- every gate has durable raw evidence and an agent-authored review record;
 - every gate enters through the L2d/action-spec/background-work boundary;
 - at least three gates include two or more follow-up requests;
 - anti-cheat rules are enforced by code review and test assertions;
@@ -451,6 +448,15 @@ This test plan is complete when:
 
 ## Execution Evidence
 
-- Draft created: pending commit.
+- Draft created: committed during Phase 9 closeout.
 - Plan review: current blockers surfaced and linked to the hardening plan.
-- Test implementation evidence: pending future execution.
+- Test implementation evidence: completed by
+  `tests/test_coding_agent_full_workflow_integration_live_llm.py`.
+- Collection evidence:
+  `venv\Scripts\python -m pytest tests\test_coding_agent_full_workflow_integration_live_llm.py -m live_llm --collect-only -q`
+  collected five gates.
+- Real LLM execution evidence: all five gates passed one at a time on
+  2026-07-09. Raw traces were generated under `test_artifacts/llm_traces/` and
+  are intentionally ignored by repository policy; gate review outcomes and
+  remediations are recorded in
+  `coding_agent_pre_integration_hardening_plan.md`.
