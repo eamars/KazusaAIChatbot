@@ -20,16 +20,15 @@
 - Acceptance criteria: deterministic verify/repair contract tests pass,
   execution feedback is bounded and redacted, original source trees remain
   unchanged, repair attempts use fresh managed apply workspaces, Phase 5 and
-  Phase 6 regressions remain passing, live LLM repair gates pass one at a
-  time with trace review, docs describe the direct trusted boundary, and
-  independent code review accepts the implementation.
+  Phase 6 regressions remain passing, five committed live LLM repair gates
+  pass one at a time with trace review, docs describe the direct trusted
+  boundary, and independent code review accepts the implementation.
 
 ## Context
 
 Phase 5 added explicit patch application into a managed apply workspace.
 Phase 6 added bounded execution against that managed apply workspace. Phase 7
-is planned to add a real existing-source modifying PM and File Agent planning
-boundary.
+added a real existing-source modifying PM and File Agent planning boundary.
 
 The current system can already:
 
@@ -207,8 +206,18 @@ Create `src/kazusa_ai_chatbot/coding_agent/code_verifying/models.py`.
     "execution_specs": list[dict[str, object]],
     "repair_attempt_limit": int,
     "max_repair_feedback_chars": int,
+    "initial_patch_artifacts": list[dict[str, object]],
+    "expected_source_identity": dict[str, object],
 }
 ```
+
+`initial_patch_artifacts` is optional. Trusted direct callers may supply an
+already reviewed proposal so verify/repair can apply, execute, and repair an
+existing patch package instead of always generating the first proposal inside
+the verifier. Live LLM closure gates use this field to seed a known-bad but
+review-valid proposal, guaranteeing the repair loop is exercised. When present,
+`expected_source_identity` is required and must match the resolved source
+identity before any managed apply workspace is created.
 
 `ExecutionRepairFeedback`:
 
@@ -285,9 +294,9 @@ never accepted by the normalizer or PM prompt builder.
 - Validate `workspace_root` before proposal generation.
 - Require explicit source-backed request fields. Phase 8 targets existing
   source repair, not source-free project generation.
-- Call `propose_code_change(...)` for the initial proposal unless the request
-  supplies a previously generated proposal through a trusted internal test
-  helper.
+- Call `propose_code_change(...)` for the initial proposal unless the trusted
+  direct request supplies `initial_patch_artifacts` with matching
+  `expected_source_identity`.
 - Validate proposal status before apply.
 - Call `apply_approved_patch(...)` with structured approval and expected
   source identity.
@@ -398,13 +407,28 @@ venv\Scripts\python -m pytest tests\test_coding_agent_phase5_patch_apply_contrac
 
 - Load `debug-llm` before running live cases.
 - Run live LLM gates one command at a time.
-- Use existing source fixtures that contain tests capable of failing before
-  repair and passing after repair.
+- Use the committed source fixtures in
+  `tests/test_coding_agent_phase8_verify_repair_live_llm.py`.
+- Each gate supplies a known-bad but review-valid `initial_patch_artifacts`
+  package so the first managed apply/execution attempt fails and the real LLM
+  repair path must run.
+- The five gates, from simple to hard, are:
+  - Gate 01 `verify_repair_gate_01_median_boundary`: single-file median
+    boundary repair.
+  - Gate 02 `verify_repair_gate_02_cli_flag_handoff`: small multi-file counter
+    and CLI flag handoff repair.
+  - Gate 03 `verify_repair_gate_03_duplicate_anchor_parser`: parser edge-case
+    duplicate-anchor repair.
+  - Gate 04 `verify_repair_gate_04_soft_delete_cross_layer`: cross-layer model,
+    store, and API soft-delete repair.
+  - Gate 05 `verify_repair_gate_05_fetch_cache_cli`: hard mixed fetch, retry,
+    cache, CLI, tests, and README context repair.
 - Require trace review that confirms:
   - failed execution output was summarized and redacted;
   - PM repair targeted the source owner path;
   - repaired proposal applied into a fresh managed copy;
   - final execution succeeded in the repaired attempt.
+  - the original source tree remained byte-for-byte unchanged.
 
 ### Stage 8 - Regression And Review
 
@@ -435,9 +459,11 @@ venv\Scripts\python -m pytest tests\test_coding_agent_phase8_interface.py -q
 Live LLM gates, one command at a time:
 
 ```powershell
-venv\Scripts\python -m pytest tests\test_coding_agent_phase8_verify_repair_live_llm.py -q -k gate_01
-venv\Scripts\python -m pytest tests\test_coding_agent_phase8_verify_repair_live_llm.py -q -k gate_03
-venv\Scripts\python -m pytest tests\test_coding_agent_phase8_verify_repair_live_llm.py -q -k gate_05
+venv\Scripts\python -m pytest tests\test_coding_agent_phase8_verify_repair_live_llm.py::test_verify_repair_live_gate_01_median_boundary -q -s -m live_llm
+venv\Scripts\python -m pytest tests\test_coding_agent_phase8_verify_repair_live_llm.py::test_verify_repair_live_gate_02_cli_flag_handoff -q -s -m live_llm
+venv\Scripts\python -m pytest tests\test_coding_agent_phase8_verify_repair_live_llm.py::test_verify_repair_live_gate_03_duplicate_anchor_parser -q -s -m live_llm
+venv\Scripts\python -m pytest tests\test_coding_agent_phase8_verify_repair_live_llm.py::test_verify_repair_live_gate_04_soft_delete_cross_layer -q -s -m live_llm
+venv\Scripts\python -m pytest tests\test_coding_agent_phase8_verify_repair_live_llm.py::test_verify_repair_live_gate_05_fetch_cache_cli -q -s -m live_llm
 ```
 
 Final non-live regression:
@@ -464,4 +490,3 @@ Status: not started.
 Record implementation commands, test results, live LLM gate notes, trace
 review decisions, independent review findings, remediations, and final
 closeout evidence here during approved execution.
-
