@@ -1,0 +1,429 @@
+{
+  "gate": {
+    "gate_id": "run_gate_02_proposal_awaits_approval",
+    "title": "Patch proposal pauses before side effects",
+    "objective_type": "propose_patch",
+    "instruction": "Modify the existing name utility so normalize_name strips leading and trailing whitespace, collapses internal whitespace to one space, and keeps the original letter casing. Update focused tests.",
+    "source_paths": [
+      "name_tools.py",
+      "tests/test_name_tools.py"
+    ],
+    "execution_specs": [],
+    "expected_status_after_start": "awaiting_approval",
+    "expected_terminal_status": "awaiting_approval",
+    "expected_changed_paths": [
+      "name_tools.py"
+    ],
+    "protected_source_paths": [
+      "tests/test_name_tools.py"
+    ],
+    "behavior_rubric": [
+      "The live PM/programmer flow produces a source-backed patch proposal.",
+      "The run pauses at approval without applying patches or running tests.",
+      "The ledger records proposal-ready and awaiting-approval events."
+    ],
+    "forbidden_failure_modes": [
+      "The run applies the patch during start without structured approval.",
+      "The proposal changes only tests while runtime behavior is unchanged.",
+      "The public ledger stores raw diffs, local roots, or command output."
+    ]
+  },
+  "model_routes": [
+    "CODING_AGENT_PM_LLM",
+    "CODING_AGENT_PROGRAMMER_LLM"
+  ],
+  "source_root": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\coding_agent_run_supervisor_workspace\\run_gate_02_proposal_awaits_approval\\source",
+  "workspace_root": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\coding_agent_run_supervisor_workspace\\run_gate_02_proposal_awaits_approval",
+  "source_identity": {
+    "provider": "github",
+    "owner": "kazusa-fixtures",
+    "repo": "run_gate_02_proposal_awaits_approval",
+    "current_commit": "b6df14e1e1399516628c4d1d106efbd7fc64d234",
+    "dirty_state": "clean"
+  },
+  "source_hashes_before": {
+    "name_tools.py": "461ee13d024702e7bf85bef60fdea92a67c3a83a1f7d47b1e074674be732d568",
+    "tests/test_name_tools.py": "c224d5b09b78e66703bb58670469b179d02b6064e269cbe6cb36e76120ce7bff"
+  },
+  "source_hashes_after": {
+    "name_tools.py": "461ee13d024702e7bf85bef60fdea92a67c3a83a1f7d47b1e074674be732d568",
+    "tests/test_name_tools.py": "c224d5b09b78e66703bb58670469b179d02b6064e269cbe6cb36e76120ce7bff"
+  },
+  "source_tree_unchanged": true,
+  "initial_patch_artifact_count": 0,
+  "start_response": null,
+  "response": {
+    "status": "awaiting_approval",
+    "run_id": "c205a9823a57440587164b4dd549b053",
+    "goal": "Modify the existing name utility so normalize_name strips leading and trailing whitespace, collapses internal whitespace to one space, and keeps the original letter casing. Update focused tests.",
+    "objective_type": "propose_patch",
+    "answer_text": "I have updated `normalize_name` in `name_tools.py` to use `' '.join(value.split())`, which effectively strips leading/trailing whitespace and collapses any internal sequence of white space into a single space while preserving the original casing. I also expanded the tests in `tests/test_name_tools.py` to cover these specific requirements.\n\nLimitations: No callers for `normalize_name` were identified outside of tests (`tests/test_name_tools.py`); No contracts, validation paths, or documentation entry points that depend on this function's output were discovered; Synthesis included ungrounded code terms",
+    "repository": {
+      "provider": "github",
+      "owner": "kazusa-fixtures",
+      "repo": "run_gate_02_proposal_awaits_approval",
+      "source_url": "https://github.com/kazusa-fixtures/run_gate_02_proposal_awaits_approval",
+      "requested_ref": null,
+      "resolved_ref": "main",
+      "current_commit": "b6df14e1e1399516628c4d1d106efbd7fc64d234",
+      "default_branch": "main",
+      "storage_kind": "existing_local_checkout",
+      "managed_checkout": false,
+      "dirty_state": "clean"
+    },
+    "source_scope": {
+      "kind": "repository",
+      "repo_relative_path": null,
+      "source_url": "local://github/kazusa-fixtures/run_gate_02_proposal_awaits_approval",
+      "requested_ref": "main",
+      "interpretation": "explicit local repository checkout"
+    },
+    "evidence": [
+      {
+        "path": "name_tools.py",
+        "line_start": 1,
+        "line_end": 2,
+        "symbol_or_topic": "source evidence",
+        "excerpt": "[source excerpt omitted from patch proposal response]",
+        "reason": "Selected by the read-only evidence survey."
+      },
+      {
+        "path": "tests/test_name_tools.py",
+        "line_start": 1,
+        "line_end": 5,
+        "symbol_or_topic": "source evidence",
+        "excerpt": "[source excerpt omitted from patch proposal response]",
+        "reason": "Selected by the read-only evidence survey."
+      }
+    ],
+    "patch_artifacts": [
+      {
+        "artifact_id": "compiled-1",
+        "base": "repository",
+        "diff_text": "diff --git a/name_tools.py b/name_tools.py\n--- a/name_tools.py\n+++ b/name_tools.py\n@@ -1,2 +1,2 @@\n def normalize_name(value):\n-    return value.strip()\n+    return \" \".join(value.split())\n",
+        "files": [
+          "name_tools.py"
+        ],
+        "summary": "Compiled from structured patch operations."
+      },
+      {
+        "artifact_id": "compiled-2",
+        "base": "repository",
+        "diff_text": "diff --git a/tests/test_name_tools.py b/tests/test_name_tools.py\n--- a/tests/test_name_tools.py\n+++ b/tests/test_name_tools.py\n@@ -3,3 +3,13 @@\n \n def test_normalize_name_strips_outer_whitespace():\n     assert normalize_name('  Ada Lovelace  ') == 'Ada Lovelace'\n+\n+\n+def test_normalize_name_collapses_internal_whitespace():\n+    assert normalize_name('Ada   Lovelace') == 'Ada Lovelace'\n+    assert normalize_name(' Ada   Lovelace ') == 'Ada Lovelace'\n+\n+\n+def test_normalize_name_preserves_casing():\n+    assert normalize_name('ADA lovelace') == 'ADA lovelace'\n+    assert normalize_name('  aDA lOVELACE  ') == 'aDA lOVELACE'\n",
+        "files": [
+          "tests/test_name_tools.py"
+        ],
+        "summary": "Compiled from structured patch operations."
+      }
+    ],
+    "changed_files": [
+      {
+        "path": "name_tools.py",
+        "change_type": "modify",
+        "summary": "Update normalize_name to strip leading/trailing whitespace and collapse internal whitespace using split and join, which preserves casing."
+      },
+      {
+        "path": "tests/test_name_tools.py",
+        "change_type": "modify",
+        "summary": "Update tests to verify leading/trailing stripping, internal whitespace collapsing, and casing preservation."
+      }
+    ],
+    "apply_attempts": [],
+    "execution_attempts": [],
+    "repair_attempts": [],
+    "attempts": [],
+    "blockers": [],
+    "events": [
+      {
+        "event_id": "d458b829c6094a52a4eb3b71df0fc810",
+        "event_type": "run_created",
+        "public_payload": {
+          "objective_type": "propose_patch"
+        },
+        "run_id": "c205a9823a57440587164b4dd549b053",
+        "sequence": 1,
+        "status": "created",
+        "summary": "Coding run was created."
+      },
+      {
+        "event_id": "0fffd276550f4f22b5588702eddee3fe",
+        "event_type": "source_resolved",
+        "public_payload": {
+          "repository": {
+            "current_commit": "b6df14e1e1399516628c4d1d106efbd7fc64d234",
+            "default_branch": "main",
+            "dirty_state": "clean",
+            "managed_checkout": false,
+            "owner": "kazusa-fixtures",
+            "provider": "github",
+            "repo": "run_gate_02_proposal_awaits_approval",
+            "requested_ref": null,
+            "resolved_ref": "main",
+            "source_url": "https://github.com/kazusa-fixtures/run_gate_02_proposal_awaits_approval",
+            "storage_kind": "existing_local_checkout"
+          }
+        },
+        "run_id": "c205a9823a57440587164b4dd549b053",
+        "sequence": 2,
+        "status": "awaiting_approval",
+        "summary": "Source was resolved for the proposal run."
+      },
+      {
+        "event_id": "d0c75f7bdee942328e9d343ee38007a3",
+        "event_type": "evidence_collected",
+        "public_payload": {
+          "evidence_count": 2
+        },
+        "run_id": "c205a9823a57440587164b4dd549b053",
+        "sequence": 3,
+        "status": "awaiting_approval",
+        "summary": "Proposal evidence was collected."
+      },
+      {
+        "event_id": "3009d1433c9743dc8cc1ef1e4c7fbb15",
+        "event_type": "proposal_ready",
+        "public_payload": {
+          "changed_files": [
+            {
+              "change_type": "modify",
+              "path": "name_tools.py",
+              "summary": "Update normalize_name to strip leading/trailing whitespace and collapse internal whitespace using split and join, which preserves casing."
+            },
+            {
+              "change_type": "modify",
+              "path": "tests/test_name_tools.py",
+              "summary": "Update tests to verify leading/trailing stripping, internal whitespace collapsing, and casing preservation."
+            }
+          ]
+        },
+        "run_id": "c205a9823a57440587164b4dd549b053",
+        "sequence": 4,
+        "status": "awaiting_approval",
+        "summary": "Patch proposal is ready for approval."
+      },
+      {
+        "event_id": "de0c5d140e4c4bfbbf2b80909d12b912",
+        "event_type": "awaiting_approval",
+        "public_payload": {
+          "patch_artifact_count": 2
+        },
+        "run_id": "c205a9823a57440587164b4dd549b053",
+        "sequence": 5,
+        "status": "awaiting_approval",
+        "summary": "Coding run is waiting for structured approval."
+      }
+    ],
+    "limitations": [
+      "No callers for `normalize_name` were identified outside of tests (`tests/test_name_tools.py`).",
+      "No contracts, validation paths, or documentation entry points that depend on this function's output were discovered.",
+      "Synthesis included ungrounded code terms."
+    ],
+    "trace_summary": [
+      "Resolved explicit local checkout without mutation.",
+      "reading_pm:repository_map files=2",
+      "reading_pm:work_plan intent=symbol_behavior status=need_programmers assignments=3",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=2",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=1",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=2",
+      "reading_pm:work_plan intent=symbol_behavior status=sufficient assignments=0",
+      "reading_pm:sufficiency=sufficient",
+      "reading_merge:evidence=2",
+      "modifying:file_plan_ready",
+      "modifying_pm:decision=create_programmer_task",
+      "modifying_pm:programmer_task=modify-normalize-name-whitespace",
+      "modifying_pm:sufficiency=programmer_artifacts_ready",
+      "modifying:artifacts=2",
+      "patch_validation:succeeded"
+    ]
+  },
+  "reloaded_response": {
+    "status": "awaiting_approval",
+    "run_id": "c205a9823a57440587164b4dd549b053",
+    "goal": "Modify the existing name utility so normalize_name strips leading and trailing whitespace, collapses internal whitespace to one space, and keeps the original letter casing. Update focused tests.",
+    "objective_type": "propose_patch",
+    "answer_text": "I have updated `normalize_name` in `name_tools.py` to use `' '.join(value.split())`, which effectively strips leading/trailing whitespace and collapses any internal sequence of white space into a single space while preserving the original casing. I also expanded the tests in `tests/test_name_tools.py` to cover these specific requirements.\n\nLimitations: No callers for `normalize_name` were identified outside of tests (`tests/test_name_tools.py`); No contracts, validation paths, or documentation entry points that depend on this function's output were discovered; Synthesis included ungrounded code terms",
+    "repository": {
+      "current_commit": "b6df14e1e1399516628c4d1d106efbd7fc64d234",
+      "default_branch": "main",
+      "dirty_state": "clean",
+      "managed_checkout": false,
+      "owner": "kazusa-fixtures",
+      "provider": "github",
+      "repo": "run_gate_02_proposal_awaits_approval",
+      "requested_ref": null,
+      "resolved_ref": "main",
+      "source_url": "https://github.com/kazusa-fixtures/run_gate_02_proposal_awaits_approval",
+      "storage_kind": "existing_local_checkout"
+    },
+    "source_scope": {
+      "interpretation": "explicit local repository checkout",
+      "kind": "repository",
+      "repo_relative_path": null,
+      "requested_ref": "main",
+      "source_url": "local://github/kazusa-fixtures/run_gate_02_proposal_awaits_approval"
+    },
+    "evidence": [
+      {
+        "excerpt": "[source excerpt omitted from patch proposal response]",
+        "line_end": 2,
+        "line_start": 1,
+        "path": "name_tools.py",
+        "reason": "Selected by the read-only evidence survey.",
+        "symbol_or_topic": "source evidence"
+      },
+      {
+        "excerpt": "[source excerpt omitted from patch proposal response]",
+        "line_end": 5,
+        "line_start": 1,
+        "path": "tests/test_name_tools.py",
+        "reason": "Selected by the read-only evidence survey.",
+        "symbol_or_topic": "source evidence"
+      }
+    ],
+    "patch_artifacts": [
+      {
+        "artifact_id": "compiled-1",
+        "base": "repository",
+        "diff_text": "diff --git a/name_tools.py b/name_tools.py\n--- a/name_tools.py\n+++ b/name_tools.py\n@@ -1,2 +1,2 @@\n def normalize_name(value):\n-    return value.strip()\n+    return \" \".join(value.split())\n",
+        "files": [
+          "name_tools.py"
+        ],
+        "summary": "Compiled from structured patch operations."
+      },
+      {
+        "artifact_id": "compiled-2",
+        "base": "repository",
+        "diff_text": "diff --git a/tests/test_name_tools.py b/tests/test_name_tools.py\n--- a/tests/test_name_tools.py\n+++ b/tests/test_name_tools.py\n@@ -3,3 +3,13 @@\n \n def test_normalize_name_strips_outer_whitespace():\n     assert normalize_name('  Ada Lovelace  ') == 'Ada Lovelace'\n+\n+\n+def test_normalize_name_collapses_internal_whitespace():\n+    assert normalize_name('Ada   Lovelace') == 'Ada Lovelace'\n+    assert normalize_name(' Ada   Lovelace ') == 'Ada Lovelace'\n+\n+\n+def test_normalize_name_preserves_casing():\n+    assert normalize_name('ADA lovelace') == 'ADA lovelace'\n+    assert normalize_name('  aDA lOVELACE  ') == 'aDA lOVELACE'\n",
+        "files": [
+          "tests/test_name_tools.py"
+        ],
+        "summary": "Compiled from structured patch operations."
+      }
+    ],
+    "changed_files": [
+      {
+        "change_type": "modify",
+        "path": "name_tools.py",
+        "summary": "Update normalize_name to strip leading/trailing whitespace and collapse internal whitespace using split and join, which preserves casing."
+      },
+      {
+        "change_type": "modify",
+        "path": "tests/test_name_tools.py",
+        "summary": "Update tests to verify leading/trailing stripping, internal whitespace collapsing, and casing preservation."
+      }
+    ],
+    "apply_attempts": [],
+    "execution_attempts": [],
+    "repair_attempts": [],
+    "attempts": [],
+    "blockers": [],
+    "events": [
+      {
+        "event_id": "d458b829c6094a52a4eb3b71df0fc810",
+        "event_type": "run_created",
+        "public_payload": {
+          "objective_type": "propose_patch"
+        },
+        "run_id": "c205a9823a57440587164b4dd549b053",
+        "sequence": 1,
+        "status": "created",
+        "summary": "Coding run was created."
+      },
+      {
+        "event_id": "0fffd276550f4f22b5588702eddee3fe",
+        "event_type": "source_resolved",
+        "public_payload": {
+          "repository": {
+            "current_commit": "b6df14e1e1399516628c4d1d106efbd7fc64d234",
+            "default_branch": "main",
+            "dirty_state": "clean",
+            "managed_checkout": false,
+            "owner": "kazusa-fixtures",
+            "provider": "github",
+            "repo": "run_gate_02_proposal_awaits_approval",
+            "requested_ref": null,
+            "resolved_ref": "main",
+            "source_url": "https://github.com/kazusa-fixtures/run_gate_02_proposal_awaits_approval",
+            "storage_kind": "existing_local_checkout"
+          }
+        },
+        "run_id": "c205a9823a57440587164b4dd549b053",
+        "sequence": 2,
+        "status": "awaiting_approval",
+        "summary": "Source was resolved for the proposal run."
+      },
+      {
+        "event_id": "d0c75f7bdee942328e9d343ee38007a3",
+        "event_type": "evidence_collected",
+        "public_payload": {
+          "evidence_count": 2
+        },
+        "run_id": "c205a9823a57440587164b4dd549b053",
+        "sequence": 3,
+        "status": "awaiting_approval",
+        "summary": "Proposal evidence was collected."
+      },
+      {
+        "event_id": "3009d1433c9743dc8cc1ef1e4c7fbb15",
+        "event_type": "proposal_ready",
+        "public_payload": {
+          "changed_files": [
+            {
+              "change_type": "modify",
+              "path": "name_tools.py",
+              "summary": "Update normalize_name to strip leading/trailing whitespace and collapse internal whitespace using split and join, which preserves casing."
+            },
+            {
+              "change_type": "modify",
+              "path": "tests/test_name_tools.py",
+              "summary": "Update tests to verify leading/trailing stripping, internal whitespace collapsing, and casing preservation."
+            }
+          ]
+        },
+        "run_id": "c205a9823a57440587164b4dd549b053",
+        "sequence": 4,
+        "status": "awaiting_approval",
+        "summary": "Patch proposal is ready for approval."
+      },
+      {
+        "event_id": "de0c5d140e4c4bfbbf2b80909d12b912",
+        "event_type": "awaiting_approval",
+        "public_payload": {
+          "patch_artifact_count": 2
+        },
+        "run_id": "c205a9823a57440587164b4dd549b053",
+        "sequence": 5,
+        "status": "awaiting_approval",
+        "summary": "Coding run is waiting for structured approval."
+      }
+    ],
+    "limitations": [
+      "No callers for `normalize_name` were identified outside of tests (`tests/test_name_tools.py`).",
+      "No contracts, validation paths, or documentation entry points that depend on this function's output were discovered.",
+      "Synthesis included ungrounded code terms."
+    ],
+    "trace_summary": [
+      "Resolved explicit local checkout without mutation.",
+      "reading_pm:repository_map files=2",
+      "reading_pm:work_plan intent=symbol_behavior status=need_programmers assignments=3",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=2",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=1",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=2",
+      "reading_pm:work_plan intent=symbol_behavior status=sufficient assignments=0",
+      "reading_pm:sufficiency=sufficient",
+      "reading_merge:evidence=2",
+      "modifying:file_plan_ready",
+      "modifying_pm:decision=create_programmer_task",
+      "modifying_pm:programmer_task=modify-normalize-name-whitespace",
+      "modifying_pm:sufficiency=programmer_artifacts_ready",
+      "modifying:artifacts=2",
+      "patch_validation:succeeded"
+    ]
+  }
+}

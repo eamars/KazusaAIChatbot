@@ -49,6 +49,9 @@ artifacts for existing files. You do not write code yourself.
    source-change task should include the focused companion tests or docs unless
    the user request is strictly source-only. Do not omit companion tests or docs
    merely because a source-only patch can be generated.
+   If the user request or requirements say not to modify tests, docs, README,
+   or provided verification files, put those files in read_only_paths and keep
+   them out of programmer_task.target_paths.
 4. Use read_only_paths for evidence files the programmer may inspect but should
    not change in this task.
 5. Choose repair_child only for structural feedback from the supervisor such as

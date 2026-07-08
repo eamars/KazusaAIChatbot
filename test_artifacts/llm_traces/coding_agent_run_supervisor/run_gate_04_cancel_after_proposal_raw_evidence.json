@@ -1,0 +1,655 @@
+{
+  "gate": {
+    "gate_id": "run_gate_04_cancel_after_proposal",
+    "title": "Cancellation preserves proposal history",
+    "objective_type": "propose_patch",
+    "instruction": "Modify the receipt formatter so format_receipt accepts an optional currency keyword argument and defaults to USD. Keep the existing two-decimal formatting behavior.",
+    "source_paths": [
+      "receipt.py",
+      "tests/test_receipt.py"
+    ],
+    "execution_specs": [],
+    "expected_status_after_start": "awaiting_approval",
+    "expected_terminal_status": "cancelled",
+    "expected_changed_paths": [
+      "receipt.py"
+    ],
+    "protected_source_paths": [
+      "tests/test_receipt.py"
+    ],
+    "behavior_rubric": [
+      "The run creates a proposal through the live coding-agent roles.",
+      "Cancellation is deterministic and does not invoke apply or execute.",
+      "The public get response preserves proposal summary and cancel event."
+    ],
+    "forbidden_failure_modes": [
+      "Cancellation deletes the run ledger or proposal summary.",
+      "A cancelled run can still be continued into apply or execution.",
+      "The public response exposes absolute managed workspace paths."
+    ]
+  },
+  "model_routes": [
+    "CODING_AGENT_PM_LLM",
+    "CODING_AGENT_PROGRAMMER_LLM"
+  ],
+  "source_root": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\coding_agent_run_supervisor_workspace\\run_gate_04_cancel_after_proposal\\source",
+  "workspace_root": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\coding_agent_run_supervisor_workspace\\run_gate_04_cancel_after_proposal",
+  "source_identity": {
+    "provider": "github",
+    "owner": "kazusa-fixtures",
+    "repo": "run_gate_04_cancel_after_proposal",
+    "current_commit": "a05ea8c593f91165ea361aedb59e4225b1e89dfd",
+    "dirty_state": "clean"
+  },
+  "source_hashes_before": {
+    "receipt.py": "4b4df2038ca7e6b0e656e624fbfe29515cced75d58913bac00a15f98b3821890",
+    "tests/test_receipt.py": "ca829b31f14f93002dc29e719525d19c4a3ef516c4af7ce2e5d97c0a80ce4e6f"
+  },
+  "source_hashes_after": {
+    "receipt.py": "4b4df2038ca7e6b0e656e624fbfe29515cced75d58913bac00a15f98b3821890",
+    "tests/test_receipt.py": "ca829b31f14f93002dc29e719525d19c4a3ef516c4af7ce2e5d97c0a80ce4e6f"
+  },
+  "source_tree_unchanged": true,
+  "initial_patch_artifact_count": 0,
+  "start_response": {
+    "status": "awaiting_approval",
+    "run_id": "8e67d346bb5d474f974f3884f0cb4130",
+    "goal": "Modify the receipt formatter so format_receipt accepts an optional currency keyword argument and defaults to USD. Keep the existing two-decimal formatting behavior.",
+    "objective_type": "propose_patch",
+    "answer_text": "I have updated `format_receipt` in `receipt.py` to accept an optional `currency` argument with a default value of 'USD'. I also added new test cases in `tests/test_receipt.py` to verify that both the default currency and custom currencies (like EUR and GBP) are formatted correctly while maintaining two-decimal precision.\n\nLimitations: No documentation entry points were found in the provided evidence",
+    "repository": {
+      "provider": "github",
+      "owner": "kazusa-fixtures",
+      "repo": "run_gate_04_cancel_after_proposal",
+      "source_url": "https://github.com/kazusa-fixtures/run_gate_04_cancel_after_proposal",
+      "requested_ref": null,
+      "resolved_ref": "main",
+      "current_commit": "a05ea8c593f91165ea361aedb59e4225b1e89dfd",
+      "default_branch": "main",
+      "storage_kind": "existing_local_checkout",
+      "managed_checkout": false,
+      "dirty_state": "clean"
+    },
+    "source_scope": {
+      "kind": "repository",
+      "repo_relative_path": null,
+      "source_url": "local://github/kazusa-fixtures/run_gate_04_cancel_after_proposal",
+      "requested_ref": "main",
+      "interpretation": "explicit local repository checkout"
+    },
+    "evidence": [
+      {
+        "path": "receipt.py",
+        "line_start": 1,
+        "line_end": 2,
+        "symbol_or_topic": "source evidence",
+        "excerpt": "[source excerpt omitted from patch proposal response]",
+        "reason": "Selected by the read-only evidence survey."
+      },
+      {
+        "path": "tests/test_receipt.py",
+        "line_start": 1,
+        "line_end": 5,
+        "symbol_or_topic": "source evidence",
+        "excerpt": "[source excerpt omitted from patch proposal response]",
+        "reason": "Selected by the read-only evidence survey."
+      },
+      {
+        "path": "tests/test_receipt.py",
+        "line_start": 1,
+        "line_end": 5,
+        "symbol_or_topic": "source evidence",
+        "excerpt": "[source excerpt omitted from patch proposal response]",
+        "reason": "Selected by the read-only evidence survey."
+      }
+    ],
+    "patch_artifacts": [
+      {
+        "artifact_id": "compiled-1",
+        "base": "repository",
+        "diff_text": "diff --git a/receipt.py b/receipt.py\n--- a/receipt.py\n+++ b/receipt.py\n@@ -1,2 +1,2 @@\n-def format_receipt(total):\n-    return f'USD {total:.2f}'\n+def format_receipt(total, currency='USD'):\n+    return f'{currency} {total:.2f}'\n",
+        "files": [
+          "receipt.py"
+        ],
+        "summary": "Compiled from structured patch operations."
+      },
+      {
+        "artifact_id": "compiled-2",
+        "base": "repository",
+        "diff_text": "diff --git a/tests/test_receipt.py b/tests/test_receipt.py\n--- a/tests/test_receipt.py\n+++ b/tests/test_receipt.py\n@@ -3,3 +3,8 @@\n \n def test_format_receipt_default_currency():\n     assert format_receipt(12) == 'USD 12.00'\n+\n+\n+def test_format_receipt_custom_currency():\n+    assert format_receipt(12, currency='EUR') == 'EUR 12.00'\n+    assert format_receipt(5.5, currency='GBP') == 'GBP 5.50'\n",
+        "files": [
+          "tests/test_receipt.py"
+        ],
+        "summary": "Compiled from structured patch operations."
+      }
+    ],
+    "changed_files": [
+      {
+        "path": "receipt.py",
+        "change_type": "modify",
+        "summary": "Update format_receipt to accept an optional currency keyword argument defaulting to 'USD'."
+      },
+      {
+        "path": "tests/test_receipt.py",
+        "change_type": "modify",
+        "summary": "Add test cases to verify custom currency formatting in format_receipt."
+      }
+    ],
+    "apply_attempts": [],
+    "execution_attempts": [],
+    "repair_attempts": [],
+    "attempts": [],
+    "blockers": [],
+    "events": [
+      {
+        "event_id": "f8387288655b4788b0e165f87f16f131",
+        "event_type": "run_created",
+        "public_payload": {
+          "objective_type": "propose_patch"
+        },
+        "run_id": "8e67d346bb5d474f974f3884f0cb4130",
+        "sequence": 1,
+        "status": "created",
+        "summary": "Coding run was created."
+      },
+      {
+        "event_id": "5b4f8c1a43974c5bada73ae64988e3fe",
+        "event_type": "source_resolved",
+        "public_payload": {
+          "repository": {
+            "current_commit": "a05ea8c593f91165ea361aedb59e4225b1e89dfd",
+            "default_branch": "main",
+            "dirty_state": "clean",
+            "managed_checkout": false,
+            "owner": "kazusa-fixtures",
+            "provider": "github",
+            "repo": "run_gate_04_cancel_after_proposal",
+            "requested_ref": null,
+            "resolved_ref": "main",
+            "source_url": "https://github.com/kazusa-fixtures/run_gate_04_cancel_after_proposal",
+            "storage_kind": "existing_local_checkout"
+          }
+        },
+        "run_id": "8e67d346bb5d474f974f3884f0cb4130",
+        "sequence": 2,
+        "status": "awaiting_approval",
+        "summary": "Source was resolved for the proposal run."
+      },
+      {
+        "event_id": "a00de4bc46924213971ba2c434eedddb",
+        "event_type": "evidence_collected",
+        "public_payload": {
+          "evidence_count": 3
+        },
+        "run_id": "8e67d346bb5d474f974f3884f0cb4130",
+        "sequence": 3,
+        "status": "awaiting_approval",
+        "summary": "Proposal evidence was collected."
+      },
+      {
+        "event_id": "0fb63c61739349a2bb28da5a7cf0b539",
+        "event_type": "proposal_ready",
+        "public_payload": {
+          "changed_files": [
+            {
+              "change_type": "modify",
+              "path": "receipt.py",
+              "summary": "Update format_receipt to accept an optional currency keyword argument defaulting to 'USD'."
+            },
+            {
+              "change_type": "modify",
+              "path": "tests/test_receipt.py",
+              "summary": "Add test cases to verify custom currency formatting in format_receipt."
+            }
+          ]
+        },
+        "run_id": "8e67d346bb5d474f974f3884f0cb4130",
+        "sequence": 4,
+        "status": "awaiting_approval",
+        "summary": "Patch proposal is ready for approval."
+      },
+      {
+        "event_id": "0381943a69214dfb87aec20fabdfda89",
+        "event_type": "awaiting_approval",
+        "public_payload": {
+          "patch_artifact_count": 2
+        },
+        "run_id": "8e67d346bb5d474f974f3884f0cb4130",
+        "sequence": 5,
+        "status": "awaiting_approval",
+        "summary": "Coding run is waiting for structured approval."
+      }
+    ],
+    "limitations": [
+      "No documentation entry points were found in the provided evidence."
+    ],
+    "trace_summary": [
+      "Resolved explicit local checkout without mutation.",
+      "reading_pm:repository_map files=2",
+      "reading_pm:work_plan intent=symbol_behavior status=need_programmers assignments=3",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=2",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=2",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=1",
+      "reading_pm:work_plan intent=api_or_interface_contract status=sufficient assignments=0",
+      "reading_pm:sufficiency=sufficient",
+      "reading_merge:evidence=3",
+      "modifying:file_plan_ready",
+      "modifying_pm:decision=create_programmer_task",
+      "modifying_pm:programmer_task=update_format_receipt_currency",
+      "modifying_pm:sufficiency=programmer_artifacts_ready",
+      "modifying:artifacts=2",
+      "patch_validation:succeeded"
+    ]
+  },
+  "response": {
+    "status": "cancelled",
+    "run_id": "8e67d346bb5d474f974f3884f0cb4130",
+    "goal": "Modify the receipt formatter so format_receipt accepts an optional currency keyword argument and defaults to USD. Keep the existing two-decimal formatting behavior.",
+    "objective_type": "propose_patch",
+    "answer_text": "I have updated `format_receipt` in `receipt.py` to accept an optional `currency` argument with a default value of 'USD'. I also added new test cases in `tests/test_receipt.py` to verify that both the default currency and custom currencies (like EUR and GBP) are formatted correctly while maintaining two-decimal precision.\n\nLimitations: No documentation entry points were found in the provided evidence",
+    "repository": {
+      "current_commit": "a05ea8c593f91165ea361aedb59e4225b1e89dfd",
+      "default_branch": "main",
+      "dirty_state": "clean",
+      "managed_checkout": false,
+      "owner": "kazusa-fixtures",
+      "provider": "github",
+      "repo": "run_gate_04_cancel_after_proposal",
+      "requested_ref": null,
+      "resolved_ref": "main",
+      "source_url": "https://github.com/kazusa-fixtures/run_gate_04_cancel_after_proposal",
+      "storage_kind": "existing_local_checkout"
+    },
+    "source_scope": {
+      "interpretation": "explicit local repository checkout",
+      "kind": "repository",
+      "repo_relative_path": null,
+      "requested_ref": "main",
+      "source_url": "local://github/kazusa-fixtures/run_gate_04_cancel_after_proposal"
+    },
+    "evidence": [
+      {
+        "excerpt": "[source excerpt omitted from patch proposal response]",
+        "line_end": 2,
+        "line_start": 1,
+        "path": "receipt.py",
+        "reason": "Selected by the read-only evidence survey.",
+        "symbol_or_topic": "source evidence"
+      },
+      {
+        "excerpt": "[source excerpt omitted from patch proposal response]",
+        "line_end": 5,
+        "line_start": 1,
+        "path": "tests/test_receipt.py",
+        "reason": "Selected by the read-only evidence survey.",
+        "symbol_or_topic": "source evidence"
+      },
+      {
+        "excerpt": "[source excerpt omitted from patch proposal response]",
+        "line_end": 5,
+        "line_start": 1,
+        "path": "tests/test_receipt.py",
+        "reason": "Selected by the read-only evidence survey.",
+        "symbol_or_topic": "source evidence"
+      }
+    ],
+    "patch_artifacts": [
+      {
+        "artifact_id": "compiled-1",
+        "base": "repository",
+        "diff_text": "diff --git a/receipt.py b/receipt.py\n--- a/receipt.py\n+++ b/receipt.py\n@@ -1,2 +1,2 @@\n-def format_receipt(total):\n-    return f'USD {total:.2f}'\n+def format_receipt(total, currency='USD'):\n+    return f'{currency} {total:.2f}'\n",
+        "files": [
+          "receipt.py"
+        ],
+        "summary": "Compiled from structured patch operations."
+      },
+      {
+        "artifact_id": "compiled-2",
+        "base": "repository",
+        "diff_text": "diff --git a/tests/test_receipt.py b/tests/test_receipt.py\n--- a/tests/test_receipt.py\n+++ b/tests/test_receipt.py\n@@ -3,3 +3,8 @@\n \n def test_format_receipt_default_currency():\n     assert format_receipt(12) == 'USD 12.00'\n+\n+\n+def test_format_receipt_custom_currency():\n+    assert format_receipt(12, currency='EUR') == 'EUR 12.00'\n+    assert format_receipt(5.5, currency='GBP') == 'GBP 5.50'\n",
+        "files": [
+          "tests/test_receipt.py"
+        ],
+        "summary": "Compiled from structured patch operations."
+      }
+    ],
+    "changed_files": [
+      {
+        "change_type": "modify",
+        "path": "receipt.py",
+        "summary": "Update format_receipt to accept an optional currency keyword argument defaulting to 'USD'."
+      },
+      {
+        "change_type": "modify",
+        "path": "tests/test_receipt.py",
+        "summary": "Add test cases to verify custom currency formatting in format_receipt."
+      }
+    ],
+    "apply_attempts": [],
+    "execution_attempts": [],
+    "repair_attempts": [],
+    "attempts": [],
+    "blockers": [],
+    "events": [
+      {
+        "event_id": "f8387288655b4788b0e165f87f16f131",
+        "event_type": "run_created",
+        "public_payload": {
+          "objective_type": "propose_patch"
+        },
+        "run_id": "8e67d346bb5d474f974f3884f0cb4130",
+        "sequence": 1,
+        "status": "created",
+        "summary": "Coding run was created."
+      },
+      {
+        "event_id": "5b4f8c1a43974c5bada73ae64988e3fe",
+        "event_type": "source_resolved",
+        "public_payload": {
+          "repository": {
+            "current_commit": "a05ea8c593f91165ea361aedb59e4225b1e89dfd",
+            "default_branch": "main",
+            "dirty_state": "clean",
+            "managed_checkout": false,
+            "owner": "kazusa-fixtures",
+            "provider": "github",
+            "repo": "run_gate_04_cancel_after_proposal",
+            "requested_ref": null,
+            "resolved_ref": "main",
+            "source_url": "https://github.com/kazusa-fixtures/run_gate_04_cancel_after_proposal",
+            "storage_kind": "existing_local_checkout"
+          }
+        },
+        "run_id": "8e67d346bb5d474f974f3884f0cb4130",
+        "sequence": 2,
+        "status": "awaiting_approval",
+        "summary": "Source was resolved for the proposal run."
+      },
+      {
+        "event_id": "a00de4bc46924213971ba2c434eedddb",
+        "event_type": "evidence_collected",
+        "public_payload": {
+          "evidence_count": 3
+        },
+        "run_id": "8e67d346bb5d474f974f3884f0cb4130",
+        "sequence": 3,
+        "status": "awaiting_approval",
+        "summary": "Proposal evidence was collected."
+      },
+      {
+        "event_id": "0fb63c61739349a2bb28da5a7cf0b539",
+        "event_type": "proposal_ready",
+        "public_payload": {
+          "changed_files": [
+            {
+              "change_type": "modify",
+              "path": "receipt.py",
+              "summary": "Update format_receipt to accept an optional currency keyword argument defaulting to 'USD'."
+            },
+            {
+              "change_type": "modify",
+              "path": "tests/test_receipt.py",
+              "summary": "Add test cases to verify custom currency formatting in format_receipt."
+            }
+          ]
+        },
+        "run_id": "8e67d346bb5d474f974f3884f0cb4130",
+        "sequence": 4,
+        "status": "awaiting_approval",
+        "summary": "Patch proposal is ready for approval."
+      },
+      {
+        "event_id": "0381943a69214dfb87aec20fabdfda89",
+        "event_type": "awaiting_approval",
+        "public_payload": {
+          "patch_artifact_count": 2
+        },
+        "run_id": "8e67d346bb5d474f974f3884f0cb4130",
+        "sequence": 5,
+        "status": "awaiting_approval",
+        "summary": "Coding run is waiting for structured approval."
+      },
+      {
+        "event_id": "3a1bd7fa5ccc45299fc0ad5d8eea2a7e",
+        "event_type": "cancelled",
+        "public_payload": {
+          "reason": "Operator rejected the proposed change during review."
+        },
+        "run_id": "8e67d346bb5d474f974f3884f0cb4130",
+        "sequence": 6,
+        "status": "cancelled",
+        "summary": "Coding run was cancelled."
+      }
+    ],
+    "limitations": [
+      "No documentation entry points were found in the provided evidence."
+    ],
+    "trace_summary": [
+      "Resolved explicit local checkout without mutation.",
+      "reading_pm:repository_map files=2",
+      "reading_pm:work_plan intent=symbol_behavior status=need_programmers assignments=3",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=2",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=2",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=1",
+      "reading_pm:work_plan intent=api_or_interface_contract status=sufficient assignments=0",
+      "reading_pm:sufficiency=sufficient",
+      "reading_merge:evidence=3",
+      "modifying:file_plan_ready",
+      "modifying_pm:decision=create_programmer_task",
+      "modifying_pm:programmer_task=update_format_receipt_currency",
+      "modifying_pm:sufficiency=programmer_artifacts_ready",
+      "modifying:artifacts=2",
+      "patch_validation:succeeded"
+    ]
+  },
+  "reloaded_response": {
+    "status": "cancelled",
+    "run_id": "8e67d346bb5d474f974f3884f0cb4130",
+    "goal": "Modify the receipt formatter so format_receipt accepts an optional currency keyword argument and defaults to USD. Keep the existing two-decimal formatting behavior.",
+    "objective_type": "propose_patch",
+    "answer_text": "I have updated `format_receipt` in `receipt.py` to accept an optional `currency` argument with a default value of 'USD'. I also added new test cases in `tests/test_receipt.py` to verify that both the default currency and custom currencies (like EUR and GBP) are formatted correctly while maintaining two-decimal precision.\n\nLimitations: No documentation entry points were found in the provided evidence",
+    "repository": {
+      "current_commit": "a05ea8c593f91165ea361aedb59e4225b1e89dfd",
+      "default_branch": "main",
+      "dirty_state": "clean",
+      "managed_checkout": false,
+      "owner": "kazusa-fixtures",
+      "provider": "github",
+      "repo": "run_gate_04_cancel_after_proposal",
+      "requested_ref": null,
+      "resolved_ref": "main",
+      "source_url": "https://github.com/kazusa-fixtures/run_gate_04_cancel_after_proposal",
+      "storage_kind": "existing_local_checkout"
+    },
+    "source_scope": {
+      "interpretation": "explicit local repository checkout",
+      "kind": "repository",
+      "repo_relative_path": null,
+      "requested_ref": "main",
+      "source_url": "local://github/kazusa-fixtures/run_gate_04_cancel_after_proposal"
+    },
+    "evidence": [
+      {
+        "excerpt": "[source excerpt omitted from patch proposal response]",
+        "line_end": 2,
+        "line_start": 1,
+        "path": "receipt.py",
+        "reason": "Selected by the read-only evidence survey.",
+        "symbol_or_topic": "source evidence"
+      },
+      {
+        "excerpt": "[source excerpt omitted from patch proposal response]",
+        "line_end": 5,
+        "line_start": 1,
+        "path": "tests/test_receipt.py",
+        "reason": "Selected by the read-only evidence survey.",
+        "symbol_or_topic": "source evidence"
+      },
+      {
+        "excerpt": "[source excerpt omitted from patch proposal response]",
+        "line_end": 5,
+        "line_start": 1,
+        "path": "tests/test_receipt.py",
+        "reason": "Selected by the read-only evidence survey.",
+        "symbol_or_topic": "source evidence"
+      }
+    ],
+    "patch_artifacts": [
+      {
+        "artifact_id": "compiled-1",
+        "base": "repository",
+        "diff_text": "diff --git a/receipt.py b/receipt.py\n--- a/receipt.py\n+++ b/receipt.py\n@@ -1,2 +1,2 @@\n-def format_receipt(total):\n-    return f'USD {total:.2f}'\n+def format_receipt(total, currency='USD'):\n+    return f'{currency} {total:.2f}'\n",
+        "files": [
+          "receipt.py"
+        ],
+        "summary": "Compiled from structured patch operations."
+      },
+      {
+        "artifact_id": "compiled-2",
+        "base": "repository",
+        "diff_text": "diff --git a/tests/test_receipt.py b/tests/test_receipt.py\n--- a/tests/test_receipt.py\n+++ b/tests/test_receipt.py\n@@ -3,3 +3,8 @@\n \n def test_format_receipt_default_currency():\n     assert format_receipt(12) == 'USD 12.00'\n+\n+\n+def test_format_receipt_custom_currency():\n+    assert format_receipt(12, currency='EUR') == 'EUR 12.00'\n+    assert format_receipt(5.5, currency='GBP') == 'GBP 5.50'\n",
+        "files": [
+          "tests/test_receipt.py"
+        ],
+        "summary": "Compiled from structured patch operations."
+      }
+    ],
+    "changed_files": [
+      {
+        "change_type": "modify",
+        "path": "receipt.py",
+        "summary": "Update format_receipt to accept an optional currency keyword argument defaulting to 'USD'."
+      },
+      {
+        "change_type": "modify",
+        "path": "tests/test_receipt.py",
+        "summary": "Add test cases to verify custom currency formatting in format_receipt."
+      }
+    ],
+    "apply_attempts": [],
+    "execution_attempts": [],
+    "repair_attempts": [],
+    "attempts": [],
+    "blockers": [],
+    "events": [
+      {
+        "event_id": "f8387288655b4788b0e165f87f16f131",
+        "event_type": "run_created",
+        "public_payload": {
+          "objective_type": "propose_patch"
+        },
+        "run_id": "8e67d346bb5d474f974f3884f0cb4130",
+        "sequence": 1,
+        "status": "created",
+        "summary": "Coding run was created."
+      },
+      {
+        "event_id": "5b4f8c1a43974c5bada73ae64988e3fe",
+        "event_type": "source_resolved",
+        "public_payload": {
+          "repository": {
+            "current_commit": "a05ea8c593f91165ea361aedb59e4225b1e89dfd",
+            "default_branch": "main",
+            "dirty_state": "clean",
+            "managed_checkout": false,
+            "owner": "kazusa-fixtures",
+            "provider": "github",
+            "repo": "run_gate_04_cancel_after_proposal",
+            "requested_ref": null,
+            "resolved_ref": "main",
+            "source_url": "https://github.com/kazusa-fixtures/run_gate_04_cancel_after_proposal",
+            "storage_kind": "existing_local_checkout"
+          }
+        },
+        "run_id": "8e67d346bb5d474f974f3884f0cb4130",
+        "sequence": 2,
+        "status": "awaiting_approval",
+        "summary": "Source was resolved for the proposal run."
+      },
+      {
+        "event_id": "a00de4bc46924213971ba2c434eedddb",
+        "event_type": "evidence_collected",
+        "public_payload": {
+          "evidence_count": 3
+        },
+        "run_id": "8e67d346bb5d474f974f3884f0cb4130",
+        "sequence": 3,
+        "status": "awaiting_approval",
+        "summary": "Proposal evidence was collected."
+      },
+      {
+        "event_id": "0fb63c61739349a2bb28da5a7cf0b539",
+        "event_type": "proposal_ready",
+        "public_payload": {
+          "changed_files": [
+            {
+              "change_type": "modify",
+              "path": "receipt.py",
+              "summary": "Update format_receipt to accept an optional currency keyword argument defaulting to 'USD'."
+            },
+            {
+              "change_type": "modify",
+              "path": "tests/test_receipt.py",
+              "summary": "Add test cases to verify custom currency formatting in format_receipt."
+            }
+          ]
+        },
+        "run_id": "8e67d346bb5d474f974f3884f0cb4130",
+        "sequence": 4,
+        "status": "awaiting_approval",
+        "summary": "Patch proposal is ready for approval."
+      },
+      {
+        "event_id": "0381943a69214dfb87aec20fabdfda89",
+        "event_type": "awaiting_approval",
+        "public_payload": {
+          "patch_artifact_count": 2
+        },
+        "run_id": "8e67d346bb5d474f974f3884f0cb4130",
+        "sequence": 5,
+        "status": "awaiting_approval",
+        "summary": "Coding run is waiting for structured approval."
+      },
+      {
+        "event_id": "3a1bd7fa5ccc45299fc0ad5d8eea2a7e",
+        "event_type": "cancelled",
+        "public_payload": {
+          "reason": "Operator rejected the proposed change during review."
+        },
+        "run_id": "8e67d346bb5d474f974f3884f0cb4130",
+        "sequence": 6,
+        "status": "cancelled",
+        "summary": "Coding run was cancelled."
+      }
+    ],
+    "limitations": [
+      "No documentation entry points were found in the provided evidence."
+    ],
+    "trace_summary": [
+      "Resolved explicit local checkout without mutation.",
+      "reading_pm:repository_map files=2",
+      "reading_pm:work_plan intent=symbol_behavior status=need_programmers assignments=3",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=2",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=2",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=1",
+      "reading_pm:work_plan intent=api_or_interface_contract status=sufficient assignments=0",
+      "reading_pm:sufficiency=sufficient",
+      "reading_merge:evidence=3",
+      "modifying:file_plan_ready",
+      "modifying_pm:decision=create_programmer_task",
+      "modifying_pm:programmer_task=update_format_receipt_currency",
+      "modifying_pm:sufficiency=programmer_artifacts_ready",
+      "modifying:artifacts=2",
+      "patch_validation:succeeded"
+    ]
+  }
+}

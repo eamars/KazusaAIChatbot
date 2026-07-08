@@ -157,6 +157,145 @@ def test_modifying_pm_prompt_defaults_to_companion_updates() -> None:
     assert "file_plan.test_or_doc_path_candidates" in prompt
     assert "source-change task should include" in prompt
     assert "do not omit companion tests or docs" in prompt
+    assert "put those files in read_only_paths" in prompt
+
+
+def test_repair_initial_reading_question_includes_structured_feedback() -> None:
+    from kazusa_ai_chatbot.coding_agent import supervisor
+
+    question = supervisor._initial_reading_question_for_write_request({
+        "question": "Add cache and CLI flags.",
+        "repair_feedback": {
+            "feedback_source": "execution_verification",
+            "attempt_index": 1,
+            "failed_paths": ["tests/test_cli.py"],
+            "failure_summaries": [
+                "unrecognized arguments: --cache-dir --refresh-cache",
+            ],
+            "required_source_owner_paths": ["releasefeed/fetch.py"],
+            "protected_verification_paths": ["tests/test_cli.py"],
+            "previous_patch_artifacts": [{
+                "artifact_id": "patch-fetch",
+                "files": ["releasefeed/fetch.py"],
+            }],
+        },
+    })
+
+    assert "Repair feedback" in question
+    assert "releasefeed/fetch.py" in question
+    assert "tests/test_cli.py" in question
+    assert "--cache-dir --refresh-cache" in question
+    assert "protected verification paths are read-only" in question
+
+
+def test_repair_fallback_prioritizes_owner_caller_and_verification_context(
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent import supervisor
+
+    package_dir = tmp_path / "releasefeed"
+    package_dir.mkdir()
+    (package_dir / "fetch.py").write_text(
+        "def fetch_page(url):\n    return url\n",
+        encoding="utf-8",
+    )
+    (package_dir / "cli.py").write_text(
+        "def main(argv=None):\n    print(fetch_page(args.url))\n",
+        encoding="utf-8",
+    )
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_cli.py").write_text(
+        "def test_cli_forwards_cache_flags():\n    pass\n",
+        encoding="utf-8",
+    )
+    (tests_dir / "test_fetch.py").write_text(
+        "def test_fetch_uses_cache():\n    pass\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "README.md").write_text("# Release Feed\n", encoding="utf-8")
+
+    result = supervisor._fallback_reading_result_for_write(
+        request={
+            "question": "Repair cache support.",
+            "repair_feedback": {
+                "feedback_source": "execution_verification",
+                "failed_paths": ["tests/test_cli.py", "tests/test_fetch.py"],
+                "failure_summaries": [
+                    "unrecognized arguments: --cache-dir --refresh-cache",
+                ],
+                "required_source_owner_paths": ["releasefeed/fetch.py"],
+                "protected_verification_paths": [
+                    "tests/test_cli.py",
+                    "tests/test_fetch.py",
+                ],
+                "previous_patch_artifacts": [{
+                    "artifact_id": "patch-fetch",
+                    "files": ["releasefeed/fetch.py"],
+                }],
+            },
+        },
+        repository={
+            "local_root": str(tmp_path),
+        },
+        source_scope={"kind": "repository"},
+        prior_reading_result={
+            "status": "succeeded",
+            "answer_text": "Only test evidence was found.",
+            "evidence": [{"path": "tests/test_cli.py"}],
+            "limitations": [],
+            "trace_summary": [],
+        },
+    )
+    paths = [row["path"] for row in result["evidence"][:4]]
+
+    assert paths[:3] == [
+        "releasefeed/fetch.py",
+        "releasefeed/cli.py",
+        "tests/test_cli.py",
+    ]
+    assert any("repair feedback" in item for item in result["limitations"])
+
+
+def test_modifying_handoff_allows_read_only_companion_tests() -> None:
+    from kazusa_ai_chatbot.coding_agent.code_modifying import supervisor
+
+    errors = supervisor._handoff_validation_errors(
+        task={
+            "task_id": "task-runtime",
+            "target_paths": ["app.py"],
+            "change_goal": "Update VALUE.",
+            "required_behavior": ["VALUE is 2."],
+            "forbidden_changes": ["Do not modify provided verification tests."],
+            "consumed_interfaces": [],
+            "expected_operations": ["replace"],
+            "acceptance_checks": [],
+            "local_risks": [],
+        },
+        decision={
+            "status": "create_programmer_task",
+            "reason": "Tests are verification evidence only.",
+            "owned_paths": ["app.py"],
+            "read_only_paths": ["tests/test_app.py"],
+            "required_evidence_ids": ["evidence-1", "evidence-2"],
+            "programmer_task": None,
+            "repair_instruction": None,
+            "blocker": None,
+        },
+        file_plan={
+            "file_contexts": [
+                {"path": "app.py"},
+                {"path": "tests/test_app.py"},
+            ],
+            "owned_path_candidates": ["app.py"],
+            "caller_path_candidates": [],
+            "test_or_doc_path_candidates": ["tests/test_app.py"],
+        },
+        programmer_task_count=0,
+        repair_feedback=None,
+    )
+
+    assert errors == []
 
 
 @pytest.mark.asyncio
@@ -195,7 +334,7 @@ async def test_modifying_supervisor_repairs_test_only_handoff(
             "status": "create_programmer_task",
             "reason": "Runtime owner must change with companion tests.",
             "owned_paths": ["app.py"],
-            "read_only_paths": ["tests/test_app.py"],
+            "read_only_paths": [],
             "required_evidence_ids": ["evidence-1", "evidence-2"],
             "programmer_task": {
                 "task_id": "task-runtime",

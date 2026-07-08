@@ -334,6 +334,18 @@ and each attempt uses a fresh managed apply copy. It remains outside
 background-worker, L2d, dialog, adapter delivery, package installation,
 network access, and original-source mutation paths.
 
+The coding-agent direct API also exposes the durable run APIs:
+`start_coding_run(...)`, `continue_coding_run(...)`, and
+`get_coding_run(...)`. Trusted callers provide an explicit `objective_type`
+for `read_only`, `propose_patch`, or `verify_repair`; continuations provide an
+explicit `action` for `approve_and_verify` or `cancel`. Runs persist a JSON
+ledger and JSONL event stream under
+`<workspace_root>\coding_runs\<run_id>\`, can be reloaded by run id, and keep
+proposal approval, managed apply, execution, repair, cancellation, attempt
+history, and public sanitization inspectable without relying on background
+worker delivery, MongoDB run persistence, Phase 10 repository-scale reading,
+or UI work.
+
 Reflection phase scheduling spreads monitor-eligible channels across the
 `REFLECTION_WORKER_INTERVAL_SECONDS` period instead of running all group
 review work in one burst. `REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD` defaults to

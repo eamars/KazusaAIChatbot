@@ -9,7 +9,9 @@
 - Status: reference direction.
 - Execution rule: reference only. Promote this document into
   `development_plans/active/short_term/` before implementation.
-- Mandatory skills for future execution: `development-plan`,
+- Promotion: executable implementation is now governed by
+  `development_plans/archive/completed/short_term/coding_agent_phase9_run_supervisor_plan.md`.
+- Mandatory skills for execution: `development-plan`,
   `local-llm-architecture`, `py-style`, `test-style-and-execution`, and
   `debug-llm`.
 - Direction: move from independent direct APIs toward a deterministic run
@@ -233,9 +235,11 @@ conversation, tool calls, file edits, tests, and iterative repair. Kazusa Phase
 - Prefer repeated small PM/programmer steps over one large prompt.
 - Cap every loop and record cap exhaustion as a first-class blocker.
 
-## Future Executable Phase 9 Scope
+## Executable Phase 9 Scope Alignment
 
-The eventual short-term Phase 9 plan should include:
+The active executable Phase 9 plan
+`development_plans/archive/completed/short_term/coding_agent_phase9_run_supervisor_plan.md`
+includes:
 
 - `coding_run` package models and ledger persistence;
 - `start_coding_run(...)`, `continue_coding_run(...)`, and
@@ -243,15 +247,17 @@ The eventual short-term Phase 9 plan should include:
 - deterministic state transition tests;
 - lifecycle event tests;
 - public projection sanitization tests;
-- continuation tests for approval, execution specs, repair attempts, scope
-  narrowing, cancellation, and blockers;
+- continuation tests for approval, execution specs, repair attempts,
+  cancellation, and blockers;
+- deterministic public E2E workflow tests proving supported Phase 9 workflows
+  do not depend on Phase 10 or later plans;
 - docs for direct callers and future control-console display;
 - selected live LLM gates proving run-level orchestration remains grounded in
   specialist traces.
 
-## Future Phase 9 Exclusions
+## Phase 9 Exclusions
 
-Keep these outside the first executable Phase 9 plan:
+Keep these outside Phase 9:
 
 - adapter auto-delivery;
 - uncontrolled background run continuation;
@@ -264,14 +270,16 @@ Keep these outside the first executable Phase 9 plan:
 
 ## Acceptance Direction
 
-A future executable Phase 9 plan is ready for sign-off when:
+The executable Phase 9 plan is aligned with this reference architecture when:
 
 - run ledgers survive process boundaries;
 - every state transition is validated deterministically;
 - public projections are sanitized;
 - existing direct APIs still work independently;
+- supported read-only, proposal, approval, apply, execution, repair,
+  cancellation, reload, sanitization, and source-immutability workflows are
+  E2E-testable without Phase 10;
 - a run can progress from source-backed request to proposal, approval, apply,
   execution, repair, and completion;
 - blocked states preserve enough information for a user or caller to continue;
 - independent code review accepts the lifecycle boundary.
-

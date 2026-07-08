@@ -496,6 +496,7 @@ async def test_execution_repair_handoff_keeps_verification_tests_read_only(
 
     errors = supervisor._handoff_validation_errors(
         task=invalid_task,
+        decision={"read_only_paths": []},
         file_plan=file_plan,
         programmer_task_count=0,
         repair_feedback=repair_feedback,
@@ -524,6 +525,7 @@ async def test_execution_repair_handoff_keeps_verification_tests_read_only(
     }
     valid_errors = supervisor._handoff_validation_errors(
         task=valid_task,
+        decision={"read_only_paths": []},
         file_plan=file_plan,
         programmer_task_count=0,
         repair_feedback=repair_feedback,
@@ -600,6 +602,7 @@ async def test_execution_repair_handoff_allows_caller_source_collaborators(
 
     errors = supervisor._handoff_validation_errors(
         task=source_task,
+        decision={"read_only_paths": []},
         file_plan=file_plan,
         programmer_task_count=0,
         repair_feedback=repair_feedback,
@@ -683,6 +686,7 @@ async def test_execution_repair_feedback_lists_allowed_source_targets(
 
     errors = supervisor._handoff_validation_errors(
         task=invalid_task,
+        decision={"read_only_paths": []},
         file_plan=file_plan,
         programmer_task_count=0,
         repair_feedback=repair_feedback,
@@ -710,6 +714,7 @@ async def test_execution_repair_feedback_lists_allowed_source_targets(
     }
     valid_errors = supervisor._handoff_validation_errors(
         task=valid_task,
+        decision={"read_only_paths": []},
         file_plan=file_plan,
         programmer_task_count=0,
         repair_feedback=repair_feedback,

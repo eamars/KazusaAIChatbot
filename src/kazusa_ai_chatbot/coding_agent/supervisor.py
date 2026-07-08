@@ -4,6 +4,7 @@ import inspect
 import json
 import re
 from pathlib import Path
+from pathlib import PurePosixPath
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -72,6 +73,7 @@ WRITE_EVIDENCE_EXCERPT_OMITTED = (
 )
 MAX_WRITE_FALLBACK_EVIDENCE_FILES = 10
 MAX_WRITE_FALLBACK_EXCERPT_CHARS = 1200
+REPAIR_CONTEXT_CALLER_STEMS = {"api", "app", "cli", "main", "routes", "views"}
 BACKGROUND_CODING_ROUTER_PROMPT = '''\
 You are the top-level supervisor inside a coding agent.
 
@@ -807,6 +809,14 @@ async def _propose_existing_repo_change(
         if _reading_has_usable_evidence(fallback_reading_result):
             reading_result = fallback_reading_result
             trace_summary.extend(fallback_reading_result["trace_summary"])
+    else:
+        reading_result, repair_trace = _repair_supplemented_reading_result(
+            request=request,
+            repository=repository,
+            source_scope=source_scope,
+            reading_result=reading_result,
+        )
+        trace_summary.extend(repair_trace)
     if (
         reading_result["status"] != "succeeded"
         and not _reading_has_usable_evidence(reading_result)
@@ -1147,7 +1157,7 @@ def _fallback_reading_result_for_write(
     source_scope: dict[str, object],
     prior_reading_result: dict[str, object],
 ) -> dict[str, object]:
-    """Build bounded source evidence when the reading PM returns none."""
+    """Build bounded source evidence for source-backed patch proposals."""
 
     repo_root = Path(repository["local_root"]).expanduser().resolve(strict=True)
     safe_files = list_scoped_safe_files(
@@ -1156,9 +1166,14 @@ def _fallback_reading_result_for_write(
     )
     ranked_paths = _rank_fallback_write_paths(
         safe_files=safe_files,
-        question=str(request.get("question") or ""),
+        question=_fallback_search_text_for_write_request(request),
+        priority_paths=_repair_context_priority_paths(
+            request=request,
+            safe_files=safe_files,
+        ),
     )
     evidence: list[dict[str, object]] = []
+    repair_feedback = _structured_repair_feedback(request)
     for safe_path in ranked_paths[:MAX_WRITE_FALLBACK_EVIDENCE_FILES]:
         file_path = repo_root / safe_path
         try:
@@ -1174,20 +1189,14 @@ def _fallback_reading_result_for_write(
             "line_end": _fallback_line_count(excerpt),
             "symbol_or_topic": "write evidence fallback",
             "excerpt": excerpt,
-            "reason": (
-                "Deterministic fallback selected this safe source file for "
-                "a source-backed patch proposal."
-            ),
+            "reason": _fallback_evidence_reason(repair_feedback),
         })
     if not evidence:
         result = dict(prior_reading_result)
         result["trace_summary"] = ["reading_fallback:evidence=0"]
         return result
     limitations = list(prior_reading_result.get("limitations") or [])
-    limitations.append(
-        "Initial reading PM returned no evidence; deterministic bounded "
-        "source evidence fallback was used for the patch proposal."
-    )
+    limitations.append(_fallback_limitation(repair_feedback))
     result = {
         "status": "succeeded",
         "answer_text": (
@@ -1201,21 +1210,277 @@ def _fallback_reading_result_for_write(
     return result
 
 
+def _repair_supplemented_reading_result(
+    *,
+    request: CodingAgentWriteRequest,
+    repository: CodeRepositoryRef,
+    source_scope: dict[str, object],
+    reading_result: dict[str, object],
+) -> tuple[dict[str, object], list[str]]:
+    """Add bounded repair context when structured verification feedback exists."""
+
+    if _structured_repair_feedback(request) is None:
+        return reading_result, []
+
+    fallback_result = _fallback_reading_result_for_write(
+        request=request,
+        repository=repository,
+        source_scope=source_scope,
+        prior_reading_result=reading_result,
+    )
+    fallback_evidence = fallback_result.get("evidence")
+    if not isinstance(fallback_evidence, list) or not fallback_evidence:
+        return reading_result, ["reading_repair_supplement:evidence=0"]
+
+    original_evidence = reading_result.get("evidence")
+    if not isinstance(original_evidence, list):
+        original_evidence = []
+    merged_evidence = _merged_evidence_rows(
+        primary=fallback_evidence,
+        secondary=original_evidence,
+    )
+    supplemented_result = dict(reading_result)
+    supplemented_result["evidence"] = merged_evidence
+    supplemented_result["limitations"] = _merged_texts(
+        reading_result.get("limitations"),
+        fallback_result.get("limitations"),
+    )
+    trace = [
+        *list(fallback_result.get("trace_summary") or []),
+        f"reading_repair_supplement:evidence={len(merged_evidence)}",
+    ]
+    return supplemented_result, trace
+
+
+def _merged_evidence_rows(
+    *,
+    primary: list[object],
+    secondary: list[object],
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    seen_paths: set[str] = set()
+    for row in [*primary, *secondary]:
+        if not isinstance(row, dict):
+            continue
+        path = row.get("path")
+        if not isinstance(path, str):
+            continue
+        if path in seen_paths:
+            continue
+        rows.append(dict(row))
+        seen_paths.add(path)
+    return rows
+
+
+def _merged_texts(*values: object) -> list[str]:
+    texts: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if not isinstance(value, list):
+            continue
+        for item in value:
+            text = _safe_request_text(item)
+            if not text or text in seen:
+                continue
+            texts.append(text)
+            seen.add(text)
+    return texts
+
+
+def _fallback_evidence_reason(
+    repair_feedback: dict[str, object] | None,
+) -> str:
+    if repair_feedback is not None:
+        return (
+            "Deterministic fallback selected this safe source file from "
+            "structured repair feedback for a repair patch proposal."
+        )
+    return (
+        "Deterministic fallback selected this safe source file for "
+        "a source-backed patch proposal."
+    )
+
+
+def _fallback_limitation(repair_feedback: dict[str, object] | None) -> str:
+    if repair_feedback is not None:
+        return (
+            "Structured repair feedback triggered deterministic bounded "
+            "source evidence fallback for the repair proposal."
+        )
+    return (
+        "Initial reading PM returned no evidence; deterministic bounded "
+        "source evidence fallback was used for the patch proposal."
+    )
+
+
 def _rank_fallback_write_paths(
     *,
     safe_files: list[str],
     question: str,
+    priority_paths: list[str] | None = None,
 ) -> list[str]:
     terms = _fallback_terms(question)
+    priority_order = {
+        path: index
+        for index, path in enumerate(priority_paths or [])
+    }
     ranked = sorted(
         safe_files,
         key=lambda path: (
+            0 if path in priority_order else 1,
+            priority_order.get(path, len(priority_order)),
             -_fallback_path_score(path, terms),
             _fallback_path_rank(path),
             path.casefold(),
         ),
     )
     return ranked
+
+
+def _fallback_search_text_for_write_request(
+    request: CodingAgentWriteRequest,
+) -> str:
+    parts = [str(request.get("question") or "")]
+    repair_feedback = _structured_repair_feedback(request)
+    if repair_feedback is not None:
+        parts.append(_repair_feedback_reading_block(repair_feedback))
+    return "\n".join(part for part in parts if part)
+
+
+def _repair_context_priority_paths(
+    *,
+    request: CodingAgentWriteRequest,
+    safe_files: list[str],
+) -> list[str]:
+    repair_feedback = _structured_repair_feedback(request)
+    if repair_feedback is None:
+        return []
+
+    safe_file_set = set(safe_files)
+    priority_paths: list[str] = []
+
+    def add_path(path: str) -> None:
+        if path not in safe_file_set or path in priority_paths:
+            return
+        priority_paths.append(path)
+
+    required_paths = _safe_repair_feedback_paths(
+        repair_feedback,
+        "required_source_owner_paths",
+    )
+    previous_paths = _repair_feedback_patch_artifact_paths(
+        repair_feedback.get("previous_patch_artifacts"),
+    )
+    protected_paths = _safe_repair_feedback_paths(
+        repair_feedback,
+        "protected_verification_paths",
+    )
+    failed_paths = _safe_repair_feedback_paths(repair_feedback, "failed_paths")
+
+    for path in required_paths:
+        add_path(path)
+    for path in previous_paths:
+        add_path(path)
+    for path in _caller_collaborator_paths(
+        seed_paths=[*required_paths, *previous_paths],
+        safe_files=safe_files,
+    ):
+        add_path(path)
+    for path in _tested_source_paths(
+        test_paths=[*protected_paths, *failed_paths],
+        safe_files=safe_files,
+    ):
+        add_path(path)
+    for path in protected_paths:
+        add_path(path)
+    for path in failed_paths:
+        add_path(path)
+    return priority_paths
+
+
+def _caller_collaborator_paths(
+    *,
+    seed_paths: list[str],
+    safe_files: list[str],
+) -> list[str]:
+    seed_dirs = {
+        PurePosixPath(path).parent.as_posix()
+        for path in seed_paths
+        if path
+    }
+    collaborators: list[str] = []
+    for safe_path in safe_files:
+        path = PurePosixPath(safe_path)
+        if path.parent.as_posix() not in seed_dirs:
+            continue
+        if path.stem not in REPAIR_CONTEXT_CALLER_STEMS:
+            continue
+        if _fallback_path_rank(safe_path) != 0:
+            continue
+        collaborators.append(safe_path)
+    return collaborators
+
+
+def _tested_source_paths(
+    *,
+    test_paths: list[str],
+    safe_files: list[str],
+) -> list[str]:
+    tested_stems = {
+        _tested_source_stem(path)
+        for path in test_paths
+    }
+    tested_stems.discard("")
+    if not tested_stems:
+        return []
+    paths: list[str] = []
+    for safe_path in safe_files:
+        if _fallback_path_rank(safe_path) != 0:
+            continue
+        if PurePosixPath(safe_path).stem not in tested_stems:
+            continue
+        paths.append(safe_path)
+    return paths
+
+
+def _tested_source_stem(path: str) -> str:
+    stem = PurePosixPath(path).stem
+    if stem.startswith("test_"):
+        return stem[5:]
+    if stem.endswith("_test"):
+        return stem[:-5]
+    return stem
+
+
+def _safe_repair_feedback_paths(
+    repair_feedback: dict[str, object],
+    key: str,
+) -> list[str]:
+    return _safe_request_list(repair_feedback.get(key))
+
+
+def _repair_feedback_patch_artifact_paths(value: object) -> list[str]:
+    paths: list[str] = []
+    if not isinstance(value, list):
+        return paths
+    for artifact in value:
+        if not isinstance(artifact, dict):
+            continue
+        files = artifact.get("files")
+        for path in _safe_request_list(files):
+            if path in paths:
+                continue
+            paths.append(path)
+    return paths
+
+
+def _structured_repair_feedback(
+    request: CodingAgentWriteRequest,
+) -> dict[str, object] | None:
+    repair_feedback = request.get("repair_feedback")
+    if not isinstance(repair_feedback, dict):
+        return None
+    return repair_feedback
 
 
 def _fallback_terms(question: str) -> set[str]:
@@ -1431,6 +1696,7 @@ def _initial_reading_question_for_write_request(
     request: CodingAgentWriteRequest,
 ) -> str:
     user_request = _bounded_request_body(request.get("question"))
+    repair_feedback = _structured_repair_feedback(request)
     reading_question = (
         "Read-only repository evidence survey for a limited patch proposal. "
         "Use the current user request as the requirements source. Identify "
@@ -1448,7 +1714,79 @@ def _initial_reading_question_for_write_request(
         "changes; only report current evidence.\n\n"
         f"User request:\n{user_request}"
     )
+    if repair_feedback is not None:
+        reading_question = (
+            f"{reading_question}\n\n"
+            f"{_repair_feedback_reading_block(repair_feedback)}"
+        )
     return reading_question
+
+
+def _repair_feedback_reading_block(repair_feedback: dict[str, object]) -> str:
+    lines = [
+        "Repair feedback from prior verification:",
+        (
+            "Inspect the required source-owner paths, caller/import sites, "
+            "wrappers, and protected verification paths as read-only evidence."
+        ),
+        (
+            "The protected verification paths are read-only; report what they "
+            "verify and keep edits scoped to runtime source owners or callers."
+        ),
+    ]
+    feedback_source = _safe_request_text(repair_feedback.get("feedback_source"))
+    if feedback_source:
+        lines.append(f"Feedback source: {feedback_source}")
+    attempt_index = repair_feedback.get("attempt_index")
+    if isinstance(attempt_index, int):
+        lines.append(f"Attempt index: {attempt_index}")
+    _append_repair_feedback_list(
+        lines=lines,
+        label="Failed paths",
+        items=_safe_repair_feedback_paths(repair_feedback, "failed_paths"),
+    )
+    _append_repair_feedback_list(
+        lines=lines,
+        label="Failure summaries",
+        items=_safe_request_list(repair_feedback.get("failure_summaries")),
+    )
+    _append_repair_feedback_list(
+        lines=lines,
+        label="Required source-owner paths",
+        items=_safe_repair_feedback_paths(
+            repair_feedback,
+            "required_source_owner_paths",
+        ),
+    )
+    _append_repair_feedback_list(
+        lines=lines,
+        label="Protected verification paths",
+        items=_safe_repair_feedback_paths(
+            repair_feedback,
+            "protected_verification_paths",
+        ),
+    )
+    _append_repair_feedback_list(
+        lines=lines,
+        label="Previous patch artifact files",
+        items=_repair_feedback_patch_artifact_paths(
+            repair_feedback.get("previous_patch_artifacts"),
+        ),
+    )
+    return "\n".join(lines)
+
+
+def _append_repair_feedback_list(
+    *,
+    lines: list[str],
+    label: str,
+    items: list[str],
+) -> None:
+    if not items:
+        return
+    lines.append(f"{label}:")
+    for item in items[:8]:
+        lines.append(f"- {item}")
 
 
 def _pm_evidence_request_text(writing_result: dict[str, object]) -> str:

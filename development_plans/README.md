@@ -38,7 +38,8 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| (none) | No active short-term execution plan | none |
+| [coding_agent_full_workflow_integration_test_plan.md](active/short_term/coding_agent_full_workflow_integration_test_plan.md) | Large coding-agent real LLM integration test plan | draft |
+| [coding_agent_pre_integration_hardening_plan.md](active/short_term/coding_agent_pre_integration_hardening_plan.md) | Large coding-agent pre-integration hardening plan | draft |
 
 ## Supporting Experiment Records
 
@@ -173,6 +174,32 @@ review remediation, documentation updates, and archived closeout evidence.
 | Outcome | Plans |
 |---|---|
 | Moved from active short-term to completed archive | `coding_agent_phase8_verify_repair_loop_plan.md` |
+
+### 2026-07-09 coding-agent Phase 9 executable plan approval
+
+The directional coding-agent run supervisor architecture was promoted into an
+approved active short-term execution plan. Five real LLM run-supervisor gates
+were prepared ahead of implementation, and plan review tightened the contract
+with closed run objectives, closed continuation actions, stable ledger
+schemas, and explicit evidence requirements.
+
+| Outcome | Plans |
+|---|---|
+| Added to active short-term | `coding_agent_phase9_run_supervisor_plan.md` |
+
+### 2026-07-09 coding-agent Phase 9 completion
+
+The coding-agent Phase 9 run supervisor plan completed after user-approved
+execution without subagents. The implementation added workspace-local durable
+run ledgers, public `start_coding_run(...)`, `continue_coding_run(...)`, and
+`get_coding_run(...)` APIs, deterministic workflow tests, five one-at-a-time
+real LLM gates with raw/review evidence, repair-context remediation for the
+hard seeded gate, no-subagent code review remediation, and documentation
+closeout.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active short-term to completed archive | `coding_agent_phase9_run_supervisor_plan.md` |
 
 ## Archive
 

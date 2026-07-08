@@ -3,3 +3,5 @@
 llm_traces/*
 !llm_traces/coding_agent_verify_repair/
 !llm_traces/coding_agent_verify_repair/*
+!llm_traces/coding_agent_run_supervisor/
+!llm_traces/coding_agent_run_supervisor/*

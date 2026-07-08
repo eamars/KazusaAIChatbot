@@ -1,0 +1,314 @@
+{
+  "gate": {
+    "gate_id": "run_gate_01_read_only_persistence",
+    "title": "Read-only run ledger persistence",
+    "objective_type": "read_only",
+    "instruction": "Explain how the score loader handles blank lines and malformed rows. Cite the source file and tests that prove the behavior.",
+    "source_paths": [
+      "scores.py",
+      "tests/test_scores.py"
+    ],
+    "execution_specs": [],
+    "expected_status_after_start": "completed",
+    "expected_terminal_status": "completed",
+    "expected_changed_paths": [],
+    "protected_source_paths": [
+      "scores.py",
+      "tests/test_scores.py"
+    ],
+    "behavior_rubric": [
+      "The run creates a durable ledger and records source/evidence events.",
+      "The answer is grounded in repository evidence, not generic CSV advice.",
+      "A fresh get call returns the same public run status after persistence."
+    ],
+    "forbidden_failure_modes": [
+      "The public response exposes absolute source or workspace roots.",
+      "The run fabricates behavior not present in scores.py or tests.",
+      "The get call loses events or evidence from the started run."
+    ]
+  },
+  "model_routes": [
+    "CODING_AGENT_PM_LLM",
+    "CODING_AGENT_PROGRAMMER_LLM"
+  ],
+  "source_root": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\coding_agent_run_supervisor_workspace\\run_gate_01_read_only_persistence\\source",
+  "workspace_root": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\coding_agent_run_supervisor_workspace\\run_gate_01_read_only_persistence",
+  "source_identity": {
+    "provider": "github",
+    "owner": "kazusa-fixtures",
+    "repo": "run_gate_01_read_only_persistence",
+    "current_commit": "fb65b0b4a8aa2b9774b50cf1ac315d05c491331e",
+    "dirty_state": "clean"
+  },
+  "source_hashes_before": {
+    "scores.py": "2442740d73eca99eb40d4292506f16d6d679a0e88d05f9d7d7d52935260f0ef8",
+    "tests/test_scores.py": "aaa8435ff7e738363fe6cca51da47406847fcef5da505bb4d82748dbec2599d5"
+  },
+  "source_hashes_after": {
+    "scores.py": "2442740d73eca99eb40d4292506f16d6d679a0e88d05f9d7d7d52935260f0ef8",
+    "tests/test_scores.py": "aaa8435ff7e738363fe6cca51da47406847fcef5da505bb4d82748dbec2599d5"
+  },
+  "source_tree_unchanged": true,
+  "initial_patch_artifact_count": 0,
+  "start_response": null,
+  "response": {
+    "status": "completed",
+    "run_id": "f1c46637e170483f80fe29b80b439ce1",
+    "goal": "Explain how the score loader handles blank lines and malformed rows. Cite the source file and tests that prove the behavior.",
+    "objective_type": "read_only",
+    "answer_text": "The score loader, implemented in `load_scores` within `scores.py`, handles blank lines and malformed rows as follows:\n\n- **Blank Lines**: The function strips each line of text; if the resulting string is empty (`if not stripped:`), it uses a `continue` statement to skip that line during iteration. This behavior is verified by the test `test_load_scores_skips_blank_lines` in `tests/test_scores.py`, which confirms that input like `'Ada,10\\n\\nGrace,8'` results in only valid data rows: `[('Ada', 10), ('Grace', 8)]`.\n- **Malformed Rows**: The function attempts to split each non-blank stripped line on the first comma (`stripped.split(',', 1)`). If a row is malformed (e.g., it lacks a comma), this operation results in a `ValueError`. This behavior is verified by the test `test_load_scores_rejects_malformed_rows` in `tests/test_scores.py`, which asserts that calling `load_scores('Ada')` raises a `ValueError`.",
+    "repository": {
+      "provider": "github",
+      "owner": "kazusa-fixtures",
+      "repo": "run_gate_01_read_only_persistence",
+      "source_url": "https://github.com/kazusa-fixtures/run_gate_01_read_only_persistence",
+      "requested_ref": null,
+      "resolved_ref": "main",
+      "current_commit": "fb65b0b4a8aa2b9774b50cf1ac315d05c491331e",
+      "default_branch": "main",
+      "storage_kind": "existing_local_checkout",
+      "managed_checkout": false,
+      "dirty_state": "clean"
+    },
+    "source_scope": {
+      "kind": "repository",
+      "repo_relative_path": null,
+      "source_url": "local://github/kazusa-fixtures/run_gate_01_read_only_persistence",
+      "requested_ref": "main",
+      "interpretation": "explicit local repository checkout"
+    },
+    "evidence": [
+      {
+        "path": "scores.py",
+        "line_start": 1,
+        "line_end": 9,
+        "symbol_or_topic": "load_scores",
+        "excerpt": "def load_scores(text):\n    scores = []\n    for line_number, line in enumerate(text.splitlines(), start=1):\n        stripped = line.strip()\n        if not stripped:\n            continue\n        name, value = stripped.split(',', 1)\n        scores.append((name.strip(), int(value)))\n    return scores",
+        "reason": "Matched assignment value: load_scores"
+      },
+      {
+        "path": "tests/test_scores.py",
+        "line_start": 1,
+        "line_end": 15,
+        "symbol_or_topic": "load_scores",
+        "excerpt": "import pytest\n\nfrom scores import load_scores\n\n\ndef test_load_scores_skips_blank_lines():\n    assert load_scores('Ada,10\\n\\nGrace,8') == [\n        ('Ada', 10),\n        ('Grace', 8),\n    ]\n\n\ndef test_load_scores_rejects_malformed_rows():\n    with pytest.raises(ValueError):\n        load_scores('Ada')",
+        "reason": "Matched assignment value: load_scores"
+      },
+      {
+        "path": "tests/test_scores.py",
+        "line_start": 1,
+        "line_end": 15,
+        "symbol_or_topic": "test_load_scores_skips_blank_lines",
+        "excerpt": "import pytest\n\nfrom scores import load_scores\n\n\ndef test_load_scores_skips_blank_lines():\n    assert load_scores('Ada,10\\n\\nGrace,8') == [\n        ('Ada', 10),\n        ('Grace', 8),\n    ]\n\n\ndef test_load_scores_rejects_malformed_rows():\n    with pytest.raises(ValueError):\n        load_scores('Ada')",
+        "reason": "Matched assignment value: test_load_scores_skips_blank_lines"
+      }
+    ],
+    "patch_artifacts": [],
+    "changed_files": [],
+    "apply_attempts": [],
+    "execution_attempts": [],
+    "repair_attempts": [],
+    "attempts": [],
+    "blockers": [],
+    "events": [
+      {
+        "event_id": "e3cde13168d84f6d9b68f766f8a27d3b",
+        "event_type": "run_created",
+        "public_payload": {
+          "objective_type": "read_only"
+        },
+        "run_id": "f1c46637e170483f80fe29b80b439ce1",
+        "sequence": 1,
+        "status": "created",
+        "summary": "Coding run was created."
+      },
+      {
+        "event_id": "8dcbd9a623b045eeb47ee0031107cdb5",
+        "event_type": "source_resolved",
+        "public_payload": {
+          "repository": {
+            "current_commit": "fb65b0b4a8aa2b9774b50cf1ac315d05c491331e",
+            "default_branch": "main",
+            "dirty_state": "clean",
+            "managed_checkout": false,
+            "owner": "kazusa-fixtures",
+            "provider": "github",
+            "repo": "run_gate_01_read_only_persistence",
+            "requested_ref": null,
+            "resolved_ref": "main",
+            "source_url": "https://github.com/kazusa-fixtures/run_gate_01_read_only_persistence",
+            "storage_kind": "existing_local_checkout"
+          }
+        },
+        "run_id": "f1c46637e170483f80fe29b80b439ce1",
+        "sequence": 2,
+        "status": "completed",
+        "summary": "Source was resolved for the read-only run."
+      },
+      {
+        "event_id": "e825a8b2c9ba4542a579c50108f2622f",
+        "event_type": "evidence_collected",
+        "public_payload": {
+          "evidence_count": 3
+        },
+        "run_id": "f1c46637e170483f80fe29b80b439ce1",
+        "sequence": 3,
+        "status": "completed",
+        "summary": "Read-only evidence was collected."
+      },
+      {
+        "event_id": "8f8fc5436a0c4433a7d5a02fd029c071",
+        "event_type": "completed",
+        "public_payload": {
+          "status": "completed"
+        },
+        "run_id": "f1c46637e170483f80fe29b80b439ce1",
+        "sequence": 4,
+        "status": "completed",
+        "summary": "Coding run reached completed."
+      }
+    ],
+    "limitations": [],
+    "trace_summary": [
+      "Resolved explicit local checkout without mutation.",
+      "reading_pm:repository_map files=2",
+      "reading_pm:work_plan intent=symbol_behavior status=need_programmers assignments=2",
+      "programmer:implementation analyst",
+      "programmer_report implementation analyst status=succeeded evidence=2",
+      "programmer:test analyst",
+      "programmer_report test analyst status=succeeded evidence=1",
+      "reading_pm:work_plan intent=symbol_behavior status=sufficient assignments=0",
+      "reading_pm:sufficiency=sufficient"
+    ]
+  },
+  "reloaded_response": {
+    "status": "completed",
+    "run_id": "f1c46637e170483f80fe29b80b439ce1",
+    "goal": "Explain how the score loader handles blank lines and malformed rows. Cite the source file and tests that prove the behavior.",
+    "objective_type": "read_only",
+    "answer_text": "The score loader, implemented in `load_scores` within `scores.py`, handles blank lines and malformed rows as follows:\n\n- **Blank Lines**: The function strips each line of text; if the resulting string is empty (`if not stripped:`), it uses a `continue` statement to skip that line during iteration. This behavior is verified by the test `test_load_scores_skips_blank_lines` in `tests/test_scores.py`, which confirms that input like `'Ada,10\\n\\nGrace,8'` results in only valid data rows: `[('Ada', 10), ('Grace', 8)]`.\n- **Malformed Rows**: The function attempts to split each non-blank stripped line on the first comma (`stripped.split(',', 1)`). If a row is malformed (e.g., it lacks a comma), this operation results in a `ValueError`. This behavior is verified by the test `test_load_scores_rejects_malformed_rows` in `tests/test_scores.py`, which asserts that calling `load_scores('Ada')` raises a `ValueError`.",
+    "repository": {
+      "current_commit": "fb65b0b4a8aa2b9774b50cf1ac315d05c491331e",
+      "default_branch": "main",
+      "dirty_state": "clean",
+      "managed_checkout": false,
+      "owner": "kazusa-fixtures",
+      "provider": "github",
+      "repo": "run_gate_01_read_only_persistence",
+      "requested_ref": null,
+      "resolved_ref": "main",
+      "source_url": "https://github.com/kazusa-fixtures/run_gate_01_read_only_persistence",
+      "storage_kind": "existing_local_checkout"
+    },
+    "source_scope": {
+      "interpretation": "explicit local repository checkout",
+      "kind": "repository",
+      "repo_relative_path": null,
+      "requested_ref": "main",
+      "source_url": "local://github/kazusa-fixtures/run_gate_01_read_only_persistence"
+    },
+    "evidence": [
+      {
+        "excerpt": "def load_scores(text):\n    scores = []\n    for line_number, line in enumerate(text.splitlines(), start=1):\n        stripped = line.strip()\n        if not stripped:\n            continue\n        name, value = stripped.split(',', 1)\n        scores.append((name.strip(), int(value)))\n    return scores",
+        "line_end": 9,
+        "line_start": 1,
+        "path": "scores.py",
+        "reason": "Matched assignment value: load_scores",
+        "symbol_or_topic": "load_scores"
+      },
+      {
+        "excerpt": "import pytest\n\nfrom scores import load_scores\n\n\ndef test_load_scores_skips_blank_lines():\n    assert load_scores('Ada,10\\n\\nGrace,8') == [\n        ('Ada', 10),\n        ('Grace', 8),\n    ]\n\n\ndef test_load_scores_rejects_malformed_rows():\n    with pytest.raises(ValueError):\n        load_scores('Ada')",
+        "line_end": 15,
+        "line_start": 1,
+        "path": "tests/test_scores.py",
+        "reason": "Matched assignment value: load_scores",
+        "symbol_or_topic": "load_scores"
+      },
+      {
+        "excerpt": "import pytest\n\nfrom scores import load_scores\n\n\ndef test_load_scores_skips_blank_lines():\n    assert load_scores('Ada,10\\n\\nGrace,8') == [\n        ('Ada', 10),\n        ('Grace', 8),\n    ]\n\n\ndef test_load_scores_rejects_malformed_rows():\n    with pytest.raises(ValueError):\n        load_scores('Ada')",
+        "line_end": 15,
+        "line_start": 1,
+        "path": "tests/test_scores.py",
+        "reason": "Matched assignment value: test_load_scores_skips_blank_lines",
+        "symbol_or_topic": "test_load_scores_skips_blank_lines"
+      }
+    ],
+    "patch_artifacts": [],
+    "changed_files": [],
+    "apply_attempts": [],
+    "execution_attempts": [],
+    "repair_attempts": [],
+    "attempts": [],
+    "blockers": [],
+    "events": [
+      {
+        "event_id": "e3cde13168d84f6d9b68f766f8a27d3b",
+        "event_type": "run_created",
+        "public_payload": {
+          "objective_type": "read_only"
+        },
+        "run_id": "f1c46637e170483f80fe29b80b439ce1",
+        "sequence": 1,
+        "status": "created",
+        "summary": "Coding run was created."
+      },
+      {
+        "event_id": "8dcbd9a623b045eeb47ee0031107cdb5",
+        "event_type": "source_resolved",
+        "public_payload": {
+          "repository": {
+            "current_commit": "fb65b0b4a8aa2b9774b50cf1ac315d05c491331e",
+            "default_branch": "main",
+            "dirty_state": "clean",
+            "managed_checkout": false,
+            "owner": "kazusa-fixtures",
+            "provider": "github",
+            "repo": "run_gate_01_read_only_persistence",
+            "requested_ref": null,
+            "resolved_ref": "main",
+            "source_url": "https://github.com/kazusa-fixtures/run_gate_01_read_only_persistence",
+            "storage_kind": "existing_local_checkout"
+          }
+        },
+        "run_id": "f1c46637e170483f80fe29b80b439ce1",
+        "sequence": 2,
+        "status": "completed",
+        "summary": "Source was resolved for the read-only run."
+      },
+      {
+        "event_id": "e825a8b2c9ba4542a579c50108f2622f",
+        "event_type": "evidence_collected",
+        "public_payload": {
+          "evidence_count": 3
+        },
+        "run_id": "f1c46637e170483f80fe29b80b439ce1",
+        "sequence": 3,
+        "status": "completed",
+        "summary": "Read-only evidence was collected."
+      },
+      {
+        "event_id": "8f8fc5436a0c4433a7d5a02fd029c071",
+        "event_type": "completed",
+        "public_payload": {
+          "status": "completed"
+        },
+        "run_id": "f1c46637e170483f80fe29b80b439ce1",
+        "sequence": 4,
+        "status": "completed",
+        "summary": "Coding run reached completed."
+      }
+    ],
+    "limitations": [],
+    "trace_summary": [
+      "Resolved explicit local checkout without mutation.",
+      "reading_pm:repository_map files=2",
+      "reading_pm:work_plan intent=symbol_behavior status=need_programmers assignments=2",
+      "programmer:implementation analyst",
+      "programmer_report implementation analyst status=succeeded evidence=2",
+      "programmer:test analyst",
+      "programmer_report test analyst status=succeeded evidence=1",
+      "reading_pm:work_plan intent=symbol_behavior status=sufficient assignments=0",
+      "reading_pm:sufficiency=sufficient"
+    ]
+  }
+}

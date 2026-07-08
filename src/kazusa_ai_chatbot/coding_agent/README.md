@@ -8,9 +8,12 @@ Current implemented surfaces:
 ```python
 from kazusa_ai_chatbot.coding_agent import answer_code_question
 from kazusa_ai_chatbot.coding_agent import apply_approved_patch
+from kazusa_ai_chatbot.coding_agent import continue_coding_run
 from kazusa_ai_chatbot.coding_agent import execute_code_check
+from kazusa_ai_chatbot.coding_agent import get_coding_run
 from kazusa_ai_chatbot.coding_agent import handle_background_coding_task
 from kazusa_ai_chatbot.coding_agent import propose_code_change
+from kazusa_ai_chatbot.coding_agent import start_coding_run
 from kazusa_ai_chatbot.coding_agent import verify_and_repair_code_change
 from kazusa_ai_chatbot.coding_agent.code_executing import run as run_code_executing
 from kazusa_ai_chatbot.coding_agent.code_fetching import run as run_code_fetching
@@ -73,6 +76,14 @@ and sends only bounded redacted execution summaries back through
 `code_modifying` when a capped repair attempt is allowed. It does not mutate
 the original source checkout and is not used by background accepted tasks.
 
+`start_coding_run(...)`, `continue_coding_run(...)`, and
+`get_coding_run(...)` are the durable direct run APIs. They create and reload
+workspace-local JSON ledgers under `<workspace_root>/coding_runs/<run_id>/`,
+require closed `objective_type` and `action` values, pause proposals before
+approval, and route approved verification only through the existing
+verify/repair primitive. They do not introduce a new global planning LLM or
+background-worker side effects.
+
 Implemented subagents:
 
 - `code_fetching`: resolves public GitHub, question-text source mentions, and
@@ -91,6 +102,8 @@ Implemented subagents:
   trusted direct callers while preserving managed-copy containment.
 - `code_writing`: creates source-free new-artifact patch proposals in managed
   storage.
+- `coding_run`: records durable run ledgers and deterministic transitions for
+  direct trusted callers while reusing existing specialist APIs.
 
 Managed checkouts and managed raw-file downloads live under the caller-supplied
 coding workspace root. Writing requests require an explicit configured
@@ -111,6 +124,7 @@ flowchart TD
     D1["Direct write API<br/>propose_code_change(...)"]
     D2["Direct execution API<br/>execute_code_check(...)"]
     D3["Direct verify/repair API<br/>verify_and_repair_code_change(...)"]
+    D4["Durable direct run API<br/>start / continue / get"]
     B0["accepted task / background_work job<br/>generic lifecycle owner"]
     B1["background_work router LLM<br/>selects worker only"]
     B2["providers.dispatch_background_work<br/>worker registry dispatch"]
@@ -130,6 +144,7 @@ flowchart TD
     D1 --> W0
     D2 --> X0
     D3 --> V0
+    D4 --> CR0
     R7 --> O1
     W14 --> O2
     O1 --> O3
@@ -222,6 +237,22 @@ flowchart TD
         V3 -->|failed and attempts remain| V4 --> V5 --> V2
     end
 
+    subgraph CodingRun["coding_run"]
+        CR0["start_coding_run(...)<br/>objective_type"]
+        CR1["workspace JSON ledger<br/>events JSONL"]
+        CR2["read_only<br/>compose direct read"]
+        CR3["propose_patch<br/>await approval"]
+        CR4["continue_coding_run(...)<br/>approve_and_verify or cancel"]
+        CR5["get_coding_run(...)<br/>public projection"]
+        CR0 --> CR1
+        CR1 --> CR2 --> D0
+        CR1 --> CR3 --> D1
+        CR1 --> CR4
+        CR4 -->|approve_and_verify| D3
+        CR4 -->|cancel| CR5
+        CR1 --> CR5
+    end
+
     F5 -->|succeeded| R0
     F0 -->|failed, rejected, or needs input| O1
     F5 -->|explicit source write| M0
@@ -243,6 +274,9 @@ consumes compact supervisor facts instead of raw generated files.
 `code_verifying` composes proposal, managed-copy apply, execution, and capped
 repair for trusted direct callers. The background worker, L2d, action spec,
 and dialog path do not dispatch to either direct trusted side-effect boundary.
+`coding_run` is the direct durable lifecycle owner for trusted callers and
+persists run state without taking ownership of source reading, patch planning,
+apply, execution, or repair internals.
 
 ## Direct Request
 
@@ -480,6 +514,62 @@ validation, managed-copy apply, execution, and any capped repair.
 The verifier returns an attempt ledger instead of mutating the original source.
 Each repair attempt creates a fresh managed apply workspace and receives only
 structured `execution_verification` feedback, not raw command output.
+
+## Direct Coding Run Request
+
+`CodingRunStartRequest` accepts:
+
+- `question`
+- `objective_type`: `read_only`, `propose_patch`, or `verify_repair`
+- the same public source-fetching fields as `CodingAgentRequest`
+- `workspace_root`
+- `preferred_language`
+- `max_answer_chars`
+- `max_artifact_chars`
+- `session_id`
+- `approval`
+- `execution_specs`
+- `repair_attempt_limit`
+- `initial_patch_artifacts`
+- `expected_source_identity`
+
+`CodingRunContinueRequest` accepts:
+
+- `workspace_root`
+- `run_id`
+- `action`: `approve_and_verify` or `cancel`
+- `approval`
+- `execution_specs`
+- `repair_attempt_limit`
+- `reason`
+
+`CodingRunGetRequest` accepts `workspace_root` and `run_id`.
+
+`CodingRunResponse` contains:
+
+- `status`
+- `run_id`
+- `goal`
+- `objective_type`
+- `answer_text`
+- `repository`
+- `source_scope`
+- `evidence`
+- `patch_artifacts`
+- `changed_files`
+- `apply_attempts`
+- `execution_attempts`
+- `repair_attempts`
+- `attempts`
+- `blockers`
+- `events`
+- `limitations`
+- `trace_summary`
+
+Run responses are public projections. They omit local roots, workspace roots,
+cache keys, environment filenames, git internals, raw full command output,
+full source dumps, secret-like values, and binary content. The run APIs do not
+infer approval, cancellation, or execution from prose.
 
 ## Change Control
 

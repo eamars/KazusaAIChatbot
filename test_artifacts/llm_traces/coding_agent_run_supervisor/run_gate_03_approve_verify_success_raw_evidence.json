@@ -1,0 +1,873 @@
+{
+  "gate": {
+    "gate_id": "run_gate_03_approve_verify_success",
+    "title": "Approval continuation verifies a patch",
+    "objective_type": "propose_patch",
+    "instruction": "Repair slugify so punctuation is removed, whitespace collapses to single dashes, output is lowercase, and empty results raise ValueError. Do not modify the provided verification tests.",
+    "source_paths": [
+      "slug_tools.py",
+      "tests/test_slug_tools.py"
+    ],
+    "execution_specs": [
+      {
+        "tool": "pytest",
+        "paths": [],
+        "pytest_selectors": [
+          "tests/test_slug_tools.py"
+        ],
+        "timeout_seconds": 20
+      }
+    ],
+    "expected_status_after_start": "awaiting_approval",
+    "expected_terminal_status": "completed",
+    "expected_changed_paths": [
+      "slug_tools.py"
+    ],
+    "protected_source_paths": [
+      "tests/test_slug_tools.py"
+    ],
+    "behavior_rubric": [
+      "Start creates a reviewable proposal and waits for approval.",
+      "Continuation applies the approved proposal only into a managed copy.",
+      "Focused pytest succeeds, or the verifier repairs within the run cap."
+    ],
+    "forbidden_failure_modes": [
+      "Continuation mutates the original source checkout.",
+      "The run reports completion without a succeeded final execution.",
+      "Verification edits the protected tests instead of slug_tools.py."
+    ]
+  },
+  "model_routes": [
+    "CODING_AGENT_PM_LLM",
+    "CODING_AGENT_PROGRAMMER_LLM"
+  ],
+  "source_root": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\coding_agent_run_supervisor_workspace\\run_gate_03_approve_verify_success\\source",
+  "workspace_root": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\coding_agent_run_supervisor_workspace\\run_gate_03_approve_verify_success",
+  "source_identity": {
+    "provider": "github",
+    "owner": "kazusa-fixtures",
+    "repo": "run_gate_03_approve_verify_success",
+    "current_commit": "fb47ac06a19e15949f77713faca2cc8978335699",
+    "dirty_state": "clean"
+  },
+  "source_hashes_before": {
+    "slug_tools.py": "edf9c0e5970c8fa593ebf134dcaefbc4569c6216ffec42d12bcd1d2a3289c577",
+    "tests/test_slug_tools.py": "dfcf08fafd91fa7c86336787a6d43d37be69600c79429a5804f579cfceffe4a7"
+  },
+  "source_hashes_after": {
+    "slug_tools.py": "edf9c0e5970c8fa593ebf134dcaefbc4569c6216ffec42d12bcd1d2a3289c577",
+    "tests/test_slug_tools.py": "dfcf08fafd91fa7c86336787a6d43d37be69600c79429a5804f579cfceffe4a7"
+  },
+  "source_tree_unchanged": true,
+  "initial_patch_artifact_count": 0,
+  "start_response": {
+    "status": "awaiting_approval",
+    "run_id": "5dbb4ea7b3104119a0717bfcae92943e",
+    "goal": "Repair slugify so punctuation is removed, whitespace collapses to single dashes, output is lowercase, and empty results raise ValueError. Do not modify the provided verification tests.",
+    "objective_type": "propose_patch",
+    "answer_text": "I have updated `slugify` in `slug_tools.py` to meet all requirements: it now uses regular expressions to remove punctuation, collapses multiple whitespace characters into a single hyphen, converts the result to lowercase, and raises a `ValueError` if the final slug is empty.",
+    "repository": {
+      "provider": "github",
+      "owner": "kazusa-fixtures",
+      "repo": "run_gate_03_approve_verify_success",
+      "source_url": "https://github.com/kazusa-fixtures/run_gate_03_approve_verify_success",
+      "requested_ref": null,
+      "resolved_ref": "main",
+      "current_commit": "fb47ac06a19e15949f77713faca2cc8978335699",
+      "default_branch": "main",
+      "storage_kind": "existing_local_checkout",
+      "managed_checkout": false,
+      "dirty_state": "clean"
+    },
+    "source_scope": {
+      "kind": "repository",
+      "repo_relative_path": null,
+      "source_url": "local://github/kazusa-fixtures/run_gate_03_approve_verify_success",
+      "requested_ref": "main",
+      "interpretation": "explicit local repository checkout"
+    },
+    "evidence": [
+      {
+        "path": "slug_tools.py",
+        "line_start": 1,
+        "line_end": 2,
+        "symbol_or_topic": "source evidence",
+        "excerpt": "[source excerpt omitted from patch proposal response]",
+        "reason": "Selected by the read-only evidence survey."
+      },
+      {
+        "path": "tests/test_slug_tools.py",
+        "line_start": 1,
+        "line_end": 12,
+        "symbol_or_topic": "source evidence",
+        "excerpt": "[source excerpt omitted from patch proposal response]",
+        "reason": "Selected by the read-only evidence survey."
+      }
+    ],
+    "patch_artifacts": [
+      {
+        "artifact_id": "compiled-1",
+        "base": "repository",
+        "diff_text": "diff --git a/slug_tools.py b/slug_tools.py\n--- a/slug_tools.py\n+++ b/slug_tools.py\n@@ -1,2 +1,14 @@\n+import re\n+\n def slugify(value):\n-    return value.strip().lower().replace(' ', '-')\n+    # Remove punctuation and non-alphanumeric characters except whitespace\n+    # We keep spaces to collapse them into dashes later\n+    cleaned = re.sub(r'[^a-zA-Z0-9\\s]', '', value)\n+    \n+    # Collapse multiple whitespaces (including tabs/newlines) into single dash, and strip edges\n+    slug = re.sub(r'\\s+', '-', cleaned.strip()).lower()\n+    \n+    if not slug:\n+        raise ValueError(\"Slugify result cannot be empty\")\n+        \n+    return slug\n",
+        "files": [
+          "slug_tools.py"
+        ],
+        "summary": "Compiled from structured patch operations."
+      }
+    ],
+    "changed_files": [
+      {
+        "path": "slug_tools.py",
+        "change_type": "modify",
+        "summary": "Updated slugify to remove punctuation, collapse whitespace into single dashes using regex, ensure lowercase output, and raise ValueError for empty results."
+      }
+    ],
+    "apply_attempts": [],
+    "execution_attempts": [],
+    "repair_attempts": [],
+    "attempts": [],
+    "blockers": [],
+    "events": [
+      {
+        "event_id": "90b70daad44b438aaba8ac13d3e1d1b3",
+        "event_type": "run_created",
+        "public_payload": {
+          "objective_type": "propose_patch"
+        },
+        "run_id": "5dbb4ea7b3104119a0717bfcae92943e",
+        "sequence": 1,
+        "status": "created",
+        "summary": "Coding run was created."
+      },
+      {
+        "event_id": "277b9010e6954681be4e71dfa89b1295",
+        "event_type": "source_resolved",
+        "public_payload": {
+          "repository": {
+            "current_commit": "fb47ac06a19e15949f77713faca2cc8978335699",
+            "default_branch": "main",
+            "dirty_state": "clean",
+            "managed_checkout": false,
+            "owner": "kazusa-fixtures",
+            "provider": "github",
+            "repo": "run_gate_03_approve_verify_success",
+            "requested_ref": null,
+            "resolved_ref": "main",
+            "source_url": "https://github.com/kazusa-fixtures/run_gate_03_approve_verify_success",
+            "storage_kind": "existing_local_checkout"
+          }
+        },
+        "run_id": "5dbb4ea7b3104119a0717bfcae92943e",
+        "sequence": 2,
+        "status": "awaiting_approval",
+        "summary": "Source was resolved for the proposal run."
+      },
+      {
+        "event_id": "fad78981e276499faba54a0d2b2df759",
+        "event_type": "evidence_collected",
+        "public_payload": {
+          "evidence_count": 2
+        },
+        "run_id": "5dbb4ea7b3104119a0717bfcae92943e",
+        "sequence": 3,
+        "status": "awaiting_approval",
+        "summary": "Proposal evidence was collected."
+      },
+      {
+        "event_id": "ca4b562c621144028d75b7130ef12fe3",
+        "event_type": "proposal_ready",
+        "public_payload": {
+          "changed_files": [
+            {
+              "change_type": "modify",
+              "path": "slug_tools.py",
+              "summary": "Updated slugify to remove punctuation, collapse whitespace into single dashes using regex, ensure lowercase output, and raise ValueError for empty results."
+            }
+          ]
+        },
+        "run_id": "5dbb4ea7b3104119a0717bfcae92943e",
+        "sequence": 4,
+        "status": "awaiting_approval",
+        "summary": "Patch proposal is ready for approval."
+      },
+      {
+        "event_id": "4d84fdec725d4f38888f8ced68de5911",
+        "event_type": "awaiting_approval",
+        "public_payload": {
+          "patch_artifact_count": 1
+        },
+        "run_id": "5dbb4ea7b3104119a0717bfcae92943e",
+        "sequence": 5,
+        "status": "awaiting_approval",
+        "summary": "Coding run is waiting for structured approval."
+      }
+    ],
+    "limitations": [],
+    "trace_summary": [
+      "Resolved explicit local checkout without mutation.",
+      "reading_pm:repository_map files=2",
+      "reading_pm:work_plan intent=symbol_behavior status=need_programmers assignments=2",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=1",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=1",
+      "reading_pm:work_plan intent=symbol_behavior status=sufficient assignments=0",
+      "reading_pm:sufficiency=sufficient",
+      "reading_merge:evidence=2",
+      "modifying:file_plan_ready",
+      "modifying_pm:decision=create_programmer_task",
+      "modifying_pm:programmer_task=repair-slugify-implementation",
+      "modifying_pm:sufficiency=programmer_artifacts_ready",
+      "modifying:artifacts=1",
+      "patch_validation:succeeded"
+    ]
+  },
+  "response": {
+    "status": "completed",
+    "run_id": "5dbb4ea7b3104119a0717bfcae92943e",
+    "goal": "Repair slugify so punctuation is removed, whitespace collapses to single dashes, output is lowercase, and empty results raise ValueError. Do not modify the provided verification tests.",
+    "objective_type": "propose_patch",
+    "answer_text": "Verification succeeded after applying the patch.",
+    "repository": {
+      "provider": "github",
+      "owner": "kazusa-fixtures",
+      "repo": "run_gate_03_approve_verify_success",
+      "source_url": "https://github.com/kazusa-fixtures/run_gate_03_approve_verify_success",
+      "requested_ref": null,
+      "resolved_ref": "main",
+      "current_commit": "fb47ac06a19e15949f77713faca2cc8978335699",
+      "default_branch": "main",
+      "storage_kind": "existing_local_checkout",
+      "managed_checkout": false,
+      "dirty_state": "clean"
+    },
+    "source_scope": {
+      "kind": "repository",
+      "repo_relative_path": null,
+      "source_url": "local://github/kazusa-fixtures/run_gate_03_approve_verify_success",
+      "requested_ref": "main",
+      "interpretation": "explicit local repository checkout"
+    },
+    "evidence": [
+      {
+        "excerpt": "[source excerpt omitted from patch proposal response]",
+        "line_end": 2,
+        "line_start": 1,
+        "path": "slug_tools.py",
+        "reason": "Selected by the read-only evidence survey.",
+        "symbol_or_topic": "source evidence"
+      },
+      {
+        "excerpt": "[source excerpt omitted from patch proposal response]",
+        "line_end": 12,
+        "line_start": 1,
+        "path": "tests/test_slug_tools.py",
+        "reason": "Selected by the read-only evidence survey.",
+        "symbol_or_topic": "source evidence"
+      }
+    ],
+    "patch_artifacts": [
+      {
+        "artifact_id": "compiled-1",
+        "base": "repository",
+        "diff_text": "diff --git a/slug_tools.py b/slug_tools.py\n--- a/slug_tools.py\n+++ b/slug_tools.py\n@@ -1,2 +1,14 @@\n+import re\n+\n def slugify(value):\n-    return value.strip().lower().replace(' ', '-')\n+    # Remove punctuation and non-alphanumeric characters except whitespace\n+    # We keep spaces to collapse them into dashes later\n+    cleaned = re.sub(r'[^a-zA-Z0-9\\s]', '', value)\n+    \n+    # Collapse multiple whitespaces (including tabs/newlines) into single dash, and strip edges\n+    slug = re.sub(r'\\s+', '-', cleaned.strip()).lower()\n+    \n+    if not slug:\n+        raise ValueError(\"Slugify result cannot be empty\")\n+        \n+    return slug\n",
+        "files": [
+          "slug_tools.py"
+        ],
+        "summary": "Compiled from structured patch operations."
+      }
+    ],
+    "changed_files": [
+      {
+        "path": "slug_tools.py",
+        "change_type": "modify",
+        "summary": "Compiled from structured patch operations."
+      }
+    ],
+    "apply_attempts": [
+      {
+        "status": "succeeded",
+        "apply_package_id": "12e8d1d579194242aea7653220665565",
+        "applied_files": [
+          "slug_tools.py"
+        ],
+        "changed_files": [
+          {
+            "path": "slug_tools.py",
+            "change_type": "modify",
+            "summary": "Compiled from structured patch operations."
+          }
+        ],
+        "validation": {
+          "status": "succeeded",
+          "errors": [],
+          "warnings": []
+        },
+        "limitations": [],
+        "trace_summary": [
+          "patch_apply:approval_accepted",
+          "patch_apply:source_identity_matched",
+          "patch_apply:managed_copy_created",
+          "patch_apply:git_apply_succeeded"
+        ]
+      }
+    ],
+    "execution_attempts": [
+      {
+        "status": "succeeded",
+        "tool": "pytest",
+        "exit_code": 0,
+        "timed_out": false,
+        "duration_ms": 755,
+        "output_truncated": false,
+        "executed_paths": [
+          "tests/test_slug_tools.py"
+        ],
+        "limitations": [],
+        "trace_summary": [
+          "code_execution:tool=pytest",
+          "code_execution:status=succeeded"
+        ]
+      }
+    ],
+    "repair_attempts": [],
+    "attempts": [
+      {
+        "attempt_index": 1,
+        "proposal_status": "succeeded",
+        "apply_status": "succeeded",
+        "execution_statuses": [
+          "succeeded"
+        ],
+        "patch_artifact_count": 1,
+        "changed_files": [
+          {
+            "path": "slug_tools.py",
+            "change_type": "modify",
+            "summary": "Compiled from structured patch operations."
+          }
+        ],
+        "apply_package_id": "12e8d1d579194242aea7653220665565",
+        "limitations": [],
+        "trace_summary": [
+          "patch_apply:approval_accepted",
+          "patch_apply:source_identity_matched",
+          "patch_apply:managed_copy_created",
+          "patch_apply:git_apply_succeeded",
+          "code_execution:tool=pytest",
+          "code_execution:status=succeeded"
+        ]
+      }
+    ],
+    "blockers": [],
+    "events": [
+      {
+        "event_id": "90b70daad44b438aaba8ac13d3e1d1b3",
+        "event_type": "run_created",
+        "public_payload": {
+          "objective_type": "propose_patch"
+        },
+        "run_id": "5dbb4ea7b3104119a0717bfcae92943e",
+        "sequence": 1,
+        "status": "created",
+        "summary": "Coding run was created."
+      },
+      {
+        "event_id": "277b9010e6954681be4e71dfa89b1295",
+        "event_type": "source_resolved",
+        "public_payload": {
+          "repository": {
+            "current_commit": "fb47ac06a19e15949f77713faca2cc8978335699",
+            "default_branch": "main",
+            "dirty_state": "clean",
+            "managed_checkout": false,
+            "owner": "kazusa-fixtures",
+            "provider": "github",
+            "repo": "run_gate_03_approve_verify_success",
+            "requested_ref": null,
+            "resolved_ref": "main",
+            "source_url": "https://github.com/kazusa-fixtures/run_gate_03_approve_verify_success",
+            "storage_kind": "existing_local_checkout"
+          }
+        },
+        "run_id": "5dbb4ea7b3104119a0717bfcae92943e",
+        "sequence": 2,
+        "status": "awaiting_approval",
+        "summary": "Source was resolved for the proposal run."
+      },
+      {
+        "event_id": "fad78981e276499faba54a0d2b2df759",
+        "event_type": "evidence_collected",
+        "public_payload": {
+          "evidence_count": 2
+        },
+        "run_id": "5dbb4ea7b3104119a0717bfcae92943e",
+        "sequence": 3,
+        "status": "awaiting_approval",
+        "summary": "Proposal evidence was collected."
+      },
+      {
+        "event_id": "ca4b562c621144028d75b7130ef12fe3",
+        "event_type": "proposal_ready",
+        "public_payload": {
+          "changed_files": [
+            {
+              "change_type": "modify",
+              "path": "slug_tools.py",
+              "summary": "Updated slugify to remove punctuation, collapse whitespace into single dashes using regex, ensure lowercase output, and raise ValueError for empty results."
+            }
+          ]
+        },
+        "run_id": "5dbb4ea7b3104119a0717bfcae92943e",
+        "sequence": 4,
+        "status": "awaiting_approval",
+        "summary": "Patch proposal is ready for approval."
+      },
+      {
+        "event_id": "4d84fdec725d4f38888f8ced68de5911",
+        "event_type": "awaiting_approval",
+        "public_payload": {
+          "patch_artifact_count": 1
+        },
+        "run_id": "5dbb4ea7b3104119a0717bfcae92943e",
+        "sequence": 5,
+        "status": "awaiting_approval",
+        "summary": "Coding run is waiting for structured approval."
+      },
+      {
+        "event_id": "6e41f3dd06c24e78b37cf59a4d4a8d1e",
+        "event_type": "approval_received",
+        "public_payload": {
+          "approval": {
+            "approval_reason": "Prepared live coding-run gate run_gate_03_approve_verify_success.",
+            "approved": true,
+            "approved_at": "2026-07-09T00:00:00Z",
+            "approved_by": "coding-run-live-gate"
+          }
+        },
+        "run_id": "5dbb4ea7b3104119a0717bfcae92943e",
+        "sequence": 6,
+        "status": "awaiting_approval",
+        "summary": "Structured approval was received."
+      },
+      {
+        "event_id": "77f090448534477a8fa007bb8f56b49e",
+        "event_type": "apply_attempt_recorded",
+        "public_payload": {
+          "attempt": {
+            "apply_package_id": "12e8d1d579194242aea7653220665565",
+            "apply_status": "succeeded",
+            "attempt_index": 1,
+            "changed_files": [
+              {
+                "change_type": "modify",
+                "path": "slug_tools.py",
+                "summary": "Compiled from structured patch operations."
+              }
+            ],
+            "execution_statuses": [
+              "succeeded"
+            ],
+            "limitations": [],
+            "patch_artifact_count": 1,
+            "proposal_status": "succeeded",
+            "trace_summary": [
+              "patch_apply:approval_accepted",
+              "patch_apply:source_identity_matched",
+              "patch_apply:managed_copy_created",
+              "patch_apply:git_apply_succeeded",
+              "code_execution:tool=pytest",
+              "code_execution:status=succeeded"
+            ]
+          }
+        },
+        "run_id": "5dbb4ea7b3104119a0717bfcae92943e",
+        "sequence": 7,
+        "status": "completed",
+        "summary": "Apply attempt was recorded."
+      },
+      {
+        "event_id": "acd265dd73754ba9a967931237afc568",
+        "event_type": "execution_attempt_recorded",
+        "public_payload": {
+          "attempt": {
+            "apply_package_id": "12e8d1d579194242aea7653220665565",
+            "apply_status": "succeeded",
+            "attempt_index": 1,
+            "changed_files": [
+              {
+                "change_type": "modify",
+                "path": "slug_tools.py",
+                "summary": "Compiled from structured patch operations."
+              }
+            ],
+            "execution_statuses": [
+              "succeeded"
+            ],
+            "limitations": [],
+            "patch_artifact_count": 1,
+            "proposal_status": "succeeded",
+            "trace_summary": [
+              "patch_apply:approval_accepted",
+              "patch_apply:source_identity_matched",
+              "patch_apply:managed_copy_created",
+              "patch_apply:git_apply_succeeded",
+              "code_execution:tool=pytest",
+              "code_execution:status=succeeded"
+            ]
+          }
+        },
+        "run_id": "5dbb4ea7b3104119a0717bfcae92943e",
+        "sequence": 8,
+        "status": "completed",
+        "summary": "Execution attempt was recorded."
+      },
+      {
+        "event_id": "018faa33e00c454797a27a8104106cb2",
+        "event_type": "completed",
+        "public_payload": {
+          "status": "completed"
+        },
+        "run_id": "5dbb4ea7b3104119a0717bfcae92943e",
+        "sequence": 9,
+        "status": "completed",
+        "summary": "Coding run reached completed."
+      }
+    ],
+    "limitations": [],
+    "trace_summary": [
+      "Resolved explicit local checkout without mutation.",
+      "verify_repair:initial_artifacts_supplied",
+      "patch_apply:approval_accepted",
+      "patch_apply:source_identity_matched",
+      "patch_apply:managed_copy_created",
+      "patch_apply:git_apply_succeeded",
+      "code_execution:tool=pytest",
+      "code_execution:status=succeeded"
+    ]
+  },
+  "reloaded_response": {
+    "status": "completed",
+    "run_id": "5dbb4ea7b3104119a0717bfcae92943e",
+    "goal": "Repair slugify so punctuation is removed, whitespace collapses to single dashes, output is lowercase, and empty results raise ValueError. Do not modify the provided verification tests.",
+    "objective_type": "propose_patch",
+    "answer_text": "Verification succeeded after applying the patch.",
+    "repository": {
+      "current_commit": "fb47ac06a19e15949f77713faca2cc8978335699",
+      "default_branch": "main",
+      "dirty_state": "clean",
+      "managed_checkout": false,
+      "owner": "kazusa-fixtures",
+      "provider": "github",
+      "repo": "run_gate_03_approve_verify_success",
+      "requested_ref": null,
+      "resolved_ref": "main",
+      "source_url": "https://github.com/kazusa-fixtures/run_gate_03_approve_verify_success",
+      "storage_kind": "existing_local_checkout"
+    },
+    "source_scope": {
+      "interpretation": "explicit local repository checkout",
+      "kind": "repository",
+      "repo_relative_path": null,
+      "requested_ref": "main",
+      "source_url": "local://github/kazusa-fixtures/run_gate_03_approve_verify_success"
+    },
+    "evidence": [
+      {
+        "excerpt": "[source excerpt omitted from patch proposal response]",
+        "line_end": 2,
+        "line_start": 1,
+        "path": "slug_tools.py",
+        "reason": "Selected by the read-only evidence survey.",
+        "symbol_or_topic": "source evidence"
+      },
+      {
+        "excerpt": "[source excerpt omitted from patch proposal response]",
+        "line_end": 12,
+        "line_start": 1,
+        "path": "tests/test_slug_tools.py",
+        "reason": "Selected by the read-only evidence survey.",
+        "symbol_or_topic": "source evidence"
+      }
+    ],
+    "patch_artifacts": [
+      {
+        "artifact_id": "compiled-1",
+        "base": "repository",
+        "diff_text": "diff --git a/slug_tools.py b/slug_tools.py\n--- a/slug_tools.py\n+++ b/slug_tools.py\n@@ -1,2 +1,14 @@\n+import re\n+\n def slugify(value):\n-    return value.strip().lower().replace(' ', '-')\n+    # Remove punctuation and non-alphanumeric characters except whitespace\n+    # We keep spaces to collapse them into dashes later\n+    cleaned = re.sub(r'[^a-zA-Z0-9\\s]', '', value)\n+    \n+    # Collapse multiple whitespaces (including tabs/newlines) into single dash, and strip edges\n+    slug = re.sub(r'\\s+', '-', cleaned.strip()).lower()\n+    \n+    if not slug:\n+        raise ValueError(\"Slugify result cannot be empty\")\n+        \n+    return slug\n",
+        "files": [
+          "slug_tools.py"
+        ],
+        "summary": "Compiled from structured patch operations."
+      }
+    ],
+    "changed_files": [
+      {
+        "change_type": "modify",
+        "path": "slug_tools.py",
+        "summary": "Compiled from structured patch operations."
+      }
+    ],
+    "apply_attempts": [
+      {
+        "applied_files": [
+          "slug_tools.py"
+        ],
+        "apply_package_id": "12e8d1d579194242aea7653220665565",
+        "changed_files": [
+          {
+            "change_type": "modify",
+            "path": "slug_tools.py",
+            "summary": "Compiled from structured patch operations."
+          }
+        ],
+        "limitations": [],
+        "status": "succeeded",
+        "trace_summary": [
+          "patch_apply:approval_accepted",
+          "patch_apply:source_identity_matched",
+          "patch_apply:managed_copy_created",
+          "patch_apply:git_apply_succeeded"
+        ],
+        "validation": {
+          "errors": [],
+          "status": "succeeded",
+          "warnings": []
+        }
+      }
+    ],
+    "execution_attempts": [
+      {
+        "duration_ms": 755,
+        "executed_paths": [
+          "tests/test_slug_tools.py"
+        ],
+        "exit_code": 0,
+        "limitations": [],
+        "output_truncated": false,
+        "status": "succeeded",
+        "timed_out": false,
+        "tool": "pytest",
+        "trace_summary": [
+          "code_execution:tool=pytest",
+          "code_execution:status=succeeded"
+        ]
+      }
+    ],
+    "repair_attempts": [],
+    "attempts": [
+      {
+        "apply_package_id": "12e8d1d579194242aea7653220665565",
+        "apply_status": "succeeded",
+        "attempt_index": 1,
+        "changed_files": [
+          {
+            "change_type": "modify",
+            "path": "slug_tools.py",
+            "summary": "Compiled from structured patch operations."
+          }
+        ],
+        "execution_statuses": [
+          "succeeded"
+        ],
+        "limitations": [],
+        "patch_artifact_count": 1,
+        "proposal_status": "succeeded",
+        "trace_summary": [
+          "patch_apply:approval_accepted",
+          "patch_apply:source_identity_matched",
+          "patch_apply:managed_copy_created",
+          "patch_apply:git_apply_succeeded",
+          "code_execution:tool=pytest",
+          "code_execution:status=succeeded"
+        ]
+      }
+    ],
+    "blockers": [],
+    "events": [
+      {
+        "event_id": "90b70daad44b438aaba8ac13d3e1d1b3",
+        "event_type": "run_created",
+        "public_payload": {
+          "objective_type": "propose_patch"
+        },
+        "run_id": "5dbb4ea7b3104119a0717bfcae92943e",
+        "sequence": 1,
+        "status": "created",
+        "summary": "Coding run was created."
+      },
+      {
+        "event_id": "277b9010e6954681be4e71dfa89b1295",
+        "event_type": "source_resolved",
+        "public_payload": {
+          "repository": {
+            "current_commit": "fb47ac06a19e15949f77713faca2cc8978335699",
+            "default_branch": "main",
+            "dirty_state": "clean",
+            "managed_checkout": false,
+            "owner": "kazusa-fixtures",
+            "provider": "github",
+            "repo": "run_gate_03_approve_verify_success",
+            "requested_ref": null,
+            "resolved_ref": "main",
+            "source_url": "https://github.com/kazusa-fixtures/run_gate_03_approve_verify_success",
+            "storage_kind": "existing_local_checkout"
+          }
+        },
+        "run_id": "5dbb4ea7b3104119a0717bfcae92943e",
+        "sequence": 2,
+        "status": "awaiting_approval",
+        "summary": "Source was resolved for the proposal run."
+      },
+      {
+        "event_id": "fad78981e276499faba54a0d2b2df759",
+        "event_type": "evidence_collected",
+        "public_payload": {
+          "evidence_count": 2
+        },
+        "run_id": "5dbb4ea7b3104119a0717bfcae92943e",
+        "sequence": 3,
+        "status": "awaiting_approval",
+        "summary": "Proposal evidence was collected."
+      },
+      {
+        "event_id": "ca4b562c621144028d75b7130ef12fe3",
+        "event_type": "proposal_ready",
+        "public_payload": {
+          "changed_files": [
+            {
+              "change_type": "modify",
+              "path": "slug_tools.py",
+              "summary": "Updated slugify to remove punctuation, collapse whitespace into single dashes using regex, ensure lowercase output, and raise ValueError for empty results."
+            }
+          ]
+        },
+        "run_id": "5dbb4ea7b3104119a0717bfcae92943e",
+        "sequence": 4,
+        "status": "awaiting_approval",
+        "summary": "Patch proposal is ready for approval."
+      },
+      {
+        "event_id": "4d84fdec725d4f38888f8ced68de5911",
+        "event_type": "awaiting_approval",
+        "public_payload": {
+          "patch_artifact_count": 1
+        },
+        "run_id": "5dbb4ea7b3104119a0717bfcae92943e",
+        "sequence": 5,
+        "status": "awaiting_approval",
+        "summary": "Coding run is waiting for structured approval."
+      },
+      {
+        "event_id": "6e41f3dd06c24e78b37cf59a4d4a8d1e",
+        "event_type": "approval_received",
+        "public_payload": {
+          "approval": {
+            "approval_reason": "Prepared live coding-run gate run_gate_03_approve_verify_success.",
+            "approved": true,
+            "approved_at": "2026-07-09T00:00:00Z",
+            "approved_by": "coding-run-live-gate"
+          }
+        },
+        "run_id": "5dbb4ea7b3104119a0717bfcae92943e",
+        "sequence": 6,
+        "status": "awaiting_approval",
+        "summary": "Structured approval was received."
+      },
+      {
+        "event_id": "77f090448534477a8fa007bb8f56b49e",
+        "event_type": "apply_attempt_recorded",
+        "public_payload": {
+          "attempt": {
+            "apply_package_id": "12e8d1d579194242aea7653220665565",
+            "apply_status": "succeeded",
+            "attempt_index": 1,
+            "changed_files": [
+              {
+                "change_type": "modify",
+                "path": "slug_tools.py",
+                "summary": "Compiled from structured patch operations."
+              }
+            ],
+            "execution_statuses": [
+              "succeeded"
+            ],
+            "limitations": [],
+            "patch_artifact_count": 1,
+            "proposal_status": "succeeded",
+            "trace_summary": [
+              "patch_apply:approval_accepted",
+              "patch_apply:source_identity_matched",
+              "patch_apply:managed_copy_created",
+              "patch_apply:git_apply_succeeded",
+              "code_execution:tool=pytest",
+              "code_execution:status=succeeded"
+            ]
+          }
+        },
+        "run_id": "5dbb4ea7b3104119a0717bfcae92943e",
+        "sequence": 7,
+        "status": "completed",
+        "summary": "Apply attempt was recorded."
+      },
+      {
+        "event_id": "acd265dd73754ba9a967931237afc568",
+        "event_type": "execution_attempt_recorded",
+        "public_payload": {
+          "attempt": {
+            "apply_package_id": "12e8d1d579194242aea7653220665565",
+            "apply_status": "succeeded",
+            "attempt_index": 1,
+            "changed_files": [
+              {
+                "change_type": "modify",
+                "path": "slug_tools.py",
+                "summary": "Compiled from structured patch operations."
+              }
+            ],
+            "execution_statuses": [
+              "succeeded"
+            ],
+            "limitations": [],
+            "patch_artifact_count": 1,
+            "proposal_status": "succeeded",
+            "trace_summary": [
+              "patch_apply:approval_accepted",
+              "patch_apply:source_identity_matched",
+              "patch_apply:managed_copy_created",
+              "patch_apply:git_apply_succeeded",
+              "code_execution:tool=pytest",
+              "code_execution:status=succeeded"
+            ]
+          }
+        },
+        "run_id": "5dbb4ea7b3104119a0717bfcae92943e",
+        "sequence": 8,
+        "status": "completed",
+        "summary": "Execution attempt was recorded."
+      },
+      {
+        "event_id": "018faa33e00c454797a27a8104106cb2",
+        "event_type": "completed",
+        "public_payload": {
+          "status": "completed"
+        },
+        "run_id": "5dbb4ea7b3104119a0717bfcae92943e",
+        "sequence": 9,
+        "status": "completed",
+        "summary": "Coding run reached completed."
+      }
+    ],
+    "limitations": [],
+    "trace_summary": [
+      "Resolved explicit local checkout without mutation.",
+      "verify_repair:initial_artifacts_supplied",
+      "patch_apply:approval_accepted",
+      "patch_apply:source_identity_matched",
+      "patch_apply:managed_copy_created",
+      "patch_apply:git_apply_succeeded",
+      "code_execution:tool=pytest",
+      "code_execution:status=succeeded"
+    ]
+  }
+}

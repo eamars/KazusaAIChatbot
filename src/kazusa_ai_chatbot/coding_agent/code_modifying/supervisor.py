@@ -75,6 +75,7 @@ async def run(request: CodeModificationRequest) -> CodeModificationResult:
                 return result
             handoff_errors = _handoff_validation_errors(
                 task=task,
+                decision=decision,
                 file_plan=file_plan,
                 programmer_task_count=programmer_task_count,
                 repair_feedback=request.get("repair_feedback"),
@@ -242,6 +243,7 @@ def _public_file_plan(file_plan: dict[str, object]) -> dict[str, object]:
 def _handoff_validation_errors(
     *,
     task: ModifyingProgrammerTask,
+    decision: ModifyingPMDecision,
     file_plan: dict[str, object],
     programmer_task_count: int,
     repair_feedback: object,
@@ -258,10 +260,14 @@ def _handoff_validation_errors(
     owner_paths = set(_string_list(file_plan.get("owned_path_candidates")))
     caller_paths = set(_string_list(file_plan.get("caller_path_candidates")))
     companion_paths = set(_string_list(file_plan.get("test_or_doc_path_candidates")))
+    read_only_paths = set(_string_list(decision.get("read_only_paths")))
     repair_constraints = _execution_repair_constraints(repair_feedback)
     required_owner_paths = set(repair_constraints["required_source_owner_paths"])
     protected_paths = set(repair_constraints["protected_verification_paths"])
-    allowed_target_paths = file_context_paths.intersection(owner_paths | companion_paths)
+    writable_companion_paths = companion_paths.difference(read_only_paths)
+    allowed_target_paths = file_context_paths.intersection(
+        owner_paths | writable_companion_paths
+    )
     if required_owner_paths or protected_paths:
         allowed_target_paths = file_context_paths.intersection(
             owner_paths | caller_paths | required_owner_paths
@@ -276,12 +282,20 @@ def _handoff_validation_errors(
                 "evidence; include it in read_only_paths instead."
             )
             continue
+        if path in read_only_paths:
+            errors.append(
+                f"Programmer target path {path!r} is read-only in the PM "
+                "decision; remove it from target_paths."
+            )
+            continue
         if path not in allowed_target_paths:
             errors.append(f"Programmer target path {path!r} is not handoff-owned.")
     missing_required_paths = sorted(required_owner_paths.difference(target_path_set))
     for path in missing_required_paths:
         errors.append(f"Programmer task omitted required source-owner path {path!r}.")
-    companion_target_paths = companion_paths.difference(protected_paths)
+    companion_target_paths = companion_paths.difference(
+        protected_paths | read_only_paths
+    )
     execution_repair_mode = bool(required_owner_paths or protected_paths)
     if programmer_task_count == 0 and owner_paths and not owner_paths.intersection(
         target_paths

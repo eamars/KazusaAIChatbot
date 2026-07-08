@@ -16,7 +16,8 @@
   - `development_plans/archive/completed/short_term/coding_agent_phase5_patch_apply_plan.md`
   - `development_plans/archive/completed/short_term/coding_agent_phase6_code_executing_plan.md`
   - `development_plans/archive/completed/short_term/coding_agent_phase7_existing_source_planning_plan.md`
-  - `development_plans/active/short_term/coding_agent_phase8_verify_repair_loop_plan.md`
+  - `development_plans/archive/completed/short_term/coding_agent_phase8_verify_repair_loop_plan.md`
+  - `development_plans/archive/completed/short_term/coding_agent_phase9_run_supervisor_plan.md`
   - `development_plans/reference/designs/coding_agent_phase9_run_supervisor_architecture.md`
   - `development_plans/reference/designs/coding_agent_phase10_repository_scale_reading_architecture.md`
 
@@ -194,7 +195,7 @@ CodeReadingRequest
 | Phase 6 | Bounded `python_compileall` and `pytest` execution in managed apply workspaces. | Trusted callers can verify approved applied copies without arbitrary shell access. |
 | Phase 7 | Existing-source planning upgrade: active modifying PM plus File Agent existing-source path maps and context planning. | Source-backed proposals gain explicit source-owner planning before programmer edits. |
 | Phase 8 | Controlled verify-and-repair loop. | Trusted callers can apply, execute, repair from redacted execution feedback, and rerun within hard caps. |
-| Phase 9 | Durable coding run supervisor. | Kazusa gains a self-contained coding-agent session with state, continuation, blockers, attempts, and completion. |
+| Phase 9 | Durable coding run supervisor. | Kazusa gains a self-contained coding-agent session with state, continuation, blockers, attempts, completion, and post-phase E2E readiness for supported workflows. |
 | Phase 10 | Repository-scale reading through master/subsystem PMs and evidence graph synthesis. | Kazusa can answer broad architecture, impact, ownership, and migration questions from bounded evidence. |
 
 ## Phase Closure Gate Policy
@@ -232,15 +233,16 @@ phase contract.
 
 ## Current Implementation Alignment
 
-As of the Phase 8 implementation plan:
+As of the Phase 9 executable plan:
 
-- Phases 0 through 7 are implemented and archived as completed records.
-- Phase 8 is the active short-term implementation step and adds controlled
-  verify-and-repair.
-- Phase 9 is the first phase where the coding agent becomes a self-contained
-  session loop.
+- Phases 0 through 8 are implemented and archived as completed records.
+- Phase 9 is the active approved short-term implementation step where the
+  coding agent becomes a self-contained session loop.
+- After Phase 9, supported read-only, proposal, approval, apply, execution,
+  repair, cancellation, reload, sanitization, and source-immutability
+  workflows must be E2E-testable without Phase 10 or later plans.
 - Phase 10 improves broad repository intelligence but is not required for the
-  core self-contained loop.
+  core self-contained loop or supported Phase 9 E2E workflows.
 
 ## Scope Boundaries
 
