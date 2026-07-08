@@ -1,0 +1,281 @@
+{
+  "gate": {
+    "gate_id": "verify_repair_gate_03_duplicate_anchor_parser",
+    "title": "Parser edge-case repair",
+    "instruction": "Repair the Markdown anchor collector so duplicate headings receive GitHub-style numeric suffixes. The first duplicate keeps the base anchor, the second gets -1, the third gets -2, and punctuation should not create different anchors. Do not modify the verification tests.",
+    "source_paths": [
+      "mdanchors.py",
+      "tests/test_mdanchors.py"
+    ],
+    "execution_specs": [
+      {
+        "tool": "pytest",
+        "paths": [],
+        "pytest_selectors": [
+          "tests/test_mdanchors.py"
+        ],
+        "timeout_seconds": 20
+      }
+    ],
+    "repair_attempt_limit": 1,
+    "expected_repaired_paths": [
+      "mdanchors.py"
+    ],
+    "protected_verification_paths": [
+      "tests/test_mdanchors.py"
+    ],
+    "behavior_rubric": [
+      "The first execution attempt fails on duplicate-anchor suffixing.",
+      "The repair changes parser state rather than special-casing one string.",
+      "The repaired attempt preserves punctuation normalization."
+    ],
+    "forbidden_failure_modes": [
+      "The repair hard-codes the fixture headings.",
+      "The repair updates tests instead of collect_anchors.",
+      "The final response omits a repaired patch artifact for mdanchors.py."
+    ]
+  },
+  "model_routes": [
+    "CODING_AGENT_PM_LLM",
+    "CODING_AGENT_PROGRAMMER_LLM"
+  ],
+  "source_root": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\coding_agent_verify_repair_workspace\\verify_repair_gate_03_duplicate_anchor_parser\\source",
+  "workspace_root": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\coding_agent_verify_repair_workspace\\verify_repair_gate_03_duplicate_anchor_parser",
+  "source_hashes_before": {
+    "mdanchors.py": "f4862c6d31e00f00d835629ade493ca1ebe354d3e622f6e2b4429be77075093e",
+    "tests/test_mdanchors.py": "059652bb5d8f616397c6c81f5290ca1b9faa43d68f6e95a630114c49e4308b0a"
+  },
+  "source_hashes_after": {
+    "mdanchors.py": "f4862c6d31e00f00d835629ade493ca1ebe354d3e622f6e2b4429be77075093e",
+    "tests/test_mdanchors.py": "059652bb5d8f616397c6c81f5290ca1b9faa43d68f6e95a630114c49e4308b0a"
+  },
+  "source_tree_unchanged": true,
+  "initial_patch_artifacts": [
+    {
+      "artifact_id": "compiled-1",
+      "base": "repository",
+      "diff_text": "diff --git a/mdanchors.py b/mdanchors.py\n--- a/mdanchors.py\n+++ b/mdanchors.py\n@@ -3,8 +3,8 @@\n \n def slugify(text):\n     lowered = text.strip().lower()\n-    lowered = re.sub(r'\\s+', '-', lowered).strip('-')\n-    return lowered\n+    lowered = re.sub(r'[^a-z0-9 ]+', '', lowered)\n+    return re.sub(r'\\s+', '-', lowered).strip('-')\n \n \n def collect_anchors(markdown):\n",
+      "files": [
+        "mdanchors.py"
+      ],
+      "summary": "Compiled from structured patch operations."
+    }
+  ],
+  "request": {
+    "question": "Repair the Markdown anchor collector so duplicate headings receive GitHub-style numeric suffixes. The first duplicate keeps the base anchor, the second gets -1, the third gets -2, and punctuation should not create different anchors. Do not modify the verification tests.",
+    "source_scope_hint": "directory",
+    "execution_specs": [
+      {
+        "tool": "pytest",
+        "paths": [],
+        "pytest_selectors": [
+          "tests/test_mdanchors.py"
+        ],
+        "timeout_seconds": 20
+      }
+    ],
+    "repair_attempt_limit": 1,
+    "initial_patch_artifact_count": 1
+  },
+  "response": {
+    "status": "succeeded",
+    "answer_text": "Verification succeeded after applying the patch.",
+    "repository": {
+      "provider": "github",
+      "owner": "kazusa-fixtures",
+      "repo": "verify_repair_gate_03_duplicate_anchor_parser",
+      "source_url": "https://github.com/kazusa-fixtures/verify_repair_gate_03_duplicate_anchor_parser",
+      "requested_ref": null,
+      "resolved_ref": "main",
+      "current_commit": "0acaa6807d85e45a7284e5352bf3995352097530",
+      "default_branch": "main",
+      "storage_kind": "existing_local_checkout",
+      "managed_checkout": false,
+      "dirty_state": "clean"
+    },
+    "source_scope": {
+      "kind": "repository",
+      "repo_relative_path": null,
+      "source_url": "local://github/kazusa-fixtures/verify_repair_gate_03_duplicate_anchor_parser",
+      "requested_ref": "main",
+      "interpretation": "explicit local repository checkout"
+    },
+    "attempts": [
+      {
+        "attempt_index": 1,
+        "proposal_status": "succeeded",
+        "apply_status": "succeeded",
+        "execution_statuses": [
+          "failed"
+        ],
+        "patch_artifact_count": 1,
+        "changed_files": [
+          {
+            "path": "mdanchors.py",
+            "change_type": "modify",
+            "summary": "Compiled from structured patch operations."
+          }
+        ],
+        "apply_package_id": "102f3feb52524a08924ccb1de4cdf631",
+        "limitations": [],
+        "trace_summary": [
+          "patch_apply:approval_accepted",
+          "patch_apply:source_identity_matched",
+          "patch_apply:managed_copy_created",
+          "patch_apply:git_apply_succeeded",
+          "code_execution:tool=pytest",
+          "code_execution:status=failed"
+        ]
+      },
+      {
+        "attempt_index": 2,
+        "proposal_status": "succeeded",
+        "apply_status": "succeeded",
+        "execution_statuses": [
+          "succeeded"
+        ],
+        "patch_artifact_count": 1,
+        "changed_files": [
+          {
+            "path": "mdanchors.py",
+            "change_type": "modify",
+            "summary": "Compiled from structured patch operations."
+          }
+        ],
+        "apply_package_id": "84a6137eac204ce8a5bb63b029240e45",
+        "limitations": [],
+        "trace_summary": [
+          "patch_apply:approval_accepted",
+          "patch_apply:source_identity_matched",
+          "patch_apply:managed_copy_created",
+          "patch_apply:git_apply_succeeded",
+          "code_execution:tool=pytest",
+          "code_execution:status=succeeded"
+        ]
+      }
+    ],
+    "final_patch_artifacts": [
+      {
+        "artifact_id": "compiled-1",
+        "base": "repository",
+        "diff_text": "diff --git a/mdanchors.py b/mdanchors.py\n--- a/mdanchors.py\n+++ b/mdanchors.py\n@@ -3,15 +3,28 @@\n \n def slugify(text):\n     lowered = text.strip().lower()\n-    lowered = re.sub(r'\\s+', '-', lowered).strip('-')\n-    return lowered\n+    # Remove punctuation (anything not alphanumeric or whitespace)\n+    cleaned = re.sub(r'[^a-z0-9\\s]', '', lowered)\n+    # Replace one or more whitespace characters with a single hyphen\n+    slug = re.sub(r'\\s+', '-', cleaned).strip('-')\n+    return slug\n \n \n def collect_anchors(markdown):\n     anchors = []\n+    seen = {}\n     for line in markdown.splitlines():\n         if not line.startswith('#'):\n             continue\n         title = line.lstrip('#').strip()\n-        anchors.append(slugify(title))\n+        base_slug = slugify(title)\n+        \n+        count = seen.get(base_slug, 0)\n+        if count == 0:\n+            final_slug = base_slug\n+        else:\n+            final_slug = f\"{base_slug}-{count}\"\n+        \n+        anchors.append(final_slug)\n+        seen[base_slug] = count + 1\n     return anchors\n",
+        "files": [
+          "mdanchors.py"
+        ],
+        "summary": "Compiled from structured patch operations."
+      }
+    ],
+    "final_changed_files": [
+      {
+        "path": "mdanchors.py",
+        "change_type": "modify",
+        "summary": "Compiled from structured patch operations."
+      }
+    ],
+    "final_apply": {
+      "status": "succeeded",
+      "apply_package_id": "84a6137eac204ce8a5bb63b029240e45",
+      "source_identity": {
+        "provider": "github",
+        "owner": "kazusa-fixtures",
+        "repo": "verify_repair_gate_03_duplicate_anchor_parser",
+        "current_commit": "0acaa6807d85e45a7284e5352bf3995352097530",
+        "dirty_state": "clean"
+      },
+      "apply_workspace_ref": {
+        "kind": "managed_apply_workspace",
+        "apply_package_id": "84a6137eac204ce8a5bb63b029240e45",
+        "source_identity": {
+          "provider": "github",
+          "owner": "kazusa-fixtures",
+          "repo": "verify_repair_gate_03_duplicate_anchor_parser",
+          "current_commit": "0acaa6807d85e45a7284e5352bf3995352097530",
+          "dirty_state": "clean"
+        },
+        "applied_files": [
+          "mdanchors.py"
+        ]
+      },
+      "applied_files": [
+        "mdanchors.py"
+      ],
+      "changed_files": [
+        {
+          "path": "mdanchors.py",
+          "change_type": "modify",
+          "summary": "Compiled from structured patch operations."
+        }
+      ],
+      "validation": {
+        "status": "succeeded",
+        "errors": [],
+        "warnings": []
+      },
+      "limitations": [],
+      "trace_summary": [
+        "patch_apply:approval_accepted",
+        "patch_apply:source_identity_matched",
+        "patch_apply:managed_copy_created",
+        "patch_apply:git_apply_succeeded"
+      ]
+    },
+    "final_execution": [
+      {
+        "status": "succeeded",
+        "tool": "pytest",
+        "exit_code": 0,
+        "timed_out": false,
+        "duration_ms": 812,
+        "stdout_excerpt": "\ntests\\test_mdanchors.py::test_duplicate_headings_receive_suffixes PASSED [ 50%]\ntests\\test_mdanchors.py::test_distinct_headings_keep_base_slug PASSED    [100%]\n\n=================================== PASSES ====================================\n=========================== short test summary info ===========================\nPASSED tests\\test_mdanchors.py::test_duplicate_headings_receive_suffixes\nPASSED tests\\test_mdanchors.py::test_distinct_headings_keep_base_slug\n============================== 2 passed in 0.04s ==============================\n",
+        "stderr_excerpt": "",
+        "output_truncated": false,
+        "executed_paths": [
+          "tests/test_mdanchors.py"
+        ],
+        "limitations": [],
+        "trace_summary": [
+          "code_execution:tool=pytest",
+          "code_execution:status=succeeded"
+        ]
+      }
+    ],
+    "limitations": [],
+    "trace_summary": [
+      "Resolved explicit local checkout without mutation.",
+      "verify_repair:initial_artifacts_supplied",
+      "patch_apply:approval_accepted",
+      "patch_apply:source_identity_matched",
+      "patch_apply:managed_copy_created",
+      "patch_apply:git_apply_succeeded",
+      "code_execution:tool=pytest",
+      "code_execution:status=failed",
+      "Resolved explicit local checkout without mutation.",
+      "reading_pm:repository_map files=2",
+      "reading_pm:work_plan intent=pipeline_or_data_flow status=need_programmers assignments=2",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=1",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=1",
+      "reading_pm:work_plan intent=pipeline_or_data_flow status=sufficient assignments=0",
+      "reading_pm:sufficiency=sufficient",
+      "reading_merge:evidence=2",
+      "modifying:file_plan_ready",
+      "modifying_pm:decision=repair_child",
+      "modifying_pm:repair_child",
+      "modifying_pm:decision=repair_child",
+      "modifying_pm:repair_child",
+      "modifying_pm:decision=create_programmer_task",
+      "modifying_pm:programmer_task=repair-duplicate-anchor-logic",
+      "modifying_pm:sufficiency=programmer_artifacts_ready",
+      "modifying:artifacts=1",
+      "patch_validation:succeeded",
+      "patch_apply:approval_accepted",
+      "patch_apply:source_identity_matched",
+      "patch_apply:managed_copy_created",
+      "patch_apply:git_apply_succeeded",
+      "code_execution:tool=pytest",
+      "code_execution:status=succeeded"
+    ]
+  },
+  "human_review_required": true
+}

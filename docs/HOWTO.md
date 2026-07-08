@@ -325,6 +325,15 @@ stdout/stderr excerpts and exit metadata, and keeps original source checkouts,
 background tasks, L2d, dialog, adapter delivery, package installation, network
 access, and repair loops outside this boundary.
 
+The coding-agent direct API also exposes `verify_and_repair_code_change(...)`
+for trusted callers that provide a source-backed request, structured approval,
+and structured execution specs. This flow composes proposal, managed-copy
+apply, bounded execution, and capped repair attempts. Repairs receive only
+structured `execution_verification` summaries with redacted failure evidence,
+and each attempt uses a fresh managed apply copy. It remains outside
+background-worker, L2d, dialog, adapter delivery, package installation,
+network access, and original-source mutation paths.
+
 Reflection phase scheduling spreads monitor-eligible channels across the
 `REFLECTION_WORKER_INTERVAL_SECONDS` period instead of running all group
 review work in one burst. `REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD` defaults to

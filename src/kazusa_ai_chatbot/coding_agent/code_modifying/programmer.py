@@ -37,6 +37,12 @@ You may receive repair_feedback containing prior artifacts and validation
 errors from an earlier attempt. When repair_feedback is present, return a full
 corrected artifact list, fix every validation error directly, and do not repeat
 the invalid code pattern.
+When repair_feedback.feedback_source is execution_verification, use failed_paths,
+failure_summaries, required_source_owner_paths, and protected_verification_paths
+to repair source-owned files while preserving protected verification paths. In
+this mode, write artifacts for required_source_owner_paths and for source
+collaborator or caller paths needed to repair the failing integration. Use
+protected_verification_paths as read-only evidence.
 Return one strict JSON object only. Do not include Markdown, prose before JSON,
 raw unified diffs, or command output. Do not claim that tests or commands were
 run.

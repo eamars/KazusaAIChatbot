@@ -1,0 +1,277 @@
+{
+  "gate": {
+    "gate_id": "verify_repair_gate_01_median_boundary",
+    "title": "Single-file median boundary repair",
+    "instruction": "Repair the statistics helper so median([]) raises ValueError and median with an even number of values returns the average of the two middle values. Do not modify the provided verification tests.",
+    "source_paths": [
+      "stats_tools.py",
+      "tests/test_stats_tools.py"
+    ],
+    "execution_specs": [
+      {
+        "tool": "pytest",
+        "paths": [],
+        "pytest_selectors": [
+          "tests/test_stats_tools.py"
+        ],
+        "timeout_seconds": 20
+      }
+    ],
+    "repair_attempt_limit": 1,
+    "expected_repaired_paths": [
+      "stats_tools.py"
+    ],
+    "protected_verification_paths": [
+      "tests/test_stats_tools.py"
+    ],
+    "behavior_rubric": [
+      "The first execution attempt fails on the even-length median contract.",
+      "Repair feedback preserves the failing test name and assertion summary.",
+      "The repaired attempt changes stats_tools.py and passes the same tests."
+    ],
+    "forbidden_failure_modes": [
+      "The repair edits tests instead of source behavior.",
+      "The final response exposes absolute managed workspace paths.",
+      "The repair loop repeats the seed patch without addressing even lengths."
+    ]
+  },
+  "model_routes": [
+    "CODING_AGENT_PM_LLM",
+    "CODING_AGENT_PROGRAMMER_LLM"
+  ],
+  "source_root": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\coding_agent_verify_repair_workspace\\verify_repair_gate_01_median_boundary\\source",
+  "workspace_root": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\coding_agent_verify_repair_workspace\\verify_repair_gate_01_median_boundary",
+  "source_hashes_before": {
+    "stats_tools.py": "021c0575fd057eccf9f6d74894f2f68762c9664c97998eaf440ed76e412cbf23",
+    "tests/test_stats_tools.py": "7b349519d3263c5b93d8eb899dda447fd9750ba200b17b249570fb4726d2eff4"
+  },
+  "source_hashes_after": {
+    "stats_tools.py": "021c0575fd057eccf9f6d74894f2f68762c9664c97998eaf440ed76e412cbf23",
+    "tests/test_stats_tools.py": "7b349519d3263c5b93d8eb899dda447fd9750ba200b17b249570fb4726d2eff4"
+  },
+  "source_tree_unchanged": true,
+  "initial_patch_artifacts": [
+    {
+      "artifact_id": "compiled-1",
+      "base": "repository",
+      "diff_text": "diff --git a/stats_tools.py b/stats_tools.py\n--- a/stats_tools.py\n+++ b/stats_tools.py\n@@ -1,4 +1,6 @@\n def median(values):\n     ordered = sorted(values)\n+    if not ordered:\n+        raise ValueError('median requires at least one value')\n     middle = len(ordered) // 2\n     return ordered[middle]\n",
+      "files": [
+        "stats_tools.py"
+      ],
+      "summary": "Compiled from structured patch operations."
+    }
+  ],
+  "request": {
+    "question": "Repair the statistics helper so median([]) raises ValueError and median with an even number of values returns the average of the two middle values. Do not modify the provided verification tests.",
+    "source_scope_hint": "directory",
+    "execution_specs": [
+      {
+        "tool": "pytest",
+        "paths": [],
+        "pytest_selectors": [
+          "tests/test_stats_tools.py"
+        ],
+        "timeout_seconds": 20
+      }
+    ],
+    "repair_attempt_limit": 1,
+    "initial_patch_artifact_count": 1
+  },
+  "response": {
+    "status": "succeeded",
+    "answer_text": "Verification succeeded after applying the patch.",
+    "repository": {
+      "provider": "github",
+      "owner": "kazusa-fixtures",
+      "repo": "verify_repair_gate_01_median_boundary",
+      "source_url": "https://github.com/kazusa-fixtures/verify_repair_gate_01_median_boundary",
+      "requested_ref": null,
+      "resolved_ref": "main",
+      "current_commit": "76a4438af45701bd9f773f386d39067d58f23f75",
+      "default_branch": "main",
+      "storage_kind": "existing_local_checkout",
+      "managed_checkout": false,
+      "dirty_state": "clean"
+    },
+    "source_scope": {
+      "kind": "repository",
+      "repo_relative_path": null,
+      "source_url": "local://github/kazusa-fixtures/verify_repair_gate_01_median_boundary",
+      "requested_ref": "main",
+      "interpretation": "explicit local repository checkout"
+    },
+    "attempts": [
+      {
+        "attempt_index": 1,
+        "proposal_status": "succeeded",
+        "apply_status": "succeeded",
+        "execution_statuses": [
+          "failed"
+        ],
+        "patch_artifact_count": 1,
+        "changed_files": [
+          {
+            "path": "stats_tools.py",
+            "change_type": "modify",
+            "summary": "Compiled from structured patch operations."
+          }
+        ],
+        "apply_package_id": "ac3f4ace620c452f8c28fa137f0832a4",
+        "limitations": [],
+        "trace_summary": [
+          "patch_apply:approval_accepted",
+          "patch_apply:source_identity_matched",
+          "patch_apply:managed_copy_created",
+          "patch_apply:git_apply_succeeded",
+          "code_execution:tool=pytest",
+          "code_execution:status=failed"
+        ]
+      },
+      {
+        "attempt_index": 2,
+        "proposal_status": "succeeded",
+        "apply_status": "succeeded",
+        "execution_statuses": [
+          "succeeded"
+        ],
+        "patch_artifact_count": 1,
+        "changed_files": [
+          {
+            "path": "stats_tools.py",
+            "change_type": "modify",
+            "summary": "Compiled from structured patch operations."
+          }
+        ],
+        "apply_package_id": "f895c92ce2d7421c8a9448feb234cf68",
+        "limitations": [],
+        "trace_summary": [
+          "patch_apply:approval_accepted",
+          "patch_apply:source_identity_matched",
+          "patch_apply:managed_copy_created",
+          "patch_apply:git_apply_succeeded",
+          "code_execution:tool=pytest",
+          "code_execution:status=succeeded"
+        ]
+      }
+    ],
+    "final_patch_artifacts": [
+      {
+        "artifact_id": "compiled-1",
+        "base": "repository",
+        "diff_text": "diff --git a/stats_tools.py b/stats_tools.py\n--- a/stats_tools.py\n+++ b/stats_tools.py\n@@ -1,4 +1,10 @@\n def median(values):\n+    if not values:\n+        raise ValueError(\"median requires at least one value\")\n     ordered = sorted(values)\n-    middle = len(ordered) // 2\n-    return ordered[middle]\n+    n = len(ordered)\n+    middle = n // 2\n+    if n % 2 == 1:\n+        return ordered[middle]\n+    else:\n+        return (ordered[middle - 1] + ordered[middle]) / 2\n",
+        "files": [
+          "stats_tools.py"
+        ],
+        "summary": "Compiled from structured patch operations."
+      }
+    ],
+    "final_changed_files": [
+      {
+        "path": "stats_tools.py",
+        "change_type": "modify",
+        "summary": "Compiled from structured patch operations."
+      }
+    ],
+    "final_apply": {
+      "status": "succeeded",
+      "apply_package_id": "f895c92ce2d7421c8a9448feb234cf68",
+      "source_identity": {
+        "provider": "github",
+        "owner": "kazusa-fixtures",
+        "repo": "verify_repair_gate_01_median_boundary",
+        "current_commit": "76a4438af45701bd9f773f386d39067d58f23f75",
+        "dirty_state": "clean"
+      },
+      "apply_workspace_ref": {
+        "kind": "managed_apply_workspace",
+        "apply_package_id": "f895c92ce2d7421c8a9448feb234cf68",
+        "source_identity": {
+          "provider": "github",
+          "owner": "kazusa-fixtures",
+          "repo": "verify_repair_gate_01_median_boundary",
+          "current_commit": "76a4438af45701bd9f773f386d39067d58f23f75",
+          "dirty_state": "clean"
+        },
+        "applied_files": [
+          "stats_tools.py"
+        ]
+      },
+      "applied_files": [
+        "stats_tools.py"
+      ],
+      "changed_files": [
+        {
+          "path": "stats_tools.py",
+          "change_type": "modify",
+          "summary": "Compiled from structured patch operations."
+        }
+      ],
+      "validation": {
+        "status": "succeeded",
+        "errors": [],
+        "warnings": []
+      },
+      "limitations": [],
+      "trace_summary": [
+        "patch_apply:approval_accepted",
+        "patch_apply:source_identity_matched",
+        "patch_apply:managed_copy_created",
+        "patch_apply:git_apply_succeeded"
+      ]
+    },
+    "final_execution": [
+      {
+        "status": "succeeded",
+        "tool": "pytest",
+        "exit_code": 0,
+        "timed_out": false,
+        "duration_ms": 813,
+        "stdout_excerpt": "\ntests\\test_stats_tools.py::test_median_odd_length PASSED                 [ 33%]\ntests\\test_stats_tools.py::test_median_even_length_averages_middle_pair PASSED [ 66%]\ntests\\test_stats_tools.py::test_median_rejects_empty_input PASSED        [100%]\n\n=================================== PASSES ====================================\n=========================== short test summary info ===========================\nPASSED tests\\test_stats_tools.py::test_median_odd_length\nPASSED tests\\test_stats_tools.py::test_median_even_length_averages_middle_pair\nPASSED tests\\test_stats_tools.py::test_median_rejects_empty_input\n============================== 3 passed in 0.04s ==============================\n",
+        "stderr_excerpt": "",
+        "output_truncated": false,
+        "executed_paths": [
+          "tests/test_stats_tools.py"
+        ],
+        "limitations": [],
+        "trace_summary": [
+          "code_execution:tool=pytest",
+          "code_execution:status=succeeded"
+        ]
+      }
+    ],
+    "limitations": [],
+    "trace_summary": [
+      "Resolved explicit local checkout without mutation.",
+      "verify_repair:initial_artifacts_supplied",
+      "patch_apply:approval_accepted",
+      "patch_apply:source_identity_matched",
+      "patch_apply:managed_copy_created",
+      "patch_apply:git_apply_succeeded",
+      "code_execution:tool=pytest",
+      "code_execution:status=failed",
+      "Resolved explicit local checkout without mutation.",
+      "reading_pm:repository_map files=2",
+      "reading_pm:work_plan intent=symbol_behavior status=need_programmers assignments=2",
+      "programmer:logic analyst",
+      "programmer_report logic analyst status=succeeded evidence=2",
+      "programmer:test analyst",
+      "programmer_report test analyst status=succeeded evidence=1",
+      "reading_pm:work_plan intent=pipeline_or_data_flow status=sufficient assignments=0",
+      "reading_pm:sufficiency=sufficient",
+      "reading_merge:evidence=3",
+      "modifying:file_plan_ready",
+      "modifying_pm:decision=create_programmer_task",
+      "modifying_pm:programmer_task=fix-median-logic",
+      "modifying_pm:sufficiency=programmer_artifacts_ready",
+      "modifying:artifacts=1",
+      "patch_validation:succeeded",
+      "patch_apply:approval_accepted",
+      "patch_apply:source_identity_matched",
+      "patch_apply:managed_copy_created",
+      "patch_apply:git_apply_succeeded",
+      "code_execution:tool=pytest",
+      "code_execution:status=succeeded"
+    ]
+  },
+  "human_review_required": true
+}

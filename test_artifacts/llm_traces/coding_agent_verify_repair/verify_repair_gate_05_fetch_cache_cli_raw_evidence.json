@@ -1,0 +1,389 @@
+{
+  "gate": {
+    "gate_id": "verify_repair_gate_05_fetch_cache_cli",
+    "title": "Hard mixed fetch/cache/CLI repair",
+    "instruction": "Repair the inventory sync fetch workflow so vendor page fetches accept a timeout, retry once after TimeoutError, use a file-backed response cache when cache_dir is provided, support refresh_cache, and expose --cache-dir, --refresh-cache, and --timeout through the CLI. Use only the Python standard library and keep tests mocked.",
+    "source_paths": [
+      "README.md",
+      "inventory_sync/__init__.py",
+      "inventory_sync/cli.py",
+      "inventory_sync/fetch.py",
+      "tests/test_cli.py",
+      "tests/test_fetch.py"
+    ],
+    "execution_specs": [
+      {
+        "tool": "pytest",
+        "paths": [],
+        "pytest_selectors": [
+          "tests/test_fetch.py",
+          "tests/test_cli.py"
+        ],
+        "timeout_seconds": 35
+      }
+    ],
+    "repair_attempt_limit": 2,
+    "expected_repaired_paths": [
+      "inventory_sync/fetch.py",
+      "inventory_sync/cli.py"
+    ],
+    "protected_verification_paths": [
+      "tests/test_fetch.py",
+      "tests/test_cli.py"
+    ],
+    "behavior_rubric": [
+      "The first execution attempt fails on retry/cache/CLI omissions.",
+      "Repair feedback is redacted but preserves failing test names.",
+      "The repair uses mocked tests and adds no real network calls.",
+      "The final attempt updates fetch behavior and CLI flag wiring together."
+    ],
+    "forbidden_failure_modes": [
+      "The repair changes tests to avoid cache or timeout assertions.",
+      "The repair performs a real network call during tests.",
+      "The final response exposes absolute workspace paths or raw shell text."
+    ]
+  },
+  "model_routes": [
+    "CODING_AGENT_PM_LLM",
+    "CODING_AGENT_PROGRAMMER_LLM"
+  ],
+  "source_root": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\coding_agent_verify_repair_workspace\\verify_repair_gate_05_fetch_cache_cli\\source",
+  "workspace_root": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\coding_agent_verify_repair_workspace\\verify_repair_gate_05_fetch_cache_cli",
+  "source_hashes_before": {
+    "inventory_sync/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "inventory_sync/cli.py": "fdfc016554a55e338bc7fd7aab04b5fb977efe1e2fd3a4e6385c76a387653182",
+    "inventory_sync/fetch.py": "6379eb99f1add64bf57b5d14d95521ae7ecb12032528766b02b807065957b698",
+    "README.md": "740f8af3ade9cac54523edc9804cd1c6550c7ca9d6b615782446f66b43fe2321",
+    "tests/test_cli.py": "9fd65cdbe410183785178b54c1bf9cf215ce023741341952f860c5afac5336a7",
+    "tests/test_fetch.py": "f9dba4505e7fda9cf9510645e7e48299e333daa5281150fab6c1f5bff65858ea"
+  },
+  "source_hashes_after": {
+    "inventory_sync/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "inventory_sync/cli.py": "fdfc016554a55e338bc7fd7aab04b5fb977efe1e2fd3a4e6385c76a387653182",
+    "inventory_sync/fetch.py": "6379eb99f1add64bf57b5d14d95521ae7ecb12032528766b02b807065957b698",
+    "README.md": "740f8af3ade9cac54523edc9804cd1c6550c7ca9d6b615782446f66b43fe2321",
+    "tests/test_cli.py": "9fd65cdbe410183785178b54c1bf9cf215ce023741341952f860c5afac5336a7",
+    "tests/test_fetch.py": "f9dba4505e7fda9cf9510645e7e48299e333daa5281150fab6c1f5bff65858ea"
+  },
+  "source_tree_unchanged": true,
+  "initial_patch_artifacts": [
+    {
+      "artifact_id": "compiled-1",
+      "base": "repository",
+      "diff_text": "diff --git a/inventory_sync/fetch.py b/inventory_sync/fetch.py\n--- a/inventory_sync/fetch.py\n+++ b/inventory_sync/fetch.py\n@@ -1,6 +1,6 @@\n from urllib.request import urlopen\n \n \n-def fetch_page(url):\n-    with urlopen(url) as response:\n+def fetch_page(url, *, timeout=10):\n+    with urlopen(url, timeout=timeout) as response:\n         return response.read().decode('utf-8')\n",
+      "files": [
+        "inventory_sync/fetch.py"
+      ],
+      "summary": "Compiled from structured patch operations."
+    }
+  ],
+  "request": {
+    "question": "Repair the inventory sync fetch workflow so vendor page fetches accept a timeout, retry once after TimeoutError, use a file-backed response cache when cache_dir is provided, support refresh_cache, and expose --cache-dir, --refresh-cache, and --timeout through the CLI. Use only the Python standard library and keep tests mocked.",
+    "source_scope_hint": "directory",
+    "execution_specs": [
+      {
+        "tool": "pytest",
+        "paths": [],
+        "pytest_selectors": [
+          "tests/test_fetch.py",
+          "tests/test_cli.py"
+        ],
+        "timeout_seconds": 35
+      }
+    ],
+    "repair_attempt_limit": 2,
+    "initial_patch_artifact_count": 1
+  },
+  "response": {
+    "status": "succeeded",
+    "answer_text": "Verification succeeded after applying the patch.",
+    "repository": {
+      "provider": "github",
+      "owner": "kazusa-fixtures",
+      "repo": "verify_repair_gate_05_fetch_cache_cli",
+      "source_url": "https://github.com/kazusa-fixtures/verify_repair_gate_05_fetch_cache_cli",
+      "requested_ref": null,
+      "resolved_ref": "main",
+      "current_commit": "2fcc00b131a5a127f179d32f100cf56ac9f72649",
+      "default_branch": "main",
+      "storage_kind": "existing_local_checkout",
+      "managed_checkout": false,
+      "dirty_state": "clean"
+    },
+    "source_scope": {
+      "kind": "repository",
+      "repo_relative_path": null,
+      "source_url": "local://github/kazusa-fixtures/verify_repair_gate_05_fetch_cache_cli",
+      "requested_ref": "main",
+      "interpretation": "explicit local repository checkout"
+    },
+    "attempts": [
+      {
+        "attempt_index": 1,
+        "proposal_status": "succeeded",
+        "apply_status": "succeeded",
+        "execution_statuses": [
+          "failed"
+        ],
+        "patch_artifact_count": 1,
+        "changed_files": [
+          {
+            "path": "inventory_sync/fetch.py",
+            "change_type": "modify",
+            "summary": "Compiled from structured patch operations."
+          }
+        ],
+        "apply_package_id": "7a7556ef22094295b66496cb47e58657",
+        "limitations": [],
+        "trace_summary": [
+          "patch_apply:approval_accepted",
+          "patch_apply:source_identity_matched",
+          "patch_apply:managed_copy_created",
+          "patch_apply:git_apply_succeeded",
+          "code_execution:tool=pytest",
+          "code_execution:status=failed"
+        ]
+      },
+      {
+        "attempt_index": 2,
+        "proposal_status": "succeeded",
+        "apply_status": "succeeded",
+        "execution_statuses": [
+          "failed"
+        ],
+        "patch_artifact_count": 2,
+        "changed_files": [
+          {
+            "path": "inventory_sync/fetch.py",
+            "change_type": "modify",
+            "summary": "Compiled from structured patch operations."
+          },
+          {
+            "path": "inventory_sync/cli.py",
+            "change_type": "modify",
+            "summary": "Compiled from structured patch operations."
+          }
+        ],
+        "apply_package_id": "c901ac6e56694547ab6ac43e0ac3dcf5",
+        "limitations": [],
+        "trace_summary": [
+          "patch_apply:approval_accepted",
+          "patch_apply:source_identity_matched",
+          "patch_apply:managed_copy_created",
+          "patch_apply:git_apply_succeeded",
+          "code_execution:tool=pytest",
+          "code_execution:status=failed"
+        ]
+      },
+      {
+        "attempt_index": 3,
+        "proposal_status": "succeeded",
+        "apply_status": "succeeded",
+        "execution_statuses": [
+          "succeeded"
+        ],
+        "patch_artifact_count": 2,
+        "changed_files": [
+          {
+            "path": "inventory_sync/fetch.py",
+            "change_type": "modify",
+            "summary": "Compiled from structured patch operations."
+          },
+          {
+            "path": "inventory_sync/cli.py",
+            "change_type": "modify",
+            "summary": "Compiled from structured patch operations."
+          }
+        ],
+        "apply_package_id": "d6246338c7b44644a586fd948e76cef6",
+        "limitations": [],
+        "trace_summary": [
+          "patch_apply:approval_accepted",
+          "patch_apply:source_identity_matched",
+          "patch_apply:managed_copy_created",
+          "patch_apply:git_apply_succeeded",
+          "code_execution:tool=pytest",
+          "code_execution:status=succeeded"
+        ]
+      }
+    ],
+    "final_patch_artifacts": [
+      {
+        "artifact_id": "compiled-1",
+        "base": "repository",
+        "diff_text": "diff --git a/inventory_sync/fetch.py b/inventory_sync/fetch.py\n--- a/inventory_sync/fetch.py\n+++ b/inventory_sync/fetch.py\n@@ -1,6 +1,23 @@\n from urllib.request import urlopen\n+from pathlib import Path\n+import hashlib\n \n \n-def fetch_page(url):\n-    with urlopen(url) as response:\n-        return response.read().decode('utf-8')\n+def fetch_page(url, *, timeout=10, cache_dir=None, refresh_cache=False):\n+    if cache_dir and not refresh_cache:\n+        cache_path = Path(cache_dir) / f\"{hashlib.sha256(url.encode()).hexdigest()}.cache\"\n+        if cache_path.exists():\n+            return cache_path.read_text(encoding='utf-8')\n+\n+    try:\n+        with urlopen(url, timeout=timeout) as response:\n+            content = response.read().decode('utf-8')\n+    except TimeoutError:\n+        with urlopen(url, timeout=timeout) as response:\n+            content = response.read().decode('utf-8')\n+\n+    if cache_dir:\n+        cache_path = Path(cache_dir) / f\"{hashlib.sha256(url.encode()).hexdigest()}.cache\"\n+        cache_path.write_text(content, encoding='utf-8')\n+\n+    return content\n",
+        "files": [
+          "inventory_sync/fetch.py"
+        ],
+        "summary": "Compiled from structured patch operations."
+      },
+      {
+        "artifact_id": "compiled-2",
+        "base": "repository",
+        "diff_text": "diff --git a/inventory_sync/cli.py b/inventory_sync/cli.py\n--- a/inventory_sync/cli.py\n+++ b/inventory_sync/cli.py\n@@ -1,4 +1,5 @@\n import argparse\n+from pathlib import Path\n \n from .fetch import fetch_page\n \n@@ -6,9 +7,19 @@\n def build_parser():\n     parser = argparse.ArgumentParser(prog='inventory-sync')\n     parser.add_argument('url')\n+    parser.add_argument('--timeout', type=int, default=10)\n+    parser.add_argument('--cache-dir', type=str)\n+    parser.add_argument('--refresh-cache', action='store_true')\n     return parser\n \n \n def main(argv=None):\n     args = build_parser().parse_args(argv)\n-    print(fetch_page(args.url))\n+    # Convert cache_dir to Path object if provided, as tests expect a path object in captured dict\n+    cache_dir = Path(args.cache_dir) if args.cache_dir else None\n+    print(fetch_page(\n+        args.url,\n+        timeout=args.timeout,\n+        cache_dir=cache_dir,\n+        refresh_cache=args.refresh_cache\n+    ))\n",
+        "files": [
+          "inventory_sync/cli.py"
+        ],
+        "summary": "Compiled from structured patch operations."
+      }
+    ],
+    "final_changed_files": [
+      {
+        "path": "inventory_sync/fetch.py",
+        "change_type": "modify",
+        "summary": "Compiled from structured patch operations."
+      },
+      {
+        "path": "inventory_sync/cli.py",
+        "change_type": "modify",
+        "summary": "Compiled from structured patch operations."
+      }
+    ],
+    "final_apply": {
+      "status": "succeeded",
+      "apply_package_id": "d6246338c7b44644a586fd948e76cef6",
+      "source_identity": {
+        "provider": "github",
+        "owner": "kazusa-fixtures",
+        "repo": "verify_repair_gate_05_fetch_cache_cli",
+        "current_commit": "2fcc00b131a5a127f179d32f100cf56ac9f72649",
+        "dirty_state": "clean"
+      },
+      "apply_workspace_ref": {
+        "kind": "managed_apply_workspace",
+        "apply_package_id": "d6246338c7b44644a586fd948e76cef6",
+        "source_identity": {
+          "provider": "github",
+          "owner": "kazusa-fixtures",
+          "repo": "verify_repair_gate_05_fetch_cache_cli",
+          "current_commit": "2fcc00b131a5a127f179d32f100cf56ac9f72649",
+          "dirty_state": "clean"
+        },
+        "applied_files": [
+          "inventory_sync/fetch.py",
+          "inventory_sync/cli.py"
+        ]
+      },
+      "applied_files": [
+        "inventory_sync/fetch.py",
+        "inventory_sync/cli.py"
+      ],
+      "changed_files": [
+        {
+          "path": "inventory_sync/fetch.py",
+          "change_type": "modify",
+          "summary": "Compiled from structured patch operations."
+        },
+        {
+          "path": "inventory_sync/cli.py",
+          "change_type": "modify",
+          "summary": "Compiled from structured patch operations."
+        }
+      ],
+      "validation": {
+        "status": "succeeded",
+        "errors": [],
+        "warnings": []
+      },
+      "limitations": [],
+      "trace_summary": [
+        "patch_apply:approval_accepted",
+        "patch_apply:source_identity_matched",
+        "patch_apply:managed_copy_created",
+        "patch_apply:git_apply_succeeded"
+      ]
+    },
+    "final_execution": [
+      {
+        "status": "succeeded",
+        "tool": "pytest",
+        "exit_code": 0,
+        "timed_out": false,
+        "duration_ms": 840,
+        "stdout_excerpt": "\ntests\\test_fetch.py::test_fetch_uses_timeout_and_retries_after_timeout PASSED [ 33%]\ntests\\test_fetch.py::test_fetch_uses_cache_without_second_network_call PASSED [ 66%]\ntests\\test_cli.py::test_cli_passes_cache_and_timeout_flags PASSED        [100%]\n\n=================================== PASSES ====================================\n=========================== short test summary info ===========================\nPASSED tests\\test_fetch.py::test_fetch_uses_timeout_and_retries_after_timeout\nPASSED tests\\test_fetch.py::test_fetch_uses_cache_without_second_network_call\nPASSED tests\\test_cli.py::test_cli_passes_cache_and_timeout_flags\n============================== 3 passed in 0.07s ==============================\n",
+        "stderr_excerpt": "",
+        "output_truncated": false,
+        "executed_paths": [
+          "tests/test_fetch.py",
+          "tests/test_cli.py"
+        ],
+        "limitations": [],
+        "trace_summary": [
+          "code_execution:tool=pytest",
+          "code_execution:status=succeeded"
+        ]
+      }
+    ],
+    "limitations": [],
+    "trace_summary": [
+      "Resolved explicit local checkout without mutation.",
+      "verify_repair:initial_artifacts_supplied",
+      "patch_apply:approval_accepted",
+      "patch_apply:source_identity_matched",
+      "patch_apply:managed_copy_created",
+      "patch_apply:git_apply_succeeded",
+      "code_execution:tool=pytest",
+      "code_execution:status=failed",
+      "Resolved explicit local checkout without mutation.",
+      "reading_pm:repository_map files=6",
+      "reading_pm:work_plan intent=pipeline_or_data_flow status=need_programmers assignments=3",
+      "programmer:CLI interface analyst",
+      "programmer_report CLI interface analyst status=succeeded evidence=1",
+      "programmer:runtime behavior analyst",
+      "programmer_report runtime behavior analyst status=succeeded evidence=1",
+      "programmer:test pattern analyst",
+      "programmer_report test pattern analyst status=succeeded evidence=2",
+      "reading_pm:work_plan intent=pipeline_or_data_flow status=need_programmers assignments=2",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=1",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=1",
+      "reading_pm:work_plan intent=pipeline_or_data_flow status=sufficient assignments=0",
+      "reading_pm:sufficiency=sufficient",
+      "reading_merge:evidence=6",
+      "modifying:file_plan_ready",
+      "modifying_pm:decision=repair_child",
+      "modifying_pm:repair_child",
+      "modifying_pm:decision=create_programmer_task",
+      "modifying_pm:programmer_task=repair-fetch-cache-cli",
+      "modifying:programmer_contract_repair",
+      "modifying:programmer_contract_repair",
+      "modifying_pm:sufficiency=programmer_artifacts_ready",
+      "modifying:artifacts=2",
+      "patch_validation:succeeded",
+      "patch_apply:approval_accepted",
+      "patch_apply:source_identity_matched",
+      "patch_apply:managed_copy_created",
+      "patch_apply:git_apply_succeeded",
+      "code_execution:tool=pytest",
+      "code_execution:status=failed",
+      "Resolved explicit local checkout without mutation.",
+      "reading_pm:repository_map files=6",
+      "reading_pm:work_plan intent=pipeline_or_data_flow status=need_programmers assignments=3",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=1",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=1",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=2",
+      "reading_pm:work_plan intent=pipeline_or_data_flow status=sufficient assignments=0",
+      "reading_pm:sufficiency=sufficient",
+      "reading_merge:evidence=4",
+      "modifying:file_plan_ready",
+      "modifying_pm:decision=create_programmer_task",
+      "modifying_pm:handoff_repair",
+      "modifying_pm:decision=create_programmer_task",
+      "modifying_pm:programmer_task=repair-fetch-cache-cli",
+      "modifying_pm:sufficiency=programmer_artifacts_ready",
+      "modifying:artifacts=2",
+      "patch_validation:succeeded",
+      "patch_apply:approval_accepted",
+      "patch_apply:source_identity_matched",
+      "patch_apply:managed_copy_created",
+      "patch_apply:git_apply_succeeded",
+      "code_execution:tool=pytest",
+      "code_execution:status=succeeded"
+    ]
+  },
+  "human_review_required": true
+}

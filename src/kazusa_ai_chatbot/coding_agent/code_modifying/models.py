@@ -42,6 +42,7 @@ ALLOWED_REPAIR_FEEDBACK_SOURCES = {
     "patch_validation",
     "review_materialization",
     "contract_validation",
+    "execution_verification",
 }
 RAW_DIFF_MARKERS = ("diff --git ", "--- a/", "+++ b/")
 INDENTED_DEF_RE = re.compile(r"^\s+def\s+\w+\(([^)]*)\)\s*(?:->[^:]+)?:")

@@ -15,7 +15,7 @@
   - `development_plans/archive/completed/short_term/coding_agent_phase4_code_modifying_and_patching_plan.md`
   - `development_plans/archive/completed/short_term/coding_agent_phase5_patch_apply_plan.md`
   - `development_plans/archive/completed/short_term/coding_agent_phase6_code_executing_plan.md`
-  - `development_plans/active/short_term/coding_agent_phase7_existing_source_planning_plan.md`
+  - `development_plans/archive/completed/short_term/coding_agent_phase7_existing_source_planning_plan.md`
   - `development_plans/active/short_term/coding_agent_phase8_verify_repair_loop_plan.md`
   - `development_plans/reference/designs/coding_agent_phase9_run_supervisor_architecture.md`
   - `development_plans/reference/designs/coding_agent_phase10_repository_scale_reading_architecture.md`
@@ -232,12 +232,11 @@ phase contract.
 
 ## Current Implementation Alignment
 
-As of the Phase 7 and Phase 8 draft plans:
+As of the Phase 8 implementation plan:
 
-- Phases 0 through 6 are implemented and archived as completed records.
-- Phase 7 is the next short-term implementation step and upgrades the
-  existing-source proposal path with active modifying PM planning.
-- Phase 8 depends on Phase 7 and adds controlled verify-and-repair.
+- Phases 0 through 7 are implemented and archived as completed records.
+- Phase 8 is the active short-term implementation step and adds controlled
+  verify-and-repair.
 - Phase 9 is the first phase where the coding agent becomes a self-contained
   session loop.
 - Phase 10 improves broad repository intelligence but is not required for the

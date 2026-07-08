@@ -55,3 +55,8 @@ and static review checks are copied to a managed apply workspace. It then runs
 git patch checks plus git apply only inside that copy. Its public response
 reports relative paths and an opaque managed workspace reference, not absolute
 filesystem roots or command output.
+
+`code_verifying` may call `apply_approved_patch(...)` multiple times for one
+trusted verify-and-repair request. Each attempt must create a fresh managed
+apply workspace; failed or timed-out verification does not authorize continued
+mutation inside a previous apply copy.

@@ -80,6 +80,7 @@ class CodingAgentWriteRequest(TypedDict, total=False):
     max_answer_chars: int
     session_id: str
     max_artifact_chars: int
+    repair_feedback: dict[str, object]
 
 
 class CodingAgentBackgroundRequest(TypedDict, total=False):

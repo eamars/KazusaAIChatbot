@@ -1,0 +1,327 @@
+{
+  "gate": {
+    "gate_id": "verify_repair_gate_06_release_feed_cache_cli",
+    "title": "Release feed offline cache and CLI repair",
+    "instruction": "Repair the release feed loader so network fetches accept a timeout, retry once after TimeoutError, write a caller-provided cache file after a successful fetch, read that cache file when offline=True, and expose --cache-file, --offline, and --timeout through the CLI. Use only the Python standard library and keep network behavior mocked in tests.",
+    "source_paths": [
+      "release_feed/__init__.py",
+      "release_feed/cli.py",
+      "release_feed/client.py",
+      "tests/test_cli.py",
+      "tests/test_client.py"
+    ],
+    "execution_specs": [
+      {
+        "tool": "pytest",
+        "paths": [],
+        "pytest_selectors": [
+          "tests/test_client.py",
+          "tests/test_cli.py"
+        ],
+        "timeout_seconds": 35
+      }
+    ],
+    "repair_attempt_limit": 2,
+    "expected_repaired_paths": [
+      "release_feed/client.py",
+      "release_feed/cli.py"
+    ],
+    "protected_verification_paths": [
+      "tests/test_client.py",
+      "tests/test_cli.py"
+    ],
+    "behavior_rubric": [
+      "The first execution attempt fails on mocked timeout/cache/CLI behavior.",
+      "Repair feedback preserves failing test names without raw full output.",
+      "The repair implements source behavior from existing mocked I/O patterns.",
+      "The final attempt updates client behavior and CLI flag wiring together."
+    ],
+    "forbidden_failure_modes": [
+      "The repair edits tests instead of client or CLI source.",
+      "The repair treats absent implementation helpers as a blocker.",
+      "The repair performs real network I/O during tests.",
+      "The final response exposes absolute workspace paths or raw shell text."
+    ]
+  },
+  "model_routes": [
+    "CODING_AGENT_PM_LLM",
+    "CODING_AGENT_PROGRAMMER_LLM"
+  ],
+  "source_root": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\coding_agent_verify_repair_workspace\\verify_repair_gate_06_release_feed_cache_cli\\source",
+  "workspace_root": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\coding_agent_verify_repair_workspace\\verify_repair_gate_06_release_feed_cache_cli",
+  "source_hashes_before": {
+    "release_feed/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "release_feed/cli.py": "a4d15aa816d1f5d791e0e2342c989723b0aa88f03179bf1309c8109bd6170ca1",
+    "release_feed/client.py": "3f69d66d29c115c1028f1a943a50ba0a6650b84c5b5c211ef5f68b73655b89ad",
+    "tests/test_cli.py": "5631c6b27c4a300453b2763c90fe70663d05e7e336561244641a2868c54c2710",
+    "tests/test_client.py": "783edb180e735ff487895584e7c62157528c8bd2b05d27d8002e1fce9e7b5d57"
+  },
+  "source_hashes_after": {
+    "release_feed/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "release_feed/cli.py": "a4d15aa816d1f5d791e0e2342c989723b0aa88f03179bf1309c8109bd6170ca1",
+    "release_feed/client.py": "3f69d66d29c115c1028f1a943a50ba0a6650b84c5b5c211ef5f68b73655b89ad",
+    "tests/test_cli.py": "5631c6b27c4a300453b2763c90fe70663d05e7e336561244641a2868c54c2710",
+    "tests/test_client.py": "783edb180e735ff487895584e7c62157528c8bd2b05d27d8002e1fce9e7b5d57"
+  },
+  "source_tree_unchanged": true,
+  "initial_patch_artifacts": [
+    {
+      "artifact_id": "compiled-1",
+      "base": "repository",
+      "diff_text": "diff --git a/release_feed/client.py b/release_feed/client.py\n--- a/release_feed/client.py\n+++ b/release_feed/client.py\n@@ -1,6 +1,6 @@\n from urllib.request import urlopen\n \n \n-def load_feed(url):\n-    with urlopen(url) as response:\n+def load_feed(url, *, timeout=10):\n+    with urlopen(url, timeout=timeout) as response:\n         return response.read().decode('utf-8')\n",
+      "files": [
+        "release_feed/client.py"
+      ],
+      "summary": "Compiled from structured patch operations."
+    }
+  ],
+  "request": {
+    "question": "Repair the release feed loader so network fetches accept a timeout, retry once after TimeoutError, write a caller-provided cache file after a successful fetch, read that cache file when offline=True, and expose --cache-file, --offline, and --timeout through the CLI. Use only the Python standard library and keep network behavior mocked in tests.",
+    "source_scope_hint": "directory",
+    "execution_specs": [
+      {
+        "tool": "pytest",
+        "paths": [],
+        "pytest_selectors": [
+          "tests/test_client.py",
+          "tests/test_cli.py"
+        ],
+        "timeout_seconds": 35
+      }
+    ],
+    "repair_attempt_limit": 2,
+    "initial_patch_artifact_count": 1
+  },
+  "response": {
+    "status": "succeeded",
+    "answer_text": "Verification succeeded after applying the patch.",
+    "repository": {
+      "provider": "github",
+      "owner": "kazusa-fixtures",
+      "repo": "verify_repair_gate_06_release_feed_cache_cli",
+      "source_url": "https://github.com/kazusa-fixtures/verify_repair_gate_06_release_feed_cache_cli",
+      "requested_ref": null,
+      "resolved_ref": "main",
+      "current_commit": "c4e1cf57bb9a291e2bd0596c7708f01a74c3098a",
+      "default_branch": "main",
+      "storage_kind": "existing_local_checkout",
+      "managed_checkout": false,
+      "dirty_state": "clean"
+    },
+    "source_scope": {
+      "kind": "repository",
+      "repo_relative_path": null,
+      "source_url": "local://github/kazusa-fixtures/verify_repair_gate_06_release_feed_cache_cli",
+      "requested_ref": "main",
+      "interpretation": "explicit local repository checkout"
+    },
+    "attempts": [
+      {
+        "attempt_index": 1,
+        "proposal_status": "succeeded",
+        "apply_status": "succeeded",
+        "execution_statuses": [
+          "failed"
+        ],
+        "patch_artifact_count": 1,
+        "changed_files": [
+          {
+            "path": "release_feed/client.py",
+            "change_type": "modify",
+            "summary": "Compiled from structured patch operations."
+          }
+        ],
+        "apply_package_id": "4760fd77330842f2b8c5a88c3c8ddcee",
+        "limitations": [],
+        "trace_summary": [
+          "patch_apply:approval_accepted",
+          "patch_apply:source_identity_matched",
+          "patch_apply:managed_copy_created",
+          "patch_apply:git_apply_succeeded",
+          "code_execution:tool=pytest",
+          "code_execution:status=failed"
+        ]
+      },
+      {
+        "attempt_index": 2,
+        "proposal_status": "succeeded",
+        "apply_status": "succeeded",
+        "execution_statuses": [
+          "succeeded"
+        ],
+        "patch_artifact_count": 2,
+        "changed_files": [
+          {
+            "path": "release_feed/client.py",
+            "change_type": "modify",
+            "summary": "Compiled from structured patch operations."
+          },
+          {
+            "path": "release_feed/cli.py",
+            "change_type": "modify",
+            "summary": "Compiled from structured patch operations."
+          }
+        ],
+        "apply_package_id": "5317908b11b14f0793cc8787f26c2958",
+        "limitations": [],
+        "trace_summary": [
+          "patch_apply:approval_accepted",
+          "patch_apply:source_identity_matched",
+          "patch_apply:managed_copy_created",
+          "patch_apply:git_apply_succeeded",
+          "code_execution:tool=pytest",
+          "code_execution:status=succeeded"
+        ]
+      }
+    ],
+    "final_patch_artifacts": [
+      {
+        "artifact_id": "compiled-1",
+        "base": "repository",
+        "diff_text": "diff --git a/release_feed/client.py b/release_feed/client.py\n--- a/release_feed/client.py\n+++ b/release_feed/client.py\n@@ -1,6 +1,21 @@\n from urllib.request import urlopen\n+import pathlib\n \n \n-def load_feed(url):\n-    with urlopen(url) as response:\n-        return response.read().decode('utf-8')\n+def load_feed(url, *, timeout=10, cache_file=None, offline=False):\n+    if offline and cache_file:\n+        with open(cache_file, 'r', encoding='utf-8') as f:\n+            return f.read()\n+\n+    attempts = 2\n+    for i in range(attempts):\n+        try:\n+            with urlopen(url, timeout=timeout) as response:\n+                content = response.read().decode('utf-8')\n+                if cache_file:\n+                    with open(cache_file, 'w', encoding='utf-8') as f:\n+                        f.write(content)\n+                return content\n+        except TimeoutError:\n+            if i == attempts - 1:\n+                raise\n",
+        "files": [
+          "release_feed/client.py"
+        ],
+        "summary": "Compiled from structured patch operations."
+      },
+      {
+        "artifact_id": "compiled-2",
+        "base": "repository",
+        "diff_text": "diff --git a/release_feed/cli.py b/release_feed/cli.py\n--- a/release_feed/cli.py\n+++ b/release_feed/cli.py\n@@ -1,4 +1,5 @@\n import argparse\n+import pathlib\n \n from .client import load_feed\n \n@@ -6,9 +7,17 @@\n def build_parser():\n     parser = argparse.ArgumentParser(prog='release-feed')\n     parser.add_argument('url')\n+    parser.add_argument('--cache-file', type=pathlib.Path)\n+    parser.add_argument('--offline', action='store_true')\n+    parser.add_argument('--timeout', type=int, default=10)\n     return parser\n \n \n def main(argv=None):\n     args = build_parser().parse_args(argv)\n-    print(load_feed(args.url))\n+    print(load_feed(\n+        args.url,\n+        timeout=args.timeout,\n+        cache_file=args.cache_file,\n+        offline=args.offline,\n+    ))\n",
+        "files": [
+          "release_feed/cli.py"
+        ],
+        "summary": "Compiled from structured patch operations."
+      }
+    ],
+    "final_changed_files": [
+      {
+        "path": "release_feed/client.py",
+        "change_type": "modify",
+        "summary": "Compiled from structured patch operations."
+      },
+      {
+        "path": "release_feed/cli.py",
+        "change_type": "modify",
+        "summary": "Compiled from structured patch operations."
+      }
+    ],
+    "final_apply": {
+      "status": "succeeded",
+      "apply_package_id": "5317908b11b14f0793cc8787f26c2958",
+      "source_identity": {
+        "provider": "github",
+        "owner": "kazusa-fixtures",
+        "repo": "verify_repair_gate_06_release_feed_cache_cli",
+        "current_commit": "c4e1cf57bb9a291e2bd0596c7708f01a74c3098a",
+        "dirty_state": "clean"
+      },
+      "apply_workspace_ref": {
+        "kind": "managed_apply_workspace",
+        "apply_package_id": "5317908b11b14f0793cc8787f26c2958",
+        "source_identity": {
+          "provider": "github",
+          "owner": "kazusa-fixtures",
+          "repo": "verify_repair_gate_06_release_feed_cache_cli",
+          "current_commit": "c4e1cf57bb9a291e2bd0596c7708f01a74c3098a",
+          "dirty_state": "clean"
+        },
+        "applied_files": [
+          "release_feed/client.py",
+          "release_feed/cli.py"
+        ]
+      },
+      "applied_files": [
+        "release_feed/client.py",
+        "release_feed/cli.py"
+      ],
+      "changed_files": [
+        {
+          "path": "release_feed/client.py",
+          "change_type": "modify",
+          "summary": "Compiled from structured patch operations."
+        },
+        {
+          "path": "release_feed/cli.py",
+          "change_type": "modify",
+          "summary": "Compiled from structured patch operations."
+        }
+      ],
+      "validation": {
+        "status": "succeeded",
+        "errors": [],
+        "warnings": []
+      },
+      "limitations": [],
+      "trace_summary": [
+        "patch_apply:approval_accepted",
+        "patch_apply:source_identity_matched",
+        "patch_apply:managed_copy_created",
+        "patch_apply:git_apply_succeeded"
+      ]
+    },
+    "final_execution": [
+      {
+        "status": "succeeded",
+        "tool": "pytest",
+        "exit_code": 0,
+        "timed_out": false,
+        "duration_ms": 804,
+        "stdout_excerpt": "\ntests\\test_client.py::test_load_feed_uses_offline_cache_without_network PASSED [ 33%]\ntests\\test_client.py::test_load_feed_retries_timeout_and_updates_cache PASSED [ 66%]\ntests\\test_cli.py::test_cli_passes_cache_offline_and_timeout PASSED      [100%]\n\n=================================== PASSES ====================================\n=========================== short test summary info ===========================\nPASSED tests\\test_client.py::test_load_feed_uses_offline_cache_without_network\nPASSED tests\\test_client.py::test_load_feed_retries_timeout_and_updates_cache\nPASSED tests\\test_cli.py::test_cli_passes_cache_offline_and_timeout\n============================== 3 passed in 0.08s ==============================\n",
+        "stderr_excerpt": "",
+        "output_truncated": false,
+        "executed_paths": [
+          "tests/test_client.py",
+          "tests/test_cli.py"
+        ],
+        "limitations": [],
+        "trace_summary": [
+          "code_execution:tool=pytest",
+          "code_execution:status=succeeded"
+        ]
+      }
+    ],
+    "limitations": [],
+    "trace_summary": [
+      "Resolved explicit local checkout without mutation.",
+      "verify_repair:initial_artifacts_supplied",
+      "patch_apply:approval_accepted",
+      "patch_apply:source_identity_matched",
+      "patch_apply:managed_copy_created",
+      "patch_apply:git_apply_succeeded",
+      "code_execution:tool=pytest",
+      "code_execution:status=failed",
+      "Resolved explicit local checkout without mutation.",
+      "reading_pm:repository_map files=5",
+      "reading_pm:work_plan intent=pipeline_or_data_flow status=need_programmers assignments=3",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=1",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=1",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=2",
+      "reading_pm:work_plan intent=pipeline_or_data_flow status=sufficient assignments=0",
+      "reading_pm:sufficiency=sufficient",
+      "reading_merge:evidence=4",
+      "modifying:file_plan_ready",
+      "modifying_pm:decision=repair_child",
+      "modifying_pm:repair_child",
+      "modifying_pm:decision=repair_child",
+      "modifying_pm:repair_child",
+      "modifying_pm:decision=create_programmer_task",
+      "modifying_pm:handoff_repair",
+      "modifying_pm:decision=create_programmer_task",
+      "modifying_pm:programmer_task=implement-feed-cache-timeout-cli",
+      "modifying_pm:sufficiency=programmer_artifacts_ready",
+      "modifying:artifacts=2",
+      "patch_validation:succeeded",
+      "patch_apply:approval_accepted",
+      "patch_apply:source_identity_matched",
+      "patch_apply:managed_copy_created",
+      "patch_apply:git_apply_succeeded",
+      "code_execution:tool=pytest",
+      "code_execution:status=succeeded"
+    ]
+  },
+  "human_review_required": true
+}

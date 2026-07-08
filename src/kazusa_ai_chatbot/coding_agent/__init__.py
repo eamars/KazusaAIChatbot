@@ -28,6 +28,13 @@ from kazusa_ai_chatbot.coding_agent.code_executing import (
     CodeExecutionSpec,
     execute_code_check,
 )
+from kazusa_ai_chatbot.coding_agent.code_verifying import (
+    CodingVerifyRepairRequest,
+    CodingVerifyRepairResponse,
+    ExecutionRepairFeedback,
+    VerifyRepairAttempt,
+    verify_and_repair_code_change,
+)
 from kazusa_ai_chatbot.coding_agent.supervisor import (
     answer_code_question,
     handle_background_coding_task,
@@ -46,6 +53,10 @@ __all__ = [
     "CodeExecutionRequest",
     "CodeExecutionResponse",
     "CodeExecutionSpec",
+    "CodingVerifyRepairRequest",
+    "CodingVerifyRepairResponse",
+    "ExecutionRepairFeedback",
+    "VerifyRepairAttempt",
     "ApplyWorkspaceRef",
     "CodingPatchApplyRequest",
     "CodingPatchApplyResponse",
@@ -58,4 +69,5 @@ __all__ = [
     "execute_code_check",
     "handle_background_coding_task",
     "propose_code_change",
+    "verify_and_repair_code_change",
 ]

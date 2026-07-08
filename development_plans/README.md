@@ -38,7 +38,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| [coding_agent_phase8_verify_repair_loop_plan.md](active/short_term/coding_agent_phase8_verify_repair_loop_plan.md) | Coding-agent controlled verify/repair execution plan | draft |
+| (none) | No active short-term execution plan | none |
 
 ## Supporting Experiment Records
 
@@ -162,6 +162,18 @@ remediation, documentation updates, and lifecycle closeout.
 |---|---|
 | Moved from active short-term to completed archive | `coding_agent_phase6_code_executing_plan.md` |
 
+### 2026-07-08 coding-agent Phase 8 completion
+
+The coding-agent Phase 8 verify/repair loop plan completed after user-approved
+fallback execution without subagents. The implementation added the direct
+trusted `verify_and_repair_code_change(...)` API, deterministic repair
+contracts, six one-at-a-time real LLM gates with committed raw/review evidence,
+review remediation, documentation updates, and archived closeout evidence.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active short-term to completed archive | `coding_agent_phase8_verify_repair_loop_plan.md` |
+
 ## Archive
 
 Completed and superseded records live under `archive/`. Use them for historical
@@ -256,6 +268,7 @@ plans.
 | [coding_agent_phase5_patch_apply_plan.md](archive/completed/short_term/coding_agent_phase5_patch_apply_plan.md) |
 | [coding_agent_phase6_code_executing_plan.md](archive/completed/short_term/coding_agent_phase6_code_executing_plan.md) |
 | [coding_agent_phase7_existing_source_planning_plan.md](archive/completed/short_term/coding_agent_phase7_existing_source_planning_plan.md) |
+| [coding_agent_phase8_verify_repair_loop_plan.md](archive/completed/short_term/coding_agent_phase8_verify_repair_loop_plan.md) |
 | [character_reflection_cycle_stage1a_plan.md](archive/completed/short_term/character_reflection_cycle_stage1a_plan.md) |
 | [character_self_words_retrieval_delivery_receipt_plan.md](archive/completed/short_term/character_self_words_retrieval_delivery_receipt_plan.md) |
 | [cognition_chain_module_separation_plan.md](archive/completed/short_term/cognition_chain_module_separation_plan.md) |

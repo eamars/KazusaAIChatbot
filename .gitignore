@@ -62,6 +62,12 @@ coverage.xml
 *.cover
 .hypothesis/
 test_artifacts/
+!test_artifacts/
+test_artifacts/*
+!test_artifacts/llm_traces/
+test_artifacts/llm_traces/*
+!test_artifacts/llm_traces/coding_agent_verify_repair/
+!test_artifacts/llm_traces/coding_agent_verify_repair/*
 
 # Logs
 *.log

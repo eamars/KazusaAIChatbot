@@ -77,3 +77,8 @@ exist.
 Target-project failures are represented as `status="failed"` with an exit code.
 They are not executor crashes. Public excerpts redact managed absolute paths
 and are capped before being returned.
+
+`code_verifying` may convert failed or timed-out execution responses into
+structured `execution_verification` repair feedback. That feedback remains
+bounded and redacted; raw command output and command lines stay outside LLM
+repair prompts.

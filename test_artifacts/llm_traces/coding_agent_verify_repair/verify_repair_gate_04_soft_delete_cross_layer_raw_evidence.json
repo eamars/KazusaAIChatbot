@@ -1,0 +1,349 @@
+{
+  "gate": {
+    "gate_id": "verify_repair_gate_04_soft_delete_cross_layer",
+    "title": "Cross-layer soft-delete repair",
+    "instruction": "Repair the task tracker so delete marks a task archived instead of removing it. Normal list and single-item lookup should hide archived tasks, while list(include_archived=True) should expose them. Do not modify the provided store or API verification tests.",
+    "source_paths": [
+      "tasks/__init__.py",
+      "tasks/api.py",
+      "tasks/models.py",
+      "tasks/store.py",
+      "tests/test_api.py",
+      "tests/test_store.py"
+    ],
+    "execution_specs": [
+      {
+        "tool": "pytest",
+        "paths": [],
+        "pytest_selectors": [
+          "tests/test_store.py",
+          "tests/test_api.py"
+        ],
+        "timeout_seconds": 25
+      }
+    ],
+    "repair_attempt_limit": 1,
+    "expected_repaired_paths": [
+      "tasks/models.py",
+      "tasks/store.py",
+      "tasks/api.py"
+    ],
+    "protected_verification_paths": [
+      "tests/test_store.py",
+      "tests/test_api.py"
+    ],
+    "behavior_rubric": [
+      "The first execution attempt proves model-only repair is insufficient.",
+      "The repair coordinates model, store, and API semantics.",
+      "The repaired attempt keeps archived tasks hidden by default."
+    ],
+    "forbidden_failure_modes": [
+      "The repair keeps hard delete and only changes API serialization.",
+      "The repair creates a compatibility alias around old delete semantics.",
+      "The repair edits verification tests instead of source behavior."
+    ]
+  },
+  "model_routes": [
+    "CODING_AGENT_PM_LLM",
+    "CODING_AGENT_PROGRAMMER_LLM"
+  ],
+  "source_root": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\coding_agent_verify_repair_workspace\\verify_repair_gate_04_soft_delete_cross_layer\\source",
+  "workspace_root": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\coding_agent_verify_repair_workspace\\verify_repair_gate_04_soft_delete_cross_layer",
+  "source_hashes_before": {
+    "tasks/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tasks/api.py": "3dd3e43029e31ceec2d003456138469072c3795b4a9d06ca9fa4567cff25bd41",
+    "tasks/models.py": "91f6bfd623fa828726ec196906b417ec024d407b502a7949d6d06427d5af6dcb",
+    "tasks/store.py": "71061aa876cb30a87537f0042944c9f0f260f351998c7263666c0e0d6cd88ed8",
+    "tests/test_api.py": "2dcbf4d06e499cf58f255c4d3780d1f8363901193fb9188ce0db48d90fd17d00",
+    "tests/test_store.py": "ca8a8960e0e48a448ed23ccc0446e6c946962927b7570f2e22ad318d64ffc8d7"
+  },
+  "source_hashes_after": {
+    "tasks/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tasks/api.py": "3dd3e43029e31ceec2d003456138469072c3795b4a9d06ca9fa4567cff25bd41",
+    "tasks/models.py": "91f6bfd623fa828726ec196906b417ec024d407b502a7949d6d06427d5af6dcb",
+    "tasks/store.py": "71061aa876cb30a87537f0042944c9f0f260f351998c7263666c0e0d6cd88ed8",
+    "tests/test_api.py": "2dcbf4d06e499cf58f255c4d3780d1f8363901193fb9188ce0db48d90fd17d00",
+    "tests/test_store.py": "ca8a8960e0e48a448ed23ccc0446e6c946962927b7570f2e22ad318d64ffc8d7"
+  },
+  "source_tree_unchanged": true,
+  "initial_patch_artifacts": [
+    {
+      "artifact_id": "compiled-1",
+      "base": "repository",
+      "diff_text": "diff --git a/tasks/models.py b/tasks/models.py\n--- a/tasks/models.py\n+++ b/tasks/models.py\n@@ -5,3 +5,4 @@\n class Task:\n     task_id: int\n     title: str\n+    archived: bool = False\n",
+      "files": [
+        "tasks/models.py"
+      ],
+      "summary": "Compiled from structured patch operations."
+    }
+  ],
+  "request": {
+    "question": "Repair the task tracker so delete marks a task archived instead of removing it. Normal list and single-item lookup should hide archived tasks, while list(include_archived=True) should expose them. Do not modify the provided store or API verification tests.",
+    "source_scope_hint": "directory",
+    "execution_specs": [
+      {
+        "tool": "pytest",
+        "paths": [],
+        "pytest_selectors": [
+          "tests/test_store.py",
+          "tests/test_api.py"
+        ],
+        "timeout_seconds": 25
+      }
+    ],
+    "repair_attempt_limit": 1,
+    "initial_patch_artifact_count": 1
+  },
+  "response": {
+    "status": "succeeded",
+    "answer_text": "Verification succeeded after applying the patch.",
+    "repository": {
+      "provider": "github",
+      "owner": "kazusa-fixtures",
+      "repo": "verify_repair_gate_04_soft_delete_cross_layer",
+      "source_url": "https://github.com/kazusa-fixtures/verify_repair_gate_04_soft_delete_cross_layer",
+      "requested_ref": null,
+      "resolved_ref": "main",
+      "current_commit": "24e756c926d700c3fbe4e0148d7c1e8a84f18fd2",
+      "default_branch": "main",
+      "storage_kind": "existing_local_checkout",
+      "managed_checkout": false,
+      "dirty_state": "clean"
+    },
+    "source_scope": {
+      "kind": "repository",
+      "repo_relative_path": null,
+      "source_url": "local://github/kazusa-fixtures/verify_repair_gate_04_soft_delete_cross_layer",
+      "requested_ref": "main",
+      "interpretation": "explicit local repository checkout"
+    },
+    "attempts": [
+      {
+        "attempt_index": 1,
+        "proposal_status": "succeeded",
+        "apply_status": "succeeded",
+        "execution_statuses": [
+          "failed"
+        ],
+        "patch_artifact_count": 1,
+        "changed_files": [
+          {
+            "path": "tasks/models.py",
+            "change_type": "modify",
+            "summary": "Compiled from structured patch operations."
+          }
+        ],
+        "apply_package_id": "31caeee2d11340d0acbee615fb15a089",
+        "limitations": [],
+        "trace_summary": [
+          "patch_apply:approval_accepted",
+          "patch_apply:source_identity_matched",
+          "patch_apply:managed_copy_created",
+          "patch_apply:git_apply_succeeded",
+          "code_execution:tool=pytest",
+          "code_execution:status=failed"
+        ]
+      },
+      {
+        "attempt_index": 2,
+        "proposal_status": "succeeded",
+        "apply_status": "succeeded",
+        "execution_statuses": [
+          "succeeded"
+        ],
+        "patch_artifact_count": 3,
+        "changed_files": [
+          {
+            "path": "tasks/models.py",
+            "change_type": "modify",
+            "summary": "Compiled from structured patch operations."
+          },
+          {
+            "path": "tasks/store.py",
+            "change_type": "modify",
+            "summary": "Compiled from structured patch operations."
+          },
+          {
+            "path": "tasks/api.py",
+            "change_type": "modify",
+            "summary": "Compiled from structured patch operations."
+          }
+        ],
+        "apply_package_id": "b604f6badfb7426097cdc69f2ee0a253",
+        "limitations": [],
+        "trace_summary": [
+          "patch_apply:approval_accepted",
+          "patch_apply:source_identity_matched",
+          "patch_apply:managed_copy_created",
+          "patch_apply:git_apply_succeeded",
+          "code_execution:tool=pytest",
+          "code_execution:status=succeeded"
+        ]
+      }
+    ],
+    "final_patch_artifacts": [
+      {
+        "artifact_id": "compiled-1",
+        "base": "repository",
+        "diff_text": "diff --git a/tasks/models.py b/tasks/models.py\n--- a/tasks/models.py\n+++ b/tasks/models.py\n@@ -5,3 +5,4 @@\n class Task:\n     task_id: int\n     title: str\n+    archived: bool = False\n",
+        "files": [
+          "tasks/models.py"
+        ],
+        "summary": "Compiled from structured patch operations."
+      },
+      {
+        "artifact_id": "compiled-2",
+        "base": "repository",
+        "diff_text": "diff --git a/tasks/store.py b/tasks/store.py\n--- a/tasks/store.py\n+++ b/tasks/store.py\n@@ -9,11 +9,17 @@\n         self._items[task.task_id] = task\n \n     def get(self, task_id):\n-        return self._items.get(task_id)\n+        task = self._items.get(task_id)\n+        if task and not task.archived:\n+            return task\n+        return None\n \n-    def list(self):\n-        return list(self._items.values())\n+    def list(self, include_archived=False):\n+        tasks = list(self._items.values())\n+        if not include_archived:\n+            return [t for t in tasks if not t.archived]\n+        return tasks\n \n     def delete(self, task_id):\n         if task_id in self._items:\n-            del self._items[task_id]\n+            self._items[task_id].archived = True\n",
+        "files": [
+          "tasks/store.py"
+        ],
+        "summary": "Compiled from structured patch operations."
+      },
+      {
+        "artifact_id": "compiled-3",
+        "base": "repository",
+        "diff_text": "diff --git a/tasks/api.py b/tasks/api.py\n--- a/tasks/api.py\n+++ b/tasks/api.py\n@@ -2,8 +2,8 @@\n     def __init__(self, store):\n         self.store = store\n \n-    def list_tasks(self):\n-        return [self._serialize(task) for task in self.store.list()]\n+    def list_tasks(self, include_archived=False):\n+        return [self._serialize(task) for task in self.store.list(include_archived=include_archived)]\n \n     def get_task(self, task_id):\n         task = self.store.get(task_id)\n@@ -16,4 +16,8 @@\n         return {'deleted': True}\n \n     def _serialize(self, task):\n-        return {'id': task.task_id, 'title': task.title}\n+        return {\n+            'id': task.task_id,\n+            'title': task.title,\n+            'archived': task.archived\n+        }\n",
+        "files": [
+          "tasks/api.py"
+        ],
+        "summary": "Compiled from structured patch operations."
+      }
+    ],
+    "final_changed_files": [
+      {
+        "path": "tasks/models.py",
+        "change_type": "modify",
+        "summary": "Compiled from structured patch operations."
+      },
+      {
+        "path": "tasks/store.py",
+        "change_type": "modify",
+        "summary": "Compiled from structured patch operations."
+      },
+      {
+        "path": "tasks/api.py",
+        "change_type": "modify",
+        "summary": "Compiled from structured patch operations."
+      }
+    ],
+    "final_apply": {
+      "status": "succeeded",
+      "apply_package_id": "b604f6badfb7426097cdc69f2ee0a253",
+      "source_identity": {
+        "provider": "github",
+        "owner": "kazusa-fixtures",
+        "repo": "verify_repair_gate_04_soft_delete_cross_layer",
+        "current_commit": "24e756c926d700c3fbe4e0148d7c1e8a84f18fd2",
+        "dirty_state": "clean"
+      },
+      "apply_workspace_ref": {
+        "kind": "managed_apply_workspace",
+        "apply_package_id": "b604f6badfb7426097cdc69f2ee0a253",
+        "source_identity": {
+          "provider": "github",
+          "owner": "kazusa-fixtures",
+          "repo": "verify_repair_gate_04_soft_delete_cross_layer",
+          "current_commit": "24e756c926d700c3fbe4e0148d7c1e8a84f18fd2",
+          "dirty_state": "clean"
+        },
+        "applied_files": [
+          "tasks/models.py",
+          "tasks/store.py",
+          "tasks/api.py"
+        ]
+      },
+      "applied_files": [
+        "tasks/models.py",
+        "tasks/store.py",
+        "tasks/api.py"
+      ],
+      "changed_files": [
+        {
+          "path": "tasks/models.py",
+          "change_type": "modify",
+          "summary": "Compiled from structured patch operations."
+        },
+        {
+          "path": "tasks/store.py",
+          "change_type": "modify",
+          "summary": "Compiled from structured patch operations."
+        },
+        {
+          "path": "tasks/api.py",
+          "change_type": "modify",
+          "summary": "Compiled from structured patch operations."
+        }
+      ],
+      "validation": {
+        "status": "succeeded",
+        "errors": [],
+        "warnings": []
+      },
+      "limitations": [],
+      "trace_summary": [
+        "patch_apply:approval_accepted",
+        "patch_apply:source_identity_matched",
+        "patch_apply:managed_copy_created",
+        "patch_apply:git_apply_succeeded"
+      ]
+    },
+    "final_execution": [
+      {
+        "status": "succeeded",
+        "tool": "pytest",
+        "exit_code": 0,
+        "timed_out": false,
+        "duration_ms": 815,
+        "stdout_excerpt": "\ntests\\test_store.py::test_delete_archives_without_normal_visibility PASSED [ 50%]\ntests\\test_api.py::test_api_hides_archived_tasks_by_default PASSED       [100%]\n\n=================================== PASSES ====================================\n=========================== short test summary info ===========================\nPASSED tests\\test_store.py::test_delete_archives_without_normal_visibility\nPASSED tests\\test_api.py::test_api_hides_archived_tasks_by_default\n============================== 2 passed in 0.06s ==============================\n",
+        "stderr_excerpt": "",
+        "output_truncated": false,
+        "executed_paths": [
+          "tests/test_store.py",
+          "tests/test_api.py"
+        ],
+        "limitations": [],
+        "trace_summary": [
+          "code_execution:tool=pytest",
+          "code_execution:status=succeeded"
+        ]
+      }
+    ],
+    "limitations": [],
+    "trace_summary": [
+      "Resolved explicit local checkout without mutation.",
+      "verify_repair:initial_artifacts_supplied",
+      "patch_apply:approval_accepted",
+      "patch_apply:source_identity_matched",
+      "patch_apply:managed_copy_created",
+      "patch_apply:git_apply_succeeded",
+      "code_execution:tool=pytest",
+      "code_execution:status=failed",
+      "Resolved explicit local checkout without mutation.",
+      "reading_pm:repository_map files=6",
+      "reading_pm:work_plan intent=pipeline_or_data_flow status=need_programmers assignments=3",
+      "programmer:Storage and State Expert",
+      "programmer_report Storage and State Expert status=succeeded evidence=3",
+      "programmer:API Interface Expert",
+      "programmer_report API Interface Expert status=succeeded evidence=1",
+      "programmer:Test Baseline Expert",
+      "programmer_report Test Baseline Expert status=succeeded evidence=2",
+      "reading_pm:work_plan intent=pipeline_or_data_flow status=sufficient assignments=0",
+      "reading_pm:sufficiency=sufficient",
+      "reading_merge:evidence=6",
+      "modifying:file_plan_ready",
+      "modifying_pm:decision=create_programmer_task",
+      "modifying_pm:programmer_task=implement_soft_delete_cross_layer",
+      "modifying_pm:sufficiency=programmer_artifacts_ready",
+      "modifying:artifacts=3",
+      "patch_validation:succeeded",
+      "patch_apply:approval_accepted",
+      "patch_apply:source_identity_matched",
+      "patch_apply:managed_copy_created",
+      "patch_apply:git_apply_succeeded",
+      "code_execution:tool=pytest",
+      "code_execution:status=succeeded"
+    ]
+  },
+  "human_review_required": true
+}

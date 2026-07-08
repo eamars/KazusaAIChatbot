@@ -1,0 +1,323 @@
+{
+  "gate": {
+    "gate_id": "verify_repair_gate_02_cli_flag_handoff",
+    "title": "Small multi-file CLI handoff repair",
+    "instruction": "Repair the word-count utility so --ignore-case is exposed by the CLI and passed into the counter. Core counting should keep current default case-sensitive behavior. Do not modify the provided verification tests.",
+    "source_paths": [
+      "tests/test_cli.py",
+      "tests/test_counter.py",
+      "wordcount/__init__.py",
+      "wordcount/cli.py",
+      "wordcount/counter.py"
+    ],
+    "execution_specs": [
+      {
+        "tool": "pytest",
+        "paths": [],
+        "pytest_selectors": [
+          "tests/test_counter.py",
+          "tests/test_cli.py"
+        ],
+        "timeout_seconds": 25
+      }
+    ],
+    "repair_attempt_limit": 1,
+    "expected_repaired_paths": [
+      "wordcount/counter.py",
+      "wordcount/cli.py"
+    ],
+    "protected_verification_paths": [
+      "tests/test_counter.py",
+      "tests/test_cli.py"
+    ],
+    "behavior_rubric": [
+      "The first execution attempt proves the core helper is insufficient.",
+      "Repair feedback points the PM/programmer toward CLI flag ownership.",
+      "The repaired attempt preserves default case-sensitive counting."
+    ],
+    "forbidden_failure_modes": [
+      "The repair removes the core ignore_case parameter.",
+      "The repair changes tests to avoid argparse coverage.",
+      "The final attempt uses a new replacement CLI outside wordcount/cli.py."
+    ]
+  },
+  "model_routes": [
+    "CODING_AGENT_PM_LLM",
+    "CODING_AGENT_PROGRAMMER_LLM"
+  ],
+  "source_root": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\coding_agent_verify_repair_workspace\\verify_repair_gate_02_cli_flag_handoff\\source",
+  "workspace_root": "C:\\workspace\\kazusa_ai_chatbot\\test_artifacts\\coding_agent_verify_repair_workspace\\verify_repair_gate_02_cli_flag_handoff",
+  "source_hashes_before": {
+    "tests/test_cli.py": "8e4b4b0192adc87c7a7a33a6fd145b764a3d123da577570cc71b638b0e061e59",
+    "tests/test_counter.py": "32341ab0359198d1246b7921a4357dfe5074c215850b8e184bfcba5aa3ca3b8f",
+    "wordcount/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "wordcount/cli.py": "87d5dcd61ed345fee881d7ab77a776971b721107e5b34c295b55941644781089",
+    "wordcount/counter.py": "0af23c90a7aa9df86b37ea0c38c7ebc2fe49034464691d22ea55fa9cf7020b96"
+  },
+  "source_hashes_after": {
+    "tests/test_cli.py": "8e4b4b0192adc87c7a7a33a6fd145b764a3d123da577570cc71b638b0e061e59",
+    "tests/test_counter.py": "32341ab0359198d1246b7921a4357dfe5074c215850b8e184bfcba5aa3ca3b8f",
+    "wordcount/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "wordcount/cli.py": "87d5dcd61ed345fee881d7ab77a776971b721107e5b34c295b55941644781089",
+    "wordcount/counter.py": "0af23c90a7aa9df86b37ea0c38c7ebc2fe49034464691d22ea55fa9cf7020b96"
+  },
+  "source_tree_unchanged": true,
+  "initial_patch_artifacts": [
+    {
+      "artifact_id": "compiled-1",
+      "base": "repository",
+      "diff_text": "diff --git a/wordcount/counter.py b/wordcount/counter.py\n--- a/wordcount/counter.py\n+++ b/wordcount/counter.py\n@@ -1,4 +1,6 @@\n-def count_words(text):\n+def count_words(text, *, ignore_case=False):\n+    if ignore_case:\n+        text = text.lower()\n     counts = {}\n     for word in text.split():\n         counts[word] = counts.get(word, 0) + 1\n",
+      "files": [
+        "wordcount/counter.py"
+      ],
+      "summary": "Compiled from structured patch operations."
+    }
+  ],
+  "request": {
+    "question": "Repair the word-count utility so --ignore-case is exposed by the CLI and passed into the counter. Core counting should keep current default case-sensitive behavior. Do not modify the provided verification tests.",
+    "source_scope_hint": "directory",
+    "execution_specs": [
+      {
+        "tool": "pytest",
+        "paths": [],
+        "pytest_selectors": [
+          "tests/test_counter.py",
+          "tests/test_cli.py"
+        ],
+        "timeout_seconds": 25
+      }
+    ],
+    "repair_attempt_limit": 1,
+    "initial_patch_artifact_count": 1
+  },
+  "response": {
+    "status": "succeeded",
+    "answer_text": "Verification succeeded after applying the patch.",
+    "repository": {
+      "provider": "github",
+      "owner": "kazusa-fixtures",
+      "repo": "verify_repair_gate_02_cli_flag_handoff",
+      "source_url": "https://github.com/kazusa-fixtures/verify_repair_gate_02_cli_flag_handoff",
+      "requested_ref": null,
+      "resolved_ref": "main",
+      "current_commit": "666cd896b25019cf60d0c87bde2a918f78c95d38",
+      "default_branch": "main",
+      "storage_kind": "existing_local_checkout",
+      "managed_checkout": false,
+      "dirty_state": "clean"
+    },
+    "source_scope": {
+      "kind": "repository",
+      "repo_relative_path": null,
+      "source_url": "local://github/kazusa-fixtures/verify_repair_gate_02_cli_flag_handoff",
+      "requested_ref": "main",
+      "interpretation": "explicit local repository checkout"
+    },
+    "attempts": [
+      {
+        "attempt_index": 1,
+        "proposal_status": "succeeded",
+        "apply_status": "succeeded",
+        "execution_statuses": [
+          "failed"
+        ],
+        "patch_artifact_count": 1,
+        "changed_files": [
+          {
+            "path": "wordcount/counter.py",
+            "change_type": "modify",
+            "summary": "Compiled from structured patch operations."
+          }
+        ],
+        "apply_package_id": "3f853a5e847543de93ac3666ed2e83dc",
+        "limitations": [],
+        "trace_summary": [
+          "patch_apply:approval_accepted",
+          "patch_apply:source_identity_matched",
+          "patch_apply:managed_copy_created",
+          "patch_apply:git_apply_succeeded",
+          "code_execution:tool=pytest",
+          "code_execution:status=failed"
+        ]
+      },
+      {
+        "attempt_index": 2,
+        "proposal_status": "succeeded",
+        "apply_status": "succeeded",
+        "execution_statuses": [
+          "succeeded"
+        ],
+        "patch_artifact_count": 2,
+        "changed_files": [
+          {
+            "path": "wordcount/counter.py",
+            "change_type": "modify",
+            "summary": "Compiled from structured patch operations."
+          },
+          {
+            "path": "wordcount/cli.py",
+            "change_type": "modify",
+            "summary": "Compiled from structured patch operations."
+          }
+        ],
+        "apply_package_id": "e5ee7a522d7d4bda9c02bd273b63e957",
+        "limitations": [],
+        "trace_summary": [
+          "patch_apply:approval_accepted",
+          "patch_apply:source_identity_matched",
+          "patch_apply:managed_copy_created",
+          "patch_apply:git_apply_succeeded",
+          "code_execution:tool=pytest",
+          "code_execution:status=succeeded"
+        ]
+      }
+    ],
+    "final_patch_artifacts": [
+      {
+        "artifact_id": "compiled-1",
+        "base": "repository",
+        "diff_text": "diff --git a/wordcount/counter.py b/wordcount/counter.py\n--- a/wordcount/counter.py\n+++ b/wordcount/counter.py\n@@ -1,4 +1,6 @@\n-def count_words(text):\n+def count_words(text, ignore_case=False):\n+    if ignore_case:\n+        text = text.lower()\n     counts = {}\n     for word in text.split():\n         counts[word] = counts.get(word, 0) + 1\n",
+        "files": [
+          "wordcount/counter.py"
+        ],
+        "summary": "Compiled from structured patch operations."
+      },
+      {
+        "artifact_id": "compiled-2",
+        "base": "repository",
+        "diff_text": "diff --git a/wordcount/cli.py b/wordcount/cli.py\n--- a/wordcount/cli.py\n+++ b/wordcount/cli.py\n@@ -5,12 +5,13 @@\n \n def build_parser():\n     parser = argparse.ArgumentParser(prog='wordcount')\n+    parser.add_argument('--ignore-case', action='store_true')\n     parser.add_argument('text')\n     return parser\n \n \n def main(argv=None):\n     args = build_parser().parse_args(argv)\n-    counts = count_words(args.text)\n+    counts = count_words(args.text, ignore_case=args.ignore_case)\n     for word, count in sorted(counts.items()):\n         print(f'{word}:{count}')\n",
+        "files": [
+          "wordcount/cli.py"
+        ],
+        "summary": "Compiled from structured patch operations."
+      }
+    ],
+    "final_changed_files": [
+      {
+        "path": "wordcount/counter.py",
+        "change_type": "modify",
+        "summary": "Compiled from structured patch operations."
+      },
+      {
+        "path": "wordcount/cli.py",
+        "change_type": "modify",
+        "summary": "Compiled from structured patch operations."
+      }
+    ],
+    "final_apply": {
+      "status": "succeeded",
+      "apply_package_id": "e5ee7a522d7d4bda9c02bd273b63e957",
+      "source_identity": {
+        "provider": "github",
+        "owner": "kazusa-fixtures",
+        "repo": "verify_repair_gate_02_cli_flag_handoff",
+        "current_commit": "666cd896b25019cf60d0c87bde2a918f78c95d38",
+        "dirty_state": "clean"
+      },
+      "apply_workspace_ref": {
+        "kind": "managed_apply_workspace",
+        "apply_package_id": "e5ee7a522d7d4bda9c02bd273b63e957",
+        "source_identity": {
+          "provider": "github",
+          "owner": "kazusa-fixtures",
+          "repo": "verify_repair_gate_02_cli_flag_handoff",
+          "current_commit": "666cd896b25019cf60d0c87bde2a918f78c95d38",
+          "dirty_state": "clean"
+        },
+        "applied_files": [
+          "wordcount/counter.py",
+          "wordcount/cli.py"
+        ]
+      },
+      "applied_files": [
+        "wordcount/counter.py",
+        "wordcount/cli.py"
+      ],
+      "changed_files": [
+        {
+          "path": "wordcount/counter.py",
+          "change_type": "modify",
+          "summary": "Compiled from structured patch operations."
+        },
+        {
+          "path": "wordcount/cli.py",
+          "change_type": "modify",
+          "summary": "Compiled from structured patch operations."
+        }
+      ],
+      "validation": {
+        "status": "succeeded",
+        "errors": [],
+        "warnings": []
+      },
+      "limitations": [],
+      "trace_summary": [
+        "patch_apply:approval_accepted",
+        "patch_apply:source_identity_matched",
+        "patch_apply:managed_copy_created",
+        "patch_apply:git_apply_succeeded"
+      ]
+    },
+    "final_execution": [
+      {
+        "status": "succeeded",
+        "tool": "pytest",
+        "exit_code": 0,
+        "timed_out": false,
+        "duration_ms": 875,
+        "stdout_excerpt": "\ntests\\test_counter.py::test_default_counting_is_case_sensitive PASSED    [ 33%]\ntests\\test_counter.py::test_ignore_case_core_counting PASSED             [ 66%]\ntests\\test_cli.py::test_cli_ignore_case_flag PASSED                      [100%]\n\n=================================== PASSES ====================================\n=========================== short test summary info ===========================\nPASSED tests\\test_counter.py::test_default_counting_is_case_sensitive\nPASSED tests\\test_counter.py::test_ignore_case_core_counting\nPASSED tests\\test_cli.py::test_cli_ignore_case_flag\n============================== 3 passed in 0.05s ==============================\n",
+        "stderr_excerpt": "",
+        "output_truncated": false,
+        "executed_paths": [
+          "tests/test_counter.py",
+          "tests/test_cli.py"
+        ],
+        "limitations": [],
+        "trace_summary": [
+          "code_execution:tool=pytest",
+          "code_execution:status=succeeded"
+        ]
+      }
+    ],
+    "limitations": [],
+    "trace_summary": [
+      "Resolved explicit local checkout without mutation.",
+      "verify_repair:initial_artifacts_supplied",
+      "patch_apply:approval_accepted",
+      "patch_apply:source_identity_matched",
+      "patch_apply:managed_copy_created",
+      "patch_apply:git_apply_succeeded",
+      "code_execution:tool=pytest",
+      "code_execution:status=failed",
+      "Resolved explicit local checkout without mutation.",
+      "reading_pm:repository_map files=5",
+      "reading_pm:work_plan intent=pipeline_or_data_flow status=need_programmers assignments=3",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=1",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=1",
+      "programmer:generic worker role",
+      "programmer_report generic worker role status=succeeded evidence=2",
+      "reading_pm:work_plan intent=pipeline_or_data_flow status=sufficient assignments=0",
+      "reading_pm:sufficiency=sufficient",
+      "reading_merge:evidence=4",
+      "modifying:file_plan_ready",
+      "modifying_pm:decision=repair_child",
+      "modifying_pm:repair_child",
+      "modifying_pm:decision=repair_child",
+      "modifying_pm:repair_child",
+      "modifying_pm:decision=create_programmer_task",
+      "modifying_pm:programmer_task=implement-ignore-case-handoff",
+      "modifying_pm:sufficiency=programmer_artifacts_ready",
+      "modifying:artifacts=2",
+      "patch_validation:succeeded",
+      "patch_apply:approval_accepted",
+      "patch_apply:source_identity_matched",
+      "patch_apply:managed_copy_created",
+      "patch_apply:git_apply_succeeded",
+      "code_execution:tool=pytest",
+      "code_execution:status=succeeded"
+    ]
+  },
+  "human_review_required": true
+}

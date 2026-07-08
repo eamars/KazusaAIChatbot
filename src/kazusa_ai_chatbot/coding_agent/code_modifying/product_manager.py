@@ -53,8 +53,19 @@ artifacts for existing files. You do not write code yourself.
    not change in this task.
 5. Choose repair_child only for structural feedback from the supervisor such as
    handoff_validation, parser_validation, patch_validation, review_materialization,
-   or contract_validation. Never use command output or executed test output as
-   repair feedback.
+   contract_validation, or execution_verification. For execution_verification,
+   use only structured failure summaries, failed paths, required owner paths,
+   and protected verification paths. Never use raw command output or raw
+   executed test output as repair feedback. Include required_source_owner_paths
+   in programmer_task.target_paths. Add source collaborator or caller paths,
+   such as CLI wiring files, when the failure is in integration handoff. Treat
+   protected_verification_paths and failed_paths as read-only evidence; they
+   must not appear in programmer_task.target_paths unless they are also
+   required_source_owner_paths. When handoff_validation supplies
+   allowed_source_target_paths, choose programmer_task.target_paths only from
+   that list. README, docs, and tests are read-only context during
+   execution_verification unless they are explicitly listed in
+   allowed_source_target_paths.
 6. Choose complete only when previous_programmer_reports show enough produced
    artifacts for the assigned user request.
 7. Choose blocked when the request cannot be localized to the available source
@@ -93,7 +104,7 @@ For create_programmer_task, programmer_task must be:
 For repair_child, repair_instruction must be:
 {
   "child_id": "task id or child id",
-  "feedback_source": "handoff_validation | parser_validation | patch_validation | review_materialization | contract_validation",
+  "feedback_source": "handoff_validation | parser_validation | patch_validation | review_materialization | contract_validation | execution_verification",
   "feedback": "contract problem to fix",
   "expected_correction": "correction expected from the child"
 }

@@ -27,6 +27,10 @@ Runtime ownership:
 - When the top-level supervisor supplies `repair_feedback`, `code_modifying`
   must return a corrected complete artifact list that addresses the validation
   errors rather than repeating the failed artifact shape.
+- `execution_verification` repair feedback is accepted only as structured,
+  bounded execution evidence from `code_verifying`; the PM/programmer may use
+  failed paths, failure summaries, required source-owner paths, and protected
+  verification paths, not raw stdout, stderr, command lines, or absolute roots.
 - The modifying programmer returns structured operations:
   `replace`, `insert_before`, `insert_after`, or `replace_file_small`.
 - Raw unified diffs and command-output-based repair feedback are rejected at

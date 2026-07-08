@@ -11,6 +11,7 @@ from kazusa_ai_chatbot.coding_agent import apply_approved_patch
 from kazusa_ai_chatbot.coding_agent import execute_code_check
 from kazusa_ai_chatbot.coding_agent import handle_background_coding_task
 from kazusa_ai_chatbot.coding_agent import propose_code_change
+from kazusa_ai_chatbot.coding_agent import verify_and_repair_code_change
 from kazusa_ai_chatbot.coding_agent.code_executing import run as run_code_executing
 from kazusa_ai_chatbot.coding_agent.code_fetching import run as run_code_fetching
 from kazusa_ai_chatbot.coding_agent.code_reading import run as run_code_reading
@@ -64,6 +65,14 @@ paths, and limitations. It does not infer commands from prose, run against
 original source, install dependencies, access the network, or start repair
 loops.
 
+`verify_and_repair_code_change(...)` is the direct trusted verify-and-repair
+interface. It resolves source, accepts either an initial proposal or generates
+one through `propose_code_change(...)`, validates structured approval, applies
+each attempt into a fresh managed apply copy, runs structured execution specs,
+and sends only bounded redacted execution summaries back through
+`code_modifying` when a capped repair attempt is allowed. It does not mutate
+the original source checkout and is not used by background accepted tasks.
+
 Implemented subagents:
 
 - `code_fetching`: resolves public GitHub, question-text source mentions, and
@@ -78,6 +87,8 @@ Implemented subagents:
   approved managed-copy apply results.
 - `code_executing`: runs bounded allowlisted verification commands inside
   Phase 5 managed apply workspaces and returns sanitized execution results.
+- `code_verifying`: composes proposal, apply, execution, and capped repair for
+  trusted direct callers while preserving managed-copy containment.
 - `code_writing`: creates source-free new-artifact patch proposals in managed
   storage.
 
@@ -99,6 +110,7 @@ flowchart TD
     D0["Direct read API<br/>answer_code_question(...)"]
     D1["Direct write API<br/>propose_code_change(...)"]
     D2["Direct execution API<br/>execute_code_check(...)"]
+    D3["Direct verify/repair API<br/>verify_and_repair_code_change(...)"]
     B0["accepted task / background_work job<br/>generic lifecycle owner"]
     B1["background_work router LLM<br/>selects worker only"]
     B2["providers.dispatch_background_work<br/>worker registry dispatch"]
@@ -117,6 +129,7 @@ flowchart TD
     D0 --> F0
     D1 --> W0
     D2 --> X0
+    D3 --> V0
     R7 --> O1
     W14 --> O2
     O1 --> O3
@@ -195,6 +208,20 @@ flowchart TD
         X0 --> X1 --> X2 --> X3 --> X4
     end
 
+    subgraph Verifying["code_verifying"]
+        V0["source-backed verify request<br/>approval + execution specs"]
+        V1["initial proposal<br/>or supplied artifacts"]
+        V2["fresh managed apply copy"]
+        V3["bounded execution"]
+        V4["redacted execution repair feedback"]
+        V5["Phase 7 modifying repair proposal"]
+        V6["CodingVerifyRepairResponse<br/>attempt ledger"]
+        V0 --> F0
+        V0 --> V1 --> V2 --> V3
+        V3 -->|succeeded| V6
+        V3 -->|failed and attempts remain| V4 --> V5 --> V2
+    end
+
     F5 -->|succeeded| R0
     F0 -->|failed, rejected, or needs input| O1
     F5 -->|explicit source write| M0
@@ -213,7 +240,9 @@ review materialization for both flows. Generated-artifact readback deliberately
 reuses `code_reading` through a managed read-only source so later writing work
 consumes compact supervisor facts instead of raw generated files.
 `code_executing` is available only through the trusted direct execution API.
-The background worker, L2d, action spec, and dialog path do not dispatch to it.
+`code_verifying` composes proposal, managed-copy apply, execution, and capped
+repair for trusted direct callers. The background worker, L2d, action spec,
+and dialog path do not dispatch to either direct trusted side-effect boundary.
 
 ## Direct Request
 
@@ -416,6 +445,41 @@ the physical managed apply path.
 source directory from the workspace root and package id; callers do not provide
 an execution directory. Public responses omit absolute workspace paths,
 environment values, raw full output, and source contents.
+
+## Direct Verify And Repair Request
+
+`CodingVerifyRepairRequest` accepts the source-backed writing fields plus:
+
+- `approval`
+- `execution_specs`
+- `repair_attempt_limit`
+- `max_repair_feedback_chars`
+- `initial_patch_artifacts`
+- `expected_source_identity`
+
+`approval` must be trusted structured runtime data. `execution_specs` must use
+the Phase 6 allowlist: `python_compileall` or focused `pytest`. When
+`initial_patch_artifacts` are supplied, they skip only initial proposal
+generation; they still pass through source identity validation, review
+validation, managed-copy apply, execution, and any capped repair.
+
+`CodingVerifyRepairResponse` contains:
+
+- `status`
+- `answer_text`
+- `repository`
+- `source_scope`
+- `attempts`
+- `final_patch_artifacts`
+- `final_changed_files`
+- `final_apply`
+- `final_execution`
+- `limitations`
+- `trace_summary`
+
+The verifier returns an attempt ledger instead of mutating the original source.
+Each repair attempt creates a fresh managed apply workspace and receives only
+structured `execution_verification` feedback, not raw command output.
 
 ## Change Control
 

@@ -943,6 +943,7 @@ def _modifying_request(
         "preferred_language",
         "max_answer_chars",
         "max_artifact_chars",
+        "repair_feedback",
     )
     for field in optional_fields:
         value = request.get(field)

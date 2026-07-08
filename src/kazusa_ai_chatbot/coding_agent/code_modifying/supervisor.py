@@ -77,12 +77,15 @@ async def run(request: CodeModificationRequest) -> CodeModificationResult:
                 task=task,
                 file_plan=file_plan,
                 programmer_task_count=programmer_task_count,
+                repair_feedback=request.get("repair_feedback"),
             )
             if handoff_errors:
                 if not handoff_repair_sent:
                     pm_payload["repair_feedback"] = _handoff_repair_feedback(
                         task=task,
                         handoff_errors=handoff_errors,
+                        file_plan=file_plan,
+                        repair_feedback=request.get("repair_feedback"),
                     )
                     trace_summary.append("modifying_pm:handoff_repair")
                     handoff_repair_sent = True
@@ -241,24 +244,45 @@ def _handoff_validation_errors(
     task: ModifyingProgrammerTask,
     file_plan: dict[str, object],
     programmer_task_count: int,
+    repair_feedback: object,
 ) -> list[str]:
     errors: list[str] = []
     target_paths = task.get("target_paths", [])
     if not target_paths:
         errors.append("Programmer task must include target_paths.")
         return errors
+    target_path_set = set(target_paths)
     if len(target_paths) > MAX_TARGET_PATHS:
         errors.append("Programmer task targets too many files.")
     file_context_paths = _path_set(file_plan.get("file_contexts"))
     owner_paths = set(_string_list(file_plan.get("owned_path_candidates")))
+    caller_paths = set(_string_list(file_plan.get("caller_path_candidates")))
     companion_paths = set(_string_list(file_plan.get("test_or_doc_path_candidates")))
+    repair_constraints = _execution_repair_constraints(repair_feedback)
+    required_owner_paths = set(repair_constraints["required_source_owner_paths"])
+    protected_paths = set(repair_constraints["protected_verification_paths"])
     allowed_target_paths = file_context_paths.intersection(owner_paths | companion_paths)
+    if required_owner_paths or protected_paths:
+        allowed_target_paths = file_context_paths.intersection(
+            owner_paths | caller_paths | required_owner_paths
+        )
     for path in target_paths:
         if path not in file_context_paths:
             errors.append(f"Programmer target path {path!r} lacks file context.")
             continue
+        if path in protected_paths:
+            errors.append(
+                f"Programmer target path {path!r} is protected verification "
+                "evidence; include it in read_only_paths instead."
+            )
+            continue
         if path not in allowed_target_paths:
             errors.append(f"Programmer target path {path!r} is not handoff-owned.")
+    missing_required_paths = sorted(required_owner_paths.difference(target_path_set))
+    for path in missing_required_paths:
+        errors.append(f"Programmer task omitted required source-owner path {path!r}.")
+    companion_target_paths = companion_paths.difference(protected_paths)
+    execution_repair_mode = bool(required_owner_paths or protected_paths)
     if programmer_task_count == 0 and owner_paths and not owner_paths.intersection(
         target_paths
     ):
@@ -267,8 +291,9 @@ def _handoff_validation_errors(
         )
     if (
         programmer_task_count == 0
-        and companion_paths
-        and not companion_paths.intersection(target_paths)
+        and not execution_repair_mode
+        and companion_target_paths
+        and not companion_target_paths.intersection(target_paths)
     ):
         errors.append(
             "First programmer task must include at least one focused companion "
@@ -281,7 +306,14 @@ def _handoff_repair_feedback(
     *,
     task: ModifyingProgrammerTask,
     handoff_errors: list[str],
+    file_plan: dict[str, object],
+    repair_feedback: object,
 ) -> dict[str, object]:
+    repair_constraints = _execution_repair_constraints(repair_feedback)
+    allowed_source_paths = _execution_allowed_source_target_paths(
+        file_plan=file_plan,
+        repair_constraints=repair_constraints,
+    )
     feedback = {
         "child_id": task.get("task_id", ""),
         "feedback_source": "handoff_validation",
@@ -291,6 +323,20 @@ def _handoff_repair_feedback(
             "the relevant source-owner path and focused companion tests or docs."
         ),
     }
+    if repair_constraints["required_source_owner_paths"]:
+        feedback["required_source_owner_paths"] = repair_constraints[
+            "required_source_owner_paths"
+        ]
+        feedback["protected_verification_paths"] = repair_constraints[
+            "protected_verification_paths"
+        ]
+        feedback["allowed_source_target_paths"] = allowed_source_paths
+        feedback["expected_correction"] = (
+            "Return a create_programmer_task decision whose target_paths include "
+            "required_source_owner_paths and are drawn only from "
+            "allowed_source_target_paths. Include protected_verification_paths, "
+            "failed_paths, tests, and docs only in read_only_paths."
+        )
     return feedback
 
 
@@ -304,7 +350,9 @@ def _programmer_payload(
 ) -> dict[str, object]:
     target_paths = set(task["target_paths"])
     read_only_paths = set(decision.get("read_only_paths", []))
-    selected_paths = target_paths | read_only_paths
+    repair_constraints = _execution_repair_constraints(request.get("repair_feedback"))
+    protected_paths = set(repair_constraints["protected_verification_paths"])
+    selected_paths = target_paths | read_only_paths | protected_paths
     file_contexts = _selected_file_contexts(
         file_plan=file_plan,
         selected_paths=selected_paths,
@@ -326,6 +374,48 @@ def _programmer_payload(
     if isinstance(repair_feedback, dict):
         payload["repair_feedback"] = repair_feedback
     return payload
+
+
+def _execution_repair_constraints(
+    repair_feedback: object,
+) -> dict[str, list[str]]:
+    constraints: dict[str, list[str]] = {
+        "required_source_owner_paths": [],
+        "protected_verification_paths": [],
+    }
+    if not isinstance(repair_feedback, dict):
+        return constraints
+    if repair_feedback.get("feedback_source") != "execution_verification":
+        return constraints
+
+    constraints["required_source_owner_paths"] = _string_list(
+        repair_feedback.get("required_source_owner_paths")
+    )
+    constraints["protected_verification_paths"] = _string_list(
+        repair_feedback.get("protected_verification_paths")
+    )
+    return constraints
+
+
+def _execution_allowed_source_target_paths(
+    *,
+    file_plan: dict[str, object],
+    repair_constraints: dict[str, list[str]],
+) -> list[str]:
+    if not repair_constraints["required_source_owner_paths"]:
+        return []
+
+    file_context_paths = _path_set(file_plan.get("file_contexts"))
+    owner_paths = set(_string_list(file_plan.get("owned_path_candidates")))
+    caller_paths = set(_string_list(file_plan.get("caller_path_candidates")))
+    required_paths = set(repair_constraints["required_source_owner_paths"])
+    protected_paths = set(repair_constraints["protected_verification_paths"])
+    allowed_paths = file_context_paths.intersection(
+        owner_paths | caller_paths | required_paths
+    )
+    allowed_paths = allowed_paths.difference(protected_paths)
+    sorted_paths = sorted(allowed_paths)
+    return sorted_paths
 
 
 def _selected_file_contexts(
@@ -485,8 +575,9 @@ def _ownership_guidance_from_file_plan(
         "test_or_doc_paths": file_plan.get("test_or_doc_path_candidates", []),
         "caller_paths": file_plan.get("caller_path_candidates", []),
         "rule": (
-            "Modify the source owner path for runtime behavior and update "
-            "focused companion tests or docs when requested or made stale."
+            "Modify the source owner path for runtime behavior. Modify caller "
+            "paths when integration wiring fails. Update focused companion "
+            "tests or docs only when requested or made stale."
         ),
     }
     return guidance
