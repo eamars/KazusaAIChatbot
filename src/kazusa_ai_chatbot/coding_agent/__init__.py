@@ -22,6 +22,12 @@ from kazusa_ai_chatbot.coding_agent.code_patching.models import (
     PatchApplyValidation,
     PatchSourceIdentity,
 )
+from kazusa_ai_chatbot.coding_agent.code_executing import (
+    CodeExecutionRequest,
+    CodeExecutionResponse,
+    CodeExecutionSpec,
+    execute_code_check,
+)
 from kazusa_ai_chatbot.coding_agent.supervisor import (
     answer_code_question,
     handle_background_coding_task,
@@ -37,6 +43,9 @@ __all__ = [
     "CodingAgentRepositorySummary",
     "CodingAgentRequest",
     "CodingAgentResponse",
+    "CodeExecutionRequest",
+    "CodeExecutionResponse",
+    "CodeExecutionSpec",
     "ApplyWorkspaceRef",
     "CodingPatchApplyRequest",
     "CodingPatchApplyResponse",
@@ -46,6 +55,7 @@ __all__ = [
     "InlineSourceInput",
     "answer_code_question",
     "apply_approved_patch",
+    "execute_code_check",
     "handle_background_coding_task",
     "propose_code_change",
 ]

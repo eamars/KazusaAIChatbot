@@ -6,7 +6,7 @@
   verification execution for approved managed apply workspaces through a
   deterministic `code_executing` boundary.
 - Plan class: high_risk_migration.
-- Status: draft.
+- Status: completed.
 - Mandatory skills: `development-plan`, `local-llm-architecture`,
   `no-prepost-user-input`, `py-style`, and `test-style-and-execution`.
 - Overall cutover strategy: bigbang for the new execution boundary; existing
@@ -375,46 +375,46 @@ that is explicitly outside this plan.
 
 ## Progress Checklist
 
-- [ ] Stage 0 - Phase 5 dependency confirmed.
+- [x] Stage 0 - Phase 5 dependency confirmed.
   - Covers: implementation step 1.
   - Verify: Phase 5 plan is completed and `apply_approved_patch(...)` contract
     exists.
   - Evidence: record Phase 5 commit or archive path.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage 1 - focused test contract established.
+  - Sign-off: `Codex/2026-07-08`.
+- [x] Stage 1 - focused test contract established.
   - Covers: implementation steps 2, 3, and 4.
   - Verify: focused Phase 6 tests fail for missing API or missing behavior.
   - Evidence: record test commands and expected failures.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage 2 - executor module implemented.
+  - Sign-off: `Codex/2026-07-08`.
+- [x] Stage 2 - executor module implemented.
   - Covers: implementation steps 5 and 6.
   - Verify:
     `venv\Scripts\python -m pytest tests\test_coding_agent_phase6_code_executing_contracts.py -q`.
   - Evidence: record changed production files and passing focused test output.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage 3 - docs and integration updated.
+  - Sign-off: `Codex/2026-07-08`.
+- [x] Stage 3 - docs and integration updated.
   - Covers: implementation step 7.
   - Verify:
     `venv\Scripts\python -m pytest tests\test_coding_agent_phase6_interface.py -q`.
   - Evidence: record integration output and documentation files changed.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage 4 - regression verification complete.
+  - Sign-off: `Codex/2026-07-08`.
+- [x] Stage 4 - regression verification complete.
   - Covers: implementation step 8.
   - Verify: all commands in `Verification`.
   - Evidence: record command outputs and accepted static grep results.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage 5 - independent code review complete.
+  - Sign-off: `Codex/2026-07-08`.
+- [x] Stage 5 - independent code review complete.
   - Covers: implementation step 9.
   - Verify: review findings are recorded, fixes are applied, and affected
     verification commands pass again.
   - Evidence: record review result, remediation, residual risk, and approval.
-  - Sign-off: `<agent/date>`.
-- [ ] Stage 6 - lifecycle closure complete.
+  - Sign-off: `Codex/2026-07-08`.
+- [x] Stage 6 - lifecycle closure complete.
   - Covers: implementation step 10.
   - Verify: plan status and registry are updated, active plan moved to
     completed archive, and `git status --short` is reviewed.
   - Evidence: record final commit or handoff state.
-  - Sign-off: `<agent/date>`.
+  - Sign-off: `Codex/2026-07-08`.
 
 ## Live LLM Gating Tests
 
@@ -523,7 +523,9 @@ one-at-a-time human or AI review of the raw evidence.
 - `rg "shell=True|cmd /c|powershell|Start-Process|pip install|npm install|curl|Invoke-WebRequest" src\kazusa_ai_chatbot\coding_agent\code_executing -n`
   must return no matches.
 - `rg "subprocess\\.(run|Popen)" src\kazusa_ai_chatbot\coding_agent -n`
-  may match only the approved deterministic runner and existing git facade.
+  may match only the approved deterministic runner and existing bounded
+  coding-agent tool facades: `code_executing/runner.py`, `tools/git.py`,
+  `code_patching/patch_validation.py`, and `code_reading/evidence.py`.
 - `rg "code_executing" src\kazusa_ai_chatbot\nodes src\kazusa_ai_chatbot\action_spec src\kazusa_ai_chatbot\background_work -n`
   must return no matches unless this plan is explicitly updated and approved
   for background execution integration.
@@ -665,12 +667,74 @@ This plan is complete when:
 
 ## Execution Evidence
 
-- Phase 5 dependency confirmation:
+- Phase 5 dependency confirmation: Phase 5 is completed in
+  `development_plans/archive/completed/short_term/coding_agent_phase5_patch_apply_plan.md`;
+  `apply_approved_patch(...)` and `apply_workspace_ref` are present in
+  `src/kazusa_ai_chatbot/coding_agent/code_patching/apply.py`.
 - Focused test baseline:
-- Implementation files changed:
+  `venv\Scripts\python -m pytest tests\test_coding_agent_phase6_code_executing_contracts.py tests\test_coding_agent_phase6_interface.py -q`
+  failed before implementation with missing `execute_code_check`,
+  `CodeExecutionRequest`, and `CodeExecutionResponse` imports.
+- Implementation files changed: added
+  `src/kazusa_ai_chatbot/coding_agent/code_executing/models.py`,
+  `src/kazusa_ai_chatbot/coding_agent/code_executing/runner.py`,
+  `src/kazusa_ai_chatbot/coding_agent/code_executing/supervisor.py`,
+  `src/kazusa_ai_chatbot/coding_agent/code_executing/__init__.py`, and
+  exported `execute_code_check` from
+  `src/kazusa_ai_chatbot/coding_agent/__init__.py`.
 - Focused test pass:
+  `venv\Scripts\python -m pytest tests\test_coding_agent_phase6_code_executing_contracts.py tests\test_coding_agent_phase6_interface.py -q`
+  passed with 13 passed.
+- Integration and docs update: added
+  `src/kazusa_ai_chatbot/coding_agent/code_executing/README.md` and updated
+  `src/kazusa_ai_chatbot/coding_agent/README.md`, `docs/HOWTO.md`, and
+  `development_plans/reference/designs/coding_agent_architecture.md`.
+  `venv\Scripts\python -m pytest tests\test_coding_agent_phase6_interface.py -q`
+  passed with 3 passed.
 - Regression test pass:
+  `venv\Scripts\python -m pytest tests\test_coding_agent_phase6_code_executing_contracts.py tests\test_coding_agent_phase6_interface.py -q`
+  passed with 15 passed after review remediation;
+  `venv\Scripts\python -m pytest tests\test_coding_agent_phase5_patch_apply_contracts.py tests\test_coding_agent_phase4_code_patching_contracts.py -q`
+  passed with 12 passed;
+  `venv\Scripts\python -m pytest tests\test_coding_agent_phase2_new_artifact_contracts.py tests\test_coding_agent_phase4_interface.py -q`
+  passed with 20 passed.
 - Static check results:
-- Manual review:
-- Independent code review:
-- Lifecycle closure:
+  `venv\Scripts\python -m compileall src\kazusa_ai_chatbot\coding_agent tests\test_coding_agent_phase6_code_executing_contracts.py tests\test_coding_agent_phase6_interface.py tests\test_coding_agent_phase6_code_executing_live_llm.py`
+  passed; `git diff --check` passed with line-ending warnings only;
+  forbidden execution grep under `code_executing` returned no matches; the
+  `subprocess` grep matched only existing bounded coding-agent tool facades and
+  the new `code_executing/runner.py`; background/action/dialog grep returned
+  no `code_executing` matches.
+- Manual review: all five live LLM gates were run one at a time with `-s` and
+  raw evidence inspected under
+  `test_artifacts/llm_traces/coding_agent_phase6_code_executing/`.
+  Gate 01 succeeded through `python_compileall` on `log_counter.py`; Gate 02
+  succeeded through focused `pytest` on `tests/test_converter.py` and
+  `tests/test_cli.py`; Gate 03 succeeded through focused `pytest` on
+  `tests/test_anchors.py` and `tests/test_scanner.py`; Gate 04 truthfully
+  returned `failed` with exit code 1 for issue tracker tests; Gate 05 succeeded
+  through `python_compileall` on `inventory_sync`. Every inspected public
+  response omitted managed source/workspace roots and every original source
+  tree hash comparison remained unchanged. A transient Gate 02 rerun failed
+  before execution because the live proposal produced invalid test syntax; raw
+  evidence showed execution correctly rejected the missing apply package, and
+  the gate passed on rerun.
+- Independent code review: user requested no-subagent execution, so Codex ran
+  the review gate as the fallback execution owner. Findings: directory
+  execution targets needed pre-run tree scanning for file-count cap and
+  symlink escape containment; child process environment values needed public
+  output redaction if target code printed them; the static `subprocess` grep
+  expectation was stale because existing bounded `code_reading` and
+  `code_patching` facades already use subprocess calls. Remediation: added
+  directory tree scan and file-count cap in `code_executing/supervisor.py`,
+  minimized and redacted execution environment values in
+  `code_executing/runner.py`, added focused tests for environment redaction and
+  directory file-count rejection, and updated the static grep expectation.
+  Rerun evidence: Phase 6 focused/interface tests passed with 15 passed,
+  compileall passed, forbidden `code_executing` grep returned no matches,
+  background/action/dialog grep returned no matches, and prior Phase 2/4/5
+  regressions remained green. Residual risk: live proposal quality still varies
+  before execution, which is outside the Phase 6 executor boundary.
+- Lifecycle closure: plan marked completed for archive move; registry update
+  records Phase 6 completion; final commit will reference this completed
+  implementation.

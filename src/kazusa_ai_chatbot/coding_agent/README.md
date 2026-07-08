@@ -8,8 +8,10 @@ Current implemented surfaces:
 ```python
 from kazusa_ai_chatbot.coding_agent import answer_code_question
 from kazusa_ai_chatbot.coding_agent import apply_approved_patch
+from kazusa_ai_chatbot.coding_agent import execute_code_check
 from kazusa_ai_chatbot.coding_agent import handle_background_coding_task
 from kazusa_ai_chatbot.coding_agent import propose_code_change
+from kazusa_ai_chatbot.coding_agent.code_executing import run as run_code_executing
 from kazusa_ai_chatbot.coding_agent.code_fetching import run as run_code_fetching
 from kazusa_ai_chatbot.coding_agent.code_reading import run as run_code_reading
 from kazusa_ai_chatbot.coding_agent.code_modifying import run as run_code_modifying
@@ -53,6 +55,15 @@ patch artifacts pass review validation, and applies the patch only inside that
 managed copy. It does not mutate the original source root and does not run
 tests, build tools, package managers, or arbitrary shell commands.
 
+`execute_code_check(...)` is the direct trusted execution interface. It
+requires a Phase 5 managed apply workspace reference, validates a structured
+execution spec, and runs only `python_compileall` or focused `pytest` inside
+`<workspace_root>/patch_apply/<apply_package_id>/source`. It returns bounded
+stdout/stderr excerpts, timing, exit code, timeout state, executed relative
+paths, and limitations. It does not infer commands from prose, run against
+original source, install dependencies, access the network, or start repair
+loops.
+
 Implemented subagents:
 
 - `code_fetching`: resolves public GitHub, question-text source mentions, and
@@ -64,12 +75,10 @@ Implemented subagents:
 - `code_patching`: converts selected writing/modifying artifacts into
   review-only patch artifacts, sandbox materialization checks, and explicitly
   approved managed-copy apply results.
+- `code_executing`: runs bounded allowlisted verification commands inside
+  Phase 5 managed apply workspaces and returns sanitized execution results.
 - `code_writing`: creates source-free new-artifact patch proposals in managed
   storage.
-
-Deferred subagents:
-
-- `code_executing`
 
 Managed checkouts and managed raw-file downloads live under the caller-supplied
 coding workspace root. Writing requests require an explicit configured
@@ -88,6 +97,7 @@ parameters.
 flowchart TD
     D0["Direct read API<br/>answer_code_question(...)"]
     D1["Direct write API<br/>propose_code_change(...)"]
+    D2["Direct execution API<br/>execute_code_check(...)"]
     B0["accepted task / background_work job<br/>generic lifecycle owner"]
     B1["background_work router LLM<br/>selects worker only"]
     B2["providers.dispatch_background_work<br/>worker registry dispatch"]
@@ -105,6 +115,7 @@ flowchart TD
     B4 -->|unsupported| O0
     D0 --> F0
     D1 --> W0
+    D2 --> X0
     R7 --> O1
     W14 --> O2
     O1 --> O3
@@ -172,6 +183,15 @@ flowchart TD
         R7 --> M1 --> M2 --> M3 --> M4 --> O2
     end
 
+    subgraph Executing["code_executing"]
+        X0["Phase 5 managed apply workspace ref"]
+        X1["structured execution spec<br/>python_compileall or pytest"]
+        X2["deterministic validator<br/>workspace, paths, caps, timeout"]
+        X3["argv subprocess runner<br/>managed apply source cwd"]
+        X4["CodingExecutionResponse<br/>bounded sanitized output"]
+        X0 --> X1 --> X2 --> X3 --> X4
+    end
+
     F5 -->|succeeded| R0
     F0 -->|failed, rejected, or needs input| O1
     F5 -->|explicit source write| M0
@@ -188,9 +208,8 @@ read evidence and bounded file context. `code_patching` owns deterministic diff
 assembly and review materialization for both flows. Generated-artifact readback
 deliberately reuses `code_reading` through a managed read-only source so later
 writing work consumes compact supervisor facts instead of raw generated files.
-
-The deferred `code_executing` subagent is not shown because no implemented
-runtime path dispatches to it.
+`code_executing` is available only through the trusted direct execution API.
+The background worker, L2d, action spec, and dialog path do not dispatch to it.
 
 ## Direct Request
 
@@ -259,6 +278,20 @@ is handled as a new-project proposal in a managed writing workspace.
 - `limitations`
 - `trace_summary`
 - optional `trace` for live LLM review artifacts
+
+`CodeExecutionResponse` contains:
+
+- `status`
+- `tool`
+- `exit_code`
+- `timed_out`
+- `duration_ms`
+- `stdout_excerpt`
+- `stderr_excerpt`
+- `output_truncated`
+- `executed_paths`
+- `limitations`
+- `trace_summary`
 
 `CodingAgentBackgroundResponse` contains the common background shape used by
 the worker:
@@ -362,6 +395,23 @@ proposal answer text.
 `apply_workspace_ref.kind` is `managed_apply_workspace`. The response omits the
 resolved source root, workspace root, raw diff text, raw command output, and
 the physical managed apply path.
+
+## Direct Code Execution Request
+
+`CodeExecutionRequest` accepts:
+
+- `workspace_root`
+- `apply_package_id`
+- `apply_workspace_ref`
+- `execution`
+- `max_stdout_chars`
+- `max_stderr_chars`
+
+`execution.tool` is either `python_compileall` with relative `paths` or
+`pytest` with relative `pytest_selectors`. The executor resolves the managed
+source directory from the workspace root and package id; callers do not provide
+an execution directory. Public responses omit absolute workspace paths,
+environment values, raw full output, and source contents.
 
 ## Change Control
 

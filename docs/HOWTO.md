@@ -288,7 +288,7 @@ coding tasks through the coding-agent supervisor using
 `CODING_AGENT_WORKSPACE_ROOT`; it may return code-reading answers or
 review-only patch proposal artifacts for source-free writing or explicit
 existing-source modification requests. Neither worker applies patches, runs
-shell commands, installs packages, processes attachments, or sends adapter
+project commands, installs packages, processes attachments, or sends adapter
 text directly. `future_speak` is the
 deterministic delayed-message worker: it schedules a future cognition slot and
 stores only a semantic objective, not prewritten user-facing text. Completed
@@ -312,6 +312,15 @@ object, and matching clean source identity. This flow creates a managed apply
 copy under the configured coding workspace only after patch review validation
 passes, and leaves the original source root unchanged. It remains outside
 background-worker, L2d, dialog, and adapter delivery paths.
+
+The coding-agent direct API also exposes `execute_code_check(...)` for trusted
+callers that already hold a Phase 5 `apply_workspace_ref`. The execution
+request must provide a structured spec for either `python_compileall` or
+focused `pytest` selectors. Execution runs only inside
+`<workspace_root>\patch_apply\<apply_package_id>\source`, returns bounded
+stdout/stderr excerpts and exit metadata, and keeps original source checkouts,
+background tasks, L2d, dialog, adapter delivery, package installation, network
+access, and repair loops outside this boundary.
 
 Reflection phase scheduling spreads monitor-eligible channels across the
 `REFLECTION_WORKER_INTERVAL_SECONDS` period instead of running all group

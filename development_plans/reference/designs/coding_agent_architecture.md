@@ -8,8 +8,11 @@
   - `development_plans/archive/completed/short_term/coding_agent_phase0_fetching_plan.md`
   - `development_plans/archive/completed/short_term/coding_agent_phase1_code_reading_final_plan.md`
   - `development_plans/archive/completed/short_term/coding_agent_phase2_code_writing_plan.md`
-  - `development_plans/active/short_term/coding_agent_phase2_5_security_boundary_plan.md`
+  - `development_plans/archive/completed/short_term/coding_agent_phase2_5_security_boundary_plan.md`
   - `development_plans/archive/completed/short_term/coding_agent_phase3_background_worker_integration_plan.md`
+  - `development_plans/archive/completed/short_term/coding_agent_phase4_code_modifying_and_patching_plan.md`
+  - `development_plans/archive/completed/short_term/coding_agent_phase5_patch_apply_plan.md`
+  - `development_plans/active/short_term/coding_agent_phase6_code_executing_plan.md`
 - Execution rule: use this document as reference context
 
 This document captures the top-level architecture for replacing placeholder
@@ -18,9 +21,12 @@ completed Phase 0 plan records the implemented `code_fetching` contract; the
 archived completed Phase 1 plan records the corrected `code_reading` and
 direct answer interface on top of that fetching contract. The archived
 completed Phase 2 plan records the standalone new-artifact `code_writing`
-stage and the patch artifact boundary it needs. The active Phase 2.5 plan
+stage and the patch artifact boundary it needs. The archived Phase 2.5 plan
 defines the agent-space security boundary for generated artifacts. The archived
-completed Phase 3 plan records the background-worker integration stage.
+completed Phase 3 plan records the background-worker integration stage. The
+archived Phase 4 and Phase 5 plans record existing-source modification,
+patching, and approved managed-copy apply. The active Phase 6 plan records the
+bounded managed-workspace execution boundary.
 
 ## Problem
 
@@ -760,6 +766,16 @@ Phase 3 provides the coding workspace root from configuration. User text,
 public artifacts, and worker metadata stay on public-safe repository summaries,
 repo-relative evidence references, and bounded result fields.
 
+Phase 6 execution is not a background-worker operation. Trusted direct callers
+may run bounded verification only after Phase 5 has produced a
+`managed_apply_workspace` reference. The executor resolves
+`<workspace_root>/patch_apply/<apply_package_id>/source`, validates structured
+`python_compileall` or `pytest` specs, runs argv commands in that managed copy,
+and returns sanitized stdout/stderr excerpts, exit code, timeout state,
+relative executed paths, and limitations. Nonzero target tests are structured
+`failed` execution results, not executor crashes. Execution results are not
+fed into automatic repair in this phase.
+
 Phase 3 reuses the standalone coding-agent split LLM route resolution. The
 worker environment supplies the configured workspace and route settings.
 
@@ -915,11 +931,18 @@ Purpose: run bounded execution to verify or inspect code.
 
 Responsibilities:
 
-- Run commands only through an allowlisted sandbox execution facade.
-- Default to no file access.
-- Use Docker or another isolated runner when local sandbox isolation is not
-  available.
-- Return stdout, stderr, exit code, timeout status, and a bounded summary.
+- Consume only Phase 5 managed apply workspace references.
+- Resolve execution roots from the workspace root and apply package id instead
+  of accepting caller-supplied execution directories.
+- Run commands only through the allowlisted execution facade.
+- Support `python_compileall` and focused `pytest` selectors as structured
+  request specs.
+- Enforce path containment, unsafe-path rejection, timeout caps, output caps,
+  and public output redaction.
+- Return stdout/stderr excerpts, exit code, timeout status, relative executed
+  paths, limitations, and a bounded trace summary.
+- Keep package installation, dependency resolution, network access, Docker,
+  background auto-execution, and repair loops deferred.
 
 Fetching, reading, and patch proposal are higher priority because ordinary
 code questions are answered through source evidence and synthesis.
@@ -998,7 +1021,7 @@ cases where code fetching needs a public page observation.
 | Phase 3 | Background-worker integration, L2d/action-spec affordance update, result-ready delivery, placeholder removal, and standalone coding-agent response to `BackgroundWorkResult` mapping for `WORKER="coding_agent"`. | Kazusa can route implemented standalone coding-agent work through the normal background-work path. |
 | Phase 4 | `code_modifying` for existing-source changes, supervisor interleaving between reading, writing, modifying, and patching, and direct hard gates for mixed new-file plus existing-file work. | Direct callers can request bounded existing-repository changes as patch proposals. |
 | Phase 5 | Direct `apply_approved_patch(...)` flow with explicit structured approval, clean source identity validation, review validation before apply-copy creation, managed source-copy apply, public-safe apply response, source-backed evidence fallback, one validation-feedback modifying repair retry, and original-source immutability tests. | Trusted callers can apply approved and review-valid patch artifacts into a controlled managed workspace without mutating the original checkout or running commands. |
-| Phase 6 | `code_executing` sandbox/Docker execution. | Run bounded verification commands and include results. |
+| Phase 6 | Direct `execute_code_check(...)` flow with structured `python_compileall` and `pytest` specs, Phase 5 managed apply workspace containment, timeout and output caps, and sanitized execution responses. | Trusted callers can run bounded verification inside an approved managed apply copy without mutating original source or invoking background auto-execution. |
 | Phase 7 | Broader repository operations and richer external help. | Handle multi-repo comparisons, docs lookups, and current dependency evidence. |
 
 ## Real Demand Mapping
