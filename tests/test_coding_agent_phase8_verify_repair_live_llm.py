@@ -535,6 +535,148 @@ GATE_05: VerifyRepairGate = {
     ],
 }
 
+GATE_06: VerifyRepairGate = {
+    "gate_id": "verify_repair_gate_06_release_feed_cache_cli",
+    "title": "Release feed offline cache and CLI repair",
+    "instruction": (
+        "Repair the release feed loader so network fetches accept a timeout, "
+        "retry once after TimeoutError, write a caller-provided cache file "
+        "after a successful fetch, read that cache file when offline=True, "
+        "and expose --cache-file, --offline, and --timeout through the CLI. "
+        "Use only the Python standard library and keep network behavior "
+        "mocked in tests."
+    ),
+    "source_files": {
+        "release_feed/__init__.py": "",
+        "release_feed/client.py": (
+            "from urllib.request import urlopen\n\n\n"
+            "def load_feed(url):\n"
+            "    with urlopen(url) as response:\n"
+            "        return response.read().decode('utf-8')\n"
+        ),
+        "release_feed/cli.py": (
+            "import argparse\n\n"
+            "from .client import load_feed\n\n\n"
+            "def build_parser():\n"
+            "    parser = argparse.ArgumentParser(prog='release-feed')\n"
+            "    parser.add_argument('url')\n"
+            "    return parser\n\n\n"
+            "def main(argv=None):\n"
+            "    args = build_parser().parse_args(argv)\n"
+            "    print(load_feed(args.url))\n"
+        ),
+        "tests/test_client.py": (
+            "from release_feed import client\n\n\n"
+            "class FakeResponse:\n"
+            "    def __init__(self, text):\n"
+            "        self.text = text\n\n"
+            "    def __enter__(self):\n"
+            "        return self\n\n"
+            "    def __exit__(self, exc_type, exc, tb):\n"
+            "        return False\n\n"
+            "    def read(self):\n"
+            "        return self.text.encode('utf-8')\n\n\n"
+            "def test_load_feed_uses_offline_cache_without_network(monkeypatch, tmp_path):\n"
+            "    cache_file = tmp_path / 'feed.json'\n"
+            "    cache_file.write_text('{\"version\": \"cached\"}', encoding='utf-8')\n\n"
+            "    def fake_urlopen(url, timeout):\n"
+            "        raise AssertionError('offline mode must not use network')\n\n"
+            "    monkeypatch.setattr(client, 'urlopen', fake_urlopen)\n"
+            "    result = client.load_feed(\n"
+            "        'https://release.test/feed.json',\n"
+            "        timeout=4,\n"
+            "        cache_file=cache_file,\n"
+            "        offline=True,\n"
+            "    )\n"
+            "    assert result == '{\"version\": \"cached\"}'\n\n\n"
+            "def test_load_feed_retries_timeout_and_updates_cache(monkeypatch, tmp_path):\n"
+            "    calls = []\n"
+            "    cache_file = tmp_path / 'feed.json'\n\n"
+            "    def fake_urlopen(url, timeout):\n"
+            "        calls.append((url, timeout))\n"
+            "        if len(calls) == 1:\n"
+            "            raise TimeoutError('slow release server')\n"
+            "        return FakeResponse('{\"version\": \"fresh\"}')\n\n"
+            "    monkeypatch.setattr(client, 'urlopen', fake_urlopen)\n"
+            "    result = client.load_feed(\n"
+            "        'https://release.test/feed.json',\n"
+            "        timeout=8,\n"
+            "        cache_file=cache_file,\n"
+            "    )\n"
+            "    assert result == '{\"version\": \"fresh\"}'\n"
+            "    assert cache_file.read_text(encoding='utf-8') == '{\"version\": \"fresh\"}'\n"
+            "    assert calls == [\n"
+            "        ('https://release.test/feed.json', 8),\n"
+            "        ('https://release.test/feed.json', 8),\n"
+            "    ]\n"
+        ),
+        "tests/test_cli.py": (
+            "from release_feed import cli\n\n\n"
+            "def test_cli_passes_cache_offline_and_timeout(monkeypatch, tmp_path, capsys):\n"
+            "    captured = {}\n"
+            "    cache_file = tmp_path / 'feed.json'\n\n"
+            "    def fake_load_feed(url, *, timeout, cache_file=None, offline=False):\n"
+            "        captured['url'] = url\n"
+            "        captured['timeout'] = timeout\n"
+            "        captured['cache_file'] = cache_file\n"
+            "        captured['offline'] = offline\n"
+            "        return '{\"version\": \"cached\"}'\n\n"
+            "    monkeypatch.setattr(cli, 'load_feed', fake_load_feed)\n"
+            "    cli.main([\n"
+            "        '--cache-file',\n"
+            "        str(cache_file),\n"
+            "        '--offline',\n"
+            "        '--timeout',\n"
+            "        '9',\n"
+            "        'https://release.test/feed.json',\n"
+            "    ])\n"
+            "    assert capsys.readouterr().out.strip() == '{\"version\": \"cached\"}'\n"
+            "    assert captured == {\n"
+            "        'url': 'https://release.test/feed.json',\n"
+            "        'timeout': 9,\n"
+            "        'cache_file': cache_file,\n"
+            "        'offline': True,\n"
+            "    }\n"
+        ),
+    },
+    "initial_operations": [{
+        "operation_id": "seed-release-timeout-only",
+        "kind": "replace_file_small",
+        "path": "release_feed/client.py",
+        "content": (
+            "from urllib.request import urlopen\n\n\n"
+            "def load_feed(url, *, timeout=10):\n"
+            "    with urlopen(url, timeout=timeout) as response:\n"
+            "        return response.read().decode('utf-8')\n"
+        ),
+        "summary": (
+            "Seed patch adds timeout but omits retry, cache-file handling, "
+            "offline mode, and CLI flags."
+        ),
+    }],
+    "execution_specs": [{
+        "tool": "pytest",
+        "paths": [],
+        "pytest_selectors": ["tests/test_client.py", "tests/test_cli.py"],
+        "timeout_seconds": 35,
+    }],
+    "repair_attempt_limit": 2,
+    "expected_repaired_paths": ["release_feed/client.py", "release_feed/cli.py"],
+    "protected_verification_paths": ["tests/test_client.py", "tests/test_cli.py"],
+    "behavior_rubric": [
+        "The first execution attempt fails on mocked timeout/cache/CLI behavior.",
+        "Repair feedback preserves failing test names without raw full output.",
+        "The repair implements source behavior from existing mocked I/O patterns.",
+        "The final attempt updates client behavior and CLI flag wiring together.",
+    ],
+    "forbidden_failure_modes": [
+        "The repair edits tests instead of client or CLI source.",
+        "The repair treats absent implementation helpers as a blocker.",
+        "The repair performs real network I/O during tests.",
+        "The final response exposes absolute workspace paths or raw shell text.",
+    ],
+}
+
 
 async def test_verify_repair_live_gate_01_median_boundary() -> None:
     """Run the simple single-file repair gate."""
@@ -569,6 +711,13 @@ async def test_verify_repair_live_gate_05_fetch_cache_cli() -> None:
 
     response = await _run_verify_repair_gate(GATE_05)
     _assert_verify_repair_response(gate=GATE_05, response=response)
+
+
+async def test_verify_repair_live_gate_06_release_feed_cache_cli() -> None:
+    """Run the retained hard mocked-I/O repair gate."""
+
+    response = await _run_verify_repair_gate(GATE_06)
+    _assert_verify_repair_response(gate=GATE_06, response=response)
 
 
 async def _run_verify_repair_gate(gate: VerifyRepairGate) -> dict[str, Any]:

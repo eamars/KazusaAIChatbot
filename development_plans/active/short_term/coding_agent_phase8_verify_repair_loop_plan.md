@@ -20,7 +20,7 @@
 - Acceptance criteria: deterministic verify/repair contract tests pass,
   execution feedback is bounded and redacted, original source trees remain
   unchanged, repair attempts use fresh managed apply workspaces, Phase 5 and
-  Phase 6 regressions remain passing, five committed live LLM repair gates
+  Phase 6 regressions remain passing, six committed live LLM repair gates
   pass one at a time with trace review, docs describe the direct trusted
   boundary, and independent code review accepts the implementation.
 
@@ -412,7 +412,7 @@ venv\Scripts\python -m pytest tests\test_coding_agent_phase5_patch_apply_contrac
 - Each gate supplies a known-bad but review-valid `initial_patch_artifacts`
   package so the first managed apply/execution attempt fails and the real LLM
   repair path must run.
-- The five gates, from simple to hard, are:
+- The six gates, from simple to hard, are:
   - Gate 01 `verify_repair_gate_01_median_boundary`: single-file median
     boundary repair.
   - Gate 02 `verify_repair_gate_02_cli_flag_handoff`: small multi-file counter
@@ -423,12 +423,41 @@ venv\Scripts\python -m pytest tests\test_coding_agent_phase5_patch_apply_contrac
     store, and API soft-delete repair.
   - Gate 05 `verify_repair_gate_05_fetch_cache_cli`: hard mixed fetch, retry,
     cache, CLI, tests, and README context repair.
+  - Gate 06 `verify_repair_gate_06_release_feed_cache_cli`: retained hard
+    mocked-I/O repair gate based on the Phase 7 Gate 05 failure mode, using a
+    different release-feed cache/offline/CLI fixture.
 - Require trace review that confirms:
   - failed execution output was summarized and redacted;
   - PM repair targeted the source owner path;
   - repaired proposal applied into a fresh managed copy;
   - final execution succeeded in the repaired attempt.
   - the original source tree remained byte-for-byte unchanged.
+
+### Stage 7A - Hard-Gate Root-Cause Readiness
+
+Before running Gate 05 or Gate 06, add and pass deterministic readiness checks
+that address the root cause surfaced by the Phase 7 retained diagnostic gate:
+the local model selected the right fetch/cache task but omitted required
+companion artifacts after bounded repair. These checks must not weaken the live
+gate assertions.
+
+- Add a repair-feedback fixture where the first proposal updates only a fetch
+  source file while pytest failures identify missing CLI flag wiring and mocked
+  I/O behavior.
+- Prove the verifier converts that execution failure into structured repair
+  feedback that contains failing test names, relative source/test paths, and
+  concise assertion summaries, while redacting raw full output and absolute
+  paths.
+- Prove the modifying request produced for repair includes explicit required
+  source-owner paths and companion context paths from the failed execution, so
+  the PM/programmer cannot treat absent exact helper code or absent newly
+  authored tests as a blocker.
+- Add deterministic contract validation that rejects a repaired proposal when
+  it omits any required changed source owner path or when it changes protected
+  verification tests for a gate.
+- Run a dry-run repair trace review for Gate 05 and Gate 06 before live LLM
+  execution, and record whether the PM handoff contains both runtime owner
+  paths and the focused test evidence paths.
 
 ### Stage 8 - Regression And Review
 
@@ -464,6 +493,7 @@ venv\Scripts\python -m pytest tests\test_coding_agent_phase8_verify_repair_live_
 venv\Scripts\python -m pytest tests\test_coding_agent_phase8_verify_repair_live_llm.py::test_verify_repair_live_gate_03_duplicate_anchor_parser -q -s -m live_llm
 venv\Scripts\python -m pytest tests\test_coding_agent_phase8_verify_repair_live_llm.py::test_verify_repair_live_gate_04_soft_delete_cross_layer -q -s -m live_llm
 venv\Scripts\python -m pytest tests\test_coding_agent_phase8_verify_repair_live_llm.py::test_verify_repair_live_gate_05_fetch_cache_cli -q -s -m live_llm
+venv\Scripts\python -m pytest tests\test_coding_agent_phase8_verify_repair_live_llm.py::test_verify_repair_live_gate_06_release_feed_cache_cli -q -s -m live_llm
 ```
 
 Final non-live regression:
