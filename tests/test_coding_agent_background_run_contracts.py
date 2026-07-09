@@ -117,6 +117,34 @@ def test_l2d_materializes_accepted_coding_task_run_action() -> None:
     assert result["handler_owner"] == "background_work"
 
 
+def test_l2d_materializes_coding_revision_action() -> None:
+    """Proposal revisions should be first-class durable coding actions."""
+
+    action_spec = _materialized_coding_action(
+        "revise_proposal",
+        coding_run_ref="coding_run:run-001",
+    )
+
+    assert action_spec["params"]["coding_action"] == "revise_proposal"
+    assert action_spec["params"]["coding_run_ref"] == "coding_run:run-001"
+    result = ActionSpecEvaluator().evaluate(action_spec)
+    assert result["ok"] is True
+
+
+def test_l2d_materializes_coding_summary_action() -> None:
+    """Run summaries should be first-class durable coding actions."""
+
+    action_spec = _materialized_coding_action(
+        "summarize",
+        coding_run_ref="coding_run:run-001",
+    )
+
+    assert action_spec["params"]["coding_action"] == "summarize"
+    assert action_spec["params"]["coding_run_ref"] == "coding_run:run-001"
+    result = ActionSpecEvaluator().evaluate(action_spec)
+    assert result["ok"] is True
+
+
 def test_accepted_coding_task_rejects_worker_local_params() -> None:
     """Model-facing coding actions must not carry execution internals."""
 
@@ -176,6 +204,18 @@ def test_coding_followup_requires_prompt_safe_run_ref() -> None:
     assert any("coding_run_ref" in error for error in result["errors"])
 
 
+def test_coding_revision_requires_prompt_safe_run_ref() -> None:
+    """Revision and summary actions must bind a coding run ref."""
+
+    for decision in ("revise_proposal", "summarize"):
+        action_spec = _materialized_coding_action(decision)
+
+        result = ActionSpecEvaluator().evaluate(action_spec)
+
+        assert result["ok"] is False
+        assert any("coding_run_ref" in error for error in result["errors"])
+
+
 def test_coding_followup_recovers_visible_run_ref_from_detail() -> None:
     """Visible prompt-safe run refs should survive weak L2d fielding."""
 
@@ -185,6 +225,29 @@ def test_coding_followup_recovers_visible_run_ref_from_detail() -> None:
             "decision": "status",
             "detail": "Check status for coding_run:run-001.",
             "reason": "The user asked for the current coding run status.",
+        }
+    ]
+
+    specs = materialize_semantic_action_requests(requests, _cognition_state())
+
+    assert len(specs) == 1
+    assert specs[0]["params"]["coding_run_ref"] == "coding_run:run-001"
+    result = ActionSpecEvaluator().evaluate(specs[0])
+    assert result["ok"] is True
+
+
+def test_coding_revision_recovers_visible_run_ref_from_detail() -> None:
+    """Revision details should recover prompt-safe run refs."""
+
+    requests = [
+        {
+            "capability": ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
+            "decision": "revise_proposal",
+            "detail": (
+                "For coding_run:run-001, keep tests unchanged and revise "
+                "only runtime files."
+            ),
+            "reason": "The user asked to revise an existing proposal.",
         }
     ]
 
@@ -216,6 +279,35 @@ async def test_queue_rejects_malformed_coding_requested_worker_payload() -> None
 
     with pytest.raises(ValueError, match="operation"):
         await jobs.enqueue_background_work_request(request)
+
+
+@pytest.mark.asyncio
+async def test_queue_accepts_revision_and_summary_payloads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The queue should accept the new validated coding operations."""
+
+    from kazusa_ai_chatbot.background_work import jobs
+
+    async def insert_job(job: dict[str, object]) -> dict[str, object]:
+        return dict(job)
+
+    monkeypatch.setattr(jobs, "insert_background_work_job", insert_job)
+
+    for operation in ("revise_proposal", "summarize"):
+        request = _queue_request()
+        request["requested_worker"] = "coding_agent"
+        request["worker_payload"] = {
+            "schema_version": "coding_agent_worker_payload.v1",
+            "operation": operation,
+            "task_brief": "Revise or summarize a coding run.",
+            "coding_run_ref": "coding_run:run-001",
+            "execution_request": "",
+        }
+
+        result = await jobs.enqueue_background_work_request(request)
+
+        assert result["status"] == "pending"
 
 
 @pytest.mark.asyncio
@@ -307,6 +399,106 @@ async def test_coding_worker_start_payload_preserves_visible_local_path_hint(
     assert result["status"] == "succeeded"
     assert decide.await_args.args[0]["local_path_hint"] == str(source_root)
     assert start.await_args.args[0]["local_path_hint"] == str(source_root)
+
+
+@pytest.mark.asyncio
+async def test_coding_worker_revision_payload_continues_without_execution(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """Revision payloads should continue the run without approval fields."""
+
+    from kazusa_ai_chatbot.background_work.subagent import coding_agent
+
+    continue_run = AsyncMock(return_value=_coding_run_response(
+        status="awaiting_approval",
+        run_id="run-001",
+        objective_type="propose_patch",
+        answer_text="Proposal was revised.",
+    ))
+    monkeypatch.setattr(
+        coding_agent,
+        "CODING_AGENT_WORKSPACE_ROOT",
+        str(tmp_path / "workspace"),
+    )
+    monkeypatch.setattr(coding_agent, "continue_coding_run", continue_run)
+
+    result = await coding_agent.execute(
+        _worker_decision({
+            "schema_version": "coding_agent_worker_payload.v1",
+            "operation": "revise_proposal",
+            "task_brief": "Keep tests unchanged; revise runtime files only.",
+            "coding_run_ref": "coding_run:run-001",
+            "execution_request": "",
+        }),
+        max_output_chars=1000,
+    )
+
+    assert result["status"] == "succeeded"
+    assert result["worker_metadata"]["worker_operation"] == "revise_proposal"
+    continue_request = continue_run.await_args.args[0]
+    assert continue_request["run_id"] == "run-001"
+    assert continue_request["action"] == "revise_proposal"
+    assert continue_request["revision_instruction"] == (
+        "Keep tests unchanged; revise runtime files only."
+    )
+    assert "approval" not in continue_request
+    assert "execution_specs" not in continue_request
+
+
+@pytest.mark.asyncio
+async def test_coding_worker_summary_payload_continues_without_execution(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """Summary payloads should project run state without approval fields."""
+
+    from kazusa_ai_chatbot.background_work.subagent import coding_agent
+
+    continue_run = AsyncMock(return_value={
+        **_coding_run_response(
+            status="awaiting_approval",
+            run_id="run-001",
+            objective_type="propose_patch",
+            answer_text="Files changed: app.py.",
+        ),
+        "allowed_next_actions": [
+            "revise_proposal",
+            "summarize",
+            "approve_and_verify",
+            "cancel",
+        ],
+    })
+    monkeypatch.setattr(
+        coding_agent,
+        "CODING_AGENT_WORKSPACE_ROOT",
+        str(tmp_path / "workspace"),
+    )
+    monkeypatch.setattr(coding_agent, "continue_coding_run", continue_run)
+
+    result = await coding_agent.execute(
+        _worker_decision({
+            "schema_version": "coding_agent_worker_payload.v1",
+            "operation": "summarize",
+            "task_brief": "Summarize changed files.",
+            "coding_run_ref": "coding_run:run-001",
+            "execution_request": "",
+        }),
+        max_output_chars=1000,
+    )
+
+    assert result["status"] == "succeeded"
+    assert result["worker_metadata"]["worker_operation"] == "summarize"
+    assert result["worker_metadata"]["allowed_next_actions"] == [
+        "revise_proposal",
+        "summarize",
+        "approve_and_verify",
+        "cancel",
+    ]
+    continue_request = continue_run.await_args.args[0]
+    assert continue_request["action"] == "summarize"
+    assert "approval" not in continue_request
+    assert "execution_specs" not in continue_request
 
 
 @pytest.mark.asyncio

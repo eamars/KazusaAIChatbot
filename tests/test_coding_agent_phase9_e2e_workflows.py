@@ -115,6 +115,108 @@ async def test_proposal_workflow_waits_for_approval_without_side_effects(
     assert _hash_tree(source_root) == before_hash
 
 
+async def test_proposal_revision_replaces_artifacts_without_verification(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A proposal revision stays review-only and preserves the run id."""
+
+    from kazusa_ai_chatbot.coding_agent import continue_coding_run
+    from kazusa_ai_chatbot.coding_agent import get_coding_run
+    from kazusa_ai_chatbot.coding_agent import start_coding_run
+    from kazusa_ai_chatbot.coding_agent.coding_run import supervisor
+
+    source_root = _source_tree(tmp_path)
+    before_hash = _hash_tree(source_root)
+    verify_calls: list[dict[str, object]] = []
+    proposal_calls: list[dict[str, object]] = []
+
+    async def fake_propose(request: dict[str, object]) -> dict[str, object]:
+        proposal_calls.append(request)
+        if len(proposal_calls) == 1:
+            return _proposal_response(
+                answer_text="Initial proposal.",
+                changed_path="app.py",
+            )
+        return _proposal_response(
+            answer_text="Revised proposal keeps tests unchanged.",
+            changed_path="app.py",
+            summary="Runtime-only value change.",
+        )
+
+    async def fake_verify(request: dict[str, object]) -> dict[str, object]:
+        verify_calls.append(request)
+        return _verify_response(status="succeeded")
+
+    monkeypatch.setattr(supervisor, "propose_code_change", fake_propose)
+    monkeypatch.setattr(supervisor, "verify_and_repair_code_change", fake_verify)
+
+    started = await start_coding_run(_proposal_request(tmp_path, source_root))
+    revised = await continue_coding_run({
+        "workspace_root": str(tmp_path / "workspace"),
+        "run_id": started["run_id"],
+        "action": "revise_proposal",
+        "revision_instruction": "Keep tests unchanged; revise runtime only.",
+        "reason": "User requested a proposal revision.",
+    })
+    reloaded = await get_coding_run({
+        "workspace_root": str(tmp_path / "workspace"),
+        "run_id": started["run_id"],
+    })
+
+    assert revised["run_id"] == started["run_id"]
+    assert revised["status"] == "awaiting_approval"
+    assert revised["answer_text"] == "Revised proposal keeps tests unchanged."
+    assert revised["changed_files"][0]["path"] == "app.py"
+    assert verify_calls == []
+    assert len(proposal_calls) == 2
+    assert "Keep tests unchanged" in proposal_calls[1]["question"]
+    assert any(
+        event["event_type"] == "proposal_revised"
+        for event in reloaded["events"]
+    )
+    assert _hash_tree(source_root) == before_hash
+
+
+async def test_summary_projection_records_allowed_next_actions(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Summary continuation exposes changed files and allowed actions."""
+
+    from kazusa_ai_chatbot.coding_agent import continue_coding_run
+    from kazusa_ai_chatbot.coding_agent import start_coding_run
+    from kazusa_ai_chatbot.coding_agent.coding_run import supervisor
+
+    source_root = _source_tree(tmp_path)
+
+    monkeypatch.setattr(supervisor, "propose_code_change", _fake_propose)
+
+    started = await start_coding_run(_proposal_request(tmp_path, source_root))
+    summarized = await continue_coding_run({
+        "workspace_root": str(tmp_path / "workspace"),
+        "run_id": started["run_id"],
+        "action": "summarize",
+        "reason": "User asked for changed files.",
+    })
+
+    assert summarized["run_id"] == started["run_id"]
+    assert summarized["status"] == "awaiting_approval"
+    assert summarized["changed_files"][0]["path"] == "app.py"
+    assert summarized["allowed_next_actions"] == [
+        "revise_proposal",
+        "summarize",
+        "status",
+        "approve_and_verify",
+        "cancel",
+    ]
+    assert "app.py" in summarized["answer_text"]
+    assert any(
+        event["event_type"] == "summary_requested"
+        for event in summarized["events"]
+    )
+
+
 async def test_approval_workflow_verifies_and_preserves_source(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -288,20 +390,25 @@ def _reading_response(*, answer_text: str) -> dict[str, object]:
     return response
 
 
-def _proposal_response() -> dict[str, object]:
+def _proposal_response(
+    *,
+    answer_text: str = "Prepared proposal.",
+    changed_path: str = "app.py",
+    summary: str = "Change value.",
+) -> dict[str, object]:
     response = {
         "status": "succeeded",
         "mode": "edit_existing_repository",
-        "answer_text": "Prepared proposal.",
+        "answer_text": answer_text,
         "repository": REPOSITORY,
         "source_scope": SOURCE_SCOPE,
         "evidence": [],
         "patch_artifacts": [PATCH_ARTIFACT],
         "created_files": [],
         "changed_files": [{
-            "path": "app.py",
+            "path": changed_path,
             "change_type": "modify",
-            "summary": "Change value.",
+            "summary": summary,
         }],
         "validation": {
             "status": "succeeded",

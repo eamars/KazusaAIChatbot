@@ -69,6 +69,7 @@ MAX_PM_LIFECYCLE_STEPS = 8
 MAX_PM_DEPTH = 4
 MAX_CHILD_PM_DELEGATION_DEPTH = 1
 MAX_CHILD_REPORTS = 16
+MAX_REVIEW_VALIDATION_FEEDBACK_PASSES = 1
 READBACK_ROOT_NAME = "writing_readback"
 
 
@@ -267,32 +268,98 @@ async def run_writing_supervisor(
         trace=trace,
         trace_summary=trace_summary,
     )
-    review_call = diagnostic.start(
-        stage="review_materialization",
-        patch_artifact_count=len(patcher_report["patch_artifacts"]),
-        max_artifact_chars=max_artifact_chars,
-    )
-    validation = materialize_patch_artifacts_for_review(
-        repo_root=None,
+    validation = _materialize_review_validation(
         workspace_root=Path(workspace_root),
-        patch_artifacts=patcher_report["patch_artifacts"],
-        max_files=MAX_PATCH_FILES,
-        max_diff_chars=max_artifact_chars,
+        patcher_report=patcher_report,
+        max_artifact_chars=max_artifact_chars,
+        diagnostic=diagnostic,
+        trace_summary=trace_summary,
     )
-    diagnostic.end(
-        stage="review_materialization",
-        call_id=review_call,
-        status=validation["status"],
-        file_count=len(validation["files"]),
-        error_count=len(validation["errors"]),
-    )
-    validation = _validation_with_patcher_diagnostics(
-        validation,
-        patcher_report["diagnostics"],
-    )
-    trace_summary.append(
-        f"writing_review_package:status={validation['status']}"
-    )
+    for feedback_attempt in range(MAX_REVIEW_VALIDATION_FEEDBACK_PASSES):
+        if not _should_run_review_validation_feedback(validation):
+            break
+
+        feedback = _review_validation_feedback(
+            validation=validation,
+            patcher_report=patcher_report,
+        )
+        attempt_number = feedback_attempt + 1
+        trace_summary.append(
+            "writing_validation_feedback:"
+            f"attempt={attempt_number} "
+            f"errors={len(validation['errors'])}"
+        )
+        diagnostic.event(
+            stage="review_materialization_feedback",
+            event="retry_started",
+            attempt=attempt_number,
+            error_count=len(validation["errors"]),
+        )
+        retry_input = _root_pm_input(
+            question=question,
+            acceptance_criteria=acceptance["acceptance_criteria"],
+            external_evidence=external_evidence,
+            supervisor_facts=supervisor_facts,
+            supervisor_state=supervisor_state,
+            prior_generated_artifacts=[],
+            child_feedback=[feedback],
+        )
+        retry_result = await _run_pm_node(
+            pm_input=retry_input,
+            initial_generated_artifacts=[],
+            depth=0,
+            diagnostic=diagnostic,
+            trace=trace,
+            trace_summary=trace_summary,
+            trace_label=f"validation_feedback_{attempt_number}",
+        )
+        if retry_result.status in ("need_external_evidence", "need_reading"):
+            result = _information_request_result(
+                status=retry_result.status,
+                requests=retry_result.information_requests,
+                generated_artifacts=retry_result.generated_artifacts,
+                session=session,
+                workspace_root=Path(workspace_root),
+                external_evidence=external_evidence,
+                trace_summary=trace_summary,
+            )
+            return result
+        if retry_result.status != "succeeded":
+            trace_summary.append(
+                "writing_validation_feedback:"
+                f"attempt={attempt_number} "
+                f"status={retry_result.status}"
+            )
+            break
+        if not retry_result.generated_artifacts:
+            trace_summary.append(
+                "writing_validation_feedback:"
+                f"attempt={attempt_number} "
+                "status=failed reason=no_generated_artifacts"
+            )
+            break
+
+        pm_result = retry_result
+        reserved_paths = _reserved_paths_from_artifacts(
+            pm_result.generated_artifacts,
+        )
+        patcher_report = _materialize_patcher_report(
+            generated_artifacts=pm_result.generated_artifacts,
+            reserved_paths=reserved_paths,
+            max_artifact_chars=max_artifact_chars,
+            diagnostic=diagnostic,
+            trace=trace,
+            trace_summary=trace_summary,
+            trace_label=f"_validation_feedback_{attempt_number}",
+        )
+        validation = _materialize_review_validation(
+            workspace_root=Path(workspace_root),
+            patcher_report=patcher_report,
+            max_artifact_chars=max_artifact_chars,
+            diagnostic=diagnostic,
+            trace_summary=trace_summary,
+            trace_label=f"validation_feedback_{attempt_number}",
+        )
 
     synthesis_trace: dict[str, object] = {}
     limitations = _dedupe_strings([
@@ -1164,6 +1231,96 @@ def _materialize_patcher_report(
         f"diagnostics={len(report['diagnostics'])}"
     )
     return report
+
+
+def _materialize_review_validation(
+    *,
+    workspace_root: Path,
+    patcher_report: WritingPatcherReport,
+    max_artifact_chars: int,
+    diagnostic: WritingDiagnosticTracer,
+    trace_summary: list[str],
+    trace_label: str = "",
+) -> PatchValidationSummary:
+    review_call = diagnostic.start(
+        stage="review_materialization",
+        trace_label=trace_label or "initial",
+        patch_artifact_count=len(patcher_report["patch_artifacts"]),
+        max_artifact_chars=max_artifact_chars,
+    )
+    validation = materialize_patch_artifacts_for_review(
+        repo_root=None,
+        workspace_root=workspace_root,
+        patch_artifacts=patcher_report["patch_artifacts"],
+        max_files=MAX_PATCH_FILES,
+        max_diff_chars=max_artifact_chars,
+    )
+    diagnostic.end(
+        stage="review_materialization",
+        call_id=review_call,
+        trace_label=trace_label or "initial",
+        status=validation["status"],
+        file_count=len(validation["files"]),
+        error_count=len(validation["errors"]),
+    )
+    validation = _validation_with_patcher_diagnostics(
+        validation,
+        patcher_report["diagnostics"],
+    )
+    if trace_label:
+        trace_summary.append(
+            "writing_review_package:"
+            f"{trace_label}:status={validation['status']}"
+        )
+    else:
+        trace_summary.append(
+            f"writing_review_package:status={validation['status']}"
+        )
+    return validation
+
+
+def _should_run_review_validation_feedback(
+    validation: PatchValidationSummary,
+) -> bool:
+    return validation["status"] == "failed" and bool(validation["errors"])
+
+
+def _review_validation_feedback(
+    *,
+    validation: PatchValidationSummary,
+    patcher_report: WritingPatcherReport,
+) -> dict[str, object]:
+    proposed_paths = _changed_paths_from_patcher_report(patcher_report)
+    feedback = {
+        "stage": "review_materialization",
+        "child_id": "artifact_package",
+        "summary": (
+            "Review materialization failed for the generated package. Return a "
+            "complete replacement package for the same user goal. Include "
+            "every source, test, docs, config, and data artifact still needed; "
+            "the failed package will not be carried forward. Correct the "
+            "reported path, import, syntax, or materialization issues without "
+            "running commands or claiming tests passed."
+        ),
+        "errors": validation["errors"][:8],
+        "materialized_files": validation["files"][:16],
+        "proposed_files": proposed_paths[:16],
+    }
+    return feedback
+
+
+def _changed_paths_from_patcher_report(
+    patcher_report: WritingPatcherReport,
+) -> list[str]:
+    paths: list[str] = []
+    for row in patcher_report["changed_files"]:
+        path = row.get("path")
+        if not isinstance(path, str) or not path.strip():
+            continue
+        if path in paths:
+            continue
+        paths.append(path)
+    return paths
 
 
 def _prepare_readback_source(

@@ -190,7 +190,12 @@ async def _execute_coding_run_payload(
             max_output_chars=max_output_chars,
         )
         return result
-    if operation in ("approve_and_verify", "cancel"):
+    if operation in (
+        "revise_proposal",
+        "summarize",
+        "approve_and_verify",
+        "cancel",
+    ):
         result = await _continue_coding_run_from_payload(
             decision,
             worker_payload=worker_payload,
@@ -314,6 +319,11 @@ async def _continue_coding_run_from_payload(
         "action": operation,
         "reason": _bounded_text(decision.get("reason")),
     }
+    if operation == "revise_proposal":
+        request["revision_instruction"] = _payload_text(
+            worker_payload,
+            "task_brief",
+        )
     if operation == "approve_and_verify":
         request["approval"] = _approval_from_payload(
             decision,
@@ -396,6 +406,9 @@ def _map_coding_run_response(
             ),
             "repair_attempts": _public_attempts(response.get("repair_attempts")),
             "blockers": _public_attempts(response.get("blockers")),
+            "allowed_next_actions": _text_list(
+                response.get("allowed_next_actions"),
+            ),
             "limitations": _text_list(response.get("limitations")),
             "trace_summary": [
                 f"coding_run:{worker_operation}:{route_reason}",

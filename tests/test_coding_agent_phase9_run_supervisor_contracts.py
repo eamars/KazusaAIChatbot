@@ -100,6 +100,42 @@ async def test_get_missing_run_is_rejected(tmp_path: Path) -> None:
     assert any("missing" in item.casefold() for item in response["limitations"])
 
 
+async def test_status_continuation_projects_run_without_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Direct status continuation returns the public projection only."""
+
+    from kazusa_ai_chatbot.coding_agent import continue_coding_run
+    from kazusa_ai_chatbot.coding_agent import get_coding_run
+    from kazusa_ai_chatbot.coding_agent import start_coding_run
+    from kazusa_ai_chatbot.coding_agent.coding_run import supervisor
+
+    monkeypatch.setattr(supervisor, "propose_code_change", _fake_propose)
+
+    started = await start_coding_run(_proposal_request(tmp_path))
+    status_response = await continue_coding_run({
+        "workspace_root": str(tmp_path / "workspace"),
+        "run_id": started["run_id"],
+        "action": "status",
+    })
+    reloaded = await get_coding_run({
+        "workspace_root": str(tmp_path / "workspace"),
+        "run_id": started["run_id"],
+    })
+
+    assert status_response["status"] == "awaiting_approval"
+    assert status_response["run_id"] == started["run_id"]
+    assert status_response["events"] == reloaded["events"]
+    assert status_response["allowed_next_actions"] == [
+        "revise_proposal",
+        "summarize",
+        "status",
+        "approve_and_verify",
+        "cancel",
+    ]
+
+
 async def test_read_only_start_persists_completed_ledger(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

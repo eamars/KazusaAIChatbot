@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 
 from kazusa_ai_chatbot.coding_agent.code_verifying import (
@@ -34,7 +35,13 @@ from kazusa_ai_chatbot.coding_agent.supervisor import (
 )
 
 ALLOWED_OBJECTIVES = {"read_only", "propose_patch", "verify_repair"}
-ALLOWED_ACTIONS = {"approve_and_verify", "cancel"}
+ALLOWED_ACTIONS = {
+    "revise_proposal",
+    "summarize",
+    "status",
+    "approve_and_verify",
+    "cancel",
+}
 TERMINAL_STATUSES = {"completed", "blocked", "rejected", "failed", "cancelled"}
 SOURCE_FIELDS = (
     "source_url",
@@ -149,7 +156,12 @@ async def continue_coding_run(
         )
         return response
 
-    if ledger["status"] in TERMINAL_STATUSES:
+    action = str(request["action"])
+    if action == "status":
+        response = _status_run(paths=paths, ledger=ledger)
+        return response
+
+    if ledger["status"] in TERMINAL_STATUSES and action != "summarize":
         response = _reject_continuation(
             paths=paths,
             ledger=ledger,
@@ -157,9 +169,18 @@ async def continue_coding_run(
         )
         return response
 
-    action = str(request["action"])
     if action == "cancel":
         response = _cancel_run(paths=paths, ledger=ledger, request=request)
+        return response
+    if action == "revise_proposal":
+        response = await _revise_proposal(
+            paths=paths,
+            ledger=ledger,
+            request=request,
+        )
+        return response
+    if action == "summarize":
+        response = _summarize_run(paths=paths, ledger=ledger, request=request)
         return response
 
     response = await _approve_and_verify(paths=paths, ledger=ledger, request=request)
@@ -332,6 +353,98 @@ def _cancel_run(
         public_payload={"reason": reason},
     )
     write_ledger(paths, ledger)
+    events = load_events(paths)
+    response = public_response(ledger=ledger, events=events)
+    return response
+
+
+async def _revise_proposal(
+    *,
+    paths: CodingRunPaths,
+    ledger: CodingRunLedger,
+    request: CodingRunContinueRequest,
+) -> CodingRunResponse:
+    if ledger["status"] != "awaiting_approval":
+        response = _reject_continuation(
+            paths=paths,
+            ledger=ledger,
+            limitation="Proposal revision is only valid for runs awaiting approval.",
+        )
+        return response
+    revision_instruction = _request_text(request.get("revision_instruction"))
+    if not revision_instruction:
+        revision_instruction = _request_text(request.get("reason"))
+    if not revision_instruction:
+        response = _reject_continuation(
+            paths=paths,
+            ledger=ledger,
+            limitation="Proposal revision requires an instruction.",
+        )
+        return response
+
+    revise_request = _revision_proposal_request(
+        paths=paths,
+        ledger=ledger,
+        revision_instruction=revision_instruction,
+    )
+    result = await propose_code_change(revise_request)
+    if result["status"] == "succeeded":
+        ledger["status"] = "awaiting_approval"
+    else:
+        ledger["status"] = _terminal_status_from_direct(result["status"])
+    ledger["answer_text"] = result["answer_text"]
+    ledger["repository"] = result["repository"]
+    ledger["source_scope"] = result["source_scope"]
+    ledger["evidence"] = result["evidence"]
+    ledger["patch_artifacts"] = result["patch_artifacts"]
+    ledger["changed_files"] = result["changed_files"]
+    ledger["limitations"] = result["limitations"]
+    ledger["trace_summary"] = result["trace_summary"]
+    if result["status"] == "succeeded":
+        _record_event(
+            paths=paths,
+            ledger=ledger,
+            event_type="proposal_revised",
+            summary="Patch proposal was revised.",
+            public_payload={
+                "changed_files": result["changed_files"],
+                "revision_instruction": revision_instruction,
+            },
+        )
+    else:
+        _record_terminal_event(paths=paths, ledger=ledger)
+    write_ledger(paths, ledger)
+    events = load_events(paths)
+    response = public_response(ledger=ledger, events=events)
+    return response
+
+
+def _summarize_run(
+    *,
+    paths: CodingRunPaths,
+    ledger: CodingRunLedger,
+    request: CodingRunContinueRequest,
+) -> CodingRunResponse:
+    reason = _request_text(request.get("reason"))
+    _record_event(
+        paths=paths,
+        ledger=ledger,
+        event_type="summary_requested",
+        summary="Coding run summary was requested.",
+        public_payload={"reason": reason},
+    )
+    write_ledger(paths, ledger)
+    events = load_events(paths)
+    response = public_response(ledger=ledger, events=events)
+    response["answer_text"] = _summary_answer_text(response)
+    return response
+
+
+def _status_run(
+    *,
+    paths: CodingRunPaths,
+    ledger: CodingRunLedger,
+) -> CodingRunResponse:
     events = load_events(paths)
     response = public_response(ledger=ledger, events=events)
     return response
@@ -588,6 +701,75 @@ def _verify_request_from_continuation(
     if repair_attempt_limit is not None:
         verify_request["repair_attempt_limit"] = repair_attempt_limit
     return verify_request
+
+
+def _revision_proposal_request(
+    *,
+    paths: CodingRunPaths,
+    ledger: CodingRunLedger,
+    revision_instruction: str,
+) -> dict[str, object]:
+    revise_request = _direct_request(ledger["source_request"])
+    prior_projection = _prior_revision_projection(paths=paths, ledger=ledger)
+    revise_request["question"] = (
+        "Original goal:\n"
+        f"{ledger['goal']}\n\n"
+        "Current revision instruction:\n"
+        f"{revision_instruction}\n\n"
+        "Prior public run projection:\n"
+        f"{json.dumps(prior_projection, ensure_ascii=False, sort_keys=True)}"
+    )
+    return revise_request
+
+
+def _prior_revision_projection(
+    *,
+    paths: CodingRunPaths,
+    ledger: CodingRunLedger,
+) -> dict[str, object]:
+    events = load_events(paths)
+    projection = public_response(ledger=ledger, events=events)
+    prior = {
+        "status": projection["status"],
+        "goal": projection["goal"],
+        "objective_type": projection["objective_type"],
+        "answer_text": projection["answer_text"],
+        "repository": projection["repository"],
+        "source_scope": projection["source_scope"],
+        "changed_files": projection["changed_files"],
+        "limitations": projection["limitations"],
+        "blockers": projection["blockers"],
+        "allowed_next_actions": projection["allowed_next_actions"],
+    }
+    return prior
+
+
+def _summary_answer_text(response: CodingRunResponse) -> str:
+    changed_paths: list[str] = []
+    for row in response["changed_files"]:
+        if not isinstance(row, Mapping):
+            continue
+        changed_path = _request_text(row.get("path"))
+        if changed_path:
+            changed_paths.append(changed_path)
+    parts = [
+        f"Status: {response['status']}",
+    ]
+    if changed_paths:
+        parts.append(f"Changed files: {', '.join(changed_paths)}")
+    if response["attempts"]:
+        parts.append(f"Attempts: {len(response['attempts'])}")
+    if response["limitations"]:
+        parts.append(f"Limitations: {'; '.join(response['limitations'])}")
+    if response["blockers"]:
+        parts.append(f"Blockers: {len(response['blockers'])}")
+    if response["allowed_next_actions"]:
+        parts.append(
+            "Allowed next actions: "
+            f"{', '.join(response['allowed_next_actions'])}"
+        )
+    answer_text = "\n".join(parts)
+    return answer_text
 
 
 def _start_validation_error(request: Mapping[str, object]) -> str:

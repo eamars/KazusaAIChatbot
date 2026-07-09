@@ -38,7 +38,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
-| None | No active short-term plans are currently classified | n/a |
+| [coding_agent_full_workflow_hardening_plan_2.md](active/short_term/coding_agent_full_workflow_hardening_plan_2.md) | Large coding-agent full workflow hardening plan | completed |
 
 ## Supporting Experiment Records
 

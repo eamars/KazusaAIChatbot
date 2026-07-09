@@ -120,6 +120,13 @@ create_child_pm.
    ambiguous, request information instead of asking the next child to guess.
    When supervisor-provided facts are present and a programmer task depends on
    them, put the relevant request_id values in consumed_fact_ids.
+   When child_feedback has stage "review_materialization", the previous full
+   package failed deterministic review. Use the reported errors, proposed
+   files, materialized files, and available local module names as correction
+   facts. Produce a complete replacement package for the same user goal, not
+   just a new extra file. Keep valid artifacts by assigning them again, correct
+   bad imports and paths, and do not claim commands, tests, package
+   installation, or real workspace mutation happened.
 5. Choose complete when your assigned work item is satisfied and your report
    can be sent upward.
 6. Choose blocked when the work cannot proceed from the available facts, when

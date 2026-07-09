@@ -105,6 +105,64 @@ async def test_verify_repair_rejects_unsupported_execution_spec(
     assert any("unsupported" in item.casefold() for item in response["limitations"])
 
 
+async def test_verify_repair_omits_initial_protected_verification_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Initial proposal test edits are omitted before approved apply."""
+
+    from kazusa_ai_chatbot.coding_agent.code_verifying import supervisor
+    from kazusa_ai_chatbot.coding_agent import verify_and_repair_code_change
+
+    source_root = _source_root(tmp_path)
+    apply_requests: list[dict[str, object]] = []
+
+    async def fake_fetch(request: dict[str, object]) -> dict[str, object]:
+        return _fetching_result(source_root)
+
+    def fake_apply(request: dict[str, object]) -> dict[str, object]:
+        apply_requests.append(request)
+        changed_paths = [
+            path
+            for artifact in request["patch_artifacts"]
+            for path in artifact["files"]
+        ]
+        return _apply_response(
+            apply_package_id="apply-protected-filter",
+            changed_paths=changed_paths,
+        )
+
+    def fake_execute(request: dict[str, object]) -> dict[str, object]:
+        return _execution_response(status="succeeded")
+
+    monkeypatch.setattr(supervisor.code_fetching, "run", fake_fetch)
+    monkeypatch.setattr(supervisor, "apply_approved_patch", fake_apply)
+    monkeypatch.setattr(supervisor, "execute_code_check", fake_execute)
+
+    request = _request(tmp_path)
+    request["initial_patch_artifacts"] = [INITIAL_ARTIFACT, TEST_ARTIFACT]
+    response = await verify_and_repair_code_change(request)
+
+    assert response["status"] == "succeeded"
+    assert len(apply_requests) == 1
+    assert apply_requests[0]["patch_artifacts"] == [INITIAL_ARTIFACT]
+    assert response["final_changed_files"] == [
+        {
+            "path": "app.py",
+            "change_type": "modify",
+            "summary": "Applied change.",
+        }
+    ]
+    assert any(
+        "Omitted protected verification path from approved apply: "
+        "tests/test_app.py" in item
+        for item in response["limitations"]
+    )
+    assert "verify_repair:protected_initial_artifacts_omitted count=1" in (
+        response["trace_summary"]
+    )
+
+
 async def test_verify_repair_attempts_fresh_apply_and_preserves_source(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

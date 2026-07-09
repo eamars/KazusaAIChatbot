@@ -223,6 +223,9 @@ def public_response(
         "attempts": _ledger_list(ledger, "attempts"),
         "blockers": _ledger_list(ledger, "blockers"),
         "events": events,
+        "allowed_next_actions": _allowed_next_actions(
+            _ledger_text(ledger, "status"),
+        ),
         "limitations": _ledger_list(ledger, "limitations"),
         "trace_summary": _ledger_list(ledger, "trace_summary"),
     }
@@ -265,6 +268,7 @@ def empty_response(
             "details": {},
         }],
         "events": [],
+        "allowed_next_actions": [],
         "limitations": [limitation],
         "trace_summary": trace_summary,
     }
@@ -362,3 +366,28 @@ def _ledger_list(ledger: dict[str, object], key: str) -> list:
     if isinstance(value, list):
         return value
     return []
+
+
+def _allowed_next_actions(status: str) -> list[str]:
+    """Return public continuation actions allowed by the current run status."""
+
+    if status == "awaiting_approval":
+        return [
+            "revise_proposal",
+            "summarize",
+            "status",
+            "approve_and_verify",
+            "cancel",
+        ]
+    if status in (
+        "created",
+        "source_resolved",
+        "evidence_collected",
+        "proposal_ready",
+    ):
+        return ["summarize", "status", "cancel"]
+    if status in ("applying", "verifying", "repairing"):
+        return ["summarize", "status"]
+    if status in ("completed", "blocked", "rejected", "failed", "cancelled"):
+        return ["summarize", "status"]
+    return ["status"]

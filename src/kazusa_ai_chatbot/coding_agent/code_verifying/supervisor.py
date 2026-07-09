@@ -113,6 +113,31 @@ async def verify_and_repair_code_change(
         return response
 
     protected_paths = _protected_verification_paths(request["execution_specs"])
+    proposal_response, protected_omissions = (
+        _proposal_without_protected_verification_paths(
+            proposal=proposal_response,
+            protected_paths=protected_paths,
+        )
+    )
+    if protected_omissions and not proposal_response["patch_artifacts"]:
+        response = _terminal_response(
+            status="rejected",
+            repository=_repository_summary(repository),
+            source_scope=source_scope,
+            final_patch_artifacts=[],
+            final_changed_files=[],
+            limitations=[
+                *fetching_result["limitations"],
+                *proposal_response["limitations"],
+                "No non-protected patch artifacts remain for approved verification.",
+            ],
+            trace_summary=[
+                *fetching_result["trace_summary"],
+                *proposal_response["trace_summary"],
+                "verify_repair:rejected:protected_initial_artifacts",
+            ],
+        )
+        return response
     required_owner_paths = _required_source_owner_paths(
         proposal_response["patch_artifacts"],
         protected_paths=protected_paths,
@@ -545,6 +570,100 @@ def _proposal_response_from_artifacts(
         "trace_summary": ["verify_repair:initial_artifacts_supplied"],
     }
     return proposal
+
+
+def _proposal_without_protected_verification_paths(
+    *,
+    proposal: CodingPatchProposalResponse,
+    protected_paths: list[str],
+) -> tuple[CodingPatchProposalResponse, list[str]]:
+    protected = set(protected_paths)
+    if not protected:
+        return proposal, []
+
+    kept_artifacts: list[PatchArtifact] = []
+    omitted_paths: list[str] = []
+    for artifact in proposal["patch_artifacts"]:
+        artifact_paths = _paths_from_patch_artifacts([artifact])
+        protected_matches = [
+            path
+            for path in artifact_paths
+            if path in protected
+        ]
+        if protected_matches:
+            omitted_paths.extend(protected_matches)
+            continue
+        kept_artifacts.append(artifact)
+
+    unique_omissions = _unique_strings(omitted_paths)
+    if not unique_omissions:
+        return proposal, []
+
+    omitted = set(unique_omissions)
+    changed_files = _changed_files_without_paths(
+        changed_files=proposal["changed_files"],
+        omitted_paths=omitted,
+    )
+    validation = _validation_without_paths(
+        validation=proposal["validation"],
+        omitted_paths=omitted,
+    )
+    updated: CodingPatchProposalResponse = {
+        **proposal,
+        "patch_artifacts": kept_artifacts,
+        "changed_files": changed_files,
+        "validation": validation,
+        "limitations": [
+            *proposal["limitations"],
+            *_protected_omission_limitations(unique_omissions),
+        ],
+        "trace_summary": [
+            *proposal["trace_summary"],
+            _protected_omission_trace(unique_omissions),
+        ],
+    }
+    return updated, unique_omissions
+
+
+def _changed_files_without_paths(
+    *,
+    changed_files: list[ChangedFileSummary],
+    omitted_paths: set[str],
+) -> list[ChangedFileSummary]:
+    kept: list[ChangedFileSummary] = []
+    for changed_file in changed_files:
+        path = changed_file.get("path")
+        if path in omitted_paths:
+            continue
+        kept.append(changed_file)
+    return kept
+
+
+def _validation_without_paths(
+    *,
+    validation: Mapping[str, object],
+    omitted_paths: set[str],
+) -> dict[str, object]:
+    updated = dict(validation)
+    files = updated.get("files")
+    if isinstance(files, list):
+        updated["files"] = [
+            path
+            for path in files
+            if not isinstance(path, str) or path not in omitted_paths
+        ]
+    return updated
+
+
+def _protected_omission_limitations(paths: list[str]) -> list[str]:
+    return [
+        f"Omitted protected verification path from approved apply: {path}"
+        for path in paths
+    ]
+
+
+def _protected_omission_trace(paths: list[str]) -> str:
+    return f"verify_repair:protected_initial_artifacts_omitted count={len(paths)}"
 
 
 def _proposal_request_from_base(

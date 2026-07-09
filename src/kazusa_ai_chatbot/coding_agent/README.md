@@ -81,7 +81,11 @@ one through `propose_code_change(...)`, validates structured approval, applies
 each attempt into a fresh managed apply copy, runs structured execution specs,
 and sends only bounded redacted execution summaries back through
 `code_modifying` when a capped repair attempt is allowed. It does not mutate
-the original source checkout and is not used by background accepted tasks.
+the original source checkout. Focused pytest selector paths are protected
+verification paths: initial proposal artifacts touching those paths are
+omitted from the approved managed apply, and repair proposals that modify
+those paths are rejected. The direct API remains trusted; background accepted
+tasks reach it only through durable coding-run approval.
 
 `start_coding_run(...)`, `continue_coding_run(...)`, and
 `get_coding_run(...)` are the durable direct run APIs. They create and reload
@@ -96,12 +100,14 @@ The background-work `coding_agent` adapter has two modes:
 - Legacy generic delayed coding work receives no worker payload and calls
   `handle_background_coding_task(...)`.
 - Durable coding-run work receives `coding_agent_worker_payload.v1` from the
-  `accepted_coding_task_request` action handler. It supports only `start`,
-  `status`, `approve_and_verify`, and `cancel`, maps them to the durable run
-  APIs, and returns `coding_agent_worker_metadata.v2` with a prompt-safe
-  `coding_run:<run_id>` reference. Approval verification accepts only
-  structured `python_compileall` or focused `pytest` specs, or has the coding
-  PM route plan those same bounded specs from the approval detail.
+  `accepted_coding_task_request` action handler. It supports `start`,
+  `revise_proposal`, `summarize`, `status`, `approve_and_verify`, and
+  `cancel`, maps them to the durable run APIs, and returns
+  `coding_agent_worker_metadata.v2` with a prompt-safe `coding_run:<run_id>`
+  reference, changed-file summaries, attempt history, and allowed next
+  actions. Approval verification accepts only structured `python_compileall`
+  or focused `pytest` specs, or has the coding PM route plan those same
+  bounded specs from the approval detail.
 
 Implemented subagents:
 
@@ -150,7 +156,7 @@ flowchart TD
     B3["background_work.subagent.coding_agent.execute<br/>injects CODING_AGENT_WORKSPACE_ROOT<br/>maps sanitized result metadata"]
     B4["handle_background_coding_task(...)<br/>coding-agent supervisor LLM<br/>operation: code_reading / code_writing / code_modifying / unsupported"]
     B5["accepted_coding_task_request<br/>deterministic requested_worker payload"]
-    B6["coding_agent_worker_payload.v1<br/>start / status / approve_and_verify / cancel"]
+    B6["coding_agent_worker_payload.v1<br/>start / revise_proposal / summarize / status / approve_and_verify / cancel"]
     O0["unsupported or failed response<br/>no coding subagent call"]
     O1["CodingAgentResponse<br/>public-safe answer and evidence"]
     O2["CodingPatchProposalResponse<br/>review-only patch proposal"]
@@ -265,14 +271,15 @@ flowchart TD
         CR1["workspace JSON ledger<br/>events JSONL"]
         CR2["read_only<br/>compose direct read"]
         CR3["propose_patch<br/>await approval"]
-        CR4["continue_coding_run(...)<br/>approve_and_verify or cancel"]
+        CR4["continue_coding_run(...)<br/>revise / summarize / status / approve / cancel"]
         CR5["get_coding_run(...)<br/>public projection"]
         CR0 --> CR1
         CR1 --> CR2 --> D0
         CR1 --> CR3 --> D1
         CR1 --> CR4
+        CR4 -->|revise_proposal| D1
+        CR4 -->|summarize/status/cancel| CR5
         CR4 -->|approve_and_verify| D3
-        CR4 -->|cancel| CR5
         CR1 --> CR5
     end
 
@@ -448,9 +455,11 @@ Kazusa background work registers:
 
 The coding-agent worker supplies the configured coding workspace root. It must
 not parse workspace paths from user text, fall back to worker-local temp paths,
-apply patches, run project commands, apply generated files, or send
-adapter-visible text directly. Generated code proposals are returned as
-artifacts only.
+apply generated files directly, run arbitrary commands, install packages, or
+send adapter-visible text directly. Generic delayed coding proposals remain
+review-only. Durable approved runs may apply patches and run focused
+verification only through the managed-copy `coding_run` and verify/repair
+contracts.
 
 ## Direct Patch Apply Request
 
@@ -560,11 +569,17 @@ structured `execution_verification` feedback, not raw command output.
 
 - `workspace_root`
 - `run_id`
-- `action`: `approve_and_verify` or `cancel`
+- `action`: `revise_proposal`, `summarize`, `status`, `approve_and_verify`, or
+  `cancel`
 - `approval`
 - `execution_specs`
 - `repair_attempt_limit`
 - `reason`
+
+`revise_proposal` is valid only while the run is `awaiting_approval`; it
+generates a replacement review-only proposal for the same run without apply,
+execution, or repair. `summarize` and `status` return public projections
+without creating new patch proposals or execution attempts.
 
 `CodingRunGetRequest` accepts `workspace_root` and `run_id`.
 

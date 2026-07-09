@@ -126,17 +126,21 @@ ways. Generic delayed coding tasks still route through the legacy
 read-versus-write and returns a read answer or review-only proposal. Durable
 coding-run work enters through `accepted_coding_task_request`, which queues
 `requested_worker="coding_agent"` with `coding_agent_worker_payload.v1`.
-That payload supports only `start`, `status`, `approve_and_verify`, and
-`cancel`. The worker maps those actions to the coding-run supervisor and
-records `coding_agent_worker_metadata.v2` with the prompt-safe
-`coding_run:<run_id>` reference.
+That payload supports closed operations `start`, `revise_proposal`,
+`summarize`, `status`, `approve_and_verify`, and `cancel`. The worker maps
+those actions to the coding-run supervisor and records
+`coding_agent_worker_metadata.v2` with the prompt-safe
+`coding_run:<run_id>` reference, public changed-file summaries, attempt
+history, and allowed next actions.
 
 The durable coding path may run allowlisted verification only after explicit
 structured approval. It accepts structured `python_compileall` or focused
 `pytest` specs, or asks the coding PM route to plan those same bounded specs
 from an approval detail. It still uses managed apply copies and does not run
 arbitrary shell commands, install packages, mutate original source checkouts,
-or deliver adapter text.
+or deliver adapter text. Pytest selector paths are protected verification
+paths; stored proposal artifacts touching those paths are omitted before
+approved managed apply so verification tests remain read-only.
 
 Any future worker that can run shell commands, edit files, install packages,
 browse the web, call external tools, or apply patches needs a separate

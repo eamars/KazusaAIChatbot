@@ -87,6 +87,7 @@ CodeWritingRequest
 -> Writing programmer on CODING_AGENT_PROGRAMMER_LLM
 -> patching boundary materializes generated artifact content as new-file diffs
 -> review-package materialization copies proposed files into managed storage
+-> optional one-pass review-materialization feedback for failed source-free packages
 -> synthesis on CODING_AGENT_PM_LLM
 -> CodeWritingResult
 ```
@@ -100,7 +101,8 @@ Acceptance preserves user-visible requirements. File Agent owns path mechanics.
 Each Writing programmer receives one PM-approved artifact contract and returns
 one fenced artifact body. The patching boundary owns file-tree or unified-diff
 materialization. Deterministic code owns caps, path safety, storage boundaries,
-review-package materialization, and public sanitization.
+review-package materialization, the one-pass validation-feedback cap, and
+public sanitization.
 
 Code-facing contract names follow the shared coding-agent role vocabulary:
 `WritingPMInput`, `WritingPMDecision`, `WritingProgrammerTask`, and
@@ -114,6 +116,14 @@ task before dispatch when generated artifacts exist, consumed interfaces are
 declared, and no matching resolved readback fact is cited. The feedback returns
 to the owning PM inside the PM lifecycle loop.
 
+When review-package materialization fails after a source-free package is
+generated, the supervisor may run one additional PM/programmer pass with a
+bounded feedback packet containing validation errors and proposed file names.
+That pass must produce a complete replacement package for the same user goal.
+It does not run generated code, generated tests, shell commands, package
+installation, or real workspace mutation, and it is not an unbounded repair
+loop.
+
 ## Mutation Boundary
 
 Review-package materialization copies proposed artifacts into managed storage
@@ -126,7 +136,7 @@ Out of scope:
 - applying patches to real checkouts;
 - running generated code, generated tests, target project tests, package
   commands, build commands, or shell verification;
-- validation feedback loops or repair loops;
+- unbounded validation feedback or repair loops;
 - dependency installation;
 - runtime integration with background work or adapter delivery.
 

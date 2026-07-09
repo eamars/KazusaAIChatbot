@@ -101,12 +101,12 @@ Core rules:
 | Top-level coding supervisor | Public direct APIs, source-backed workflow selection, bounded interleave between specialists, public response assembly. | Raw code edits, shell execution, persistent run state after Phase 9. |
 | `code_fetching` | Source resolution, managed clone/raw/inline/local source contracts, source identity, safe scope projection. | Reading, writing, modifying, patching, execution. |
 | `code_reading` | Read-only evidence, PM/programmer reading decomposition, answer synthesis from evidence rows. | Patch stance, edit choice, command execution, external current facts. |
-| `code_writing` | Source-free new artifacts through PM/programmer contracts. | Existing-source edits, patch application, command execution. |
+| `code_writing` | Source-free new artifacts through PM/programmer contracts and one capped review-materialization feedback pass. | Existing-source edits, patch application, command execution, unbounded repair loops. |
 | `code_modifying` | Existing-source semantic planning, source-owner selection, File Agent context use, modifying programmer dispatch, structured modification artifacts. | Applying patches, executing commands, direct filesystem mutation. |
 | File Agent | Repo-relative path safety, new-artifact reservations, existing-source file context planning, owned/read-only/test/doc/caller path maps. | Semantic edit judgment or final patch selection. |
 | `code_patching` | Structured operation validation, diff/file-tree assembly, review materialization, explicit approved apply into managed copies. | LLM patch generation, original-source mutation, command execution. |
 | `code_executing` | Allowlisted verification execution inside Phase 5 managed apply workspaces. | Command generation, arbitrary shell, package installation, repair. |
-| `code_verifying` | Direct trusted apply/execute/repair orchestration with capped attempts and redacted execution feedback. | Background auto-execution, arbitrary commands, durable coding-session state. |
+| `code_verifying` | Direct trusted apply/execute/repair orchestration with capped attempts, redacted execution feedback, and protected pytest selector paths. | Background auto-execution, arbitrary commands, durable coding-session state. |
 | `coding_run` | Durable run ledger, state transitions, continuation API, blockers, attempt history, public projection. | Specialist internals, raw execution, adapter delivery. |
 
 ## Agent-Space Security Boundary
@@ -119,6 +119,8 @@ records. Real-world effects require dedicated deterministic owners:
   managed apply copy;
 - command execution requires structured execution specs and targets only a
   managed apply copy;
+- focused pytest selector paths are protected verification paths and remain
+  read-only during approved apply and repair;
 - generic background-worker coding tasks remain review-only;
 - durable accepted coding tasks may continue through `coding_run` only through
   `accepted_coding_task_request`, a prompt-safe `coding_run:<run_id>` reference,
@@ -179,7 +181,8 @@ L2d accepted_coding_task_request
 -> accepted-task lifecycle
 -> requested_worker="coding_agent" with coding_agent_worker_payload.v1
 -> coding_agent worker
--> start/get/continue coding_run
+-> start / revise_proposal / summarize / status / approve_and_verify / cancel
+-> coding_run ledger and public projection
 -> accepted_task_result_ready delivery
 ```
 
@@ -211,7 +214,7 @@ CodeReadingRequest
 | Phase 7 | Existing-source planning upgrade: active modifying PM plus File Agent existing-source path maps and context planning. | Source-backed proposals gain explicit source-owner planning before programmer edits. |
 | Phase 8 | Controlled verify-and-repair loop. | Trusted callers can apply, execute, repair from redacted execution feedback, and rerun within hard caps. |
 | Phase 9 | Durable coding run supervisor. | Kazusa gains a self-contained coding-agent session with state, continuation, blockers, attempts, completion, and post-phase E2E readiness for supported workflows. |
-| Post-Phase 9 hardening | L2d accepted-task/background-worker binding for durable coding runs. | Supported coding runs can start, report status, approve-and-verify, and cancel through the real background entrypoint. |
+| Post-Phase 9 hardening | L2d accepted-task/background-worker binding for durable coding runs. | Supported coding runs can start, revise proposals, summarize runs, report status, approve-and-verify, and cancel through the real background entrypoint. |
 | Phase 10 | Repository-scale reading through master/subsystem PMs and evidence graph synthesis. | Kazusa can answer broad architecture, impact, ownership, and migration questions from bounded evidence. |
 
 ## Phase Closure Gate Policy
@@ -256,6 +259,9 @@ As of the Phase 9 executable plan and pre-integration hardening:
 - Pre-integration hardening binds that session loop to L2d
   `accepted_coding_task_request` and background-work `requested_worker`
   execution.
+- Full-workflow hardening adds same-run proposal revision, run summaries,
+  source-free review-materialization feedback, and approval-time protected
+  verification-path filtering through the real background entrypoint.
 - After Phase 9, supported read-only, proposal, approval, apply, execution,
   repair, cancellation, reload, sanitization, and source-immutability
   workflows must be E2E-testable without Phase 10 or later plans.

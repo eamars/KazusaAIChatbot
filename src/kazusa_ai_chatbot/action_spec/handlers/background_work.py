@@ -65,6 +65,8 @@ _CODING_FORBIDDEN_WORKER_LOCAL_PARAMS = (
     ))
 )
 _CODING_ACTIONS_REQUIRING_RUN_REF = frozenset((
+    "revise_proposal",
+    "summarize",
     "status",
     "approve_and_verify",
     "cancel",
@@ -211,6 +213,8 @@ def validate_accepted_coding_task_action(
     coding_action = _param_text(params, "coding_action")
     if coding_action not in (
         "start",
+        "revise_proposal",
+        "summarize",
         "status",
         "approve_and_verify",
         "cancel",

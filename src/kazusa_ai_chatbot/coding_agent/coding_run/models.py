@@ -21,7 +21,12 @@ from kazusa_ai_chatbot.coding_agent.models import (
 
 
 CodingRunObjectiveType = Literal["read_only", "propose_patch", "verify_repair"]
-CodingRunAction = Literal["approve_and_verify", "cancel"]
+CodingRunAction = Literal[
+    "revise_proposal",
+    "summarize",
+    "approve_and_verify",
+    "cancel",
+]
 CodingRunStatus = Literal[
     "created",
     "source_resolved",
@@ -70,6 +75,7 @@ class CodingRunContinueRequest(TypedDict, total=False):
     workspace_root: str
     run_id: str
     action: str
+    revision_instruction: str
     approval: PatchApplyApproval
     execution_specs: list[CodeExecutionSpec]
     repair_attempt_limit: int
@@ -163,5 +169,6 @@ class CodingRunResponse(TypedDict):
     attempts: list[CodingRunAttempt]
     blockers: list[CodingRunBlocker]
     events: list[CodingRunEvent]
+    allowed_next_actions: list[str]
     limitations: list[str]
     trace_summary: list[str]

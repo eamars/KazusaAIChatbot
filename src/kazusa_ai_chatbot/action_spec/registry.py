@@ -342,6 +342,8 @@ def _accepted_coding_task_capability() -> CapabilitySpecV1:
                     "type": "string",
                     "enum": [
                         "start",
+                        "revise_proposal",
+                        "summarize",
                         "status",
                         "approve_and_verify",
                         "cancel",
@@ -415,13 +417,16 @@ def _accepted_coding_task_projection() -> dict[str, object]:
             ),
             (
                 "Use decision=start for a new coding task, decision=status "
-                "for a specific run progress check, decision=approve_and_verify "
+                "for a compact run progress check, decision=revise_proposal "
+                "to revise an awaiting proposal, decision=summarize for "
+                "changed files and attempt history, decision=approve_and_verify "
                 "only after explicit approval, and decision=cancel only when "
                 "the user asks to stop that run."
             ),
             (
-                "For status, approval, or cancellation, include the "
-                "prompt-safe coding_run_ref if the conversation provides it."
+                "For revision, summary, status, approval, or cancellation, "
+                "include the prompt-safe coding_run_ref if the conversation "
+                "provides it."
             ),
             (
                 "For approval, put requested checks such as focused pytest "

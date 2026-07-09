@@ -858,6 +858,194 @@ async def test_code_writing_rejects_dependent_programmer_without_readback(
     )
 
 
+async def test_code_writing_repairs_source_free_review_import_feedback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_writing import supervisor
+
+    feedback_passes = 0
+
+    def programmer_decision(
+        *,
+        task_id: str,
+        purpose: str,
+        behavior: str,
+        imports: list[str],
+        output_format: str,
+    ) -> dict[str, Any]:
+        return {
+            "status": "create_programmer_task",
+            "reason": purpose,
+            "information_request": None,
+            "child_pm_task": None,
+            "programmer_task": {
+                "task_id": task_id,
+                "artifact_purpose": purpose,
+                "required_behavior": [behavior],
+                "provided_interfaces": [],
+                "consumed_interfaces": [],
+                "imports": imports,
+                "output_format": output_format,
+            },
+            "repair_instruction": None,
+            "completion_report": None,
+            "blocker": None,
+        }
+
+    def complete_decision() -> dict[str, Any]:
+        return {
+            "status": "complete",
+            "reason": "The package is complete.",
+            "information_request": None,
+            "child_pm_task": None,
+            "programmer_task": None,
+            "repair_instruction": None,
+            "completion_report": {
+                "pm_id": "writing_pm_root",
+                "status": "complete",
+                "provided_facts": ["CSV normalizer package generated."],
+                "created_artifacts": [],
+                "consumed_facts": [],
+                "open_risks": [],
+                "next_dependency_needs": [],
+            },
+            "blocker": None,
+        }
+
+    async def fake_pm(
+        pm_input: dict[str, Any],
+        *,
+        trace: dict[str, object] | None = None,
+    ) -> dict[str, Any]:
+        nonlocal feedback_passes
+
+        child_reports = pm_input["direct_child_reports"]
+        child_feedback = pm_input["child_feedback"]
+        if child_feedback:
+            if not child_reports:
+                feedback_passes += 1
+                feedback_text = str(child_feedback[0])
+                assert "unresolved local Python imports" in feedback_text
+                assert "src.csv_normalizer_logic" in feedback_text
+                return programmer_decision(
+                    task_id="csv_normalizer_logic",
+                    purpose="Provide the CSV normalization logic.",
+                    behavior="define normalize_csv(text: str) -> str",
+                    imports=[],
+                    output_format="python source",
+                )
+            if len(child_reports) == 1:
+                return programmer_decision(
+                    task_id="csv_normalizer_tests",
+                    purpose="Test the CSV normalization logic.",
+                    behavior="assert normalize_csv trims cells",
+                    imports=[
+                        "from src.csv_normalizer_logic import normalize_csv",
+                    ],
+                    output_format="python test",
+                )
+            return complete_decision()
+
+        if not child_reports:
+            return programmer_decision(
+                task_id="csv_normalizer_logic",
+                purpose="Provide the CSV normalization logic.",
+                behavior="define normalize_csv(text: str) -> str",
+                imports=[],
+                output_format="python source",
+            )
+        if len(child_reports) == 1:
+            return programmer_decision(
+                task_id="csv_normalizer_tests",
+                purpose="Test the CSV normalization logic.",
+                behavior="assert normalize_csv trims cells",
+                imports=["from csv_normalizer import normalize_csv"],
+                output_format="python test",
+            )
+        return complete_decision()
+
+    async def fake_programmer(
+        *,
+        artifact_contract: dict[str, Any],
+        trace: dict[str, object] | None = None,
+    ) -> dict[str, Any]:
+        artifact_id = artifact_contract["artifact_id"]
+        if artifact_id == "csv_normalizer_logic":
+            code = (
+                "def normalize_csv(text: str) -> str:\n"
+                "    rows = []\n"
+                "    for line in text.splitlines():\n"
+                "        cells = [cell.strip() for cell in line.split(',')]\n"
+                "        rows.append(','.join(cells))\n"
+                "    return '\\n'.join(rows)\n"
+            )
+        else:
+            imports = artifact_contract["imports"]
+            code = (
+                f"{imports[0]}\n\n"
+                "def test_normalize_csv_trims_cells() -> None:\n"
+                "    assert normalize_csv(' a , b ') == 'a,b'\n"
+            )
+        return {
+            "artifact_id": artifact_id,
+            "status": "succeeded",
+            "content_format": artifact_contract["content_format"],
+            "code_artifact": code,
+            "diagnostics": [],
+        }
+
+    async def fake_acceptance(**kwargs: Any) -> dict[str, Any]:
+        return {
+            "status": "pass",
+            "acceptance_criteria": [
+                {
+                    "criterion_id": "csv",
+                    "requirement": "Create CSV normalizer source and tests.",
+                    "evidence_needed": "Generated tests import generated source.",
+                }
+            ],
+            "limitations": [],
+        }
+
+    async def fake_synthesis(**kwargs: Any) -> tuple[str, list[str]]:
+        return "Generated a coherent CSV normalizer package.", kwargs["limitations"]
+
+    monkeypatch.setattr(supervisor, "derive_acceptance_criteria", fake_acceptance)
+    monkeypatch.setattr(supervisor, "decide_writing_work", fake_pm)
+    monkeypatch.setattr(
+        supervisor,
+        "run_writing_programmer_contract",
+        fake_programmer,
+    )
+    monkeypatch.setattr(supervisor, "synthesize_patch_proposal", fake_synthesis)
+
+    result = await supervisor.run_writing_supervisor({
+        "question": "Create CSV normalizer source and tests.",
+        "mode_hint": "create_new_project",
+        "workspace_root": str(tmp_path / "workspace"),
+    })
+
+    assert result["status"] == "succeeded"
+    assert result["validation"]["status"] == "succeeded"
+    assert feedback_passes == 1
+    assert {
+        row["path"]
+        for row in result["created_files"]
+    } == {
+        "src/csv_normalizer_logic.py",
+        "tests/test_csv_normalizer_tests.py",
+    }
+    assert not any(
+        "unresolved local Python imports" in item
+        for item in result["limitations"]
+    )
+    assert any(
+        row.startswith("writing_validation_feedback:attempt=1")
+        for row in result["trace_summary"]
+    )
+
+
 async def test_code_writing_rejects_nested_child_pm_and_resumes_same_pm(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

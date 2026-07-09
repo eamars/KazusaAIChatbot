@@ -432,7 +432,13 @@ def _coding_run_ref_for_request(
 ) -> str:
     """Return a prompt-safe coding run ref for follow-up coding actions."""
 
-    if coding_action not in ("status", "approve_and_verify", "cancel"):
+    if coding_action not in (
+        "revise_proposal",
+        "summarize",
+        "status",
+        "approve_and_verify",
+        "cancel",
+    ):
         return ""
     direct_ref = _semantic_text(request, "coding_run_ref")
     if direct_ref:
@@ -454,6 +460,8 @@ def _coding_action_for_request(request: ActionRequestV1) -> str:
     decision = _semantic_text(request, "decision")
     if decision in (
         "start",
+        "revise_proposal",
+        "summarize",
         "status",
         "approve_and_verify",
         "cancel",

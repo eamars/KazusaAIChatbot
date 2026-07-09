@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -40,173 +42,311 @@ from tests.test_coding_agent_phase3_handoff_e2e import (
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
 
+FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "coding_agent_full_workflow"
+
 
 async def test_live_gate_01_read_only_question_from_l2d_to_worker(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Simple read-only task through L2d, accepted task, and worker tick."""
+    """Read-only source question through L2d, queue, and coding worker."""
 
     await _skip_if_llm_unavailable()
-    source_root = _simple_source_tree(tmp_path, "gate01")
-    user_request = (
-        "Use the local source checkout at "
-        f"{source_root} and explain what normalize_name does. "
-        "This is a coding-agent task; start a durable coding run."
+    source_root = _prepare_fixture_checkout(
+        tmp_path,
+        "gate_01_cli_command_discovery",
     )
-
-    trace = await _run_live_background_turn(
+    gate_trace = await _run_live_background_sequence(
         monkeypatch,
         tmp_path,
-        case_id="gate_01_read_only",
-        user_request=user_request,
+        case_id="gate_01_read_only_question",
+        turns=[
+            (
+                "In this fixture repo, explain where the CLI discovers "
+                f"commands. Use the local source checkout at {source_root}."
+            ),
+        ],
     )
 
-    _assert_worker_succeeded(trace)
-    assert trace["worker_metadata"]["coding_run_status"] in (
-        "completed",
-        "blocked",
-        "awaiting_approval",
-    )
-    assert trace["worker_metadata"]["coding_run_ref"]
+    turn = gate_trace["turns"][0]
+    _assert_worker_succeeded(turn)
+    metadata = turn["worker_metadata"]
+    assert metadata["worker_operation"] == "start"
+    assert metadata["coding_run_ref"]
+    assert metadata["evidence_refs"], gate_trace["trace_path"]
+    assert metadata["patch_artifacts"] == [], gate_trace["trace_path"]
+    assert metadata["apply_attempts"] == [], gate_trace["trace_path"]
+    assert metadata["execution_attempts"] == [], gate_trace["trace_path"]
+    assert metadata["repair_attempts"] == [], gate_trace["trace_path"]
+    _assert_no_private_leaks(gate_trace)
 
 
-async def test_live_gate_02_source_free_proposal_from_l2d_to_worker(
+async def test_live_gate_02_source_free_proposal_with_revision_followups(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Source-free artifact request should create a durable proposal run."""
+    """Source-free proposal should revise and summarize one durable run."""
 
     await _skip_if_llm_unavailable()
-    user_request = (
-        "Create a small Python CLI script that reads newline-delimited names "
-        "from a file and prints a sorted unique list. Use only the standard "
-        "library. Start this as a durable coding run."
-    )
-
-    trace = await _run_live_background_turn(
+    gate_trace = await _run_live_background_sequence(
         monkeypatch,
         tmp_path,
-        case_id="gate_02_source_free_proposal",
-        user_request=user_request,
+        case_id="gate_02_source_free_revision",
+        turns=[
+            (
+                "Create a small Python CSV normalizer CLI with tests. It "
+                "should trim whitespace from headers and values, sort rows "
+                "deterministically, and stay review-only until I approve it."
+            ),
+            (
+                "For {coding_run_ref}, revise the proposal to add a dry-run "
+                "mode and make the output deterministic."
+            ),
+            (
+                "For {coding_run_ref}, summarize the files I should review."
+            ),
+        ],
     )
 
-    _assert_worker_succeeded(trace)
-    assert trace["worker_metadata"]["coding_run_status"] in (
-        "awaiting_approval",
-        "completed",
-        "blocked",
+    start_turn, revision_turn, summary_turn = gate_trace["turns"]
+    _assert_worker_succeeded(start_turn)
+    _assert_worker_succeeded(revision_turn)
+    _assert_worker_succeeded(summary_turn)
+    coding_run_ref = _coding_run_ref_from_trace(start_turn)
+    assert _coding_run_ref_from_trace(revision_turn) == coding_run_ref
+    assert _coding_run_ref_from_trace(summary_turn) == coding_run_ref
+    assert revision_turn["worker_metadata"]["worker_operation"] == (
+        "revise_proposal"
     )
-    assert trace["worker_metadata"]["coding_run_ref"]
+    assert summary_turn["worker_metadata"]["worker_operation"] == "summarize"
+    assert revision_turn["worker_metadata"]["coding_run_status"] == (
+        "awaiting_approval"
+    )
+    assert summary_turn["worker_metadata"]["changed_files"], gate_trace["trace_path"]
+    for turn in gate_trace["turns"]:
+        metadata = turn["worker_metadata"]
+        assert metadata["apply_attempts"] == [], gate_trace["trace_path"]
+        assert metadata["execution_attempts"] == [], gate_trace["trace_path"]
+        assert metadata["repair_attempts"] == [], gate_trace["trace_path"]
+    _assert_no_private_leaks(gate_trace)
 
 
-async def test_live_gate_03_existing_source_proposal_then_status_followup(
+async def test_live_gate_03_existing_source_proposal_with_runtime_only_followups(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Follow-up status should bind to the prompt-safe coding run ref."""
+    """Existing-source proposal should revise to keep tests unchanged."""
 
     await _skip_if_llm_unavailable()
-    source_root = _simple_source_tree(tmp_path, "gate03")
-    start_trace = await _run_live_background_turn(
+    source_root = _prepare_fixture_checkout(tmp_path, "gate_03_counter_cli_json")
+    gate_trace = await _run_live_background_sequence(
         monkeypatch,
         tmp_path,
-        case_id="gate_03_start",
-        user_request=(
-            "Use the local source checkout at "
-            f"{source_root}. Modify normalize_name so it collapses internal "
-            "whitespace to a single space and update focused tests. Start a "
-            "durable coding run."
-        ),
-    )
-    coding_run_ref = _coding_run_ref_from_trace(start_trace)
-
-    status_trace = await _run_live_background_turn(
-        monkeypatch,
-        tmp_path,
-        case_id="gate_03_status",
-        user_request=(
-            f"Check status for coding_run_ref={coding_run_ref}. "
-            "Use accepted_coding_task_request with decision=status."
-        ),
+        case_id="gate_03_existing_source_runtime_only",
+        turns=[
+            (
+                "In this fixture repo, add JSON output to the counter CLI. "
+                f"Use the local source checkout at {source_root}."
+            ),
+            (
+                "For {coding_run_ref}, keep tests unchanged; revise the "
+                "proposal so it changes only runtime source files."
+            ),
+            (
+                "For {coding_run_ref}, summarize the exact files changed and "
+                "why."
+            ),
+        ],
     )
 
-    _assert_worker_succeeded(status_trace)
-    assert status_trace["worker_metadata"]["coding_run_ref"] == coding_run_ref
+    start_turn, revision_turn, summary_turn = gate_trace["turns"]
+    _assert_worker_succeeded(start_turn)
+    _assert_worker_succeeded(revision_turn)
+    _assert_worker_succeeded(summary_turn)
+    coding_run_ref = _coding_run_ref_from_trace(start_turn)
+    assert _coding_run_ref_from_trace(revision_turn) == coding_run_ref
+    assert _coding_run_ref_from_trace(summary_turn) == coding_run_ref
+    assert revision_turn["worker_metadata"]["worker_operation"] == (
+        "revise_proposal"
+    )
+    changed_files = _changed_file_paths(summary_turn)
+    assert changed_files, gate_trace["trace_path"]
+    assert all(
+        not path.startswith("tests/")
+        for path in changed_files
+    ), gate_trace["trace_path"]
+    _assert_no_private_leaks(gate_trace)
 
 
-async def test_live_gate_04_approval_verify_followup_from_l2d_to_worker(
+async def test_live_gate_04_approval_verify_and_repair_followups(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Approval follow-up should continue the referenced run with safe checks."""
+    """Approval should run focused verification and expose attempt history."""
 
     await _skip_if_llm_unavailable()
-    source_root = _simple_source_tree(tmp_path, "gate04")
-    start_trace = await _run_live_background_turn(
+    source_root = _prepare_fixture_checkout(
+        tmp_path,
+        "gate_04_slug_normalization",
+    )
+    gate_trace = await _run_live_background_sequence(
         monkeypatch,
         tmp_path,
-        case_id="gate_04_start",
-        user_request=(
-            "Use the local source checkout at "
-            f"{source_root}. Modify normalize_name so it collapses internal "
-            "whitespace to a single space and update focused tests. Start a "
-            "durable coding run."
-        ),
-    )
-    coding_run_ref = _coding_run_ref_from_trace(start_trace)
-
-    approval_trace = await _run_live_background_turn(
-        monkeypatch,
-        tmp_path,
-        case_id="gate_04_approve_verify",
-        user_request=(
-            f"I approve coding_run_ref={coding_run_ref}. Run focused pytest "
-            "for tests/test_names.py. Use accepted_coding_task_request with "
-            "decision=approve_and_verify."
-        ),
+        case_id="gate_04_approval_verify_repair",
+        turns=[
+            (
+                "Fix the slug normalization bug in this fixture repo. "
+                f"Use the local source checkout at {source_root}."
+            ),
+            (
+                "I approve {coding_run_ref}. Run the focused slug pytest "
+                "tests/test_slug.py. If it fails, repair source without "
+                "editing tests."
+            ),
+            (
+                "For {coding_run_ref}, summarize the verification attempts "
+                "and final changed files."
+            ),
+        ],
     )
 
-    _assert_worker_succeeded(approval_trace)
-    assert approval_trace["worker_metadata"]["coding_run_ref"] == coding_run_ref
-    assert approval_trace["worker_metadata"]["worker_operation"] == (
+    start_turn, approval_turn, summary_turn = gate_trace["turns"]
+    _assert_worker_succeeded(start_turn)
+    _assert_worker_succeeded(approval_turn)
+    _assert_worker_succeeded(summary_turn)
+    coding_run_ref = _coding_run_ref_from_trace(start_turn)
+    assert _coding_run_ref_from_trace(approval_turn) == coding_run_ref
+    assert _coding_run_ref_from_trace(summary_turn) == coding_run_ref
+    assert approval_turn["worker_metadata"]["worker_operation"] == (
         "approve_and_verify"
     )
+    assert approval_turn["worker_metadata"]["apply_attempts"], (
+        gate_trace["trace_path"]
+    )
+    assert approval_turn["worker_metadata"]["execution_attempts"], (
+        gate_trace["trace_path"]
+    )
+    changed_files = _changed_file_paths(summary_turn)
+    assert changed_files, gate_trace["trace_path"]
+    assert all(
+        not path.startswith("tests/")
+        for path in changed_files
+    ), gate_trace["trace_path"]
+    _assert_no_private_leaks(gate_trace)
 
 
-async def test_live_gate_05_cancel_followup_from_l2d_to_worker(
+async def test_live_gate_05_hard_multifile_approval_history_cancel_status(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Cancellation follow-up should persist through the background entrypoint."""
+    """Hard multi-file workflow should preserve durable run state."""
 
     await _skip_if_llm_unavailable()
-    source_root = _simple_source_tree(tmp_path, "gate05")
-    start_trace = await _run_live_background_turn(
+    source_root = _prepare_fixture_checkout(
+        tmp_path,
+        "gate_05_release_feed_cache_cli",
+    )
+    gate_trace = await _run_live_background_sequence(
         monkeypatch,
         tmp_path,
-        case_id="gate_05_start",
-        user_request=(
-            "Use the local source checkout at "
-            f"{source_root}. Propose a small refactor to normalize_name. "
-            "Start a durable coding run."
-        ),
+        case_id="gate_05_hard_multifile_status",
+        turns=[
+            (
+                "Fix the release feed cache timeout and CLI flag behavior in "
+                f"this repo. Use the local source checkout at {source_root}."
+            ),
+            (
+                "I approve {coding_run_ref}. Run the focused release feed "
+                "tests tests/test_cache.py and tests/test_cli.py. Repair "
+                "source if those checks fail, but keep protected tests "
+                "unchanged."
+            ),
+            (
+                "For {coding_run_ref}, show the attempt history and final "
+                "changed source files."
+            ),
+            (
+                "For {coding_run_ref}, cancel any remaining work if protected "
+                "tests would need edits."
+            ),
+            "For {coding_run_ref}, give me the final status.",
+        ],
     )
-    coding_run_ref = _coding_run_ref_from_trace(start_trace)
 
-    cancel_trace = await _run_live_background_turn(
-        monkeypatch,
-        tmp_path,
-        case_id="gate_05_cancel",
-        user_request=(
-            f"Cancel coding_run_ref={coding_run_ref}. Use "
-            "accepted_coding_task_request with decision=cancel."
-        ),
+    start_turn, approval_turn, summary_turn, cancel_turn, final_turn = (
+        gate_trace["turns"]
     )
+    _assert_worker_succeeded(start_turn)
+    _assert_worker_succeeded(approval_turn)
+    _assert_worker_succeeded(summary_turn)
+    _assert_worker_finished(cancel_turn)
+    _assert_worker_succeeded(final_turn)
+    coding_run_ref = _coding_run_ref_from_trace(start_turn)
+    for turn in gate_trace["turns"][1:]:
+        assert _coding_run_ref_from_trace(turn) == coding_run_ref
+    assert approval_turn["worker_metadata"]["apply_attempts"], (
+        gate_trace["trace_path"]
+    )
+    assert approval_turn["worker_metadata"]["execution_attempts"], (
+        gate_trace["trace_path"]
+    )
+    changed_files = _changed_file_paths(summary_turn)
+    assert changed_files, gate_trace["trace_path"]
+    assert all(
+        not path.startswith("tests/")
+        for path in changed_files
+    ), gate_trace["trace_path"]
+    final_status = final_turn["worker_metadata"]["coding_run_status"]
+    assert final_status in (
+        "completed",
+        "failed",
+        "blocked",
+        "cancelled",
+    ), gate_trace["trace_path"]
+    if cancel_turn["background_job"]["status"] == "completed":
+        cancel_status = cancel_turn["worker_metadata"]["coding_run_status"]
+        assert cancel_status in ("cancelled", final_status), gate_trace["trace_path"]
+    _assert_no_private_leaks(gate_trace)
 
-    _assert_worker_succeeded(cancel_trace)
-    assert cancel_trace["worker_metadata"]["coding_run_ref"] == coding_run_ref
-    assert cancel_trace["worker_metadata"]["coding_run_status"] == "cancelled"
+
+async def _run_live_background_sequence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    case_id: str,
+    turns: list[str],
+) -> dict[str, Any]:
+    """Run a multi-turn coding workflow through background work."""
+
+    rendered_turns: list[dict[str, Any]] = []
+    coding_run_ref = ""
+    coding_workspace = tmp_path / case_id / "coding-workspace"
+    for turn_index, turn_template in enumerate(turns, start=1):
+        user_request = turn_template.format(coding_run_ref=coding_run_ref)
+        turn_trace = await _run_live_background_turn(
+            monkeypatch,
+            tmp_path,
+            case_id=f"{case_id}_turn_{turn_index}",
+            user_request=user_request,
+            coding_workspace=coding_workspace,
+        )
+        rendered_turns.append(turn_trace)
+        next_ref = _optional_coding_run_ref_from_trace(turn_trace)
+        if next_ref:
+            coding_run_ref = next_ref
+
+    gate_trace = {
+        "case_id": case_id,
+        "fixture_root": str(FIXTURE_ROOT),
+        "turns": rendered_turns,
+    }
+    trace_path = write_llm_trace(
+        "coding_agent_full_workflow_integration_live_llm",
+        case_id,
+        gate_trace,
+    )
+    gate_trace["trace_path"] = str(trace_path)
+    return gate_trace
 
 
 async def _run_live_background_turn(
@@ -215,9 +355,11 @@ async def _run_live_background_turn(
     *,
     case_id: str,
     user_request: str,
+    coding_workspace: Path,
 ) -> dict[str, Any]:
     """Run one live L2d coding action through queue and worker tick."""
 
+    del tmp_path
     from kazusa_ai_chatbot.background_work import worker as background_worker
     from kazusa_ai_chatbot.background_work.subagent import (
         coding_agent as coding_worker,
@@ -231,7 +373,7 @@ async def _run_live_background_turn(
     monkeypatch.setattr(
         coding_worker,
         "CODING_AGENT_WORKSPACE_ROOT",
-        str(tmp_path / "coding-workspace"),
+        str(coding_workspace),
     )
 
     state = _l2d_state(user_request)
@@ -420,39 +562,30 @@ def _l2d_state(user_request: str) -> dict[str, object]:
     }
 
 
-def _simple_source_tree(tmp_path: Path, name: str) -> Path:
-    """Create a small local source tree for live coding-agent gates."""
+def _prepare_fixture_checkout(tmp_path: Path, fixture_name: str) -> Path:
+    """Copy one committed fixture into a git-backed temporary checkout."""
 
-    source_root = tmp_path / name / "source"
-    source_root.mkdir(parents=True, exist_ok=True)
-    (source_root / "names.py").write_text(
-        "def normalize_name(value):\n"
-        "    return value.strip()\n",
-        encoding="utf-8",
-    )
-    tests_root = source_root / "tests"
-    tests_root.mkdir(exist_ok=True)
-    (tests_root / "test_names.py").write_text(
-        "from names import normalize_name\n\n\n"
-        "def test_normalize_name_strips_outer_whitespace():\n"
-        "    assert normalize_name('  Ada Lovelace  ') == 'Ada Lovelace'\n",
-        encoding="utf-8",
-    )
-    _run_git(["init"], source_root)
-    _run_git(["config", "user.email", "test@example.com"], source_root)
-    _run_git(["config", "user.name", "Test User"], source_root)
-    _run_git(["add", "names.py", "tests/test_names.py"], source_root)
-    _run_git(["commit", "-m", "initial fixture"], source_root)
+    fixture_source = FIXTURE_ROOT / fixture_name
+    assert fixture_source.exists(), str(fixture_source)
+    checkout_root = tmp_path / "fixture-checkouts" / fixture_name
+    if checkout_root.exists():
+        shutil.rmtree(checkout_root)
+    shutil.copytree(fixture_source, checkout_root)
+    _run_git(["init"], checkout_root)
+    _run_git(["config", "user.email", "test@example.com"], checkout_root)
+    _run_git(["config", "user.name", "Test User"], checkout_root)
+    _run_git(["add", "."], checkout_root)
+    _run_git(["commit", "-m", "initial fixture"], checkout_root)
     _run_git(
         [
             "remote",
             "add",
             "origin",
-            "https://github.com/fixture/coding-agent-live-fixture.git",
+            f"https://github.com/fixture/{fixture_name}.git",
         ],
-        source_root,
+        checkout_root,
     )
-    return source_root
+    return checkout_root
 
 
 def _run_git(args: list[str], cwd: Path) -> str:
@@ -470,24 +603,82 @@ def _run_git(args: list[str], cwd: Path) -> str:
 
 
 def _assert_worker_succeeded(trace: dict[str, Any]) -> None:
-    """Assert worker completion and expose trace path on failure."""
+    """Assert successful worker completion and expose trace path on failure."""
+
+    _assert_worker_finished(trace)
+    assert trace["worker_tick"]["succeeded_count"] == 1, trace["trace_path"]
+    assert trace["background_job"]["status"] == "completed", trace["trace_path"]
+
+
+def _assert_worker_finished(trace: dict[str, Any]) -> None:
+    """Assert one worker processed the job."""
 
     assert trace["worker_tick"]["processed_count"] == 1, trace["trace_path"]
-    assert trace["worker_tick"]["succeeded_count"] == 1, trace["trace_path"]
     job = trace["background_job"]
     assert job["worker"] == "coding_agent", trace["trace_path"]
-    assert job["status"] == "completed", trace["trace_path"]
+    assert job["status"] in ("completed", "failed"), trace["trace_path"]
     assert trace["worker_metadata"]["schema_version"] == (
         "coding_agent_worker_metadata.v2"
     )
 
 
+def _optional_coding_run_ref_from_trace(trace: dict[str, Any]) -> str:
+    """Return the prompt-safe coding run ref when one is present."""
+
+    metadata = trace.get("worker_metadata", {})
+    if not isinstance(metadata, dict):
+        return ""
+    coding_run_ref = str(metadata.get("coding_run_ref", ""))
+    if coding_run_ref.startswith("coding_run:"):
+        return coding_run_ref
+    return ""
+
+
 def _coding_run_ref_from_trace(trace: dict[str, Any]) -> str:
     """Return the prompt-safe coding run ref from a worker trace."""
 
-    coding_run_ref = str(trace["worker_metadata"].get("coding_run_ref", ""))
+    coding_run_ref = _optional_coding_run_ref_from_trace(trace)
     assert coding_run_ref.startswith("coding_run:"), trace["trace_path"]
     return coding_run_ref
+
+
+def _changed_file_paths(trace: dict[str, Any]) -> list[str]:
+    """Return changed file paths from worker metadata."""
+
+    changed_files = trace["worker_metadata"].get("changed_files", [])
+    if not isinstance(changed_files, list):
+        return []
+    paths = [
+        str(row.get("path", "")).replace("\\", "/")
+        for row in changed_files
+        if isinstance(row, dict) and row.get("path")
+    ]
+    return paths
+
+
+def _assert_no_private_leaks(gate_trace: dict[str, Any]) -> None:
+    """Assert public trace projections omit private roots and raw command text."""
+
+    public_rows: list[dict[str, object]] = []
+    for turn in gate_trace["turns"]:
+        job = turn["background_job"]
+        public_rows.append({
+            "artifact_text": job.get("artifact_text"),
+            "result_summary": job.get("result_summary"),
+            "worker_metadata": turn.get("worker_metadata"),
+        })
+    serialized = json.dumps(public_rows, ensure_ascii=False)
+    for forbidden in (
+        "workspace_root",
+        "local_root",
+        "source_root",
+        "stdout_excerpt",
+        "stderr_excerpt",
+        ".env",
+        ".git/",
+        ".git\\",
+    ):
+        assert forbidden not in serialized, gate_trace["trace_path"]
 
 
 class _CapturingLLM:

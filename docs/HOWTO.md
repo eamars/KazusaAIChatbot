@@ -330,21 +330,25 @@ for trusted callers that provide a source-backed request, structured approval,
 and structured execution specs. This flow composes proposal, managed-copy
 apply, bounded execution, and capped repair attempts. Repairs receive only
 structured `execution_verification` summaries with redacted failure evidence,
-and each attempt uses a fresh managed apply copy. It remains outside
-background-worker, L2d, dialog, adapter delivery, package installation,
-network access, and original-source mutation paths.
+and each attempt uses a fresh managed apply copy. Focused pytest selector
+paths are protected verification paths: initial proposal artifacts touching
+those tests are omitted from approved managed apply, and repair proposals that
+modify them are rejected. It remains outside background-worker, L2d, dialog,
+adapter delivery, package installation, network access, and original-source
+mutation paths.
 
 The coding-agent direct API also exposes the durable run APIs:
 `start_coding_run(...)`, `continue_coding_run(...)`, and
 `get_coding_run(...)`. Trusted callers provide an explicit `objective_type`
 for `read_only`, `propose_patch`, or `verify_repair`; continuations provide an
-explicit `action` for `approve_and_verify` or `cancel`. Runs persist a JSON
-ledger and JSONL event stream under
+explicit `action` for `revise_proposal`, `summarize`, `status`,
+`approve_and_verify`, or `cancel`. Runs persist a JSON ledger and JSONL event
+stream under
 `<workspace_root>\coding_runs\<run_id>\`, can be reloaded by run id, and keep
-proposal approval, managed apply, execution, repair, cancellation, attempt
-history, and public sanitization inspectable without relying on background
-worker delivery, MongoDB run persistence, Phase 10 repository-scale reading,
-or UI work.
+proposal revision, approval, managed apply, execution, repair, cancellation,
+attempt history, allowed next actions, and public sanitization inspectable
+without relying on background worker delivery, MongoDB run persistence, Phase
+10 repository-scale reading, or UI work.
 
 Accepted durable coding work enters through L2d
 `accepted_coding_task_request`, not through direct API calls. Deterministic
@@ -352,9 +356,10 @@ action execution validates a closed coding action, persists accepted-task
 state, queues `requested_worker="coding_agent"` with
 `coding_agent_worker_payload.v1`, and the worker maps that payload to the
 durable run APIs. Approval follow-ups require a prompt-safe
-`coding_run:<run_id>` reference and can run only structured
-`python_compileall` or focused `pytest` verification inside the managed coding
-workspace.
+`coding_run:<run_id>` reference. Revision and summary follow-ups preserve the
+same run id without applying or executing patches. Approval follow-ups can run
+only structured `python_compileall` or focused `pytest` verification inside
+the managed coding workspace.
 
 Reflection phase scheduling spreads monitor-eligible channels across the
 `REFLECTION_WORKER_INTERVAL_SECONDS` period instead of running all group
