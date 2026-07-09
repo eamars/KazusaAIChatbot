@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import builtins
+from importlib.util import find_spec
 import io
 import os
 import re
@@ -1170,6 +1171,8 @@ def _import_is_known(
     if top_level in sys.builtin_module_names:
         return True
     if top_level in getattr(sys, "stdlib_module_names", set()):
+        return True
+    if find_spec(top_level) is not None:
         return True
     if module_name in module_index:
         return True

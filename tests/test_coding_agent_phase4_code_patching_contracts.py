@@ -194,3 +194,62 @@ def test_code_patching_materializes_review_package_under_patch_root(
     assert validation["status"] == "succeeded"
     assert validation["sandbox_applied"] is True
     assert (workspace_root / VALIDATION_ROOT_NAME).is_dir()
+
+
+def test_code_patching_allows_importable_test_dependency_in_source_free_package(
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_patching.patch_operations import (
+        compile_patch_operations,
+    )
+    from kazusa_ai_chatbot.coding_agent.code_patching.patch_validation import (
+        materialize_patch_artifacts_for_review,
+    )
+
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+
+    patch_artifacts, _, _, errors = compile_patch_operations(
+        repo_root=None,
+        patch_operations=[
+            {
+                "operation_id": "create-source",
+                "kind": "create_file",
+                "path": "src/csv_normalizer_cli.py",
+                "content": (
+                    "def normalize(text: str) -> str:\n"
+                    "    return text.strip()\n"
+                ),
+                "summary": "Create CSV normalizer source.",
+            },
+            {
+                "operation_id": "create-tests",
+                "kind": "create_file",
+                "path": "tests/test_csv_normalizer_tests.py",
+                "content": (
+                    "import pytest\n\n"
+                    "from csv_normalizer_cli import normalize\n\n\n"
+                    "def test_normalize_trims_text() -> None:\n"
+                    "    assert normalize(' value ') == 'value'\n\n\n"
+                    "def test_normalize_requires_text() -> None:\n"
+                    "    with pytest.raises(AttributeError):\n"
+                    "        normalize(None)\n"
+                ),
+                "summary": "Create CSV normalizer tests.",
+            },
+        ],
+        max_files=4,
+        max_diff_chars=4000,
+    )
+
+    assert errors == []
+    validation = materialize_patch_artifacts_for_review(
+        repo_root=None,
+        workspace_root=workspace_root,
+        patch_artifacts=patch_artifacts,
+        max_files=4,
+        max_diff_chars=4000,
+    )
+
+    assert validation["status"] == "succeeded"
+    assert validation["errors"] == []

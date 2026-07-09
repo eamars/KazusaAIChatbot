@@ -1046,6 +1046,266 @@ async def test_code_writing_repairs_source_free_review_import_feedback(
     )
 
 
+async def test_code_writing_repairs_rejected_source_free_patcher_feedback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_writing import supervisor
+
+    feedback_passes = 0
+
+    def programmer_decision(task_id: str, behavior: str) -> dict[str, Any]:
+        return {
+            "status": "create_programmer_task",
+            "reason": behavior,
+            "information_request": None,
+            "child_pm_task": None,
+            "programmer_task": {
+                "task_id": task_id,
+                "artifact_purpose": behavior,
+                "required_behavior": [behavior],
+                "provided_interfaces": [],
+                "consumed_interfaces": [],
+                "imports": [],
+                "output_format": "python source",
+            },
+            "repair_instruction": None,
+            "completion_report": None,
+            "blocker": None,
+        }
+
+    def complete_decision() -> dict[str, Any]:
+        return {
+            "status": "complete",
+            "reason": "The package is complete.",
+            "information_request": None,
+            "child_pm_task": None,
+            "programmer_task": None,
+            "repair_instruction": None,
+            "completion_report": {
+                "pm_id": "writing_pm_root",
+                "status": "complete",
+                "provided_facts": ["Compact helper generated."],
+                "created_artifacts": [],
+                "consumed_facts": [],
+                "open_risks": [],
+                "next_dependency_needs": [],
+            },
+            "blocker": None,
+        }
+
+    async def fake_pm(
+        pm_input: dict[str, Any],
+        *,
+        trace: dict[str, object] | None = None,
+    ) -> dict[str, Any]:
+        nonlocal feedback_passes
+
+        child_reports = pm_input["direct_child_reports"]
+        child_feedback = pm_input["child_feedback"]
+        if child_feedback:
+            if not child_reports:
+                feedback_passes += 1
+                feedback_text = str(child_feedback[0])
+                assert "Compiled patch operations exceed the diff limit" in (
+                    feedback_text
+                )
+                return programmer_decision(
+                    task_id="compact_helper",
+                    behavior="Create a compact helper.",
+                )
+            return complete_decision()
+
+        if not child_reports:
+            return programmer_decision(
+                task_id="oversized_helper",
+                behavior="Create an oversized helper.",
+            )
+        return complete_decision()
+
+    async def fake_programmer(
+        *,
+        artifact_contract: dict[str, Any],
+        trace: dict[str, object] | None = None,
+    ) -> dict[str, Any]:
+        artifact_id = artifact_contract["artifact_id"]
+        if artifact_id == "oversized_helper":
+            code = (
+                "def helper() -> str:\n"
+                f"    return {('x' * 2500)!r}\n"
+            )
+        else:
+            code = "def helper() -> str:\n    return 'ok'\n"
+        return {
+            "artifact_id": artifact_id,
+            "status": "succeeded",
+            "content_format": artifact_contract["content_format"],
+            "code_artifact": code,
+            "diagnostics": [],
+        }
+
+    async def fake_acceptance(**kwargs: Any) -> dict[str, Any]:
+        return {
+            "status": "pass",
+            "acceptance_criteria": [
+                {
+                    "criterion_id": "helper",
+                    "requirement": "Create a compact helper.",
+                    "evidence_needed": "Generated helper source.",
+                }
+            ],
+            "limitations": [],
+        }
+
+    async def fake_synthesis(**kwargs: Any) -> tuple[str, list[str]]:
+        return "Generated a compact helper.", kwargs["limitations"]
+
+    monkeypatch.setattr(supervisor, "derive_acceptance_criteria", fake_acceptance)
+    monkeypatch.setattr(supervisor, "decide_writing_work", fake_pm)
+    monkeypatch.setattr(
+        supervisor,
+        "run_writing_programmer_contract",
+        fake_programmer,
+    )
+    monkeypatch.setattr(supervisor, "synthesize_patch_proposal", fake_synthesis)
+
+    result = await supervisor.run_writing_supervisor({
+        "question": "Create a compact helper.",
+        "mode_hint": "create_new_project",
+        "workspace_root": str(tmp_path / "workspace"),
+        "max_artifact_chars": 800,
+    })
+
+    assert result["status"] == "succeeded"
+    assert feedback_passes == 1
+    assert {
+        row["path"]
+        for row in result["created_files"]
+    } == {"src/compact_helper.py"}
+    assert not any(
+        "Compiled patch operations exceed the diff limit" in item
+        for item in result["limitations"]
+    )
+
+
+async def test_code_writing_repairs_empty_pm_completion_with_feedback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from kazusa_ai_chatbot.coding_agent.code_writing import supervisor
+
+    feedback_passes = 0
+
+    def programmer_decision() -> dict[str, Any]:
+        return {
+            "status": "create_programmer_task",
+            "reason": "Create the requested helper source.",
+            "information_request": None,
+            "child_pm_task": None,
+            "programmer_task": {
+                "task_id": "helper",
+                "artifact_purpose": "Create the requested helper source.",
+                "required_behavior": ["define helper() -> str"],
+                "provided_interfaces": [],
+                "consumed_interfaces": [],
+                "imports": [],
+                "output_format": "python source",
+            },
+            "repair_instruction": None,
+            "completion_report": None,
+            "blocker": None,
+        }
+
+    def complete_decision() -> dict[str, Any]:
+        return {
+            "status": "complete",
+            "reason": "The package is complete.",
+            "information_request": None,
+            "child_pm_task": None,
+            "programmer_task": None,
+            "repair_instruction": None,
+            "completion_report": {
+                "pm_id": "writing_pm_root",
+                "status": "complete",
+                "provided_facts": ["Helper generated."],
+                "created_artifacts": [],
+                "consumed_facts": [],
+                "open_risks": [],
+                "next_dependency_needs": [],
+            },
+            "blocker": None,
+        }
+
+    async def fake_pm(
+        pm_input: dict[str, Any],
+        *,
+        trace: dict[str, object] | None = None,
+    ) -> dict[str, Any]:
+        nonlocal feedback_passes
+
+        child_reports = pm_input["direct_child_reports"]
+        child_feedback = pm_input["child_feedback"]
+        if child_feedback:
+            if not child_reports:
+                feedback_passes += 1
+                feedback_text = str(child_feedback[0])
+                assert "completed without generated artifacts" in feedback_text
+                return programmer_decision()
+            return complete_decision()
+        return complete_decision()
+
+    async def fake_programmer(
+        *,
+        artifact_contract: dict[str, Any],
+        trace: dict[str, object] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "artifact_id": artifact_contract["artifact_id"],
+            "status": "succeeded",
+            "content_format": artifact_contract["content_format"],
+            "code_artifact": "def helper() -> str:\n    return 'ok'\n",
+            "diagnostics": [],
+        }
+
+    async def fake_acceptance(**kwargs: Any) -> dict[str, Any]:
+        return {
+            "status": "pass",
+            "acceptance_criteria": [
+                {
+                    "criterion_id": "helper",
+                    "requirement": "Create the requested helper source.",
+                    "evidence_needed": "Generated helper source.",
+                }
+            ],
+            "limitations": [],
+        }
+
+    async def fake_synthesis(**kwargs: Any) -> tuple[str, list[str]]:
+        return "Generated helper source.", kwargs["limitations"]
+
+    monkeypatch.setattr(supervisor, "derive_acceptance_criteria", fake_acceptance)
+    monkeypatch.setattr(supervisor, "decide_writing_work", fake_pm)
+    monkeypatch.setattr(
+        supervisor,
+        "run_writing_programmer_contract",
+        fake_programmer,
+    )
+    monkeypatch.setattr(supervisor, "synthesize_patch_proposal", fake_synthesis)
+
+    result = await supervisor.run_writing_supervisor({
+        "question": "Create helper source.",
+        "mode_hint": "create_new_project",
+        "workspace_root": str(tmp_path / "workspace"),
+    })
+
+    assert result["status"] == "succeeded"
+    assert feedback_passes == 1
+    assert {
+        row["path"]
+        for row in result["created_files"]
+    } == {"src/helper.py"}
+
+
 async def test_code_writing_rejects_nested_child_pm_and_resumes_same_pm(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -242,20 +242,59 @@ async def run_writing_supervisor(
         )
         return result
     if not pm_result.generated_artifacts:
-        result = _pm_blocked_result(
-            pm_result=_PMNodeResult(
-                status="failed",
-                generated_artifacts=[],
-                direct_child_reports=pm_result.direct_child_reports,
-                information_requests=[],
-                limitations=["PM completed without generated artifacts."],
-                final_decision=pm_result.final_decision,
-            ),
-            session=session,
+        trace_summary.append("writing_empty_completion_feedback:attempt=1")
+        retry_input = _root_pm_input(
+            question=question,
+            acceptance_criteria=acceptance["acceptance_criteria"],
             external_evidence=external_evidence,
-            trace_summary=trace_summary,
+            supervisor_facts=supervisor_facts,
+            supervisor_state=supervisor_state,
+            prior_generated_artifacts=[],
+            child_feedback=[_missing_generated_artifacts_feedback()],
         )
-        return result
+        pm_result = await _run_pm_node(
+            pm_input=retry_input,
+            initial_generated_artifacts=[],
+            depth=0,
+            diagnostic=diagnostic,
+            trace=trace,
+            trace_summary=trace_summary,
+            trace_label="empty_completion_feedback_1",
+        )
+        if pm_result.status in ("need_external_evidence", "need_reading"):
+            result = _information_request_result(
+                status=pm_result.status,
+                requests=pm_result.information_requests,
+                generated_artifacts=pm_result.generated_artifacts,
+                session=session,
+                workspace_root=Path(workspace_root),
+                external_evidence=external_evidence,
+                trace_summary=trace_summary,
+            )
+            return result
+        if pm_result.status != "succeeded":
+            result = _pm_blocked_result(
+                pm_result=pm_result,
+                session=session,
+                external_evidence=external_evidence,
+                trace_summary=trace_summary,
+            )
+            return result
+        if not pm_result.generated_artifacts:
+            result = _pm_blocked_result(
+                pm_result=_PMNodeResult(
+                    status="failed",
+                    generated_artifacts=[],
+                    direct_child_reports=pm_result.direct_child_reports,
+                    information_requests=[],
+                    limitations=["PM completed without generated artifacts."],
+                    final_decision=pm_result.final_decision,
+                ),
+                session=session,
+                external_evidence=external_evidence,
+                trace_summary=trace_summary,
+            )
+            return result
 
     reserved_paths = _reserved_paths_from_artifacts(
         pm_result.generated_artifacts,
@@ -1282,7 +1321,28 @@ def _materialize_review_validation(
 def _should_run_review_validation_feedback(
     validation: PatchValidationSummary,
 ) -> bool:
-    return validation["status"] == "failed" and bool(validation["errors"])
+    should_retry = validation["status"] in ("failed", "rejected") and bool(
+        validation["errors"]
+    )
+    return should_retry
+
+
+def _missing_generated_artifacts_feedback() -> dict[str, object]:
+    feedback = {
+        "stage": "pm_completion",
+        "child_id": "writing_pm_root",
+        "summary": (
+            "The PM completed the package without generated artifacts. Return "
+            "a complete replacement package for the same user goal. Create the "
+            "programmer tasks needed for every required source, test, docs, "
+            "config, and data artifact, then complete only after child reports "
+            "exist."
+        ),
+        "errors": ["PM completed without generated artifacts."],
+        "materialized_files": [],
+        "proposed_files": [],
+    }
+    return feedback
 
 
 def _review_validation_feedback(
