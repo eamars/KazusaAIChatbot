@@ -157,6 +157,29 @@ def test_describe_backend_detects_qwopus_qwen_derived_models() -> None:
         assert disabled_descriptor.thinking_strategy == "qwen3_disabled"
 
 
+def test_describe_backend_detects_ornith_qwen_derived_models() -> None:
+    """Ornith model ids use the same Qwen-compatible thinking support."""
+
+    interface = LLInterface()
+    supported_models = (
+        "ornith-1.0-35b-nvfp4-mtp",
+        "local/Ornith-1.0-35B-NVFP4-MTP",
+    )
+
+    for model in supported_models:
+        enabled_descriptor = interface.describe_backend(
+            config=_call_config(model=model, thinking_enabled=True),
+        )
+        disabled_descriptor = interface.describe_backend(
+            config=_call_config(model=model, thinking_enabled=False),
+        )
+
+        assert enabled_descriptor.model_family == "qwen"
+        assert enabled_descriptor.thinking_strategy == "qwen3_enabled"
+        assert disabled_descriptor.model_family == "qwen"
+        assert disabled_descriptor.thinking_strategy == "qwen3_disabled"
+
+
 def test_describe_backend_rejects_qwen3_adjacent_names() -> None:
     """Broad Qwen/Qwopus 3-like names do not get thinking strategy."""
 

@@ -10,7 +10,7 @@ from kazusa_ai_chatbot.llm_interface.contracts import (
 )
 
 QWEN3_THINKING_MODEL_PATTERN = re.compile(
-    r"(^|-)(?:qwen3|qwopus3)(?:$|[.-]\d)",
+    r"(^|-)(?:qwen3|qwopus3|ornith)(?:$|[.-]\d)",
 )
 
 
@@ -38,7 +38,11 @@ def detect_model_family(model: str) -> tuple[str, str]:
     if "gemma4" in compact_model or "gemma-4" in normalized_model:
         return_value = ("gemma4", "model_name_inferred")
         return return_value
-    if "qwen" in normalized_model or "qwopus" in normalized_model:
+    if (
+        "qwen" in normalized_model
+        or "qwopus" in normalized_model
+        or "ornith" in normalized_model
+    ):
         return_value = ("qwen", "model_name_inferred")
         return return_value
     if "deepseek" in normalized_model:

@@ -200,7 +200,7 @@ Current model-family labels include:
 | Detected family | Model-name signal |
 | --- | --- |
 | `gemma4` | `gemma4` or `gemma-4` |
-| `qwen` | `qwen` or Qwen-derived aliases such as `qwopus` |
+| `qwen` | `qwen` or Qwen-derived aliases such as `qwopus` and `ornith` |
 | `deepseek` | `deepseek` |
 | `openai` | `gpt` or `openai` |
 | `unknown` | no known signal |
@@ -227,7 +227,8 @@ the OpenAI-compatible provider sends the request-level disable hint where the
 backend supports it and does not add the assistant prefill.
 
 Provider-side thinking support currently covers Gemma 4, Qwen3-family models,
-and Qwen-compatible Qwopus 3.x model names.
+Qwen-compatible Qwopus 3.x model names, and Qwen-compatible Ornith model
+names.
 
 When thinking is enabled and the detected model family is `gemma4`, the
 OpenAI-compatible provider maps it to both the request-level chat-template hint
@@ -260,11 +261,13 @@ this prefill is the effective activation mechanism for
 `qwen3.6-34b-80l-fable-5-heretic`; the request-level hint alone was accepted
 but did not produce reasoning tokens.
 
-Qwen3-compatible matching is segment-based after model-name normalization, so
+Qwen-compatible thinking matching is segment-based after model-name
+normalization, so
 repository-prefixed model ids such as
 `hiebo/Qwen3.6-34B-80L-Fable-5-Heretic`, `Qwen/Qwen3-32B`, and
-`Jackrong/Qwopus3.6-27B-v2-GGUF` are supported without broadening support to
-unversioned adjacent names such as `qwen30` or `qwopus3-coder`.
+`Jackrong/Qwopus3.6-27B-v2-GGUF`, and `local/Ornith-1.0-35B-NVFP4-MTP` are
+supported without broadening support to unversioned adjacent names such as
+`qwen30` or `qwopus3-coder`.
 
 When thinking is enabled for unsupported or unknown model families, the
 interface records an `ignored_unsupported_model` strategy and omits
