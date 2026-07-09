@@ -38,6 +38,8 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [coding_agent_assessment_gap_phase_b_plan.md](active/short_term/coding_agent_assessment_gap_phase_b_plan.md) | Large coding-agent assessment gap plan for preflight execution and structured repair feedback | draft |
+| [coding_agent_assessment_gap_phase_c_plan.md](active/short_term/coding_agent_assessment_gap_phase_c_plan.md) | Large coding-agent assessment gap plan for typed blockers, affordances, approval evidence, locks, and benchmark seam | draft |
 | [coding_agent_full_workflow_hardening_plan_2.md](active/short_term/coding_agent_full_workflow_hardening_plan_2.md) | Large coding-agent full workflow hardening plan | completed |
 
 ## Supporting Experiment Records
@@ -57,6 +59,8 @@ long_term/todo.md
 | Document | Type |
 |---|---|
 | [action_spec_effector_expansion_architecture.md](reference/designs/action_spec_effector_expansion_architecture.md) | Architecture reference |
+| [CODING_AGENT_CAPABILITY_ASSESSMENT.md](reference/designs/CODING_AGENT_CAPABILITY_ASSESSMENT.md) | Coding-agent capability assessment reference |
+| [coding_agent_assessment_gap_gate_06_10_failure_modes.md](reference/designs/coding_agent_assessment_gap_gate_06_10_failure_modes.md) | Supporting real LLM failure-mode evidence |
 | [coding_agent_architecture.md](reference/designs/coding_agent_architecture.md) | Architecture reference |
 | [coding_agent_phase9_run_supervisor_architecture.md](reference/designs/coding_agent_phase9_run_supervisor_architecture.md) | Directional architecture reference |
 | [coding_agent_phase10_repository_scale_reading_architecture.md](reference/designs/coding_agent_phase10_repository_scale_reading_architecture.md) | Directional architecture reference |
@@ -214,6 +218,20 @@ architecture and ICD documents.
 |---|---|
 | Moved from active short-term to completed archive | `coding_agent_full_workflow_integration_test_plan.md`, `coding_agent_pre_integration_hardening_plan.md` |
 
+### 2026-07-10 coding-agent assessment gap Phase A completion
+
+The coding-agent assessment gap Phase A plan completed after user-approved
+execution without subagents. The implementation added existing-source
+`create_file` support, source-backed mixed create/edit routing, source-free
+package coherence and alignment gates, durable alignment projection, revision
+package-state preservation, and deterministic regressions. Live Gate 02 and
+Gate 10 reruns passed after targeted hardening.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active short-term to completed archive | `coding_agent_assessment_gap_phase_a_plan.md` |
+| Kept active draft follow-up plans | `coding_agent_assessment_gap_phase_b_plan.md`, `coding_agent_assessment_gap_phase_c_plan.md` |
+
 ## Archive
 
 Completed and superseded records live under `archive/`. Use them for historical
@@ -297,6 +315,7 @@ plans.
 | [channel_name_semantic_projection_plan.md](archive/completed/short_term/channel_name_semantic_projection_plan.md) |
 | [character_local_time_context_plan.md](archive/completed/short_term/character_local_time_context_plan.md) |
 | [character_profile_runtime_state_split_plan.md](archive/completed/short_term/character_profile_runtime_state_split_plan.md) |
+| [coding_agent_assessment_gap_phase_a_plan.md](archive/completed/short_term/coding_agent_assessment_gap_phase_a_plan.md) |
 | [coding_agent_phase0_fetching_plan.md](archive/completed/short_term/coding_agent_phase0_fetching_plan.md) |
 | [coding_agent_phase1_code_reading_final_plan.md](archive/completed/short_term/coding_agent_phase1_code_reading_final_plan.md) |
 | [coding_agent_phase1_real_repo_retrieval_remediation_plan.md](archive/completed/short_term/coding_agent_phase1_real_repo_retrieval_remediation_plan.md) |

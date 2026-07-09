@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -357,6 +359,161 @@ async def test_coding_worker_start_payload_starts_durable_run(
 
 
 @pytest.mark.asyncio
+async def test_coding_worker_start_metadata_projects_created_files_and_alignment(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """Worker metadata v2 should expose durable proposal alignment evidence."""
+
+    from kazusa_ai_chatbot.background_work.subagent import coding_agent
+
+    run_response = _coding_run_response(
+        status="awaiting_approval",
+        run_id="run-001",
+        objective_type="propose_patch",
+        answer_text="Patch proposal is ready.",
+    )
+    run_response["created_files"] = [{
+        "path": "counter_cli/formatters.py",
+        "role": "Create formatter helper.",
+    }]
+    run_response["alignment"] = {
+        "status": "pass",
+        "request_satisfied": True,
+        "matched_criteria": ["criterion-format"],
+        "missing_criteria": [],
+        "blockers": [],
+    }
+    run_response["trace_summary"] = [
+        *[f"step:{index}" for index in range(20)],
+        "writing_alignment:status=pass",
+    ]
+    decide = AsyncMock(return_value=("code_modifying", "source-backed patch"))
+    start = AsyncMock(return_value=run_response)
+    monkeypatch.setattr(
+        coding_agent,
+        "CODING_AGENT_WORKSPACE_ROOT",
+        str(tmp_path / "workspace"),
+    )
+    monkeypatch.setattr(coding_agent, "decide_background_coding_operation", decide)
+    monkeypatch.setattr(coding_agent, "start_coding_run", start)
+
+    result = await coding_agent.execute(
+        _worker_decision({
+            "schema_version": "coding_agent_worker_payload.v1",
+            "operation": "start",
+            "task_brief": "Modify slugify behavior.",
+            "coding_run_ref": "",
+            "execution_request": "",
+        }),
+        max_output_chars=1000,
+    )
+
+    assert result["status"] == "succeeded"
+    assert result["worker_metadata"]["created_files"] == [{
+        "path": "counter_cli/formatters.py",
+        "role": "Create formatter helper.",
+    }]
+    assert result["worker_metadata"]["alignment"]["status"] == "pass"
+    assert "writing_alignment:status=pass" in (
+        result["worker_metadata"]["trace_summary"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_background_operation_routes_source_backed_mixed_work_to_modifying(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """Explicit source plus mixed create/edit must choose modifying."""
+
+    from kazusa_ai_chatbot.coding_agent import supervisor
+
+    payloads: list[dict[str, object]] = []
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+
+    async def fake_ainvoke(
+        messages: list[object],
+        *,
+        config: object,
+    ) -> SimpleNamespace:
+        payloads.append(json.loads(messages[-1].content))
+        return SimpleNamespace(
+            content=json.dumps({
+                "operation": "code_writing",
+                "reason": "The task asks for a new helper file.",
+            }),
+        )
+
+    monkeypatch.setattr(
+        supervisor._background_coding_router_llm,
+        "ainvoke",
+        fake_ainvoke,
+    )
+
+    operation, reason = await supervisor.decide_background_coding_operation({
+        "question": (
+            "Use the local source checkout, create a formatter module, "
+            "and wire the existing CLI to call it."
+        ),
+        "local_root_hint": str(source_root),
+        "source_scope_hint": "repository",
+        "workspace_root": str(tmp_path / "workspace"),
+    })
+
+    assert payloads[0]["source_context"] == {
+        "kind": "explicit_source",
+        "fields": ["local_root_hint", "source_scope_hint"],
+    }
+    assert operation == "code_modifying"
+    assert "source" in reason.lower()
+
+
+@pytest.mark.asyncio
+async def test_background_operation_keeps_source_free_artifact_as_writing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """Truly source-free artifact requests remain in code_writing."""
+
+    from kazusa_ai_chatbot.coding_agent import supervisor
+
+    payloads: list[dict[str, object]] = []
+
+    async def fake_ainvoke(
+        messages: list[object],
+        *,
+        config: object,
+    ) -> SimpleNamespace:
+        payloads.append(json.loads(messages[-1].content))
+        return SimpleNamespace(
+            content=json.dumps({
+                "operation": "code_writing",
+                "reason": "The task asks for a new standalone artifact.",
+            }),
+        )
+
+    monkeypatch.setattr(
+        supervisor._background_coding_router_llm,
+        "ainvoke",
+        fake_ainvoke,
+    )
+
+    operation, reason = await supervisor.decide_background_coding_operation({
+        "question": "Create a standalone Python script that formats CSV rows.",
+        "workspace_root": str(tmp_path / "workspace"),
+    })
+
+    assert payloads[0]["source_context"] == {
+        "kind": "source_free",
+        "fields": [],
+    }
+    assert operation == "code_writing"
+    assert "standalone" in reason
+
+
+@pytest.mark.asyncio
 async def test_coding_worker_start_payload_preserves_visible_local_path_hint(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
@@ -399,6 +556,27 @@ async def test_coding_worker_start_payload_preserves_visible_local_path_hint(
     assert result["status"] == "succeeded"
     assert decide.await_args.args[0]["local_path_hint"] == str(source_root)
     assert start.await_args.args[0]["local_path_hint"] == str(source_root)
+
+
+def test_local_source_hint_ignores_repo_relative_paths_before_checkout(
+    tmp_path,
+) -> None:
+    """Repo-relative path mentions should not swallow a later local checkout."""
+
+    from kazusa_ai_chatbot.background_work.subagent.coding_agent import (
+        _local_source_hints_from_task_brief,
+    )
+
+    source_root = tmp_path / "source checkout"
+    source_root.mkdir()
+    task_brief = (
+        "Add counter_cli/formatters.py, wire counter_cli/cli.py, and use "
+        f"the local source checkout at {source_root}."
+    )
+
+    assert _local_source_hints_from_task_brief(task_brief) == {
+        "local_path_hint": str(source_root),
+    }
 
 
 @pytest.mark.asyncio

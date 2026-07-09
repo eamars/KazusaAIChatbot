@@ -22,6 +22,38 @@ def test_modifying_programmer_artifact_accepts_structured_replace() -> None:
     assert artifact["target_path"] == "app.py"
 
 
+def test_modifying_programmer_artifact_accepts_create_file_projection() -> None:
+    from kazusa_ai_chatbot.coding_agent.code_modifying.models import (
+        artifact_to_patch_operation,
+        normalize_modification_artifact,
+    )
+
+    artifact = normalize_modification_artifact({
+        "artifact_id": "artifact-create-1",
+        "status": "succeeded",
+        "task_id": "task-1",
+        "target_path": "counter_cli/formatters.py",
+        "evidence_ids": ["ev-1"],
+        "operation_kind": "create_file",
+        "exact_anchor": "",
+        "replacement_or_insert_content": (
+            "def format_total(total: int) -> str:\n"
+            "    return f'Total: {total}'\n"
+        ),
+        "operation_summary": "Create formatter helper.",
+        "risk_notes": ["New runtime module must be imported by caller."],
+        "tests_or_docs_to_update": ["tests/test_counter_cli.py"],
+    })
+    operation = artifact_to_patch_operation(artifact)
+
+    assert artifact["status"] == "succeeded"
+    assert artifact["operation_kind"] == "create_file"
+    assert operation is not None
+    assert operation["kind"] == "create_file"
+    assert operation["path"] == "counter_cli/formatters.py"
+    assert "anchor" not in operation
+
+
 def test_modifying_programmer_artifact_rejects_raw_diff() -> None:
     from kazusa_ai_chatbot.coding_agent.code_modifying.models import (
         normalize_modification_artifact,
@@ -153,3 +185,35 @@ def test_modifying_pm_accepts_programmer_task_with_evidence() -> None:
     assert decision["status"] == "create_programmer_task"
     assert decision["programmer_task"] is not None
     assert decision["programmer_task"]["task_id"] == "task-1"
+
+
+def test_modifying_pm_accepts_mixed_create_and_edit_programmer_task() -> None:
+    from kazusa_ai_chatbot.coding_agent.code_modifying.models import (
+        normalize_modifying_pm_decision,
+    )
+
+    decision = normalize_modifying_pm_decision({
+        "status": "create_programmer_task",
+        "reason": "A new helper file and existing caller edit are both needed.",
+        "owned_paths": ["counter_cli/main.py", "counter_cli/formatters.py"],
+        "read_only_paths": ["tests/test_counter_cli.py"],
+        "required_evidence_ids": ["ev-1"],
+        "programmer_task": {
+            "task_id": "task-1",
+            "target_paths": ["counter_cli/main.py", "counter_cli/formatters.py"],
+            "change_goal": "Create formatter helper and wire main.",
+            "required_behavior": ["Output uses the shared formatter."],
+            "forbidden_changes": ["Do not edit protected verification tests."],
+            "consumed_interfaces": ["main.py currently prints totals."],
+            "expected_operations": ["create_file", "replace"],
+            "acceptance_checks": ["Run existing counter CLI tests."],
+            "local_risks": ["Import path must match package layout."],
+        },
+    })
+
+    assert decision["status"] == "create_programmer_task"
+    assert decision["programmer_task"] is not None
+    assert decision["programmer_task"]["expected_operations"] == [
+        "create_file",
+        "replace",
+    ]

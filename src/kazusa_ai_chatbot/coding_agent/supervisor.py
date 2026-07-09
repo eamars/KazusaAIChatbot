@@ -83,12 +83,13 @@ task.
 Operations:
 - code_reading: answer a question about a codebase, project design, source
   behavior, architecture, dependency use, tests, or repository structure.
-- code_writing: propose new-file code artifacts for source-free coding tasks.
-  The coding agent may return proposal artifacts, but it does not edit existing
-  source, apply patches, run commands, install packages, deploy, or validate by
-  executing the target project.
+- code_writing: propose new-file code artifacts only when source_context.kind
+  is source_free. The coding agent may return proposal artifacts, but it does
+  not edit existing source, apply patches, run commands, install packages,
+  deploy, or validate by executing the target project.
 - code_modifying: propose reviewable existing-source patch artifacts when the
-  task includes an explicit source structure.
+  task includes explicit source structure. This includes mixed work that creates
+  a new source file and edits existing source in one review-only proposal.
 - unsupported: the task is not a coding task, or it requires live execution,
   deployment, credential access, package installation, adapter delivery, or
   real-world mutation as the primary result.
@@ -189,9 +190,11 @@ async def _decide_background_coding_operation(
 ) -> tuple[CodingAgentBackgroundOperation, str]:
     """Ask the coding-agent supervisor route to choose the supported operation."""
 
+    source_context = _background_source_context(request)
     payload = {
         "task": _bounded_request_body(request.get("question")),
         "source_summary": _bounded_request_body(request.get("source_summary")),
+        "source_context": source_context,
         "available_operations": [
             "code_reading",
             "code_writing",
@@ -199,7 +202,8 @@ async def _decide_background_coding_operation(
             "unsupported",
         ],
         "operation_limits": [
-            "No patch application.",
+            "No original-source mutation.",
+            "No patch application without structured approval.",
             "No shell command execution.",
             "No package installation.",
             "No adapter delivery.",
@@ -221,7 +225,63 @@ async def _decide_background_coding_operation(
     reason = ""
     if isinstance(parsed, dict):
         reason = _safe_request_text(parsed.get("reason"))
+    if (
+        operation == "code_writing"
+        and source_context["kind"] == "explicit_source"
+    ):
+        reason = (
+            "Structured source context routes review-only patch work through "
+            f"code_modifying. Router reason: {reason}"
+        )
+        return "code_modifying", reason
     return operation, reason
+
+
+def _background_source_context(
+    request: CodingAgentBackgroundRequest,
+) -> dict[str, object]:
+    """Summarize structured source fields for the router prompt."""
+
+    explicit_source_fields = (
+        "source_url",
+        "repo_url",
+        "repo_hint",
+        "local_root_hint",
+        "local_path_hint",
+    )
+    contextual_fields = (
+        *explicit_source_fields,
+        "requested_ref",
+        "source_scope_hint",
+    )
+    present_fields = [
+        field_name
+        for field_name in contextual_fields
+        if _source_context_field_present(request.get(field_name))
+    ]
+    has_explicit_source = any(
+        field_name in explicit_source_fields
+        for field_name in present_fields
+    )
+    if not has_explicit_source:
+        return {
+            "kind": "source_free",
+            "fields": [],
+        }
+    return {
+        "kind": "explicit_source",
+        "fields": present_fields,
+    }
+
+
+def _source_context_field_present(value: object) -> bool:
+    """Return whether one structured source field has a meaningful value."""
+
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    return True
 
 
 def _parsed_operation_is_supported(parsed: object) -> bool:
@@ -383,6 +443,9 @@ def _background_response_from_writing(
         "limitations": response["limitations"],
         "trace_summary": trace_summary,
     }
+    alignment = response.get("alignment")
+    if alignment is not None:
+        result["alignment"] = alignment
     return result
 
 

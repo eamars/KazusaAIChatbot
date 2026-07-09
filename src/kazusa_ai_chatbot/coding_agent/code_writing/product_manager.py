@@ -86,6 +86,11 @@ create_child_pm.
 2. For a small multi-artifact work item, create programmer tasks one artifact
    at a time when the next artifact contract is clear from available facts and
    direct child reports.
+   Direct child reports whose child_id starts with "prior_" are generated
+   artifacts from an earlier supervised step or proposal revision. Treat them
+   as already-created artifacts for dependency planning. For a revision request,
+   keep useful prior artifacts conceptually in the package and assign only the
+   missing or changed artifacts needed to satisfy the current revision.
    This stage currently writes Python artifacts. Describe interfaces with
    normal Python type hints. Every input and output item must have an agreed
    name at PM level. For a list, name the list and its element type. For a dict
@@ -127,6 +132,34 @@ create_child_pm.
    just a new extra file. Keep valid artifacts by assigning them again, correct
    bad imports and paths, and do not claim commands, tests, package
    installation, or real workspace mutation happened.
+   When child_feedback has stage "package_coherence", the generated package
+   passed patch materialization but failed deterministic package-level import
+   and interface review. Treat the reported missing imports, missing imported
+   symbols, direct-call signature mismatches, and duplicate entrypoints as
+   mandatory interface facts. Produce a complete replacement package for the
+   same user goal. Keep one coherent module and CLI layout, make tests import
+   generated modules that exist, call generated functions with their actual
+   signatures, and do not add parallel wrappers or duplicate entrypoints.
+   When child_feedback has stage "package_progress", the supervisor rejected
+   the proposed programmer task because it would duplicate an existing
+   generated artifact path or create a second CLI entrypoint. Do not retry the
+   same task_id, same file purpose, or alternate wrapper for the same role.
+   Choose the next missing source, test, docs, config, or data artifact, or
+   complete if the package already has the needed artifact. If artifact
+   alignment feedback names a specific existing file for repair, regenerate
+   exactly that named file instead of creating an alternate wrapper.
+   When child_feedback has stage "artifact_alignment", the previous package
+   was structurally valid but failed preserved user-requirement review. Treat
+   blockers, errors, summary, and required_repair_files as mandatory correction
+   facts. If required_repair_files names a CLI, test, source, docs, config, or
+   data artifact, assign that artifact first using a task_id and purpose that
+   map back to the named file, then regenerate any dependency artifacts needed
+   for a complete replacement package. Do not keep creating unrelated logic
+   artifacts when the blocker names a CLI or test file.
+   When child_feedback has stage "pm_contract", your previous lifecycle action
+   was structurally invalid. Choose exactly one valid status and include the
+   required matching payload for that status. If the next artifact is clear,
+   prefer create_programmer_task with programmer_task populated.
 5. Choose complete when your assigned work item is satisfied and your report
    can be sent upward.
 6. Choose blocked when the work cannot proceed from the available facts, when

@@ -16,6 +16,7 @@ from kazusa_ai_chatbot.coding_agent.code_reading.models import (
 ModificationStatus = Literal["succeeded", "failed", "needs_user_input", "rejected"]
 ModificationArtifactStatus = Literal["succeeded", "blocked"]
 ModificationOperationKind = Literal[
+    "create_file",
     "replace",
     "insert_before",
     "insert_after",
@@ -31,6 +32,7 @@ ModifyingPMStatus = Literal[
 ]
 
 ALLOWED_OPERATION_KINDS = {
+    "create_file",
     "replace",
     "insert_before",
     "insert_after",
@@ -164,6 +166,7 @@ def normalize_modification_artifact(
         evidence_ids=evidence_ids,
         anchor=anchor,
         content=content,
+        summary=summary,
     )
     status: ModificationArtifactStatus = "succeeded"
     if blocker:
@@ -261,9 +264,9 @@ def artifact_to_patch_operation(
         "summary": artifact["operation_summary"],
         "evidence_ids": artifact["evidence_ids"],
     }
-    if artifact["operation_kind"] != "replace_file_small":
+    if artifact["operation_kind"] in ("replace", "insert_before", "insert_after"):
         operation["anchor"] = artifact["exact_anchor"]
-    else:
+    if artifact["operation_kind"] == "replace_file_small":
         operation["full_file_rationale"] = artifact["operation_summary"]
     return operation
 
@@ -275,6 +278,7 @@ def _artifact_blocker(
     evidence_ids: list[str],
     anchor: str,
     content: str,
+    summary: str,
 ) -> str:
     if not target_path or not is_safe_repo_relative_path(target_path):
         return "target path is unsafe or missing"
@@ -282,10 +286,12 @@ def _artifact_blocker(
         return "operation kind is unsupported"
     if not evidence_ids:
         return "evidence ids are required"
-    if operation_kind != "replace_file_small" and not anchor:
+    if operation_kind not in ("create_file", "replace_file_small") and not anchor:
         return "exact anchor is required"
     if not content:
         return "replacement or insertion content is required"
+    if operation_kind == "create_file" and not summary:
+        return "operation summary is required"
     if _contains_raw_diff(content):
         return "raw diff content is not accepted"
     if target_path.endswith(".py") and _contains_indented_import(content):

@@ -7,6 +7,7 @@ from kazusa_ai_chatbot.coding_agent.code_executing.models import (
 )
 from kazusa_ai_chatbot.coding_agent.code_patching.models import (
     ChangedFileSummary,
+    CreatedFileSummary,
     PatchApplyApproval,
     PatchArtifact,
     PatchSourceIdentity,
@@ -139,7 +140,9 @@ class CodingRunLedger(TypedDict):
     answer_text: str
     evidence: list[CodeEvidenceReference]
     patch_artifacts: list[PatchArtifact]
+    created_files: list[CreatedFileSummary]
     changed_files: list[ChangedFileSummary]
+    alignment: dict[str, object] | None
     approvals: list[dict[str, object]]
     apply_attempts: list[dict[str, object]]
     execution_attempts: list[dict[str, object]]
@@ -162,7 +165,9 @@ class CodingRunResponse(TypedDict):
     source_scope: CodingAgentSourceScope | None
     evidence: list[CodeEvidenceReference]
     patch_artifacts: list[PatchArtifact]
+    created_files: list[CreatedFileSummary]
     changed_files: list[ChangedFileSummary]
+    alignment: dict[str, object] | None
     apply_attempts: list[dict[str, object]]
     execution_attempts: list[dict[str, object]]
     repair_attempts: list[CodingRunAttempt]

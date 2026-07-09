@@ -254,6 +254,8 @@ def _handoff_validation_errors(
         errors.append("Programmer task must include target_paths.")
         return errors
     target_path_set = set(target_paths)
+    expected_operations = set(_string_list(task.get("expected_operations")))
+    create_file_allowed = "create_file" in expected_operations
     if len(target_paths) > MAX_TARGET_PATHS:
         errors.append("Programmer task targets too many files.")
     file_context_paths = _path_set(file_plan.get("file_contexts"))
@@ -274,6 +276,8 @@ def _handoff_validation_errors(
         )
     for path in target_paths:
         if path not in file_context_paths:
+            if create_file_allowed and path not in read_only_paths:
+                continue
             errors.append(f"Programmer target path {path!r} lacks file context.")
             continue
         if path in protected_paths:
@@ -590,8 +594,10 @@ def _ownership_guidance_from_file_plan(
         "caller_paths": file_plan.get("caller_path_candidates", []),
         "rule": (
             "Modify the source owner path for runtime behavior. Modify caller "
-            "paths when integration wiring fails. Update focused companion "
-            "tests or docs only when requested or made stale."
+            "paths when integration wiring fails. Create new helper/source "
+            "paths only through create_file, and wire existing callers in the "
+            "same task. Update focused companion tests or docs only when "
+            "requested or made stale."
         ),
     }
     return guidance
@@ -600,6 +606,7 @@ def _ownership_guidance_from_file_plan(
 def _output_contract() -> dict[str, object]:
     return {
         "operation_kinds": [
+            "create_file",
             "replace",
             "insert_before",
             "insert_after",

@@ -175,5 +175,6 @@ class CodingAgentBackgroundResponse(TypedDict):
     created_files: list[dict[str, str]]
     changed_files: list[dict[str, str]]
     validation: dict[str, object] | None
+    alignment: NotRequired[dict[str, object]]
     limitations: list[str]
     trace_summary: list[str]

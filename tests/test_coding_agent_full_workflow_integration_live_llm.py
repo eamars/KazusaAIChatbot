@@ -309,6 +309,206 @@ async def test_live_gate_05_hard_multifile_approval_history_cancel_status(
     _assert_no_private_leaks(gate_trace)
 
 
+async def test_live_gate_06_mixed_create_and_existing_edit_workflow(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A real feature often needs a new helper module wired into old code."""
+
+    await _skip_if_llm_unavailable()
+    source_root = _prepare_fixture_checkout(tmp_path, "gate_03_counter_cli_json")
+    gate_trace = await _run_live_background_sequence(
+        monkeypatch,
+        tmp_path,
+        case_id="gate_06_mixed_create_existing_edit",
+        turns=[
+            (
+                "In this fixture repo, add a new module "
+                "counter_cli/formatters.py for output formatting, then wire "
+                "counter_cli/cli.py to use it for the existing text output. "
+                f"Use the local source checkout at {source_root}."
+            ),
+            (
+                "For {coding_run_ref}, summarize the exact created and "
+                "modified source files."
+            ),
+        ],
+    )
+
+    start_turn, summary_turn = gate_trace["turns"]
+    _assert_worker_succeeded(start_turn)
+    _assert_worker_succeeded(summary_turn)
+    changed_files = _changed_file_paths(summary_turn)
+    assert "counter_cli/formatters.py" in changed_files, gate_trace["trace_path"]
+    assert "counter_cli/cli.py" in changed_files, gate_trace["trace_path"]
+    _assert_no_private_leaks(gate_trace)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Known assessment gap: patch proposals are delivered before managed "
+        "preflight apply and execution evidence exists."
+    ),
+)
+async def test_live_gate_07_proposal_has_preapproval_preflight_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A proposal should be mechanically exercised before user approval."""
+
+    await _skip_if_llm_unavailable()
+    source_root = _prepare_fixture_checkout(
+        tmp_path,
+        "gate_04_slug_normalization",
+    )
+    gate_trace = await _run_live_background_sequence(
+        monkeypatch,
+        tmp_path,
+        case_id="gate_07_preapproval_preflight",
+        turns=[
+            (
+                "Fix the slug normalization bug in this fixture repo. "
+                "Before asking for approval, preflight the proposed patch in "
+                "a managed copy with the focused slug tests. Use the local "
+                f"source checkout at {source_root}."
+            ),
+        ],
+    )
+
+    start_turn = gate_trace["turns"][0]
+    _assert_worker_succeeded(start_turn)
+    metadata = start_turn["worker_metadata"]
+    assert metadata["worker_operation"] == "start"
+    assert metadata["coding_run_status"] == "awaiting_approval"
+    assert metadata["apply_attempts"], gate_trace["trace_path"]
+    assert metadata["execution_attempts"], gate_trace["trace_path"]
+    assert "pytest" in _execution_tools(start_turn), gate_trace["trace_path"]
+    _assert_no_private_leaks(gate_trace)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Known assessment gap: approval checks are planned from approval "
+        "prose instead of deterministically from changed files and repo tests."
+    ),
+)
+async def test_live_gate_08_vague_approval_runs_changed_file_tests(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Vague approval should still run the focused tests for touched code."""
+
+    await _skip_if_llm_unavailable()
+    source_root = _prepare_fixture_checkout(
+        tmp_path,
+        "gate_04_slug_normalization",
+    )
+    gate_trace = await _run_live_background_sequence(
+        monkeypatch,
+        tmp_path,
+        case_id="gate_08_changed_file_execution_derivation",
+        turns=[
+            (
+                "Fix the slug normalization bug in this fixture repo. "
+                f"Use the local source checkout at {source_root}."
+            ),
+            (
+                "I approve {coding_run_ref}. Run the right focused "
+                "verification for the changed behavior, then repair source "
+                "if it fails."
+            ),
+        ],
+    )
+
+    start_turn, approval_turn = gate_trace["turns"]
+    _assert_worker_succeeded(start_turn)
+    _assert_worker_succeeded(approval_turn)
+    assert "pytest" in _execution_tools(approval_turn), gate_trace["trace_path"]
+    assert "tests/test_slug.py" in _executed_paths(approval_turn), (
+        gate_trace["trace_path"]
+    )
+    _assert_no_private_leaks(gate_trace)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Known assessment gap: verifier failures do not produce typed "
+        "environment dependency blockers."
+    ),
+)
+async def test_live_gate_09_missing_dependency_becomes_typed_blocker(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Missing project dependencies should block instead of looping repairs."""
+
+    await _skip_if_llm_unavailable()
+    source_root = _prepare_fixture_checkout(tmp_path, "gate_09_missing_dependency")
+    gate_trace = await _run_live_background_sequence(
+        monkeypatch,
+        tmp_path,
+        case_id="gate_09_dependency_blocker",
+        turns=[
+            (
+                "Fix YAML config loading in this fixture repo. The protected "
+                "tests express the required external package. Use the local "
+                f"source checkout at {source_root}."
+            ),
+            (
+                "I approve {coding_run_ref}. Run pytest "
+                "tests/test_yaml_dependency.py. If the external dependency "
+                "is missing, return a typed environment blocker and do not "
+                "edit protected tests."
+            ),
+        ],
+    )
+
+    start_turn, approval_turn = gate_trace["turns"]
+    _assert_worker_succeeded(start_turn)
+    _assert_worker_finished(approval_turn)
+    metadata = approval_turn["worker_metadata"]
+    assert metadata["coding_run_status"] == "blocked", gate_trace["trace_path"]
+    assert _has_blocker_code(
+        approval_turn,
+        "environment_dependency_missing",
+    ), gate_trace["trace_path"]
+    assert metadata["repair_attempts"] == [], gate_trace["trace_path"]
+    _assert_no_private_leaks(gate_trace)
+
+
+async def test_live_gate_10_source_free_proposal_records_alignment_gate(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Source-free proposals should pass a semantic alignment gate."""
+
+    await _skip_if_llm_unavailable()
+    gate_trace = await _run_live_background_sequence(
+        monkeypatch,
+        tmp_path,
+        case_id="gate_10_source_free_alignment",
+        turns=[
+            (
+                "Create a Python TOML settings linter CLI with tests. It "
+                "must read TOML, report duplicate logical keys, exit nonzero "
+                "on invalid settings, and stay review-only until approval."
+            ),
+        ],
+    )
+
+    start_turn = gate_trace["turns"][0]
+    _assert_worker_succeeded(start_turn)
+    trace_summary = _metadata_trace_summary(start_turn)
+    assert any(
+        row.startswith("writing_alignment:status=pass")
+        for row in trace_summary
+    ), gate_trace["trace_path"]
+    _assert_no_private_leaks(gate_trace)
+
+
 async def _run_live_background_sequence(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -654,6 +854,65 @@ def _changed_file_paths(trace: dict[str, Any]) -> list[str]:
         if isinstance(row, dict) and row.get("path")
     ]
     return paths
+
+
+def _execution_tools(trace: dict[str, Any]) -> list[str]:
+    """Return execution tool names from worker metadata."""
+
+    attempts = trace["worker_metadata"].get("execution_attempts", [])
+    if not isinstance(attempts, list):
+        return []
+    return [
+        str(row.get("tool", ""))
+        for row in attempts
+        if isinstance(row, dict) and row.get("tool")
+    ]
+
+
+def _executed_paths(trace: dict[str, Any]) -> list[str]:
+    """Return executed paths from worker metadata execution attempts."""
+
+    attempts = trace["worker_metadata"].get("execution_attempts", [])
+    if not isinstance(attempts, list):
+        return []
+    paths: list[str] = []
+    for row in attempts:
+        if not isinstance(row, dict):
+            continue
+        executed = row.get("executed_paths")
+        if not isinstance(executed, list):
+            continue
+        paths.extend(
+            str(path).replace("\\", "/")
+            for path in executed
+            if isinstance(path, str)
+        )
+    return paths
+
+
+def _has_blocker_code(trace: dict[str, Any], code: str) -> bool:
+    """Return whether worker metadata exposes a specific blocker code."""
+
+    blockers = trace["worker_metadata"].get("blockers", [])
+    if not isinstance(blockers, list):
+        return False
+    return any(
+        isinstance(row, dict) and row.get("code") == code
+        for row in blockers
+    )
+
+
+def _metadata_trace_summary(trace: dict[str, Any]) -> list[str]:
+    """Return worker metadata trace rows."""
+
+    rows = trace["worker_metadata"].get("trace_summary", [])
+    if not isinstance(rows, list):
+        return []
+    return [
+        row
+        for row in rows
+        if isinstance(row, str)
+    ]
 
 
 def _assert_no_private_leaks(gate_trace: dict[str, Any]) -> None:

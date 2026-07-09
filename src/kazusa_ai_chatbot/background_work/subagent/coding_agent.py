@@ -50,6 +50,7 @@ DESCRIPTION = (
 CODING_AGENT_WORKER_PAYLOAD_VERSION = "coding_agent_worker_payload.v1"
 CODING_RUN_REF_PREFIX = "coding_run:"
 _LOCAL_PATH_RE = re.compile(
+    r"(?<![A-Za-z0-9_.-])"
     r"(?P<path>(?:[A-Za-z]:[\\/]|~[\\/]|/|\./|\../)[^\r\n\"'<>`]{1,500})"
 )
 _LOCAL_PATH_BOUNDARY_TOKENS = (
@@ -399,7 +400,9 @@ def _map_coding_run_response(
             "patch_artifacts": _patch_artifact_summaries(
                 response.get("patch_artifacts"),
             ),
+            "created_files": _file_summaries(response.get("created_files")),
             "changed_files": _file_summaries(response.get("changed_files")),
+            "alignment": _optional_mapping(response.get("alignment")),
             "apply_attempts": _public_attempts(response.get("apply_attempts")),
             "execution_attempts": _public_attempts(
                 response.get("execution_attempts"),
@@ -412,7 +415,7 @@ def _map_coding_run_response(
             "limitations": _text_list(response.get("limitations")),
             "trace_summary": [
                 f"coding_run:{worker_operation}:{route_reason}",
-                *_text_list(response.get("trace_summary")),
+                *_text_list(response.get("trace_summary"), limit=80),
             ],
         },
     }
@@ -699,8 +702,9 @@ def _map_coding_agent_response(
             "created_files": _file_summaries(response.get("created_files")),
             "changed_files": _file_summaries(response.get("changed_files")),
             "validation": _optional_mapping(response.get("validation")),
+            "alignment": _optional_mapping(response.get("alignment")),
             "limitations": limitations,
-            "trace_summary": _text_list(response.get("trace_summary")),
+            "trace_summary": _text_list(response.get("trace_summary"), limit=80),
         },
     }
     return result
@@ -832,12 +836,18 @@ def _file_summaries(value: object) -> list[dict[str, object]]:
     for row in value:
         if not isinstance(row, Mapping):
             continue
-        summaries.append({
+        summary = {
             "path": _bounded_text(row.get("path"), limit=500),
-            "role": _bounded_text(row.get("role"), limit=120),
-            "change_type": _bounded_text(row.get("change_type"), limit=120),
-            "summary": _bounded_text(row.get("summary"), limit=500),
-        })
+        }
+        for field_name, limit in (
+            ("role", 120),
+            ("change_type", 120),
+            ("summary", 500),
+        ):
+            field_value = _bounded_text(row.get(field_name), limit=limit)
+            if field_value:
+                summary[field_name] = field_value
+        summaries.append(summary)
         if len(summaries) >= 24:
             break
     return summaries

@@ -6,10 +6,12 @@ from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
+import re
 import shutil
 
 from kazusa_ai_chatbot.coding_agent.code_writing.acceptance import (
     derive_acceptance_criteria,
+    evaluate_artifact_alignment,
 )
 from kazusa_ai_chatbot.coding_agent.code_writing.diagnostic_trace import (
     WritingDiagnosticTracer,
@@ -37,6 +39,10 @@ from kazusa_ai_chatbot.coding_agent.code_writing.models import (
     WritingProgrammerContract,
     WritingProgrammerResult,
     WritingProgrammerTask,
+)
+from kazusa_ai_chatbot.coding_agent.code_writing.package_coherence import (
+    PackageCoherenceReport,
+    evaluate_package_coherence,
 )
 from kazusa_ai_chatbot.coding_agent.code_patching.patcher import (
     materialize_patch_artifacts,
@@ -70,6 +76,7 @@ MAX_PM_DEPTH = 4
 MAX_CHILD_PM_DELEGATION_DEPTH = 1
 MAX_CHILD_REPORTS = 16
 MAX_REVIEW_VALIDATION_FEEDBACK_PASSES = 1
+MAX_ALIGNMENT_FEEDBACK_PASSES = 1
 READBACK_ROOT_NAME = "writing_readback"
 
 
@@ -249,7 +256,7 @@ async def run_writing_supervisor(
             external_evidence=external_evidence,
             supervisor_facts=supervisor_facts,
             supervisor_state=supervisor_state,
-            prior_generated_artifacts=[],
+            prior_generated_artifacts=prior_generated_artifacts,
             child_feedback=[_missing_generated_artifacts_feedback()],
         )
         pm_result = await _run_pm_node(
@@ -314,6 +321,14 @@ async def run_writing_supervisor(
         diagnostic=diagnostic,
         trace_summary=trace_summary,
     )
+    validation = _validation_with_package_coherence(
+        validation=validation,
+        coherence=_evaluate_package_coherence(
+            generated_artifacts=pm_result.generated_artifacts,
+            diagnostic=diagnostic,
+            trace_summary=trace_summary,
+        ),
+    )
     for feedback_attempt in range(MAX_REVIEW_VALIDATION_FEEDBACK_PASSES):
         if not _should_run_review_validation_feedback(validation):
             break
@@ -340,7 +355,7 @@ async def run_writing_supervisor(
             external_evidence=external_evidence,
             supervisor_facts=supervisor_facts,
             supervisor_state=supervisor_state,
-            prior_generated_artifacts=[],
+            prior_generated_artifacts=prior_generated_artifacts,
             child_feedback=[feedback],
         )
         retry_result = await _run_pm_node(
@@ -399,14 +414,158 @@ async def run_writing_supervisor(
             trace_summary=trace_summary,
             trace_label=f"validation_feedback_{attempt_number}",
         )
+        validation = _validation_with_package_coherence(
+            validation=validation,
+            coherence=_evaluate_package_coherence(
+                generated_artifacts=pm_result.generated_artifacts,
+                diagnostic=diagnostic,
+                trace_summary=trace_summary,
+                trace_label=f"validation_feedback_{attempt_number}",
+            ),
+        )
+
+    final_decision = pm_result.final_decision or _fallback_pm_decision()
+    alignment = None
+    if validation["status"] == "succeeded":
+        alignment = await _evaluate_writing_alignment(
+            question=question,
+            acceptance_criteria=acceptance["acceptance_criteria"],
+            pm_decision=final_decision,
+            generated_artifacts=pm_result.generated_artifacts,
+            validation=validation,
+            diagnostic=diagnostic,
+            trace=trace,
+            trace_summary=trace_summary,
+            trace_label="final",
+        )
+    for feedback_attempt in range(MAX_ALIGNMENT_FEEDBACK_PASSES):
+        if not _should_run_alignment_feedback(
+            validation=validation,
+            alignment=alignment,
+        ):
+            break
+
+        attempt_number = feedback_attempt + 1
+        feedback = _alignment_feedback(
+            alignment=alignment,
+            patcher_report=patcher_report,
+        )
+        replaceable_artifact_paths = _object_string_list(
+            feedback.get("required_repair_files"),
+        )
+        alignment_retry_prior_artifacts = _dedupe_generated_artifacts([
+            *prior_generated_artifacts,
+            *pm_result.generated_artifacts,
+        ])
+        trace_summary.append(
+            "writing_alignment_feedback:"
+            f"attempt={attempt_number} "
+            f"blockers={len(alignment['blockers'])}"
+        )
+        diagnostic.event(
+            stage="artifact_alignment_feedback",
+            event="retry_started",
+            attempt=attempt_number,
+            blocker_count=len(alignment["blockers"]),
+        )
+        retry_input = _root_pm_input(
+            question=question,
+            acceptance_criteria=acceptance["acceptance_criteria"],
+            external_evidence=external_evidence,
+            supervisor_facts=supervisor_facts,
+            supervisor_state=supervisor_state,
+            prior_generated_artifacts=alignment_retry_prior_artifacts,
+            child_feedback=[feedback],
+        )
+        retry_result = await _run_pm_node(
+            pm_input=retry_input,
+            initial_generated_artifacts=pm_result.generated_artifacts,
+            replaceable_artifact_paths=replaceable_artifact_paths,
+            depth=0,
+            diagnostic=diagnostic,
+            trace=trace,
+            trace_summary=trace_summary,
+            trace_label=f"alignment_feedback_{attempt_number}",
+        )
+        if retry_result.status in ("need_external_evidence", "need_reading"):
+            result = _information_request_result(
+                status=retry_result.status,
+                requests=retry_result.information_requests,
+                generated_artifacts=retry_result.generated_artifacts,
+                session=session,
+                workspace_root=Path(workspace_root),
+                external_evidence=external_evidence,
+                trace_summary=trace_summary,
+            )
+            return result
+        if retry_result.status != "succeeded":
+            trace_summary.append(
+                "writing_alignment_feedback:"
+                f"attempt={attempt_number} "
+                f"status={retry_result.status}"
+            )
+            break
+        if not retry_result.generated_artifacts:
+            trace_summary.append(
+                "writing_alignment_feedback:"
+                f"attempt={attempt_number} "
+                "status=failed reason=no_generated_artifacts"
+            )
+            break
+
+        pm_result = retry_result
+        reserved_paths = _reserved_paths_from_artifacts(
+            pm_result.generated_artifacts,
+        )
+        patcher_report = _materialize_patcher_report(
+            generated_artifacts=pm_result.generated_artifacts,
+            reserved_paths=reserved_paths,
+            max_artifact_chars=max_artifact_chars,
+            diagnostic=diagnostic,
+            trace=trace,
+            trace_summary=trace_summary,
+            trace_label=f"_alignment_feedback_{attempt_number}",
+        )
+        validation = _materialize_review_validation(
+            workspace_root=Path(workspace_root),
+            patcher_report=patcher_report,
+            max_artifact_chars=max_artifact_chars,
+            diagnostic=diagnostic,
+            trace_summary=trace_summary,
+            trace_label=f"alignment_feedback_{attempt_number}",
+        )
+        validation = _validation_with_package_coherence(
+            validation=validation,
+            coherence=_evaluate_package_coherence(
+                generated_artifacts=pm_result.generated_artifacts,
+                diagnostic=diagnostic,
+                trace_summary=trace_summary,
+                trace_label=f"alignment_feedback_{attempt_number}",
+            ),
+        )
+        final_decision = pm_result.final_decision or _fallback_pm_decision()
+        if validation["status"] == "succeeded":
+            alignment = await _evaluate_writing_alignment(
+                question=question,
+                acceptance_criteria=acceptance["acceptance_criteria"],
+                pm_decision=final_decision,
+                generated_artifacts=pm_result.generated_artifacts,
+                validation=validation,
+                diagnostic=diagnostic,
+                trace=trace,
+                trace_summary=trace_summary,
+                trace_label=f"alignment_feedback_{attempt_number}",
+            )
+        else:
+            alignment = None
 
     synthesis_trace: dict[str, object] = {}
     limitations = _dedupe_strings([
         *pm_result.limitations,
         *patcher_report["diagnostics"],
         *validation["errors"],
+        *_alignment_limitations(alignment),
     ])
-    final_decision = pm_result.final_decision or _fallback_pm_decision()
     synthesis_call = diagnostic.start(
         stage="synthesis_llm",
         generated_artifact_count=len(pm_result.generated_artifacts),
@@ -435,7 +594,10 @@ async def run_writing_supervisor(
     _record_internal_trace(trace, "synthesis", synthesis_trace)
 
     result = _result(
-        status=_status_from_validation(validation),
+        status=_status_from_validation_and_alignment(
+            validation=validation,
+            alignment=alignment,
+        ),
         mode="create_new_project",
         answer_text=answer_text,
         patch_artifacts=patcher_report["patch_artifacts"],
@@ -444,7 +606,7 @@ async def run_writing_supervisor(
         external_evidence_requests=[],
         external_evidence=external_evidence,
         validation=validation,
-        alignment=None,
+        alignment=alignment,
         session=session,
         limitations=limitations,
         trace_summary=trace_summary,
@@ -456,6 +618,7 @@ async def _run_pm_node(
     *,
     pm_input: WritingPMInput,
     initial_generated_artifacts: list[GeneratedArtifact] | None = None,
+    replaceable_artifact_paths: list[str] | None = None,
     depth: int,
     diagnostic: WritingDiagnosticTracer,
     trace: dict[str, object] | None,
@@ -474,9 +637,11 @@ async def _run_pm_node(
         return result
 
     generated_artifacts = list(initial_generated_artifacts or [])
+    replaceable_paths = set(replaceable_artifact_paths or [])
     direct_child_reports = list(pm_input["direct_child_reports"])
     child_feedback = list(pm_input["child_feedback"])
     final_decision: WritingPMDecision | None = None
+    invalid_action_repair_sent = False
 
     for step_index in range(MAX_PM_LIFECYCLE_STEPS):
         step_input: WritingPMInput = {
@@ -519,6 +684,17 @@ async def _run_pm_node(
         if decision["status"] == "request_information":
             request = decision["information_request"]
             if request is None:
+                if not invalid_action_repair_sent:
+                    invalid_action_repair_sent = True
+                    _append_invalid_pm_action_feedback(
+                        child_feedback=child_feedback,
+                        diagnostic=diagnostic,
+                        trace_summary=trace_summary,
+                        pm_id=pm_input["pm_id"],
+                        status=decision["status"],
+                        problem="PM information_request payload was missing.",
+                    )
+                    continue
                 return _invalid_pm_result(
                     "PM information request was missing.",
                     decision,
@@ -540,6 +716,17 @@ async def _run_pm_node(
         if decision["status"] == "create_child_pm":
             child_task = decision["child_pm_task"]
             if child_task is None:
+                if not invalid_action_repair_sent:
+                    invalid_action_repair_sent = True
+                    _append_invalid_pm_action_feedback(
+                        child_feedback=child_feedback,
+                        diagnostic=diagnostic,
+                        trace_summary=trace_summary,
+                        pm_id=pm_input["pm_id"],
+                        status=decision["status"],
+                        problem="PM child_pm_task payload was missing.",
+                    )
+                    continue
                 return _invalid_pm_result("PM child task was missing.", decision)
             if depth >= MAX_CHILD_PM_DELEGATION_DEPTH:
                 child_feedback.append(
@@ -611,6 +798,17 @@ async def _run_pm_node(
         if decision["status"] == "create_programmer_task":
             programmer_task = decision["programmer_task"]
             if programmer_task is None:
+                if not invalid_action_repair_sent:
+                    invalid_action_repair_sent = True
+                    _append_invalid_pm_action_feedback(
+                        child_feedback=child_feedback,
+                        diagnostic=diagnostic,
+                        trace_summary=trace_summary,
+                        pm_id=pm_input["pm_id"],
+                        status=decision["status"],
+                        problem="PM programmer_task payload was missing.",
+                    )
+                    continue
                 return _invalid_pm_result("PM programmer task was missing.", decision)
             dependency_feedback = _programmer_dependency_feedback(
                 programmer_task=programmer_task,
@@ -635,23 +833,49 @@ async def _run_pm_node(
                 continue
             outcome = await _run_programmer_task(
                 programmer_task=programmer_task,
+                existing_artifact_paths=_known_artifact_paths(
+                    generated_artifacts=generated_artifacts,
+                    direct_child_reports=direct_child_reports,
+                ),
+                existing_cli_entrypoint_paths=_known_cli_entrypoint_paths(
+                    generated_artifacts=generated_artifacts,
+                    direct_child_reports=direct_child_reports,
+                ),
+                replaceable_artifact_paths=list(replaceable_paths),
                 diagnostic=diagnostic,
                 trace=trace,
                 trace_summary=trace_summary,
                 trace_label=f"{trace_label}_{programmer_task['task_id']}",
             )
-            direct_child_reports.append(outcome["report"])
             if outcome["diagnostics"]:
                 child_feedback.append({
-                    "stage": "programmer",
+                    "stage": outcome["feedback_stage"],
                     "child_id": programmer_task["task_id"],
                     "summary": "; ".join(outcome["diagnostics"]),
                 })
                 continue
-            generated_artifacts.extend(outcome["generated_artifacts"])
+            direct_child_reports.append(outcome["report"])
+            generated_artifacts = _merge_generated_artifacts(
+                existing_artifacts=generated_artifacts,
+                new_artifacts=outcome["generated_artifacts"],
+                replaceable_paths=replaceable_paths,
+            )
             continue
 
         if decision["status"] == "repair_child":
+            if not invalid_action_repair_sent:
+                invalid_action_repair_sent = True
+                _append_invalid_pm_action_feedback(
+                    child_feedback=child_feedback,
+                    diagnostic=diagnostic,
+                    trace_summary=trace_summary,
+                    pm_id=pm_input["pm_id"],
+                    status=decision["status"],
+                    problem=(
+                        "PM repair_child is outside the current writing scope."
+                    ),
+                )
+                continue
             return _invalid_pm_result(
                 "PM repair action is outside the current writing scope.",
                 decision,
@@ -700,6 +924,9 @@ async def _run_pm_node(
 async def _run_programmer_task(
     *,
     programmer_task: WritingProgrammerTask,
+    existing_artifact_paths: list[str],
+    existing_cli_entrypoint_paths: list[str],
+    replaceable_artifact_paths: list[str],
     diagnostic: WritingDiagnosticTracer,
     trace: dict[str, object] | None,
     trace_summary: list[str],
@@ -737,6 +964,39 @@ async def _run_programmer_task(
             "generated_artifacts": [],
             "diagnostics": reservation["errors"],
             "report": report,
+            "feedback_stage": "programmer",
+        }
+
+    progress_diagnostics = _programmer_progress_diagnostics(
+        programmer_task=programmer_task,
+        reserved_path=reservation["reserved_paths"][0],
+        existing_artifact_paths=existing_artifact_paths,
+        existing_cli_entrypoint_paths=existing_cli_entrypoint_paths,
+        replaceable_artifact_paths=replaceable_artifact_paths,
+    )
+    if progress_diagnostics:
+        diagnostic.event(
+            stage="package_progress_guard",
+            event="programmer_task_rejected",
+            task_id=programmer_task["task_id"],
+            reserved_path=reservation["reserved_paths"][0]["path"],
+            diagnostic_count=len(progress_diagnostics),
+        )
+        trace_summary.append(
+            "writing_pm:programmer_rejected "
+            f"task={programmer_task['task_id']} "
+            "reason=package_progress"
+        )
+        report = _programmer_report(
+            task=programmer_task,
+            generated_artifact=None,
+            diagnostics=progress_diagnostics,
+        )
+        return {
+            "generated_artifacts": [],
+            "diagnostics": progress_diagnostics,
+            "report": report,
+            "feedback_stage": "package_progress",
         }
 
     programmer_contract = _programmer_contract(
@@ -799,6 +1059,7 @@ async def _run_programmer_task(
         "generated_artifacts": generated_artifacts,
         "diagnostics": diagnostics,
         "report": report,
+        "feedback_stage": "programmer",
     }
 
 
@@ -819,6 +1080,198 @@ def _child_pm_depth_feedback(
         "remaining_child_pm_depth": 0,
     }
     return feedback
+
+
+def _append_invalid_pm_action_feedback(
+    *,
+    child_feedback: list[dict[str, object]],
+    diagnostic: WritingDiagnosticTracer,
+    trace_summary: list[str],
+    pm_id: str,
+    status: str,
+    problem: str,
+) -> None:
+    feedback = {
+        "stage": "pm_contract",
+        "child_id": pm_id,
+        "summary": (
+            f"{problem} Return one valid lifecycle action with exactly the "
+            "required payload for that action, or choose a different valid "
+            "action whose payload you can provide now."
+        ),
+        "invalid_status": status,
+        "errors": [problem],
+    }
+    child_feedback.append(feedback)
+    diagnostic.event(
+        stage="pm_contract_guard",
+        event="invalid_action_payload",
+        pm_id=pm_id,
+        status=status,
+        problem=problem,
+    )
+    trace_summary.append(
+        "writing_pm:invalid_action_repair "
+        f"pm={pm_id} status={status}"
+    )
+
+
+def _programmer_progress_diagnostics(
+    *,
+    programmer_task: WritingProgrammerTask,
+    reserved_path: ReservedArtifactPath,
+    existing_artifact_paths: list[str],
+    existing_cli_entrypoint_paths: list[str],
+    replaceable_artifact_paths: list[str],
+) -> list[str]:
+    path = reserved_path["path"]
+    replaceable_paths = set(replaceable_artifact_paths)
+    diagnostics: list[str] = []
+    if path in existing_artifact_paths and path not in replaceable_paths:
+        diagnostics.append(
+            "Package progress guard rejected duplicate generated artifact "
+            f"path '{path}'. Choose a missing artifact, or complete if the "
+            "package is already sufficient."
+        )
+        return diagnostics
+
+    if (
+        _reserved_artifact_looks_cli_entrypoint(
+            programmer_task=programmer_task,
+            reserved_path=reserved_path,
+        )
+        and existing_cli_entrypoint_paths
+        and path not in existing_cli_entrypoint_paths
+    ):
+        diagnostics.append(
+            "Package progress guard rejected a second generated CLI entrypoint "
+            f"'{path}'. Existing CLI entrypoint path: "
+            f"{existing_cli_entrypoint_paths[0]}. Keep one CLI entrypoint and "
+            "make tests and docs target that file."
+        )
+    return diagnostics
+
+
+def _merge_generated_artifacts(
+    *,
+    existing_artifacts: list[GeneratedArtifact],
+    new_artifacts: list[GeneratedArtifact],
+    replaceable_paths: set[str],
+) -> list[GeneratedArtifact]:
+    merged = list(existing_artifacts)
+    for new_artifact in new_artifacts:
+        replaced = False
+        if new_artifact["path"] in replaceable_paths:
+            for index, existing_artifact in enumerate(merged):
+                if existing_artifact["path"] != new_artifact["path"]:
+                    continue
+                merged[index] = new_artifact
+                replaced = True
+                break
+        if replaced:
+            continue
+        merged.append(new_artifact)
+    return merged
+
+
+def _dedupe_generated_artifacts(
+    artifacts: list[GeneratedArtifact],
+) -> list[GeneratedArtifact]:
+    deduped: list[GeneratedArtifact] = []
+    seen_paths: set[str] = set()
+    for artifact in artifacts:
+        path = artifact["path"]
+        if path in seen_paths:
+            continue
+        seen_paths.add(path)
+        deduped.append(artifact)
+    return deduped
+
+
+def _known_artifact_paths(
+    *,
+    generated_artifacts: list[GeneratedArtifact],
+    direct_child_reports: list[dict[str, object]],
+) -> list[str]:
+    paths = [artifact["path"] for artifact in generated_artifacts]
+    for row in _created_artifact_rows_from_reports(direct_child_reports):
+        path = row.get("path")
+        if not isinstance(path, str) or not path.strip():
+            continue
+        paths.append(path)
+    return _dedupe_strings(paths)
+
+
+def _known_cli_entrypoint_paths(
+    *,
+    generated_artifacts: list[GeneratedArtifact],
+    direct_child_reports: list[dict[str, object]],
+) -> list[str]:
+    paths: list[str] = []
+    for artifact in generated_artifacts:
+        if not _generated_artifact_looks_cli_entrypoint(artifact):
+            continue
+        paths.append(artifact["path"])
+    for row in _created_artifact_rows_from_reports(direct_child_reports):
+        path = row.get("path")
+        purpose = row.get("purpose")
+        if not isinstance(path, str) or not isinstance(purpose, str):
+            continue
+        if _artifact_row_looks_cli_entrypoint(path=path, purpose=purpose):
+            paths.append(path)
+    return _dedupe_strings(paths)
+
+
+def _created_artifact_rows_from_reports(
+    direct_child_reports: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for report in direct_child_reports:
+        created_artifacts = report.get("created_artifacts")
+        if not isinstance(created_artifacts, list):
+            continue
+        for row in created_artifacts:
+            if not isinstance(row, dict):
+                continue
+            rows.append(row)
+    return rows
+
+
+def _reserved_artifact_looks_cli_entrypoint(
+    *,
+    programmer_task: WritingProgrammerTask,
+    reserved_path: ReservedArtifactPath,
+) -> bool:
+    if reserved_path["file_kind"] != "source":
+        return False
+    purpose = programmer_task["artifact_purpose"]
+    path = reserved_path["path"]
+    return _artifact_row_looks_cli_entrypoint(path=path, purpose=purpose)
+
+
+def _generated_artifact_looks_cli_entrypoint(
+    artifact: GeneratedArtifact,
+) -> bool:
+    if artifact["file_kind"] != "source":
+        return False
+    if not _artifact_row_looks_cli_entrypoint(
+        path=artifact["path"],
+        purpose=artifact["purpose"],
+    ):
+        return False
+    content = artifact["content"]
+    return "def main" in content or "__main__" in content
+
+
+def _artifact_row_looks_cli_entrypoint(*, path: str, purpose: str) -> bool:
+    text = f"{path} {purpose}".casefold()
+    return (
+        "cli" in text
+        or "command-line" in text
+        or "command line" in text
+        or "entrypoint" in text
+        or "wrapper" in text
+    )
 
 
 def _programmer_dependency_feedback(
@@ -1318,6 +1771,38 @@ def _materialize_review_validation(
     return validation
 
 
+def _evaluate_package_coherence(
+    *,
+    generated_artifacts: list[GeneratedArtifact],
+    diagnostic: WritingDiagnosticTracer,
+    trace_summary: list[str],
+    trace_label: str = "",
+) -> PackageCoherenceReport:
+    coherence = evaluate_package_coherence(generated_artifacts)
+    label = trace_label or "initial"
+    diagnostic.event(
+        stage="package_coherence",
+        event="evaluated",
+        trace_label=label,
+        status=coherence["status"],
+        file_count=len(coherence["files"]),
+        error_count=len(coherence["errors"]),
+    )
+    if trace_label:
+        trace_summary.append(
+            "writing_package_coherence:"
+            f"{trace_label}:status={coherence['status']} "
+            f"errors={len(coherence['errors'])}"
+        )
+    else:
+        trace_summary.append(
+            "writing_package_coherence:"
+            f"status={coherence['status']} "
+            f"errors={len(coherence['errors'])}"
+        )
+    return coherence
+
+
 def _should_run_review_validation_feedback(
     validation: PatchValidationSummary,
 ) -> bool:
@@ -1351,22 +1836,166 @@ def _review_validation_feedback(
     patcher_report: WritingPatcherReport,
 ) -> dict[str, object]:
     proposed_paths = _changed_paths_from_patcher_report(patcher_report)
+    package_errors = [
+        error
+        for error in validation["errors"]
+        if error.startswith("Package coherence failed")
+    ]
+    stage = "review_materialization"
+    summary = (
+        "Review materialization failed for the generated package. Return a "
+        "complete replacement package for the same user goal. Include "
+        "every source, test, docs, config, and data artifact still needed; "
+        "the failed package will not be carried forward. Correct the "
+        "reported path, import, syntax, or materialization issues without "
+        "running commands or claiming tests passed."
+    )
+    if package_errors:
+        stage = "package_coherence"
+        summary = (
+            "The generated package failed deterministic package-coherence "
+            "review. Return a complete replacement package for the same user "
+            "goal. Treat the reported missing imports, missing symbols, "
+            "direct-call signature mismatches, and duplicate entrypoints as "
+            "mandatory interface facts. Keep one coherent generated package "
+            "and make tests import the exact generated modules and call the "
+            "exact generated signatures."
+        )
     feedback = {
-        "stage": "review_materialization",
+        "stage": stage,
         "child_id": "artifact_package",
-        "summary": (
-            "Review materialization failed for the generated package. Return a "
-            "complete replacement package for the same user goal. Include "
-            "every source, test, docs, config, and data artifact still needed; "
-            "the failed package will not be carried forward. Correct the "
-            "reported path, import, syntax, or materialization issues without "
-            "running commands or claiming tests passed."
-        ),
+        "summary": summary,
         "errors": validation["errors"][:8],
         "materialized_files": validation["files"][:16],
         "proposed_files": proposed_paths[:16],
     }
     return feedback
+
+
+async def _evaluate_writing_alignment(
+    *,
+    question: str,
+    acceptance_criteria: list[WritingAcceptanceCriterion],
+    pm_decision: WritingPMDecision,
+    generated_artifacts: list[GeneratedArtifact],
+    validation: PatchValidationSummary,
+    diagnostic: WritingDiagnosticTracer,
+    trace: dict[str, object],
+    trace_summary: list[str],
+    trace_label: str,
+) -> WritingAlignmentResult:
+    alignment_trace: dict[str, object] = {}
+    alignment_call = diagnostic.start(
+        stage="alignment_llm",
+        trace_label=trace_label,
+        criteria_count=len(acceptance_criteria),
+        generated_artifact_count=len(generated_artifacts),
+    )
+    alignment = await evaluate_artifact_alignment(
+        question=question,
+        acceptance_criteria=acceptance_criteria,
+        pm_decision=pm_decision,
+        generated_artifacts=generated_artifacts,
+        validation=validation,
+        trace=alignment_trace,
+    )
+    diagnostic.end(
+        stage="alignment_llm",
+        call_id=alignment_call,
+        trace_label=trace_label,
+        status=alignment["status"],
+        blocker_count=len(alignment["blockers"]),
+        raw_output_chars=_trace_text_chars(alignment_trace, "raw_output"),
+    )
+    trace_key = "alignment"
+    if trace_label != "final":
+        trace_key = f"alignment_{trace_label}"
+    _record_internal_trace(trace, trace_key, alignment_trace)
+    trace_summary.append(f"writing_alignment:status={alignment['status']}")
+    return alignment
+
+
+def _should_run_alignment_feedback(
+    *,
+    validation: PatchValidationSummary,
+    alignment: WritingAlignmentResult | None,
+) -> bool:
+    if validation["status"] != "succeeded":
+        return False
+    return alignment is not None and alignment["status"] != "pass"
+
+
+def _alignment_feedback(
+    *,
+    alignment: WritingAlignmentResult,
+    patcher_report: WritingPatcherReport,
+) -> dict[str, object]:
+    summary = alignment["feedback_for_pm"].strip()
+    if not summary:
+        summary = (
+            "Generated artifacts failed semantic alignment. Return a complete "
+            "replacement package that satisfies the preserved user-visible "
+            "requirements."
+        )
+    errors = _dedupe_strings([
+        *alignment["blockers"],
+        *alignment["reasons"],
+        summary,
+    ])
+    proposed_files = _changed_paths_from_patcher_report(patcher_report)[:16]
+    required_repair_files = _required_alignment_repair_files(
+        texts=errors,
+        proposed_files=proposed_files,
+    )
+    feedback = {
+        "stage": "artifact_alignment",
+        "child_id": "artifact_package",
+        "summary": (
+            "Previous package failed semantic alignment. Return a complete "
+            "replacement package for the same user goal. Start by correcting "
+            "these files: "
+            f"{', '.join(required_repair_files) or 'the files named in errors'}. "
+            f"{summary}"
+        ),
+        "errors": errors[:8],
+        "materialized_files": [],
+        "proposed_files": proposed_files,
+        "required_repair_files": required_repair_files,
+    }
+    return feedback
+
+
+def _alignment_limitations(
+    alignment: WritingAlignmentResult | None,
+) -> list[str]:
+    if alignment is None or alignment["status"] == "pass":
+        return []
+    return _dedupe_strings([
+        *alignment["blockers"],
+        alignment["feedback_for_pm"],
+    ])
+
+
+def _required_alignment_repair_files(
+    *,
+    texts: list[str],
+    proposed_files: list[str],
+) -> list[str]:
+    """Return proposed package paths explicitly named by alignment feedback."""
+
+    combined_text = "\n".join(texts)
+    required_files: list[str] = []
+    for path in proposed_files:
+        if path and path in combined_text and path not in required_files:
+            required_files.append(path)
+    if required_files:
+        return required_files
+
+    mentioned = set(re.findall(r"\b[\w./-]+\.[A-Za-z0-9_]+\b", combined_text))
+    for path in proposed_files:
+        if path in mentioned and path not in required_files:
+            required_files.append(path)
+    return required_files
 
 
 def _changed_paths_from_patcher_report(
@@ -1709,6 +2338,35 @@ def _validation_with_patcher_diagnostics(
         **validation,
         "status": status,
         "errors": errors,
+    }
+    return updated_validation
+
+
+def _validation_with_package_coherence(
+    *,
+    validation: PatchValidationSummary,
+    coherence: PackageCoherenceReport,
+) -> PatchValidationSummary:
+    if not coherence["errors"] and not coherence["warnings"]:
+        return validation
+    status = validation["status"]
+    if coherence["errors"] and status == "succeeded":
+        status = "failed"
+    updated_validation: PatchValidationSummary = {
+        **validation,
+        "status": status,
+        "errors": _dedupe_strings([
+            *validation["errors"],
+            *coherence["errors"],
+        ]),
+        "warnings": _dedupe_strings([
+            *validation["warnings"],
+            *coherence["warnings"],
+        ]),
+        "files": _dedupe_strings([
+            *validation["files"],
+            *coherence["files"],
+        ]),
     }
     return updated_validation
 

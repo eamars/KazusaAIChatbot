@@ -52,7 +52,6 @@ def test_background_metadata_preserves_code_modifying() -> None:
     assert "code_modifying" in result["result_summary"]
     assert result["worker_metadata"]["changed_files"] == [{
         "path": "app.py",
-        "role": "",
         "change_type": "modify",
         "summary": "Update app.",
     }]

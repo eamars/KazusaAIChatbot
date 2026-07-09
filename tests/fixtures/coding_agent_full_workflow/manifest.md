@@ -12,6 +12,11 @@ Committed fixture path: `tests/fixtures/coding_agent_full_workflow/`.
 | 03 | `gate_03_counter_cli_json` | Existing-source proposal: add JSON output to the runtime counter CLI, then revise to keep tests unchanged, then summarize exact changed files. |
 | 04 | `gate_04_slug_normalization` | Existing-source verify/repair: fix slug normalization, approve focused pytest, allow source repair, and report attempts without changing tests. |
 | 05 | `gate_05_release_feed_cache_cli` | Hard multi-file workflow: fix cache timeout and CLI flag behavior, approve focused tests, summarize attempts/final files, conditionally cancel, and report final status. |
+| 06 | `gate_03_counter_cli_json` | Phase A mixed create/edit gate: add a new formatter module and wire existing CLI source to it in one proposal. |
+| 07 | `gate_04_slug_normalization` | Known-gap preflight gate: proposal delivery should include managed apply and focused execution evidence before user approval. |
+| 08 | `gate_04_slug_normalization` | Known-gap execution derivation gate: vague approval should still run focused tests derived from changed files and repository evidence. |
+| 09 | `gate_09_missing_dependency` | Known-gap typed blocker gate: missing external dependency should become a typed environment blocker instead of repair-loop churn. |
+| 10 | source-free | Phase A alignment gate: source-free proposals should record a passing semantic artifact-alignment judgment before delivery. |
 
 Anti-cheat expectations:
 

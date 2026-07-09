@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from pathlib import PurePosixPath
 
 from kazusa_ai_chatbot.coding_agent.code_verifying import (
     verify_and_repair_code_change,
@@ -263,7 +264,9 @@ async def _start_propose_patch(
     ledger["source_scope"] = result["source_scope"]
     ledger["evidence"] = result["evidence"]
     ledger["patch_artifacts"] = result["patch_artifacts"]
+    ledger["created_files"] = result["created_files"]
     ledger["changed_files"] = result["changed_files"]
+    ledger["alignment"] = _mapping_or_none(result.get("alignment"))
     ledger["limitations"] = result["limitations"]
     ledger["trace_summary"] = result["trace_summary"]
     if result["repository"] is not None:
@@ -288,7 +291,11 @@ async def _start_propose_patch(
             ledger=ledger,
             event_type="proposal_ready",
             summary="Patch proposal is ready for approval.",
-            public_payload={"changed_files": result["changed_files"]},
+            public_payload={
+                "created_files": result["created_files"],
+                "changed_files": result["changed_files"],
+                "alignment": result.get("alignment"),
+            },
         )
         _record_event(
             paths=paths,
@@ -397,7 +404,9 @@ async def _revise_proposal(
     ledger["source_scope"] = result["source_scope"]
     ledger["evidence"] = result["evidence"]
     ledger["patch_artifacts"] = result["patch_artifacts"]
+    ledger["created_files"] = result["created_files"]
     ledger["changed_files"] = result["changed_files"]
+    ledger["alignment"] = _mapping_or_none(result.get("alignment"))
     ledger["limitations"] = result["limitations"]
     ledger["trace_summary"] = result["trace_summary"]
     if result["status"] == "succeeded":
@@ -407,7 +416,9 @@ async def _revise_proposal(
             event_type="proposal_revised",
             summary="Patch proposal was revised.",
             public_payload={
+                "created_files": result["created_files"],
                 "changed_files": result["changed_files"],
+                "alignment": result.get("alignment"),
                 "revision_instruction": revision_instruction,
             },
         )
@@ -522,7 +533,13 @@ def _record_verify_result(
     ledger["attempts"] = _list_of_dicts(result.get("attempts"))
     ledger["repair_attempts"] = ledger["attempts"][1:]
     ledger["patch_artifacts"] = _list_of_dicts(result.get("final_patch_artifacts"))
+    final_created_files = _list_of_dicts(result.get("final_created_files"))
+    if final_created_files:
+        ledger["created_files"] = final_created_files
     ledger["changed_files"] = _list_of_dicts(result.get("final_changed_files"))
+    final_alignment = _mapping_or_none(result.get("alignment"))
+    if final_alignment is not None:
+        ledger["alignment"] = final_alignment
     ledger["apply_attempts"] = _apply_attempts(result)
     ledger["execution_attempts"] = _execution_attempts(result)
     ledger["limitations"] = _string_list(result.get("limitations"))
@@ -633,7 +650,9 @@ def _initial_ledger(
         "answer_text": "",
         "evidence": [],
         "patch_artifacts": [],
+        "created_files": [],
         "changed_files": [],
+        "alignment": None,
         "approvals": [],
         "apply_attempts": [],
         "execution_attempts": [],
@@ -719,7 +738,155 @@ def _revision_proposal_request(
         "Prior public run projection:\n"
         f"{json.dumps(prior_projection, ensure_ascii=False, sort_keys=True)}"
     )
+    prior_artifacts = _prior_generated_artifacts_from_ledger(ledger)
+    if prior_artifacts:
+        revise_request["prior_generated_artifacts"] = prior_artifacts
     return revise_request
+
+
+def _prior_generated_artifacts_from_ledger(
+    ledger: CodingRunLedger,
+) -> list[dict[str, str]]:
+    created_roles = _created_file_roles(ledger["created_files"])
+    if not created_roles:
+        return []
+
+    artifacts: list[dict[str, str]] = []
+    seen_paths: set[str] = set()
+    for patch_artifact in ledger["patch_artifacts"]:
+        if not isinstance(patch_artifact, Mapping):
+            continue
+        diff_text = _request_text(patch_artifact.get("diff_text"))
+        contents = _created_file_contents_from_diff(
+            diff_text=diff_text,
+            created_paths=set(created_roles),
+        )
+        for path, content in contents.items():
+            if path in seen_paths:
+                continue
+            seen_paths.add(path)
+            artifacts.append({
+                "artifact_id": _prior_artifact_id(path),
+                "file_label": PurePosixPath(path).name,
+                "file_kind": _file_kind_for_prior_artifact(path),
+                "content_format": _content_format_for_prior_artifact(path),
+                "path": path,
+                "content": content,
+                "purpose": created_roles[path],
+            })
+    return artifacts
+
+
+def _created_file_roles(
+    created_files: list[dict[str, object]],
+) -> dict[str, str]:
+    roles: dict[str, str] = {}
+    for row in created_files:
+        if not isinstance(row, Mapping):
+            continue
+        path = _normalized_patch_path(_request_text(row.get("path")))
+        role = _request_text(row.get("role"))
+        if not path:
+            continue
+        if not role:
+            role = "Prior generated artifact from stored source-free proposal."
+        roles[path] = role
+    return roles
+
+
+def _created_file_contents_from_diff(
+    *,
+    diff_text: str,
+    created_paths: set[str],
+) -> dict[str, str]:
+    contents: dict[str, str] = {}
+    current_path = ""
+    current_lines: list[str] = []
+    in_hunk = False
+
+    def flush_current_file() -> None:
+        if current_path and current_path in created_paths:
+            contents[current_path] = "\n".join(current_lines) + "\n"
+
+    for line in diff_text.splitlines():
+        if line.startswith("diff --git "):
+            flush_current_file()
+            current_path = ""
+            current_lines = []
+            in_hunk = False
+            continue
+        if line.startswith("+++ "):
+            flush_current_file()
+            current_path = _diff_target_path(line[4:])
+            current_lines = []
+            in_hunk = False
+            continue
+        if not current_path:
+            continue
+        if line.startswith("@@"):
+            in_hunk = True
+            continue
+        if not in_hunk:
+            continue
+        if line.startswith("+") and not line.startswith("+++"):
+            current_lines.append(line[1:])
+            continue
+        if line.startswith(" "):
+            current_lines.append(line[1:])
+
+    flush_current_file()
+    return contents
+
+
+def _diff_target_path(path_text: str) -> str:
+    path = path_text.strip()
+    if path == "/dev/null":
+        return ""
+    if path.startswith("a/") or path.startswith("b/"):
+        path = path[2:]
+    return _normalized_patch_path(path)
+
+
+def _normalized_patch_path(path: str) -> str:
+    return path.replace("\\", "/").strip("/")
+
+
+def _prior_artifact_id(path: str) -> str:
+    chars = [
+        char.lower()
+        if char.isalnum()
+        else "_"
+        for char in path
+    ]
+    artifact_id = "prior_" + "".join(chars).strip("_")
+    return artifact_id
+
+
+def _file_kind_for_prior_artifact(path: str) -> str:
+    lower_path = path.casefold()
+    basename = PurePosixPath(lower_path).name
+    if lower_path.startswith("tests/") or basename.startswith("test_"):
+        return "test"
+    if lower_path.startswith("docs/") or lower_path.endswith(".md"):
+        return "docs"
+    if lower_path.endswith((".json", ".toml", ".yaml", ".yml", ".ini")):
+        return "config"
+    if lower_path.endswith((".csv", ".txt")):
+        return "data"
+    return "source"
+
+
+def _content_format_for_prior_artifact(path: str) -> str:
+    lower_path = path.casefold()
+    if lower_path.endswith(".py"):
+        return "python"
+    if lower_path.endswith(".md"):
+        return "markdown"
+    if lower_path.endswith(".json"):
+        return "json"
+    if lower_path.endswith(".csv"):
+        return "csv"
+    return "text"
 
 
 def _prior_revision_projection(
@@ -736,7 +903,9 @@ def _prior_revision_projection(
         "answer_text": projection["answer_text"],
         "repository": projection["repository"],
         "source_scope": projection["source_scope"],
+        "created_files": projection["created_files"],
         "changed_files": projection["changed_files"],
+        "alignment": projection["alignment"],
         "limitations": projection["limitations"],
         "blockers": projection["blockers"],
         "allowed_next_actions": projection["allowed_next_actions"],

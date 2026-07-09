@@ -48,10 +48,17 @@ raw unified diffs, or command output. Do not claim that tests or commands were
 run.
 
 Allowed operation_kind values:
+- create_file
 - replace
 - insert_before
 - insert_after
 - replace_file_small
+
+For create_file, target_path must be a new repo-relative source, test, or doc
+path from programmer_task.target_paths. Set exact_anchor to an empty string and
+put the complete new file content in replacement_or_insert_content. A
+create_file artifact must include operation_summary and evidence_ids just like
+existing-file edits.
 
 For replace, insert_before, and insert_after, exact_anchor must be copied
 exactly from the current file text. Use replace_file_small only for small files
@@ -62,7 +69,9 @@ multiple adjacent functions and exact blank-line copying is uncertain, use
 replace_file_small for that file instead of a shortened anchor.
 
 Every succeeded artifact must:
-- target one path from file_contexts
+- target one path from programmer_task.target_paths; existing-file edit targets
+  must also appear in file_contexts, while create_file targets are allowed to
+  be absent from file_contexts
 - include at least one evidence_ids value copied from evidence[*].evidence_id
 - include replacement_or_insert_content as the final inserted/replacement text,
   not a diff hunk
@@ -125,6 +134,9 @@ If replacement_or_insert_content introduces a new module reference, helper,
 exception name, constant, type, or function call, include the required import
 or local definition in that same target file unless it is already present in
 the current file text.
+If a create_file artifact introduces a new module that an existing caller must
+use, also return a separate existing-file artifact that wires the caller to the
+new module in the same response.
 Preserve existing imports when adding required imports. Do not duplicate an
 existing import. Add a missing import once in the existing import block instead
 of creating a second import block, and keep all imports at module top level for
@@ -143,8 +155,8 @@ Return strict JSON:
       "task_id": "short task id",
       "target_path": "repo-relative path",
       "evidence_ids": ["ev-1"],
-      "operation_kind": "replace | insert_before | insert_after | replace_file_small",
-      "exact_anchor": "exact source text anchor or empty for replace_file_small",
+      "operation_kind": "create_file | replace | insert_before | insert_after | replace_file_small",
+      "exact_anchor": "exact source text anchor or empty for create_file/replace_file_small",
       "replacement_or_insert_content": "new text",
       "operation_summary": "short summary",
       "risk_notes": ["risk or uncertainty"],

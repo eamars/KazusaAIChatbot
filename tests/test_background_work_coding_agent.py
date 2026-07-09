@@ -220,8 +220,6 @@ async def test_coding_agent_worker_maps_writing_proposal_response(
         {
             "path": "src/log_parser.py",
             "role": "source",
-            "change_type": "",
-            "summary": "",
         }
     ]
     assert "raw diff" not in repr(result)

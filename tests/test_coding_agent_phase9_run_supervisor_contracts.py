@@ -367,6 +367,130 @@ async def test_verify_repair_start_records_terminal_attempts(
     }]
 
 
+async def test_proposal_run_projects_created_files_and_alignment(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Durable proposal ledgers should preserve creation and alignment evidence."""
+
+    from kazusa_ai_chatbot.coding_agent import get_coding_run
+    from kazusa_ai_chatbot.coding_agent import start_coding_run
+    from kazusa_ai_chatbot.coding_agent.coding_run import supervisor
+
+    created_files = [{
+        "path": "counter_cli/formatters.py",
+        "role": "Create formatter helper.",
+    }]
+    alignment = {
+        "status": "pass",
+        "request_satisfied": True,
+        "matched_criteria": ["criterion-header"],
+        "missing_criteria": [],
+        "blockers": [],
+    }
+
+    async def fake_propose(request: dict[str, object]) -> dict[str, object]:
+        response = _proposal_response()
+        response["created_files"] = created_files
+        response["alignment"] = alignment
+        response["trace_summary"] = [
+            *response["trace_summary"],
+            "writing_alignment:status=pass",
+        ]
+        return response
+
+    monkeypatch.setattr(supervisor, "propose_code_change", fake_propose)
+
+    response = await start_coding_run({
+        **_proposal_request(tmp_path),
+        "question": "Create formatter helper and wire the CLI.",
+        "objective_type": "propose_patch",
+    })
+    reloaded = await get_coding_run({
+        "workspace_root": str(tmp_path / "workspace"),
+        "run_id": response["run_id"],
+    })
+
+    assert response["created_files"] == created_files
+    assert response["alignment"] == alignment
+    assert reloaded["created_files"] == created_files
+    assert reloaded["alignment"] == alignment
+    assert "writing_alignment:status=pass" in reloaded["trace_summary"]
+
+
+async def test_revision_request_reconstructs_source_free_prior_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Source-free revision requests carry the stored generated package state."""
+
+    from kazusa_ai_chatbot.coding_agent import continue_coding_run
+    from kazusa_ai_chatbot.coding_agent import start_coding_run
+    from kazusa_ai_chatbot.coding_agent.coding_run import supervisor
+
+    calls: list[dict[str, object]] = []
+    patch_artifact = {
+        "artifact_id": "patch-package",
+        "base": "generated_artifacts",
+        "diff_text": (
+            "diff --git a/src/runtime.py b/src/runtime.py\n"
+            "new file mode 100644\n"
+            "index 0000000..1111111\n"
+            "--- /dev/null\n"
+            "+++ b/src/runtime.py\n"
+            "@@ -0,0 +1,2 @@\n"
+            "+def run() -> int:\n"
+            "+    return 1\n"
+        ),
+        "files": ["src/runtime.py"],
+        "summary": "Create runtime.",
+    }
+    created_files = [{
+        "path": "src/runtime.py",
+        "role": "Provide runtime logic.",
+    }]
+
+    async def fake_propose(request: dict[str, object]) -> dict[str, object]:
+        calls.append(request)
+        response = _proposal_response()
+        response["patch_artifacts"] = [patch_artifact]
+        response["created_files"] = created_files
+        response["changed_files"] = [{
+            "path": "src/runtime.py",
+            "change_type": "create",
+            "summary": "Create runtime.",
+        }]
+        return response
+
+    monkeypatch.setattr(supervisor, "propose_code_change", fake_propose)
+
+    started = await start_coding_run({
+        **_proposal_request(tmp_path),
+        "question": "Create a source-free runtime package.",
+        "local_root_hint": None,
+        "source_scope_hint": None,
+    })
+    revised = await continue_coding_run({
+        "workspace_root": str(tmp_path / "workspace"),
+        "run_id": started["run_id"],
+        "action": "revise_proposal",
+        "revision_instruction": "Add a dry-run mode without losing runtime.py.",
+    })
+
+    assert revised["status"] == "awaiting_approval"
+    assert len(calls) == 2
+    prior_artifacts = calls[1]["prior_generated_artifacts"]
+    assert prior_artifacts == [{
+        "artifact_id": "prior_src_runtime_py",
+        "file_label": "runtime.py",
+        "file_kind": "source",
+        "content_format": "python",
+        "path": "src/runtime.py",
+        "content": "def run() -> int:\n    return 1\n",
+        "purpose": "Provide runtime logic.",
+    }]
+
+
 async def test_terminal_run_rejects_late_cancel_and_preserves_state(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
