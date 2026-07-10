@@ -24,6 +24,7 @@ ALLOWED_ARTIFACT_TYPES = frozenset((
     "conversation_ref",
     "external_ref",
     "live_context_ref",
+    "media_ref",
     "memory_ref",
     "person_ref",
     "recall_ref",
@@ -31,11 +32,13 @@ ALLOWED_ARTIFACT_TYPES = frozenset((
 ))
 ALLOWED_NODE_KINDS = frozenset((
     "conversation_evidence",
+    "current_turn_media",
     "external_evidence",
     "live_context",
     "memory_evidence",
     "person_context",
     "recall_evidence",
+    "recent_media",
     "scoped_memory",
     "subtask",
     "synthesis",
@@ -119,7 +122,7 @@ class LocalContextResolverContextV1(TypedDict):
     current_platform_message_id: NotRequired[str]
     active_turn_platform_message_ids: NotRequired[list[str]]
     active_turn_conversation_row_ids: NotRequired[list[str]]
-    source_hydration_enabled: NotRequired[bool]
+    session_media_refs: NotRequired[list[dict[str, object]]]
 
 
 class LocalContextResolverOptionsV1(TypedDict):
@@ -140,11 +143,13 @@ class LocalContextNodeV1(TypedDict):
     node_id: str
     node_kind: Literal[
         "conversation_evidence",
+        "current_turn_media",
         "external_evidence",
         "live_context",
         "memory_evidence",
         "person_context",
         "recall_evidence",
+        "recent_media",
         "scoped_memory",
         "subtask",
         "synthesis",
@@ -312,12 +317,8 @@ def validate_local_context_resolver_context(
                 field_name,
                 allow_empty_strings=False,
             )
-    if "source_hydration_enabled" in data:
-        source_hydration_enabled = data.get("source_hydration_enabled")
-        if not isinstance(source_hydration_enabled, bool):
-            raise LocalContextValidationError(
-                "source_hydration_enabled: expected boolean"
-            )
+    if "session_media_refs" in data:
+        _require_list(data, "session_media_refs")
     return_value = data
     return return_value
 
@@ -516,6 +517,11 @@ def validate_local_context_subagent_result(
         "unresolved_items",
         allow_empty_strings=False,
     )
+    status = data["status"]
+    if status == "resolved" and resolved is not True:
+        raise LocalContextValidationError("resolved: required for resolved status")
+    if status in ("invalid", "unavailable", "failed") and resolved is True:
+        raise LocalContextValidationError("resolved: forbidden for terminal failure")
     return_value = data
     return return_value
 
@@ -683,6 +689,8 @@ def _validate_rag_result(rag_result: dict) -> None:
         "external_evidence",
     ):
         _require_list(rag_result, field_name)
+    if "media_evidence" in rag_result:
+        _require_list(rag_result, "media_evidence")
 
 
 def _validate_graph_references(

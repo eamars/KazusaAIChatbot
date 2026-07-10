@@ -61,7 +61,7 @@ At a high level, Kazusa provides:
 | Bounded live response path       | Queueing, relevance, the cognition resolver, selected evidence capabilities, action routing, and L3 surfaces are explicit stages with caps and inspectable payloads. |
 | Multi-horizon memory             | Recent chat, short-term conversation flow, retrieved evidence, durable memory, and scheduled commitments remain separate.          |
 | Internal monologue residue       | A short private residue lane carries bounded first-person reasons from completed episodes into the next L2a cognition pass.       |
-| RAG3 local context recall        | Demand-driven graph resolver retrieves and projects local/private evidence when cognition asks through `local_context_recall`. |
+| RAG3 local context recall        | Demand-driven graph resolver dispatches local evidence subagents and projects prompt-safe local/private evidence, including session image observations, when cognition asks through `local_context_recall`. |
 | Layered cognition                | Cognition decides stance, boundaries, judgment, style, action needs, and response goals before selected L3 surfaces render output. |
 | Background consolidation         | Completed episodes update durable memory, relationship state, Cache2 invalidation, images, and progress from text plus action/surface traces. |
 | Accepted delayed work            | Accepted reminders, text tasks, and coding tasks are persisted, routed to internal background workers, and returned through cognition rather than sent directly. |

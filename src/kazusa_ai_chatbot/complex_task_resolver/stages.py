@@ -39,7 +39,7 @@ the question and do not cite sources.
   "tasks": [
     {
       "objective": "one concrete subtask objective",
-      "kind": "subtask|evidence_need|algorithmic_task|synthesis"
+      "kind": "subtask|evidence_need|algorithmic_task|media_inspection_task|synthesis"
     }
   ]
 }
@@ -57,6 +57,8 @@ the question and do not cite sources.
 - For an "algorithmic_task", include the numeric inputs and already-stated
   units needed for the calculation in the objective. Do not make later stages
   recover hidden operands from a vague label.
+- Use "media_inspection_task" only when supplied external evidence contains a
+  specific image URL and the objective needs a visual observation from it.
 - Semantic comparison, feasibility review, collapse review, recommendation,
   route selection, and source-quality judgment are not calculation work unless
   a concrete numeric formula with visible operands is supplied.

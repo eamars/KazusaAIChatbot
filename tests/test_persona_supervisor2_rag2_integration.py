@@ -1194,7 +1194,7 @@ async def test_rag_evidence_request_shape_snapshot(monkeypatch) -> None:
             "current_platform_message_id": "",
             "active_turn_platform_message_ids": ["msg-1", "msg-2"],
             "active_turn_conversation_row_ids": ["row-1", "row-2"],
-            "source_hydration_enabled": True,
+            "session_media_refs": [],
         },
         "options": {
             "schema_version": "local_context_resolver_options.v1",

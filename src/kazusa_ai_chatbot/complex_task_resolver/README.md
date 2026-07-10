@@ -51,8 +51,8 @@ The companion L2d capability is:
 local_context_recall
 ```
 
-`local_context_recall` is not owned by this package. It routes to existing RAG2
-through `run_rag_evidence_for_persona_state(...)` and owns local memory,
+`local_context_recall` is not owned by this package. It routes to RAG3 through
+`resolve_local_context(...)` and owns local memory,
 relationship, profile, prior conversation, and private/contextual recall.
 
 L2d should not use `public_answer_research` for:
@@ -272,6 +272,13 @@ Resolver-local subagents are registered through module-owned discovery under
 capability description, supported actions, owned node kinds, default action,
 and factory. LLM prompts receive the generated semantic capability list; the
 service owns capability validation, default-action selection, and dispatch.
+
+The `media` subagent owns `media_inspection_task` nodes. It fetches only
+public HTTP(S) image URLs through deterministic DNS/IP, redirect, timeout,
+MIME, byte, magic-byte, and decoder/dimension validation, then calls the
+shared image-only media-inspection service. It returns bounded visual evidence
+and source boundaries only; raw bytes and fetch internals do not enter graph
+prompts or `available_evidence`.
 
 ## LLM Stage Projection
 

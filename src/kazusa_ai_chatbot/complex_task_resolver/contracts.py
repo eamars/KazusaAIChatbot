@@ -36,10 +36,23 @@ ALLOWED_REQUEST_SOURCES = frozenset((
 ))
 ALLOWED_REQUEST_PRIORITIES = frozenset(("normal", "review"))
 ALLOWED_NODE_KINDS = frozenset(
-    ("root", "subtask", "evidence_need", "algorithmic_task", "synthesis")
+    (
+        "root",
+        "subtask",
+        "evidence_need",
+        "algorithmic_task",
+        "media_inspection_task",
+        "synthesis",
+    )
 )
 ALLOWED_FOLLOWUP_TASK_KINDS = frozenset(
-    ("subtask", "evidence_need", "algorithmic_task", "synthesis")
+    (
+        "subtask",
+        "evidence_need",
+        "algorithmic_task",
+        "media_inspection_task",
+        "synthesis",
+    )
 )
 ALLOWED_NODE_STATUSES = frozenset(
     (
@@ -161,7 +174,13 @@ class ComplexTaskFollowupTaskV1(TypedDict):
 
     schema_version: Literal["complex_task_followup_task.v1"]
     objective: str
-    kind: Literal["subtask", "evidence_need", "algorithmic_task", "synthesis"]
+    kind: Literal[
+        "subtask",
+        "evidence_need",
+        "algorithmic_task",
+        "media_inspection_task",
+        "synthesis",
+    ]
     reason: str
 
 
@@ -178,6 +197,7 @@ class ComplexTaskNodeV1(TypedDict):
         "subtask",
         "evidence_need",
         "algorithmic_task",
+        "media_inspection_task",
         "synthesis",
     ]
     status: Literal[

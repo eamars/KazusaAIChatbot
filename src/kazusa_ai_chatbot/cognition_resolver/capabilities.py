@@ -44,6 +44,7 @@ from kazusa_ai_chatbot.local_context_resolver.contracts import (
     LocalContextResolverOptionsV1,
     LocalContextResolverRequestV1,
 )
+from kazusa_ai_chatbot.media_inspection.session_cache import list_session_media_refs
 from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_projection import (
     project_known_facts,
 )
@@ -832,7 +833,11 @@ def _local_context_resolver_context_from_state(
         "active_turn_conversation_row_ids": _string_list(
             state.get("active_turn_conversation_row_ids"),
         ),
-        "source_hydration_enabled": True,
+        "session_media_refs": list_session_media_refs((
+            state["platform"],
+            state["platform_channel_id"],
+            state["global_user_id"],
+        )),
     }
     return context
 

@@ -8,7 +8,7 @@ from kazusa_ai_chatbot.rag.cache2_runtime import (
     stable_cache_key,
 )
 
-RAG3_CACHE_POLICY_VERSION = "rag3_local_context_cache:v1"
+RAG3_CACHE_POLICY_VERSION = "rag3_local_context_cache:v2"
 RAG3_PLANNER_CACHE_NAME = "rag3_local_context_planner"
 RAG3_ACTIVE_NODE_CACHE_NAME = "rag3_local_context_active_node"
 SECONDS_PER_MINUTE = 60
@@ -63,7 +63,6 @@ def build_active_node_cache_key(
             "source": str(request["source"]).strip(),
         },
         "scope": _scope_signature(context),
-        "source_hydration_enabled": context.get("source_hydration_enabled") is True,
         "active_node": _node_signature(active_node),
         "compact_context_digest": _digest_payload(compact_context),
         "dependency_context_digest": _digest_payload(dependency_context),
@@ -118,6 +117,8 @@ def build_active_node_cache_dependencies(
             source="user_profile",
             global_user_id=global_user_id,
         ))
+    elif node_kind in ("current_turn_media", "recent_media"):
+        return []
 
     return dependencies
 
@@ -129,6 +130,8 @@ def active_node_cache_ttl_seconds(node_kind: str) -> int | None:
         return LIVE_CONTEXT_NODE_TTL_SECONDS
     if node_kind == "external_evidence":
         return EXTERNAL_EVIDENCE_NODE_TTL_SECONDS
+    if node_kind in ("current_turn_media", "recent_media"):
+        return 0
     return_value = None
     return return_value
 

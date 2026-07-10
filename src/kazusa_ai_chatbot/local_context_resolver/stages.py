@@ -214,7 +214,7 @@ nodes that should be checked. Planning only decomposes; it does not answer.
   "tasks": [
     {
       "objective": "one concrete local evidence task",
-      "node_kind": "memory_evidence|conversation_evidence|person_context|recall_evidence|live_context|external_evidence|scoped_memory|subtask"
+      "node_kind": "memory_evidence|conversation_evidence|person_context|recall_evidence|live_context|external_evidence|scoped_memory|current_turn_media|recent_media|subtask"
     }
   ]
 }
@@ -237,6 +237,8 @@ nodes that should be checked. Planning only decomposes; it does not answer.
 - Use live_context for supplied local time/date/runtime context.
 - Use external_evidence only when local context points at public URL or web
   content that must be read.
+- Use current_turn_media or recent_media only when a prompt-safe conversation
+  image alias is present and the objective requires a visual detail.
 - Do not add recall_evidence for recent chat events, command responses,
   direct-address behavior, tags, URLs, exact phrases, or neighboring dialog.
 - Do not add person_context for command behavior, tags, direct address, or a
@@ -343,7 +345,7 @@ prompt-safe local evidence. Do not write final character dialog.
     {
       "schema_version": "local_context_artifact.v1",
       "artifact_id": "short semantic artifact id",
-      "artifact_type": "memory_ref|conversation_ref|person_ref|recall_ref|live_context_ref|external_ref|semantic_packet",
+      "artifact_type": "memory_ref|conversation_ref|person_ref|recall_ref|live_context_ref|external_ref|media_ref|semantic_packet",
       "producer_node_id": "active_node",
       "summary": "prompt-safe evidence summary",
       "projection_payload": {
@@ -351,6 +353,7 @@ prompt-safe local evidence. Do not write final character dialog.
         "recall_evidence": [],
         "conversation_evidence": [],
         "external_evidence": [],
+        "media_evidence": [],
         "third_party_profiles": [],
         "user_memory_unit_candidates": []
       },
@@ -394,6 +397,9 @@ prompt-safe local evidence. Do not write final character dialog.
   opening, or runtime context. Put prompt-facing live context in
   conversation_evidence because the retained rag_result surface has no
   live_context_evidence list.
+  media_ref is only for a supplied prompt-safe conversation image alias and
+  writes media_evidence. Never write image payloads, hashes, cache refs, or
+  platform message identifiers.
 - Do not put person profile evidence, URL provenance, or active agreements
   into memory_evidence unless the source row is explicitly durable memory.
 - Do not use recall_ref for exact quoted phrases, command definitions,

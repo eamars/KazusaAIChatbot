@@ -123,6 +123,10 @@ from kazusa_ai_chatbot.message_envelope import (
     project_prompt_message_context,
     project_reply_attachment_summaries,
 )
+from kazusa_ai_chatbot.media_inspection.session_cache import (
+    begin_session_turn,
+    put_session_media,
+)
 from kazusa_ai_chatbot.utils import log_list_preview, log_preview, trim_history_dict
 from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.dispatcher import (
@@ -2029,6 +2033,12 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         )
 
         multimedia_input: list[MultiMediaDoc] = []
+        media_scope = (
+            req.platform,
+            req.platform_channel_id,
+            global_user_id,
+        )
+        begin_session_turn(media_scope)
         for queued_item in [item, *item.collapsed_items]:
             queued_envelope: MessageEnvelope = (
                 queued_item.request.message_envelope.model_dump(
@@ -2061,6 +2071,20 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
                     "base64_data": base64_data,
                     "description": description,
                 })
+        put_session_media(
+            media_scope,
+            [
+                {
+                    "media_kind": "image",
+                    "content_type": item["content_type"],
+                    "base64_data": item["base64_data"],
+                    "source_summary": item["description"],
+                }
+                for item in multimedia_input
+                if item["content_type"].startswith("image/")
+                and bool(item["base64_data"])
+            ],
+        )
 
         history = await get_conversation_history(
             platform=req.platform,

@@ -91,6 +91,7 @@ _PLANNER_TASK_KINDS = frozenset((
     "subtask",
     "evidence_need",
     "algorithmic_task",
+    "media_inspection_task",
     "synthesis",
 ))
 _SEMANTIC_WORK_TYPE_TO_KIND = {
@@ -98,6 +99,7 @@ _SEMANTIC_WORK_TYPE_TO_KIND = {
     "public_evidence": "evidence_need",
     "calculation": "algorithmic_task",
     "arithmetic": "algorithmic_task",
+    "media_inspection": "media_inspection_task",
     "analysis": "synthesis",
     "synthesis": "synthesis",
 }
@@ -3845,6 +3847,8 @@ def _semantic_work_type_from_node_kind(node_kind: str) -> str:
         return "public_evidence"
     if node_kind == "algorithmic_task":
         return "calculation"
+    if node_kind == "media_inspection_task":
+        return "media_inspection"
     return_value = node_kind
     return return_value
 

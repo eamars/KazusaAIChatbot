@@ -47,7 +47,7 @@ from .contracts import (
     validate_local_context_resolver_request,
 )
 from .graph import find_next_active_node
-from .source_hydration import hydrate_source_for_node
+from .subagent import dispatch_subagent_for_node
 from .stages import (
     active_node_stage_cache_identity,
     plan_local_context_graph as _planner_stage_handler,
@@ -69,6 +69,7 @@ _PROMPT_VISIBLE_RAG_LIST_FIELDS = (
     "recall_evidence",
     "conversation_evidence",
     "external_evidence",
+    "media_evidence",
     "user_memory_unit_candidates",
 )
 _TRACE_SOURCE_REF_LIMIT = 8
@@ -88,6 +89,9 @@ _FORBIDDEN_PROMPT_PAYLOAD_KEYS = frozenset((
     "adapter_message_id",
     "adapter_user_id",
     "cache_key",
+    "cache_ref",
+    "base64_data",
+    "content_hash",
     "channel_id",
     "conversation_row_id",
     "created_at",
@@ -405,6 +409,10 @@ async def _resolve_active_node(
     active_node = graph["nodes"][active_node_id]
     compact_context = _compact_context(context)
     dependency_context = _dependency_context(graph, active_node)
+    use_active_node_cache = active_node["node_kind"] not in (
+        "current_turn_media",
+        "recent_media",
+    )
     cache_key = build_active_node_cache_key(
         request=request,
         context=context,
@@ -415,11 +423,13 @@ async def _resolve_active_node(
         stage_identity=active_node_stage_cache_identity(),
     )
     runtime = get_rag_cache2_runtime()
-    cached_response = await runtime.get(
-        cache_key,
-        cache_name=RAG3_ACTIVE_NODE_CACHE_NAME,
-        agent_name=RAG3_ACTIVE_NODE_CACHE_NAME,
-    )
+    cached_response = None
+    if use_active_node_cache:
+        cached_response = await runtime.get(
+            cache_key,
+            cache_name=RAG3_ACTIVE_NODE_CACHE_NAME,
+            agent_name=RAG3_ACTIVE_NODE_CACHE_NAME,
+        )
     if isinstance(cached_response, dict):
         trace_summary["active_node_cache_hits"] = (
             int(trace_summary["active_node_cache_hits"]) + 1
@@ -427,16 +437,18 @@ async def _resolve_active_node(
         trace_summary["cache_hits"] = int(trace_summary["cache_hits"]) + 1
         return cached_response
 
-    source_hydration = await hydrate_source_for_node(
-        active_node=active_node,
-        context=context,
-        dependency_context=dependency_context,
-        max_attempts=options["max_subagent_attempts"],
-    )
-    if source_hydration.get("called") is True:
+    subagent_result = _empty_subagent_result()
+    if request["source"] in ("l2d", "live_llm_review"):
+        subagent_result = await dispatch_subagent_for_node(
+            active_node=active_node,
+            context=context,
+            dependency_context=dependency_context,
+            max_attempts=options["max_subagent_attempts"],
+        )
         trace_summary["subagent_calls"] = int(trace_summary["subagent_calls"]) + 1
     prompt_context = dict(compact_context)
-    source_records = source_hydration.get("source_records")
+    subagent_payload = subagent_result["result"]
+    source_records = subagent_payload.get("source_records")
     if isinstance(source_records, list) and source_records:
         prompt_context["source_context"] = _sanitized_prompt_payload(
             source_records
@@ -450,9 +462,9 @@ async def _resolve_active_node(
         "limits": _option_limits(options),
     }
     response = await _node_stage_handler(payload)
-    response = _merge_source_hydration_response(
+    response = _merge_subagent_response(
         response,
-        source_hydration,
+        subagent_payload,
     )
     cacheable_response = _cacheable_active_node_response(
         response,
@@ -461,31 +473,32 @@ async def _resolve_active_node(
     trace_summary["active_node_calls"] = int(
         trace_summary["active_node_calls"]
     ) + 1
-    await runtime.store(
-        cache_key=cache_key,
-        cache_name=RAG3_ACTIVE_NODE_CACHE_NAME,
-        result=cacheable_response,
-        dependencies=build_active_node_cache_dependencies(
-            node_kind=active_node["node_kind"],
-            context=context,
-        ),
-        metadata={
-            "agent_name": RAG3_ACTIVE_NODE_CACHE_NAME,
-            "node_kind": active_node["node_kind"],
-        },
-        ttl_seconds=active_node_cache_ttl_seconds(active_node["node_kind"]),
-    )
+    if use_active_node_cache:
+        await runtime.store(
+            cache_key=cache_key,
+            cache_name=RAG3_ACTIVE_NODE_CACHE_NAME,
+            result=cacheable_response,
+            dependencies=build_active_node_cache_dependencies(
+                node_kind=active_node["node_kind"],
+                context=context,
+            ),
+            metadata={
+                "agent_name": RAG3_ACTIVE_NODE_CACHE_NAME,
+                "node_kind": active_node["node_kind"],
+            },
+            ttl_seconds=active_node_cache_ttl_seconds(active_node["node_kind"]),
+        )
     return cacheable_response
 
 
-def _merge_source_hydration_response(
+def _merge_subagent_response(
     response: dict[str, object],
-    source_hydration: dict[str, object],
+    subagent_payload: dict[str, object],
 ) -> dict[str, object]:
     """Merge deterministic source evidence into an active-node response."""
 
-    source_update = source_hydration.get("node_update")
-    source_artifacts = source_hydration.get("artifacts")
+    source_update = subagent_payload.get("node_update")
+    source_artifacts = subagent_payload.get("artifacts")
     if not isinstance(source_update, dict):
         source_update = {}
     if not isinstance(source_artifacts, list):
@@ -510,6 +523,19 @@ def _merge_source_hydration_response(
     artifacts.extend(source_artifacts)
     merged_response["artifacts"] = artifacts
     return merged_response
+
+
+def _empty_subagent_result() -> dict[str, object]:
+    """Return the canonical no-dispatch result for standalone graph review."""
+
+    result = {
+        "result": {
+            "source_records": [],
+            "artifacts": [],
+            "node_update": {},
+        },
+    }
+    return result
 
 
 def _merge_source_node_update(
@@ -1339,6 +1365,7 @@ def _empty_rag_result(trace_summary: dict[str, object]) -> dict[str, object]:
         "recall_evidence": [],
         "conversation_evidence": [],
         "external_evidence": [],
+        "media_evidence": [],
         "supervisor_trace": supervisor_trace,
     }
     return rag_result
@@ -1488,6 +1515,8 @@ def _node_kind_from_semantic_text(value: str) -> str:
     aliases = {
         "conversation": "conversation_evidence",
         "conversation_evidence": "conversation_evidence",
+        "current_media": "current_turn_media",
+        "current_turn_media": "current_turn_media",
         "external": "external_evidence",
         "external_evidence": "external_evidence",
         "live": "live_context",
@@ -1499,6 +1528,7 @@ def _node_kind_from_semantic_text(value: str) -> str:
         "profile": "person_context",
         "recall": "recall_evidence",
         "recall_evidence": "recall_evidence",
+        "recent_media": "recent_media",
         "scoped_memory": "scoped_memory",
         "subtask": "subtask",
         "synthesis": "synthesis",
@@ -1545,6 +1575,8 @@ def _artifact_type_from_semantic_text(value: str) -> str:
         "recall_evidence": "recall_ref",
         "recall_ref": "recall_ref",
         "semantic_packet": "semantic_packet",
+        "media": "media_ref",
+        "media_ref": "media_ref",
     }
     artifact_type = aliases.get(normalized, normalized)
     return artifact_type
@@ -1605,7 +1637,37 @@ def _compact_context(
         compact["original_user_request"] = _sanitized_prompt_payload(
             original_user_request
         )
+    compact["session_media_aliases"] = _session_media_aliases(context)
     return compact
+
+
+def _session_media_aliases(
+    context: LocalContextResolverContextV1,
+) -> list[dict[str, str]]:
+    """Project trusted session cache rows into selector-only prompt aliases."""
+
+    raw_refs = context.get("session_media_refs")
+    if not isinstance(raw_refs, list):
+        return []
+    counters = {"current": 0, "recent": 0}
+    aliases: list[dict[str, str]] = []
+    for raw_ref in reversed(raw_refs):
+        if not isinstance(raw_ref, dict):
+            continue
+        relation = raw_ref.get("turn_relation")
+        content_type = raw_ref.get("content_type")
+        source_summary = raw_ref.get("source_summary")
+        if relation not in counters or not isinstance(content_type, str):
+            continue
+        counters[relation] += 1
+        aliases.append({
+            "alias": f"{relation}_media_{counters[relation]}",
+            "media_kind": "image",
+            "content_type": content_type,
+            "turn_relation": relation,
+            "source_summary": source_summary if isinstance(source_summary, str) else "",
+        })
+    return aliases
 
 
 def _compact_node(node: LocalContextNodeV1) -> dict[str, object]:

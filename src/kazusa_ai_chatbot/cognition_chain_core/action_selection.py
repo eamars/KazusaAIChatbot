@@ -84,7 +84,8 @@ _RESOLVER_AFFORDANCE_DESCRIPTIONS = {
     "local_context_recall": (
         "Retrieve local/private context when the missing answer depends on "
         "Kazusa state: persona, user memory, relationship, prior conversation, "
-        "commitments, profile, or a local nickname/reference."
+        "commitments, profile, a conversation image, or a local "
+        "nickname/reference."
     ),
     "public_answer_research": (
         "Investigate public/current/external/source-checkable evidence needed "
@@ -434,6 +435,7 @@ def _build_evidence_section(
     rag_result = state.get("rag_result")
     rag_answer = ""
     memory_evidence: list[dict[str, object]] = []
+    media_evidence: list[dict[str, object]] = []
     if isinstance(rag_result, dict):
         raw_answer = rag_result.get("answer")
         if isinstance(raw_answer, str):
@@ -441,6 +443,9 @@ def _build_evidence_section(
         raw_mem = rag_result.get("memory_evidence")
         if isinstance(raw_mem, list):
             memory_evidence = _project_memory_evidence(raw_mem)
+        raw_media = rag_result.get("media_evidence")
+        if isinstance(raw_media, list):
+            media_evidence = _project_media_evidence(raw_media)
 
     conversation_progress = state.get("conversation_progress")
     if not isinstance(conversation_progress, dict):
@@ -449,6 +454,7 @@ def _build_evidence_section(
     section: dict[str, object] = {
         "rag_answer": rag_answer,
         "memory_evidence": memory_evidence,
+        "media_evidence": media_evidence,
         "conversation_progress": conversation_progress,
         "active_commitment_clues": active_commitments,
     }
@@ -525,6 +531,37 @@ def _project_memory_evidence(
                 entry[field] = value
         if entry:
             projected.append(entry)
+    return projected
+
+
+def _project_media_evidence(
+    raw_evidence: list[object],
+) -> list[dict[str, object]]:
+    """Project visual observations without session lookup or binary fields."""
+
+    projected: list[dict[str, object]] = []
+    for raw in raw_evidence:
+        if not isinstance(raw, dict):
+            continue
+        description = raw.get("description")
+        if not isinstance(description, str) or not description.strip():
+            continue
+        entry: dict[str, object] = {
+            "visual_observation": description.strip(),
+        }
+        recency = raw.get("recency")
+        if isinstance(recency, str) and recency.strip():
+            entry["recency"] = recency.strip()
+        boundary_notes = raw.get("evidence_boundary_notes")
+        if isinstance(boundary_notes, list):
+            notes = [
+                note.strip()
+                for note in boundary_notes
+                if isinstance(note, str) and note.strip()
+            ]
+            if notes:
+                entry["evidence_boundary_notes"] = notes
+        projected.append(entry)
     return projected
 
 
