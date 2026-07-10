@@ -41,7 +41,6 @@ long_term/todo.md
 | [coding_agent_assessment_gap_phase_b_plan.md](active/short_term/coding_agent_assessment_gap_phase_b_plan.md) | Large coding-agent assessment gap plan for preflight execution and structured repair feedback | draft |
 | [coding_agent_assessment_gap_phase_c_plan.md](active/short_term/coding_agent_assessment_gap_phase_c_plan.md) | Large coding-agent assessment gap plan for typed blockers, affordances, approval evidence, locks, and benchmark seam | draft |
 | [coding_agent_full_workflow_hardening_plan_2.md](active/short_term/coding_agent_full_workflow_hardening_plan_2.md) | Large coding-agent full workflow hardening plan | completed |
-| [rag3_subagent_framework_and_media_inspection_bigbang_plan.md](active/short_term/rag3_subagent_framework_and_media_inspection_bigbang_plan.md) | High-risk RAG3 subagent framework and image media-inspection bigbang plan | in_progress |
 
 ## Supporting Experiment Records
 
@@ -402,6 +401,7 @@ plans.
 | [rag2_mainline_fusion_recall_quality_plan.md](archive/completed/short_term/rag2_mainline_fusion_recall_quality_plan.md) |
 | [rag2_phase4_continuation_plan.md](archive/completed/short_term/rag2_phase4_continuation_plan.md) |
 | [rag3_local_context_resolver_bigbang_plan.md](archive/completed/short_term/rag3_local_context_resolver_bigbang_plan.md) |
+| [rag3_subagent_framework_and_media_inspection_bigbang_plan.md](archive/completed/short_term/rag3_subagent_framework_and_media_inspection_bigbang_plan.md) |
 | [rag_agent_package_reorganization_plan.md](archive/completed/short_term/rag_agent_package_reorganization_plan.md) |
 | [rag_cache2_persistent_initializer_plan.md](archive/completed/short_term/rag_cache2_persistent_initializer_plan.md) |
 | [rag_current_turn_exclusion_plan.md](archive/completed/short_term/rag_current_turn_exclusion_plan.md) |

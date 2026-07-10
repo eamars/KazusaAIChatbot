@@ -18,6 +18,9 @@ from kazusa_ai_chatbot.complex_task_resolver import (
     validate_complex_task_resolver_request,
 )
 from kazusa_ai_chatbot.complex_task_resolver.service import resolve_complex_task
+from kazusa_ai_chatbot.complex_task_resolver.subagent.media import (
+    MediaSubagent as ExternalMediaSubagent,
+)
 from kazusa_ai_chatbot.config import (
     JSON_REPAIR_LLM_BASE_URL,
     JSON_REPAIR_LLM_MODEL,
@@ -26,6 +29,7 @@ from kazusa_ai_chatbot.config import (
     WEB_SEARCH_LLM_MODEL,
 )
 from kazusa_ai_chatbot.rag.web_agent3 import direct_searxng, url_reader
+from kazusa_ai_chatbot.media_inspection import service as media_service
 from tests.llm_trace import write_llm_trace
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -745,3 +749,96 @@ def _make_live_review_case(case: dict[str, object]):
 for _case in _load_review_cases():
     _generated_test = _make_live_review_case(_case)
     globals()[_generated_test.__name__] = _generated_test
+
+
+_PUBLIC_PYTHON_LOGO_URL = (
+    "https://raw.githubusercontent.com/github/explore/main/topics/python/"
+    "python.png"
+)
+
+
+@pytest.mark.live_internet
+async def test_live_media_inspection_external_image_exact_question(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fetch a real public image and review its visual evidence result."""
+
+    capturing_llm = _MediaCapturingLLM(media_service._media_inspection_llm)
+    monkeypatch.setattr(media_service, "_media_inspection_llm", capturing_llm)
+    task = _external_media_task(
+        _PUBLIC_PYTHON_LOGO_URL,
+        "What colors are most visible in this Python logo image?",
+    )
+    result = await ExternalMediaSubagent().run(task, {})
+    trace_path = write_llm_trace(
+        "complex_task_resolver_live_llm",
+        "external_image_exact_question",
+        {
+            "task": task,
+            "result": result,
+            "raw_model_output": capturing_llm.raw_output,
+            "judgment": "manual_review_required_for_external_visual_grounding",
+        },
+    )
+
+    assert result["status"] in {"resolved", "partial"}
+    assert result["trace"]["media_inspection_called"] is True
+    assert capturing_llm.raw_output.strip()
+    assert trace_path.exists()
+
+
+@pytest.mark.live_internet
+async def test_live_media_inspection_external_image_fetch_refusal() -> None:
+    """Review the private-network refusal before any external media call."""
+
+    task = _external_media_task(
+        "http://127.0.0.1/private.png",
+        "What colors are visible in this image?",
+    )
+    result = await ExternalMediaSubagent().run(task, {})
+    trace_path = write_llm_trace(
+        "complex_task_resolver_live_llm",
+        "external_image_fetch_refusal",
+        {
+            "task": task,
+            "result": result,
+            "judgment": "private-network fetch must fail before visual inspection",
+        },
+    )
+
+    assert result["status"] == "failed"
+    assert result["trace"]["media_inspection_called"] is False
+    assert "private" in result["result"]["evidence_boundary_notes"][0]
+    assert trace_path.exists()
+
+
+def _external_media_task(url: str, question: str) -> dict[str, object]:
+    """Build one bounded complex-resolver external-image request."""
+
+    result = {
+        "schema_version": "complex_task_subagent_request.v1",
+        "node_id": "external_media_review",
+        "subagent": "media",
+        "action": "inspect_media",
+        "objective": question,
+        "payload": {"url": url, "question": question},
+        "constraints": {},
+    }
+    return result
+
+
+class _MediaCapturingLLM:
+    """Retain raw production media-inspection model output for review."""
+
+    def __init__(self, delegate: object) -> None:
+        """Store the configured production LLM delegate."""
+
+        self._delegate = delegate
+        self.raw_output = ""
+
+    async def ainvoke(self, messages, config):
+        """Forward one invocation and retain the model response body."""
+
+        response = await self._delegate.ainvoke(messages, config=config)
+        self.raw_output = str(response.content)
+        return response

@@ -102,3 +102,31 @@ dry run.
 - [Final debug-adapter E2E trace](../../../test_artifacts/llm_traces/rag3_media_debug_adapter_e2e_live_llm__recent_image_precision_followups__20260710T021058301645Z.json)
 - [Direct visual-inspector diagnostic](../../../test_artifacts/llm_traces/rag3_media_inspection_diagnostic__precise_scene_below_white_circle.json)
 - [RAG3 media-projection diagnostic after selector correction](../../../test_artifacts/llm_traces/rag3_media_projection_diagnostic__recent_image_below_white_circle_after_selector_fix.json)
+
+## Completion Live-Case Review
+
+| Case | Result | Quality assessment |
+| --- | --- | --- |
+| RAG3 current-image exact | `answered`: `red` | Correct visual fact, with the current-media alias and no payload leakage. |
+| RAG3 identity boundary | `unsupported` | Correctly says the solid-red image cannot establish the photographer's identity and explains the missing visual anchors. |
+| RAG3 cache miss | `unavailable`, zero inspector calls | Correct bounded evidence gap; no visual call was attempted. |
+| Preserved conversation source | Mika and the exact phrase remain in `conversation_evidence` | Grounded source evidence survived the subagent conversion. The evidence-only resolver leaves visible wording to downstream cognition/dialog. |
+| Preserved scoped memory source | Current-user jasmine-tea preference remains scoped `memory_evidence` | Correct current-user evidence projection without identity or transport leakage. |
+| Complex external image | `answered`: `Blue and yellow` | The production subagent fetched, validated, decoded, and visually inspected the public Python-logo PNG correctly. |
+| Complex private URL | `failed`, zero inspector calls | Loopback target was rejected before fetching or visual inspection. |
+
+All cases were executed one pytest case at a time. The visual-answer and
+boundary outputs are accepted. The preserved RAG3 source cases are also
+accepted as evidence-only behavior: their projected evidence is correct while
+the existing resolver keeps `rag_result.answer` empty for downstream cognition
+and dialog to render.
+
+### Completion Raw Evidence
+
+- [RAG3 current-image exact](../../../test_artifacts/llm_traces/rag3_media_inspection_live_llm__current_image_exact_question.json)
+- [RAG3 identity boundary](../../../test_artifacts/llm_traces/rag3_media_inspection_live_llm__current_image_identity_uncertainty.json)
+- [RAG3 cache-miss boundary](../../../test_artifacts/llm_traces/rag3_media_inspection_live_llm__current_image_cache_miss_boundary.json)
+- [Preserved conversation source](../../../test_artifacts/local_context_resolver/raw/production_exact_phrase.json)
+- [Preserved scoped-memory source](../../../test_artifacts/local_context_resolver/raw/production_scoped_memory.json)
+- [Complex external-image exact](../../../test_artifacts/llm_traces/complex_task_resolver_live_llm__external_image_exact_question.json)
+- [Complex private-URL refusal](../../../test_artifacts/llm_traces/complex_task_resolver_live_llm__external_image_fetch_refusal.json)
