@@ -344,13 +344,6 @@ async def test_live_gate_06_mixed_create_and_existing_edit_workflow(
     _assert_no_private_leaks(gate_trace)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Known assessment gap: patch proposals are delivered before managed "
-        "preflight apply and execution evidence exists."
-    ),
-)
 async def test_live_gate_07_proposal_has_preapproval_preflight_evidence(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -358,6 +351,11 @@ async def test_live_gate_07_proposal_has_preapproval_preflight_evidence(
     """A proposal should be mechanically exercised before user approval."""
 
     await _skip_if_llm_unavailable()
+    from kazusa_ai_chatbot.coding_agent.code_patching import apply
+    from kazusa_ai_chatbot.coding_agent.coding_run import supervisor
+
+    monkeypatch.setattr(supervisor, "CODING_AGENT_PREFLIGHT_EXECUTION", True)
+    monkeypatch.setattr(apply, "CODING_AGENT_PREFLIGHT_EXECUTION", True)
     source_root = _prepare_fixture_checkout(
         tmp_path,
         "gate_04_slug_normalization",
@@ -387,13 +385,6 @@ async def test_live_gate_07_proposal_has_preapproval_preflight_evidence(
     _assert_no_private_leaks(gate_trace)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Known assessment gap: approval checks are planned from approval "
-        "prose instead of deterministically from changed files and repo tests."
-    ),
-)
 async def test_live_gate_08_vague_approval_runs_changed_file_tests(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -432,13 +423,6 @@ async def test_live_gate_08_vague_approval_runs_changed_file_tests(
     _assert_no_private_leaks(gate_trace)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Known assessment gap: verifier failures do not produce typed "
-        "environment dependency blockers."
-    ),
-)
 async def test_live_gate_09_missing_dependency_becomes_typed_blocker(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

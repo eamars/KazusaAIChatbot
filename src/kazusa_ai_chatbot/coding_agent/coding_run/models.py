@@ -68,6 +68,7 @@ class CodingRunStartRequest(TypedDict, total=False):
     repair_attempt_limit: int
     initial_patch_artifacts: list[PatchArtifact]
     expected_source_identity: PatchSourceIdentity
+    preflight_enabled: bool
 
 
 class CodingRunContinueRequest(TypedDict, total=False):
@@ -79,6 +80,7 @@ class CodingRunContinueRequest(TypedDict, total=False):
     revision_instruction: str
     approval: PatchApplyApproval
     execution_specs: list[CodeExecutionSpec]
+    execution_request: str
     repair_attempt_limit: int
     reason: str
 
@@ -102,6 +104,10 @@ class CodingRunAttempt(TypedDict, total=False):
     apply_package_id: str | None
     limitations: list[str]
     trace_summary: list[str]
+    proposal_revision: int
+    patch_artifact_digest: str
+    execution_plan: dict[str, object] | None
+    preflight: dict[str, object]
 
 
 class CodingRunBlocker(TypedDict, total=False):
@@ -151,6 +157,10 @@ class CodingRunLedger(TypedDict):
     blockers: list[CodingRunBlocker]
     limitations: list[str]
     trace_summary: list[str]
+    proposal_revision: int
+    patch_artifact_digest: str
+    execution_plan: dict[str, object] | None
+    preflight: dict[str, object]
 
 
 class CodingRunResponse(TypedDict):

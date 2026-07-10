@@ -16,6 +16,7 @@ from kazusa_ai_chatbot.coding_agent.code_executing.models import (
 )
 from kazusa_ai_chatbot.coding_agent.code_patching.apply import (
     apply_approved_patch,
+    materialize_managed_candidate,
 )
 from kazusa_ai_chatbot.coding_agent.code_patching.models import (
     ChangedFileSummary,
@@ -35,11 +36,15 @@ from kazusa_ai_chatbot.coding_agent.models import (
 from kazusa_ai_chatbot.coding_agent.supervisor import (
     propose_code_change,
 )
+from kazusa_ai_chatbot.config import (
+    CODING_AGENT_REPAIR_BUNDLE_CHAR_LIMIT,
+    CODING_AGENT_REPAIR_MAX_CALLS,
+)
 
 ALLOWED_EXECUTION_TOOLS = {"python_compileall", "pytest"}
-DEFAULT_REPAIR_ATTEMPTS = 1
-MAX_REPAIR_ATTEMPTS = 2
-DEFAULT_REPAIR_FEEDBACK_CHARS = 4000
+DEFAULT_REPAIR_ATTEMPTS = CODING_AGENT_REPAIR_MAX_CALLS
+MAX_REPAIR_ATTEMPTS = 6
+DEFAULT_REPAIR_FEEDBACK_CHARS = CODING_AGENT_REPAIR_BUNDLE_CHAR_LIMIT
 MIN_REPAIR_EXCERPT_CHARS = 200
 SUMMARY_LIMIT = 8
 COMMAND_OUTPUT_PATTERNS = (
@@ -55,6 +60,165 @@ FAILURE_SUMMARY_MARKERS = (
     "Traceback",
     "timed out",
 )
+MISSING_MODULE_RE = re.compile(
+    r"ModuleNotFoundError:\s+No module named ['\"](?P<module>[A-Za-z_][\w.]*)['\"]",
+)
+MISSING_INTERPRETER_MARKERS = (
+    "No such file or directory",
+    "Python executable was not found",
+    "python: command not found",
+)
+
+
+def build_execution_failure_bundle(
+    *,
+    spec_id: str,
+    execution: Mapping[str, object],
+    candidate_root: Path,
+) -> dict[str, object]:
+    """Preserve bounded structural evidence for one failed execution spec."""
+
+    stdout_excerpt = _request_text(execution.get("stdout_excerpt"))
+    stderr_excerpt = _request_text(execution.get("stderr_excerpt"))
+    exception_text = _root_exception_text(stdout_excerpt, stderr_excerpt)
+    failure_kind = _failure_kind(execution, exception_text)
+    trace_frames = _failure_trace_frames(
+        text="\n".join((stdout_excerpt, stderr_excerpt)),
+        candidate_root=candidate_root,
+    )
+    bundle = {
+        "failure_id": _failure_signature(
+            spec_id=spec_id,
+            failure_kind=failure_kind,
+            exception_text=exception_text,
+        ),
+        "spec_id": spec_id,
+        "tool": _request_text(execution.get("tool")),
+        "selector": _first_executed_path(execution),
+        "failure_kind": failure_kind,
+        "exception_type": _exception_type(exception_text),
+        "exception_message": exception_text,
+        "trace_frames": trace_frames,
+        "failure_signature": _failure_signature(
+            spec_id=spec_id,
+            failure_kind=failure_kind,
+            exception_text=exception_text,
+        ),
+        "related_evidence_ids": [],
+        "stdout_excerpt": stdout_excerpt,
+        "stderr_excerpt": stderr_excerpt,
+    }
+    return bundle
+
+
+def classify_execution_failure(
+    bundle: Mapping[str, object],
+    *,
+    candidate_root: Path,
+) -> str:
+    """Classify environment failures before spending a repair attempt."""
+
+    exception_message = _request_text(bundle.get("exception_message"))
+    if any(marker in exception_message for marker in MISSING_INTERPRETER_MARKERS):
+        return "environment_dependency_missing"
+    missing_module = _missing_module(exception_message)
+    if not missing_module:
+        return _request_text(bundle.get("failure_kind")) or "exception"
+    if _candidate_mentions_module(candidate_root, missing_module):
+        return "exception"
+    return "environment_dependency_missing"
+
+
+def _root_exception_text(stdout_excerpt: str, stderr_excerpt: str) -> str:
+    """Extract the terminal exception cause from complete bounded output."""
+
+    combined_text = "\n".join((stderr_excerpt, stdout_excerpt))
+    missing_module_match = MISSING_MODULE_RE.search(combined_text)
+    if missing_module_match is not None:
+        return missing_module_match.group(0)
+    for line in [*stderr_excerpt.splitlines(), *stdout_excerpt.splitlines()]:
+        if "Error" in line or "Exception" in line or "not found" in line:
+            return line[:500]
+    return "Execution failed without a parseable exception message."
+
+
+def _request_text(value: object) -> str:
+    """Convert an optional request value into a bounded plain string."""
+
+    if not isinstance(value, str):
+        return ""
+    text = value.strip()
+    return text
+
+
+def _failure_kind(execution: Mapping[str, object], exception_text: str) -> str:
+    if execution.get("status") == "timed_out":
+        return "timeout"
+    tool = _request_text(execution.get("tool"))
+    if tool == "python_compileall":
+        return "compile_error"
+    if "AssertionError" in exception_text:
+        return "assertion"
+    return "exception"
+
+
+def _failure_trace_frames(*, text: str, candidate_root: Path) -> list[dict[str, object]]:
+    frames: list[dict[str, object]] = []
+    frame_re = re.compile(r'File "(?P<path>[^"]+)", line (?P<line>\d+)')
+    for match in frame_re.finditer(text):
+        path_value = Path(match.group("path"))
+        try:
+            relative_path = path_value.resolve().relative_to(candidate_root.resolve())
+        except ValueError:
+            continue
+        frames.append({
+            "path": relative_path.as_posix(),
+            "line": int(match.group("line")),
+            "function": "",
+            "code_line": "",
+        })
+        if len(frames) >= 8:
+            break
+    return frames
+
+
+def _failure_signature(*, spec_id: str, failure_kind: str, exception_text: str) -> str:
+    normalized_text = re.sub(r"\d+", "#", exception_text.casefold())
+    return f"{spec_id}:{failure_kind}:{normalized_text[:240]}"
+
+
+def _exception_type(exception_text: str) -> str:
+    if ":" not in exception_text:
+        return ""
+    exception_type = exception_text.split(":", 1)[0].strip()
+    return exception_type
+
+
+def _first_executed_path(execution: Mapping[str, object]) -> str:
+    paths = execution.get("executed_paths")
+    if not isinstance(paths, list):
+        return ""
+    for path in paths:
+        if isinstance(path, str):
+            return path
+    return ""
+
+
+def _missing_module(exception_message: str) -> str:
+    match = MISSING_MODULE_RE.search(exception_message)
+    if match is None:
+        return ""
+    module_name = match.group("module").split(".", 1)[0]
+    return module_name
+
+
+def _candidate_mentions_module(candidate_root: Path, module_name: str) -> bool:
+    """Return whether the missing root is present in the candidate manifest."""
+
+    module_path = candidate_root / module_name
+    if module_path.exists() or (candidate_root / f"{module_name}.py").exists():
+        return True
+    return False
 
 
 async def verify_and_repair_code_change(
@@ -69,6 +233,10 @@ async def verify_and_repair_code_change(
             limitations=[validation_error],
             trace_summary=["verify_repair:rejected:request"],
         )
+        return response
+
+    if not _has_source_fields(request):
+        response = _verify_source_free_candidate(request)
         return response
 
     fetching_result = await code_fetching.run(request)
@@ -229,6 +397,30 @@ async def verify_and_repair_code_change(
             )
             return response
 
+        environment_blocker = _environment_blocker(
+            execution_results=execution_results,
+            candidate_root=_apply_candidate_root(
+                workspace_root=Path(request["workspace_root"]),
+                apply_response=apply_response,
+            ),
+        )
+        if environment_blocker is not None:
+            response = _terminal_response(
+                status="blocked",
+                repository=_repository_summary(repository),
+                source_scope=source_scope,
+                attempts=attempts,
+                final_patch_artifacts=patch_artifacts,
+                final_changed_files=apply_response["changed_files"],
+                final_apply=final_apply,
+                final_execution=final_execution,
+                blockers=[environment_blocker],
+                limitations=[environment_blocker["message"]],
+                trace_summary=trace_summary,
+                answer_text="Verification is blocked by an environment dependency.",
+            )
+            return response
+
         terminal_status = _terminal_status_from_execution(execution_results)
         if terminal_status == "rejected" or attempt_index > repair_attempt_limit:
             response = _terminal_response(
@@ -305,6 +497,68 @@ async def verify_and_repair_code_change(
         final_execution=final_execution,
         limitations=limitations,
         trace_summary=trace_summary,
+    )
+    return response
+
+
+def _verify_source_free_candidate(
+    request: CodingVerifyRepairRequest,
+) -> CodingVerifyRepairResponse:
+    """Verify generated proposal artifacts through the canonical candidate path."""
+
+    patch_artifacts = request.get("initial_patch_artifacts")
+    expected_identity = request.get("expected_source_identity")
+    if not isinstance(patch_artifacts, list) or not isinstance(expected_identity, Mapping):
+        response = _terminal_response(
+            status="rejected",
+            limitations=["Source-free verification requires bound patch artifacts."],
+            trace_summary=["verify_repair:rejected:source_free_binding"],
+        )
+        return response
+    apply_response = materialize_managed_candidate({
+        "workspace_root": request["workspace_root"],
+        "source_identity": dict(expected_identity),
+        "expected_source_identity": dict(expected_identity),
+        "patch_artifacts": patch_artifacts,
+        "candidate_baseline": "empty_source_free",
+        "authorization_purpose": "approved_verification",
+        "approval": request["approval"],
+        "max_diff_chars": request.get("max_artifact_chars"),
+    })
+    if apply_response["status"] != "succeeded":
+        response = _terminal_response(
+            status=apply_response["status"],
+            final_patch_artifacts=patch_artifacts,
+            final_changed_files=apply_response["changed_files"],
+            final_apply=apply_response,
+            limitations=apply_response["limitations"],
+            trace_summary=apply_response["trace_summary"],
+        )
+        return response
+    execution_results = _run_execution_specs(
+        request=request,
+        apply_response=apply_response,
+    )
+    attempt = _attempt_summary(
+        attempt_index=1,
+        proposal_status="succeeded",
+        apply_response=apply_response,
+        execution_results=execution_results,
+        patch_artifacts=patch_artifacts,
+    )
+    status = _terminal_status_from_execution(execution_results)
+    if _all_execution_succeeded(execution_results):
+        status = "succeeded"
+    response = _terminal_response(
+        status=status,
+        attempts=[attempt],
+        final_patch_artifacts=patch_artifacts,
+        final_changed_files=apply_response["changed_files"],
+        final_apply=apply_response,
+        final_execution=execution_results,
+        limitations=attempt["limitations"],
+        trace_summary=[*apply_response["trace_summary"], *_execution_trace(execution_results)],
+        answer_text="Source-free proposal verification completed.",
     )
     return response
 
@@ -446,8 +700,6 @@ def _request_validation_error(request: Mapping[str, object]) -> str:
     approval_error = _approval_error(request.get("approval"))
     if approval_error:
         return approval_error
-    if not _has_source_fields(request):
-        return "Verify repair requires an explicit source-backed request."
     workspace_root = request.get("workspace_root")
     if not isinstance(workspace_root, str) or not workspace_root.strip():
         return "Verify repair requires a workspace root."
@@ -467,6 +719,9 @@ def _request_validation_error(request: Mapping[str, object]) -> str:
         expected_identity = request.get("expected_source_identity")
         if not isinstance(expected_identity, Mapping):
             return "Verify repair requires expected source identity."
+    if not _has_source_fields(request):
+        if not isinstance(initial_artifacts, list) or not initial_artifacts:
+            return "Verify repair requires source fields or proposal artifacts."
     return ""
 
 
@@ -772,6 +1027,63 @@ def _execution_trace(
     return trace
 
 
+def _environment_blocker(
+    *,
+    execution_results: list[CodeExecutionResponse],
+    candidate_root: Path,
+) -> dict[str, object] | None:
+    """Return a typed blocker when verification needs an external dependency."""
+
+    for index, execution_result in enumerate(execution_results, start=1):
+        if execution_result["status"] not in {"failed", "timed_out"}:
+            continue
+        bundle = build_execution_failure_bundle(
+            spec_id=f"execution-{index}",
+            execution=execution_result,
+            candidate_root=candidate_root,
+        )
+        classification = classify_execution_failure(
+            bundle,
+            candidate_root=candidate_root,
+        )
+        if classification != "environment_dependency_missing":
+            continue
+        missing_module = _missing_module(
+            _request_text(bundle.get("exception_message")),
+        )
+        blocker = {
+            "code": "environment_dependency_missing",
+            "blocker_kind": "environment",
+            "message": "Verification requires an unavailable external dependency.",
+            "question": "Install the dependency in the execution environment, then retry verification.",
+            "options": ["Install dependency", "Retry verification", "Cancel run"],
+            "resume_target": "retry_verification",
+            "details": {
+                "missing_module": missing_module,
+                "tool": execution_result["tool"],
+                "selector": _first_executed_path(execution_result),
+            },
+        }
+        return blocker
+    return None
+
+
+def _apply_candidate_root(
+    *,
+    workspace_root: Path,
+    apply_response: CodingPatchApplyResponse,
+) -> Path:
+    """Return the final managed candidate used by the execution boundary."""
+
+    candidate_root = (
+        workspace_root
+        / "patch_apply"
+        / apply_response["apply_package_id"]
+        / "source"
+    )
+    return candidate_root
+
+
 def _repair_attempt_limit(request: Mapping[str, object]) -> int:
     value = request.get("repair_attempt_limit")
     if not isinstance(value, int):
@@ -1050,6 +1362,7 @@ def _terminal_response(
     final_changed_files: list[ChangedFileSummary] | None = None,
     final_apply: CodingPatchApplyResponse | None = None,
     final_execution: list[CodeExecutionResponse] | None = None,
+    blockers: list[dict[str, object]] | None = None,
     limitations: list[str] | None = None,
     trace_summary: list[str] | None = None,
     answer_text: str = "",
@@ -1064,6 +1377,7 @@ def _terminal_response(
         "final_changed_files": final_changed_files or [],
         "final_apply": final_apply,
         "final_execution": final_execution or [],
+        "blockers": blockers or [],
         "limitations": limitations or [],
         "trace_summary": trace_summary or [],
     }
@@ -1077,4 +1391,6 @@ def _verify_status(status: str) -> VerifyRepairStatus:
         return "rejected"
     if status == "timed_out":
         return "timed_out"
+    if status == "blocked":
+        return "blocked"
     return "failed"

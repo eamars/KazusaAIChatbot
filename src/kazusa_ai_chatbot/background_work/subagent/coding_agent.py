@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Mapping
 from pathlib import Path
-
-from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.background_work.models import (
     BackgroundWorkResult,
@@ -20,25 +17,11 @@ from kazusa_ai_chatbot.coding_agent import (
     handle_background_coding_task,
     start_coding_run,
 )
-from kazusa_ai_chatbot.coding_agent.code_executing.models import (
-    CodeExecutionSpec,
-)
 from kazusa_ai_chatbot.config import (
     BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
     CODING_AGENT_WORKSPACE_ROOT,
-    CODING_AGENT_PM_LLM_API_KEY,
-    CODING_AGENT_PM_LLM_BASE_URL,
-    CODING_AGENT_PM_LLM_MAX_COMPLETION_TOKENS,
-    CODING_AGENT_PM_LLM_MODEL,
-    CODING_AGENT_PM_LLM_THINKING_ENABLED,
-)
-from kazusa_ai_chatbot.llm_interface import (
-    LLInterface,
-    LLMCallConfig,
-    LLMThinkingConfig,
 )
 from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
-from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 WORKER = "coding_agent"
 DESCRIPTION = (
@@ -65,50 +48,6 @@ _LOCAL_PATH_BOUNDARY_TOKENS = (
     "\r",
     ")",
 )
-EXECUTION_SPEC_PLANNER_PROMPT = """\
-You are a coding-agent execution planner.
-
-Convert an approval follow-up into bounded verification specs. Only these
-tools are allowed:
-- python_compileall with paths
-- pytest with pytest_selectors
-
-Return strict JSON:
-{
-  "execution_specs": [
-    {
-      "tool": "python_compileall | pytest",
-      "paths": ["relative path"],
-      "pytest_selectors": ["relative pytest selector"],
-      "timeout_seconds": 20
-    }
-  ],
-  "reason": "short reason"
-}
-
-Use python_compileall on "." when the user gave approval without a specific
-test request. Do not invent shell commands, package installs, network access,
-or broad command strings.
-"""
-_execution_spec_planner_llm = LLInterface()
-_execution_spec_planner_llm_config = LLMCallConfig(
-    stage_name=__name__,
-    route_name="CODING_AGENT_PM_LLM",
-    base_url=CODING_AGENT_PM_LLM_BASE_URL,
-    api_key=CODING_AGENT_PM_LLM_API_KEY,
-    model=CODING_AGENT_PM_LLM_MODEL,
-    temperature=0.1,
-    top_p=0.7,
-    top_k=None,
-    max_completion_tokens=CODING_AGENT_PM_LLM_MAX_COMPLETION_TOKENS,
-    presence_penalty=None,
-    timeout_seconds=120,
-    thinking=LLMThinkingConfig(
-        enabled=CODING_AGENT_PM_LLM_THINKING_ENABLED,
-    ),
-)
-
-
 async def execute(
     decision: BackgroundWorkWorkerDecision,
     *,
@@ -330,11 +269,10 @@ async def _continue_coding_run_from_payload(
             decision,
             worker_payload=worker_payload,
         )
-        request["execution_specs"] = await _execution_specs_for_payload(
+        request["execution_request"] = _payload_text(
             worker_payload,
-            max_output_chars=max_output_chars,
+            "execution_request",
         )
-        request["repair_attempt_limit"] = _repair_attempt_limit(worker_payload)
     response = await continue_coding_run(request)
     result = _map_coding_run_response(
         response,
@@ -422,102 +360,6 @@ def _map_coding_run_response(
     return result
 
 
-async def _execution_specs_for_payload(
-    worker_payload: dict[str, object],
-    *,
-    max_output_chars: int,
-) -> list[CodeExecutionSpec]:
-    """Return trusted execution specs for an approved coding run."""
-
-    raw_specs = worker_payload.get("execution_specs")
-    specs = _valid_execution_specs(raw_specs)
-    if specs:
-        return specs
-    execution_request = _payload_text(worker_payload, "execution_request")
-    if not execution_request:
-        return [_default_execution_spec()]
-    planned_specs = await _plan_execution_specs(
-        execution_request=execution_request,
-        max_output_chars=max_output_chars,
-    )
-    if planned_specs:
-        return planned_specs
-    return [_default_execution_spec()]
-
-
-async def _plan_execution_specs(
-    *,
-    execution_request: str,
-    max_output_chars: int,
-) -> list[CodeExecutionSpec]:
-    """Ask the coding PM route for bounded verification specs."""
-
-    payload = {
-        "execution_request": execution_request,
-        "allowed_tools": ["python_compileall", "pytest"],
-        "max_output_chars": max_output_chars,
-    }
-    messages = [
-        SystemMessage(content=EXECUTION_SPEC_PLANNER_PROMPT),
-        HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
-    ]
-    response = await _execution_spec_planner_llm.ainvoke(
-        messages,
-        config=_execution_spec_planner_llm_config,
-    )
-    parsed = parse_llm_json_output(response.content)
-    if not isinstance(parsed, Mapping):
-        return []
-    specs = _valid_execution_specs(parsed.get("execution_specs"))
-    return specs
-
-
-def _valid_execution_specs(value: object) -> list[CodeExecutionSpec]:
-    """Validate execution specs against the bounded tool contract."""
-
-    if not isinstance(value, list):
-        return []
-    specs: list[CodeExecutionSpec] = []
-    for row in value:
-        if not isinstance(row, Mapping):
-            continue
-        tool = _bounded_text(row.get("tool"), limit=80)
-        if tool == "python_compileall":
-            paths = _safe_text_list(row.get("paths"), default=["."])
-            spec: CodeExecutionSpec = {
-                "tool": tool,
-                "paths": paths,
-            }
-        elif tool == "pytest":
-            selectors = _safe_text_list(row.get("pytest_selectors"))
-            if not selectors:
-                continue
-            spec = {
-                "tool": tool,
-                "pytest_selectors": selectors,
-            }
-        else:
-            continue
-        timeout_seconds = row.get("timeout_seconds")
-        if isinstance(timeout_seconds, int) and 1 <= timeout_seconds <= 600:
-            spec["timeout_seconds"] = timeout_seconds
-        specs.append(spec)
-        if len(specs) >= 3:
-            break
-    return specs
-
-
-def _default_execution_spec() -> CodeExecutionSpec:
-    """Return the default bounded verification for approved runs."""
-
-    return_value: CodeExecutionSpec = {
-        "tool": "python_compileall",
-        "paths": ["."],
-        "timeout_seconds": 60,
-    }
-    return return_value
-
-
 def _approval_from_payload(
     decision: BackgroundWorkWorkerDecision,
     *,
@@ -544,15 +386,6 @@ def _approval_from_payload(
         "approval_reason": approval_reason,
     }
     return approval
-
-
-def _repair_attempt_limit(worker_payload: Mapping[str, object]) -> int:
-    """Return the bounded repair-attempt limit for approved verification."""
-
-    value = worker_payload.get("repair_attempt_limit")
-    if isinstance(value, int) and 0 <= value <= 3:
-        return value
-    return 1
 
 
 def _objective_type_for_operation(operation: str) -> str:

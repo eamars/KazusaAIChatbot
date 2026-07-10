@@ -24,7 +24,6 @@ ModificationOperationKind = Literal[
 ]
 ModifyingPMStatus = Literal[
     "request_information",
-    "create_child_pm",
     "create_programmer_task",
     "repair_child",
     "complete",
@@ -335,7 +334,6 @@ def _contains_method_without_receiver(text: str) -> bool:
 def _allowed_pm_statuses() -> set[str]:
     statuses = {
         "request_information",
-        "create_child_pm",
         "create_programmer_task",
         "repair_child",
         "complete",

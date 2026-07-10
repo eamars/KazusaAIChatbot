@@ -4,6 +4,11 @@
 coding agent. It composes existing proposal, patch-apply, and execution
 boundaries without changing their independent contracts.
 
+Execution plans bind one run id, source identity, proposal revision, and
+ordered patch-artifact digest. Deterministic planning derives exact Python
+compile paths and safe focused pytest selectors. Missing external dependencies
+become typed environment blockers before repair work is attempted.
+
 ## Ownership
 
 - Resolves the source through `code_fetching`.

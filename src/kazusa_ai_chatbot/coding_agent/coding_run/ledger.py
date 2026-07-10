@@ -19,7 +19,7 @@ from kazusa_ai_chatbot.coding_agent.tools.paths import (
     ensure_path_inside,
 )
 
-RUN_SCHEMA_VERSION = 1
+RUN_SCHEMA_VERSION = 2
 RUN_ROOT_DIR_NAME = "coding_runs"
 RUN_FILE_NAME = "run.json"
 EVENT_FILE_NAME = "events.jsonl"
@@ -230,6 +230,10 @@ def public_response(
         ),
         "limitations": _ledger_list(ledger, "limitations"),
         "trace_summary": _ledger_list(ledger, "trace_summary"),
+        "proposal_revision": ledger.get("proposal_revision", 0),
+        "patch_artifact_digest": _ledger_text(ledger, "patch_artifact_digest"),
+        "execution_plan": ledger.get("execution_plan"),
+        "preflight": _ledger_mapping(ledger, "preflight"),
     }
     sanitized = sanitize_public_value(
         response,
@@ -275,6 +279,10 @@ def empty_response(
         "allowed_next_actions": [],
         "limitations": [limitation],
         "trace_summary": trace_summary,
+        "proposal_revision": 0,
+        "patch_artifact_digest": "",
+        "execution_plan": None,
+        "preflight": {},
     }
     return response
 
@@ -370,6 +378,16 @@ def _ledger_list(ledger: dict[str, object], key: str) -> list:
     if isinstance(value, list):
         return value
     return []
+
+
+def _ledger_mapping(ledger: dict[str, object], key: str) -> dict[str, object]:
+    """Return one optional ledger mapping without inventing a fallback shape."""
+
+    value = ledger.get(key)
+    if not isinstance(value, dict):
+        return {}
+    mapping = dict(value)
+    return mapping
 
 
 def _allowed_next_actions(status: str) -> list[str]:

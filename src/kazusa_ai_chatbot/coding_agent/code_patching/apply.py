@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
 import uuid
 from collections.abc import Mapping
 from pathlib import Path
@@ -15,6 +16,7 @@ from kazusa_ai_chatbot.coding_agent.code_patching.models import (
     PatchApplyStatus,
     PatchArtifact,
 )
+from kazusa_ai_chatbot.config import CODING_AGENT_PREFLIGHT_EXECUTION
 from kazusa_ai_chatbot.coding_agent.code_patching.patch_validation import (
     _git_apply_error,
     _parse_patch_artifacts,
@@ -37,17 +39,28 @@ def apply_approved_patch(
 ) -> CodingPatchApplyResponse:
     """Apply approved patch artifacts into a managed copy of source."""
 
+    candidate_request = dict(request)
+    candidate_request["authorization_purpose"] = "approved_verification"
+    response = materialize_managed_candidate(candidate_request)
+    return response
+
+
+def materialize_managed_candidate(
+    request: CodingPatchApplyRequest,
+) -> CodingPatchApplyResponse:
+    """Materialize a proposal in a managed candidate under closed authority."""
+
     source_identity = _mapping_or_empty(request.get("source_identity"))
     expected_identity = _mapping_or_empty(
         request.get("expected_source_identity"),
     )
-    approval_error = _approval_error(request.get("approval"))
-    if approval_error:
+    authorization_error = _authorization_error(request)
+    if authorization_error:
         response = _response(
             status="rejected",
             source_identity=source_identity,
-            errors=[approval_error],
-            trace_summary=["patch_apply:rejected:approval"],
+            errors=[authorization_error],
+            trace_summary=["patch_apply:rejected:authorization"],
         )
         return response
 
@@ -92,7 +105,9 @@ def apply_approved_patch(
         )
         return response
 
-    roots_result = _resolve_roots(
+    candidate_baseline = request.get("candidate_baseline", "resolved_source")
+    roots_result = _candidate_roots(
+        candidate_baseline=candidate_baseline,
         source_root_text=request.get("source_root"),
         workspace_root_text=request.get("workspace_root"),
     )
@@ -105,10 +120,10 @@ def apply_approved_patch(
             trace_summary=["patch_apply:rejected:path"],
         )
         return response
-    source_root, workspace_root = roots_result
+    source_root, workspace_root, source_free = roots_result
 
     review_validation = materialize_patch_artifacts_for_review(
-        repo_root=source_root,
+        repo_root=None if source_free else source_root,
         workspace_root=workspace_root,
         patch_artifacts=patch_artifacts,
         max_files=max_files,
@@ -125,11 +140,17 @@ def apply_approved_patch(
         return response
 
     apply_package_id = uuid.uuid4().hex
-    apply_source_root_result = _copy_source_to_apply_workspace(
-        source_root=source_root,
-        workspace_root=workspace_root,
-        apply_package_id=apply_package_id,
-    )
+    if source_free:
+        apply_source_root_result = _create_empty_apply_workspace(
+            workspace_root=workspace_root,
+            apply_package_id=apply_package_id,
+        )
+    else:
+        apply_source_root_result = _copy_source_to_apply_workspace(
+            source_root=source_root,
+            workspace_root=workspace_root,
+            apply_package_id=apply_package_id,
+        )
     if isinstance(apply_source_root_result, str):
         response = _response(
             status="failed",
@@ -189,13 +210,61 @@ def apply_approved_patch(
         changed_files=changed_files,
         warnings=warnings,
         trace_summary=[
-            "patch_apply:approval_accepted",
+            "patch_apply:authorization_accepted",
             "patch_apply:source_identity_matched",
             "patch_apply:managed_copy_created",
             "patch_apply:git_apply_succeeded",
         ],
     )
     return response
+
+
+def _authorization_error(request: Mapping[str, object]) -> str:
+    """Validate the closed managed-candidate authorization purpose."""
+
+    purpose = request.get("authorization_purpose")
+    if purpose == "approved_verification":
+        approval_error = _approval_error(request.get("approval"))
+        return approval_error
+    if purpose == "preapproval_preflight":
+        if not CODING_AGENT_PREFLIGHT_EXECUTION:
+            return "Managed preflight execution is disabled."
+        return ""
+    return "Managed candidate authorization purpose is invalid."
+
+
+def _candidate_roots(
+    *,
+    candidate_baseline: object,
+    source_root_text: object,
+    workspace_root_text: object,
+) -> tuple[Path, Path, bool] | str:
+    """Resolve baseline-specific candidate roots without widening containment."""
+
+    if candidate_baseline == "resolved_source":
+        roots_result = _resolve_roots(
+            source_root_text=source_root_text,
+            workspace_root_text=workspace_root_text,
+        )
+        if isinstance(roots_result, str):
+            return roots_result
+        source_root, workspace_root = roots_result
+        return source_root, workspace_root, False
+    if candidate_baseline == "empty_source_free":
+        workspace_root = _workspace_root(workspace_root_text)
+        if isinstance(workspace_root, str):
+            return workspace_root
+        return workspace_root, workspace_root, True
+    return "Managed candidate baseline is invalid."
+
+
+def _workspace_root(workspace_root_text: object) -> Path | str:
+    """Resolve a workspace root for a source-free managed candidate."""
+
+    if not isinstance(workspace_root_text, str) or not workspace_root_text.strip():
+        return "Patch application requires a workspace root."
+    workspace_root = Path(workspace_root_text).expanduser().resolve(strict=False)
+    return workspace_root
 
 
 def _approval_error(approval_value: object) -> str:
@@ -282,6 +351,53 @@ def _copy_source_to_apply_workspace(
         )
     except (OSError, PathSafetyError):
         return "Patch application could not create the managed workspace."
+    return apply_source_root
+
+
+def _create_empty_apply_workspace(
+    *,
+    workspace_root: Path,
+    apply_package_id: str,
+) -> Path | str:
+    """Create an empty Git-backed managed candidate for generated artifacts."""
+
+    try:
+        workspace_root.mkdir(parents=True, exist_ok=True)
+        apply_root = ensure_path_inside(
+            workspace_root / APPLY_ROOT_NAME,
+            workspace_root,
+        )
+        apply_root.mkdir(parents=True, exist_ok=True)
+        package_root = ensure_path_inside(
+            apply_root / apply_package_id,
+            workspace_root,
+        )
+        apply_source_root = ensure_path_inside(
+            package_root / APPLIED_SOURCE_DIR_NAME,
+            workspace_root,
+        )
+        package_root.mkdir(parents=True, exist_ok=False)
+        apply_source_root.mkdir()
+    except (OSError, PathSafetyError):
+        return "Patch application could not create the managed workspace."
+
+    try:
+        initialized = subprocess.run(
+            ["git", "init", "-q"],
+            cwd=apply_source_root,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=20,
+        )
+    except FileNotFoundError:
+        return "git executable is unavailable for patch application."
+    except subprocess.TimeoutExpired:
+        return "Patch application managed workspace initialization timed out."
+    if initialized.returncode != 0:
+        return "Patch application could not initialize the managed workspace."
     return apply_source_root
 
 

@@ -74,6 +74,8 @@ WRITE_EVIDENCE_EXCERPT_OMITTED = (
 MAX_WRITE_FALLBACK_EVIDENCE_FILES = 10
 MAX_WRITE_FALLBACK_EXCERPT_CHARS = 1200
 REPAIR_CONTEXT_CALLER_STEMS = {"api", "app", "cli", "main", "routes", "views"}
+REPAIR_CONTEXT_WINDOW_LINES = 20
+MAX_REPAIR_CONTEXT_WINDOWS = 4
 BACKGROUND_CODING_ROUTER_PROMPT = '''\
 You are the top-level supervisor inside a coding agent.
 
@@ -89,7 +91,10 @@ Operations:
   deploy, or validate by executing the target project.
 - code_modifying: propose reviewable existing-source patch artifacts when the
   task includes explicit source structure. This includes mixed work that creates
-  a new source file and edits existing source in one review-only proposal.
+  a new source file and edits existing source in one review-only proposal. A
+  patch task remains code_modifying when the user also asks for managed-copy
+  preflight; deployment configuration and execution permission are decided
+  after routing by deterministic coding-run code.
 - unsupported: the task is not a coding task, or it requires live execution,
   deployment, credential access, package installation, adapter delivery, or
   real-world mutation as the primary result.
@@ -203,10 +208,9 @@ async def _decide_background_coding_operation(
         ],
         "operation_limits": [
             "No original-source mutation.",
-            "No patch application without structured approval.",
-            "No shell command execution.",
             "No package installation.",
-            "No adapter delivery.",
+            "No deployment or adapter delivery.",
+            "Managed-copy preflight availability is outside this route decision.",
         ],
     }
     payload_text = json.dumps(payload, ensure_ascii=False)
@@ -961,18 +965,11 @@ async def _propose_existing_repo_change(
             source_scope=source_scope,
             reading_result=reading_result,
         )
-        repair_request["repair_feedback"] = {
-            "validation": response["validation"],
-            "previous_modification_artifacts": modifying_result.get(
-                "modification_artifacts",
-                [],
-            ),
-            "instruction": (
-                "Return a corrected complete artifact list that fixes the "
-                "validation errors. Do not repeat invalid syntax, missing "
-                "imports, unsafe paths, or no-op artifacts."
-            ),
-        }
+        repair_request["repair_feedback"] = _loop_a_repair_feedback(
+            repository=repository,
+            response=response,
+            modifying_result=modifying_result,
+        )
         trace_summary.append("modifying:repair_retry")
         modifying_result = await _maybe_await(code_modifying.run(repair_request))
         trace_summary.extend(modifying_result["trace_summary"])
@@ -1004,6 +1001,103 @@ def _write_response_needs_modifying_repair(
         return False
     errors = validation.get("errors")
     return isinstance(errors, list) and bool(errors)
+
+
+def _loop_a_repair_feedback(
+    *,
+    repository: CodeRepositoryRef,
+    response: CodingPatchProposalResponse,
+    modifying_result: dict[str, object],
+) -> dict[str, object]:
+    """Build one bounded validator-feedback payload for the existing retry."""
+
+    validation = response["validation"]
+    validator_diagnostics = [
+        item
+        for item in validation.get("errors", [])
+        if isinstance(item, str)
+    ]
+    artifacts = modifying_result.get("modification_artifacts", [])
+    refreshed_context = _refreshed_repair_context(
+        repository=repository,
+        artifacts=artifacts,
+    )
+    feedback = {
+        "validation": validation,
+        "validator_diagnostics": validator_diagnostics,
+        "refreshed_context": refreshed_context,
+        "previous_modification_artifacts": artifacts,
+        "instruction": (
+            "Return a corrected complete artifact list that fixes the exact "
+            "validator diagnostics. Use refreshed file context when an anchor "
+            "must be corrected. Do not repeat invalid syntax, missing imports, "
+            "unsafe paths, or no-op artifacts."
+        ),
+    }
+    return feedback
+
+
+def _refreshed_repair_context(
+    *,
+    repository: CodeRepositoryRef,
+    artifacts: object,
+) -> list[dict[str, object]]:
+    """Load bounded current source windows around repair artifact anchors."""
+
+    if not isinstance(artifacts, list):
+        return []
+    contexts: list[dict[str, object]] = []
+    repo_root = Path(repository["local_root"])
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            continue
+        path = artifact.get("path")
+        if not isinstance(path, str) or not _safe_context_path(path):
+            continue
+        file_path = repo_root / PurePosixPath(path)
+        if not file_path.is_file():
+            continue
+        lines = file_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        anchor = artifact.get("anchor")
+        anchor_text = anchor if isinstance(anchor, str) else ""
+        anchor_line = _anchor_line(lines, anchor_text)
+        start_line = max(1, anchor_line - REPAIR_CONTEXT_WINDOW_LINES)
+        end_line = min(len(lines), anchor_line + REPAIR_CONTEXT_WINDOW_LINES)
+        excerpt = "\n".join(lines[start_line - 1:end_line])
+        contexts.append({
+            "path": path,
+            "anchor_line": anchor_line,
+            "line_start": start_line,
+            "line_end": end_line,
+            "excerpt": excerpt,
+        })
+        if len(contexts) >= MAX_REPAIR_CONTEXT_WINDOWS:
+            break
+    return contexts
+
+
+def _safe_context_path(path: str) -> bool:
+    """Allow only non-hidden repository-relative paths in repair context."""
+
+    path_value = PurePosixPath(path.replace("\\", "/"))
+    if path_value.is_absolute() or ".." in path_value.parts:
+        return False
+    if ".git" in path_value.parts or ".env" in path_value.parts:
+        return False
+    return bool(path_value.parts)
+
+
+def _anchor_line(lines: list[str], anchor: str) -> int:
+    """Find an exact anchor line or choose the nearest stable file boundary."""
+
+    if anchor:
+        anchor_first_line = anchor.splitlines()[0]
+        for index, line in enumerate(lines, start=1):
+            if line == anchor_first_line:
+                return index
+    if not lines:
+        return 1
+    return 1
 
 
 def _modifying_request(

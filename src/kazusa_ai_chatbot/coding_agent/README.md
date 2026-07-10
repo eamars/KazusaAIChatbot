@@ -95,6 +95,12 @@ approval, and route approved verification only through the existing
 verify/repair primitive. They do not introduce a new global planning LLM or
 background-worker side effects.
 
+Proposal runs store an ordered artifact digest, monotonically increasing
+proposal revision, and deterministic execution plan. Managed-copy preflight is
+default-disabled and uses the current process-only backend when enabled; it is
+not a host sandbox. The background adapter does not own primary verification
+planning.
+
 The background-work `coding_agent` adapter has two modes:
 
 - Legacy generic delayed coding work receives no worker payload and calls

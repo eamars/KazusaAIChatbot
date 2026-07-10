@@ -4,11 +4,22 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 from kazusa_ai_chatbot.coding_agent.code_verifying import (
     verify_and_repair_code_change,
 )
+from kazusa_ai_chatbot.coding_agent.code_verifying.execution_planning import (
+    derive_base_execution_plan,
+    extract_additive_execution_specs,
+    patch_artifact_digest,
+    validate_execution_plan_binding,
+)
+from kazusa_ai_chatbot.coding_agent.code_patching.apply import (
+    materialize_managed_candidate,
+)
+from kazusa_ai_chatbot.coding_agent.code_executing import execute_code_check
+from kazusa_ai_chatbot.config import CODING_AGENT_PREFLIGHT_EXECUTION
 from kazusa_ai_chatbot.coding_agent.coding_run.ledger import (
     RUN_SCHEMA_VERSION,
     CodingRunPaths,
@@ -269,6 +280,8 @@ async def _start_propose_patch(
     ledger["alignment"] = _mapping_or_none(result.get("alignment"))
     ledger["limitations"] = result["limitations"]
     ledger["trace_summary"] = result["trace_summary"]
+    if result["status"] == "succeeded":
+        _bind_proposal_and_preflight(paths=paths, ledger=ledger, result=result)
     if result["repository"] is not None:
         _record_event(
             paths=paths,
@@ -285,7 +298,7 @@ async def _start_propose_patch(
             summary="Proposal evidence was collected.",
             public_payload={"evidence_count": len(result["evidence"])},
         )
-    if result["status"] == "succeeded":
+    if ledger["status"] == "awaiting_approval":
         _record_event(
             paths=paths,
             ledger=ledger,
@@ -410,6 +423,8 @@ async def _revise_proposal(
     ledger["limitations"] = result["limitations"]
     ledger["trace_summary"] = result["trace_summary"]
     if result["status"] == "succeeded":
+        _bind_proposal_and_preflight(paths=paths, ledger=ledger, result=result)
+    if ledger["status"] == "awaiting_approval":
         _record_event(
             paths=paths,
             ledger=ledger,
@@ -482,12 +497,30 @@ async def _approve_and_verify(
             limitation=validation_error,
         )
         return response
+    plan_error = _stored_plan_binding_error(ledger)
+    if plan_error:
+        response = _reject_continuation(
+            paths=paths,
+            ledger=ledger,
+            limitation=plan_error,
+        )
+        return response
     _record_approval(paths=paths, ledger=ledger, approval=request["approval"])
     ledger["status"] = "verifying"
     verify_request = _verify_request_from_continuation(
         ledger=ledger,
         request=request,
     )
+    execution_request = _request_text(request.get("execution_request"))
+    if execution_request:
+        candidate_root = _planning_root(paths=paths, ledger=ledger)
+        extra_specs = await extract_additive_execution_specs(
+            user_request=execution_request,
+            candidate_root=candidate_root,
+        )
+        if extra_specs:
+            base_specs = verify_request["execution_specs"]
+            verify_request["execution_specs"] = [*base_specs, *extra_specs]
     result = await verify_and_repair_code_change(verify_request)
     _record_verify_result(paths=paths, ledger=ledger, result=result)
     write_ledger(paths, ledger)
@@ -542,6 +575,7 @@ def _record_verify_result(
         ledger["alignment"] = final_alignment
     ledger["apply_attempts"] = _apply_attempts(result)
     ledger["execution_attempts"] = _execution_attempts(result)
+    ledger["blockers"] = _list_of_dicts(result.get("blockers"))
     ledger["limitations"] = _string_list(result.get("limitations"))
     ledger["trace_summary"] = _string_list(result.get("trace_summary"))
     for attempt in ledger["attempts"]:
@@ -568,6 +602,185 @@ def _record_verify_result(
             public_payload={"attempt": attempt},
         )
     _record_terminal_event(paths=paths, ledger=ledger)
+
+
+def _bind_proposal_and_preflight(
+    *,
+    paths: CodingRunPaths,
+    ledger: CodingRunLedger,
+    result: Mapping[str, object],
+) -> None:
+    """Bind the current proposal to one deterministic plan and candidate run."""
+
+    patch_artifacts = ledger["patch_artifacts"]
+    ledger["proposal_revision"] += 1
+    artifact_digest = patch_artifact_digest(patch_artifacts)
+    ledger["patch_artifact_digest"] = artifact_digest
+    source_identity = _proposal_source_identity(ledger)
+    candidate_baseline = _candidate_baseline(result)
+    execution_plan = derive_base_execution_plan(
+        candidate_root=_planning_root(paths=paths, ledger=ledger),
+        patch_artifacts=patch_artifacts,
+        run_id=ledger["run_id"],
+        source_identity=source_identity,
+        proposal_revision=ledger["proposal_revision"],
+    )
+    ledger["execution_plan"] = execution_plan
+    candidate_response = _materialize_preflight_candidate(
+        paths=paths,
+        ledger=ledger,
+        source_identity=source_identity,
+        candidate_baseline=candidate_baseline,
+    )
+    if candidate_response is None:
+        ledger["preflight"] = {
+            "preflight_enabled": False,
+            "execution_backend": "managed_copy_process",
+            "status": "disabled",
+        }
+        return
+    if candidate_response["status"] != "succeeded":
+        ledger["status"] = "failed"
+        ledger["preflight"] = {
+            "preflight_enabled": True,
+            "execution_backend": "managed_copy_process",
+            "status": "failed",
+            "limitations": candidate_response["limitations"],
+        }
+        ledger["limitations"].extend(candidate_response["limitations"])
+        return
+    execution_results = _run_preflight_specs(
+        workspace_root=paths.workspace_root,
+        candidate_response=candidate_response,
+        execution_plan=execution_plan,
+    )
+    statuses = [result["status"] for result in execution_results]
+    ledger["apply_attempts"] = [{
+        "apply_package_id": candidate_response["apply_package_id"],
+        "status": candidate_response["status"],
+    }]
+    ledger["execution_attempts"] = execution_results
+    preflight_status = "passed" if all(status == "succeeded" for status in statuses) else "failed"
+    ledger["preflight"] = {
+        "preflight_enabled": True,
+        "execution_backend": "managed_copy_process",
+        "authorization_purpose": "preapproval_preflight",
+        "status": preflight_status,
+        "apply_package_id": candidate_response["apply_package_id"],
+        "execution_plan_id": execution_plan["plan_id"],
+    }
+    if preflight_status == "failed":
+        ledger["status"] = "failed"
+        ledger["limitations"].append("Preapproval verification did not succeed.")
+
+
+def _materialize_preflight_candidate(
+    *,
+    paths: CodingRunPaths,
+    ledger: CodingRunLedger,
+    source_identity: dict[str, object],
+    candidate_baseline: str,
+) -> dict[str, object] | None:
+    """Materialize the configured managed candidate without human approval."""
+
+    if not CODING_AGENT_PREFLIGHT_EXECUTION:
+        return None
+    request: dict[str, object] = {
+        "workspace_root": str(paths.workspace_root),
+        "source_identity": source_identity,
+        "expected_source_identity": source_identity,
+        "patch_artifacts": ledger["patch_artifacts"],
+        "candidate_baseline": candidate_baseline,
+        "authorization_purpose": "preapproval_preflight",
+    }
+    repository = ledger["repository"]
+    if candidate_baseline == "resolved_source" and isinstance(repository, Mapping):
+        source_root = _resolved_source_root_from_ledger(ledger)
+        if source_root is not None:
+            request["source_root"] = str(source_root)
+    response = materialize_managed_candidate(request)
+    return response
+
+
+def _proposal_source_identity(ledger: CodingRunLedger) -> dict[str, object]:
+    """Build the stable source identity stored with the current proposal."""
+
+    repository = ledger["repository"]
+    if isinstance(repository, Mapping):
+        identity = _identity_from_repository(repository)
+        return identity
+    identity = {
+        "provider": "generated",
+        "owner": None,
+        "repo": None,
+        "current_commit": f"artifact-sha256:{ledger['patch_artifact_digest']}",
+        "dirty_state": "clean",
+    }
+    return identity
+
+
+def _candidate_baseline(result: Mapping[str, object]) -> str:
+    """Choose the canonical candidate baseline from proposal ownership."""
+
+    if result.get("mode") == "source_free":
+        return "empty_source_free"
+    return "resolved_source"
+
+
+def _planning_root(*, paths: CodingRunPaths, ledger: CodingRunLedger) -> Path:
+    """Select existing source evidence for planning before optional preflight."""
+
+    repository = ledger["repository"]
+    if isinstance(repository, Mapping):
+        source_root = _resolved_source_root_from_ledger(ledger)
+        if source_root is not None:
+            return source_root
+    return paths.workspace_root
+
+
+def _resolved_source_root_from_ledger(ledger: CodingRunLedger) -> Path | None:
+    """Recover the private local checkout root from the stored source request."""
+
+    source_request = ledger["source_request"]
+    root_hint = source_request.get("local_root_hint")
+    path_hint = source_request.get("local_path_hint")
+    hint = root_hint if isinstance(root_hint, str) and root_hint else path_hint
+    if not isinstance(hint, str) or not hint:
+        return None
+    path = Path(hint).expanduser().resolve(strict=False)
+    if path.is_file():
+        path = path.parent
+    for candidate in (path, *path.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    if path.is_dir():
+        return path
+    return None
+
+
+def _run_preflight_specs(
+    *,
+    workspace_root: Path,
+    candidate_response: Mapping[str, object],
+    execution_plan: Mapping[str, object],
+) -> list[dict[str, object]]:
+    """Run the bound deterministic plan through the existing executor allowlist."""
+
+    specs_value = execution_plan.get("base_specs")
+    if not isinstance(specs_value, list):
+        return []
+    execution_results: list[dict[str, object]] = []
+    for spec in specs_value:
+        if not isinstance(spec, Mapping):
+            continue
+        result = execute_code_check({
+            "workspace_root": str(workspace_root),
+            "apply_package_id": candidate_response["apply_package_id"],
+            "apply_workspace_ref": candidate_response["apply_workspace_ref"],
+            "execution": dict(spec),
+        })
+        execution_results.append(result)
+    return execution_results
 
 
 def _record_approval(
@@ -661,6 +874,10 @@ def _initial_ledger(
         "blockers": [],
         "limitations": [],
         "trace_summary": [],
+        "proposal_revision": 0,
+        "patch_artifact_digest": "",
+        "execution_plan": None,
+        "preflight": {},
     }
     return ledger
 
@@ -709,12 +926,24 @@ def _verify_request_from_continuation(
 ) -> dict[str, object]:
     verify_request = _direct_request(ledger["source_request"])
     verify_request["approval"] = request["approval"]
-    verify_request["execution_specs"] = request["execution_specs"]
+    execution_specs = request.get("execution_specs")
+    if isinstance(execution_specs, list) and execution_specs:
+        verify_request["execution_specs"] = execution_specs
+    else:
+        execution_plan = ledger["execution_plan"]
+        if isinstance(execution_plan, Mapping):
+            base_specs = execution_plan.get("base_specs")
+            if isinstance(base_specs, list):
+                verify_request["execution_specs"] = base_specs
     verify_request["initial_patch_artifacts"] = ledger["patch_artifacts"]
     repository = ledger.get("repository")
     if isinstance(repository, Mapping):
         verify_request["expected_source_identity"] = _identity_from_repository(
             repository,
+        )
+    else:
+        verify_request["expected_source_identity"] = _proposal_source_identity(
+            ledger,
         )
     repair_attempt_limit = request.get("repair_attempt_limit")
     if repair_attempt_limit is not None:
@@ -969,10 +1198,28 @@ def _approval_continue_validation_error(request: Mapping[str, object]) -> str:
     approval_error = _approval_error(request.get("approval"))
     if approval_error:
         return approval_error
-    execution_error = _execution_specs_error(request.get("execution_specs"))
-    if execution_error:
-        return execution_error
+    execution_specs = request.get("execution_specs")
+    if execution_specs is not None:
+        execution_error = _execution_specs_error(execution_specs)
+        if execution_error:
+            return execution_error
     return ""
+
+
+def _stored_plan_binding_error(ledger: CodingRunLedger) -> str:
+    """Reject approval when the stored plan no longer matches the proposal."""
+
+    execution_plan = ledger["execution_plan"]
+    if not isinstance(execution_plan, Mapping):
+        return "Coding run is missing a proposal-bound execution plan."
+    error = validate_execution_plan_binding(
+        plan=execution_plan,
+        run_id=ledger["run_id"],
+        source_identity=_proposal_source_identity(ledger),
+        proposal_revision=ledger["proposal_revision"],
+        patch_artifact_digest=ledger["patch_artifact_digest"],
+    )
+    return error
 
 
 def _verify_request_validation_error(request: Mapping[str, object]) -> str:
@@ -1071,6 +1318,8 @@ def _terminal_status_from_verify(status: str) -> str:
         return "completed"
     if status == "rejected":
         return "rejected"
+    if status == "blocked":
+        return "blocked"
     return "failed"
 
 

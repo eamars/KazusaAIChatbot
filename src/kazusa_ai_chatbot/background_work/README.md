@@ -133,10 +133,10 @@ those actions to the coding-run supervisor and records
 `coding_run:<run_id>` reference, public changed-file summaries, attempt
 history, and allowed next actions.
 
-The durable coding path may run allowlisted verification only after explicit
-structured approval. It accepts structured `python_compileall` or focused
-`pytest` specs, or asks the coding PM route to plan those same bounded specs
-from an approval detail. It still uses managed apply copies and does not run
+The durable coding path derives its base verification plan inside `coding_run`
+from the stored proposal. The worker forwards only a bounded semantic request
+for additive verification and does not plan primary specs from approval prose.
+It still uses managed apply copies and does not run
 arbitrary shell commands, install packages, mutate original source checkouts,
 or deliver adapter text. Pytest selector paths are protected verification
 paths; stored proposal artifacts touching those paths are omitted before

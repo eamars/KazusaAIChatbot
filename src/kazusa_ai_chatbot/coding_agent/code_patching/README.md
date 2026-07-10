@@ -60,3 +60,10 @@ filesystem roots or command output.
 trusted verify-and-repair request. Each attempt must create a fresh managed
 apply workspace; failed or timed-out verification does not authorize continued
 mutation inside a previous apply copy.
+
+`materialize_managed_candidate(...)` is internal. Its
+`approved_verification` purpose requires structured human approval, while
+`preapproval_preflight` is available only when explicitly enabled in
+deployment. `resolved_source` copies a resolved checkout and
+`empty_source_free` creates a Git-backed candidate for generated artifacts.
+Managed copies provide process containment, not an operating-system sandbox.

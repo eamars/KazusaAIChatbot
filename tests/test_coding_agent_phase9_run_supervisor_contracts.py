@@ -223,6 +223,61 @@ async def test_proposal_start_waits_for_approval_without_verification(
     assert "awaiting_approval" in event_types
 
 
+async def test_proposal_preflight_uses_managed_candidate_and_bound_plan(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Enabled preflight verifies the proposal without mutating its source root."""
+
+    from kazusa_ai_chatbot.coding_agent import start_coding_run
+    from kazusa_ai_chatbot.coding_agent.code_patching import apply
+    from kazusa_ai_chatbot.coding_agent.code_patching.patch_operations import (
+        compile_patch_operations,
+    )
+    from kazusa_ai_chatbot.coding_agent.coding_run import supervisor
+
+    request = _proposal_request(tmp_path)
+    source_root = Path(request["local_root_hint"])
+    request["local_path_hint"] = request.pop("local_root_hint")
+    tests_root = source_root / "tests"
+    tests_root.mkdir()
+    (tests_root / "test_app.py").write_text(
+        "from app import VALUE\n\n\ndef test_value():\n    assert VALUE == 2\n",
+        encoding="utf-8",
+    )
+    artifacts, _, _, errors = compile_patch_operations(
+        repo_root=source_root,
+        patch_operations=[{
+            "operation_id": "replace-value",
+            "kind": "replace",
+            "path": "app.py",
+            "anchor": "VALUE = 1\n",
+            "content": "VALUE = 2\n",
+            "summary": "Replace value.",
+        }],
+        max_files=4,
+        max_diff_chars=4000,
+    )
+    assert errors == []
+
+    async def fake_propose(_request: dict[str, object]) -> dict[str, object]:
+        response = _proposal_response()
+        response["patch_artifacts"] = artifacts
+        return response
+
+    monkeypatch.setattr(supervisor, "propose_code_change", fake_propose)
+    monkeypatch.setattr(supervisor, "CODING_AGENT_PREFLIGHT_EXECUTION", True)
+    monkeypatch.setattr(apply, "CODING_AGENT_PREFLIGHT_EXECUTION", True)
+
+    response = await start_coding_run(request)
+
+    assert response["status"] == "awaiting_approval"
+    assert response["preflight"]["status"] == "passed"
+    assert response["execution_plan"] is not None
+    assert response["execution_attempts"]
+    assert (source_root / "app.py").read_text(encoding="utf-8") == "VALUE = 1\n"
+
+
 async def test_cancel_non_terminal_run_persists_cancelled(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

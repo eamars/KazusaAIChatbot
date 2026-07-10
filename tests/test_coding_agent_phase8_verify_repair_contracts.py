@@ -68,19 +68,39 @@ async def test_verify_repair_rejects_missing_approval(tmp_path: Path) -> None:
     assert any("approval" in item.casefold() for item in response["limitations"])
 
 
-async def test_verify_repair_rejects_source_free_request(tmp_path: Path) -> None:
-    """Verification targets source-backed repair only."""
+async def test_verify_repair_accepts_source_free_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Source-free proposals use the same managed candidate executor path."""
 
+    from kazusa_ai_chatbot.coding_agent.code_verifying import supervisor
     from kazusa_ai_chatbot.coding_agent import verify_and_repair_code_change
 
     request = _request(tmp_path)
     request.pop("local_root_hint")
 
+    def fake_materialize(request: dict[str, object]) -> dict[str, object]:
+        assert request["candidate_baseline"] == "empty_source_free"
+        assert request["authorization_purpose"] == "approved_verification"
+        return _apply_response(
+            apply_package_id="apply-source-free",
+            changed_paths=["app.py"],
+        )
+
+    def fake_execute(request: dict[str, object]) -> dict[str, object]:
+        return _execution_response(status="succeeded")
+
+    monkeypatch.setattr(
+        supervisor,
+        "materialize_managed_candidate",
+        fake_materialize,
+    )
+    monkeypatch.setattr(supervisor, "execute_code_check", fake_execute)
     response = await verify_and_repair_code_change(request)
 
-    assert response["status"] == "rejected"
-    assert response["attempts"] == []
-    assert any("source" in item.casefold() for item in response["limitations"])
+    assert response["status"] == "succeeded"
+    assert response["attempts"][0]["apply_package_id"] == "apply-source-free"
 
 
 async def test_verify_repair_rejects_unsupported_execution_spec(
@@ -324,6 +344,50 @@ async def test_verify_repair_reports_terminal_timeout(
 
     assert response["status"] == "timed_out"
     assert response["attempts"][0]["execution_statuses"] == ["timed_out"]
+
+
+async def test_verify_repair_blocks_missing_external_dependency_without_repair(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Missing external modules block verification before repair generation."""
+
+    from kazusa_ai_chatbot.coding_agent.code_verifying import supervisor
+    from kazusa_ai_chatbot.coding_agent import verify_and_repair_code_change
+
+    source_root = _source_root(tmp_path)
+    proposal_calls: list[dict[str, object]] = []
+
+    async def fake_fetch(request: dict[str, object]) -> dict[str, object]:
+        return _fetching_result(source_root)
+
+    def fake_apply(request: dict[str, object]) -> dict[str, object]:
+        return _apply_response(
+            apply_package_id="apply-dependency",
+            changed_paths=["app.py"],
+        )
+
+    def fake_execute(request: dict[str, object]) -> dict[str, object]:
+        response = _execution_response(status="failed")
+        response["stderr_excerpt"] = (
+            "ModuleNotFoundError: No module named 'yaml'"
+        )
+        return response
+
+    async def fake_propose(request: dict[str, object]) -> dict[str, object]:
+        proposal_calls.append(request)
+        return _proposal_response([INITIAL_ARTIFACT])
+
+    monkeypatch.setattr(supervisor.code_fetching, "run", fake_fetch)
+    monkeypatch.setattr(supervisor, "apply_approved_patch", fake_apply)
+    monkeypatch.setattr(supervisor, "execute_code_check", fake_execute)
+    monkeypatch.setattr(supervisor, "propose_code_change", fake_propose)
+
+    response = await verify_and_repair_code_change(_request(tmp_path))
+
+    assert response["status"] == "blocked"
+    assert response["blockers"][0]["code"] == "environment_dependency_missing"
+    assert proposal_calls == []
 
 
 async def test_verify_repair_updates_required_paths_after_each_repair(

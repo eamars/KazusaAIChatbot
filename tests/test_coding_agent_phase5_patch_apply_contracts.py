@@ -237,6 +237,44 @@ def test_patch_apply_public_response_is_sanitized(tmp_path: Path) -> None:
     assert "diff --git" not in serialized
 
 
+def test_preflight_candidate_rejects_disabled_flag_and_keeps_approval_contract(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Preflight has separate authority while public apply still needs approval."""
+
+    from kazusa_ai_chatbot.coding_agent.code_patching import apply
+
+    source_root = _source_root(tmp_path)
+    source_identity = _source_identity()
+    monkeypatch.setattr(apply, "CODING_AGENT_PREFLIGHT_EXECUTION", False)
+
+    response = apply.materialize_managed_candidate({
+        "workspace_root": str(tmp_path / "workspace"),
+        "source_root": str(source_root),
+        "source_identity": source_identity,
+        "expected_source_identity": source_identity,
+        "patch_artifacts": _patch_artifacts(source_root),
+        "authorization_purpose": "preapproval_preflight",
+        "max_files": MAX_FILES,
+        "max_diff_chars": MAX_DIFF_CHARS,
+    })
+    public_response = apply.apply_approved_patch({
+        "workspace_root": str(tmp_path / "workspace"),
+        "source_root": str(source_root),
+        "source_identity": source_identity,
+        "expected_source_identity": source_identity,
+        "patch_artifacts": _patch_artifacts(source_root),
+        "max_files": MAX_FILES,
+        "max_diff_chars": MAX_DIFF_CHARS,
+    })
+
+    assert response["status"] == "rejected"
+    assert "disabled" in response["limitations"][0]
+    assert public_response["status"] == "rejected"
+    assert "approval" in public_response["limitations"][0].casefold()
+
+
 def _source_root(tmp_path: Path) -> Path:
     source_root = tmp_path / "source"
     source_root.mkdir()

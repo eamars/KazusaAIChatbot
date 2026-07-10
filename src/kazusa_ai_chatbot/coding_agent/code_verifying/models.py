@@ -20,7 +20,13 @@ from kazusa_ai_chatbot.coding_agent.models import (
     SourceKind,
 )
 
-VerifyRepairStatus = Literal["succeeded", "failed", "rejected", "timed_out"]
+VerifyRepairStatus = Literal[
+    "succeeded",
+    "failed",
+    "rejected",
+    "timed_out",
+    "blocked",
+]
 
 
 class ExecutionRepairFeedback(TypedDict):
@@ -89,6 +95,7 @@ class CodingVerifyRepairResponse(TypedDict):
     final_changed_files: list[ChangedFileSummary]
     final_apply: CodingPatchApplyResponse | None
     final_execution: list[CodeExecutionResponse]
+    blockers: list[dict[str, object]]
     limitations: list[str]
     trace_summary: list[str]
     trace: NotRequired[dict[str, object]]

@@ -12,6 +12,11 @@ PatchOperationKind = Literal[
     "replace_file_small",
 ]
 PatchPackageStatus = Literal["succeeded", "failed", "rejected"]
+CandidateBaseline = Literal["resolved_source", "empty_source_free"]
+CandidateAuthorizationPurpose = Literal[
+    "preapproval_preflight",
+    "approved_verification",
+]
 
 
 class PatchArtifact(TypedDict):
@@ -110,6 +115,8 @@ class CodingPatchApplyRequest(TypedDict, total=False):
     approval: PatchApplyApproval
     max_files: int
     max_diff_chars: int
+    candidate_baseline: CandidateBaseline
+    authorization_purpose: CandidateAuthorizationPurpose
 
 
 class CodingPatchApplyResponse(TypedDict):

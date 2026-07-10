@@ -514,6 +514,51 @@ async def test_background_operation_keeps_source_free_artifact_as_writing(
 
 
 @pytest.mark.asyncio
+async def test_background_operation_routes_managed_preflight_patch_to_modifying(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """Managed-copy preflight keeps its semantic existing-source patch route."""
+
+    from kazusa_ai_chatbot.coding_agent import supervisor
+
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+
+    async def fake_ainvoke(
+        messages: list[object],
+        *,
+        config: object,
+    ) -> SimpleNamespace:
+        prompt = messages[0].content
+        assert "managed-copy\n  preflight" in prompt.casefold()
+        payload = json.loads(messages[-1].content)
+        assert "preflight" in payload["task"].casefold()
+        assert "enabled" not in json.dumps(payload["operation_limits"]).casefold()
+        return SimpleNamespace(
+            content=json.dumps({
+                "operation": "code_modifying",
+                "reason": "The task is an existing-source patch proposal.",
+            }),
+        )
+
+    monkeypatch.setattr(
+        supervisor._background_coding_router_llm,
+        "ainvoke",
+        fake_ainvoke,
+    )
+
+    operation, _ = await supervisor.decide_background_coding_operation({
+        "question": "Fix the parser and preflight the patch in a managed copy.",
+        "local_root_hint": str(source_root),
+        "source_scope_hint": "repository",
+        "workspace_root": str(tmp_path / "workspace"),
+    })
+
+    assert operation == "code_modifying"
+
+
+@pytest.mark.asyncio
 async def test_coding_worker_start_payload_preserves_visible_local_path_hint(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
@@ -680,11 +725,11 @@ async def test_coding_worker_summary_payload_continues_without_execution(
 
 
 @pytest.mark.asyncio
-async def test_coding_worker_approval_payload_continues_with_execution_specs(
+async def test_coding_worker_approval_payload_forwards_semantic_extra_request(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
-    """Approval payloads should call continue_coding_run with safe specs."""
+    """Approval payloads leave primary verification planning to coding_run."""
 
     from kazusa_ai_chatbot.background_work.subagent import coding_agent
 
@@ -728,13 +773,8 @@ async def test_coding_worker_approval_payload_continues_with_execution_specs(
     assert continue_request["action"] == "approve_and_verify"
     assert continue_request["approval"]["approved"] is True
     assert continue_request["approval"]["approved_by"] == "global-user-001"
-    assert continue_request["execution_specs"] == [
-        {
-            "tool": "pytest",
-            "pytest_selectors": ["tests/test_slug_tools.py"],
-            "timeout_seconds": 20,
-        }
-    ]
+    assert continue_request["execution_request"] == "Run focused pytest."
+    assert "execution_specs" not in continue_request
 
 
 @pytest.mark.asyncio

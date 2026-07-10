@@ -5,6 +5,11 @@ does not add a new LLM role. It persists run state, validates deterministic
 transitions, and composes the existing reading, proposal, apply, execution,
 and verify/repair primitives.
 
+Each proposal stores a monotonic revision, ordered artifact digest, and a
+proposal-bound execution plan. With `CODING_AGENT_PREFLIGHT_EXECUTION` enabled,
+the run records managed-copy preflight evidence for the current process-only
+execution backend. The flag remains disabled by default.
+
 Public APIs:
 
 ```python

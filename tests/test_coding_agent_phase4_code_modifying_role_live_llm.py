@@ -334,13 +334,6 @@ def test_modifying_pm_contract_lifecycle_decisions_recorded() -> None:
             "required_evidence_ids": [],
         },
         {
-            "status": "create_child_pm",
-            "reason": "Split store and API analysis.",
-            "owned_paths": ["issue_tracker/store.py"],
-            "read_only_paths": ["issue_tracker/api.py"],
-            "required_evidence_ids": ["evidence-1"],
-        },
-        {
             "status": "create_programmer_task",
             "reason": "Evidence is sufficient for a bounded edit.",
             "owned_paths": ["log_counter.py"],
@@ -415,7 +408,6 @@ def test_modifying_pm_contract_lifecycle_decisions_recorded() -> None:
     statuses = [decision["status"] for decision in normalized]
     assert statuses == [
         "request_information",
-        "create_child_pm",
         "create_programmer_task",
         "repair_child",
         "complete",
