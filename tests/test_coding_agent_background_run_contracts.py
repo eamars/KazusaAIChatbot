@@ -95,7 +95,7 @@ async def test_accepted_coding_task_execution_enqueues_requested_worker(
     queued = queued_requests[0]
     assert queued["requested_worker"] == "coding_agent"
     assert queued["worker_payload"] == {
-        "schema_version": "coding_agent_worker_payload.v1",
+        "schema_version": "coding_agent_worker_payload.v2",
         "operation": "start",
         "task_brief": "Add slugify tests.",
         "coding_run_ref": "",
@@ -142,6 +142,20 @@ def test_l2d_materializes_coding_summary_action() -> None:
     )
 
     assert action_spec["params"]["coding_action"] == "summarize"
+    assert action_spec["params"]["coding_run_ref"] == "coding_run:run-001"
+    result = ActionSpecEvaluator().evaluate(action_spec)
+    assert result["ok"] is True
+
+
+def test_l2d_materializes_coding_blocker_response_action() -> None:
+    """A resumable blocker response is an executable durable action."""
+
+    action_spec = _materialized_coding_action(
+        "respond_to_blocker",
+        coding_run_ref="coding_run:run-001",
+    )
+
+    assert action_spec["params"]["coding_action"] == "respond_to_blocker"
     assert action_spec["params"]["coding_run_ref"] == "coding_run:run-001"
     result = ActionSpecEvaluator().evaluate(action_spec)
     assert result["ok"] is True
@@ -195,31 +209,70 @@ def test_l2d_stage_preserves_coding_followup_fields() -> None:
     ]
 
 
-def test_coding_followup_requires_prompt_safe_run_ref() -> None:
-    """Approval, status, and cancellation must bind a coding run ref."""
+def test_coding_followup_uniquely_binds_current_prompt_safe_run_ref() -> None:
+    """A ref-less continuation binds the only eligible current run."""
 
     action_spec = _materialized_coding_action("approve_and_verify")
 
     result = ActionSpecEvaluator().evaluate(action_spec)
 
-    assert result["ok"] is False
-    assert any("coding_run_ref" in error for error in result["errors"])
+    assert action_spec["params"]["coding_run_ref"] == "coding_run:run-001"
+    assert result["ok"] is True
 
 
-def test_coding_revision_requires_prompt_safe_run_ref() -> None:
-    """Revision and summary actions must bind a coding run ref."""
+def test_coding_revision_uniquely_binds_current_prompt_safe_run_ref() -> None:
+    """Revision and summary bind the only eligible current run."""
 
     for decision in ("revise_proposal", "summarize"):
         action_spec = _materialized_coding_action(decision)
 
         result = ActionSpecEvaluator().evaluate(action_spec)
 
-        assert result["ok"] is False
-        assert any("coding_run_ref" in error for error in result["errors"])
+        assert action_spec["params"]["coding_run_ref"] == "coding_run:run-001"
+        assert result["ok"] is True
 
 
-def test_coding_followup_recovers_visible_run_ref_from_detail() -> None:
-    """Visible prompt-safe run refs should survive weak L2d fielding."""
+def test_coding_approval_rejects_missing_message_quote() -> None:
+    """Approval requires a non-empty current user-message quote."""
+
+    action_spec = _materialized_coding_action("approve_and_verify")
+    action_spec["params"]["approval_evidence"]["quote"] = ""
+
+    result = ActionSpecEvaluator().evaluate(action_spec)
+
+    assert result["ok"] is False
+    assert any("approval_evidence.quote" in error for error in result["errors"])
+
+
+def test_coding_approval_rejects_non_user_or_mismatched_evidence() -> None:
+    """Approval provenance must match the current user-message scope exactly."""
+
+    action_spec = _materialized_coding_action("approve_and_verify")
+    action_spec["params"]["approval_evidence"]["source_trigger_source"] = (
+        "accepted_task_result_ready"
+    )
+    non_user_result = ActionSpecEvaluator().evaluate(action_spec)
+
+    action_spec = _materialized_coding_action("approve_and_verify")
+    action_spec["params"]["approval_evidence"]["requester_global_user_id"] = (
+        "other-user"
+    )
+    mismatched_result = ActionSpecEvaluator().evaluate(action_spec)
+
+    assert non_user_result["ok"] is False
+    assert mismatched_result["ok"] is False
+    assert any(
+        "source_trigger_source" in error
+        for error in non_user_result["errors"]
+    )
+    assert any(
+        "scope mismatch" in error
+        for error in mismatched_result["errors"]
+    )
+
+
+def test_coding_followup_does_not_scan_user_text_for_run_ref() -> None:
+    """A raw user-text ref cannot choose between multiple offered runs."""
 
     requests = [
         {
@@ -230,16 +283,23 @@ def test_coding_followup_recovers_visible_run_ref_from_detail() -> None:
         }
     ]
 
-    specs = materialize_semantic_action_requests(requests, _cognition_state())
+    state = _cognition_state()
+    state["action_selection_context"] = {
+        "coding_runs": [
+            *state["action_selection_context"]["coding_runs"],
+            {
+                "coding_run_ref": "coding_run:run-002",
+                "allowed_next_actions": ["status"],
+            },
+        ],
+    }
+    specs = materialize_semantic_action_requests(requests, state)
 
-    assert len(specs) == 1
-    assert specs[0]["params"]["coding_run_ref"] == "coding_run:run-001"
-    result = ActionSpecEvaluator().evaluate(specs[0])
-    assert result["ok"] is True
+    assert specs == []
 
 
-def test_coding_revision_recovers_visible_run_ref_from_detail() -> None:
-    """Revision details should recover prompt-safe run refs."""
+def test_coding_revision_does_not_scan_user_text_for_run_ref() -> None:
+    """A raw user-text ref cannot authorize an offered continuation."""
 
     requests = [
         {
@@ -253,12 +313,11 @@ def test_coding_revision_recovers_visible_run_ref_from_detail() -> None:
         }
     ]
 
-    specs = materialize_semantic_action_requests(requests, _cognition_state())
+    state = _cognition_state()
+    state["action_selection_context"] = {"coding_runs": []}
+    specs = materialize_semantic_action_requests(requests, state)
 
-    assert len(specs) == 1
-    assert specs[0]["params"]["coding_run_ref"] == "coding_run:run-001"
-    result = ActionSpecEvaluator().evaluate(specs[0])
-    assert result["ok"] is True
+    assert specs == []
 
 
 @pytest.mark.asyncio
@@ -274,7 +333,7 @@ async def test_queue_rejects_malformed_coding_requested_worker_payload() -> None
         await jobs.enqueue_background_work_request(request)
 
     request["worker_payload"] = {
-        "schema_version": "coding_agent_worker_payload.v1",
+        "schema_version": "coding_agent_worker_payload.v2",
         "operation": "shell",
         "task_brief": "Run arbitrary shell.",
     }
@@ -300,7 +359,7 @@ async def test_queue_accepts_revision_and_summary_payloads(
         request = _queue_request()
         request["requested_worker"] = "coding_agent"
         request["worker_payload"] = {
-            "schema_version": "coding_agent_worker_payload.v1",
+            "schema_version": "coding_agent_worker_payload.v2",
             "operation": operation,
             "task_brief": "Revise or summarize a coding run.",
             "coding_run_ref": "coding_run:run-001",
@@ -338,7 +397,7 @@ async def test_coding_worker_start_payload_starts_durable_run(
 
     result = await coding_agent.execute(
         _worker_decision({
-            "schema_version": "coding_agent_worker_payload.v1",
+            "schema_version": "coding_agent_worker_payload.v2",
             "operation": "start",
             "task_brief": "Modify slugify behavior.",
             "coding_run_ref": "",
@@ -350,7 +409,7 @@ async def test_coding_worker_start_payload_starts_durable_run(
     assert result["status"] == "succeeded"
     assert "coding_run:run-001" in result["artifact_text"]
     assert result["worker_metadata"]["schema_version"] == (
-        "coding_agent_worker_metadata.v2"
+        "coding_agent_worker_metadata.v3"
     )
     assert result["worker_metadata"]["coding_run_status"] == "awaiting_approval"
     start_request = start.await_args.args[0]
@@ -400,7 +459,7 @@ async def test_coding_worker_start_metadata_projects_created_files_and_alignment
 
     result = await coding_agent.execute(
         _worker_decision({
-            "schema_version": "coding_agent_worker_payload.v1",
+            "schema_version": "coding_agent_worker_payload.v2",
             "operation": "start",
             "task_brief": "Modify slugify behavior.",
             "coding_run_ref": "",
@@ -589,7 +648,7 @@ async def test_coding_worker_start_payload_preserves_visible_local_path_hint(
 
     result = await coding_agent.execute(
         _worker_decision({
-            "schema_version": "coding_agent_worker_payload.v1",
+            "schema_version": "coding_agent_worker_payload.v2",
             "operation": "start",
             "task_brief": task_brief,
             "coding_run_ref": "",
@@ -648,7 +707,7 @@ async def test_coding_worker_revision_payload_continues_without_execution(
 
     result = await coding_agent.execute(
         _worker_decision({
-            "schema_version": "coding_agent_worker_payload.v1",
+            "schema_version": "coding_agent_worker_payload.v2",
             "operation": "revise_proposal",
             "task_brief": "Keep tests unchanged; revise runtime files only.",
             "coding_run_ref": "coding_run:run-001",
@@ -701,7 +760,7 @@ async def test_coding_worker_summary_payload_continues_without_execution(
 
     result = await coding_agent.execute(
         _worker_decision({
-            "schema_version": "coding_agent_worker_payload.v1",
+            "schema_version": "coding_agent_worker_payload.v2",
             "operation": "summarize",
             "task_brief": "Summarize changed files.",
             "coding_run_ref": "coding_run:run-001",
@@ -748,7 +807,7 @@ async def test_coding_worker_approval_payload_forwards_semantic_extra_request(
 
     result = await coding_agent.execute(
         _worker_decision({
-            "schema_version": "coding_agent_worker_payload.v1",
+            "schema_version": "coding_agent_worker_payload.v2",
             "operation": "approve_and_verify",
             "task_brief": "Approved; run focused pytest.",
             "coding_run_ref": "coding_run:run-001",
@@ -762,6 +821,13 @@ async def test_coding_worker_approval_payload_forwards_semantic_extra_request(
             ],
             "source_scope": {"source_user_id": "global-user-001"},
             "storage_timestamp_utc": "2026-07-09T01:00:00+00:00",
+            "approval_evidence": {
+                "source_message_id": "message-001",
+                "source_trigger_source": "user_message",
+                "requester_global_user_id": "global-user-001",
+                "quote": "Approved; run focused pytest.",
+                "storage_timestamp_utc": "2026-07-09T01:00:00+00:00",
+            },
         }),
         max_output_chars=1000,
     )
@@ -773,8 +839,49 @@ async def test_coding_worker_approval_payload_forwards_semantic_extra_request(
     assert continue_request["action"] == "approve_and_verify"
     assert continue_request["approval"]["approved"] is True
     assert continue_request["approval"]["approved_by"] == "global-user-001"
+    assert continue_request["approval"]["approval_evidence"] == {
+        "source_message_id": "message-001",
+        "source_trigger_source": "user_message",
+        "requester_global_user_id": "global-user-001",
+        "quote": "Approved; run focused pytest.",
+        "storage_timestamp_utc": "2026-07-09T01:00:00+00:00",
+    }
     assert continue_request["execution_request"] == "Run focused pytest."
     assert "execution_specs" not in continue_request
+
+
+@pytest.mark.asyncio
+async def test_coding_worker_rejects_approval_without_evidence_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """Worker approval never fabricates requester or timestamp provenance."""
+
+    from kazusa_ai_chatbot.background_work.subagent import coding_agent
+
+    continue_run = AsyncMock()
+    monkeypatch.setattr(
+        coding_agent,
+        "CODING_AGENT_WORKSPACE_ROOT",
+        str(tmp_path / "workspace"),
+    )
+    monkeypatch.setattr(coding_agent, "continue_coding_run", continue_run)
+
+    result = await coding_agent.execute(
+        _worker_decision({
+            "schema_version": "coding_agent_worker_payload.v2",
+            "operation": "approve_and_verify",
+            "task_brief": "Approved; run focused pytest.",
+            "coding_run_ref": "coding_run:run-001",
+            "execution_request": "Run focused pytest.",
+            "source_scope": {"source_user_id": "global-user-001"},
+            "storage_timestamp_utc": "2026-07-09T01:00:00+00:00",
+        }),
+        max_output_chars=1000,
+    )
+
+    assert result["status"] == "rejected"
+    assert continue_run.await_count == 0
 
 
 @pytest.mark.asyncio
@@ -793,7 +900,7 @@ async def test_worker_tick_dispatches_requested_coding_worker(
         "source_context": "User accepted durable coding work.",
         "requested_worker": "coding_agent",
         "worker_payload": {
-            "schema_version": "coding_agent_worker_payload.v1",
+            "schema_version": "coding_agent_worker_payload.v2",
             "operation": "start",
             "task_brief": "Modify slugify behavior.",
             "coding_run_ref": "",
@@ -815,8 +922,20 @@ async def test_worker_tick_dispatches_requested_coding_worker(
         "failure_summary": "",
         "result_summary": "coding_agent run; start; awaiting_approval",
         "worker_metadata": {
-            "schema_version": "coding_agent_worker_metadata.v2",
+            "schema_version": "coding_agent_worker_metadata.v3",
             "coding_run_ref": "coding_run:run-001",
+            "coding_run_context": {
+                "schema_version": "coding_run_context.v1",
+                "coding_run_ref": "coding_run:run-001",
+                "status": "awaiting_approval",
+                "objective_summary": "Modify slugify behavior.",
+                "allowed_next_actions": ["approve_and_verify", "cancel"],
+                "active_blocker": None,
+                "followup_open": True,
+                "updated_at": "2026-07-10T00:00:00Z",
+                "execution_specs": [{"tool": "pytest"}],
+                "approval_evidence": {"quote": "private"},
+            },
         },
     })
     monkeypatch.setattr(
@@ -835,10 +954,11 @@ async def test_worker_tick_dispatches_requested_coding_worker(
         "mark_accepted_task_running",
         AsyncMock(),
     )
+    mark_result_ready = AsyncMock()
     monkeypatch.setattr(
         worker_module,
         "mark_accepted_task_result_ready",
-        AsyncMock(),
+        mark_result_ready,
     )
     monkeypatch.setattr(
         worker_module,
@@ -861,6 +981,10 @@ async def test_worker_tick_dispatches_requested_coding_worker(
     assert dispatch_decision["worker_payload"]["source_action_attempt_id"] == (
         "action_attempt:coding-001"
     )
+    persisted_context = mark_result_ready.await_args.kwargs["coding_run_context"]
+    assert persisted_context is not None
+    assert "execution_specs" not in persisted_context
+    assert "approval_evidence" not in persisted_context
 
 
 def _materialized_coding_action(
@@ -897,6 +1021,33 @@ def _cognition_state() -> dict[str, object]:
         "character_profile": {
             "name": "Test Character",
             "global_user_id": "character-global-001",
+        },
+        "cognitive_episode": {
+            "trigger_source": "user_message",
+            "storage_timestamp_utc": "2026-07-09T01:00:00+00:00",
+            "target_scope": {
+                "current_global_user_id": "global-user-001",
+            },
+            "origin_metadata": {
+                "platform_message_id": "message-001",
+            },
+            "percepts": [{
+                "input_source": "dialog_text",
+                "content": "Add slugify tests.",
+            }],
+        },
+        "action_selection_context": {
+            "coding_runs": [{
+                "coding_run_ref": "coding_run:run-001",
+                "allowed_next_actions": [
+                    "revise_proposal",
+                    "summarize",
+                    "status",
+                    "approve_and_verify",
+                    "respond_to_blocker",
+                    "cancel",
+                ],
+            }],
         },
         "conversation_progress": {},
     }

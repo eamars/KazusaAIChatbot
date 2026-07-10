@@ -176,6 +176,8 @@ class CognitionState(TypedDict):
     past_dialog_cognition_context: NotRequired[str]
     interaction_style_context: NotRequired[dict]
     group_engagement_action_context: NotRequired[dict]
+    action_selection_context: NotRequired[dict]
+    coding_run_followup: NotRequired[dict]
     selected_text_surface_intent: NotRequired[str]
 
     decontexualized_input: str

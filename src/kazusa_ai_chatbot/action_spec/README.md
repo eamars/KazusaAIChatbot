@@ -116,9 +116,11 @@ state stay out of L2d and L3 prompts.
 Durable coding-agent work uses `accepted_coding_task_request` instead of the
 generic delayed-work route. L2d selects one closed semantic coding action:
 `start`, `revise_proposal`, `summarize`, `status`, `approve_and_verify`, or
-`cancel`. Deterministic validation requires a prompt-safe
+`respond_to_blocker`, or `cancel`. Deterministic validation requires a prompt-safe
 `coding_run:<run_id>` reference for revision, summary, status, approval, and
-cancellation. The handler then queues `requested_worker="coding_agent"` with a
+cancellation or blocker response. Each continuation must also be present in
+that offered run's `allowed_next_actions`. The handler then queues
+`requested_worker="coding_agent"` with a
 versioned worker payload. The worker maps that payload onto
 `start_coding_run(...)`, `get_coding_run(...)`, or `continue_coding_run(...)`.
 Execution specs are accepted only as structured allowlisted checks or planned

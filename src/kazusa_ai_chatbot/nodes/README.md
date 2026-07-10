@@ -122,6 +122,13 @@ final text as `SurfaceOutputV1(surface_kind="text")`. When no visible surface
 is selected, the graph may still produce private finalization or action results
 for consolidation without fabricating user-visible dialog.
 
+For a user-message turn, persona cognition loads at most three newest open
+`coding_run_context.v1` records for the trusted requester/channel scope. L2d
+uses each run's current allowed actions to select a semantic continuation;
+materialization binds only offered refs and never scans user text for one. L3
+receives only a ref-free blocker or ambiguity follow-up summary, so visible
+wording can ask the stored blocker question without exposing execution data.
+
 Memory lifecycle is also split by ownership. L2d may select
 `memory_lifecycle_update` when the current turn might affect an active
 commitment, but it does not choose a commitment, alias, database id, or lifecycle

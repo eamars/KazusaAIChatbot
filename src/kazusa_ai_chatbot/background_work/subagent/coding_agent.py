@@ -21,7 +21,6 @@ from kazusa_ai_chatbot.config import (
     BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
     CODING_AGENT_WORKSPACE_ROOT,
 )
-from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
 
 WORKER = "coding_agent"
 DESCRIPTION = (
@@ -30,7 +29,7 @@ DESCRIPTION = (
     "not apply patches, execute commands, install packages, or deliver "
     "adapter text directly."
 )
-CODING_AGENT_WORKER_PAYLOAD_VERSION = "coding_agent_worker_payload.v1"
+CODING_AGENT_WORKER_PAYLOAD_VERSION = "coding_agent_worker_payload.v2"
 CODING_RUN_REF_PREFIX = "coding_run:"
 _LOCAL_PATH_RE = re.compile(
     r"(?<![A-Za-z0-9_.-])"
@@ -134,6 +133,7 @@ async def _execute_coding_run_payload(
         "revise_proposal",
         "summarize",
         "approve_and_verify",
+        "respond_to_blocker",
         "cancel",
     ):
         result = await _continue_coding_run_from_payload(
@@ -264,11 +264,23 @@ async def _continue_coding_run_from_payload(
             worker_payload,
             "task_brief",
         )
+    if operation == "respond_to_blocker":
+        request["revision_instruction"] = _payload_text(
+            worker_payload,
+            "task_brief",
+        )
     if operation == "approve_and_verify":
-        request["approval"] = _approval_from_payload(
+        approval = _approval_from_payload(
             decision,
             worker_payload=worker_payload,
         )
+        if approval is None:
+            result = _failure_result(
+                status="rejected",
+                summary="Coding run approval requires trusted user-message evidence.",
+            )
+            return result
+        request["approval"] = approval
         request["execution_request"] = _payload_text(
             worker_payload,
             "execution_request",
@@ -323,7 +335,7 @@ def _map_coding_run_response(
             worker_operation=worker_operation,
         ),
         "worker_metadata": {
-            "schema_version": "coding_agent_worker_metadata.v2",
+            "schema_version": "coding_agent_worker_metadata.v3",
             "coding_operation": coding_operation,
             "worker_operation": worker_operation,
             "coding_run_ref": coding_run_ref,
@@ -350,6 +362,7 @@ def _map_coding_run_response(
             "allowed_next_actions": _text_list(
                 response.get("allowed_next_actions"),
             ),
+            "coding_run_context": _coding_run_context(response),
             "limitations": _text_list(response.get("limitations")),
             "trace_summary": [
                 f"coding_run:{worker_operation}:{route_reason}",
@@ -360,22 +373,77 @@ def _map_coding_run_response(
     return result
 
 
+def _coding_run_context(response: Mapping[str, object]) -> dict[str, object]:
+    """Project a coding-run response into the prompt-safe worker handoff.
+
+    Args:
+        response: Public coding-run response returned by the durable supervisor.
+
+    Returns:
+        The semantic run context allowed to leave worker execution.
+    """
+
+    status = _bounded_text(response.get("status"), limit=80)
+    blockers = response.get("blockers")
+    active_blocker: dict[str, object] | None = None
+    if isinstance(blockers, list):
+        for blocker in blockers:
+            if not isinstance(blocker, Mapping):
+                continue
+            if _bounded_text(blocker.get("status"), limit=40) != "open":
+                continue
+            active_blocker = {
+                "blocker_kind": _bounded_text(
+                    blocker.get("blocker_kind"),
+                    limit=80,
+                ),
+                "question": _bounded_text(blocker.get("question"), limit=500),
+                "options": _text_list(blocker.get("options"), limit=5),
+            }
+            break
+    actions = _text_list(response.get("allowed_next_actions"), limit=5)
+    context = {
+        "schema_version": "coding_run_context.v1",
+        "coding_run_ref": _coding_run_ref(
+            _bounded_text(response.get("run_id"), limit=120),
+        ),
+        "status": status,
+        "objective_summary": _bounded_text(response.get("goal"), limit=500),
+        "allowed_next_actions": actions,
+        "active_blocker": active_blocker,
+        "followup_open": status in ("awaiting_approval", "blocked"),
+        "updated_at": _bounded_text(response.get("updated_at"), limit=80),
+    }
+    return context
+
+
 def _approval_from_payload(
     decision: BackgroundWorkWorkerDecision,
     *,
     worker_payload: dict[str, object],
-) -> dict[str, object]:
+) -> dict[str, object] | None:
     """Build structured approval from the accepted action payload."""
 
+    evidence = worker_payload.get("approval_evidence")
     source_scope = worker_payload.get("source_scope")
-    approved_by = ""
-    if isinstance(source_scope, Mapping):
-        approved_by = _bounded_text(source_scope.get("source_user_id"), limit=200)
-    if not approved_by:
-        approved_by = "current_user"
-    approved_at = _payload_text(worker_payload, "storage_timestamp_utc")
-    if not approved_at:
-        approved_at = storage_utc_now_iso()
+    if not isinstance(evidence, Mapping) or not isinstance(source_scope, Mapping):
+        return None
+    approved_by = _bounded_text(
+        evidence.get("requester_global_user_id"),
+        limit=200,
+    )
+    approved_at = _bounded_text(evidence.get("storage_timestamp_utc"), limit=80)
+    quote = _bounded_text(evidence.get("quote"), limit=500)
+    source_message_id = _bounded_text(evidence.get("source_message_id"), limit=200)
+    source_trigger_source = _bounded_text(
+        evidence.get("source_trigger_source"),
+        limit=80,
+    )
+    source_user_id = _bounded_text(source_scope.get("source_user_id"), limit=200)
+    if not approved_by or not approved_at or not quote or not source_message_id:
+        return None
+    if source_trigger_source != "user_message" or approved_by != source_user_id:
+        return None
     approval_reason = _bounded_text(decision.get("reason"), limit=500)
     if not approval_reason:
         approval_reason = "User approved the coding run for verification."
@@ -384,6 +452,13 @@ def _approval_from_payload(
         "approved_by": approved_by,
         "approved_at": approved_at,
         "approval_reason": approval_reason,
+        "approval_evidence": {
+            "source_message_id": source_message_id,
+            "source_trigger_source": source_trigger_source,
+            "requester_global_user_id": approved_by,
+            "quote": quote,
+            "storage_timestamp_utc": approved_at,
+        },
     }
     return approval
 

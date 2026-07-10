@@ -125,13 +125,18 @@ ways. Generic delayed coding tasks still route through the legacy
 `background_work_request` path, where the coding-agent supervisor chooses
 read-versus-write and returns a read answer or review-only proposal. Durable
 coding-run work enters through `accepted_coding_task_request`, which queues
-`requested_worker="coding_agent"` with `coding_agent_worker_payload.v1`.
+`requested_worker="coding_agent"` with `coding_agent_worker_payload.v2`.
 That payload supports closed operations `start`, `revise_proposal`,
-`summarize`, `status`, `approve_and_verify`, and `cancel`. The worker maps
+`summarize`, `status`, `approve_and_verify`, `respond_to_blocker`, and `cancel`.
+The worker maps
 those actions to the coding-run supervisor and records
-`coding_agent_worker_metadata.v2` with the prompt-safe
+`coding_agent_worker_metadata.v3` with the prompt-safe `coding_run_context.v1`
 `coding_run:<run_id>` reference, public changed-file summaries, attempt
 history, and allowed next actions.
+
+The result source copies only the validated `coding_run_context.v1` into the
+accepted-task lifecycle. Raw worker metadata remains operational audit data and
+does not enter L2d or L3 prompts.
 
 The durable coding path derives its base verification plan inside `coding_run`
 from the stored proposal. The worker forwards only a bounded semantic request

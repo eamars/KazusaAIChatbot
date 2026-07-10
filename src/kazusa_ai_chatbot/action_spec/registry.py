@@ -346,6 +346,7 @@ def _accepted_coding_task_capability() -> CapabilitySpecV1:
                         "summarize",
                         "status",
                         "approve_and_verify",
+                        "respond_to_blocker",
                         "cancel",
                     ],
                 },
@@ -420,17 +421,26 @@ def _accepted_coding_task_projection() -> dict[str, object]:
                 "for a compact run progress check, decision=revise_proposal "
                 "to revise an awaiting proposal, decision=summarize for "
                 "changed files and attempt history, decision=approve_and_verify "
-                "only after explicit approval, and decision=cancel only when "
-                "the user asks to stop that run."
+                "only after explicit approval, decision=respond_to_blocker "
+                "only when the run asks a resumable blocker question, and "
+                "decision=cancel only when the user asks to stop that run."
             ),
             (
-                "For revision, summary, status, approval, or cancellation, "
-                "include the prompt-safe coding_run_ref if the conversation "
-                "provides it."
+                "For every continuation decision, select it only when the "
+                "exact action appears in that run's allowed_next_actions. "
+                "Use a coding_run_ref from the current coding-run context; "
+                "omit it only when exactly one offered run allows that action. "
+                "When multiple offered runs allow the requested continuation, "
+                "select a visible clarification asking the user which objective "
+                "to continue instead of selecting a coding action."
             ),
             (
                 "For approval, put requested checks such as focused pytest "
                 "or Python compile verification in detail."
+            ),
+            (
+                "For respond_to_blocker, put the user's answer to the active "
+                "blocker question in detail."
             ),
             "Pair this private request with a visible speak acknowledgement.",
         ],

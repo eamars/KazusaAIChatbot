@@ -79,6 +79,13 @@ and call the public entrypoint. The core returns semantic action requests and
 surface planning data. The caller then performs recurrence, action execution,
 persistence, scheduling, delivery, and consolidation outside this package.
 
+For user-message turns, the core may receive up to three prompt-safe coding
+run contexts in the L2d human payload. Stable coding-action meanings belong to
+the L2d system prompt; each run's ref, state, allowed actions, and blocker
+question/options are current human-message facts. L3 receives a separate
+follow-up source without run refs or operational fields and uses it only to
+render a blocker question or an ambiguity clarification.
+
 ## Action Boundary
 
 The core emits `SemanticActionRequestV1` rows. These rows describe semantic

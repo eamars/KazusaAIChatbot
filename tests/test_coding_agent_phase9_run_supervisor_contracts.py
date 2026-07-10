@@ -384,6 +384,60 @@ async def test_approve_and_verify_uses_stored_patch_artifacts(
     assert verify_calls[0]["execution_specs"] == [EXECUTION_SPEC]
 
 
+async def test_verify_blocker_receives_durable_lifecycle_fields(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A verifier blocker becomes the run's one resumable durable blocker."""
+
+    from kazusa_ai_chatbot.coding_agent import continue_coding_run
+    from kazusa_ai_chatbot.coding_agent import start_coding_run
+    from kazusa_ai_chatbot.coding_agent.coding_run import supervisor
+    from kazusa_ai_chatbot.coding_agent.coding_run.ledger import (
+        project_coding_run_context,
+    )
+
+    async def fake_verify(request: dict[str, object]) -> dict[str, object]:
+        response = _verify_response(status="blocked")
+        response["blockers"] = [{
+            "code": "environment_dependency_missing",
+            "blocker_kind": "environment",
+            "message": "The dependency is unavailable.",
+            "question": "Install the dependency, then retry verification.",
+            "options": ["Install dependency", "Cancel run"],
+            "resume_target": "retry_verification",
+            "details": {"missing_module": "fixture_dependency"},
+        }]
+        return response
+
+    monkeypatch.setattr(supervisor, "propose_code_change", _fake_propose)
+    monkeypatch.setattr(supervisor, "verify_and_repair_code_change", fake_verify)
+
+    started = await start_coding_run(_proposal_request(tmp_path))
+    blocked = await continue_coding_run({
+        "workspace_root": str(tmp_path / "workspace"),
+        "run_id": started["run_id"],
+        "action": "approve_and_verify",
+        "approval": _approval(),
+        "execution_specs": [EXECUTION_SPEC],
+        "repair_attempt_limit": 0,
+    })
+    context = project_coding_run_context(blocked)
+
+    blocker = blocked["blockers"]
+    assert blocked["status"] == "blocked"
+    assert len(blocker) == 1
+    assert blocker[0]["status"] == "open"
+    assert blocker[0]["blocker_id"]
+    assert blocker[0]["created_at"]
+    assert blocker[0]["answered_at"] is None
+    assert context["active_blocker"] == {
+        "blocker_kind": "environment",
+        "question": "Install the dependency, then retry verification.",
+        "options": ["Install dependency", "Cancel run"],
+    }
+
+
 async def test_verify_repair_start_records_terminal_attempts(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

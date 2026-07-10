@@ -517,6 +517,7 @@ def build_accepted_task_result_ready_cognitive_episode(
     requester_display_name: str,
     source_platform_bot_id: str,
     source_character_name: str,
+    coding_run_context: dict[str, object] | None = None,
 ) -> CognitiveEpisode:
     """Build a source-bound episode for a completed accepted task."""
 
@@ -528,6 +529,8 @@ def build_accepted_task_result_ready_cognitive_episode(
         "source_platform_bot_id": source_platform_bot_id,
         "source_character_name": source_character_name,
     }
+    if coding_run_context is not None:
+        metadata["coding_run_context"] = coding_run_context
     percept: CognitivePercept = {
         "percept_id": percept_id,
         "input_source": "accepted_task_result",

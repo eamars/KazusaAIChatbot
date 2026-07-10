@@ -213,6 +213,9 @@ def _state_from_chain_input(
         "rag_result": rag_result,
         "resolver_context": resolver["resolver_context"],
         "cognitive_episode": build_prompt_selection_episode(input_payload),
+        "coding_run_followup": _mapping(
+            input_payload.get("coding_run_followup", {}),
+        ),
         "available_action_affordances": list(input_payload["available_actions"]),
         "max_action_requests": (
             input_payload["runtime_context"]["max_action_requests"]

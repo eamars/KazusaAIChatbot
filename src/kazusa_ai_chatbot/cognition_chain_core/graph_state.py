@@ -25,6 +25,7 @@ class CoreStageState(TypedDict):
     chat_history_recent: list[dict[str, Any]]
     chat_history_wide: list[dict[str, Any]]
     cognitive_episode: dict[str, Any]
+    coding_run_followup: dict[str, Any]
     content_plan: dict[str, str]
     conversation_progress: dict[str, Any]
     decontexualized_input: str

@@ -25,7 +25,9 @@ CodingRunObjectiveType = Literal["read_only", "propose_patch", "verify_repair"]
 CodingRunAction = Literal[
     "revise_proposal",
     "summarize",
+    "status",
     "approve_and_verify",
+    "respond_to_blocker",
     "cancel",
 ]
 CodingRunStatus = Literal[
@@ -113,9 +115,38 @@ class CodingRunAttempt(TypedDict, total=False):
 class CodingRunBlocker(TypedDict, total=False):
     """Public blocker that explains why a run cannot continue automatically."""
 
+    blocker_id: str
     code: str
+    blocker_kind: Literal["needs_user_input", "environment", "scope", "safety"]
     message: str
+    question: str
+    options: list[str]
+    resume_target: Literal["replan_proposal", "retry_verification", "none"]
+    status: Literal["open", "answered", "superseded"]
     details: dict[str, object]
+    created_at: str
+    answered_at: str | None
+
+
+class CodingRunActiveBlockerV1(TypedDict):
+    """Prompt-safe summary of the current blocker for one coding run."""
+
+    blocker_kind: str
+    question: str
+    options: list[str]
+
+
+class CodingRunContextV1(TypedDict):
+    """Prompt-safe coding-run affordance carried across accepted-task turns."""
+
+    schema_version: Literal["coding_run_context.v1"]
+    coding_run_ref: str
+    status: str
+    objective_summary: str
+    allowed_next_actions: list[str]
+    active_blocker: CodingRunActiveBlockerV1 | None
+    followup_open: bool
+    updated_at: str
 
 
 class CodingRunEvent(TypedDict):
@@ -170,6 +201,7 @@ class CodingRunResponse(TypedDict):
     run_id: str
     goal: str
     objective_type: str
+    updated_at: str
     answer_text: str
     repository: CodingAgentRepositorySummary | None
     source_scope: CodingAgentSourceScope | None
@@ -187,3 +219,5 @@ class CodingRunResponse(TypedDict):
     allowed_next_actions: list[str]
     limitations: list[str]
     trace_summary: list[str]
+    operation_outcome: Literal["applied", "busy", "rejected"]
+    retry_guidance: str

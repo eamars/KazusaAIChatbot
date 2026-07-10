@@ -14,6 +14,7 @@ from kazusa_ai_chatbot.accepted_task import (
     mark_accepted_task_running,
 )
 from kazusa_ai_chatbot.background_work.providers import dispatch_background_work
+from kazusa_ai_chatbot.coding_agent.coding_run.ledger import sanitize_coding_run_context
 from kazusa_ai_chatbot.background_work.router import route_background_work
 from kazusa_ai_chatbot.background_work.subagent import worker_descriptions
 from kazusa_ai_chatbot.config import (
@@ -138,11 +139,19 @@ async def run_background_work_worker_tick(
                         delivered_at=completed_at,
                     )
                 else:
+                    worker_metadata = worker_result.get("worker_metadata")
+                    coding_run_context = None
+                    if isinstance(worker_metadata, Mapping):
+                        metadata_context = worker_metadata.get("coding_run_context")
+                        coding_run_context = sanitize_coding_run_context(
+                            metadata_context
+                        )
                     await mark_accepted_task_result_ready(
                         accepted_task_id=accepted_task_id,
                         artifact_text=worker_result["artifact_text"],
                         result_summary=worker_result["result_summary"],
                         completed_at=completed_at,
+                        coding_run_context=coding_run_context,
                     )
             succeeded_count += 1
         else:

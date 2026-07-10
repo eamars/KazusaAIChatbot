@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from kazusa_ai_chatbot.accepted_task import (
@@ -69,6 +69,7 @@ _CODING_ACTIONS_REQUIRING_RUN_REF = frozenset((
     "summarize",
     "status",
     "approve_and_verify",
+    "respond_to_blocker",
     "cancel",
 ))
 
@@ -217,6 +218,7 @@ def validate_accepted_coding_task_action(
         "summarize",
         "status",
         "approve_and_verify",
+        "respond_to_blocker",
         "cancel",
     ):
         raise ActionValidationError("coding_action: unsupported value")
@@ -226,6 +228,11 @@ def validate_accepted_coding_task_action(
             raise ActionValidationError(
                 "coding_run_ref: expected prompt-safe coding_run:<run_id>"
             )
+    approval_evidence = params.get("approval_evidence")
+    if coding_action == "approve_and_verify":
+        _validate_approval_evidence(approval_evidence, scope)
+    elif approval_evidence is not None:
+        raise ActionValidationError("approval_evidence: unexpected parameter")
     max_output_chars = params.get("max_output_chars")
     if not isinstance(max_output_chars, int):
         raise ActionValidationError("max_output_chars: expected integer")
@@ -278,6 +285,16 @@ async def enqueue_accepted_coding_task_action(
     coding_action = _param_text(params, "coding_action")
     coding_run_ref = _optional_param_text(params, "coding_run_ref")
     execution_request = _optional_param_text(params, "execution_request")
+    approval_evidence = params.get("approval_evidence")
+    worker_payload: dict[str, object] = {
+        "schema_version": "coding_agent_worker_payload.v2",
+        "operation": coding_action,
+        "task_brief": task_brief,
+        "coding_run_ref": coding_run_ref,
+        "execution_request": execution_request,
+    }
+    if isinstance(approval_evidence, Mapping):
+        worker_payload["approval_evidence"] = dict(approval_evidence)
     result = await _create_or_queue_accepted_task(
         validated,
         storage_timestamp_utc=storage_timestamp_utc,
@@ -299,16 +316,40 @@ async def enqueue_accepted_coding_task_action(
             task_brief=task_brief,
         ),
         requested_worker="coding_agent",
-        worker_payload={
-            "schema_version": "coding_agent_worker_payload.v1",
-            "operation": coding_action,
-            "task_brief": task_brief,
-            "coding_run_ref": coding_run_ref,
-            "execution_request": execution_request,
-        },
+        worker_payload=worker_payload,
         enqueue_background_work_func=enqueue_background_work_func,
     )
     return result
+
+
+def _validate_approval_evidence(
+    value: object,
+    scope: Mapping[str, object],
+) -> None:
+    """Validate the trusted current-message evidence required for approval."""
+
+    if not isinstance(value, Mapping):
+        raise ActionValidationError("approval_evidence: required for approval")
+    for field_name in (
+        "source_message_id",
+        "source_trigger_source",
+        "requester_global_user_id",
+        "quote",
+        "storage_timestamp_utc",
+    ):
+        field_value = value.get(field_name)
+        if not isinstance(field_value, str) or not field_value.strip():
+            raise ActionValidationError(
+                f"approval_evidence.{field_name}: required"
+            )
+    if value["source_trigger_source"] != "user_message":
+        raise ActionValidationError(
+            "approval_evidence.source_trigger_source: expected user_message"
+        )
+    if value["requester_global_user_id"] != scope["requester_global_user_id"]:
+        raise ActionValidationError(
+            "approval_evidence.requester_global_user_id: scope mismatch"
+        )
 
 
 async def enqueue_future_speak_action(

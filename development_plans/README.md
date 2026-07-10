@@ -39,7 +39,8 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [coding_agent_assessment_gap_phase_b_plan.md](archive/completed/short_term/coding_agent_assessment_gap_phase_b_plan.md) | Large coding-agent assessment gap plan for preflight execution and structured repair feedback | completed |
-| [coding_agent_assessment_gap_phase_c_plan.md](active/short_term/coding_agent_assessment_gap_phase_c_plan.md) | Large coding-agent assessment gap plan for typed blockers, affordances, approval evidence, locks, and benchmark seam | draft |
+| [coding_agent_assessment_gap_phase_c_plan.md](archive/completed/short_term/coding_agent_assessment_gap_phase_c_plan.md) | High-risk coding-agent assessment gap plan for typed blockers, affordances, approval evidence, locks, and benchmark seam | completed |
+| [coding_agent_assessment_gap_phase_d_plan.md](active/short_term/coding_agent_assessment_gap_phase_d_plan.md) | High-risk coding-agent migration plan for a generic JSON action loop, persistent repository index, exploration-cap removal, and delete/rename | draft |
 | [coding_agent_full_workflow_hardening_plan_2.md](active/short_term/coding_agent_full_workflow_hardening_plan_2.md) | Large coding-agent full workflow hardening plan | completed |
 
 ## Supporting Experiment Records
@@ -231,6 +232,19 @@ Gate 10 reruns passed after targeted hardening.
 |---|---|
 | Moved from active short-term to completed archive | `coding_agent_assessment_gap_phase_a_plan.md` |
 | Kept active draft follow-up plans | `coding_agent_assessment_gap_phase_b_plan.md`, `coding_agent_assessment_gap_phase_c_plan.md` |
+
+### 2026-07-10 coding-agent assessment gap Phase C completion
+
+The coding-agent assessment gap Phase C plan completed after user-approved
+fallback execution without subagents. The implementation added durable typed
+blocker continuation, prompt-safe accepted-task run context, trusted approval
+provenance, ordered kernel locks, a 30-case benchmark seam, five individually
+inspected live outer-loop gates, final remediation for context sanitization, and
+lifecycle closeout.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active short-term to completed archive | `coding_agent_assessment_gap_phase_c_plan.md` |
 
 ## Archive
 

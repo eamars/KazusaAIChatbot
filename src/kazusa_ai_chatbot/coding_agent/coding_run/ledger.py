@@ -5,11 +5,14 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 from kazusa_ai_chatbot.coding_agent.coding_run.models import (
+    CodingRunActiveBlockerV1,
+    CodingRunContextV1,
     CodingRunEvent,
     CodingRunLedger,
     CodingRunResponse,
@@ -19,7 +22,7 @@ from kazusa_ai_chatbot.coding_agent.tools.paths import (
     ensure_path_inside,
 )
 
-RUN_SCHEMA_VERSION = 2
+RUN_SCHEMA_VERSION = 3
 RUN_ROOT_DIR_NAME = "coding_runs"
 RUN_FILE_NAME = "run.json"
 EVENT_FILE_NAME = "events.jsonl"
@@ -62,6 +65,7 @@ def build_run_paths(
     workspace_root_text: str,
     run_id: str,
     create: bool,
+    create_run_dir: bool = True,
 ) -> CodingRunPaths | str:
     """Resolve all ledger paths and enforce workspace containment.
 
@@ -69,6 +73,8 @@ def build_run_paths(
         workspace_root_text: Caller-owned coding workspace root.
         run_id: Durable run identifier.
         create: Whether missing directories should be created.
+        create_run_dir: Whether to create the run directory while preparing
+            writable paths.
 
     Returns:
         A path bundle or a public error string.
@@ -94,7 +100,8 @@ def build_run_paths(
         event_file = ensure_path_inside(run_dir / EVENT_FILE_NAME, workspace_root)
         if create:
             run_root.mkdir(parents=True, exist_ok=True)
-            run_dir.mkdir(parents=True, exist_ok=False)
+            if create_run_dir:
+                run_dir.mkdir(parents=True, exist_ok=False)
     except (OSError, PathSafetyError) as exc:
         error = f"Coding run workspace cannot be prepared: {exc}"
         return error
@@ -211,6 +218,7 @@ def public_response(
         "run_id": _ledger_text(ledger, "run_id"),
         "goal": _ledger_text(ledger, "goal"),
         "objective_type": _ledger_text(ledger, "objective_type"),
+        "updated_at": _ledger_text(ledger, "updated_at"),
         "answer_text": _ledger_text(ledger, "answer_text"),
         "repository": ledger.get("repository"),
         "source_scope": ledger.get("source_scope"),
@@ -225,15 +233,15 @@ def public_response(
         "attempts": _ledger_list(ledger, "attempts"),
         "blockers": _ledger_list(ledger, "blockers"),
         "events": events,
-        "allowed_next_actions": _allowed_next_actions(
-            _ledger_text(ledger, "status"),
-        ),
+        "allowed_next_actions": allowed_next_actions(ledger),
         "limitations": _ledger_list(ledger, "limitations"),
         "trace_summary": _ledger_list(ledger, "trace_summary"),
         "proposal_revision": ledger.get("proposal_revision", 0),
         "patch_artifact_digest": _ledger_text(ledger, "patch_artifact_digest"),
         "execution_plan": ledger.get("execution_plan"),
         "preflight": _ledger_mapping(ledger, "preflight"),
+        "operation_outcome": "applied",
+        "retry_guidance": "",
     }
     sanitized = sanitize_public_value(
         response,
@@ -258,6 +266,7 @@ def empty_response(
         "run_id": run_id,
         "goal": goal,
         "objective_type": objective_type,
+        "updated_at": "",
         "answer_text": "",
         "repository": None,
         "source_scope": None,
@@ -279,6 +288,8 @@ def empty_response(
         "allowed_next_actions": [],
         "limitations": [limitation],
         "trace_summary": trace_summary,
+        "operation_outcome": "rejected",
+        "retry_guidance": "",
         "proposal_revision": 0,
         "patch_artifact_digest": "",
         "execution_plan": None,
@@ -390,8 +401,18 @@ def _ledger_mapping(ledger: dict[str, object], key: str) -> dict[str, object]:
     return mapping
 
 
-def _allowed_next_actions(status: str) -> list[str]:
-    """Return public continuation actions allowed by the current run status."""
+def allowed_next_actions(ledger: Mapping[str, object]) -> list[str]:
+    """Return the closed continuation actions legal for the current ledger.
+
+    Args:
+        ledger: Durable coding-run state being projected or continued.
+
+    Returns:
+        The current public action names in their canonical display order.
+    """
+
+    status = _ledger_text(dict(ledger), "status")
+    blocker = _active_blocker(ledger)
 
     if status == "awaiting_approval":
         return [
@@ -410,6 +431,163 @@ def _allowed_next_actions(status: str) -> list[str]:
         return ["summarize", "status", "cancel"]
     if status in ("applying", "verifying", "repairing"):
         return ["summarize", "status"]
-    if status in ("completed", "blocked", "rejected", "failed", "cancelled"):
+    if status == "blocked":
+        if _mapping_text(blocker, "resume_target") != "none":
+            return ["respond_to_blocker", "summarize", "status", "cancel"]
+        return ["summarize", "status", "cancel"]
+    if status in ("completed", "rejected", "failed", "cancelled"):
         return ["summarize", "status"]
     return ["status"]
+
+
+def project_coding_run_context(
+    ledger: Mapping[str, object],
+) -> CodingRunContextV1:
+    """Project one ledger into the bounded cognition-facing run context.
+
+    Args:
+        ledger: Durable coding-run state with only public-safe fields exposed.
+
+    Returns:
+        The semantic follow-up context persisted with accepted tasks.
+    """
+
+    blocker = _active_blocker(ledger)
+    active_blocker: CodingRunActiveBlockerV1 | None = None
+    if blocker is not None:
+        active_blocker = {
+            "blocker_kind": _mapping_text(blocker, "blocker_kind"),
+            "question": _mapping_text(blocker, "question"),
+            "options": _blocker_text_list(blocker, "options"),
+        }
+    actions = allowed_next_actions(ledger)
+    run_id = _ledger_text(dict(ledger), "run_id")
+    context: CodingRunContextV1 = {
+        "schema_version": "coding_run_context.v1",
+        "coding_run_ref": f"coding_run:{run_id}",
+        "status": _ledger_text(dict(ledger), "status"),
+        "objective_summary": _ledger_text(dict(ledger), "goal")[:500],
+        "allowed_next_actions": actions,
+        "active_blocker": active_blocker,
+        "followup_open": _followup_is_open(ledger, actions),
+        "updated_at": _ledger_text(dict(ledger), "updated_at"),
+    }
+    return context
+
+
+def sanitize_coding_run_context(
+    value: object,
+) -> CodingRunContextV1 | None:
+    """Validate and bound one cross-layer coding-run context.
+
+    Args:
+        value: Untrusted worker or accepted-task value claiming the v1 shape.
+
+    Returns:
+        The exact prompt-safe v1 context, or ``None`` for an invalid value.
+    """
+
+    if not isinstance(value, Mapping):
+        return None
+    schema_version = _mapping_text(value, "schema_version")
+    coding_run_ref = _mapping_text(value, "coding_run_ref")
+    status = _mapping_text(value, "status")
+    objective_summary = _mapping_text(value, "objective_summary")[:500]
+    updated_at = _mapping_text(value, "updated_at")
+    followup_open = value.get("followup_open")
+    allowed_actions = value.get("allowed_next_actions")
+    if not all((
+        schema_version == "coding_run_context.v1",
+        coding_run_ref.startswith("coding_run:"),
+        status,
+        objective_summary,
+        updated_at,
+        isinstance(followup_open, bool),
+        isinstance(allowed_actions, list),
+    )):
+        return None
+    if any(not isinstance(action, str) or not action for action in allowed_actions):
+        return None
+    active_blocker = _sanitize_active_blocker(value.get("active_blocker"))
+    if value.get("active_blocker") is not None and active_blocker is None:
+        return None
+    context: CodingRunContextV1 = {
+        "schema_version": "coding_run_context.v1",
+        "coding_run_ref": coding_run_ref,
+        "status": status,
+        "objective_summary": objective_summary,
+        "allowed_next_actions": allowed_actions[:5],
+        "active_blocker": active_blocker,
+        "followup_open": followup_open,
+        "updated_at": updated_at,
+    }
+    return context
+
+
+def _sanitize_active_blocker(value: object) -> CodingRunActiveBlockerV1 | None:
+    """Validate the one bounded blocker permitted in a run context."""
+
+    if not isinstance(value, Mapping):
+        return None
+    blocker_kind = _mapping_text(value, "blocker_kind")
+    question = _mapping_text(value, "question")[:500]
+    options = _blocker_text_list(value, "options")
+    if not blocker_kind or not question:
+        return None
+    blocker: CodingRunActiveBlockerV1 = {
+        "blocker_kind": blocker_kind,
+        "question": question,
+        "options": options,
+    }
+    return blocker
+
+
+def _active_blocker(
+    ledger: Mapping[str, object],
+) -> Mapping[str, object] | None:
+    """Return the one open blocker permitted by the ledger contract."""
+
+    blockers = ledger.get("blockers")
+    if not isinstance(blockers, list):
+        return None
+    for blocker in blockers:
+        if not isinstance(blocker, Mapping):
+            continue
+        if _mapping_text(blocker, "status") == "open":
+            return blocker
+    return None
+
+
+def _mapping_text(value: Mapping[str, object] | None, key: str) -> str:
+    """Read one optional text field from a mapping at a boundary."""
+
+    if value is None:
+        return ""
+    raw_value = value.get(key)
+    if not isinstance(raw_value, str):
+        return ""
+    text = raw_value.strip()
+    return text
+
+
+def _blocker_text_list(
+    blocker: Mapping[str, object],
+    key: str,
+) -> list[str]:
+    """Project bounded text options from a typed blocker."""
+
+    value = blocker.get(key)
+    if not isinstance(value, list):
+        return []
+    options = [item for item in value if isinstance(item, str) and item.strip()]
+    return options[:5]
+
+
+def _followup_is_open(
+    ledger: Mapping[str, object],
+    actions: list[str],
+) -> bool:
+    """Return whether the current run has a meaningful user follow-up action."""
+
+    status = _ledger_text(dict(ledger), "status")
+    return status in ("awaiting_approval", "blocked") and bool(actions)

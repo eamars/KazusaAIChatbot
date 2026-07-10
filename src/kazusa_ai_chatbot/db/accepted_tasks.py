@@ -15,8 +15,12 @@ from kazusa_ai_chatbot.accepted_task.models import (
     AcceptedTaskDoc,
     AcceptedTaskStatusCheckRequest,
 )
+from kazusa_ai_chatbot.coding_agent.coding_run.ledger import sanitize_coding_run_context
+from kazusa_ai_chatbot.coding_agent.coding_run.models import CodingRunContextV1
 from kazusa_ai_chatbot.db._client import get_db
 from kazusa_ai_chatbot.db.errors import DatabaseOperationError
+
+CODING_RUN_CONTEXT_LOAD_MULTIPLIER = 4
 
 
 async def ensure_accepted_task_indexes() -> None:
@@ -51,6 +55,19 @@ async def ensure_accepted_task_indexes() -> None:
                 ("updated_at", -1),
             ],
             name="accepted_task_scope_active_lookup",
+        )
+        await collection.create_index(
+            [
+                ("source_platform", 1),
+                ("source_channel_id", 1),
+                ("requester_global_user_id", 1),
+                ("action_kind", 1),
+                ("updated_at", -1),
+            ],
+            partialFilterExpression={
+                "coding_run_context.followup_open": True,
+            },
+            name="accepted_task_open_coding_run_context_lookup",
         )
     except PyMongoError as exc:
         raise DatabaseOperationError(
@@ -96,6 +113,66 @@ async def insert_or_get_active_accepted_task(
         "task": task,
     }
     return result
+
+
+async def load_open_coding_run_contexts_for_scope(
+    *,
+    source_platform: str,
+    source_channel_id: str,
+    requester_global_user_id: str,
+    limit: int = 3,
+) -> list[CodingRunContextV1]:
+    """Load newest unique open coding contexts for one trusted user scope.
+
+    Args:
+        source_platform: Adapter platform owning the current user turn.
+        source_channel_id: Channel owning the current user turn.
+        requester_global_user_id: Durable requester identity for the turn.
+        limit: Maximum number of newest distinct run contexts to project.
+
+    Returns:
+        Prompt-safe contexts collapsed by coding-run reference.
+    """
+
+    if limit < 1:
+        return []
+    db = await get_db()
+    collection = db[ACCEPTED_TASKS_COLLECTION]
+    query = {
+        "source_platform": source_platform,
+        "source_channel_id": source_channel_id,
+        "requester_global_user_id": requester_global_user_id,
+        "action_kind": "accepted_coding_task_request",
+        "coding_run_context.followup_open": True,
+    }
+    try:
+        cursor = collection.find(
+            query,
+            projection={"_id": 0, "coding_run_context": 1},
+        ).sort("updated_at", -1).limit(
+            limit * CODING_RUN_CONTEXT_LOAD_MULTIPLIER,
+        )
+        rows = await cursor.to_list(
+            length=limit * CODING_RUN_CONTEXT_LOAD_MULTIPLIER,
+        )
+    except PyMongoError as exc:
+        raise DatabaseOperationError(
+            f"failed to load open coding-run contexts: {exc}"
+        ) from exc
+    contexts: list[CodingRunContextV1] = []
+    seen_refs: set[str] = set()
+    for row in rows:
+        context = sanitize_coding_run_context(row.get("coding_run_context"))
+        if context is None:
+            continue
+        context_ref = context["coding_run_ref"]
+        if context_ref in seen_refs:
+            continue
+        seen_refs.add(context_ref)
+        contexts.append(context)
+        if len(contexts) >= limit:
+            break
+    return contexts
 
 
 async def mark_accepted_task_pending(
@@ -277,6 +354,7 @@ async def mark_accepted_task_result_ready(
     artifact_text: str,
     result_summary: str,
     completed_at: str,
+    coding_run_context: CodingRunContextV1 | None,
 ) -> AcceptedTaskDoc | None:
     """Record a completed artifact result for source-bound delivery."""
 
@@ -290,6 +368,8 @@ async def mark_accepted_task_result_ready(
             "updated_at": completed_at,
         }
     }
+    if coding_run_context is not None:
+        update["$set"]["coding_run_context"] = dict(coding_run_context)
     task = await _update_task({"accepted_task_id": accepted_task_id}, update)
     return task
 

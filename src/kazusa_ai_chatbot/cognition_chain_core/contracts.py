@@ -187,6 +187,7 @@ class CognitionChainInputV1(TypedDict):
     available_actions: list[ActionAffordanceV1]
     runtime_context: RuntimeContextV1
     action_selection_context: NotRequired[Mapping[str, Any]]
+    coding_run_followup: NotRequired[Mapping[str, Any]]
 
 
 class CognitionResidueV1(TypedDict):

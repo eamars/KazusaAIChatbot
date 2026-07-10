@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from kazusa_ai_chatbot.background_work.models import BackgroundWorkJobDoc
+from kazusa_ai_chatbot.coding_agent.coding_run.ledger import (
+    sanitize_coding_run_context,
+)
 from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisode,
     build_accepted_task_result_ready_cognitive_episode,
@@ -21,6 +26,11 @@ def build_result_ready_episode_from_job(
     if not accepted_task_id:
         raise ValueError("accepted_task_id is required for result delivery")
 
+    worker_metadata = job.get("worker_metadata")
+    coding_run_context = None
+    if isinstance(worker_metadata, Mapping):
+        metadata_context = worker_metadata.get("coding_run_context")
+        coding_run_context = sanitize_coding_run_context(metadata_context)
     episode = build_accepted_task_result_ready_cognitive_episode(
         episode_id=f"accepted_task_result_ready:{accepted_task_id}",
         percept_id=f"accepted_task_result_ready:{accepted_task_id}:result:0",
@@ -43,5 +53,6 @@ def build_result_ready_episode_from_job(
         requester_display_name=job.get("requester_display_name", ""),
         source_platform_bot_id=job.get("source_platform_bot_id", ""),
         source_character_name=job.get("source_character_name", ""),
+        coding_run_context=coding_run_context,
     )
     return episode

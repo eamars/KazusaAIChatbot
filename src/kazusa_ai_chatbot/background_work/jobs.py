@@ -34,6 +34,7 @@ _SUPPORTED_CODING_AGENT_OPERATIONS = frozenset((
     "summarize",
     "status",
     "approve_and_verify",
+    "respond_to_blocker",
     "cancel",
 ))
 
@@ -113,7 +114,7 @@ def _validate_coding_agent_worker_payload(
 ) -> None:
     """Validate the durable coding-run worker payload."""
 
-    if worker_payload.get("schema_version") != "coding_agent_worker_payload.v1":
+    if worker_payload.get("schema_version") != "coding_agent_worker_payload.v2":
         raise ValueError("coding_agent worker_payload schema_version is invalid")
     operation = worker_payload.get("operation")
     if operation not in _SUPPORTED_CODING_AGENT_OPERATIONS:
@@ -126,6 +127,7 @@ def _validate_coding_agent_worker_payload(
         "summarize",
         "status",
         "approve_and_verify",
+        "respond_to_blocker",
         "cancel",
     ):
         coding_run_ref = worker_payload.get("coding_run_ref")

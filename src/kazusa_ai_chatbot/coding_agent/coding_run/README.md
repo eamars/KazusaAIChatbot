@@ -39,6 +39,11 @@ Ledgers are stored under the caller-supplied workspace:
 - `approve_and_verify`: allowed only from `awaiting_approval`; calls
   `verify_and_repair_code_change(...)` with the stored proposal artifacts and
   supplied execution specs.
+- `revise_proposal`, `summarize`, and `status`: follow the stored run's
+  canonical affordances and do not infer a continuation from user text.
+- `respond_to_blocker`: allowed only for the one open blocker with a resumable
+  target. It either revises the proposal with the user answer or retries the
+  stored verification plan with zero repair attempts.
 - `cancel`: allowed from non-terminal states; records cancellation without
   apply or execution side effects.
 
@@ -50,6 +55,12 @@ files, apply/execution/repair attempt summaries, blockers, events,
 limitations, and trace summary. Public projection sanitizes local roots,
 workspace roots, cache keys, environment filenames, git internals, secret-like
 values, raw command output, and full source dumps.
+
+`allowed_next_actions(...)` is the single state-machine owner for every
+continuation. The worker, accepted-task context, and L2d materializer consume
+its public result and revalidate the stored run before work. Each mutation
+holds sorted kernel locks for `run:<run_id>` and its normalized source identity;
+contention returns a non-mutating `operation_outcome="busy"` response.
 
 Ownership boundaries:
 

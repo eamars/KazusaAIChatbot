@@ -211,6 +211,9 @@ def _state_from_surface_input(
         "memory_lifecycle_context": input_payload["memory_lifecycle_context"],
         "interaction_style_context": input_payload["interaction_style_context"],
         "cognitive_episode": build_prompt_selection_episode(chain_input),
+        "coding_run_followup": _mapping(
+            chain_input.get("coding_run_followup", {}),
+        ),
     }
     resolver = chain_input["resolver"]
     resolver_state = resolver.get("resolver_state")

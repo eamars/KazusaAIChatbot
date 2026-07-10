@@ -847,6 +847,7 @@ class _InMemoryAcceptedCodeWorkStore:
         artifact_text: str,
         result_summary: str,
         completed_at: str,
+        coding_run_context: dict[str, object] | None = None,
     ) -> dict[str, Any] | None:
         task = self._accepted_task(accepted_task_id)
         task.update({
@@ -857,6 +858,8 @@ class _InMemoryAcceptedCodeWorkStore:
             "completed_at": completed_at,
             "updated_at": completed_at,
         })
+        if coding_run_context is not None:
+            task["coding_run_context"] = dict(coding_run_context)
         return dict(task)
 
     async def mark_accepted_task_failure_ready(

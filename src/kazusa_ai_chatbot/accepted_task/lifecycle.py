@@ -17,9 +17,11 @@ from kazusa_ai_chatbot.accepted_task.models import (
     AcceptedTaskStatusCheckRequest,
     AcceptedTaskStatusResult,
 )
+from kazusa_ai_chatbot.coding_agent.coding_run.models import CodingRunContextV1
 from kazusa_ai_chatbot.db.accepted_tasks import (
     find_active_accepted_task_for_scope,
     insert_or_get_active_accepted_task,
+    load_open_coding_run_contexts_for_scope as repository_load_open_contexts,
     mark_accepted_task_delivered as repository_mark_delivered,
     mark_accepted_task_delivery_failed as repository_mark_delivery_failed,
     mark_accepted_task_delivery_in_progress as repository_mark_delivery_in_progress,
@@ -159,6 +161,24 @@ async def check_accepted_task_status(
     return result
 
 
+async def load_open_coding_run_contexts_for_scope(
+    *,
+    source_platform: str,
+    source_channel_id: str,
+    requester_global_user_id: str,
+    limit: int = 3,
+) -> list[CodingRunContextV1]:
+    """Load current prompt-safe coding contexts for a trusted user turn."""
+
+    contexts = await repository_load_open_contexts(
+        source_platform=source_platform,
+        source_channel_id=source_channel_id,
+        requester_global_user_id=requester_global_user_id,
+        limit=limit,
+    )
+    return contexts
+
+
 async def mark_accepted_task_running(
     *,
     accepted_task_id: str,
@@ -179,6 +199,7 @@ async def mark_accepted_task_result_ready(
     artifact_text: str,
     result_summary: str,
     completed_at: str,
+    coding_run_context: CodingRunContextV1 | None = None,
 ) -> AcceptedTaskDoc | None:
     """Record a completed artifact and make it ready for result delivery."""
 
@@ -187,6 +208,7 @@ async def mark_accepted_task_result_ready(
         artifact_text=artifact_text,
         result_summary=result_summary,
         completed_at=completed_at,
+        coding_run_context=coding_run_context,
     )
     return task
 

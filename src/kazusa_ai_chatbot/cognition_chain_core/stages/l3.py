@@ -645,6 +645,7 @@ _CONTENT_PLAN_AGENT_PROMPT = '''\
 - `reflection_artifact` 若存在，表示本轮材料来自角色自己的反思资料，不是用户正在说话；只根据上游判断和反思中真实沉淀的经历生成计划内容。
 - `internal_thought_residue` 若存在，表示本轮材料来自内部观察残留，不是外部命令或当前用户发言；只把其中真实可见的观察作为来源背景。
 - `accepted_task_result` 若存在，表示本轮材料是已经完成或失败的任务结果。`artifact_text` 是要转交的结果正文，`metadata` 提供任务摘要、结果摘要、失败原因和限制；内容计划必须围绕交付这些结果。如果 `artifact_text` 已包含 fenced code block、JSON、配置或其他固定格式块，`semantic_content` 必须保留该固定格式块，不要替换成新写的近似内容。
+- `coding_run_followup` 只提供当前可见的后续说明。`mode` 为 `single` 且含有阻碍问题时，必须把该问题和可选项自然地呈现给用户；`mode` 为 `ambiguous` 时，必须根据不同目标摘要请求用户选择。它不改变已经确定的动作，也不补充任何未提供的操作细节。
 
 # 输出格式 (JSON)
 请务必返回合法的 JSON 字符串，仅包含以下字段：
@@ -864,6 +865,10 @@ async def call_content_plan_agent(state: dict[str, Any]) -> dict[str, Any]:
             ),
         ),
         "conversation_progress": state.get("conversation_progress"),
+        "coding_run_followup": state.get("coding_run_followup", {
+            "mode": "none",
+            "runs": [],
+        }),
     })
     msg.update(_content_plan_source_payload(
         episode=episode,

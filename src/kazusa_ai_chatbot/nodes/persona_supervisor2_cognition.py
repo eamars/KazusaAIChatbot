@@ -32,6 +32,7 @@ from kazusa_ai_chatbot.action_spec.registry import (
     build_initial_action_capabilities,
     project_prompt_affordances,
 )
+from kazusa_ai_chatbot.accepted_task import load_open_coding_run_contexts_for_scope
 from kazusa_ai_chatbot.cognition_chain_core.action_selection import (
     ACCEPTED_TASK_REQUEST_CAPABILITY,
 )
@@ -161,6 +162,12 @@ def build_cognition_chain_input_from_global_state(
         cognitive_episode,
         media_observations,
     )
+    stored_coding_run_followup = state.get("coding_run_followup")
+    if isinstance(stored_coding_run_followup, Mapping):
+        coding_run_followup = dict(stored_coding_run_followup)
+    else:
+        coding_run_context = _coding_run_context_from_episode(cognitive_episode)
+        coding_run_followup = _coding_run_followup([coding_run_context])
     scene_channel_topic = project_channel_topic_text(
         channel_type=state["channel_type"],
         channel_name=state.get("channel_name", ""),
@@ -292,6 +299,8 @@ def build_cognition_chain_input_from_global_state(
             ),
         },
     }
+    if coding_run_followup["mode"] != "none":
+        payload["coding_run_followup"] = coding_run_followup
     validated_payload = validate_cognition_chain_input(payload)
     return validated_payload
 
@@ -313,15 +322,22 @@ def build_text_surface_chain_input_from_global_state(
 def apply_cognition_chain_output_to_global_state(
     output: CognitionChainOutputV1,
     state: GlobalPersonaState,
+    *,
+    action_selection_context: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
     """Map core output back to Kazusa graph updates."""
 
     validated_output = validate_cognition_chain_output(output)
     residue = validated_output["cognition_residue"]
     semantic_requests = validated_output["semantic_action_requests"]
+    materialization_state = _initial_cognition_state_from_global_state(state)
+    if action_selection_context is not None:
+        materialization_state["action_selection_context"] = dict(
+            action_selection_context
+        )
     action_specs = materialize_semantic_action_requests(
         semantic_requests,
-        _initial_cognition_state_from_global_state(state),
+        materialization_state,
     )
     resolver_capability_requests = _validated_resolver_capability_requests(
         validated_output["resolver_capability_requests"],
@@ -399,20 +415,41 @@ async def call_cognition_subgraph(state: GlobalPersonaState) -> GlobalPersonaSta
         )
     if group_engagement_task is not None:
         group_engagement_context = await group_engagement_task
-        chain_input["action_selection_context"] = {
-            "group_engagement_action_context": _prompt_safe_mapping(
-                group_engagement_context
-            ),
-        }
+        action_selection_context = dict(chain_input["action_selection_context"])
+        action_selection_context["group_engagement_action_context"] = (
+            _prompt_safe_mapping(group_engagement_context)
+        )
+        chain_input["action_selection_context"] = action_selection_context
+    cognitive_episode = state["cognitive_episode"]
+    if cognitive_episode["trigger_source"] == "user_message":
+        coding_run_contexts = await load_open_coding_run_contexts_for_scope(
+            source_platform=state["platform"],
+            source_channel_id=state["platform_channel_id"],
+            requester_global_user_id=state["global_user_id"],
+        )
+        if coding_run_contexts:
+            action_selection_context = dict(chain_input["action_selection_context"])
+            action_selection_context["coding_runs"] = coding_run_contexts
+            chain_input["action_selection_context"] = action_selection_context
+            chain_input["coding_run_followup"] = _coding_run_followup(
+                coding_run_contexts
+            )
     chain_input = validate_cognition_chain_input(chain_input)
     chain_output = await run_cognition_chain(
         chain_input,
         build_cognition_chain_services(),
     )
-    update = apply_cognition_chain_output_to_global_state(chain_output, state)
+    update = apply_cognition_chain_output_to_global_state(
+        chain_output,
+        state,
+        action_selection_context=chain_input["action_selection_context"],
+    )
     update["rag_result"] = chain_input["evidence"].get(
         "rag_result",
         state["rag_result"],
+    )
+    update["coding_run_followup"] = dict(
+        chain_input.get("coding_run_followup", {"mode": "none", "runs": []})
     )
     _log_cognition_output(chain_input, update)
     return update
@@ -742,6 +779,63 @@ def _model_visible_percepts_from_episode(value: object) -> list[dict[str, object
         })
     return_value = percepts
     return return_value
+
+
+def _coding_run_context_from_episode(
+    episode: Mapping[str, object],
+) -> dict[str, object] | None:
+    """Return the current result's sanitized coding-run context when present."""
+
+    percepts = episode.get("percepts")
+    if not isinstance(percepts, list):
+        return None
+    for percept in percepts:
+        if not isinstance(percept, Mapping):
+            continue
+        if percept.get("input_source") != "accepted_task_result":
+            continue
+        metadata = percept.get("metadata")
+        if not isinstance(metadata, Mapping):
+            continue
+        context = metadata.get("coding_run_context")
+        if isinstance(context, Mapping):
+            return dict(context)
+    return None
+
+
+def _coding_run_followup(
+    contexts: list[Mapping[str, object] | None],
+) -> dict[str, object]:
+    """Project coding-run follow-up wording facts without operational fields."""
+
+    runs: list[dict[str, object]] = []
+    for context in contexts:
+        if not isinstance(context, Mapping):
+            continue
+        if context.get("followup_open") is not True:
+            continue
+        objective_summary = _text(context.get("objective_summary"))[:500]
+        if not objective_summary:
+            continue
+        active_blocker = context.get("active_blocker")
+        projected_blocker: dict[str, object] | None = None
+        if isinstance(active_blocker, Mapping):
+            question = _text(active_blocker.get("question"))[:500]
+            options = _string_list(active_blocker.get("options"))[:5]
+            if question:
+                projected_blocker = {
+                    "question": question,
+                    "options": options,
+                }
+        runs.append({
+            "objective_summary": objective_summary,
+            "active_blocker": projected_blocker,
+        })
+    if not runs:
+        return {"mode": "none", "runs": []}
+    if len(runs) == 1:
+        return {"mode": "single", "runs": runs}
+    return {"mode": "ambiguous", "runs": runs[:3]}
 
 
 def _metadata_summary(value: object) -> list[str]:

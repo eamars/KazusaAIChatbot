@@ -36,6 +36,9 @@ ids, workers, leases, retry counters, or adapter callback details.
 - Durable coding tasks use a coding-specific action that exposes only closed
   semantic actions and prompt-safe `coding_run:<run_id>` references. The
   accepted-task layer still hides queue rows and worker internals.
+- Coding worker completion may persist one optional `coding_run_context.v1`.
+  It contains only the run ref, public status, objective summary, allowed next
+  actions, one blocker question/options, follow-up state, and update time.
 
 ## Public Interfaces
 
@@ -76,6 +79,13 @@ claim accepted_task enqueueing row
 If the internal job insert fails, the accepted task moves to `enqueue_failed`
 and the active identity is released. The character must not promise completion
 for a task that has no durable executor row.
+
+On result-ready turns, cognition consumes the current sanitized context. On a
+later user turn, the accepted-task repository loads the newest open contexts
+for the trusted requester and channel through its indexed public query, keeps
+the newest row per run, and returns at most three contexts. Queue payloads,
+worker metadata, approvals, execution details, and paths never enter this
+lookup or the LLM prompt.
 
 ## Persistence
 

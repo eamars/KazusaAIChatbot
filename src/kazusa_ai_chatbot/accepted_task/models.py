@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Literal, NotRequired, TypedDict
 
+from kazusa_ai_chatbot.coding_agent.coding_run.models import CodingRunContextV1
+
 ACCEPTED_TASKS_COLLECTION = "accepted_tasks"
 ACCEPTED_TASK_SCHEMA_VERSION = "accepted_task.v1"
 ACCEPTED_TASK_REQUESTED_DELIVERY = "send_result_when_done"
@@ -130,6 +132,7 @@ class AcceptedTaskDoc(TypedDict, total=False):
     delivery_tracking_id: str
     delivered_conversation_message_id: str
     last_progress_reported_at: str
+    coding_run_context: CodingRunContextV1
 
 
 class AcceptedTaskCreateResult(TypedDict):

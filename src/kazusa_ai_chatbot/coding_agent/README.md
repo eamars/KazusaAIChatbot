@@ -105,15 +105,21 @@ The background-work `coding_agent` adapter has two modes:
 
 - Legacy generic delayed coding work receives no worker payload and calls
   `handle_background_coding_task(...)`.
-- Durable coding-run work receives `coding_agent_worker_payload.v1` from the
+- Durable coding-run work receives `coding_agent_worker_payload.v2` from the
   `accepted_coding_task_request` action handler. It supports `start`,
-  `revise_proposal`, `summarize`, `status`, `approve_and_verify`, and
-  `cancel`, maps them to the durable run APIs, and returns
-  `coding_agent_worker_metadata.v2` with a prompt-safe `coding_run:<run_id>`
+  `revise_proposal`, `summarize`, `status`, `approve_and_verify`,
+  `respond_to_blocker`, and `cancel`, maps them to the durable run APIs, and returns
+  `coding_agent_worker_metadata.v3` with a prompt-safe `coding_run_context.v1`
   reference, changed-file summaries, attempt history, and allowed next
   actions. Approval verification accepts only structured `python_compileall`
   or focused `pytest` specs, or has the coding PM route plan those same
   bounded specs from the approval detail.
+
+`respond_to_blocker` is valid only when the current durable run exposes that
+action. A resumable environment blocker retries the stored verification plan
+without a repair call; a proposal blocker returns through the existing revision
+path. The worker projects only the run ref, public state, allowed actions, and
+active blocker question/options to accepted-task cognition.
 
 Implemented subagents:
 
@@ -162,7 +168,7 @@ flowchart TD
     B3["background_work.subagent.coding_agent.execute<br/>injects CODING_AGENT_WORKSPACE_ROOT<br/>maps sanitized result metadata"]
     B4["handle_background_coding_task(...)<br/>coding-agent supervisor LLM<br/>operation: code_reading / code_writing / code_modifying / unsupported"]
     B5["accepted_coding_task_request<br/>deterministic requested_worker payload"]
-    B6["coding_agent_worker_payload.v1<br/>start / revise_proposal / summarize / status / approve_and_verify / cancel"]
+    B6["coding_agent_worker_payload.v2<br/>start / revise_proposal / summarize / status / approve_and_verify / respond_to_blocker / cancel"]
     O0["unsupported or failed response<br/>no coding subagent call"]
     O1["CodingAgentResponse<br/>public-safe answer and evidence"]
     O2["CodingPatchProposalResponse<br/>review-only patch proposal"]

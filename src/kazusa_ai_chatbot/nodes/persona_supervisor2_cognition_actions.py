@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from collections.abc import Mapping
 from typing import TypedDict
 
@@ -31,9 +30,6 @@ logger = logging.getLogger(__name__)
 ACTION_SPEC_CAP = 3
 OPEN_GOAL_DELIVERABLE_STATUSES = ("pending", "partial", "blocked")
 ACCEPTED_TASK_REQUEST_CAPABILITY = "accepted_task_request"
-CODING_RUN_REF_RE = re.compile(
-    r"coding_run:[A-Za-z0-9][A-Za-z0-9_-]{0,127}"
-)
 ALLOWED_ACTION_CAPABILITIES = frozenset((
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
@@ -398,9 +394,21 @@ def _build_accepted_coding_task_action_spec(
         "max_output_chars": BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
     }
     coding_run_ref = _coding_run_ref_for_request(request, state, coding_action)
-    if coding_run_ref:
+    if coding_action != "start":
+        if not coding_run_ref:
+            logger.warning(
+                "L2d dropped coding continuation outside current run affordances"
+            )
+            return None
         params["coding_run_ref"] = coding_run_ref
     if coding_action == "approve_and_verify":
+        approval_evidence = _approval_evidence_from_state(state)
+        if approval_evidence is None:
+            logger.warning(
+                "L2d dropped coding approval without current message evidence"
+            )
+            return None
+        params["approval_evidence"] = approval_evidence
         execution_request = _semantic_text(request, "execution_request")
         if not execution_request:
             execution_request = _semantic_text(request, "detail")
@@ -425,6 +433,56 @@ def _build_accepted_coding_task_action_spec(
     return action_spec
 
 
+def _approval_evidence_from_state(
+    state: CognitionState,
+) -> dict[str, str] | None:
+    """Extract current-user approval provenance without interpreting its text."""
+
+    episode = state.get("cognitive_episode")
+    if not isinstance(episode, Mapping):
+        return None
+    if _mapping_text(episode, "trigger_source") != "user_message":
+        return None
+    percepts = episode.get("percepts")
+    if not isinstance(percepts, list):
+        return None
+    quote = ""
+    for percept in percepts:
+        if not isinstance(percept, Mapping):
+            continue
+        if _mapping_text(percept, "input_source") != "dialog_text":
+            continue
+        quote = _mapping_text(percept, "content")[:500]
+        break
+    if not quote:
+        return None
+    target_scope = episode.get("target_scope")
+    origin_metadata = episode.get("origin_metadata")
+    if not isinstance(target_scope, Mapping) or not isinstance(
+        origin_metadata,
+        Mapping,
+    ):
+        return None
+    requester_global_user_id = _mapping_text(
+        target_scope,
+        "current_global_user_id",
+    )
+    source_message_id = _mapping_text(origin_metadata, "platform_message_id")
+    storage_timestamp_utc = _mapping_text(episode, "storage_timestamp_utc")
+    if not requester_global_user_id or not source_message_id:
+        return None
+    if not storage_timestamp_utc:
+        return None
+    evidence = {
+        "source_message_id": source_message_id,
+        "source_trigger_source": "user_message",
+        "requester_global_user_id": requester_global_user_id,
+        "quote": quote,
+        "storage_timestamp_utc": storage_timestamp_utc,
+    }
+    return evidence
+
+
 def _coding_run_ref_for_request(
     request: ActionRequestV1,
     state: CognitionState,
@@ -437,21 +495,55 @@ def _coding_run_ref_for_request(
         "summarize",
         "status",
         "approve_and_verify",
+        "respond_to_blocker",
         "cancel",
     ):
         return ""
+    contexts = _coding_run_contexts(state)
     direct_ref = _semantic_text(request, "coding_run_ref")
+    eligible_refs = [
+        context["coding_run_ref"]
+        for context in contexts
+        if coding_action in context["allowed_next_actions"]
+    ]
     if direct_ref:
-        return direct_ref
-    for text in (
-        _semantic_text(request, "detail"),
-        _semantic_text(request, "reason"),
-        _semantic_text(state, "decontexualized_input"),
-    ):
-        match = CODING_RUN_REF_RE.search(text)
-        if match:
-            return match.group(0)
+        if direct_ref in eligible_refs:
+            return direct_ref
+        return ""
+    if len(eligible_refs) == 1:
+        return eligible_refs[0]
     return ""
+
+
+def _coding_run_contexts(
+    state: CognitionState,
+) -> list[dict[str, object]]:
+    """Return trusted run contexts with valid continuation affordances."""
+
+    action_selection_context = state.get("action_selection_context")
+    if not isinstance(action_selection_context, Mapping):
+        return []
+    raw_contexts = action_selection_context.get("coding_runs")
+    if not isinstance(raw_contexts, list):
+        return []
+    contexts: list[dict[str, object]] = []
+    for raw_context in raw_contexts:
+        if not isinstance(raw_context, Mapping):
+            continue
+        coding_run_ref = _mapping_text(raw_context, "coding_run_ref")
+        allowed_actions = raw_context.get("allowed_next_actions")
+        if not coding_run_ref or not isinstance(allowed_actions, list):
+            continue
+        actions = [
+            action
+            for action in allowed_actions
+            if isinstance(action, str)
+        ]
+        contexts.append({
+            "coding_run_ref": coding_run_ref,
+            "allowed_next_actions": actions,
+        })
+    return contexts
 
 
 def _coding_action_for_request(request: ActionRequestV1) -> str:
@@ -464,6 +556,7 @@ def _coding_action_for_request(request: ActionRequestV1) -> str:
         "summarize",
         "status",
         "approve_and_verify",
+        "respond_to_blocker",
         "cancel",
     ):
         return decision

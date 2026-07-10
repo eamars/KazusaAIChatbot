@@ -23,6 +23,7 @@ from kazusa_ai_chatbot.config import CODING_AGENT_PREFLIGHT_EXECUTION
 from kazusa_ai_chatbot.coding_agent.coding_run.ledger import (
     RUN_SCHEMA_VERSION,
     CodingRunPaths,
+    allowed_next_actions,
     append_event,
     build_run_paths,
     empty_response,
@@ -33,6 +34,11 @@ from kazusa_ai_chatbot.coding_agent.coding_run.ledger import (
     redaction_roots_from_ledger,
     utc_timestamp,
     write_ledger,
+)
+from kazusa_ai_chatbot.coding_agent.coding_run.locking import (
+    LOCK_TIMEOUT_SECONDS,
+    acquire_workspace_locks,
+    build_lock_keys,
 )
 from kazusa_ai_chatbot.coding_agent.coding_run.models import (
     CodingRunContinueRequest,
@@ -52,9 +58,10 @@ ALLOWED_ACTIONS = {
     "summarize",
     "status",
     "approve_and_verify",
+    "respond_to_blocker",
     "cancel",
 }
-TERMINAL_STATUSES = {"completed", "blocked", "rejected", "failed", "cancelled"}
+TERMINAL_STATUSES = {"completed", "rejected", "failed", "cancelled"}
 SOURCE_FIELDS = (
     "source_url",
     "repo_url",
@@ -75,6 +82,17 @@ COMMON_DIRECT_FIELDS = (
     "session_id",
 )
 ALLOWED_EXECUTION_TOOLS = {"python_compileall", "pytest"}
+CODING_RUN_LOCK_TIMEOUT_SECONDS = LOCK_TIMEOUT_SECONDS
+LOCK_SOURCE_FIELDS = (
+    "source_url",
+    "repo_url",
+    "repo_hint",
+    "local_root_hint",
+    "local_path_hint",
+    "requested_ref",
+    "source_scope_hint",
+    "inline_sources",
+)
 
 
 async def start_coding_run(
@@ -99,6 +117,7 @@ async def start_coding_run(
         workspace_root_text=str(request["workspace_root"]),
         run_id=run_id,
         create=True,
+        create_run_dir=False,
     )
     if isinstance(paths_result, str):
         response = empty_response(
@@ -110,33 +129,64 @@ async def start_coding_run(
         )
         return response
 
-    ledger = _initial_ledger(
+    source_identity = _source_identity_from_request(request)
+    lock_keys = build_lock_keys(
         run_id=run_id,
-        request=request,
-        objective_type=objective_type,
+        source_identity=source_identity,
     )
-    write_ledger(paths_result, ledger)
-    _record_event(
-        paths=paths_result,
-        ledger=ledger,
-        event_type="run_created",
-        summary="Coding run was created.",
-        public_payload={"objective_type": objective_type},
-    )
+    async with acquire_workspace_locks(
+        workspace_root=paths_result.workspace_root,
+        keys=lock_keys,
+        timeout_seconds=CODING_RUN_LOCK_TIMEOUT_SECONDS,
+    ) as acquired:
+        if not acquired:
+            response = _busy_response_without_ledger(
+                run_id=run_id,
+                objective_type=objective_type,
+                goal=_request_text(request.get("question")),
+            )
+            return response
+        locked_paths = build_run_paths(
+            workspace_root_text=str(request["workspace_root"]),
+            run_id=run_id,
+            create=True,
+        )
+        if isinstance(locked_paths, str):
+            response = empty_response(
+                status="rejected",
+                objective_type=objective_type,
+                goal=_request_text(request.get("question")),
+                limitation=locked_paths,
+                trace_summary=["coding_run:rejected:workspace"],
+            )
+            return response
+        ledger = _initial_ledger(
+            run_id=run_id,
+            request=request,
+            objective_type=objective_type,
+        )
+        write_ledger(locked_paths, ledger)
+        _record_event(
+            paths=locked_paths,
+            ledger=ledger,
+            event_type="run_created",
+            summary="Coding run was created.",
+            public_payload={"objective_type": objective_type},
+        )
 
-    if objective_type == "read_only":
-        response = await _start_read_only(paths=paths_result, ledger=ledger)
-        return response
-    if objective_type == "propose_patch":
-        response = await _start_propose_patch(paths=paths_result, ledger=ledger)
-        return response
+        if objective_type == "read_only":
+            response = await _start_read_only(paths=locked_paths, ledger=ledger)
+            return response
+        if objective_type == "propose_patch":
+            response = await _start_propose_patch(paths=locked_paths, ledger=ledger)
+            return response
 
-    response = await _start_verify_repair(
-        paths=paths_result,
-        ledger=ledger,
-        request=request,
-    )
-    return response
+        response = await _start_verify_repair(
+            paths=locked_paths,
+            ledger=ledger,
+            request=request,
+        )
+        return response
 
 
 async def continue_coding_run(
@@ -160,43 +210,89 @@ async def continue_coding_run(
     ledger = ledger_or_error
 
     action_error = _action_validation_error(request)
-    if action_error:
-        response = _reject_continuation(
-            paths=paths,
-            ledger=ledger,
-            limitation=action_error,
-        )
-        return response
-
-    action = str(request["action"])
-    if action == "status":
+    action = _request_text(request.get("action"))
+    if not action_error and action == "status":
         response = _status_run(paths=paths, ledger=ledger)
         return response
+    source_identity = _source_identity_from_ledger(ledger)
+    lock_keys = build_lock_keys(
+        run_id=ledger["run_id"],
+        source_identity=source_identity,
+    )
+    async with acquire_workspace_locks(
+        workspace_root=paths.workspace_root,
+        keys=lock_keys,
+        timeout_seconds=CODING_RUN_LOCK_TIMEOUT_SECONDS,
+    ) as acquired:
+        if not acquired:
+            response = _busy_response(paths=paths, ledger=ledger)
+            return response
+        locked_ledger_or_error = load_ledger(paths)
+        if isinstance(locked_ledger_or_error, str):
+            response = empty_response(
+                status="rejected",
+                run_id=_request_text(request.get("run_id")),
+                limitation=locked_ledger_or_error,
+                trace_summary=["coding_run:rejected:missing_run"],
+            )
+            return response
+        locked_ledger = locked_ledger_or_error
+        if action_error:
+            response = _reject_continuation(
+                paths=paths,
+                ledger=locked_ledger,
+                limitation=action_error,
+            )
+            return response
+        if action not in allowed_next_actions(locked_ledger):
+            response = _reject_continuation(
+                paths=paths,
+                ledger=locked_ledger,
+                limitation="Coding run action is not currently allowed.",
+            )
+            return response
+        if locked_ledger["status"] in TERMINAL_STATUSES and action != "summarize":
+            response = _reject_continuation(
+                paths=paths,
+                ledger=locked_ledger,
+                limitation="Coding run is already terminal.",
+            )
+            return response
+        if action == "cancel":
+            response = _cancel_run(
+                paths=paths,
+                ledger=locked_ledger,
+                request=request,
+            )
+            return response
+        if action == "revise_proposal":
+            response = await _revise_proposal(
+                paths=paths,
+                ledger=locked_ledger,
+                request=request,
+            )
+            return response
+        if action == "summarize":
+            response = _summarize_run(
+                paths=paths,
+                ledger=locked_ledger,
+                request=request,
+            )
+            return response
+        if action == "respond_to_blocker":
+            response = await _respond_to_blocker(
+                paths=paths,
+                ledger=locked_ledger,
+                request=request,
+            )
+            return response
 
-    if ledger["status"] in TERMINAL_STATUSES and action != "summarize":
-        response = _reject_continuation(
+        response = await _approve_and_verify(
             paths=paths,
-            ledger=ledger,
-            limitation="Coding run is already terminal.",
-        )
-        return response
-
-    if action == "cancel":
-        response = _cancel_run(paths=paths, ledger=ledger, request=request)
-        return response
-    if action == "revise_proposal":
-        response = await _revise_proposal(
-            paths=paths,
-            ledger=ledger,
+            ledger=locked_ledger,
             request=request,
         )
         return response
-    if action == "summarize":
-        response = _summarize_run(paths=paths, ledger=ledger, request=request)
-        return response
-
-    response = await _approve_and_verify(paths=paths, ledger=ledger, request=request)
-    return response
 
 
 async def get_coding_run(
@@ -476,6 +572,117 @@ def _status_run(
     return response
 
 
+async def _respond_to_blocker(
+    *,
+    paths: CodingRunPaths,
+    ledger: CodingRunLedger,
+    request: CodingRunContinueRequest,
+) -> CodingRunResponse:
+    """Resume the one active blocker through its stored deterministic target.
+
+    Args:
+        paths: Resolved workspace paths for the durable run.
+        ledger: Current durable run state with exactly one active blocker.
+        request: Validated user-follow-up continuation request.
+
+    Returns:
+        The refreshed public run projection after the authorized resume path.
+    """
+
+    blocker = _open_blocker(ledger)
+    if blocker is None:
+        response = _reject_continuation(
+            paths=paths,
+            ledger=ledger,
+            limitation="Coding run has no active blocker to answer.",
+        )
+        return response
+    answer = _request_text(request.get("revision_instruction"))
+    if not answer:
+        response = _reject_continuation(
+            paths=paths,
+            ledger=ledger,
+            limitation="Coding run blocker response requires a user answer.",
+        )
+        return response
+    resume_target = _request_text(blocker.get("resume_target"))
+    if resume_target == "replan_proposal":
+        blocker["status"] = "answered"
+        blocker["answered_at"] = utc_timestamp()
+        ledger["status"] = "awaiting_approval"
+        response = await _revise_proposal(
+            paths=paths,
+            ledger=ledger,
+            request={
+                "workspace_root": request["workspace_root"],
+                "run_id": request["run_id"],
+                "action": "revise_proposal",
+                "revision_instruction": answer,
+            },
+        )
+        return response
+    if resume_target == "retry_verification":
+        response = await _retry_blocked_verification(
+            paths=paths,
+            ledger=ledger,
+            blocker=blocker,
+        )
+        return response
+    response = _reject_continuation(
+        paths=paths,
+        ledger=ledger,
+        limitation="Coding run blocker cannot be resumed.",
+    )
+    return response
+
+
+async def _retry_blocked_verification(
+    *,
+    paths: CodingRunPaths,
+    ledger: CodingRunLedger,
+    blocker: dict[str, object],
+) -> CodingRunResponse:
+    """Rerun the stored verification plan without creating repair work.
+
+    Args:
+        paths: Resolved workspace paths for the durable run.
+        ledger: Blocked durable run holding the prior verified proposal.
+        blocker: The active environment blocker being answered.
+
+    Returns:
+        The public response after one repair-free verification retry.
+    """
+
+    approval = _latest_approval(ledger)
+    if approval is None:
+        response = _reject_continuation(
+            paths=paths,
+            ledger=ledger,
+            limitation="Blocked verification has no stored approval evidence.",
+        )
+        return response
+    blocker["status"] = "answered"
+    blocker["answered_at"] = utc_timestamp()
+    ledger["status"] = "verifying"
+    verify_request = _verify_request_from_continuation(
+        ledger=ledger,
+        request={
+            "workspace_root": str(paths.workspace_root),
+            "run_id": ledger["run_id"],
+            "action": "approve_and_verify",
+            "approval": approval,
+            "repair_attempt_limit": 0,
+        },
+    )
+    verify_request["repair_attempt_limit"] = 0
+    result = await verify_and_repair_code_change(verify_request)
+    _record_verify_result(paths=paths, ledger=ledger, result=result)
+    write_ledger(paths, ledger)
+    events = load_events(paths)
+    response = public_response(ledger=ledger, events=events)
+    return response
+
+
 async def _approve_and_verify(
     *,
     paths: CodingRunPaths,
@@ -552,6 +759,41 @@ def _reject_continuation(
     return response
 
 
+def _busy_response(
+    *,
+    paths: CodingRunPaths,
+    ledger: CodingRunLedger,
+) -> CodingRunResponse:
+    """Project retryable lock contention without changing a stored run."""
+
+    events = load_events(paths)
+    response = public_response(ledger=ledger, events=events)
+    response["operation_outcome"] = "busy"
+    response["retry_guidance"] = "Retry the same coding action."
+    return response
+
+
+def _busy_response_without_ledger(
+    *,
+    run_id: str,
+    objective_type: str,
+    goal: str,
+) -> CodingRunResponse:
+    """Project start-lock contention before a durable ledger exists."""
+
+    response = empty_response(
+        status="busy",
+        run_id=run_id,
+        objective_type=objective_type,
+        goal=goal,
+        limitation="Coding run is busy.",
+        trace_summary=["coding_run:busy:start_lock"],
+    )
+    response["operation_outcome"] = "busy"
+    response["retry_guidance"] = "Retry the same coding action."
+    return response
+
+
 def _record_verify_result(
     *,
     paths: CodingRunPaths,
@@ -575,7 +817,7 @@ def _record_verify_result(
         ledger["alignment"] = final_alignment
     ledger["apply_attempts"] = _apply_attempts(result)
     ledger["execution_attempts"] = _execution_attempts(result)
-    ledger["blockers"] = _list_of_dicts(result.get("blockers"))
+    ledger["blockers"] = _durable_blockers(result.get("blockers"))
     ledger["limitations"] = _string_list(result.get("limitations"))
     ledger["trace_summary"] = _string_list(result.get("trace_summary"))
     for attempt in ledger["attempts"]:
@@ -794,6 +1036,7 @@ def _record_approval(
         "approved_by": approval.get("approved_by"),
         "approved_at": approval.get("approved_at"),
         "approval_reason": approval.get("approval_reason"),
+        "approval_evidence": approval.get("approval_evidence"),
     }
     ledger["approvals"].append(approval_record)
     _record_event(
@@ -891,6 +1134,40 @@ def _source_request_from_start(
         if value is not None:
             source_request[field_name] = value
     return source_request
+
+
+def _source_identity_from_request(
+    request: Mapping[str, object],
+) -> dict[str, object] | None:
+    """Build a stable explicit source identity for a start-time workspace lock."""
+
+    identity: dict[str, object] = {}
+    for field_name in LOCK_SOURCE_FIELDS:
+        value = request.get(field_name)
+        if isinstance(value, str):
+            normalized_value = value.strip()
+            if normalized_value:
+                identity[field_name] = normalized_value
+            continue
+        if value is not None:
+            identity[field_name] = value
+    if not identity:
+        return None
+    return identity
+
+
+def _source_identity_from_ledger(
+    ledger: CodingRunLedger,
+) -> dict[str, object] | None:
+    """Return the persisted repository or source identity for a continuation."""
+
+    repository = ledger["repository"]
+    if isinstance(repository, Mapping):
+        identity = _identity_from_repository(repository)
+        if identity:
+            return identity
+    identity = _source_identity_from_request(ledger["source_request"])
+    return identity
 
 
 def _direct_request(source_request: Mapping[str, object]) -> dict[str, object]:
@@ -1391,6 +1668,24 @@ def _list_of_dicts(value: object) -> list[dict[str, object]]:
     return items
 
 
+def _durable_blockers(value: object) -> list[dict[str, object]]:
+    """Attach durable lifecycle fields to the verifier's one typed blocker."""
+
+    blockers = _list_of_dicts(value)
+    if len(blockers) > 1:
+        raise ValueError("Coding run verification returned multiple blockers.")
+    if not blockers:
+        return []
+
+    blocker = blockers[0]
+    blocker["blocker_id"] = new_run_id()
+    blocker["status"] = "open"
+    blocker["created_at"] = utc_timestamp()
+    blocker["answered_at"] = None
+    durable_blockers = [blocker]
+    return durable_blockers
+
+
 def _string_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -1409,10 +1704,42 @@ def _request_text(value: object) -> str:
     return text
 
 
+def _open_blocker(ledger: CodingRunLedger) -> dict[str, object] | None:
+    """Return the one durable blocker whose answer may resume the run."""
+
+    for blocker in ledger["blockers"]:
+        if not isinstance(blocker, dict):
+            continue
+        if _request_text(blocker.get("status")) == "open":
+            return blocker
+    return None
+
+
+def _latest_approval(ledger: CodingRunLedger) -> dict[str, object] | None:
+    """Return the most recent stored approval needed for a verification retry."""
+
+    if not ledger["approvals"]:
+        return None
+    approval = ledger["approvals"][-1]
+    if not isinstance(approval, dict):
+        return None
+    latest_approval = dict(approval)
+    return latest_approval
+
+
 def _blocker(message: str) -> dict[str, object]:
+    now = utc_timestamp()
     blocker = {
+        "blocker_id": new_run_id(),
         "code": "request_rejected",
+        "blocker_kind": "scope",
         "message": message,
+        "question": message,
+        "options": [],
+        "resume_target": "none",
+        "status": "open",
         "details": {},
+        "created_at": now,
+        "answered_at": None,
     }
     return blocker

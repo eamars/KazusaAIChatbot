@@ -127,6 +127,9 @@ def build_action_selection_payload(
     group_engagement = _build_group_engagement_section(state)
     if group_engagement is not None:
         payload["group_engagement"] = group_engagement
+    coding_runs = _build_coding_runs_section(state)
+    if coding_runs:
+        payload["coding_runs"] = coding_runs
     return payload
 
 
@@ -486,6 +489,55 @@ def _build_resolver_section(state: Mapping[str, object]) -> dict[str, object]:
     return section
 
 
+def _build_coding_runs_section(
+    state: Mapping[str, object],
+) -> list[dict[str, object]]:
+    """Project current coding affordances without operational worker fields."""
+
+    action_selection_context = state.get("action_selection_context")
+    if not isinstance(action_selection_context, Mapping):
+        return []
+    contexts = action_selection_context.get("coding_runs")
+    if not isinstance(contexts, list):
+        return []
+    projected_contexts: list[dict[str, object]] = []
+    for context in contexts:
+        if not isinstance(context, Mapping):
+            continue
+        coding_run_ref = _safe_text(context.get("coding_run_ref"))
+        status = _safe_text(context.get("status"))
+        objective_summary = _safe_text(context.get("objective_summary"))
+        allowed_actions = context.get("allowed_next_actions")
+        if not isinstance(allowed_actions, list):
+            continue
+        projected_actions = [
+            action
+            for action in allowed_actions
+            if isinstance(action, str) and action
+        ]
+        projected_context = {
+            "coding_run_ref": coding_run_ref,
+            "status": status,
+            "objective_summary": objective_summary,
+            "allowed_next_actions": projected_actions,
+        }
+        active_blocker = context.get("active_blocker")
+        if isinstance(active_blocker, Mapping):
+            question = _safe_text(active_blocker.get("question"))
+            options = active_blocker.get("options")
+            if isinstance(options, list):
+                projected_context["active_blocker"] = {
+                    "question": question,
+                    "options": [
+                        option
+                        for option in options
+                        if isinstance(option, str) and option
+                    ],
+                }
+        projected_contexts.append(projected_context)
+    return projected_contexts[:3]
+
+
 def _build_capabilities_section(
     action_affordances: list[dict[str, object]],
 ) -> dict[str, object]:
@@ -811,14 +863,25 @@ def _default_action_summary(capability: str) -> list[str]:
                 "durable run state and follow-up."
             ),
             (
-                "Use decision=start, status, approve_and_verify, or cancel."
+                "Use decision=start, revise_proposal, summarize, status, "
+                "approve_and_verify, respond_to_blocker, or cancel."
             ),
             (
-                "For status, approval, and cancellation, include the "
-                "prompt-safe coding_run_ref when it is visible in context."
+                "For every continuation decision, select it only when that "
+                "exact action appears in the chosen coding run's "
+                "allowed_next_actions."
+            ),
+            (
+                "Use a visible coding_run_ref only from the current coding "
+                "run context; omit it only when exactly one offered run "
+                "allows the selected action."
             ),
             (
                 "For approval, put requested verification checks in detail."
+            ),
+            (
+                "For respond_to_blocker, put the user's answer to the active "
+                "blocker question in detail."
             ),
             "Pair this private request with a visible speak acknowledgement.",
         ],
