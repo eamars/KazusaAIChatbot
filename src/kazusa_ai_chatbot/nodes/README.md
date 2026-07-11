@@ -128,6 +128,11 @@ uses each run's current allowed actions to select a semantic continuation;
 materialization binds only offered refs and never scans user text for one. L3
 receives only a ref-free blocker or ambiguity follow-up summary, so visible
 wording can ask the stored blocker question without exposing execution data.
+The persona wrapper always initializes `action_selection_context` before the
+core runs, using `coding_runs=[]` and `group_engagement_action_context={}` as
+the neutral value. User-message coding-run lookup and group self-cognition
+enrichment merge into that same context, so L2d and deterministic
+materialization consume one normalized trusted shape.
 
 Memory lifecycle is also split by ownership. L2d may select
 `memory_lifecycle_update` when the current turn might affect an active

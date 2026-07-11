@@ -86,6 +86,23 @@ question/options are current human-message facts. L3 receives a separate
 follow-up source without run refs or operational fields and uses it only to
 render a blocker question or an ambiguity clarification.
 
+`CognitionChainInputV1.action_selection_context` is required runtime handoff
+state for L2d and later deterministic action materialization. Callers must
+initialize it even when there are no contextual action-selection facts:
+
+```python
+{
+    "coding_runs": [],
+    "group_engagement_action_context": {},
+}
+```
+
+The cognition wrapper may populate `coding_runs` with prompt-safe current run
+affordances or `group_engagement_action_context` with prompt-safe group
+engagement facts. The core must not receive raw worker payloads, database
+rows, approval evidence, adapter ids, job ids, leases, or delivery targets in
+this context.
+
 ## Action Boundary
 
 The core emits `SemanticActionRequestV1` rows. These rows describe semantic

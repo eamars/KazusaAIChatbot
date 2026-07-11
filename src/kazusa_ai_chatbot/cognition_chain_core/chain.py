@@ -174,9 +174,7 @@ def _state_from_chain_input(
         "affinity_level": current_user["affinity_level"],
         "last_relationship_insight": current_user["last_relationship_insight"],
     })
-    action_selection_context = _mapping(
-        input_payload.get("action_selection_context", {}),
-    )
+    action_selection_context = _mapping(input_payload["action_selection_context"])
     state = {
         "llm_trace_id": input_payload.get("llm_trace_id", ""),
         "character_profile": character_profile,
@@ -216,6 +214,7 @@ def _state_from_chain_input(
         "coding_run_followup": _mapping(
             input_payload.get("coding_run_followup", {}),
         ),
+        "action_selection_context": dict(action_selection_context),
         "available_action_affordances": list(input_payload["available_actions"]),
         "max_action_requests": (
             input_payload["runtime_context"]["max_action_requests"]

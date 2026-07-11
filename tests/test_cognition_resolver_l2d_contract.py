@@ -130,6 +130,10 @@ def _l2d_state() -> dict:
         "resolver_context": (
             "resolver_state: status=running; cycle_index=0; max_cycles=3"
         ),
+        "action_selection_context": {
+            "coding_runs": [],
+            "group_engagement_action_context": {},
+        },
     }
 
 
@@ -176,6 +180,9 @@ async def test_action_selection_returns_resolver_request(
 @pytest.mark.asyncio
 async def test_cognition_subgraph_propagates_resolver_requests() -> None:
     """Resolver requests from L2d must return to the persona graph."""
+
+    async def no_open_coding_contexts(**_kwargs: Any) -> list[dict[str, Any]]:
+        return []
 
     async def l1_agent(_state: dict) -> dict:
         return {
@@ -234,9 +241,91 @@ async def test_cognition_subgraph_propagates_resolver_requests() -> None:
             l2c2_agent,
         ),
         patch.object(l2d_module, "select_semantic_actions", l2d_agent),
+        patch.object(
+            cognition_module,
+            "load_open_coding_run_contexts_for_scope",
+            no_open_coding_contexts,
+        ),
     ):
         result = await cognition_module.call_cognition_subgraph(_persona_state())
 
     assert result["resolver_capability_requests"] == [_resolver_request()]
     assert result["resolver_pending_resolution"] == _pending_resolution()
+    assert result["action_specs"] == []
+
+
+@pytest.mark.asyncio
+async def test_cognition_subgraph_runs_without_open_coding_context() -> None:
+    """No open coding runs should still provide an action-selection context."""
+
+    async def no_open_coding_contexts(**_kwargs: Any) -> list[dict[str, Any]]:
+        return []
+
+    async def l1_agent(_state: dict) -> dict:
+        return {
+            "emotional_appraisal": "calm",
+            "interaction_subtext": "direct request",
+        }
+
+    async def l2a_agent(_state: dict) -> dict:
+        return {
+            "internal_monologue": "Answer directly.",
+            "logical_stance": "ANSWER",
+            "character_intent": "RESPOND",
+        }
+
+    async def l2b_agent(_state: dict) -> dict:
+        return {
+            "boundary_core_assessment": {
+                "boundary_issue": "none",
+                "acceptance": "allow",
+                "stance_bias": "direct",
+            },
+        }
+
+    async def l2c1_agent(_state: dict) -> dict:
+        return {
+            "logical_stance": "ANSWER",
+            "character_intent": "RESPOND",
+            "judgment_note": "No resolver needed.",
+        }
+
+    async def l2c2_agent(_state: dict) -> dict:
+        return {
+            "social_distance": "friendly",
+            "emotional_intensity": "low",
+            "vibe_check": "calm",
+            "relational_dynamic": "stable",
+        }
+
+    async def l2d_agent(state: dict) -> dict:
+        assert state["action_selection_context"] == {
+            "coding_runs": [],
+            "group_engagement_action_context": {},
+        }
+        return {
+            "semantic_action_requests": [],
+            "resolver_capability_requests": [],
+        }
+
+    with (
+        patch.object(l1_module, "call_cognition_subconscious", l1_agent),
+        patch.object(l2_module, "call_cognition_consciousness", l2a_agent),
+        patch.object(l2_module, "call_boundary_core_agent", l2b_agent),
+        patch.object(l2_module, "call_judgment_core_agent", l2c1_agent),
+        patch.object(
+            l2c2_module,
+            "call_social_context_appraisal",
+            l2c2_agent,
+        ),
+        patch.object(l2d_module, "select_semantic_actions", l2d_agent),
+        patch.object(
+            cognition_module,
+            "load_open_coding_run_contexts_for_scope",
+            no_open_coding_contexts,
+        ),
+    ):
+        result = await cognition_module.call_cognition_subgraph(_persona_state())
+
+    assert result["resolver_capability_requests"] == []
     assert result["action_specs"] == []

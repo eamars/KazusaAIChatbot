@@ -298,6 +298,10 @@ def build_cognition_chain_input_from_global_state(
                 BACKGROUND_WORK_OUTPUT_CHAR_LIMIT
             ),
         },
+        "action_selection_context": {
+            "coding_runs": [],
+            "group_engagement_action_context": {},
+        },
     }
     if coding_run_followup["mode"] != "none":
         payload["coding_run_followup"] = coding_run_followup
@@ -537,6 +541,10 @@ def _initial_cognition_state_from_global_state(
         "referents": state["referents"],
         "rag_result": state["rag_result"],
         "resolver_context": state.get("resolver_context", ""),
+        "action_selection_context": {
+            "coding_runs": [],
+            "group_engagement_action_context": {},
+        },
     }
     for optional_key in (
         "resolver_state",

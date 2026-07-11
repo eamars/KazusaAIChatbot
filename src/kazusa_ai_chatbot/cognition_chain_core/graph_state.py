@@ -12,6 +12,7 @@ class CoreStageState(TypedDict):
     action_directives: dict[str, Any]
     action_results: list[dict[str, Any]]
     action_specs: list[dict[str, Any]]
+    action_selection_context: dict[str, Any]
     available_action_affordances: list[dict[str, Any]]
     background_work_output_char_limit: int
     body_language: list[str]

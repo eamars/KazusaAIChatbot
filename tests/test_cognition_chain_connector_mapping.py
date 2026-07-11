@@ -134,8 +134,25 @@ def test_persona_connector_maps_global_state_to_chain_input(
         chain_input["runtime_context"]["task_willingness_boundary_enabled"]
         is True
     )
+    assert chain_input["action_selection_context"] == {
+        "coding_runs": [],
+        "group_engagement_action_context": {},
+    }
     assert "platform_channel_id" not in chain_input["scene"]
     assert "action_specs" not in chain_input
+
+
+def test_cognition_chain_input_includes_empty_action_selection_context() -> None:
+    from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
+        build_cognition_chain_input_from_global_state,
+    )
+
+    chain_input = build_cognition_chain_input_from_global_state(_global_state())
+
+    assert chain_input["action_selection_context"] == {
+        "coding_runs": [],
+        "group_engagement_action_context": {},
+    }
 
 
 def test_persona_connector_projects_media_observations_to_chain_input() -> None:

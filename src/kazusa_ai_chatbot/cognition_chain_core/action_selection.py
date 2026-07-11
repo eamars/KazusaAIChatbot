@@ -494,9 +494,7 @@ def _build_coding_runs_section(
 ) -> list[dict[str, object]]:
     """Project current coding affordances without operational worker fields."""
 
-    action_selection_context = state.get("action_selection_context")
-    if not isinstance(action_selection_context, Mapping):
-        return []
+    action_selection_context = state["action_selection_context"]
     contexts = action_selection_context.get("coding_runs")
     if not isinstance(contexts, list):
         return []

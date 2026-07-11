@@ -520,9 +520,7 @@ def _coding_run_contexts(
 ) -> list[dict[str, object]]:
     """Return trusted run contexts with valid continuation affordances."""
 
-    action_selection_context = state.get("action_selection_context")
-    if not isinstance(action_selection_context, Mapping):
-        return []
+    action_selection_context = state["action_selection_context"]
     raw_contexts = action_selection_context.get("coding_runs")
     if not isinstance(raw_contexts, list):
         return []

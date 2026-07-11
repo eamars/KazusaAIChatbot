@@ -126,6 +126,10 @@ def _minimal_cognition_state() -> dict:
         "resolver_pending_resume": None,
         "resolver_previous_observations": [],
         "group_engagement_context": None,
+        "action_selection_context": {
+            "coding_runs": [],
+            "group_engagement_action_context": {},
+        },
         "available_action_affordances": [
             {
                 "capability": "speak",

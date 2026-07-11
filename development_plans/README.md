@@ -53,6 +53,7 @@ long_term/todo.md
 
 | Document | Type | Status |
 |---|---|---|
+| [action_selection_context_contract_bugfix_plan.md](active/bugfix/action_selection_context_contract_bugfix_plan.md) | Large cognition-chain action-selection context contract bugfix plan | completed |
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
 
 ## Reference Documents

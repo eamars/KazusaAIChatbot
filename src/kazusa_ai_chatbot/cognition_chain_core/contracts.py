@@ -173,6 +173,11 @@ class RuntimeContextV1(TypedDict):
     background_work_output_char_limit: int
 
 
+class ActionSelectionContextV1(TypedDict):
+    coding_runs: list[Mapping[str, Any]]
+    group_engagement_action_context: Mapping[str, Any]
+
+
 class CognitionChainInputV1(TypedDict):
     schema_version: Literal["cognition_chain_input.v1"]
     llm_trace_id: NotRequired[str]
@@ -186,7 +191,7 @@ class CognitionChainInputV1(TypedDict):
     resolver: ResolverPromptV1
     available_actions: list[ActionAffordanceV1]
     runtime_context: RuntimeContextV1
-    action_selection_context: NotRequired[Mapping[str, Any]]
+    action_selection_context: ActionSelectionContextV1
     coding_run_followup: NotRequired[Mapping[str, Any]]
 
 
@@ -423,6 +428,7 @@ _INPUT_REQUIRED_KEYS = frozenset((
     "resolver",
     "available_actions",
     "runtime_context",
+    "action_selection_context",
 ))
 _EPISODE_OUTPUT_MODES = frozenset((
     "live_response",
@@ -495,6 +501,7 @@ def validate_cognition_chain_input(
     _require_positive_int(runtime_context, "max_resolver_requests")
     _require_positive_int(runtime_context, "background_work_output_char_limit")
     _require_bool(runtime_context, "task_willingness_boundary_enabled")
+    _validate_action_selection_context(value["action_selection_context"])
     _validate_episode(value["episode"])
     _validate_current_event(value["current_event"])
     _validate_available_actions(value["available_actions"])
@@ -741,3 +748,14 @@ def _validate_available_actions(value: object) -> None:
                 f"available_actions.output_kind must be one of "
                 f"{sorted(_ACTION_OUTPUT_KINDS)}"
             )
+
+
+def _validate_action_selection_context(value: object) -> None:
+    """Validate trusted context used by semantic action selection."""
+
+    context = _require_mapping(value, "action selection context")
+    _require_list(context.get("coding_runs"), "action selection coding runs")
+    _require_mapping(
+        context.get("group_engagement_action_context"),
+        "group engagement action context",
+    )
