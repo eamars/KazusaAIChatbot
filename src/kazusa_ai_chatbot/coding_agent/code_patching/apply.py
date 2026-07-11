@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import shutil
 import subprocess
 import uuid
@@ -10,11 +12,19 @@ from pathlib import Path
 from typing import cast
 
 from kazusa_ai_chatbot.coding_agent.code_patching.models import (
+    CanonicalPatchOperationRecord,
     ChangedFileSummary,
     CodingPatchApplyRequest,
     CodingPatchApplyResponse,
     PatchApplyStatus,
     PatchArtifact,
+)
+from kazusa_ai_chatbot.coding_agent.code_patching.patch_operations import (
+    validate_canonical_operation_binding,
+)
+from kazusa_ai_chatbot.coding_agent.safety import (
+    copy_managed_source_tree,
+    managed_source_tree_digest,
 )
 from kazusa_ai_chatbot.config import CODING_AGENT_PREFLIGHT_EXECUTION
 from kazusa_ai_chatbot.coding_agent.code_patching.patch_validation import (
@@ -54,6 +64,22 @@ def materialize_managed_candidate(
     expected_identity = _mapping_or_empty(
         request.get("expected_source_identity"),
     )
+    canonical_records = cast(
+        list[CanonicalPatchOperationRecord],
+        request.get("canonical_operation_records", []),
+    )
+    proposal_digest = request.get("proposal_digest", "")
+    if not isinstance(proposal_digest, str):
+        proposal_digest = ""
+    canonical_binding_error = _canonical_binding_error(request)
+    if canonical_binding_error:
+        response = _response(
+            status="rejected",
+            source_identity=source_identity,
+            errors=[canonical_binding_error],
+            trace_summary=["patch_apply:rejected:canonical_binding"],
+        )
+        return response
     authorization_error = _authorization_error(request)
     if authorization_error:
         response = _response(
@@ -139,17 +165,34 @@ def materialize_managed_candidate(
         )
         return response
 
-    apply_package_id = uuid.uuid4().hex
+    requested_package_id = request.get("apply_package_id")
+    if requested_package_id is None:
+        apply_package_id = uuid.uuid4().hex
+        replace_existing_package = False
+    elif _valid_package_id(requested_package_id):
+        apply_package_id = str(requested_package_id)
+        replace_existing_package = True
+    else:
+        response = _response(
+            status="rejected",
+            source_identity=source_identity,
+            errors=["Managed apply package identity is invalid."],
+            warnings=warnings,
+            trace_summary=["patch_apply:rejected:package_identity"],
+        )
+        return response
     if source_free:
         apply_source_root_result = _create_empty_apply_workspace(
             workspace_root=workspace_root,
             apply_package_id=apply_package_id,
+            replace_existing_package=replace_existing_package,
         )
     else:
         apply_source_root_result = _copy_source_to_apply_workspace(
             source_root=source_root,
             workspace_root=workspace_root,
             apply_package_id=apply_package_id,
+            replace_existing_package=replace_existing_package,
         )
     if isinstance(apply_source_root_result, str):
         response = _response(
@@ -197,6 +240,23 @@ def materialize_managed_candidate(
         )
         return response
 
+    candidate_tree_digest = request.get("candidate_tree_digest", "")
+    if isinstance(candidate_tree_digest, str) and candidate_tree_digest:
+        applied_tree_digest = managed_source_tree_digest(apply_source_root)
+        if applied_tree_digest != candidate_tree_digest:
+            response = _response(
+                status="failed",
+                source_identity=source_identity,
+                apply_package_id=apply_package_id,
+                errors=["Managed apply candidate identity does not match review."],
+                warnings=warnings,
+                trace_summary=["patch_apply:failed:candidate_identity"],
+                canonical_operation_records=canonical_records,
+                proposal_digest=proposal_digest,
+                candidate_tree_digest=applied_tree_digest,
+            )
+            return response
+
     changed_files = _changed_file_summaries(
         source_root=source_root,
         files=files,
@@ -215,6 +275,13 @@ def materialize_managed_candidate(
             "patch_apply:managed_copy_created",
             "patch_apply:git_apply_succeeded",
         ],
+        canonical_operation_records=canonical_records,
+        proposal_digest=proposal_digest,
+        candidate_tree_digest=(
+            str(candidate_tree_digest)
+            if isinstance(candidate_tree_digest, str)
+            else ""
+        ),
     )
     return response
 
@@ -225,12 +292,38 @@ def _authorization_error(request: Mapping[str, object]) -> str:
     purpose = request.get("authorization_purpose")
     if purpose == "approved_verification":
         approval_error = _approval_error(request.get("approval"))
-        return approval_error
+        if approval_error:
+            return approval_error
+        binding_error = _approval_binding_error(request)
+        return binding_error
     if purpose == "preapproval_preflight":
         if not CODING_AGENT_PREFLIGHT_EXECUTION:
             return "Managed preflight execution is disabled."
         return ""
     return "Managed candidate authorization purpose is invalid."
+
+
+def _canonical_binding_error(request: Mapping[str, object]) -> str:
+    """Validate optional evaluation-time canonical patch provenance."""
+
+    records_value = request.get("canonical_operation_records")
+    digest_value = request.get("proposal_digest")
+    revision_value = request.get("candidate_revision")
+    if records_value is None and digest_value is None and revision_value is None:
+        return ""
+    if not isinstance(records_value, list):
+        return "Canonical operation records are required."
+    if not isinstance(digest_value, str) or not digest_value:
+        return "Canonical operation proposal digest is required."
+    if not isinstance(revision_value, int) or revision_value < 0:
+        return "Canonical operation candidate revision is required."
+    records = cast(list[CanonicalPatchOperationRecord], records_value)
+    binding_error = validate_canonical_operation_binding(
+        records=records,
+        proposal_digest=digest_value,
+        candidate_revision=revision_value,
+    )
+    return binding_error
 
 
 def _candidate_roots(
@@ -276,6 +369,53 @@ def _approval_error(approval_value: object) -> str:
         value = approval_value.get(key)
         if not isinstance(value, str) or not value.strip():
             return "Patch application approval is incomplete."
+    return ""
+
+
+def _approval_binding_error(request: Mapping[str, object]) -> str:
+    """Validate an optional internal approval-to-proposal binding."""
+
+    binding = request.get("approval_binding")
+    if binding is None:
+        return ""
+    if not isinstance(binding, Mapping):
+        return "Patch application approval binding is invalid."
+    if binding.get("schema_version") != "coding_action_loop_approval_binding.v1":
+        return "Patch application approval binding is invalid."
+    if binding.get("proposal_digest") != request.get("proposal_digest"):
+        return "Patch application approval does not match the proposal."
+    if binding.get("candidate_revision") != request.get("candidate_revision"):
+        return "Patch application approval does not match the candidate revision."
+    if binding.get("candidate_tree_digest") != request.get(
+        "candidate_tree_digest"
+    ):
+        return "Patch application approval does not match the candidate tree."
+    for field_name in (
+        "approval_evidence_digest",
+        "source_message_id",
+    ):
+        value = binding.get(field_name)
+        if not isinstance(value, str) or not value:
+            return "Patch application approval binding is incomplete."
+    approval = request.get("approval")
+    if not isinstance(approval, Mapping):
+        return "Patch application approval binding is incomplete."
+    evidence = approval.get("approval_evidence")
+    if not isinstance(evidence, Mapping):
+        return "Patch application approval evidence is incomplete."
+    if binding.get("source_message_id") != evidence.get("source_message_id"):
+        return "Patch application approval evidence identity does not match."
+    serialized_evidence = json.dumps(
+        dict(evidence),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    evidence_digest = hashlib.sha256(
+        serialized_evidence.encode("utf-8"),
+    ).hexdigest()
+    if binding.get("approval_evidence_digest") != evidence_digest:
+        return "Patch application approval evidence does not match."
     return ""
 
 
@@ -327,27 +467,36 @@ def _copy_source_to_apply_workspace(
     source_root: Path,
     workspace_root: Path,
     apply_package_id: str,
+    replace_existing_package: bool,
 ) -> Path | str:
     try:
         workspace_root.mkdir(parents=True, exist_ok=True)
+        unresolved_apply_root = workspace_root / APPLY_ROOT_NAME
+        if unresolved_apply_root.is_symlink():
+            return "Patch application workspace is unsafe."
         apply_root = ensure_path_inside(
-            workspace_root / APPLY_ROOT_NAME,
+            unresolved_apply_root,
             workspace_root,
         )
         apply_root.mkdir(parents=True, exist_ok=True)
+        unresolved_package_root = apply_root / apply_package_id
+        if unresolved_package_root.is_symlink():
+            return "Patch application package path is unsafe."
         package_root = ensure_path_inside(
-            apply_root / apply_package_id,
+            unresolved_package_root,
             workspace_root,
         )
         apply_source_root = ensure_path_inside(
             package_root / APPLIED_SOURCE_DIR_NAME,
             workspace_root,
         )
+        if replace_existing_package and package_root.exists():
+            shutil.rmtree(package_root)
         package_root.mkdir(parents=True, exist_ok=False)
-        shutil.copytree(
+        copy_managed_source_tree(
             source_root,
             apply_source_root,
-            ignore=shutil.ignore_patterns(".git", APPLY_ROOT_NAME),
+            extra_excluded_names=(APPLY_ROOT_NAME,),
         )
     except (OSError, PathSafetyError):
         return "Patch application could not create the managed workspace."
@@ -358,24 +507,33 @@ def _create_empty_apply_workspace(
     *,
     workspace_root: Path,
     apply_package_id: str,
+    replace_existing_package: bool,
 ) -> Path | str:
     """Create an empty Git-backed managed candidate for generated artifacts."""
 
     try:
         workspace_root.mkdir(parents=True, exist_ok=True)
+        unresolved_apply_root = workspace_root / APPLY_ROOT_NAME
+        if unresolved_apply_root.is_symlink():
+            return "Patch application workspace is unsafe."
         apply_root = ensure_path_inside(
-            workspace_root / APPLY_ROOT_NAME,
+            unresolved_apply_root,
             workspace_root,
         )
         apply_root.mkdir(parents=True, exist_ok=True)
+        unresolved_package_root = apply_root / apply_package_id
+        if unresolved_package_root.is_symlink():
+            return "Patch application package path is unsafe."
         package_root = ensure_path_inside(
-            apply_root / apply_package_id,
+            unresolved_package_root,
             workspace_root,
         )
         apply_source_root = ensure_path_inside(
             package_root / APPLIED_SOURCE_DIR_NAME,
             workspace_root,
         )
+        if replace_existing_package and package_root.exists():
+            shutil.rmtree(package_root)
         package_root.mkdir(parents=True, exist_ok=False)
         apply_source_root.mkdir()
     except (OSError, PathSafetyError):
@@ -399,6 +557,18 @@ def _create_empty_apply_workspace(
     if initialized.returncode != 0:
         return "Patch application could not initialize the managed workspace."
     return apply_source_root
+
+
+def _valid_package_id(value: object) -> bool:
+    """Return whether an apply package id is safe for a managed path."""
+
+    if not isinstance(value, str) or not 1 <= len(value) <= 64:
+        return False
+    valid = all(
+        character.isalnum() or character in {"-", "_"}
+        for character in value
+    )
+    return valid
 
 
 def _apply_error(result: object) -> str:
@@ -505,6 +675,9 @@ def _response(
     errors: list[str] | None = None,
     warnings: list[str] | None = None,
     trace_summary: list[str] | None = None,
+    canonical_operation_records: list[CanonicalPatchOperationRecord] | None = None,
+    proposal_digest: str = "",
+    candidate_tree_digest: str = "",
 ) -> CodingPatchApplyResponse:
     safe_applied_files = applied_files or []
     safe_errors = errors or []
@@ -530,5 +703,8 @@ def _response(
         },
         "limitations": safe_errors,
         "trace_summary": trace_summary or [],
+        "canonical_operation_records": canonical_operation_records or [],
+        "proposal_digest": proposal_digest,
+        "candidate_tree_digest": candidate_tree_digest,
     }
     return response

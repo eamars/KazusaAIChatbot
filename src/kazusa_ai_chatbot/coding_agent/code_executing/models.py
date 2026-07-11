@@ -22,6 +22,7 @@ class CodeExecutionRequest(TypedDict, total=False):
     workspace_root: str
     apply_package_id: str
     apply_workspace_ref: dict[str, object]
+    candidate_execution_identity: dict[str, object]
     execution: CodeExecutionSpec
     max_stdout_chars: int
     max_stderr_chars: int

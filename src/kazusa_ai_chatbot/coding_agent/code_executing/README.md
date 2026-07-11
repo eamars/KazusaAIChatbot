@@ -82,3 +82,12 @@ and are capped before being returned.
 structured `execution_verification` repair feedback. That feedback remains
 bounded and redacted; raw command output and command lines stay outside LLM
 repair prompts.
+
+The private action loop may supply `candidate_execution_identity` instead of
+an apply-workspace reference after a verification failure. The executor binds
+that request to the run id, current candidate revision, managed-tree digest,
+pinned base snapshot, execution policy, and exact structured spec. It copies
+the current candidate into a short digest-named managed workspace and reuses a
+terminal result only when the complete identity matches.
+Apply, candidate, and deterministic execution paths reject symlinked managed
+roots or identity files before any command is selected or executed.

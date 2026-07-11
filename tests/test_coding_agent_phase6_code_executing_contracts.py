@@ -2,9 +2,114 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
+
+
+def test_candidate_execution_runs_current_revision_and_caches_exact_result(
+    tmp_path: Path,
+) -> None:
+    """Run only the exact isolated candidate identity and reuse its evidence."""
+
+    from kazusa_ai_chatbot.coding_agent import execute_code_check
+    from kazusa_ai_chatbot.coding_agent.code_executing.supervisor import (
+        _tree_digest,
+    )
+
+    workspace_root = tmp_path / "workspace"
+    run_id = "a" * 32
+    candidate_source = (
+        workspace_root / "coding_runs" / run_id / "candidate" / "source"
+    )
+    (candidate_source / "tests").mkdir(parents=True)
+    (candidate_source / "module.py").write_text("VALUE = 2\n", encoding="utf-8")
+    (candidate_source / "tests/test_module.py").write_text(
+        "from module import VALUE\n\n\ndef test_value() -> None:\n"
+        "    assert VALUE == 2\n",
+        encoding="utf-8",
+    )
+    (candidate_source.parent / "state.json").write_text(
+        json.dumps({"revision": 2}),
+        encoding="utf-8",
+    )
+    execution = {
+        "tool": "pytest",
+        "pytest_selectors": ["tests/test_module.py"],
+    }
+    identity = _candidate_execution_identity(
+        run_id=run_id,
+        revision=2,
+        manifest_digest=_tree_digest(candidate_source),
+        execution=execution,
+    )
+    request = {
+        "workspace_root": str(workspace_root),
+        "candidate_execution_identity": identity,
+        "execution": execution,
+    }
+
+    first = execute_code_check(request)
+    second = execute_code_check(request)
+
+    assert first["status"] == "succeeded"
+    assert second["status"] == "succeeded"
+    assert "code_execution:cache_hit" in second["trace_summary"]
+
+
+def test_candidate_execution_rejects_stale_revision_and_apply_identity(
+    tmp_path: Path,
+) -> None:
+    """Invalidate prior candidate evidence after edit and reject mixed authority."""
+
+    from kazusa_ai_chatbot.coding_agent import execute_code_check
+    from kazusa_ai_chatbot.coding_agent.code_executing.supervisor import (
+        _tree_digest,
+    )
+
+    workspace_root = tmp_path / "workspace"
+    run_id = "b" * 32
+    candidate_source = (
+        workspace_root / "coding_runs" / run_id / "candidate" / "source"
+    )
+    candidate_source.mkdir(parents=True)
+    module_path = candidate_source / "module.py"
+    module_path.write_text("VALUE = 1\n", encoding="utf-8")
+    (candidate_source.parent / "state.json").write_text(
+        json.dumps({"revision": 2}),
+        encoding="utf-8",
+    )
+    execution = {"tool": "python_compileall", "paths": ["module.py"]}
+    identity = _candidate_execution_identity(
+        run_id=run_id,
+        revision=1,
+        manifest_digest=_tree_digest(candidate_source),
+        execution=execution,
+    )
+    module_path.write_text("VALUE = 2\n", encoding="utf-8")
+
+    stale = execute_code_check({
+        "workspace_root": str(workspace_root),
+        "candidate_execution_identity": identity,
+        "execution": execution,
+    })
+    mixed = execute_code_check({
+        "workspace_root": str(workspace_root),
+        "candidate_execution_identity": {
+            **identity,
+            "candidate_revision": 2,
+            "candidate_manifest_digest": _tree_digest(candidate_source),
+        },
+        "apply_package_id": "apply-one",
+        "apply_workspace_ref": {"kind": "managed_apply_workspace"},
+        "execution": execution,
+    })
+
+    assert stale["status"] == "rejected"
+    assert any("stale" in row.casefold() for row in stale["limitations"])
+    assert mixed["status"] == "rejected"
+    assert any("mixes" in row.casefold() for row in mixed["limitations"])
 
 
 def test_execution_rejects_unsupported_tool(tmp_path: Path) -> None:
@@ -411,3 +516,33 @@ def _apply_ref(apply_package_id: str) -> dict[str, object]:
         "applied_files": ["app.py"],
     }
     return apply_ref
+
+
+def _candidate_execution_identity(
+    *,
+    run_id: str,
+    revision: int,
+    manifest_digest: str,
+    execution: dict[str, object],
+) -> dict[str, object]:
+    """Build one exact managed candidate execution identity."""
+
+    execution_text = json.dumps(
+        execution,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return {
+        "run_id": run_id,
+        "candidate_id": hashlib.sha256(
+            f"{run_id}:candidate".encode("utf-8"),
+        ).hexdigest(),
+        "candidate_revision": revision,
+        "candidate_manifest_digest": manifest_digest,
+        "base_snapshot_id": "c" * 64,
+        "execution_policy_digest": "d" * 64,
+        "execution_spec_digest": hashlib.sha256(
+            execution_text.encode("utf-8"),
+        ).hexdigest(),
+    }

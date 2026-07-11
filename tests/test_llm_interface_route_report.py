@@ -22,6 +22,7 @@ EXPECTED_ROUTE_TABLE_ROWS = (
     "BACKGROUND_WORK_LLM",
     "CODING_AGENT_PM_LLM",
     "CODING_AGENT_PROGRAMMER_LLM",
+    "CODING_AGENT_ACTION_LOOP_LLM",
     "EMBEDDING",
 )
 
@@ -41,6 +42,12 @@ def test_llm_route_inventory_contains_all_routes_once() -> None:
 
     assert tuple(route_names) == EXPECTED_ROUTE_TABLE_ROWS
     assert len(route_names) == len(set(route_names))
+    action_loop_diagnostic = next(
+        diagnostic
+        for diagnostic in configured_route_diagnostics()
+        if diagnostic.route_name == "CODING_AGENT_ACTION_LOOP_LLM"
+    )
+    assert action_loop_diagnostic.required is False
 
 
 def test_llm_route_inventory_uses_configured_models_and_sources() -> None:
@@ -197,6 +204,7 @@ def test_llm_route_table_omits_api_keys() -> None:
         config.BACKGROUND_WORK_LLM_API_KEY,
         config.CODING_AGENT_PM_LLM_API_KEY,
         config.CODING_AGENT_PROGRAMMER_LLM_API_KEY,
+        config.CODING_AGENT_ACTION_LOOP_LLM_API_KEY,
         config.EMBEDDING_API_KEY,
     )
     for api_key in api_keys:

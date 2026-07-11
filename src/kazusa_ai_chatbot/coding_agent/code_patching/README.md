@@ -8,8 +8,9 @@ only into managed apply copies.
 ## Ownership
 
 - Validates repo-relative paths, operation kinds, anchors, and proposal caps.
-- Compiles `create_file`, `insert_before`, `insert_after`, `replace`, and
-  `replace_file_small` operations into unified-diff artifacts.
+- Compiles `create_file`, `insert_before`, `insert_after`, `replace`,
+  `replace_file_small`, `delete_file`, and `rename_file` operations into
+  ordered unified-diff artifacts.
 - Materializes review packages under a managed coding-agent workspace.
 - Applies approved patch artifacts into
   `<workspace_root>/patch_apply/<apply_package_id>/source`.
@@ -25,8 +26,9 @@ only into managed apply copies.
   creating any managed apply workspace.
 - It rejects missing or ambiguous existing-file anchors instead of guessing.
 - It rejects mixed packages atomically when any operation is invalid.
-- It rejects delete, rename, chmod, binary writes, unsafe paths, and secret-like
-  paths.
+- It rejects directory operations, chmod, binary writes, unsafe paths,
+  secret-like paths, stale hashes/revisions, rename collisions, and unbound
+  action-loop approvals.
 
 ## Public Entrypoints
 
@@ -55,6 +57,13 @@ and static review checks are copied to a managed apply workspace. It then runs
 git patch checks plus git apply only inside that copy. Its public response
 reports relative paths and an opaque managed workspace reference, not absolute
 filesystem roots or command output.
+
+Action-loop apply requests additionally bind the ordered operation digest,
+candidate revision, managed candidate-tree digest, and approval evidence. The
+deterministic package id may be rematerialized after interruption; execution
+starts only after the recreated apply tree matches the reviewed tree digest.
+Replay also rejects symlinked apply roots and package paths before replacing a
+deterministic managed package.
 
 `code_verifying` may call `apply_approved_patch(...)` multiple times for one
 trusted verify-and-repair request. Each attempt must create a fresh managed

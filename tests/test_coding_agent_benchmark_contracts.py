@@ -10,6 +10,9 @@ from scripts.run_coding_agent_benchmark import (
     BENCHMARK_CASE_TIMEOUT_SECONDS,
     BENCHMARK_VERSION,
     RESULT_SCHEMA_VERSION,
+    _digest_engine_contract_records,
+    _engine_contract_digest,
+    _engine_contract_manifest,
     aggregate_benchmark_results,
     load_benchmark_cases,
     select_benchmark_case,
@@ -44,6 +47,48 @@ def test_benchmark_case_selection_returns_one_pinned_fixture() -> None:
         select_benchmark_case(cases, "missing-case")
 
 
+def test_action_loop_engine_contract_records_runtime_closure() -> None:
+    """Freeze shared runtime owners used by the evaluated action loop."""
+
+    manifest = _engine_contract_manifest("action_loop_v1")
+    files = manifest["files"]
+    assert isinstance(files, list)
+    paths = {row["path"] for row in files}
+
+    required_paths = {
+        "src/kazusa_ai_chatbot/coding_agent/code_action_loop/supervisor.py",
+        "src/kazusa_ai_chatbot/coding_agent/code_patching/apply.py",
+        "src/kazusa_ai_chatbot/coding_agent/code_patching/patch_operations.py",
+        "src/kazusa_ai_chatbot/coding_agent/code_patching/patch_validation.py",
+        "src/kazusa_ai_chatbot/coding_agent/code_fetching/source_resolver.py",
+        "src/kazusa_ai_chatbot/coding_agent/code_executing/runner.py",
+        "src/kazusa_ai_chatbot/coding_agent/code_verifying/supervisor.py",
+        "src/kazusa_ai_chatbot/coding_agent/coding_run/evaluation.py",
+        "src/kazusa_ai_chatbot/coding_agent/repository_index/builder.py",
+        "src/kazusa_ai_chatbot/coding_agent/safety.py",
+        "src/kazusa_ai_chatbot/llm_interface/interface.py",
+        "src/kazusa_ai_chatbot/config.py",
+    }
+    assert required_paths <= paths
+    assert manifest["closure_digest"] == _engine_contract_digest(
+        "action_loop_v1",
+    )
+
+
+def test_action_loop_engine_contract_changes_with_included_content() -> None:
+    """Bind the closure digest to every included file content identity."""
+
+    manifest = _engine_contract_manifest("action_loop_v1")
+    files = manifest["files"]
+    assert isinstance(files, list)
+    changed_files = [dict(row) for row in files]
+    changed_files[0]["content_sha256"] = "f" * 64
+
+    assert _digest_engine_contract_records(
+        changed_files,
+    ) != manifest["closure_digest"]
+
+
 def test_benchmark_result_schema_preserves_hidden_evaluator_boundary() -> None:
     """Result rows record outcomes without exposing manifest evaluator internals."""
 
@@ -67,11 +112,15 @@ def test_benchmark_aggregate_reads_existing_results_without_running_cases(
         category="environment_blocker",
         status="blocked",
     )
-    (tmp_path / "case-one.json").write_text(
+    first_path = tmp_path / "case-one" / "result.json"
+    first_path.parent.mkdir(parents=True)
+    first_path.write_text(
         json.dumps(first),
         encoding="utf-8",
     )
-    (tmp_path / "case-two.json").write_text(
+    second_path = tmp_path / "case-two" / "result.json"
+    second_path.parent.mkdir(parents=True)
+    second_path.write_text(
         json.dumps(second),
         encoding="utf-8",
     )
@@ -106,7 +155,11 @@ async def test_benchmark_timeout_writes_blocked_result_and_partial_trace(
 
     cases = load_benchmark_cases(BENCHMARK_MANIFEST_PATH)
     case = select_benchmark_case(cases, "source_backed_preflight_bugfix")
-    monkeypatch.setattr(benchmark, "start_coding_run", stalled_start)
+    monkeypatch.setattr(
+        benchmark,
+        "run_evaluation_coding_run",
+        lambda request, engine_id: stalled_start(dict(request)),
+    )
     monkeypatch.setattr(benchmark, "BENCHMARK_CASE_TIMEOUT_SECONDS", 0.01)
 
     result = await run_benchmark_case(
@@ -120,6 +173,119 @@ async def test_benchmark_timeout_writes_blocked_result_and_partial_trace(
     assert result["final_run_status"] == "timeout"
     assert result["evaluator"]["status"] == "not_applicable"
     assert result["trace_paths"]
+
+
+@pytest.mark.asyncio
+async def test_verify_repair_benchmark_starts_with_approval_and_execution(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Provide the required verification authorization on the initial request."""
+
+    from scripts import run_coding_agent_benchmark as benchmark
+
+    captured_request: dict[str, object] = {}
+
+    async def rejected_start(request: dict[str, object]) -> dict[str, object]:
+        captured_request.update(request)
+        return {"status": "rejected", "run_id": "verification-run"}
+
+    case = select_benchmark_case(
+        load_benchmark_cases(BENCHMARK_MANIFEST_PATH),
+        "repair_cli",
+    )
+    monkeypatch.setattr(
+        benchmark,
+        "run_evaluation_coding_run",
+        lambda request, engine_id: rejected_start(dict(request)),
+    )
+
+    await run_benchmark_case(
+        case,
+        repository_root=Path.cwd(),
+        results_directory=tmp_path,
+    )
+
+    approval = captured_request["approval"]
+    assert isinstance(approval, dict)
+    assert approval["approved"] is True
+    assert captured_request["execution_specs"]
+
+
+@pytest.mark.asyncio
+async def test_benchmark_reapproves_each_repaired_proposal_explicitly(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Continue a repaired proposal with a distinct explicit approval record."""
+
+    from scripts import run_coding_agent_benchmark as benchmark
+
+    approval_message_ids: list[str] = []
+
+    async def awaiting_start(
+        _request: dict[str, object],
+        engine_id: str,
+    ) -> dict[str, object]:
+        assert engine_id == "action_loop_v1"
+        return {"status": "awaiting_approval", "run_id": "repair-run"}
+
+    async def continue_repair(
+        request: dict[str, object],
+        engine_id: str,
+    ) -> dict[str, object]:
+        assert engine_id == "action_loop_v1"
+        approval = request["approval"]
+        assert isinstance(approval, dict)
+        evidence = approval["approval_evidence"]
+        assert isinstance(evidence, dict)
+        approval_message_ids.append(str(evidence["source_message_id"]))
+        if len(approval_message_ids) == 1:
+            return {"status": "awaiting_approval", "run_id": "repair-run"}
+        return {"status": "completed", "run_id": "repair-run"}
+
+    case = select_benchmark_case(
+        load_benchmark_cases(BENCHMARK_MANIFEST_PATH),
+        "source_backed_slug_bugfix",
+    )
+    monkeypatch.setattr(benchmark, "run_evaluation_coding_run", awaiting_start)
+    monkeypatch.setattr(
+        benchmark,
+        "continue_evaluation_coding_run",
+        continue_repair,
+    )
+
+    result = await run_benchmark_case(
+        case,
+        repository_root=Path.cwd(),
+        results_directory=tmp_path,
+        engine_id="action_loop_v1",
+    )
+
+    assert result["final_run_status"] == "completed"
+    assert approval_message_ids == ["benchmark-message-1", "benchmark-message-2"]
+
+
+@pytest.mark.asyncio
+async def test_benchmark_case_rejects_replacing_durable_evidence(
+    tmp_path: Path,
+) -> None:
+    """Require an explicit retirement step before a case can be rerun."""
+
+    case = select_benchmark_case(
+        load_benchmark_cases(BENCHMARK_MANIFEST_PATH),
+        "repair_cli",
+    )
+    existing_result = tmp_path / case["case_id"] / "result.json"
+    existing_result.parent.mkdir(parents=True)
+    existing_result.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(FileExistsError, match="durable evidence"):
+        await run_benchmark_case(
+            case,
+            repository_root=Path.cwd(),
+            results_directory=tmp_path,
+        )
 
 
 def _benchmark_result(
@@ -136,6 +302,11 @@ def _benchmark_result(
         "case_id": case_id,
         "category": category,
         "engine_id": "pipeline_v1",
+        "engine_contract_digest": _engine_contract_digest("pipeline_v1"),
+        "manifest_sha256": "a" * 64,
+        "objective_type": "propose_patch",
+        "fixture_manifest_sha256": "b" * 64,
+        "route_policy_digest": "c" * 64,
         "routes": [{"route_name": "coding_run", "model": "configured"}],
         "status": status,
         "entrypoint": "coding_run",
@@ -144,7 +315,30 @@ def _benchmark_result(
         "token_usage": None,
         "final_run_status": "completed",
         "evaluator": {"status": "passed", "checks": ["status matched"]},
+        "acceptance_outcomes": {"terminal": True},
+        "hard_safety_gate_outcomes": {"source_immutable": True},
+        "judgment_status": "reviewed",
+        "rubric": {
+            "task_progress": 2,
+            "repository_grounding": 2,
+            "repair_quality": 2,
+            "safety_privacy": 2,
+            "authorization": 2,
+        },
+        "judgment_note": "Status matched the locked target.",
+        "review_reference": "test_artifacts/review.md",
+        "judgment_artifact_path": "test_artifacts/judgment.json",
+        "judgment_trace_citations": {
+            "task_progress": ["test_artifacts/trace.json"],
+            "repository_grounding": ["test_artifacts/trace.json"],
+            "repair_quality": ["test_artifacts/trace.json"],
+            "safety_privacy": ["test_artifacts/trace.json"],
+            "authorization": ["test_artifacts/trace.json"],
+        },
         "trace_paths": ["test_artifacts/trace.json"],
+        "parsed_observation_trace_paths": ["test_artifacts/trace.json"],
+        "context_manifest_paths": ["test_artifacts/context_manifest.json"],
+        "raw_trace_sha256": "d" * 64,
         "notes": ["provider token usage was unavailable"],
     }
     return result

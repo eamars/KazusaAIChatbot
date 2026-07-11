@@ -10,6 +10,8 @@ PatchOperationKind = Literal[
     "insert_after",
     "replace",
     "replace_file_small",
+    "delete_file",
+    "rename_file",
 ]
 PatchPackageStatus = Literal["succeeded", "failed", "rejected"]
 CandidateBaseline = Literal["resolved_source", "empty_source_free"]
@@ -35,11 +37,27 @@ class PatchOperation(TypedDict, total=False):
     operation_id: str
     kind: PatchOperationKind
     path: str
+    target_path: str
     content: str
     anchor: str
     summary: str
     evidence_ids: list[str]
     full_file_rationale: str
+    expected_source_sha256: str
+    expected_candidate_revision: int
+
+
+class CanonicalPatchOperationRecord(TypedDict):
+    """One candidate-bound operation retained through review and apply."""
+
+    operation_id: str
+    kind: PatchOperationKind
+    source_path: str | None
+    target_path: str | None
+    expected_source_sha256: str | None
+    expected_candidate_revision: int
+    result_sha256: str | None
+    content_sha256: str | None
 
 
 class CreatedFileSummary(TypedDict):
@@ -87,6 +105,17 @@ class PatchApplyApproval(TypedDict):
     approval_reason: str
 
 
+class PatchApprovalBinding(TypedDict):
+    """Internal action-loop binding between approval and reviewed candidate."""
+
+    schema_version: Literal["coding_action_loop_approval_binding.v1"]
+    proposal_digest: str
+    candidate_revision: int
+    candidate_tree_digest: str
+    approval_evidence_digest: str
+    source_message_id: str
+
+
 class ApplyWorkspaceRef(TypedDict):
     """Opaque public reference to a managed patch apply workspace."""
 
@@ -117,6 +146,12 @@ class CodingPatchApplyRequest(TypedDict, total=False):
     max_diff_chars: int
     candidate_baseline: CandidateBaseline
     authorization_purpose: CandidateAuthorizationPurpose
+    canonical_operation_records: list[CanonicalPatchOperationRecord]
+    proposal_digest: str
+    candidate_revision: int
+    candidate_tree_digest: str
+    approval_binding: PatchApprovalBinding
+    apply_package_id: str
 
 
 class CodingPatchApplyResponse(TypedDict):
@@ -131,6 +166,9 @@ class CodingPatchApplyResponse(TypedDict):
     validation: PatchApplyValidation
     limitations: list[str]
     trace_summary: list[str]
+    canonical_operation_records: list[CanonicalPatchOperationRecord]
+    proposal_digest: str
+    candidate_tree_digest: str
 
 
 class PatchProposalInput(TypedDict):

@@ -15,7 +15,8 @@ import tokenize
 import uuid
 from pathlib import Path, PurePosixPath
 
-from kazusa_ai_chatbot.coding_agent.code_reading.planner import (
+from kazusa_ai_chatbot.coding_agent.safety import (
+    copy_managed_source_tree,
     is_binary_like_path,
     is_secret_like_path,
 )
@@ -1764,10 +1765,10 @@ def _prepare_sandbox(repo_root: Path | None, workspace_root: Path) -> Path:
         return sandbox_root
 
     resolved_repo = repo_root.expanduser().resolve(strict=True)
-    shutil.copytree(
+    copy_managed_source_tree(
         resolved_repo,
         sandbox_root,
-        ignore=shutil.ignore_patterns(".git", ".tmp_pytest"),
+        extra_excluded_names=(".tmp_pytest",),
     )
     return sandbox_root
 

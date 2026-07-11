@@ -72,6 +72,7 @@ def _configured_chat_routes() -> tuple[LLMCallConfig, ...]:
         "BACKGROUND_WORK_LLM",
         "CODING_AGENT_PM_LLM",
         "CODING_AGENT_PROGRAMMER_LLM",
+        "CODING_AGENT_ACTION_LOOP_LLM",
     )
     routes = tuple(_route_config(route_name) for route_name in route_names)
     return routes

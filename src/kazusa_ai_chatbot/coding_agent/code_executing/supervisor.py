@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 from pathlib import Path, PurePosixPath
 import re
+import shutil
 import sys
 from collections.abc import Mapping
+from uuid import uuid4
 
 from kazusa_ai_chatbot.coding_agent.code_executing.models import (
     CodeExecutionRequest,
@@ -13,6 +18,10 @@ from kazusa_ai_chatbot.coding_agent.code_executing.models import (
     CodeExecutionStatus,
 )
 from kazusa_ai_chatbot.coding_agent.code_executing.runner import run_argv
+from kazusa_ai_chatbot.coding_agent.safety import (
+    copy_managed_source_tree,
+    managed_source_tree_digest,
+)
 from kazusa_ai_chatbot.coding_agent.tools.paths import (
     PathSafetyError,
     ensure_path_inside,
@@ -20,6 +29,8 @@ from kazusa_ai_chatbot.coding_agent.tools.paths import (
 
 APPLY_ROOT_NAME = "patch_apply"
 APPLIED_SOURCE_DIR_NAME = "source"
+CANDIDATE_EXECUTION_ROOT_NAME = "candidate_exec"
+EXECUTION_EPHEMERAL_PARTS = {".pytest_cache", "__pycache__"}
 DEFAULT_OUTPUT_CHARS = 6000
 MAX_OUTPUT_CHARS = 20_000
 DEFAULT_TIMEOUT_SECONDS = 30
@@ -59,7 +70,7 @@ def run(request: CodeExecutionRequest) -> CodeExecutionResponse:
     execution_value = request.get("execution")
     execution = _mapping_or_empty(execution_value)
     tool = _tool_name(execution)
-    root_result = _managed_apply_source_root(request)
+    root_result = _managed_execution_source_root(request)
     if isinstance(root_result, str):
         response = _response(
             status="rejected",
@@ -68,7 +79,23 @@ def run(request: CodeExecutionRequest) -> CodeExecutionResponse:
             trace_summary=["code_execution:rejected:workspace"],
         )
         return response
-    workspace_root, apply_source_root = root_result
+    workspace_root, execution_source_root, candidate_execution_root = root_result
+
+    if candidate_execution_root is not None:
+        try:
+            cached = _load_candidate_execution_result(
+                candidate_execution_root,
+                request=request,
+            )
+        except ValueError as exc:
+            return _response(
+                status="rejected",
+                tool=tool,
+                limitations=[str(exc)],
+                trace_summary=["code_execution:rejected:cached_identity"],
+            )
+        if cached is not None:
+            return cached
 
     max_stdout_result = _output_cap(request.get("max_stdout_chars"))
     max_stderr_result = _output_cap(request.get("max_stderr_chars"))
@@ -101,7 +128,7 @@ def run(request: CodeExecutionRequest) -> CodeExecutionResponse:
     command_result = _command_for_execution(
         execution=execution,
         tool=tool,
-        apply_source_root=apply_source_root,
+        apply_source_root=execution_source_root,
     )
     if isinstance(command_result, str):
         response = _response(
@@ -115,11 +142,11 @@ def run(request: CodeExecutionRequest) -> CodeExecutionResponse:
 
     run_result = run_argv(
         command,
-        cwd=apply_source_root,
+        cwd=execution_source_root,
         timeout_seconds=timeout_result,
         max_stdout_chars=max_stdout_result,
         max_stderr_chars=max_stderr_result,
-        scrub_roots=[workspace_root, apply_source_root],
+        scrub_roots=[workspace_root, execution_source_root],
     )
     status = _status_from_run(run_result.timed_out, run_result.returncode)
     response = _response(
@@ -137,7 +164,34 @@ def run(request: CodeExecutionRequest) -> CodeExecutionResponse:
             f"code_execution:status={status}",
         ],
     )
+    if candidate_execution_root is not None:
+        _persist_candidate_execution_result(
+            candidate_execution_root,
+            request=request,
+            response=response,
+        )
     return response
+
+
+def _managed_execution_source_root(
+    request: Mapping[str, object],
+) -> tuple[Path, Path, Path | None] | str:
+    """Resolve one exact managed apply or candidate execution workspace."""
+
+    candidate_identity = request.get("candidate_execution_identity")
+    has_apply_identity = any(
+        request.get(field_name) is not None
+        for field_name in ("apply_package_id", "apply_workspace_ref")
+    )
+    if candidate_identity is not None:
+        if has_apply_identity:
+            return "Code execution request mixes apply and candidate identities."
+        return _managed_candidate_execution_source_root(request)
+    apply_result = _managed_apply_source_root(request)
+    if isinstance(apply_result, str):
+        return apply_result
+    workspace_root, apply_source_root = apply_result
+    return workspace_root, apply_source_root, None
 
 
 def _managed_apply_source_root(
@@ -164,12 +218,21 @@ def _managed_apply_source_root(
         return "Code execution requires applied files in the workspace reference."
 
     workspace_root = Path(workspace_root_text).expanduser().resolve(strict=False)
+    unresolved_apply_root = workspace_root / APPLY_ROOT_NAME
+    unresolved_package_root = unresolved_apply_root / apply_package_id
+    unresolved_source_root = unresolved_package_root / APPLIED_SOURCE_DIR_NAME
+    if any(
+        path.is_symlink()
+        for path in (
+            unresolved_apply_root,
+            unresolved_package_root,
+            unresolved_source_root,
+        )
+    ):
+        return "Code execution managed workspace path is unsafe."
     try:
         apply_source_root = ensure_path_inside(
-            workspace_root
-            / APPLY_ROOT_NAME
-            / apply_package_id
-            / APPLIED_SOURCE_DIR_NAME,
+            unresolved_source_root,
             workspace_root,
         )
     except PathSafetyError:
@@ -178,6 +241,277 @@ def _managed_apply_source_root(
         return "Code execution managed apply workspace is missing."
 
     return workspace_root, apply_source_root
+
+
+def _managed_candidate_execution_source_root(
+    request: Mapping[str, object],
+) -> tuple[Path, Path, Path] | str:
+    """Materialize and validate one immutable current-candidate workspace."""
+
+    workspace_root_text = request.get("workspace_root")
+    identity = request.get("candidate_execution_identity")
+    if not isinstance(workspace_root_text, str) or not workspace_root_text.strip():
+        return "Code execution requires a workspace root."
+    identity_error = _candidate_execution_identity_error(identity, request)
+    if identity_error:
+        return identity_error
+    if not isinstance(identity, Mapping):
+        raise ValueError("validated candidate execution identity is invalid")
+    run_id = str(identity["run_id"])
+    workspace_root = Path(workspace_root_text).expanduser().resolve(strict=False)
+    unresolved_run_root = workspace_root / "coding_runs" / run_id
+    unresolved_candidate_root = unresolved_run_root / "candidate"
+    unresolved_candidate_source = unresolved_candidate_root / "source"
+    if any(
+        path.is_symlink()
+        for path in (
+            unresolved_run_root,
+            unresolved_candidate_root,
+            unresolved_candidate_source,
+        )
+    ):
+        return "Code execution candidate workspace path is unsafe."
+    try:
+        run_root = ensure_path_inside(
+            unresolved_run_root,
+            workspace_root,
+        )
+        candidate_source_root = ensure_path_inside(
+            unresolved_candidate_source,
+            run_root,
+        )
+    except PathSafetyError:
+        return "Code execution candidate workspace path is unsafe."
+    if not candidate_source_root.is_dir():
+        return "Code execution current candidate source is missing."
+    candidate_state = _read_json_object(run_root / "candidate" / "state.json")
+    if (
+        candidate_state is None
+        or candidate_state.get("revision") != identity["candidate_revision"]
+    ):
+        return "Code execution candidate revision is stale."
+    expected_manifest_digest = str(identity["candidate_manifest_digest"])
+    if _tree_digest(candidate_source_root) != expected_manifest_digest:
+        return "Code execution candidate identity is stale."
+    identity_digest = _canonical_digest(identity)
+    unresolved_execution_parent = (
+        workspace_root / CANDIDATE_EXECUTION_ROOT_NAME
+    )
+    unresolved_execution_root = (
+        unresolved_execution_parent / identity_digest
+    )
+    if (
+        unresolved_execution_parent.is_symlink()
+        or unresolved_execution_root.is_symlink()
+    ):
+        return "Code execution candidate materialization path is unsafe."
+    try:
+        execution_root = ensure_path_inside(
+            unresolved_execution_root,
+            workspace_root,
+        )
+    except PathSafetyError:
+        return "Code execution candidate materialization path is unsafe."
+    execution_source_root = execution_root / "source"
+    if execution_root.exists():
+        if (
+            execution_source_root.is_symlink()
+            or (execution_root / "identity.json").is_symlink()
+        ):
+            return "Code execution candidate workspace identity does not match."
+        persisted_identity = _read_json_object(execution_root / "identity.json")
+        if persisted_identity != dict(identity):
+            return "Code execution candidate workspace identity does not match."
+        if (
+            not execution_source_root.is_dir()
+            or _tree_digest(execution_source_root) != expected_manifest_digest
+        ):
+            return "Code execution candidate workspace content does not match."
+        return workspace_root, execution_source_root, execution_root
+
+    execution_root.parent.mkdir(parents=True, exist_ok=True)
+    temporary_root = execution_root.with_name(
+        f"{execution_root.name}.tmp-{uuid4().hex}",
+    )
+    try:
+        copy_managed_source_tree(
+            candidate_source_root,
+            temporary_root / "source",
+            extra_excluded_names=EXECUTION_EPHEMERAL_PARTS,
+        )
+        if _tree_digest(temporary_root / "source") != expected_manifest_digest:
+            return "Code execution candidate changed during materialization."
+        _write_json_atomic(temporary_root / "identity.json", dict(identity))
+        try:
+            os.replace(temporary_root, execution_root)
+        except FileExistsError:
+            shutil.rmtree(temporary_root, ignore_errors=True)
+    except (OSError, ValueError):
+        return "Code execution candidate workspace materialization failed."
+    finally:
+        if temporary_root.exists():
+            shutil.rmtree(temporary_root, ignore_errors=True)
+    persisted_identity = _read_json_object(execution_root / "identity.json")
+    if (
+        persisted_identity != dict(identity)
+        or not execution_source_root.is_dir()
+        or _tree_digest(execution_source_root) != expected_manifest_digest
+    ):
+        return "Code execution candidate workspace materialization failed."
+    return workspace_root, execution_source_root, execution_root
+
+
+def _candidate_execution_identity_error(
+    value: object,
+    request: Mapping[str, object],
+) -> str:
+    """Validate candidate, snapshot, and execution-spec identity binding."""
+
+    if not isinstance(value, Mapping):
+        return "Code execution requires a candidate execution identity."
+    required_keys = {
+        "run_id",
+        "candidate_id",
+        "candidate_revision",
+        "candidate_manifest_digest",
+        "base_snapshot_id",
+        "execution_policy_digest",
+        "execution_spec_digest",
+    }
+    if set(value) != required_keys:
+        return "Code execution candidate identity keys are invalid."
+    for key in ("run_id", "candidate_id"):
+        field_value = value.get(key)
+        if not isinstance(field_value, str) or not SAFE_PACKAGE_ID_RE.fullmatch(
+            field_value,
+        ):
+            return "Code execution candidate identity is unsafe."
+    run_id = str(value["run_id"])
+    expected_candidate_id = hashlib.sha256(
+        f"{run_id}:candidate".encode("utf-8"),
+    ).hexdigest()
+    if value.get("candidate_id") != expected_candidate_id:
+        return "Code execution candidate id does not match the run."
+    revision = value.get("candidate_revision")
+    if not isinstance(revision, int) or revision < 0:
+        return "Code execution candidate revision is invalid."
+    for key in (
+        "candidate_manifest_digest",
+        "base_snapshot_id",
+        "execution_policy_digest",
+        "execution_spec_digest",
+    ):
+        digest = value.get(key)
+        if (
+            not isinstance(digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+        ):
+            return "Code execution candidate digest is invalid."
+    execution = request.get("execution")
+    if not isinstance(execution, Mapping):
+        return "Code execution candidate spec is invalid."
+    if _canonical_digest(execution) != value["execution_spec_digest"]:
+        return "Code execution candidate spec identity does not match."
+    return ""
+
+
+def _load_candidate_execution_result(
+    execution_root: Path,
+    *,
+    request: Mapping[str, object],
+) -> CodeExecutionResponse | None:
+    """Reuse one exact durable result without executing the command again."""
+
+    result_path = execution_root / "result.json"
+    if not result_path.is_file():
+        return None
+    payload = _read_json_object(result_path)
+    identity = request.get("candidate_execution_identity")
+    if not isinstance(identity, Mapping):
+        raise ValueError("candidate execution result identity is missing")
+    if (
+        payload is None
+        or payload.get("identity_digest") != _canonical_digest(identity)
+        or payload.get("execution_spec_digest")
+        != identity.get("execution_spec_digest")
+    ):
+        raise ValueError("candidate execution result identity mismatch")
+    response = payload.get("response")
+    if not isinstance(response, dict):
+        raise ValueError("candidate execution cached response is invalid")
+    cached = dict(response)
+    trace_summary = cached.get("trace_summary")
+    if not isinstance(trace_summary, list):
+        raise ValueError("candidate execution cached trace is invalid")
+    cached["trace_summary"] = [*trace_summary, "code_execution:cache_hit"]
+    return cached
+
+
+def _persist_candidate_execution_result(
+    execution_root: Path,
+    *,
+    request: Mapping[str, object],
+    response: CodeExecutionResponse,
+) -> None:
+    """Persist a bounded result under its complete candidate identity."""
+
+    identity = request.get("candidate_execution_identity")
+    if not isinstance(identity, Mapping):
+        raise ValueError("candidate execution identity is missing")
+    _write_json_atomic(
+        execution_root / "result.json",
+        {
+            "schema_version": "candidate_execution_result.v1",
+            "identity_digest": _canonical_digest(identity),
+            "execution_spec_digest": identity["execution_spec_digest"],
+            "response": response,
+        },
+    )
+
+
+def _tree_digest(root: Path) -> str:
+    """Return a deterministic digest for one managed candidate tree."""
+
+    tree_digest = managed_source_tree_digest(
+        root,
+        extra_excluded_names=EXECUTION_EPHEMERAL_PARTS,
+    )
+    return tree_digest
+
+
+def _canonical_digest(value: object) -> str:
+    serialized = json.dumps(
+        value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _read_json_object(path: Path) -> dict[str, object] | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _write_json_atomic(path: Path, payload: Mapping[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = path.with_name(f"{path.name}.tmp-{uuid4().hex}")
+    serialized = json.dumps(
+        payload,
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+    )
+    with temporary_path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(serialized)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary_path, path)
 
 
 def _tool_name(execution: Mapping[str, object]) -> str:

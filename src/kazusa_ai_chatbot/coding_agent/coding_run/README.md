@@ -74,3 +74,9 @@ Ownership boundaries:
   existing trusted primitives.
 - Background accepted coding tasks remain review-only and do not invoke this
   trusted continuation boundary.
+
+The benchmark-only `coding_run.evaluation` boundary can select the private
+`action_loop_v1` engine without exposing an engine selector through these
+public APIs. Scenario materialization acquires the same sorted run/source locks
+and preserves one precondition operation identity through candidate review,
+approval, apply, and comparison evidence.
