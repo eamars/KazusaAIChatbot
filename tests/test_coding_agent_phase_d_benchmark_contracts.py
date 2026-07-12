@@ -14,7 +14,7 @@ import pytest
 def test_phase_d_benchmark_declares_both_engine_ids() -> None:
     """Require the benchmark harness to select either evaluated engine."""
 
-    assert benchmark.BENCHMARK_VERSION == "coding_agent_benchmark.v2"
+    assert benchmark.BENCHMARK_VERSION == "coding_agent_benchmark.v3"
     assert benchmark.ENGINE_IDS == frozenset(("pipeline_v1", "action_loop_v1"))
 
 
@@ -90,7 +90,7 @@ async def test_environment_precondition_is_identical_across_native_ledgers(
     case = next(
         row
         for row in benchmark.load_benchmark_cases()
-        if row["case_id"] == "dependency_blocker_response"
+        if row["case_id"] == "blocker_answer_cli"
     )
     fixture_path = Path(str(case["fixture_ref"]))
     approval_request = benchmark._approval_request(
@@ -193,7 +193,7 @@ async def test_environment_precondition_runs_native_verifier_and_blocks(
     case = next(
         row
         for row in benchmark.load_benchmark_cases()
-        if row["case_id"] == "dependency_blocker_response"
+        if row["case_id"] == "blocker_answer_cli"
     )
     fixture_path = Path(str(case["fixture_ref"]))
 
@@ -296,6 +296,47 @@ def test_comparator_rejects_missing_paired_engine_results(tmp_path) -> None:
         )
 
 
+def test_v3_synthetic_paired_cohort_compares_only_locked_rows(
+    tmp_path: Path,
+) -> None:
+    """Exercise the complete synthetic v3 comparator lifecycle offline."""
+
+    pipeline_root = tmp_path / "pipeline_v1"
+    action_loop_root = tmp_path / "action_loop_v1"
+    _write_paired_results(pipeline_root, engine_id="pipeline_v1")
+    _write_paired_results(action_loop_root, engine_id="action_loop_v1")
+
+    comparison = benchmark.compare_benchmark_results(
+        manifest_path=benchmark.MANIFEST_PATH,
+        pipeline_results_directory=pipeline_root,
+        action_loop_results_directory=action_loop_root,
+    )
+
+    assert comparison["benchmark_version"] == "coding_agent_benchmark.v3"
+    assert comparison["case_count"] == 22
+
+
+def test_v3_comparator_rejects_scenario_driver_drift(tmp_path: Path) -> None:
+    """Reject a result whose scenario closure differs from the manifest."""
+
+    pipeline_root = tmp_path / "pipeline_v1"
+    action_loop_root = tmp_path / "action_loop_v1"
+    _write_paired_results(pipeline_root, engine_id="pipeline_v1")
+    _write_paired_results(action_loop_root, engine_id="action_loop_v1")
+    first_case = benchmark.load_benchmark_cases()[0]
+    result_path = action_loop_root / first_case["case_id"] / "result.json"
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    result["scenario_driver"] = "rename"
+    result_path.write_text(json.dumps(result), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="scenario driver mismatch"):
+        benchmark.compare_benchmark_results(
+            manifest_path=benchmark.MANIFEST_PATH,
+            pipeline_results_directory=pipeline_root,
+            action_loop_results_directory=action_loop_root,
+        )
+
+
 def test_comparator_ignores_retained_attempt_results(tmp_path: Path) -> None:
     """Keep retired evidence outside the canonical paired result cohort."""
 
@@ -363,7 +404,7 @@ def test_comparator_rejects_environment_precondition_drift(tmp_path: Path) -> No
     environment_case = next(
         row
         for row in benchmark.load_benchmark_cases()
-        if row["category"] == "environment_blocker"
+        if row["category"] == "blocker_response"
     )
     result_path = action_loop_root / environment_case["case_id"] / "result.json"
     result = json.loads(result_path.read_text(encoding="utf-8"))
@@ -416,6 +457,8 @@ def test_reviewed_result_rejects_missing_non_target_trace_citation() -> None:
         "benchmark_version": benchmark.BENCHMARK_VERSION,
         "case_id": case["case_id"],
         "category": case["category"],
+        "scenario_driver": case["scenario_driver"],
+        "scenario_contract_digest": benchmark._scenario_contract_digest(case),
         "engine_id": "action_loop_v1",
         "engine_contract_digest": benchmark._engine_contract_digest(
             "action_loop_v1"
@@ -431,6 +474,7 @@ def test_reviewed_result_rejects_missing_non_target_trace_citation() -> None:
         "llm_call_count": 1,
         "token_usage": None,
         "final_run_status": case["evaluator"]["required_final_status"],
+        "terminal_status_match": True,
         "evaluator": {"status": "passed", "checks": ["matched"]},
         "acceptance_outcomes": {check: True for check in case["acceptance_checks"]},
         "hard_safety_gate_outcomes": {
@@ -586,6 +630,8 @@ def _write_paired_results(root: Path, *, engine_id: str) -> None:
             "benchmark_version": benchmark.BENCHMARK_VERSION,
             "case_id": case["case_id"],
             "category": case["category"],
+            "scenario_driver": case["scenario_driver"],
+            "scenario_contract_digest": benchmark._scenario_contract_digest(case),
             "engine_id": engine_id,
             "engine_contract_digest": benchmark._engine_contract_digest(engine_id),
             "manifest_sha256": manifest_digest,
@@ -599,6 +645,7 @@ def _write_paired_results(root: Path, *, engine_id: str) -> None:
             "llm_call_count": 1,
             "token_usage": None,
             "final_run_status": case["evaluator"]["required_final_status"],
+            "terminal_status_match": True,
             "evaluator": {"status": "passed", "checks": ["matched"]},
             "acceptance_outcomes": {
                 check: True for check in case["acceptance_checks"]
@@ -620,10 +667,34 @@ def _write_paired_results(root: Path, *, engine_id: str) -> None:
             "raw_trace_sha256": "d" * 64,
             "notes": ["test fixture"],
         }
-        if case["category"] in {"environment_blocker", "blocker_response"}:
+        if case["category"] == "blocker_response":
             result["scenario_precondition_digest"] = "e" * 64
         path = root / case["case_id"] / "result.json"
         path.parent.mkdir(parents=True, exist_ok=True)
+        closure_path = path.with_name("scenario_closure.json")
+        closure = benchmark._scenario_closure_payload(
+            case=case,
+            engine_id=engine_id,
+            run_id=f"synthetic-{case['case_id']}",
+            run_ledger={
+                "ledger_schema_version": "synthetic.v3",
+                "candidate_revision": 1,
+                "canonical_operation_records": [],
+                "proposal_digest": "synthetic-proposal",
+                "approvals": [{}],
+                "apply_attempts": [{}],
+                "execution_attempts": [{}],
+            },
+            trace_paths=result["trace_paths"],
+        )
+        closure_path.write_text(
+            json.dumps(closure),
+            encoding="utf-8",
+        )
+        result["scenario_closure_path"] = str(closure_path)
+        result["scenario_closure_sha256"] = hashlib.sha256(
+            closure_path.read_bytes(),
+        ).hexdigest()
         path.write_text(json.dumps(result), encoding="utf-8")
 
 
@@ -655,6 +726,8 @@ def _write_provisional_and_judgment(
         "benchmark_version": benchmark.BENCHMARK_VERSION,
         "case_id": case["case_id"],
         "category": case["category"],
+        "scenario_driver": case["scenario_driver"],
+        "scenario_contract_digest": benchmark._scenario_contract_digest(case),
         "engine_id": "action_loop_v1",
         "engine_contract_digest": benchmark._engine_contract_digest(
             "action_loop_v1"
@@ -670,6 +743,7 @@ def _write_provisional_and_judgment(
         "llm_call_count": 1,
         "token_usage": None,
         "final_run_status": case["evaluator"]["required_final_status"],
+        "terminal_status_match": True,
         "evaluator": {"status": "passed", "checks": ["matched"]},
         "acceptance_outcomes": {check: True for check in case["acceptance_checks"]},
         "hard_safety_gate_outcomes": {

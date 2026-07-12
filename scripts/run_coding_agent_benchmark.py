@@ -21,27 +21,57 @@ from kazusa_ai_chatbot.coding_agent.coding_run.evaluation import (
     materialize_evaluation_scenario,
     run_evaluation_coding_run,
 )
+from kazusa_ai_chatbot.coding_agent.path_classification import is_test_path
 from kazusa_ai_chatbot.llm_interface import LLInterface
 
-BENCHMARK_VERSION = "coding_agent_benchmark.v2"
-RESULT_SCHEMA_VERSION = "coding_agent_benchmark_result.v2"
+BENCHMARK_VERSION = "coding_agent_benchmark.v3"
+RESULT_SCHEMA_VERSION = "coding_agent_benchmark_result.v3"
 JUDGMENT_SCHEMA_VERSION = "coding_agent_benchmark_judgment.v1"
 ENGINE_IDS = frozenset(("pipeline_v1", "action_loop_v1"))
 MANIFEST_PATH = Path("tests/fixtures/coding_agent_benchmark/cases.jsonl")
 DEFAULT_RESULTS_DIRECTORY = Path("test_artifacts/coding_agent_benchmark")
 BENCHMARK_CASE_TIMEOUT_SECONDS = 600
 ALLOWED_CATEGORIES = frozenset((
-    "bug_fix",
+    "source_backed_bug_fix",
     "small_feature",
     "mixed_create_edit",
     "source_free_creation",
     "revision",
     "preflight",
     "verification_repair",
-    "environment_blocker",
     "blocker_response",
-    "concurrency",
+    "same_source_concurrency",
+    "repository_scale",
+    "stale_index_cursor",
+    "delete",
+    "rename",
 ))
+SCENARIO_DRIVERS = frozenset((
+    "source_backed_bug_fix",
+    "source_free_creation",
+    "small_feature",
+    "revision",
+    "preflight",
+    "verification_repair",
+    "blocker_response",
+    "same_source_concurrency",
+    "mixed_create_edit",
+    "repository_scale",
+    "stale_index_cursor",
+    "delete",
+    "rename",
+))
+SCENARIO_CONTRACT_VERSION = "coding_agent_benchmark_scenario.v3"
+CATEGORY_HARD_GATES = {
+    "revision": ("revision_binding",),
+    "preflight": ("preapproval_execution_boundary",),
+    "same_source_concurrency": ("lock_overlap_isolation",),
+    "mixed_create_edit": ("operation_order_integrity",),
+    "repository_scale": ("scale_discovery",),
+    "stale_index_cursor": ("stale_evidence_rejection",),
+    "delete": ("canonical_delete_binding",),
+    "rename": ("canonical_rename_binding",),
+}
 ALLOWED_ENTRYPOINTS = frozenset(("accepted_task", "coding_run"))
 ALLOWED_RESULT_STATUSES = frozenset(("passed", "failed", "blocked"))
 ALLOWED_EVALUATOR_STATUSES = frozenset((
@@ -78,8 +108,8 @@ def load_benchmark_cases(manifest_path: Path = MANIFEST_PATH) -> list[dict[str, 
             raise ValueError(f"benchmark manifest row {line_number} is not an object")
         validate_benchmark_case(row, manifest_path.parent.parent.parent.parent)
         rows.append(row)
-    if len(rows) != 30:
-        raise ValueError(f"benchmark manifest requires 30 cases, found {len(rows)}")
+    if len(rows) != 22:
+        raise ValueError(f"benchmark manifest requires 22 cases, found {len(rows)}")
     case_ids = [row["case_id"] for row in rows]
     if len(case_ids) != len(set(case_ids)):
         raise ValueError("benchmark manifest contains duplicate case_id values")
@@ -103,6 +133,7 @@ def validate_benchmark_case(
         "category",
         "entrypoint",
         "fixture_ref",
+        "scenario_driver",
         "objective_type",
         "task_text",
         "fixture_manifest_sha256",
@@ -118,6 +149,7 @@ def validate_benchmark_case(
         "category",
         "entrypoint",
         "fixture_ref",
+        "scenario_driver",
         "objective_type",
         "task_text",
         "fixture_manifest_sha256",
@@ -133,6 +165,8 @@ def validate_benchmark_case(
         raise ValueError("benchmark case has an unsupported benchmark_version")
     if case["category"] not in ALLOWED_CATEGORIES:
         raise ValueError("benchmark case has an unsupported category")
+    if case["scenario_driver"] not in SCENARIO_DRIVERS:
+        raise ValueError("benchmark case has an unsupported scenario_driver")
     if case["entrypoint"] not in ALLOWED_ENTRYPOINTS:
         raise ValueError("benchmark case has an unsupported entrypoint")
     fixture_path = repository_root / str(case["fixture_ref"])
@@ -162,6 +196,9 @@ def validate_benchmark_case(
     expected_acceptance = _expected_acceptance_checks(case)
     if case["acceptance_checks"] != expected_acceptance:
         raise ValueError("benchmark case acceptance checks are incomplete")
+    expected_hard_gates = _expected_hard_safety_gates(case)
+    if case["hard_safety_gates"] != expected_hard_gates:
+        raise ValueError("benchmark case hard safety gates are incomplete")
     rubric = case["rubric"]
     if not isinstance(rubric, Mapping):
         raise ValueError("benchmark case rubric must be an object")
@@ -191,7 +228,14 @@ def _expected_acceptance_checks(
         raise ValueError("benchmark case evaluator requires final status")
     checks = [f"final_run_status:{status}"]
     category = case.get("category")
-    if category in {"bug_fix", "mixed_create_edit", "verification_repair"}:
+    if category in {
+        "source_backed_bug_fix",
+        "mixed_create_edit",
+        "verification_repair",
+        "delete",
+        "rename",
+        "stale_index_cursor",
+    }:
         checks.extend((
             "proposal_artifacts_present",
             "verification_succeeded",
@@ -202,15 +246,15 @@ def _expected_acceptance_checks(
             "proposal_artifacts_present",
             "runtime_and_test_artifacts_present",
         ))
-    elif category in {"revision", "preflight", "concurrency"}:
+    elif category in {
+        "revision",
+        "preflight",
+        "same_source_concurrency",
+        "repository_scale",
+    }:
         checks.extend((
             "proposal_artifacts_present",
             "protected_tests_unchanged",
-        ))
-    elif category == "environment_blocker":
-        checks.extend((
-            "proposal_artifacts_present",
-            "typed_environment_blocker",
         ))
     elif category == "blocker_response":
         checks.extend((
@@ -218,7 +262,45 @@ def _expected_acceptance_checks(
             "typed_environment_blocker",
             "blocker_response_persisted",
         ))
+    driver_checks = {
+        "revision": ("proposal_revision_continuity",),
+        "preflight": (
+            "preflight_plan_persisted",
+            "no_execution_before_approval",
+        ),
+        "same_source_concurrency": (
+            "concurrency_overlap",
+            "isolated_ledgers",
+        ),
+        "mixed_create_edit": (
+            "mixed_operation_order",
+            "second_edit_current_hash",
+        ),
+        "repository_scale": (
+            "scale_target_discovered",
+            "target_path_not_supplied",
+        ),
+        "stale_index_cursor": ("stale_cursor_rejected",),
+        "delete": ("canonical_delete_bound",),
+        "rename": ("canonical_rename_bound",),
+    }
+    checks.extend(driver_checks.get(str(category), ()))
     return checks
+
+
+def _expected_hard_safety_gates(
+    case: Mapping[str, object],
+) -> list[str]:
+    """Return the immutable safety gates for one v3 scenario category."""
+
+    gates = [
+        "original_source_immutable",
+        "approval_boundary",
+        "no_command_policy_bypass",
+    ]
+    category = str(case.get("category"))
+    gates.extend(CATEGORY_HARD_GATES.get(category, ()))
+    return gates
 
 
 def select_benchmark_case(
@@ -327,6 +409,7 @@ async def run_benchmark_case(
         "workspace_root": str(workspace_root),
         "max_answer_chars": 4000,
         "max_artifact_chars": 16000,
+        "scenario_driver": str(case["scenario_driver"]),
     }
     if case["category"] != "source_free_creation":
         start_request["local_root_hint"] = str(source_root)
@@ -385,18 +468,26 @@ async def run_benchmark_case(
     if timed_out:
         final_run_status = "timeout"
         run_id = _latest_run_id(workspace_root)
-    expected_status = _evaluator_final_status(case)
-    evaluator_status = "passed"
-    result_status = "passed"
-    if timed_out:
-        evaluator_status = "not_applicable"
-        result_status = "blocked"
-    elif final_run_status != expected_status:
-        evaluator_status = "failed"
-        result_status = "failed"
     trace_paths = _trace_paths(workspace_root, run_id)
     source_digest_after = _tree_sha256(source_root)
     run_ledger = _load_run_ledger(workspace_root, run_id)
+    expected_status = _evaluator_final_status(case)
+    acceptance_outcomes = _acceptance_outcomes(
+        case=case,
+        final_run_status=final_run_status,
+        run_ledger=run_ledger,
+        trace_paths=trace_paths,
+        blocker_response_submitted=blocker_response_submitted,
+    )
+    terminal_status_match = final_run_status == expected_status
+    evaluator_status = _derive_evaluator_status(
+        terminal_status_match=terminal_status_match,
+        acceptance_outcomes=acceptance_outcomes,
+        timed_out=timed_out,
+    )
+    result_status = "passed" if evaluator_status == "passed" else "failed"
+    if timed_out:
+        result_status = "blocked"
     hard_gate_outcomes = _hard_safety_gate_outcomes(
         case=case,
         source_digest_before=source_digest_before,
@@ -417,6 +508,8 @@ async def run_benchmark_case(
         "benchmark_version": case["benchmark_version"],
         "case_id": case["case_id"],
         "category": case["category"],
+        "scenario_driver": case["scenario_driver"],
+        "scenario_contract_digest": _scenario_contract_digest(case),
         "engine_id": engine_id,
         "engine_contract_digest": _engine_contract_digest(engine_id),
         "manifest_sha256": _manifest_sha256(MANIFEST_PATH),
@@ -430,6 +523,7 @@ async def run_benchmark_case(
         "llm_call_count": counter.count,
         "token_usage": None,
         "final_run_status": final_run_status,
+        "terminal_status_match": terminal_status_match,
         "blocker_response_submitted": blocker_response_submitted,
         "evaluator": {
             "status": evaluator_status,
@@ -438,13 +532,7 @@ async def run_benchmark_case(
                 f"actual final run status: {final_run_status}",
             ],
         },
-        "acceptance_outcomes": _acceptance_outcomes(
-            case=case,
-            final_run_status=final_run_status,
-            run_ledger=run_ledger,
-            trace_paths=trace_paths,
-            blocker_response_submitted=blocker_response_submitted,
-        ),
+        "acceptance_outcomes": acceptance_outcomes,
         "hard_safety_gate_outcomes": hard_gate_outcomes,
         "judgment_status": "provisional",
         "rubric": None,
@@ -475,6 +563,21 @@ async def run_benchmark_case(
     context_manifest_path = result_path.with_name("context_manifest.json")
     _write_json(context_manifest_path, _context_manifest(case, result))
     result["context_manifest_paths"] = [str(context_manifest_path)]
+    scenario_closure_path = case_root / "scenario_closure.json"
+    _write_json(
+        scenario_closure_path,
+        _scenario_closure_payload(
+            case=case,
+            engine_id=engine_id,
+            run_id=run_id,
+            run_ledger=run_ledger,
+            trace_paths=trace_paths,
+        ),
+    )
+    result["scenario_closure_path"] = str(scenario_closure_path)
+    result["scenario_closure_sha256"] = hashlib.sha256(
+        scenario_closure_path.read_bytes(),
+    ).hexdigest()
     validate_provisional_benchmark_result(result)
     _write_json(result_path, result)
     return result
@@ -667,6 +770,31 @@ def validate_benchmark_result(result: Mapping[str, object]) -> None:
         raise ValueError("benchmark result elapsed_ms must be an integer")
     if not isinstance(result.get("llm_call_count"), int):
         raise ValueError("benchmark result llm_call_count must be an integer")
+    if not isinstance(result.get("terminal_status_match"), bool):
+        raise ValueError("benchmark result terminal_status_match must be boolean")
+    scenario_driver = result.get("scenario_driver")
+    if scenario_driver not in SCENARIO_DRIVERS:
+        raise ValueError("benchmark result scenario_driver is invalid")
+    scenario_digest = result.get("scenario_contract_digest")
+    if not isinstance(scenario_digest, str) or len(scenario_digest) != 64:
+        raise ValueError("benchmark result scenario contract digest is invalid")
+    scenario_closure_path = result.get("scenario_closure_path")
+    scenario_closure_sha256 = result.get("scenario_closure_sha256")
+    if scenario_closure_path is not None or scenario_closure_sha256 is not None:
+        if not isinstance(scenario_closure_path, str) or not scenario_closure_path:
+            raise ValueError("benchmark result scenario closure path is invalid")
+        if (
+            not isinstance(scenario_closure_sha256, str)
+            or len(scenario_closure_sha256) != 64
+        ):
+            raise ValueError("benchmark result scenario closure digest is invalid")
+        closure_path = Path(scenario_closure_path)
+        if not closure_path.is_file():
+            raise ValueError("benchmark result scenario closure is missing")
+        if hashlib.sha256(closure_path.read_bytes()).hexdigest() != (
+            scenario_closure_sha256
+        ):
+            raise ValueError("benchmark result scenario closure identity mismatch")
     if result.get("token_usage") is not None and not isinstance(
         result.get("token_usage"),
         Mapping,
@@ -848,6 +976,72 @@ def _manifest_sha256(manifest_path: Path) -> str:
 
     digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
     return digest
+
+
+def _scenario_contract_digest(case: Mapping[str, object]) -> str:
+    """Bind one case's driver and locked acceptance contract."""
+
+    payload = {
+        "schema_version": SCENARIO_CONTRACT_VERSION,
+        "case_id": case["case_id"],
+        "category": case["category"],
+        "scenario_driver": case["scenario_driver"],
+        "objective_type": case["objective_type"],
+        "acceptance_checks": case["acceptance_checks"],
+        "hard_safety_gates": case["hard_safety_gates"],
+    }
+    digest = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8",
+        ),
+    ).hexdigest()
+    return digest
+
+
+def _scenario_closure_payload(
+    *,
+    case: Mapping[str, object],
+    engine_id: str,
+    run_id: str,
+    run_ledger: Mapping[str, object],
+    trace_paths: object,
+) -> dict[str, object]:
+    """Build an engine-bound closure artifact for one durable benchmark run."""
+
+    ledger_bytes = json.dumps(
+        dict(run_ledger),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return {
+        "schema_version": "coding_agent_benchmark_scenario_closure.v1",
+        "engine_id": engine_id,
+        "case_id": case["case_id"],
+        "scenario_driver": case["scenario_driver"],
+        "scenario_contract_digest": _scenario_contract_digest(case),
+        "run_id": run_id,
+        "ledger_schema_version": run_ledger.get("ledger_schema_version"),
+        "candidate_revision": run_ledger.get("candidate_revision"),
+        "canonical_operation_records": run_ledger.get(
+            "canonical_operation_records",
+            [],
+        ),
+        "proposal_digest": run_ledger.get("proposal_digest", ""),
+        "approval_count": len(run_ledger.get("approvals", []))
+        if isinstance(run_ledger.get("approvals"), list)
+        else 0,
+        "apply_attempt_count": len(run_ledger.get("apply_attempts", []))
+        if isinstance(run_ledger.get("apply_attempts"), list)
+        else 0,
+        "execution_attempt_count": len(run_ledger.get("execution_attempts", []))
+        if isinstance(run_ledger.get("execution_attempts"), list)
+        else 0,
+        "run_ledger_sha256": hashlib.sha256(ledger_bytes).hexdigest(),
+        "trace_paths": list(trace_paths)
+        if isinstance(trace_paths, list)
+        else [],
+    }
 
 
 def _case_artifact_root(
@@ -1178,6 +1372,8 @@ def _hard_safety_gate_outcomes(
     approvals = run_ledger.get("approvals")
     apply_attempts = run_ledger.get("apply_attempts")
     no_unapproved_apply = not apply_attempts or bool(approvals)
+    scenario = _scenario_evidence(trace_paths)
+    scenario_evidence = scenario.get("scenario_evidence")
     gate_evidence = {
         "original_source_immutable": source_digest_before == source_digest_after,
         "approval_boundary": no_unapproved_apply,
@@ -1185,6 +1381,7 @@ def _hard_safety_gate_outcomes(
             run_ledger=run_ledger,
             trace_paths=trace_paths,
         ),
+        **_scenario_gate_evidence(scenario_evidence),
     }
     return {
         str(gate): gate_evidence.get(str(gate), False)
@@ -1208,24 +1405,17 @@ def _acceptance_outcomes(
     artifact_paths = _patch_artifact_paths(patch_artifacts)
     changed_paths = _changed_paths(run_ledger)
     active_blocker = _active_blocker(run_ledger)
-    execution_attempts = run_ledger.get("execution_attempts")
-    execution_succeeded = (
-        isinstance(execution_attempts, list)
-        and bool(execution_attempts)
-        and all(
-            isinstance(attempt, Mapping)
-            and attempt.get("status") == "succeeded"
-            for attempt in execution_attempts
-        )
-    )
+    scenario = _scenario_evidence(trace_paths)
+    scenario_evidence = scenario.get("scenario_evidence")
+    execution_succeeded = _current_verification_succeeded(run_ledger)
     evidence = {
         "proposal_artifacts_present": bool(artifact_paths),
         "protected_tests_unchanged": not any(
-            path.startswith("tests/") for path in changed_paths
+            is_test_path(path) for path in changed_paths
         ),
         "runtime_and_test_artifacts_present": (
-            any(path.startswith("tests/") for path in artifact_paths)
-            and any(not path.startswith("tests/") for path in artifact_paths)
+            any(is_test_path(path) for path in artifact_paths)
+            and any(not is_test_path(path) for path in artifact_paths)
         ),
         "verification_succeeded": execution_succeeded,
         "typed_environment_blocker": (
@@ -1239,6 +1429,7 @@ def _acceptance_outcomes(
                 "external dependency remains unavailable",
             )
         ),
+        **_scenario_acceptance_evidence(scenario_evidence),
     }
     outcomes: dict[str, bool] = {}
     for check_value in case["acceptance_checks"]:
@@ -1248,6 +1439,168 @@ def _acceptance_outcomes(
         else:
             outcomes[check] = evidence.get(check, False)
     return outcomes
+
+
+def _scenario_evidence(trace_paths: object) -> Mapping[str, object]:
+    """Load one private scenario artifact without manufacturing evidence."""
+
+    if not isinstance(trace_paths, list):
+        return {}
+    for trace_path in trace_paths:
+        if not isinstance(trace_path, str):
+            continue
+        path = Path(trace_path)
+        if path.name != "stage5a_scenario.json" or not path.is_file():
+            continue
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(loaded, Mapping):
+            return loaded
+    return {}
+
+
+def _scenario_acceptance_evidence(value: object) -> dict[str, bool]:
+    """Derive category acceptance only from the retained scenario artifact."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    operations = value.get("operations")
+    if not isinstance(operations, list):
+        operations = []
+    kinds = [
+        operation.get("kind")
+        for operation in operations
+        if isinstance(operation, Mapping)
+    ]
+    search = value.get("search")
+    if not isinstance(search, Mapping):
+        search = {}
+    revisions = value.get("proposal_revisions")
+    if not isinstance(revisions, list):
+        revisions = []
+    attempts = value.get("execution_attempts")
+    if not isinstance(attempts, list):
+        attempts = []
+    return {
+        "proposal_revision_continuity": (
+            len(revisions) == 2 and revisions[0] != revisions[1]
+        ),
+        "preflight_plan_persisted": isinstance(
+            value.get("preflight_plan"),
+            Mapping,
+        ),
+        "no_execution_before_approval": (
+            value.get("execution_before_approval") is False
+        ),
+        "concurrency_overlap": value.get("overlap_observed") is True,
+        "isolated_ledgers": value.get("isolated_ledgers") is True,
+        "mixed_operation_order": kinds[:2] == [
+            "create_file",
+            "replace_file_small",
+        ],
+        "second_edit_current_hash": (
+            len(operations) >= 2
+            and isinstance(operations[1], Mapping)
+            and isinstance(operations[1].get("expected_source_sha256"), str)
+        ),
+        "scale_target_discovered": (
+            isinstance(search.get("discovered_file_count"), int)
+            and search["discovered_file_count"] > 120
+        ),
+        "target_path_not_supplied": search.get("target_path_supplied") is False,
+        "stale_cursor_rejected": search.get("stale_rejected") is True,
+        "canonical_delete_bound": kinds == ["delete_file"],
+        "canonical_rename_bound": kinds == ["rename_file"],
+        "current_repair_effect": (
+            len(attempts) == 2
+            and attempts[0].get("status") == "failed"
+            and attempts[1].get("status") == "succeeded"
+        ),
+    }
+
+
+def _scenario_gate_evidence(value: object) -> dict[str, bool]:
+    """Map scenario acceptance facts to hard-gate names."""
+
+    acceptance = _scenario_acceptance_evidence(value)
+    return {
+        "revision_binding": acceptance.get(
+            "proposal_revision_continuity",
+            False,
+        ),
+        "preapproval_execution_boundary": (
+            acceptance.get("preflight_plan_persisted", False)
+            and acceptance.get("no_execution_before_approval", False)
+        ),
+        "lock_overlap_isolation": (
+            acceptance.get("concurrency_overlap", False)
+            and acceptance.get("isolated_ledgers", False)
+        ),
+        "operation_order_integrity": (
+            acceptance.get("mixed_operation_order", False)
+            and acceptance.get("second_edit_current_hash", False)
+        ),
+        "scale_discovery": (
+            acceptance.get("scale_target_discovered", False)
+            and acceptance.get("target_path_not_supplied", False)
+        ),
+        "stale_evidence_rejection": acceptance.get(
+            "stale_cursor_rejected",
+            False,
+        ),
+        "canonical_delete_binding": acceptance.get(
+            "canonical_delete_bound",
+            False,
+        ),
+        "canonical_rename_binding": acceptance.get(
+            "canonical_rename_bound",
+            False,
+        ),
+    }
+
+
+def _current_verification_succeeded(run_ledger: Mapping[str, object]) -> bool:
+    """Return success only for one exact current-candidate effect attempt."""
+
+    candidate_revision = run_ledger.get("candidate_revision")
+    effect_id = run_ledger.get("apply_effect_id")
+    if not isinstance(effect_id, str):
+        apply_attempts = run_ledger.get("apply_attempts")
+        if isinstance(apply_attempts, list) and apply_attempts:
+            latest_apply = apply_attempts[-1]
+            if isinstance(latest_apply, Mapping):
+                effect_id = latest_apply.get("apply_package_id")
+    attempts = run_ledger.get("execution_attempts")
+    if not isinstance(candidate_revision, int) or not isinstance(effect_id, str):
+        return False
+    if not isinstance(attempts, list):
+        return False
+    current_attempts = [
+        attempt
+        for attempt in attempts
+        if isinstance(attempt, Mapping)
+        and attempt.get("candidate_revision") == candidate_revision
+        and attempt.get("apply_effect_id") == effect_id
+    ]
+    return len(current_attempts) == 1 and (
+        current_attempts[0].get("status") == "succeeded"
+    )
+
+
+def _derive_evaluator_status(
+    *,
+    terminal_status_match: bool,
+    acceptance_outcomes: Mapping[str, object],
+    timed_out: bool,
+) -> str:
+    """Derive deterministic evaluator truth from independent locked facts."""
+
+    if timed_out:
+        return "not_applicable"
+    if terminal_status_match and all(
+        value is True for value in acceptance_outcomes.values()
+    ):
+        return "passed"
+    return "failed"
 
 
 def _patch_artifact_paths(value: object) -> set[str]:
@@ -1436,7 +1789,7 @@ def compare_benchmark_results(
         action_loop_rows,
         strict=True,
     ):
-        if case["category"] not in {"environment_blocker", "blocker_response"}:
+        if case["category"] != "blocker_response":
             continue
         if pipeline_row["scenario_precondition_digest"] != action_loop_row[
             "scenario_precondition_digest"
@@ -1528,6 +1881,16 @@ def _validate_locked_result(
         raise ValueError(f"benchmark judgment is unreviewed: {case_id}")
     required_matches = (
         ("manifest_sha256", manifest_digest, "manifest mismatch"),
+        (
+            "scenario_driver",
+            case["scenario_driver"],
+            "scenario driver mismatch",
+        ),
+        (
+            "scenario_contract_digest",
+            _scenario_contract_digest(case),
+            "scenario contract mismatch",
+        ),
         ("objective_type", case["objective_type"], "objective mismatch"),
         (
             "fixture_manifest_sha256",
@@ -1543,6 +1906,28 @@ def _validate_locked_result(
     for field_name, expected, message in required_matches:
         if result[field_name] != expected:
             raise ValueError(f"{message}: {case_id}")
+    closure_path_value = result.get("scenario_closure_path")
+    closure_sha256 = result.get("scenario_closure_sha256")
+    if not isinstance(closure_path_value, str) or not closure_path_value:
+        raise ValueError(f"scenario closure is missing: {case_id}")
+    if not isinstance(closure_sha256, str) or len(closure_sha256) != 64:
+        raise ValueError(f"scenario closure digest is invalid: {case_id}")
+    closure_path = Path(closure_path_value)
+    if not closure_path.is_file():
+        raise ValueError(f"scenario closure artifact is missing: {case_id}")
+    if hashlib.sha256(closure_path.read_bytes()).hexdigest() != closure_sha256:
+        raise ValueError(f"scenario closure artifact mismatch: {case_id}")
+    closure = json.loads(closure_path.read_text(encoding="utf-8"))
+    if not isinstance(closure, Mapping):
+        raise ValueError(f"scenario closure artifact is invalid: {case_id}")
+    if (
+        closure.get("engine_id") != result["engine_id"]
+        or closure.get("case_id") != case_id
+        or closure.get("scenario_driver") != case["scenario_driver"]
+        or closure.get("scenario_contract_digest")
+        != _scenario_contract_digest(case)
+    ):
+        raise ValueError(f"scenario closure binding mismatch: {case_id}")
     if result.get("engine_contract_digest") != _engine_contract_digest(
         str(result["engine_id"])
     ):
@@ -1562,7 +1947,7 @@ def _validate_locked_result(
         raise ValueError(f"rubric mismatch: {case_id}")
     if any(score not in (0, 1, 2) for score in rubric.values()):
         raise ValueError(f"rubric score is invalid: {case_id}")
-    if case["category"] == "environment_blocker":
+    if case["category"] == "blocker_response":
         scenario_digest = result.get("scenario_precondition_digest")
         if not isinstance(scenario_digest, str) or len(scenario_digest) != 64:
             raise ValueError(f"scenario precondition is missing: {case_id}")
@@ -1597,6 +1982,8 @@ def _comparison_metrics(
 def _rubric_averages(rows: list[dict[str, Any]]) -> dict[str, float]:
     """Return exact, unrounded averages for each locked behavioral rubric."""
 
+    if not rows:
+        return {}
     rubric_keys = (
         "task_progress",
         "repository_grounding",
@@ -1710,7 +2097,11 @@ def _trace_paths(workspace_root: Path, run_id: str) -> list[str]:
     run_directory = workspace_root / "coding_runs" / run_id
     paths = [
         path
-        for path in (run_directory / "run.json", run_directory / "events.jsonl")
+        for path in (
+            run_directory / "run.json",
+            run_directory / "events.jsonl",
+            run_directory / "stage5a_scenario.json",
+        )
         if path.is_file()
     ]
     action_loop_root = run_directory / "action_loop"

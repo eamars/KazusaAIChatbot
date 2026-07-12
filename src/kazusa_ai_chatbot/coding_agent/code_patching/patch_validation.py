@@ -24,6 +24,7 @@ from kazusa_ai_chatbot.coding_agent.code_patching.models import (
     PatchArtifact,
     PatchValidationSummary,
 )
+from kazusa_ai_chatbot.coding_agent.path_classification import is_test_path
 from kazusa_ai_chatbot.coding_agent.tools.paths import (
     PathSafetyError,
     ensure_path_inside,
@@ -453,7 +454,7 @@ def _broad_exception_detail(broad_catches: list[tuple[str, str]]) -> str:
 
 
 def _broad_test_exception_error(*, diff_text: str, files: list[str]) -> str | None:
-    if not any(_is_test_path(safe_path) for safe_path in files):
+    if not any(is_test_path(safe_path) for safe_path in files):
         return None
     if not _diff_adds_broad_test_exception(diff_text):
         return None
@@ -470,7 +471,7 @@ def _diff_adds_broad_test_exception(diff_text: str) -> bool:
         if line.startswith("+++ "):
             current_path = _safe_path_from_diff_marker(line[4:])
             continue
-        if current_path is None or not _is_test_path(current_path):
+        if current_path is None or not is_test_path(current_path):
             continue
         if not line.startswith("+") or line.startswith("+++"):
             continue
@@ -485,7 +486,7 @@ def _test_exception_type_change_error(
     diff_text: str,
     files: list[str],
 ) -> str | None:
-    if not any(_is_test_path(safe_path) for safe_path in files):
+    if not any(is_test_path(safe_path) for safe_path in files):
         return None
     changed_names = _changed_test_exception_names(diff_text)
     if not changed_names:
@@ -517,7 +518,7 @@ def _test_exception_match_change_error(
     diff_text: str,
     files: list[str],
 ) -> str | None:
-    if not any(_is_test_path(safe_path) for safe_path in files):
+    if not any(is_test_path(safe_path) for safe_path in files):
         return None
     changed_names = _changed_test_exception_match_names(diff_text)
     if not changed_names:
@@ -576,7 +577,7 @@ def _pytest_raises_blocks_from_diff(
             collecting = False
             block_lines = []
             continue
-        if current_path is None or not _is_test_path(current_path):
+        if current_path is None or not is_test_path(current_path):
             continue
         if line.startswith(("---", "+++", "@@")):
             continue
@@ -612,7 +613,7 @@ def _response_text_assertion_error(
     diff_text: str,
     files: list[str],
 ) -> str | None:
-    if not any(_is_test_path(safe_path) for safe_path in files):
+    if not any(is_test_path(safe_path) for safe_path in files):
         return None
 
     current_path: str | None = None
@@ -637,7 +638,7 @@ def _response_text_assertion_error(
                 return error
             hunk_lines = []
             continue
-        if current_path is None or not _is_test_path(current_path):
+        if current_path is None or not is_test_path(current_path):
             continue
         if line.startswith((" ", "+", "-")) and not line.startswith(
             ("+++", "---")
@@ -658,7 +659,7 @@ def _response_text_hunk_error(
     current_path: str | None,
     hunk_lines: list[str],
 ) -> str | None:
-    if current_path is None or not _is_test_path(current_path):
+    if current_path is None or not is_test_path(current_path):
         return None
     expected_values = _added_response_text_expected_values(hunk_lines)
     if not expected_values:
@@ -782,7 +783,7 @@ def _line_can_change_message(line: str) -> bool:
 
 
 def _test_assertion_error(*, diff_text: str, files: list[str]) -> str | None:
-    if not any(_is_test_path(safe_path) for safe_path in files):
+    if not any(is_test_path(safe_path) for safe_path in files):
         return None
     if _diff_adds_executable_test_assertion(diff_text):
         return None
@@ -798,7 +799,7 @@ def _diff_adds_executable_test_assertion(diff_text: str) -> bool:
         if line.startswith("+++ "):
             current_path = _safe_path_from_diff_marker(line[4:])
             continue
-        if current_path is None or not _is_test_path(current_path):
+        if current_path is None or not is_test_path(current_path):
             continue
         if not line.startswith("+") or line.startswith("+++"):
             continue
@@ -1230,7 +1231,7 @@ def _python_import_error_message(
 def _available_runtime_module_names(module_index: dict[str, str]) -> list[str]:
     module_names: list[str] = []
     for module_name, safe_path in sorted(module_index.items()):
-        if _is_test_path(safe_path):
+        if is_test_path(safe_path):
             continue
         if module_name in module_names:
             continue
@@ -1622,7 +1623,7 @@ def _assigned_names(target: ast.AST) -> set[str]:
 
 
 def _runtime_behavior_error(*, diff_text: str, files: list[str]) -> str | None:
-    if not any(_is_test_path(safe_path) for safe_path in files):
+    if not any(is_test_path(safe_path) for safe_path in files):
         return None
     if not any(_is_runtime_python_path(safe_path) for safe_path in files):
         return None
@@ -1651,15 +1652,7 @@ def _diff_has_runtime_python_behavior(diff_text: str) -> bool:
 
 def _is_runtime_python_path(safe_path: str) -> bool:
     suffix = Path(safe_path).suffix.casefold()
-    return suffix == ".py" and not _is_test_path(safe_path)
-
-
-def _is_test_path(safe_path: str) -> bool:
-    path = PurePosixPath(safe_path)
-    name = path.name.casefold()
-    if name.startswith("test_") or name.endswith("_test.py"):
-        return True
-    return any(part.casefold() in ("test", "tests") for part in path.parts)
+    return suffix == ".py" and not is_test_path(safe_path)
 
 
 def _added_python_line_has_runtime_behavior(line: str) -> bool:

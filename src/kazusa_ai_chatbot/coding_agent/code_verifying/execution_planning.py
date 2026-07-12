@@ -16,6 +16,7 @@ from kazusa_ai_chatbot.coding_agent.code_patching.models import PatchArtifact
 from kazusa_ai_chatbot.coding_agent.code_patching.patch_validation import (
     _parse_patch_artifacts,
 )
+from kazusa_ai_chatbot.coding_agent.path_classification import is_test_path
 from kazusa_ai_chatbot.config import (
     CODING_AGENT_PM_LLM_API_KEY,
     CODING_AGENT_PM_LLM_BASE_URL,
@@ -220,7 +221,7 @@ def merge_additive_execution_specs(
 def _safe_test_paths(*, candidate_root: Path, changed_paths: list[str]) -> list[str]:
     safe_paths: list[str] = []
     for changed_path in changed_paths:
-        if _is_test_path(changed_path):
+        if is_test_path(changed_path):
             _append_changed_test_path(safe_paths, changed_path)
             continue
         companion_path = _conventional_test_companion(changed_path)
@@ -238,13 +239,6 @@ def _conventional_test_companion(path: str) -> str:
         return candidate.as_posix()
     candidate = PurePosixPath("tests") / f"test_{path_value.stem}.py"
     return candidate.as_posix()
-
-
-def _is_test_path(path: str) -> bool:
-    path_value = PurePosixPath(path)
-    return path_value.suffix == ".py" and (
-        path_value.name.startswith("test_") or "tests" in path_value.parts
-    )
 
 
 def _append_if_existing(paths: list[str], candidate_root: Path, path: str) -> None:

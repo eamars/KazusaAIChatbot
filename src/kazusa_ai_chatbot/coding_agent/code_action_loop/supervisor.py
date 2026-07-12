@@ -2060,12 +2060,17 @@ async def _apply_and_verify(
         execution_spec = execution_specs[execution_index]
         pending_effect["active_execution_index"] = execution_index
         _persist_active_loop_state(run_root, loop_state)
-        execution_result = execute_code_check({
+        raw_execution_result = execute_code_check({
             "workspace_root": str(run_root.parent.parent),
             "apply_package_id": apply_result["apply_package_id"],
             "apply_workspace_ref": apply_result["apply_workspace_ref"],
             "execution": execution_spec,
         })
+        execution_result = {
+            **raw_execution_result,
+            "candidate_revision": candidate_revision,
+            "apply_effect_id": pending_effect["effect_id"],
+        }
         execution_attempts.append(execution_result)
         effect_results = pending_effect.get("execution_results")
         if not isinstance(effect_results, list):

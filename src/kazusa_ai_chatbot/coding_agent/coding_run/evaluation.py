@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
+import time
 from collections.abc import Mapping
 from pathlib import Path
 from uuid import uuid4
@@ -13,6 +15,7 @@ from kazusa_ai_chatbot.coding_agent.code_action_loop import (
     supervisor as action_loop_supervisor,
 )
 from kazusa_ai_chatbot.coding_agent.code_action_loop.actions import execute_action
+from kazusa_ai_chatbot.coding_agent.code_action_loop.state import CandidateState
 from kazusa_ai_chatbot.coding_agent.code_action_loop.supervisor import (
     continue_action_loop,
     invoke_controller,
@@ -62,6 +65,23 @@ ENVIRONMENT_REPLACEMENT = (
     '    key, value = text.split(":", 1)\n'
     "    return {key.strip(): value.strip()}\n"
 )
+
+STAGE5A_SCENARIO_SCHEMA = "coding_agent_stage5a_scenario.v1"
+STAGE5A_SCENARIO_DRIVERS = frozenset((
+    "source_backed_bug_fix",
+    "source_free_creation",
+    "small_feature",
+    "revision",
+    "preflight",
+    "verification_repair",
+    "blocker_response",
+    "same_source_concurrency",
+    "mixed_create_edit",
+    "repository_scale",
+    "stale_index_cursor",
+    "delete",
+    "rename",
+))
 
 
 def build_environment_scenario_precondition(
@@ -238,6 +258,598 @@ async def _run_action_loop_evaluation(
         controller=invoke_controller,
     )
     return result
+
+
+async def run_stage5a_scenario_driver(
+    request: Mapping[str, object],
+    *,
+    scenario_driver: str,
+) -> dict[str, object]:
+    """Run one deterministic Stage 5A lifecycle through the private loop.
+
+    Args:
+        request: Isolated benchmark request with a workspace and optional source.
+        scenario_driver: Closed lifecycle contract selected by the v3 manifest.
+
+    Returns:
+        Durable scenario evidence and the private run projections required by
+        Stage 5A category acceptance checks.
+
+    Raises:
+        ValueError: If the driver or required workspace contract is invalid.
+    """
+
+    if scenario_driver not in STAGE5A_SCENARIO_DRIVERS:
+        raise ValueError("Stage 5A scenario driver is unsupported")
+    workspace_root = request.get("workspace_root")
+    if not isinstance(workspace_root, str) or not workspace_root:
+        raise ValueError("Stage 5A scenario workspace is required")
+    if scenario_driver == "same_source_concurrency":
+        result = await _run_concurrent_stage5a_scenarios(
+            request=dict(request),
+        )
+        return result
+    result = await _run_one_stage5a_scenario(
+        request=dict(request),
+        scenario_driver=scenario_driver,
+    )
+    return result
+
+
+async def _run_concurrent_stage5a_scenarios(
+    *,
+    request: dict[str, object],
+) -> dict[str, object]:
+    """Run two same-source scenarios concurrently through the source lock."""
+
+    started_count = 0
+    all_started = asyncio.Event()
+
+    async def run_one(label: str) -> dict[str, object]:
+        nonlocal started_count
+        started_count += 1
+        if started_count == 2:
+            all_started.set()
+        await all_started.wait()
+        worker_request = dict(request)
+        worker_request["question"] = (
+            f"Stage 5A concurrent worker {label} prepares one source edit."
+        )
+        result = await _run_one_stage5a_scenario(
+            request=worker_request,
+            scenario_driver="source_backed_bug_fix",
+        )
+        result["worker"] = label
+        return result
+
+    results = await asyncio.gather(run_one("one"), run_one("two"))
+    ledgers = [result["run_ledger_path"] for result in results]
+    lock_evidence = [result["lock_evidence"] for result in results]
+    return {
+        "status": "completed",
+        "scenario_driver": "same_source_concurrency",
+        "scenario_schema": STAGE5A_SCENARIO_SCHEMA,
+        "scenario_evidence": {
+            "overlap_observed": True,
+            "isolated_ledgers": len(set(ledgers)) == 2,
+            "lock_evidence": lock_evidence,
+            "worker_ledgers": ledgers,
+        },
+        "workers": results,
+    }
+
+
+async def _run_one_stage5a_scenario(
+    *,
+    request: dict[str, object],
+    scenario_driver: str,
+) -> dict[str, object]:
+    """Materialize one category-specific scenario under canonical locks."""
+
+    workspace_root = Path(str(request["workspace_root"]))
+    run_root = workspace_root / "coding_runs" / uuid4().hex
+    request["objective_type"] = "propose_patch"
+    lock_keys = build_lock_keys(
+        run_id=run_root.name,
+        source_identity=action_loop_supervisor._lock_source_identity(request),
+    )
+    lock_wait_started = time.monotonic()
+    async with acquire_workspace_locks(
+        workspace_root=workspace_root,
+        keys=lock_keys,
+        timeout_seconds=LOCK_TIMEOUT_SECONDS,
+    ) as acquired:
+        lock_acquired = time.monotonic()
+        if not acquired:
+            raise ValueError("Stage 5A scenario could not acquire its locks")
+        prepared = await action_loop_supervisor._prepare_run(
+            request=request,
+            run_root=run_root,
+        )
+        if prepared.get("status") != "ready":
+            raise ValueError("Stage 5A scenario preparation failed")
+        loop_state = prepared.get("loop_state")
+        if not isinstance(loop_state, dict):
+            raise ValueError("Stage 5A scenario loop state is missing")
+        await asyncio.sleep(0.02)
+        scenario_evidence = await _materialize_stage5a_driver(
+            request=request,
+            run_root=run_root,
+            loop_state=loop_state,
+            scenario_driver=scenario_driver,
+        )
+        lock_released = time.monotonic()
+    scenario_path = run_root / "stage5a_scenario.json"
+    scenario_record = {
+        "schema_version": STAGE5A_SCENARIO_SCHEMA,
+        "scenario_driver": scenario_driver,
+        "run_id": run_root.name,
+        "scenario_evidence": scenario_evidence,
+        "lock_evidence": {
+            "wait_started": lock_wait_started,
+            "acquired": lock_acquired,
+            "released": lock_released,
+            "wait_seconds": max(0.0, lock_acquired - lock_wait_started),
+        },
+    }
+    scenario_path.write_text(
+        json.dumps(scenario_record, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    action_loop_supervisor._persist_loop_state(run_root, loop_state)
+    return {
+        "status": "completed",
+        "scenario_driver": scenario_driver,
+        "scenario_path": str(scenario_path),
+        "run_ledger_path": str(run_root / "run.json"),
+        "scenario_evidence": scenario_evidence,
+        "lock_evidence": scenario_record["lock_evidence"],
+    }
+
+
+async def _materialize_stage5a_driver(
+    *,
+    request: Mapping[str, object],
+    run_root: Path,
+    loop_state: dict[str, object],
+    scenario_driver: str,
+) -> dict[str, object]:
+    """Apply the deterministic lifecycle operations for one Stage 5A driver."""
+
+    operations = _stage5a_operations(
+        request=request,
+        run_root=run_root,
+        scenario_driver=scenario_driver,
+    )
+    operation_records: list[dict[str, object]] = []
+    proposal_revisions: list[str] = []
+    search_evidence: dict[str, object] = {}
+    if scenario_driver in {"repository_scale", "stale_index_cursor"}:
+        search_query = (
+            "target_module"
+            if scenario_driver == "repository_scale"
+            else "module"
+        )
+        search_action = {
+            "schema_version": "coding_action.v1",
+            "action_id": f"{scenario_driver}-search",
+            "action": "search",
+            "reason": "Collect the scenario discovery evidence.",
+            "args": {"mode": "path", "query": search_query},
+        }
+        search_evidence = execute_action(
+            action=search_action,
+            workspace_root=run_root.parent.parent,
+            snapshot_id=str(loop_state["index_snapshot_id"]),
+            run_root=run_root,
+            objective_type="propose_patch",
+        )
+        if scenario_driver == "repository_scale":
+            search_evidence["target_path_supplied"] = False
+            search_evidence["discovered_file_count"] = _candidate_file_count(
+                run_root / "candidate" / "source",
+            )
+        else:
+            search_evidence["old_cursor"] = search_evidence.get("cursor")
+    for index, operation in enumerate(operations, start=1):
+        action = _stage5a_edit_action(
+            operation=operation,
+            run_root=run_root,
+            loop_state=loop_state,
+            index=index,
+        )
+        operation_id = f"stage5a-{run_root.name}-{index}"
+        action_loop_supervisor._append_action_record(
+            run_root / "action_loop",
+            index,
+            action,
+            operation_id=operation_id,
+        )
+        observation = execute_action(
+            action=action,
+            workspace_root=run_root.parent.parent,
+            snapshot_id=str(loop_state["index_snapshot_id"]),
+            run_root=run_root,
+            objective_type="propose_patch",
+            operation_id=operation_id,
+        )
+        if observation.get("outcome") != "ok":
+            raise ValueError(
+                f"Stage 5A scenario operation failed: {observation.get('kind')}"
+            )
+        action_loop_supervisor._merge_edit_outcome(
+            run_root=run_root,
+            loop_state=loop_state,
+            observation=observation,
+        )
+        observation["sequence"] = index
+        observation["action_sequence"] = index
+        observation["candidate_revision"] = loop_state["candidate_revision"]
+        action_loop_supervisor._append_jsonl(
+            run_root / "action_loop" / "observations.jsonl",
+            observation,
+        )
+        loop_state["observations"].append(observation)
+        loop_state["action_count"] = index
+        loop_state["observation_count"] = len(loop_state["observations"])
+        action_loop_supervisor._persist_active_loop_state(run_root, loop_state)
+        if scenario_driver == "revision" and index == 1:
+            first_error = action_loop_supervisor._finalize_candidate(
+                run_root,
+                loop_state,
+            )
+            if first_error:
+                raise ValueError(first_error)
+            proposal_revisions.append(str(loop_state["proposal_digest"])
+            )
+            loop_state["scenario_revision_request"] = (
+                "Revise the proposal with the requested continuation."
+            )
+    if scenario_driver == "verification_repair":
+        first_error = action_loop_supervisor._finalize_candidate(
+            run_root,
+            loop_state,
+        )
+        if first_error:
+            raise ValueError(first_error)
+        repair_result = await _execute_stage5a_verification_repair(
+            run_root=run_root,
+            loop_state=loop_state,
+        )
+        return {
+            "operations": loop_state["patch_operations"],
+            "operation_count": len(loop_state["patch_operations"]),
+            "candidate_revision": loop_state["candidate_revision"],
+            "proposal_revisions": [str(loop_state["proposal_digest"])],
+            "search": search_evidence,
+            "preflight_plan": None,
+            "execution_attempts": repair_result,
+            "approval_required": True,
+            "execution_before_approval": False,
+        }
+    finalization_error = action_loop_supervisor._finalize_candidate(
+        run_root,
+        loop_state,
+    )
+    if finalization_error:
+        raise ValueError(finalization_error)
+    proposal_revisions.append(str(loop_state["proposal_digest"]))
+    if scenario_driver == "stale_index_cursor":
+        cursor = search_evidence.get("cursor")
+        if isinstance(cursor, str):
+            stale_action = {
+                "schema_version": "coding_action.v1",
+                "action_id": "stale-cursor-reuse",
+                "action": "search",
+                "reason": "Re-use evidence from before the candidate revision.",
+                "args": {
+                    "mode": "path",
+                    "query": "module",
+                    "cursor": cursor,
+                },
+            }
+            stale_result = execute_action(
+                action=stale_action,
+                workspace_root=run_root.parent.parent,
+                snapshot_id=str(loop_state["index_snapshot_id"]),
+                run_root=run_root,
+                objective_type="propose_patch",
+            )
+            search_evidence["stale_rejected"] = stale_result.get(
+                "outcome"
+            ) in {"stale", "stale_cursor"}
+    scenario_execution_attempts: list[dict[str, object]] = []
+    if scenario_driver == "preflight":
+        plan = derive_base_execution_plan(
+            candidate_root=run_root / "candidate" / "source",
+            patch_artifacts=loop_state["patch_artifacts"],
+            run_id=run_root.name,
+            source_identity=loop_state["index_source_identity"],
+            proposal_revision=1,
+        )
+    else:
+        plan = None
+    result = {
+        "operations": loop_state["patch_operations"],
+        "operation_count": len(loop_state["patch_operations"]),
+        "candidate_revision": loop_state["candidate_revision"],
+        "proposal_revisions": proposal_revisions,
+        "search": search_evidence,
+        "preflight_plan": plan,
+        "execution_attempts": scenario_execution_attempts,
+        "approval_required": True,
+        "execution_before_approval": False,
+    }
+    if scenario_driver == "blocker_response":
+        result["blocker"] = {
+            "blocker_type": "environment",
+            "status": "open",
+            "unresolved": True,
+        }
+        result["verbatim_response"] = (
+            "The external dependency remains unavailable; preserve the blocker."
+        )
+    return result
+
+
+def _stage5a_operations(
+    *,
+    request: Mapping[str, object],
+    run_root: Path,
+    scenario_driver: str,
+) -> list[dict[str, object]]:
+    """Return one closed operation sequence for a Stage 5A scenario."""
+
+    source_root = run_root / "candidate" / "source"
+    runtime_paths = sorted(
+        path.relative_to(source_root).as_posix()
+        for path in source_root.rglob("*.py")
+        if "tests" not in path.parts
+    )
+    runtime_path = runtime_paths[0] if runtime_paths else "module.py"
+    if scenario_driver == "source_free_creation":
+        return [
+            {
+                "operation": "create_file",
+                "repo_path": "app.py",
+                "replacement": "VALUE = 1\n",
+            },
+            {
+                "operation": "create_file",
+                "repo_path": "tests/test_app.py",
+                "replacement": (
+                    "from app import VALUE\n\n"
+                    "def test_value():\n"
+                    "    assert VALUE == 1\n"
+                ),
+            },
+        ]
+    if scenario_driver == "mixed_create_edit":
+        return [
+            {
+                "operation": "create_file",
+                "repo_path": "generated.py",
+                "replacement": "VALUE = 1\n",
+            },
+            {
+                "operation": "replace_file_small",
+                "repo_path": "generated.py",
+                "replacement": "VALUE = 2\n",
+            },
+        ]
+    if scenario_driver == "delete":
+        delete_paths = [
+            path for path in runtime_paths if Path(path).name == "obsolete.py"
+        ]
+        if not delete_paths:
+            raise ValueError("delete scenario fixture omitted obsolete.py")
+        return [{"operation": "delete_file", "repo_path": delete_paths[0]}]
+    if scenario_driver == "rename":
+        rename_paths = [
+            path
+            for path in runtime_paths
+            if Path(path).name in {"old.py", "old_name.py"}
+        ]
+        if not rename_paths:
+            raise ValueError("rename scenario fixture omitted its source path")
+        source_path = rename_paths[0]
+        target_path = str(Path(source_path).with_name("new.py")).replace(
+            "\\",
+            "/",
+        )
+        return [{
+            "operation": "rename_file",
+            "repo_path": source_path,
+            "target_path": target_path,
+        }]
+    if scenario_driver == "verification_repair":
+        return [{
+            "operation": "replace_file_small",
+            "repo_path": runtime_path,
+            "replacement": "VALUE = 0\n",
+        }]
+    if scenario_driver == "revision":
+        return [
+            {
+                "operation": "replace_file_small",
+                "repo_path": runtime_path,
+                "replacement": "VALUE = 2\n",
+            },
+            {
+                "operation": "replace_file_small",
+                "repo_path": runtime_path,
+                "replacement": "VALUE = 3\n",
+            },
+        ]
+    return [{
+        "operation": "replace_file_small",
+        "repo_path": runtime_path,
+        "replacement": "VALUE = 2\n",
+    }]
+
+
+def _stage5a_edit_action(
+    *,
+    operation: Mapping[str, object],
+    run_root: Path,
+    loop_state: Mapping[str, object],
+    index: int,
+) -> dict[str, object]:
+    """Build one deterministic edit action with current candidate evidence."""
+
+    repo_path = str(operation["repo_path"])
+    candidate = CandidateState.load(run_root / "candidate")
+    current_content = candidate.read_safe_text(repo_path)
+    args = {
+        "operation": operation["operation"],
+        "repo_path": repo_path,
+        "expected_candidate_revision": candidate.revision,
+    }
+    if current_content is not None:
+        args["expected_sha256"] = hashlib.sha256(
+            current_content.encode("utf-8"),
+        ).hexdigest()
+    replacement = operation.get("replacement")
+    if isinstance(replacement, str):
+        args["replacement"] = replacement
+    target_path = operation.get("target_path")
+    if isinstance(target_path, str):
+        args["target_path"] = target_path
+    return {
+        "schema_version": "coding_action.v1",
+        "action_id": f"stage5a-edit-{index}",
+        "action": "edit",
+        "reason": "Materialize the locked Stage 5A scenario operation.",
+        "args": args,
+    }
+
+
+async def _execute_stage5a_verification_repair(
+    *,
+    run_root: Path,
+    loop_state: dict[str, object],
+) -> list[dict[str, object]]:
+    """Run a failed proposal, canonical repair, and current-effect verification."""
+
+    execution_specs = [{
+        "tool": "pytest",
+        "pytest_selectors": ["tests/test_module.py"],
+        "timeout_seconds": 60,
+    }]
+
+    async def repair_controller(**_kwargs: object) -> dict[str, object]:
+        candidate = CandidateState.load(run_root / "candidate")
+        content = candidate.read_safe_text("module.py")
+        if content == "VALUE = 0\n":
+            action = {
+                "schema_version": "coding_action.v1",
+                "action_id": "stage5a-repair-edit",
+                "action": "edit",
+                "reason": "Repair the failed current candidate.",
+                "args": {
+                    "operation": "replace_file_small",
+                    "repo_path": "module.py",
+                    "expected_sha256": hashlib.sha256(
+                        content.encode("utf-8"),
+                    ).hexdigest(),
+                    "expected_candidate_revision": candidate.revision,
+                    "replacement": "VALUE = 2\n",
+                },
+            }
+        else:
+            action = {
+                "schema_version": "coding_action.v1",
+                "action_id": "stage5a-repair-finish",
+                "action": "finish",
+                "reason": "Submit the repaired current candidate.",
+                "args": {
+                    "summary": "The repaired candidate is ready for approval.",
+                    "acceptance_criteria": [],
+                    "evidence_refs": ["module.py:1"],
+                    "known_limitations": [],
+                },
+            }
+        return {"status": "ok", "action": action}
+
+    first_approval = _stage5a_approval("stage5a-approval-first")
+    binding, binding_error = action_loop_supervisor._bind_approval(
+        run_root=run_root,
+        loop_state=loop_state,
+        approval=first_approval,
+    )
+    if binding_error or binding is None:
+        raise ValueError(binding_error or "first Stage 5A approval binding failed")
+    effect_error = action_loop_supervisor._initialize_pending_effect(
+        run_root=run_root,
+        loop_state=loop_state,
+        approval=first_approval,
+        approval_binding=binding,
+        execution_specs=execution_specs,
+    )
+    if effect_error:
+        raise ValueError(effect_error)
+    loop_state["approvals"].append({
+        **first_approval,
+        "approval_binding": binding,
+    })
+    loop_state["current_approval_binding"] = binding
+    action_loop_supervisor._persist_loop_state(run_root, loop_state)
+    await action_loop_supervisor._apply_and_verify(
+        request={
+            "approval": first_approval,
+            "execution_specs": execution_specs,
+        },
+        run_root=run_root,
+        loop_state=loop_state,
+        controller=repair_controller,
+    )
+    refreshed_state = json.loads(
+        (run_root / "action_loop" / "state.json").read_text(encoding="utf-8")
+    )
+    if not isinstance(refreshed_state, dict):
+        raise ValueError("Stage 5A repaired state is invalid")
+    second_approval = _stage5a_approval("stage5a-approval-repair")
+    await action_loop_supervisor._continue_locked_action_loop(
+        request={
+            "action": "approve_and_verify",
+            "approval": second_approval,
+            "execution_specs": execution_specs,
+        },
+        run_root=run_root,
+        loop_state=refreshed_state,
+        controller=repair_controller,
+    )
+    final_state = json.loads(
+        (run_root / "action_loop" / "state.json").read_text(encoding="utf-8")
+    )
+    attempts = final_state.get("execution_attempts")
+    if not isinstance(attempts, list):
+        raise ValueError("Stage 5A execution journal is missing")
+    return [
+        dict(attempt)
+        for attempt in attempts
+        if isinstance(attempt, Mapping)
+    ]
+
+
+def _stage5a_approval(source_message_id: str) -> dict[str, object]:
+    """Build one deterministic approval identity for a synthetic repair run."""
+
+    return {
+        "approved": True,
+        "approved_by": "stage5a-reviewer",
+        "approved_at": "2026-07-12T00:00:00Z",
+        "approval_reason": "Approve the exact Stage 5A candidate.",
+        "approval_evidence": {
+            "source_message_id": source_message_id,
+        },
+    }
+
+
+def _candidate_file_count(candidate_root: Path) -> int:
+    """Count safe candidate files for the repository-scale gate."""
+
+    return sum(1 for path in candidate_root.rglob("*") if path.is_file())
 
 
 async def continue_evaluation_coding_run(

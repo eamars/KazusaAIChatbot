@@ -157,7 +157,7 @@ def _project_evidence(row: Mapping[str, object]) -> dict[str, object]:
     if isinstance(patch_operation, Mapping):
         projected["patch_operation"] = {
             key: _safe_model_text(str(patch_operation[key]))
-            for key in ("kind", "path", "target_path")
+            for key in ("kind", "path", "target_path", "content_sha256")
             if isinstance(patch_operation.get(key), str)
         }
     return projected

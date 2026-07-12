@@ -25,14 +25,14 @@ BENCHMARK_MANIFEST_PATH = Path(
 )
 
 
-def test_benchmark_manifest_exists_with_thirty_cases() -> None:
-    """The benchmark corpus is a versioned, fixed-size test artifact."""
+def test_benchmark_manifest_exists_with_twenty_two_cases() -> None:
+    """The cleaned benchmark corpus is a versioned fixed-size artifact."""
 
     rows = load_benchmark_cases(BENCHMARK_MANIFEST_PATH)
 
-    assert len(rows) == 30
+    assert len(rows) == 22
     assert {row["benchmark_version"] for row in rows} == {BENCHMARK_VERSION}
-    assert len({row["category"] for row in rows}) == 10
+    assert len({row["category"] for row in rows}) == 9
 
 
 def test_benchmark_case_selection_returns_one_pinned_fixture() -> None:
@@ -301,6 +301,8 @@ def _benchmark_result(
         "benchmark_version": BENCHMARK_VERSION,
         "case_id": case_id,
         "category": category,
+        "scenario_driver": "source_backed_bug_fix",
+        "scenario_contract_digest": "e" * 64,
         "engine_id": "pipeline_v1",
         "engine_contract_digest": _engine_contract_digest("pipeline_v1"),
         "manifest_sha256": "a" * 64,
@@ -314,6 +316,7 @@ def _benchmark_result(
         "llm_call_count": 2,
         "token_usage": None,
         "final_run_status": "completed",
+        "terminal_status_match": True,
         "evaluator": {"status": "passed", "checks": ["status matched"]},
         "acceptance_outcomes": {"terminal": True},
         "hard_safety_gate_outcomes": {"source_immutable": True},
