@@ -146,7 +146,7 @@ def search_snapshot(
         for row in page_rows
     ]
     next_cursor = None
-    if len(candidate_rows) > SEARCH_PAGE_SIZE and page_rows:
+    if page_rows and (cursor is None or len(candidate_rows) > SEARCH_PAGE_SIZE):
         next_cursor = _encode_cursor({
             "snapshot_id": snapshot_id,
             "overlay_revision": overlay_revision,
@@ -469,7 +469,7 @@ def _project_row(
 ) -> dict[str, object]:
     """Render one prompt-safe canonical result row for controller context."""
 
-    content = str(row["content"])
+    content = str(row.get("content", row.get("excerpt", "")))
     if row["match_kind"] in {"literal", "regex"} and content:
         match = re.search(query, content) if row["match_kind"] == "regex" else None
         match_start = match.start() if match is not None else content.casefold().find(

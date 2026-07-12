@@ -262,7 +262,7 @@ def test_journaled_mutation_commits_candidate_and_overlay_as_one_operation(
     candidate = CandidateState.create(tmp_path / "candidate")
     operation = candidate.apply_journaled_mutation(
         operation_id="operation-one",
-        kind="replace_file_small",
+        kind="create_file",
         repo_path="module.py",
         replacement="VALUE = 2\n",
         expected_revision=0,

@@ -100,7 +100,10 @@ class CandidateState:
                         "operation_id": str(operation["operation_id"]),
                         "state": "rolled_back",
                     })
-                    continue
+                    raise ValueError(
+                        "candidate recovery failed: candidate result identity "
+                        "mismatch",
+                    )
                 self._write_result_overlay(operation)
                 operation["state"] = "overlay_written"
                 self._save()
@@ -115,7 +118,9 @@ class CandidateState:
                         "operation_id": str(operation["operation_id"]),
                         "state": "rolled_back",
                     })
-                    continue
+                    raise ValueError(
+                        "candidate recovery failed: result identity mismatch",
+                    )
                 self._commit_operation(operation)
                 outcomes.append({
                     "operation_id": str(operation["operation_id"]),

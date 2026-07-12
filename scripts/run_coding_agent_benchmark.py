@@ -573,6 +573,7 @@ def finalize_existing_benchmark_result(
         source_digest_before=source_digest,
         source_digest_after=source_digest if source_is_clean else "modified",
         run_ledger=run_ledger,
+        trace_paths=loaded["trace_paths"],
     )
     judgment = _load_reviewed_judgment(
         judgment_path=judgment_path,

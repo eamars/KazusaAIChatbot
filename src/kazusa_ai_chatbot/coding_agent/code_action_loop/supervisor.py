@@ -993,7 +993,32 @@ def _reconcile_orphan_action(
                 for row in observations
             )
         ):
-            lagged_terminal_action = last_action
+            terminal_observation_sequences = [
+                row["sequence"]
+                for row in observations
+                if isinstance(row, Mapping)
+                and row.get("action_sequence")
+                == int(loop_state.get("action_count", 0))
+                and isinstance(row.get("sequence"), int)
+            ]
+            terminal_observation_sequence = max(
+                terminal_observation_sequences,
+                default=-1,
+            )
+            resumed_after_terminal = any(
+                isinstance(row, Mapping)
+                and row.get("kind")
+                in {
+                    "apply_failed",
+                    "execution_verification",
+                    "user_blocker_response",
+                }
+                and isinstance(row.get("sequence"), int)
+                and row["sequence"] > terminal_observation_sequence
+                for row in observations
+            )
+            if not resumed_after_terminal:
+                lagged_terminal_action = last_action
     if lagged_terminal_action is not None:
         terminal_action_name = lagged_terminal_action.get("action")
         terminal_sequence = int(loop_state.get("action_count", 0))

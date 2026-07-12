@@ -166,15 +166,17 @@ def _published_snapshot_matches(
 ) -> bool:
     """Validate the complete immutable identity before reusing publication."""
 
+    connection = sqlite3.connect(database_path)
     try:
-        with sqlite3.connect(database_path) as connection:
-            row = connection.execute(
-                "SELECT snapshot_id, source_identity_hash, manifest_digest, "
-                "schema_version, exclusion_policy_version, status "
-                "FROM snapshot LIMIT 1",
-            ).fetchone()
+        row = connection.execute(
+            "SELECT snapshot_id, source_identity_hash, manifest_digest, "
+            "schema_version, exclusion_policy_version, status "
+            "FROM snapshot LIMIT 1",
+        ).fetchone()
     except sqlite3.DatabaseError:
         return False
+    finally:
+        connection.close()
     expected = (
         snapshot_id,
         source_hash,
@@ -293,14 +295,17 @@ def _latest_complete_database(index_directory: Path) -> Path | None:
         reverse=True,
     )
     for database_path in candidates:
+        status = None
+        connection = sqlite3.connect(database_path)
         try:
-            with sqlite3.connect(database_path) as connection:
-                status = connection.execute(
-                    "SELECT status, schema_version, exclusion_policy_version "
-                    "FROM snapshot LIMIT 1"
-                ).fetchone()
+            status = connection.execute(
+                "SELECT status, schema_version, exclusion_policy_version "
+                "FROM snapshot LIMIT 1"
+            ).fetchone()
         except sqlite3.DatabaseError:
-            continue
+            status = None
+        finally:
+            connection.close()
         if status == (
             "complete",
             INDEX_SCHEMA_VERSION,
@@ -522,33 +527,35 @@ def _reuse_complete_file_rows(
 
     if reusable_database is None:
         return False
+    reusable = sqlite3.connect(reusable_database)
     try:
-        with sqlite3.connect(reusable_database) as reusable:
-            prior_file = reusable.execute(
-                "SELECT file_id FROM file WHERE content_sha256 = ? "
-                "ORDER BY repo_path, file_id LIMIT 1",
-                (content_hash,),
-            ).fetchone()
-            if prior_file is None:
-                return False
-            prior_file_id = prior_file[0]
-            chunks = reusable.execute(
-                "SELECT start_line, end_line, content FROM chunk "
-                "WHERE file_id = ? ORDER BY start_line, chunk_id",
-                (prior_file_id,),
-            ).fetchall()
-            symbols = reusable.execute(
-                "SELECT qualified_name, symbol_kind, start_line, end_line, "
-                "signature FROM symbol WHERE file_id = ? ORDER BY symbol_id",
-                (prior_file_id,),
-            ).fetchall()
-            imports = reusable.execute(
-                "SELECT imported_name, target_repo_path FROM import_edge "
-                "WHERE file_id = ? ORDER BY edge_id",
-                (prior_file_id,),
-            ).fetchall()
+        prior_file = reusable.execute(
+            "SELECT file_id FROM file WHERE content_sha256 = ? "
+            "ORDER BY repo_path, file_id LIMIT 1",
+            (content_hash,),
+        ).fetchone()
+        if prior_file is None:
+            return False
+        prior_file_id = prior_file[0]
+        chunks = reusable.execute(
+            "SELECT start_line, end_line, content FROM chunk "
+            "WHERE file_id = ? ORDER BY start_line, chunk_id",
+            (prior_file_id,),
+        ).fetchall()
+        symbols = reusable.execute(
+            "SELECT qualified_name, symbol_kind, start_line, end_line, "
+            "signature FROM symbol WHERE file_id = ? ORDER BY symbol_id",
+            (prior_file_id,),
+        ).fetchall()
+        imports = reusable.execute(
+            "SELECT imported_name, target_repo_path FROM import_edge "
+            "WHERE file_id = ? ORDER BY edge_id",
+            (prior_file_id,),
+        ).fetchall()
     except sqlite3.DatabaseError:
         return False
+    finally:
+        reusable.close()
     for chunk_number, row in enumerate(chunks, start=1):
         chunk_id = hashlib.sha256(
             f"{file_id}:{chunk_number}".encode("utf-8")

@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 from kazusa_ai_chatbot.coding_agent.repository_index.identity import (
     source_identity_hash,
 )
+
+
+SNAPSHOT_UNLINK_ATTEMPTS = 5
+SNAPSHOT_UNLINK_DELAY_SECONDS = 0.01
 
 
 def reclaim_unpinned_snapshots(
@@ -42,7 +47,7 @@ def reclaim_unpinned_snapshots(
             continue
         if _snapshot_status(database_path) != "complete":
             continue
-        database_path.unlink()
+        _unlink_snapshot(database_path)
         reclaimed_snapshot_ids.append(snapshot_id)
     return reclaimed_snapshot_ids
 
@@ -116,7 +121,7 @@ def reclaim_released_snapshots(
             continue
         if _snapshot_status(database_path) != "complete":
             continue
-        database_path.unlink()
+        _unlink_snapshot(database_path)
         reclaimed.append(snapshot_id)
     return reclaimed
 
@@ -186,3 +191,16 @@ def _snapshot_status(database_path: Path) -> str:
     if row is None or not isinstance(row[0], str):
         return "invalid"
     return row[0]
+
+
+def _unlink_snapshot(database_path: Path) -> None:
+    """Remove one closed snapshot, tolerating transient Windows file locks."""
+
+    for attempt in range(SNAPSHOT_UNLINK_ATTEMPTS):
+        try:
+            database_path.unlink()
+            return
+        except PermissionError:
+            if attempt == SNAPSHOT_UNLINK_ATTEMPTS - 1:
+                raise
+            time.sleep(SNAPSHOT_UNLINK_DELAY_SECONDS)

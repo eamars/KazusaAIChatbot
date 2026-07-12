@@ -188,6 +188,9 @@ def managed_source_tree_digest(
             continue
         digest.update(relative_path.as_posix().encode("utf-8"))
         digest.update(b"\0")
-        digest.update(hashlib.sha256(path.read_bytes()).digest())
+        content = path.read_bytes()
+        if not is_binary_like_path(relative_path.as_posix()):
+            content = content.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        digest.update(hashlib.sha256(content).digest())
     tree_digest = digest.hexdigest()
     return tree_digest

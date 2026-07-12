@@ -1151,6 +1151,7 @@ async def test_completed_turn_is_durable_before_the_next_controller_call(
             return {
                 "status": "ok",
                 "action": {
+                    "action_id": "note-one",
                     "action": "note",
                     "args": {
                         "completed": ["inspected source"],

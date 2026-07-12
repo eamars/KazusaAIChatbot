@@ -2563,6 +2563,55 @@ evidence, cutover, and independent code-review gates complete.
 - Documentation reconciliation: not recorded.
 - Final sign-off and archive path: not recorded.
 
+### Stage 5 execution handover, Codex, 2026-07-12
+
+- All five deterministic Stage 5 commands were executed sequentially. Results:
+  23/9, 39/2, 8/3, 17/8, and 87/22 passed/failed; every command exited 1.
+- Both named live controller nodes were run individually with `-m live_llm`
+  after the repository-default invocation deselected them. Both passed and
+  produced inspected traces.
+- All 30 manifest cases were executed sequentially under preserved attempt ids
+  `stage5-01` through `stage5-30`. Eighteen evaluator results passed, ten
+  failed, and two crashed without provisional results. Twenty-eight
+  provisional artifacts and all command logs are retained.
+- The comparator exited 1 because canonical pipeline evidence lacks the
+  required `engine_contract_digest`. Post-cutover scans found legacy symbols,
+  imports, and routes; the coding-run recheck remained 8/3 passed/failed.
+- Human-readable handover and raw evidence: `test_artifacts/stage5_handover.md`.
+- Stage 5 remains unchecked and `in_progress`. Public dispatch remains on
+  `pipeline_v1`; no cutover, legacy removal, or completion sign-off occurred.
+
+### Stage 5 crash and deterministic-gate remediation rerun, Codex, 2026-07-12
+
+- Failure-mode remediation addressed the observed crash and deterministic-gate
+  owners: overlay row projection, Windows SQLite connection lifetime and
+  reclamation, candidate recovery identity signaling, text line-ending identity
+  across managed apply, stale terminal replay during blocker/verification resume,
+  benchmark trace-path finalization, and two stale contract fixtures.
+- The required deterministic sequence was rerun in order and passed: repository
+  index/candidate recovery 32/32; patch/action-loop 41/41; coding-run integration
+  11/11; benchmark contracts 35/35; complete six-file gate 109/109. Logs are
+  `test_artifacts/stage5_r2_command_01_repo_recovery.log` through
+  `test_artifacts/stage5_r2_command_05_complete_gate.log`.
+- Both named live controller nodes passed individually with inspected traces:
+  `test_artifacts/llm_traces/coding_agent_phase_d_controller_targeted_search_20260712T002536Z.json`
+  and
+  `test_artifacts/llm_traces/coding_agent_phase_d_controller_no_progress_20260712T002605Z.json`.
+- All 30 `action_loop_v1` manifest cases ran sequentially under immutable
+  attempts `stage5-r2-01` through `stage5-r2-30`. All produced provisional
+  results, all three hard safety gates were true for every case, and there were
+  no crashes. Evaluator outcomes were 27 passed and 3 failed:
+  `mixed_create_edit_slug`, `source_free_project_one`, and
+  `blocker_answer_cli`. Full per-case results, trace locations, and logs are in
+  `test_artifacts/stage5_handover_latest.md`.
+- The comparator was rerun and remains blocked by the canonical paired
+  `pipeline_v1` artifact missing `engine_contract_digest`; new attempts remain
+  provisional and were not substituted into canonical results. Static scans were
+  rerun and still report legacy topology, as expected before cutover.
+- Historical Stage 5 artifacts remain preserved. Stage 5 stays unchecked and
+  `in_progress`; public dispatch remains `pipeline_v1`, with no cutover or legacy
+  removal performed.
+
 ## Risks
 
 | Risk | Mitigation |
