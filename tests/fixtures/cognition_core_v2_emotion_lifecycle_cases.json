@@ -1,0 +1,23 @@
+[
+  {"case_id": "joy", "emotion_id": "joy", "root": "goal_reward"},
+  {"case_id": "fear", "emotion_id": "fear", "root": "credible_threat"},
+  {"case_id": "anger", "emotion_id": "anger", "root": "goal_obstruction"},
+  {"case_id": "sadness", "emotion_id": "sadness", "root": "valued_loss"},
+  {"case_id": "disgust", "emotion_id": "disgust", "root": "contamination_or_norm_rejection"},
+  {"case_id": "surprise", "emotion_id": "surprise", "root": "prediction_error"},
+  {"case_id": "love_attachment", "emotion_id": "love_attachment", "root": "bond_attachment"},
+  {"case_id": "compassion_empathy", "emotion_id": "compassion_empathy", "root": "observed_other_affect"},
+  {"case_id": "gratitude", "emotion_id": "gratitude", "root": "attributed_benefit"},
+  {"case_id": "jealousy", "emotion_id": "jealousy", "root": "rival_threat"},
+  {"case_id": "envy", "emotion_id": "envy", "root": "upward_comparison"},
+  {"case_id": "pride", "emotion_id": "pride", "root": "self_caused_achievement"},
+  {"case_id": "shame", "emotion_id": "shame", "root": "global_standard_threat"},
+  {"case_id": "guilt", "emotion_id": "guilt", "root": "self_caused_harm"},
+  {"case_id": "embarrassment", "emotion_id": "embarrassment", "root": "minor_social_error"},
+  {"case_id": "curiosity", "emotion_id": "curiosity", "root": "valuable_knowledge_gap"},
+  {"case_id": "awe", "emotion_id": "awe", "root": "vastness"},
+  {"case_id": "nostalgia", "emotion_id": "nostalgia", "root": "autobiographical_continuity"},
+  {"case_id": "loneliness", "emotion_id": "loneliness", "root": "connection_gap"},
+  {"case_id": "relief", "emotion_id": "relief", "root": "prior_threat_reduction"},
+  {"case_id": "ennui_existential_angst", "emotion_id": "ennui_existential_angst", "root": "low_purpose_coherence"}
+]

@@ -42,6 +42,8 @@ long_term/todo.md
 | [coding_agent_assessment_gap_phase_c_plan.md](archive/completed/short_term/coding_agent_assessment_gap_phase_c_plan.md) | High-risk coding-agent assessment gap plan for typed blockers, affordances, approval evidence, locks, and benchmark seam | completed |
 | [coding_agent_assessment_gap_phase_d_plan.md](active/short_term/coding_agent_assessment_gap_phase_d_plan.md) | High-risk coding-agent migration plan for a generic JSON action loop, persistent repository index, exploration-cap removal, and delete/rename | in progress |
 | [coding_agent_full_workflow_hardening_plan_2.md](active/short_term/coding_agent_full_workflow_hardening_plan_2.md) | Large coding-agent full workflow hardening plan | completed |
+| [cognition_core_v2_stage_2_integration_plan.md](active/short_term/cognition_core_v2_stage_2_integration_plan.md) | Detailed big-bang V2 release-candidate integration governed by the mandatory [contract specification](active/short_term/cognition_core_v2_stage_2_contract_spec.md) and [execution manifest](active/short_term/cognition_core_v2_stage_2_execution_manifest.md); two-phase deterministic emotion, exact drift checkpoints, synthetic `_test_kazusa_live_llm` validation, and affinity/V1 removal; production migration/deployment deferred | draft |
+| [cognition_core_v2_stage_3_auxiliary_adoption_plan.md](active/short_term/cognition_core_v2_stage_3_auxiliary_adoption_plan.md) | High-level auxiliary-adoption inventory for the control console, ops APIs, exports, audits, traces, test harnesses, and documentation using the isolated seeded test database; production cutover deferred | draft |
 
 ## Supporting Experiment Records
 
@@ -346,6 +348,7 @@ plans.
 | [character_reflection_cycle_stage1a_plan.md](archive/completed/short_term/character_reflection_cycle_stage1a_plan.md) |
 | [character_self_words_retrieval_delivery_receipt_plan.md](archive/completed/short_term/character_self_words_retrieval_delivery_receipt_plan.md) |
 | [cognition_chain_module_separation_plan.md](archive/completed/short_term/cognition_chain_module_separation_plan.md) |
+| [cognition_core_v2_stage_1_validation_plan.md](archive/completed/short_term/cognition_core_v2_stage_1_validation_plan.md) |
 | [cognition_llm_stage_reconnection_plan.md](archive/completed/short_term/cognition_llm_stage_reconnection_plan.md) |
 | [cognition_visual_directives_control_plan.md](archive/completed/short_term/cognition_visual_directives_control_plan.md) |
 | [cognition_state_integrity_plan.md](archive/completed/short_term/cognition_state_integrity_plan.md) |
