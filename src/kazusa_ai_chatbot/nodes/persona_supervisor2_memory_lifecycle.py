@@ -724,6 +724,17 @@ def _visible_final_dialog(state: Mapping[str, object]) -> list[str]:
 def _user_visible_surface_text(state: Mapping[str, object]) -> list[str]:
     """Project user-visible text fragments without surface internals."""
 
+    v2_surface = state.get("text_surface_output_v2")
+    if isinstance(v2_surface, dict):
+        final_dialog = state.get("final_dialog")
+        if isinstance(final_dialog, list):
+            return [
+                fragment
+                for fragment in final_dialog
+                if isinstance(fragment, str) and fragment.strip()
+            ]
+        return []
+
     raw_surface_outputs = state.get("surface_outputs")
     if not isinstance(raw_surface_outputs, list):
         return_value: list[str] = []

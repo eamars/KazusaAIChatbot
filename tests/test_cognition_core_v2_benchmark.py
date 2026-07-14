@@ -9,19 +9,17 @@ from typing import Any, Mapping
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_chain_core import (
-    run_cognition_chain as run_v1_cognition_chain,
-)
 from kazusa_ai_chatbot.cognition_core_v2 import (
-    run_cognition_chain as run_v2_cognition_chain,
+    run_cognition,
+    build_acquaintance_user_state,
+    build_character_production_state,
 )
 from kazusa_ai_chatbot.cognition_core_v2.diagnostics import (
-    reset_local_state,
     reset_validation_capture,
     validation_capture_snapshot,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
-    build_cognition_chain_services,
+    build_cognition_core_services,
 )
 
 
@@ -124,137 +122,53 @@ def _cases() -> list[dict[str, str]]:
 
 
 def _chain_input(case: dict[str, str]) -> dict[str, object]:
-    """Build one equivalent V1 input for both measured implementations."""
+    """Build one native V2 input for the measured cognition implementation."""
 
-    payload = {
-        "schema_version": "cognition_chain_input.v1",
+    updated_at = "2026-07-14T00:00:00Z"
+    character = build_character_production_state(updated_at=updated_at)
+    semantic_text = (
+        f"{case['origin_summary']}: {case['decontextualized_input']}"
+    )
+    return {
+        "schema_version": "cognition_core_input.v2",
         "episode": {
             "episode_id": f"benchmark-{case['case_id']}",
             "trigger_source": "user_message",
-            "input_sources": ["dialog_text"],
-            "output_mode": "live_response",
-            "model_visible_percepts": [{
-                "percept_id": f"benchmark-percept-{case['case_id']}",
-                "input_source": "dialog_text",
-                "content": case["user_input"],
-                "metadata_summary": [],
-            }],
-            "target_scope_summary": f"benchmark scope {case['case_id']}",
-            "origin_summary": case["origin_summary"],
+            "output_mode": "visible_reply",
+            "semantic_scene": semantic_text,
+            "semantic_temporal_context": "immediate",
         },
-        "character": {
-            "character_global_id": "benchmark-character",
-            "name": "Validation Character",
-            "description": "validation-only character",
-            "gender": "unknown",
-            "age": "unknown",
-            "birthday": "unknown",
-            "backstory": "none",
-            "personality_brief": {
-                "mbti": "INTJ",
-                "logic": "structured",
-                "tempo": "steady",
-                "defense": "reserved",
-                "quirks": "dry",
-                "taboos": "none",
+        "state_scope": "user",
+        "mutable_state": build_acquaintance_user_state(
+            global_user_id="benchmark-user",
+            updated_at=updated_at,
+        ),
+        "character_constraints": {
+            "drives": character["drives"],
+            "standards": character["standards"],
+            "meaning_state": character["meaning_state"],
+        },
+        "evidence": [{
+            "evidence_handle": "ev1",
+            "evidence_ref": {
+                "source_kind": "episode",
+                "source_id": f"episode:benchmark-{case['case_id']}",
+                "occurred_at": updated_at,
+                "semantic_summary": semantic_text,
             },
-            "boundary_profile": {
-                "self_integrity": 0.7,
-                "control_sensitivity": 0.5,
-                "compliance_strategy": "selective",
-                "relational_override": 0.4,
-                "control_intimacy_misread": 0.2,
-                "boundary_recovery": "steady",
-                "authority_skepticism": 0.5,
-            },
-            "linguistic_texture_profile": {
-                "fragmentation": 0.2,
-                "hesitation_density": 0.2,
-                "counter_questioning": 0.2,
-                "softener_density": 0.2,
-                "formalism_avoidance": 0.2,
-                "abstraction_reframing": 0.2,
-                "direct_assertion": 0.5,
-                "emotional_leakage": 0.2,
-                "rhythmic_bounce": 0.2,
-                "self_deprecation": 0.1,
-            },
-            "mood": "neutral",
-            "global_vibe": "calm",
-        },
-        "current_user": {
-            "global_user_id": "benchmark-user",
-            "display_name": "Benchmark User",
-            "affinity": 500,
-            "affinity_level": "known",
-            "last_relationship_insight": "none",
-            "memory_context": {
-                "durable_profile_summary": "",
-                "relationship_summary": "",
-                "recent_commitments_summary": "",
-                "known_preferences_summary": "",
-            },
-        },
-        "current_event": {
-            "user_input": case["user_input"],
-            "decontextualized_input": case["decontextualized_input"],
-            "indirect_speech_context": "",
-            "referents": [],
-            "media_observations": [],
-            "reply_context_summary": "",
-            "prompt_message_context_summary": "",
-        },
-        "scene": {
-            "platform": "debug",
-            "channel_type": "dm",
-            "channel_topic": "",
-            "local_time_context": {"time_of_day": "day"},
-            "storage_timestamp_utc": "2026-07-13T00:00:00Z",
-            "interaction_history_recent": [],
-        },
-        "conversation_context": {
-            "conversation_progress": {},
-            "promoted_reflection_context": {},
-            "internal_monologue_residue_context": "",
-            "previous_action_summary": "",
-        },
-        "evidence": {
-            "rag_answer": "",
-            "current_user_rag_bundle": "",
-            "memory_evidence": [],
-            "conversation_evidence": [],
-            "external_evidence": [],
-            "recall_evidence": [],
-            "supervisor_trace": [],
-        },
-        "resolver": {
-            "resolver_context": "",
-            "pending_resume": "",
-            "goal_progress": "",
-            "recent_observations": [],
-            "max_projected_observations": 3,
-        },
-        "available_actions": [{
-            "capability": "speak",
-            "available": True,
-            "visibility": "public",
-            "semantic_input_summary": "visible text surface",
-            "output_kind": "semantic_action_request",
+            "semantic_text": semantic_text,
+            "visible_to": ["cognition", "surface"],
         }],
-        "runtime_context": {
-            "language_policy": "english",
-            "visual_directives_enabled": False,
-            "task_willingness_boundary_enabled": False,
-            "max_action_requests": 1,
-            "max_resolver_requests": 1,
-            "background_work_output_char_limit": 1000,
-        },
-        "action_selection_context": {
-            "coding_runs": [],
-            "group_engagement_action_context": {},
+        "direct_facts": [],
+        "available_actions": [],
+        "available_resolver_capabilities": [],
+        "scene_context": {
+            "channel_scope": "private",
+            "character_role": "companion",
+            "semantic_scene": semantic_text,
+            "semantic_temporal_context": "immediate",
         },
     }
-    return payload
 
 
 @pytest.mark.live_llm
@@ -265,55 +179,49 @@ async def test_paired_v1_v2_benchmark_records_all_samples(
 ) -> None:
     """Measure all planned samples without hiding failures or ordering effects."""
 
-    base_services = build_cognition_chain_services()
+    base_services = build_cognition_core_services()
     samples: list[dict[str, object]] = []
     for sample_index in range(BENCHMARK_REPETITIONS):
-        order = ("v1", "v2") if sample_index % 2 == 0 else ("v2", "v1")
-        for implementation in order:
-            await reset_local_state()
-            capture_llm = _CapturingLLM(base_services.llm)
-            services = replace(base_services, llm=capture_llm)
-            payload = _chain_input(case)
-            started_at = time.perf_counter()
-            output: object | None = None
-            validation_capture: dict[str, object] | None = None
-            failure: dict[str, str] | None = None
-            try:
-                if implementation == "v1":
-                    output = await run_v1_cognition_chain(payload, services)
-                else:
-                    reset_validation_capture(
-                        f"benchmark-{case['case_id']}-{sample_index}-{implementation}",
-                    )
-                    output = await run_v2_cognition_chain(payload, services)
-                    validation_capture = validation_capture_snapshot()
-            except Exception as exc:
-                failure = {
-                    "class": type(exc).__name__,
-                    "message": str(exc),
-                }
-                if implementation == "v2":
-                    validation_capture = validation_capture_snapshot()
-            wall_clock_ms = round((time.perf_counter() - started_at) * 1000)
-            measurements = _sample_measurements(
-                capture_llm.calls,
-                validation_capture,
-                wall_clock_ms,
-                failure,
-            )
-            samples.append({
-                "case_id": case["case_id"],
-                "sample_id": sample_index,
-                "order": order,
-                "implementation": implementation,
-                "wall_clock_ms": wall_clock_ms,
-                "llm_call_count": len(capture_llm.calls),
-                "llm_calls": capture_llm.calls,
-                "output": output,
-                "v2_capture": validation_capture,
-                "measurements": measurements,
-                "failure": failure,
-            })
+        implementation = "v2"
+        capture_llm = _CapturingLLM(base_services.llm)
+        services = replace(base_services, llm=capture_llm)
+        payload = _chain_input(case)
+        reset_validation_capture(
+            f"benchmark-{case['case_id']}-{sample_index}-v2",
+        )
+        started_at = time.perf_counter()
+        output: object | None = None
+        validation_capture: dict[str, object] | None = None
+        failure: dict[str, str] | None = None
+        try:
+            output = await run_cognition(payload, services)
+            validation_capture = validation_capture_snapshot()
+        except Exception as exc:
+            failure = {
+                "class": type(exc).__name__,
+                "message": str(exc),
+            }
+            validation_capture = validation_capture_snapshot()
+        wall_clock_ms = round((time.perf_counter() - started_at) * 1000)
+        measurements = _sample_measurements(
+            capture_llm.calls,
+            validation_capture,
+            wall_clock_ms,
+            failure,
+        )
+        samples.append({
+            "case_id": case["case_id"],
+            "sample_id": sample_index,
+            "order": ("v2",),
+            "implementation": implementation,
+            "wall_clock_ms": wall_clock_ms,
+            "llm_call_count": len(capture_llm.calls),
+            "llm_calls": capture_llm.calls,
+            "output": output,
+            "v2_capture": validation_capture,
+            "measurements": measurements,
+            "failure": failure,
+        })
     artifact = {
         "case_id": case["case_id"],
         "repetitions": BENCHMARK_REPETITIONS,
@@ -327,7 +235,7 @@ async def test_paired_v1_v2_benchmark_records_all_samples(
         encoding="utf-8",
     )
 
-    assert len(samples) == BENCHMARK_REPETITIONS * 2
+    assert len(samples) == BENCHMARK_REPETITIONS
     assert artifact_path.exists()
 
 

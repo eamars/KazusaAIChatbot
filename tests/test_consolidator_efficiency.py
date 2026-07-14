@@ -1,32 +1,29 @@
-"""Tests for R2-compliant consolidator efficiency behavior."""
+"""Tests for efficient canonical V2 consolidator behavior."""
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    build_acquaintance_user_state,
+)
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.consolidation import core as consolidator_module
-from kazusa_ai_chatbot.consolidation.target import (
-    build_consolidation_target_plan,
-)
-from kazusa_ai_chatbot.consolidation import persistence as persistence_module
 from kazusa_ai_chatbot.consolidation.origin import (
     build_user_message_consolidation_origin,
 )
 from kazusa_ai_chatbot.time_boundary import local_time_context_from_storage_utc
 
+
 STORAGE_TIMESTAMP_UTC = "2026-04-26T12:00:00+00:00"
 
 
 def _cognitive_episode() -> dict:
-    """Build a valid text-chat episode for direct consolidator calls.
+    """Build a valid text-chat episode for direct consolidator calls."""
 
-    Returns:
-        Valid user-message cognitive episode.
-    """
-    episode = build_text_chat_cognitive_episode(
+    return build_text_chat_cognitive_episode(
         episode_id="episode-1",
         percept_id="percept-1",
         storage_timestamp_utc=STORAGE_TIMESTAMP_UTC,
@@ -45,22 +42,11 @@ def _cognitive_episode() -> dict:
         active_turn_conversation_row_ids=["conversation-row-1"],
         debug_modes={},
     )
-    return episode
-
-
-def _consolidation_origin() -> dict:
-    """Build valid user-message origin metadata for direct db_writer calls.
-
-    Returns:
-        Valid user-message consolidation origin metadata.
-    """
-    origin = build_user_message_consolidation_origin(
-        episode=_cognitive_episode(),
-    )
-    return origin
 
 
 def _global_state() -> dict:
+    """Build a native V2 global state for consolidation."""
+
     return {
         "storage_timestamp_utc": STORAGE_TIMESTAMP_UTC,
         "local_time_context": local_time_context_from_storage_utc(
@@ -70,13 +56,23 @@ def _global_state() -> dict:
         "user_name": "User",
         "user_profile": {
             "global_user_id": "user-1",
-            "affinity": 500,
+            "cognition_state": build_acquaintance_user_state(
+                global_user_id="user-1",
+                updated_at="2026-04-26T12:00:00Z",
+            ),
         },
         "platform": "qq",
         "platform_channel_id": "chan-1",
         "channel_type": "group",
         "platform_message_id": "msg-1",
-        "action_directives": {"linguistic_directives": {"content_plan": {}}},
+        "cognition_core_output": {
+            "schema_version": "cognition_core_output.v2",
+            "selected_stance": "CONFIRM",
+        },
+        "text_surface_output_v2": {
+            "schema_version": "text_surface_output.v2",
+            "content_plan": "acknowledge",
+        },
         "internal_monologue": "test",
         "final_dialog": ["ok"],
         "interaction_subtext": "",
@@ -90,26 +86,10 @@ def _global_state() -> dict:
                     "stable_patterns": [],
                     "recent_shifts": [],
                     "objective_facts": [
-                        {
-                            "fact": "User likes tea",
-                            "subjective_appraisal": "Kazusa treats this as a preference.",
-                            "relationship_signal": "Offer tea-related continuity.",
-                        }
+                        {"fact": "User likes tea"},
                     ],
-                    "active_commitments": [
-                        {
-                            "fact": "Kazusa will reply in English",
-                            "subjective_appraisal": "Kazusa treats this as active preference context.",
-                            "relationship_signal": "Use English in future replies when relevant.",
-                        }
-                    ],
-                    "milestones": [
-                        {
-                            "fact": "Met Kazusa",
-                            "subjective_appraisal": "Kazusa treats this as relationship history.",
-                            "relationship_signal": "Keep light continuity.",
-                        }
-                    ],
+                    "active_commitments": [],
+                    "milestones": [],
                 }
             }
         },
@@ -119,104 +99,65 @@ def _global_state() -> dict:
 
 
 def test_build_existing_dedup_keys_ignores_memory_unit_context() -> None:
-    keys = consolidator_module._build_existing_dedup_keys(_global_state())
+    """Transient RAG context must not become a dedup authority."""
 
-    assert keys == set()
+    assert consolidator_module._build_existing_dedup_keys(_global_state()) == set()
+
+
+def test_build_consolidator_state_forwards_native_v2_outputs() -> None:
+    """The background state carries canonical cognition and surface outputs."""
+
+    global_state = _global_state()
+    origin = build_user_message_consolidation_origin(
+        episode=_cognitive_episode(),
+    )
+    target_plan = {
+        "origin_kind": "user_message",
+        "targets": [],
+    }
+
+    state = consolidator_module._build_consolidator_state(
+        global_state,
+        consolidation_origin=origin,
+        consolidation_target_plan=target_plan,
+    )
+
+    assert state["cognition_core_output"]["schema_version"] == (
+        "cognition_core_output.v2"
+    )
+    assert state["text_surface_output_v2"]["content_plan"] == "acknowledge"
 
 
 @pytest.mark.asyncio
 async def test_empty_lane_router_output_skips_persistence_work(monkeypatch) -> None:
-    calls = {"pipeline": 0}
+    """An empty lane decision returns without durable writer work."""
+
+    writer = AsyncMock()
 
     async def _lane_pipeline(state):
-        calls["pipeline"] += 1
         assert state["existing_dedup_keys"] == set()
-        pipeline_state = {
-            **state,
-            "mood": "",
-            "global_vibe": "",
-            "reflection_summary": "",
-            "subjective_appraisals": [],
-            "affinity_delta": 0,
-            "last_relationship_insight": "",
-            "new_facts": [],
-            "future_promises": [],
-            "metadata": {"write_success": {}},
+        return {
+            "router_tasks": [],
+            "state": {
+                **state,
+                "new_facts": [],
+                "future_promises": [],
+                "metadata": {"write_success": {}},
+            },
         }
-        return {"router_tasks": [], "state": pipeline_state}
 
     monkeypatch.setattr(
         consolidator_module,
         "run_consolidation_lane_pipeline",
         _lane_pipeline,
     )
+    monkeypatch.setattr(consolidator_module, "db_writer", writer, raising=False)
 
     result = await consolidator_module.call_consolidation_subgraph(_global_state())
 
-    assert calls["pipeline"] == 1
     assert result["new_facts"] == []
     assert result["future_promises"] == []
     assert result["consolidation_metadata"]["write_success"] == {}
     assert result["consolidation_metadata"]["cache_evicted_count"] == 0
     assert result["consolidation_metadata"]["cache_invalidated"] == []
-
-
-@pytest.mark.asyncio
-async def test_db_writer_runs_image_updaters_through_gather(monkeypatch) -> None:
-    gather_calls = []
-
-    async def _fake_gather(*aws, return_exceptions=False):
-        gather_calls.append((aws, return_exceptions))
-        results = []
-        for awaitable in aws:
-            results.append(await awaitable)
-        return results
-
-    monkeypatch.setattr(persistence_module.asyncio, "gather", _fake_gather)
-    monkeypatch.setattr(persistence_module, "get_rag_cache2_runtime", MagicMock(return_value=MagicMock(invalidate=AsyncMock(return_value=0))))
-    monkeypatch.setattr(persistence_module, "upsert_character_state", AsyncMock())
-    monkeypatch.setattr(persistence_module, "update_last_relationship_insight", AsyncMock())
-    monkeypatch.setattr(persistence_module, "update_affinity", AsyncMock())
-    monkeypatch.setattr(
-        persistence_module,
-        "get_character_runtime_state",
-        AsyncMock(return_value={}),
-    )
-    monkeypatch.setattr(persistence_module, "upsert_character_self_image", AsyncMock())
-    monkeypatch.setattr(persistence_module, "_update_character_image", AsyncMock(return_value=None))
-    monkeypatch.setattr(persistence_module, "update_user_memory_units_from_state", AsyncMock(return_value=[]))
-
-    state = {
-        "storage_timestamp_utc": STORAGE_TIMESTAMP_UTC,
-        "local_time_context": local_time_context_from_storage_utc(
-            STORAGE_TIMESTAMP_UTC,
-        ),
-        "global_user_id": "user-1",
-        "user_name": "User",
-        "platform": "qq",
-        "platform_channel_id": "chan-1",
-        "channel_type": "group",
-        "platform_message_id": "msg-1",
-        "character_profile": {"name": "Kazusa"},
-        "metadata": {},
-        "mood": "neutral",
-        "global_vibe": "",
-        "reflection_summary": "",
-        "subjective_appraisals": [],
-        "interaction_subtext": "",
-        "last_relationship_insight": "",
-        "new_facts": [],
-        "future_promises": [],
-        "user_profile": {"global_user_id": "user-1", "affinity": 500},
-        "affinity_delta": 0,
-        "decontexualized_input": "hello",
-        "consolidation_origin": _consolidation_origin(),
-        "enabled_consolidation_write_lanes": ["character_state"],
-    }
-    state["consolidation_target_plan"] = build_consolidation_target_plan(state)
-
-    await persistence_module.db_writer(state)
-
-    assert len(gather_calls) == 1
-    assert len(gather_calls[0][0]) == 1
-    assert gather_calls[0][1] is True
+    writer.assert_not_awaited()

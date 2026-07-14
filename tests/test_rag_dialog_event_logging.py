@@ -149,22 +149,14 @@ def _dialog_global_state() -> dict[str, object]:
 
     state = {
         "internal_monologue": "private internal thought",
-        "action_directives": {
-            "contextual_directives": {
-                "social_distance": "casual",
-                "emotional_intensity": "low",
-                "vibe_check": "friendly",
-                "relational_dynamic": "direct reply",
-            },
-            "linguistic_directives": {
-                "rhetorical_strategy": "answer directly",
-                "linguistic_style": "concise",
-                "accepted_user_preferences": [],
-                "content_plan": {
-                    "semantic_content": "Acknowledge the request.",
-                },
-                "forbidden_phrases": [],
-            },
+        "text_surface_output_v2": {
+            "schema_version": "text_surface_output.v2",
+            "content_plan": "Acknowledge the request.",
+            "visible_boundaries": [],
+            "addressee_plan": ["current user"],
+            "style_guidance": "concise",
+            "pacing_guidance": "one message",
+            "selected_surface_intent": "acknowledge",
         },
         "chat_history_wide": [],
         "chat_history_recent": [],
@@ -177,7 +169,10 @@ def _dialog_global_state() -> dict[str, object]:
         "platform_bot_id": "bot-1",
         "global_user_id": "user-1",
         "user_name": "User",
-        "user_profile": {"affinity": 500},
+        "user_profile": {
+            "global_user_id": "user-1",
+            "cognition_state": {"owner_user_id": "user-1"},
+        },
         "character_profile": {
             "name": "Kazusa",
             "personality_brief": {

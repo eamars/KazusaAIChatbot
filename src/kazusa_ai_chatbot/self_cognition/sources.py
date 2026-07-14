@@ -56,9 +56,6 @@ from kazusa_ai_chatbot.utils import text_or_empty
 _CHARACTER_PROFILE_FIELDS = frozenset(
     (
         "name",
-        "mood",
-        "global_vibe",
-        "reflection_summary",
         "personality_brief",
         "boundary_profile",
         "linguistic_texture_profile",
@@ -740,12 +737,8 @@ def _build_group_review_case(
         },
         "character_profile": _project_character_profile(character_profile),
         "user_profile": {
-            "affinity": models.DEFAULT_SELF_COGNITION_AFFINITY,
             "display_name": "group audience",
-            "last_relationship_insight": "",
         },
-        "current_mood": text_or_empty(character_profile.get("mood")),
-        "global_vibe": text_or_empty(character_profile.get("global_vibe")),
     }
     channel_name = usable_channel_label(
         channel_type='group',
@@ -1421,8 +1414,6 @@ def _build_scheduled_future_cognition_case(
         },
         "character_profile": _project_character_profile(character_profile),
         "user_profile": case_user_profile,
-        "current_mood": text_or_empty(character_profile.get("mood")),
-        "global_vibe": text_or_empty(character_profile.get("global_vibe")),
         "platform_bot_id": source_platform_bot_id,
         "source_calendar_run_id": run_id,
         "source_action_attempt_id": source_action_attempt_id,
@@ -1613,8 +1604,6 @@ def _build_active_commitment_case(
         "visible_context": _visible_context(rows),
         "character_profile": _project_character_profile(character_profile),
         "user_profile": dict(user_profile),
-        "current_mood": text_or_empty(character_profile.get("mood")),
-        "global_vibe": text_or_empty(character_profile.get("global_vibe")),
     }
     return case
 

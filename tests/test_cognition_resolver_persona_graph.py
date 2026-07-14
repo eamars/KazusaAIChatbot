@@ -166,57 +166,23 @@ async def test_persona_graph_default_runs_goal_resolver_without_legacy_rag(
     calls: list[str] = []
     captured: dict = {}
 
-    async def legacy_rag_node(state: dict) -> dict:
-        calls.append("legacy_rag")
-        assert state["decontexualized_input"] == "今晚想随便聊两句。"
-        return {
-            "rag_result": {
-                "answer": "legacy evidence",
-            },
-        }
-
-    async def call_cognition_subgraph(state: dict) -> dict:
-        calls.append("direct_cognition")
-        assert state["rag_result"]["answer"] == "legacy evidence"
-        return _cognition_output()
-
-    async def call_cognition_resolver_loop(
+    async def call_v2_resolver_loop(
         state: dict,
         *,
-        call_cognition_subgraph_func: object,
-        execute_capability_func: object,
+        cognition_func: object,
+        capability_func: object,
         max_cycles: int,
-        capability_timeout_seconds: float,
-        upsert_pending_resume_func: object,
-        apply_pending_resolution_func: object,
+        origin_scope: str | None = None,
     ) -> dict:
         calls.append("resolver")
         captured["state"] = dict(state)
-        captured["call_cognition_subgraph_func"] = call_cognition_subgraph_func
-        captured["execute_capability_func"] = execute_capability_func
+        captured["cognition_func"] = cognition_func
+        captured["capability_func"] = capability_func
         captured["max_cycles"] = max_cycles
-        captured["capability_timeout_seconds"] = capability_timeout_seconds
-        captured["upsert_pending_resume_func"] = upsert_pending_resume_func
-        captured["apply_pending_resolution_func"] = apply_pending_resolution_func
-        return _cognition_output()
-
-    async def load_matching_pending_resume_into_state(state: dict) -> dict:
-        loaded = dict(state)
-        loaded["pending_resolver_resume"] = {
-            "resume_id": "resolver-pending-graph",
-        }
-        loaded["resolver_context"] = (
-            f"{state['resolver_context']}\n"
-            "pending_resolver_resume: resume_id=resolver-pending-graph"
-        )
-        return loaded
+        captured["origin_scope"] = origin_scope
+        return {"cognition_output": _cognition_output(), "observations": []}
 
     monkeypatch.setattr(persona_module, "COGNITION_RESOLVER_MAX_CYCLES", 3)
-    monkeypatch.setattr(
-        persona_module,
-        "COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS",
-        45.0,
-    )
     monkeypatch.setattr(
         persona_module,
         "call_msg_decontexualizer",
@@ -224,24 +190,8 @@ async def test_persona_graph_default_runs_goal_resolver_without_legacy_rag(
     )
     monkeypatch.setattr(
         persona_module,
-        REMOVED_RAG_FIRST_NODE,
-        legacy_rag_node,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        persona_module,
-        "call_cognition_subgraph",
-        call_cognition_subgraph,
-    )
-    monkeypatch.setattr(
-        persona_module,
-        "call_cognition_resolver_loop",
-        call_cognition_resolver_loop,
-    )
-    monkeypatch.setattr(
-        persona_module,
-        "load_matching_pending_resume_into_state",
-        load_matching_pending_resume_into_state,
+        "call_v2_resolver_loop",
+        call_v2_resolver_loop,
     )
     monkeypatch.setattr(
         persona_module,
@@ -253,23 +203,12 @@ async def test_persona_graph_default_runs_goal_resolver_without_legacy_rag(
 
     assert calls == ["resolver"]
     assert captured["state"]["decontexualized_input"] == "今晚想随便聊两句。"
-    assert captured["state"]["rag_result"]["answer"] == ""
-    assert captured["state"]["resolver_context"].startswith("resolver_state:")
-    assert captured["state"]["pending_resolver_resume"]["resume_id"] == (
-        "resolver-pending-graph"
-    )
-    assert captured["call_cognition_subgraph_func"] is call_cognition_subgraph
-    assert captured["execute_capability_func"] is (
-        persona_module.execute_resolver_capability_request
-    )
-    assert captured["upsert_pending_resume_func"] is (
-        persona_module.upsert_pending_resume
-    )
-    assert captured["apply_pending_resolution_func"] is (
-        persona_module.apply_pending_resolution
-    )
+    assert "rag_result" not in captured["state"]
+    assert "resolver_state" not in captured["state"]
+    assert callable(captured["cognition_func"])
+    assert callable(captured["capability_func"])
     assert captured["max_cycles"] == 3
-    assert captured["capability_timeout_seconds"] == 45.0
+    assert captured["origin_scope"] is None
     assert result["should_respond"] is False
 
 
@@ -289,24 +228,17 @@ async def test_persona_graph_image_only_empty_text_enters_goal_resolver(
     calls: list[str] = []
     captured: dict = {}
 
-    async def call_cognition_resolver_loop(
+    async def call_v2_resolver_loop(
         state: dict,
         *,
-        call_cognition_subgraph_func: object,
-        execute_capability_func: object,
+        cognition_func: object,
+        capability_func: object,
         max_cycles: int,
-        capability_timeout_seconds: float,
-        upsert_pending_resume_func: object,
-        apply_pending_resolution_func: object,
+        origin_scope: str | None = None,
     ) -> dict:
         calls.append("resolver")
         captured["state"] = dict(state)
-        cognition_output = _cognition_output()
-        return cognition_output
-
-    async def load_matching_pending_resume_into_state(state: dict) -> dict:
-        loaded = dict(state)
-        return loaded
+        return {"cognition_output": _cognition_output(), "observations": []}
 
     monkeypatch.setattr(
         persona_module,
@@ -315,13 +247,8 @@ async def test_persona_graph_image_only_empty_text_enters_goal_resolver(
     )
     monkeypatch.setattr(
         persona_module,
-        "call_cognition_resolver_loop",
-        call_cognition_resolver_loop,
-    )
-    monkeypatch.setattr(
-        persona_module,
-        "load_matching_pending_resume_into_state",
-        load_matching_pending_resume_into_state,
+        "call_v2_resolver_loop",
+        call_v2_resolver_loop,
     )
     monkeypatch.setattr(
         persona_module,
@@ -334,11 +261,6 @@ async def test_persona_graph_image_only_empty_text_enters_goal_resolver(
     expected_goal = '当前输入包含图片观察：一张浅绿色头发角色头像。'
     assert calls == ["resolver"]
     assert captured["state"]["decontexualized_input"] == ""
-    assert captured["state"]["resolver_state"][
-        "original_decontexualized_input"
-    ] == expected_goal
-    assert captured["state"]["resolver_state"]["goal_progress"][
-        "original_goal"
-    ] == expected_goal
-    assert expected_goal in captured["state"]["resolver_context"]
+    assert captured["state"]["decontexualized_input"] == ""
+    assert "resolver_state" not in captured["state"]
     assert result["should_respond"] is False

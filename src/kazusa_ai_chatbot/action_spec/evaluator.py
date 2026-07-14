@@ -27,6 +27,7 @@ from kazusa_ai_chatbot.action_spec.models import (
     ActionValidationError,
     CapabilitySpecV1,
     validate_action_spec,
+    validate_semantic_action_request_v2,
     validate_capability_spec,
 )
 from kazusa_ai_chatbot.action_spec.registry import (
@@ -95,6 +96,32 @@ class ActionSpecEvaluator:
             "errors": [],
         }
         return result
+
+    def evaluate_v2_request(
+        self,
+        request: object,
+        *,
+        available_action_kinds: set[str] | None = None,
+    ) -> dict[str, object]:
+        """Validate a V2 route request before legacy execution materialization."""
+
+        available = available_action_kinds or set(self._capabilities)
+        try:
+            validated = validate_semantic_action_request_v2(
+                request,
+                available_action_kinds=available,
+            )
+        except ActionValidationError as exc:
+            return {
+                "ok": False,
+                "request": None,
+                "errors": [str(exc)],
+            }
+        return {
+            "ok": True,
+            "request": validated,
+            "errors": [],
+        }
 
 
 def _rejected(

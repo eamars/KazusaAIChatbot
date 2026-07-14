@@ -795,20 +795,9 @@ async def _refresh_runtime_character_state() -> None:
 async def _update_runtime_character_state_from_consolidation(
     consolidation_result: dict,
 ) -> None:
-    """Merge persisted runtime-state fields from a consolidation result."""
+    """Keep V2 cognition state as the sole runtime character authority."""
     global _runtime_character_state
-
-    runtime_update = {}
-    for field_name in ("mood", "global_vibe", "reflection_summary"):
-        field_value = consolidation_result.get(field_name)
-        if isinstance(field_value, str) and field_value:
-            runtime_update[field_name] = field_value
-
-    if runtime_update:
-        _runtime_character_state = {
-            **_runtime_character_state,
-            **runtime_update,
-        }
+    del consolidation_result
 
 
 def _primary_interaction_busy() -> bool:

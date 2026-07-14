@@ -11,6 +11,10 @@ import logging
 from kazusa_ai_chatbot.config import (
     MEDIA_DESCRIPTOR_CACHE_MAX_PERSISTENT_ENTRIES,
 )
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    build_character_production_state,
+    validate_cognition_state,
+)
 from kazusa_ai_chatbot.db._client import enable_vector_index, get_db
 from kazusa_ai_chatbot.background_work.models import (
     BACKGROUND_WORK_JOBS_COLLECTION,
@@ -126,12 +130,25 @@ async def db_bootstrap() -> None:
     if existing_state is None:
         await db.character_state.insert_one({
             "_id": "global",
-            "mood": "neutral",
-            "global_vibe": "",
-            "reflection_summary": "",
             "updated_at": _now_iso(),
+            "cognition_state": build_character_production_state(
+                updated_at=_now_iso(),
+            ),
         })
         logger.info("Seeded default character_state document")
+    elif existing_state.get("cognition_state") is None:
+        await db.character_state.update_one(
+            {"_id": "global"},
+            {
+                "$set": {
+                    "cognition_state": build_character_production_state(
+                        updated_at=_now_iso(),
+                    )
+                }
+            },
+        )
+    else:
+        validate_cognition_state(existing_state["cognition_state"])
 
     # ── Standard regular indexes (idempotent) ──────────────────────
     await db.conversation_history.create_index(

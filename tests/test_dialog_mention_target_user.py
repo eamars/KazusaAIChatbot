@@ -1,4 +1,4 @@
-"""Tests for dialog-authored inline mention tags."""
+"""Tests for dialog-authored inline mention tags under the V2 contract."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ class _CapturingLLM:
         self.messages = []
 
     async def ainvoke(self, messages, *, config=None):
+        del config
         self.messages = messages
         backend = BackendDescriptor(
             route_name="test",
@@ -29,70 +30,27 @@ class _CapturingLLM:
             confidence="high",
             generation=1,
         )
-        response = LLMResponse(
+        return LLMResponse(
             content=json.dumps(self.payload),
             backend=backend,
             raw_response=None,
             usage={},
         )
-        return response
-
-
-def _character_profile() -> dict:
-    """Return the minimal character profile needed by dialog prompt rendering."""
-
-    profile = {
-        "name": "Kazusa",
-        "personality_brief": {
-            "mbti": "INTJ",
-            "logic": "precise",
-            "tempo": "measured",
-            "defense": "guarded",
-            "quirks": "dry",
-            "taboos": "physical action narration",
-        },
-        "linguistic_texture_profile": {
-            "fragmentation": 0.4,
-            "hesitation_density": 0.2,
-            "counter_questioning": 0.2,
-            "softener_density": 0.3,
-            "formalism_avoidance": 0.6,
-            "abstraction_reframing": 0.4,
-            "direct_assertion": 0.6,
-            "emotional_leakage": 0.3,
-            "rhythmic_bounce": 0.2,
-            "self_deprecation": 0.1,
-        },
-    }
-    return profile
 
 
 def _dialog_state() -> dict:
-    """Build a reusable dialog-generator state fixture.
+    """Build a reusable native dialog state fixture."""
 
-    Returns:
-        Dialog-agent state with deterministic ASCII content.
-    """
-
-    state = {
+    return {
         "internal_monologue": "answer directly",
-        "action_directives": {
-            "linguistic_directives": {
-                "rhetorical_strategy": "direct",
-                "linguistic_style": "brief",
-                "accepted_user_preferences": [],
-                "content_plan": {
-                    "semantic_content": "answer",
-                    "rendering": "short",
-                },
-                "forbidden_phrases": [],
-            },
-            "contextual_directives": {
-                "social_distance": "friendly",
-                "emotional_intensity": "low",
-                "vibe_check": "calm",
-                "relational_dynamic": "cooperative",
-            },
+        "text_surface_output_v2": {
+            "schema_version": "text_surface_output.v2",
+            "content_plan": "answer",
+            "visible_boundaries": [],
+            "addressee_plan": ["current user"],
+            "style_guidance": "brief",
+            "pacing_guidance": "one message",
+            "selected_surface_intent": "answer",
         },
         "chat_history_wide": [],
         "chat_history_recent": [],
@@ -100,50 +58,63 @@ def _dialog_state() -> dict:
         "platform_bot_id": "bot-1",
         "global_user_id": "global-user-1",
         "user_name": "User",
-        "user_profile": {"affinity": 700},
-        "character_profile": _character_profile(),
+        "user_profile": {
+            "global_user_id": "global-user-1",
+            "cognition_state": {"owner_user_id": "global-user-1"},
+        },
+        "character_profile": {
+            "name": "Kazusa",
+            "personality_brief": {
+                "logic": "precise",
+                "tempo": "measured",
+                "defense": "guarded",
+                "quirks": "dry",
+                "taboos": "physical action narration",
+            },
+            "linguistic_texture_profile": {
+                "fragmentation": 0.4,
+                "hesitation_density": 0.2,
+                "counter_questioning": 0.2,
+                "softener_density": 0.3,
+                "formalism_avoidance": 0.6,
+                "abstraction_reframing": 0.4,
+                "direct_assertion": 0.6,
+                "emotional_leakage": 0.3,
+                "rhythmic_bounce": 0.2,
+                "self_deprecation": 0.1,
+            },
+        },
         "debug_modes": {},
         "should_respond": True,
         "dialog_usage_mode": "live_visible_reply",
-        "messages": [],
     }
-    return state
 
 
 @pytest.mark.asyncio
 async def test_dialog_generator_preserves_inline_tag_without_delivery_context(
     monkeypatch,
 ) -> None:
-    """Dialog generator should preserve authored tags without delivery data."""
+    """Dialog preserves authored tags without receiving delivery identifiers."""
 
-    fake_llm = _CapturingLLM({
-        "final_dialog": ["@User answer"],
-    })
+    fake_llm = _CapturingLLM({"final_dialog": ["@User answer"]})
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", fake_llm)
 
     result = await dialog_module.dialog_generator(_dialog_state())
 
     assert result == {"final_dialog": ["@User answer"]}
-
     human_payload = json.loads(fake_llm.messages[1].content)
-    assert "delivery_context" not in human_payload
-    assert "channel_type" not in human_payload
-    assert "use_reply_feature" not in human_payload
-    assert "single_target_user" not in human_payload
+    assert human_payload["text_surface_output_v2"]["schema_version"] == (
+        "text_surface_output.v2"
+    )
     assert "platform_user_id" not in human_payload
     assert "global_user_id" not in human_payload
-    assert "scope_users" not in human_payload
 
 
 @pytest.mark.asyncio
-async def test_dialog_generator_does_not_require_mention_flag(
-    monkeypatch,
-) -> None:
-    """Dialog generator output shape should only require final_dialog."""
+async def test_dialog_generator_does_not_require_mention_flag(monkeypatch) -> None:
+    """Dialog output does not require a separate mention control field."""
 
-    fake_llm = _CapturingLLM({
-        "final_dialog": ["answer"],
-    })
+    fake_llm = _CapturingLLM({"final_dialog": ["answer"]})
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", fake_llm)
 
     result = await dialog_module.dialog_generator(_dialog_state())
@@ -152,18 +123,14 @@ async def test_dialog_generator_does_not_require_mention_flag(
 
 
 @pytest.mark.asyncio
-async def test_dialog_agent_returns_no_mention_flag(
-    monkeypatch,
-) -> None:
-    """Dialog agent should not expose retired delivery trigger fields."""
+async def test_dialog_agent_returns_no_mention_flag(monkeypatch) -> None:
+    """Dialog delivery metadata remains separate from model-authored text."""
 
-    fake_generator = _CapturingLLM({
-        "final_dialog": ["@User answer"],
-    })
+    fake_generator = _CapturingLLM({"final_dialog": ["@User answer"]})
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", fake_generator)
 
     result = await dialog_module.dialog_agent(_dialog_state())
 
     assert result["final_dialog"] == ["@User answer"]
-    retired_field = "mention" + "_target_user"
-    assert retired_field not in result
+    assert "mention_target_user" not in result
+    assert result["target_addressed_user_ids"] == ["global-user-1"]

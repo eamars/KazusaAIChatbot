@@ -121,40 +121,30 @@ async def test_default_self_cognition_client_uses_resolver_loop(
         "resolver_capability_requests": [],
     }
 
-    async def direct_cognition(_state: dict[str, Any]) -> dict[str, Any]:
-        raise AssertionError("self-cognition bypassed the resolver loop")
-
     async def resolver_loop(
         state: dict[str, Any],
         **kwargs: Any,
     ) -> dict[str, Any]:
         captured["state"] = state
         captured["kwargs"] = kwargs
-        return expected_result
+        return {"cognition_output": expected_result, "observations": []}
 
-    monkeypatch.setattr(runner, "call_cognition_subgraph", direct_cognition)
     monkeypatch.setattr(
         runner,
-        "call_cognition_resolver_loop",
+        "call_v2_resolver_loop",
         resolver_loop,
-        raising=False,
     )
     state = {"cognitive_episode": {"trigger_source": "internal_thought"}}
 
     result = await runner._default_cognition_client(state)
 
-    assert result == expected_result
+    assert result["internal_monologue"] == expected_result["internal_monologue"]
+    assert result["resolver_observations"] == []
     assert captured["state"] is state
-    assert captured["kwargs"]["call_cognition_subgraph_func"] is (
-        direct_cognition
-    )
-    assert callable(captured["kwargs"]["execute_capability_func"])
-    assert captured["kwargs"]["upsert_pending_resume_func"] is (
-        runner._non_persistent_pending_resume
-    )
-    assert captured["kwargs"]["apply_pending_resolution_func"] is (
-        runner._non_persistent_pending_resolution
-    )
+    assert callable(captured["kwargs"]["cognition_func"])
+    assert callable(captured["kwargs"]["capability_func"])
+    assert captured["kwargs"]["max_cycles"] == runner.COGNITION_RESOLVER_MAX_CYCLES
+    assert captured["kwargs"]["origin_scope"] == "character"
 
 
 def _group_noise_case() -> dict[str, Any]:
@@ -279,23 +269,14 @@ def _action_cognition_output(text: str) -> dict[str, Any]:
         "logical_stance": "CONFIRM",
         "character_intent": "PROVIDE",
         "internal_monologue": "The scheduled follow-up should be visible.",
-        "action_directives": {
-            "contextual_directives": {
-                "social_distance": "friendly",
-                "emotional_intensity": "low",
-                "vibe_check": "focused",
-                "relational_dynamic": "scheduled follow-up",
-            },
-            "linguistic_directives": {
-                "rhetorical_strategy": "answer the scheduled follow-up",
-                "linguistic_style": "brief",
-                "accepted_user_preferences": [],
-                "content_plan": {
-                    "semantic_content": text,
-                    "rendering": "One ordinary text message; concise.",
-                },
-                "forbidden_phrases": [],
-            },
+        "text_surface_output_v2": {
+            "schema_version": "text_surface_output.v2",
+            "content_plan": text,
+            "visible_boundaries": [],
+            "addressee_plan": ["current user"],
+            "style_guidance": "brief and direct",
+            "pacing_guidance": "one ordinary message",
+            "selected_surface_intent": "answer the scheduled follow-up",
         },
         "action_specs": [_speak_action_spec()],
     }
@@ -306,13 +287,7 @@ def _progress_cognition_output() -> dict[str, Any]:
     output = {
         "logical_stance": "maintain awareness without outward contact",
         "character_intent": "keep progress internally visible",
-        "action_directives": {
-            "linguistic_directives": {
-                "content_plan": {
-                    "semantic_content": "Track the commitment quietly.",
-                },
-            },
-        },
+        "self_cognition_route": models.ROUTE_PROGRESS_MAINTENANCE,
     }
     return output
 
@@ -332,7 +307,6 @@ def _silent_cognition_output() -> dict[str, Any]:
         "logical_stance": "no outward contact is warranted",
         "character_intent": "stay silent",
         "self_cognition_route": models.ROUTE_AUDIT_ONLY,
-        "action_directives": {"linguistic_directives": {"content_plan": {}}},
     }
     return output
 
@@ -474,32 +448,18 @@ def _memory_lifecycle_route_action_spec() -> dict[str, Any]:
     return spec
 
 
-def _surface_action_directives() -> dict[str, Any]:
-    directives = {
-        "contextual_directives": {
-            "social_distance": "friendly",
-            "emotional_intensity": "low",
-            "vibe_check": "focused",
-            "relational_dynamic": "scheduled follow-up",
-        },
-        "linguistic_directives": {
-            "rhetorical_strategy": "answer the scheduled follow-up",
-            "linguistic_style": "brief",
-            "accepted_user_preferences": [],
-            "content_plan": {
-                "semantic_content": "Continue the GPU model topic.",
-                "rendering": "One ordinary text message; concise.",
-            },
-            "forbidden_phrases": [],
-        },
-        "visual_directives": {
-            "facial_expression": [],
-            "body_language": [],
-            "gaze_direction": [],
-            "visual_vibe": [],
-        },
+def _surface_output(content_plan: str = "Continue the GPU model topic.") -> dict[str, Any]:
+    """Build the canonical V2 surface result used by dialog tests."""
+
+    return {
+        "schema_version": "text_surface_output.v2",
+        "content_plan": content_plan,
+        "visible_boundaries": [],
+        "addressee_plan": ["current user"],
+        "style_guidance": "brief",
+        "pacing_guidance": "direct",
+        "selected_surface_intent": "answer the scheduled follow-up",
     }
-    return directives
 
 
 def _speak_cognition_output_with_partial_directives() -> dict[str, Any]:
@@ -512,13 +472,6 @@ def _speak_cognition_output_with_partial_directives() -> dict[str, Any]:
         "emotional_intensity": "low",
         "vibe_check": "focused",
         "relational_dynamic": "scheduled follow-up",
-        "action_directives": {
-            "linguistic_directives": {
-                "content_plan": {
-                    "semantic_content": "Continue the GPU model topic.",
-                },
-            },
-        },
         "action_specs": [_speak_action_spec()],
     }
     return output
@@ -853,14 +806,14 @@ def test_classify_route_does_not_use_content_plan_without_speak_action() -> None
         {
             "logical_stance": "CONFIRM",
             "character_intent": "PROVIDE",
-            "action_directives": {
-                "linguistic_directives": {
-                    "content_plan": {
-                        "semantic_content": (
-                            "Check whether the user has started work."
-                        ),
-                    },
-                },
+            "text_surface_output_v2": {
+                "schema_version": "text_surface_output.v2",
+                "content_plan": "Check whether the user has started work.",
+                "visible_boundaries": [],
+                "addressee_plan": [],
+                "style_guidance": "brief",
+                "pacing_guidance": "direct",
+                "selected_surface_intent": "observe",
             },
             "action_specs": [],
         },
@@ -1245,7 +1198,6 @@ def test_runner_rejects_explicit_visible_route_without_speak() -> None:
                 "logical_stance": "CONFIRM",
                 "character_intent": "PROVIDE",
                 "self_cognition_route": models.ROUTE_ACTION_CANDIDATE,
-                "action_directives": _surface_action_directives(),
                 "action_specs": [],
             },
             dialog_client=dialog_client,
@@ -1310,7 +1262,6 @@ def test_runner_executes_private_lifecycle_action_for_consolidation(
             "character_intent": "DISMISS",
             "internal_monologue": "Close the stale commitment privately.",
             "judgment_note": "The commitment should be abandoned.",
-            "action_directives": {"linguistic_directives": {"content_plan": {}}},
             "action_specs": [_memory_lifecycle_action_spec()],
         },
         consolidation_client=consolidation_client,
@@ -1412,7 +1363,6 @@ def test_runner_routes_lifecycle_intent_through_specialist_before_execution(
             "character_intent": "DISMISS",
             "internal_monologue": "Review the stale commitment privately.",
             "judgment_note": "The commitment may need lifecycle review.",
-            "action_directives": {"linguistic_directives": {"content_plan": {}}},
             "action_specs": [_memory_lifecycle_route_action_spec()],
         },
         apply_consolidation=False,
@@ -1474,7 +1424,6 @@ def test_runner_does_not_execute_private_actions_by_default(
             "character_intent": "DISMISS",
             "internal_monologue": "Close the stale commitment privately.",
             "judgment_note": "The commitment should be abandoned.",
-            "action_directives": {"linguistic_directives": {"content_plan": {}}},
             "action_specs": [_memory_lifecycle_action_spec()],
         },
         consolidation_client=consolidation_client,
@@ -1548,7 +1497,7 @@ def test_contact_decision_without_candidate_marker_uses_dialog_candidate(
     async def l3_text_surface_handler(state: dict[str, Any]) -> dict[str, Any]:
         l3_states.append(state)
         assert state["action_specs"][0]["kind"] == SPEAK_CAPABILITY
-        result = {"action_directives": _surface_action_directives()}
+        result = {"text_surface_output_v2": _surface_output()}
         return result
 
     async def fake_dialog_client(state: dict[str, Any]) -> dict[str, Any]:
@@ -1589,16 +1538,16 @@ def test_selected_speak_self_cognition_runs_l3_before_dialog(
     case = _scheduled_future_cognition_case()
     l3_states: list[dict[str, Any]] = []
     dialog_states: list[dict[str, Any]] = []
-    action_directives = _surface_action_directives()
+    surface_output = _surface_output()
 
     async def l3_text_surface_handler(state: dict[str, Any]) -> dict[str, Any]:
         l3_states.append(state)
-        result = {"action_directives": action_directives}
+        result = {"text_surface_output_v2": surface_output}
         return result
 
     async def dialog_client(state: dict[str, Any]) -> dict[str, Any]:
         dialog_states.append(state)
-        assert state["action_directives"] == action_directives
+        assert state["text_surface_output_v2"] == surface_output
         result = {
             "final_dialog": ["Continuing the GPU model topic now."],
         }
@@ -1891,20 +1840,13 @@ def test_scheduled_future_cognition_starts_without_preloaded_rag(
     case = _scheduled_future_cognition_case()
 
     def cognition_client(state: dict[str, Any]) -> dict[str, Any]:
-        assert state["rag_result"]["answer"] == ""
-        assert "user_image" in state["rag_result"]
-        assert "character_image" in state["rag_result"]
-        assert state["rag_result"]["user_image"]["user_memory_context"][
-            "active_commitments"
-        ] == []
+        assert "rag_result" not in state
         output = _silent_cognition_output()
-        output["resolver_state"] = {
-            "observations": [
-                {
-                    "capability_kind": "local_context_recall",
-                }
-            ]
-        }
+        output["resolver_observations"] = [
+            {
+                "capability_kind": "local_context_recall",
+            }
+        ]
         return output
 
     paths = _build_tracking_records(

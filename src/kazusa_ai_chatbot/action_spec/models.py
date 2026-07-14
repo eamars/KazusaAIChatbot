@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Literal, TypedDict
 
+from kazusa_ai_chatbot.cognition_core_v2.contracts import RoleRefV2
+
 ACTION_SPEC_VERSION = "action_spec.v1"
 ACTION_SOURCE_REF_VERSION = "action_source_ref.v1"
 ACTION_TARGET_VERSION = "action_target.v1"
@@ -204,6 +206,15 @@ class ActionEvalResult(TypedDict):
     errors: list[str]
 
 
+class SemanticActionRequestV2(TypedDict):
+    """Route-only V2 request before action-spec materialization."""
+
+    action_kind: str
+    semantic_goal: str
+    target_roles: list[RoleRefV2]
+    evidence_handles: list[str]
+
+
 class SpeakParamsV1(TypedDict):
     """Params for a text-surface action realized by the L3 text handler."""
 
@@ -356,6 +367,49 @@ def validate_action_spec(value: object) -> ActionSpecV1:
     _require_non_empty_string(data, "reason")
     return_value = data
     return return_value
+
+
+def validate_semantic_action_request_v2(
+    value: object,
+    *,
+    available_action_kinds: set[str],
+) -> SemanticActionRequestV2:
+    """Validate a V2 route request without selecting an executable handler."""
+
+    if not isinstance(value, dict) or set(value) != {
+        "action_kind",
+        "semantic_goal",
+        "target_roles",
+        "evidence_handles",
+    }:
+        raise ActionValidationError("V2 action request fields are not exact")
+    action_kind = value["action_kind"]
+    semantic_goal = value["semantic_goal"]
+    target_roles = value["target_roles"]
+    evidence_handles = value["evidence_handles"]
+    if action_kind not in available_action_kinds:
+        raise ActionValidationError("V2 action kind is unavailable")
+    if not isinstance(semantic_goal, str) or not semantic_goal.strip():
+        raise ActionValidationError("V2 semantic goal is invalid")
+    if not isinstance(target_roles, list) or not isinstance(evidence_handles, list):
+        raise ActionValidationError("V2 action request lists are invalid")
+    for role in target_roles:
+        if not isinstance(role, dict) or set(role) != {
+            "role",
+            "entity_kind",
+            "entity_id",
+        }:
+            raise ActionValidationError("V2 target role is invalid")
+        if any(
+            not isinstance(role[field_name], str) or not role[field_name].strip()
+            for field_name in ("role", "entity_kind", "entity_id")
+        ):
+            raise ActionValidationError("V2 target role text is invalid")
+    if any(not isinstance(handle, str) or not handle for handle in evidence_handles):
+        raise ActionValidationError("V2 evidence handles are invalid")
+    if len(evidence_handles) != len(set(evidence_handles)):
+        raise ActionValidationError("V2 evidence handles are duplicated")
+    return dict(value)  # type: ignore[return-value]
 
 
 def _require_mapping(value: object, label: str) -> dict:

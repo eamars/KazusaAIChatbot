@@ -1,126 +1,110 @@
-"""Bounded semantic appraisal that emits propositions instead of state writes."""
+"""Scoped semantic appraisal with deterministic structural validation."""
 
 from __future__ import annotations
 
 import json
 import time
 from collections.abc import Mapping, Sequence
+from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from kazusa_ai_chatbot.cognition_chain_core.contracts import CognitionChainServices
-from kazusa_ai_chatbot.cognition_core_v2.contracts import SemanticProposition
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionCoreServicesV2,
+    CognitionContextLimitError,
+    CognitionEvidenceV2,
+    SemanticAppraisalResultV2,
+    SemanticQuestionV2,
+)
 from kazusa_ai_chatbot.cognition_core_v2.diagnostics import (
     capture_validation_stage,
 )
+from kazusa_ai_chatbot.cognition_core_v2.semantic_source_planner import (
+    question_proposition_kinds,
+)
+from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+    PromptProjectionV2,
+)
 
 
-SEMANTIC_APPRAISAL_PROMPT = '''You assess only the causal meaning of the current evidence.
-Use the supplied permitted causal roots. Do not select actions, write dialogue,
-or infer facts absent from the evidence.
-
-# Generation Procedure
-For each supported causal root, decide whether the evidence establishes it.
-Return a false proposition only when an active causal root is established as
-resolved or absent by supplied evidence. Do not treat a root as absent merely
-because it is unmentioned. Return every proposition with a supplied source ref.
-
-# Active-Cause Resolution Rule
-active_causal_roots identifies causes that were active before this evidence.
-When supplied evidence expressly establishes that one of those causes is
-resolved, ended, gone, or no longer applies, return present=false for that
-active root. Do not return present=true merely because the evidence mentions
-the earlier cause or its history. In particular, return present=false for an
-active prior_threat_reduction root when the evidence establishes that the
-previously active reduction event is now resolved and no longer applies.
-
-# Canonical Causal-Root Glossary
-- goal_reward: a valued goal has made meaningful progress or reached reward.
-- credible_threat: credible expected harm remains possible and unresolved.
-- goal_obstruction: an important goal is being blocked by a meaningful obstacle.
-- valued_loss: a valued person, object, relationship, opportunity, or outcome
-  is actually lost or irreversibly unavailable in the current judgment.
-- contamination_or_norm_rejection: contamination or a rejected norm creates
-  identity-relevant aversion.
-- prediction_error: an unexpected event requires attention or belief revision.
-- bond_attachment: an established valued bond or desire for closeness is salient.
-- observed_other_affect: evidence establishes another person's affect or need.
-- attributed_benefit: another agent intentionally provided a meaningful benefit.
-- rival_threat: a valued bond faces a credible rival or exclusivity threat.
-- upward_comparison: another's desired advantage creates an attainable comparison.
-- self_caused_achievement: the active character caused a valued achievement.
-- global_standard_threat: a broad self-standard or reputation is threatened.
-- self_caused_harm: the active character caused specific harm needing repair.
-- minor_social_error: a visible minor social error has limited moral severity.
-- valuable_knowledge_gap: an important and learnable knowledge gap is present.
-- vastness: exceptional scale or complexity requires model accommodation.
-- autobiographical_continuity: a memory links the present self to a personally
-  meaningful past, supporting nostalgic remembrance or continuity.
-- connection_gap: desired connection exceeds perceived available connection.
-- prior_threat_reduction: a previously active threat has materially reduced.
-- low_purpose_coherence: purpose, agency, or viable long-horizon direction is low.
-
-# Distinguishing Nostalgia From Sadness
-Use autobiographical_continuity when evidence is primarily a personally
-meaningful memory connecting the present to a cherished past. A past memory,
-even one that is tender or unavailable now, does not by itself establish
-valued_loss. Use valued_loss only when the evidence also establishes an actual
-irreversible loss or current unavailability that is central to the judgment.
+SEMANTIC_APPRAISAL_PROMPT = '''You assess one scoped semantic question from bounded evidence.
+Use only the supplied prompt handles and semantic descriptions. Do not select
+actions, write dialogue, emit emotion ids, change lifecycle status, or invent
+facts. Return semantic propositions and allowlisted numeric deltas only when
+the supplied evidence supports them.
 
 # Output Format
-Return a JSON object with "propositions": a list of objects. Each object has
-"root_id" (string), "present" (boolean), "causal_source_ref" (string), and
-"semantic_basis" (short string).
+Return exactly one JSON object with question_id, selected_evidence_handles,
+selected_role_handles, propositions, deltas, and explanation. Every
+proposition and delta must cite supplied evidence handles. Unknown or
+unsupported meaning must be omitted rather than guessed.
 '''
 
 
-async def appraise_semantic_sources(
-    source_summaries: Sequence[Mapping[str, str]],
-    allowed_root_ids: set[str],
-    services: CognitionChainServices,
-    active_root_ids: set[str] | None = None,
-) -> list[SemanticProposition]:
-    """Ask one bounded appraisal question and validate its typed propositions.
+async def appraise_semantic_question(
+    question: SemanticQuestionV2,
+    evidence: Sequence[CognitionEvidenceV2],
+    projection: PromptProjectionV2,
+    services: CognitionCoreServicesV2,
+) -> SemanticAppraisalResultV2:
+    """Run one bounded family appraisal and return no state authority."""
 
-    Args:
-        source_summaries: Prompt-safe current evidence with stable source refs.
-        allowed_root_ids: Causal roots available to the local reducer.
-        services: Existing V1 LLM binding and cognition configuration.
-        active_root_ids: Existing causal roots that evidence may resolve.
-
-    Returns:
-        Structurally validated semantic propositions without applying state.
-    """
-
-    payload = {
-        "permitted_causal_roots": sorted(allowed_root_ids),
-        "active_causal_roots": sorted(active_root_ids or set()),
-        "evidence": list(source_summaries),
+    evidence_by_handle = {
+        row["evidence_handle"]: {
+            "handle": row["evidence_handle"],
+            "semantic_text": row["semantic_text"],
+            "source_kind": row["evidence_ref"]["source_kind"],
+        }
+        for row in evidence
+        if row["evidence_handle"] in question["evidence_handles"]
     }
-    payload_text = json.dumps(payload, ensure_ascii=False)
+    payload = {
+        "question": {
+            "question_id": question["question_id"],
+            "question_kind": question["question_kind"],
+            "semantic_question": question["semantic_question"],
+            "permitted_role_handles": question["permitted_role_handles"],
+            "permitted_delta_paths": question["permitted_delta_paths"],
+            "permitted_proposition_kinds": list(
+                question_proposition_kinds(question["question_kind"])
+            ),
+            "output_schema": {
+                "propositions": "list of grounded proposition objects",
+                "deltas": "list of allowlisted signed integer deltas",
+                "evidence_handles": "every proposition and delta must cite these",
+            },
+        },
+        "evidence": list(evidence_by_handle.values()),
+        "state": projection.payload,
+    }
+    payload_text = _fit_appraisal_payload(payload)
     started_at = time.perf_counter()
     raw_output: str | None = None
-    parsed: object | None = None
+    parsed_output: object | None = None
     try:
         response = await services.llm.ainvoke(
             [
                 SystemMessage(content=SEMANTIC_APPRAISAL_PROMPT),
                 HumanMessage(content=payload_text),
             ],
-            config=services.cognition_config,
+            config=services.appraisal_config,
         )
         raw_output = response.content
-        parsed = services.parse_json(raw_output)
-        propositions = _validate_propositions(parsed, allowed_root_ids)
+        parsed_output = services.parse_json(raw_output)
+        result = validate_semantic_appraisal_result(
+            parsed_output,
+            question,
+            set(evidence_by_handle),
+        )
     except Exception as exc:
         ended_at = time.perf_counter()
         capture_validation_stage(
-            stage_id="semantic_appraisal",
-            config=services.cognition_config,
+            stage_id=f"semantic_appraisal:{question['question_id']}",
+            config=services.appraisal_config,
             system_prompt=SEMANTIC_APPRAISAL_PROMPT,
             human_payload=payload_text,
             raw_output=raw_output,
-            parsed_output=parsed,
+            parsed_output=parsed_output,
             parse_status="failed",
             started_at=started_at,
             ended_at=ended_at,
@@ -129,52 +113,234 @@ async def appraise_semantic_sources(
         raise
     ended_at = time.perf_counter()
     capture_validation_stage(
-        stage_id="semantic_appraisal",
-        config=services.cognition_config,
+        stage_id=f"semantic_appraisal:{question['question_id']}",
+        config=services.appraisal_config,
         system_prompt=SEMANTIC_APPRAISAL_PROMPT,
         human_payload=payload_text,
         raw_output=raw_output,
-        parsed_output=parsed,
+        parsed_output=parsed_output,
         parse_status="succeeded",
         started_at=started_at,
         ended_at=ended_at,
     )
-    return propositions
+    return result
 
 
-def _validate_propositions(
+def validate_semantic_appraisal_result(
     parsed: object,
-    allowed_root_ids: set[str],
-) -> list[SemanticProposition]:
-    """Retain only structurally valid propositions inside the allowed root set."""
+    question: SemanticQuestionV2,
+    evidence_handles: set[str],
+) -> SemanticAppraisalResultV2:
+    """Validate one appraisal without interpreting its semantic prose."""
 
     if not isinstance(parsed, Mapping):
         raise ValueError("semantic appraisal must return an object")
-    raw_propositions = parsed.get("propositions")
-    if not isinstance(raw_propositions, list):
-        raise ValueError("semantic appraisal propositions must be a list")
-    propositions: list[SemanticProposition] = []
-    for raw_proposition in raw_propositions:
-        if not isinstance(raw_proposition, Mapping):
-            raise ValueError("semantic proposition must be an object")
-        root_id = raw_proposition.get("root_id")
-        present = raw_proposition.get("present")
-        causal_source_ref = raw_proposition.get("causal_source_ref")
-        semantic_basis = raw_proposition.get("semantic_basis")
-        if root_id not in allowed_root_ids:
-            raise ValueError("semantic proposition uses an unsupported causal root")
-        if not isinstance(present, bool):
-            raise ValueError("semantic proposition presence must be boolean")
-        if not isinstance(causal_source_ref, str) or not causal_source_ref:
-            raise ValueError("semantic proposition requires a causal source ref")
-        if not isinstance(semantic_basis, str) or not semantic_basis:
-            raise ValueError("semantic proposition requires a semantic basis")
-        propositions.append(
-            SemanticProposition(
-                root_id=root_id,
-                present=present,
-                causal_source_ref=causal_source_ref,
-                semantic_basis=semantic_basis,
+    required = {
+        "question_id",
+        "selected_evidence_handles",
+        "selected_role_handles",
+        "propositions",
+        "deltas",
+        "explanation",
+    }
+    if set(parsed) != required:
+        raise ValueError("semantic appraisal fields are not exact")
+    if parsed["question_id"] != question["question_id"]:
+        raise ValueError("semantic appraisal question id does not match")
+    selected_evidence = _validate_handles(
+        parsed["selected_evidence_handles"],
+        evidence_handles,
+        "selected evidence",
+    )
+    selected_roles = _validate_handles(
+        parsed["selected_role_handles"],
+        set(question["permitted_role_handles"]),
+        "selected roles",
+        minimum=0,
+    )
+    if not isinstance(parsed["propositions"], list) or len(parsed["propositions"]) > 8:
+        raise ValueError("semantic propositions are invalid")
+    propositions = [
+        _validate_proposition(row, question, evidence_handles)
+        for row in parsed["propositions"]
+    ]
+    if not isinstance(parsed["deltas"], list) or len(parsed["deltas"]) > 8:
+        raise ValueError("semantic deltas are invalid")
+    deltas = [
+        _validate_delta(row, question, evidence_handles)
+        for row in parsed["deltas"]
+    ]
+    paths = [delta["target_path"] for delta in deltas]
+    if len(paths) != len(set(paths)):
+        raise ValueError("one appraisal cannot duplicate a target path")
+    explanation = parsed["explanation"]
+    if not isinstance(explanation, str) or not 1 <= len(explanation) <= 1000:
+        raise ValueError("semantic appraisal explanation is invalid")
+    return {
+        "question_id": question["question_id"],
+        "selected_evidence_handles": selected_evidence,
+        "selected_role_handles": selected_roles,
+        "propositions": propositions,
+        "deltas": deltas,
+        "explanation": explanation,
+    }
+
+
+def _validate_proposition(
+    value: Any,
+    question: SemanticQuestionV2,
+    evidence_handles: set[str],
+) -> dict[str, Any]:
+    """Validate one semantic proposition and its role assignments."""
+
+    if not isinstance(value, Mapping):
+        raise ValueError("semantic proposition must be an object")
+    allowed = {
+        "proposition_kind",
+        "subject_handle",
+        "evidence_handles",
+        "role_assignments",
+        "semantic_value",
+    }
+    if "object_handle" in value:
+        allowed.add("object_handle")
+    if set(value) != allowed:
+        raise ValueError("semantic proposition fields are not exact")
+    proposition_kind = value["proposition_kind"]
+    if proposition_kind not in question_proposition_kinds(question["question_kind"]):
+        raise ValueError("semantic proposition kind is not owned by question")
+    subject = value["subject_handle"]
+    if subject not in set(question["permitted_role_handles"]):
+        raise ValueError("semantic proposition subject handle is not permitted")
+    if "object_handle" in value and value["object_handle"] not in set(
+        question["permitted_role_handles"]
+    ):
+        raise ValueError("semantic proposition object handle is not permitted")
+    cited = _validate_handles(value["evidence_handles"], evidence_handles, "proposition evidence")
+    assignments = value["role_assignments"]
+    if not isinstance(assignments, list) or len(assignments) > 8:
+        raise ValueError("semantic proposition roles are invalid")
+    normalized_assignments: list[dict[str, str]] = []
+    for assignment in assignments:
+        if not isinstance(assignment, Mapping) or set(assignment) != {
+            "role",
+            "entity_handle",
+        }:
+            raise ValueError("semantic role assignment is invalid")
+        if assignment["role"] not in {
+            "actor",
+            "experiencer",
+            "target",
+            "object",
+            "affected_goal",
+            "affected_relationship",
+        }:
+            raise ValueError("semantic role value is invalid")
+        if assignment["entity_handle"] not in set(question["permitted_role_handles"]):
+            raise ValueError("semantic role handle is not permitted")
+        normalized_assignments.append(dict(assignment))
+    result = {
+        "proposition_kind": proposition_kind,
+        "subject_handle": subject,
+        "evidence_handles": cited,
+        "role_assignments": normalized_assignments,
+        "semantic_value": _require_text(value.get("semantic_value")),
+    }
+    if "object_handle" in value:
+        result["object_handle"] = value["object_handle"]
+    return result
+
+
+def _validate_delta(
+    value: Any,
+    question: SemanticQuestionV2,
+    evidence_handles: set[str],
+) -> dict[str, Any]:
+    """Validate one allowlisted semantic numeric delta."""
+
+    if not isinstance(value, Mapping) or set(value) != {
+        "target_path",
+        "delta",
+        "evidence_handles",
+        "reason",
+    }:
+        raise ValueError("semantic delta fields are not exact")
+    path = value["target_path"]
+    if path not in set(question["permitted_delta_paths"]):
+        raise ValueError("semantic delta path is not owned by question")
+    delta = value["delta"]
+    if isinstance(delta, bool) or not isinstance(delta, int) or not -40 <= delta <= 40:
+        raise ValueError("semantic delta must be an integer in range")
+    cited = _validate_handles(value["evidence_handles"], evidence_handles, "delta evidence")
+    return {
+        "target_path": path,
+        "delta": delta,
+        "evidence_handles": cited,
+        "reason": _require_text(value["reason"], maximum=300),
+    }
+
+
+def _validate_handles(
+    value: Any,
+    allowed: set[str],
+    label: str,
+    *,
+    minimum: int = 1,
+) -> list[str]:
+    """Validate a bounded duplicate-free handle list."""
+
+    if not isinstance(value, list) or not minimum <= len(value) <= 8:
+        raise ValueError(f"{label} handles are invalid")
+    if any(not isinstance(handle, str) or handle not in allowed for handle in value):
+        raise ValueError(f"{label} contains an unknown handle")
+    if len(value) != len(set(value)):
+        raise ValueError(f"{label} handles are duplicated")
+    return list(value)
+
+
+def _require_text(value: Any, maximum: int = 200) -> str:
+    """Require bounded non-empty semantic text."""
+
+    if not isinstance(value, str) or not value.strip() or len(value) > maximum:
+        raise ValueError("semantic text is invalid")
+    return value
+
+
+def _fit_appraisal_payload(payload: dict[str, Any]) -> str:
+    """Drop only supplemental projected context in reverse order before failing."""
+
+    supplemental_order = (
+        "causal_candidates",
+        "knowledge_gaps",
+        "events",
+        "threats",
+        "goals",
+        "affect",
+        "relationship",
+        "roles",
+    )
+    state = payload["state"]
+    if not isinstance(state, Mapping):
+        raise CognitionContextLimitError("semantic appraisal state projection is invalid")
+    projected_state = dict(state)
+    while True:
+        candidate = dict(payload)
+        candidate["state"] = projected_state
+        payload_text = json.dumps(candidate, ensure_ascii=False, sort_keys=True)
+        if len(payload_text) <= 8000:
+            return payload_text
+        removed = False
+        for key in supplemental_order:
+            value = projected_state.get(key)
+            if isinstance(value, list) and value:
+                projected_state[key] = value[:-1]
+                removed = True
+                break
+            if key in projected_state and value:
+                projected_state.pop(key)
+                removed = True
+                break
+        if not removed:
+            raise CognitionContextLimitError(
+                "required semantic appraisal context exceeds the contract cap"
             )
-        )
-    return propositions

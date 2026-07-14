@@ -4,18 +4,26 @@ from __future__ import annotations
 
 from pymongo.errors import PyMongoError
 
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    build_character_production_state,
+    validate_cognition_state,
+)
 from kazusa_ai_chatbot.db._client import get_db
 from kazusa_ai_chatbot.db.errors import DatabaseOperationError
 from kazusa_ai_chatbot.db.schemas import CharacterProfileDoc
+from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
 
 
 RUNTIME_CHARACTER_STATE_FIELDS = (
+    "self_image",
+    "cognition_state",
+    "updated_at",
+)
+LEGACY_CHARACTER_AFFECT_FIELDS = frozenset({
     "mood",
     "global_vibe",
     "reflection_summary",
-    "self_image",
-    "updated_at",
-)
+})
 
 
 def split_character_profile_runtime_state(profile: dict) -> tuple[dict, dict]:
@@ -34,7 +42,11 @@ def split_character_profile_runtime_state(profile: dict) -> tuple[dict, dict]:
     static_profile = {
         key: value
         for key, value in profile.items()
-        if key not in runtime_field_names and key != "_id"
+        if (
+            key not in runtime_field_names
+            and key not in LEGACY_CHARACTER_AFFECT_FIELDS
+            and key != "_id"
+        )
     }
     runtime_state = {
         key: value
@@ -121,6 +133,39 @@ async def get_character_state() -> CharacterProfileDoc | dict:
     return return_value
 
 
+async def get_character_cognition_state() -> dict:
+    """Read and validate the singleton character cognition state."""
+
+    db = await get_db()
+    document = await db.character_state.find_one(
+        {"_id": "global"},
+        {"cognition_state": 1},
+    )
+    if document is None or document.get("cognition_state") is None:
+        return build_character_production_state(
+            updated_at=storage_utc_now_iso(),
+        )
+    return validate_cognition_state(document["cognition_state"])
+
+
+async def replace_character_cognition_state(state: dict) -> None:
+    """Validate and replace the singleton character cognition state."""
+
+    validated_state = validate_cognition_state(state)
+    if validated_state["state_scope"] != "character":
+        raise ValueError("character cognition state must be character-scoped")
+    db = await get_db()
+    result = await db.character_state.update_one(
+        {"_id": "global"},
+        {"$set": {"cognition_state": validated_state}},
+        upsert=False,
+    )
+    if result.matched_count != 1:
+        raise DatabaseOperationError(
+            "global character state document does not exist"
+        )
+
+
 async def upsert_character_self_image(image_doc: dict) -> None:
     """Persist the three-tier character self-image document to ``character_state``.
 
@@ -154,38 +199,10 @@ async def upsert_character_state(
     value for that field is preserved. ``updated_at_utc`` always overwrites
     ``updated_at``.
     """
-    try:
-        db = await get_db()
-        existing = await get_character_state()
-    except PyMongoError as exc:
-        raise DatabaseOperationError(
-            f"failed to load character state before update: {exc}"
-        ) from exc
-
-    if mood == "":
-        mood = existing.get("mood", "")
-    if global_vibe == "":
-        global_vibe = existing.get("global_vibe", "")
-    if reflection_summary == "":
-        reflection_summary = existing.get("reflection_summary", "")
-
-    try:
-        await db.character_state.update_one(
-            {"_id": "global"},
-            {
-                "$set": {
-                    "mood": mood,
-                    "global_vibe": global_vibe,
-                    "reflection_summary": reflection_summary,
-                    "updated_at": updated_at_utc,
-                }
-            },
-            upsert=True,
-        )
-    except PyMongoError as exc:
-        raise DatabaseOperationError(
-            f"failed to upsert character state: {exc}"
-        ) from exc
+    del mood, global_vibe, reflection_summary, updated_at_utc
+    raise DatabaseOperationError(
+        "legacy prose character-state writes are not part of cognition_core_v2"
+    )
 
 
 async def compare_and_upsert_character_state(
@@ -210,24 +227,13 @@ async def compare_and_upsert_character_state(
         otherwise ``False`` so callers can record a non-retryable stale skip.
     """
 
-    try:
-        db = await get_db()
-        result = await db.character_state.update_one(
-            {"_id": "global", "updated_at": expected_updated_at},
-            {
-                "$set": {
-                    "mood": mood,
-                    "global_vibe": global_vibe,
-                    "reflection_summary": reflection_summary,
-                    "updated_at": updated_at_utc,
-                }
-            },
-            upsert=False,
-        )
-    except PyMongoError as exc:
-        raise DatabaseOperationError(
-            f"failed to compare-and-upsert character state: {exc}"
-        ) from exc
-
-    return_value = result.matched_count > 0
-    return return_value
+    del (
+        expected_updated_at,
+        mood,
+        global_vibe,
+        reflection_summary,
+        updated_at_utc,
+    )
+    raise DatabaseOperationError(
+        "legacy prose character-state writes are not part of cognition_core_v2"
+    )

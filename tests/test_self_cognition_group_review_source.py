@@ -71,8 +71,6 @@ async def test_collect_group_chat_review_cases_builds_same_group_cases(
             "name": "Character",
             "global_user_id": "character-global",
             "platform_bot_id": "bot-1",
-            "mood": "focused",
-            "global_vibe": "steady",
         },
         max_cases=3,
         collect_reflection_inputs_func=collect_inputs,
@@ -97,8 +95,8 @@ async def test_collect_group_chat_review_cases_builds_same_group_cases(
         "self_cognition_source_channel"
     )
     assert newest_case["delivery_target"]["fallback_reason"] == ""
-    assert newest_case["current_mood"] == "focused"
-    assert newest_case["global_vibe"] == "steady"
+    assert "current_mood" not in newest_case
+    assert "global_vibe" not in newest_case
     addressed_case = next(
         case
         for case in cases

@@ -389,9 +389,20 @@ async def run_conversation_progress_record_background(
         None.
     """
 
-    linguistic_directives = state["action_directives"]["linguistic_directives"]
     character_profile = state["character_profile"]
     boundary_profile = character_profile["boundary_profile"]
+    surface_output = state.get("text_surface_output_v2")
+    if isinstance(surface_output, dict):
+        content_plan = {
+            "semantic_content": surface_output["content_plan"],
+            "surface_intent": surface_output["selected_surface_intent"],
+            "style_guidance": surface_output["style_guidance"],
+        }
+    else:
+        content_plan = {
+            "semantic_content": state["character_intent"],
+            "surface_intent": state["logical_stance"],
+        }
     scope = ConversationProgressScope(
         platform=state["platform"],
         platform_channel_id=state["platform_channel_id"],
@@ -404,7 +415,7 @@ async def run_conversation_progress_record_background(
         "prior_episode_state": state.get("conversation_episode_state"),
         "decontexualized_input": state["decontexualized_input"],
         "chat_history_recent": state["chat_history_recent"],
-        "content_plan": linguistic_directives["content_plan"],
+        "content_plan": content_plan,
         "logical_stance": state["logical_stance"],
         "character_intent": state["character_intent"],
         "final_dialog": state["final_dialog"],

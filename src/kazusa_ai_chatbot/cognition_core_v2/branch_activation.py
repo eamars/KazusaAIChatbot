@@ -1,118 +1,191 @@
-"""State-triggered goal branch selection for validation-local cognition."""
+"""Frozen goal-branch registry and goal-owned activation."""
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from dataclasses import replace
 
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
-    BranchDefinition,
-    EmotionActivation,
-)
+from kazusa_ai_chatbot.cognition_core_v2.contracts import BranchDefinition
+
+
+def _branch(
+    branch_id: str,
+    dependencies: tuple[str, ...],
+    tendencies: tuple[str, ...],
+    *,
+    goal_kind: str,
+    dependency_options: tuple[tuple[str, ...], ...] = (),
+) -> BranchDefinition:
+    """Construct one registry row with explicit goal ownership."""
+
+    return BranchDefinition(
+        branch_id=branch_id,
+        dependencies=dependencies,
+        action_tendencies=tendencies,
+        required=branch_id == "ordinary_response",
+        goal_kind=goal_kind,
+        dependency_options=dependency_options,
+    )
 
 
 DEFAULT_BRANCH_DEFINITIONS: dict[str, BranchDefinition] = {
-    "ordinary_conversation": BranchDefinition(
-        branch_id="ordinary_conversation",
-        activating_emotions=(),
-        dependencies=(),
-        action_tendencies=("respond",),
+    "ordinary_response": _branch(
+        "ordinary_response", (), ("respond",), goal_kind="ordinary_response"
     ),
-    "safety_coping": BranchDefinition(
-        branch_id="safety_coping",
-        activating_emotions=("fear",),
-        dependencies=(),
-        action_tendencies=("protect", "avoid"),
+    "relationship_connection": _branch(
+        "relationship_connection",
+        ("q:relationship_social",),
+        ("connect", "reciprocate"),
+        goal_kind="relationship_connection",
     ),
-    "obstruction_strategy": BranchDefinition(
-        branch_id="obstruction_strategy",
-        activating_emotions=("anger",),
-        dependencies=(),
-        action_tendencies=("confront", "repair"),
+    "bond_protection": _branch(
+        "bond_protection",
+        ("q:relationship_social", "q:goal_threat_outcome"),
+        ("protect", "verify"),
+        goal_kind="bond_protection",
     ),
-    "loss_processing": BranchDefinition(
-        branch_id="loss_processing",
-        activating_emotions=("sadness",),
-        dependencies=(),
-        action_tendencies=("grieve", "withdraw"),
+    "trust_verification": _branch(
+        "trust_verification",
+        ("q:relationship_social", "q:goal_threat_outcome"),
+        ("verify", "ask"),
+        goal_kind="trust_verification",
     ),
-    "bond_protection": BranchDefinition(
-        branch_id="bond_protection",
-        activating_emotions=("love_attachment", "jealousy", "loneliness"),
-        dependencies=(),
-        action_tendencies=("connect", "protect"),
+    "autonomy_boundary": _branch(
+        "autonomy_boundary",
+        ("q:relationship_social",),
+        ("set_boundary", "refuse"),
+        goal_kind="autonomy_boundary",
+        dependency_options=(
+            ("q:relationship_social",),
+            ("q:moral_identity",),
+        ),
     ),
-    "moral_repair": BranchDefinition(
-        branch_id="moral_repair",
-        activating_emotions=("guilt", "shame", "embarrassment"),
-        dependencies=(),
-        action_tendencies=("repair", "apologize"),
+    "safety_coping": _branch(
+        "safety_coping",
+        ("q:goal_threat_outcome",),
+        ("protect", "cope"),
+        goal_kind="safety",
     ),
-    "epistemic_exploration": BranchDefinition(
-        branch_id="epistemic_exploration",
-        activating_emotions=("curiosity", "awe"),
-        dependencies=(),
-        action_tendencies=("explore", "ask"),
+    "obstruction_strategy": _branch(
+        "obstruction_strategy",
+        ("q:goal_threat_outcome",),
+        ("confront", "repair"),
+        goal_kind="obstruction_resolution",
     ),
-    "meaning_reconstruction": BranchDefinition(
-        branch_id="meaning_reconstruction",
-        activating_emotions=("ennui_existential_angst", "nostalgia"),
-        dependencies=(),
-        action_tendencies=("reconstruct_meaning", "remember"),
+    "loss_recovery": _branch(
+        "loss_recovery",
+        ("q:goal_threat_outcome",),
+        ("recover", "grieve"),
+        goal_kind="loss_recovery",
     ),
-    "social_care": BranchDefinition(
-        branch_id="social_care",
-        activating_emotions=("compassion_empathy", "gratitude"),
-        dependencies=(),
-        action_tendencies=("support", "reciprocate"),
+    "moral_repair": _branch(
+        "moral_repair",
+        ("q:event_agency", "q:moral_identity"),
+        ("repair", "apologize"),
+        goal_kind="moral_repair",
+    ),
+    "social_care": _branch(
+        "social_care",
+        ("q:event_agency", "q:moral_identity"),
+        ("support", "care"),
+        goal_kind="social_care",
+        dependency_options=(
+            ("q:event_agency", "q:moral_identity"),
+            ("q:event_agency", "q:goal_threat_outcome"),
+        ),
+    ),
+    "reciprocal_response": _branch(
+        "reciprocal_response",
+        ("q:event_agency", "q:goal_threat_outcome"),
+        ("reciprocate", "respond"),
+        goal_kind="reciprocity",
+    ),
+    "epistemic_exploration": _branch(
+        "epistemic_exploration",
+        ("q:epistemic_comparison_memory",),
+        ("explore", "ask"),
+        goal_kind="epistemic_exploration",
+    ),
+    "meaning_reconstruction": _branch(
+        "meaning_reconstruction",
+        ("q:existential_drive",),
+        ("reconstruct_meaning", "remember"),
+        goal_kind="meaning_reconstruction",
+    ),
+    "self_improvement": _branch(
+        "self_improvement",
+        ("q:epistemic_comparison_memory",),
+        ("learn", "improve"),
+        goal_kind="self_improvement",
     ),
 }
-MAX_GOAL_BRANCHES = 6
+MAX_GOAL_BRANCHES = 14
 
 
 def select_preliminary_branches(
-    activations: Mapping[str, EmotionActivation],
+    goals: Iterable[Mapping[str, object]] | Mapping[str, object],
     definitions: Mapping[str, BranchDefinition] = DEFAULT_BRANCH_DEFINITIONS,
 ) -> list[BranchDefinition]:
-    """Select branches supported by currently committed causal activations.
+    """Select ordinary response plus branches for active persistent goals."""
 
-    Args:
-        activations: Deterministic emotion projections from committed state.
-        definitions: Explicit local branch registry used for validation.
-
-    Returns:
-        Ready branch definitions, or the ordinary branch when none activate.
-    """
-
-    active_emotions = {
-        emotion_id
-        for emotion_id, activation in activations.items()
-        if activation.activation > 0.0 and activation.trend != "inactive"
-    }
-    selected = [
+    goal_kinds = _active_goal_kinds(goals)
+    selected = [definitions["ordinary_response"]]
+    selected.extend(
         definition
         for definition in definitions.values()
-        if definition.activating_emotions
-        and active_emotions.intersection(definition.activating_emotions)
-    ]
-    if not selected and "ordinary_conversation" in definitions:
-        selected.append(definitions["ordinary_conversation"])
-    ordered_definitions = sorted(selected, key=lambda definition: definition.branch_id)
-    bounded_definitions = ordered_definitions[:MAX_GOAL_BRANCHES]
-    return bounded_definitions
+        if definition.branch_id != "ordinary_response"
+        and definition.goal_kind in goal_kinds
+    )
+    return sorted(selected, key=lambda definition: definition.branch_id)[:MAX_GOAL_BRANCHES]
 
 
 def select_final_branches(
     preliminary: Iterable[BranchDefinition],
-    activations: Mapping[str, EmotionActivation],
+    goals: Iterable[Mapping[str, object]] | Mapping[str, object],
+    question_ids: Iterable[str] = (),
     definitions: Mapping[str, BranchDefinition] = DEFAULT_BRANCH_DEFINITIONS,
 ) -> list[BranchDefinition]:
-    """Add semantic-dependent branches while preserving a stable branch order."""
+    """Add active branches whose current appraisal dependencies are complete."""
 
-    selected_by_id = {definition.branch_id: definition for definition in preliminary}
-    for definition in select_preliminary_branches(activations, definitions):
-        selected_by_id.setdefault(definition.branch_id, definition)
-    selected_definitions = sorted(
-        selected_by_id.values(),
-        key=lambda definition: definition.branch_id,
-    )
-    return selected_definitions
+    selected = {definition.branch_id: definition for definition in preliminary}
+    available_questions = set(question_ids)
+    active_goal_kinds = _active_goal_kinds(goals)
+    for definition in definitions.values():
+        if definition.branch_id == "ordinary_response":
+            continue
+        if definition.goal_kind not in active_goal_kinds:
+            continue
+        resolved = _resolve_dependencies(definition, available_questions)
+        if resolved is not None:
+            selected.setdefault(definition.branch_id, resolved)
+    return sorted(selected.values(), key=lambda definition: definition.branch_id)[:MAX_GOAL_BRANCHES]
+
+
+def _active_goal_kinds(
+    goals: Iterable[Mapping[str, object]] | Mapping[str, object],
+) -> set[str]:
+    """Return goal kinds whose persistent state is pursuing or blocked."""
+
+    rows = goals.get("goals", []) if isinstance(goals, Mapping) else goals
+    if not isinstance(rows, Iterable):
+        return set()
+    return {
+        str(goal["goal_kind"])
+        for goal in rows
+        if isinstance(goal, Mapping)
+        and goal.get("status") in {"pursuing", "blocked"}
+        and isinstance(goal.get("goal_kind"), str)
+    }
+
+
+def _resolve_dependencies(
+    definition: BranchDefinition,
+    available_questions: set[str],
+) -> BranchDefinition | None:
+    """Choose the first complete dependency option for a branch."""
+
+    options = definition.dependency_options or (definition.dependencies,)
+    for option in options:
+        if set(option).issubset(available_questions):
+            return replace(definition, dependencies=option)
+    return None

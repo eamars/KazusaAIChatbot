@@ -17,12 +17,6 @@ from kazusa_ai_chatbot.config import (
     CONSOLIDATION_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.consolidation.persistence import db_writer
-from kazusa_ai_chatbot.consolidation.reflection import (
-    character_state_reviewer,
-    global_state_updater,
-    relationship_profile_reviewer,
-    relationship_recorder,
-)
 from kazusa_ai_chatbot.consolidation.character_self_guidance import (
     character_self_guidance_specialist,
 )
@@ -55,8 +49,6 @@ from kazusa_ai_chatbot.utils import parse_llm_json_output, text_or_empty
 logger = logging.getLogger(__name__)
 
 CONSOLIDATION_LANE_NAMES = (
-    "character_state",
-    "relationship_profile",
     "user_memory_units",
     "active_commitment",
     "character_self_guidance",
@@ -71,8 +63,6 @@ _FORBIDDEN_ROUTER_TASK_KEYS = frozenset(
 _MAX_ROUTER_TASKS = 4
 
 _LANE_DESCRIPTIONS = {
-    "character_state": "Update the active character's durable mood, vibe, or self-state.",
-    "relationship_profile": "Update the relationship profile for the current real user.",
     "user_memory_units": "Store durable facts, patterns, shifts, or milestones about the current real user.",
     "active_commitment": "Store an accepted promise or ongoing rule for the current user specifically.",
     "character_self_guidance": "Store accepted general future behavior guidance owned by the character.",
@@ -97,8 +87,8 @@ owned by later deterministic stages.
 # Decision Procedure
 1. Read the source_views and decide whether the episode contains a durable
    memory update after the completed response.
-2. Identify the owner and scope of that update: current user, relationship,
-   active character, group/channel style, or approved reflection promotion.
+2. Identify the owner and scope of that update: current user, character
+   guidance, group/channel style, or approved reflection promotion.
 3. Select the matching lane from lane_roster. If no roster lane owns the
    durable update, return an empty lane_tasks list.
 4. For accepted future behavior rules, include both the request source and the
@@ -107,18 +97,10 @@ owned by later deterministic stages.
    only acknowledges, remembers, respects, or accommodates it, route the
    user-owned lane. Treat the character's accommodation as support for that
    user memory rather than a separate character behavior rule.
-6. When the durable subject is feedback about the current relationship or a
-   local repair of the recent interaction, route the relationship-owned lane.
-   Acknowledging discomfort or promising to be more careful in that local
-   repair is evidence for relationship_profile unless the final dialog accepts
-   a standalone general future behavior rule.
-7. Keep the router coarse. The selected specialist will write or reject the
+6. Keep the router coarse. The selected specialist will write or reject the
    actual memory candidate.
 
 # Lane Ownership
-- relationship_profile: relationship feedback for the current real user,
-  including trust, comfort, disappointment, repair, tension, or how the recent
-  character behavior landed with the user.
 - user_memory_units: durable information about the current real user, such as
   personal facts, preferences, habits, recent shifts, milestones, or updates to
   recalled user memory.
@@ -128,8 +110,6 @@ owned by later deterministic stages.
 - character_self_guidance: accepted future behavior guidance where the future
   behavior itself is owned by the active character generally across future
   social situations.
-- character_state: accepted or evidenced character self-continuity, durable
-  mood, vibe, identity, trait, or self-description.
 - interaction_style_image: user-style or group/channel interaction norms when
   the target plan and source role make that style target available.
 - shared_memory_promotion: approved reflection or shared-memory promotion
@@ -202,10 +182,6 @@ def build_lane_roster(
         roster.append(_roster_entry("shared_memory_promotion"))
         return roster
 
-    if "character_state" in write_lanes:
-        roster.append(_roster_entry("character_state"))
-    if "relationship_insight" in write_lanes or "affinity" in write_lanes:
-        roster.append(_roster_entry("relationship_profile"))
     if "user_memory_units" in write_lanes:
         roster.append(_roster_entry("user_memory_units"))
         roster.append(_roster_entry("active_commitment"))
@@ -573,12 +549,6 @@ def _target_alias_and_write_lane(
 ) -> tuple[str, str]:
     """Map consolidation lane names to existing target-plan write lanes."""
 
-    if lane == "character_state":
-        return_value = (CHARACTER_TARGET_ALIAS, "character_state")
-        return return_value
-    if lane == "relationship_profile":
-        return_value = (USER_TARGET_ALIAS, "relationship_insight")
-        return return_value
     if lane in {"user_memory_units", "active_commitment"}:
         return_value = (USER_TARGET_ALIAS, "user_memory_units")
         return return_value
@@ -608,12 +578,6 @@ def _target_alias_and_write_lane(
 def _ensure_writer_defaults(working_state: dict[str, Any]) -> None:
     """Populate writer state defaults produced by omitted lane specialists."""
 
-    working_state.setdefault("mood", "")
-    working_state.setdefault("global_vibe", "")
-    working_state.setdefault("reflection_summary", "")
-    working_state.setdefault("subjective_appraisals", [])
-    working_state.setdefault("affinity_delta", 0)
-    working_state.setdefault("last_relationship_insight", "")
     working_state.setdefault("new_facts", [])
     working_state.setdefault("future_promises", [])
     working_state.setdefault("character_self_guidance", {})
@@ -628,60 +592,11 @@ async def _run_lane_specialists(
     """Run existing lane-local specialists before persistence."""
 
     accepted_lane_set = set(accepted_lanes)
-    if "character_state" in accepted_lane_set:
-        character_candidate = await global_state_updater(working_state)
-        character_patch = await character_state_reviewer(
-            working_state,
-            character_candidate,
-        )
-        if _character_state_patch_has_content(character_patch):
-            working_state.update(character_patch)
-        else:
-            _disable_accepted_lane(
-                working_state,
-                accepted_lanes,
-                "character_state",
-            )
-    if "relationship_profile" in accepted_lane_set:
-        relationship_candidate = await relationship_recorder(working_state)
-        relationship_patch = await relationship_profile_reviewer(
-            working_state,
-            relationship_candidate,
-        )
-        if _relationship_profile_patch_has_content(relationship_patch):
-            working_state.update(relationship_patch)
-        else:
-            _disable_accepted_lane(
-                working_state,
-                accepted_lanes,
-                "relationship_profile",
-            )
     if "character_self_guidance" in accepted_lane_set:
         self_guidance_patch = await character_self_guidance_specialist(
             working_state
         )
         working_state.update(self_guidance_patch)
-
-
-def _character_state_patch_has_content(patch: Mapping[str, Any]) -> bool:
-    """Return whether a reviewed character-state patch can be persisted."""
-
-    return_value = any(
-        text_or_empty(patch.get(field_name))
-        for field_name in ("mood", "global_vibe", "reflection_summary")
-    )
-    return return_value
-
-
-def _relationship_profile_patch_has_content(patch: Mapping[str, Any]) -> bool:
-    """Return whether a reviewed relationship patch can be persisted."""
-
-    raw_appraisals = patch.get("subjective_appraisals")
-    has_appraisals = isinstance(raw_appraisals, list) and bool(raw_appraisals)
-    has_delta = patch.get("affinity_delta", 0) not in (0, None, "")
-    has_insight = bool(text_or_empty(patch.get("last_relationship_insight")))
-    return_value = has_appraisals or has_delta or has_insight
-    return return_value
 
 
 def _disable_accepted_lane(

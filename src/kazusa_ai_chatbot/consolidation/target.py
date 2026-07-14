@@ -8,12 +8,9 @@ from typing import Any, Literal, TypedDict
 
 TargetKind = Literal["user", "group_channel", "character", "internal"]
 WriteLane = Literal[
-    "relationship_insight",
     "user_memory_units",
-    "affinity",
     "user_style_image",
     "group_channel_style_image",
-    "character_state",
     "character_self_image",
     "character_self_guidance",
     "shared_memory_promotion",
@@ -54,18 +51,9 @@ GROUP_CHANNEL_TARGET_ALIAS = "group_channel"
 CHARACTER_TARGET_ALIAS = "character"
 INTERNAL_TARGET_ALIAS = "internal"
 
-USER_WRITE_LANES = [
-    "relationship_insight",
-    "user_memory_units",
-    "affinity",
-    "user_style_image",
-]
+USER_WRITE_LANES = ["user_memory_units", "user_style_image"]
 GROUP_CHANNEL_WRITE_LANES = ["group_channel_style_image"]
-CHARACTER_WRITE_LANES = [
-    "character_state",
-    "character_self_image",
-    "character_self_guidance",
-]
+CHARACTER_WRITE_LANES = ["character_self_image", "character_self_guidance"]
 INTERNAL_WRITE_LANES = ["audit", "shared_memory_promotion"]
 
 SYNTHETIC_USER_IDS = frozenset(
@@ -286,9 +274,14 @@ def _validate_runtime_user_profile(
         raise ConsolidationTargetValidationError(
             f"user target {global_user_id!r} missing user_profile"
         )
-    if "affinity" not in user_profile:
+    cognition_state = user_profile.get("cognition_state")
+    if not isinstance(cognition_state, Mapping):
         raise ConsolidationTargetValidationError(
-            f"user target {global_user_id!r} missing user_profile.affinity"
+            f"user target {global_user_id!r} missing user_profile.cognition_state"
+        )
+    if cognition_state.get("owner_user_id") != global_user_id:
+        raise ConsolidationTargetValidationError(
+            f"user target {global_user_id!r} has mismatched cognition_state owner"
         )
     profile_global_user_id = user_profile.get("global_user_id")
     if profile_global_user_id != global_user_id:

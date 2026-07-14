@@ -32,6 +32,8 @@ MAX_RESOLVER_RAG_EVIDENCE_SUMMARY_CHARS = 320
 MAX_RESOLVER_RAG_EVIDENCE_ITEMS = 4
 MAX_RESOLVER_KNOWLEDGE_ITEMS = 8
 
+RESOLVER_WORKING_STATE_VERSION = "resolver_working_state.v2"
+
 _RAW_MARKER_RE = re.compile(r"\braw-[A-Za-z0-9_-]+")
 
 ALLOWED_RESOLVER_CAPABILITIES = frozenset((
@@ -79,6 +81,19 @@ ALLOWED_GOAL_DELIVERABLE_STATUSES = frozenset((
 
 class ResolverValidationError(ValueError):
     """Raised when a resolver contract payload is structurally invalid."""
+
+
+class ResolverWorkingStateV2(TypedDict):
+    """Episode-local V2 recurrence state carried without a database reload."""
+
+    schema_version: Literal["resolver_working_state.v2"]
+    origin_scope: Literal["user", "character"]
+    cycle_index: int
+    max_cycles: int
+    cognition_output: NotRequired[dict]
+    pending_requests: list[dict]
+    observations: list[dict]
+    terminal: bool
 
 
 class ResolverCapabilityRequestV1(TypedDict):

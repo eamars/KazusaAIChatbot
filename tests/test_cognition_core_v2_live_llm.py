@@ -5,15 +5,18 @@ from pathlib import Path
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2 import run_cognition_chain
+from kazusa_ai_chatbot.cognition_core_v2 import (
+    build_acquaintance_user_state,
+    build_character_production_state,
+    run_cognition,
+)
 from kazusa_ai_chatbot.cognition_core_v2.diagnostics import (
-    reset_local_state,
     reset_validation_capture,
     validation_capture_snapshot,
     write_validation_capture,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
-    build_cognition_chain_services,
+    build_cognition_core_services,
 )
 
 _FIXTURE_PATH = Path("tests/fixtures/cognition_core_v2_emotion_lifecycle_cases.json")
@@ -54,112 +57,58 @@ def _cases() -> list[dict[str, object]]:
     return rows
 
 
-def _chain_input() -> dict[str, object]:
-    """Build a self-contained prompt-safe V1 input for a live V2 case."""
+def _chain_input(
+    message: str,
+    *,
+    episode_id: str,
+    mutable_state: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Build one native V2 input for a live causal lifecycle case."""
 
-    payload = {
-        "schema_version": "cognition_chain_input.v1",
+    updated_at = "2026-07-14T00:00:00Z"
+    character = build_character_production_state(updated_at=updated_at)
+    semantic_text = message or "no new causal event"
+    state = mutable_state or build_acquaintance_user_state(
+        global_user_id="live-v2-user",
+        updated_at=updated_at,
+    )
+    return {
+        "schema_version": "cognition_core_input.v2",
         "episode": {
-            "episode_id": "live-v2-case",
+            "episode_id": episode_id,
             "trigger_source": "user_message",
-            "input_sources": ["dialog_text"],
-            "output_mode": "live_response",
-            "model_visible_percepts": [{
-                "percept_id": "live-v2-percept",
-                "input_source": "dialog_text",
-                "content": "",
-                "metadata_summary": [],
-            }],
-            "target_scope_summary": "live v2 validation scope",
-            "origin_summary": "live causal lifecycle evidence",
+            "output_mode": "visible_reply",
+            "semantic_scene": semantic_text,
+            "semantic_temporal_context": "immediate",
         },
-        "character": {
-            "character_global_id": "live-v2-character",
-            "name": "Validation Character",
-            "description": "validation-only character",
-            "gender": "unknown",
-            "age": "unknown",
-            "birthday": "unknown",
-            "backstory": "none",
-            "personality_brief": {},
-            "boundary_profile": {},
-            "linguistic_texture_profile": {},
-            "mood": "neutral",
-            "global_vibe": "calm",
+        "state_scope": "user",
+        "mutable_state": state,
+        "character_constraints": {
+            "drives": character["drives"],
+            "standards": character["standards"],
+            "meaning_state": character["meaning_state"],
         },
-        "current_user": {
-            "global_user_id": "live-v2-user",
-            "display_name": "Validation User",
-            "affinity": "neutral",
-            "affinity_level": "known",
-            "last_relationship_insight": "none",
-            "memory_context": {
-                "durable_profile_summary": "",
-                "relationship_summary": "",
-                "recent_commitments_summary": "",
-                "known_preferences_summary": "",
+        "evidence": [{
+            "evidence_handle": "ev1",
+            "evidence_ref": {
+                "source_kind": "episode",
+                "source_id": f"episode:{episode_id}",
+                "occurred_at": updated_at,
+                "semantic_summary": semantic_text,
             },
-        },
-        "current_event": {
-            "user_input": "",
-            "decontextualized_input": "",
-            "indirect_speech_context": "",
-            "referents": [],
-            "media_observations": [],
-            "reply_context_summary": "",
-            "prompt_message_context_summary": "",
-        },
-        "scene": {
-            "platform": "debug",
-            "channel_type": "dm",
-            "channel_topic": "",
-            "local_time_context": {"time_of_day": "day"},
-            "storage_timestamp_utc": "2026-07-13T00:00:00Z",
-            "interaction_history_recent": [],
-        },
-        "conversation_context": {
-            "conversation_progress": {},
-            "promoted_reflection_context": {},
-            "internal_monologue_residue_context": "",
-            "previous_action_summary": "",
-        },
-        "evidence": {
-            "rag_answer": "",
-            "current_user_rag_bundle": "",
-            "memory_evidence": [],
-            "conversation_evidence": [],
-            "external_evidence": [],
-            "recall_evidence": [],
-            "supervisor_trace": [],
-        },
-        "resolver": {
-            "resolver_context": "",
-            "pending_resume": "",
-            "goal_progress": "",
-            "recent_observations": [],
-            "max_projected_observations": 3,
-        },
-        "available_actions": [{
-            "capability": "speak",
-            "available": True,
-            "visibility": "public",
-            "semantic_input_summary": "visible text surface",
-            "output_kind": "semantic_action_request",
+            "semantic_text": semantic_text,
+            "visible_to": ["cognition", "surface"],
         }],
-        "runtime_context": {
-            "language_policy": "english",
-            "visual_directives_enabled": False,
-            "task_willingness_boundary_enabled": False,
-            "max_action_requests": 1,
-            "max_resolver_requests": 1,
-            "background_work_output_char_limit": 1000,
-        },
-        "action_selection_context": {
-            "coding_runs": [],
-            "group_engagement_action_context": {},
+        "direct_facts": [],
+        "available_actions": [],
+        "available_resolver_capabilities": [],
+        "scene_context": {
+            "channel_scope": "private",
+            "character_role": "companion",
+            "semantic_scene": semantic_text,
+            "semantic_temporal_context": "immediate",
         },
     }
-    return payload
 
 
 @pytest.mark.live_llm
@@ -173,25 +122,23 @@ async def test_live_v2_lifecycle_case_writes_complete_raw_capture(
     case_id = case["case_id"]
     if not isinstance(case_id, str):
         raise TypeError("lifecycle case id must be text")
-    payload = _chain_input()
+    payload = _chain_input(
+        "",
+        episode_id=f"live-v2-{case_id}",
+    )
     episode = payload["episode"]
-    current_event = payload["current_event"]
-    if not isinstance(episode, dict) or not isinstance(current_event, dict):
-        raise TypeError("contract fixture must provide mutable episode and event")
     message = _CASE_MESSAGES[case_id]
-    episode["episode_id"] = f"live-v2-{case_id}"
-    episode["origin_summary"] = "live causal lifecycle evidence"
-    current_event["user_input"] = message
-    current_event["decontextualized_input"] = message
-    await reset_local_state()
     reset_validation_capture(case_id)
-    services = build_cognition_chain_services()
+    services = build_cognition_core_services()
 
-    output = await run_cognition_chain(payload, services)
+    payload["episode"]["semantic_scene"] = message
+    payload["evidence"][0]["semantic_text"] = message
+    payload["evidence"][0]["evidence_ref"]["semantic_summary"] = message
+    output = await run_cognition(payload, services)
     capture = validation_capture_snapshot()
     artifact_path = write_validation_capture()
 
-    assert output["schema_version"] == "cognition_chain_output.v1"
+    assert output["schema_version"] == "cognition_core_output.v2"
     assert capture is not None
     assert capture["case_id"] == case_id
     assert artifact_path.exists()
@@ -208,44 +155,36 @@ async def test_live_v2_lifecycle_sequence_writes_complete_raw_capture(
     case_id = case["case_id"]
     if not isinstance(case_id, str):
         raise TypeError("lifecycle case id must be text")
-    await reset_local_state()
     reset_validation_capture(f"lifecycle-sequence-{case_id}")
-    services = build_cognition_chain_services()
+    services = build_cognition_core_services()
     outputs = []
+    mutable_state = None
     for phase, message in (
         ("baseline", _NEUTRAL_MESSAGE),
         ("begin", _CASE_MESSAGES[case_id]),
         ("sustain", _CASE_MESSAGES[case_id]),
         ("fade", _RESOLUTION_MESSAGE),
     ):
-        payload = _chain_input()
-        episode = payload["episode"]
-        current_event = payload["current_event"]
-        if not isinstance(episode, dict) or not isinstance(current_event, dict):
-            raise TypeError("contract fixture must provide mutable episode and event")
-        episode["episode_id"] = f"live-v2-{case_id}-{phase}"
-        episode["origin_summary"] = "live causal lifecycle sequence"
-        current_event["user_input"] = message
-        current_event["decontextualized_input"] = message
-        output = await run_cognition_chain(payload, services)
+        payload = _chain_input(
+            message,
+            episode_id=f"live-v2-{case_id}-{phase}",
+            mutable_state=mutable_state,
+        )
+        output = await run_cognition(payload, services)
+        mutable_state = output["state_update"]["replacement_state"]
         outputs.append({"phase": phase, "output": output})
-    await reset_local_state()
-    negative_payload = _chain_input()
-    negative_episode = negative_payload["episode"]
-    negative_event = negative_payload["current_event"]
-    if not isinstance(negative_episode, dict) or not isinstance(negative_event, dict):
-        raise TypeError("contract fixture must provide mutable episode and event")
-    negative_episode["episode_id"] = f"live-v2-{case_id}-negative-control"
-    negative_episode["origin_summary"] = "live causal lifecycle sequence"
-    negative_event["user_input"] = _NEUTRAL_MESSAGE
-    negative_event["decontextualized_input"] = _NEUTRAL_MESSAGE
-    negative_output = await run_cognition_chain(negative_payload, services)
+    negative_payload = _chain_input(
+        _NEUTRAL_MESSAGE,
+        episode_id=f"live-v2-{case_id}-negative-control",
+        mutable_state=mutable_state,
+    )
+    negative_output = await run_cognition(negative_payload, services)
     outputs.append({"phase": "negative_control", "output": negative_output})
     capture = validation_capture_snapshot()
     artifact_path = write_validation_capture()
 
     assert all(
-        entry["output"]["schema_version"] == "cognition_chain_output.v1"
+        entry["output"]["schema_version"] == "cognition_core_output.v2"
         for entry in outputs
     )
     assert capture is not None

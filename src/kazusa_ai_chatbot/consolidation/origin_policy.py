@@ -9,12 +9,8 @@ from kazusa_ai_chatbot.consolidation.origin import (
 )
 
 WritePolicyKey = Literal[
-    "character_state",
-    "relationship_insight",
     "user_memory_units",
-    "affinity",
     "group_channel_style_image",
-    "character_image",
     "character_self_guidance",
     "cache_invalidation",
 ]
@@ -30,12 +26,8 @@ class WritePolicyDecision(TypedDict):
 class ConsolidationWritePolicy(TypedDict):
     """Write-policy decisions for every consolidation persistence category."""
 
-    character_state: WritePolicyDecision
-    relationship_insight: WritePolicyDecision
     user_memory_units: WritePolicyDecision
-    affinity: WritePolicyDecision
     group_channel_style_image: WritePolicyDecision
-    character_image: WritePolicyDecision
     character_self_guidance: WritePolicyDecision
     cache_invalidation: WritePolicyDecision
 
@@ -90,12 +82,8 @@ def build_consolidation_write_policy(
         reason = _DENIED_REASON
 
     policy: ConsolidationWritePolicy = {
-        "character_state": {"allowed": allowed, "reason": reason},
-        "relationship_insight": {"allowed": allowed, "reason": reason},
         "user_memory_units": {"allowed": allowed, "reason": reason},
-        "affinity": {"allowed": allowed, "reason": reason},
         "group_channel_style_image": {"allowed": allowed, "reason": reason},
-        "character_image": {"allowed": allowed, "reason": reason},
         "character_self_guidance": {"allowed": allowed, "reason": reason},
         "cache_invalidation": {"allowed": allowed, "reason": reason},
     }

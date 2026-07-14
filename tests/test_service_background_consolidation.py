@@ -1494,7 +1494,7 @@ async def test_graph_failure_does_not_stop_queue_worker(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_background_consolidation_refreshes_cached_character_state(monkeypatch):
-    """Successful character-state writes should update the service cache."""
+    """Consolidation cannot author the cognition-owned character state cache."""
 
     monkeypatch.setattr(
         service_module,
@@ -1525,12 +1525,11 @@ async def test_background_consolidation_refreshes_cached_character_state(monkeyp
         "local_time_context": _CONSOLIDATION_TURN_CLOCK["local_time_context"],
     })
 
-    assert service_module._runtime_character_state["mood"] == "Curious"
-    assert service_module._runtime_character_state["global_vibe"] == "Focused"
-    assert (
-        service_module._runtime_character_state["reflection_summary"]
-        == "The previous turn left her attentive."
-    )
+    assert service_module._runtime_character_state == {
+        "mood": "old mood",
+        "global_vibe": "old vibe",
+        "reflection_summary": "old reflection",
+    }
 
 
 @pytest.mark.asyncio

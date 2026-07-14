@@ -2,15 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import timedelta
 
-from kazusa_ai_chatbot.config import (
-    AFFINITY_DECREMENT_BREAKPOINTS,
-    AFFINITY_INCREMENT_BREAKPOINTS,
-    AFFINITY_RAW_DEAD_ZONE,
-)
 from kazusa_ai_chatbot.consolidation.target import (
     CHARACTER_TARGET_ALIAS,
     GROUP_CHANNEL_TARGET_ALIAS,
@@ -27,14 +21,6 @@ from kazusa_ai_chatbot.consolidation.character_self_guidance import (
 )
 from kazusa_ai_chatbot.db import (
     DatabaseOperationError,
-    get_character_runtime_state,
-    update_affinity,
-    update_last_relationship_insight,
-    upsert_character_self_image,
-    upsert_character_state,
-)
-from kazusa_ai_chatbot.consolidation.images import (
-    _update_character_image,
 )
 from kazusa_ai_chatbot.consolidation.memory_units import (
     update_user_memory_units_from_state,
@@ -183,43 +169,6 @@ def _group_channel_style_image_payload(
     return payload
 
 
-def process_affinity_delta(current_affinity: int, raw_delta: int) -> int:
-    """Scale a raw affinity delta by direction-specific breakpoints.
-
-    Args:
-        current_affinity: Current affinity score (0-1000).
-        raw_delta: Raw delta from the relationship recorder (-5..+5).
-
-    Returns:
-        Scaled delta with sign preserved.
-    """
-    if raw_delta == 0:
-        return 0
-
-    if abs(raw_delta) <= AFFINITY_RAW_DEAD_ZONE:
-        return 0
-
-    if raw_delta > 0:
-        breakpoints = AFFINITY_INCREMENT_BREAKPOINTS
-    else:
-        breakpoints = AFFINITY_DECREMENT_BREAKPOINTS
-
-    scaling_factor = 1.0
-    for i in range(len(breakpoints) - 1):
-        x1, y1 = breakpoints[i]
-        x2, y2 = breakpoints[i + 1]
-
-        if x1 <= current_affinity <= x2:
-            if x2 == x1:
-                scaling_factor = y1
-            else:
-                scaling_factor = y1 + (current_affinity - x1) * (y2 - y1) / (x2 - x1)
-            break
-
-    return_value = int(round(raw_delta * scaling_factor, 0))
-    return return_value
-
-
 def _default_future_promise_due_time(storage_timestamp_utc: str) -> str:
     """Return the immediate fallback due time for untimed future promises.
 
@@ -323,68 +272,7 @@ async def db_writer(state: ConsolidatorState) -> dict:
         origin=state["consolidation_origin"],
     )
 
-    # ── Step 1: character_state (mood / vibe / reflection) ──────────
-    mood = state.get("mood", "")
-    global_vibe = state.get("global_vibe", "")
-    reflection_summary = state.get("reflection_summary", "")
-    character_state_allowed = _write_intent_is_allowed(
-        state,
-        target_alias=CHARACTER_TARGET_ALIAS,
-        write_lane="character_state",
-        payload={
-            "mood": mood,
-            "global_vibe": global_vibe,
-            "reflection_summary": reflection_summary,
-        },
-    )
-    if (
-        origin_policy["character_state"]["allowed"]
-        and character_state_allowed
-        and _consolidation_lane_is_enabled(state, "character_state")
-    ):
-        try:
-            await upsert_character_state(
-                mood=mood,
-                global_vibe=global_vibe,
-                reflection_summary=reflection_summary,
-                updated_at_utc=storage_timestamp_utc,
-            )
-            write_log["character_state"] = True
-        except DatabaseOperationError as exc:
-            logger.exception(f"db_writer: failed to upsert character_state: {exc}")
-            write_log["character_state"] = False
-    else:
-        write_log["character_state"] = False
-
-    # ── Step 2: last relationship insight ───────────────────────────
-    last_relationship_insight = state.get("last_relationship_insight", "")
-    relationship_insight_allowed = _write_intent_is_allowed(
-        state,
-        target_alias=USER_TARGET_ALIAS,
-        write_lane="relationship_insight",
-        payload={"last_relationship_insight": last_relationship_insight},
-    )
-    if global_user_id and last_relationship_insight:
-        if (
-            origin_policy["relationship_insight"]["allowed"]
-            and relationship_insight_allowed
-            and _consolidation_lane_is_enabled(state, "relationship_profile")
-        ):
-            try:
-                await update_last_relationship_insight(
-                    global_user_id,
-                    last_relationship_insight,
-                )
-                write_log["relationship_insight"] = True
-            except DatabaseOperationError as exc:
-                logger.exception(
-                    f"db_writer: failed to update_last_relationship_insight: {exc}"
-                )
-                write_log["relationship_insight"] = False
-        else:
-            write_log["relationship_insight"] = False
-
-    # ── Step 3: unified user-memory units ────────────────────────────
+    # ── Step 1: unified user-memory units ────────────────────────────
     user_memory_units_allowed = _write_intent_is_allowed(
         state,
         target_alias=USER_TARGET_ALIAS,
@@ -434,45 +322,7 @@ async def db_writer(state: ConsolidatorState) -> dict:
     else:
         write_log["user_memory_units"] = False
 
-    # ── Step 4: affinity (direction-scaled) ─────────────────────────
-    affinity_allowed = _write_intent_is_allowed(
-        state,
-        target_alias=USER_TARGET_ALIAS,
-        write_lane="affinity",
-        payload={"affinity_delta": state.get("affinity_delta", 0) or 0},
-    )
-    raw_affinity_delta = state.get("affinity_delta", 0) or 0
-    user_affinity_score: int | None = None
-    processed_affinity_delta = 0
-    if global_user_id:
-        if (
-            origin_policy["affinity"]["allowed"]
-            and affinity_allowed
-            and _consolidation_lane_is_enabled(state, "relationship_profile")
-        ):
-            user_profile = state["user_profile"]
-            user_affinity_score = int(user_profile["affinity"])
-            processed_affinity_delta = process_affinity_delta(
-                user_affinity_score,
-                raw_affinity_delta,
-            )
-            try:
-                await update_affinity(global_user_id, processed_affinity_delta)
-                write_log["affinity"] = True
-            except DatabaseOperationError as exc:
-                logger.exception(f"db_writer: failed to update_affinity: {exc}")
-                write_log["affinity"] = False
-        else:
-            write_log["affinity"] = False
-
-    if user_affinity_score is not None:
-        logger.debug(
-            f"User {user_name}(@{global_user_id}) affinity "
-            f"{user_affinity_score} "
-            f"-> {user_affinity_score + processed_affinity_delta}"
-        )
-
-    # ── Step 5: group-channel image ─────────────────────────────────
+    # ── Step 2: group-channel image ─────────────────────────────────
     has_group_channel_target = False
     for target in _target_plan(state)["targets"]:
         if target["target_alias"] == GROUP_CHANNEL_TARGET_ALIAS:
@@ -515,68 +365,7 @@ async def db_writer(state: ConsolidatorState) -> dict:
     elif has_group_channel_target:
         write_log["group_channel_style_image"] = False
 
-    # ── Step 6: character image ──────────────────────────────────────
-    character_image_allowed = _write_intent_is_allowed(
-        state,
-        target_alias=CHARACTER_TARGET_ALIAS,
-        write_lane="character_self_image",
-        payload={"reflection_summary": state.get("reflection_summary", "")},
-    )
-    if (
-        origin_policy["character_image"]["allowed"]
-        and character_image_allowed
-        and _consolidation_lane_is_enabled(state, "character_state")
-    ):
-        async def _update_character_image_from_runtime_state() -> dict | None:
-            """Build character image using the DB-current self-image base."""
-
-            if not state["reflection_summary"]:
-                return None
-
-            runtime_state = await get_character_runtime_state()
-            runtime_self_image = runtime_state.get("self_image")
-            if isinstance(runtime_self_image, dict):
-                existing_image = runtime_self_image
-            else:
-                existing_image = {}
-
-            character_image = await _update_character_image(
-                state,
-                storage_timestamp_utc=storage_timestamp_utc,
-                existing_image=existing_image,
-            )
-            return character_image
-
-        image_results = await asyncio.gather(
-            _update_character_image_from_runtime_state(),
-            return_exceptions=True,
-        )
-        character_image_result = image_results[0]
-
-        if isinstance(character_image_result, Exception):
-            logger.error(
-                f"db_writer: failed to update character_image: "
-                f"{character_image_result}",
-                exc_info=(
-                    type(character_image_result),
-                    character_image_result,
-                    character_image_result.__traceback__,
-                ),
-            )
-            write_log["character_image"] = False
-        elif character_image_result is not None:
-            try:
-                await upsert_character_self_image(character_image_result)
-                write_log["character_image"] = True
-            except DatabaseOperationError as exc:
-                logger.exception(
-                    f"db_writer: failed to upsert_character_self_image: {exc}"
-                )
-                write_log["character_image"] = False
-    else:
-        write_log["character_image"] = False
-
-    # ── Step 7: character self-guidance memory ──────────────────────
+    # ── Step 3: character self-guidance memory ──────────────────────
     character_self_guidance_payload = state.get("character_self_guidance")
     has_character_self_guidance_payload = isinstance(
         character_self_guidance_payload,
@@ -628,11 +417,7 @@ async def db_writer(state: ConsolidatorState) -> dict:
         runtime = get_rag_cache2_runtime()
         events: list[CacheInvalidationEvent] = []
 
-        if global_user_id and (
-            write_log.get("affinity")
-            or write_log.get("relationship_insight")
-            or write_log.get("user_memory_units")
-        ):
+        if global_user_id and write_log.get("user_memory_units"):
             events.append(CacheInvalidationEvent(
                 source="user_profile",
                 platform=state["platform"],
@@ -642,10 +427,10 @@ async def db_writer(state: ConsolidatorState) -> dict:
                 reason="consolidator: user_profile",
             ))
 
-        if write_log.get("character_state") or write_log.get("character_image"):
+        if write_log.get("character_self_guidance"):
             events.append(CacheInvalidationEvent(
-                source="character_state",
-                reason="consolidator: character_state",
+                source="character_self_guidance",
+                reason="consolidator: character_self_guidance",
             ))
 
         for event in events:
@@ -656,16 +441,12 @@ async def db_writer(state: ConsolidatorState) -> dict:
     metadata.update({
         "write_success": write_log,
         "cache_invalidated": cache_invalidated,
-        "affinity_before": user_affinity_score,
-        "affinity_delta_processed": processed_affinity_delta,
         "consolidation_target_plan": _target_plan(state),
     })
 
     logger.debug(
         f"db_writer summary: user={user_name} global_user={global_user_id} "
-        f"writes={write_log} cache_invalidated={cache_invalidated} "
-        f"affinity_before={user_affinity_score} "
-        f"affinity_delta={processed_affinity_delta}"
+        f"writes={write_log} cache_invalidated={cache_invalidated}"
     )
 
     return_value = {"metadata": metadata}

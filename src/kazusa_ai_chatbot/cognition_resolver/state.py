@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+from copy import deepcopy
+from typing import Any, Mapping
 
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ALLOWED_RESOLVER_STATES,
@@ -11,6 +12,7 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ResolverCycleTraceV1,
     ResolverGoalProgressV1,
     ResolverObservationV1,
+    ResolverWorkingStateV2,
     ResolverValidationError,
     new_empty_goal_progress,
     project_goal_progress_for_cognition,
@@ -27,6 +29,57 @@ from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
 )
 
 MAX_PROJECTED_RESOLVER_OBSERVATIONS = 4
+
+
+def new_v2_resolver_working_state(
+    *,
+    origin_scope: str,
+    max_cycles: int,
+) -> ResolverWorkingStateV2:
+    """Create episode-local V2 recurrence state with one immutable origin scope."""
+
+    if origin_scope not in {"user", "character"}:
+        raise ResolverValidationError("origin_scope must be user or character")
+    if not isinstance(max_cycles, int) or max_cycles < 1:
+        raise ResolverValidationError("max_cycles must be positive")
+    return {
+        "schema_version": "resolver_working_state.v2",
+        "origin_scope": origin_scope,
+        "cycle_index": 0,
+        "max_cycles": max_cycles,
+        "pending_requests": [],
+        "observations": [],
+        "terminal": False,
+    }
+
+
+def carry_v2_resolver_working_state(
+    working_state: Mapping[str, Any],
+    cognition_output: Mapping[str, Any],
+) -> ResolverWorkingStateV2:
+    """Carry the current V2 output into recurrence without reloading persistence."""
+
+    if working_state.get("schema_version") != "resolver_working_state.v2":
+        raise ResolverValidationError("invalid V2 working-state schema")
+    updated = deepcopy(dict(working_state))
+    updated["cognition_output"] = deepcopy(dict(cognition_output))
+    updated["pending_requests"] = list(cognition_output.get("resolver_requests", []))
+    updated["cycle_index"] = int(updated["cycle_index"]) + 1
+    updated["terminal"] = not bool(updated["pending_requests"])
+    return updated  # type: ignore[return-value]
+
+
+def append_v2_resolver_observation(
+    working_state: Mapping[str, Any],
+    observation: Mapping[str, Any],
+) -> ResolverWorkingStateV2:
+    """Append one typed resolver observation to the episode-local packet."""
+
+    updated = deepcopy(dict(working_state))
+    observations = list(updated.get("observations", []))
+    observations.append(deepcopy(dict(observation)))
+    updated["observations"] = observations[-MAX_PROJECTED_RESOLVER_OBSERVATIONS:]
+    return updated  # type: ignore[return-value]
 
 
 def new_resolver_state(

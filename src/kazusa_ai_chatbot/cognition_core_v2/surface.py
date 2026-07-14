@@ -1,0 +1,91 @@
+"""Public V2 text-surface planning facade."""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import Mapping
+from typing import Any
+
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    TextSurfaceInputV2,
+    TextSurfaceOutputV2,
+    TextSurfaceServicesV2,
+    validate_text_surface_input,
+    validate_text_surface_output,
+)
+from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
+    run_surface_stage,
+)
+from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+    validate_prompt_projection,
+)
+
+
+async def run_text_surface_planning(
+    input_payload: TextSurfaceInputV2,
+    services: TextSurfaceServicesV2,
+) -> TextSurfaceOutputV2:
+    """Run four bounded surface stages after cognition state is committed."""
+
+    payload = validate_text_surface_input(input_payload)
+    stage_payload = _project_surface_payload(payload)
+    validate_prompt_projection(stage_payload)
+    style, content, preference, visual = await asyncio.gather(
+        run_surface_stage("style", stage_payload, services),
+        run_surface_stage("content_plan", stage_payload, services),
+        run_surface_stage("preference", stage_payload, services),
+        run_surface_stage("visual", stage_payload, services),
+    )
+    output: TextSurfaceOutputV2 = {
+        "schema_version": "text_surface_output.v2",
+        "content_plan": content,
+        "visible_boundaries": [preference],
+        "addressee_plan": [preference],
+        "style_guidance": style,
+        "pacing_guidance": visual,
+        "selected_surface_intent": payload["intention"]["intention"],
+    }
+    return validate_text_surface_output(output)
+
+
+def _project_surface_payload(
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Remove persistent/private fields before any surface stage sees input."""
+
+    intention = payload["intention"]
+    projected_intention = {
+        "route": intention["route"],
+        "intention": intention["intention"],
+        "reason": intention["reason"],
+    }
+    result: dict[str, Any] = {
+        "episode": _project_episode(payload["episode"]),
+        "intention": projected_intention,
+        "supporting_bids": payload["supporting_bids"],
+        "expression_policy": payload["expression_policy"],
+        "semantic_affect": payload["semantic_affect"],
+        "permitted_action_results": payload["permitted_action_results"],
+        "interaction_style_context": payload["interaction_style_context"],
+    }
+    if "primary_bid" in payload:
+        result["primary_bid"] = payload["primary_bid"]
+    if "semantic_relationship" in payload:
+        result["semantic_relationship"] = payload["semantic_relationship"]
+    return result
+
+
+def _project_episode(episode: Mapping[str, Any]) -> dict[str, Any]:
+    """Retain only semantic episode descriptors for surface planning."""
+
+    allowed = (
+        "semantic_scene",
+        "semantic_temporal_context",
+        "interaction_summary",
+        "episode_summary",
+    )
+    return {
+        key: episode[key]
+        for key in allowed
+        if key in episode and isinstance(episode[key], str)
+    }

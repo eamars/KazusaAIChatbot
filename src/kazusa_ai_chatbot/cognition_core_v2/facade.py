@@ -1,412 +1,567 @@
-"""V1-compatible entrypoint for the validation-local cognition core."""
+"""Public V2 cognition facade with explicit preliminary and final phases."""
 
 from __future__ import annotations
 
-import hashlib
-from collections.abc import Mapping
+import asyncio
+import time
+from collections.abc import Mapping, Sequence
+from dataclasses import replace
+from datetime import datetime, timezone
+from typing import Any
 
-from kazusa_ai_chatbot.cognition_chain_core.contracts import (
-    CognitionChainInputV1,
-    CognitionChainOutputV1,
-    CognitionChainServices,
-    validate_cognition_chain_input,
-    validate_cognition_chain_output,
-)
-from kazusa_ai_chatbot.cognition_core_v2.action_selection import (
-    select_semantic_actions,
-)
+from kazusa_ai_chatbot.cognition_core_v2.action_selection import select_route
 from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
     select_final_branches,
     select_preliminary_branches,
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
-    BranchDefinition,
-    BranchResult,
-    EmotionActivation,
-    LocalMotivationalState,
-    LocalStateKey,
-    WorkspaceResult,
+    ActionBidV2,
+    CognitionCoreInputV2,
+    CognitionCoreOutputV2,
+    CognitionCoreServicesV2,
+    CognitionContextLimitError,
+    CognitionExecutionError,
+    SemanticAppraisalResultV2,
+    validate_cognition_core_input,
+    validate_cognition_core_output,
 )
 from kazusa_ai_chatbot.cognition_core_v2.dependency_graph import (
     build_dependency_graph,
 )
-from kazusa_ai_chatbot.cognition_core_v2.diagnostics import (
-    LOCAL_STATE_STORE,
-    capture_validation_event,
-    record_diagnostic,
+from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import run_goal_cognition
+from kazusa_ai_chatbot.cognition_core_v2.output_projection import (
+    build_state_update,
+    default_expression_policy,
+    project_affect,
+    project_relationship,
 )
-from kazusa_ai_chatbot.cognition_core_v2.emotion_definitions import (
-    EMOTION_DEFINITIONS,
-)
-from kazusa_ai_chatbot.cognition_core_v2.emotion_derivation import (
-    derive_emotion_activations,
-)
-from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import run_goal_branch
-from kazusa_ai_chatbot.cognition_core_v2.output_projection import project_v1_output
 from kazusa_ai_chatbot.cognition_core_v2.parallel_executor import (
     execute_dependency_graph,
 )
 from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
-    appraise_semantic_sources,
+    appraise_semantic_question,
+)
+from kazusa_ai_chatbot.cognition_core_v2.semantic_source_planner import (
+    plan_semantic_questions,
+)
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    ROLE_ENTITY_KINDS,
+    validate_cognition_state,
+)
+from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+    project_state_for_prompt,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
-    proposals_from_semantic_propositions,
+    apply_semantic_appraisals,
+    apply_state_update,
+    create_deterministic_goals,
 )
-from kazusa_ai_chatbot.cognition_core_v2.workspace import (
-    admit_branch_bids,
-    integrate_workspace,
-)
+from kazusa_ai_chatbot.cognition_core_v2.workspace import collapse_bids
 
 
-MAX_BRANCH_PROMPT_CHARS = 24000
+async def run_cognition(
+    input_payload: CognitionCoreInputV2,
+    services: CognitionCoreServicesV2,
+) -> CognitionCoreOutputV2:
+    """Run the bounded two-phase cognition pipeline."""
 
-
-async def run_cognition_chain(
-    input_payload: CognitionChainInputV1,
-    services: CognitionChainServices,
-) -> CognitionChainOutputV1:
-    """Validate V1 input and return the initial V2 validation projection.
-
-    Args:
-        input_payload: Prompt-safe public V1 cognition input.
-        services: Existing V1 service bindings reserved for V2 semantic stages.
-
-    Returns:
-        A structurally validated V1 cognition output with a V2 trace marker.
-    """
-
-    validated_input = validate_cognition_chain_input(input_payload)
-    capture_validation_event(
-        "facade_input",
-        {
-            "episode_id": _episode_id(validated_input),
-            "scope_fingerprint": resolve_local_state_fingerprint(validated_input),
-        },
-    )
-    if _is_upstream_unambiguous(validated_input):
-        output = _empty_v1_output(validated_input)
-        validated_output = validate_cognition_chain_output(output)
-        capture_validation_event(
-            "facade_output",
-            {"output": validated_output, "deterministic_shortcut": True},
-        )
-        return validated_output
-
-    state_key = _resolve_local_state_key(validated_input)
-    before_state = await LOCAL_STATE_STORE.snapshot(state_key)
-    capture_validation_event("state_before", {"state": before_state})
+    started_at = time.perf_counter()
+    payload = validate_cognition_core_input(input_payload)
+    previous_state = validate_cognition_state(payload["mutable_state"])
+    updated_at = _episode_updated_at(payload["episode"], previous_state["updated_at"])
+    elapsed_seconds = _elapsed_seconds(previous_state["updated_at"], updated_at)
     warnings: list[str] = []
-    evidence = _project_evidence(validated_input)
-    allowed_root_ids = {
-        definition.causal_inputs[0]
-        for definition in EMOTION_DEFINITIONS.values()
+    stage_status: dict[str, str] = {
+        "input_validation": "completed",
+        "deterministic_preliminary": "skipped",
+        "semantic_appraisal": "skipped",
+        "final_reduction": "skipped",
+        "branch_cognition": "skipped",
+        "workspace_collapse": "skipped",
+        "route_selection": "skipped",
     }
-    active_root_ids = {
-        root_id
-        for root_id, strength in _root_strengths(before_state).items()
-        if root_id in allowed_root_ids and strength > 0.0
-    }
-    try:
-        propositions = await appraise_semantic_sources(
-            evidence,
-            allowed_root_ids,
-            services,
-            active_root_ids,
-        )
-    except Exception as exc:
-        services.logger.error(f"V2 semantic appraisal failed: {exc}")
-        propositions = []
-        warnings.append(f"semantic appraisal failed: {exc}")
-    proposals = proposals_from_semantic_propositions(
-        propositions,
-        before_state.state_version,
-    )
-    if proposals:
-        current_state = await LOCAL_STATE_STORE.apply_proposals(state_key, proposals)
-    else:
-        current_state = before_state
-    capture_validation_event(
-        "state_transition",
-        {"proposals": proposals, "state_after_reduction": current_state},
-    )
-    root_strengths = _root_strengths(current_state)
-    activations = derive_emotion_activations(current_state, root_strengths)
-    current_state = await LOCAL_STATE_STORE.set_derived_activations(
-        state_key,
-        activations,
-    )
-    capture_validation_event(
-        "emotion_derivation",
-        {"activations": activations, "state_after_derivation": current_state},
-    )
-    preliminary_branches = select_preliminary_branches(activations)
-    branches = select_final_branches(preliminary_branches, activations)
-    dependency_graph = build_dependency_graph(branches)
-    capture_validation_event(
-        "dependency_graph",
-        {
-            "branch_definitions": branches,
-            "dependencies": {
-                branch_id: list(definition.dependencies)
-                for branch_id, definition in dependency_graph.definitions.items()
-            },
-        },
-    )
-    semantic_state = _semantic_state_projection(activations)
 
-    async def run_branch(definition: BranchDefinition) -> BranchResult:
-        """Run one dependency-ready goal branch with only semantic local state."""
+    fact_pairs = [
+        (fact["producer"], _fact_without_producer(fact))
+        for fact in payload["direct_facts"]
+    ]
+    preliminary_state = apply_state_update(
+        previous_state,
+        direct_facts=fact_pairs,
+        elapsed_seconds=elapsed_seconds,
+        updated_at=updated_at,
+        character_constraints=payload["character_constraints"],
+        relationship_context=payload.get("relationship_context"),
+    )
+    preliminary_state = create_deterministic_goals(
+        preliminary_state,
+        character_constraints=payload["character_constraints"],
+        relationship_context=payload.get("relationship_context"),
+        evidence=payload["evidence"],
+        updated_at=updated_at,
+    )
+    preliminary_state = validate_cognition_state(preliminary_state)
+    projection = project_state_for_prompt(
+        preliminary_state,
+        character_constraints=payload["character_constraints"],
+        relationship_context=payload.get("relationship_context"),
+        evidence=payload["evidence"],
+    )
+    questions = plan_semantic_questions(
+        payload["evidence"],
+        preliminary_state,
+        payload["character_constraints"],
+        payload.get("relationship_context"),
+    )
+    stage_status["deterministic_preliminary"] = "completed"
 
-        branch_result = await run_goal_branch(
-            definition,
-            semantic_state,
-            evidence,
-            services,
-        )
-        return branch_result
+    preliminary_branches = [
+        replace(definition, dependencies=(), dependency_options=())
+        for definition in select_preliminary_branches(preliminary_state["goals"])
+    ]
+    preliminary_graph = build_dependency_graph(preliminary_branches)
+    branch_context = _branch_context(projection, preliminary_state, payload["evidence"])
 
-    execution = await execute_dependency_graph(dependency_graph, run_branch)
-    warnings.extend(execution.warnings)
-    capture_validation_event(
-        "branch_execution",
-        {
-            "results": execution.results,
-            "warnings": execution.warnings,
-            "started_at": execution.started_at,
-            "ended_at": execution.ended_at,
-            "maximum_concurrency": execution.maximum_concurrency,
-        },
-    )
-    admitted_bids = admit_branch_bids(execution.results)
-    try:
-        workspace = await integrate_workspace(admitted_bids, services)
-    except Exception as exc:
-        services.logger.error(f"V2 workspace integration failed: {exc}")
-        workspace = WorkspaceResult(
-            selected_bid_id=None,
-            public_intention="",
-            internal_summary="workspace integration failed",
-            suppressed_bid_ids=(),
+    appraisal_tasks = [
+        asyncio.create_task(
+            appraise_semantic_question(
+                question,
+                payload["evidence"],
+                projection,
+                services,
+            )
         )
-        warnings.append(f"workspace integration failed: {exc}")
-    capture_validation_event(
-        "workspace_result",
-        {"admitted_bids": admitted_bids, "workspace": workspace},
-    )
-    try:
-        action_requests = await select_semantic_actions(
-            workspace,
-            validated_input,
-            services,
-        )
-    except Exception as exc:
-        services.logger.error(f"V2 action selection failed: {exc}")
-        action_requests = []
-        warnings.append(f"action selection failed: {exc}")
-    capture_validation_event(
-        "action_selection_result",
-        {"action_requests": action_requests},
-    )
-    output = project_v1_output(
-        activations,
-        workspace,
-        action_requests,
-        warnings,
-    )
-    validated_output = validate_cognition_chain_output(output)
-    capture_validation_event(
-        "facade_output",
-        {"output": validated_output, "warnings": warnings},
-    )
-    record_diagnostic(
-        {
-            "scope_fingerprint": state_key.target_scope_fingerprint,
-            "state_version_before": before_state.state_version,
-            "state_version_after": current_state.state_version,
-            "transition_count": len(proposals),
-            "activated_emotions": sorted(
-                emotion_id
-                for emotion_id, activation in activations.items()
-                if activation.activation > 0.0
+        for question in questions
+    ]
+    if appraisal_tasks:
+        stage_status["semantic_appraisal"] = "completed"
+    preliminary_branch_task = asyncio.create_task(
+        execute_dependency_graph(
+            preliminary_graph,
+            _branch_handler(
+                branch_context,
+                preliminary_state,
+                payload,
+                services,
             ),
-            "branch_ids": sorted(execution.results),
+        )
+    )
+    preliminary_execution, appraisal_collection = await asyncio.gather(
+        preliminary_branch_task,
+        _collect_appraisals(appraisal_tasks, questions),
+    )
+    appraisal_results, appraisal_warnings = appraisal_collection
+    warnings.extend(appraisal_warnings)
+    warnings.extend(preliminary_execution.warnings)
+    stage_status["branch_cognition"] = "completed"
+
+    comparison_results: list[dict[str, Any]] = []
+    final_state = preliminary_state
+    if appraisal_results:
+        final_state = apply_semantic_appraisals(
+            final_state,
+            appraisal_results,
+            payload["evidence"],
+            projection.handle_to_ref,
+            comparison_results,
+        )
+    final_state = apply_state_update(
+        final_state,
+        updated_at=updated_at,
+        character_constraints=payload["character_constraints"],
+        relationship_context=payload.get("relationship_context"),
+    )
+    final_state = create_deterministic_goals(
+        final_state,
+        character_constraints=payload["character_constraints"],
+        relationship_context=payload.get("relationship_context"),
+        evidence=payload["evidence"],
+        updated_at=updated_at,
+    )
+    final_state = validate_cognition_state(final_state)
+    stage_status["final_reduction"] = "completed"
+
+    successful_questions = {result["question_id"] for result in appraisal_results}
+    final_branches = select_final_branches(
+        preliminary_branches,
+        final_state["goals"],
+        successful_questions,
+    )
+    new_branch_definitions = [
+        definition
+        for definition in final_branches
+        if definition.branch_id not in preliminary_graph.definitions
+    ]
+    final_execution = await execute_dependency_graph(
+        build_dependency_graph(
+            new_branch_definitions,
+            external_dependencies=successful_questions,
+        ),
+        _branch_handler(
+            _branch_context(
+                projection,
+                final_state,
+                payload["evidence"],
+                appraisal_results,
+            ),
+            final_state,
+            payload,
+            services,
+        ),
+        completed_external_dependencies=successful_questions,
+    ) if new_branch_definitions else None
+    if final_execution is not None:
+        warnings.extend(final_execution.warnings)
+
+    bids: list[ActionBidV2] = list(preliminary_execution.results.values())
+    if final_execution is not None:
+        bids.extend(final_execution.results.values())
+    bids = [bid for bid in bids if isinstance(bid, Mapping)]
+    try:
+        collapse = await collapse_bids(bids, services) if bids else _empty_collapse()
+    except Exception as exc:
+        raise CognitionExecutionError(f"workspace collapse failed: {exc}") from exc
+    primary_bid = collapse.get("primary_bid")
+    supporting_bids = collapse.get("supporting_bids", [])
+    try:
+        intention, action_requests, resolver_requests = await select_route(
+            primary_bid,
+            supporting_bids,
+            payload["available_actions"],
+            payload["available_resolver_capabilities"],
+            services,
+        )
+    except CognitionExecutionError:
+        raise
+    except Exception as exc:
+        raise CognitionExecutionError(f"route selection failed: {exc}") from exc
+    _validate_output_mode(payload["episode"], intention["route"])
+    stage_status["workspace_collapse"] = "completed"
+    stage_status["route_selection"] = "completed"
+
+    admitted_bid = _selected_bid(intention, primary_bid, supporting_bids)
+    affect = project_affect(final_state["affect_activations"], final_state)
+    relationship = project_relationship(final_state.get("relationship"))
+    expression_policy = default_expression_policy(intention["route"], affect)
+    output: dict[str, Any] = {
+        "schema_version": "cognition_core_output.v2",
+        "intention": intention,
+        "supporting_bids": [
+            bid for bid in supporting_bids
+            if admitted_bid is None or bid["branch_id"] != admitted_bid["branch_id"]
+        ],
+        "state_update": build_state_update(
+            previous_state,
+            final_state,
+            comparison_results,
+        ),
+        "affect_projection": affect,
+        "action_requests": action_requests,
+        "resolver_requests": resolver_requests,
+        "resolver_progress": _resolver_progress(resolver_requests),
+        "residue": collapse["residue"],
+        "expression_policy": expression_policy,
+        "diagnostics": {
+            "run_id": str(payload["episode"].get("episode_id", "episode")),
+            "stage_status": stage_status,
+            "selected_question_count": len(questions),
+            "dispatched_question_count": len(appraisal_tasks),
+            "selected_branch_count": len(preliminary_branches) + len(new_branch_definitions),
+            "dispatched_branch_count": (
+                len(preliminary_execution.started_at)
+                + (len(final_execution.started_at) if final_execution else 0)
+            ),
+            "completed_branch_count": (
+                len(preliminary_execution.results)
+                + (len(final_execution.results) if final_execution else 0)
+            ),
+            "failed_branch_count": (
+                len(preliminary_execution.failed_branch_ids)
+                + (len(final_execution.failed_branch_ids) if final_execution else 0)
+            ),
+            "overlap_ms": max(
+                preliminary_execution.overlap_ms,
+                final_execution.overlap_ms if final_execution else 0,
+            ),
+            "dependency_wait_ms": max(
+                preliminary_execution.dependency_wait_ms,
+                final_execution.dependency_wait_ms if final_execution else 0,
+            ),
+            "critical_path_ms": preliminary_execution.critical_path_ms + (
+                final_execution.critical_path_ms if final_execution else 0
+            ),
+            "call_count": preliminary_execution.call_count + (
+                final_execution.call_count if final_execution else 0
+            ),
+            "total_ms": _elapsed_ms(started_at),
             "warnings": warnings,
+        },
+    }
+    if admitted_bid is not None:
+        output["admitted_bid"] = admitted_bid
+    if relationship is not None:
+        output["relationship_projection"] = relationship
+    return validate_cognition_core_output(output)
+
+
+def _resolver_progress(
+    requests: Sequence[Mapping[str, Any]],
+) -> dict[str, str]:
+    """Describe whether this result requires an episode-local resolver cycle."""
+
+    if not requests:
+        return {
+            "status": "not_requested",
+            "semantic_summary": "no resolver was selected",
         }
+    capabilities = sorted({
+        str(request.get("capability", ""))
+        for request in requests
+        if request.get("capability")
+    })
+    capability_text = ", ".join(capabilities) or "bounded resolver work"
+    return {
+        "status": "pending",
+        "semantic_summary": f"resolver evidence requested: {capability_text}",
+    }
+
+
+def _branch_handler(
+    semantic_context: Mapping[str, Any],
+    state: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    services: CognitionCoreServicesV2,
+):
+    """Create an isolated branch handler with immutable semantic inputs."""
+
+    async def handle(definition: Any) -> ActionBidV2:
+        if definition.branch_id == "ordinary_response" and not payload["evidence"]:
+            return None  # type: ignore[return-value]
+        goal = _goal_for_branch(state, definition.goal_kind)
+        goal_ref = goal or {
+            "scope": state["state_scope"],
+            "kind": "goal",
+            "entity_id": f"goal:{definition.goal_kind}:episode",
+        }
+        context = dict(semantic_context)
+        context["goal_projection"] = _goal_projection(goal, definition.goal_kind)
+        return await run_goal_cognition(
+            definition,
+            goal_ref,
+            context,
+            payload["evidence"],
+            payload["available_actions"],
+            payload["available_resolver_capabilities"],
+            services,
+        )
+
+    return handle
+
+
+def _branch_context(
+    projection: Any,
+    state: Mapping[str, Any],
+    evidence: Sequence[Mapping[str, Any]],
+    appraisal_results: Sequence[Mapping[str, Any]] = (),
+) -> dict[str, Any]:
+    """Build semantic branch context and retain handle bindings privately."""
+
+    context = dict(projection.payload)
+    role_bindings: dict[str, dict[str, str]] = {}
+    role_summaries: dict[str, str] = {}
+    for handle, ref in projection.handle_to_ref.items():
+        role_summaries[handle] = _role_summary(handle, ref)
+        if ref["kind"] in ROLE_ENTITY_KINDS:
+            role_bindings[handle] = {
+                "role": _role_label(handle, ref),
+                "entity_kind": ref["kind"],
+                "entity_id": ref["entity_id"],
+            }
+        elif handle == "self":
+            role_bindings[handle] = {
+                "role": "actor",
+                "entity_kind": "character",
+                "entity_id": "character:global",
+            }
+        elif handle == "current_user" and state.get("owner_user_id"):
+            role_bindings[handle] = {
+                "role": "target",
+                "entity_kind": "user",
+                "entity_id": state["owner_user_id"],
+            }
+    context["role_summaries"] = role_summaries
+    context["_role_bindings"] = role_bindings
+    context["appraisal_summaries"] = [
+        {
+            "question_id": result["question_id"],
+            "explanation": result["explanation"],
+            "propositions": [
+                proposition["semantic_value"]
+                for proposition in result["propositions"]
+            ],
+        }
+        for result in appraisal_results
+    ]
+    del evidence
+    return context
+
+
+def _goal_for_branch(
+    state: Mapping[str, Any],
+    goal_kind: str,
+) -> Mapping[str, Any] | None:
+    """Choose the stable active goal for one branch."""
+
+    return next(
+        (
+            goal for goal in state["goals"]
+            if goal.get("goal_kind") == goal_kind
+            and goal.get("status") in {"pursuing", "blocked"}
+        ),
+        None,
     )
-    return validated_output
 
 
-def resolve_local_state_fingerprint(input_payload: Mapping[str, object]) -> str:
-    """Return a stable one-way fingerprint for the V1 semantic target scope."""
+def _goal_projection(goal: Mapping[str, Any] | None, goal_kind: str) -> dict[str, str]:
+    """Project a goal into semantic branch context without ids or numbers."""
 
-    episode = input_payload["episode"]
-    if not isinstance(episode, Mapping):
-        raise TypeError("validated episode must be a mapping")
-    scope_summary = episode["target_scope_summary"]
-    if not isinstance(scope_summary, str):
-        raise TypeError("validated target scope summary must be text")
-    fingerprint = hashlib.sha256(scope_summary.encode("utf-8")).hexdigest()
-    return fingerprint
-
-
-def _resolve_local_state_key(input_payload: Mapping[str, object]) -> LocalStateKey:
-    """Build one V2-owned state key from stable V1 scope identifiers."""
-
-    character = input_payload["character"]
-    current_user = input_payload["current_user"]
-    episode = input_payload["episode"]
-    if (
-        not isinstance(character, Mapping)
-        or not isinstance(current_user, Mapping)
-        or not isinstance(episode, Mapping)
-    ):
-        raise TypeError("validated V1 identity sections must be mappings")
-    state_key = LocalStateKey(
-        character_global_id=_required_text(character, "character_global_id"),
-        current_user_global_id=_required_text(current_user, "global_user_id"),
-        trigger_source=_required_text(episode, "trigger_source"),
-        target_scope_fingerprint=resolve_local_state_fingerprint(input_payload),
-    )
-    return state_key
+    if goal is None:
+        return {"goal_kind": goal_kind, "lifecycle": "episode-local ordinary response"}
+    return {
+        "goal_kind": str(goal["goal_kind"]),
+        "description": str(goal["description"]),
+        "lifecycle": str(goal["status"]),
+    }
 
 
-def _episode_id(input_payload: Mapping[str, object]) -> str:
-    """Read the V1 episode identity used to correlate a diagnostic capture."""
+def _role_summary(handle: str, ref: Mapping[str, str]) -> str:
+    """Describe a local role handle without exposing its backing identity."""
 
-    episode = input_payload["episode"]
-    if not isinstance(episode, Mapping):
-        raise TypeError("validated episode must be a mapping")
-    episode_id = _required_text(episode, "episode_id")
-    return episode_id
+    if handle == "self":
+        return "the active character"
+    if handle == "current_user":
+        return "the current conversation participant"
+    if handle.startswith("ce"):
+        return "the current episode event candidate"
+    if handle.startswith("ct"):
+        return "the current threat candidate"
+    if handle.startswith("ck"):
+        return "the current knowledge-gap candidate"
+    return f"the current {ref['kind']} context"
 
 
-def _is_upstream_unambiguous(input_payload: Mapping[str, object]) -> bool:
-    """Honor an upstream fact that the current episode needs no appraisal."""
+def _role_label(handle: str, ref: Mapping[str, str]) -> str:
+    """Choose a semantic role label for an internal target binding."""
 
-    episode = input_payload["episode"]
-    if not isinstance(episode, Mapping):
-        raise TypeError("validated episode must be a mapping")
-    origin_summary = episode["origin_summary"]
-    if not isinstance(origin_summary, str):
-        raise TypeError("validated origin summary must be text")
-    result = origin_summary == "unambiguous greeting"
+    if handle == "self":
+        return "actor"
+    if handle == "current_user":
+        return "target"
+    return {
+        "goal": "affected_goal",
+        "relationship": "affected_relationship",
+        "user": "target",
+        "character": "actor",
+    }.get(ref["kind"], "object")
+
+
+def _selected_bid(
+    intention: Mapping[str, Any],
+    primary: ActionBidV2 | None,
+    supporting: Sequence[ActionBidV2],
+) -> ActionBidV2 | None:
+    """Copy the exact bid selected by route selection."""
+
+    selected_id = intention.get("selected_branch_id")
+    for bid in [primary, *supporting]:
+        if bid is not None and bid["branch_id"] == selected_id:
+            return bid
+    if selected_id is None:
+        return None
+    raise CognitionExecutionError("route selected a bid outside the admitted set")
+
+
+def _empty_collapse() -> dict[str, Any]:
+    """Return the deterministic no-bid collapse envelope."""
+
+    return {
+        "primary_bid": None,
+        "supporting_bids": [],
+        "competing_bids": [],
+        "residue": "no grounded bid",
+    }
+
+
+def _fact_without_producer(fact: Mapping[str, Any]) -> dict[str, Any]:
+    """Strip the routing producer before passing a fact to the reducer."""
+
+    result = dict(fact)
+    result.pop("producer", None)
     return result
 
 
-def _project_evidence(input_payload: Mapping[str, object]) -> list[dict[str, str]]:
-    """Collect bounded prompt-safe current evidence without semantic filtering."""
+def _episode_updated_at(episode: Mapping[str, Any], fallback: str) -> str:
+    """Read the episode timestamp when it is a valid UTC contract value."""
 
-    current_event = input_payload["current_event"]
-    episode = input_payload["episode"]
-    if not isinstance(current_event, Mapping) or not isinstance(episode, Mapping):
-        raise TypeError("validated V1 event sections must be mappings")
-    source_summaries = [
-        {
-            "source_ref": _required_text(episode, "episode_id"),
-            "summary": _required_text(current_event, "decontextualized_input"),
-        },
-    ]
-    evidence = input_payload["evidence"]
-    if not isinstance(evidence, Mapping):
-        raise TypeError("validated evidence must be a mapping")
-    for index, row in enumerate(evidence["memory_evidence"]):
-        if not isinstance(row, Mapping):
-            continue
-        content = row.get("content")
-        if isinstance(content, str) and content:
-            source_summaries.append({
-                "source_ref": f"memory:{index}",
-                "summary": content,
-            })
-    total_chars = 0
-    bounded_summaries: list[dict[str, str]] = []
-    for source in source_summaries:
-        remaining_chars = MAX_BRANCH_PROMPT_CHARS - total_chars
-        if remaining_chars < 1:
-            break
-        summary = source["summary"][:remaining_chars]
-        bounded_summaries.append({"source_ref": source["source_ref"], "summary": summary})
-        total_chars += len(summary)
-    return bounded_summaries
+    for key in ("occurred_at", "timestamp", "created_at"):
+        value = episode.get(key)
+        if isinstance(value, str):
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if parsed.tzinfo is not None:
+                return value.replace("+00:00", "Z")
+    return fallback
 
 
-def _root_strengths(state: LocalMotivationalState) -> dict[str, float]:
-    """Read local root activation fields for deterministic emotion derivation."""
+def _elapsed_seconds(previous: str, current: str) -> int:
+    """Return non-negative elapsed seconds between two UTC values."""
 
-    root_strengths: dict[str, float] = {}
-    for entity_mapping_name in (
-        "drives",
-        "goals",
-        "bonds",
-        "threats",
-        "standards",
-        "incidents",
-        "epistemic_state",
-    ):
-        entity_mapping = getattr(state, entity_mapping_name)
-        for entity_ref, entity in entity_mapping.items():
-            activation = entity.get("activation")
-            if isinstance(activation, (int, float)):
-                root_strengths[entity_ref] = float(activation)
-    return root_strengths
+    try:
+        previous_dt = datetime.fromisoformat(previous.replace("Z", "+00:00"))
+        current_dt = datetime.fromisoformat(current.replace("Z", "+00:00"))
+    except ValueError:
+        return 0
+    if previous_dt.tzinfo is None or current_dt.tzinfo is None:
+        return 0
+    return max(0, int((current_dt - previous_dt).total_seconds()))
 
 
-def _semantic_state_projection(
-    activations: Mapping[str, EmotionActivation],
-) -> dict[str, str]:
-    """Project activation state into qualitative branch prompts without floats."""
+async def _collect_appraisals(
+    tasks: Sequence[asyncio.Task[SemanticAppraisalResultV2]],
+    questions: Sequence[Mapping[str, Any]],
+) -> tuple[list[SemanticAppraisalResultV2], list[str]]:
+    """Collect independent appraisals while isolating failed question slots."""
 
-    projected = {
-        emotion_id: _qualitative_activation(activation.activation)
-        for emotion_id, activation in activations.items()
-        if activation.activation > 0.0
-    }
-    return projected
-
-
-def _qualitative_activation(activation: float) -> str:
-    """Translate normalized state into a local-model-safe semantic descriptor."""
-
-    if activation >= 0.75:
-        return "strong and current"
-    if activation >= 0.4:
-        return "present and current"
-    return "fading but unresolved"
+    if not tasks:
+        return [], []
+    collected = await asyncio.gather(*tasks, return_exceptions=True)
+    results: list[SemanticAppraisalResultV2] = []
+    warnings: list[str] = []
+    for question, result in zip(questions, collected, strict=True):
+        if isinstance(result, Exception):
+            if isinstance(result, CognitionContextLimitError):
+                raise result
+            warnings.append(f"{question['question_id']} appraisal failed: {result}")
+        else:
+            results.append(result)
+    return results, warnings
 
 
-def _required_text(value: Mapping[str, object], key: str) -> str:
-    """Read a required public text field after V1 boundary validation."""
+def _validate_output_mode(episode: Mapping[str, Any], route: str) -> None:
+    """Enforce expression policy before the state update can be committed."""
 
-    field_value = value[key]
-    if not isinstance(field_value, str):
-        raise TypeError(f"validated {key} must be text")
-    return field_value
+    output_mode = episode.get("output_mode", "visible_reply")
+    if output_mode not in {"silence", "think_only", "preview", "visible_reply"}:
+        raise CognitionExecutionError("episode output_mode is invalid")
+    if output_mode == "silence" and route != "silence":
+        raise CognitionExecutionError("visible route conflicts with silence output_mode")
+    if output_mode in {"think_only", "preview"} and route == "speech":
+        raise CognitionExecutionError("speech route conflicts with private output_mode")
 
 
-def _empty_v1_output(input_payload: Mapping[str, object]) -> dict[str, object]:
-    """Project an initial no-activation V2 state onto the public V1 schema."""
+def _elapsed_ms(started_at: float) -> int:
+    """Return a bounded integer duration for protected diagnostics."""
 
-    output = {
-        "schema_version": "cognition_chain_output.v1",
-        "cognition_residue": {
-            "emotional_appraisal": "no causally active emotion",
-            "interaction_subtext": "no additional interpersonal pressure established",
-            "internal_monologue": "no unresolved motive is active",
-            "logical_stance": "preserve the current evidence boundary",
-            "character_intent": "await a grounded cognition bid",
-            "judgment_note": "no causal transition was proposed",
-            "social_distance": "unchanged",
-            "emotional_intensity": "none",
-            "vibe_check": "unassessed",
-            "relational_dynamic": "unchanged",
-        },
-        "semantic_action_requests": [],
-        "resolver_capability_requests": [],
-        "chain_trace": {
-            "stage_order": ["v2"],
-            "selected_actions_summary": "",
-            "resolver_summary": "",
-            "warnings": [],
-        },
-    }
-    return output
+    return max(0, int((time.perf_counter() - started_at) * 1000))

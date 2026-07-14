@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -190,6 +191,23 @@ async def get_text_embeddings_batch(texts: list[str]) -> list[list[float]]:
 _client: AsyncIOMotorClient | None = None
 _db = None
 _db_loop: asyncio.AbstractEventLoop | None = None
+TEST_DATABASE_NAME = "_test_kazusa_live_llm"
+
+
+class DatabaseTestGuardError(RuntimeError):
+    """Raised when guarded tests would connect to a non-test database."""
+
+
+def _assert_guarded_database_name() -> None:
+    """Reject non-isolated database configuration while the test guard is on."""
+
+    if os.getenv("KAZUSA_TEST_DB_GUARD") != "1":
+        return
+    if MONGODB_DB_NAME != TEST_DATABASE_NAME:
+        raise DatabaseTestGuardError(
+            f"guarded DB access requires {TEST_DATABASE_NAME!r}; "
+            f"received {MONGODB_DB_NAME!r}"
+        )
 
 
 async def get_db():
@@ -213,6 +231,7 @@ async def get_db():
         _db_loop = None
 
     if _db is None:
+        _assert_guarded_database_name()
         _client = AsyncIOMotorClient(MONGODB_URI)
         _db = _client[MONGODB_DB_NAME]
         _db_loop = current_loop

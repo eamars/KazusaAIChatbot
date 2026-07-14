@@ -7,13 +7,9 @@ from kazusa_ai_chatbot.action_spec.results import (
     SurfaceOutputV1,
 )
 from kazusa_ai_chatbot.cognition_episode import CognitiveEpisode
+from kazusa_ai_chatbot.cognition_core_v2.contracts import TextSurfaceOutputV2
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
-    ResolverCapabilityRequestV1,
-    ResolverCycleStateV1,
-    ResolverCycleTraceV1,
-    ResolverGoalProgressV1,
-    ResolverPendingResolutionV1,
-    ResolverPendingResumeV1,
+    ResolverWorkingStateV2,
 )
 from kazusa_ai_chatbot.conversation_progress import ConversationProgressPromptDoc
 from kazusa_ai_chatbot.state import (
@@ -98,17 +94,15 @@ class GlobalPersonaState(TypedDict):
     rag_result: dict
 
     # Cognition resolver output and recurrence context
-    resolver_state: NotRequired[ResolverCycleStateV1]
-    resolver_context: NotRequired[str]
-    resolver_capability_requests: NotRequired[list[ResolverCapabilityRequestV1]]
-    resolver_cycle_trace: NotRequired[ResolverCycleTraceV1]
-    resolver_goal_progress: NotRequired[ResolverGoalProgressV1]
-    pending_resolver_resume: NotRequired[ResolverPendingResumeV1]
-    resolver_pending_resolution: NotRequired[ResolverPendingResolutionV1]
+    resolver_working_state: NotRequired[ResolverWorkingStateV2]
+    resolver_observations: NotRequired[list[dict]]
+    cognition_resolver_requests: NotRequired[list[dict]]
+    cognition_resolver_progress: NotRequired[dict]
 
     # Cognition output
     internal_monologue: str
-    action_directives: dict
+    cognition_core_output: NotRequired[dict]
+    text_surface_output_v2: NotRequired[TextSurfaceOutputV2]
     action_specs: NotRequired[list[ActionSpecV1]]
     pre_surface_action_results: NotRequired[list[ActionResultV1]]
     action_results: NotRequired[list[ActionResultV1]]
@@ -116,16 +110,16 @@ class GlobalPersonaState(TypedDict):
     episode_trace: NotRequired[EpisodeTraceV1]
     memory_lifecycle_context: NotRequired[dict]
 
-    # Cognition output for consolidation
-    interaction_subtext: str
-    emotional_appraisal: str
-    character_intent: str
-    logical_stance: str
-    judgment_note: str
-    social_distance: str
-    emotional_intensity: str
-    vibe_check: str
-    relational_dynamic: str
+    # Semantic cognition projections for downstream consolidation and audit.
+    interaction_subtext: NotRequired[str]
+    emotional_appraisal: NotRequired[str]
+    character_intent: NotRequired[str]
+    logical_stance: NotRequired[str]
+    judgment_note: NotRequired[str]
+    social_distance: NotRequired[str]
+    emotional_intensity: NotRequired[str]
+    vibe_check: NotRequired[str]
+    relational_dynamic: NotRequired[str]
 
     # Dialog output
     final_dialog: [str]  # -> Will be used for dialog end point (e.g,. Discord)
@@ -133,20 +127,9 @@ class GlobalPersonaState(TypedDict):
     target_broadcast: NotRequired[bool]
     # Other outputs from here
 
-    # Consolidation output
-    # global state updater
-    mood: str
-    global_vibe: str
-    reflection_summary: str
-
-    # Relationship recorder
-    subjective_appraisals: [str]
-    affinity_delta: int
-    last_relationship_insight: str
-
     # Consolidation memory rows
-    new_facts: [str]
-    future_promises: [str]
+    new_facts: NotRequired[list[str]]
+    future_promises: NotRequired[list[str]]
 
 
 class CognitionState(TypedDict):

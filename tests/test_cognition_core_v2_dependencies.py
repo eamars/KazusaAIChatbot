@@ -1,109 +1,128 @@
-"""Patched orchestration tests for V2 branch dependencies and workspace guards."""
+"""Checkpoint E dependency, branch, overlap, and collapse tests."""
 
 import asyncio
+import inspect
+import json
+from types import SimpleNamespace
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_chain_core.contracts import (
-    validate_cognition_chain_output,
+from kazusa_ai_chatbot.cognition_core_v2.action_selection import select_route
+from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
+    DEFAULT_BRANCH_DEFINITIONS,
+    MAX_GOAL_BRANCHES,
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     BranchDefinition,
-    BranchResult,
-    EmotionActivation,
-    EmotionDefinition,
-    LocalMotivationalState,
-    WorkspaceResult,
+    CognitionExecutionError,
 )
 from kazusa_ai_chatbot.cognition_core_v2.dependency_graph import (
     DependencyGraphError,
     build_dependency_graph,
     build_dependency_levels,
 )
-from kazusa_ai_chatbot.cognition_core_v2.output_projection import (
-    project_v1_output,
-)
 from kazusa_ai_chatbot.cognition_core_v2.parallel_executor import (
     execute_dependency_graph,
 )
-from kazusa_ai_chatbot.cognition_core_v2.workspace import collapse_workspace
+from kazusa_ai_chatbot.cognition_core_v2.workspace import collapse_bids
 
 
-BRANCH_EXECUTION_TIMEOUT_SECONDS = 0.5
+def _bid(branch_id: str, route: str = "speech") -> dict[str, object]:
+    """Build one complete bid for workspace and route tests."""
+
+    return {
+        "branch_id": branch_id,
+        "goal_ref": {"scope": "user", "kind": "goal", "entity_id": "g1"},
+        "intention": f"intention from {branch_id}",
+        "desired_outcome": "grounded outcome",
+        "concrete_detail": "bounded detail",
+        "reason": "typed evidence supports this branch",
+        "target_roles": [],
+        "evidence_handles": ["ev1"],
+        "expected_consequences": ["preserve continuity"],
+        "confidence": "high",
+        "requested_route": route,
+    }
 
 
-def test_dependency_levels_only_release_declared_ready_branches() -> None:
-    """Release independent branches together and wait for declared inputs only."""
+def test_dependency_levels_release_internal_ready_branches() -> None:
+    """Independent branches overlap and dependents wait for internal results."""
 
     branches = [
-        BranchDefinition("meaning", (), (), ("reflect",)),
-        BranchDefinition("safety", (), (), ("protect",)),
-        BranchDefinition("repair", (), ("meaning",), ("repair",)),
+        BranchDefinition("meaning", (), ("reflect",)),
+        BranchDefinition("safety", (), ("protect",)),
+        BranchDefinition("repair", ("meaning",), ("repair",)),
     ]
 
-    levels = build_dependency_levels(branches)
+    assert build_dependency_levels(branches) == (
+        ("meaning", "safety"),
+        ("repair",),
+    )
 
-    assert levels == (("meaning", "safety"), ("repair",))
+
+def test_dependency_graph_accepts_declared_question_dependencies() -> None:
+    """Question dependencies become ready only when their family completes."""
+
+    branch = BranchDefinition(
+        "relationship_connection",
+        ("q:relationship_social",),
+        ("connect",),
+    )
+    graph = build_dependency_graph(
+        [branch],
+        external_dependencies={"q:relationship_social"},
+    )
+
+    assert graph.ready_branch_ids(set(), set(), set()) == []
+    assert graph.ready_branch_ids(
+        set(),
+        set(),
+        set(),
+        {"q:relationship_social"},
+    ) == ["relationship_connection"]
 
 
-def test_dependency_graph_rejects_a_missing_dependency() -> None:
-    """Fail closed instead of inventing readiness for an unknown branch."""
+def test_dependency_graph_rejects_an_undeclared_dependency() -> None:
+    """Unknown refs fail before execution begins."""
 
     branches = [
-        BranchDefinition("repair", (), ("missing",), ("repair",)),
+        BranchDefinition("repair", ("missing",), ("repair",)),
     ]
 
     with pytest.raises(DependencyGraphError):
         build_dependency_levels(branches)
 
 
-def test_workspace_cannot_select_a_suppressed_bid() -> None:
-    """Allow output projection to use only bids admitted by the workspace."""
+def test_fourteen_branch_registry_and_jealousy_dependency_are_frozen() -> None:
+    """All approved branches remain available with explicit family ownership."""
 
-    bids = [
-        BranchResult(
-            branch_id="ordinary",
-            action_bid={"decision": "visible_reply", "detail": "answer"},
-            perceived_meaning="direct question",
-            desired_outcome="answer",
-            confidence="high",
-        ),
-        BranchResult(
-            branch_id="suppressed",
-            action_bid={"decision": "visible_reply", "detail": "overreach"},
-            perceived_meaning="unrelated",
-            desired_outcome="overreach",
-            confidence="low",
-        ),
-    ]
-
-    result = collapse_workspace(
-        bids=bids,
-        admitted_bid_ids={"ordinary"},
-        selected_bid_id="suppressed",
+    assert MAX_GOAL_BRANCHES == 14
+    assert len(DEFAULT_BRANCH_DEFINITIONS) == 14
+    assert DEFAULT_BRANCH_DEFINITIONS["trust_verification"].dependencies == (
+        "q:relationship_social",
+        "q:goal_threat_outcome",
     )
-
-    assert result.selected_bid_id is None
-    assert result.suppressed_bid_ids == ("suppressed",)
+    assert DEFAULT_BRANCH_DEFINITIONS["bond_protection"].dependencies == (
+        "q:relationship_social",
+        "q:goal_threat_outcome",
+    )
 
 
 @pytest.mark.asyncio
-async def test_independent_branches_overlap_and_dependencies_wait() -> None:
-    """Run independent branches concurrently before releasing a dependent one."""
+async def test_independent_branches_overlap_without_code_call_cap() -> None:
+    """All dependency-ready calls start together and no code cap is present."""
 
     definitions = [
-        BranchDefinition("first", (), (), ("reflect",)),
-        BranchDefinition("second", (), (), ("protect",)),
-        BranchDefinition("dependent", (), ("first",), ("repair",)),
+        BranchDefinition("first", (), ("reflect",)),
+        BranchDefinition("second", (), ("protect",)),
+        BranchDefinition("dependent", ("first",), ("repair",)),
     ]
     graph = build_dependency_graph(definitions)
     independent_started: set[str] = set()
     simultaneous_start = asyncio.Event()
     dependent_started_after: list[set[str]] = []
 
-    async def handler(definition: BranchDefinition) -> BranchResult:
-        """Hold independent work until both handlers have started."""
-
+    async def handler(definition: BranchDefinition) -> dict[str, str]:
         if definition.branch_id in {"first", "second"}:
             independent_started.add(definition.branch_id)
             if len(independent_started) == 2:
@@ -111,144 +130,100 @@ async def test_independent_branches_overlap_and_dependencies_wait() -> None:
             await simultaneous_start.wait()
         else:
             dependent_started_after.append(set(independent_started))
-        result = BranchResult(
-            branch_id=definition.branch_id,
-            action_bid={"decision": "visible_reply", "detail": "grounded"},
-            perceived_meaning="patched branch",
-            desired_outcome="complete test",
-            confidence="high",
-        )
-        return result
+        await asyncio.sleep(0)
+        return {"branch_id": definition.branch_id}
 
     execution = await asyncio.wait_for(
-        execute_dependency_graph(graph, handler, concurrency_cap=2),
-        timeout=BRANCH_EXECUTION_TIMEOUT_SECONDS,
+        execute_dependency_graph(graph, handler),
+        timeout=0.5,
     )
 
     assert execution.maximum_concurrency == 2
     assert set(execution.results) == {"first", "second", "dependent"}
     assert dependent_started_after == [{"first", "second"}]
-    assert max(
-        execution.started_at["first"],
-        execution.started_at["second"],
-    ) < min(
-        execution.ended_at["first"],
-        execution.ended_at["second"],
-    )
-    assert execution.started_at["dependent"] >= max(
-        execution.ended_at["first"],
-        execution.ended_at["second"],
-    )
+    source = inspect.getsource(execute_dependency_graph)
+    assert "Semaphore" not in source
+    assert "concurrency_cap" not in source
 
 
 @pytest.mark.asyncio
-async def test_branch_failure_warns_and_preserves_successful_branch_results() -> None:
-    """Retain successful branch bids while skipping dependents of a failure."""
+async def test_branch_failure_isolated_from_successful_slots() -> None:
+    """A failed branch warns and its dependent is skipped without losing siblings."""
 
     definitions = [
-        BranchDefinition("successful", (), (), ("reflect",)),
-        BranchDefinition("failing", (), (), ("protect",)),
-        BranchDefinition("blocked", (), ("failing",), ("repair",)),
+        BranchDefinition("successful", (), ("reflect",)),
+        BranchDefinition("failing", (), ("protect",)),
+        BranchDefinition("blocked", ("failing",), ("repair",)),
     ]
     graph = build_dependency_graph(definitions)
 
-    async def handler(definition: BranchDefinition) -> BranchResult:
-        """Simulate one branch failure without mutating shared state."""
-
+    async def handler(definition: BranchDefinition) -> dict[str, str]:
         if definition.branch_id == "failing":
             raise RuntimeError("patched branch failure")
-        result = BranchResult(
-            branch_id=definition.branch_id,
-            action_bid={"decision": "visible_reply", "detail": "grounded"},
-            perceived_meaning="successful patched branch",
-            desired_outcome="preserve valid result",
-            confidence="high",
-        )
-        return result
+        return {"branch_id": definition.branch_id}
 
     execution = await execute_dependency_graph(graph, handler)
 
     assert set(execution.results) == {"successful"}
-    assert any("failing failed: patched branch failure" in warning for warning in execution.warnings)
-    assert any(
-        "blocked skipped because a dependency failed" in warning
-        for warning in execution.warnings
+    assert "blocked" in execution.failed_branch_ids
+    assert any("patched branch failure" in warning for warning in execution.warnings)
+
+
+@pytest.mark.asyncio
+async def test_collapse_copies_complete_bids_from_handle_partition() -> None:
+    """Collapse output selects handles; code copies the complete internal bids."""
+
+    class _LLM:
+        async def ainvoke(self, messages: list[object], *, config: object) -> SimpleNamespace:
+            del messages, config
+            return SimpleNamespace(
+                content=json.dumps({
+                    "primary_bid_handle": "b1",
+                    "supporting_bid_handles": ["b2"],
+                    "suppressed_bid_handles": [],
+                })
+            )
+
+    services = SimpleNamespace(
+        llm=_LLM(),
+        collapse_config=object(),
     )
+    services.parse_json = json.loads
+
+    result = await collapse_bids([_bid("first"), _bid("second")], services)
+
+    assert result["primary_bid"]["branch_id"] == "first"
+    assert result["supporting_bids"][0]["reason"] == _bid("second")["reason"]
 
 
-def test_output_projection_validates_a_v1_compatible_workspace_result() -> None:
-    """Project authoritative state and one admitted bid through the V1 schema."""
+@pytest.mark.asyncio
+async def test_route_selection_validates_action_availability() -> None:
+    """Route-only selection cannot invent an unavailable executable action."""
 
-    activations = {
-        "fear": EmotionActivation(
-            emotion_id="fear",
-            activation=1.0,
-            trend="beginning",
-            causal_source_refs=("credible_threat",),
-        ),
-    }
-    workspace = WorkspaceResult(
-        selected_bid_id="safety",
-        public_intention="address the credible threat",
-        internal_summary="preserve safety while responding",
-        suppressed_bid_ids=(),
-    )
+    class _LLM:
+        async def ainvoke(self, messages: list[object], *, config: object) -> object:
+            del messages, config
+            return type("Response", (), {
+                "content": json.dumps({
+                    "selected_bid_handle": "b1",
+                    "route": "action",
+                    "action_handle": "a1",
+                })
+            })()
 
-    output = project_v1_output(
-        activations,
-        workspace,
-        [{"decision": "visible_reply", "detail": "address safety"}],
-        ["one branch unavailable"],
-    )
-    validated_output = validate_cognition_chain_output(output)
-
-    assert validated_output["cognition_residue"]["emotional_appraisal"] == "fear"
-    assert validated_output["chain_trace"]["selected_actions_summary"] == "safety"
-
-
-def test_test_only_emotion_and_branch_use_existing_extension_seams(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Prove registry extension without reducer, scheduler, workspace, or facade edits."""
-
-    from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
-        DEFAULT_BRANCH_DEFINITIONS,
-        select_preliminary_branches,
-    )
-    from kazusa_ai_chatbot.cognition_core_v2.emotion_definitions import (
-        EMOTION_DEFINITIONS,
-    )
-    from kazusa_ai_chatbot.cognition_core_v2.emotion_derivation import (
-        derive_emotion_activations,
-    )
-
-    test_definition = EmotionDefinition(
-        emotion_id="test_resolve",
-        causal_inputs=("test_resolution",),
-        begin_guard="test root present",
-        sustain_rule="test root remains",
-        fade_rule="test root absent",
-        action_tendencies=("resolve",),
-    )
-    monkeypatch.setitem(EMOTION_DEFINITIONS, "test_resolve", test_definition)
-    activations = derive_emotion_activations(
-        LocalMotivationalState(),
-        {"test_resolution": 0.7},
-    )
-    extension_definitions = dict(DEFAULT_BRANCH_DEFINITIONS)
-    extension_definitions["test_resolution_branch"] = BranchDefinition(
-        branch_id="test_resolution_branch",
-        activating_emotions=("test_resolve",),
-        dependencies=(),
-        action_tendencies=("resolve",),
-    )
-
-    selected_branches = select_preliminary_branches(
-        activations,
-        extension_definitions,
-    )
-
-    assert activations["test_resolve"].activation == 0.7
-    assert [branch.branch_id for branch in selected_branches] == [
-        "test_resolution_branch",
-    ]
+    services = type("Services", (), {
+        "llm": _LLM(),
+        "action_selection_config": object(),
+        "parse_json": json.loads,
+    })()
+    with pytest.raises(CognitionExecutionError):
+        await select_route(
+            {
+                **_bid("safety", route="action"),
+                "requested_action_kind": "protect",
+            },
+            [],
+            [],
+            [],
+            services,
+        )

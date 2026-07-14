@@ -6,14 +6,18 @@ Design intent:
   character accepts/refuses, or whether a user instruction is valid.
 - Those decisions belong upstream in cognition, especially L2/L3. If dialog
   needs a fact, answer, conclusion, question, or code block, it must already be
-  represented in `action_directives.linguistic_directives.content_plan`.
+  represented in `text_surface_output_v2.content_plan`.
 """
 
 import time
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot import llm_tracing
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    TextSurfaceOutputV2,
+    validate_text_surface_output,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.config import (
     DIALOG_GENERATOR_LLM_API_KEY,
@@ -62,116 +66,6 @@ DIALOG_USAGE_MODE_SELF_COGNITION_ACTION_CANDIDATE = (
 
 class StateContractError(ValueError):
     """Raised when internal graph state violates the dialog contract."""
-
-
-def _normalize_content_plan(
-    value: object,
-    *,
-    usage_mode: str,
-) -> dict[str, str]:
-    """Return a stripped non-empty content plan from dialog directives."""
-
-    if not isinstance(value, dict):
-        raise StateContractError(
-            "dialog state field "
-            "action_directives.linguistic_directives.content_plan "
-            f"must be a dict for usage_mode={usage_mode}"
-        )
-
-    content_plan: dict[str, str] = {}
-    for raw_key, raw_value in value.items():
-        if not isinstance(raw_key, str) or not isinstance(raw_value, str):
-            raise StateContractError(
-                "dialog state field "
-                "action_directives.linguistic_directives.content_plan "
-                f"must contain only string keys and values "
-                f"for usage_mode={usage_mode}"
-            )
-        key = raw_key.strip()
-        item_value = raw_value.strip()
-        if key and item_value:
-            content_plan[key] = item_value
-
-    if not content_plan:
-        raise StateContractError(
-            "dialog state field "
-            "action_directives.linguistic_directives.content_plan "
-            f"must contain at least one non-empty entry "
-            f"for usage_mode={usage_mode}"
-        )
-
-    return content_plan
-
-
-def validate_dialog_action_directives(
-    state: dict[str, Any],
-    *,
-    usage_mode: str,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Return required dialog directives or raise a typed contract error.
-
-    Args:
-        state: Dialog-ready state built by the persona graph or a shared
-            background runner.
-        usage_mode: Stable label describing why dialog is being rendered.
-
-    Returns:
-        Linguistic and contextual directive dictionaries.
-
-    Raises:
-        StateContractError: If the required directive envelope is absent or
-            not dictionary-shaped.
-    """
-
-    if "action_directives" not in state:
-        raise StateContractError(
-            f"dialog state missing action_directives "
-            f"for usage_mode={usage_mode}"
-        )
-    action_directives = state["action_directives"]
-    if not isinstance(action_directives, dict):
-        raise StateContractError(
-            f"dialog state field action_directives must be a dict "
-            f"for usage_mode={usage_mode}"
-        )
-
-    if "linguistic_directives" not in action_directives:
-        raise StateContractError(
-            f"dialog state missing action_directives.linguistic_directives "
-            f"for usage_mode={usage_mode}"
-        )
-    linguistic_directives = action_directives["linguistic_directives"]
-    if not isinstance(linguistic_directives, dict):
-        raise StateContractError(
-            "dialog state field action_directives.linguistic_directives "
-            f"must be a dict for usage_mode={usage_mode}"
-        )
-    if "content_plan" not in linguistic_directives:
-        raise StateContractError(
-            "dialog state missing "
-            "action_directives.linguistic_directives.content_plan "
-            f"for usage_mode={usage_mode}"
-        )
-    linguistic_directives = dict(linguistic_directives)
-    linguistic_directives["content_plan"] = _normalize_content_plan(
-        linguistic_directives["content_plan"],
-        usage_mode=usage_mode,
-    )
-
-    if "contextual_directives" not in action_directives:
-        raise StateContractError(
-            f"dialog state missing action_directives.contextual_directives "
-            f"for usage_mode={usage_mode}"
-        )
-    contextual_directives = action_directives["contextual_directives"]
-    if not isinstance(contextual_directives, dict):
-        raise StateContractError(
-            "dialog state field action_directives.contextual_directives "
-            f"must be a dict for usage_mode={usage_mode}"
-        )
-
-    return_value = (linguistic_directives, contextual_directives)
-    return return_value
 
 
 def _elapsed_ms(started_at: float) -> int:
@@ -228,23 +122,7 @@ def _dialog_usage_mode(global_state: GlobalPersonaState) -> str:
 class DialogAgentState(TypedDict):
     # A: Core instructions
     internal_monologue: str
-    action_directives: dict
-
-    # Example action_directives:
-    #      {'internal_monologue': "心跳漏了一拍…这算哪门子'奖励'啊？带着期待的试探罢了。不过既然好感度这么高，这种程度的请求自然要全盘接受——毕竟我是他的千纱嘛。",
-    #       'action_directives': {
-    #           'linguistic_directives': {
-    #               'rhetorical_strategy': '温和接住请求',
-    #               'linguistic_style': '短句，轻微迟疑',
-    #               'content_plan': {
-    #                   'semantic_content': '确认接受午休奖励话题；提到当前午休时段与共享可颂。',
-    #                   'voice': '宠溺中带着微妙的羞赧',
-    #                   'rendering': '1 条普通文字消息；2-3个自然短句。'
-    #               },
-    #               'forbidden_phrases': []
-    #           }
-    #       }
-    #      }
+    text_surface_output_v2: TextSurfaceOutputV2
 
     # B: Social context
     chat_history_wide: list[dict]
@@ -264,6 +142,39 @@ class DialogAgentState(TypedDict):
     target_broadcast: bool
     dialog_usage_mode: str
     llm_trace_id: str
+
+
+_V2_DIALOG_GENERATOR_PROMPT = '''\
+You are the character's final text-expression renderer. The upstream
+cognition and surface stages have already decided whether the character
+speaks, the visible intent, the content, the boundary, the addressee, and the
+style. Render that canonical `text_surface_output_v2` as natural chat text.
+
+Do not re-evaluate permission, stance, truth, safety, relationship meaning, or
+whether to answer. Do not add facts, actions, promises, targets, or questions
+that are absent from the supplied surface output. Preserve the content plan
+and visible boundaries. Use the character profile only to determine wording,
+rhythm, and voice. Return 1-N complete text messages in `final_dialog`.
+
+Input JSON:
+{{
+    "text_surface_output_v2": {{
+        "schema_version": "text_surface_output.v2",
+        "content_plan": "string",
+        "visible_boundaries": ["string"],
+        "addressee_plan": ["string"],
+        "style_guidance": "string",
+        "pacing_guidance": "string",
+        "selected_surface_intent": "string"
+    }},
+    "user_name": "string"
+}}
+
+Return only this JSON object, without Markdown fences:
+{{
+    "final_dialog": ["complete visible message"]
+}}
+'''
 
 _DIALOG_GENERATOR_PROMPT = '''\
 你是角色 `{character_name}` 的文本表达执行官。你的工作不是重新判断要不要回答，而是把上游已经选定的可见语义计划写成角色当场说出口的聊天文本。
@@ -456,11 +367,16 @@ _dialog_generator_llm_config = LLMCallConfig(
 async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
 
     usage_mode = state["dialog_usage_mode"]
-    linguistic_directives, contextual_directives = (
-        validate_dialog_action_directives(state, usage_mode=usage_mode)
-    )
+    surface_output = state.get("text_surface_output_v2")
+    if not isinstance(surface_output, dict):
+        raise StateContractError(
+            "dialog state missing text_surface_output_v2 "
+            f"for usage_mode={usage_mode}"
+        )
+    surface_output = validate_text_surface_output(surface_output)
+    dialog_prompt = _V2_DIALOG_GENERATOR_PROMPT
     ltp = state["character_profile"]["linguistic_texture_profile"]
-    system_prompt = SystemMessage(content=_DIALOG_GENERATOR_PROMPT.format(
+    system_prompt = SystemMessage(content=dialog_prompt.format(
         character_name=state["character_profile"]["name"],
         character_logic=state["character_profile"]["personality_brief"]["logic"],
         character_tempo=state["character_profile"]["personality_brief"]["tempo"],
@@ -480,8 +396,7 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
     ))
 
     msg = {
-        "linguistic_directives": linguistic_directives,
-        "contextual_directives": contextual_directives,
+        "text_surface_output_v2": dict(surface_output),
         "user_name": state["user_name"],
     }
 
@@ -591,14 +506,18 @@ async def dialog_agent(
     global_state: GlobalPersonaState
 ) -> list[str]:
     """
-    Dialog agent that renders dialogue from upstream action directives.
+    Dialog agent that renders dialogue from the canonical V2 surface output.
     """
     
     usage_mode = _dialog_usage_mode(global_state)
-    linguistic_directives, _ = validate_dialog_action_directives(
-        global_state,
-        usage_mode=usage_mode,
-    )
+    surface_output = global_state.get("text_surface_output_v2")
+    if not isinstance(surface_output, dict):
+        raise StateContractError(
+            "persona state missing text_surface_output_v2 "
+            f"for usage_mode={usage_mode}"
+        )
+    validate_text_surface_output(surface_output)
+    content_plan_entry_count = 1
     sub_agent_builder = StateGraph(DialogAgentState)
 
     sub_agent_builder.add_node("generator", dialog_generator)
@@ -612,7 +531,7 @@ async def dialog_agent(
     subState: DialogAgentState = {
         # A
         "internal_monologue": global_state["internal_monologue"],
-        "action_directives": global_state["action_directives"],
+        "text_surface_output_v2": surface_output,
 
         # B
         "chat_history_wide": global_state["chat_history_wide"],
@@ -631,7 +550,6 @@ async def dialog_agent(
         "dialog_usage_mode": usage_mode,
         "llm_trace_id": global_state.get("llm_trace_id", ""),
     }
-
     result = await sub_graph.ainvoke(subState)
 
     # Assemble output.
@@ -653,7 +571,7 @@ async def dialog_agent(
         quality_status=quality_status,
         retry_count=0,
         failure_codes=[] if final_dialog else ["empty_dialog"],
-        content_plan_entry_count=len(linguistic_directives["content_plan"]),
+        content_plan_entry_count=content_plan_entry_count,
         status="succeeded",
     )
 

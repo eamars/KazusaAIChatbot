@@ -11,12 +11,15 @@ from kazusa_ai_chatbot.db import (
     build_user_engagement_relevance_context,
     get_user_profile,
 )
+from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+    project_relationship_context,
+)
 from kazusa_ai_chatbot.rag.conversation_evidence import ConversationEvidenceAgent
 from kazusa_ai_chatbot.time_boundary import (
     normalize_storage_utc_iso,
     parse_storage_utc_datetime,
 )
-from kazusa_ai_chatbot.utils import build_affinity_block, text_or_empty
+from kazusa_ai_chatbot.utils import text_or_empty
 
 SOURCE_NAME = "group_review_participant_context"
 CONTEXT_SHAPE = "single_flow_focus"
@@ -629,7 +632,6 @@ def _empty_hydration() -> dict[str, Any]:
     hydration = {
         "relationship_label": "unknown",
         "relationship_band": "unknown",
-        "last_relationship_insight": "",
         "engagement_guidelines": [],
         "nearby_conversation_evidence": [],
     }
@@ -644,14 +646,33 @@ def _hydration_from_sources(
 ) -> dict[str, Any]:
     """Project DB and helper results into prompt-facing semantic fields."""
 
-    affinity = _profile_affinity(profile)
-    if affinity is None:
+    cognition_state = profile.get("cognition_state")
+    relationship = (
+        cognition_state.get("relationship")
+        if isinstance(cognition_state, Mapping)
+        else None
+    )
+    if not isinstance(relationship, Mapping):
         relationship_label = "unknown"
         relationship_band = "unknown"
     else:
-        affinity_block = build_affinity_block(affinity)
-        relationship_label = text_or_empty(affinity_block.get("level"))
-        relationship_band = _relationship_band(affinity)
+        relationship_context = project_relationship_context(relationship)
+        axes = relationship_context["axes"]
+        positive_regard = axes.get("positive_regard", "neutral or mixed")
+        attachment = axes.get("attachment", "none")
+        if positive_regard in {"positive", "strongly positive"}:
+            relationship_band = "positive"
+            relationship_label = (
+                "strong connection"
+                if attachment in {"high", "very high"}
+                else "growing connection"
+            )
+        elif positive_regard in {"negative", "strongly negative"}:
+            relationship_band = "negative"
+            relationship_label = "strained relationship"
+        else:
+            relationship_band = "neutral"
+            relationship_label = "acquaintance relationship"
 
     raw_guidelines = engagement_context.get("engagement_guidelines")
     engagement_guidelines = _string_items(
@@ -662,39 +683,10 @@ def _hydration_from_sources(
     hydration = {
         "relationship_label": relationship_label,
         "relationship_band": relationship_band,
-        "last_relationship_insight": text_or_empty(
-            profile.get("last_relationship_insight"),
-        ),
         "engagement_guidelines": engagement_guidelines,
         "nearby_conversation_evidence": conversation_evidence,
     }
     return hydration
-
-
-def _profile_affinity(profile: Mapping[str, Any]) -> int | None:
-    """Return affinity only when the profile carries a valid integer score."""
-
-    affinity = profile.get("affinity")
-    if isinstance(affinity, bool):
-        return_value = None
-        return return_value
-    if not isinstance(affinity, int):
-        return_value = None
-        return return_value
-    return affinity
-
-
-def _relationship_band(affinity: int) -> str:
-    """Map affinity into a coarse prompt-facing relationship band."""
-
-    if affinity >= 600:
-        return_value = "positive"
-        return return_value
-    if affinity <= 400:
-        return_value = "negative"
-        return return_value
-    return_value = "neutral"
-    return return_value
 
 
 async def _conversation_evidence(
@@ -838,7 +830,6 @@ def _primary_reply_target(
         "role_in_window": _ordered_roles(primary.roles),
         "relationship_label": hydration["relationship_label"],
         "relationship_band": hydration["relationship_band"],
-        "last_relationship_insight": hydration["last_relationship_insight"],
         "engagement_guidelines": hydration["engagement_guidelines"],
         "nearby_conversation_evidence": (
             hydration["nearby_conversation_evidence"]

@@ -38,7 +38,7 @@ USER_PROFILE_CACHE_NAME = "rag2_user_profile_agent"
 USER_PROFILE_POLICY_VERSION = "user_profile:v2"
 
 RELATIONSHIP_CACHE_NAME = "rag2_relationship_agent"
-RELATIONSHIP_POLICY_VERSION = "relationship:v1"
+RELATIONSHIP_POLICY_VERSION = "relationship:v2-native-cognition-state"
 
 CONVERSATION_FILTER_CACHE_NAME = "rag2_conversation_filter_agent"
 CONVERSATION_FILTER_POLICY_VERSION = "conversation_filter:v1"
@@ -400,7 +400,8 @@ def build_relationship_dependencies(context: dict[str, Any]) -> list[CacheDepend
 
     Returns:
         A user-profile dependency scoped to the current runtime platform/channel
-        where available. Any profile or affinity update can affect the ranking.
+        where available. Any native relationship-state update can affect the
+        ranking.
     """
     scope = _context_scope(context)
     return_value = [

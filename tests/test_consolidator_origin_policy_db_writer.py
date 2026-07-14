@@ -1,24 +1,23 @@
-"""Tests for consolidator db_writer origin-policy enforcement."""
+"""Tests for the native V2 consolidation writer boundary."""
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from kazusa_ai_chatbot.db import DatabaseOperationError
-from kazusa_ai_chatbot.consolidation.target import (
-    build_consolidation_target_plan,
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    build_acquaintance_user_state,
 )
-from kazusa_ai_chatbot.consolidation import (
-    images as image_module,
-    persistence as persistence_module,
-)
+from kazusa_ai_chatbot.consolidation import persistence as persistence_module
 from kazusa_ai_chatbot.consolidation.origin import (
     ConsolidationOriginMetadata,
 )
+from kazusa_ai_chatbot.consolidation.target import (
+    build_consolidation_target_plan,
+)
+from kazusa_ai_chatbot.db import DatabaseOperationError
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 
@@ -28,21 +27,12 @@ def _origin(
     input_sources: list[str] | None = None,
     output_mode: str = "visible_reply",
 ) -> ConsolidationOriginMetadata:
-    """Build origin metadata for direct db_writer calls.
+    """Build identifier-only origin metadata for one writer case."""
 
-    Args:
-        trigger_source: Trigger source label to project into the origin.
-        input_sources: Input source labels to project into the origin.
-        output_mode: Output mode to project into the origin.
-
-    Returns:
-        Consolidation origin metadata with stable identifier fields.
-    """
     if input_sources is None:
         input_sources = ["dialog_text"]
-
     turn_clock = build_turn_clock("2026-04-27 00:00:00")
-    origin: ConsolidationOriginMetadata = {
+    return {
         "episode_id": "episode-1",
         "trigger_source": trigger_source,
         "input_sources": input_sources,
@@ -58,7 +48,6 @@ def _origin(
         "current_global_user_id": "user-1",
         "current_display_name": "User",
     }
-    return origin
 
 
 def _state(
@@ -66,17 +55,10 @@ def _state(
     origin: ConsolidationOriginMetadata | None = None,
     enabled_lanes: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Build a db_writer state that would exercise every write path.
+    """Build a writer state with native embedded user cognition state."""
 
-    Args:
-        origin: Consolidation origin metadata for the writer policy.
-
-    Returns:
-        Direct consolidator state for db_writer tests.
-    """
     if origin is None:
         origin = _origin()
-
     turn_clock = build_turn_clock("2026-04-27 00:00:00")
     state: dict[str, Any] = {
         "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
@@ -89,12 +71,21 @@ def _state(
         "platform_message_id": "msg-1",
         "character_profile": {"name": "Kazusa"},
         "metadata": {},
-        "mood": "neutral",
-        "global_vibe": "quiet",
-        "reflection_summary": "summary",
-        "subjective_appraisals": ["User sounded happy"],
         "interaction_subtext": "test",
-        "last_relationship_insight": "friendly",
+        "emotional_appraisal": "",
+        "character_intent": "PROVIDE",
+        "logical_stance": "CONFIRM",
+        "internal_monologue": "",
+        "final_dialog": ["I will remember that."],
+        "text_surface_output_v2": {
+            "schema_version": "text_surface_output.v2",
+            "content_plan": "acknowledge",
+            "visible_boundaries": [],
+            "addressee_plan": ["current user"],
+            "style_guidance": "brief",
+            "pacing_guidance": "direct",
+            "selected_surface_intent": "acknowledge",
+        },
         "new_facts": [
             {
                 "description": "User likes tea",
@@ -102,19 +93,26 @@ def _state(
                 "dedup_key": "likes_tea",
             }
         ],
-        "future_promises": [
-            {
-                "target": "user",
-                "action": "send a reminder",
-                "due_time": "2026-04-27 00:30",
-                "commitment_type": "future_promise",
-            }
-        ],
-        "user_profile": {"global_user_id": "user-1", "affinity": 500},
-        "affinity_delta": 1,
+        "future_promises": [],
+        "user_profile": {
+            "global_user_id": "user-1",
+            "cognition_state": build_acquaintance_user_state(
+                global_user_id="user-1",
+                updated_at="2026-04-27T00:00:00Z",
+            ),
+        },
         "decontexualized_input": "remember tea",
-        "final_dialog": ["I will remind you later."],
-        "action_directives": {"linguistic_directives": {"content_plan": {}}},
+        "rag_result": {
+            "user_image": {
+                "user_memory_context": {
+                    "stable_patterns": [],
+                    "recent_shifts": [],
+                    "objective_facts": [],
+                    "milestones": [],
+                    "active_commitments": [],
+                }
+            }
+        },
         "consolidation_origin": origin,
     }
     if enabled_lanes is not None:
@@ -123,51 +121,17 @@ def _state(
     return state
 
 
-def _all_private_lanes() -> list[str]:
-    """Return accepted private-chat lanes used by direct writer tests."""
-
-    return [
-        "character_state",
-        "relationship_profile",
-        "user_memory_units",
-        "active_commitment",
-    ]
-
-
-def _patch_allowed_write_dependencies(
-    monkeypatch,
-    *,
-    memory_results: list[dict[str, Any]] | None = None,
-    character_image: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Patch db_writer dependencies for allowed-origin regression tests.
-
-    Args:
-        monkeypatch: Pytest monkeypatch fixture.
-        memory_results: User-memory unit write results to return.
-        character_image: Character image result to return.
-
-    Returns:
-        Named mocks and fake runtime objects for assertions.
-    """
-    if memory_results is None:
-        memory_results = []
+def _patch_writer_dependencies(monkeypatch) -> dict[str, Any]:
+    """Patch only native writer dependencies."""
 
     runtime = MagicMock()
     runtime.invalidate = AsyncMock(return_value=1)
-    mocks: dict[str, Any] = {
+    mocks = {
         "runtime": runtime,
         "get_runtime": MagicMock(return_value=runtime),
-        "upsert_character_state": AsyncMock(),
-        "update_last_relationship_insight": AsyncMock(),
-        "update_user_memory_units_from_state": AsyncMock(
-            return_value=memory_results
-        ),
-        "update_affinity": AsyncMock(),
-        "update_character_image": AsyncMock(return_value=character_image),
-        "get_character_runtime_state": AsyncMock(return_value={}),
-        "upsert_character_self_image": AsyncMock(),
-        "persist_group_channel_style_image": AsyncMock(),
+        "memory": AsyncMock(return_value=[{"kind": "fact", "id": "memory-1"}]),
+        "guidance": AsyncMock(return_value={"memory_id": "guidance-1"}),
+        "group_style": AsyncMock(),
     }
     monkeypatch.setattr(
         persistence_module,
@@ -176,144 +140,18 @@ def _patch_allowed_write_dependencies(
     )
     monkeypatch.setattr(
         persistence_module,
-        "upsert_character_state",
-        mocks["upsert_character_state"],
-    )
-    monkeypatch.setattr(
-        persistence_module,
-        "update_last_relationship_insight",
-        mocks["update_last_relationship_insight"],
-    )
-    monkeypatch.setattr(
-        persistence_module,
         "update_user_memory_units_from_state",
-        mocks["update_user_memory_units_from_state"],
+        mocks["memory"],
     )
     monkeypatch.setattr(
         persistence_module,
-        "update_affinity",
-        mocks["update_affinity"],
-    )
-    monkeypatch.setattr(
-        persistence_module,
-        "_update_character_image",
-        mocks["update_character_image"],
-    )
-    monkeypatch.setattr(
-        persistence_module,
-        "get_character_runtime_state",
-        mocks["get_character_runtime_state"],
-        raising=False,
-    )
-    monkeypatch.setattr(
-        persistence_module,
-        "upsert_character_self_image",
-        mocks["upsert_character_self_image"],
+        "persist_character_self_guidance_from_state",
+        mocks["guidance"],
     )
     monkeypatch.setattr(
         persistence_module,
         "persist_group_channel_style_image",
-        mocks["persist_group_channel_style_image"],
-    )
-    return mocks
-
-
-def _image_response(summary: str) -> SimpleNamespace:
-    """Build a fake LangChain response with JSON content."""
-
-    response = SimpleNamespace(
-        content=f'{{"session_summary": "{summary}"}}',
-    )
-    return response
-
-
-def _image_llm(summary: str) -> SimpleNamespace:
-    """Build a fake character-image LLM object."""
-
-    llm = SimpleNamespace(
-        ainvoke=AsyncMock(return_value=_image_response(summary)),
-    )
-    return llm
-
-
-def _patch_writer_dependencies_except_image(
-    monkeypatch,
-    *,
-    runtime_state: dict[str, Any] | None = None,
-    runtime_state_error: Exception | None = None,
-) -> dict[str, Any]:
-    """Patch db_writer dependencies while keeping the real image updater.
-
-    Args:
-        monkeypatch: Pytest monkeypatch fixture.
-        runtime_state: Runtime character state returned by the DB reader.
-        runtime_state_error: Optional exception raised by the DB reader.
-
-    Returns:
-        Named mocks and fake runtime objects for assertions.
-    """
-
-    runtime = MagicMock()
-    runtime.invalidate = AsyncMock(return_value=1)
-    if runtime_state_error is None:
-        get_character_runtime_state = AsyncMock(
-            return_value=runtime_state or {},
-        )
-    else:
-        get_character_runtime_state = AsyncMock(
-            side_effect=runtime_state_error,
-        )
-
-    mocks: dict[str, Any] = {
-        "runtime": runtime,
-        "get_runtime": MagicMock(return_value=runtime),
-        "upsert_character_state": AsyncMock(),
-        "update_last_relationship_insight": AsyncMock(),
-        "update_user_memory_units_from_state": AsyncMock(return_value=[]),
-        "update_affinity": AsyncMock(),
-        "get_character_runtime_state": get_character_runtime_state,
-        "upsert_character_self_image": AsyncMock(),
-    }
-    monkeypatch.setattr(
-        persistence_module,
-        "get_rag_cache2_runtime",
-        mocks["get_runtime"],
-    )
-    monkeypatch.setattr(
-        persistence_module,
-        "upsert_character_state",
-        mocks["upsert_character_state"],
-    )
-    monkeypatch.setattr(
-        persistence_module,
-        "update_last_relationship_insight",
-        mocks["update_last_relationship_insight"],
-    )
-    monkeypatch.setattr(
-        persistence_module,
-        "update_user_memory_units_from_state",
-        mocks["update_user_memory_units_from_state"],
-    )
-    monkeypatch.setattr(
-        persistence_module,
-        "update_affinity",
-        mocks["update_affinity"],
-    )
-    monkeypatch.setattr(
-        persistence_module,
-        "get_character_runtime_state",
-        mocks["get_character_runtime_state"],
-        raising=False,
-    )
-    monkeypatch.setattr(
-        persistence_module,
-        "upsert_character_self_image",
-        mocks["upsert_character_self_image"],
-    )
-    monkeypatch.setattr(
-        image_module,
-        "_character_image_session_summary_llm",
-        _image_llm("new self-image"),
+        mocks["group_style"],
     )
     return mocks
 
@@ -324,356 +162,128 @@ async def test_db_writer_requires_attached_target_plan() -> None:
 
     state = _state()
     del state["consolidation_target_plan"]
-
     with pytest.raises(KeyError, match="consolidation_target_plan"):
         await persistence_module.db_writer(state)
 
 
 @pytest.mark.asyncio
-async def test_db_writer_denied_origin_skips_all_durable_write_effects(
+async def test_denied_origin_has_no_durable_effects(monkeypatch) -> None:
+    """Denied origins fail closed before native persistence effects."""
+
+    mocks = _patch_writer_dependencies(monkeypatch)
+    state = _state(
+        origin=_origin(
+            trigger_source="reflection_signal",
+            input_sources=["reflection_artifact"],
+            output_mode="think_only",
+        ),
+    )
+    result = await persistence_module.db_writer(state)
+
+    assert all(
+        value is False for value in result["metadata"]["write_success"].values()
+    )
+    assert result["metadata"]["cache_invalidated"] == []
+    mocks["memory"].assert_not_awaited()
+    mocks["guidance"].assert_not_awaited()
+    mocks["runtime"].invalidate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_user_memory_write_uses_native_lane_and_cache_invalidation(
     monkeypatch,
 ) -> None:
-    """Denied origins must not reach persistence, scheduler, image, or cache."""
-    failure = AssertionError("denied origin must not call durable write effects")
-    denied_async_effect = AsyncMock(side_effect=failure)
-    denied_sync_effect = MagicMock(side_effect=failure)
-    monkeypatch.setattr(
-        persistence_module,
-        "upsert_character_state",
-        denied_async_effect,
-    )
-    monkeypatch.setattr(
-        persistence_module,
-        "update_last_relationship_insight",
-        denied_async_effect,
-    )
-    monkeypatch.setattr(
-        persistence_module,
-        "update_user_memory_units_from_state",
-        denied_async_effect,
-    )
-    monkeypatch.setattr(persistence_module, "update_affinity", denied_async_effect)
-    monkeypatch.setattr(
-        persistence_module,
-        "_update_character_image",
-        denied_sync_effect,
-    )
-    monkeypatch.setattr(
-        persistence_module,
-        "upsert_character_self_image",
-        denied_async_effect,
-    )
-    monkeypatch.setattr(
-        persistence_module,
-        "persist_group_channel_style_image",
-        denied_async_effect,
-    )
-    monkeypatch.setattr(
-        persistence_module,
-        "get_rag_cache2_runtime",
-        denied_sync_effect,
+    """User facts persist through the V2 user-memory lane only."""
+
+    mocks = _patch_writer_dependencies(monkeypatch)
+    result = await persistence_module.db_writer(
+        _state(enabled_lanes=["user_memory_units", "active_commitment"]),
     )
 
-    result = await persistence_module.db_writer(
-        _state(
-            origin=_origin(
-                trigger_source="reflection_signal",
-                input_sources=["reflection_artifact"],
-                output_mode="think_only",
-            )
+    mocks["memory"].assert_awaited_once()
+    assert result["metadata"]["write_success"]["user_memory_units"] is True
+    assert result["metadata"]["cache_invalidated"] == ["user_profile"]
+    assert all(
+        field not in result["metadata"]
+        for field in (
+            "affinity_before",
+            "affinity_delta_processed",
+            "relationship_insight",
+            "character_state",
         )
     )
 
-    assert result["metadata"]["write_success"] == {
-        "character_state": False,
-        "relationship_insight": False,
-        "user_memory_units": False,
-        "affinity": False,
-        "group_channel_style_image": False,
-        "character_image": False,
+
+@pytest.mark.asyncio
+async def test_character_guidance_is_the_only_character_consolidation_lane(
+    monkeypatch,
+) -> None:
+    """Character-owned durable guidance is separate from mutable affect."""
+
+    mocks = _patch_writer_dependencies(monkeypatch)
+    state = _state(enabled_lanes=["character_self_guidance"])
+    state["character_self_guidance"] = {
+        "memory_type": "defense_rule",
+        "content": "Keep accepted boundaries explicit.",
     }
-    assert result["metadata"]["cache_invalidated"] == []
-    assert result["metadata"]["cache_evicted_count"] == 0
-    assert "scheduled_event_ids" not in result["metadata"]
-    assert all("dispatch" not in key for key in result["metadata"])
-    denied_async_effect.assert_not_called()
-    denied_sync_effect.assert_not_called()
+    result = await persistence_module.db_writer(state)
+
+    mocks["guidance"].assert_awaited_once()
+    assert result["metadata"]["write_success"]["character_self_guidance"] is True
+    assert result["metadata"]["cache_invalidated"] == ["character_self_guidance"]
 
 
 @pytest.mark.asyncio
-async def test_db_writer_user_message_origin_preserves_character_and_user_writes(
+async def test_group_style_write_has_no_user_relationship_side_effect(
     monkeypatch,
 ) -> None:
-    """Router-accepted user-message lanes run durable write paths."""
-    mocks = _patch_allowed_write_dependencies(
-        monkeypatch,
-        memory_results=[{"kind": "fact", "id": "memory-1"}],
-        character_image={"recent_window": []},
+    """Group style persistence remains independently scoped."""
+
+    mocks = _patch_writer_dependencies(monkeypatch)
+    state = _state(
+        origin=_origin(
+            trigger_source="internal_thought",
+            input_sources=["internal_monologue"],
+            output_mode="preview",
+        ),
     )
-
-    result = await persistence_module.db_writer(
-        _state(enabled_lanes=_all_private_lanes())
-    )
-
-    mocks["upsert_character_state"].assert_awaited_once()
-    mocks["update_last_relationship_insight"].assert_awaited_once_with(
-        "user-1",
-        "friendly",
-    )
-    mocks["update_user_memory_units_from_state"].assert_awaited_once()
-    mocks["update_affinity"].assert_awaited_once()
-    mocks["update_character_image"].assert_awaited_once()
-    mocks["upsert_character_self_image"].assert_awaited_once_with(
-        {"recent_window": []}
-    )
-    assert result["metadata"]["write_success"] == {
-        "character_state": True,
-        "relationship_insight": True,
-        "user_memory_units": True,
-        "affinity": True,
-        "group_channel_style_image": False,
-        "character_image": True,
-    }
-
-
-@pytest.mark.asyncio
-async def test_db_writer_without_router_lanes_fails_closed(
-    monkeypatch,
-) -> None:
-    """Direct writer calls must not bypass lane-router acceptance."""
-
-    mocks = _patch_allowed_write_dependencies(
-        monkeypatch,
-        memory_results=[{"kind": "fact", "id": "memory-1"}],
-        character_image={"recent_window": []},
-    )
-
-    result = await persistence_module.db_writer(_state())
-
-    mocks["upsert_character_state"].assert_not_awaited()
-    mocks["update_last_relationship_insight"].assert_not_awaited()
-    mocks["update_user_memory_units_from_state"].assert_not_awaited()
-    mocks["update_affinity"].assert_not_awaited()
-    mocks["update_character_image"].assert_not_awaited()
-    mocks["upsert_character_self_image"].assert_not_awaited()
-    assert result["metadata"]["write_success"] == {
-        "character_state": False,
-        "relationship_insight": False,
-        "user_memory_units": False,
-        "affinity": False,
-        "group_channel_style_image": False,
-        "character_image": False,
-    }
-
-
-@pytest.mark.asyncio
-async def test_db_writer_group_review_persists_group_channel_style_image(
-    monkeypatch,
-) -> None:
-    """Group-review consolidation can write the group lane without user lanes."""
-
-    mocks = _patch_allowed_write_dependencies(monkeypatch)
-    origin = _origin(
-        trigger_source="internal_thought",
-        input_sources=["internal_monologue"],
-        output_mode="preview",
-    )
-    state = _state(origin=origin)
     state["global_user_id"] = "self_cognition"
-    state["user_name"] = "self-cognition"
-    state["user_profile"] = {
-        "affinity": 500,
-        "display_name": "group audience",
-    }
+    state["user_profile"] = {"display_name": "group audience"}
     state["group_channel_style_image"] = {
-        "overlay": {
-            "speech_guidelines": ["Keep replies compact in this group."],
-            "social_guidelines": [],
-            "pacing_guidelines": [],
-            "engagement_guidelines": [],
-            "confidence": "medium",
-        },
-        "source_reflection_run_ids": ["group-review-case-1"],
+        "overlay": {"speech_guidelines": ["Keep replies compact."]},
+        "source_reflection_run_ids": ["group-review-1"],
     }
     state["consolidation_target_plan"] = build_consolidation_target_plan(state)
-
     state["enabled_consolidation_write_lanes"] = ["interaction_style_image"]
 
     result = await persistence_module.db_writer(state)
 
-    mocks["persist_group_channel_style_image"].assert_awaited_once_with(
-        platform="qq",
-        platform_channel_id="chan-1",
-        overlay=state["group_channel_style_image"]["overlay"],
-        source_reflection_run_ids=["group-review-case-1"],
-        storage_timestamp_utc=state["storage_timestamp_utc"],
-    )
-    mocks["update_last_relationship_insight"].assert_not_awaited()
-    mocks["update_user_memory_units_from_state"].assert_not_awaited()
-    mocks["update_affinity"].assert_not_awaited()
+    mocks["group_style"].assert_awaited_once()
     assert result["metadata"]["write_success"]["group_channel_style_image"] is True
-    assert result["metadata"]["write_success"]["relationship_insight"] is False
-    assert result["metadata"]["write_success"]["user_memory_units"] is False
-    assert result["metadata"]["write_success"]["affinity"] is False
+    assert result["metadata"]["cache_invalidated"] == []
 
 
 @pytest.mark.asyncio
-async def test_db_writer_user_message_origin_does_not_emit_dispatch_metadata(
-    monkeypatch,
-) -> None:
-    """Allowed user-message origins no longer schedule user-visible text."""
-    mocks = _patch_allowed_write_dependencies(monkeypatch)
+async def test_native_writer_does_not_rehydrate_legacy_affect(monkeypatch) -> None:
+    """Legacy prose-affect keys cannot become a writer authority."""
 
-    result = await persistence_module.db_writer(
-        _state(enabled_lanes=["user_memory_units", "active_commitment"])
+    mocks = _patch_writer_dependencies(monkeypatch)
+    state = _state(enabled_lanes=["user_memory_units"])
+    state.update(
+        {
+            "mood": "legacy mood",
+            "global_vibe": "legacy vibe",
+            "reflection_summary": "legacy summary",
+            "affinity_delta": 9,
+            "last_relationship_insight": "legacy insight",
+        }
     )
-
-    assert "scheduled_event_ids" not in result["metadata"]
-    assert all("dispatch" not in key for key in result["metadata"])
-    mocks["update_user_memory_units_from_state"].assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_db_writer_user_message_origin_preserves_cache_invalidation(
-    monkeypatch,
-) -> None:
-    """Allowed user-message origins still emit current Cache2 invalidations."""
-    mocks = _patch_allowed_write_dependencies(
-        monkeypatch,
-        memory_results=[{"kind": "fact", "id": "memory-1"}],
-        character_image={"recent_window": []},
-    )
-
-    result = await persistence_module.db_writer(
-        _state(enabled_lanes=_all_private_lanes())
-    )
-
-    sources = [
-        call.args[0].source
-        for call in mocks["runtime"].invalidate.await_args_list
-    ]
-    assert sources == ["user_profile", "character_state"]
-    assert result["metadata"]["cache_invalidated"] == [
-        "user_profile",
-        "character_state",
-    ]
-    assert result["metadata"]["cache_evicted_count"] == 2
-
-
-@pytest.mark.asyncio
-async def test_db_writer_internal_thought_uses_db_current_self_image(
-    monkeypatch,
-) -> None:
-    """Internal-thought image writes must merge from DB-current image state."""
-
-    existing_image = {
-        "milestones": [{"summary": "stable self image"}],
-        "recent_window": [
-            {
-                "timestamp": "2026-05-18T00:00:00+00:00",
-                "summary": "previous self-image",
-            }
-        ],
-        "historical_summary": "older self-image history",
-        "meta": {"synthesis_count": 4},
-    }
-    mocks = _patch_writer_dependencies_except_image(
-        monkeypatch,
-        runtime_state={"self_image": existing_image},
-    )
-    state = _state(
-        origin=_origin(
-            trigger_source="internal_thought",
-            input_sources=["internal_monologue"],
-            output_mode="preview",
-        )
-    )
-    state["platform_channel_id"] = "private-1"
-    state["channel_type"] = "private"
-    state["enabled_consolidation_write_lanes"] = ["character_state"]
-    state["consolidation_target_plan"] = build_consolidation_target_plan(state)
 
     result = await persistence_module.db_writer(state)
 
-    expected_image = {
-        "milestones": [{"summary": "stable self image"}],
-        "recent_window": [
-            {
-                "timestamp": "2026-05-18T00:00:00+00:00",
-                "summary": "previous self-image",
-            },
-            {
-                "timestamp": state["storage_timestamp_utc"],
-                "summary": "new self-image",
-            },
-        ],
-        "historical_summary": "older self-image history",
-        "meta": {
-            "synthesis_count": 5,
-            "last_updated": state["storage_timestamp_utc"],
-        },
-    }
-    mocks["get_character_runtime_state"].assert_awaited_once()
-    mocks["upsert_character_self_image"].assert_awaited_once_with(
-        expected_image,
-    )
-    assert result["metadata"]["write_success"]["character_image"] is True
-
-
-@pytest.mark.asyncio
-async def test_db_writer_runtime_state_failure_fails_character_image_closed(
-    monkeypatch,
-) -> None:
-    """A DB-current image read failure must not abort db_writer."""
-
-    mocks = _patch_writer_dependencies_except_image(
-        monkeypatch,
-        runtime_state_error=DatabaseOperationError("runtime state unavailable"),
-    )
-    state = _state(
-        origin=_origin(
-            trigger_source="internal_thought",
-            input_sources=["internal_monologue"],
-            output_mode="preview",
-        )
-    )
-    state["platform_channel_id"] = "private-1"
-    state["channel_type"] = "private"
-    state["enabled_consolidation_write_lanes"] = ["character_state"]
-    state["consolidation_target_plan"] = build_consolidation_target_plan(state)
-
-    result = await persistence_module.db_writer(state)
-
-    mocks["get_character_runtime_state"].assert_awaited_once()
-    mocks["upsert_character_self_image"].assert_not_awaited()
-    assert result["metadata"]["write_success"]["character_image"] is False
-
-
-@pytest.mark.asyncio
-async def test_db_writer_empty_reflection_skips_self_image_db_read(
-    monkeypatch,
-) -> None:
-    """No image synthesis means no DB-current self-image read is needed."""
-
-    mocks = _patch_writer_dependencies_except_image(
-        monkeypatch,
-        runtime_state_error=DatabaseOperationError("must not read self image"),
-    )
-    state = _state(
-        origin=_origin(
-            trigger_source="internal_thought",
-            input_sources=["internal_monologue"],
-            output_mode="preview",
-        )
-    )
-    state["platform_channel_id"] = "private-1"
-    state["channel_type"] = "private"
-    state["enabled_consolidation_write_lanes"] = ["character_state"]
-    state["consolidation_target_plan"] = build_consolidation_target_plan(state)
-    state["reflection_summary"] = ""
-
-    result = await persistence_module.db_writer(state)
-
-    mocks["get_character_runtime_state"].assert_not_awaited()
-    mocks["upsert_character_self_image"].assert_not_awaited()
-    assert "character_image" not in result["metadata"]["write_success"]
+    mocks["memory"].assert_awaited_once()
+    assert "legacy mood" not in str(result)
+    assert "legacy insight" not in str(result)
+    assert "affinity" not in str(result).lower()
+    assert result["metadata"]["write_success"]["user_memory_units"] is True
+    assert result["metadata"]["write_success"]["group_channel_style_image"] is False

@@ -217,9 +217,7 @@ class UserProfileDoc(TypedDict, total=False):
     platform_accounts: list[PlatformAccountDoc]  # All linked accounts
     suspected_aliases: list[str]                 # Other global_user_ids suspected to be same person
 
-    # ── Relationship metrics ───────────────────────────────────
-    affinity: int                                # 0–1000 affinity score (default 500)
-    last_relationship_insight: str               # Character's instantaneous impression of the user
+    cognition_state: dict                         # Validated cognition_state.v2 user state
 
 
 class UserMemoryUnitSourceRef(TypedDict, total=False):
@@ -350,14 +348,9 @@ class CharacterProfileDoc(TypedDict, total=False):
     boundary_profile: BoundaryProfileDoc
     linguistic_texture_profile: LinguisticTextureProfileDoc
 
-    # ── runtime state ─────────────────────────────────────────────
-    mood: str               # e.g. "melancholic", "playful", "irritated"
-    global_vibe: str        # See Cognition Layer
-    reflection_summary: str # See Cognition Layer
-    updated_at: str         # ISO-8601 UTC timestamp of last update
-
     # ── Three-tier character self-image (NEW) ─────────────────
     self_image: dict        # {milestones, recent_window, historical_summary, meta}
+    cognition_state: dict   # Validated cognition_state.v2 character state
 
 
 class MemoryDoc(TypedDict, total=False):

@@ -484,29 +484,18 @@ def _route_from_content_plan(cognition_output: dict[str, Any]) -> str:
 
 
 def _content_plan_values(cognition_output: dict[str, Any]) -> list[str]:
-    """Read non-empty linguistic content-plan values from cognition output."""
+    """Read non-empty content-plan values from the native V2 surface."""
 
-    action_directives = cognition_output.get("action_directives")
-    if not isinstance(action_directives, dict):
+    surface_output = cognition_output.get("text_surface_output_v2")
+    if not isinstance(surface_output, dict):
         return_value: list[str] = []
         return return_value
 
-    linguistic_directives = action_directives.get("linguistic_directives")
-    if not isinstance(linguistic_directives, dict):
+    content_plan = surface_output.get("content_plan")
+    if not isinstance(content_plan, str) or not content_plan.strip():
         return_value = []
         return return_value
-
-    content_plan = linguistic_directives.get("content_plan")
-    if not isinstance(content_plan, dict):
-        return_value = []
-        return return_value
-
-    plan_values = [
-        value
-        for value in content_plan.values()
-        if isinstance(value, str) and value.strip()
-    ]
-    return plan_values
+    return [content_plan]
 
 
 def _case_target_scope(case: models.SelfCognitionCase) -> dict[str, Any]:

@@ -8,7 +8,7 @@
   integrates the V2 surface contract, and removes V1 and affinity from the
   candidate runtime.
 - Plan class: high_risk_migration.
-- Status: draft.
+- Status: in_progress.
 - Mandatory skills: `development-plan`, `local-llm-architecture`,
   `no-prepost-user-input`, `py-style`, `cjk-safety`,
   `test-style-and-execution`, and `debug-llm`.
@@ -408,30 +408,30 @@ Every checkpoint's `Calibration` entry requires both
 and `calibration/<gate>_architect.md` from the parent/architect. Checkpoint I
 also requires the independent review record.
 
-- [ ] Checkpoint A — contract and baseline lock signed.
+- [x] Checkpoint A — contract and baseline lock signed.
   - Verify/evidence/handoff: execution-manifest Checkpoint A.
   - Calibration: the Gate A implementation/architect pair maps frozen contracts to all outcomes.
-  - Sign-off: `<architect/date>`; then reread all three plan documents.
-- [ ] Checkpoint B — isolated DB harness and exact V2 schema signed.
+  - Sign-off: `Codex/2026-07-14`; evidence is under `test_artifacts/cognition_core_v2/stage_2/`; then reread all three plan documents.
+- [ ] Checkpoint B — isolated DB harness and exact V2 schema reopened after drift detection.
   - Verify/evidence/handoff: execution-manifest Checkpoint B.
   - Calibration: `S2-O2`, `S2-O4`, `S2-O8`.
-  - Sign-off: `<architect/date>`; then reread all three plan documents.
-- [ ] Checkpoint C — deterministic state and twenty-one lifecycles signed.
+  - Sign-off: Codex/2026-07-14 (parent-owned single-agent execution); evidence is under test_artifacts/cognition_core_v2/stage_2/persistence/ and calibration/; then reread all three plan documents.
+- [ ] Checkpoint C — deterministic state and twenty-one lifecycles reopened after drift detection.
   - Verify/evidence/handoff: execution-manifest Checkpoint C.
   - Calibration: `S2-O2`, `S2-O3`, `S2-O4`.
-  - Sign-off: `<architect/date>`; then reread all three plan documents.
-- [ ] Checkpoint D — two-phase appraisal/projection boundary signed.
+  - Sign-off: Codex/2026-07-14 (parent-owned single-agent execution); evidence is under test_artifacts/cognition_core_v2/stage_2/lifecycle/ and calibration/; then reread all three plan documents.
+- [x] Checkpoint D — two-phase appraisal/projection boundary aligned after drift remediation.
   - Verify/evidence/handoff: execution-manifest Checkpoint D.
   - Calibration: `S2-O3`, `S2-O5` and appraisal/projection RCA rows.
-  - Sign-off: `<architect/date>`; then reread all three plan documents.
-- [ ] Checkpoint E — goal DAG, collapse, facade, and V2 L3 signed.
+  - Sign-off: `Codex/2026-07-14` (parent-owned single-agent execution); exact D packet 28 passed; evidence is under test_artifacts/cognition_core_v2/stage_2/contracts/ and calibration/; then reread all three plan documents.
+- [x] Checkpoint E — goal DAG, collapse, facade, and V2 L3 aligned after drift remediation.
   - Verify/evidence/handoff: execution-manifest Checkpoint E.
   - Calibration: `S2-O5`, `S2-O6`, `S2-O7` and branch/collapse RCA rows.
-  - Sign-off: `<architect/date>`; then reread all three plan documents.
-- [ ] Checkpoint F — one caller switch and runtime integration signed.
+  - Sign-off: `Codex/2026-07-14` (parent-owned single-agent execution); exact E packet 25 passed; evidence is under test_artifacts/cognition_core_v2/stage_2/parallelism/ and calibration/; then reread all three plan documents.
+- [x] Checkpoint F — one caller switch and runtime integration aligned after drift remediation.
   - Verify/evidence/handoff: execution-manifest Checkpoint F.
   - Calibration: `S2-O1`, `S2-O2`, `S2-O5`, `S2-O7`.
-  - Sign-off: `<architect/date>`; then reread all three plan documents.
+  - Sign-off: `Codex/2026-07-14` (parent-owned single-agent execution); exact F packet 200 passed and extended deterministic packet 228 passed; evidence is under test_artifacts/cognition_core_v2/stage_2/integration/ and calibration/; then reread all three plan documents.
 - [ ] Checkpoint G — isolated live/model/DB/performance evidence signed.
   - Verify/evidence/handoff: execution-manifest Checkpoint G and fixed live manifest.
   - Calibration: `S2-O3` through `S2-O9`.
@@ -588,6 +588,9 @@ commands execution.
 During approved execution, record:
 
 - approval/status, pre-existing changes, V1 synthetic baseline, and collection baseline;
+- Checkpoint A is signed under the user-authorized parent-owned fallback; its
+  contract hashes, baseline, inventory, ledger, and calibration pair are under
+  `test_artifacts/cognition_core_v2/stage_2/`;
 - frozen contract/spec/manifest hashes and the exact production-subagent id;
 - Checkpoint A-I packets, commands, signers, calibration, deviations, and remediation;
 - selected test DB, guard, seed, owner, singleton, and zero-production-access evidence;

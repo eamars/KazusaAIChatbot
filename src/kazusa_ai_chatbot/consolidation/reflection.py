@@ -451,7 +451,7 @@ async def relationship_recorder(state: ConsolidatorState) -> dict:
         "decontexualized_input": state["decontexualized_input"],
         "final_dialog": state["final_dialog"],
         "content_plan": content_plan_from_action_directives(
-            state.get("action_directives"),
+            state.get("text_surface_output_v2"),
         ),
     }, character_name=character_name)
 
@@ -542,7 +542,7 @@ def _relationship_profile_payload(state: ConsolidatorState) -> dict:
         "decontexualized_input": state["decontexualized_input"],
         "final_dialog": state["final_dialog"],
         "content_plan": content_plan_from_action_directives(
-            state.get("action_directives"),
+            state.get("text_surface_output_v2"),
         ),
     }
     return_value = project_relationship_prompt_payload(

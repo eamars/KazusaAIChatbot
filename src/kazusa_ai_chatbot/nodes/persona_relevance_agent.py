@@ -32,8 +32,8 @@ from kazusa_ai_chatbot.conversation_history_prompt_projection import (
 )
 from kazusa_ai_chatbot.state import IMProcessState
 from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
+from kazusa_ai_chatbot.cognition_core_v2.state_projection import project_numeric_band
 from kazusa_ai_chatbot.utils import (
-    build_affinity_block,
     log_dict_subset,
     log_preview,
     parse_llm_json_output,
@@ -295,8 +295,7 @@ _RELEVANCE_SYSTEM_PROMPT = """\
 
 # 本轮语境
 - `current_run_context.character_name` 和 `current_run_context.platform_bot_id` 是本轮角色身份与平台账号，只用于区分 active character、当前发言者和 reply 目标。
-- `current_run_context.mood` 与 `current_run_context.global_vibe` 是角色此刻心境和背景氛围，只能在消息已经可能面向 active character 时调整介入倾向。
-- `current_run_context.affinity_level`、`affinity_instruction` 和 `last_relationship_insight` 是对当前发言者的关系判断；它们影响已合格消息的回应意愿，但不能替代指向证据。
+- `current_run_context.relationship_context` 是当前 V2 关系状态的语义投影；它只能在消息已经可能面向 active character 时调整介入倾向，不能替代指向证据。
 - `user_message.user_name` 与 `platform_user_id` 是当前发言者身份；`content` 是当前消息正文；`channel_name` 是会话名称，只用于理解场景和话题。
 - `user_message.directly_addressed` 与 `user_message.reply_context` 是结构化平台证据，优先级高于正文措辞。
 - `conversation_history` 是近期对话窗口，格式是日志式文本行。每行包含可见发言人和可见消息文本，用来判断线性延续、第三方对话和上下文断层。
@@ -310,9 +309,9 @@ _RELEVANCE_SYSTEM_PROMPT = """\
    - 注意：即便在关系恶劣（如 Hostile）时，也要根据该等级的指令（如”冷嘲热讽”）进行回复。*
 2. **对话延续**：你是最后一个发言者，且当前发言者正在回应你。
 3. **主观倾向触发**：
-   - 如果关系属于 `Friendly` 以上：即便没有直接提问，只要话题涉及当前发言者的事实或符合 `current_run_context.mood`，也应主动参与。
-   - 如果关系属于 `Reserved` 以下：除非被直接召唤或涉及关键利益，否则倾向于保持冷漠/沉默。
-4. **情感波动响应**：用户表达痛苦、寻求安慰，且 `current_run_context.affinity_instruction` 允许你表现出关心（如 `Caring` 级别）。
+   - 如果关系投影显示出较强的连接、关怀或信任：即便没有直接提问，只要话题涉及当前发言者的事实，也可主动参与。
+   - 如果关系投影显示连接依据很弱：除非被直接召唤或涉及关键利益，否则倾向于保持观察。
+4. **情感波动响应**：用户表达痛苦、寻求安慰，且 `current_run_context.relationship_context` 提供了足够的关怀依据。
 
 ## B. 拒绝回复 (Should Respond: false)
 1. **第三方对话**：用户显然是在与其他人/或其他机器人交谈。就算消息中抱怨或提到了你的名字或“我的机器人”，只要其主要互动对象是别人，你也应保持沉默旁观。
@@ -384,7 +383,7 @@ _RELEVANCE_SYSTEM_NOISY_PROMPT = """\
 
 软性参考（仅在听众已确认后使用）:
 - `user_engagement_context.engagement_guidelines` 是当前发言者的互动参与偏好，只能在消息已经合格时作为软参考。
-- `current_run_context.mood`、`current_run_context.global_vibe`、`current_run_context.affinity_level`、`current_run_context.affinity_instruction` 和 `current_run_context.last_relationship_insight` 只能在听众已经确认后调整介入倾向。
+- `current_run_context.relationship_context` 只能在听众已经确认后调整介入倾向。
 
 # 核心契约
 1. 你只判断是否介入当前群聊消息，不生成角色回复内容。
@@ -516,9 +515,49 @@ _relevance_agent_llm_config = LLMCallConfig(
         enabled=RELEVANCE_AGENT_LLM_THINKING_ENABLED,
     ),
 )
+
+
+def _semantic_relationship_context(state: IMProcessState) -> dict[str, str]:
+    """Project native V2 relationship state into qualitative relevance bands."""
+
+    user_profile = state.get("user_profile")
+    if not isinstance(user_profile, dict):
+        return {"relationship_summary": "no relationship state available"}
+    cognition_state = user_profile.get("cognition_state")
+    if not isinstance(cognition_state, dict):
+        return {"relationship_summary": "acquaintance relationship context"}
+    relationship = cognition_state.get("relationship")
+    if not isinstance(relationship, dict):
+        return {"relationship_summary": "no relationship state available"}
+    axes: dict[str, str] = {}
+    for field_name in (
+        "familiarity",
+        "positive_regard",
+        "trust",
+        "attachment",
+        "care",
+        "desired_closeness",
+        "perceived_closeness",
+        "boundary_safety",
+    ):
+        value = relationship.get(field_name)
+        if isinstance(value, int) and not isinstance(value, bool):
+            axes[field_name] = project_numeric_band(
+                value,
+                signed=field_name in {
+                    "positive_regard",
+                    "trust",
+                    "boundary_safety",
+                },
+            )
+    return {
+        "relationship_summary": "native V2 relationship context",
+        **axes,
+    }
+
+
 async def relevance_agent(state: IMProcessState) -> IMProcessState:
-    # Calculate affinity context
-    affinity_block = build_affinity_block(state["user_profile"]["affinity"])
+    relationship_context = _semantic_relationship_context(state)
 
     # get other attributes
     user_name = state.get("user_name")
@@ -664,14 +703,7 @@ async def relevance_agent(state: IMProcessState) -> IMProcessState:
         "current_run_context": {
             "character_name": state["character_profile"]["name"],
             "platform_bot_id": state["platform_bot_id"],
-            "mood": state["character_profile"]["mood"],
-            "global_vibe": state["character_profile"]["global_vibe"],
-            "affinity_level": affinity_block["level"],
-            "affinity_instruction": affinity_block["instruction"],
-            "last_relationship_insight": state["user_profile"].get(
-                "last_relationship_insight",
-                "",
-            ),
+            "relationship_context": relationship_context,
         },
         "user_message": {
             "user_name": user_name,

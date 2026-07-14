@@ -21,7 +21,6 @@ from kazusa_ai_chatbot.consolidation.origin import (
 )
 from kazusa_ai_chatbot.consolidation.schema import (
     ConsolidatorState,
-    normalize_subjective_appraisals,
 )
 from kazusa_ai_chatbot.consolidation.target import (
     build_consolidation_target_plan,
@@ -32,7 +31,6 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import (
 from kazusa_ai_chatbot.utils import (
     log_dict_subset,
     log_list_preview,
-    log_preview,
 )
 
 logger = logging.getLogger(__name__)
@@ -94,7 +92,9 @@ def _build_existing_dedup_keys(global_state: GlobalPersonaState) -> set[str]:
         Stable lower-cased dedup keys for known memory rows.
     """
 
-    rag_result = global_state["rag_result"]
+    rag_result = global_state.get("rag_result")
+    if not isinstance(rag_result, dict):
+        return set()
     user_image = rag_result["user_image"]
     user_memory_context = user_image["user_memory_context"]
     dedup_keys: set[str] = set()
@@ -136,14 +136,6 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
     packet = await run_consolidation_lane_pipeline(sub_state)
     result = packet["state"]
 
-    mood = result.get("mood", "")
-    global_vibe = result.get("global_vibe", "")
-    reflection_summary = result.get("reflection_summary", "")
-    subjective_appraisals = normalize_subjective_appraisals(
-        result.get("subjective_appraisals")
-    )
-    affinity_delta = result.get("affinity_delta", 0)
-    last_relationship_insight = result.get("last_relationship_insight", "")
     new_facts = result.get("new_facts", [])
     future_promises = result.get("future_promises", [])
     metadata = finalize_consolidation_metadata(result.get("metadata"))
@@ -151,18 +143,13 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
     logger.info(
         f"Consolidation output: lanes={log_list_preview(packet['router_tasks'])} "
         f"memory_rows={log_list_preview(new_facts)} "
-        f"commitments={log_list_preview(future_promises)} "
-        f"mood={log_preview(mood)} vibe={log_preview(global_vibe)} "
-        f"reflection={log_preview(reflection_summary)} "
-        f"affinity_delta={affinity_delta}"
+        f"commitments={log_list_preview(future_promises)}"
     )
 
     metadata_preview = log_dict_subset(
         metadata,
         [
             'lane_pipeline',
-            'affinity_before',
-            'affinity_delta_processed',
         ],
     )
     logger.debug(
@@ -173,12 +160,6 @@ async def call_consolidation_subgraph(global_state: GlobalPersonaState):
     )
 
     return_value = {
-        "mood": mood,
-        "global_vibe": global_vibe,
-        "reflection_summary": reflection_summary,
-        "subjective_appraisals": subjective_appraisals,
-        "affinity_delta": affinity_delta,
-        "last_relationship_insight": last_relationship_insight,
         "new_facts": new_facts,
         "future_promises": future_promises,
         "consolidation_metadata": metadata,
@@ -205,7 +186,8 @@ def _build_consolidator_state(
         "platform_channel_id": global_state["platform_channel_id"],
         "channel_type": global_state["channel_type"],
         "platform_message_id": global_state["platform_message_id"],
-        "action_directives": global_state["action_directives"],
+        "cognition_core_output": global_state.get("cognition_core_output"),
+        "text_surface_output_v2": global_state.get("text_surface_output_v2"),
         "internal_monologue": global_state["internal_monologue"],
         "final_dialog": global_state["final_dialog"],
         "episode_trace_projection": project_episode_trace_for_consolidation(
@@ -217,19 +199,13 @@ def _build_consolidator_state(
         "logical_stance": global_state["logical_stance"],
         "character_profile": global_state["character_profile"],
         "group_channel_style_image": {},
-        "rag_result": global_state["rag_result"],
+        "rag_result": global_state.get("rag_result", {}),
         "existing_dedup_keys": _build_existing_dedup_keys(global_state),
         "decontexualized_input": global_state["decontexualized_input"],
         "chat_history_recent": chat_history_recent,
         "metadata": {},
         "consolidation_origin": consolidation_origin,
         "consolidation_target_plan": consolidation_target_plan,
-        "mood": "",
-        "global_vibe": "",
-        "reflection_summary": "",
-        "subjective_appraisals": [],
-        "affinity_delta": 0,
-        "last_relationship_insight": "",
         "new_facts": [],
         "future_promises": [],
     }  # pyright: ignore[reportAssignmentType]

@@ -1,213 +1,126 @@
-"""Admitted-bid validation and bounded workspace collapse for V2."""
+"""Provenance-safe workspace collapse for complete V2 action bids."""
 
 from __future__ import annotations
 
 import json
-import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from kazusa_ai_chatbot.cognition_chain_core.contracts import CognitionChainServices
-from kazusa_ai_chatbot.cognition_core_v2.contracts import BranchResult, WorkspaceResult
-from kazusa_ai_chatbot.cognition_core_v2.diagnostics import (
-    capture_validation_stage,
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    ActionBidV2,
+    CollapsedIntentionV2,
+    CognitionCoreServicesV2,
 )
 
 
-WORKSPACE_INTEGRATION_PROMPT = '''You reconcile only the supplied, admitted character-goal bids.
-Choose one grounded public intention and identify any suppressed bid ids.
-Do not invent a bid, mutate state, select executable handlers, or write final dialogue.
-
-# Generation Procedure
-Compare the permitted bids and their stated consequences. Prefer a coherent
-intention that preserves unresolved motives in the private summary.
-
-# Output Format
-Return a JSON object with "selected_bid_id", "public_intention",
-"internal_summary", and "suppressed_bid_ids" (a list of strings).
+COLLAPSE_PROMPT = '''Collapse complete goal bids into a prompt-local partition.
+Return only JSON with primary_bid_handle, supporting_bid_handles, and
+suppressed_bid_handles. Copy no content and invent no detail.
+Every supplied bid handle must occur exactly once across the three partitions.
 '''
 
 
-def admit_branch_bids(
-    branch_results: Mapping[str, BranchResult],
-) -> dict[str, BranchResult]:
-    """Admit only results whose mapping key matches their declared branch id."""
+async def collapse_bids(
+    bids: Sequence[ActionBidV2],
+    services: CognitionCoreServicesV2,
+) -> CollapsedIntentionV2:
+    """Collapse complete bids while preserving whole-bid ownership in code."""
 
-    admitted = {
-        branch_id: result
-        for branch_id, result in branch_results.items()
-        if branch_id == result.branch_id and result.action_bid
+    ordered = sorted(bids, key=lambda bid: bid["branch_id"])
+    if not ordered:
+        return {
+            "supporting_bids": [],
+            "competing_bids": [],
+            "residue": "no grounded bid",
+        }
+    if len(ordered) == 1:
+        return {
+            "primary_branch_id": ordered[0]["branch_id"],
+            "supporting_branch_ids": [],
+            "suppressed_branch_ids": [],
+            "primary_bid": ordered[0],
+            "supporting_bids": [],
+            "competing_bids": [],
+            "residue": "single grounded bid admitted",
+        }
+    handles = {f"b{index}": bid for index, bid in enumerate(ordered, start=1)}
+    prompt_payload = {
+        "bids": {
+            handle: {
+                "intention": bid["intention"],
+                "desired_outcome": bid["desired_outcome"],
+                "requested_route": bid["requested_route"],
+                "confidence": bid["confidence"],
+            }
+            for handle, bid in handles.items()
+        }
     }
-    return admitted
-
-
-def collapse_workspace(
-    *,
-    bids: list[BranchResult],
-    admitted_bid_ids: set[str],
-    selected_bid_id: str | None,
-) -> WorkspaceResult:
-    """Fail closed when the selected bid is absent from the admitted bid set.
-
-    Args:
-        bids: Completed branch bids before workspace admission filtering.
-        admitted_bid_ids: Branch ids permitted to influence the workspace.
-        selected_bid_id: Proposed selected bid from deterministic or semantic work.
-
-    Returns:
-        A workspace result that contains no selected intention for an invalid bid.
-    """
-
-    bid_by_id = {bid.branch_id: bid for bid in bids}
-    if selected_bid_id not in admitted_bid_ids:
-        suppressed = () if selected_bid_id is None else (selected_bid_id,)
-        return WorkspaceResult(
-            selected_bid_id=None,
-            public_intention="",
-            internal_summary="selected bid was not admitted",
-            suppressed_bid_ids=suppressed,
-        )
-    if selected_bid_id not in bid_by_id:
-        return WorkspaceResult(
-            selected_bid_id=None,
-            public_intention="",
-            internal_summary="selected bid was unavailable",
-            suppressed_bid_ids=(),
-        )
-    selected_bid = bid_by_id[selected_bid_id]
-    intention = selected_bid.action_bid.get("intention")
-    if not isinstance(intention, str):
-        decision = selected_bid.action_bid.get("decision")
-        intention = decision if isinstance(decision, str) else ""
-    suppressed = tuple(
-        branch_id
-        for branch_id in admitted_bid_ids
-        if branch_id != selected_bid_id
+    prompt_text = json.dumps(prompt_payload, ensure_ascii=False, sort_keys=True)
+    if len(prompt_text) > 24000:
+        raise ValueError("workspace collapse prompt exceeds the contract cap")
+    response = await services.llm.ainvoke(
+        [SystemMessage(content=COLLAPSE_PROMPT), HumanMessage(content=prompt_text)],
+        config=services.collapse_config,
     )
-    result = WorkspaceResult(
-        selected_bid_id=selected_bid_id,
-        public_intention=intention,
-        internal_summary=selected_bid.perceived_meaning,
-        suppressed_bid_ids=suppressed,
-    )
+    parsed = services.parse_json(response.content)
+    partition = _validate_partition(parsed, set(handles))
+    primary_handle = partition["primary_bid_handle"]
+    primary = handles[primary_handle]
+    declared_supporting = [
+        handles[handle] for handle in partition["supporting_bid_handles"]
+    ]
+    if any(
+        bid["requested_route"] != primary["requested_route"]
+        for bid in declared_supporting
+    ):
+        raise ValueError("supporting bid route conflicts with primary")
+    suppressed = [
+        handles[handle] for handle in partition["suppressed_bid_handles"]
+    ]
+    result: CollapsedIntentionV2 = {
+        "primary_branch_id": primary["branch_id"],
+        "supporting_branch_ids": [
+            bid["branch_id"] for bid in declared_supporting
+        ],
+        "suppressed_branch_ids": [
+            bid["branch_id"] for bid in suppressed
+        ],
+        "primary_bid": primary,
+        "supporting_bids": declared_supporting,
+        "competing_bids": suppressed,
+        "residue": "complete bid partition collapsed deterministically",
+    }
     return result
 
 
-async def integrate_workspace(
-    admitted_bids: Mapping[str, BranchResult],
-    services: CognitionChainServices,
-) -> WorkspaceResult:
-    """Select a V2 workspace intention from only admitted branch bids.
-
-    Args:
-        admitted_bids: Validated branch outputs allowed to influence collapse.
-        services: Existing V1 cognition binding for multi-bid reconciliation.
-
-    Returns:
-        A selected or no-response workspace result with suppressed bids listed.
-    """
-
-    if not admitted_bids:
-        empty_result = collapse_workspace(
-            bids=[],
-            admitted_bid_ids=set(),
-            selected_bid_id=None,
-        )
-        return empty_result
-    if len(admitted_bids) == 1:
-        selected_bid_id = next(iter(admitted_bids))
-        deterministic_result = collapse_workspace(
-            bids=list(admitted_bids.values()),
-            admitted_bid_ids=set(admitted_bids),
-            selected_bid_id=selected_bid_id,
-        )
-        return deterministic_result
-    payload = {
-        "admitted_bids": {
-            branch_id: {
-                "action_bid": dict(result.action_bid),
-                "perceived_meaning": result.perceived_meaning,
-                "desired_outcome": result.desired_outcome,
-                "confidence": result.confidence,
-            }
-            for branch_id, result in admitted_bids.items()
-        },
-    }
-    payload_text = json.dumps(payload, ensure_ascii=False)
-    started_at = time.perf_counter()
-    raw_output: str | None = None
-    parsed: object | None = None
-    try:
-        response = await services.llm.ainvoke(
-            [
-                SystemMessage(content=WORKSPACE_INTEGRATION_PROMPT),
-                HumanMessage(content=payload_text),
-            ],
-            config=services.cognition_config,
-        )
-        raw_output = response.content
-        parsed = services.parse_json(raw_output)
-        workspace_result = _validate_workspace_result(parsed, admitted_bids)
-    except Exception as exc:
-        ended_at = time.perf_counter()
-        capture_validation_stage(
-            stage_id="workspace_integration",
-            config=services.cognition_config,
-            system_prompt=WORKSPACE_INTEGRATION_PROMPT,
-            human_payload=payload_text,
-            raw_output=raw_output,
-            parsed_output=parsed,
-            parse_status="failed",
-            started_at=started_at,
-            ended_at=ended_at,
-            error=str(exc),
-        )
-        raise
-    ended_at = time.perf_counter()
-    capture_validation_stage(
-        stage_id="workspace_integration",
-        config=services.cognition_config,
-        system_prompt=WORKSPACE_INTEGRATION_PROMPT,
-        human_payload=payload_text,
-        raw_output=raw_output,
-        parsed_output=parsed,
-        parse_status="succeeded",
-        started_at=started_at,
-        ended_at=ended_at,
-    )
-    return workspace_result
-
-
-def _validate_workspace_result(
-    parsed: object,
-    admitted_bids: Mapping[str, BranchResult],
-) -> WorkspaceResult:
-    """Reject workspace selections that do not originate from admitted bids."""
+def _validate_partition(parsed: object, handles: set[str]) -> dict[str, Any]:
+    """Validate exact handle partition output from workspace collapse."""
 
     if not isinstance(parsed, Mapping):
-        raise ValueError("workspace output must be an object")
-    selected_bid_id = parsed.get("selected_bid_id")
-    public_intention = parsed.get("public_intention")
-    internal_summary = parsed.get("internal_summary")
-    suppressed_bid_ids = parsed.get("suppressed_bid_ids")
-    if selected_bid_id not in admitted_bids:
-        raise ValueError("workspace selected an unadmitted bid")
-    if not isinstance(public_intention, str) or not public_intention:
-        raise ValueError("workspace requires a public intention")
-    if not isinstance(internal_summary, str) or not internal_summary:
-        raise ValueError("workspace requires an internal summary")
-    if not isinstance(suppressed_bid_ids, list):
-        raise ValueError("workspace suppressed bids must be a list")
-    normalized_suppressed = []
-    for branch_id in suppressed_bid_ids:
-        if branch_id not in admitted_bids or branch_id == selected_bid_id:
-            raise ValueError("workspace suppressed bids must be other admitted bids")
-        normalized_suppressed.append(branch_id)
-    result = WorkspaceResult(
-        selected_bid_id=selected_bid_id,
-        public_intention=public_intention,
-        internal_summary=internal_summary,
-        suppressed_bid_ids=tuple(normalized_suppressed),
-    )
-    return result
+        raise ValueError("workspace partition must be an object")
+    required = {
+        "primary_bid_handle",
+        "supporting_bid_handles",
+        "suppressed_bid_handles",
+    }
+    if set(parsed) != required:
+        raise ValueError("workspace partition fields are not exact")
+    primary = parsed["primary_bid_handle"]
+    if primary not in handles:
+        raise ValueError("workspace primary handle is unavailable")
+    partitions = []
+    for field_name in ("supporting_bid_handles", "suppressed_bid_handles"):
+        values = parsed[field_name]
+        if not isinstance(values, list) or any(value not in handles for value in values):
+            raise ValueError("workspace partition handle is unavailable")
+        if len(values) != len(set(values)):
+            raise ValueError("workspace partition contains duplicate handles")
+        partitions.extend(values)
+    all_handles = [primary] + partitions
+    if len(all_handles) != len(handles) or set(all_handles) != handles:
+        raise ValueError("workspace partition is incomplete")
+    if len(all_handles) != len(set(all_handles)):
+        raise ValueError("workspace partition overlaps")
+    return dict(parsed)

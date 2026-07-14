@@ -232,30 +232,21 @@ async def test_style_agent_receives_at_most_two_history_messages(monkeypatch) ->
 
 @pytest.mark.asyncio
 async def test_dialog_generator_payload_excludes_raw_history_and_monologue(monkeypatch) -> None:
-    """Dialog Generator receives only current L3 directives and addressability."""
+    """Dialog Generator receives only the canonical surface and user name."""
 
     fake_llm = _CapturingLLM({"final_dialog": ["answer"]})
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", fake_llm)
 
     await dialog_module.dialog_generator({
         "internal_monologue": "answer",
-        "action_directives": {
-            "linguistic_directives": {
-                "rhetorical_strategy": "direct",
-                "linguistic_style": "brief",
-                "accepted_user_preferences": [],
-                "content_plan": {
-                    "semantic_content": "answer",
-                    "rendering": "short",
-                },
-                "forbidden_phrases": [],
-            },
-            "contextual_directives": {
-                "social_distance": "friendly",
-                "emotional_intensity": "low",
-                "vibe_check": "calm",
-                "relational_dynamic": "cooperative",
-            },
+        "text_surface_output_v2": {
+            "schema_version": "text_surface_output.v2",
+            "content_plan": "answer",
+            "visible_boundaries": [],
+            "addressee_plan": ["current user"],
+            "style_guidance": "brief",
+            "pacing_guidance": "short",
+            "selected_surface_intent": "answer",
         },
         "chat_history_wide": _history(),
         "chat_history_recent": _history(),
@@ -266,17 +257,16 @@ async def test_dialog_generator_payload_excludes_raw_history_and_monologue(monke
         "platform_bot_id": "bot-1",
         "global_user_id": "global-user-1",
         "user_name": "User",
-        "user_profile": {"affinity": 700},
+        "user_profile": {
+            "global_user_id": "global-user-1",
+            "cognition_state": {"owner_user_id": "global-user-1"},
+        },
         "character_profile": _character_profile(),
         "messages": [],
     })
 
     human_payload = json.loads(fake_llm.messages[1].content)
-    assert set(human_payload) == {
-        "linguistic_directives",
-        "contextual_directives",
-        "user_name",
-    }
+    assert set(human_payload) == {"text_surface_output_v2", "user_name"}
     assert "internal_monologue" not in human_payload
     assert _TONE_HISTORY_KEY not in human_payload
     assert "chat_history_wide" not in human_payload

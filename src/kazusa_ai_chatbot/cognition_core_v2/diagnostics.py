@@ -1,4 +1,4 @@
-"""Validation-only lifecycle and process-local state diagnostics."""
+"""Validation-only diagnostics for the native V2 cognition pipeline."""
 
 from __future__ import annotations
 
@@ -10,21 +10,14 @@ from pathlib import Path
 import time
 from typing import Mapping
 
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
-    EmotionActivation,
-    LocalMotivationalState,
-    LocalStateKey,
-)
 from kazusa_ai_chatbot.cognition_core_v2.emotion_definitions import (
     EMOTION_DEFINITIONS,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_store import LocalStateStore
+from kazusa_ai_chatbot.cognition_core_v2.emotion_derivation import (
+    derive_emotion_activation_v2,
+)
 
 
-BEGIN_ACTIVATION = 0.6
-SUSTAIN_ACTIVATION = 0.6
-FADE_MULTIPLIER = 0.4
-LOCAL_STATE_STORE = LocalStateStore()
 _DIAGNOSTIC_RECORDS: list[dict[str, object]] = []
 _VALIDATION_CAPTURE: ContextVar[dict[str, object] | None] = ContextVar(
     "cognition_core_v2_validation_capture",
@@ -33,30 +26,58 @@ _VALIDATION_CAPTURE: ContextVar[dict[str, object] | None] = ContextVar(
 
 
 def run_lifecycle_case(case: Mapping[str, object]) -> dict[str, object]:
-    """Run the deterministic five-phase proof for one emotion definition.
+    """Run a native activation lifecycle diagnostic for one typed fixture.
 
     Args:
-        case: Fixture row containing the approved emotion id and causal root.
+        case: Fixture row containing an approved emotion id and typed cause sequence.
 
     Returns:
         Phase-by-phase activation, trend, and guard outcomes for test evidence.
     """
 
     emotion_id = case["emotion_id"]
-    root = case["root"]
     if not isinstance(emotion_id, str) or emotion_id not in EMOTION_DEFINITIONS:
         raise ValueError("lifecycle case must name an approved emotion")
-    if not isinstance(root, str):
-        raise ValueError("lifecycle case must name a causal root")
+    cause_sequence = case["cause_sequence"]
+    if not isinstance(cause_sequence, list) or not cause_sequence:
+        raise ValueError("lifecycle case must include a typed cause sequence")
     definition = EMOTION_DEFINITIONS[emotion_id]
-    if definition.causal_inputs != (root,):
-        raise ValueError("lifecycle root does not match the emotion definition")
-
-    baseline = _activation_for_phase(definition, 0.0, None)
-    beginning = _activation_for_phase(definition, BEGIN_ACTIVATION, baseline)
-    sustained = _activation_for_phase(definition, SUSTAIN_ACTIVATION, beginning)
-    fading = _activation_for_phase(definition, 0.0, sustained)
-    negative_control = _activation_for_phase(definition, 0.0, None)
+    root_kind = definition.causal_entity_kinds[0]
+    root_ref = {
+        "scope": "character" if root_kind == "meaning" else "user",
+        "kind": root_kind,
+        "entity_id": f"diagnostic:{emotion_id}",
+    }
+    cause = {
+        "root_ref": root_ref,
+        "score": 60,
+        "cause_status": "active",
+        "salience": 60,
+    }
+    baseline = None
+    beginning = derive_emotion_activation_v2(
+        emotion_id,
+        candidates=[cause],
+        previous=None,
+        updated_at="2026-07-14T00:00:00Z",
+    )
+    sustained = derive_emotion_activation_v2(
+        emotion_id,
+        candidates=[cause],
+        previous=beginning,
+        updated_at="2026-07-14T01:00:00Z",
+    )
+    fading = derive_emotion_activation_v2(
+        emotion_id,
+        candidates=[{
+            **cause,
+            "score": 0,
+            "cause_status": "resolved",
+        }],
+        previous=sustained,
+        updated_at="2026-07-14T02:00:00Z",
+    )
+    negative_control = None
     result = {
         "case_id": case["case_id"],
         "emotion_id": emotion_id,
@@ -69,19 +90,6 @@ def run_lifecycle_case(case: Mapping[str, object]) -> dict[str, object]:
         },
     }
     return result
-
-
-async def reset_local_state(state_key: LocalStateKey | None = None) -> None:
-    """Reset one test scope or every validation-local state scope."""
-
-    await LOCAL_STATE_STORE.reset(state_key)
-
-
-async def snapshot_local_state(state_key: LocalStateKey) -> LocalMotivationalState:
-    """Return a copied state snapshot for diagnostics and focused tests."""
-
-    state_snapshot = await LOCAL_STATE_STORE.snapshot(state_key)
-    return state_snapshot
 
 
 def record_diagnostic(record: Mapping[str, object]) -> None:
@@ -276,41 +284,15 @@ def write_diagnostic_artifact(
     return artifact_path
 
 
-def _activation_for_phase(
-    definition: object,
-    root_strength: float,
-    prior: EmotionActivation | None,
-) -> EmotionActivation:
-    """Derive one bounded activation from causal presence and prior residue."""
-
-    typed_definition = definition
-    if root_strength > 0.0:
-        trend = "beginning" if prior is None or prior.activation == 0.0 else "sustained"
-        activation = root_strength
-    elif prior is not None and prior.activation > 0.0:
-        trend = "fading"
-        activation = prior.activation * FADE_MULTIPLIER
-    else:
-        trend = "inactive"
-        activation = 0.0
-    emotion_activation = EmotionActivation(
-        emotion_id=typed_definition.emotion_id,
-        activation=activation,
-        trend=trend,
-        causal_source_refs=typed_definition.causal_inputs if root_strength > 0.0 else (),
-    )
-    return emotion_activation
-
-
 def _phase_payload(
-    activation: EmotionActivation,
+    activation: Mapping[str, object] | None,
     guard_passed: bool,
 ) -> dict[str, object]:
     """Project one lifecycle state into inspectable fixture evidence."""
 
     phase = {
-        "activation": activation.activation,
-        "trend": activation.trend,
+        "activation": activation["score"] if activation is not None else 0,
+        "trend": activation["trend"] if activation is not None else "inactive",
         "guard_passed": guard_passed,
     }
     return phase

@@ -14,7 +14,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2 import (
     stage_3_no_response,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
-    build_cognition_chain_input_from_global_state,
+    build_cognition_input_from_global_state,
 )
 from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
 
@@ -229,6 +229,20 @@ def _action_directives() -> dict:
     }
 
 
+def _text_surface_output() -> dict:
+    """Build the canonical V2 handoff consumed by dialog."""
+
+    return {
+        "schema_version": "text_surface_output.v2",
+        "content_plan": "answer",
+        "visible_boundaries": [],
+        "addressee_plan": ["current user"],
+        "style_guidance": "brief",
+        "pacing_guidance": "direct",
+        "selected_surface_intent": "answer naturally",
+    }
+
+
 def _resolver_update(action_specs: list[dict]) -> dict:
     """Build a patched resolver result for persona graph plumbing tests."""
 
@@ -248,6 +262,26 @@ def _resolver_update(action_specs: list[dict]) -> dict:
     }
 
 
+def _v2_resolver_update(action_specs: list[dict]) -> dict:
+    """Build a patched native V2 recurrence result for graph plumbing tests."""
+
+    output = _resolver_update(action_specs)
+    return {
+        "working_state": {
+            "schema_version": "resolver_working_state.v2",
+            "origin_scope": "user",
+            "cycle_index": 0,
+            "max_cycles": 2,
+            "cognition_output": output,
+            "pending_requests": [],
+            "observations": [],
+            "terminal": True,
+        },
+        "cognition_output": output,
+        "observations": [],
+    }
+
+
 @pytest.mark.asyncio
 async def test_call_action_subgraph_returns_final_dialog():
     """call_action_subgraph wraps dialog_agent output correctly."""
@@ -261,7 +295,7 @@ async def test_call_action_subgraph_returns_final_dialog():
         patch(
             "kazusa_ai_chatbot.nodes.persona_supervisor2.call_l3_text_surface_handler",
             new_callable=AsyncMock,
-            return_value={"action_directives": _action_directives()},
+            return_value={"text_surface_output_v2": _text_surface_output()},
         ),
         patch(
             "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",
@@ -298,7 +332,7 @@ async def test_call_action_subgraph_empty_dialog():
         patch(
             "kazusa_ai_chatbot.nodes.persona_supervisor2.call_l3_text_surface_handler",
             new_callable=AsyncMock,
-            return_value={"action_directives": _action_directives()},
+            return_value={"text_surface_output_v2": _text_surface_output()},
         ),
         patch(
             "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",
@@ -384,7 +418,7 @@ async def test_background_work_executes_before_l3_acknowledgement() -> None:
 
     async def _l3_text_surface_handler(l3_state):
         l3_states.append(dict(l3_state))
-        return {"action_directives": _action_directives()}
+        return {"text_surface_output_v2": _text_surface_output()}
 
     with (
         patch(
@@ -393,15 +427,9 @@ async def test_background_work_executes_before_l3_acknowledgement() -> None:
             return_value={"decontexualized_input": "Hello"},
         ),
         patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_resolver_loop",
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_v2_resolver_loop",
             new_callable=AsyncMock,
-            return_value=_resolver_update(action_specs),
-        ),
-        patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2."
-            "load_matching_pending_resume_into_state",
-            new_callable=AsyncMock,
-            side_effect=lambda persona_state: persona_state,
+            return_value=_v2_resolver_update(action_specs),
         ),
         patch(
             "kazusa_ai_chatbot.nodes.persona_supervisor2."
@@ -466,14 +494,14 @@ async def test_persona_supervisor2_returns_final_dialog_and_consolidation_state(
             return_value={"decontexualized_input": "Hello"},
         ) as m_decon,
         patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_resolver_loop",
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_v2_resolver_loop",
             new_callable=AsyncMock,
-            return_value=_resolver_update([_speak_action_spec()]),
+            return_value=_v2_resolver_update([_speak_action_spec()]),
         ) as m_resolver,
         patch(
             "kazusa_ai_chatbot.nodes.persona_supervisor2.call_l3_text_surface_handler",
             new_callable=AsyncMock,
-            return_value={"action_directives": _action_directives()},
+            return_value={"text_surface_output_v2": _text_surface_output()},
         ),
         patch(
             "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",
@@ -506,11 +534,12 @@ async def test_persona_supervisor2_returns_final_dialog_and_consolidation_state(
     m_resolver.assert_awaited_once()
 
 
-def test_cognition_chain_input_projects_group_name_into_scene_topic() -> None:
-    """Cognition should receive the named group as existing scene text."""
+def test_cognition_input_projects_group_name_into_semantic_scene() -> None:
+    """V2 cognition receives named-group context as semantic scene text."""
 
     state = _base_discord_state()
     state.update({
+        "storage_timestamp_utc": "2024-01-01T00:00:00Z",
         "channel_name": "动画讨论群",
         "channel_topic": "新番角色和剧情走向",
         "decontexualized_input": "Hello",
@@ -518,12 +547,14 @@ def test_cognition_chain_input_projects_group_name_into_scene_topic() -> None:
         "rag_result": {},
     })
 
-    chain_input = build_cognition_chain_input_from_global_state(state)
+    chain_input = build_cognition_input_from_global_state(state)
 
-    assert chain_input["scene"]["channel_topic"] == (
+    assert chain_input["schema_version"] == "cognition_core_input.v2"
+    assert chain_input["scene_context"]["semantic_scene"].startswith(
         '“动画讨论群”群聊中正在讨论：新番角色和剧情走向'
     )
-    assert "channel_name" not in chain_input["scene"]
+    assert chain_input["scene_context"]["semantic_scene"].endswith("。Hello")
+    assert "channel_name" not in chain_input["scene_context"]
     assert state["channel_topic"] == "新番角色和剧情走向"
 
 
@@ -540,10 +571,10 @@ async def test_persona_supervisor2_no_speak_action_skips_dialog():
             return_value={"decontexualized_input": "Hello"},
         ),
         patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_resolver_loop",
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_v2_resolver_loop",
             new_callable=AsyncMock,
             return_value={
-                **_resolver_update([]),
+                **_v2_resolver_update([]),
                 "internal_monologue": "choosing silence",
                 "character_intent": "DISMISS",
                 "logical_stance": "REFUSE",
@@ -633,9 +664,9 @@ async def test_persona_supervisor2_scopes_group_history_before_persona_stages():
             return_value={"decontexualized_input": "Hello"},
         ) as m_decon,
         patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_resolver_loop",
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_v2_resolver_loop",
             new_callable=AsyncMock,
-            return_value=_resolver_update([]),
+            return_value=_v2_resolver_update([]),
         ) as m_resolver,
         patch(
             "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",
@@ -795,10 +826,10 @@ async def test_persona_supervisor2_builds_scope_users_for_first_pass_only():
             },
         ) as m_decon,
         patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_resolver_loop",
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_v2_resolver_loop",
             new_callable=AsyncMock,
             return_value={
-                **_resolver_update([]),
+                **_v2_resolver_update([]),
                 "internal_monologue": "choosing silence",
                 "character_intent": "CLARIFY",
                 "logical_stance": "UNKNOWN_REFERENT",
@@ -866,14 +897,14 @@ async def test_persona_supervisor2_no_remember_skips_consolidation():
             return_value={"decontexualized_input": "Hello"},
         ),
         patch(
-            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_cognition_resolver_loop",
+            "kazusa_ai_chatbot.nodes.persona_supervisor2.call_v2_resolver_loop",
             new_callable=AsyncMock,
-            return_value=_resolver_update([_speak_action_spec()]),
+            return_value=_v2_resolver_update([_speak_action_spec()]),
         ),
         patch(
             "kazusa_ai_chatbot.nodes.persona_supervisor2.call_l3_text_surface_handler",
             new_callable=AsyncMock,
-            return_value={"action_directives": _action_directives()},
+            return_value={"text_surface_output_v2": _text_surface_output()},
         ),
         patch(
             "kazusa_ai_chatbot.nodes.persona_supervisor2.dialog_agent",

@@ -50,6 +50,8 @@ class ActionRequestV1(TypedDict, total=False):
     detail: str
     coding_run_ref: str
     execution_request: str
+    target_roles: list[dict[str, str]]
+    evidence_handles: list[str]
 
 
 def _current_episode_source_ref() -> ActionSourceRefV1:
@@ -160,6 +162,10 @@ def _materialize_action_request(
 
     if action_spec is None:
         return None
+    action_spec["params"]["cognition_provenance"] = {
+        "target_roles": list(request.get("target_roles", [])),
+        "evidence_handles": list(request.get("evidence_handles", [])),
+    }
     validated_spec = validate_action_spec(action_spec)
     return validated_spec
 
@@ -184,6 +190,8 @@ def _build_speak_action_spec(
     surface_requirements = {
         "decision": _semantic_text(request, "decision"),
         "detail": detail,
+        "target_roles": list(request.get("target_roles", [])),
+        "evidence_handles": list(request.get("evidence_handles", [])),
     }
     action_spec = _build_action_spec(
         kind=SPEAK_CAPABILITY,

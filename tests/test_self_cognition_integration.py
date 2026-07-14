@@ -434,17 +434,7 @@ def _progress_cognition_output() -> dict[str, Any]:
     output = {
         "logical_stance": "OBSERVE",
         "character_intent": "WAIT",
-        "mood": "subdued",
-        "affinity_delta": -1,
-        "action_directives": {
-            "linguistic_directives": {
-                "content_plan": {
-                    "semantic_content": (
-                        "[AUDIT_ONLY] The missed promise should be remembered."
-                    ),
-                },
-            },
-        },
+        "self_cognition_route": models.ROUTE_PROGRESS_MAINTENANCE,
     }
     return output
 
@@ -459,25 +449,18 @@ def _speak_action_spec() -> dict[str, Any]:
     return spec
 
 
-def _visible_action_directives() -> dict[str, Any]:
-    """Build complete text directives for deterministic dialog rendering."""
+def _text_surface_output(content_plan: str = "Checking in now.") -> dict[str, Any]:
+    """Build the canonical V2 surface result used by worker tests."""
 
-    directives = {
-        "contextual_directives": {
-            "social_distance": "friendly",
-            "emotional_intensity": "low",
-            "vibe_check": "focused",
-            "relational_dynamic": "scheduled follow-up",
-        },
-        "linguistic_directives": {
-            "rhetorical_strategy": "answer the scheduled follow-up",
-            "linguistic_style": "brief",
-            "accepted_user_preferences": [],
-            "content_plan": {"semantic_content": "Checking in now."},
-            "forbidden_phrases": [],
-        },
+    return {
+        "schema_version": "text_surface_output.v2",
+        "content_plan": content_plan,
+        "visible_boundaries": [],
+        "addressee_plan": ["current user"],
+        "style_guidance": "brief",
+        "pacing_guidance": "direct",
+        "selected_surface_intent": "answer the scheduled follow-up",
     }
-    return directives
 
 
 def _action_cognition_output() -> dict[str, Any]:
@@ -486,9 +469,7 @@ def _action_cognition_output() -> dict[str, Any]:
     output = {
         "logical_stance": "CONFIRM",
         "character_intent": "PROVIDE",
-        "mood": "hurt",
-        "affinity_delta": -1,
-        "action_directives": _visible_action_directives(),
+        "text_surface_output_v2": _text_surface_output(),
         "action_specs": [_speak_action_spec()],
     }
     return output

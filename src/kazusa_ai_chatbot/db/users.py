@@ -4,8 +4,7 @@ Covers:
 
 * Identity resolution (``resolve_global_user_id``, ``link_platform_account``)
 * Profile read/create (``get_user_profile``, ``create_user_profile``)
-* Affinity (``get_affinity``, ``update_affinity``)
-* Relationship insight (``update_last_relationship_insight``)
+* Native V2 relationship-state reads
 """
 
 from __future__ import annotations
@@ -16,11 +15,10 @@ import uuid
 
 from pymongo.errors import PyMongoError
 
-from kazusa_ai_chatbot.config import (
-    AFFINITY_DEFAULT,
-    AFFINITY_MAX,
-    AFFINITY_MIN,
-    CHARACTER_GLOBAL_USER_ID,
+from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    build_acquaintance_user_state,
+    validate_cognition_state,
 )
 from kazusa_ai_chatbot.db._client import get_db
 from kazusa_ai_chatbot.db.errors import DatabaseOperationError
@@ -33,9 +31,9 @@ logger = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
-    """Current UTC timestamp as ISO-8601 string."""
-    current_time_utc = storage_utc_now_iso()
-    return current_time_utc
+    """Current UTC timestamp in the cognition contract's Z form."""
+
+    return storage_utc_now_iso().replace("+00:00", "Z")
 
 
 # ── Identity resolution ────────────────────────────────────────────
@@ -69,8 +67,10 @@ async def resolve_global_user_id(
         }],
         "suspected_aliases": [],
         "facts": [],
-        "affinity": AFFINITY_DEFAULT,
-        "last_relationship_insight": "",
+        "cognition_state": build_acquaintance_user_state(
+            global_user_id=new_id,
+            updated_at=_now_iso(),
+        ),
     }
     await db.user_profiles.insert_one(new_profile)
     logger.info(f'Created new user profile {new_id} for {platform}/{platform_user_id}')
@@ -145,8 +145,10 @@ async def ensure_character_identity(
                 "platform_accounts": [],
                 "suspected_aliases": [],
                 "facts": [],
-                "affinity": AFFINITY_DEFAULT,
-                "last_relationship_insight": "",
+                "cognition_state": build_acquaintance_user_state(
+                    global_user_id=clean_global_id,
+                    updated_at=now,
+                ),
             }
         },
         upsert=True,
@@ -491,6 +493,89 @@ async def list_users_by_affinity(
     return results
 
 
+def _relationship_rank_score(relationship: dict) -> int:
+    """Compute an internal ranking score from native V2 relationship axes."""
+
+    return (
+        int(relationship.get("positive_regard", 0))
+        + int(relationship.get("trust", 0))
+        + int(relationship.get("attachment", 0))
+        + int(relationship.get("care", 0))
+        + int(relationship.get("desired_closeness", 0))
+        + int(relationship.get("perceived_closeness", 0))
+        + int(relationship.get("boundary_safety", 0))
+        - int(relationship.get("unresolved_injury", 0))
+    )
+
+
+def _relationship_semantic_band(score: int) -> tuple[str, str]:
+    """Describe an internal relationship score without exposing the score."""
+
+    if score >= 240:
+        return "strong connection", "positive"
+    if score >= 80:
+        return "growing connection", "positive"
+    if score <= -240:
+        return "severely strained relationship", "negative"
+    if score <= -80:
+        return "strained relationship", "negative"
+    return "acquaintance relationship", "neutral"
+
+
+async def list_users_by_relationship(
+    *,
+    rank_order: str = "top",
+    platform: str | None = None,
+    limit: int = 5,
+) -> list[dict]:
+    """List users by native V2 semantic relationship state.
+
+    The ranking is deterministic and internal. Returned rows contain only
+    qualitative relationship descriptors and stable identity metadata.
+    """
+
+    if limit <= 0:
+        return []
+
+    db = await get_db()
+    cursor = db.user_profiles.find(
+        {
+            "global_user_id": {"$ne": CHARACTER_GLOBAL_USER_ID},
+            "cognition_state.state_scope": "user",
+            "cognition_state.relationship": {"$exists": True},
+            "platform_accounts.0": {"$exists": True},
+        },
+        {
+            "_id": 0,
+            "global_user_id": 1,
+            "platform_accounts": 1,
+            "cognition_state.relationship": 1,
+        },
+    )
+    ranked: list[tuple[int, dict]] = []
+    async for document in cursor:
+        relationship = document.get("cognition_state", {}).get("relationship")
+        if not isinstance(relationship, dict):
+            continue
+        account = _preferred_platform_account(
+            document.get("platform_accounts", []),
+            platform,
+        )
+        score = _relationship_rank_score(relationship)
+        label, band = _relationship_semantic_band(score)
+        ranked.append((score, {
+            "global_user_id": str(document.get("global_user_id", "")),
+            "display_name": str(account.get("display_name", "")),
+            "platform": str(account.get("platform", "")),
+            "platform_user_id": str(account.get("platform_user_id", "")),
+            "relationship_label": label,
+            "relationship_band": band,
+        }))
+
+    ranked.sort(key=lambda row: row[0], reverse=rank_order != "bottom")
+    return [row[1] for row in ranked[:limit]]
+
+
 async def add_suspected_alias(
     global_user_id: str,
     other_global_user_id: str,
@@ -605,9 +690,58 @@ async def create_user_profile(user_profile: UserProfileDoc) -> None:
     user_profile.setdefault("global_user_id", str(uuid.uuid4()))
     user_profile.setdefault("platform_accounts", [])
     user_profile.setdefault("suspected_aliases", [])
-    user_profile.setdefault("affinity", AFFINITY_DEFAULT)
-    user_profile.setdefault("last_relationship_insight", "")
+    global_user_id = user_profile["global_user_id"]
+    cognition_state = user_profile.get("cognition_state")
+    if cognition_state is None:
+        user_profile["cognition_state"] = build_acquaintance_user_state(
+            global_user_id=global_user_id,
+            updated_at=_now_iso(),
+        )
+    else:
+        user_profile["cognition_state"] = validate_cognition_state(
+            cognition_state
+        )
     await db.user_profiles.insert_one(user_profile)
+
+
+async def get_user_cognition_state(global_user_id: str) -> dict:
+    """Read and validate one user's persistent cognition state."""
+
+    db = await get_db()
+    document = await db.user_profiles.find_one(
+        {"global_user_id": global_user_id},
+        {"cognition_state": 1},
+    )
+    if document is None or document.get("cognition_state") is None:
+        return build_acquaintance_user_state(
+            global_user_id=global_user_id,
+            updated_at=_now_iso(),
+        )
+    state = validate_cognition_state(document["cognition_state"])
+    return state
+
+
+async def replace_user_cognition_state(
+    global_user_id: str,
+    state: dict,
+) -> None:
+    """Validate and replace the cognition state embedded in one user row."""
+
+    validated_state = validate_cognition_state(state)
+    if validated_state["state_scope"] != "user":
+        raise ValueError("user cognition state must be user-scoped")
+    if validated_state["owner_user_id"] != global_user_id:
+        raise ValueError("user cognition state owner does not match the row")
+    db = await get_db()
+    result = await db.user_profiles.update_one(
+        {"global_user_id": global_user_id},
+        {"$set": {"cognition_state": validated_state}},
+        upsert=False,
+    )
+    if result.matched_count != 1:
+        raise DatabaseOperationError(
+            f"user profile {global_user_id!r} does not exist"
+        )
 
 
 # ── Affinity & relationship insight ────────────────────────────────

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Literal, NotRequired, TypeAlias, TypedDict
 
+from kazusa_ai_chatbot.cognition_core_v2.contracts import RoleRefV2
+
 from kazusa_ai_chatbot.action_spec.models import (
     ActionContinuationV1,
     ActionSpecV1,
@@ -55,6 +57,36 @@ class ActionResultV1(TypedDict):
     accepted_task_summary: NotRequired[str]
     wait_guidance: NotRequired[str]
     acknowledgement_constraint: NotRequired[str]
+
+
+class SemanticActionResultV2(TypedDict):
+    """Typed execution outcome allowed back into later cognition."""
+
+    action_kind: str
+    status: Literal["completed", "failed", "unavailable"]
+    semantic_result: str
+    target_roles: list[RoleRefV2]
+
+
+def project_semantic_action_result_v2(
+    *,
+    action_kind: str,
+    status: str,
+    semantic_result: str,
+    target_roles: list[RoleRefV2],
+) -> SemanticActionResultV2:
+    """Project an action outcome without returning handlers or raw parameters."""
+
+    if status not in {"completed", "failed", "unavailable"}:
+        raise ValueError("V2 action result status is invalid")
+    if not isinstance(semantic_result, str) or not semantic_result.strip():
+        raise ValueError("V2 action result summary is invalid")
+    return {
+        "action_kind": action_kind,
+        "status": status,
+        "semantic_result": semantic_result,
+        "target_roles": list(target_roles),
+    }
 
 
 class SurfaceOutputV1(TypedDict):

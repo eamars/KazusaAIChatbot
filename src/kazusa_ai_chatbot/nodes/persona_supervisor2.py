@@ -1,6 +1,8 @@
 """Persona graph orchestration for decontextualization, RAG, cognition, and dialog."""
 
 import logging
+from collections.abc import Mapping
+from uuid import uuid4
 
 from langgraph.graph import END, START, StateGraph
 
@@ -19,22 +21,17 @@ from kazusa_ai_chatbot.action_spec.results import (
 )
 from kazusa_ai_chatbot.config import (
     CHAT_HISTORY_RECENT_LIMIT,
-    COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS,
     COGNITION_RESOLVER_MAX_CYCLES,
 )
 from kazusa_ai_chatbot.cognition_resolver.capabilities import (
-    execute_resolver_capability_request,
     run_rag_evidence_for_persona_state as _run_rag_evidence_for_persona_state,
 )
-from kazusa_ai_chatbot.cognition_resolver.loop import call_cognition_resolver_loop
-from kazusa_ai_chatbot.cognition_resolver.pending import (
-    apply_pending_resolution,
-    load_matching_pending_resume_into_state,
-    upsert_pending_resume,
-)
-from kazusa_ai_chatbot.cognition_resolver.state import ensure_initial_resolver_inputs
+from kazusa_ai_chatbot.cognition_resolver.loop import call_v2_resolver_loop
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import call_cognition_subgraph
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
+    call_cognition_subgraph,
+    commit_cognition_output,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
     call_l3_text_surface_handler,
 )
@@ -259,32 +256,11 @@ def _selected_action_specs(state: GlobalPersonaState) -> list[dict]:
 def _cognition_selects_text_surface(state: GlobalPersonaState) -> bool:
     """Return whether L2d selected the text surface handler."""
 
-    return_value = (
-        _first_valid_action_attempt_id(state, SPEAK_CAPABILITY) is not None
-    )
+    cognition_output = state.get("cognition_core_output")
+    if isinstance(cognition_output, dict):
+        return cognition_output.get("intention", {}).get("route") == "speech"
+    return_value = _first_valid_action_attempt_id(state, SPEAK_CAPABILITY) is not None
     return return_value
-
-
-def _empty_action_directives() -> dict:
-    """Return a consolidation-safe directive shell for private-only episodes."""
-
-    directives = {
-        "contextual_directives": {},
-        "linguistic_directives": {
-            "rhetorical_strategy": "",
-            "linguistic_style": "",
-            "accepted_user_preferences": [],
-            "content_plan": {},
-            "forbidden_phrases": [],
-        },
-        "visual_directives": {
-            "facial_expression": [],
-            "body_language": [],
-            "gaze_direction": [],
-            "visual_vibe": [],
-        },
-    }
-    return directives
 
 
 async def _action_results_for_state(
@@ -485,7 +461,6 @@ async def stage_3_no_response(state: GlobalPersonaState) -> dict:
     return_value = {
         "should_respond": False,
         "final_dialog": [],
-        "action_directives": _empty_action_directives(),
         "target_addressed_user_ids": [],
         "target_broadcast": False,
     }
@@ -524,26 +499,102 @@ async def run_rag_evidence_for_persona_state(
 
 
 async def stage_1_goal_resolver(state: GlobalPersonaState) -> dict:
-    """Run the cognition-preserving resolver loop after decontextualization."""
+    """Run episode-local V2 resolver recurrence and commit only its final result."""
 
-    initialized = ensure_initial_resolver_inputs(
+    async def cognition_cycle(
+        current_state: Mapping[str, object],
+    ) -> Mapping[str, object]:
+        cycle_state = dict(current_state)
+        result = await call_cognition_subgraph(
+            cycle_state,  # type: ignore[arg-type]
+            commit=False,
+        )
+        combined = dict(cycle_state)
+        combined.update(result)
+        core_output = result.get("cognition_core_output")
+        if isinstance(core_output, Mapping):
+            combined["resolver_requests"] = list(
+                core_output.get("resolver_requests", [])
+            )
+        else:
+            combined["resolver_requests"] = []
+        return combined
+
+    async def capability_cycle(
+        request: Mapping[str, object],
+        current_state: Mapping[str, object],
+    ) -> Mapping[str, object]:
+        capability = str(request.get("capability", ""))
+        if capability != "local_context_recall":
+            return {
+                "observation_id": f"resolver-observation:{uuid4().hex}",
+                "capability": capability,
+                "status": "failed",
+                "semantic_summary": "requested resolver capability is unavailable",
+                "created_at_utc": state["storage_timestamp_utc"],
+            }
+        try:
+            rag_result = await run_rag_evidence_for_persona_state(
+                current_state,  # type: ignore[arg-type]
+                agent_name="v2_resolver_local_context",
+                objective=str(request.get("semantic_goal", "")),
+            )
+        except Exception as exc:
+            return {
+                "observation_id": f"resolver-observation:{uuid4().hex}",
+                "capability": capability,
+                "status": "failed",
+                "semantic_summary": f"local context recall failed: {exc}",
+                "created_at_utc": state["storage_timestamp_utc"],
+            }
+        summary = _resolver_result_summary(rag_result)
+        return {
+            "observation_id": f"resolver-observation:{uuid4().hex}",
+            "capability": capability,
+            "status": "succeeded",
+            "semantic_summary": summary,
+            "rag_result": rag_result,
+            "created_at_utc": state["storage_timestamp_utc"],
+        }
+
+    resolved = await call_v2_resolver_loop(
         state,
+        cognition_func=cognition_cycle,
+        capability_func=capability_cycle,
         max_cycles=COGNITION_RESOLVER_MAX_CYCLES,
     )
-    initialized = await load_matching_pending_resume_into_state(initialized)
-    resolved_state = await call_cognition_resolver_loop(
-        initialized,
-        call_cognition_subgraph_func=call_cognition_subgraph,
-        execute_capability_func=execute_resolver_capability_request,
-        max_cycles=COGNITION_RESOLVER_MAX_CYCLES,
-        capability_timeout_seconds=(
-            COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS
-        ),
-        upsert_pending_resume_func=upsert_pending_resume,
-        apply_pending_resolution_func=apply_pending_resolution,
+    final_state = dict(state)
+    cognition_output = resolved.get("cognition_output")
+    if isinstance(cognition_output, Mapping):
+        final_state.update(cognition_output)
+    final_state["resolver_observations"] = list(
+        resolved.get("observations", [])
     )
-    return_value = resolved_state
-    return return_value
+    core_output = final_state.get("cognition_core_output")
+    if isinstance(core_output, Mapping):
+        await commit_cognition_output(core_output)  # type: ignore[arg-type]
+    return final_state  # type: ignore[return-value]
+
+
+def _resolver_result_summary(result: object) -> str:
+    """Build one bounded semantic summary from a projected RAG result."""
+
+    if not isinstance(result, Mapping):
+        return "local context recall returned no usable evidence"
+    answer = result.get("answer")
+    if isinstance(answer, str) and answer.strip():
+        return answer.strip()[:1000]
+    rows = result.get("memory_evidence")
+    if isinstance(rows, list):
+        summaries = [
+            str(row.get("summary") or row.get("content"))[:300]
+            for row in rows
+            if isinstance(row, Mapping)
+            and isinstance(row.get("summary") or row.get("content"), str)
+        ]
+        if summaries:
+            return "; ".join(summaries)[:1000]
+    return "local context recall completed without additional grounded evidence"
 
 
 def _route_after_cognition(state: GlobalPersonaState) -> str:

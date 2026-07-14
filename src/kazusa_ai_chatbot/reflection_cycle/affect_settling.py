@@ -8,26 +8,18 @@ from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
-
 from kazusa_ai_chatbot import db
 from kazusa_ai_chatbot import event_logging
+from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
+    apply_sleep_recovery as apply_sleep_recovery_state,
+)
 from kazusa_ai_chatbot.config import (
     AFFECT_SETTLING_WAKE_PREP_MINUTES,
     CHARACTER_SLEEP_LOCAL_PERIOD,
-    CONSOLIDATION_LLM_API_KEY,
-    CONSOLIDATION_LLM_BASE_URL,
-    CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
-    CONSOLIDATION_LLM_MODEL,
-    CONSOLIDATION_LLM_THINKING_ENABLED,
     REFLECTION_PROMOTION_RUN_AFTER_LOCAL_TIME,
 )
 from kazusa_ai_chatbot.db.schemas import CharacterReflectionRunDoc
-from kazusa_ai_chatbot.llm_interface import (
-    LLInterface,
-    LLMCallConfig,
-    LLMThinkingConfig,
-)
+from kazusa_ai_chatbot.db.errors import DatabaseOperationError
 from kazusa_ai_chatbot.reflection_cycle.models import (
     AFFECT_SETTLING_PROMPT_VERSION,
     PromptBuildResult,
@@ -35,6 +27,7 @@ from kazusa_ai_chatbot.reflection_cycle.models import (
     REFLECTION_RUN_KIND_DAILY_CHANNEL,
     REFLECTION_RUN_KIND_HOURLY,
     REFLECTION_STATUS_DRY_RUN,
+    REFLECTION_STATUS_FAILED,
     REFLECTION_STATUS_SKIPPED,
     REFLECTION_STATUS_SUCCEEDED,
     ReflectionWorkerResult,
@@ -47,7 +40,6 @@ from kazusa_ai_chatbot.time_boundary import (
     parse_storage_utc_datetime,
     storage_utc_now_iso,
 )
-from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
 LOCAL_CLOCK_TEXT_LENGTH = 5
@@ -68,12 +60,6 @@ AFFECT_SETTLING_PROMPT_MAX_CHARS = 12000
 AFFECT_SETTLING_REVIEW_PROMPT_MAX_CHARS = 8000
 AFFECT_SETTLING_AFTER_PROMOTION_GRACE_MINUTES = 15
 AFFECT_SETTLING_WAKE_DEFER_GRACE_MINUTES = 15
-AFFECT_SETTLING_LLM_TEMPERATURE = 0.2
-AFFECT_SETTLING_LLM_TOP_P = 0.8
-AFFECT_SETTLING_REVIEW_LLM_TEMPERATURE = 0.0
-AFFECT_SETTLING_REVIEW_LLM_TOP_P = 0.8
-_AFFECT_REQUIRED_FIELDS = ("mood", "global_vibe", "reflection_summary")
-_REVIEW_REQUIRED_FIELDS = ("write_decision", "review_reason")
 logger = logging.getLogger(__name__)
 
 AFFECT_SETTLING_SYSTEM_PROMPT = '''\
@@ -114,40 +100,6 @@ AFFECT_SETTLING_REVIEW_SYSTEM_PROMPT = '''\
   "review_reason": "简短说明"
 }
 '''
-
-_affect_settling_llm = LLInterface()
-_affect_settling_review_llm = LLInterface()
-_affect_settling_llm_config = LLMCallConfig(
-    stage_name=__name__,
-    route_name="CONSOLIDATION_LLM",
-    base_url=CONSOLIDATION_LLM_BASE_URL,
-    api_key=CONSOLIDATION_LLM_API_KEY,
-    model=CONSOLIDATION_LLM_MODEL,
-    temperature=AFFECT_SETTLING_LLM_TEMPERATURE,
-    top_p=AFFECT_SETTLING_LLM_TOP_P,
-    top_k=None,
-    max_completion_tokens=CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
-    presence_penalty=None,
-    thinking=LLMThinkingConfig(
-        enabled=CONSOLIDATION_LLM_THINKING_ENABLED,
-    ),
-)
-_affect_settling_review_llm_config = LLMCallConfig(
-    stage_name=__name__,
-    route_name="CONSOLIDATION_LLM",
-    base_url=CONSOLIDATION_LLM_BASE_URL,
-    api_key=CONSOLIDATION_LLM_API_KEY,
-    model=CONSOLIDATION_LLM_MODEL,
-    temperature=AFFECT_SETTLING_REVIEW_LLM_TEMPERATURE,
-    top_p=AFFECT_SETTLING_REVIEW_LLM_TOP_P,
-    top_k=None,
-    max_completion_tokens=CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
-    presence_penalty=None,
-    thinking=LLMThinkingConfig(
-        enabled=CONSOLIDATION_LLM_THINKING_ENABLED,
-    ),
-)
-
 
 def compute_affect_settling_due_local_time(
     *,
@@ -350,36 +302,6 @@ def build_affect_settling_prompt(
     return prompt
 
 
-async def run_affect_settling_proposal_llm(
-    *,
-    prompt: PromptBuildResult,
-) -> dict[str, Any]:
-    """Run the consolidation LLM for one affect-settling proposal."""
-
-    response = await _affect_settling_llm.ainvoke([
-        SystemMessage(content=prompt.system_prompt),
-        HumanMessage(content=prompt.human_prompt),
-    ], config=_affect_settling_llm_config)
-    raw_output = str(response.content)
-    parsed_output = parse_llm_json_output(raw_output)
-    return parsed_output
-
-
-async def run_affect_settling_review_llm(
-    *,
-    prompt: PromptBuildResult,
-) -> dict[str, Any]:
-    """Run the consolidation LLM for affect-settling structural review."""
-
-    response = await _affect_settling_review_llm.ainvoke([
-        SystemMessage(content=prompt.system_prompt),
-        HumanMessage(content=prompt.human_prompt),
-    ], config=_affect_settling_review_llm_config)
-    raw_output = str(response.content)
-    parsed_output = parse_llm_json_output(raw_output)
-    return parsed_output
-
-
 async def load_affect_settling_source_documents(
     *,
     settling_local_date: str,
@@ -436,6 +358,55 @@ async def run_daily_affect_settling(
 ) -> ReflectionWorkerResult:
     """Run one persistent daily affect-settling pass."""
 
+    return await _run_daily_sleep_recovery(
+        settling_local_date=settling_local_date,
+        dry_run=dry_run,
+        enable_character_state_write=enable_character_state_write,
+        character_state_refresh_callback=character_state_refresh_callback,
+    )
+
+
+def sleep_recovery(
+    state: dict[str, Any],
+    *,
+    local_date_key: str,
+    elapsed_sleep_seconds: int,
+    started_at: str,
+    completed_at: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Apply deterministic character recovery and build its audit artifact."""
+
+    recovered_state = apply_sleep_recovery_state(
+        state,
+        elapsed_sleep_seconds=elapsed_sleep_seconds,
+        updated_at=completed_at,
+    )
+    changed_paths = _changed_state_paths(state, recovered_state)
+    artifact = {
+        "status": "completed",
+        "local_date_key": local_date_key,
+        "state_scope": "character",
+        "elapsed_sleep_seconds": elapsed_sleep_seconds,
+        "changed_paths": changed_paths,
+        "semantic_recovery_summary": _recovery_summary(
+            state,
+            recovered_state,
+        ),
+        "started_at": started_at,
+        "completed_at": completed_at,
+    }
+    return recovered_state, artifact
+
+
+async def _run_daily_sleep_recovery(
+    *,
+    settling_local_date: str,
+    dry_run: bool,
+    enable_character_state_write: bool,
+    character_state_refresh_callback: Callable[[], Any] | None,
+) -> ReflectionWorkerResult:
+    """Run one idempotent deterministic sleep-recovery pass."""
+
     result = ReflectionWorkerResult(
         run_kind=REFLECTION_RUN_KIND_DAILY_AFFECT_SETTLING,
         dry_run=dry_run,
@@ -444,175 +415,77 @@ async def run_daily_affect_settling(
         settling_local_date=settling_local_date,
     )
     result.run_ids.append(run_id)
-
     existing = await repository.reflection_run_by_id(run_id)
     if _affect_settling_doc_blocks_retry(existing):
         result.skipped_count = 1
-        result.defer_reason = "daily affect settling already terminal"
+        result.defer_reason = "daily sleep recovery already completed"
         return result
 
     result.processed_count = 1
-    character_state = await db.get_character_runtime_state()
-    state_warning = _character_state_warning(character_state)
-    if state_warning:
+    state = await db.get_character_cognition_state()
+    started_at = storage_utc_now_iso()
+    elapsed_sleep_seconds = _configured_sleep_interval_seconds()
+    recovered_state, artifact = sleep_recovery(
+        state,
+        local_date_key=settling_local_date,
+        elapsed_sleep_seconds=elapsed_sleep_seconds,
+        started_at=started_at,
+        completed_at=storage_utc_now_iso().replace("+00:00", "Z"),
+    )
+    output = {
+        "sleep_recovery": artifact,
+        "retryable": False,
+    }
+    if dry_run:
+        await _persist_affect_settling_run(
+            settling_local_date=settling_local_date,
+            status=REFLECTION_STATUS_DRY_RUN,
+            source_run_ids=[],
+            output=output,
+            validation_warnings=[],
+        )
+        result.skipped_count = 1
+        return result
+    if not enable_character_state_write:
         await _persist_affect_settling_run(
             settling_local_date=settling_local_date,
             status=REFLECTION_STATUS_SKIPPED,
             source_run_ids=[],
             output={
-                "skip_reason": state_warning,
-                "retryable": False,
-            },
-            validation_warnings=[state_warning],
-        )
-        result.skipped_count = 1
-        result.validation_warnings.append(state_warning)
-        return result
-
-    daily_docs, sleep_window_docs = await load_affect_settling_source_documents(
-        settling_local_date=settling_local_date,
-    )
-    payload = build_affect_settling_payload(
-        settling_local_date=settling_local_date,
-        character_state=character_state,
-        daily_docs=daily_docs,
-        sleep_window_docs=sleep_window_docs,
-    )
-    prompt = build_affect_settling_prompt(payload)
-    proposal_raw = await run_affect_settling_proposal_llm(prompt=prompt)
-    proposal, proposal_warnings = _validate_affect_proposal(proposal_raw)
-    validation_warnings = list(prompt.validation_warnings)
-    validation_warnings.extend(proposal_warnings)
-    source_run_ids = _source_run_ids(daily_docs, sleep_window_docs)
-    if proposal_warnings:
-        await _persist_affect_settling_run(
-            settling_local_date=settling_local_date,
-            status=REFLECTION_STATUS_SKIPPED,
-            source_run_ids=source_run_ids,
-            output={
-                "skip_reason": "proposal_structurally_invalid",
-                "retryable": False,
-                "proposal": proposal_raw,
-            },
-            validation_warnings=validation_warnings,
-        )
-        result.skipped_count = 1
-        result.validation_warnings.extend(validation_warnings)
-        return result
-
-    review_prompt = _build_affect_settling_review_prompt(
-        payload=payload,
-        proposal=proposal,
-    )
-    review_raw = await run_affect_settling_review_llm(prompt=review_prompt)
-    review, review_warnings = _validate_review(review_raw)
-    validation_warnings.extend(review_prompt.validation_warnings)
-    validation_warnings.extend(review_warnings)
-    if review_warnings:
-        await _persist_affect_settling_run(
-            settling_local_date=settling_local_date,
-            status=REFLECTION_STATUS_SKIPPED,
-            source_run_ids=source_run_ids,
-            output={
-                "skip_reason": "review_structurally_invalid",
-                "retryable": False,
-                "proposal": proposal,
-                "review": review_raw,
-            },
-            validation_warnings=validation_warnings,
-        )
-        result.skipped_count = 1
-        result.validation_warnings.extend(validation_warnings)
-        return result
-
-    if review["write_decision"] != "accept":
-        await _persist_affect_settling_run(
-            settling_local_date=settling_local_date,
-            status=REFLECTION_STATUS_SKIPPED,
-            source_run_ids=source_run_ids,
-            output={
-                "skip_reason": "reviewer_rejected",
-                "retryable": False,
-                "proposal": proposal,
-                "review": review,
-            },
-            validation_warnings=validation_warnings,
-        )
-        result.skipped_count = 1
-        result.validation_warnings.extend(validation_warnings)
-        return result
-
-    if dry_run:
-        await _persist_affect_settling_run(
-            settling_local_date=settling_local_date,
-            status=REFLECTION_STATUS_DRY_RUN,
-            source_run_ids=source_run_ids,
-            output={
-                "skip_reason": "dry_run",
-                "retryable": True,
-                "proposal": proposal,
-                "review": review,
-            },
-            validation_warnings=validation_warnings,
-        )
-        result.skipped_count = 1
-        result.validation_warnings.extend(validation_warnings)
-        return result
-
-    if not enable_character_state_write:
-        await _persist_affect_settling_run(
-            settling_local_date=settling_local_date,
-            status=REFLECTION_STATUS_SKIPPED,
-            source_run_ids=source_run_ids,
-            output={
                 "skip_reason": "character_state_write_disabled",
-                "retryable": False,
-                "proposal": proposal,
-                "review": review,
+                **output,
             },
-            validation_warnings=validation_warnings,
+            validation_warnings=[],
         )
         result.skipped_count = 1
-        result.validation_warnings.extend(validation_warnings)
         return result
 
-    expected_updated_at = str(character_state.get("updated_at") or "")
-    write_succeeded = await db.compare_and_upsert_character_state(
-        expected_updated_at=expected_updated_at,
-        mood=proposal["mood"],
-        global_vibe=proposal["global_vibe"],
-        reflection_summary=proposal["reflection_summary"],
-        updated_at_utc=storage_utc_now_iso(),
-    )
-    if not write_succeeded:
+    try:
+        await db.replace_character_cognition_state(recovered_state)
+    except DatabaseOperationError as exc:
+        logger.exception(f"Daily sleep recovery persistence failed: {exc}")
         await _persist_affect_settling_run(
             settling_local_date=settling_local_date,
-            status=REFLECTION_STATUS_SKIPPED,
-            source_run_ids=source_run_ids,
+            status=REFLECTION_STATUS_FAILED,
+            source_run_ids=[],
             output={
-                "skip_reason": "stale_character_state",
-                "retryable": False,
-                "proposal": proposal,
-                "review": review,
+                "retryable": True,
+                "error_type": type(exc).__name__,
+                "error_message": str(exc),
             },
-            validation_warnings=validation_warnings,
+            validation_warnings=[],
+            error=type(exc).__name__,
         )
-        result.skipped_count = 1
-        result.validation_warnings.extend(validation_warnings)
+        result.failed_count = 1
+        result.validation_warnings.append(type(exc).__name__)
         return result
 
     await _persist_affect_settling_run(
         settling_local_date=settling_local_date,
         status=REFLECTION_STATUS_SUCCEEDED,
-        source_run_ids=source_run_ids,
-        output={
-            "mood": proposal["mood"],
-            "global_vibe": proposal["global_vibe"],
-            "reflection_summary": proposal["reflection_summary"],
-            "proposal": proposal,
-            "review": review,
-        },
-        validation_warnings=validation_warnings,
+        source_run_ids=[],
+        output=output,
+        validation_warnings=[],
     )
     try:
         await _call_refresh_callback(character_state_refresh_callback)
@@ -630,9 +503,101 @@ async def run_daily_affect_settling(
             run_id=run_id,
         )
     result.succeeded_count = 1
-    result.validation_warnings.extend(validation_warnings)
     return result
 
+
+def _elapsed_seconds_since(value: Any, now_value: str) -> int:
+    """Return non-negative elapsed seconds between two storage timestamps."""
+
+    if not isinstance(value, str) or not value:
+        return 0
+    try:
+        elapsed = parse_storage_utc_datetime(now_value) - parse_storage_utc_datetime(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, int(elapsed.total_seconds()))
+
+
+def _configured_sleep_interval_seconds() -> int:
+    """Return the configured sleep-window duration, independent of state age."""
+
+    start_text, end_text = CHARACTER_SLEEP_LOCAL_PERIOD.split("-", 1)
+    start_hour, start_minute = (int(value) for value in start_text.split(":"))
+    end_hour, end_minute = (int(value) for value in end_text.split(":"))
+    start_minutes = start_hour * MINUTES_PER_HOUR + start_minute
+    end_minutes = end_hour * MINUTES_PER_HOUR + end_minute
+    if end_minutes <= start_minutes:
+        end_minutes += MINUTES_PER_DAY
+    return (end_minutes - start_minutes) * MINUTES_PER_HOUR
+
+
+def _changed_state_paths(
+    before: dict[str, Any],
+    after: dict[str, Any],
+) -> list[str]:
+    """List changed transient paths without embedding a state snapshot."""
+
+    paths: list[str] = []
+    for drive_id, drive in before.get("drives", {}).items():
+        updated_drive = after.get("drives", {}).get(drive_id, {})
+        if drive.get("pressure") != updated_drive.get("pressure"):
+            paths.append(f"drives.{drive_id}.pressure")
+    for field_name in ("goals", "threats", "active_events", "knowledge_gaps"):
+        before_entities = {
+            entity.get("entity_id"): entity
+            for entity in before.get(field_name, [])
+            if isinstance(entity, dict)
+        }
+        after_entities = {
+            entity.get("entity_id"): entity
+            for entity in after.get(field_name, [])
+            if isinstance(entity, dict)
+        }
+        for entity_id, entity in before_entities.items():
+            updated_entity = after_entities.get(entity_id, {})
+            for axis in ("salience", "residual_pressure"):
+                if entity.get(axis) != updated_entity.get(axis):
+                    paths.append(f"{field_name}.{entity_id}.{axis}")
+    for before_activation in before.get("affect_activations", []):
+        if not isinstance(before_activation, dict):
+            continue
+        activation_id = before_activation.get("activation_id")
+        updated_activation = next(
+            (
+                activation
+                for activation in after.get("affect_activations", [])
+                if isinstance(activation, dict)
+                and activation.get("activation_id") == activation_id
+            ),
+            {},
+        )
+        if before_activation.get("score") != updated_activation.get("score"):
+            paths.append(f"affect_activations.{activation_id}.score")
+    return sorted(paths)
+
+
+def _recovery_summary(
+    before: dict[str, Any],
+    after: dict[str, Any],
+) -> str:
+    """Summarize deterministic recovery semantics without raw values."""
+
+    changed_paths = _changed_state_paths(before, after)
+    if not changed_paths:
+        return "Sleep recovery completed with no transient state changes."
+    categories = []
+    if any(path.startswith("drives.") for path in changed_paths):
+        categories.append("drive pressure was reduced")
+    if any(path.endswith(".salience") for path in changed_paths):
+        categories.append("transient causal salience was settled")
+    if any(
+        path.startswith("threats.") and path.endswith(".residual_pressure")
+        for path in changed_paths
+    ):
+        categories.append("threat pressure was recovered")
+    if any(path.startswith("affect_activations.") for path in changed_paths):
+        categories.append("derived affect activation was recomputed")
+    return "Sleep recovery " + "; ".join(categories) + "."
 
 def _build_affect_settling_review_prompt(
     *,
@@ -698,59 +663,6 @@ async def _call_refresh_callback(
     value = callback()
     if inspect.isawaitable(value):
         await value
-
-
-def _validate_affect_proposal(
-    proposal: Any,
-) -> tuple[dict[str, str], list[str]]:
-    """Validate required proposal fields without interpreting their content."""
-
-    if not isinstance(proposal, dict):
-        return ({}, ["proposal must be a JSON object"])
-    output: dict[str, str] = {}
-    warnings: list[str] = []
-    for field_name in _AFFECT_REQUIRED_FIELDS:
-        value = proposal.get(field_name)
-        if not isinstance(value, str) or not value.strip():
-            warnings.append(f"proposal.{field_name} must be a non-empty string")
-            continue
-        output[field_name] = value.strip()
-    return_value = (output, warnings)
-    return return_value
-
-
-def _validate_review(review: Any) -> tuple[dict[str, str], list[str]]:
-    """Validate the reviewer decision envelope."""
-
-    if not isinstance(review, dict):
-        return ({}, ["review must be a JSON object"])
-    warnings: list[str] = []
-    output: dict[str, str] = {}
-    for field_name in _REVIEW_REQUIRED_FIELDS:
-        value = review.get(field_name)
-        if not isinstance(value, str) or not value.strip():
-            warnings.append(f"review.{field_name} must be a non-empty string")
-            continue
-        output[field_name] = value.strip()
-    if output.get("write_decision") not in {"accept", "reject"}:
-        warnings.append("review.write_decision must be accept or reject")
-    return_value = (output, warnings)
-    return return_value
-
-
-def _character_state_warning(character_state: dict[str, Any]) -> str:
-    """Return a structural missing-state warning or an empty string."""
-
-    if not character_state:
-        return "missing_character_state"
-    if not str(character_state.get("updated_at") or "").strip():
-        return "missing_character_state_updated_at"
-    for field_name in _AFFECT_REQUIRED_FIELDS:
-        value = character_state.get(field_name)
-        if not isinstance(value, str) or not value.strip():
-            return f"missing_character_state_{field_name}"
-    return_value = ""
-    return return_value
 
 
 def _affect_settling_doc_blocks_retry(

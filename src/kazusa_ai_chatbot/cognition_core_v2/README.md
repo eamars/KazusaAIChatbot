@@ -1,48 +1,36 @@
-# Cognition Core V2 validation package
+# Cognition Core V2
 
-`cognition_core_v2` is an isolated Stage 1 validation implementation. Its only
-package-root API is `run_cognition_chain`, which accepts the public V1 chain
-input and service bindings and returns a validated V1 chain output.
+`cognition_core_v2` owns the validated persistent cognition state used by
+Stage 2. User state and the singleton character state are separate mutable
+scopes. The exact state contract is enforced by `state_models.py`; structured
+role references, complete evidence records, canonical singular entity kinds,
+bounded axes, root ownership, and activation identity are validated before
+state crosses the database boundary.
 
-The package owns process-local, versioned state for a single validation
-process. State keys isolate character, user, trigger source, and semantic scope.
-The package does not access databases, caches, production service routes,
-connectors, schedulers, delivery, consolidation, or V1 stage internals.
+`transition_guards.py` accepts only trusted direct facts and bounded semantic
+deltas. `state_reducers.py` performs elapsed evolution, cause-first event
+comparison, guarded goal creation and lifecycle transitions, deterministic
+event identity, retention, and activation-cache recomputation. Emotion rows are
+derived projections: every activation retains typed roots, phase, trend, score,
+cause status, and timestamps.
 
-Emotion labels are deterministic causal projections. Semantic appraisal may
-produce typed propositions, but only the local reducer applies guarded state
-transitions. Goal branches receive qualitative state descriptors rather than
-raw numeric state. Branch results are bids; the workspace admits and collapses
-them before route-only action selection.
+The twenty-one emotion formulas are exercised from typed natural causes in
+`tests/test_cognition_core_v2_emotion_lifecycle.py`. Cross-scope character
+constraints and optional relationship context are passed as dedicated
+projections; they are not merged into mutable state. Character sleep recovery
+is deterministic and separate from user elapsed decay.
 
-The lifecycle CLI runs one named deterministic case at a time:
+Database-backed callers use `db.users` for user-owned state and `db.character`
+for the character singleton. The test database harness requires the exact
+`_test_kazusa_live_llm` name, validates seeded V2 state, and gives every
+mutable test row a unique owner.
 
-```powershell
-venv\Scripts\python -m kazusa_ai_chatbot.cognition_core_v2.validation_cli lifecycle --case-id joy
-```
+The public Stage 2 surface is the pair `run_cognition(...)` and
+`run_text_surface_planning(...)`. Cognition runs deterministic preparation,
+scoped semantic appraisal, dependency-ready goal branches, complete-bid
+collapse, route validation, and one replacement-state update. The caller
+commits that update before action, surface, resolver, or dialog work.
 
-It writes raw structured artifacts under `test_artifacts/cognition_core_v2/`.
-The parent validation harness owns paired V1/V2 benchmark execution because it
-must supply identical V1 inputs, model bindings, ordering, warm-up, and reset
-control without adding a V1 runtime dependency to this package.
-
-For one real-LLM case, the parent harness starts a context-local raw capture
-before invoking the facade, then snapshots or writes it after the invocation:
-
-```python
-from kazusa_ai_chatbot.cognition_core_v2.diagnostics import (
-    reset_validation_capture,
-    validation_capture_snapshot,
-    write_validation_capture,
-)
-
-reset_validation_capture("joy")
-result = await run_cognition_chain(input_payload, services)
-capture = validation_capture_snapshot()
-artifact_path = write_validation_capture()
-```
-
-Each capture retains stage prompts, normalized raw output, parser/validation
-status, safe route and model configuration, duration, deterministic state and
-branch events, workspace/action results, and failures. API keys are excluded.
-The capture contains evidence only; it never generates a human-readable review.
+The text-surface API receives only semantic intention, bounded affect and
+relationship projections, complete-bid projections, and permitted action
+results. It owns expression planning; dialog owns final wording.
