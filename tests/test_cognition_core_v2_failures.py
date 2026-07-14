@@ -15,6 +15,8 @@ from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
     apply_elapsed_decay,
     apply_sleep_recovery,
     apply_state_update,
+    canonical_event_entity_id,
+    reduce_causal_event,
 )
 from kazusa_ai_chatbot.cognition_core_v2.transition_guards import (
     apply_direct_fact,
@@ -136,8 +138,8 @@ def test_direct_fact_rejects_extra_fields_and_terminal_mutation() -> None:
         )
 
 
-def test_progress_observation_does_not_invent_completion() -> None:
-    """Require explicit completion evidence before satisfying a goal."""
+def test_progress_observation_at_full_progress_completes_goal() -> None:
+    """Treat trusted observed progress at 100 as deterministic completion."""
 
     state = _state_with_goal()
     updated = apply_direct_fact(
@@ -153,7 +155,7 @@ def test_progress_observation_does_not_invent_completion() -> None:
     )
 
     assert updated["goals"][0]["progress"] == 100
-    assert updated["goals"][0]["status"] == "pursuing"
+    assert updated["goals"][0]["status"] == "satisfied"
     assert updated["goals"][0]["evidence_refs"][1]["source_kind"] == (
         "resolver_observation"
     )
@@ -189,6 +191,126 @@ def test_direct_fact_source_occurrence_preserves_full_evidence() -> None:
     scheduled = apply_direct_fact(state, fact, producer="scheduler_event")
 
     assert scheduled["goals"][0]["evidence_refs"][-1] == fact["evidence_ref"]
+
+
+def test_source_occurrence_can_address_one_structured_role_target() -> None:
+    """Append occurrence evidence through a unique role-owned causal entity."""
+
+    state = _state_with_goal()
+    goal_id = state["goals"][0]["entity_id"]
+    state["active_events"] = [{
+        "entity_id": "event:role-target",
+        "description": "an event carrying a target role",
+        "status": "active",
+        "outcome_impact": 0,
+        "responsibility": 0,
+        "intentionality": 0,
+        "harm": 0,
+        "unfairness": 0,
+        "exposure": 0,
+        "repair_need": 0,
+        "reparability": 100,
+        "expectation_mismatch": 0,
+        "norm_violation": 0,
+        "contamination_risk": 0,
+        "identity_threat": 0,
+        "comparison_gap": 0,
+        "vastness": 0,
+        "memory_warmth": 0,
+        "temporal_loss": 0,
+        "salience": 40,
+        "role_refs": [{
+            "role": "affected_goal",
+            "entity_kind": "goal",
+            "entity_id": goal_id,
+        }],
+        "evidence_refs": [_evidence("episode")],
+        "created_at": "2026-07-14T00:00:00Z",
+        "updated_at": "2026-07-14T00:00:00Z",
+    }]
+    fact = _fact(
+        "source_occurred",
+        "goal",
+        goal_id,
+        source_kind="scheduler_event",
+    )
+    fact["target_refs"] = [{
+        "role": "affected_goal",
+        "entity_kind": "goal",
+        "entity_id": goal_id,
+    }]
+
+    updated = apply_direct_fact(state, fact, producer="scheduler_event")
+
+    assert updated["active_events"][0]["evidence_refs"][-1] == fact["evidence_ref"]
+
+
+@pytest.mark.parametrize(
+    "axis",
+    ["importance", "progress", "salience"],
+)
+def test_semantic_deltas_reject_reducer_owned_goal_axes(axis: str) -> None:
+    """Keep reducer-owned goal axes outside the semantic delta lane."""
+
+    state = _state_with_goal()
+    goal_id = state["goals"][0]["entity_id"]
+    with pytest.raises(CognitionStateError):
+        apply_semantic_deltas(
+            state,
+            [{
+                "target_path": f"goals.{goal_id}.{axis}",
+                "delta": 10,
+                "evidence_handles": ["action-c"],
+                "reason": "forbidden reducer-owned update",
+            }],
+        )
+
+
+def test_causal_event_identity_and_salience_are_reducer_owned() -> None:
+    """Use the frozen evidence digest and accepted-axis magnitude on create."""
+
+    state = build_acquaintance_user_state(
+        global_user_id="user-c",
+        updated_at="2026-07-14T00:00:00Z",
+    )
+    primary_evidence = _evidence("episode")
+    event = {
+        "description": "a reducer-owned causal event",
+        "role_refs": [{
+            "role": "actor",
+            "entity_kind": "user",
+            "entity_id": "user-c",
+        }],
+        "outcome_impact": 0,
+        "responsibility": 0,
+        "intentionality": 0,
+        "harm": 40,
+        "unfairness": 0,
+        "exposure": 0,
+        "repair_need": 0,
+        "reparability": 100,
+        "expectation_mismatch": 0,
+        "norm_violation": 0,
+        "contamination_risk": 0,
+        "identity_threat": 0,
+        "comparison_gap": 0,
+        "vastness": 0,
+        "memory_warmth": 0,
+        "temporal_loss": 0,
+        "salience": 99,
+    }
+
+    updated, outcome = reduce_causal_event(
+        state,
+        event,
+        accepted_deltas={"harm": 30},
+        primary_evidence=primary_evidence,
+    )
+
+    assert outcome == "create"
+    stored = updated["active_events"][0]
+    assert stored["entity_id"] == canonical_event_entity_id(state, primary_evidence)
+    assert stored["salience"] == 30
 
 
 def test_duplicate_semantic_targets_do_not_block_unique_targets() -> None:
@@ -232,7 +354,11 @@ def test_event_comparison_uses_refs_and_reports_unrelated_text() -> None:
     current = {
         "entity_id": "event-current",
         "role_refs": [
-            {"role": "actor", "entity_kind": "character", "entity_id": "character:global"},
+            {
+                "role": "actor",
+                "entity_kind": "character",
+                "entity_id": "character:global",
+            },
             {"role": "target", "entity_kind": "user", "entity_id": "user-1"},
         ],
         "axis_deltas": {"harm": 10},

@@ -1,11 +1,11 @@
-"""Daily affect settling for persistent character mood and global vibe."""
+"""Daily deterministic sleep recovery for persistent character cognition."""
 
 from __future__ import annotations
 
 import inspect
 import logging
 from collections.abc import Callable
-from datetime import date, datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 from kazusa_ai_chatbot import db
@@ -22,17 +22,13 @@ from kazusa_ai_chatbot.db.schemas import CharacterReflectionRunDoc
 from kazusa_ai_chatbot.db.errors import DatabaseOperationError
 from kazusa_ai_chatbot.reflection_cycle.models import (
     AFFECT_SETTLING_PROMPT_VERSION,
-    PromptBuildResult,
     REFLECTION_RUN_KIND_DAILY_AFFECT_SETTLING,
-    REFLECTION_RUN_KIND_DAILY_CHANNEL,
-    REFLECTION_RUN_KIND_HOURLY,
     REFLECTION_STATUS_DRY_RUN,
     REFLECTION_STATUS_FAILED,
     REFLECTION_STATUS_SKIPPED,
     REFLECTION_STATUS_SUCCEEDED,
     ReflectionWorkerResult,
 )
-from kazusa_ai_chatbot.reflection_cycle.projection import build_prompt_result
 from kazusa_ai_chatbot.reflection_cycle import repository
 from kazusa_ai_chatbot.time_boundary import (
     local_time_context_from_storage_utc,
@@ -54,52 +50,10 @@ MINUTES_PER_DAY = HOURS_PER_DAY * MINUTES_PER_HOUR
 LOCAL_DATE_END_INDEX = 10
 LOCAL_TIME_START_INDEX = 11
 LOCAL_TIME_END_INDEX = 16
-PREVIOUS_DAY_OFFSET_DAYS = 1
 
-AFFECT_SETTLING_PROMPT_MAX_CHARS = 12000
-AFFECT_SETTLING_REVIEW_PROMPT_MAX_CHARS = 8000
 AFFECT_SETTLING_AFTER_PROMOTION_GRACE_MINUTES = 15
 AFFECT_SETTLING_WAKE_DEFER_GRACE_MINUTES = 15
 logger = logging.getLogger(__name__)
-
-AFFECT_SETTLING_SYSTEM_PROMPT = '''\
-# 任务
-你负责在角色睡眠/休息结束前，审阅当前 mood, global_vibe, reflection_summary，并输出一个更接近人类隔夜沉淀后的版本。
-
-# 约束
-- 只输出有效 JSON。
-- JSON key 必须保持英文。
-- mood, global_vibe, reflection_summary 是自由文本，不要把它们改成固定枚举。
-- 你的目标是渐进衰减，不是强行开心、失忆、道歉或压制情绪。
-- 如果昨天确实发生了严重冲突，新的状态仍可以生气、戒备或受伤，只是应体现睡眠后的距离感。
-- 不要依据任何操作性元数据判断情绪。
-- 只能根据 current_affect, daily_reflection_cards, sleep_window_reflection_cards 和 review_questions 输出。
-
-# 输出格式
-{
-  "mood": "自由文本，角色当前即时情绪",
-  "global_vibe": "自由文本，角色整体氛围",
-  "reflection_summary": "自由文本，解释这次隔夜沉淀后的持续心理状态"
-}
-'''
-
-AFFECT_SETTLING_REVIEW_SYSTEM_PROMPT = '''\
-# 任务
-你是 daily affect settling 的结构与角色可信度审阅器。
-
-# 判断标准
-- 只判断 proposed_affect 是否是对 current_affect 的渐进沉淀。
-- 不要使用固定情绪词表或枚举。
-- 不要替作者改写 mood/global_vibe/reflection_summary。
-- 如果输出过度清空情绪、突然转好、忽略明确冲突、或结构缺字段，reject。
-- 如果输出保留因果连续性、变化幅度可信、且字段为非空自由文本，accept。
-
-# 输出格式
-{
-  "write_decision": "accept 或 reject",
-  "review_reason": "简短说明"
-}
-'''
 
 def compute_affect_settling_due_local_time(
     *,
@@ -245,107 +199,6 @@ async def should_pause_self_cognition_for_affect_settling(
     )
     existing = await repository.reflection_run_by_id(run_id)
     return_value = not _affect_settling_doc_blocks_retry(existing)
-    return return_value
-
-
-def build_affect_settling_payload(
-    *,
-    settling_local_date: str,
-    character_state: dict[str, Any],
-    daily_docs: list[CharacterReflectionRunDoc],
-    sleep_window_docs: list[CharacterReflectionRunDoc],
-) -> dict[str, Any]:
-    """Build the prompt payload without operational ids or freshness tokens."""
-
-    payload = {
-        "evaluation_mode": "daily_affect_settling",
-        "settling_local_date": settling_local_date,
-        "current_affect": {
-            "mood": str(character_state.get("mood", "") or ""),
-            "global_vibe": str(character_state.get("global_vibe", "") or ""),
-            "reflection_summary": str(
-                character_state.get("reflection_summary", "") or ""
-            ),
-        },
-        "source_counts": {
-            "daily_reflection_cards": len(daily_docs),
-            "sleep_window_reflection_cards": len(sleep_window_docs),
-        },
-        "daily_reflection_cards": [
-            _daily_doc_card(document)
-            for document in daily_docs
-        ],
-        "sleep_window_reflection_cards": [
-            _hourly_doc_card(document)
-            for document in sleep_window_docs
-        ],
-        "review_questions": [
-            "What emotional residue should plausibly survive sleep?",
-            "What sharpness should decay because it is no longer immediate?",
-            "What should remain unchanged because evidence still supports it?",
-            "Does the new affect read like gradual rest, not a sudden reset?",
-        ],
-    }
-    return payload
-
-
-def build_affect_settling_prompt(
-    payload: dict[str, Any],
-) -> PromptBuildResult:
-    """Serialize the affect-settling proposal prompt."""
-
-    prompt = build_prompt_result(
-        system_prompt=AFFECT_SETTLING_SYSTEM_PROMPT,
-        human_payload=payload,
-        max_prompt_chars=AFFECT_SETTLING_PROMPT_MAX_CHARS,
-    )
-    return prompt
-
-
-async def load_affect_settling_source_documents(
-    *,
-    settling_local_date: str,
-) -> tuple[list[CharacterReflectionRunDoc], list[CharacterReflectionRunDoc]]:
-    """Load previous-day daily docs and current sleep-window hourly docs."""
-
-    local_date = date.fromisoformat(settling_local_date)
-    previous_local_date = (
-        local_date - timedelta(days=PREVIOUS_DAY_OFFSET_DAYS)
-    ).isoformat()
-    daily_docs = await repository.reflection_runs_for_kind_date(
-        run_kind=REFLECTION_RUN_KIND_DAILY_CHANNEL,
-        character_local_date=previous_local_date,
-    )
-    hourly_docs: list[CharacterReflectionRunDoc] = []
-    hourly_docs.extend(
-        await repository.reflection_runs_for_kind_date(
-            run_kind=REFLECTION_RUN_KIND_HOURLY,
-            character_local_date=settling_local_date,
-        )
-    )
-    if _sleep_period_crosses_midnight(CHARACTER_SLEEP_LOCAL_PERIOD):
-        hourly_docs.extend(
-            await repository.reflection_runs_for_kind_date(
-                run_kind=REFLECTION_RUN_KIND_HOURLY,
-                character_local_date=previous_local_date,
-            )
-        )
-
-    usable_daily_docs = [
-        document
-        for document in daily_docs
-        if _doc_has_succeeded_output(document)
-    ]
-    sleep_window_docs = [
-        document
-        for document in hourly_docs
-        if _doc_has_succeeded_output(document)
-        and _hourly_doc_in_sleep_window(
-            document,
-            settling_local_date=settling_local_date,
-        )
-    ]
-    return_value = (usable_daily_docs, sleep_window_docs)
     return return_value
 
 
@@ -512,7 +365,10 @@ def _elapsed_seconds_since(value: Any, now_value: str) -> int:
     if not isinstance(value, str) or not value:
         return 0
     try:
-        elapsed = parse_storage_utc_datetime(now_value) - parse_storage_utc_datetime(value)
+        elapsed = (
+            parse_storage_utc_datetime(now_value)
+            - parse_storage_utc_datetime(value)
+        )
     except (TypeError, ValueError):
         return 0
     return max(0, int(elapsed.total_seconds()))
@@ -599,36 +455,6 @@ def _recovery_summary(
         categories.append("derived affect activation was recomputed")
     return "Sleep recovery " + "; ".join(categories) + "."
 
-def _build_affect_settling_review_prompt(
-    *,
-    payload: dict[str, Any],
-    proposal: dict[str, str],
-) -> PromptBuildResult:
-    """Build the LLM reviewer prompt."""
-
-    review_payload = {
-        "evaluation_mode": "daily_affect_settling_review",
-        "current_affect": payload["current_affect"],
-        "settling_local_date": payload["settling_local_date"],
-        "source_counts": payload["source_counts"],
-        "daily_reflection_cards": payload["daily_reflection_cards"],
-        "sleep_window_reflection_cards": payload["sleep_window_reflection_cards"],
-        "proposed_affect": proposal,
-        "review_questions": [
-            "Is the proposed affect a gradual change from current_affect?",
-            "Does it preserve justified anger or hurt when evidence supports it?",
-            "Does it avoid fixed mood labels and deterministic vocabulary?",
-            "Should this exact proposal be written?",
-        ],
-    }
-    prompt = build_prompt_result(
-        system_prompt=AFFECT_SETTLING_REVIEW_SYSTEM_PROMPT,
-        human_payload=review_payload,
-        max_prompt_chars=AFFECT_SETTLING_REVIEW_PROMPT_MAX_CHARS,
-    )
-    return prompt
-
-
 async def _persist_affect_settling_run(
     *,
     settling_local_date: str,
@@ -681,151 +507,6 @@ def _affect_settling_doc_blocks_retry(
     if not isinstance(output, dict):
         return False
     return_value = output.get("retryable") is False
-    return return_value
-
-
-def _source_run_ids(
-    daily_docs: list[CharacterReflectionRunDoc],
-    sleep_window_docs: list[CharacterReflectionRunDoc],
-) -> list[str]:
-    """Return unique source run ids in prompt evidence order."""
-
-    seen: set[str] = set()
-    source_run_ids: list[str] = []
-    for document in [*daily_docs, *sleep_window_docs]:
-        run_id = str(document.get("run_id", "") or "").strip()
-        if not run_id or run_id in seen:
-            continue
-        source_run_ids.append(run_id)
-        seen.add(run_id)
-    return source_run_ids
-
-
-def _daily_doc_card(document: CharacterReflectionRunDoc) -> dict[str, Any]:
-    """Project a daily reflection row into a prompt-facing card."""
-
-    output = document.get("output")
-    if not isinstance(output, dict):
-        output = {}
-    scope = document.get("scope")
-    if not isinstance(scope, dict):
-        scope = {}
-    card = {
-        "channel_type": str(scope.get("channel_type", "") or ""),
-        "day_summary": str(output.get("day_summary", "") or ""),
-        "cross_hour_topics": _string_list(output.get("cross_hour_topics")),
-        "conversation_quality_patterns": _string_list(
-            output.get("conversation_quality_patterns"),
-        ),
-        "privacy_risks": _string_list(output.get("privacy_risks")),
-        "synthesis_limitations": _string_list(
-            output.get("synthesis_limitations"),
-        ),
-        "confidence": str(output.get("confidence", "") or ""),
-    }
-    return card
-
-
-def _hourly_doc_card(document: CharacterReflectionRunDoc) -> dict[str, Any]:
-    """Project an hourly reflection row into a prompt-facing card."""
-
-    output = document.get("output")
-    if not isinstance(output, dict):
-        output = {}
-    scope = document.get("scope")
-    if not isinstance(scope, dict):
-        scope = {}
-    card = {
-        "channel_type": str(scope.get("channel_type", "") or ""),
-        "topic_summary": str(output.get("topic_summary", "") or ""),
-        "conversation_quality_feedback": _string_list(
-            output.get("conversation_quality_feedback"),
-        ),
-        "privacy_notes": _string_list(output.get("privacy_notes")),
-        "active_character_utterances": _string_list(
-            output.get("active_character_utterances"),
-        ),
-        "confidence": str(output.get("confidence", "") or ""),
-    }
-    return card
-
-
-def _string_list(value: Any) -> list[str]:
-    """Return string items from a prompt-facing list value."""
-
-    if not isinstance(value, list):
-        return []
-    return_value = [
-        str(item)
-        for item in value
-        if str(item).strip()
-    ]
-    return return_value
-
-
-def _doc_has_succeeded_output(document: CharacterReflectionRunDoc) -> bool:
-    """Return whether a reflection run has succeeded prompt evidence."""
-
-    output = document.get("output")
-    return_value = (
-        document.get("status") == REFLECTION_STATUS_SUCCEEDED
-        and isinstance(output, dict)
-        and bool(output)
-    )
-    return return_value
-
-
-def _hourly_doc_in_sleep_window(
-    document: CharacterReflectionRunDoc,
-    *,
-    settling_local_date: str,
-) -> bool:
-    """Return whether one hourly doc falls inside the configured sleep window."""
-
-    if not CHARACTER_SLEEP_LOCAL_PERIOD:
-        return False
-    hour_start = str(document.get("hour_start", "") or "")
-    if not hour_start:
-        return False
-    timestamp = parse_storage_utc_datetime(hour_start)
-    local_time_context = local_time_context_from_storage_utc(
-        normalize_storage_utc_iso(timestamp.isoformat()),
-    )
-    local_datetime = local_time_context["current_local_datetime"]
-    local_date = local_datetime[:LOCAL_DATE_END_INDEX]
-    local_clock = local_datetime[LOCAL_TIME_START_INDEX:LOCAL_TIME_END_INDEX]
-    local_minutes = _local_clock_minutes(local_clock)
-    sleep_start_minutes, sleep_end_minutes = _sleep_period_bounds(
-        CHARACTER_SLEEP_LOCAL_PERIOD,
-    )
-    if sleep_start_minutes < sleep_end_minutes:
-        return_value = (
-            local_date == settling_local_date
-            and sleep_start_minutes <= local_minutes < sleep_end_minutes
-        )
-        return return_value
-
-    settling_date = date.fromisoformat(settling_local_date)
-    previous_date = (
-        settling_date - timedelta(days=PREVIOUS_DAY_OFFSET_DAYS)
-    ).isoformat()
-    return_value = (
-        local_date == previous_date
-        and local_minutes >= sleep_start_minutes
-    ) or (
-        local_date == settling_local_date
-        and local_minutes < sleep_end_minutes
-    )
-    return return_value
-
-
-def _sleep_period_crosses_midnight(sleep_local_period: str) -> bool:
-    """Return whether the configured sleep period spans local midnight."""
-
-    if not sleep_local_period:
-        return False
-    start_minutes, end_minutes = _sleep_period_bounds(sleep_local_period)
-    return_value = start_minutes > end_minutes
     return return_value
 
 

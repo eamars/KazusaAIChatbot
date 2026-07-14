@@ -482,14 +482,19 @@ result when character state is written.
 
 ## 5. Execution Checkpoints
 
-The same production-code subagent receives a read-only alignment packet at
+The same production-code owner receives a read-only alignment packet at
 Checkpoint A and sequential bounded implementation packets through Checkpoint
-H. The parent records the subagent's canonical id at Checkpoint A and uses
-follow-up tasks for later packets and any Checkpoint I remediation. The
-subagent closes only after Checkpoint I sign-off. The parent owns every test,
-command, evidence artifact, architect calibration, and sign-off. The production
-subagent owns its implementation self-calibration and in-scope production
-remediation.
+H. The original native subagent is unavailable; the user explicitly authorized
+the current Codex parent agent to take over that production-owner role. The
+current Codex agent is the sole production implementation owner for B/C
+remediation, later packets, and any Checkpoint I remediation, and remains
+available until Checkpoint I sign-off. The parent owns every test, command,
+evidence artifact, architect calibration, and sign-off. The takeover owner
+owns implementation self-calibration and in-scope production remediation.
+
+This is an execution-model deviation only. Frozen contracts, change surface,
+test ownership, checkpoint order, evidence requirements, and the rule that B/C
+must be aligned before D remain unchanged.
 
 Every checkpoint uses this pair:
 
@@ -554,7 +559,9 @@ venv\Scripts\python -m pytest tests\test_live_llm_mongo_isolation.py tests\test_
 - Evidence: `persistence/gate_b.md`, `calibration/gate_b_implementation.md`,
   `calibration/gate_b_architect.md`.
 - Handoff: Checkpoint C.
-- Sign-off: `<architect/date>`.
+- Status: `aligned`.
+- Sign-off: `Codex parent architect / 2026-07-15`; takeover implementation and
+  architect calibration records are aligned.
 
 ### Checkpoint C — deterministic reducers and twenty-one lifecycles
 
@@ -576,7 +583,9 @@ venv\Scripts\python -m pytest tests\test_cognition_core_v2_state.py tests\test_c
 - Evidence: `lifecycle/gate_c.md`, `calibration/gate_c_implementation.md`,
   `calibration/gate_c_architect.md`.
 - Handoff: Checkpoint D. Branch/DAG work remains unopened until sign-off.
-- Sign-off: `<architect/date>`.
+- Status: `aligned`.
+- Sign-off: `Codex parent architect / 2026-07-15`; takeover implementation and
+  architect calibration records are aligned.
 
 ### Checkpoint D — two-phase appraisal and projection
 

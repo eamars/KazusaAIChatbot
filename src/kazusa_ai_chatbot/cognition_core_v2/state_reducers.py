@@ -56,6 +56,7 @@ def apply_semantic_appraisals(
     local_handle_to_ref = deepcopy(dict(handle_to_ref))
     translated: list[dict[str, Any]] = []
     unsupported: list[dict[str, Any]] = []
+    new_causal_ids: set[str] = set()
     for result in results:
         for proposition in result["propositions"]:
             _materialize_proposition_root(
@@ -65,6 +66,7 @@ def apply_semantic_appraisals(
                 local_handle_to_ref,
                 result["selected_evidence_handles"],
                 comparison_results,
+                new_causal_ids,
             )
         for delta in result["deltas"]:
             native_path = _native_delta_path(
@@ -89,6 +91,11 @@ def apply_semantic_appraisals(
                 translated.append(proposal)
     _retain_prompt_evidence(updated, results, evidence_by_handle, handle_to_ref)
     updated = apply_semantic_deltas(updated, translated)
+    _recompute_new_causal_salience(
+        updated,
+        translated,
+        new_causal_ids,
+    )
     for proposal in unsupported:
         _apply_unretained_character_delta(updated, proposal)
     return updated
@@ -101,6 +108,7 @@ def _materialize_proposition_root(
     handle_to_ref: Mapping[str, Mapping[str, str]],
     selected_evidence_handles: Sequence[str],
     comparison_results: list[dict[str, Any]] | None,
+    new_causal_ids: set[str],
 ) -> None:
     """Turn a validated prompt-local proposition into a causal state root."""
 
@@ -168,6 +176,7 @@ def _materialize_proposition_root(
             handle_to_ref,
         )
         entities.append(existing)
+        new_causal_ids.add(existing["entity_id"])
         outcome = "create"
     else:
         outcome = _apply_proposition_transition(
@@ -297,14 +306,11 @@ def _causal_candidate_id(
 ) -> str:
     """Create a stable scoped identity for one evidence-grounded candidate."""
 
-    if kind == "event":
-        return canonical_event_entity_id(state, evidence_ref)
     material = "|".join(
         (
             "cognition_state.v2",
             state["state_scope"],
             state.get("owner_user_id", "global"),
-            kind,
             str(evidence_ref["source_kind"]),
             str(evidence_ref["source_id"]),
         )
@@ -326,7 +332,7 @@ def _new_causal_candidate(
     common = {
         "entity_id": entity_id,
         "description": description,
-        "salience": 50,
+        "salience": 0,
         "role_refs": [],
         "evidence_refs": [deepcopy(dict(ref)) for ref in evidence_refs],
         "created_at": timestamp,
@@ -373,6 +379,43 @@ def _new_causal_candidate(
         "novelty": 0,
         "model_accommodation": 0,
     }
+
+
+def _recompute_new_causal_salience(
+    state: dict[str, Any],
+    translated_deltas: Sequence[Mapping[str, Any]],
+    new_causal_ids: set[str],
+) -> None:
+    """Set candidate salience from accepted causal deltas and reject weak creates."""
+
+    counts: dict[str, int] = {}
+    magnitudes: dict[str, int] = {}
+    for proposal in translated_deltas:
+        path = proposal["target_path"]
+        counts[path] = counts.get(path, 0) + 1
+    for proposal in translated_deltas:
+        path = proposal["target_path"]
+        if counts[path] != 1:
+            continue
+        pieces = path.split(".")
+        if len(pieces) != 3:
+            continue
+        entity_id = pieces[1]
+        magnitudes[entity_id] = max(
+            magnitudes.get(entity_id, 0),
+            abs(int(proposal["delta"])),
+        )
+
+    for field_name in ("threats", "active_events", "knowledge_gaps"):
+        retained = []
+        for entity in state[field_name]:
+            if entity["entity_id"] not in new_causal_ids:
+                retained.append(entity)
+                continue
+            entity["salience"] = magnitudes.get(entity["entity_id"], 0)
+            if entity["salience"] >= 25:
+                retained.append(entity)
+        state[field_name] = retained
 
 
 def _native_delta_path(
@@ -504,6 +547,7 @@ def apply_elapsed_decay(
             minimum = 25 if _has_unresolved_pressure(entity) else 0
             entity["salience"] = max(minimum, salience - amount)
             entity["updated_at"] = _timestamp_from_state(updated_state)
+    retained_activations: list[dict[str, Any]] = []
     for activation in _mapping_values(updated_state["affect_activations"]):
         emotion_id = activation["emotion_id"]
         definition = EMOTION_DEFINITIONS[emotion_id]
@@ -512,6 +556,9 @@ def apply_elapsed_decay(
         )
         activation["score"] = max(0, activation["score"] - activation_amount)
         _update_activation_lifecycle(activation, updated_state)
+        if activation["score"] > 10:
+            retained_activations.append(activation)
+    updated_state["affect_activations"] = retained_activations
     return updated_state
 
 
@@ -532,28 +579,26 @@ def apply_sleep_recovery(
             "sleep recovery requires character cognition scope"
         )
     recovered = deepcopy(dict(state))
+    recovery_timestamp = updated_at or recovered["updated_at"]
+    recovered["updated_at"] = recovery_timestamp
     decay_amount = floor(elapsed_sleep_seconds * 4 / 3600)
     for drive in _mapping_values(recovered["drives"]):
         drive["pressure"] = max(0, drive["pressure"] - decay_amount - 20)
     for field_name in _ENTITY_FIELDS:
         for entity in _mapping_values(recovered[field_name]):
-            minimum = 25 if _has_unresolved_pressure(entity) else 0
-            entity["salience"] = max(
-                minimum,
-                entity["salience"] - decay_amount - 20,
-            )
-            entity["updated_at"] = updated_at or recovered["updated_at"]
             if field_name == "threats" and "residual_pressure" in entity:
                 entity["residual_pressure"] = max(
                     0,
                     entity["residual_pressure"] - decay_amount - 20,
                 )
+            minimum = 25 if _has_unresolved_pressure(entity) else 0
+            entity["salience"] = max(
+                minimum,
+                entity["salience"] - decay_amount - 20,
+            )
+            entity["updated_at"] = recovery_timestamp
     _update_low_coherence_since(recovered)
-    pre_recovery_scores = {
-        row["emotion_id"]: row["score"]
-        for row in recovered["affect_activations"]
-        if isinstance(row, Mapping)
-    }
+    retained_activations: list[dict[str, Any]] = []
     for activation in _mapping_values(recovered["affect_activations"]):
         definition = EMOTION_DEFINITIONS[activation["emotion_id"]]
         amount = floor(
@@ -561,20 +606,9 @@ def apply_sleep_recovery(
         ) + 20
         activation["score"] = max(0, activation["score"] - amount)
         _update_activation_lifecycle(activation, recovered)
-    if updated_at is not None:
-        recovered["updated_at"] = updated_at
-    recovered["affect_activations"] = derive_persistent_emotion_activations(
-        recovered,
-        updated_at=recovered["updated_at"],
-        character_constraints=character_constraints,
-        relationship_context=relationship_context,
-    )
-    for activation in recovered["affect_activations"]:
-        prior_score = pre_recovery_scores.get(activation["emotion_id"])
-        if prior_score is not None and activation["score"] > prior_score:
-            activation["score"] = prior_score
-            activation["trend"] = "falling" if prior_score < activation["peak_score"] else "stable"
-            activation["phase"] = "fading" if prior_score < 25 else activation["phase"]
+        if activation["score"] > 10:
+            retained_activations.append(activation)
+    recovered["affect_activations"] = retained_activations
     return recovered
 
 
@@ -667,11 +701,16 @@ def reduce_causal_event(
         state,
         event,
         primary_evidence,
+        accepted_deltas,
         updated_at or state["updated_at"],
     )
     updated_state = deepcopy(dict(state))
     stored = _matching_event(updated_state, incoming)
-    outcome = compare_event(incoming, stored, accepted_deltas)
+    comparison_event = {
+        **incoming,
+        "axis_deltas": dict(accepted_deltas),
+    }
+    outcome = compare_event(comparison_event, stored, accepted_deltas)
     if outcome == "create":
         updated_state["active_events"].append(incoming)
     elif outcome in {"reinforce", "contradict"}:
@@ -719,12 +758,21 @@ def create_guarded_goal(
         if isinstance(role, Mapping)
     ):
         raise CognitionStateError("relationship goal requires relationship cause")
-    if goal_kind == "safety" and not any(
-        role.get("role") == "target"
-        for role in role_refs
-        if isinstance(role, Mapping)
-    ):
-        raise CognitionStateError("safety goal requires a target cause")
+    if any(key not in {
+        "importance",
+        "progress",
+        "obstruction",
+        "expected_success",
+        "controllability",
+        "recoverability",
+        "urgency",
+    } for key in axes):
+        raise CognitionStateError("goal axes contain a reducer-owned field")
+    root_salience = (
+        primary_root_ref.get("salience", 50)
+        if isinstance(primary_root_ref, Mapping)
+        else 50
+    )
     defaults = {
         "importance": 50,
         "progress": 0,
@@ -732,16 +780,10 @@ def create_guarded_goal(
         "expected_success": 50,
         "controllability": 50,
         "recoverability": 50,
-        "urgency": 50,
-        "salience": 50,
+        "urgency": root_salience,
     }
     defaults.update(axes)
     evidence_id = evidence_refs[0]["source_id"]
-    owner = (
-        state["owner_user_id"]
-        if state["state_scope"] == "user"
-        else "global"
-    )
     root_id = (
         str(primary_root_ref.get("entity_id"))
         if isinstance(primary_root_ref, Mapping)
@@ -751,7 +793,7 @@ def create_guarded_goal(
     goal = {
         "entity_id": entity_id,
         "description": description,
-        "salience": defaults["salience"],
+        "salience": defaults["importance"],
         "role_refs": deepcopy(list(role_refs)),
         "evidence_refs": deepcopy(list(evidence_refs)),
         "created_at": updated_at or state["updated_at"],
@@ -786,7 +828,11 @@ def create_deterministic_goals(
     relationship = updated.get("relationship") or relationship_context
     now = updated_at or updated["updated_at"]
     episode_evidence_refs = [
-        row["evidence_ref"] if isinstance(row, Mapping) and "evidence_ref" in row else row
+        (
+            row["evidence_ref"]
+            if isinstance(row, Mapping) and "evidence_ref" in row
+            else row
+        )
         for row in evidence
     ]
 
@@ -818,7 +864,6 @@ def create_deterministic_goals(
             evidence_refs=evidence,
             axes={
                 "importance": _clamp_axis(importance),
-                "salience": _clamp_axis(importance),
                 "urgency": _clamp_axis(root.get("salience", importance)),
             },
             primary_root_ref=root,
@@ -828,7 +873,7 @@ def create_deterministic_goals(
 
     if isinstance(relationship, Mapping):
         relationship_root = {
-            "scope": "user",
+            "scope": updated["state_scope"],
             "kind": "relationship",
             "entity_id": relationship["relationship_id"],
             "salience": relationship["salience"],
@@ -910,18 +955,28 @@ def create_deterministic_goals(
             add_goal(
                 "safety",
                 threat_root,
-                max(threat["expected_harm"], _drive_value(constraints, "safety", "importance")),
+                max(
+                    threat["expected_harm"],
+                    _drive_value(constraints, "safety", "importance"),
+                ),
                 "reduce the active threat and preserve safety",
                 threat.get("evidence_refs", []),
                 threat_roles,
             )
 
     for goal in list(updated.get("goals", [])):
-        if not isinstance(goal, Mapping) or goal.get("status") not in {"pursuing", "blocked", "failed"}:
+        if (
+            not isinstance(goal, Mapping)
+            or goal.get("status") not in {"pursuing", "blocked", "failed"}
+        ):
             continue
         goal_root = _entity_root(updated, "goal", goal)
         goal_roles = list(goal.get("role_refs", []))
-        if goal.get("status") in {"pursuing", "blocked"} and goal["importance"] >= 40 and goal["obstruction"] >= 40:
+        if (
+            goal.get("status") in {"pursuing", "blocked"}
+            and goal["importance"] >= 40
+            and goal["obstruction"] >= 40
+        ):
             add_goal(
                 "obstruction_resolution",
                 goal_root,
@@ -954,16 +1009,27 @@ def create_deterministic_goals(
                 event.get("evidence_refs", []),
                 event_roles,
             )
-        if _has_self_actor(event, updated) and event["repair_need"] >= 40 and max(event["harm"], event["norm_violation"]) >= 40:
+        if (
+            _has_self_actor(event, updated)
+            and event["repair_need"] >= 40
+            and max(event["harm"], event["norm_violation"]) >= 40
+        ):
             add_goal(
                 "moral_repair",
                 event_root,
-                max(_drive_value(constraints, "integrity", "importance"), event["repair_need"]),
+                max(
+                    _drive_value(constraints, "integrity", "importance"),
+                    event["repair_need"],
+                ),
                 "repair the self-caused moral injury",
                 event.get("evidence_refs", []),
                 event_roles,
             )
-        if _has_other_experiencer(event, updated) and event["harm"] >= 40 and _drive_value(constraints, "care", "importance") >= 40:
+        if (
+            _has_other_experiencer(event, updated)
+            and event["harm"] >= 40
+            and _drive_value(constraints, "care", "importance") >= 40
+        ):
             add_goal(
                 "social_care",
                 event_root,
@@ -972,7 +1038,11 @@ def create_deterministic_goals(
                 event.get("evidence_refs", []),
                 event_roles,
             )
-        if _has_other_actor(event, updated) and event["outcome_impact"] >= 40 and event["responsibility"] >= 40:
+        if (
+            _has_other_actor(event, updated)
+            and event["outcome_impact"] >= 40
+            and event["responsibility"] >= 40
+        ):
             add_goal(
                 "reciprocity",
                 event_root,
@@ -992,23 +1062,38 @@ def create_deterministic_goals(
             )
         if event["comparison_gap"] >= 40 and (
             _drive_value(constraints, "competence", "pressure") >= 40
-            or any(goal_item.get("importance", 0) >= 40 for goal_item in updated.get("goals", []) if isinstance(goal_item, Mapping))
+            or any(
+                goal_item.get("importance", 0) >= 40
+                for goal_item in updated.get("goals", [])
+                if isinstance(goal_item, Mapping)
+            )
         ):
             add_goal(
                 "self_improvement",
                 event_root,
-                max(event["comparison_gap"], _drive_value(constraints, "competence", "pressure")),
+                max(
+                    event["comparison_gap"],
+                    _drive_value(constraints, "competence", "pressure"),
+                ),
                 "improve in response to the comparison gap",
                 event.get("evidence_refs", []),
                 event_roles,
             )
 
     for gap in list(updated.get("knowledge_gaps", [])):
-        if isinstance(gap, Mapping) and gap.get("status") in {"open", "reduced"} and gap["relevance"] >= 40 and gap["learnability"] >= 40:
+        if (
+            isinstance(gap, Mapping)
+            and gap.get("status") in {"open", "reduced"}
+            and gap["relevance"] >= 40
+            and gap["learnability"] >= 40
+        ):
             add_goal(
                 "epistemic_exploration",
                 _entity_root(updated, "knowledge_gap", gap),
-                max(gap["relevance"], _drive_value(constraints, "exploration", "importance")),
+                max(
+                    gap["relevance"],
+                    _drive_value(constraints, "exploration", "importance"),
+                ),
                 "explore the open learnable knowledge gap",
                 gap.get("evidence_refs", []),
                 list(gap.get("role_refs", [])),
@@ -1020,7 +1105,12 @@ def create_deterministic_goals(
     ) and _drive_value(constraints, "meaning", "pressure") >= 40:
         add_goal(
             "meaning_reconstruction",
-            {"scope": "character", "kind": "meaning", "entity_id": "meaning:character", "salience": meaning["salience"]},
+            {
+                "scope": "character",
+                "kind": "meaning",
+                "entity_id": "meaning:character",
+                "salience": meaning["salience"],
+            },
             max(
                 _drive_value(constraints, "meaning", "pressure"),
                 100 - meaning["purpose_coherence"],
@@ -1037,6 +1127,7 @@ def _build_event_record(
     state: Mapping[str, Any],
     event: Mapping[str, Any],
     primary_evidence: Mapping[str, Any],
+    accepted_deltas: Mapping[str, int],
     updated_at: str,
 ) -> dict[str, Any]:
     """Build an exact event row from accepted typed inputs."""
@@ -1064,10 +1155,11 @@ def _build_event_record(
     axes = {field_name: event[field_name] for field_name in event_axes}
     if "description" not in event or "role_refs" not in event:
         raise CognitionStateError("causal event identity is incomplete")
+    salience = max((abs(delta) for delta in accepted_deltas.values()), default=0)
     return {
         "entity_id": canonical_event_entity_id(state, primary_evidence),
         "description": event["description"],
-        "salience": event["salience"],
+        "salience": min(100, salience),
         "role_refs": deepcopy(list(event["role_refs"])),
         "evidence_refs": [deepcopy(dict(primary_evidence))],
         "created_at": updated_at,
@@ -1130,7 +1222,11 @@ def _merge_event(
         stored[axis] = max(minimum, min(100, stored[axis] + delta))
     if outcome == "contradict":
         stored["repair_need"] = min(100, stored["repair_need"] + 20)
-    stored["salience"] = max(stored["salience"], incoming["salience"])
+    salience_delta = min(
+        40,
+        max((abs(delta) for delta in accepted_deltas.values()), default=0),
+    )
+    stored["salience"] = min(100, stored["salience"] + salience_delta)
     _append_unique_evidence(stored, incoming["evidence_refs"][0])
     stored["updated_at"] = incoming["updated_at"]
 
@@ -1171,9 +1267,15 @@ def _update_activation_lifecycle(
     """Apply exact activation phase and retention thresholds after decay."""
 
     score = activation["score"]
-    root = activation["primary_root"]
-    cause_active = _root_is_active(state, root)
-    activation["cause_status"] = "active" if cause_active else "resolved"
+    roots = activation.get("root_refs", [activation["primary_root"]])
+    cause_active = any(_root_is_active(state, root) for root in roots)
+    cause_replaced = any(_root_is_replaced(state, root) for root in roots)
+    if cause_active:
+        activation["cause_status"] = "active"
+    elif cause_replaced:
+        activation["cause_status"] = "replaced"
+    else:
+        activation["cause_status"] = "resolved"
     if score <= 10:
         activation["phase"] = "fading"
     elif cause_active and score >= 25:
@@ -1200,6 +1302,19 @@ def _root_is_active(state: Mapping[str, Any], root: Mapping[str, Any]) -> bool:
             "replaced",
         }
     return False
+
+
+def _root_is_replaced(state: Mapping[str, Any], root: Mapping[str, Any]) -> bool:
+    """Return whether an activation root was superseded by another cause."""
+
+    field_name = ENTITY_LIST_FIELDS.get(root["kind"])
+    if field_name is None:
+        return False
+    return any(
+        entity["entity_id"] == root["entity_id"]
+        and entity["status"] == "replaced"
+        for entity in state[field_name]
+    )
 
 
 def _has_unresolved_pressure(entity: Mapping[str, Any]) -> bool:

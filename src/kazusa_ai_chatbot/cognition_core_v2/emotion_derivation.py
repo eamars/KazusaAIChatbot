@@ -25,6 +25,7 @@ def derive_emotion_activation_v2(
     candidates: Sequence[Mapping[str, Any]],
     previous: Mapping[str, Any] | None,
     updated_at: str,
+    reinforced: bool = False,
 ) -> dict[str, Any] | None:
     """Derive one thresholded persistent activation from typed candidates."""
 
@@ -39,7 +40,11 @@ def derive_emotion_activation_v2(
             _root_sort_key(candidate["root_ref"]),
         )
     )
-    passing = [candidate for candidate in normalized if candidate["score"] > INACTIVE_THRESHOLD]
+    passing = [
+        candidate
+        for candidate in normalized
+        if candidate["score"] > INACTIVE_THRESHOLD
+    ]
     if not passing:
         if previous is None or previous["score"] <= INACTIVE_THRESHOLD:
             return None
@@ -54,9 +59,23 @@ def derive_emotion_activation_v2(
     score = primary["score"]
     if previous is None and score < BEGIN_THRESHOLD:
         return None
-    if previous is not None and not active_candidates and primary["cause_status"] == "resolved":
-        return _copy_fading_activation(previous, updated_at, score=score)
-    phase = "active" if score >= SUSTAIN_THRESHOLD and active_candidates else "fading"
+    if previous is not None and not active_candidates:
+        return _copy_fading_activation(
+            previous,
+            updated_at,
+            score=score,
+            cause_status=primary["cause_status"],
+        )
+    if previous is None:
+        phase = "active" if score >= BEGIN_THRESHOLD and active_candidates else "fading"
+    elif previous["phase"] == "fading":
+        phase = "active" if score >= BEGIN_THRESHOLD and active_candidates else "fading"
+    else:
+        phase = (
+            "active"
+            if score >= SUSTAIN_THRESHOLD and active_candidates
+            else "fading"
+        )
     if previous is None:
         trend = "rising"
     elif score >= previous_score + 4:
@@ -67,7 +86,11 @@ def derive_emotion_activation_v2(
         trend = "stable"
     cause_status = "active" if active_candidates else primary["cause_status"]
     last_reinforced = previous["last_reinforced_at"] if previous else updated_at
-    if previous is not None and score >= previous_score + REINFORCEMENT_DELTA:
+    if (
+        previous is not None
+        and reinforced
+        and score >= previous_score + REINFORCEMENT_DELTA
+    ):
         last_reinforced = updated_at
     return {
         "activation_id": f"emotion:{emotion_id}",
@@ -118,6 +141,10 @@ def derive_persistent_emotion_activations(
             candidates=candidates,
             previous=previous_rows.get(emotion_id),
             updated_at=updated_at,
+            reinforced=(
+                isinstance(transition_context, Mapping)
+                and transition_context.get("matched_outcome") == "reinforce"
+            ),
         )
         if activation is not None and activation["score"] > INACTIVE_THRESHOLD:
             activations.append(activation)
@@ -168,7 +195,11 @@ def _candidates_for_emotion(
         )
         if score is not None and state.get("state_scope") == "user":
             candidates.append({
-                "root_ref": _root(state, "relationship", relationship["relationship_id"]),
+                "root_ref": _root(
+                    state,
+                    "relationship",
+                    relationship["relationship_id"],
+                ),
                 "score": score,
                 "cause_status": "active",
                 "salience": relationship["salience"],
@@ -200,23 +231,40 @@ def _event_score(
     harm = event["harm"]
     responsibility = event["responsibility"]
     if emotion_id == "joy" and outcome > 0:
-        return _minimum(outcome, salience)
+        goal = _matching_goal(state, event)
+        goal_progress = goal["progress"] if goal is not None else 0
+        goal_importance = goal["importance"] if goal is not None else salience
+        return _minimum(
+            max(outcome, goal_progress),
+            max(goal_importance, salience),
+            salience,
+        )
     if emotion_id == "anger":
         blocked_goals = [
             goal for goal in _mapping_list(state.get("goals"))
             if goal.get("status") == "blocked"
         ]
-        if not blocked_goals:
-            return None
-        goal = max(blocked_goals, key=lambda row: row["importance"])
+        goal = max(
+            blocked_goals,
+            key=lambda row: row["importance"],
+            default=None,
+        )
         relationship = _relationship(state, None)
+        first_axis = max(
+            goal["importance"] if goal is not None else 0,
+            event["harm"],
+            relationship["unresolved_injury"] if relationship else 0,
+        )
+        second_axis = max(
+            goal["obstruction"] if goal is not None else 0,
+            event["unfairness"],
+            event["intentionality"],
+        )
+        if max(first_axis, second_axis) < 40:
+            return None
         return _minimum(
-            max(
-                goal["importance"],
-                event["harm"],
-                relationship["unresolved_injury"] if relationship else 0,
-            ),
-            max(goal["obstruction"], event["unfairness"], event["intentionality"]),
+            first_axis,
+            second_axis,
             salience,
         )
     if emotion_id == "sadness" and outcome < 0:
@@ -224,20 +272,31 @@ def _event_score(
             goal for goal in _mapping_list(state.get("goals"))
             if goal.get("status") == "failed"
         ]
-        if not failed_goals:
-            return None
-        goal = max(failed_goals, key=lambda row: row["importance"])
+        goal = max(
+            failed_goals,
+            key=lambda row: row["importance"],
+            default=None,
+        )
         relationship = _relationship(state, None)
         return _minimum(
-            max(-outcome, 100 - goal["recoverability"]),
             max(
-                goal["importance"],
+                -outcome,
+                100 - goal["recoverability"] if goal is not None else 0,
+            ),
+            max(
+                goal["importance"] if goal is not None else 0,
                 relationship["attachment"] if relationship else 0,
                 -outcome,
             ),
             salience,
         )
-    if emotion_id == "disgust" and max(event["contamination_risk"], event["norm_violation"]) >= 40:
+    if (
+        emotion_id == "disgust"
+        and max(
+            event["contamination_risk"],
+            event["norm_violation"],
+        ) >= 40
+    ):
         if not _has_role(event, {"target", "object"}):
             return None
         return _minimum(
@@ -260,8 +319,19 @@ def _event_score(
             return None
         if event["comparison_gap"] < 40:
             return None
-        competence = _constraint_axis(character_constraints, "drives", "competence", "pressure")
-        return _minimum(event["comparison_gap"], competence, salience)
+        competence = _constraint_axis(
+            character_constraints,
+            "drives",
+            "competence",
+            "pressure",
+        )
+        goal = _matching_goal(state, event)
+        goal_importance = goal["importance"] if goal is not None else 0
+        return _minimum(
+            event["comparison_gap"],
+            max(goal_importance, competence),
+            salience,
+        )
     if emotion_id == "pride":
         if _has_self_actor(event, state) and outcome > 0:
             return _minimum(responsibility, outcome, salience)
@@ -269,9 +339,18 @@ def _event_score(
     if emotion_id == "shame":
         if not _has_self_actor(event, state) or responsibility < 40:
             return None
-        if event["norm_violation"] < 40 or event["identity_threat"] < 40:
+        identity_or_exposure = max(
+            event["identity_threat"],
+            event["exposure"],
+        )
+        if event["norm_violation"] < 40 or identity_or_exposure < 40:
             return None
-        return _minimum(responsibility, event["norm_violation"], event["identity_threat"], salience)
+        return _minimum(
+            responsibility,
+            event["norm_violation"],
+            identity_or_exposure,
+            salience,
+        )
     if emotion_id == "guilt":
         if not _has_self_actor(event, state) or responsibility < 40:
             return None
@@ -286,7 +365,12 @@ def _event_score(
             return None
         if event["harm"] >= 40 or event["identity_threat"] >= 50:
             return None
-        return _minimum(responsibility, event["exposure"], event["expectation_mismatch"], salience)
+        return _minimum(
+            responsibility,
+            event["exposure"],
+            event["expectation_mismatch"],
+            salience,
+        )
     if emotion_id == "awe":
         if event["vastness"] < 40:
             return None
@@ -301,8 +385,17 @@ def _event_score(
     if emotion_id == "nostalgia":
         if not _has_source(event, "promoted_memory") or not _has_cue(event):
             return None
-        continuity = _constraint_axis(character_constraints, "meaning_state", "identity_continuity")
-        return _minimum(event["memory_warmth"], event["temporal_loss"], continuity, salience)
+        continuity = _constraint_axis(
+            character_constraints,
+            "meaning_state",
+            "identity_continuity",
+        )
+        return _minimum(
+            event["memory_warmth"],
+            event["temporal_loss"],
+            continuity,
+            salience,
+        )
     if emotion_id == "relief":
         return _transition_score(transition_context, salience)
     return None
@@ -318,8 +411,18 @@ def _goal_score(
 
     if emotion_id == "joy" and goal["status"] == "satisfied":
         return _minimum(goal["progress"], goal["importance"], goal["salience"])
-    if emotion_id == "pride" and goal["status"] == "satisfied" and _goal_is_self_owned(goal, state):
+    if (
+        emotion_id == "pride"
+        and goal["status"] == "satisfied"
+        and _goal_is_self_owned(goal, state)
+    ):
         return _minimum(goal["progress"], goal["importance"], goal["salience"])
+    if emotion_id == "sadness" and goal["status"] == "failed":
+        return _minimum(
+            100 - goal["recoverability"],
+            goal["importance"],
+            goal["salience"],
+        )
     return None
 
 
@@ -355,6 +458,16 @@ def _threat_score(
             threat["likelihood"],
             threat["salience"],
         )
+    if emotion_id == "compassion_empathy" and threat["status"] == "active":
+        if not _has_other_experiencer(threat, state):
+            return None
+        care = _constraint_axis(
+            _effective_character_constraints(state, None),
+            "drives",
+            "care",
+            "importance",
+        )
+        return _minimum(care, threat["residual_pressure"], threat["salience"])
     return None
 
 
@@ -396,7 +509,12 @@ def _relationship_score(
             relationship["salience"],
         )
     if emotion_id == "loneliness":
-        pressure = _constraint_axis(character_constraints, "drives", "connection", "pressure")
+        pressure = _constraint_axis(
+            character_constraints,
+            "drives",
+            "connection",
+            "pressure",
+        )
         gap = max(
             relationship["desired_closeness"] - relationship["perceived_closeness"],
             0,
@@ -466,7 +584,11 @@ def _normalize_candidate(candidate: Mapping[str, Any]) -> dict[str, Any]:
     if set(candidate) != {"root_ref", "score", "cause_status", "salience"}:
         raise ValueError("emotion candidate fields are not exact")
     root_ref = candidate["root_ref"]
-    if not isinstance(root_ref, Mapping) or set(root_ref) != {"scope", "kind", "entity_id"}:
+    if not isinstance(root_ref, Mapping) or set(root_ref) != {
+        "scope",
+        "kind",
+        "entity_id",
+    }:
         raise ValueError("emotion candidate root is incomplete")
     if root_ref["scope"] not in {"user", "character"} or root_ref["kind"] not in {
         "relationship",
@@ -485,7 +607,11 @@ def _normalize_candidate(candidate: Mapping[str, Any]) -> dict[str, Any]:
     salience = candidate["salience"]
     if isinstance(score, bool) or not isinstance(score, int) or not 0 <= score <= 100:
         raise ValueError("emotion candidate score is invalid")
-    if isinstance(salience, bool) or not isinstance(salience, int) or not 0 <= salience <= 100:
+    if (
+        isinstance(salience, bool)
+        or not isinstance(salience, int)
+        or not 0 <= salience <= 100
+    ):
         raise ValueError("emotion candidate salience is invalid")
     if candidate["cause_status"] not in {"active", "resolved", "replaced"}:
         raise ValueError("emotion candidate cause status is invalid")
@@ -502,6 +628,7 @@ def _copy_fading_activation(
     updated_at: str,
     *,
     score: int | None = None,
+    cause_status: str | None = None,
 ) -> dict[str, Any] | None:
     """Preserve one resolved activation until explicit elapsed decay removes it."""
 
@@ -513,7 +640,7 @@ def _copy_fading_activation(
         "phase": "fading",
         "score": resolved_score,
         "trend": "stable" if resolved_score == previous["score"] else "falling",
-        "cause_status": "resolved",
+        "cause_status": cause_status or previous["cause_status"],
         "updated_at": updated_at,
     })
     return copied
@@ -662,6 +789,23 @@ def _matching_gap(
     for gap in _mapping_list(state.get("knowledge_gaps")):
         if gap["entity_id"] in ids:
             return gap
+    return None
+
+
+def _matching_goal(
+    state: Mapping[str, Any],
+    event: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    """Find a goal attached to an event through an affected-goal role."""
+
+    ids = {
+        role["entity_id"]
+        for role in event["role_refs"]
+        if isinstance(role, Mapping) and role["role"] == "affected_goal"
+    }
+    for goal in _mapping_list(state.get("goals")):
+        if goal["entity_id"] in ids:
+            return goal
     return None
 
 

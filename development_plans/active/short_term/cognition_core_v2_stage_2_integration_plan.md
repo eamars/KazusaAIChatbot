@@ -401,6 +401,36 @@ before the next packet.
 - Native subagent unavailability stops execution unless the user explicitly
   approves fallback execution.
 
+### Execution-model deviation audit — 2026-07-15
+
+The prior execution records identify Checkpoint A-F implementation as
+`parent-owned single-agent execution` and do not record the canonical native
+production-subagent id required by this execution model. The commit metadata
+also contains no resumable native-agent identity. Checkpoints B and C remain
+reopened and unsigned, and the production implementation agent is therefore
+not resumable from the repository evidence currently available.
+
+Production implementation and Checkpoint I remediation remain paused pending
+explicit user direction. The user subsequently approved the takeover recorded
+below, which resolves this execution pause under a documented plan-level
+execution-model change.
+
+### User-authorized production-owner takeover — 2026-07-15
+
+The user confirmed that the original production implementation agent no longer
+exists and explicitly authorized the current Codex parent agent to take over
+its role. This is a plan-level execution-model deviation; the frozen Stage 2
+contracts, change surface, test ownership, checkpoint order, and evidence
+requirements remain unchanged.
+
+The current Codex agent is the sole production implementation owner for the B/C
+remediation packets, all later production packets, and any Checkpoint I
+production remediation. It remains available through Checkpoint I and closes
+only after Checkpoint I sign-off. The parent continues to own tests, commands,
+evidence, architect calibration, lifecycle, and final sign-off. The takeover
+identity is recorded in every implementation calibration as the execution
+owner and deviation; B/C must reach `Status: aligned` before handoff to D.
+
 ## Progress Checklist
 
 Every checkpoint's `Calibration` entry requires both
@@ -412,14 +442,14 @@ also requires the independent review record.
   - Verify/evidence/handoff: execution-manifest Checkpoint A.
   - Calibration: the Gate A implementation/architect pair maps frozen contracts to all outcomes.
   - Sign-off: `Codex/2026-07-14`; evidence is under `test_artifacts/cognition_core_v2/stage_2/`; then reread all three plan documents.
-- [ ] Checkpoint B — isolated DB harness and exact V2 schema reopened after drift detection.
+- [x] Checkpoint B — isolated DB harness and exact V2 schema aligned after takeover remediation.
   - Verify/evidence/handoff: execution-manifest Checkpoint B.
   - Calibration: `S2-O2`, `S2-O4`, `S2-O8`.
-  - Sign-off: Codex/2026-07-14 (parent-owned single-agent execution); evidence is under test_artifacts/cognition_core_v2/stage_2/persistence/ and calibration/; then reread all three plan documents.
-- [ ] Checkpoint C — deterministic state and twenty-one lifecycles reopened after drift detection.
+  - Sign-off: `Codex takeover implementation / Codex parent architect / 2026-07-15`; exact B command 20 passed with 3 deselected and guarded live command 3 passed with 2 deselected; both calibration records are `Status: aligned`; evidence is under test_artifacts/cognition_core_v2/stage_2/persistence/ and calibration/; then reread all three plan documents.
+- [x] Checkpoint C — deterministic state and twenty-one lifecycles aligned after takeover remediation.
   - Verify/evidence/handoff: execution-manifest Checkpoint C.
   - Calibration: `S2-O2`, `S2-O3`, `S2-O4`.
-  - Sign-off: Codex/2026-07-14 (parent-owned single-agent execution); evidence is under test_artifacts/cognition_core_v2/stage_2/lifecycle/ and calibration/; then reread all three plan documents.
+  - Sign-off: `Codex takeover implementation / Codex parent architect / 2026-07-15`; exact C command 64 passed; both calibration records are `Status: aligned`; evidence is under test_artifacts/cognition_core_v2/stage_2/lifecycle/ and calibration/; then reread all three plan documents.
 - [x] Checkpoint D — two-phase appraisal/projection boundary aligned after drift remediation.
   - Verify/evidence/handoff: execution-manifest Checkpoint D.
   - Calibration: `S2-O3`, `S2-O5` and appraisal/projection RCA rows.
@@ -591,7 +621,8 @@ During approved execution, record:
 - Checkpoint A is signed under the user-authorized parent-owned fallback; its
   contract hashes, baseline, inventory, ledger, and calibration pair are under
   `test_artifacts/cognition_core_v2/stage_2/`;
-- frozen contract/spec/manifest hashes and the exact production-subagent id;
+- frozen contract/spec/manifest hashes, the unavailable native-agent deviation,
+  and the user-authorized takeover owner identity;
 - Checkpoint A-I packets, commands, signers, calibration, deviations, and remediation;
 - selected test DB, guard, seed, owner, singleton, and zero-production-access evidence;
 - exact changed/deleted files and commits;

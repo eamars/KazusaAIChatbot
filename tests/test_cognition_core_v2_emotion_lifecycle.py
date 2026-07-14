@@ -302,7 +302,11 @@ EMOTION_CASES = tuple(EMOTION_DEFINITIONS)
 def test_each_emotion_derives_from_typed_state_causes(emotion_id: str) -> None:
     """Prove every registry emotion has a typed V2 cause and activation."""
 
-    state = _character_case_state() if emotion_id == "ennui_existential_angst" else _user_case_state()
+    state = (
+        _character_case_state()
+        if emotion_id == "ennui_existential_angst"
+        else _user_case_state()
+    )
     constraints = {
         "drives": {
             "care": {"importance": 80, "pressure": 80},
@@ -433,3 +437,95 @@ def test_activation_lifecycle_preserves_resolved_score_until_elapsed_decay() -> 
     assert beginning["phase"] == "active"
     assert sustained["phase"] == "active"
     assert sustained["last_reinforced_at"] == NOW
+
+
+def test_fading_activation_requires_begin_threshold_to_reactivate() -> None:
+    """Require supported reinforcement at 40 before a fading row reactivates."""
+
+    root_ref = {
+        "scope": "user",
+        "kind": "event",
+        "entity_id": "event:fading",
+    }
+    previous = {
+        "activation_id": "emotion:joy",
+        "emotion_id": "joy",
+        "primary_root": root_ref,
+        "root_refs": [root_ref],
+        "phase": "fading",
+        "score": 30,
+        "peak_score": 60,
+        "trend": "falling",
+        "cause_status": "active",
+        "started_at": NOW,
+        "updated_at": NOW,
+        "last_reinforced_at": NOW,
+    }
+    fading = derive_emotion_activation_v2(
+        "joy",
+        candidates=[{
+            "root_ref": root_ref,
+            "score": 30,
+            "cause_status": "active",
+            "salience": 60,
+        }],
+        previous=previous,
+        updated_at=NOW,
+    )
+    active = derive_emotion_activation_v2(
+        "joy",
+        candidates=[{
+            "root_ref": root_ref,
+            "score": 40,
+            "cause_status": "active",
+            "salience": 60,
+        }],
+        previous=previous,
+        updated_at="2026-07-14T01:00:00Z",
+        reinforced=True,
+    )
+
+    assert fading is not None
+    assert fading["phase"] == "fading"
+    assert active is not None
+    assert active["phase"] == "active"
+    assert active["last_reinforced_at"] == "2026-07-14T01:00:00Z"
+
+
+def test_score_rise_without_reinforce_outcome_does_not_refresh_timestamp() -> None:
+    """Keep last reinforcement tied to the reducer's matched outcome."""
+
+    root_ref = {
+        "scope": "user",
+        "kind": "event",
+        "entity_id": "event:rise",
+    }
+    previous = {
+        "activation_id": "emotion:joy",
+        "emotion_id": "joy",
+        "primary_root": root_ref,
+        "root_refs": [root_ref],
+        "phase": "active",
+        "score": 30,
+        "peak_score": 30,
+        "trend": "stable",
+        "cause_status": "active",
+        "started_at": NOW,
+        "updated_at": NOW,
+        "last_reinforced_at": NOW,
+    }
+
+    updated = derive_emotion_activation_v2(
+        "joy",
+        candidates=[{
+            "root_ref": root_ref,
+            "score": 45,
+            "cause_status": "active",
+            "salience": 60,
+        }],
+        previous=previous,
+        updated_at="2026-07-14T01:00:00Z",
+    )
+
+    assert updated is not None
+    assert updated["last_reinforced_at"] == NOW

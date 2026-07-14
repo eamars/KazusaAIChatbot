@@ -84,6 +84,7 @@ def apply_direct_fact(
     target = _validate_target_ref(
         updated_state,
         fact["target_refs"],
+        allow_role=fact_kind == "source_occurred",
     )
     kind = target["kind"]
     entity = _find_entity(updated_state, kind, target["entity_id"])
@@ -97,6 +98,8 @@ def apply_direct_fact(
     if fact_kind == "goal_progress_observed":
         _require_kind(kind, "goal", fact_kind)
         entity["progress"] = fact["observed_progress"]
+        if entity["progress"] == 100:
+            entity["status"] = "satisfied"
     elif fact_kind == "goal_completed":
         _require_kind(kind, "goal", fact_kind)
         entity["progress"] = 100
@@ -266,7 +269,6 @@ def transition_threat(
     elif transition == "replaced":
         if not successor_ref:
             raise CognitionStateError("replaced threat requires successor")
-        updated_threat["successor_ref"] = successor_ref
     else:
         raise CognitionStateError("unknown threat transition")
     updated_threat["status"] = transition
@@ -293,7 +295,6 @@ def transition_event(
     elif transition == "replaced":
         if not successor_ref:
             raise CognitionStateError("replaced event requires successor")
-        updated_event["successor_ref"] = successor_ref
     else:
         raise CognitionStateError("unknown event transition")
     updated_event["status"] = transition
@@ -319,7 +320,9 @@ def transition_knowledge_gap(
         decrease = previous_uncertainty - updated_gap["uncertainty"]
     if transition == "reduced":
         if decrease is None or decrease < 20:
-            raise CognitionStateError("knowledge reduction requires a 20-point decrease")
+            raise CognitionStateError(
+                "knowledge reduction requires a 20-point decrease"
+            )
         if updated_gap["uncertainty"] <= 0:
             raise CognitionStateError("resolved gap requires answer evidence")
     elif transition == "resolved":
@@ -368,8 +371,17 @@ def _validate_evidence_for_producer(
         raise CognitionStateError("evidence source does not match producer")
     if not isinstance(value["source_id"], str) or not value["source_id"].strip():
         raise CognitionStateError("evidence source_id is invalid")
-    if not isinstance(value["occurred_at"], str) or not value["occurred_at"].endswith("Z"):
+    if (
+        not isinstance(value["occurred_at"], str)
+        or not value["occurred_at"].endswith("Z")
+    ):
         raise CognitionStateError("evidence occurred_at is invalid")
+    try:
+        from datetime import datetime
+
+        datetime.fromisoformat(value["occurred_at"][:-1] + "+00:00")
+    except (TypeError, ValueError) as exc:
+        raise CognitionStateError("evidence occurred_at is invalid") from exc
     summary = value["semantic_summary"]
     if not isinstance(summary, str) or not 1 <= len(summary) <= 500:
         raise CognitionStateError("evidence semantic_summary is invalid")
@@ -379,6 +391,8 @@ def _validate_evidence_for_producer(
 def _validate_target_ref(
     state: Mapping[str, Any],
     target_refs: Any,
+    *,
+    allow_role: bool = False,
 ) -> dict[str, str]:
     """Validate one canonical target and enforce mutable scope ownership."""
 
@@ -387,21 +401,61 @@ def _validate_target_ref(
     target = target_refs[0]
     if not isinstance(target, Mapping):
         raise CognitionStateError("direct fact target must be structured")
-    if set(target) != {"scope", "kind", "entity_id"}:
+    if set(target) == {"scope", "kind", "entity_id"}:
+        if target["scope"] != state["state_scope"]:
+            raise CognitionStateError("direct fact target scope is not mutable")
+        if target["kind"] not in ENTITY_KINDS:
+            raise CognitionStateError("direct fact target kind is not canonical")
+        if not isinstance(target["entity_id"], str) or not target["entity_id"].strip():
+            raise CognitionStateError("direct fact target id is invalid")
+        if target["kind"] not in ENTITY_LIST_FIELDS:
+            raise CognitionStateError("direct fact target kind is not fact-addressable")
+        _find_entity(state, target["kind"], target["entity_id"])
+        return {
+            "scope": target["scope"],
+            "kind": target["kind"],
+            "entity_id": target["entity_id"],
+        }
+    if not allow_role or set(target) != {"role", "entity_kind", "entity_id"}:
         raise CognitionStateError("direct fact target fields are not exact")
-    if target["scope"] != state["state_scope"]:
-        raise CognitionStateError("direct fact target scope is not mutable")
-    if target["kind"] not in ENTITY_KINDS:
-        raise CognitionStateError("direct fact target kind is not canonical")
+    if target["role"] not in {
+        "actor",
+        "experiencer",
+        "target",
+        "object",
+        "affected_goal",
+        "affected_relationship",
+    }:
+        raise CognitionStateError("direct fact target role is invalid")
+    if target["entity_kind"] not in {
+        "character",
+        "user",
+        "group",
+        "third_party",
+        "goal",
+        "relationship",
+        "standard",
+        "object",
+    }:
+        raise CognitionStateError("direct fact target entity kind is invalid")
     if not isinstance(target["entity_id"], str) or not target["entity_id"].strip():
         raise CognitionStateError("direct fact target id is invalid")
-    if target["kind"] not in ENTITY_LIST_FIELDS:
-        raise CognitionStateError("direct fact target kind is not fact-addressable")
-    _find_entity(state, target["kind"], target["entity_id"])
+    matches = []
+    for kind, field_name in ENTITY_LIST_FIELDS.items():
+        for entity in state[field_name]:
+            if any(
+                isinstance(role_ref, Mapping)
+                and role_ref == target
+                for role_ref in entity.get("role_refs", [])
+            ):
+                matches.append((kind, entity))
+    if len(matches) != 1:
+        raise CognitionStateError("direct fact role target is not uniquely addressable")
+    kind, entity = matches[0]
     return {
-        "scope": target["scope"],
-        "kind": target["kind"],
-        "entity_id": target["entity_id"],
+        "scope": state["state_scope"],
+        "kind": kind,
+        "entity_id": entity["entity_id"],
     }
 
 
@@ -472,7 +526,11 @@ def _apply_delta_path(
         return target
     if len(pieces) == 3 and pieces[0] == "drives":
         drives = state.get("drives")
-        if not isinstance(drives, dict) or pieces[1] not in drives or pieces[2] != "pressure":
+        if (
+            not isinstance(drives, dict)
+            or pieces[1] not in drives
+            or pieces[2] != "pressure"
+        ):
             raise CognitionStateError("semantic drive path is invalid")
         target = drives[pieces[1]]
         if not isinstance(target, dict):
@@ -490,14 +548,11 @@ def _apply_delta_path(
     target = _find_entity(state, kind, pieces[1])
     allowed_axes = {
         "goals": {
-            "importance",
-            "progress",
             "obstruction",
             "expected_success",
             "controllability",
             "recoverability",
             "urgency",
-            "salience",
         },
         "threats": {
             "likelihood",
@@ -506,7 +561,6 @@ def _apply_delta_path(
             "controllability",
             "coping_potential",
             "residual_pressure",
-            "salience",
         },
         "active_events": {
             "outcome_impact",
@@ -525,7 +579,6 @@ def _apply_delta_path(
             "vastness",
             "memory_warmth",
             "temporal_loss",
-            "salience",
         },
         "knowledge_gaps": {
             "relevance",
@@ -533,7 +586,6 @@ def _apply_delta_path(
             "learnability",
             "novelty",
             "model_accommodation",
-            "salience",
         },
     }[pieces[0]]
     if pieces[2] not in allowed_axes:
@@ -653,7 +705,12 @@ def _has_typed_outcome(
             values.update(semantic_summary.lower().split())
         if markers.intersection(values):
             return True
-        if fact_kind in {"goal_completed", "event_repaired", "knowledge_answered", "threat_resolved"}:
+        if fact_kind in {
+            "goal_completed",
+            "event_repaired",
+            "knowledge_answered",
+            "threat_resolved",
+        }:
             return True
     return False
 

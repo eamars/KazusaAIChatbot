@@ -697,6 +697,21 @@ def _validate_activations(
             raise CognitionStateError("invalid affect activation cause status")
         _validate_number(activation["score"], 0, 100, "activation.score")
         _validate_number(activation["peak_score"], 0, 100, "activation.peak_score")
+        if activation["peak_score"] < activation["score"]:
+            raise CognitionStateError(
+                "activation peak_score cannot be below score"
+            )
+        if activation["score"] <= 10:
+            raise CognitionStateError(
+                "inactive affect activation must be removed"
+            )
+        if activation["phase"] == "active" and (
+            activation["score"] < 25
+            or activation["cause_status"] != "active"
+        ):
+            raise CognitionStateError(
+                "active affect activation does not satisfy lifecycle guards"
+            )
         for field_name in (
             "started_at",
             "updated_at",
@@ -743,7 +758,10 @@ def _root_exists(state: Mapping[str, Any], root_ref: Mapping[str, Any]) -> bool:
             and relationship["relationship_id"] == entity_id
         )
     if kind == "meaning":
-        return entity_id == "meaning:character" and state["state_scope"] == CHARACTER_SCOPE
+        return (
+            entity_id == "meaning:character"
+            and state["state_scope"] == CHARACTER_SCOPE
+        )
     if kind == "drive":
         return entity_id in state.get("drives", {})
     if kind == "standard":
