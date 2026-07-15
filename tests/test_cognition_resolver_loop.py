@@ -21,7 +21,11 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_PENDING_RESUME_VERSION,
     ResolverValidationError,
 )
-from kazusa_ai_chatbot.cognition_resolver.loop import call_cognition_resolver_loop
+from kazusa_ai_chatbot.cognition_resolver import loop as resolver_loop_module
+from kazusa_ai_chatbot.cognition_resolver.loop import (
+    call_cognition_resolver_loop,
+    call_v2_resolver_loop,
+)
 from kazusa_ai_chatbot.cognition_resolver.pending import (
     RESOLVER_PENDING_APPROVAL_ACTION_KIND,
     RESOLVER_PENDING_HIL_ACTION_KIND,
@@ -37,6 +41,7 @@ from kazusa_ai_chatbot.cognition_resolver.state import (
 from kazusa_ai_chatbot.cognition_resolver.telemetry import (
     build_resolver_cycle_event,
     build_resolver_terminal_event,
+    build_v2_resolver_telemetry_fields,
     write_human_readable_resolver_trace,
 )
 from kazusa_ai_chatbot.local_context_resolver import (
@@ -48,6 +53,119 @@ from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
     empty_user_memory_context,
 )
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
+
+
+def test_v2_resolver_telemetry_is_bounded_and_excludes_private_fields() -> None:
+    """V2 telemetry should expose only request, progress, and status fields."""
+
+    fields = build_v2_resolver_telemetry_fields(
+        [{
+            "capability": "local_context_recall",
+            "semantic_goal": "Check the relevant prior promise.",
+            "evidence_handles": ["e1"],
+            "replacement_state": {"forbidden": True},
+        }],
+        {
+            "status": "completed",
+            "semantic_summary": "Relevant evidence was returned.",
+            "owner_key": "forbidden-owner",
+        },
+    )
+
+    assert fields == {
+        "request_count": 1,
+        "requests": [{
+            "capability": "local_context_recall",
+            "semantic_goal": "Check the relevant prior promise.",
+        }],
+        "progress": {
+            "status": "completed",
+            "semantic_summary": "Relevant evidence was returned.",
+        },
+        "status": "completed",
+    }
+
+
+@pytest.mark.asyncio
+async def test_v2_resolver_loop_emits_terminal_sanitized_telemetry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The runtime loop calls the bounded telemetry projector at termination."""
+
+    telemetry_calls: list[tuple[object, object]] = []
+    original_builder = build_v2_resolver_telemetry_fields
+
+    def capture_telemetry(requests: object, progress: object) -> dict:
+        telemetry_calls.append((requests, progress))
+        return original_builder(requests, progress)
+
+    monkeypatch.setattr(
+        resolver_loop_module,
+        "build_v2_resolver_telemetry_fields",
+        capture_telemetry,
+    )
+    cognition_calls = 0
+
+    async def cognition_func(state: object) -> dict:
+        nonlocal cognition_calls
+        del state
+        cognition_calls += 1
+        if cognition_calls == 1:
+            requests = [{
+                "capability": "local_context_recall",
+                "semantic_goal": "retrieve bounded prior context",
+                "evidence_handles": ["e-private"],
+            }]
+            progress = {
+                "status": "pending",
+                "semantic_summary": "bounded recall is pending",
+            }
+        else:
+            requests = []
+            progress = {
+                "status": "completed",
+                "semantic_summary": "bounded recall completed",
+            }
+        return {
+            "cognition_core_output": {
+                "resolver_requests": requests,
+                "resolver_progress": progress,
+                "state_update": {"replacement_state": "private"},
+            },
+        }
+
+    async def capability_func(request: object, state: object) -> dict:
+        del request
+        del state
+        return {
+            "observation_id": "private-observation-id",
+            "capability": "local_context_recall",
+            "status": "succeeded",
+            "semantic_summary": "bounded context returned",
+        }
+
+    result = await call_v2_resolver_loop(
+        {},
+        cognition_func=cognition_func,
+        capability_func=capability_func,
+        max_cycles=2,
+        origin_scope="user",
+    )
+
+    assert len(telemetry_calls) == 1
+    assert result["telemetry"] == {
+        "request_count": 0,
+        "requests": [],
+        "progress": {
+            "status": "completed",
+            "semantic_summary": "bounded recall completed",
+        },
+        "status": "completed",
+    }
+    rendered = json.dumps(result["telemetry"])
+    assert "e-private" not in rendered
+    assert "private-observation-id" not in rendered
+    assert "replacement_state" not in rendered
 
 
 def _resolver_request(

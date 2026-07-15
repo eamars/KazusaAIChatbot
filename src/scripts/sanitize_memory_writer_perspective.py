@@ -255,10 +255,10 @@ async def scan_character_state(*, limit: int) -> list[dict[str, Any]]:
 
     if limit <= 0:
         return []
-    state = await get_character_state()
+    state = await get_character_profile()
     if not state:
         return []
-    before = _field_view(state, ('character_reflection', 'self_image'))
+    before = _field_view(state, ('self_image',))
     if not before:
         return []
     return [

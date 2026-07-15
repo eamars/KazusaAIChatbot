@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-pytest.skip("Stage 1 assertions replaced by the V2 contract suite", allow_module_level=True)
 
 import json
 from types import SimpleNamespace
@@ -96,6 +95,7 @@ async def test_accepted_coding_task_execution_enqueues_requested_worker(
     assert results[0]["accepted_task_state"] == "scheduled"
     assert len(queued_requests) == 1
     queued = queued_requests[0]
+    assert queued["task_brief"] == "Add slugify tests."
     assert queued["requested_worker"] == "coding_agent"
     assert queued["worker_payload"] == {
         "schema_version": "coding_agent_worker_payload.v2",
@@ -178,37 +178,6 @@ def test_accepted_coding_task_rejects_worker_local_params() -> None:
 
     assert result["ok"] is False
     assert any("worker-local fields" in error for error in result["errors"])
-
-
-def test_l2d_stage_preserves_coding_followup_fields() -> None:
-    """The stage wrapper must not drop coding run refs after core parsing."""
-
-
-    parsed = {
-        "semantic_action_requests": [
-            {
-                "capability": ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
-                "decision": "approve_and_verify",
-                "detail": "Run focused pytest.",
-                "reason": "The user approved the run.",
-                "coding_run_ref": "coding_run:run-001",
-                "execution_request": "pytest tests/test_slug_tools.py",
-            }
-        ]
-    }
-
-    requests = l2d._normalize_action_requests(parsed, {"max_action_requests": 1})
-
-    assert requests == [
-        {
-            "capability": ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
-            "reason": "The user approved the run.",
-            "decision": "approve_and_verify",
-            "detail": "Run focused pytest.",
-            "coding_run_ref": "coding_run:run-001",
-            "execution_request": "pytest tests/test_slug_tools.py",
-        }
-    ]
 
 
 def test_coding_followup_uniquely_binds_current_prompt_safe_run_ref() -> None:

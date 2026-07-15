@@ -119,7 +119,9 @@ async def test_default_self_cognition_client_uses_resolver_loop(
         "internal_monologue": "resolver completed",
         "action_specs": [],
         "resolver_capability_requests": [],
+        "cognition_core_output": {"state_update": {"scope": "character"}},
     }
+    committed_outputs: list[dict[str, Any]] = []
 
     async def resolver_loop(
         state: dict[str, Any],
@@ -134,17 +136,86 @@ async def test_default_self_cognition_client_uses_resolver_loop(
         "call_v2_resolver_loop",
         resolver_loop,
     )
+    async def commit_cognition_output(output: dict[str, Any]) -> None:
+        committed_outputs.append(output)
+
+    monkeypatch.setattr(
+        runner,
+        "commit_cognition_output",
+        commit_cognition_output,
+    )
     state = {"cognitive_episode": {"trigger_source": "internal_thought"}}
 
     result = await runner._default_cognition_client(state)
 
     assert result["internal_monologue"] == expected_result["internal_monologue"]
     assert result["resolver_observations"] == []
+    assert result["cognition_state_committed"] is True
+    assert committed_outputs == [expected_result["cognition_core_output"]]
     assert captured["state"] is state
     assert callable(captured["kwargs"]["cognition_func"])
     assert callable(captured["kwargs"]["capability_func"])
     assert captured["kwargs"]["max_cycles"] == runner.COGNITION_RESOLVER_MAX_CYCLES
     assert captured["kwargs"]["origin_scope"] == "character"
+
+
+@pytest.mark.asyncio
+async def test_self_cognition_resolver_failure_redacts_exception_text(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Operational failure details stay outside semantic observations."""
+
+    captured: dict[str, Any] = {}
+    expected_result = {
+        "cognition_core_output": {"state_update": {"scope": "character"}},
+    }
+
+    async def resolver_loop(
+        state: dict[str, Any],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        del state
+        captured.update(kwargs)
+        return {"cognition_output": expected_result, "observations": []}
+
+    async def commit_cognition_output(output: dict[str, Any]) -> None:
+        del output
+
+    secret = "mongodb://user:password@private-host/internal"
+
+    async def failed_recall(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        del args, kwargs
+        raise TimeoutError(secret)
+
+    monkeypatch.setattr(runner, "call_v2_resolver_loop", resolver_loop)
+    monkeypatch.setattr(
+        runner,
+        "commit_cognition_output",
+        commit_cognition_output,
+    )
+    monkeypatch.setattr(
+        runner,
+        "run_rag_evidence_for_persona_state",
+        failed_recall,
+    )
+    state = {
+        "cognitive_episode": {"trigger_source": "internal_thought"},
+        "storage_timestamp_utc": "2026-07-15T00:00:00Z",
+    }
+
+    await runner._default_cognition_client(state)
+    observation = await captured["capability_func"](
+        {
+            "capability": "local_context_recall",
+            "semantic_goal": "recall relevant context",
+        },
+        state,
+    )
+
+    assert observation["semantic_summary"] == "local context recall failed"
+    assert secret not in caplog.text
+    assert "TimeoutError" in caplog.text
 
 
 def _group_noise_case() -> dict[str, Any]:
@@ -1003,7 +1074,7 @@ def test_runner_apply_consolidation_uses_empty_dialog_without_render() -> None:
     )
 
     assert captured_consolidation_state["cognitive_episode"]["trigger_source"] == (
-        "internal_thought"
+        "scheduled_recall"
     )
     assert captured_consolidation_state["cognitive_episode"]["output_mode"] == (
         "preview"
@@ -1027,7 +1098,7 @@ def test_runner_apply_consolidation_uses_empty_dialog_without_render() -> None:
         },
         "scheduled_event_count": 0,
         "cache_evicted_count": 2,
-        "origin_trigger_source": "internal_thought",
+        "origin_trigger_source": "scheduled_recall",
         "origin_episode_id": "self_cognition:tracking:commitment_past_due:promise-001",
     }
     serialized = json.dumps(outcome, ensure_ascii=False)

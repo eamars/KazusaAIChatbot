@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -70,6 +71,7 @@ SELF_COGNITION_PRIVATE_ACTION_KINDS = frozenset(
         TRIGGER_FUTURE_COGNITION_CAPABILITY,
     )
 )
+logger = logging.getLogger(__name__)
 
 
 def build_self_cognition_case_artifacts(
@@ -379,11 +381,15 @@ async def _default_cognition_client(state: dict[str, Any]) -> dict[str, Any]:
                 objective=str(request.get("semantic_goal", "")),
             )
         except Exception as exc:
+            logger.warning(
+                "Self-cognition local context recall failed: exception_type=%s",
+                type(exc).__name__,
+            )
             return {
                 "observation_id": "self-cognition:local-context-failed",
                 "capability": capability,
                 "status": "failed",
-                "semantic_summary": f"local context recall failed: {exc}",
+                "semantic_summary": "local context recall failed",
                 "created_at_utc": state["storage_timestamp_utc"],
             }
         return {
@@ -409,9 +415,17 @@ async def _default_cognition_client(state: dict[str, Any]) -> dict[str, Any]:
     final_state["resolver_observations"] = list(
         resolved.get("observations", [])
     )
+    telemetry = resolved.get("telemetry")
+    final_state["cognition_resolver_diagnostics"] = (
+        dict(telemetry) if isinstance(telemetry, dict) else {}
+    )
     core_output = final_state.get("cognition_core_output")
-    if isinstance(core_output, dict):
-        await commit_cognition_output(core_output)  # type: ignore[arg-type]
+    if not isinstance(core_output, dict):
+        raise StateContractError(
+            "V2 self-cognition completed without cognition_core_output"
+        )
+    await commit_cognition_output(core_output)  # type: ignore[arg-type]
+    final_state["cognition_state_committed"] = True
     return final_state
 
 
@@ -877,9 +891,18 @@ def _build_cognitive_episode(
         ensure_ascii=False,
         sort_keys=True,
     )
+    trigger_kind = _string_field(case, "trigger_kind")
+    episode_trigger = (
+        "scheduled_recall"
+        if trigger_kind in {
+            models.TRIGGER_ACTIVE_COMMITMENT_DUE_CHECK,
+            models.TRIGGER_SCHEDULED_FUTURE_COGNITION,
+        }
+        else "internal_thought"
+    )
     episode: CognitiveEpisode = {
         "episode_id": f"self_cognition:tracking:{_string_field(case, 'case_id')}",
-        "trigger_source": "internal_thought",
+        "trigger_source": episode_trigger,
         "input_sources": ["internal_monologue"],
         "output_mode": "preview",
         "percepts": [
@@ -888,7 +911,11 @@ def _build_cognitive_episode(
                 "input_source": "internal_monologue",
                 "content": percept_content,
                 "visibility": "model_visible",
-                "metadata": {"source": "self_cognition_source_packet"},
+                "metadata": {
+                    "source": "self_cognition_source_packet",
+                    "trigger_kind": trigger_kind,
+                    **_typed_cognition_source_metadata(case),
+                },
             },
         ],
         "target_scope": {
@@ -913,6 +940,19 @@ def _build_cognitive_episode(
     }
     validate_cognitive_episode(episode)
     return episode
+
+
+def _typed_cognition_source_metadata(
+    case: models.SelfCognitionCase,
+) -> dict[str, object]:
+    """Carry a scheduler-owned cognition source without rewriting its meaning."""
+
+    source = case.get("cognition_source")
+    if not isinstance(source, dict):
+        return_value: dict[str, object] = {}
+        return return_value
+    return_value = {"cognition_source": dict(source)}
+    return return_value
 
 
 def _route_effect_for_route(

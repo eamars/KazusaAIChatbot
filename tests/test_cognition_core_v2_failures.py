@@ -464,7 +464,11 @@ def test_state_update_uses_fixed_order_and_derives_cache() -> None:
         "memory_warmth": 0,
         "temporal_loss": 0,
         "salience": 70,
-        "role_refs": [],
+        "role_refs": [{
+            "role": "affected_goal",
+            "entity_kind": "goal",
+            "entity_id": goal_id,
+        }],
         "evidence_refs": [_evidence("episode")],
         "created_at": "2026-07-14T00:00:00Z",
         "updated_at": "2026-07-14T00:00:00Z",

@@ -295,6 +295,19 @@ def _character_case_state() -> dict[str, object]:
     return state
 
 
+def _character_constraints() -> dict[str, object]:
+    """Build the cross-scope character axes used by emotion formulas."""
+
+    return {
+        "drives": {
+            "care": {"importance": 80, "pressure": 80},
+            "competence": {"importance": 80, "pressure": 80},
+            "connection": {"importance": 80, "pressure": 80},
+        },
+        "meaning_state": {"identity_continuity": 80},
+    }
+
+
 EMOTION_CASES = tuple(EMOTION_DEFINITIONS)
 
 
@@ -307,24 +320,23 @@ def test_each_emotion_derives_from_typed_state_causes(emotion_id: str) -> None:
         if emotion_id == "ennui_existential_angst"
         else _user_case_state()
     )
-    constraints = {
-        "drives": {
-            "care": {"importance": 80, "pressure": 80},
-            "competence": {"importance": 80, "pressure": 80},
-            "connection": {"importance": 80, "pressure": 80},
-        },
-        "meaning_state": {"identity_continuity": 80},
-    }
+    constraints = _character_constraints()
     transitions = {
+        "root_ref": {
+            "scope": "user",
+            "kind": "threat",
+            "entity_id": "threat:rival",
+        },
         "prior": {"status": "active", "residual_pressure": 80},
         "current": {"status": "resolved", "residual_pressure": 10},
         "evidence_ref": _evidence("action_result", "relief:transition"),
+        "salience": 70,
     }
     activations = derive_persistent_emotion_activations(
         state,
         updated_at=NOW,
         character_constraints=constraints,
-        transition_context=transitions,
+        transition_contexts=[transitions] if emotion_id == "relief" else [],
     )
 
     by_id = {activation["emotion_id"]: activation for activation in activations}
@@ -363,20 +375,114 @@ def test_typed_formula_negative_controls_require_roles_and_evidence() -> None:
     activations = derive_persistent_emotion_activations(
         state,
         updated_at=NOW,
-        character_constraints={
-            "drives": {
-                "care": {"importance": 80, "pressure": 80},
-                "competence": {"importance": 80, "pressure": 80},
-                "connection": {"importance": 80, "pressure": 80},
-            },
-            "meaning_state": {"identity_continuity": 80},
-        },
+        character_constraints=_character_constraints(),
     )
     active_ids = {activation["emotion_id"] for activation in activations}
 
     assert "disgust" not in active_ids
-    assert "gratitude" not in active_ids
+    assert "gratitude" in active_ids
     assert "nostalgia" not in active_ids
+
+
+def test_owner_user_is_other_and_only_character_actor_is_self() -> None:
+    """Keep user-document ownership separate from character self identity."""
+
+    state = build_acquaintance_user_state(
+        global_user_id="owner-user",
+        updated_at=NOW,
+    )
+    state["active_events"] = [_event(
+        "event:owner-helped",
+        roles=[_role("actor", "user", "owner-user")],
+        outcome_impact=80,
+        responsibility=80,
+    )]
+    constraints = _character_constraints()
+
+    activations = derive_persistent_emotion_activations(
+        state,
+        updated_at=NOW,
+        character_constraints=constraints,
+    )
+    active_ids = {row["emotion_id"] for row in activations}
+    assert "gratitude" in active_ids
+    assert "pride" not in active_ids
+
+    state["active_events"] = [_event(
+        "event:self-helped",
+        roles=[_role("actor", "character", "character:global")],
+        outcome_impact=80,
+        responsibility=80,
+    )]
+    activations = derive_persistent_emotion_activations(
+        state,
+        updated_at=NOW,
+        character_constraints=constraints,
+    )
+    active_ids = {row["emotion_id"] for row in activations}
+    assert "pride" in active_ids
+    assert "gratitude" not in active_ids
+
+
+def test_compassion_threat_uses_character_care_across_user_scope() -> None:
+    """Read care from character constraints for another user's pressure."""
+
+    state = build_acquaintance_user_state(
+        global_user_id="other-experiencer",
+        updated_at=NOW,
+    )
+    threat = _threat("threat:user-under-pressure")
+    threat["role_refs"] = [
+        _role("experiencer", "user", "other-experiencer"),
+    ]
+    state["threats"] = [threat]
+
+    activations = derive_persistent_emotion_activations(
+        state,
+        updated_at=NOW,
+        character_constraints=_character_constraints(),
+    )
+    active_ids = {row["emotion_id"] for row in activations}
+    assert "compassion_empathy" in active_ids
+
+
+def test_anger_and_sadness_cannot_borrow_unrelated_goals() -> None:
+    """Require event-to-goal affected_goal links before using goal axes."""
+
+    state = build_acquaintance_user_state(
+        global_user_id="goal-link-user",
+        updated_at=NOW,
+    )
+    state["goals"] = [
+        _goal("goal:unrelated-block", status="blocked", obstruction=90),
+        _goal(
+            "goal:unrelated-loss",
+            status="failed",
+            recoverability=0,
+        ),
+    ]
+    state["active_events"] = [
+        _event(
+            "event:weak-anger",
+            unfairness=30,
+            intentionality=30,
+        ),
+        _event("event:weak-loss", outcome_impact=-30),
+    ]
+
+    activations = derive_persistent_emotion_activations(
+        state,
+        updated_at=NOW,
+        character_constraints=_character_constraints(),
+    )
+    active_ids = {row["emotion_id"] for row in activations}
+    assert "anger" not in active_ids
+    sadness = next(row for row in activations if row["emotion_id"] == "sadness")
+    assert sadness["primary_root"] == {
+        "scope": "user",
+        "kind": "goal",
+        "entity_id": "goal:unrelated-loss",
+    }
 
 
 def test_activation_lifecycle_preserves_resolved_score_until_elapsed_decay() -> None:

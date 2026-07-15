@@ -1,1003 +1,311 @@
-"""Stage 07 reflection-triggered cognition dry-run tests."""
+"""V2 promoted-reflection source-boundary tests."""
 
 from __future__ import annotations
 
-import pytest
-pytest.skip("Stage 1 assertions replaced by the V2 contract suite", allow_module_level=True)
-
-import hashlib
 import inspect
 import json
-import logging
 from copy import deepcopy
-from typing import Any
 
 import pytest
 
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    EVIDENCE_SOURCE_QUESTION_IDS,
+    validate_cognition_core_input,
+)
+from kazusa_ai_chatbot.cognition_core_v2.semantic_source_planner import (
+    plan_semantic_questions,
+)
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    build_acquaintance_user_state,
+    build_character_production_state,
+)
 from kazusa_ai_chatbot.cognition_episode import validate_cognitive_episode
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as cognition_module
+from kazusa_ai_chatbot.reflection_cycle import cognition_dry_run as dry_run_module
 from kazusa_ai_chatbot.reflection_cycle.cognition_dry_run import (
     ReflectionCognitionDryRunError,
     build_reflection_signal_cognitive_episode,
     run_reflection_cognition_dry_run,
 )
-from kazusa_ai_chatbot.reflection_cycle import cognition_dry_run as dry_run_module
-from llm_test_helpers import bind_test_llm, make_llm_call_config
+from tests.cognition_core_v2_test_helpers import canonical_episode
 
 
-_APPROVED_STAGES: tuple[CognitionPromptStage, ...] = (
-    "l1_subconscious",
-    "l2a_conscious_framing",
-    "l2b_boundary_appraisal",
-    "l2c1_judgment_synthesis",
-    "l2d_action_selection",
-    "l2c2_social_context_appraisal",
-    "l3_style_agent",
-    "l3_content_plan_agent",
-    "l3_preference_adapter",
-    "l3_visual_agent",
-)
-_EXPECTED_PROMPT_KEYS = [
-    "l1_subconscious.reflection_signal_reflection_artifact",
-    "l2a_conscious_framing.reflection_signal_reflection_artifact",
-    "l2b_boundary_appraisal.reflection_signal_reflection_artifact",
-    "l2c1_judgment_synthesis.reflection_signal_reflection_artifact",
-    "l2c2_social_context_appraisal.reflection_signal_reflection_artifact",
-    "l2d_action_selection.reflection_signal_reflection_artifact",
-]
-_FORBIDDEN_DRY_RUN_TOKENS = (
-    "call_consolidation_subgraph",
-    "save_conversation",
-    "save_assistant_message",
-    "dispatcher.dispatch",
-    "runtime.invalidate",
-    "get_rag_cache2_runtime",
-)
-_PROMPT_FINGERPRINTS = (
-    (
-        "_COGNITION_SUBCONSCIOUS_PROMPT",
-        l1_module._COGNITION_SUBCONSCIOUS_PROMPT,
-        3395,
-        "be2585903511bdb9b1828c52a6aafee28e352f84faf7c1341f6c9fe56b8b5477",
-    ),
-    (
-        "_COGNITION_CONSCIOUSNESS_PROMPT",
-        l2_module._COGNITION_CONSCIOUSNESS_PROMPT,
-        7805,
-        "35e71d9b29800aa15a827bfb5806c3c0a926e9ec91386343cbdc7191688012c9",
-    ),
-    (
-        "_BOUNDARY_CORE_PROMPT",
-        l2_module._BOUNDARY_CORE_PROMPT,
-        5750,
-        "4a17f713b7b82ffe2a688a98059bb893dd5cbb2a6d3191dadb9e8be7970781b9",
-    ),
-    (
-        "_JUDGEMENT_CORE_PROMPT",
-        l2_module._JUDGEMENT_CORE_PROMPT,
-        5502,
-        "de74fc47656b9cfa5806ad35982caa99816e4c7c964503b5adbe8633546b5e4f",
-    ),
-    (
-        "_CONTEXTUAL_AGENT_PROMPT",
-        l2c2_module._CONTEXTUAL_AGENT_PROMPT,
-        4770,
-        "c7809c4a3ce08ca37d6938c6437f9e82d1b3bdb1f49e5513e1071682cb73d4f8",
-    ),
-    (
-        "_STYLE_AGENT_PROMPT",
-        l3_module._STYLE_AGENT_PROMPT,
-        9438,
-        "5f87f9353423815b947cebb707de8dc4623867741b62ad635103692c498a9851",
-    ),
-    (
-        "_CONTENT_PLAN_AGENT_PROMPT",
-        l3_module._CONTENT_PLAN_AGENT_PROMPT,
-        14197,
-        "4ede19776f50fa80aea1ce31e2833deeafa313de82c93a4c1b106b7f5c66b59d",
-    ),
-    (
-        "_PREFERENCE_ADAPTER_PROMPT",
-        l3_module._PREFERENCE_ADAPTER_PROMPT,
-        4865,
-        "a2396cb3e0979941375b0599dfdf9331a86e577988f51bc80da6491fd3225bde",
-    ),
-    (
-        "_VISUAL_AGENT_PROMPT",
-        l3_module._VISUAL_AGENT_PROMPT,
-        7936,
-        "28e8ac752d123f76a55b0703a61d292e55aca49cf0ea6d9efd80c0f7f5775b65",
-    ),
-)
+NOW = "2026-07-14T00:00:00Z"
+STORAGE_TIMESTAMP_UTC = "2026-07-14T00:00:00+00:00"
 
 
-class _DummyResponse:
-    """Small LangChain-like response wrapper for dry-run prompt tests."""
-
-    def __init__(self, content: str) -> None:
-        """Create a dummy LLM response.
-
-        Args:
-            content: Response text returned from the fake LLM.
-        """
-        self.content = content
-
-
-class _CapturingAsyncLLM:
-    """Async fake LLM that records messages and returns fixed JSON."""
-
-    def __init__(self, payload: dict[str, Any]) -> None:
-        """Create the capturing fake.
-
-        Args:
-            payload: JSON-serializable payload returned by `ainvoke`.
-        """
-        self.payload = payload
-        self.messages: list[Any] = []
-
-    async def ainvoke(self, messages: list[Any], *, config=None) -> _DummyResponse:
-        """Record prompt messages and return the configured payload.
-
-        Args:
-            messages: Prompt messages passed by the cognition handler.
-
-        Returns:
-            Dummy response containing serialized JSON.
-        """
-        self.messages = messages
-        content = json.dumps(self.payload, ensure_ascii=False)
-        response = _DummyResponse(content)
-        return response
-
-
-_COGNITION_LLM_DISPATCH_MAP = {
-    "的潜意识层": "_subconscious_llm",
-    "的意识层": "_conscious_llm",
-    "边界感知层": "_boundary_core_llm",
-    "的裁决核心": "_judgement_core_llm",
-    "的社交观察脑": "_contextual_agent_llm",
-    "语义行动路由层": "_action_selection_llm",
-}
-
-
-class _DispatchingAsyncLLM:
-    """Fake LLM that dispatches to per-stage fakes based on system prompt."""
-
-    def __init__(self, stage_llms: dict[str, _CapturingAsyncLLM]) -> None:
-        self.stage_llms = stage_llms
-        self._model_key = ("fake", "dispatching")
-
-    async def ainvoke(self, messages: list[Any], *, config=None) -> _DummyResponse:
-        system_text = messages[0].content if messages else ""
-        for marker, llm_name in _COGNITION_LLM_DISPATCH_MAP.items():
-            if marker in system_text:
-                return await self.stage_llms[llm_name].ainvoke(messages)
-        return await self.stage_llms["_subconscious_llm"].ainvoke(messages)
-
-
-class _BusyProbe:
-    """Callable busy probe with call-count inspection."""
-
-    def __init__(self, busy: bool) -> None:
-        """Create a deterministic busy probe.
-
-        Args:
-            busy: Value returned whenever the probe is called.
-        """
-        self.busy = busy
-        self.call_count = 0
-
-    def __call__(self) -> bool:
-        """Return the configured busy value.
-
-        Returns:
-            Whether the primary interaction path is busy.
-        """
-        self.call_count += 1
-        return_value = self.busy
-        return return_value
-
-
-class _CapturingCognitionCallable:
-    """Injected cognition callable that records dry-run states."""
-
-    def __init__(self, output: dict[str, Any]) -> None:
-        """Create the injected cognition callable.
-
-        Args:
-            output: Dict returned from each invocation.
-        """
-        self.output = output
-        self.calls = 0
-        self.states: list[dict[str, Any]] = []
-
-    async def __call__(self, state: dict[str, Any]) -> dict[str, Any]:
-        """Record the dry-run state and return configured output.
-
-        Args:
-            state: Global persona state built by the dry-run runner.
-
-        Returns:
-            Configured cognition result copy.
-        """
-        self.calls += 1
-        self.states.append(deepcopy(state))
-        return_value = deepcopy(self.output)
-        return return_value
+def _promoted_context() -> dict[str, object]:
+    return {
+        "promoted_lore": [{
+            "memory_name": "quiet_space_preference",
+            "content": "The character protects quiet shared spaces.",
+            "memory_type": "lore",
+            "updated_at": STORAGE_TIMESTAMP_UTC,
+            "confidence_note": "Promoted from repeated reflection.",
+        }],
+        "promoted_self_guidance": [{
+            "memory_name": "avoid_overcommitting",
+            "content": "Keep reflective conclusions tentative in speech.",
+            "memory_type": "self_guidance",
+            "updated_at": STORAGE_TIMESTAMP_UTC,
+            "confidence_note": "Promoted as private guidance.",
+        }],
+        "source_dates": ["2026-07-14"],
+        "retrieval_notes": ["Only promoted rows are included."],
+    }
 
 
 def _time_context() -> dict[str, str]:
-    """Build a fixed character-local time context for dry-run tests.
-
-    Returns:
-        Minimal local time context mapping.
-    """
-    time_context = {
-        "current_local_datetime": "2026-05-10 09:30",
-        "current_local_weekday": "Sunday",
+    return {
+        "current_local_datetime": "2026-07-14 12:00",
+        "current_local_weekday": "Tuesday",
     }
-    return time_context
 
 
-def _promoted_reflection_context() -> dict[str, list[dict[str, str]] | list[str]]:
-    """Build promoted reflection context with one model-visible artifact.
-
-    Returns:
-        `PromotedReflectionContext`-compatible mapping containing promoted lore
-        and self-guidance lanes.
-    """
-    context = {
-        "promoted_lore": [
-            {
-                "memory_name": "quiet_library_preference",
-                "content": "The active character protects quiet study spaces.",
-                "memory_type": "lore",
-                "updated_at": "2026-05-09T22:15:00+00:00",
-                "confidence_note": "Repeated in promoted reflection.",
+def _payload() -> dict[str, object]:
+    character = build_character_production_state(updated_at=NOW)
+    state = build_acquaintance_user_state(
+        global_user_id="reflection-user",
+        updated_at=NOW,
+    )
+    return {
+        "schema_version": "cognition_core_input.v2",
+        "episode": canonical_episode(
+            episode_id="reflection-dry-run",
+            trigger_source="reflection_signal",
+            output_mode="think_only",
+            current_global_user_id="reflection-user",
+            content="a promoted reflection is available",
+        ),
+        "state_scope": "user",
+        "mutable_state": state,
+        "character_constraints": {
+            "drives": character["drives"],
+            "standards": character["standards"],
+            "meaning_state": character["meaning_state"],
+        },
+        "evidence": [{
+            "evidence_handle": "e1",
+            "evidence_ref": {
+                "source_kind": "promoted_reflection",
+                "source_id": "reflection:promoted-1",
+                "occurred_at": NOW,
+                "semantic_summary": "promoted guidance about staying concise",
             },
-        ],
-        "promoted_self_guidance": [
-            {
-                "memory_name": "avoid_overcommitting",
-                "content": "Keep reflective conclusions tentative in speech.",
-                "memory_type": "self_guidance",
-                "updated_at": "2026-05-09T22:20:00+00:00",
-                "confidence_note": "Promoted as internal guidance.",
-            },
-        ],
-        "source_dates": ["2026-05-09"],
-        "retrieval_notes": [
-            "Only active reflection-promoted memory rows are included.",
-        ],
-    }
-    return context
-
-
-def _canonical_context(context: dict[str, Any]) -> str:
-    """Render promoted reflection context with the stable payload shape.
-
-    Args:
-        context: Promoted reflection context to render.
-
-    Returns:
-        Canonical JSON string used as the reflection percept content.
-    """
-    rendered = json.dumps(context, sort_keys=True, ensure_ascii=False)
-    return rendered
-
-
-def _expected_episode_id(context: dict[str, Any]) -> str:
-    """Return the deterministic reflection dry-run episode id.
-
-    Args:
-        context: Promoted reflection context used to derive the id.
-
-    Returns:
-        Expected `episode_id` for the reflection dry-run episode.
-    """
-    digest = hashlib.sha256(
-        _canonical_context(context).encode("utf-8"),
-    ).hexdigest()[:16]
-    episode_id = f"reflection:dry_run:{digest}"
-    return episode_id
-
-
-def _character_profile() -> dict[str, Any]:
-    """Build a cognition-compatible character profile fixture.
-
-    Returns:
-        Character profile with all fields consumed by L1/L2/L3 prompt render.
-    """
-    profile = {
-        "name": "Kazusa",
-        "personality_brief": {
-            "mbti": "INTJ",
-            "logic": "precise and guarded",
-            "tempo": "measured",
-            "defense": "uses dry deflection",
-            "quirks": "notices quiet rooms",
-            "taboos": "do not overpromise",
-        },
-        "mood": "calm",
-        "vibe_check": "quiet",
-        "character_reflection": "",
-        "boundary_profile": {
-            "self_integrity": 0.7,
-            "control_sensitivity": 0.4,
-            "relational_override": 0.3,
-            "control_intimacy_misread": 0.2,
-            "compliance_strategy": "negotiate",
-            "boundary_recovery": "recenter",
-            "authority_skepticism": 0.5,
-        },
-        "linguistic_texture_profile": {
-            "fragmentation": 0.2,
-            "hesitation_density": 0.3,
-            "counter_questioning": 0.2,
-            "softener_density": 0.3,
-            "formalism_avoidance": 0.6,
-            "abstraction_reframing": 0.4,
-            "direct_assertion": 0.5,
-            "emotional_leakage": 0.2,
-            "rhythmic_bounce": 0.3,
-            "self_deprecation": 0.1,
+            "semantic_text": "promoted guidance about staying concise",
+            "visible_to": list(
+                EVIDENCE_SOURCE_QUESTION_IDS["promoted_reflection"]
+            ),
+        }],
+        "direct_facts": [],
+        "available_actions": [],
+        "available_resolver_capabilities": [],
+        "scene_context": {
+            "channel_scope": "internal",
+            "character_role": "character",
+            "semantic_scene": "a promoted reflection is available",
+            "semantic_temporal_context": "recent",
         },
     }
-    return profile
 
 
-def _user_profile() -> dict[str, Any]:
-    """Build a minimal user profile fixture.
+def test_promoted_reflection_is_valid_typed_evidence() -> None:
+    """Allow only promoted reflection through the normal evidence contract."""
 
-    Returns:
-        User profile fields consumed by cognition prompt render.
-    """
-    profile = {
-        "global_user_id": "reflection_cycle",
-        "relationship_state": 500,
-        "semantic_relationship_projection": "",
-    }
-    return profile
-
-
-def _expected_empty_rag_result() -> dict[str, Any]:
-    """Build the exact empty RAG shape required for dry-run cognition.
-
-    Returns:
-        Empty projected RAG payload for dry-run cognition state.
-    """
-    rag_result = {
-        "answer": "",
-        "user_image": {
-            "user_memory_context": {
-                "stable_patterns": [],
-                "recent_shifts": [],
-                "objective_facts": [],
-                "milestones": [],
-                "active_commitments": [],
-            },
-        },
-        "user_memory_unit_candidates": [],
-        "character_image": {},
-        "third_party_profiles": [],
-        "memory_evidence": [],
-        "recall_evidence": [],
-        "conversation_evidence": [],
-        "external_evidence": [],
-        "supervisor_trace": {
-            "loop_count": 0,
-            "unknown_slots": [],
-            "dispatched": [],
-        },
-    }
-    return rag_result
-
-
-def _llm_output_payloads() -> dict[str, dict[str, Any]]:
-    """Build fixed JSON outputs for every cognition LLM stage.
-
-    Returns:
-        Mapping of LLM attribute names to stage-compatible payloads.
-    """
-    payloads = {
-        "_subconscious_llm": {
-            "emotional_appraisal": "steady",
-            "interaction_subtext": "reflection",
-        },
-        "_conscious_llm": {
-            "internal_monologue": "Keep the reflection tentative.",
-            "character_intent": "PROVIDE",
-            "logical_stance": "CONFIRM",
-        },
-        "_boundary_core_llm": {
-            "boundary_issue": "none",
-            "boundary_summary": "no boundary issue",
-            "behavior_primary": "answer",
-            "behavior_secondary": "none",
-            "acceptance": "allow",
-            "stance_bias": "confirm",
-            "identity_policy": "accept",
-            "pressure_policy": "absorb",
-            "trajectory": "stable",
-        },
-        "_judgement_core_llm": {
-            "logical_stance": "CONFIRM",
-            "character_intent": "PROVIDE",
-            "judgment_note": "reflection dry run remains internal",
-        },
-        "_action_selection_llm": {
-            "action_requests": [],
-        },
-        "_contextual_agent_llm": {
-            "social_distance": "neutral",
-            "emotional_intensity": "low",
-            "vibe_check": "quiet",
-            "relational_dynamic": "stable",
-        },
-        "_style_agent_llm": {
-            "rhetorical_strategy": "brief",
-            "linguistic_style": "plain",
-            "forbidden_phrases": [],
-        },
-        "_content_plan_agent_llm": {
-            "content_plan": {
-                "semantic_content": "Keep the reflection dry run internal.",
-                "rendering": "No visible reply is emitted.",
-            },
-        },
-        "_preference_adapter_llm": {
-            "accepted_user_preferences": [],
-        },
-        "_visual_agent_llm": {
-            "facial_expression": ["neutral"],
-            "body_language": ["still"],
-            "gaze_direction": ["down"],
-            "visual_vibe": ["quiet"],
-        },
-    }
-    return payloads
-
-
-def _empty_interaction_style_context() -> dict[str, Any]:
-    """Build an empty interaction-style context without database access.
-
-    Returns:
-        Prompt-facing interaction-style overlay fixture.
-    """
-    overlay = {
-        "speech_guidelines": [],
-        "social_guidelines": [],
-        "pacing_guidelines": [],
-        "engagement_guidelines": [],
-        "confidence": "empty",
-    }
-    context = {
-        "user_style": overlay,
-        "application_order": ["user_style"],
-    }
-    return context
-
-
-async def _fake_build_interaction_style_context(**_kwargs: Any) -> dict[str, Any]:
-    """Return empty interaction-style context without database access.
-
-    Args:
-        **_kwargs: Ignored context lookup parameters.
-
-    Returns:
-        Empty prompt-facing interaction-style context.
-    """
-    context = _empty_interaction_style_context()
-    return context
-
-
-def _patch_cognition_llms(
-    monkeypatch: pytest.MonkeyPatch,
-) -> dict[str, _CapturingAsyncLLM]:
-    """Patch every L1/L2d/L3 cognition LLM with a capturing fake.
-
-    Args:
-        monkeypatch: Pytest monkeypatch fixture.
-
-    Returns:
-        Mapping of patched LLM attribute names to fake LLMs.
-    """
-    payloads = _llm_output_payloads()
-    llms = {
-        llm_name: _CapturingAsyncLLM(payload)
-        for llm_name, payload in payloads.items()
-    }
-    monkeypatch.setattr(l1_module, "_subconscious_llm", bind_test_llm(llms["_subconscious_llm"], "subconscious_llm"))
-    monkeypatch.setattr(l2_module, "_conscious_llm", bind_test_llm(llms["_conscious_llm"], "conscious_llm"))
-    monkeypatch.setattr(l2_module, "_boundary_core_llm", bind_test_llm(llms["_boundary_core_llm"], "boundary_core_llm"))
-    monkeypatch.setattr(l2_module, "_judgement_core_llm", bind_test_llm(llms["_judgement_core_llm"], "judgement_core_llm"))
-    monkeypatch.setattr(
-        l2d_module,
-        "_action_selection_llm",
-        bind_test_llm(llms["_action_selection_llm"], "action_selection_llm"),
+    validated = validate_cognition_core_input(_payload())
+    assert validated["evidence"][0]["evidence_ref"]["source_kind"] == (
+        "promoted_reflection"
     )
-    monkeypatch.setattr(
-        l2c2_module,
-        "_contextual_agent_llm",
-        bind_test_llm(llms["_contextual_agent_llm"], "contextual_agent_llm"),
-    )
-    monkeypatch.setattr(l3_module, "_style_agent_llm", bind_test_llm(llms["_style_agent_llm"], "style_agent_llm"))
-    monkeypatch.setattr(
-        l3_module,
-        "_content_plan_agent_llm",
-        bind_test_llm(llms["_content_plan_agent_llm"], "content_plan_agent_llm"),
-    )
-    monkeypatch.setattr(
-        l3_module,
-        "_preference_adapter_llm",
-        bind_test_llm(llms["_preference_adapter_llm"], "preference_adapter_llm"),
-    )
-    monkeypatch.setattr(l3_module, "_visual_agent_llm", bind_test_llm(llms["_visual_agent_llm"], "visual_agent_llm"))
-
-    from kazusa_ai_chatbot.utils import parse_llm_json_output
-
-    cognition_dispatch = _DispatchingAsyncLLM({
-        "_subconscious_llm": llms["_subconscious_llm"],
-        "_conscious_llm": llms["_conscious_llm"],
-        "_boundary_core_llm": llms["_boundary_core_llm"],
-        "_judgement_core_llm": llms["_judgement_core_llm"],
-        "_action_selection_llm": llms["_action_selection_llm"],
-        "_contextual_agent_llm": llms["_contextual_agent_llm"],
-    })
-    fake_services = CognitionChainServices(
-        llm=cognition_dispatch,
-        cognition_config=make_llm_call_config("cognition"),
-        boundary_core_config=make_llm_call_config("boundary_core"),
-        action_selection_config=make_llm_call_config("action_selection"),
-        style_config=make_llm_call_config("style_agent"),
-        content_plan_config=make_llm_call_config("content_plan_agent"),
-        preference_config=make_llm_call_config("preference_adapter"),
-        visual_config=make_llm_call_config("visual_agent"),
-        parse_json=parse_llm_json_output,
-        logger=logging.getLogger(__name__),
-    )
-    monkeypatch.setattr(
-        cognition_module,
-        "build_cognition_chain_services",
-        lambda: fake_services,
-    )
-    return llms
 
 
-def test_reflection_episode_builder_creates_valid_episode() -> None:
-    """Builder should create the exact reflection_signal episode contract."""
-    context = _promoted_reflection_context()
+def test_promoted_reflection_selects_exact_source_owned_questions() -> None:
+    """Keep reflection provenance while exposing only semantic text."""
+
+    payload = _payload()
+    questions = plan_semantic_questions(
+        payload["evidence"],
+        payload["mutable_state"],
+        payload["character_constraints"],
+    )
+    assert [question["question_id"] for question in questions] == list(
+        EVIDENCE_SOURCE_QUESTION_IDS["promoted_reflection"]
+    )
+    assert all(question["evidence_handles"] == ["e1"] for question in questions)
+
+
+def test_reflection_builder_creates_exact_valid_episode() -> None:
+    """The retained builder emits one canonical private reflection episode."""
+
     episode = build_reflection_signal_cognitive_episode(
-        promoted_reflection_context=context,
-        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        promoted_reflection_context=_promoted_context(),  # type: ignore[arg-type]
+        storage_timestamp_utc=STORAGE_TIMESTAMP_UTC,
         local_time_context=_time_context(),
-        output_mode="think_only",
     )
 
     validate_cognitive_episode(episode)
-
-    assert episode["episode_id"] == _expected_episode_id(context)
     assert episode["trigger_source"] == "reflection_signal"
     assert episode["input_sources"] == ["reflection_artifact"]
     assert episode["output_mode"] == "think_only"
-    assert episode["storage_timestamp_utc"] == "2026-05-09T21:30:00+00:00"
-    assert episode["local_time_context"] == _time_context()
-    assert episode["target_scope"] == {
-        "platform": "reflection_cycle",
-        "platform_channel_id": "reflection_dry_run",
-        "channel_type": "reflection_dry_run",
-        "current_platform_user_id": "reflection_cycle",
-        "current_global_user_id": "reflection_cycle",
-        "current_display_name": "reflection_cycle",
-        "target_addressed_user_ids": [],
-        "target_broadcast": False,
+    assert json.loads(episode["percepts"][0]["content"]) == (
+        _promoted_context()
+    )
+    assert episode["origin_metadata"]["debug_modes"] == {
+        "think_only": True,
+        "no_remember": True,
     }
-    assert episode["origin_metadata"] == {
-        "platform": "reflection_cycle",
-        "platform_message_id": "reflection:dry_run",
-        "active_turn_platform_message_ids": [],
-        "active_turn_conversation_row_ids": [],
-        "debug_modes": {"think_only": True, "no_remember": True},
-    }
-    assert episode["percepts"] == [
-        {
-            "percept_id": "reflection:artifact:promoted_context",
-            "input_source": "reflection_artifact",
-            "content": _canonical_context(context),
-            "visibility": "model_visible",
-            "metadata": {"source": "promoted_reflection_context"},
-        },
-    ]
 
 
-def test_reflection_episode_builder_rejects_empty_promoted_context() -> None:
-    """Builder should reject context with no promoted reflection lanes."""
+def test_reflection_builder_rejects_empty_promoted_context() -> None:
+    """Reflection recurrence requires at least one promoted content lane."""
+
     with pytest.raises(
         ReflectionCognitionDryRunError,
         match="promoted reflection context is empty",
     ):
         build_reflection_signal_cognitive_episode(
-            promoted_reflection_context={"retrieval_notes": ["nothing active"]},
-            storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+            promoted_reflection_context={  # type: ignore[arg-type]
+                "retrieval_notes": ["nothing promoted"],
+            },
+            storage_timestamp_utc=STORAGE_TIMESTAMP_UTC,
             local_time_context=_time_context(),
         )
 
 
-def test_reflection_episode_builder_rejects_unsupported_output_mode() -> None:
-    """Builder should fail closed for output modes outside the dry-run set."""
+def test_reflection_builder_rejects_visible_reply() -> None:
+    """The private reflection source cannot directly request a reply."""
+
     with pytest.raises(
         ReflectionCognitionDryRunError,
-        match="reflection output_mode is not supported",
+        match="output_mode is not supported",
     ):
         build_reflection_signal_cognitive_episode(
-            promoted_reflection_context=_promoted_reflection_context(),
-            storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+            promoted_reflection_context=_promoted_context(),  # type: ignore[arg-type]
+            storage_timestamp_utc=STORAGE_TIMESTAMP_UTC,
             local_time_context=_time_context(),
-            output_mode="visible_reply",
-        )
-
-
-def test_selector_returns_reflection_variant_for_every_stage() -> None:
-    """Reflection episodes should select the exact dry-run prompt variant."""
-    episode = build_reflection_signal_cognitive_episode(
-        promoted_reflection_context=_promoted_reflection_context(),
-        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
-        local_time_context=_time_context(),
-        output_mode="preview",
-    )
-
-    for stage in _APPROVED_STAGES:
-        selection = select_cognition_prompt_variant(
-            episode=episode,
-            stage=stage,
-        )
-
-        assert selection == {
-            "stage": stage,
-            "variant": "reflection_signal_reflection_artifact",
-            "prompt_key": f"{stage}.reflection_signal_reflection_artifact",
-            "trigger_source": "reflection_signal",
-            "input_sources": ["reflection_artifact"],
-            "output_mode": "preview",
-        }
-
-
-def test_source_payload_projects_only_reflection_artifact() -> None:
-    """Reflection payload projection should expose only artifact content."""
-    context = _promoted_reflection_context()
-    episode = build_reflection_signal_cognitive_episode(
-        promoted_reflection_context=context,
-        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
-        local_time_context=_time_context(),
-        output_mode="think_only",
-    )
-    selection = select_cognition_prompt_variant(
-        episode=episode,
-        stage="l1_subconscious",
-    )
-
-    payload = build_cognition_prompt_source_payload(
-        episode=episode,
-        selection=selection,
-    )
-
-    assert payload == {"reflection_artifact": _canonical_context(context)}
-    assert "cognitive_episode" not in payload
-    assert "trigger_source" not in payload
-    assert "input_sources" not in payload
-
-
-def test_source_payload_rejects_duplicate_reflection_artifacts() -> None:
-    """Reflection payload projection should require one artifact percept."""
-    episode = build_reflection_signal_cognitive_episode(
-        promoted_reflection_context=_promoted_reflection_context(),
-        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
-        local_time_context=_time_context(),
-        output_mode="think_only",
-    )
-    second_percept = deepcopy(episode["percepts"][0])
-    second_percept["percept_id"] = "reflection:artifact:extra_context"
-    episode["percepts"].append(second_percept)
-    selection = select_cognition_prompt_variant(
-        episode=episode,
-        stage="l1_subconscious",
-    )
-
-    with pytest.raises(CognitionPromptSelectionError, match="reflection_artifact"):
-        build_cognition_prompt_source_payload(
-            episode=episode,
-            selection=selection,
-        )
-
-
-def test_selector_rejects_reflection_visible_reply_output_mode() -> None:
-    """Reflection prompt selection should fail closed for visible replies."""
-    episode = build_reflection_signal_cognitive_episode(
-        promoted_reflection_context=_promoted_reflection_context(),
-        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
-        local_time_context=_time_context(),
-        output_mode="think_only",
-    )
-    episode["output_mode"] = "visible_reply"
-
-    with pytest.raises(CognitionPromptSelectionError, match="output_mode"):
-        select_cognition_prompt_variant(
-            episode=episode,
-            stage="l1_subconscious",
+            output_mode="visible_reply",  # type: ignore[arg-type]
         )
 
 
 @pytest.mark.asyncio
-async def test_dry_run_returns_busy_skip_without_cognition_call() -> None:
-    """Busy dry run should return the exact skipped audit without cognition."""
-    busy_probe = _BusyProbe(True)
-    cognition = _CapturingCognitionCallable({"unused": True})
+async def test_reflection_dry_run_busy_path_skips_cognition() -> None:
+    """A busy primary interaction returns a bounded V2 audit result."""
+
+    async def unexpected_client(state: dict[str, object]) -> dict[str, object]:
+        raise AssertionError(f"unexpected cognition call: {state!r}")
 
     audit = await run_reflection_cognition_dry_run(
-        promoted_reflection_context=_promoted_reflection_context(),
-        character_profile=_character_profile(),
-        user_profile=_user_profile(),
-        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        promoted_reflection_context=_promoted_context(),  # type: ignore[arg-type]
+        character_profile={"name": "Test Character"},
+        user_profile={},
+        storage_timestamp_utc=STORAGE_TIMESTAMP_UTC,
         local_time_context=_time_context(),
-        is_primary_interaction_busy=busy_probe,
-        call_cognition_subgraph_func=cognition,
+        is_primary_interaction_busy=lambda: True,
+        call_cognition_subgraph_func=unexpected_client,
         output_mode="preview",
     )
 
-    assert busy_probe.call_count == 1
-    assert cognition.calls == 0
-    assert audit == {
-        "status": "skipped_busy",
-        "skip_reason": "primary_interaction_busy",
-        "cognition_called": False,
-        "episode_id": "",
-        "trigger_source": "reflection_signal",
-        "input_sources": ["reflection_artifact"],
-        "output_mode": "preview",
-        "prompt_variant": "reflection_signal_reflection_artifact",
-        "prompt_keys": [],
-        "cognition_output_keys": [],
-    }
+    assert audit["status"] == "skipped_busy"
+    assert audit["cognition_called"] is False
+    assert audit["state_scope"] == "character"
+    assert audit["cognition_schema_version"] == "cognition_core_input.v2"
 
 
 @pytest.mark.asyncio
-async def test_dry_run_rejects_output_mode_before_busy_probe() -> None:
-    """Runner should validate output mode before checking primary load."""
-    cognition = _CapturingCognitionCallable({"unused": True})
+async def test_reflection_dry_run_validates_mode_before_busy_probe() -> None:
+    """Output-mode validation precedes the runtime busy check."""
 
-    def _failing_busy_probe() -> bool:
-        """Fail if output-mode validation did not happen first.
+    def unexpected_probe() -> bool:
+        raise AssertionError("busy probe must not run")
 
-        Returns:
-            This function never returns in a passing test.
-        """
-        raise AssertionError("busy probe should not be called")
+    async def unexpected_client(state: dict[str, object]) -> dict[str, object]:
+        raise AssertionError(f"unexpected cognition call: {state!r}")
 
     with pytest.raises(
         ReflectionCognitionDryRunError,
-        match="reflection output_mode is not supported",
+        match="output_mode is not supported",
     ):
         await run_reflection_cognition_dry_run(
-            promoted_reflection_context=_promoted_reflection_context(),
-            character_profile=_character_profile(),
-            user_profile=_user_profile(),
-            storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+            promoted_reflection_context=_promoted_context(),  # type: ignore[arg-type]
+            character_profile={"name": "Test Character"},
+            user_profile={},
+            storage_timestamp_utc=STORAGE_TIMESTAMP_UTC,
             local_time_context=_time_context(),
-            is_primary_interaction_busy=_failing_busy_probe,
-            call_cognition_subgraph_func=cognition,
-            output_mode="visible_reply",
+            is_primary_interaction_busy=unexpected_probe,
+            call_cognition_subgraph_func=unexpected_client,
+            output_mode="visible_reply",  # type: ignore[arg-type]
         )
-
-    assert cognition.calls == 0
 
 
 @pytest.mark.asyncio
-async def test_dry_run_returns_empty_context_skip_without_cognition_call() -> None:
-    """Empty promoted reflection context should skip before episode build."""
-    busy_probe = _BusyProbe(False)
-    cognition = _CapturingCognitionCallable({"unused": True})
+async def test_reflection_dry_run_empty_context_skips_cognition() -> None:
+    """An ordinary empty promoted context does not build an episode."""
+
+    async def unexpected_client(state: dict[str, object]) -> dict[str, object]:
+        raise AssertionError(f"unexpected cognition call: {state!r}")
 
     audit = await run_reflection_cognition_dry_run(
-        promoted_reflection_context={"retrieval_notes": ["nothing active"]},
-        character_profile=_character_profile(),
-        user_profile=_user_profile(),
-        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        promoted_reflection_context={  # type: ignore[arg-type]
+            "retrieval_notes": ["nothing promoted"],
+        },
+        character_profile={"name": "Test Character"},
+        user_profile={},
+        storage_timestamp_utc=STORAGE_TIMESTAMP_UTC,
         local_time_context=_time_context(),
-        is_primary_interaction_busy=busy_probe,
-        call_cognition_subgraph_func=cognition,
+        is_primary_interaction_busy=lambda: False,
+        call_cognition_subgraph_func=unexpected_client,
         output_mode="silent",
     )
 
-    assert busy_probe.call_count == 1
-    assert cognition.calls == 0
-    assert audit == {
-        "status": "skipped_empty_context",
-        "skip_reason": "promoted_reflection_context_empty",
-        "cognition_called": False,
-        "episode_id": "",
-        "trigger_source": "reflection_signal",
-        "input_sources": ["reflection_artifact"],
-        "output_mode": "silent",
-        "prompt_variant": "reflection_signal_reflection_artifact",
-        "prompt_keys": [],
-        "cognition_output_keys": [],
-    }
+    assert audit["status"] == "skipped_empty_context"
+    assert audit["cognition_called"] is False
+    assert audit["skip_reason"] == "promoted_reflection_context_empty"
 
 
 @pytest.mark.asyncio
-async def test_dry_run_calls_injected_cognition_once_and_returns_audit() -> None:
-    """Non-busy dry run should build exact state and completed audit."""
-    context = _promoted_reflection_context()
-    busy_probe = _BusyProbe(False)
-    cognition = _CapturingCognitionCallable({
-        "zeta": "last",
-        "alpha": "first",
-    })
+async def test_reflection_dry_run_calls_v2_boundary_once() -> None:
+    """A non-busy promoted reflection reaches cognition exactly once."""
+
+    captured_states: list[dict[str, object]] = []
+
+    async def cognition_client(state: dict[str, object]) -> dict[str, object]:
+        captured_states.append(deepcopy(state))
+        return {
+            "cognition_core_output": {
+                "schema_version": "cognition_core_output.v2",
+            },
+            "cognition_state_committed": True,
+        }
 
     audit = await run_reflection_cognition_dry_run(
-        promoted_reflection_context=context,
-        character_profile=_character_profile(),
-        user_profile=_user_profile(),
-        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
+        promoted_reflection_context=_promoted_context(),  # type: ignore[arg-type]
+        character_profile={"name": "Test Character"},
+        user_profile={},
+        storage_timestamp_utc=STORAGE_TIMESTAMP_UTC,
         local_time_context=_time_context(),
-        is_primary_interaction_busy=busy_probe,
-        call_cognition_subgraph_func=cognition,
-        output_mode="think_only",
+        is_primary_interaction_busy=lambda: False,
+        call_cognition_subgraph_func=cognition_client,
     )
 
-    assert busy_probe.call_count == 1
-    assert cognition.calls == 1
-    assert audit == {
-        "status": "completed",
-        "skip_reason": "",
-        "cognition_called": True,
-        "episode_id": _expected_episode_id(context),
-        "trigger_source": "reflection_signal",
-        "input_sources": ["reflection_artifact"],
-        "output_mode": "think_only",
-        "prompt_variant": "reflection_signal_reflection_artifact",
-        "prompt_keys": _EXPECTED_PROMPT_KEYS,
-        "cognition_output_keys": ["alpha", "zeta"],
-    }
-
-    dry_run_state = cognition.states[0]
-    assert dry_run_state["user_input"] == (
-        "Reflection dry run over promoted reflection artifact."
+    assert len(captured_states) == 1
+    assert captured_states[0]["cognitive_episode"]["trigger_source"] == (
+        "reflection_signal"
     )
-    assert dry_run_state["prompt_message_context"] == {
-        "body_text": "",
-        "addressed_to_global_user_ids": [],
-        "broadcast": False,
-        "mentions": [],
-        "attachments": [],
-    }
-    assert dry_run_state["user_multimedia_input"] == []
-    assert dry_run_state["platform"] == "reflection_cycle"
-    assert dry_run_state["platform_channel_id"] == "reflection_dry_run"
-    assert dry_run_state["channel_type"] == "reflection_dry_run"
-    assert dry_run_state["platform_message_id"] == "reflection:dry_run"
-    assert dry_run_state["platform_user_id"] == "reflection_cycle"
-    assert dry_run_state["global_user_id"] == "reflection_cycle"
-    assert dry_run_state["user_name"] == "reflection_cycle"
-    assert dry_run_state["platform_bot_id"] == "reflection_cycle"
-    assert dry_run_state["chat_history_wide"] == []
-    assert dry_run_state["chat_history_recent"] == []
-    assert dry_run_state["reply_context"] == {}
-    assert dry_run_state["indirect_speech_context"] == ""
-    assert dry_run_state["channel_topic"] == ""
-    assert dry_run_state["debug_modes"] == {
-        "think_only": True,
-        "no_remember": True,
-    }
-    assert dry_run_state["should_respond"] is False
-    assert dry_run_state["decontexualized_input"] == (
-        "Reflection dry run over promoted reflection artifact."
-    )
-    assert dry_run_state["referents"] == []
-    assert dry_run_state["promoted_reflection_context"] == context
-    assert dry_run_state["rag_result"] == _expected_empty_rag_result()
-    assert dry_run_state["internal_monologue"] == ""
-    assert dry_run_state["action_directives"] == {}
-    assert dry_run_state["interaction_subtext"] == ""
-    assert dry_run_state["emotional_appraisal"] == ""
-    assert dry_run_state["character_intent"] == ""
-    assert dry_run_state["logical_stance"] == ""
-    assert dry_run_state["final_dialog"] == []
-    assert dry_run_state["mood"] == ""
-    assert dry_run_state["vibe_check"] == ""
-    assert dry_run_state["character_reflection"] == ""
-    assert dry_run_state["subjective_appraisals"] == []
-    assert dry_run_state["relationship_delta"] == 0
-    assert dry_run_state["semantic_relationship_projection"] == ""
-    assert dry_run_state["new_facts"] == []
-    assert dry_run_state["future_promises"] == []
-
-
-def test_dry_run_module_contains_no_write_delivery_or_scheduler_calls() -> None:
-    """Dry-run module should not reference write or delivery entrypoints."""
-    module_source = inspect.getsource(dry_run_module)
-
-    for token in _FORBIDDEN_DRY_RUN_TOKENS:
-        assert token not in module_source
-
-
-@pytest.mark.asyncio
-async def test_reflection_prompt_rendering_uses_only_artifact_payload(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Mocked cognition prompts should receive only reflection_artifact content."""
-    context = _promoted_reflection_context()
-    llms = _patch_cognition_llms(monkeypatch)
-    monkeypatch.setattr(
-        l3_module,
-        "call_interaction_style_context_loader",
-        _fake_build_interaction_style_context,
-    )
-
-    audit = await run_reflection_cognition_dry_run(
-        promoted_reflection_context=context,
-        character_profile=_character_profile(),
-        user_profile=_user_profile(),
-        storage_timestamp_utc="2026-05-09T21:30:00+00:00",
-        local_time_context=_time_context(),
-        is_primary_interaction_busy=_BusyProbe(False),
-        call_cognition_subgraph_func=cognition_module.call_cognition_subgraph,
-        output_mode="think_only",
-    )
-
     assert audit["status"] == "completed"
-    l1_l2_llm_names = (
-        "_subconscious_llm",
-        "_conscious_llm",
-        "_boundary_core_llm",
-        "_judgement_core_llm",
+    assert audit["cognition_output_keys"] == [
+        "cognition_core_output",
+        "cognition_state_committed",
+    ]
+
+
+def test_reflection_dry_run_module_has_no_side_effect_entrypoints() -> None:
+    """The reflection recurrence module remains audit-only."""
+
+    source = inspect.getsource(dry_run_module)
+    forbidden_tokens = (
+        "call_consolidation_subgraph",
+        "save_conversation",
+        "save_assistant_message",
+        "dispatcher.dispatch",
+        "schedule_event",
     )
-    for llm_name in l1_l2_llm_names:
-        fake_llm = llms[llm_name]
-        assert fake_llm.messages
-        prompt_payload = json.loads(fake_llm.messages[1].content)
-        assert prompt_payload["reflection_artifact"] == _canonical_context(context)
-        assert "cognitive_episode" not in prompt_payload
-        assert "trigger_source" not in prompt_payload
-        assert "input_sources" not in prompt_payload
-        assert "hourly_reflections" not in prompt_payload
-        assert "daily_syntheses" not in prompt_payload
-        assert "source_message_refs" not in prompt_payload
-        assert "raw_reflection_run" not in prompt_payload
-        if "promoted_reflection_context" in prompt_payload:
-            assert prompt_payload["promoted_reflection_context"] == {}
 
-    l2d_llm = llms["_action_selection_llm"]
-    assert l2d_llm.messages
-    l2d_context = l2d_llm.messages[1].content
-    l2d_payload = json.loads(l2d_context)
-    assert l2d_payload["source"]["trigger_source"] == "reflection_signal"
-    assert "reflection_artifact" in l2d_payload["source"]["input_sources"]
-    assert l2d_payload["cognition"]["social_distance"] == "neutral"
-    assert l2d_payload["cognition"]["emotional_intensity"] == "low"
-    assert l2d_payload["cognition"]["vibe_check"] == "quiet"
-    assert l2d_payload["cognition"]["relational_dynamic"] == "stable"
-    assert "cognitive_episode" not in l2d_context
-    assert "raw_reflection_run" not in l2d_context
-    assert "available_capabilities" not in l2d_context
-
-    invoked_llm_names = (
-        *l1_l2_llm_names,
-        "_contextual_agent_llm",
-        "_action_selection_llm",
-    )
-    for llm_name, fake_llm in llms.items():
-        if llm_name not in invoked_llm_names:
-            assert fake_llm.messages == []
-
-
-def test_text_chat_prompt_fingerprints_remain_stable() -> None:
-    """Existing text-chat prompt constants should remain byte-for-byte stable."""
-    for prompt_name, prompt_text, expected_bytes, expected_digest in (
-        _PROMPT_FINGERPRINTS
-    ):
-        encoded_prompt = prompt_text.encode("utf-8")
-        digest = hashlib.sha256(encoded_prompt).hexdigest()
-
-        assert len(encoded_prompt) == expected_bytes, prompt_name
-        assert digest == expected_digest, prompt_name
+    assert all(token not in source for token in forbidden_tokens)

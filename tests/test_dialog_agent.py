@@ -23,6 +23,11 @@ from kazusa_ai_chatbot.nodes.dialog_agent import (
 def _stub_dialog_event_logging(monkeypatch):
     """Keep deterministic dialog tests away from event-log persistence."""
 
+    monkeypatch.setattr(
+        dialog_module.llm_tracing,
+        "record_llm_trace_step",
+        AsyncMock(),
+    )
     for recorder_name in (
         "record_llm_stage_event",
         "record_model_contract_event",
@@ -152,10 +157,55 @@ async def test_dialog_generator_forwards_native_surface_without_legacy_fields(
 
     assert result["final_dialog"] == ["Hello."]
     human_payload = json.loads(generator_llm.ainvoke.await_args.args[0][1].content)
+    assert set(human_payload) == {
+        "text_surface_output_v2",
+        "user_name",
+    }
+    assert set(human_payload["text_surface_output_v2"]) == {
+        "schema_version",
+        "content_plan",
+        "visible_boundaries",
+        "addressee_plan",
+        "style_guidance",
+        "pacing_guidance",
+        "selected_surface_intent",
+    }
     assert human_payload["text_surface_output_v2"]["schema_version"] == (
         "text_surface_output.v2"
     )
-    assert "action_directives" not in human_payload
+    rendered_payload = json.dumps(human_payload)
+    for forbidden_field in (
+        "action_directives",
+        "internal_monologue",
+        "chat_history_wide",
+        "chat_history_recent",
+        "user_profile",
+        "character_profile",
+        "cognition_core_output",
+        "cognition_state",
+    ):
+        assert forbidden_field not in rendered_payload
+
+
+@pytest.mark.asyncio
+async def test_dialog_generator_preserves_valid_fragment_text(
+    monkeypatch,
+) -> None:
+    """Final wording remains model-owned after exact contract validation."""
+
+    generator_llm = MagicMock()
+    generator_llm.ainvoke = AsyncMock(
+        return_value=AIMessage(
+            content=json.dumps({
+                "final_dialog": ["  First line.  ", "Second line."],
+            })
+        )
+    )
+    monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
+
+    result = await dialog_generator(_dialog_state())
+
+    assert result["final_dialog"] == ["  First line.  ", "Second line."]
 
 
 @pytest.mark.asyncio

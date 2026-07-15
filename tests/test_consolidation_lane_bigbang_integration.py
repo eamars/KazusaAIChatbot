@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -264,3 +265,42 @@ async def test_native_guidance_route_runs_only_native_specialist(
     assert captured["writer_state"]["character_self_guidance"]["memory_type"] == (
         "defense_rule"
     )
+
+
+@pytest.mark.asyncio
+async def test_guidance_reviewer_rejection_disables_persistence(
+    monkeypatch,
+) -> None:
+    """A rejected specialist candidate must leave no enabled write lane."""
+
+    state = _base_state()
+
+    async def _fake_router(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        del args, kwargs
+        return {
+            "lane_tasks": [{
+                "lane": "character_self_guidance",
+                "reason": "candidate character behavior guidance",
+                "source_keys": ["current_turn_user_message"],
+            }]
+        }
+
+    specialist = AsyncMock(return_value={"character_self_guidance": {}})
+    writer = AsyncMock()
+    monkeypatch.setattr(lane_router, "call_lane_router_llm", _fake_router)
+    monkeypatch.setattr(
+        lane_router,
+        "character_self_guidance_specialist",
+        specialist,
+    )
+    monkeypatch.setattr(lane_router, "db_writer", writer)
+
+    packet = await lane_router.run_consolidation_lane_pipeline(state)
+
+    assert packet["accepted_lanes"] == []
+    assert packet["state"]["enabled_consolidation_write_lanes"] == []
+    assert packet["state"]["metadata"]["review_rejected_lanes"] == [
+        "character_self_guidance"
+    ]
+    specialist.assert_awaited_once()
+    writer.assert_not_awaited()

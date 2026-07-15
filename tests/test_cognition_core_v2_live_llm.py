@@ -18,6 +18,9 @@ from kazusa_ai_chatbot.cognition_core_v2.diagnostics import (
     validation_capture_snapshot,
     write_validation_capture,
 )
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    EVIDENCE_SOURCE_QUESTION_IDS,
+)
 from kazusa_ai_chatbot.db.character import (
     get_character_cognition_state,
     replace_character_cognition_state,
@@ -34,6 +37,7 @@ from tests.live_llm_mongo import (
     seed_shared_documents,
     unique_owner_id,
 )
+from tests.cognition_core_v2_test_helpers import canonical_episode
 
 _FIXTURE_PATH = Path("tests/fixtures/cognition_core_v2_emotion_lifecycle_cases.json")
 _CASE_MESSAGES = {
@@ -95,13 +99,19 @@ def _chain_input(
         )
     return {
         "schema_version": "cognition_core_input.v2",
-        "episode": {
-            "episode_id": episode_id,
-            "trigger_source": trigger_source,
-            "output_mode": "visible_reply",
-            "semantic_scene": semantic_text,
-            "semantic_temporal_context": "immediate",
-        },
+        "episode": canonical_episode(
+            episode_id=episode_id,
+            trigger_source=trigger_source,
+            output_mode=(
+                "think_only"
+                if trigger_source == "internal_thought"
+                else "visible_reply"
+            ),
+            current_global_user_id=str(
+                state.get("owner_user_id", "live-v2-user")
+            ),
+            content=semantic_text,
+        ),
         "state_scope": state_scope,
         "mutable_state": state,
         "character_constraints": {
@@ -110,7 +120,7 @@ def _chain_input(
             "meaning_state": character["meaning_state"],
         },
         "evidence": [{
-            "evidence_handle": "ev1",
+            "evidence_handle": "e1",
             "evidence_ref": {
                 "source_kind": "episode",
                 "source_id": f"episode:{episode_id}",
@@ -118,7 +128,7 @@ def _chain_input(
                 "semantic_summary": semantic_text,
             },
             "semantic_text": semantic_text,
-            "visible_to": ["cognition", "surface"],
+            "visible_to": list(EVIDENCE_SOURCE_QUESTION_IDS["episode"]),
         }],
         "direct_facts": [],
         "available_actions": [],
@@ -219,7 +229,7 @@ async def _run_character_case(
             episode_id=f"live-v2-{case_id}",
             mutable_state=deepcopy(snapshot),
             state_scope="character",
-            trigger_source="self_cognition",
+            trigger_source="internal_thought",
         )
         reset_validation_capture(case_id)
         output = await run_cognition(payload, build_cognition_core_services())
@@ -722,7 +732,7 @@ async def test_group_user_scope_full_pipeline_live_llm_db(live_db, request) -> N
         live_db,
         request,
         message="A group discussion created a clear request for my view.",
-        trigger_source="group_message",
+        trigger_source="user_message",
         channel_scope="group",
     )
 
@@ -758,7 +768,7 @@ async def test_resolver_recurrence_full_pipeline_live_llm_db(
         live_db,
         request,
         message="Continue the unresolved question using the current evidence.",
-        trigger_source="resolver_recurrence",
+        trigger_source="user_message",
     )
 
 

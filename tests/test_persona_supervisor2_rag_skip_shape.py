@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-pytest.skip("Stage 1 assertions replaced by the V2 contract suite", allow_module_level=True)
 
 import pytest
 
@@ -153,37 +152,3 @@ async def test_skip_branch_does_not_call_adapter(monkeypatch) -> None:
 
     assert rag_result["answer"] == ""
     assert rag_result["supervisor_trace"]["loop_count"] == 0
-
-
-@pytest.mark.asyncio
-async def test_content_plan_accepts_skipped_rag_result_shape(monkeypatch) -> None:
-    """Content-plan agent should not raise on skipped-RAG projection shape."""
-    monkeypatch.setattr(
-        l3_module,
-        "_content_plan_agent_llm",
-        bind_test_llm(_StaticAsyncLLM(), "content_plan_agent"),
-    )
-    rag_result = await supervisor_module.run_rag_evidence_for_persona_state(
-        _clarification_state(),
-        agent_name="resolver_rag_evidence",
-    )
-
-    result = await l3_module.call_content_plan_agent({
-        "character_profile": {"name": "Kazusa"},
-        "decontexualized_input": "这些是什么意思？",
-        "referents": [
-            {"phrase": "这些", "referent_role": "object", "status": "unresolved"},
-        ],
-        "rag_result": rag_result,
-        "internal_monologue": "I need to ask what these refers to.",
-        "logical_stance": "TENTATIVE",
-        "character_intent": "CLARIFY",
-        "conversation_progress": None,
-        "cognitive_episode": _minimal_text_chat_episode(),
-        "user_input": "clean body",
-        "prompt_message_context": {},
-        "reply_context": {},
-        "user_name": "User",
-    })
-
-    assert result["content_plan"]["semantic_content"] == "你说的这些具体是指什么？"

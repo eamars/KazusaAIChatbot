@@ -30,12 +30,19 @@ async def run_text_surface_planning(
     payload = validate_text_surface_input(input_payload)
     stage_payload = _project_surface_payload(payload)
     validate_prompt_projection(stage_payload)
-    style, content, preference, visual = await asyncio.gather(
+    stage_calls = [
         run_surface_stage("style", stage_payload, services),
         run_surface_stage("content_plan", stage_payload, services),
         run_surface_stage("preference", stage_payload, services),
-        run_surface_stage("visual", stage_payload, services),
-    )
+    ]
+    if _visual_guidance_disabled(payload["episode"]):
+        style, content, preference = await asyncio.gather(*stage_calls)
+        visual = "Visual and pacing guidance is disabled for this episode."
+    else:
+        style, content, preference, visual = await asyncio.gather(
+            *stage_calls,
+            run_surface_stage("visual", stage_payload, services),
+        )
     output: TextSurfaceOutputV2 = {
         "schema_version": "text_surface_output.v2",
         "content_plan": content,
@@ -46,6 +53,18 @@ async def run_text_surface_planning(
         "selected_surface_intent": payload["intention"]["intention"],
     }
     return validate_text_surface_output(output)
+
+
+def _visual_guidance_disabled(episode: Mapping[str, Any]) -> bool:
+    """Return the deterministic episode flag for skipping visual planning."""
+
+    origin_metadata = episode.get("origin_metadata")
+    if not isinstance(origin_metadata, Mapping):
+        return False
+    debug_modes = origin_metadata.get("debug_modes")
+    return isinstance(debug_modes, Mapping) and (
+        debug_modes.get("no_visual_directives") is True
+    )
 
 
 def _project_surface_payload(
@@ -76,16 +95,21 @@ def _project_surface_payload(
 
 
 def _project_episode(episode: Mapping[str, Any]) -> dict[str, Any]:
-    """Retain only semantic episode descriptors for surface planning."""
+    """Project visible typed percepts and configured-local time for L3."""
 
-    allowed = (
-        "semantic_scene",
-        "semantic_temporal_context",
-        "interaction_summary",
-        "episode_summary",
-    )
+    visible_percepts = [
+        {
+            "input_source": percept["input_source"],
+            "content": percept["content"],
+        }
+        for percept in episode["percepts"]
+        if percept["visibility"] == "model_visible"
+    ]
+    local_time = episode["local_time_context"]
     return {
-        key: episode[key]
-        for key in allowed
-        if key in episode and isinstance(episode[key], str)
+        "visible_percepts": visible_percepts,
+        "local_time_context": {
+            "current_local_datetime": local_time["current_local_datetime"],
+            "current_local_weekday": local_time["current_local_weekday"],
+        },
     }

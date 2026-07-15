@@ -17,14 +17,22 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     GoalBidDraftV2,
     ResolverAffordanceV2,
 )
+from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
 GOAL_COGNITION_PROMPT = '''You are one independent goal cognition branch.
 Use only the supplied semantic context, evidence handles, and capability handles.
 Return one complete bid draft. Do not mutate state, invent evidence, or author
-the final route decision. A bid may request speech, evidence, action, deferral,
+the final route decision. Do not write final dialogue. A bid may request
+speech, evidence, action, deferral,
 or silence. Use an empty target list when unsupported. Always provide at least
 one bounded expected consequence for a complete bid.
+Respect the supplied typed source_kind: character-owned reflection or internal
+observation material is evidence, not live user speech. Do not copy packet
+headings, timestamps, transport summaries, schema keys, or operational
+metadata into bid prose. Write newly generated free-text fields in Simplified
+Chinese, while preserving quoted user text, proper nouns, code, URLs, and
+schema or enum tokens when needed.
 
 # Output Format
 Return exactly one JSON object with exactly these required fields:
@@ -84,6 +92,7 @@ async def run_goal_cognition(
         "evidence": [
             {
                 "handle": row["evidence_handle"],
+                "source_kind": row["evidence_ref"]["source_kind"],
                 "semantic_text": row["semantic_text"],
             }
             for row in evidence
@@ -109,7 +118,7 @@ async def run_goal_cognition(
         ],
         config=services.goal_cognition_config,
     )
-    parsed = services.parse_json(response.content)
+    parsed = parse_llm_json_output(response.content)
     draft = validate_goal_bid_draft(
         parsed,
         evidence_handles=set(evidence_handles),

@@ -71,8 +71,10 @@ CALENDAR_RUNS_COLLECTION = "calendar_runs"
 
 
 def _now_iso() -> str:
-    return_value = storage_utc_now_iso()
-    return return_value
+    timestamp = storage_utc_now_iso()
+    if timestamp.endswith("+00:00"):
+        return f"{timestamp[:-6]}Z"
+    return timestamp
 
 
 async def db_bootstrap() -> None:

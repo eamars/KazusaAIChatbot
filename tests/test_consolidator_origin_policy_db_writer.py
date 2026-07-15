@@ -190,6 +190,25 @@ async def test_denied_origin_has_no_durable_effects(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_missing_router_allowlist_has_no_durable_effects(
+    monkeypatch,
+) -> None:
+    """Writer persistence fails closed without accepted router lanes."""
+
+    mocks = _patch_writer_dependencies(monkeypatch)
+    result = await persistence_module.db_writer(_state())
+
+    assert all(
+        value is False for value in result["metadata"]["write_success"].values()
+    )
+    assert result["metadata"]["cache_invalidated"] == []
+    mocks["memory"].assert_not_awaited()
+    mocks["guidance"].assert_not_awaited()
+    mocks["group_style"].assert_not_awaited()
+    mocks["runtime"].invalidate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_user_memory_write_uses_native_lane_and_cache_invalidation(
     monkeypatch,
 ) -> None:

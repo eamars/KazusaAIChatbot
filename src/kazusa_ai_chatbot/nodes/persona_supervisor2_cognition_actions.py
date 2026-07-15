@@ -38,6 +38,7 @@ ALLOWED_ACTION_CAPABILITIES = frozenset((
     ACCEPTED_TASK_REQUEST_CAPABILITY,
     ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
     ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
+    BACKGROUND_WORK_REQUEST_CAPABILITY,
 ))
 
 
@@ -141,6 +142,13 @@ def _materialize_action_request(
         if not _can_create_delayed_task_from_source(state):
             logger.warning(
                 "L2d dropped accepted-task request from non-user source"
+            )
+            return None
+        action_spec = _build_background_work_action_spec(request, state)
+    elif capability == BACKGROUND_WORK_REQUEST_CAPABILITY:
+        if not _can_create_delayed_task_from_source(state):
+            logger.warning(
+                "L2d dropped background-work request from non-user source"
             )
             return None
         action_spec = _build_background_work_action_spec(request, state)

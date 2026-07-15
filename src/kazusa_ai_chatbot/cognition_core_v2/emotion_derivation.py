@@ -9,6 +9,9 @@ from typing import Any
 from kazusa_ai_chatbot.cognition_core_v2.emotion_definitions import (
     EMOTION_DEFINITIONS,
 )
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    EVIDENCE_SOURCE_KINDS,
+)
 
 
 FADE_MULTIPLIER = 0.4
@@ -114,7 +117,7 @@ def derive_persistent_emotion_activations(
     updated_at: str,
     character_constraints: Mapping[str, Any] | None = None,
     relationship_context: Mapping[str, Any] | None = None,
-    transition_context: Mapping[str, Any] | None = None,
+    transition_contexts: Sequence[Mapping[str, Any]] = (),
 ) -> list[dict[str, Any]]:
     """Derive all twenty-one activations from typed mutable causes."""
 
@@ -134,17 +137,14 @@ def derive_persistent_emotion_activations(
             emotion_id,
             character_constraints=effective_constraints,
             relationship_context=relationship_context,
-            transition_context=transition_context,
+            transition_contexts=transition_contexts,
         )
         activation = derive_emotion_activation_v2(
             emotion_id,
             candidates=candidates,
             previous=previous_rows.get(emotion_id),
             updated_at=updated_at,
-            reinforced=(
-                isinstance(transition_context, Mapping)
-                and transition_context.get("matched_outcome") == "reinforce"
-            ),
+            reinforced=False,
         )
         if activation is not None and activation["score"] > INACTIVE_THRESHOLD:
             activations.append(activation)
@@ -157,9 +157,16 @@ def _candidates_for_emotion(
     *,
     character_constraints: Mapping[str, Any] | None,
     relationship_context: Mapping[str, Any] | None,
-    transition_context: Mapping[str, Any] | None,
+    transition_contexts: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
     """Build exact candidate rows without reading missing internal axes."""
+
+    if emotion_id == "relief":
+        return [
+            candidate
+            for context in transition_contexts
+            if (candidate := _relief_candidate(state, context)) is not None
+        ]
 
     candidates: list[dict[str, Any]] = []
     for event in _mapping_list(state.get("active_events")):
@@ -168,7 +175,6 @@ def _candidates_for_emotion(
             event,
             emotion_id,
             character_constraints,
-            transition_context,
         )
         if score is not None:
             candidates.append(_candidate(state, "event", event, score))
@@ -177,7 +183,13 @@ def _candidates_for_emotion(
         if score is not None:
             candidates.append(_candidate(state, "goal", goal, score))
     for threat in _mapping_list(state.get("threats")):
-        score = _threat_score(state, threat, emotion_id, relationship_context)
+        score = _threat_score(
+            state,
+            threat,
+            emotion_id,
+            relationship_context,
+            character_constraints,
+        )
         if score is not None:
             candidates.append(_candidate(state, "threat", threat, score))
     for gap in _mapping_list(state.get("knowledge_gaps")):
@@ -222,7 +234,6 @@ def _event_score(
     event: Mapping[str, Any],
     emotion_id: str,
     character_constraints: Mapping[str, Any] | None,
-    transition_context: Mapping[str, Any] | None,
 ) -> int | None:
     """Apply the event-based formula and role/evidence guards."""
 
@@ -240,15 +251,9 @@ def _event_score(
             salience,
         )
     if emotion_id == "anger":
-        blocked_goals = [
-            goal for goal in _mapping_list(state.get("goals"))
-            if goal.get("status") == "blocked"
-        ]
-        goal = max(
-            blocked_goals,
-            key=lambda row: row["importance"],
-            default=None,
-        )
+        goal = _matching_goal(state, event)
+        if goal is not None and goal.get("status") != "blocked":
+            goal = None
         relationship = _relationship(state, None)
         first_axis = max(
             goal["importance"] if goal is not None else 0,
@@ -268,15 +273,9 @@ def _event_score(
             salience,
         )
     if emotion_id == "sadness" and outcome < 0:
-        failed_goals = [
-            goal for goal in _mapping_list(state.get("goals"))
-            if goal.get("status") == "failed"
-        ]
-        goal = max(
-            failed_goals,
-            key=lambda row: row["importance"],
-            default=None,
-        )
+        goal = _matching_goal(state, event)
+        if goal is not None and goal.get("status") != "failed":
+            goal = None
         relationship = _relationship(state, None)
         return _minimum(
             max(
@@ -396,8 +395,6 @@ def _event_score(
             continuity,
             salience,
         )
-    if emotion_id == "relief":
-        return _transition_score(transition_context, salience)
     return None
 
 
@@ -431,6 +428,7 @@ def _threat_score(
     threat: Mapping[str, Any],
     emotion_id: str,
     relationship_context: Mapping[str, Any] | None,
+    character_constraints: Mapping[str, Any] | None,
 ) -> int | None:
     """Apply active threat, jealousy, and fear formulas."""
 
@@ -462,7 +460,7 @@ def _threat_score(
         if not _has_other_experiencer(threat, state):
             return None
         care = _constraint_axis(
-            _effective_character_constraints(state, None),
+            character_constraints,
             "drives",
             "care",
             "importance",
@@ -706,18 +704,12 @@ def _has_role(entity: Mapping[str, Any], roles: set[str]) -> bool:
 def _has_self_actor(entity: Mapping[str, Any], state: Mapping[str, Any]) -> bool:
     """Return whether actor ownership belongs to the current character."""
 
-    owner = state.get("owner_user_id")
+    del state
     return any(
         isinstance(role, Mapping)
         and role["role"] == "actor"
         and role["entity_kind"] == "character"
         and role["entity_id"] in _SELF_IDS
-        for role in entity["role_refs"]
-    ) or any(
-        isinstance(role, Mapping)
-        and role["role"] == "actor"
-        and role["entity_kind"] == "user"
-        and role["entity_id"] == owner
         for role in entity["role_refs"]
     )
 
@@ -725,17 +717,13 @@ def _has_self_actor(entity: Mapping[str, Any], state: Mapping[str, Any]) -> bool
 def _has_other_actor(entity: Mapping[str, Any], state: Mapping[str, Any]) -> bool:
     """Return whether a typed actor is not the current self actor."""
 
-    owner = state.get("owner_user_id")
+    del state
     return any(
         isinstance(role, Mapping)
         and role["role"] == "actor"
         and not (
             role["entity_kind"] == "character"
             and role["entity_id"] in _SELF_IDS
-        )
-        and not (
-            role["entity_kind"] == "user"
-            and role["entity_id"] == owner
         )
         for role in entity["role_refs"]
     )
@@ -744,17 +732,13 @@ def _has_other_actor(entity: Mapping[str, Any], state: Mapping[str, Any]) -> boo
 def _has_other_experiencer(entity: Mapping[str, Any], state: Mapping[str, Any]) -> bool:
     """Return whether another entity is the typed emotional experiencer."""
 
-    owner = state.get("owner_user_id")
+    del state
     return any(
         isinstance(role, Mapping)
         and role["role"] == "experiencer"
         and not (
             role["entity_kind"] == "character"
             and role["entity_id"] in _SELF_IDS
-        )
-        and not (
-            role["entity_kind"] == "user"
-            and role["entity_id"] == owner
         )
         for role in entity["role_refs"]
     )
@@ -851,12 +835,10 @@ def _constraint_axis(
 def _transition_score_evidence_marker(value: Any) -> bool:
     """Keep transition evidence checking typed and local."""
 
-    return isinstance(value, Mapping) and value.get("source_kind") in {
-        "action_result",
-        "resolver_observation",
-        "accepted_task_result",
-        "scheduler_event",
-    }
+    return (
+        isinstance(value, Mapping)
+        and value.get("source_kind") in EVIDENCE_SOURCE_KINDS
+    )
 
 
 def _has_typed_evidence(context: Mapping[str, Any]) -> bool:
@@ -865,22 +847,77 @@ def _has_typed_evidence(context: Mapping[str, Any]) -> bool:
     return _transition_score_evidence_marker(context.get("evidence_ref"))
 
 
-def _transition_score(
-    transition_context: Mapping[str, Any] | None,
-    salience: int,
-) -> int | None:
-    """Derive relief from an explicit prior/current transition."""
+def _relief_candidate(
+    state: Mapping[str, Any],
+    transition_context: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Derive relief from one evidence-backed pressure transition."""
 
-    if not isinstance(transition_context, Mapping):
-        return None
+    if set(transition_context) != {
+        "root_ref",
+        "prior",
+        "current",
+        "evidence_ref",
+        "salience",
+    }:
+        raise ValueError("relief transition fields are not exact")
+    root_ref = transition_context["root_ref"]
+    if not isinstance(root_ref, Mapping) or set(root_ref) != {
+        "scope",
+        "kind",
+        "entity_id",
+    }:
+        raise ValueError("relief transition root is invalid")
+    if root_ref["scope"] != state["state_scope"] or root_ref["kind"] not in {
+        "goal",
+        "threat",
+        "event",
+    }:
+        raise ValueError("relief transition root is outside the mutable scope")
+    salience = transition_context["salience"]
+    if isinstance(salience, bool) or not isinstance(salience, int):
+        raise ValueError("relief transition salience is invalid")
+    if not 0 <= salience <= 100:
+        raise ValueError("relief transition salience is invalid")
     prior = transition_context["prior"]
     current = transition_context["current"]
-    if prior["status"] != "active" or current["status"] != "resolved":
-        return None
+    if not isinstance(prior, Mapping) or not isinstance(current, Mapping):
+        raise ValueError("relief transition pressure states are invalid")
+    if set(prior) != {"status", "residual_pressure"} or set(current) != {
+        "status",
+        "residual_pressure",
+    }:
+        raise ValueError("relief transition pressure fields are not exact")
     if not _has_typed_evidence(transition_context):
         return None
-    reduction = prior["residual_pressure"] - current["residual_pressure"]
-    return _minimum(prior["residual_pressure"], reduction, salience)
+    prior_pressure = prior["residual_pressure"]
+    current_pressure = current["residual_pressure"]
+    if any(
+        isinstance(value, bool) or not isinstance(value, int)
+        for value in (prior_pressure, current_pressure)
+    ):
+        raise ValueError("relief transition pressure is invalid")
+    if not all(0 <= value <= 100 for value in (prior_pressure, current_pressure)):
+        raise ValueError("relief transition pressure is invalid")
+    if prior["status"] != "active":
+        return None
+    if prior_pressure < 40 or prior_pressure - current_pressure < 20:
+        return None
+    cause_status = (
+        "resolved"
+        if current["status"] in {"resolved", "replaced"}
+        else "active"
+    )
+    return {
+        "root_ref": dict(root_ref),
+        "score": _minimum(
+            prior_pressure,
+            prior_pressure - current_pressure,
+            salience,
+        ),
+        "cause_status": cause_status,
+        "salience": salience,
+    }
 
 
 def _validate_timestamp(value: str) -> None:

@@ -57,6 +57,7 @@ from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
     create_deterministic_goals,
 )
 from kazusa_ai_chatbot.cognition_core_v2.workspace import collapse_bids
+from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 
 
 async def run_cognition(
@@ -68,7 +69,7 @@ async def run_cognition(
     started_at = time.perf_counter()
     payload = validate_cognition_core_input(input_payload)
     previous_state = validate_cognition_state(payload["mutable_state"])
-    updated_at = _episode_updated_at(payload["episode"], previous_state["updated_at"])
+    updated_at = _episode_updated_at(payload["episode"])
     elapsed_seconds = _elapsed_seconds(previous_state["updated_at"], updated_at)
     warnings: list[str] = []
     stage_status: dict[str, str] = {
@@ -120,7 +121,12 @@ async def run_cognition(
         for definition in select_preliminary_branches(preliminary_state["goals"])
     ]
     preliminary_graph = build_dependency_graph(preliminary_branches)
-    branch_context = _branch_context(projection, preliminary_state, payload["evidence"])
+    branch_context = _branch_context(
+        projection,
+        preliminary_state,
+        payload["evidence"],
+        scene_context=payload["scene_context"],
+    )
 
     appraisal_tasks = [
         asyncio.create_task(
@@ -165,11 +171,19 @@ async def run_cognition(
             projection.handle_to_ref,
             comparison_results,
         )
+    relief_transitions = _semantic_relief_transitions(
+        preliminary_state,
+        final_state,
+        appraisal_results,
+        payload["evidence"],
+        projection.handle_to_ref,
+    )
     final_state = apply_state_update(
         final_state,
         updated_at=updated_at,
         character_constraints=payload["character_constraints"],
         relationship_context=payload.get("relationship_context"),
+        transition_contexts=relief_transitions,
     )
     final_state = create_deterministic_goals(
         final_state,
@@ -180,6 +194,12 @@ async def run_cognition(
     )
     final_state = validate_cognition_state(final_state)
     stage_status["final_reduction"] = "completed"
+    final_projection = project_state_for_prompt(
+        final_state,
+        character_constraints=payload["character_constraints"],
+        relationship_context=payload.get("relationship_context"),
+        evidence=payload["evidence"],
+    )
 
     successful_questions = {result["question_id"] for result in appraisal_results}
     final_branches = select_final_branches(
@@ -199,10 +219,11 @@ async def run_cognition(
         ),
         _branch_handler(
             _branch_context(
-                projection,
+                final_projection,
                 final_state,
                 payload["evidence"],
                 appraisal_results,
+                scene_context=payload["scene_context"],
             ),
             final_state,
             payload,
@@ -242,7 +263,11 @@ async def run_cognition(
     admitted_bid = _selected_bid(intention, primary_bid, supporting_bids)
     affect = project_affect(final_state["affect_activations"], final_state)
     relationship = project_relationship(final_state.get("relationship"))
-    expression_policy = default_expression_policy(intention["route"], affect)
+    expression_policy = default_expression_policy(
+        intention["route"],
+        affect,
+        output_mode=payload["episode"]["output_mode"],
+    )
     output: dict[str, Any] = {
         "schema_version": "cognition_core_output.v2",
         "intention": intention,
@@ -259,7 +284,11 @@ async def run_cognition(
         "action_requests": action_requests,
         "resolver_requests": resolver_requests,
         "resolver_progress": _resolver_progress(resolver_requests),
-        "residue": collapse["residue"],
+        "residue": (
+            admitted_bid["reason"]
+            if admitted_bid is not None
+            else "no grounded bid"
+        ),
         "expression_policy": expression_policy,
         "diagnostics": {
             "run_id": str(payload["episode"].get("episode_id", "episode")),
@@ -286,12 +315,6 @@ async def run_cognition(
             "dependency_wait_ms": max(
                 preliminary_execution.dependency_wait_ms,
                 final_execution.dependency_wait_ms if final_execution else 0,
-            ),
-            "critical_path_ms": preliminary_execution.critical_path_ms + (
-                final_execution.critical_path_ms if final_execution else 0
-            ),
-            "call_count": preliminary_execution.call_count + (
-                final_execution.call_count if final_execution else 0
             ),
             "total_ms": _elapsed_ms(started_at),
             "warnings": warnings,
@@ -363,6 +386,8 @@ def _branch_context(
     state: Mapping[str, Any],
     evidence: Sequence[Mapping[str, Any]],
     appraisal_results: Sequence[Mapping[str, Any]] = (),
+    *,
+    scene_context: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Build semantic branch context and retain handle bindings privately."""
 
@@ -402,6 +427,7 @@ def _branch_context(
         }
         for result in appraisal_results
     ]
+    context["scene_context"] = dict(scene_context)
     del evidence
     return context
 
@@ -488,8 +514,70 @@ def _empty_collapse() -> dict[str, Any]:
         "primary_bid": None,
         "supporting_bids": [],
         "competing_bids": [],
-        "residue": "no grounded bid",
     }
+
+
+def _semantic_relief_transitions(
+    prior_state: Mapping[str, Any],
+    current_state: Mapping[str, Any],
+    results: Sequence[SemanticAppraisalResultV2],
+    evidence: Sequence[Mapping[str, Any]],
+    handle_to_ref: Mapping[str, Mapping[str, str]],
+) -> list[dict[str, Any]]:
+    """Project accepted threat-pressure reductions into relief causes."""
+
+    evidence_by_handle = {
+        row["evidence_handle"]: row["evidence_ref"]
+        for row in evidence
+    }
+    transition_evidence: dict[str, Mapping[str, Any]] = {}
+    for result in results:
+        for delta in result["deltas"]:
+            path = delta["target_path"].split(".")
+            if len(path) != 3 or path[0] != "threats":
+                continue
+            if path[2] != "residual_pressure":
+                continue
+            target_ref = handle_to_ref.get(path[1])
+            if target_ref is None or target_ref["kind"] != "threat":
+                continue
+            evidence_ref = evidence_by_handle.get(delta["evidence_handles"][0])
+            if evidence_ref is not None:
+                transition_evidence[target_ref["entity_id"]] = evidence_ref
+
+    current_threats = {
+        threat["entity_id"]: threat
+        for threat in current_state["threats"]
+    }
+    transitions: list[dict[str, Any]] = []
+    for prior_threat in prior_state["threats"]:
+        entity_id = prior_threat["entity_id"]
+        current_threat = current_threats.get(entity_id)
+        evidence_ref = transition_evidence.get(entity_id)
+        if current_threat is None or evidence_ref is None:
+            continue
+        prior_pressure = prior_threat["residual_pressure"]
+        current_pressure = current_threat["residual_pressure"]
+        if prior_pressure < 40 or prior_pressure - current_pressure < 20:
+            continue
+        transitions.append({
+            "root_ref": {
+                "scope": prior_state["state_scope"],
+                "kind": "threat",
+                "entity_id": entity_id,
+            },
+            "prior": {
+                "status": prior_threat["status"],
+                "residual_pressure": prior_pressure,
+            },
+            "current": {
+                "status": current_threat["status"],
+                "residual_pressure": current_pressure,
+            },
+            "evidence_ref": dict(evidence_ref),
+            "salience": prior_threat["salience"],
+        })
+    return transitions
 
 
 def _fact_without_producer(fact: Mapping[str, Any]) -> dict[str, Any]:
@@ -500,19 +588,17 @@ def _fact_without_producer(fact: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _episode_updated_at(episode: Mapping[str, Any], fallback: str) -> str:
-    """Read the episode timestamp when it is a valid UTC contract value."""
+def _episode_updated_at(episode: Mapping[str, Any]) -> str:
+    """Project the canonical episode storage timestamp into native UTC-Z."""
 
-    for key in ("occurred_at", "timestamp", "created_at"):
-        value = episode.get(key)
-        if isinstance(value, str):
-            try:
-                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            except ValueError:
-                continue
-            if parsed.tzinfo is not None:
-                return value.replace("+00:00", "Z")
-    return fallback
+    value = episode["storage_timestamp_utc"]
+    try:
+        parsed = parse_storage_utc_datetime(value)
+    except (TypeError, ValueError) as exc:
+        raise CognitionContractError(
+            "episode storage_timestamp_utc is invalid"
+        ) from exc
+    return parsed.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _elapsed_seconds(previous: str, current: str) -> int:
@@ -552,13 +638,20 @@ async def _collect_appraisals(
 def _validate_output_mode(episode: Mapping[str, Any], route: str) -> None:
     """Enforce expression policy before the state update can be committed."""
 
-    output_mode = episode.get("output_mode", "visible_reply")
-    if output_mode not in {"silence", "think_only", "preview", "visible_reply"}:
-        raise CognitionExecutionError("episode output_mode is invalid")
+    output_mode = episode["output_mode"]
     if output_mode == "silence" and route != "silence":
         raise CognitionExecutionError("visible route conflicts with silence output_mode")
     if output_mode in {"think_only", "preview"} and route == "speech":
-        raise CognitionExecutionError("speech route conflicts with private output_mode")
+        raise CognitionExecutionError(
+            "speech route conflicts with private output_mode"
+        )
+    if output_mode == "scheduled_action_request" and route not in {
+        "action",
+        "silence",
+    }:
+        raise CognitionExecutionError(
+            "non-action route conflicts with scheduled_action_request output_mode"
+        )
 
 
 def _elapsed_ms(started_at: float) -> int:

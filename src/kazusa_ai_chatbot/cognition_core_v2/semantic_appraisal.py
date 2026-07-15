@@ -25,13 +25,20 @@ from kazusa_ai_chatbot.cognition_core_v2.semantic_source_planner import (
 from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
     PromptProjectionV2,
 )
+from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
 SEMANTIC_APPRAISAL_PROMPT = '''You assess one scoped semantic question from bounded evidence.
-Use only the supplied prompt handles and semantic descriptions. Do not select
+Use only the permitted prompt-local handles and semantic descriptions. Do not select
 actions, write dialogue, emit emotion ids, change lifecycle status, or invent
 facts. Return semantic propositions and allowlisted numeric deltas only when
 the supplied evidence supports them.
+Respect each typed source_kind. Character-owned reflection or internal
+observation material is evidence, not live user speech. Do not copy source
+packet headings, timestamps, transport summaries, schema keys, or operational
+metadata into generated prose. Write newly generated free-text fields in
+Simplified Chinese, while preserving quoted user text, proper nouns, code,
+URLs, and schema or enum tokens when needed.
 
 # Output Format
 Return exactly one JSON object with question_id, selected_evidence_handles,
@@ -106,7 +113,7 @@ async def appraise_semantic_question(
             config=services.appraisal_config,
         )
         raw_output = response.content
-        parsed_output = services.parse_json(raw_output)
+        parsed_output = parse_llm_json_output(raw_output)
         result = validate_semantic_appraisal_result(
             parsed_output,
             question,

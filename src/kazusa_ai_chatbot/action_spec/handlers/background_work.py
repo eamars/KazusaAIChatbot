@@ -318,6 +318,7 @@ async def enqueue_accepted_coding_task_action(
         requested_worker="coding_agent",
         worker_payload=worker_payload,
         enqueue_background_work_func=enqueue_background_work_func,
+        task_brief=task_brief,
     )
     return result
 

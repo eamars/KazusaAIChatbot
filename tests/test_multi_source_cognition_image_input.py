@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-pytest.skip("Stage 1 assertions replaced by the V2 contract suite", allow_module_level=True)
 
 import asyncio
 import json
@@ -283,40 +282,6 @@ async def test_relevance_keeps_image_descriptor_out_of_user_input() -> None:
     )
     assert "Image attachment:" not in human_message.content
     assert "image shows a desk setup" not in human_message.content
-
-
-def test_source_payload_projects_structured_image_observations() -> None:
-    """Cognition prompt payload should expose typed visual facts."""
-    episode = build_text_chat_cognitive_episode(
-        **_episode_kwargs(),
-        media_description_rows=[{
-            "content_type": "image/png",
-            "description": "A desk setup with handwritten study notes.",
-            "image_observation": _image_observation(),
-        }],
-    )
-    selection = select_cognition_prompt_variant(
-        episode=episode,
-        stage="l1_subconscious",
-    )
-
-    source_payload = build_cognition_prompt_source_payload(
-        episode=episode,
-        selection=selection,
-    )
-
-    assert source_payload == {
-        "media_observations": {
-            "image_observations": [
-                {
-                    key: value
-                    for key, value in _image_observation().items()
-                    if key != "source_message_id"
-                }
-            ],
-            "audio_observations": [],
-        },
-    }
 
 
 @pytest.mark.asyncio

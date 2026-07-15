@@ -435,6 +435,10 @@ def _progress_cognition_output() -> dict[str, Any]:
         "logical_stance": "OBSERVE",
         "character_intent": "WAIT",
         "self_cognition_route": models.ROUTE_PROGRESS_MAINTENANCE,
+        "cognition_core_output": {
+            "state_update": {"state_scope": "character"},
+        },
+        "cognition_state_committed": True,
     }
     return output
 
@@ -471,6 +475,10 @@ def _action_cognition_output() -> dict[str, Any]:
         "character_intent": "PROVIDE",
         "text_surface_output_v2": _text_surface_output(),
         "action_specs": [_speak_action_spec()],
+        "cognition_core_output": {
+            "state_update": {"state_scope": "character"},
+        },
+        "cognition_state_committed": True,
     }
     return output
 
@@ -492,6 +500,25 @@ def _consolidation_result() -> dict[str, Any]:
         },
     }
     return result
+
+
+def test_worker_v2_result_requires_character_scope_and_completed_commit() -> None:
+    """Worker delivery must follow a committed character-scoped V2 result."""
+
+    payloads = {
+        models.ARTIFACT_COGNITION_OUTPUT: {
+            "cognition_core_output": {
+                "state_update": {"state_scope": "user"},
+            },
+            "cognition_state_committed": True,
+        },
+    }
+
+    with pytest.raises(StateContractError, match="character scope"):
+        worker._validate_worker_v2_cognition_result(
+            payloads,
+            required=True,
+        )
 
 
 def _case_runner_with_candidate(
@@ -982,6 +1009,15 @@ async def test_collect_commitment_due_cognition_cases_projects_stale_run_skip(
             "trigger_kind": models.TRIGGER_ACTIVE_COMMITMENT_DUE_CHECK,
             "source_calendar_run_id": "calendar_run_commitment_123",
             "source_calendar_skip_reason": "stale_active_commitment_due_at",
+            "cognition_source": {
+                "source_kind": "scheduler_event",
+                "source_id": "calendar_run_commitment_123",
+                "occurred_at": "2026-05-13T00:00:00+00:00",
+                "semantic_summary": (
+                    "scheduled commitment was skipped: "
+                    "stale_active_commitment_due_at"
+                ),
+            },
         }
     ]
 
@@ -1032,6 +1068,15 @@ async def test_collect_commitment_due_cognition_cases_skips_unbuildable_case(
             "source_calendar_skip_reason": (
                 "active_commitment_case_unavailable"
             ),
+            "cognition_source": {
+                "source_kind": "scheduler_event",
+                "source_id": "calendar_run_commitment_123",
+                "occurred_at": "2026-05-13T00:00:00+00:00",
+                "semantic_summary": (
+                    "scheduled commitment was skipped: "
+                    "active_commitment_case_unavailable"
+                ),
+            },
         }
     ]
 
@@ -2214,7 +2259,7 @@ async def test_worker_default_path_applies_consolidation_without_dispatch_or_fil
         return []
 
     async def cognition_client(state: dict[str, Any]) -> dict[str, Any]:
-        assert state["cognitive_episode"]["trigger_source"] == "internal_thought"
+        assert state["cognitive_episode"]["trigger_source"] == "scheduled_recall"
         return _progress_cognition_output()
 
     async def dialog_client(state: dict[str, Any]) -> dict[str, Any]:
@@ -2244,7 +2289,7 @@ async def test_worker_default_path_applies_consolidation_without_dispatch_or_fil
     assert result.processed_count == 1
     assert captured_consolidation_state["cognitive_episode"][
         "trigger_source"
-    ] == "internal_thought"
+    ] == "scheduled_recall"
     assert captured_consolidation_state["final_dialog"] == []
     assert list(tmp_path.iterdir()) == []
 
@@ -2272,7 +2317,7 @@ async def test_worker_default_path_records_action_without_dispatch(
         recorded_attempts.append(dict(attempt))
 
     async def cognition_client(state: dict[str, Any]) -> dict[str, Any]:
-        assert state["cognitive_episode"]["trigger_source"] == "internal_thought"
+        assert state["cognitive_episode"]["trigger_source"] == "scheduled_recall"
         return _action_cognition_output()
 
     async def dialog_client(state: dict[str, Any]) -> dict[str, Any]:

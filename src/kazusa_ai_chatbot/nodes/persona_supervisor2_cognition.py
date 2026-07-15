@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import logging
-from datetime import timezone
 from collections.abc import Mapping
+from datetime import timezone
 from typing import Any
 
 from kazusa_ai_chatbot.action_spec.registry import (
+    ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
     build_initial_action_capabilities,
 )
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
+from kazusa_ai_chatbot.action_spec.results import project_trace_action_result_v2
 from kazusa_ai_chatbot.config import (
     BOUNDARY_CORE_LLM_API_KEY,
     BOUNDARY_CORE_LLM_BASE_URL,
@@ -23,6 +25,10 @@ from kazusa_ai_chatbot.config import (
     COGNITION_LLM_MODEL,
     COGNITION_LLM_THINKING_ENABLED,
 )
+from kazusa_ai_chatbot.cognition_episode import (
+    CognitiveEpisodeValidationError,
+    validate_cognitive_episode,
+)
 from kazusa_ai_chatbot.cognition_core_v2 import run_cognition
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     ActionAffordanceV2,
@@ -30,13 +36,18 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionCoreOutputV2,
     CognitionCoreServicesV2,
     CognitionExecutionError,
+    EVIDENCE_SOURCE_QUESTION_IDS,
     ResolverAffordanceV2,
+    validate_cognition_core_input,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
     resolve_state_scope,
     validate_cognition_state,
+)
+from kazusa_ai_chatbot.cognition_resolver.capabilities import (
+    project_resolver_observation_for_cognition,
 )
 from kazusa_ai_chatbot.db import (
     get_character_cognition_state,
@@ -49,13 +60,12 @@ from kazusa_ai_chatbot.llm_interface import (
     LLMCallConfig,
     LLMThinkingConfig,
 )
+from kazusa_ai_chatbot.event_logging import record_cognition_v2_event
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_actions import (
     materialize_semantic_action_requests,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
-from kazusa_ai_chatbot.utils import parse_llm_json_output
-
 
 logger = logging.getLogger(__name__)
 _llm_interface = LLInterface()
@@ -89,7 +99,7 @@ _boundary_core_llm_config = LLMCallConfig(
 
 
 def build_cognition_core_services() -> CognitionCoreServicesV2:
-    """Build the injected V2 model and parser bindings."""
+    """Build the injected V2 model bindings."""
 
     return CognitionCoreServicesV2(
         llm=_llm_interface,
@@ -97,8 +107,6 @@ def build_cognition_core_services() -> CognitionCoreServicesV2:
         goal_cognition_config=_cognition_llm_config,
         collapse_config=_cognition_llm_config,
         action_selection_config=_boundary_core_llm_config,
-        parse_json=parse_llm_json_output,
-        logger=logger,
     )
 
 
@@ -110,7 +118,14 @@ def build_cognition_input_from_global_state(
 ) -> CognitionCoreInputV2:
     """Map adapter-neutral graph state into one native V2 cognition scope."""
 
-    timestamp = _v2_timestamp(state["storage_timestamp_utc"])
+    episode = state.get("cognitive_episode")
+    if not isinstance(episode, dict):
+        raise CognitionExecutionError("canonical cognitive episode is required")
+    try:
+        validate_cognitive_episode(episode)
+    except CognitiveEpisodeValidationError as exc:
+        raise CognitionExecutionError(str(exc)) from exc
+    timestamp = _v2_timestamp(episode["storage_timestamp_utc"])
     selected_character_state = character_state
     if selected_character_state is None:
         selected_character_state = state.get("character_cognition_state")
@@ -132,39 +147,38 @@ def build_cognition_input_from_global_state(
         "standards": selected_character_state["standards"],
         "meaning_state": selected_character_state["meaning_state"],
     }
-    episode = state.get("cognitive_episode")
-    if not isinstance(episode, Mapping):
-        episode = {}
-    episode_id = str(episode.get("episode_id", "episode"))
+    episode_id = episode["episode_id"]
     semantic_text = _semantic_episode_text(state)
-    evidence = [{
-        "evidence_handle": "ev1",
-        "evidence_ref": {
-            "source_kind": "episode",
-            "source_id": f"episode:{episode_id}",
-            "occurred_at": timestamp,
-            "semantic_summary": semantic_text,
-        },
-        "semantic_text": semantic_text,
-        "visible_to": ["cognition", "surface"],
-    }]
+    evidence = _episode_evidence(
+        episode,
+        episode_id=episode_id,
+        occurred_at=timestamp,
+        fallback_text=semantic_text,
+    )
+    evidence.extend(_media_evidence(
+        state.get("user_multimedia_input"),
+        episode_id,
+        timestamp,
+    ))
     evidence.extend(_rag_evidence(state.get("rag_result"), timestamp))
     evidence.extend(_resolver_observation_evidence(
         state.get("resolver_observations"),
         timestamp,
     ))
+    evidence.extend(_action_result_evidence(
+        state.get("action_results"),
+        timestamp,
+    ))
+    for index, row in enumerate(evidence, start=1):
+        row["evidence_handle"] = f"e{index}"
     scope = selected_mutable_state["state_scope"]
-    channel_scope = "private" if state["channel_type"] in {"dm", "private"} else "group"
+    channel_scope = _scene_channel_scope(
+        episode["target_scope"]["channel_type"],
+        episode.get("trigger_source"),
+    )
     payload: CognitionCoreInputV2 = {
         "schema_version": "cognition_core_input.v2",
-        "episode": {
-            "episode_id": episode_id,
-            "trigger_source": str(episode.get("trigger_source", "user_message")),
-            "output_mode": _output_mode(episode.get("output_mode")),
-            "semantic_scene": semantic_text,
-            "semantic_temporal_context": "immediate",
-            "interaction_style_context": _interaction_style_context(state),
-        },
+        "episode": dict(episode),
         "state_scope": scope,
         "mutable_state": dict(selected_mutable_state),
         "character_constraints": constraints,
@@ -176,13 +190,11 @@ def build_cognition_input_from_global_state(
             "channel_scope": channel_scope,
             "character_role": "character",
             "current_user_role": "participant",
-            "semantic_scene": semantic_text,
+            "semantic_scene": _semantic_scene_context(state, semantic_text),
             "semantic_temporal_context": "immediate",
         },
     }
-    if scope == "character" and isinstance(selected_mutable_state.get("relationship"), Mapping):
-        payload["relationship_context"] = dict(selected_mutable_state["relationship"])
-    return payload
+    return validate_cognition_core_input(payload)
 
 
 async def call_cognition_subgraph(
@@ -233,10 +245,41 @@ async def _commit_cognition_state(output: CognitionCoreOutputV2) -> None:
 
     state_update = output["state_update"]
     replacement = state_update["replacement_state"]
-    if state_update["state_scope"] == "user":
-        await replace_user_cognition_state(state_update["owner_key"], replacement)
-    else:
-        await replace_character_cognition_state(replacement)
+    try:
+        if state_update["state_scope"] == "user":
+            await replace_user_cognition_state(
+                state_update["owner_key"],
+                replacement,
+            )
+        else:
+            await replace_character_cognition_state(replacement)
+    except Exception:
+        await _record_state_commit_event(output, succeeded=False)
+        raise
+    await _record_state_commit_event(output, succeeded=True)
+
+
+async def _record_state_commit_event(
+    output: CognitionCoreOutputV2,
+    *,
+    succeeded: bool,
+) -> None:
+    """Emit best-effort bounded telemetry for one terminal state commit."""
+
+    intention = output["intention"]
+    try:
+        await record_cognition_v2_event(
+            component="nodes.persona_supervisor2_cognition",
+            cognition_component="state_commit",
+            status="completed" if succeeded else "failed",
+            stage_status="completed" if succeeded else "failed",
+            selected_branch_id=intention.get("selected_branch_id", ""),
+            state_scope=output["state_update"]["state_scope"],
+            state_commit_status="committed" if succeeded else "failed",
+            severity="info" if succeeded else "error",
+        )
+    except Exception as exc:
+        logger.warning("V2 state-commit event write failed: %s", type(exc).__name__)
 
 
 def _project_output_to_global_state(
@@ -296,9 +339,12 @@ def _materialize_v2_action_requests(
             raise CognitionExecutionError(
                 "V2 action request failed deterministic validation"
             )
+        decision = output["intention"]["route"]
+        if request["action_kind"] == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY:
+            decision = "start"
         requests.append({
             "capability": request["action_kind"],
-            "decision": output["intention"]["route"],
+            "decision": decision,
             "detail": request["semantic_goal"],
             "reason": output["intention"]["reason"],
             "target_roles": list(request["target_roles"]),
@@ -352,6 +398,101 @@ def _typed_direct_facts(value: object) -> list[dict[str, Any]]:
     return [dict(row) for row in value if isinstance(row, Mapping)]
 
 
+def _episode_evidence(
+    episode: Mapping[str, Any],
+    *,
+    episode_id: str,
+    occurred_at: str,
+    fallback_text: str,
+) -> list[dict[str, Any]]:
+    """Project the current source through its canonical V2 evidence kind."""
+
+    trigger_source = str(episode.get("trigger_source", "user_message"))
+    source_kind = {
+        "accepted_task_result_ready": "accepted_task_result",
+        "scheduled_recall": "scheduler_event",
+        "reflection_signal": "promoted_reflection",
+    }.get(trigger_source, "episode")
+    source_id = f"episode:{episode_id}"
+    semantic_text = fallback_text
+    percepts = episode.get("percepts")
+    if isinstance(percepts, list):
+        for percept in percepts:
+            if not isinstance(percept, Mapping):
+                continue
+            if percept.get("visibility") != "model_visible":
+                continue
+            content = _text(percept.get("content"))
+            metadata = percept.get("metadata")
+            cognition_source = (
+                metadata.get("cognition_source")
+                if isinstance(metadata, Mapping)
+                else None
+            )
+            if isinstance(cognition_source, Mapping):
+                typed_source_kind = _text(
+                    cognition_source.get("source_kind")
+                )
+                typed_source_id = _text(cognition_source.get("source_id"))
+                typed_summary = _text(
+                    cognition_source.get("semantic_summary")
+                )
+                if (
+                    typed_source_kind == source_kind
+                    and typed_source_id
+                    and typed_summary
+                ):
+                    source_id = typed_source_id
+                    semantic_text = typed_summary
+            if source_kind == "accepted_task_result" and isinstance(
+                metadata,
+                Mapping,
+            ):
+                if not isinstance(cognition_source, Mapping):
+                    source_id = (
+                        _text(metadata.get("accepted_task_id")) or source_id
+                    )
+                    semantic_text = _accepted_task_result_text(
+                        metadata,
+                        content,
+                        fallback_text,
+                    )
+            elif content and not isinstance(cognition_source, Mapping):
+                semantic_text = content
+                source_id = _text(percept.get("percept_id")) or source_id
+            break
+    semantic_text = semantic_text[:1000]
+    semantic_summary = semantic_text[:500]
+    return [{
+        "evidence_handle": "e1",
+        "evidence_ref": {
+            "source_kind": source_kind,
+            "source_id": source_id,
+            "occurred_at": occurred_at,
+            "semantic_summary": semantic_summary,
+        },
+        "semantic_text": semantic_text,
+        "visible_to": list(EVIDENCE_SOURCE_QUESTION_IDS[source_kind]),
+    }]
+
+
+def _accepted_task_result_text(
+    metadata: Mapping[str, Any],
+    content: str,
+    fallback_text: str,
+) -> str:
+    """Build bounded semantic evidence from an accepted-task outcome."""
+
+    parts = [
+        _text(metadata.get("accepted_task_summary")),
+        _text(metadata.get("result_summary")),
+        _text(metadata.get("failure_summary")),
+        content,
+    ]
+    semantic_text = "; ".join(part for part in parts if part)
+    return semantic_text or fallback_text
+
+
 def _rag_evidence(value: object, occurred_at: str) -> list[dict[str, Any]]:
     """Convert RAG rows to evidence with complete source provenance."""
 
@@ -376,7 +517,41 @@ def _rag_evidence(value: object, occurred_at: str) -> list[dict[str, Any]]:
                 "semantic_summary": text,
             },
             "semantic_text": text,
-            "visible_to": ["cognition"],
+            "visible_to": list(
+                EVIDENCE_SOURCE_QUESTION_IDS["promoted_memory"]
+            ),
+        })
+    return evidence
+
+
+def _media_evidence(
+    value: object,
+    episode_id: str,
+    occurred_at: str,
+) -> list[dict[str, Any]]:
+    """Project current semantic media observations with typed provenance."""
+
+    if not isinstance(value, list):
+        return []
+    evidence: list[dict[str, Any]] = []
+    for index, row in enumerate(value, start=1):
+        if not isinstance(row, Mapping):
+            continue
+        description = _text(row.get("description"))
+        if not description:
+            continue
+        evidence.append({
+            "evidence_handle": "e0",
+            "evidence_ref": {
+                "source_kind": "media_observation",
+                "source_id": f"episode:{episode_id}:media:{index}",
+                "occurred_at": occurred_at,
+                "semantic_summary": description,
+            },
+            "semantic_text": description,
+            "visible_to": list(
+                EVIDENCE_SOURCE_QUESTION_IDS["media_observation"]
+            ),
         })
     return evidence
 
@@ -393,28 +568,56 @@ def _resolver_observation_evidence(
     for index, row in enumerate(value, start=1):
         if not isinstance(row, Mapping):
             continue
-        observation_id = _text(row.get("observation_id"))
-        summary = _text(
-            row.get("semantic_summary") or row.get("prompt_safe_summary")
-        )
-        capability = _text(row.get("capability")) or _text(
-            row.get("capability_kind")
-        )
-        if not observation_id or not summary:
+        observation_time = _text(row.get("created_at_utc")) or occurred_at
+        try:
+            projected, _direct_facts = (
+                project_resolver_observation_for_cognition(
+                    row,
+                    occurred_at=_v2_timestamp(observation_time),
+                )
+            )
+        except (ValueError, TypeError):
             continue
-        source_id = observation_id or f"resolver:{index}"
+        projected["evidence_handle"] = f"e{index}"
+        evidence.append(projected)
+    return evidence
+
+
+def _action_result_evidence(
+    value: object,
+    occurred_at: str,
+) -> list[dict[str, Any]]:
+    """Project prior action outcomes as typed evidence for later cognition."""
+
+    if not isinstance(value, list):
+        return []
+    evidence: list[dict[str, Any]] = []
+    for index, row in enumerate(value, start=1):
+        if not isinstance(row, Mapping):
+            continue
+        projected = row.get("semantic_result_v2")
+        if not isinstance(projected, Mapping):
+            projected = project_trace_action_result_v2(row)
+        action_kind = _text(projected.get("action_kind"))
+        action_status = _text(projected.get("status"))
+        summary = _text(projected.get("semantic_result"))
+        action_attempt_id = _text(row.get("action_attempt_id"))
+        if not action_kind or not action_status or not summary:
+            continue
         evidence.append({
-            "evidence_handle": f"resolver_ev{index}",
+            "evidence_handle": f"e{index}",
             "evidence_ref": {
-                "source_kind": "resolver_observation",
-                "source_id": source_id,
-                "occurred_at": _text(row.get("created_at_utc")) or occurred_at,
-                "semantic_summary": summary,
+                "source_kind": "action_result",
+                "source_id": action_attempt_id or f"action-result:{index}",
+                "occurred_at": _v2_timestamp(
+                    _text(row.get("completed_at")) or occurred_at
+                ),
+                "semantic_summary": summary[:500],
             },
-            "semantic_text": (
-                f"{capability}: {summary}" if capability else summary
+            "semantic_text": f"{action_kind} {action_status}: {summary}"[:1000],
+            "visible_to": list(
+                EVIDENCE_SOURCE_QUESTION_IDS["action_result"]
             ),
-            "visible_to": ["cognition"],
         })
     return evidence
 
@@ -445,6 +648,67 @@ def _semantic_episode_text(state: Mapping[str, Any]) -> str:
     return "no grounded semantic episode"
 
 
+def _semantic_scene_context(
+    state: Mapping[str, Any],
+    current_event: str,
+) -> str:
+    """Combine current evidence with bounded conversation continuity."""
+
+    progress = _conversation_progress_text(state.get("conversation_progress"))
+    if not progress:
+        return current_event[:500]
+    current_summary = current_event[:180].strip()
+    progress_budget = 500 - len(current_summary) - 34
+    progress_summary = progress[:max(1, progress_budget)].strip()
+    return (
+        f"Current event: {current_summary} | "
+        f"Conversation continuity: {progress_summary}"
+    )[:500]
+
+
+def _conversation_progress_text(value: object) -> str:
+    """Render only prompt-safe semantic fields from conversation progress."""
+
+    if not isinstance(value, Mapping):
+        return ""
+    fragments: list[str] = []
+    for field_name, label in (
+        ("continuity", "continuity"),
+        ("current_thread", "current thread"),
+        ("user_goal", "user goal"),
+        ("current_blocker", "current blocker"),
+        ("emotional_trajectory", "emotional trajectory"),
+        ("progression_guidance", "progression guidance"),
+    ):
+        text = _text(value.get(field_name))
+        if text:
+            fragments.append(f"{label}: {text}")
+    for field_name, label in (
+        ("overused_moves", "avoid repeating"),
+        ("next_affordances", "next affordances"),
+    ):
+        rows = value.get(field_name)
+        if isinstance(rows, list):
+            texts = [_text(row) for row in rows if _text(row)]
+            if texts:
+                fragments.append(f"{label}: {', '.join(texts)}")
+    for field_name, label in (
+        ("open_loops", "open loops"),
+        ("avoid_reopening", "avoid reopening"),
+    ):
+        rows = value.get(field_name)
+        if not isinstance(rows, list):
+            continue
+        texts = [
+            _text(row.get("text"))
+            for row in rows
+            if isinstance(row, Mapping) and _text(row.get("text"))
+        ]
+        if texts:
+            fragments.append(f"{label}: {', '.join(texts)}")
+    return "; ".join(fragments)
+
+
 def _v2_timestamp(value: str) -> str:
     """Project the adapter timestamp into the native V2 UTC-Z contract."""
 
@@ -458,89 +722,56 @@ def _text(value: object) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
-def _output_mode(value: object) -> str:
-    """Normalize upstream expression policy to the V2 episode vocabulary."""
-
-    if value in {"silence", "think_only", "preview", "visible_reply"}:
-        return str(value)
-    if value == "live_response":
-        return "visible_reply"
-    return "visible_reply"
-
-
 def _scope_caller(episode: Mapping[str, Any] | object) -> str:
     """Map a typed trigger source to the frozen scope-matrix caller."""
 
+    if isinstance(episode, Mapping) and _is_self_cognition_episode(episode):
+        return "self_cognition"
     trigger = episode.get("trigger_source") if isinstance(episode, Mapping) else None
     return {
         "user_message": "persona_user_message",
-        "accepted_task_result": "accepted_task_result_ready",
+        "accepted_task_result_ready": "accepted_task_result_ready",
         "background_result": "background_result",
         "group_message": "group_sender",
         "reflection_signal": "reflection",
         "reflection_dry_run": "reflection_dry_run",
         "internal_thought": "internal_thought_cognition",
-        "scheduler_event": "scheduler",
+        "scheduled_recall": "recall",
+        "system_probe": "system_probe",
         "resolver_recurrence": "resolver_recurrence",
     }.get(str(trigger), "persona_user_message")
 
 
-def _interaction_style_context(state: Mapping[str, Any]) -> str:
-    """Project approved character style and boundary context semantically."""
+def _is_self_cognition_episode(episode: Mapping[str, Any]) -> bool:
+    """Identify the canonical self-cognition packet without parsing its prose."""
 
-    profile = state.get("character_profile")
-    if not isinstance(profile, Mapping):
-        return "use the character's established interaction style and boundaries"
-    personality = profile.get("personality_brief")
-    style = profile.get("linguistic_texture_profile")
-    boundary = profile.get("boundary_profile")
-    personality_terms = []
-    if isinstance(personality, Mapping):
-        for field_name in ("logic", "tempo", "defense", "quirks", "taboos"):
-            value = _text(personality.get(field_name))
-            if value:
-                personality_terms.append(value)
-    return "; ".join((
-        "character style is semantically bounded",
-        *personality_terms,
-        _semantic_profile_terms(
-            style,
-            "voice texture",
-            (
-                "hesitation_density",
-                "fragmentation",
-                "emotional_leakage",
-                "direct_assertion",
-                "softener_density",
-            ),
-        ),
-        _semantic_profile_terms(
-            boundary,
-            "boundary profile",
-            (
-                "self_integrity",
-                "control_sensitivity",
-                "relational_override",
-                "authority_skepticism",
-            ),
-        ),
-    ))
+    percepts = episode.get("percepts")
+    if not isinstance(percepts, list):
+        return False
+    for percept in percepts:
+        if not isinstance(percept, Mapping):
+            continue
+        metadata = percept.get("metadata")
+        if (
+            isinstance(metadata, Mapping)
+            and metadata.get("source") == "self_cognition_source_packet"
+        ):
+            return True
+    return False
 
 
-def _semantic_profile_terms(
-    value: object,
-    label: str,
-    dimensions: tuple[str, ...],
+def _scene_channel_scope(
+    channel_type: object,
+    trigger_source: object,
 ) -> str:
-    """Describe configured profile dimensions without exposing raw scalars."""
+    """Select the semantic scene scope from the typed episode source."""
 
-    if not isinstance(value, Mapping):
-        return f"{label} remains established"
-    present = [
-        dimension.replace("_", " ")
-        for dimension in dimensions
-        if dimension in value
-    ]
-    if not present:
-        return f"{label} remains established"
-    return f"{label} covers {', '.join(present)}"
+    if trigger_source in {
+        "reflection_signal",
+        "internal_thought",
+        "system_probe",
+    }:
+        return "internal"
+    if channel_type in {"dm", "private"}:
+        return "private"
+    return "group"

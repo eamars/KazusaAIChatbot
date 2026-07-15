@@ -152,6 +152,11 @@ def _materialize_proposition_root(
         if candidate_subject
         else subject_id
     )
+    current_event_ref = {
+        "scope": state["state_scope"],
+        "kind": subject_kind,
+        "entity_id": root_id,
+    }
     field_name = ENTITY_LIST_FIELDS[subject_kind]
     entities = state[field_name]
     existing = next(
@@ -214,17 +219,22 @@ def _materialize_proposition_root(
         )
     subject_ref["entity_id"] = existing["entity_id"]
     if comparison_results is not None:
-        comparison_results.append({
-            "entity_kind": subject_kind,
-            "entity_id": existing["entity_id"],
+        comparison_result: dict[str, Any] = {
+            "current_event_ref": current_event_ref,
             "outcome": outcome,
-            "evidence_source_ids": sorted(
-                str(evidence_by_handle[handle]["source_id"])
+            "evidence_refs": [
+                deepcopy(dict(evidence_by_handle[handle]))
                 for handle in evidence_handles
                 if handle in evidence_by_handle
-            ),
-            "reason": proposition["semantic_value"],
-        })
+            ],
+        }
+        if outcome != "create":
+            comparison_result["matched_entity_ref"] = {
+                "scope": state["state_scope"],
+                "kind": subject_kind,
+                "entity_id": existing["entity_id"],
+            }
+        comparison_results.append(comparison_result)
 
 
 def _apply_proposition_transition(
@@ -637,7 +647,7 @@ def apply_state_update(
     updated_at: str | None = None,
     character_constraints: Mapping[str, Any] | None = None,
     relationship_context: Mapping[str, Any] | None = None,
-    transition_context: Mapping[str, Any] | None = None,
+    transition_contexts: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Apply elapsed time, facts, deltas, lifecycle, cache, and retention."""
 
@@ -653,12 +663,22 @@ def apply_state_update(
                 "character elapsed evolution requires sleep recovery"
             )
         updated_state = deepcopy(dict(state))
+    accepted_transitions = [deepcopy(dict(row)) for row in transition_contexts]
     for producer, fact in direct_facts:
-        updated_state = apply_direct_fact(
+        prior_fact_state = updated_state
+        next_state = apply_direct_fact(
             updated_state,
             fact,
             producer=producer,
         )
+        transition = _direct_fact_relief_transition(
+            prior_fact_state,
+            next_state,
+            fact,
+        )
+        if transition is not None:
+            accepted_transitions.append(transition)
+        updated_state = next_state
     updated_state = apply_semantic_deltas(updated_state, semantic_deltas)
     _apply_guarded_lifecycle_transitions(updated_state)
     if updated_at is not None:
@@ -669,10 +689,50 @@ def apply_state_update(
         updated_at=updated_state["updated_at"],
         character_constraints=character_constraints,
         relationship_context=relationship_context,
-        transition_context=transition_context,
+        transition_contexts=accepted_transitions,
     )
     retained_state = prune_terminal_entities(updated_state)
     return retained_state
+
+
+def _direct_fact_relief_transition(
+    prior_state: Mapping[str, Any],
+    current_state: Mapping[str, Any],
+    fact: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Project an accepted threat-resolution fact into a relief cause."""
+
+    if fact.get("fact_kind") != "threat_resolved":
+        return None
+    target_ref = fact["target_refs"][0]
+    entity_id = target_ref["entity_id"]
+    prior_threat = next(
+        threat
+        for threat in prior_state["threats"]
+        if threat["entity_id"] == entity_id
+    )
+    current_threat = next(
+        threat
+        for threat in current_state["threats"]
+        if threat["entity_id"] == entity_id
+    )
+    return {
+        "root_ref": {
+            "scope": prior_state["state_scope"],
+            "kind": "threat",
+            "entity_id": entity_id,
+        },
+        "prior": {
+            "status": prior_threat["status"],
+            "residual_pressure": prior_threat["residual_pressure"],
+        },
+        "current": {
+            "status": current_threat["status"],
+            "residual_pressure": current_threat["residual_pressure"],
+        },
+        "evidence_ref": deepcopy(dict(fact["evidence_ref"])),
+        "salience": prior_threat["salience"],
+    }
 
 
 def canonical_event_entity_id(
@@ -1403,20 +1463,12 @@ def _clamp_axis(value: int) -> int:
 def _has_self_actor(entity: Mapping[str, Any], state: Mapping[str, Any]) -> bool:
     """Check whether a causal row assigns agency to the active self."""
 
-    owner = state.get("owner_user_id")
+    del state
     return any(
         isinstance(role, Mapping)
         and role.get("role") == "actor"
-        and (
-            (
-                role.get("entity_kind") == "character"
-                and role.get("entity_id") in {"character:global", "self", "character"}
-            )
-            or (
-                role.get("entity_kind") == "user"
-                and role.get("entity_id") == owner
-            )
-        )
+        and role.get("entity_kind") == "character"
+        and role.get("entity_id") in {"character:global", "self", "character"}
         for role in entity.get("role_refs", [])
     )
 
@@ -1424,17 +1476,13 @@ def _has_self_actor(entity: Mapping[str, Any], state: Mapping[str, Any]) -> bool
 def _has_other_actor(entity: Mapping[str, Any], state: Mapping[str, Any]) -> bool:
     """Check whether a causal row assigns agency to another actor."""
 
-    owner = state.get("owner_user_id")
+    del state
     return any(
         isinstance(role, Mapping)
         and role.get("role") == "actor"
         and not (
             role.get("entity_kind") == "character"
             and role.get("entity_id") in {"character:global", "self", "character"}
-        )
-        and not (
-            role.get("entity_kind") == "user"
-            and role.get("entity_id") == owner
         )
         for role in entity.get("role_refs", [])
     )
@@ -1446,17 +1494,13 @@ def _has_other_experiencer(
 ) -> bool:
     """Check whether another experiencer is affected by a causal row."""
 
-    owner = state.get("owner_user_id")
+    del state
     return any(
         isinstance(role, Mapping)
         and role.get("role") == "experiencer"
         and not (
             role.get("entity_kind") == "character"
             and role.get("entity_id") in {"character:global", "self", "character"}
-        )
-        and not (
-            role.get("entity_kind") == "user"
-            and role.get("entity_id") == owner
         )
         for role in entity.get("role_refs", [])
     )

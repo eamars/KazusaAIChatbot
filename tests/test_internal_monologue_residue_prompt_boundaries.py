@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-pytest.skip("Stage 1 assertions replaced by the V2 contract suite", allow_module_level=True)
 
 from pathlib import Path
 
@@ -42,35 +41,6 @@ def test_recorder_system_prompt_is_chinese_first_person_and_not_appended() -> No
     assert '侧线/未定对象' in prompt
     assert '来源优先级' in prompt
     assert prompt.count('# 输出格式') == 1
-
-
-def test_l2a_is_the_only_raw_residue_prompt_consumer() -> None:
-    """Only L2a should receive the prompt-facing residue string."""
-
-    l2a_prompt = l2_module._COGNITION_CONSCIOUSNESS_PROMPT
-    l1_prompt = l1_module._COGNITION_SUBCONSCIOUS_PROMPT
-
-    assert 'internal_monologue_residue_context' in l2a_prompt
-    assert '私念残留' in l2a_prompt
-    assert '当前输入' in l2a_prompt
-    assert '优先' in l2a_prompt
-    assert 'internal_monologue_residue_context' not in l1_prompt
-    assert 'character_reflection' not in l1_prompt
-    assert '情绪余波' not in l1_prompt
-
-
-def test_root_readmes_document_residue_architecture() -> None:
-    """Both root READMEs document the new production residue lane."""
-
-    english_readme = (_ROOT / 'README.md').read_text(encoding='utf-8')
-    chinese_readme = (_ROOT / 'README_CN.md').read_text(encoding='utf-8')
-
-    assert 'internal monologue residue' in english_readme
-    assert 'L2a' in english_readme
-    assert 'character_reflection' in english_readme
-    assert '私念残留' in chinese_readme or '内心独白残留' in chinese_readme
-    assert 'L2a' in chinese_readme
-    assert 'character_reflection' in chinese_readme
 
 
 def test_internal_monologue_residue_experiments_are_removed() -> None:

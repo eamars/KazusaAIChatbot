@@ -1,44 +1,14 @@
-import pytest
-pytest.skip("Stage 1 assertions replaced by the V2 contract suite", allow_module_level=True)
+"""V2 media-evidence routing contract tests."""
 
-"""L2d reachability coverage for local conversation images."""
-
-
-
-def test_local_context_recall_mentions_conversation_images() -> None:
-    """Retain one capability while making local image evidence selectable."""
-
-    payload = build_action_selection_payload({}, {})
-    affordances = payload["capabilities"]["resolver_affordances"]
-    local_context = next(
-        row for row in affordances
-        if row["capability_kind"] == "local_context_recall"
-    )
-
-    assert "conversation image" in local_context["semantic_input_summary"]
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    EVIDENCE_SOURCE_QUESTION_IDS,
+)
 
 
-def test_action_selection_projects_visual_observations_without_raw_media() -> None:
-    """Expose answered image evidence to cognition without trusted cache fields."""
+def test_media_observation_routes_only_to_semantic_appraisal() -> None:
+    """Media remains typed evidence instead of an action prompt payload."""
 
-    payload = build_action_selection_payload({
-        "rag_result": {
-            "media_evidence": [{
-                "alias": "recent_media_1",
-                "description": "The teal square is directly below the white circle.",
-                "recency": "recent conversation",
-                "evidence_boundary_notes": ["Visible image evidence only."],
-                "cache_ref": "trusted-cache-ref",
-                "base64_data": "not-prompt-safe",
-            }],
-        },
-    }, {})
+    question_ids = EVIDENCE_SOURCE_QUESTION_IDS["media_observation"]
 
-    media_evidence = payload["evidence"]["media_evidence"]
-    assert media_evidence == [{
-        "visual_observation": "The teal square is directly below the white circle.",
-        "recency": "recent conversation",
-        "evidence_boundary_notes": ["Visible image evidence only."],
-    }]
-    assert "trusted-cache-ref" not in str(payload)
-    assert "not-prompt-safe" not in str(payload)
+    assert question_ids
+    assert all(question_id.startswith("q:") for question_id in question_ids)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import Literal, TypedDict
 
 from kazusa_ai_chatbot.background_work.models import BackgroundWorkJobDoc
 from kazusa_ai_chatbot.coding_agent.coding_run.ledger import (
@@ -13,6 +14,15 @@ from kazusa_ai_chatbot.cognition_episode import (
     build_accepted_task_result_ready_cognitive_episode,
 )
 from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
+
+
+class AcceptedTaskCognitionSourceV2(TypedDict):
+    """Typed accepted-task outcome admitted to a later cognition episode."""
+
+    source_kind: Literal["accepted_task_result"]
+    source_id: str
+    occurred_at: str
+    semantic_summary: str
 
 
 def build_result_ready_episode_from_job(
@@ -55,4 +65,16 @@ def build_result_ready_episode_from_job(
         source_character_name=job.get("source_character_name", ""),
         coding_run_context=coding_run_context,
     )
+    outcome_summary = (
+        job.get("result_summary")
+        or job.get("failure_summary")
+        or "accepted task completed without a result summary"
+    )
+    cognition_source = AcceptedTaskCognitionSourceV2(
+        source_kind="accepted_task_result",
+        source_id=accepted_task_id,
+        occurred_at=completed_at,
+        semantic_summary=outcome_summary,
+    )
+    episode["percepts"][0]["metadata"]["cognition_source"] = cognition_source
     return episode

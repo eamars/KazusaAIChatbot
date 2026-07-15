@@ -7,6 +7,19 @@ from langgraph.graph import END, START, StateGraph
 from kazusa_ai_chatbot.state import IMProcessState
 
 
+def validate_v2_terminal_state(state: IMProcessState) -> dict:
+    """Fail closed unless persona cognition committed before terminal handling."""
+
+    if state.get("cognition_state_committed") is not True:
+        raise ValueError("persona V2 state was not committed before terminal handling")
+    if not isinstance(state.get("cognition_core_output"), dict):
+        raise ValueError("persona V2 cognition output is missing at terminal handling")
+    if not isinstance(state.get("cognition_state_update"), dict):
+        raise ValueError("persona V2 state update is missing at terminal handling")
+    return_value: dict = {}
+    return return_value
+
+
 def build_graph(
     *,
     relevance_agent_node,
@@ -35,6 +48,7 @@ def build_graph(
         load_conversation_episode_state_node,
     )
     graph.add_node("persona_supervisor2", persona_supervisor_node)
+    graph.add_node("validate_v2_terminal_state", validate_v2_terminal_state)
 
     def _start_router(state):
         debug = state.get("debug_modes") or {}
@@ -66,7 +80,8 @@ def build_graph(
         {"continue": "load_conversation_episode_state", "end": END},
     )
     graph.add_edge("load_conversation_episode_state", "persona_supervisor2")
-    graph.add_edge("persona_supervisor2", END)
+    graph.add_edge("persona_supervisor2", "validate_v2_terminal_state")
+    graph.add_edge("validate_v2_terminal_state", END)
 
     compiled_graph = graph.compile()
     return compiled_graph

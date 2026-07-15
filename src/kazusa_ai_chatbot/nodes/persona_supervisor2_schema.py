@@ -104,10 +104,13 @@ class GlobalPersonaState(TypedDict):
     resolver_observations: NotRequired[list[dict]]
     cognition_resolver_requests: NotRequired[list[dict]]
     cognition_resolver_progress: NotRequired[dict]
+    cognition_resolver_diagnostics: NotRequired[dict]
 
     # Cognition output
     internal_monologue: str
     cognition_core_output: NotRequired[dict]
+    cognition_state_update: NotRequired[dict]
+    cognition_state_committed: NotRequired[bool]
     text_surface_output_v2: NotRequired[TextSurfaceOutputV2]
     action_specs: NotRequired[list[ActionSpecV1]]
     pre_surface_action_results: NotRequired[list[ActionResultV1]]

@@ -38,6 +38,7 @@ from kazusa_ai_chatbot.action_spec.results import (
     ActionResultV1,
     action_attempt_id_from_eval_result,
     build_action_result,
+    project_trace_action_result_v2,
 )
 from kazusa_ai_chatbot.db import DatabaseOperationError
 from kazusa_ai_chatbot.time_boundary import normalize_storage_utc_iso
@@ -404,6 +405,9 @@ async def execute_action_specs_for_trace(
         )
         if prompt_result_fields:
             action_result.update(prompt_result_fields)
+        action_result["semantic_result_v2"] = project_trace_action_result_v2(
+            action_result,
+        )
         if record_attempt_func is not None:
             await _record_action_attempt(
                 record_attempt_func,

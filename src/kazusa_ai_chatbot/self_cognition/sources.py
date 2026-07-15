@@ -563,6 +563,7 @@ async def collect_commitment_due_cognition_cases(
                 "trigger_kind": models.TRIGGER_ACTIVE_COMMITMENT_DUE_CHECK,
                 "source_calendar_run_id": run_id,
                 "source_calendar_skip_reason": handler_result["reason"],
+                "cognition_source": handler_result["cognition_source"],
             })
             continue
         if handler_result.get("status") != "case_created":
@@ -1417,6 +1418,14 @@ def _build_scheduled_future_cognition_case(
         "platform_bot_id": source_platform_bot_id,
         "source_calendar_run_id": run_id,
         "source_action_attempt_id": source_action_attempt_id,
+        "cognition_source": {
+            "source_kind": "scheduler_event",
+            "source_id": run_id,
+            "occurred_at": due_at,
+            "semantic_summary": (
+                f"scheduled cognition became due: {continuation_objective}"
+            ),
+        },
     }
     return case
 

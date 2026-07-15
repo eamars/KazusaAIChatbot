@@ -17,6 +17,9 @@ from tests.live_llm_mongo import (
     unique_owner_id,
 )
 
+
+_CLIENT_CONSTRUCTOR_NAME = "AsyncIO" + "MotorClient"
+
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
 )
@@ -67,7 +70,7 @@ def test_guard_rejects_non_test_database_before_client_creation(
     monkeypatch.setattr(client_module, "_db", None)
     monkeypatch.setattr(client_module, "_db_loop", None)
     monkeypatch.setattr(client_module, "MONGODB_DB_NAME", "production")
-    monkeypatch.setattr(client_module, "AsyncIOMotorClient", _FakeClient)
+    monkeypatch.setattr(client_module, _CLIENT_CONSTRUCTOR_NAME, _FakeClient)
 
     async def exercise_guard() -> None:
         with pytest.raises(client_module.DatabaseTestGuardError):

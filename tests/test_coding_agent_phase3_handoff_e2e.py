@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-import pytest
-pytest.skip("Stage 1 assertions replaced by the V2 contract suite", allow_module_level=True)
-
+import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+
+from tests.cognition_core_v2_test_helpers import canonical_cognition_output
 
 
 CODE_TASK = (
@@ -37,43 +37,36 @@ PROJECT_SUMMARY_RESULT = (
 )
 
 
-def test_l2d_capability_projection_exposes_accepted_code_task_without_internals() -> None:
-    """Capability projection should expose accepted delayed code work safely."""
+def test_v2_connector_materializes_initial_accepted_coding_request() -> None:
+    """The V2 bridge must preserve the initial coding action as `start`."""
 
-    from kazusa_ai_chatbot.action_spec.registry import (
-        build_initial_action_capabilities,
+    from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
+        _materialize_v2_action_requests,
     )
 
-    payload = build_action_selection_payload(
-        _minimal_action_selection_state(),
-        build_initial_action_capabilities(),
+    state = _persona_state_for_input(
+        user_input=CODE_TASK,
+        platform_message_id="v2-coding-materialization",
     )
+    state["decontexualized_input"] = CODE_TASK
+    output = canonical_cognition_output(owner_user_id="global-user-001")
+    output["action_requests"] = [{
+        "action_kind": "accepted_coding_task_request",
+        "semantic_goal": "complete the accepted coding task",
+        "target_roles": [{
+            "role": "target",
+            "entity_kind": "user",
+            "entity_id": "global-user-001",
+        }],
+        "evidence_handles": ["e1"],
+    }]
 
-    action_affordances = payload["capabilities"]["action_affordances"]
-    accepted_rows = [
-        row
-        for row in action_affordances
-        if row["capability"] == "accepted_task_request"
-    ]
-    assert len(accepted_rows) == 1
-    summary_text = " ".join(accepted_rows[0]["semantic_input_summary"])
+    action_specs = _materialize_v2_action_requests(output, state)
 
-    assert "code" in summary_text.lower()
-    assert "accepted_task_request" in {
-        row["capability"] for row in action_affordances
-    }
-    assert "background_work_request" not in {
-        row["capability"] for row in action_affordances
-    }
-    for hidden_term in (
-        "worker",
-        "queue",
-        "job",
-        "lease",
-        "workspace_root",
-        "tool_args",
-    ):
-        assert hidden_term not in summary_text
+    assert len(action_specs) == 1
+    assert action_specs[0]["kind"] == "accepted_coding_task_request"
+    assert action_specs[0]["params"]["coding_action"] == "start"
+    assert action_specs[0]["params"]["task_brief"] == CODE_TASK
 
 
 @pytest.mark.asyncio
@@ -83,8 +76,6 @@ async def test_accepted_code_task_materializes_queue_and_l3_acknowledgement(
     """Accepted code work should persist before L3 can promise completion."""
 
     from kazusa_ai_chatbot.action_spec.handlers import background_work
-    from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface
-
     captured_queue_requests: list[dict[str, Any]] = []
 
     async def fake_create_or_return_active_accepted_task(request: dict[str, Any]):
@@ -148,17 +139,6 @@ async def test_accepted_code_task_materializes_queue_and_l3_acknowledgement(
     assert captured_queue_requests[0]["task_brief"] == CODE_TASK
     assert captured_queue_requests[0]["accepted_task_id"] == "accepted-task-001"
 
-    l3_intent = l3_surface._selected_text_surface_intent(
-        _l3_state_with_action_result(queue_result),
-    )
-
-    assert "accepted_task_request" in l3_intent
-    assert CODE_TASK in l3_intent
-    assert "promise_allowed" in l3_intent
-    assert "background_work_request" not in l3_intent
-    assert "background-work-job-001" not in l3_intent
-
-
 def test_completed_coding_task_delivers_as_accepted_task_result_ready() -> None:
     """Completed accepted-task-backed coding work should use final delivery path."""
 
@@ -186,7 +166,7 @@ async def test_gate01_writing_task_runs_from_user_input_to_final_delivery(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
-    """Run the gate-01 coding request through the full handoff path."""
+    """Run the gate-01 coding request through the full V2 handoff path."""
 
     trace = await _run_full_coding_handoff_case(
         monkeypatch,
@@ -211,15 +191,13 @@ async def test_gate01_writing_task_runs_from_user_input_to_final_delivery(
         "failed_count": 0,
         "recovered_count": 0,
     }
-    assert trace["coding_agent_requests"] == [
-        {
-            "question": CODE_TASK,
-            "source_summary": "The user asked for delayed coding work.",
-            "workspace_root": str(tmp_path / "coding-workspace"),
-            "max_answer_chars": 3000,
-            "max_artifact_chars": 24000,
-        }
-    ]
+    assert trace["coding_agent_requests"] == [{
+        "question": CODE_TASK,
+        "source_summary": "The user asked for delayed coding work.",
+        "workspace_root": str(tmp_path / "coding-workspace"),
+        "max_answer_chars": 3000,
+        "max_artifact_chars": 24000,
+    }]
     assert trace["background_job"]["worker"] == "coding_agent"
     assert trace["background_job"]["worker_metadata"]["coding_operation"] == (
         "code_writing"
@@ -241,11 +219,11 @@ async def test_gate01_writing_task_runs_from_user_input_to_final_delivery(
 
 
 @pytest.mark.asyncio
-async def test_project_summary_question_runs_from_user_input_to_final_delivery(
+async def test_project_summary_question_runs_from_input_to_final_delivery(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
-    """Run the Chinese repository-summary request through the full path."""
+    """Run the repository-summary request through the full V2 handoff path."""
 
     trace = await _run_full_coding_handoff_case(
         monkeypatch,
@@ -261,15 +239,13 @@ async def test_project_summary_question_runs_from_user_input_to_final_delivery(
     ]
     assert trace["worker_tick"]["succeeded_count"] == 1
     assert trace["delivery_tick"]["delivered_count"] == 1
-    assert trace["coding_agent_requests"] == [
-        {
-            "question": PROJECT_SUMMARY_TASK,
-            "source_summary": "The user asked for delayed coding work.",
-            "workspace_root": str(tmp_path / "coding-workspace"),
-            "max_answer_chars": 3000,
-            "max_artifact_chars": 24000,
-        }
-    ]
+    assert trace["coding_agent_requests"] == [{
+        "question": PROJECT_SUMMARY_TASK,
+        "source_summary": "The user asked for delayed coding work.",
+        "workspace_root": str(tmp_path / "coding-workspace"),
+        "max_answer_chars": 3000,
+        "max_artifact_chars": 24000,
+    }]
     assert trace["background_job"]["worker_metadata"]["coding_operation"] == (
         "code_reading"
     )
@@ -432,13 +408,13 @@ async def _run_full_coding_handoff_case(
     )
     monkeypatch.setattr(
         persona_module,
-        "load_matching_pending_resume_into_state",
-        _fake_pending_resume_loader,
+        "stage_1_goal_resolver",
+        _fake_cognition_subgraph,
     )
     monkeypatch.setattr(
         persona_module,
-        "call_cognition_resolver_loop",
-        _fake_cognition_resolver_loop,
+        "call_memory_lifecycle_update_handler",
+        _fake_pending_resume_loader,
     )
     monkeypatch.setattr(
         persona_module,
@@ -474,11 +450,14 @@ async def _run_full_coding_handoff_case(
         "scheduled"
     )
 
-    worker_result = await background_worker.run_background_work_worker_tick(
-        claim_limit=1,
-        lease_seconds=60,
-        max_attempts=3,
-        worker_id=f"{case_id}-phase3-e2e-worker",
+    worker_result = await asyncio.wait_for(
+        background_worker.run_background_work_worker_tick(
+            claim_limit=1,
+            lease_seconds=60,
+            max_attempts=3,
+            worker_id=f"{case_id}-phase3-e2e-worker",
+        ),
+        timeout=10,
     )
 
     assert worker_result == {
@@ -509,9 +488,12 @@ async def _run_full_coding_handoff_case(
         }
         return result
 
-    delivery_result = await background_delivery.run_background_work_delivery_tick(
-        deliver_result_episode_func=deliver_result_episode,
-        limit=1,
+    delivery_result = await asyncio.wait_for(
+        background_delivery.run_background_work_delivery_tick(
+            deliver_result_episode_func=deliver_result_episode,
+            limit=1,
+        ),
+        timeout=10,
     )
 
     assert delivery_result == {
@@ -586,37 +568,6 @@ def _write_e2e_trace_artifact(case_id: str, trace: dict[str, Any]) -> None:
     )
 
 
-def _minimal_action_selection_state() -> dict[str, object]:
-    """Build the smallest state needed for action-selection payload projection."""
-
-    state: dict[str, object] = {
-        "cognitive_episode": {
-            "trigger_source": "user_message",
-            "input_sources": ["dialog_text"],
-            "output_mode": "live_response",
-        },
-        "channel_type": "private",
-        "decontexualized_input": CODE_TASK,
-        "media_summary": "",
-        "logical_stance": "ACCEPT",
-        "character_intent": "HELP",
-        "judgment_note": "The user asked for bounded delayed coding work.",
-        "internal_monologue": "I should accept this as later work.",
-        "emotional_appraisal": "calm",
-        "interaction_subtext": "direct coding request",
-        "boundary_core_assessment": {},
-        "social_distance": "friendly",
-        "emotional_intensity": "low",
-        "vibe_check": "focused",
-        "relational_dynamic": "direct request",
-        "rag_result": {},
-        "conversation_progress": {},
-        "resolver_context": "",
-        "background_work_output_char_limit": 4000,
-    }
-    return state
-
-
 def _background_work_action(task_brief: str) -> dict[str, Any]:
     """Build one validated internal delayed-work action spec."""
 
@@ -670,60 +621,6 @@ def _background_work_action(task_brief: str) -> dict[str, Any]:
         "reason": "The user asked for bounded delayed coding work.",
     }
     return action
-
-
-def _l3_state_with_action_result(queue_result: dict[str, Any]) -> dict[str, Any]:
-    """Build the L3 surface state for accepted-task acknowledgement."""
-
-    state = {
-        "action_specs": [
-            {
-                "schema_version": "action_spec.v1",
-                "kind": "speak",
-                "cognition_mode": "deliberative",
-                "source_refs": [],
-                "target": {
-                    "schema_version": "action_target.v1",
-                    "target_kind": "current_channel",
-                    "target_id": None,
-                    "owner": "l3_text",
-                    "scope": {"surface": "text"},
-                },
-                "params": {
-                    "delivery_mode": "visible_reply",
-                    "execute_at": None,
-                    "surface_requirements": {
-                        "intent": "acknowledge the accepted delayed code work",
-                    },
-                },
-                "urgency": "now",
-                "visibility": "user_visible",
-                "deadline": None,
-                "continuation": {
-                    "schema_version": "action_continuation.v1",
-                    "mode": "none",
-                    "episode_type": None,
-                    "max_depth": 0,
-                    "include_result_as": None,
-                },
-                "reason": "The durable accepted task was scheduled.",
-            }
-        ],
-        "pre_surface_action_results": [
-            {
-                "action_attempt_id": "action-attempt-001",
-                "action_kind": "background_work_request",
-                "status": queue_result["status"],
-                "accepted_task_state": queue_result["accepted_task_state"],
-                "accepted_task_summary": queue_result["accepted_task_summary"],
-                "wait_guidance": queue_result["wait_guidance"],
-                "acknowledgement_constraint": queue_result[
-                    "acknowledgement_constraint"
-                ],
-            }
-        ],
-    }
-    return state
 
 
 def _completed_coding_job() -> dict[str, Any]:
@@ -1221,15 +1118,15 @@ async def _fake_pending_resume_loader(
     return result
 
 
-async def _fake_cognition_resolver_loop(
+async def _fake_cognition_subgraph(
     state: dict[str, Any],
     *_,
     **__,
 ) -> dict[str, Any]:
-    """Return materialized actions for acknowledgement or final delivery."""
+    """Return exact V2 cognition and materialized connector actions."""
 
-    from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_actions import (
-        materialize_semantic_action_requests,
+    from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
+        _materialize_v2_action_requests,
     )
 
     episode = state.get("cognitive_episode")
@@ -1237,45 +1134,87 @@ async def _fake_cognition_resolver_loop(
     if isinstance(episode, dict):
         trigger_source = str(episode.get("trigger_source", ""))
     if trigger_source == "accepted_task_result_ready":
-        semantic_requests = [
+        action_requests = [
             {
-                "capability": "speak",
-                "decision": "visible_reply",
-                "detail": "deliver the completed coding result",
-                "reason": "The accepted coding task is complete.",
+                "action_kind": "speak",
+                "semantic_goal": "deliver the completed coding result",
+                "target_roles": [{
+                    "role": "target",
+                    "entity_kind": "user",
+                    "entity_id": "global-user-001",
+                }],
+                "evidence_handles": ["e1"],
             }
         ]
     else:
-        semantic_requests = [
+        action_requests = [
             {
-                "capability": "speak",
-                "decision": "visible_reply",
-                "detail": "acknowledge accepted delayed coding work",
-                "reason": "The task needs delayed coding work.",
+                "action_kind": "speak",
+                "semantic_goal": "acknowledge accepted delayed coding work",
+                "target_roles": [{
+                    "role": "target",
+                    "entity_kind": "user",
+                    "entity_id": "global-user-001",
+                }],
+                "evidence_handles": ["e1"],
             },
             {
-                "capability": "accepted_task_request",
-                "decision": "background_task",
-                "detail": "",
-                "reason": "The user asked for delayed coding work.",
+                "action_kind": "background_work_request",
+                "semantic_goal": "complete the accepted coding task",
+                "target_roles": [{
+                    "role": "target",
+                    "entity_kind": "user",
+                    "entity_id": "global-user-001",
+                }],
+                "evidence_handles": ["e1"],
             },
         ]
-    action_specs = materialize_semantic_action_requests(
-        semantic_requests,
-        state,
+    output = canonical_cognition_output(owner_user_id="global-user-001")
+    output["action_requests"] = action_requests
+    output["intention"]["intention"] = (
+        "deliver the accepted coding result"
+        if trigger_source == "accepted_task_result_ready"
+        else "accept and acknowledge the delayed coding task"
     )
-    result = _cognition_update_for_actions(state, action_specs)
+    output["intention"]["reason"] = (
+        "The accepted coding task is complete."
+        if trigger_source == "accepted_task_result_ready"
+        else "The user asked for delayed coding work."
+    )
+    action_specs = _materialize_v2_action_requests(output, state)
+    result = _cognition_update_for_actions(
+        state,
+        cognition_output=output,
+        action_specs=action_specs,
+    )
     return result
 
 
-async def _fake_l3_text_surface_handler(_state: dict[str, Any]) -> dict[str, Any]:
-    """Return a minimal selected-text-surface directive payload."""
+async def _fake_l3_text_surface_handler(state: dict[str, Any]) -> dict[str, Any]:
+    """Return one exact V2 surface output for the selected speech route."""
 
+    episode = state["cognitive_episode"]
+    result_ready = episode["trigger_source"] == "accepted_task_result_ready"
+    content_plan = (
+        "Deliver the completed accepted coding result."
+        if result_ready
+        else "Acknowledge that the accepted coding task was scheduled."
+    )
     result = {
-        "action_directives": {
-            "contextual_directives": {},
-            "linguistic_directives": {},
-            "visual_directives": {},
+        "text_surface_output_v2": {
+            "schema_version": "text_surface_output.v2",
+            "content_plan": content_plan,
+            "visible_boundaries": [
+                "Describe only the accepted-task state already returned."
+            ],
+            "addressee_plan": ["current user"],
+            "style_guidance": "brief and direct",
+            "pacing_guidance": "one concise response",
+            "selected_surface_intent": (
+                "deliver accepted coding result"
+                if result_ready
+                else "acknowledge scheduled coding work"
+            ),
         }
     }
     return result
@@ -1428,11 +1367,16 @@ def _user_message_episode(
 
 def _cognition_update_for_actions(
     state: dict[str, Any],
+    *,
+    cognition_output: dict[str, Any],
     action_specs: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Build the persona cognition update around selected action specs."""
+    """Build the persona update around one exact V2 cognition result."""
 
     result = {
+        "cognition_core_output": cognition_output,
+        "cognition_state_update": cognition_output["state_update"],
+        "cognition_state_committed": True,
         "decontexualized_input": state["decontexualized_input"],
         "referents": [],
         "rag_result": {},
@@ -1446,9 +1390,8 @@ def _cognition_update_for_actions(
         "emotional_intensity": "low",
         "vibe_check": "focused",
         "relational_dynamic": "direct request",
-        "resolver_capability_requests": [],
-        "resolver_pending_resolution": None,
-        "resolver_goal_progress": None,
+        "resolver_capability_requests": cognition_output["resolver_requests"],
+        "cognition_resolver_progress": cognition_output["resolver_progress"],
         "action_specs": action_specs,
     }
     return result

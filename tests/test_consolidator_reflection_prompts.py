@@ -1,159 +1,26 @@
-"""Tests for consolidator reflection prompt contracts."""
+"""Tests for the V2 consolidation ownership boundary."""
 
 from __future__ import annotations
 
-import pytest
-
-pytest.skip(
-    "Retired consolidation reviewer assertions replaced by V2 state tests",
-    allow_module_level=True,
-)
-
-import json
+from pathlib import Path
 
 from kazusa_ai_chatbot.consolidation import reflection as reflection_module
 
 
-class _DummyResponse:
-    """Minimal async LLM response wrapper."""
+def test_reflection_has_no_cognition_state_authoring_llms() -> None:
+    """Consolidation cannot author relationship or character cognition state."""
 
-    def __init__(self, content: str) -> None:
-        self.content = content
-
-
-class _CapturingAsyncLLM:
-    """Capture messages passed to an async LLM call."""
-
-    def __init__(self, response_payload: dict) -> None:
-        self.messages = []
-        self._response_payload = response_payload
-
-    async def ainvoke(self, messages, *, config=None):
-        self.messages = messages
-        response = _DummyResponse(
-            json.dumps(self._response_payload, ensure_ascii=False),
-        )
-        return response
+    assert not hasattr(reflection_module, "global_state_updater")
+    assert not hasattr(reflection_module, "relationship_recorder")
+    assert not hasattr(reflection_module, "_global_state_updater_llm")
+    assert not hasattr(reflection_module, "_relationship_recorder_llm")
 
 
-def _state() -> dict:
-    return {
-        "character_profile": {
-            "name": "杏山千纱",
-            "personality_brief": {"mbti": "ISTJ"},
-        },
-        "user_profile": {"relationship_state": 500},
-        "user_name": "测试用户甲",
-        "consolidation_origin": {
-            "episode_id": "episode-1",
-            "trigger_source": "user_message",
-            "input_sources": ["dialog_text"],
-            "output_mode": "visible_reply",
-            "timestamp": "2026-04-27T00:00:00+12:00",
-            "platform": "debug",
-            "platform_channel_id": "channel-1",
-            "channel_type": "private",
-            "platform_message_id": "message-1",
-            "active_turn_platform_message_ids": ["message-1"],
-            "active_turn_conversation_row_ids": ["row-1"],
-            "current_platform_user_id": "platform-user-1",
-            "current_global_user_id": "global-user-1",
-            "current_display_name": "测试用户甲",
-        },
-        "decontexualized_input": "不是在拉开距离，只是顺手整理线材。",
-        "internal_monologue": "一瞬间有些局促，但这只是普通任务说明。",
-        "emotional_appraisal": "轻微局促。",
-        "interaction_subtext": "事务协作。",
-        "logical_stance": "CONFIRM",
-        "character_intent": "PROVIDE",
-        "final_dialog": ["那就按你说的来吧。"],
-        "action_directives": {
-            "linguistic_directives": {
-                "content_plan": {
-                    "semantic_content": "按普通事务回应。",
-                },
-            },
-        },
-    }
+def test_reflection_source_contains_no_removed_writer_contracts() -> None:
+    """Removed prose-affect write lanes stay absent from implementation text."""
 
+    source = Path(reflection_module.__file__).read_text(encoding="utf-8")
 
-@pytest.mark.asyncio
-async def test_global_state_updater_receives_grounding_fields(monkeypatch) -> None:
-    llm = _CapturingAsyncLLM({
-        "mood": "平稳",
-        "vibe_check": "松弛",
-        "character_reflection": "只是普通整理，没有留下强烈情绪。",
-    })
-    monkeypatch.setattr(reflection_module, "_global_state_updater_llm", llm)
-
-    result = await reflection_module.global_state_updater(_state())
-
-    system_prompt = llm.messages[0].content
-    payload = json.loads(llm.messages[1].content)
-    assert "不会收到完整设定资料" in system_prompt
-    assert "final_dialog" in system_prompt
-    assert "弱证据" in system_prompt
-    assert "强负面状态准入" in system_prompt
-    assert "不要从固定例词中挑选" in system_prompt
-    assert '"mood": "心情描述"' in system_prompt
-    assert '"vibe_check": "氛围描述"' in system_prompt
-    assert "例如：包括但不限于" not in system_prompt
-    assert '"Neutral"' not in system_prompt
-    assert '"Defensive"' not in system_prompt
-    assert "既有英文状态标签" not in system_prompt
-    assert "# 记忆视角契约" in system_prompt
-    assert "杏山千纱" in system_prompt
-    assert "不要用“我”指代 `杏山千纱`" in system_prompt
-    assert "以杏山千纱的第一人称" not in system_prompt
-    assert payload["logical_stance"] == "CONFIRM"
-    assert payload["decontexualized_input"] == "不是在拉开距离，只是顺手整理线材。"
-    assert result["mood"] == "平稳"
-    assert result["vibe_check"] == "松弛"
-
-
-@pytest.mark.asyncio
-async def test_relationship_recorder_receives_reassurance_context(monkeypatch) -> None:
-    llm = _CapturingAsyncLLM({
-        "skip": True,
-        "subjective_appraisals": ["should be dropped when skip is true"],
-        "relationship_delta": 0,
-        "semantic_relationship_projection": "should not persist",
-    })
-    monkeypatch.setattr(reflection_module, "_relationship_recorder_llm", llm)
-
-    result = await reflection_module.relationship_recorder(_state())
-
-    system_prompt = llm.messages[0].content
-    payload = json.loads(llm.messages[1].content)
-    assert "输入纠偏规则" in system_prompt
-    assert "不会收到完整设定资料" in system_prompt
-    assert "证据分层规则" in system_prompt
-    assert "普通任务默认跳过" in system_prompt
-    assert "# 记忆视角契约" in system_prompt
-    assert "杏山千纱" in system_prompt
-    assert "描述“我”如何理解" not in system_prompt
-    assert payload["decontexualized_input"] == "不是在拉开距离，只是顺手整理线材。"
-    assert payload["final_dialog"] == ["那就按你说的来吧。"]
-    assert payload["content_plan"] == {"semantic_content": "按普通事务回应。"}
-    assert result["relationship_delta"] == 0
-    assert result["subjective_appraisals"] == []
-    assert result["semantic_relationship_projection"] == ""
-
-
-@pytest.mark.asyncio
-async def test_relationship_recorder_accepts_no_surface_action(monkeypatch) -> None:
-    llm = _CapturingAsyncLLM({
-        "skip": True,
-        "subjective_appraisals": [],
-        "relationship_delta": 0,
-        "semantic_relationship_projection": "",
-    })
-    monkeypatch.setattr(reflection_module, "_relationship_recorder_llm", llm)
-    state = _state()
-    state["action_directives"] = {}
-
-    result = await reflection_module.relationship_recorder(state)
-
-    payload = json.loads(llm.messages[1].content)
-    assert payload["content_plan"] == {}
-    assert result["relationship_delta"] == 0
+    assert "relationship_delta" not in source
+    assert "vibe_check" not in source
+    assert "character_reflection" not in source

@@ -29,14 +29,6 @@ ReflectionDryRunStatus = Literal[
 _REFLECTION_DRY_RUN_OUTPUT_MODES = frozenset(
     ("think_only", "preview", "silent"),
 )
-_REFLECTION_DRY_RUN_PROMPT_KEYS = [
-    "l1_subconscious.reflection_signal_reflection_artifact",
-    "l2a_conscious_framing.reflection_signal_reflection_artifact",
-    "l2b_boundary_appraisal.reflection_signal_reflection_artifact",
-    "l2c1_judgment_synthesis.reflection_signal_reflection_artifact",
-    "l2c2_social_context_appraisal.reflection_signal_reflection_artifact",
-    "l2d_action_selection.reflection_signal_reflection_artifact",
-]
 _REFLECTION_DRY_RUN_INPUT_TEXT = (
     "Reflection dry run over promoted reflection artifact."
 )
@@ -56,8 +48,8 @@ class ReflectionCognitionDryRunAudit(TypedDict):
     trigger_source: Literal["reflection_signal"]
     input_sources: list[Literal["reflection_artifact"]]
     output_mode: ReflectionDryRunOutputMode
-    prompt_variant: Literal["reflection_signal_reflection_artifact"]
-    prompt_keys: list[str]
+    cognition_schema_version: Literal["cognition_core_input.v2"]
+    state_scope: Literal["character"]
     cognition_output_keys: list[str]
 
 
@@ -184,8 +176,8 @@ async def run_reflection_cognition_dry_run(
             "trigger_source": "reflection_signal",
             "input_sources": ["reflection_artifact"],
             "output_mode": output_mode,
-            "prompt_variant": "reflection_signal_reflection_artifact",
-            "prompt_keys": [],
+            "cognition_schema_version": "cognition_core_input.v2",
+            "state_scope": "character",
             "cognition_output_keys": [],
         }
         return audit
@@ -199,8 +191,8 @@ async def run_reflection_cognition_dry_run(
             "trigger_source": "reflection_signal",
             "input_sources": ["reflection_artifact"],
             "output_mode": output_mode,
-            "prompt_variant": "reflection_signal_reflection_artifact",
-            "prompt_keys": [],
+            "cognition_schema_version": "cognition_core_input.v2",
+            "state_scope": "character",
             "cognition_output_keys": [],
         }
         return audit
@@ -282,8 +274,8 @@ async def run_reflection_cognition_dry_run(
         "trigger_source": "reflection_signal",
         "input_sources": ["reflection_artifact"],
         "output_mode": output_mode,
-        "prompt_variant": "reflection_signal_reflection_artifact",
-        "prompt_keys": list(_REFLECTION_DRY_RUN_PROMPT_KEYS),
+        "cognition_schema_version": "cognition_core_input.v2",
+        "state_scope": "character",
         "cognition_output_keys": cognition_output_keys,
     }
     return audit

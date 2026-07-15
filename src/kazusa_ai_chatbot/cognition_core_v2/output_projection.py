@@ -83,13 +83,6 @@ def build_state_update(
         else "global"
     )
     normalized_comparisons = [dict(row) for row in comparison_results]
-    normalized_comparisons.sort(
-        key=lambda row: (
-            str(row.get("entity_kind", "")),
-            str(row.get("entity_id", "")),
-            str(row.get("outcome", "")),
-        )
-    )
     return {
         "state_scope": replacement_state["state_scope"],
         "owner_key": owner_key,
@@ -102,11 +95,15 @@ def build_state_update(
 def default_expression_policy(
     route: str,
     affect: Sequence[Mapping[str, Any]],
+    *,
+    output_mode: str = "visible_reply",
 ) -> ExpressionPolicyV2:
     """Derive deterministic visible-expression limits from route and affect."""
 
-    if route in {"silence", "deferral"}:
-        visibility = "none" if route == "silence" else "private"
+    if route == "silence":
+        visibility = "none"
+    elif output_mode in {"think_only", "preview"}:
+        visibility = "private"
     else:
         visibility = "visible"
     intensity = "restrained"

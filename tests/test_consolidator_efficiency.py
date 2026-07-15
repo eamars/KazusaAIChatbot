@@ -15,6 +15,7 @@ from kazusa_ai_chatbot.consolidation.origin import (
     build_user_message_consolidation_origin,
 )
 from kazusa_ai_chatbot.time_boundary import local_time_context_from_storage_utc
+from tests.cognition_core_v2_test_helpers import canonical_cognition_output
 
 
 STORAGE_TIMESTAMP_UTC = "2026-04-26T12:00:00+00:00"
@@ -65,13 +66,17 @@ def _global_state() -> dict:
         "platform_channel_id": "chan-1",
         "channel_type": "group",
         "platform_message_id": "msg-1",
-        "cognition_core_output": {
-            "schema_version": "cognition_core_output.v2",
-            "selected_stance": "CONFIRM",
-        },
+        "cognition_core_output": canonical_cognition_output(
+            owner_user_id="user-1",
+        ),
         "text_surface_output_v2": {
             "schema_version": "text_surface_output.v2",
             "content_plan": "acknowledge",
+            "visible_boundaries": [],
+            "addressee_plan": ["current user"],
+            "style_guidance": "brief and grounded",
+            "pacing_guidance": "direct",
+            "selected_surface_intent": "acknowledge",
         },
         "internal_monologue": "test",
         "final_dialog": ["ok"],
@@ -122,10 +127,12 @@ def test_build_consolidator_state_forwards_native_v2_outputs() -> None:
         consolidation_target_plan=target_plan,
     )
 
-    assert state["cognition_core_output"]["schema_version"] == (
-        "cognition_core_output.v2"
-    )
-    assert state["text_surface_output_v2"]["content_plan"] == "acknowledge"
+    assert state["cognition_core_output"] == global_state[
+        "cognition_core_output"
+    ]
+    assert state["text_surface_output_v2"] == global_state[
+        "text_surface_output_v2"
+    ]
 
 
 @pytest.mark.asyncio

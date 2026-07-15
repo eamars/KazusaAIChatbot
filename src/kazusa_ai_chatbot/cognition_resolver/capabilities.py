@@ -30,6 +30,11 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     validate_resolver_capability_request,
     validate_resolver_observation,
 )
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionEvidenceV2,
+    DirectFactV2,
+    EVIDENCE_SOURCE_QUESTION_IDS,
+)
 from kazusa_ai_chatbot.db.errors import DatabaseBackendError
 from kazusa_ai_chatbot.local_context_resolver import (
     DEFAULT_OPTION_LIMITS,
@@ -81,6 +86,45 @@ SHARED_MEMORY_SUMMARY_FIELDS = (
 logger = logging.getLogger(__name__)
 
 RecordRagEventFunc = Callable[..., Awaitable[None]]
+
+
+def project_resolver_observation_for_cognition(
+    observation: Mapping[str, object],
+    *,
+    occurred_at: str,
+) -> tuple[CognitionEvidenceV2, list[DirectFactV2]]:
+    """Project one resolver result into typed evidence without state authority."""
+
+    observation_id = text_or_empty(observation.get("observation_id")).strip()
+    summary = text_or_empty(
+        observation.get("semantic_summary")
+        or observation.get("prompt_safe_summary")
+    ).strip()
+    capability = text_or_empty(
+        observation.get("capability")
+        or observation.get("capability_kind")
+    ).strip()
+    if not observation_id:
+        raise ResolverValidationError("resolver observation id is required")
+    if not summary:
+        raise ResolverValidationError("resolver observation summary is required")
+    semantic_text = f"{capability}: {summary}" if capability else summary
+    evidence = CognitionEvidenceV2(
+        evidence_handle="e1",
+        evidence_ref={
+            "source_kind": "resolver_observation",
+            "source_id": observation_id,
+            "occurred_at": occurred_at,
+            "semantic_summary": summary[:500],
+        },
+        semantic_text=semantic_text[:1000],
+        visible_to=list(
+            EVIDENCE_SOURCE_QUESTION_IDS["resolver_observation"]
+        ),
+    )
+    direct_facts: list[DirectFactV2] = []
+    return_value = (evidence, direct_facts)
+    return return_value
 
 
 async def run_rag_evidence_for_persona_state(

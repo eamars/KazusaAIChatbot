@@ -2,18 +2,11 @@ import json
 
 import httpx
 import pytest
-
-pytest.skip(
-    "Retired relationship prose helper assertions replaced by V2 state tests",
-    allow_module_level=True,
-)
-
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from kazusa_ai_chatbot.config import AFFINITY_DEFAULT, JSON_REPAIR_LLM_BASE_URL
+from kazusa_ai_chatbot.config import JSON_REPAIR_LLM_BASE_URL
 from kazusa_ai_chatbot import utils as utils_module
 from kazusa_ai_chatbot.utils import (
-    build_relationship_state_block,
     parse_llm_json_output,
 )
 from tests.llm_trace import write_llm_trace
@@ -545,29 +538,3 @@ def test_parse_json_with_llm_live_repairs_malformed_object_contract(
     assert tool_call["tool"] == "send_message"
     assert tool_call["args"]["target_channel"] == "same"
     assert tool_call["args"]["text"] == "I will remind you now."
-
-
-class TestBuildRelationshipStateBlock:
-    def test_hostile(self):
-        result = build_relationship_state_block(100)
-        assert result["level"] == "Scornful"
-        assert "contempt" in result["instruction"] or "dismissive" in result["instruction"]
-
-    def test_cold(self):
-        result = build_relationship_state_block(300)
-        assert result["level"] == "Reserved"
-        assert "brief" in result["instruction"] or "professional" in result["instruction"]
-
-    def test_neutral(self):
-        result = build_relationship_state_block(AFFINITY_DEFAULT)
-        assert result["level"] == "Neutral"
-
-    def test_friendly(self):
-        result = build_relationship_state_block(700)
-        assert result["level"] == "Warm"
-        assert "warmth" in result["instruction"] or "enthusiasm" in result["instruction"]
-
-    def test_devoted(self):
-        result = build_relationship_state_block(900)
-        assert result["level"] == "Protective"
-        assert "protective" in result["instruction"] or "loyalty" in result["instruction"]

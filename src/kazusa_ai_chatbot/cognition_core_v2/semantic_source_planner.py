@@ -7,25 +7,19 @@ from typing import Any
 
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionEvidenceV2,
+    EVIDENCE_SOURCE_QUESTION_IDS,
+    SEMANTIC_QUESTION_KINDS,
     SemanticQuestionV2,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     ENTITY_LIST_FIELDS,
-    EVIDENCE_SOURCE_KINDS,
 )
 
 
 MAX_SEMANTIC_QUESTIONS_PER_EPISODE = 6
 MAX_EVIDENCE_HANDLES_PER_QUESTION = 8
 
-QUESTION_KINDS = (
-    "event_agency",
-    "relationship_social",
-    "moral_identity",
-    "goal_threat_outcome",
-    "epistemic_comparison_memory",
-    "existential_drive",
-)
+QUESTION_KINDS = SEMANTIC_QUESTION_KINDS
 
 _QUESTION_PROPOSITION_KINDS = {
     "event_agency": ("responsibility", "intentionality"),
@@ -42,34 +36,6 @@ _QUESTION_PROPOSITION_KINDS = {
         "memory_cue",
     ),
     "existential_drive": ("meaning_relevance",),
-}
-
-_SOURCE_TO_QUESTIONS = {
-    "episode": QUESTION_KINDS,
-    "promoted_memory": QUESTION_KINDS,
-    "promoted_reflection": QUESTION_KINDS,
-    "media_observation": QUESTION_KINDS,
-    "action_result": (
-        "event_agency",
-        "relationship_social",
-        "moral_identity",
-        "goal_threat_outcome",
-    ),
-    "resolver_observation": (
-        "event_agency",
-        "relationship_social",
-        "moral_identity",
-        "goal_threat_outcome",
-        "epistemic_comparison_memory",
-    ),
-    "accepted_task_result": (
-        "event_agency",
-        "relationship_social",
-        "moral_identity",
-        "goal_threat_outcome",
-        "epistemic_comparison_memory",
-    ),
-    "scheduler_event": ("goal_threat_outcome",),
 }
 
 _QUESTION_DESCRIPTIONS = {
@@ -111,40 +77,39 @@ def plan_semantic_questions(
     route, action, or final response.
     """
 
-    del character_constraints
     evidence_rows = _select_evidence_rows(evidence)
     if not evidence_rows:
         return []
-    source_kinds = {
-        row["evidence_ref"]["source_kind"]
-        for row in evidence_rows
-    }
     selected_kinds = [
         question_kind
         for question_kind in QUESTION_KINDS
-        if any(
-            question_kind in _SOURCE_TO_QUESTIONS[source_kind]
-            for source_kind in source_kinds
-        )
+        if any(f"q:{question_kind}" in row["visible_to"] for row in evidence_rows)
     ]
     handle_map = _build_prompt_handles(
         mutable_state,
+        character_constraints,
         relationship_context,
         evidence_rows,
     )
     questions: list[SemanticQuestionV2] = []
     for question_kind in selected_kinds[:MAX_SEMANTIC_QUESTIONS_PER_EPISODE]:
+        question_id = f"q:{question_kind}"
+        question_evidence = [
+            row
+            for row in evidence_rows
+            if question_id in row["visible_to"]
+        ][:MAX_EVIDENCE_HANDLES_PER_QUESTION]
         permitted_paths = _permitted_delta_paths(
             question_kind,
             handle_map,
             mutable_state,
         )
         question = {
-            "question_id": f"q:{question_kind}",
+            "question_id": question_id,
             "question_kind": question_kind,
             "semantic_question": _QUESTION_DESCRIPTIONS[question_kind],
             "evidence_handles": [
-                row["evidence_handle"] for row in evidence_rows
+                row["evidence_handle"] for row in question_evidence
             ],
             "permitted_role_handles": sorted(handle_map.values()),
             "permitted_delta_paths": permitted_paths,
@@ -177,18 +142,18 @@ def _select_evidence_rows(
         handle = row["evidence_handle"]
         ref = row["evidence_ref"]
         source_kind = ref["source_kind"]
-        if source_kind not in EVIDENCE_SOURCE_KINDS:
+        if source_kind not in EVIDENCE_SOURCE_QUESTION_IDS:
             raise ValueError("semantic evidence source kind is invalid")
         if handle in seen:
             raise ValueError("semantic evidence handles must be unique")
         seen.add(handle)
-        if len(selected) < MAX_EVIDENCE_HANDLES_PER_QUESTION:
-            selected.append(row)
+        selected.append(row)
     return selected
 
 
 def _build_prompt_handles(
     state: Mapping[str, Any],
+    character_constraints: Mapping[str, Any],
     relationship_context: Mapping[str, Any] | None,
     evidence: Sequence[CognitionEvidenceV2],
 ) -> dict[str, str]:
@@ -210,11 +175,17 @@ def _build_prompt_handles(
         relationship = relationship_context
     if isinstance(relationship, Mapping):
         mapping[relationship["relationship_id"]] = "r1"
-    for index, drive_id in enumerate(state.get("drives", {}), start=1):
+    drives = state.get("drives", character_constraints["drives"])
+    for index, drive_id in enumerate(drives, start=1):
         mapping[drive_id] = f"d{index}"
-    for index, standard in enumerate(state.get("standards", []), start=1):
+    standards = state.get("standards", character_constraints["standards"])
+    for index, standard in enumerate(standards, start=1):
         mapping[standard["standard_id"]] = f"s{index}"
-    if isinstance(state.get("meaning_state"), Mapping):
+    meaning_state = state.get(
+        "meaning_state",
+        character_constraints["meaning_state"],
+    )
+    if isinstance(meaning_state, Mapping):
         mapping["meaning:character"] = "m1"
     for index, row in enumerate(evidence, start=1):
         evidence_handle = row["evidence_handle"]

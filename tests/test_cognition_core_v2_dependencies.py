@@ -38,7 +38,7 @@ def _bid(branch_id: str, route: str = "speech") -> dict[str, object]:
         "concrete_detail": "bounded detail",
         "reason": "typed evidence supports this branch",
         "target_roles": [],
-        "evidence_handles": ["ev1"],
+        "evidence_handles": ["e1"],
         "expected_consequences": ["preserve continuity"],
         "confidence": "high",
         "requested_route": route,
@@ -188,7 +188,6 @@ async def test_collapse_copies_complete_bids_from_handle_partition() -> None:
         llm=_LLM(),
         collapse_config=object(),
     )
-    services.parse_json = json.loads
 
     result = await collapse_bids([_bid("first"), _bid("second")], services)
 
@@ -214,7 +213,6 @@ async def test_route_selection_validates_action_availability() -> None:
     services = type("Services", (), {
         "llm": _LLM(),
         "action_selection_config": object(),
-        "parse_json": json.loads,
     })()
     with pytest.raises(CognitionExecutionError):
         await select_route(

@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from uuid import uuid4
 
 from langgraph.graph import END, START, StateGraph
+from openai import OpenAIError
 
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
 from kazusa_ai_chatbot.action_spec.execution import execute_action_specs_for_trace
@@ -23,10 +24,18 @@ from kazusa_ai_chatbot.config import (
     CHAT_HISTORY_RECENT_LIMIT,
     COGNITION_RESOLVER_MAX_CYCLES,
 )
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionExecutionError,
+    validate_cognition_core_output,
+)
 from kazusa_ai_chatbot.cognition_resolver.capabilities import (
     run_rag_evidence_for_persona_state as _run_rag_evidence_for_persona_state,
 )
 from kazusa_ai_chatbot.cognition_resolver.loop import call_v2_resolver_loop
+from kazusa_ai_chatbot.db.errors import DatabaseBackendError
+from kazusa_ai_chatbot.local_context_resolver.contracts import (
+    LocalContextValidationError,
+)
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     call_cognition_subgraph,
@@ -254,12 +263,15 @@ def _selected_action_specs(state: GlobalPersonaState) -> list[dict]:
 
 
 def _cognition_selects_text_surface(state: GlobalPersonaState) -> bool:
-    """Return whether L2d selected the text surface handler."""
+    """Return whether the validated V2 intention selects text speech."""
 
     cognition_output = state.get("cognition_core_output")
-    if isinstance(cognition_output, dict):
-        return cognition_output.get("intention", {}).get("route") == "speech"
-    return_value = _first_valid_action_attempt_id(state, SPEAK_CAPABILITY) is not None
+    if not isinstance(cognition_output, Mapping):
+        raise CognitionExecutionError(
+            "validated V2 cognition output is required for surface routing"
+        )
+    validated_output = validate_cognition_core_output(cognition_output)
+    return_value = validated_output["intention"]["route"] == "speech"
     return return_value
 
 
@@ -539,12 +551,21 @@ async def stage_1_goal_resolver(state: GlobalPersonaState) -> dict:
                 agent_name="v2_resolver_local_context",
                 objective=str(request.get("semantic_goal", "")),
             )
-        except Exception as exc:
+        except (
+            DatabaseBackendError,
+            LocalContextValidationError,
+            OpenAIError,
+            TimeoutError,
+        ) as exc:
+            logger.warning(
+                "Local context recall failed: exception_type=%s",
+                type(exc).__name__,
+            )
             return {
                 "observation_id": f"resolver-observation:{uuid4().hex}",
                 "capability": capability,
                 "status": "failed",
-                "semantic_summary": f"local context recall failed: {exc}",
+                "semantic_summary": "local context recall failed",
                 "created_at_utc": state["storage_timestamp_utc"],
             }
         summary = _resolver_result_summary(rag_result)
@@ -570,9 +591,15 @@ async def stage_1_goal_resolver(state: GlobalPersonaState) -> dict:
     final_state["resolver_observations"] = list(
         resolved.get("observations", [])
     )
+    telemetry = resolved.get("telemetry")
+    final_state["cognition_resolver_diagnostics"] = (
+        dict(telemetry) if isinstance(telemetry, Mapping) else {}
+    )
     core_output = final_state.get("cognition_core_output")
-    if isinstance(core_output, Mapping):
-        await commit_cognition_output(core_output)  # type: ignore[arg-type]
+    if not isinstance(core_output, Mapping):
+        raise ValueError("V2 resolver completed without cognition_core_output")
+    await commit_cognition_output(core_output)  # type: ignore[arg-type]
+    final_state["cognition_state_committed"] = True
     return final_state  # type: ignore[return-value]
 
 
@@ -770,6 +797,12 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "target_broadcast": bool(results["target_broadcast"]),
         "scope_users": results.get("scope_users", []),
         "future_promises": [],
+        "cognition_core_output": results.get("cognition_core_output"),
+        "cognition_state_update": results.get("cognition_state_update"),
+        "cognition_state_committed": results.get(
+            "cognition_state_committed",
+            False,
+        ),
         "consolidation_state": consolidation_state,
         "surface_outputs": results.get("surface_outputs", []),
         "action_results": results.get("action_results", []),

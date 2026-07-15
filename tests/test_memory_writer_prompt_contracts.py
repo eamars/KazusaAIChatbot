@@ -4,19 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-pytest.skip(
-    "Retired consolidation prompt assertions replaced by V2 state tests",
-    allow_module_level=True,
-)
-
 from kazusa_ai_chatbot.consolidation import (
     images as images_module,
 )
 from kazusa_ai_chatbot.consolidation import (
     memory_units as memory_units_module,
-)
-from kazusa_ai_chatbot.consolidation import (
-    reflection as reflection_module,
 )
 from kazusa_ai_chatbot.reflection_cycle import promotion as promotion_module
 from scripts import sanitize_memory_writer_perspective as migration_module
@@ -42,26 +34,6 @@ def test_memory_unit_prompts_render_third_person_contract() -> None:
     assert 'speaker_kind' not in extractor_prompt
     assert 'YYYY-MM-DD HH:MM' in extractor_prompt
     assert '规范名称是一个不可拆分的完整字符串' in extractor_prompt
-
-
-def test_reflection_prompts_render_third_person_contract() -> None:
-    """Reflection prompts should not ask durable summaries to use first person."""
-
-    prompts = [
-        reflection_module._GLOBAL_STATE_UPDATER_PROMPT.format(
-            character_name=CHARACTER_NAME,
-        ),
-        reflection_module._RELATIONSHIP_RECORDER_PROMPT.format(
-            character_name=CHARACTER_NAME,
-            user_name='测试用户',
-            character_mbti='ISTJ',
-        ),
-    ]
-
-    for prompt in prompts:
-        _assert_third_person_contract(prompt)
-    assert '以杏山千纱 (Kyōyama Kazusa)的第一人称' not in prompts[0]
-    assert '描述“我”如何理解' not in prompts[1]
 
 
 def test_character_image_prompts_render_third_person_contract() -> None:

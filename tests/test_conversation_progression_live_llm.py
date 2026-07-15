@@ -12,6 +12,13 @@ import httpx
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from kazusa_ai_chatbot.cognition_core_v2 import (
+    run_cognition,
+    run_text_surface_planning,
+)
+from kazusa_ai_chatbot.cognition_episode import (
+    build_text_chat_cognitive_episode,
+)
 from kazusa_ai_chatbot.config import (
     COGNITION_LLM_API_KEY,
     COGNITION_LLM_BASE_URL,
@@ -25,6 +32,14 @@ from kazusa_ai_chatbot.llm_interface import (
     LLMThinkingConfig,
 )
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
+    build_cognition_core_services,
+    build_cognition_input_from_global_state,
+)
+from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
+    _build_surface_services,
+    build_text_surface_input_from_global_state,
+)
 from kazusa_ai_chatbot.time_boundary import (
     build_turn_clock_from_storage_utc,
     storage_utc_now_iso,
@@ -171,6 +186,11 @@ def _base_state(
         "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
         "local_time_context": turn_clock["local_time_context"],
         "user_input": user_input,
+        "user_multimedia_input": [],
+        "platform": "test",
+        "platform_channel_id": "conversation-progression-channel",
+        "channel_type": "private",
+        "platform_message_id": "conversation-progression-message",
         "global_user_id": global_user_id,
         "user_name": user_name,
         "platform_user_id": platform_user_id,
@@ -541,39 +561,61 @@ def _mixed_language_art_case() -> dict:
     )
 
 
-async def _run_live_cognition_and_dialog(state: dict) -> tuple[dict, dict]:
-    """Run the current cognition stack and dialog agent for one live turn."""
+def _attach_cognitive_episode(state: dict[str, Any]) -> None:
+    """Attach the canonical text-chat episode consumed by V2 cognition."""
 
-    l1 = await call_cognition_subconscious(state)
-    state.update(l1)
+    state["cognitive_episode"] = build_text_chat_cognitive_episode(
+        episode_id=f"conversation-progression:{state['platform_message_id']}",
+        percept_id=(
+            f"conversation-progression:{state['platform_message_id']}:dialog"
+        ),
+        storage_timestamp_utc=state["storage_timestamp_utc"],
+        local_time_context=state["local_time_context"],
+        user_input=state["user_input"],
+        platform=state["platform"],
+        platform_channel_id=state["platform_channel_id"],
+        channel_type=state["channel_type"],
+        platform_message_id=state["platform_message_id"],
+        platform_user_id=state["platform_user_id"],
+        global_user_id=state["global_user_id"],
+        user_name=state["user_name"],
+        active_turn_platform_message_ids=[state["platform_message_id"]],
+        active_turn_conversation_row_ids=[],
+        debug_modes={},
+    )
 
-    l2a = await call_cognition_consciousness(state)
-    state.update(l2a)
 
-    l2b = await call_boundary_core_agent(state)
-    state.update(l2b)
+async def _run_live_cognition_and_dialog(
+    state: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Run canonical V2 cognition, surface planning, and dialog rendering."""
 
-    l2c = await call_judgment_core_agent(state)
-    state.update(l2c)
+    _attach_cognitive_episode(state)
+    cognition_input = build_cognition_input_from_global_state(state)
+    cognition_output = await run_cognition(
+        cognition_input,
+        build_cognition_core_services(),
+    )
+    assert cognition_output["intention"]["route"] == "speech"
+    state["cognition_input"] = cognition_input
+    state["cognition_core_output"] = cognition_output
+    state["internal_monologue"] = cognition_output["residue"]
+    state["should_respond"] = True
+    state["debug_modes"] = {}
 
-    l3a = await call_social_context_appraisal(state)
-    state.update(l3a)
-
-    l3b = await call_style_agent(state)
-    state.update(l3b)
-
-    l3b_anchor = await call_content_plan_agent(state)
-    state.update(l3b_anchor)
-
-    l3b_pref = await call_preference_adapter(state)
-    state.update(l3b_pref)
-
-    l3c = await call_visual_agent(state)
-    state.update(l3c)
-
-    l4 = await call_surface_directive_collector(state)
-    state.update(l4)
-
+    surface_input = build_text_surface_input_from_global_state(
+        state,
+        interaction_style_context=(
+            "Keep the established character voice while advancing the current "
+            "grounded conversation thread."
+        ),
+    )
+    surface_output = await run_text_surface_planning(
+        surface_input,
+        _build_surface_services(),
+    )
+    state["text_surface_input_v2"] = surface_input
+    state["text_surface_output_v2"] = surface_output
     dialog = await dialog_agent(state)
     return state, dialog
 
@@ -596,7 +638,9 @@ async def _judge_progression(
         "prior_user_disclosures": prior_user_disclosures,
         "overused_assistant_move": case["overused_assistant_move"],
         "recent_history": prior_history,
-        "content_plan": cognition_state.get("content_plan", []),
+        "content_plan": cognition_state["text_surface_output_v2"][
+            "content_plan"
+        ],
         "final_dialog": dialog.get("final_dialog", []),
     }
     response = await _llm_interface.ainvoke(
@@ -697,6 +741,9 @@ def _state_for_turn(
     )
     if conversation_progress is not None:
         state["conversation_progress"] = conversation_progress
+    state["platform_message_id"] = (
+        f"conversation-progression:{case['case_id']}:{turn['turn_index']}"
+    )
     return state
 
 
@@ -752,10 +799,15 @@ async def _record_progression_sequence(case: dict) -> None:
             **turn,
             "prior_user_disclosures": prior_user_disclosures,
             "conversation_progress": conversation_progress,
-            "content_plan": cognition_state.get("content_plan", []),
-            "forbidden_phrases": cognition_state.get("forbidden_phrases", []),
-            "logical_stance": cognition_state.get("logical_stance", ""),
-            "character_intent": cognition_state.get("character_intent", ""),
+            "content_plan": cognition_state["text_surface_output_v2"][
+                "content_plan"
+            ],
+            "visible_boundaries": cognition_state["text_surface_output_v2"][
+                "visible_boundaries"
+            ],
+            "cognition_intention": cognition_state["cognition_core_output"][
+                "intention"
+            ],
             "final_dialog": final_dialog,
             "lexical_repetition": _lexical_repetition_notes(
                 dialog=dialog,

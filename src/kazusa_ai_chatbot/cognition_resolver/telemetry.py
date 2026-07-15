@@ -27,6 +27,46 @@ _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]+")
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
+def build_v2_resolver_telemetry_fields(
+    requests: object,
+    progress: object,
+) -> dict[str, Any]:
+    """Build bounded V2 request, progress, and status telemetry fields."""
+
+    bounded_requests: list[dict[str, str]] = []
+    if isinstance(requests, list):
+        for request in requests[:MAX_TELEMETRY_LIST_ITEMS]:
+            if not isinstance(request, dict):
+                continue
+            bounded_requests.append({
+                "capability": _safe_text(request.get("capability"), limit=80),
+                "semantic_goal": _safe_text(
+                    request.get("semantic_goal"),
+                    limit=240,
+                ),
+            })
+    progress_status = "not_requested"
+    progress_summary = ""
+    if isinstance(progress, dict):
+        status_value = _safe_text(progress.get("status"), limit=40)
+        if status_value in {"not_requested", "pending", "completed", "failed"}:
+            progress_status = status_value
+        progress_summary = _safe_text(
+            progress.get("semantic_summary"),
+            limit=300,
+        )
+    fields = {
+        "request_count": len(bounded_requests),
+        "requests": bounded_requests,
+        "progress": {
+            "status": progress_status,
+            "semantic_summary": progress_summary,
+        },
+        "status": progress_status,
+    }
+    return fields
+
+
 def build_resolver_cycle_event(
     state: GlobalPersonaState,
     trace: ResolverCycleTraceV1,

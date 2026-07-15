@@ -128,6 +128,9 @@ class IMProcessState(TypedDict):
     debug_modes: DebugModes
 
     # Output from Persona Supervisor
+    cognition_core_output: NotRequired[dict[str, Any]]
+    cognition_state_update: NotRequired[dict[str, Any]]
+    cognition_state_committed: NotRequired[bool]
     final_dialog: list[str]
     target_addressed_user_ids: NotRequired[list[str]]
     target_broadcast: NotRequired[bool]

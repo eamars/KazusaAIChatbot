@@ -345,6 +345,12 @@ async def test_action_execution_rejects_malformed_spec_without_crashing() -> Non
     assert results[0]["status"] == "rejected"
     assert results[0]["action_kind"] == "speak"
     assert "schema_version" in results[0]["result_summary"]
+    assert results[0]["semantic_result_v2"] == {
+        "action_kind": "speak",
+        "status": "unavailable",
+        "semantic_result": results[0]["result_summary"],
+        "target_roles": [],
+    }
 
 
 @pytest.mark.asyncio

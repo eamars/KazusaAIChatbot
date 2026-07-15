@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-pytest.skip("Stage 1 assertions replaced by the V2 contract suite", allow_module_level=True)
 
 import importlib
 import json
@@ -110,7 +109,7 @@ def test_accepted_task_result_source_builder_creates_prompt_safe_episode() -> No
 
 
 def test_accepted_task_result_payload_uses_semantic_metadata() -> None:
-    """Prompt payload should expose accepted-task result fields only."""
+    """Result source should expose a typed accepted-task cognition outcome."""
 
     result_source = importlib.import_module(
         "kazusa_ai_chatbot.background_work.result_source"
@@ -118,25 +117,14 @@ def test_accepted_task_result_payload_uses_semantic_metadata() -> None:
     episode = result_source.build_result_ready_episode_from_job(
         _accepted_task_completed_job()
     )
-    selection = select_cognition_prompt_variant(
-        episode=episode,
-        stage="l2d_action_selection",
-    )
-
-    payload = build_cognition_prompt_source_payload(
-        episode=episode,
-        selection=selection,
-    )
-
-    result_payload = payload["accepted_task_result"]
-    metadata = result_payload["metadata"]
-    assert metadata == {
-        "accepted_task_summary": "Generate a Fibonacci function snippet.",
-        "failure_summary": "",
-        "result_summary": "Generated a compact Fibonacci snippet.",
-        "source_character_name": "Test Character",
+    metadata = episode["percepts"][0]["metadata"]
+    assert metadata["cognition_source"] == {
+        "source_kind": "accepted_task_result",
+        "source_id": "task-001",
+        "occurred_at": "2026-06-06T00:01:00+00:00",
+        "semantic_summary": "Generated a compact Fibonacci snippet.",
     }
-    serialized_payload = json.dumps(payload, ensure_ascii=False).lower()
+    serialized_payload = json.dumps(episode, ensure_ascii=False).lower()
     assert "accepted_task_result" in serialized_payload
     for forbidden in ("worker_metadata", "worker", "job_ref", "queue_state"):
         assert forbidden not in serialized_payload

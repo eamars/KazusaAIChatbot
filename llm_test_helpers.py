@@ -2,9 +2,18 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig
+
+
+@dataclass(frozen=True)
+class TestLLMStageBinding:
+    """Explicit test-only pairing of an LLM double and its call config."""
+
+    llm: Any
+    config: LLMCallConfig
 
 
 def make_llm_call_config(stage_name: str = "test_stage") -> LLMCallConfig:
@@ -25,8 +34,14 @@ def make_llm_call_config(stage_name: str = "test_stage") -> LLMCallConfig:
     return config
 
 
-def bind_test_llm(llm: Any, stage_name: str = "test_stage") -> Any:
-    """Return a fake LLM for callers that own an explicit V2 service binding."""
+def bind_test_llm(
+    llm: Any,
+    stage_name: str = "test_stage",
+) -> TestLLMStageBinding:
+    """Pair a fake LLM with an explicit test call configuration."""
 
-    del stage_name
-    return llm
+    binding = TestLLMStageBinding(
+        llm=llm,
+        config=make_llm_call_config(stage_name),
+    )
+    return binding

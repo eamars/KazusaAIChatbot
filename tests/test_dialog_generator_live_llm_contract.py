@@ -14,7 +14,7 @@ from kazusa_ai_chatbot.config import (
 )
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes.dialog_agent import (
-    _DIALOG_GENERATOR_PROMPT,
+    _V2_DIALOG_GENERATOR_PROMPT,
     get_abstraction_reframing_description,
     get_counter_questioning_description,
     get_direct_assertion_description,
@@ -26,10 +26,7 @@ from kazusa_ai_chatbot.nodes.dialog_agent import (
     get_self_deprecation_description,
     get_softener_density_description,
 )
-from kazusa_ai_chatbot.utils import (
-    build_relationship_state_block,
-    parse_llm_json_output,
-)
+from kazusa_ai_chatbot.utils import parse_llm_json_output
 from tests.llm_trace import write_llm_trace
 
 
@@ -90,7 +87,7 @@ def _render_system_prompt(character_profile: dict) -> SystemMessage:
     """Render the exact dialog-generator system prompt for a profile."""
 
     ltp = character_profile['linguistic_texture_profile']
-    prompt = _DIALOG_GENERATOR_PROMPT.format(
+    prompt = _V2_DIALOG_GENERATOR_PROMPT.format(
         character_name=character_profile['name'],
         character_logic=character_profile['personality_brief']['logic'],
         character_tempo=character_profile['personality_brief']['tempo'],
@@ -132,20 +129,17 @@ def _render_system_prompt(character_profile: dict) -> SystemMessage:
 def _dialog_payload(character_profile: dict, case: dict) -> tuple[HumanMessage, list]:
     """Build the same human payload shape used by dialog_generator."""
 
-    relationship_state_block = build_relationship_state_block(case.get('relationship_state', 500))
     msg = {
-        'linguistic_directives': {
-            'rhetorical_strategy': case['rhetorical_strategy'],
-            'linguistic_style': case['linguistic_style'],
-            'accepted_user_preferences': [],
-            'content_plan': case['content_plan'],
-            'forbidden_phrases': [],
-        },
-        'contextual_directives': {
-            'social_distance': relationship_state_block['level'],
-            'emotional_intensity': case['emotional_intensity'],
-            'vibe_check': case['vibe_check'],
-            'relational_dynamic': case['relational_dynamic'],
+        'text_surface_output_v2': {
+            'schema_version': 'text_surface_output.v2',
+            'content_plan': case['content_plan']['semantic_content'],
+            'visible_boundaries': [],
+            'addressee_plan': ['current user'],
+            'style_guidance': (
+                f"{case['rhetorical_strategy']} {case['linguistic_style']}"
+            ),
+            'pacing_guidance': case['content_plan']['rendering'],
+            'selected_surface_intent': case['content_plan']['visible_goal'],
         },
         'user_name': '测试用户',
     }
@@ -245,32 +239,22 @@ async def test_live_dialog_generator_node_accepts_deepseek_output() -> None:
     character_profile = _character_profile()
     state = {
         'internal_monologue': '这是普通整理建议，按事实回答就好。',
-        'action_directives': {
-            'contextual_directives': {
-                'social_distance': 'Neutral',
-                'emotional_intensity': '低',
-                'vibe_check': '事务协作',
-                'relational_dynamic': '普通协作关系',
-            },
-            'linguistic_directives': {
-                'rhetorical_strategy': '给出明确但不说教的建议。',
-                'linguistic_style': '务实、短句、略带吐槽。',
-                'accepted_user_preferences': [],
-                'content_plan': {
-                    'visible_goal': '认可用户先按用途分类。',
-                    'semantic_content': '先把充电、视频输出、用途待确认分开会比较省事。',
-                    'rendering': '25-45字。',
-                },
-                'forbidden_phrases': [],
-            },
-            'visual_directives': {},
+        'text_surface_output_v2': {
+            'schema_version': 'text_surface_output.v2',
+            'content_plan': '先把充电、视频输出、用途待确认分开会比较省事。',
+            'visible_boundaries': [],
+            'addressee_plan': ['测试用户'],
+            'style_guidance': '务实、短句、略带吐槽，但不说教。',
+            'pacing_guidance': '25-45字。',
+            'selected_surface_intent': '认可用户先按用途分类。',
         },
         'chat_history_wide': [],
         'chat_history_recent': [],
         'platform_user_id': 'live-dialog-user',
         'platform_bot_id': 'live-dialog-bot',
+        'global_user_id': 'live-dialog-user',
         'user_name': '测试用户',
-        'user_profile': {'relationship_state': 500},
+        'user_profile': {},
         'character_profile': character_profile,
         'dialog_usage_mode': 'live_visible_reply',
     }

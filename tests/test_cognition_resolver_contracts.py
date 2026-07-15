@@ -26,6 +26,9 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     validate_resolver_pending_resolution,
     validate_resolver_pending_resume,
 )
+from kazusa_ai_chatbot.cognition_resolver.capabilities import (
+    project_resolver_observation_for_cognition,
+)
 from kazusa_ai_chatbot.cognition_resolver.state import (
     MAX_PROJECTED_RESOLVER_OBSERVATIONS,
     append_cycle_trace,
@@ -46,6 +49,28 @@ def _capability_request() -> dict:
         "reason": "The current cognition cycle lacks enough evidence.",
         "priority": "now",
     }
+
+
+def test_v2_observation_projection_has_typed_evidence_without_state_authority(
+) -> None:
+    """Capability outcomes should re-enter V2 as evidence, not state writes."""
+
+    evidence, direct_facts = project_resolver_observation_for_cognition(
+        {
+            "observation_id": "resolver-observation:1",
+            "capability": "local_context_recall",
+            "semantic_summary": "A prior promise is relevant.",
+            "replacement_state": {"forbidden": True},
+        },
+        occurred_at="2026-05-16T00:00:00Z",
+    )
+
+    assert evidence["evidence_ref"]["source_kind"] == "resolver_observation"
+    assert evidence["semantic_text"] == (
+        "local_context_recall: A prior promise is relevant."
+    )
+    assert direct_facts == []
+    assert "replacement_state" not in evidence
 
 
 def _observation() -> dict:

@@ -18,10 +18,14 @@ from kazusa_ai_chatbot.cognition_core_v2.diagnostics import (
     reset_validation_capture,
     validation_capture_snapshot,
 )
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    EVIDENCE_SOURCE_QUESTION_IDS,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_cognition_core_services,
 )
 from tests.live_llm_mongo import live_db, seed_shared_documents
+from tests.cognition_core_v2_test_helpers import canonical_episode
 
 
 BENCHMARK_FIXTURE_PATH = Path(
@@ -132,13 +136,11 @@ def _chain_input(case: dict[str, str]) -> dict[str, object]:
     )
     return {
         "schema_version": "cognition_core_input.v2",
-        "episode": {
-            "episode_id": f"benchmark-{case['case_id']}",
-            "trigger_source": "user_message",
-            "output_mode": "visible_reply",
-            "semantic_scene": semantic_text,
-            "semantic_temporal_context": "immediate",
-        },
+        "episode": canonical_episode(
+            episode_id=f"benchmark-{case['case_id']}",
+            current_global_user_id="benchmark-user",
+            content=semantic_text,
+        ),
         "state_scope": "user",
         "mutable_state": build_acquaintance_user_state(
             global_user_id="benchmark-user",
@@ -150,7 +152,7 @@ def _chain_input(case: dict[str, str]) -> dict[str, object]:
             "meaning_state": character["meaning_state"],
         },
         "evidence": [{
-            "evidence_handle": "ev1",
+            "evidence_handle": "e1",
             "evidence_ref": {
                 "source_kind": "episode",
                 "source_id": f"episode:benchmark-{case['case_id']}",
@@ -158,7 +160,7 @@ def _chain_input(case: dict[str, str]) -> dict[str, object]:
                 "semantic_summary": semantic_text,
             },
             "semantic_text": semantic_text,
-            "visible_to": ["cognition", "surface"],
+            "visible_to": list(EVIDENCE_SOURCE_QUESTION_IDS["episode"]),
         }],
         "direct_facts": [],
         "available_actions": [],
@@ -170,6 +172,22 @@ def _chain_input(case: dict[str, str]) -> dict[str, object]:
             "semantic_temporal_context": "immediate",
         },
     }
+
+
+def test_validation_cli_builds_v2_only_benchmark_payload() -> None:
+    """Checkpoint-H CLI benchmark uses the retained V2 fixture contract."""
+
+    from kazusa_ai_chatbot.cognition_core_v2 import validation_cli
+    from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+        validate_cognition_core_input,
+    )
+
+    case = validation_cli._load_benchmark_cases()[0]
+    payload = validation_cli._build_benchmark_payload(case)
+
+    validate_cognition_core_input(payload)
+    assert payload["schema_version"] == "cognition_core_input.v2"
+    assert "v1" not in json.dumps(payload).lower()
 
 
 @pytest.mark.live_llm

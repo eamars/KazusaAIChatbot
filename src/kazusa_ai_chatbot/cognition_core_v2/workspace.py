@@ -13,11 +13,13 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CollapsedIntentionV2,
     CognitionCoreServicesV2,
 )
+from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
 COLLAPSE_PROMPT = '''Collapse complete goal bids into a prompt-local partition.
 Return only JSON with primary_bid_handle, supporting_bid_handles, and
-suppressed_bid_handles. Copy no content and invent no detail.
+suppressed_bid_handles. Do not rewrite bid content, copy content, or invent
+detail.
 Every supplied bid handle must occur exactly once across the three partitions.
 '''
 
@@ -30,11 +32,7 @@ async def collapse_bids(
 
     ordered = sorted(bids, key=lambda bid: bid["branch_id"])
     if not ordered:
-        return {
-            "supporting_bids": [],
-            "competing_bids": [],
-            "residue": "no grounded bid",
-        }
+        raise ValueError("workspace collapse requires at least one bid")
     if len(ordered) == 1:
         return {
             "primary_branch_id": ordered[0]["branch_id"],
@@ -43,7 +41,6 @@ async def collapse_bids(
             "primary_bid": ordered[0],
             "supporting_bids": [],
             "competing_bids": [],
-            "residue": "single grounded bid admitted",
         }
     handles = {f"b{index}": bid for index, bid in enumerate(ordered, start=1)}
     prompt_payload = {
@@ -64,7 +61,7 @@ async def collapse_bids(
         [SystemMessage(content=COLLAPSE_PROMPT), HumanMessage(content=prompt_text)],
         config=services.collapse_config,
     )
-    parsed = services.parse_json(response.content)
+    parsed = parse_llm_json_output(response.content)
     partition = _validate_partition(parsed, set(handles))
     primary_handle = partition["primary_bid_handle"]
     primary = handles[primary_handle]
@@ -90,7 +87,6 @@ async def collapse_bids(
         "primary_bid": primary,
         "supporting_bids": declared_supporting,
         "competing_bids": suppressed,
-        "residue": "complete bid partition collapsed deterministically",
     }
     return result
 

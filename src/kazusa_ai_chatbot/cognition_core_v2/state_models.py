@@ -7,16 +7,38 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, TypedDict
 
-from kazusa_ai_chatbot.cognition_core_v2.contracts import CognitionStateError
-from kazusa_ai_chatbot.cognition_core_v2.emotion_definitions import (
-    EMOTION_DEFINITIONS,
-)
-
-
 SCHEMA_VERSION = "cognition_state.v2"
 CHARACTER_SCOPE = "character"
 USER_SCOPE = "user"
 CHARACTER_OWNER = "global"
+
+EMOTION_IDS = (
+    "joy",
+    "fear",
+    "anger",
+    "sadness",
+    "disgust",
+    "surprise",
+    "love_attachment",
+    "compassion_empathy",
+    "gratitude",
+    "jealousy",
+    "envy",
+    "pride",
+    "shame",
+    "guilt",
+    "embarrassment",
+    "curiosity",
+    "awe",
+    "nostalgia",
+    "loneliness",
+    "relief",
+    "ennui_existential_angst",
+)
+
+
+class CognitionStateError(ValueError):
+    """Raised when native cognition state violates a reducer invariant."""
 
 STATE_LIST_CAPS = {
     "goals": 16,
@@ -385,6 +407,21 @@ def validate_cognition_state(state: Mapping[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def validate_relationship_state(
+    relationship: Mapping[str, Any],
+    *,
+    owner_user_id: str,
+) -> RelationshipStateV2:
+    """Validate and copy one native relationship state for its exact owner."""
+
+    if not isinstance(relationship, Mapping):
+        raise CognitionStateError("relationship must be a mapping")
+    payload = deepcopy(dict(relationship))
+    _require_nonempty_text(owner_user_id, "owner_user_id")
+    _validate_relationship(payload, owner_user_id)
+    return payload  # type: ignore[return-value]
+
+
 def resolve_state_scope(
     caller: str,
     target_user_id: str | None = None,
@@ -670,7 +707,7 @@ def _validate_activations(
             raise CognitionStateError("affect activation must be a mapping")
         _require_exact_keys(activation, ACTIVATION_KEYS, "affect activation")
         emotion_id = activation["emotion_id"]
-        if emotion_id not in EMOTION_DEFINITIONS:
+        if emotion_id not in EMOTION_IDS:
             raise CognitionStateError("unknown affect activation emotion")
         if emotion_id in seen_emotions:
             raise CognitionStateError("duplicate affect activation emotion")

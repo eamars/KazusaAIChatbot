@@ -159,6 +159,13 @@ async def test_write_analysis_snapshot_persists_semantic_descriptors(
         "llm_parse_stability": "watch",
         "worker_error_level": "none",
     }
+    assert captured["cognition_v2_summary"] == {
+        "event_count": 0,
+        "component_counts": {},
+        "branch_counts": {},
+        "commit_status_counts": {"committed": 0, "failed": 0},
+        "failed_stage_count": 0,
+    }
 
 
 @pytest.mark.asyncio

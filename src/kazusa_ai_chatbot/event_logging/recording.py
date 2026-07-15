@@ -24,6 +24,7 @@ from kazusa_ai_chatbot.event_logging.sanitization import (
     sanitized_rejection_reason,
     sanitize_short_text,
     sanitize_string_list,
+    sanitize_cognition_v2_event_fields,
     unsafe_field_paths,
 )
 from kazusa_ai_chatbot.event_logging.schemas import EventLogEventDoc
@@ -113,6 +114,7 @@ async def _record_event(
     stack_fingerprint: str = "",
     recovered: bool = False,
     occurred_at: datetime | None = None,
+    cognition_v2: Mapping[str, object] | None = None,
 ) -> EventLogWriteResult:
     """Build, sanitize, and persist one event document.
 
@@ -187,6 +189,10 @@ async def _record_event(
         },
         payload=dict(payload),
     )
+    if cognition_v2 is not None:
+        event_doc["cognition_v2"] = sanitize_cognition_v2_event_fields(
+            cognition_v2,
+        )
     unsafe_paths = unsafe_field_paths(event_doc)
     if unsafe_paths:
         reason = sanitized_rejection_reason(unsafe_paths)
@@ -219,6 +225,47 @@ async def _record_event(
         event_id=event_id,
         status="recorded",
         reason="",
+    )
+    return result
+
+
+async def record_cognition_v2_event(
+    *,
+    component: str,
+    cognition_component: str,
+    status: str,
+    stage_status: Literal["started", "completed", "failed", "skipped"],
+    selected_branch_id: str = "",
+    state_scope: Literal["", "user", "character"] = "",
+    state_commit_status: Literal[
+        "not_started",
+        "committed",
+        "failed",
+        "skipped",
+    ] = "not_started",
+    severity: EventSeverity = "info",
+    warning_codes: Sequence[str] = (),
+    occurred_at: datetime | None = None,
+) -> EventLogWriteResult:
+    """Record one bounded V2 stage or state-commit diagnostic event."""
+
+    fields = {
+        "cognition_component": cognition_component,
+        "selected_branch_id": selected_branch_id,
+        "state_scope": state_scope,
+        "state_commit_status": state_commit_status,
+        "stage_status": stage_status,
+    }
+    result = await _record_event(
+        event_family="cognition_v2",
+        event_type="component_status",
+        component=component,
+        status=status,
+        severity=severity,
+        payload={},
+        warning_codes=warning_codes,
+        occurred_at=occurred_at,
+        cognition_v2=fields,
     )
     return result
 

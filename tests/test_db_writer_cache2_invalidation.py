@@ -6,14 +6,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-pytestmark = pytest.mark.skip(
-    reason=(
-        "Retired profile and character-state writer assertions replaced by "
-        "V2 persistence tests"
-    )
-)
-
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    build_acquaintance_user_state,
+    build_character_production_state,
+)
 from kazusa_ai_chatbot.consolidation.target import (
     build_consolidation_target_plan,
 )
@@ -24,6 +21,7 @@ from kazusa_ai_chatbot.consolidation.origin import (
 from kazusa_ai_chatbot.time_boundary import local_time_context_from_storage_utc
 
 STORAGE_TIMESTAMP_UTC = "2026-04-26T12:00:00+00:00"
+COGNITION_UPDATED_AT = "2026-04-26T12:00:00Z"
 
 
 def _consolidation_origin() -> dict:
@@ -69,7 +67,12 @@ def _state() -> dict:
         "platform_channel_id": "chan-1",
         "channel_type": "group",
         "platform_message_id": "msg-1",
-        "character_profile": {"name": "Kazusa"},
+        "character_profile": {
+            "name": "Kazusa",
+            "cognition_state": build_character_production_state(
+                updated_at=COGNITION_UPDATED_AT,
+            ),
+        },
         "metadata": {},
         "mood": "neutral",
         "vibe_check": "",
@@ -83,7 +86,13 @@ def _state() -> dict:
             "dedup_key": "likes_tea",
         }],
         "future_promises": [],
-        "user_profile": {"global_user_id": "user-1", "relationship_state": 500},
+        "user_profile": {
+            "global_user_id": "user-1",
+            "cognition_state": build_acquaintance_user_state(
+                global_user_id="user-1",
+                updated_at=COGNITION_UPDATED_AT,
+            ),
+        },
         "relationship_delta": 1,
         "decontexualized_input": "remember tea",
         "consolidation_origin": _consolidation_origin(),
@@ -97,37 +106,35 @@ def _state() -> dict:
     return state
 
 
-def _patch_writers(monkeypatch, *, character_image=None) -> MagicMock:
+def _patch_writers(monkeypatch) -> MagicMock:
     runtime = MagicMock()
     runtime.invalidate = AsyncMock(return_value=1)
-    monkeypatch.setattr(persistence_module, "get_rag_cache2_runtime", MagicMock(return_value=runtime))
-    monkeypatch.setattr(persistence_module, "upsert_character_state", AsyncMock())
-    monkeypatch.setattr(persistence_module, "update_semantic_relationship_projection", AsyncMock())
-    monkeypatch.setattr(persistence_module, "update_relationship_state", AsyncMock())
     monkeypatch.setattr(
         persistence_module,
-        "get_character_runtime_state",
-        AsyncMock(return_value={}),
+        "get_rag_cache2_runtime",
+        MagicMock(return_value=runtime),
     )
-    monkeypatch.setattr(persistence_module, "upsert_character_self_image", AsyncMock())
-    monkeypatch.setattr(persistence_module, "_update_character_image", AsyncMock(return_value=character_image))
-    monkeypatch.setattr(persistence_module, "update_user_memory_units_from_state", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        persistence_module,
+        "update_user_memory_units_from_state",
+        AsyncMock(return_value=[{"memory_unit_id": "memory-unit-1"}]),
+    )
     return runtime
 
 
 @pytest.mark.asyncio
-async def test_db_writer_emits_user_profile_and_character_state_events(monkeypatch) -> None:
-    runtime = _patch_writers(
-        monkeypatch,
-        character_image={"recent_window": []},
-    )
+async def test_db_writer_invalidates_user_profile_after_memory_write(
+    monkeypatch,
+) -> None:
+    runtime = _patch_writers(monkeypatch)
 
     result = await persistence_module.db_writer(_state())
 
     sources = [call.args[0].source for call in runtime.invalidate.await_args_list]
-    assert sources == ["user_profile", "character_state"]
-    assert result["metadata"]["cache_invalidated"] == ["user_profile", "character_state"]
-    assert result["metadata"]["cache_evicted_count"] == 2
+    assert sources == ["user_profile"]
+    assert result["metadata"]["cache_invalidated"] == ["user_profile"]
+    assert result["metadata"]["cache_evicted_count"] == 1
+    assert "character_state" not in sources
 
 
 @pytest.mark.asyncio

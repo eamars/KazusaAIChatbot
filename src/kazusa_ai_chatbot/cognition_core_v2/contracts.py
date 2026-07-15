@@ -3,9 +3,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal, Mapping, NotRequired, Protocol, TypedDict
+from datetime import datetime
+from typing import Any, Literal, Mapping, NotRequired, TypedDict
 
+from kazusa_ai_chatbot.cognition_episode import (
+    CognitiveEpisode,
+    CognitiveEpisodeValidationError,
+    validate_cognitive_episode,
+)
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig, LLMInvoker
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    CognitionStateError,
+    RelationshipStateV2,
+    validate_cognition_state,
+    validate_relationship_state,
+)
 
 
 @dataclass(frozen=True)
@@ -38,16 +50,96 @@ class CognitionContractError(ValueError):
     """Raised when a V2 public boundary is structurally invalid."""
 
 
-class CognitionStateError(CognitionContractError):
-    """Raised when deterministic state reduction violates an invariant."""
-
-
 class CognitionExecutionError(CognitionContractError):
     """Raised when collapse or route execution cannot produce a valid result."""
 
 
 class CognitionContextLimitError(CognitionContractError):
     """Raised when required model context remains over its frozen cap."""
+
+
+SEMANTIC_QUESTION_KINDS = (
+    "event_agency",
+    "relationship_social",
+    "moral_identity",
+    "goal_threat_outcome",
+    "epistemic_comparison_memory",
+    "existential_drive",
+)
+
+EVIDENCE_SOURCE_QUESTION_IDS = {
+    "episode": tuple(f"q:{kind}" for kind in SEMANTIC_QUESTION_KINDS),
+    "promoted_memory": tuple(f"q:{kind}" for kind in SEMANTIC_QUESTION_KINDS),
+    "promoted_reflection": tuple(f"q:{kind}" for kind in SEMANTIC_QUESTION_KINDS),
+    "media_observation": tuple(f"q:{kind}" for kind in SEMANTIC_QUESTION_KINDS),
+    "action_result": (
+        "q:event_agency",
+        "q:relationship_social",
+        "q:moral_identity",
+        "q:goal_threat_outcome",
+    ),
+    "resolver_observation": (
+        "q:event_agency",
+        "q:relationship_social",
+        "q:moral_identity",
+        "q:goal_threat_outcome",
+        "q:epistemic_comparison_memory",
+    ),
+    "accepted_task_result": (
+        "q:event_agency",
+        "q:relationship_social",
+        "q:moral_identity",
+        "q:goal_threat_outcome",
+        "q:epistemic_comparison_memory",
+    ),
+    "scheduler_event": ("q:goal_threat_outcome",),
+}
+
+GOAL_BRANCH_IDS = (
+    "ordinary_response",
+    "relationship_connection",
+    "bond_protection",
+    "trust_verification",
+    "autonomy_boundary",
+    "safety_coping",
+    "obstruction_strategy",
+    "loss_recovery",
+    "moral_repair",
+    "social_care",
+    "reciprocal_response",
+    "epistemic_exploration",
+    "meaning_reconstruction",
+    "self_improvement",
+)
+
+ENTITY_KINDS = {
+    "relationship",
+    "goal",
+    "threat",
+    "event",
+    "knowledge_gap",
+    "drive",
+    "standard",
+    "meaning",
+}
+ROLE_VALUES = {
+    "actor",
+    "experiencer",
+    "target",
+    "object",
+    "affected_goal",
+    "affected_relationship",
+}
+ROLE_ENTITY_KINDS = {
+    "character",
+    "user",
+    "group",
+    "third_party",
+    "goal",
+    "relationship",
+    "standard",
+    "object",
+}
 
 
 class EntityRefV2(TypedDict):
@@ -246,7 +338,6 @@ class CollapsedIntentionV2(TypedDict):
     primary_bid: ActionBidV2
     supporting_bids: list[ActionBidV2]
     competing_bids: list[ActionBidV2]
-    residue: str
 
 
 class WorkspaceDecisionV2(TypedDict):
@@ -313,8 +404,24 @@ class StateUpdateV2(TypedDict):
     state_scope: Literal["user", "character"]
     owner_key: str
     replacement_state: dict[str, Any]
-    comparison_results: list[dict[str, Any]]
+    comparison_results: list[EventComparisonResultV2]
     changed_paths: list[str]
+
+
+class EventComparisonResultV2(TypedDict):
+    """Cause comparison retained in evidence-source order."""
+
+    current_event_ref: EntityRefV2
+    matched_entity_ref: NotRequired[EntityRefV2]
+    outcome: Literal[
+        "reinforce",
+        "contradict",
+        "resolve",
+        "replace",
+        "create",
+        "unrelated",
+    ]
+    evidence_refs: list[EvidenceRefV2]
 
 
 class CognitionDiagnosticsV2(TypedDict):
@@ -330,8 +437,6 @@ class CognitionDiagnosticsV2(TypedDict):
     failed_branch_count: int
     overlap_ms: int
     dependency_wait_ms: int
-    critical_path_ms: int
-    call_count: int
     total_ms: int
     warnings: list[str]
 
@@ -340,11 +445,11 @@ class CognitionCoreInputV2(TypedDict):
     """Public V2 cognition input contract."""
 
     schema_version: Literal["cognition_core_input.v2"]
-    episode: Mapping[str, Any]
+    episode: CognitiveEpisode
     state_scope: Literal["user", "character"]
     mutable_state: dict[str, Any]
     character_constraints: CharacterConstraintSnapshotV2
-    relationship_context: NotRequired[dict[str, Any]]
+    relationship_context: NotRequired[RelationshipStateV2]
     evidence: list[CognitionEvidenceV2]
     direct_facts: list[DirectFactV2]
     available_actions: list[ActionAffordanceV2]
@@ -394,7 +499,7 @@ class TextSurfaceInputV2(TypedDict):
     """Public V2 text-surface input contract."""
 
     schema_version: Literal["text_surface_input.v2"]
-    episode: Mapping[str, Any]
+    episode: CognitiveEpisode
     intention: SelectedIntentionV2
     primary_bid: NotRequired[SurfaceBidProjectionV2]
     supporting_bids: list[SurfaceBidProjectionV2]
@@ -417,29 +522,6 @@ class TextSurfaceOutputV2(TypedDict):
     selected_surface_intent: str
 
 
-class JsonParserV2(Protocol):
-    """Parse one model response into a JSON-compatible object."""
-
-    def __call__(self, content: str) -> Mapping[str, Any] | list[Any]:
-        """Return parsed JSON or raise a parser error."""
-
-
-class CognitionLoggerV2(Protocol):
-    """Small logger boundary used by V2 services."""
-
-    def debug(self, message: str, *args: Any, **kwargs: Any) -> None:
-        """Record debug information."""
-
-    def info(self, message: str, *args: Any, **kwargs: Any) -> None:
-        """Record informational information."""
-
-    def warning(self, message: str, *args: Any, **kwargs: Any) -> None:
-        """Record a recoverable boundary issue."""
-
-    def error(self, message: str, *args: Any, **kwargs: Any) -> None:
-        """Record an unrecoverable boundary issue."""
-
-
 @dataclass(frozen=True)
 class CognitionCoreServicesV2:
     """Injected V2 model bindings; services never enter model payloads."""
@@ -449,8 +531,6 @@ class CognitionCoreServicesV2:
     goal_cognition_config: LLMCallConfig
     collapse_config: LLMCallConfig
     action_selection_config: LLMCallConfig
-    parse_json: JsonParserV2
-    logger: CognitionLoggerV2
 
 
 @dataclass(frozen=True)
@@ -462,8 +542,6 @@ class TextSurfaceServicesV2:
     content_plan_config: LLMCallConfig
     preference_config: LLMCallConfig
     visual_config: LLMCallConfig
-    parse_json: JsonParserV2
-    logger: CognitionLoggerV2
 
 
 def validate_cognition_core_input(
@@ -496,11 +574,20 @@ def validate_cognition_core_input(
     if not isinstance(state, Mapping) or state.get("state_scope") != scope:
         raise CognitionContractError("mutable state scope does not match input")
     _validate_persistent_state(state)
-    if not isinstance(payload["episode"], Mapping):
-        raise CognitionContractError("episode must be a mapping")
+    episode = _validate_canonical_episode(payload["episode"])
+    if "relationship_context" in payload:
+        _validate_relationship_context(
+            payload["relationship_context"],
+            scope=scope,
+            state=state,
+            episode=episode,
+        )
+    _validate_character_constraints(payload["character_constraints"])
     _validate_evidence_rows(payload["evidence"])
     if not isinstance(payload["direct_facts"], list):
         raise CognitionContractError("direct_facts must be a list")
+    for row in payload["direct_facts"]:
+        _validate_direct_fact(row)
     if not isinstance(payload["available_actions"], list):
         raise CognitionContractError("available_actions must be a list")
     for row in payload["available_actions"]:
@@ -513,6 +600,7 @@ def validate_cognition_core_input(
         _validate_resolver_affordance(row)
     if not isinstance(payload["scene_context"], Mapping):
         raise CognitionContractError("scene_context must be a mapping")
+    _validate_scene_context(payload["scene_context"])
     return dict(payload)  # type: ignore[return-value]
 
 
@@ -598,8 +686,26 @@ def validate_text_surface_input(
         raise CognitionContractError("unsupported text surface input schema")
     _validate_intention(payload["intention"])
     _require_text(payload["interaction_style_context"], "interaction style")
-    if not isinstance(payload["episode"], Mapping):
-        raise CognitionContractError("surface episode must be a mapping")
+    _validate_canonical_episode(payload["episode"])
+    if "primary_bid" in payload:
+        _validate_surface_bid(payload["primary_bid"])
+    if not isinstance(payload["supporting_bids"], list):
+        raise CognitionContractError("surface supporting_bids must be a list")
+    for bid in payload["supporting_bids"]:
+        _validate_surface_bid(bid)
+    _validate_expression_policy(payload["expression_policy"])
+    if not isinstance(payload["semantic_affect"], list):
+        raise CognitionContractError("surface semantic_affect must be a list")
+    for row in payload["semantic_affect"]:
+        _validate_affect_projection(row)
+    if "semantic_relationship" in payload:
+        _validate_relationship_projection(payload["semantic_relationship"])
+    if not isinstance(payload["permitted_action_results"], list):
+        raise CognitionContractError(
+            "surface permitted_action_results must be a list"
+        )
+    for row in payload["permitted_action_results"]:
+        _validate_action_result(row)
     return dict(payload)  # type: ignore[return-value]
 
 
@@ -630,15 +736,17 @@ def validate_text_surface_output(
     for field_name in ("visible_boundaries", "addressee_plan"):
         if not isinstance(payload[field_name], list):
             raise CognitionContractError(f"{field_name} must be a list")
+        for index, item in enumerate(payload[field_name]):
+            _require_text(
+                item,
+                f"{field_name}[{index}]",
+                maximum=1000,
+            )
     return dict(payload)  # type: ignore[return-value]
 
 
 def _validate_persistent_state(state: Mapping[str, Any]) -> None:
-    """Delegate exact native-state validation without a circular import."""
-
-    from kazusa_ai_chatbot.cognition_core_v2.state_models import (
-        validate_cognition_state,
-    )
+    """Delegate exact native-state validation."""
 
     try:
         validate_cognition_state(state)
@@ -661,7 +769,13 @@ def _validate_evidence_rows(rows: Any) -> None:
             "evidence row",
         )
         handle = row["evidence_handle"]
-        if not isinstance(handle, str) or not handle or handle in seen:
+        if (
+            not isinstance(handle, str)
+            or len(handle) < 2
+            or handle[0] != "e"
+            or not handle[1:].isdigit()
+            or handle in seen
+        ):
             raise CognitionContractError("evidence handle is invalid")
         seen.add(handle)
         _validate_evidence_ref(row["evidence_ref"])
@@ -677,13 +791,19 @@ def _validate_evidence_rows(rows: Any) -> None:
             raise CognitionContractError("evidence visibility must be a list")
         if len(row["visible_to"]) != len(set(row["visible_to"])):
             raise CognitionContractError("evidence visibility is duplicated")
-        if not set(row["visible_to"]).issubset({
-            "cognition",
-            "surface",
-            "dialog",
-            "persistence",
-        }):
-            raise CognitionContractError("evidence visibility audience is invalid")
+        source_kind = row["evidence_ref"]["source_kind"]
+        required_question_ids = set(EVIDENCE_SOURCE_QUESTION_IDS[source_kind])
+        visibility = set(row["visible_to"])
+        allowed = required_question_ids | set(GOAL_BRANCH_IDS)
+        if not visibility.issubset(allowed):
+            raise CognitionContractError("evidence visibility id is invalid")
+        visible_question_ids = {
+            value for value in visibility if value.startswith("q:")
+        }
+        if visible_question_ids != required_question_ids:
+            raise CognitionContractError(
+                "evidence visibility does not match its source kind"
+            )
 
 
 def _validate_intention(value: Any) -> None:
@@ -855,8 +975,6 @@ def _validate_diagnostics(value: Any) -> None:
         "failed_branch_count",
         "overlap_ms",
         "dependency_wait_ms",
-        "critical_path_ms",
-        "call_count",
         "total_ms",
         "warnings",
     }
@@ -920,9 +1038,10 @@ def _validate_evidence_ref(value: Any) -> None:
     required = {"source_kind", "source_id", "occurred_at", "semantic_summary"}
     if not isinstance(value, Mapping) or set(value) != required:
         raise CognitionContractError("evidence_ref fields are not exact")
-    _require_text(value["source_kind"], "evidence_ref.source_kind")
+    if value["source_kind"] not in EVIDENCE_SOURCE_QUESTION_IDS:
+        raise CognitionContractError("evidence_ref.source_kind is invalid")
     _require_text(value["source_id"], "evidence_ref.source_id")
-    _require_text(value["occurred_at"], "evidence_ref.occurred_at")
+    _require_utc_timestamp(value["occurred_at"], "evidence_ref.occurred_at")
     _require_text(value["semantic_summary"], "evidence_ref.semantic_summary")
 
 
@@ -937,7 +1056,8 @@ def _validate_entity_ref(value: Any, label: str) -> None:
         raise CognitionContractError(f"{label} fields are not exact")
     if value["scope"] not in {"user", "character"}:
         raise CognitionContractError(f"{label}.scope is invalid")
-    _require_text(value["kind"], f"{label}.kind")
+    if value["kind"] not in ENTITY_KINDS:
+        raise CognitionContractError(f"{label}.kind is invalid")
     _require_text(value["entity_id"], f"{label}.entity_id")
 
 
@@ -953,8 +1073,12 @@ def _validate_roles(value: Any, label: str) -> None:
             "entity_id",
         }:
             raise CognitionContractError(f"{label}[{index}] is invalid")
-        _require_text(role["role"], f"{label}[{index}].role")
-        _require_text(role["entity_kind"], f"{label}[{index}].entity_kind")
+        if role["role"] not in ROLE_VALUES:
+            raise CognitionContractError(f"{label}[{index}].role is invalid")
+        if role["entity_kind"] not in ROLE_ENTITY_KINDS:
+            raise CognitionContractError(
+                f"{label}[{index}].entity_kind is invalid"
+            )
         _require_text(role["entity_id"], f"{label}[{index}].entity_id")
 
 
@@ -1007,16 +1131,6 @@ def _validate_state_update(value: Mapping[str, Any]) -> None:
         raise CognitionContractError("comparison_results must be a list")
     for row in value["comparison_results"]:
         _validate_comparison_result(row)
-    comparison_keys = [
-        (
-            str(row["entity_kind"]),
-            str(row["entity_id"]),
-            str(row["outcome"]),
-        )
-        for row in value["comparison_results"]
-    ]
-    if comparison_keys != sorted(comparison_keys):
-        raise CognitionContractError("comparison_results must be sorted")
     if not isinstance(value["changed_paths"], list):
         raise CognitionContractError("changed_paths must be a list")
     if any(not isinstance(path, str) or not path for path in value["changed_paths"]):
@@ -1028,24 +1142,283 @@ def _validate_state_update(value: Mapping[str, Any]) -> None:
 def _validate_comparison_result(value: Any) -> None:
     """Validate one deterministic causal comparison result."""
 
-    required = {
-        "entity_kind",
-        "entity_id",
-        "outcome",
-        "evidence_source_ids",
-        "reason",
-    }
+    required = {"current_event_ref", "outcome", "evidence_refs"}
+    if "matched_entity_ref" in value:
+        required.add("matched_entity_ref")
     if not isinstance(value, Mapping) or set(value) != required:
         raise CognitionContractError("comparison result fields are not exact")
-    _require_text(value["entity_kind"], "comparison result.entity_kind")
-    _require_text(value["entity_id"], "comparison result.entity_id")
-    if value["outcome"] not in {"create", "reinforce", "contradict", "resolve", "replace"}:
-        raise CognitionContractError("comparison result outcome is invalid")
-    _validate_text_list(
-        value["evidence_source_ids"],
-        "comparison result.evidence_source_ids",
+    _validate_entity_ref(
+        value["current_event_ref"],
+        "comparison result.current_event_ref",
     )
-    _require_text(value["reason"], "comparison result.reason")
+    if "matched_entity_ref" in value:
+        _validate_entity_ref(
+            value["matched_entity_ref"],
+            "comparison result.matched_entity_ref",
+        )
+    if value["outcome"] not in {
+        "create",
+        "reinforce",
+        "contradict",
+        "resolve",
+        "replace",
+        "unrelated",
+    }:
+        raise CognitionContractError("comparison result outcome is invalid")
+    if not isinstance(value["evidence_refs"], list):
+        raise CognitionContractError("comparison result.evidence_refs is invalid")
+    for evidence_ref in value["evidence_refs"]:
+        _validate_evidence_ref(evidence_ref)
+
+
+def _validate_character_constraints(value: Any) -> None:
+    """Validate the read-only character constraint snapshot."""
+
+    if not isinstance(value, Mapping) or set(value) != {
+        "drives",
+        "standards",
+        "meaning_state",
+    }:
+        raise CognitionContractError("character constraints fields are not exact")
+    drives = value["drives"]
+    if not isinstance(drives, Mapping) or set(drives) != {
+        "autonomy",
+        "connection",
+        "safety",
+        "competence",
+        "care",
+        "integrity",
+        "exploration",
+        "meaning",
+    }:
+        raise CognitionContractError("character constraint drives are invalid")
+    for drive_id, drive in drives.items():
+        if not isinstance(drive, Mapping) or set(drive) != {
+            "importance",
+            "pressure",
+        }:
+            raise CognitionContractError(
+                f"character constraint drive {drive_id} is invalid"
+            )
+        _require_axis(drive["importance"], f"{drive_id}.importance")
+        _require_axis(drive["pressure"], f"{drive_id}.pressure")
+    standards = value["standards"]
+    if not isinstance(standards, list) or len(standards) > 16:
+        raise CognitionContractError("character constraint standards are invalid")
+    for standard in standards:
+        if not isinstance(standard, Mapping) or set(standard) != {
+            "standard_id",
+            "description",
+            "importance",
+        }:
+            raise CognitionContractError("character constraint standard is invalid")
+        if standard["standard_id"] not in {
+            "honesty",
+            "avoid_harm",
+            "respect_boundaries",
+            "follow_through",
+            "self_respect",
+        }:
+            raise CognitionContractError("character constraint standard id is invalid")
+        _require_text(standard["description"], "standard.description")
+        _require_axis(standard["importance"], "standard.importance")
+    meaning = value["meaning_state"]
+    allowed_meaning = {
+        "purpose_coherence",
+        "agency",
+        "identity_continuity",
+        "salience",
+    }
+    if isinstance(meaning, Mapping) and "low_coherence_since" in meaning:
+        allowed_meaning.add("low_coherence_since")
+    if not isinstance(meaning, Mapping) or set(meaning) != allowed_meaning:
+        raise CognitionContractError("character constraint meaning state is invalid")
+    for field_name in allowed_meaning - {"low_coherence_since"}:
+        _require_axis(meaning[field_name], f"meaning_state.{field_name}")
+    if "low_coherence_since" in meaning:
+        _require_utc_timestamp(
+            meaning["low_coherence_since"],
+            "meaning_state.low_coherence_since",
+        )
+
+
+def _validate_direct_fact(value: Any) -> None:
+    """Validate the exact trusted direct-fact envelope."""
+
+    required = {
+        "fact_id",
+        "producer",
+        "fact_kind",
+        "target_refs",
+        "evidence_ref",
+    }
+    if isinstance(value, Mapping) and "observed_progress" in value:
+        required.add("observed_progress")
+    if not isinstance(value, Mapping) or set(value) != required:
+        raise CognitionContractError("direct fact fields are not exact")
+    _require_text(value["fact_id"], "direct fact.fact_id")
+    if value["producer"] not in {
+        "action_result",
+        "resolver_observation",
+        "accepted_task_result",
+        "scheduler_event",
+        "promoted_source_metadata",
+    }:
+        raise CognitionContractError("direct fact producer is invalid")
+    if value["fact_kind"] not in {
+        "goal_progress_observed",
+        "goal_completed",
+        "goal_terminal_failure",
+        "goal_obstruction_removed",
+        "threat_resolved",
+        "event_repaired",
+        "knowledge_answered",
+        "deadline_reached",
+        "source_occurred",
+    }:
+        raise CognitionContractError("direct fact kind is invalid")
+    target_refs = value["target_refs"]
+    if not isinstance(target_refs, list) or not 1 <= len(target_refs) <= 8:
+        raise CognitionContractError("direct fact target_refs are invalid")
+    for target_ref in target_refs:
+        if not isinstance(target_ref, Mapping):
+            raise CognitionContractError("direct fact target ref is invalid")
+        if set(target_ref) == {"scope", "kind", "entity_id"}:
+            _validate_entity_ref(target_ref, "direct fact target ref")
+        else:
+            _validate_roles([target_ref], "direct fact target refs")
+    _validate_evidence_ref(value["evidence_ref"])
+    if "observed_progress" in value:
+        _require_axis(value["observed_progress"], "direct fact.observed_progress")
+
+
+def _validate_scene_context(value: Any) -> None:
+    """Validate semantic scene context without platform metadata."""
+
+    required = {
+        "channel_scope",
+        "character_role",
+        "semantic_scene",
+        "semantic_temporal_context",
+    }
+    if isinstance(value, Mapping) and "current_user_role" in value:
+        required.add("current_user_role")
+    if not isinstance(value, Mapping) or set(value) != required:
+        raise CognitionContractError("scene context fields are not exact")
+    if value["channel_scope"] not in {"private", "group", "internal"}:
+        raise CognitionContractError("scene context channel_scope is invalid")
+    for field_name in required - {"channel_scope"}:
+        _require_text(value[field_name], f"scene context.{field_name}")
+
+
+def _validate_canonical_episode(value: Any) -> CognitiveEpisode:
+    """Validate the frozen episode contract and translate its public error."""
+
+    required = {
+        "episode_id",
+        "trigger_source",
+        "input_sources",
+        "output_mode",
+        "percepts",
+        "target_scope",
+        "origin_metadata",
+        "storage_timestamp_utc",
+        "local_time_context",
+    }
+    if not isinstance(value, Mapping) or set(value) != required:
+        raise CognitionContractError("cognitive episode fields are not exact")
+    try:
+        validate_cognitive_episode(value)
+    except CognitiveEpisodeValidationError as exc:
+        raise CognitionContractError(str(exc)) from exc
+    return dict(value)  # type: ignore[return-value]
+
+
+def _validate_relationship_context(
+    value: Any,
+    *,
+    scope: str,
+    state: Mapping[str, Any],
+    episode: CognitiveEpisode,
+) -> None:
+    """Delegate optional relationship validation to the native state owner."""
+
+    if scope == "user":
+        owner_user_id = state.get("owner_user_id")
+    else:
+        owner_user_id = episode["target_scope"]["current_global_user_id"]
+    if not isinstance(owner_user_id, str) or not owner_user_id.strip():
+        raise CognitionContractError(
+            "relationship context requires an authorized target user"
+        )
+    try:
+        validate_relationship_state(
+            value,
+            owner_user_id=owner_user_id,
+        )
+    except CognitionStateError as exc:
+        raise CognitionContractError(str(exc)) from exc
+
+
+def _validate_surface_bid(value: Any) -> None:
+    """Validate the exact public bid projection allowed into L3."""
+
+    required = {
+        "motive",
+        "intention",
+        "desired_outcome",
+        "permitted_detail",
+        "target_summaries",
+        "expected_consequences",
+    }
+    if not isinstance(value, Mapping) or set(value) != required:
+        raise CognitionContractError("surface bid fields are not exact")
+    for field_name in (
+        "motive",
+        "intention",
+        "desired_outcome",
+        "permitted_detail",
+    ):
+        _require_text(value[field_name], f"surface bid.{field_name}", maximum=1000)
+    _validate_text_list(value["target_summaries"], "surface bid.target_summaries", allow_empty=True)
+    _validate_text_list(
+        value["expected_consequences"],
+        "surface bid.expected_consequences",
+        allow_empty=True,
+    )
+
+
+def _validate_action_result(value: Any) -> None:
+    """Validate one permitted semantic action result for L3."""
+
+    required = {"action_kind", "status", "semantic_result", "target_roles"}
+    if not isinstance(value, Mapping) or set(value) != required:
+        raise CognitionContractError("surface action result fields are not exact")
+    _require_text(value["action_kind"], "surface action result.action_kind")
+    if value["status"] not in {"completed", "failed", "unavailable"}:
+        raise CognitionContractError("surface action result.status is invalid")
+    _require_text(value["semantic_result"], "surface action result.semantic_result")
+    _validate_roles(value["target_roles"], "surface action result.target_roles")
+
+
+def _require_axis(value: Any, label: str) -> None:
+    """Require one non-boolean integer causal axis in the native range."""
+
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 100:
+        raise CognitionContractError(f"{label} is invalid")
+
+
+def _require_utc_timestamp(value: Any, label: str) -> None:
+    """Require an ISO-8601 UTC timestamp ending in Z."""
+
+    if not isinstance(value, str) or not value.endswith("Z"):
+        raise CognitionContractError(f"{label} is invalid")
+    try:
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00")
+    except ValueError as exc:
+        raise CognitionContractError(f"{label} is invalid") from exc
+    if parsed.tzinfo is None:
+        raise CognitionContractError(f"{label} is invalid")
 
 
 def _require_exact_keys(

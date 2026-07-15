@@ -58,7 +58,6 @@ MAX_SYNTHESIS_EVIDENCE_REFS = 12
 MAX_SYNTHESIS_EVIDENCE_ROWS = 18
 MAX_SYNTHESIS_EVIDENCE_EXCERPT_CHARS = 450
 MAX_LIMITATIONS_IN_ANSWER = 3
-MAX_EVIDENCE_ANCHORS = 24
 SYNTHESIS_LLM_CALL_TIMEOUT_SECONDS = 300
 UNGROUNDED_CODE_TERMS_LIMITATION = "Synthesis included ungrounded code terms."
 PUBLIC_SYNTHESIS_DIAGNOSTIC_LIMITATIONS = {
@@ -267,11 +266,6 @@ def synthesize_from_programmer_reports(
             *public_limitations,
             UNGROUNDED_CODE_TERMS_LIMITATION,
         ])
-    answer_text = _append_missing_evidence_anchors(
-        answer_text,
-        evidence=evidence,
-        max_answer_chars=max_answer_chars,
-    )
 
     _fill_trace(
         trace,
@@ -648,93 +642,6 @@ def _repair_ungrounded_answer_terms(
         "without inventing concrete code identifiers."
     )
     return fallback_answer, True
-
-
-def _append_missing_evidence_anchors(
-    answer_text: str,
-    *,
-    evidence: list[CodeEvidenceRow],
-    max_answer_chars: int,
-) -> str:
-    """Preserve bounded source identifiers omitted by synthesis prose.
-
-    The model owns the explanation, while this projection keeps selected
-    evidence identifiers visible when the model summarizes around them. Every
-    appended value is taken directly from a selected evidence row and the
-    result remains inside the caller's public answer limit.
-    """
-
-    anchors = _evidence_anchors(evidence)
-    missing = [
-        anchor
-        for anchor in anchors
-        if anchor.casefold() not in answer_text.casefold()
-    ]
-    if not missing:
-        return answer_text
-
-    prefix = "Evidence anchors: "
-    selected: list[str] = []
-    for anchor in missing:
-        candidate = prefix + ", ".join([
-            *_format_evidence_anchors(selected),
-            _format_evidence_anchor(anchor),
-        ])
-        if len(answer_text) + 2 + len(candidate) > max_answer_chars:
-            break
-        selected.append(anchor)
-    if not selected:
-        return answer_text
-    return f"{answer_text}\n\n{prefix}{', '.join(_format_evidence_anchors(selected))}"
-
-
-def _evidence_anchors(evidence: list[CodeEvidenceRow]) -> list[str]:
-    """Collect bounded code and markup anchors directly from evidence rows."""
-
-    anchors: list[str] = []
-    for row in evidence:
-        for value in (row["path"], row["symbol_or_topic"]):
-            if _is_evidence_anchor(value):
-                _append_unique(anchors, value)
-        excerpt = row["excerpt"]
-        for match in _PATH_TOKEN_RE.finditer(excerpt):
-            _append_unique(anchors, _clean_code_candidate(match.group(0)))
-        for match in _CODE_IDENTIFIER_RE.finditer(excerpt):
-            token = _clean_code_candidate(match.group(0))
-            if "_" in token or any(char.isupper() for char in token[1:]):
-                _append_unique(anchors, token)
-        for match in re.finditer(r"<[A-Za-z][^>]*>", excerpt):
-            _append_unique(anchors, match.group(0))
-        if len(anchors) >= MAX_EVIDENCE_ANCHORS:
-            break
-    return anchors[:MAX_EVIDENCE_ANCHORS]
-
-
-def _is_evidence_anchor(value: str) -> bool:
-    """Return whether a row field is useful as a public source anchor."""
-
-    return bool(
-        value
-        and (
-            _PATH_TOKEN_RE.fullmatch(value) is not None
-            or "_" in value
-            or any(char.isupper() for char in value[1:])
-        )
-    )
-
-
-def _format_evidence_anchor(value: str) -> str:
-    """Format a source anchor without changing its grounded value."""
-
-    if value.startswith("<") and value.endswith(">"):
-        return value
-    return f"`{value}`"
-
-
-def _format_evidence_anchors(values: list[str]) -> list[str]:
-    """Format a list of evidence anchors for the public answer."""
-
-    return [_format_evidence_anchor(value) for value in values]
 
 
 def _answer_with_required_limitations(

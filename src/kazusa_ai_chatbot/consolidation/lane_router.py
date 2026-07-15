@@ -597,6 +597,13 @@ async def _run_lane_specialists(
             working_state
         )
         working_state.update(self_guidance_patch)
+        reviewed_guidance = working_state.get("character_self_guidance")
+        if not isinstance(reviewed_guidance, dict) or not reviewed_guidance:
+            _disable_accepted_lane(
+                working_state,
+                accepted_lanes,
+                "character_self_guidance",
+            )
 
 
 def _disable_accepted_lane(

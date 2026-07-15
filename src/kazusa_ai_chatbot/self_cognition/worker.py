@@ -351,6 +351,10 @@ async def run_self_cognition_worker_tick(
                     case_for_run,
                     pipeline_run_handle=active_pipeline_handle,
                 )
+            _validate_worker_v2_cognition_result(
+                artifact_payloads,
+                required=run_case_func is None,
+            )
             if active_pipeline_handle is not None:
                 active_pipeline_handle.raise_if_cancelled(
                     "before_action_outputs",
@@ -436,6 +440,36 @@ async def run_self_cognition_worker_tick(
 
     await _record_worker_tick_event(result)
     return result
+
+
+def _validate_worker_v2_cognition_result(
+    artifact_payloads: dict[str, Any],
+    *,
+    required: bool,
+) -> None:
+    """Enforce character-scoped commit completion before worker delivery."""
+
+    output = artifact_payloads.get(models.ARTIFACT_COGNITION_OUTPUT)
+    if not isinstance(output, dict):
+        if required and models.ARTIFACT_COGNITION_INPUT in artifact_payloads:
+            raise StateContractError("self-cognition V2 output is missing")
+        return
+    core_output = output.get("cognition_core_output")
+    if not isinstance(core_output, dict):
+        if required:
+            raise StateContractError("self-cognition V2 core output is missing")
+        return
+    state_update = core_output.get("state_update")
+    if not isinstance(state_update, dict):
+        raise StateContractError("self-cognition V2 state update is missing")
+    if state_update.get("state_scope") != "character":
+        raise StateContractError(
+            "self-cognition V2 state update must use character scope"
+        )
+    if output.get("cognition_state_committed") is not True:
+        raise StateContractError(
+            "self-cognition V2 state was not committed before delivery"
+        )
 
 
 async def _self_cognition_worker_loop(

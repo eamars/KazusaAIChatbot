@@ -4,11 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-pytest.skip(
-    "Legacy profile and character-writer migration assertions retired at V2 cutover",
-    allow_module_level=True,
-)
-
 from unittest.mock import AsyncMock
 
 from kazusa_ai_chatbot.db import script_operations
@@ -18,6 +13,26 @@ from scripts import sanitize_memory_writer_perspective as sanitizer
 pytestmark = pytest.mark.asyncio
 
 CHARACTER_NAME = '杏山千纱 (Kyōyama Kazusa)'
+
+
+async def test_character_state_scan_uses_profile_self_image_lane(
+    monkeypatch,
+) -> None:
+    """Character scanning should use the remaining self-image owner."""
+
+    monkeypatch.setattr(
+        sanitizer,
+        'get_character_profile',
+        AsyncMock(return_value={
+            'self_image': {'recent_window': [{'summary': 'bounded'}]},
+        }),
+    )
+
+    records = await sanitizer.scan_character_state(limit=1)
+
+    assert records[0]['before'] == {
+        'self_image': {'recent_window': [{'summary': 'bounded'}]},
+    }
 
 
 async def test_dry_run_report_rewrites_ready_records(monkeypatch) -> None:
@@ -170,23 +185,10 @@ async def test_apply_report_uses_existing_user_and_character_helpers(
     async def _update_unit(unit_id, after, **kwargs):
         calls.append(('unit', unit_id, after, kwargs))
 
-    async def _update_insight(global_user_id, insight):
-        calls.append(('insight', global_user_id, insight))
-
-    async def _get_character_state():
-        calls.append(('get_character_state',))
-        return {'mood': 'Neutral', 'vibe_check': 'Calm'}
-
-    async def _upsert_state(mood, vibe_check, character_reflection, timestamp):
-        calls.append(('state', mood, vibe_check, character_reflection, timestamp))
-
     async def _upsert_self_image(image_doc):
         calls.append(('self_image', image_doc))
 
     monkeypatch.setattr(sanitizer, 'update_user_memory_unit_semantics', _update_unit)
-    monkeypatch.setattr(sanitizer, 'update_semantic_relationship_projection', _update_insight)
-    monkeypatch.setattr(sanitizer, 'get_character_state', _get_character_state)
-    monkeypatch.setattr(sanitizer, 'upsert_character_state', _upsert_state)
     monkeypatch.setattr(sanitizer, 'upsert_character_self_image', _upsert_self_image)
 
     report = {
@@ -218,7 +220,6 @@ async def test_apply_report_uses_existing_user_and_character_helpers(
                 'document_id': 'global',
                 'status': 'ready',
                 'after': {
-                    'character_reflection': f'{CHARACTER_NAME}平稳接住了说明。',
                     'self_image': {
                         'recent_window': [
                             {'summary': f'{CHARACTER_NAME}更重视边界表达。'},
@@ -237,19 +238,20 @@ async def test_apply_report_uses_existing_user_and_character_helpers(
 
     apply_result = await sanitizer.apply_report(report)
 
-    assert apply_result['applied_count'] == 3
+    assert apply_result['applied_count'] == 2
     assert apply_result['skipped_count'] == 1
-    assert apply_result['blocked_count'] == 0
+    assert apply_result['blocked_count'] == 1
     assert calls[0][0] == 'unit'
     assert calls[0][3]['increment_count'] is False
-    assert calls[1] == (
-        'insight',
-        'user-1',
-        f'{CHARACTER_NAME}认为用户愿意清楚说明边界。',
-    )
-    assert calls[2] == ('get_character_state',)
-    assert calls[3][0] == 'state'
-    assert calls[4][0] == 'self_image'
+    assert calls[1][0] == 'self_image'
+    assert apply_result['blocked_records'] == [{
+        'collection': sanitizer.SCOPE_USER_PROFILES,
+        'document_id': 'user-1',
+        'status': 'blocked',
+        'notes': [
+            'user-profile relationship prose is outside the V2 migration scope'
+        ],
+    }]
 
 
 async def test_apply_persistent_memory_uses_supersede(monkeypatch) -> None:

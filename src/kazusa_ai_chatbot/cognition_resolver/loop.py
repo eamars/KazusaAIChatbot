@@ -44,6 +44,9 @@ from kazusa_ai_chatbot.cognition_resolver.state import (
     carry_v2_resolver_working_state,
     new_v2_resolver_working_state,
 )
+from kazusa_ai_chatbot.cognition_resolver.telemetry import (
+    build_v2_resolver_telemetry_fields,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.past_dialog_cognition import (
     build_past_dialog_cognition_context_from_rag_result,
@@ -120,10 +123,20 @@ async def call_v2_resolver_loop(
             if isinstance(observation.get("rag_result"), Mapping):
                 current_context["rag_result"] = observation["rag_result"]
         current_context["resolver_observations"] = list(working["observations"])
+    terminal_output = working.get("cognition_output", {})
+    core_output = terminal_output.get("cognition_core_output")
+    telemetry_source = (
+        core_output if isinstance(core_output, Mapping) else terminal_output
+    )
+    telemetry = build_v2_resolver_telemetry_fields(
+        telemetry_source.get("resolver_requests", []),
+        telemetry_source.get("resolver_progress", {}),
+    )
     return {
         "working_state": working,
-        "cognition_output": working.get("cognition_output", {}),
+        "cognition_output": terminal_output,
         "observations": list(working["observations"]),
+        "telemetry": telemetry,
     }
 
 

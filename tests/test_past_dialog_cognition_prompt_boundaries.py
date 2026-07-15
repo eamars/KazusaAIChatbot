@@ -1,209 +1,98 @@
-"""Prompt boundary tests for past-dialog cognition residual."""
-
-from __future__ import annotations
-
-import pytest
-pytest.skip("Stage 1 assertions replaced by the V2 contract suite", allow_module_level=True)
+"""V2 past-dialog surface-boundary tests."""
 
 import json
+from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
-from kazusa_ai_chatbot.time_boundary import build_turn_clock
-from llm_test_helpers import bind_test_llm
+from kazusa_ai_chatbot.cognition_core_v2 import run_text_surface_planning
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionContractError,
+    TextSurfaceServicesV2,
+    validate_text_surface_input,
+)
+from llm_test_helpers import make_llm_call_config
+from tests.cognition_core_v2_test_helpers import canonical_episode
 
 
-class _CapturingLLM:
-    """Capture one stage call while returning a fixed JSON response."""
+class _PromptCaptureLLM:
+    """Capture public L3 prompts and return the exact surface-stage shape."""
 
-    def __init__(self, payload: dict) -> None:
-        self._payload = payload
-        self.messages: list[list[object]] = []
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
 
     async def ainvoke(
         self,
         messages: list[object],
         *,
-        config,
+        config: object,
     ) -> SimpleNamespace:
         del config
-        self.messages.append(messages)
-        return SimpleNamespace(
-            content=json.dumps(self._payload, ensure_ascii=False),
-        )
+        self.prompts.append(str(getattr(messages[-1], "content", "")))
+        return SimpleNamespace(content=json.dumps({"result": "bounded"}))
 
 
-def _episode() -> dict:
-    turn_clock = build_turn_clock("2026-06-24 10:15:00")
-    episode = build_text_chat_cognitive_episode(
-        episode_id="past-dialog-prompt-boundary-episode",
-        percept_id="past-dialog-prompt-boundary-percept",
-        storage_timestamp_utc=turn_clock["storage_timestamp_utc"],
-        local_time_context=turn_clock["local_time_context"],
-        user_input="What did you mean in that earlier message?",
-        platform="debug",
-        platform_channel_id="channel-1",
-        channel_type="private",
-        platform_message_id="message-1",
-        platform_user_id="platform-user-1",
-        global_user_id="user-1",
-        user_name="User",
-        active_turn_platform_message_ids=["message-1"],
-        active_turn_conversation_row_ids=["row-current"],
-        debug_modes={},
-        target_addressed_user_ids=["character-1"],
-        target_broadcast=False,
+def _surface_payload() -> dict[str, object]:
+    """Build one canonical packet carrying private past-dialog metadata."""
+
+    episode = canonical_episode(
+        episode_id="past-dialog-boundary",
+        content="visible current exchange",
+        metadata={"past_dialog": "RAW_PAST_DIALOG_SENTINEL"},
     )
-    return episode
-
-
-def _base_l2_state() -> dict:
-    episode = _episode()
+    episode["percepts"].append({
+        "percept_id": "private-past-dialog-percept",
+        "input_source": "dialog_text",
+        "content": "PRIVATE_PAST_DIALOG_SENTINEL",
+        "visibility": "audit_only",
+        "metadata": {"private_memory": "PRIVATE_MEMORY_SENTINEL"},
+    })
     return {
-        "user_input": "What did you mean in that earlier message?",
-        "prompt_message_context": {
-            "body_text": "What did you mean in that earlier message?",
-            "mentions": [],
-            "attachments": [],
-            "addressed_to_global_user_ids": ["character-1"],
-            "broadcast": False,
+        "schema_version": "text_surface_input.v2",
+        "episode": episode,
+        "intention": {
+            "route": "speech",
+            "intention": "continue the current exchange",
+            "target_roles": [],
+            "reason": "the current percept is visible",
         },
-        "reply_context": {
-            "reply_to_message_id": "past-message-1",
-            "reply_to_display_name": "Kazusa",
-            "reply_excerpt": "I meant that the idea needed time.",
+        "supporting_bids": [],
+        "expression_policy": {
+            "visibility": "visible",
+            "emotional_tone": "calm",
+            "intensity": "restrained",
+            "directness": "balanced",
         },
-        "user_name": "User",
-        "character_profile": {
-            "name": "Kazusa",
-            "global_user_id": "character-1",
-            "mood": "Neutral",
-            "vibe_check": "Calm",
-            "personality_brief": {"mbti": "INTJ"},
-        },
-        "local_time_context": episode["local_time_context"],
-        "user_profile": {
-            "relationship_state": 500,
-            "semantic_relationship_projection": "",
-        },
-        "cognitive_episode": episode,
-        "decontexualized_input": (
-            "The user asks about the meaning of an earlier Kazusa message."
-        ),
-        "rag_result": {
-            "answer": "",
-            "memory_evidence": [],
-            "conversation_evidence": [],
-            "external_evidence": [],
-            "recall_evidence": [],
-            "user_image": {},
-        },
-        "past_dialog_cognition_context": (
-            "Prior private context: she was tentative, not making a promise."
-        ),
-        "indirect_speech_context": "",
-        "emotional_appraisal": {"valence": "neutral"},
-        "interaction_subtext": {"summary": "past-message clarification"},
+        "semantic_affect": [],
+        "permitted_action_results": [],
+        "interaction_style_context": "brief and natural",
     }
 
 
-def _captured_payload(fake_llm: _CapturingLLM) -> dict:
-    messages = fake_llm.messages[0]
-    payload = json.loads(messages[1].content)
-    return payload
-
-
 @pytest.mark.asyncio
-async def test_l2a_receives_past_dialog_cognition_context_only_in_human_payload() -> None:
-    fake_llm = _CapturingLLM({
-        "internal_monologue": "The prior message was tentative.",
-        "logical_stance": "Clarify without overstating.",
-        "character_intent": "Explain continuity.",
-    })
-    token = l2_module.set_conscious_llm(
-        bind_test_llm(fake_llm, "conscious_llm"),
+async def test_surface_contract_excludes_raw_dialog_history() -> None:
+    """The public L3 path rejects retired maps and hides private episode data."""
+
+    invalid_payload = deepcopy(_surface_payload())
+    invalid_payload["episode"] = {
+        "semantic_scene": "retired semantic episode projection"
+    }
+    with pytest.raises(CognitionContractError):
+        validate_text_surface_input(invalid_payload)
+
+    llm = _PromptCaptureLLM()
+    services = TextSurfaceServicesV2(
+        llm=llm,
+        style_config=make_llm_call_config("past_dialog_style"),
+        content_plan_config=make_llm_call_config("past_dialog_content"),
+        preference_config=make_llm_call_config("past_dialog_preference"),
+        visual_config=make_llm_call_config("past_dialog_visual"),
     )
-    try:
-        await l2_module.call_cognition_consciousness(_base_l2_state())
-    finally:
-        l2_module.reset_conscious_llm(token)
+    await run_text_surface_planning(_surface_payload(), services)
 
-    payload = _captured_payload(fake_llm)
-    assert payload["past_dialog_cognition_context"] == (
-        "Prior private context: she was tentative, not making a promise."
-    )
-    serialized = json.dumps(payload, ensure_ascii=False)
-    assert "trace-" not in serialized
-    assert "raw_messages" not in serialized
-    assert "raw_response_text" not in serialized
-    assert "l2a_conscious_framing" not in serialized
-    assert "l2c1_judgment_synthesis" not in serialized
-
-
-@pytest.mark.asyncio
-async def test_l2a_omits_empty_past_dialog_cognition_context() -> None:
-    fake_llm = _CapturingLLM({
-        "internal_monologue": "No prior private context is available.",
-        "logical_stance": "Clarify from visible context.",
-        "character_intent": "Answer carefully.",
-    })
-    state = _base_l2_state()
-    state["past_dialog_cognition_context"] = ""
-    token = l2_module.set_conscious_llm(
-        bind_test_llm(fake_llm, "conscious_llm"),
-    )
-    try:
-        await l2_module.call_cognition_consciousness(state)
-    finally:
-        l2_module.reset_conscious_llm(token)
-
-    payload = _captured_payload(fake_llm)
-    assert "past_dialog_cognition_context" not in payload
-
-
-@pytest.mark.asyncio
-async def test_l2c1_does_not_receive_past_dialog_cognition_context() -> None:
-    fake_llm = _CapturingLLM({
-        "logical_stance": "Clarify without overstating.",
-        "character_intent": "Explain continuity.",
-        "judgment_note": "The prior message was tentative.",
-    })
-    state = _base_l2_state()
-    state.update({
-        "referents": [],
-        "internal_monologue": "The prior message was tentative.",
-        "logical_stance": "Clarify without overstating.",
-        "character_intent": "Explain continuity.",
-        "boundary_core_assessment": {
-            "boundary_issue": False,
-            "boundary_summary": "No boundary issue.",
-            "behavior_primary": "Clarify.",
-            "behavior_secondary": "Avoid overclaiming.",
-            "acceptance": "Allowed.",
-            "stance_bias": "Clarify.",
-            "identity_policy": "No identity pressure.",
-            "pressure_policy": "No pressure.",
-            "trajectory": "Normal clarification.",
-        },
-    })
-
-    token = l2_module.set_judgement_core_llm(
-        bind_test_llm(fake_llm, "judgement_core_llm"),
-    )
-    try:
-        await l2_module.call_judgment_core_agent(state)
-    finally:
-        l2_module.reset_judgement_core_llm(token)
-
-    payload = _captured_payload(fake_llm)
-    serialized = json.dumps(payload, ensure_ascii=False)
-    assert "past_dialog_cognition_context" not in serialized
-    assert "Prior private context" not in serialized
-
-
-def test_l1_system_prompt_does_not_reference_past_dialog_cognition_context() -> None:
-    assert "past_dialog_cognition_context" not in (
-        l1_module._COGNITION_SUBCONSCIOUS_PROMPT
-    )
+    rendered = "\n".join(llm.prompts)
+    assert "visible current exchange" in rendered
+    assert "RAW_PAST_DIALOG_SENTINEL" not in rendered
+    assert "PRIVATE_PAST_DIALOG_SENTINEL" not in rendered
+    assert "PRIVATE_MEMORY_SENTINEL" not in rendered

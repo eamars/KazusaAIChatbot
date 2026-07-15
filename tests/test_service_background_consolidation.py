@@ -1593,6 +1593,9 @@ async def test_build_graph_preserves_consolidation_state_from_supervisor(monkeyp
 
     async def _persona_supervisor(_state):
         return {
+            "cognition_core_output": {},
+            "cognition_state_update": {},
+            "cognition_state_committed": True,
             "final_dialog": ["好呀。"],
             "future_promises": [],
             "consolidation_state": {
@@ -1670,6 +1673,9 @@ async def test_build_graph_preserves_persona_no_response(monkeypatch):
 
     async def _persona_supervisor(_state):
         return {
+            "cognition_core_output": {},
+            "cognition_state_update": {},
+            "cognition_state_committed": True,
             "should_respond": False,
             "final_dialog": [],
             "target_addressed_user_ids": [],
@@ -1731,6 +1737,20 @@ async def test_build_graph_preserves_persona_no_response(monkeypatch):
     assert result["should_respond"] is False
     assert result["final_dialog"] == []
     assert result["consolidation_state"]["should_respond"] is False
+
+
+def test_brain_terminal_requires_v2_output_update_and_commit_marker() -> None:
+    """Terminal handling should fail closed before an incomplete V2 commit."""
+
+    from kazusa_ai_chatbot.brain_service.graph import validate_v2_terminal_state
+
+    with pytest.raises(ValueError, match="not committed"):
+        validate_v2_terminal_state({})  # type: ignore[arg-type]
+    assert validate_v2_terminal_state({
+        "cognition_core_output": {},
+        "cognition_state_update": {},
+        "cognition_state_committed": True,
+    }) == {}  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio

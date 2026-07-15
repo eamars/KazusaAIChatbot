@@ -63,7 +63,14 @@ def carry_v2_resolver_working_state(
         raise ResolverValidationError("invalid V2 working-state schema")
     updated = deepcopy(dict(working_state))
     updated["cognition_output"] = deepcopy(dict(cognition_output))
-    updated["pending_requests"] = list(cognition_output.get("resolver_requests", []))
+    core_output = cognition_output.get("cognition_core_output")
+    if isinstance(core_output, Mapping):
+        pending_requests = core_output.get("resolver_requests", [])
+    else:
+        pending_requests = cognition_output.get("resolver_requests", [])
+    if not isinstance(pending_requests, list):
+        raise ResolverValidationError("V2 resolver requests must be a list")
+    updated["pending_requests"] = deepcopy(pending_requests)
     updated["cycle_index"] = int(updated["cycle_index"]) + 1
     updated["terminal"] = not bool(updated["pending_requests"])
     return updated  # type: ignore[return-value]

@@ -18,12 +18,14 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     SelectedIntentionV2,
     SemanticActionRequestV2,
 )
+from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
 ROUTE_PROMPT = '''Select only a route from the supplied complete bid handles.
 Return JSON with selected_bid_handle and route, plus action_handle or
-resolver_handle only when the selected bid declares that capability. Do not
-author intention, reason, targets, details, or evidence.
+resolver_handle only when the selected bid declares that capability.
+Do not rewrite bid content. Do not author intention, reason, targets, details,
+or evidence.
 
 # Output Format
 Return exactly selected_bid_handle and route. Add action_handle only for an
@@ -106,7 +108,7 @@ async def select_route(
         config=services.action_selection_config,
     )
     decision = _validate_route_decision(
-        services.parse_json(response.content),
+        parse_llm_json_output(response.content),
         bid_handles,
         action_handles,
         resolver_handles,

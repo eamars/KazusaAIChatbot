@@ -20,6 +20,7 @@ from kazusa_ai_chatbot.db.users import (
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionCoreServicesV2,
+    EVIDENCE_SOURCE_QUESTION_IDS,
     TextSurfaceServicesV2,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
@@ -28,6 +29,7 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
 )
 
 from llm_test_helpers import make_llm_call_config
+from tests.cognition_core_v2_test_helpers import canonical_episode
 from tests.live_llm_mongo import live_db, seed_shared_documents, unique_owner_id
 
 
@@ -39,6 +41,7 @@ class _ScriptedLLM:
 
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.human_calls: list[str] = []
 
     async def ainvoke(
         self,
@@ -55,7 +58,7 @@ class _ScriptedLLM:
             roles = question["permitted_role_handles"]
             result = {
                 "question_id": question["question_id"],
-                "selected_evidence_handles": ["ev1"],
+                "selected_evidence_handles": ["e1"],
                 "selected_role_handles": roles[:1],
                 "propositions": [],
                 "deltas": [],
@@ -68,7 +71,7 @@ class _ScriptedLLM:
                 "concrete_detail": "use the current episode only",
                 "reason": "the episode supplies bounded evidence",
                 "target_role_handles": [],
-                "evidence_handles": ["ev1"],
+                "evidence_handles": ["e1"],
                 "expected_consequences": ["preserve continuity"],
                 "confidence": "high",
                 "requested_route": "speech",
@@ -89,18 +92,8 @@ class _ScriptedLLM:
             stage = payload["stage"]
             result = {"result": f"bounded {stage} guidance"}
         self.calls.append(system)
+        self.human_calls.append(human)
         return SimpleNamespace(content=json.dumps(result))
-
-
-class _Logger:
-    """No-op logger for injected V2 services."""
-
-    def debug(self, message: str, *args: object, **kwargs: object) -> None:
-        del message, args, kwargs
-
-    info = debug
-    warning = debug
-    error = debug
 
 
 def _core_services(llm: _ScriptedLLM) -> CognitionCoreServicesV2:
@@ -112,8 +105,6 @@ def _core_services(llm: _ScriptedLLM) -> CognitionCoreServicesV2:
         goal_cognition_config=make_llm_call_config("v2_goal"),
         collapse_config=make_llm_call_config("v2_collapse"),
         action_selection_config=make_llm_call_config("v2_route"),
-        parse_json=json.loads,
-        logger=_Logger(),
     )
 
 
@@ -126,8 +117,6 @@ def _surface_services(llm: _ScriptedLLM) -> TextSurfaceServicesV2:
         content_plan_config=make_llm_call_config("v2_content"),
         preference_config=make_llm_call_config("v2_preference"),
         visual_config=make_llm_call_config("v2_visual"),
-        parse_json=json.loads,
-        logger=_Logger(),
     )
 
 
@@ -149,12 +138,14 @@ def _input(
         )
     return {
         "schema_version": "cognition_core_input.v2",
-        "episode": {
-            "episode_id": episode_id,
-            "trigger_source": trigger_source,
-            "semantic_scene": "private evidence-grounded exchange",
-            "semantic_temporal_context": "immediate",
-        },
+        "episode": canonical_episode(
+            episode_id=episode_id,
+            trigger_source=trigger_source,
+            content="private evidence-grounded exchange",
+            current_global_user_id=str(
+                state.get("owner_user_id", "integration-user")
+            ),
+        ),
         "state_scope": state_scope,
         "mutable_state": state,
         "character_constraints": {
@@ -163,7 +154,7 @@ def _input(
             "meaning_state": character["meaning_state"],
         },
         "evidence": [{
-            "evidence_handle": "ev1",
+            "evidence_handle": "e1",
             "evidence_ref": {
                 "source_kind": "episode",
                 "source_id": f"episode:{episode_id}",
@@ -171,7 +162,7 @@ def _input(
                 "semantic_summary": "the user supplied a direct bounded episode",
             },
             "semantic_text": "the user supplied a direct bounded episode",
-            "visible_to": ["cognition", "surface"],
+            "visible_to": list(EVIDENCE_SOURCE_QUESTION_IDS["episode"]),
         }],
         "direct_facts": [],
         "available_actions": [],
@@ -263,11 +254,10 @@ async def test_v2_surface_receives_semantic_handoff_only() -> None:
     llm = _ScriptedLLM()
     input_payload = {
         "schema_version": "text_surface_input.v2",
-        "episode": {
-            "episode_id": "surface-episode",
-            "semantic_scene": "private scene",
-            "semantic_temporal_context": "immediate",
-        },
+        "episode": canonical_episode(
+            episode_id="v2-surface-integration",
+            content="private scene",
+        ),
         "intention": {
             "route": "speech",
             "intention": "acknowledge the episode",
@@ -299,6 +289,62 @@ async def test_v2_surface_receives_semantic_handoff_only() -> None:
     assert output["schema_version"] == "text_surface_output.v2"
     assert output["content_plan"] == "bounded content_plan guidance"
     assert len(llm.calls) == 4
+    rendered_prompts = "\n".join(llm.human_calls)
+    for raw_value in (
+        "v2-surface-integration",
+        "percept:v2-surface-integration",
+        "channel-test",
+        "platform-user-test",
+        "message-test",
+    ):
+        assert raw_value not in rendered_prompts
+    assert '"target_scope"' not in rendered_prompts
+    assert '"origin_metadata"' not in rendered_prompts
+    assert '"storage_timestamp_utc"' not in rendered_prompts
+
+
+@pytest.mark.asyncio
+async def test_v2_surface_skips_visual_stage_when_episode_disables_it() -> None:
+    """The retained debug mode prevents the optional visual model call."""
+
+    llm = _ScriptedLLM()
+    episode = canonical_episode(
+        episode_id="v2-surface-no-visual",
+        content="private scene",
+    )
+    episode["origin_metadata"]["debug_modes"] = {
+        "no_visual_directives": True,
+    }
+    input_payload = {
+        "schema_version": "text_surface_input.v2",
+        "episode": episode,
+        "intention": {
+            "route": "speech",
+            "intention": "acknowledge the episode",
+            "target_roles": [],
+            "reason": "grounded evidence",
+        },
+        "supporting_bids": [],
+        "expression_policy": {
+            "visibility": "visible",
+            "emotional_tone": "neutral",
+            "intensity": "restrained",
+            "directness": "balanced",
+        },
+        "semantic_affect": [],
+        "permitted_action_results": [],
+        "interaction_style_context": "calm and concise",
+    }
+
+    output = await run_text_surface_planning(
+        input_payload,
+        _surface_services(llm),
+    )
+
+    assert len(llm.calls) == 3
+    assert output["pacing_guidance"] == (
+        "Visual and pacing guidance is disabled for this episode."
+    )
 
 
 @pytest.mark.live_db
@@ -312,7 +358,7 @@ async def test_test_database_private_chat_smoke(
     await _run_db_user_smoke(
         live_db,
         request,
-        trigger_source="persona_user_message",
+        trigger_source="user_message",
     )
 
 
@@ -327,7 +373,7 @@ async def test_test_database_resolver_recurrence_smoke(
     await _run_db_user_smoke(
         live_db,
         request,
-        trigger_source="resolver_recurrence",
+        trigger_source="user_message",
     )
 
 
@@ -344,7 +390,7 @@ async def test_test_database_self_cognition_smoke(live_db: object) -> None:
                 episode_id="db-smoke-self-cognition",
                 mutable_state=deepcopy(snapshot),
                 state_scope="character",
-                trigger_source="self_cognition",
+                trigger_source="internal_thought",
             ),
             _core_services(_ScriptedLLM()),
         )

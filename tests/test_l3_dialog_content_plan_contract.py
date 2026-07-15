@@ -10,22 +10,16 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     validate_text_surface_output,
 )
 from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as surface_module
+from tests.cognition_core_v2_test_helpers import (
+    canonical_cognition_output,
+    canonical_episode,
+)
 
 
 def _cognition_output() -> dict[str, Any]:
     """Build the semantic output shape required by surface projection."""
 
-    return {
-        "intention": {"route": "speech", "intention": "acknowledge", "target_roles": [], "reason": "grounded"},
-        "supporting_bids": [],
-        "affect_projection": [],
-        "expression_policy": {
-            "visibility": "visible",
-            "emotional_tone": "warm",
-            "intensity": "restrained",
-            "directness": "balanced",
-        },
-    }
+    return canonical_cognition_output()
 
 
 def _state() -> dict[str, Any]:
@@ -33,9 +27,10 @@ def _state() -> dict[str, Any]:
 
     return {
         "cognition_core_output": _cognition_output(),
-        "cognitive_episode": {
-            "semantic_scene": "conversation",
-        },
+        "cognitive_episode": canonical_episode(
+            episode_id="l3-dialog-content-plan",
+            content="conversation",
+        ),
         "user_input": "hello",
         "action_results": [],
     }
@@ -44,7 +39,10 @@ def _state() -> dict[str, Any]:
 def test_surface_input_uses_native_v2_contract() -> None:
     """Surface input contains semantic projections rather than directive bags."""
 
-    payload = surface_module.build_text_surface_input_from_global_state(_state())
+    payload = surface_module.build_text_surface_input_from_global_state(
+        _state(),
+        interaction_style_context="brief and natural",
+    )
 
     assert payload["schema_version"] == "text_surface_input.v2"
     assert payload["intention"]["route"] == "speech"
@@ -89,6 +87,25 @@ async def test_surface_handler_returns_native_output(monkeypatch) -> None:
         surface_module,
         "run_text_surface_planning",
         _fake_planner,
+    )
+
+    async def _style_context(**kwargs: Any) -> dict[str, Any]:
+        del kwargs
+        return {
+            "user_style": {
+                "speech_guidelines": [],
+                "social_guidelines": [],
+                "pacing_guidelines": [],
+                "engagement_guidelines": [],
+                "confidence": "",
+            },
+            "application_order": ["user_style"],
+        }
+
+    monkeypatch.setattr(
+        surface_module,
+        "build_interaction_style_context",
+        _style_context,
     )
 
     result = await surface_module.call_l3_text_surface_handler(_state())

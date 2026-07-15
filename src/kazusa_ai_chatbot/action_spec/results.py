@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Literal, NotRequired, TypeAlias, TypedDict
 
 from kazusa_ai_chatbot.cognition_core_v2.contracts import RoleRefV2
@@ -57,6 +58,7 @@ class ActionResultV1(TypedDict):
     accepted_task_summary: NotRequired[str]
     wait_guidance: NotRequired[str]
     acknowledgement_constraint: NotRequired[str]
+    semantic_result_v2: NotRequired["SemanticActionResultV2"]
 
 
 class SemanticActionResultV2(TypedDict):
@@ -87,6 +89,34 @@ def project_semantic_action_result_v2(
         "semantic_result": semantic_result,
         "target_roles": list(target_roles),
     }
+
+
+def project_trace_action_result_v2(
+    row: Mapping[str, object],
+) -> SemanticActionResultV2:
+    """Project one executed trace row into the exact V2 surface outcome."""
+
+    trace_status = _string_field(row, "status")
+    if trace_status in {"executed", "scheduled", "pending"}:
+        status = "completed"
+    elif trace_status == "failed":
+        status = "failed"
+    else:
+        status = "unavailable"
+    semantic_result = _string_field(row, "result_summary").strip()
+    if not semantic_result:
+        semantic_result = f"{_string_field(row, 'action_kind')} {trace_status}"
+    target_roles = row.get("target_roles")
+    if not isinstance(target_roles, list):
+        target_roles = []
+    return project_semantic_action_result_v2(
+        action_kind=_string_field(row, "action_kind") or "unknown",
+        status=status,
+        semantic_result=semantic_result,
+        target_roles=[
+            role for role in target_roles if isinstance(role, dict)
+        ],
+    )
 
 
 class SurfaceOutputV1(TypedDict):

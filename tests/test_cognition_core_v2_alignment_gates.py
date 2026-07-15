@@ -6,6 +6,8 @@ import pytest
 
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionContractError,
+    EVIDENCE_SOURCE_QUESTION_IDS,
+    validate_cognition_core_input,
 )
 from kazusa_ai_chatbot.cognition_core_v2.semantic_source_planner import (
     QUESTION_KINDS,
@@ -15,11 +17,7 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
 )
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
-    validate_cognition_core_input,
-)
-
-
+from tests.cognition_core_v2_test_helpers import canonical_episode
 NOW = "2026-07-14T00:00:00Z"
 
 
@@ -46,7 +44,7 @@ def _evidence(source_kind: str = "episode") -> list[dict[str, object]]:
             "semantic_summary": "bounded episode evidence",
         },
         "semantic_text": "A bounded semantic observation is available.",
-        "visible_to": [],
+        "visible_to": list(EVIDENCE_SOURCE_QUESTION_IDS[source_kind]),
     }]
 
 
@@ -107,7 +105,12 @@ def test_v2_input_rejects_scope_mismatch_before_any_model_call() -> None:
     )
     payload = {
         "schema_version": "cognition_core_input.v2",
-        "episode": {},
+        "episode": canonical_episode(
+            episode_id="alignment-direct-fact",
+            trigger_source="internal_thought",
+            output_mode="think_only",
+            current_global_user_id="user-d",
+        ),
         "state_scope": "character",
         "mutable_state": state,
         "character_constraints": _constraints(),

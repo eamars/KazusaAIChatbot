@@ -29,17 +29,6 @@ InternalThoughtDryRunStatus = Literal[
 _INTERNAL_THOUGHT_DRY_RUN_OUTPUT_MODES = frozenset(
     ("think_only", "preview", "silent"),
 )
-_INTERNAL_THOUGHT_DRY_RUN_PROMPT_KEYS = [
-    "l1_subconscious.internal_thought_internal_monologue",
-    "l2a_conscious_framing.internal_thought_internal_monologue",
-    "l2b_boundary_appraisal.internal_thought_internal_monologue",
-    "l2c1_judgment_synthesis.internal_thought_internal_monologue",
-    "l2c2_social_context_appraisal.internal_thought_internal_monologue",
-    "l2d_action_selection.internal_thought_internal_monologue",
-]
-_INTERNAL_THOUGHT_DRY_RUN_PROMPT_KEYS_WITHOUT_VISUAL = list(
-    _INTERNAL_THOUGHT_DRY_RUN_PROMPT_KEYS
-)
 _INTERNAL_MONOLOGUE_MAX_CHARACTERS = 4000
 _ACTION_LATCH_TEXT_MAX_CHARACTERS = 1000
 _INTERNAL_THOUGHT_INPUT_TEXT = (
@@ -86,8 +75,8 @@ class InternalThoughtCognitionDryRunAudit(TypedDict):
     trigger_source: Literal["internal_thought"]
     input_sources: list[Literal["internal_monologue"]]
     output_mode: InternalThoughtDryRunOutputMode
-    prompt_variant: Literal["internal_thought_internal_monologue"]
-    prompt_keys: list[str]
+    cognition_schema_version: Literal["cognition_core_input.v2"]
+    state_scope: Literal["character"]
     cognition_output_keys: list[str]
 
 
@@ -241,8 +230,8 @@ async def run_internal_thought_cognition_dry_run(
             "trigger_source": "internal_thought",
             "input_sources": ["internal_monologue"],
             "output_mode": output_mode,
-            "prompt_variant": "internal_thought_internal_monologue",
-            "prompt_keys": [],
+            "cognition_schema_version": "cognition_core_input.v2",
+            "state_scope": "character",
             "cognition_output_keys": [],
         }
         return audit
@@ -258,8 +247,8 @@ async def run_internal_thought_cognition_dry_run(
             "trigger_source": "internal_thought",
             "input_sources": ["internal_monologue"],
             "output_mode": output_mode,
-            "prompt_variant": "internal_thought_internal_monologue",
-            "prompt_keys": [],
+            "cognition_schema_version": "cognition_core_input.v2",
+            "state_scope": "character",
             "cognition_output_keys": [],
         }
         return audit
@@ -336,11 +325,6 @@ async def run_internal_thought_cognition_dry_run(
     }
     cognition_result = await call_cognition_subgraph_func(dry_run_state)
     cognition_output_keys = sorted(cognition_result)
-    if debug_modes.get("no_visual_directives"):
-        prompt_keys = list(_INTERNAL_THOUGHT_DRY_RUN_PROMPT_KEYS_WITHOUT_VISUAL)
-    else:
-        prompt_keys = list(_INTERNAL_THOUGHT_DRY_RUN_PROMPT_KEYS)
-
     audit = {
         "status": "completed",
         "skip_reason": "",
@@ -351,8 +335,8 @@ async def run_internal_thought_cognition_dry_run(
         "trigger_source": "internal_thought",
         "input_sources": ["internal_monologue"],
         "output_mode": output_mode,
-        "prompt_variant": "internal_thought_internal_monologue",
-        "prompt_keys": prompt_keys,
+        "cognition_schema_version": "cognition_core_input.v2",
+        "state_scope": "character",
         "cognition_output_keys": cognition_output_keys,
     }
     return audit
