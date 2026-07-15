@@ -41,7 +41,15 @@ async def run_surface_stage(
         raise ValueError("surface stage prompt exceeds the contract cap")
     response = await services.llm.ainvoke(
         [
-            SystemMessage(content="Return one concise semantic surface plan."),
+            SystemMessage(
+                content=(
+                    "Return exactly one JSON object with exactly one key, "
+                    '"result". The result value must be one concise semantic '
+                    "surface guidance string of at most 1000 characters. "
+                    "Do not return any other keys, nested objects, dialogue, "
+                    "or numeric fields."
+                )
+            ),
             HumanMessage(content=prompt_text),
         ],
         config=config,

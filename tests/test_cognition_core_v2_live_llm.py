@@ -1,7 +1,10 @@
 """One-case live-LLM lifecycle evidence for the validation-only V2 core."""
 
 import json
+from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -15,8 +18,21 @@ from kazusa_ai_chatbot.cognition_core_v2.diagnostics import (
     validation_capture_snapshot,
     write_validation_capture,
 )
+from kazusa_ai_chatbot.db.character import (
+    get_character_cognition_state,
+    replace_character_cognition_state,
+)
+from kazusa_ai_chatbot.db.users import (
+    get_user_cognition_state,
+    replace_user_cognition_state,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_cognition_core_services,
+)
+from tests.live_llm_mongo import (
+    live_db,
+    seed_shared_documents,
+    unique_owner_id,
 )
 
 _FIXTURE_PATH = Path("tests/fixtures/cognition_core_v2_emotion_lifecycle_cases.json")
@@ -62,26 +78,31 @@ def _chain_input(
     *,
     episode_id: str,
     mutable_state: dict[str, object] | None = None,
+    state_scope: str = "user",
+    trigger_source: str = "user_message",
+    channel_scope: str = "private",
 ) -> dict[str, object]:
     """Build one native V2 input for a live causal lifecycle case."""
 
     updated_at = "2026-07-14T00:00:00Z"
     character = build_character_production_state(updated_at=updated_at)
     semantic_text = message or "no new causal event"
-    state = mutable_state or build_acquaintance_user_state(
-        global_user_id="live-v2-user",
-        updated_at=updated_at,
-    )
+    state = mutable_state
+    if state is None:
+        state = build_acquaintance_user_state(
+            global_user_id="live-v2-user",
+            updated_at=updated_at,
+        )
     return {
         "schema_version": "cognition_core_input.v2",
         "episode": {
             "episode_id": episode_id,
-            "trigger_source": "user_message",
+            "trigger_source": trigger_source,
             "output_mode": "visible_reply",
             "semantic_scene": semantic_text,
             "semantic_temporal_context": "immediate",
         },
-        "state_scope": "user",
+        "state_scope": state_scope,
         "mutable_state": state,
         "character_constraints": {
             "drives": character["drives"],
@@ -103,12 +124,218 @@ def _chain_input(
         "available_actions": [],
         "available_resolver_capabilities": [],
         "scene_context": {
-            "channel_scope": "private",
+            "channel_scope": channel_scope,
             "character_role": "companion",
             "semantic_scene": semantic_text,
             "semantic_temporal_context": "immediate",
         },
     }
+
+
+async def _prepare_user_state(
+    live_db: Any,
+    request: pytest.FixtureRequest,
+) -> tuple[str, dict[str, object]]:
+    """Create one owner-isolated user row from the validated shared seed."""
+
+    await seed_shared_documents(live_db)
+    owner_id = unique_owner_id(request.node.nodeid)
+    seed = await live_db.user_profiles.find_one(
+        {"global_user_id": "seed-s2-acquaintance"},
+    )
+    if seed is None:
+        raise AssertionError("the shared acquaintance seed is missing")
+    state = deepcopy(seed["cognition_state"])
+    state["owner_user_id"] = owner_id
+    state["relationship"]["other_user_id"] = owner_id
+    state["relationship"]["relationship_id"] = (
+        f"relationship:user:{owner_id}"
+    )
+    document = {"global_user_id": owner_id, "cognition_state": state}
+    await live_db.user_profiles.insert_one(document)
+    loaded_state = await get_user_cognition_state(owner_id)
+    return owner_id, loaded_state
+
+
+async def _run_live_case(
+    case_id: str,
+    live_db: Any,
+    request: pytest.FixtureRequest,
+    *,
+    message: str,
+    trigger_source: str = "user_message",
+    channel_scope: str = "private",
+) -> None:
+    """Run one guarded V2 case and persist its validated replacement state."""
+
+    owner_id, state = await _prepare_user_state(live_db, request)
+    try:
+        payload = _chain_input(
+            message,
+            episode_id=f"live-v2-{case_id}",
+            mutable_state=state,
+            trigger_source=trigger_source,
+            channel_scope=channel_scope,
+        )
+        reset_validation_capture(case_id)
+        try:
+            output = await run_cognition(
+                payload,
+                build_cognition_core_services(),
+            )
+        except Exception:
+            write_validation_capture()
+            raise
+        capture = validation_capture_snapshot()
+        artifact_path = write_validation_capture()
+        replacement = output["state_update"]["replacement_state"]
+        await replace_user_cognition_state(owner_id, replacement)
+        reloaded = await get_user_cognition_state(owner_id)
+
+        assert output["schema_version"] == "cognition_core_output.v2"
+        assert output["state_update"]["state_scope"] == "user"
+        assert reloaded["owner_user_id"] == owner_id
+        assert capture is not None
+        assert artifact_path.exists()
+    finally:
+        await live_db.user_profiles.delete_one(
+            {"global_user_id": owner_id},
+        )
+
+
+async def _run_character_case(
+    case_id: str,
+    live_db: Any,
+    *,
+    message: str,
+) -> None:
+    """Run one character-scoped case and restore the singleton exactly."""
+
+    await seed_shared_documents(live_db)
+    snapshot = await get_character_cognition_state()
+    try:
+        payload = _chain_input(
+            message,
+            episode_id=f"live-v2-{case_id}",
+            mutable_state=deepcopy(snapshot),
+            state_scope="character",
+            trigger_source="self_cognition",
+        )
+        reset_validation_capture(case_id)
+        output = await run_cognition(payload, build_cognition_core_services())
+        capture = validation_capture_snapshot()
+        artifact_path = write_validation_capture()
+        await replace_character_cognition_state(
+            output["state_update"]["replacement_state"],
+        )
+
+        assert output["schema_version"] == "cognition_core_output.v2"
+        assert output["state_update"]["state_scope"] == "character"
+        assert capture is not None
+        assert artifact_path.exists()
+    finally:
+        await replace_character_cognition_state(snapshot)
+
+
+async def _run_lifecycle_case(
+    case_id: str,
+    live_db: Any,
+    request: pytest.FixtureRequest,
+) -> None:
+    """Run baseline, natural cause, sustain, fade, and negative controls."""
+
+    owner_id, mutable_state = await _prepare_user_state(live_db, request)
+    reset_validation_capture(f"lifecycle-sequence-{case_id}")
+    services = build_cognition_core_services()
+    outputs: list[dict[str, object]] = []
+    try:
+        for phase, message in (
+            ("baseline", _NEUTRAL_MESSAGE),
+            ("begin", _CASE_MESSAGES[case_id]),
+            ("sustain", _CASE_MESSAGES[case_id]),
+            ("fade", _RESOLUTION_MESSAGE),
+        ):
+            payload = _chain_input(
+                message,
+                episode_id=f"live-v2-{case_id}-{phase}",
+                mutable_state=mutable_state,
+            )
+            output = await run_cognition(payload, services)
+            mutable_state = output["state_update"]["replacement_state"]
+            await replace_user_cognition_state(owner_id, mutable_state)
+            outputs.append(output)
+
+        negative_payload = _chain_input(
+            _NEUTRAL_MESSAGE,
+            episode_id=f"live-v2-{case_id}-negative-control",
+            mutable_state=mutable_state,
+        )
+        negative_output = await run_cognition(negative_payload, services)
+        outputs.append(negative_output)
+        capture = validation_capture_snapshot()
+        artifact_path = write_validation_capture()
+
+        assert all(
+            output["schema_version"] == "cognition_core_output.v2"
+            for output in outputs
+        )
+        assert capture is not None
+        assert artifact_path.exists()
+    finally:
+        await live_db.user_profiles.delete_one(
+            {"global_user_id": owner_id},
+        )
+
+
+async def _run_cross_model_case(
+    live_db: Any,
+    request: pytest.FixtureRequest,
+) -> None:
+    """Run one ambiguous episode through two configured model routes."""
+
+    owner_id, state = await _prepare_user_state(live_db, request)
+    services = build_cognition_core_services()
+    primary_model = services.appraisal_config.model
+    comparison_model = services.action_selection_config.model
+    if primary_model == comparison_model:
+        raise AssertionError(
+            "COGNITION_LLM and BOUNDARY_CORE_LLM must use distinct models"
+        )
+    try:
+        outputs: list[dict[str, object]] = []
+        for index, service_set in enumerate(
+            (
+                services,
+                replace(
+                    services,
+                    appraisal_config=services.action_selection_config,
+                    goal_cognition_config=services.action_selection_config,
+                    collapse_config=services.action_selection_config,
+                ),
+            )
+        ):
+            payload = _chain_input(
+                "The same ambiguous event could mean support or criticism;"
+                " ask what the speaker intends before judging it.",
+                episode_id=f"live-v2-cross-model-{index}",
+                mutable_state=deepcopy(state),
+            )
+            reset_validation_capture(f"cross-model-{index}")
+            output = await run_cognition(payload, service_set)
+            outputs.append(output)
+            capture = validation_capture_snapshot()
+            artifact_path = write_validation_capture()
+            assert capture is not None
+            assert artifact_path.exists()
+
+        assert all(
+            output["schema_version"] == "cognition_core_output.v2"
+            for output in outputs
+        )
+    finally:
+        await live_db.user_profiles.delete_one(
+            {"global_user_id": owner_id},
+        )
 
 
 @pytest.mark.live_llm
@@ -189,3 +416,390 @@ async def test_live_v2_lifecycle_sequence_writes_complete_raw_capture(
     )
     assert capture is not None
     assert artifact_path.exists()
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_joy_lifecycle_live_llm(live_db, request) -> None:
+    """Exercise the natural joy lifecycle through the guarded V2 core."""
+
+    await _run_lifecycle_case("joy", live_db, request)
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_fear_lifecycle_live_llm(live_db, request) -> None:
+    """Exercise the natural fear lifecycle through the guarded V2 core."""
+
+    await _run_lifecycle_case("fear", live_db, request)
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_anger_lifecycle_live_llm(live_db, request) -> None:
+    """Exercise the natural anger lifecycle through the guarded V2 core."""
+
+    await _run_lifecycle_case("anger", live_db, request)
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_sadness_lifecycle_live_llm(live_db, request) -> None:
+    """Exercise the natural sadness lifecycle through the guarded V2 core."""
+
+    await _run_lifecycle_case("sadness", live_db, request)
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_disgust_lifecycle_live_llm(live_db, request) -> None:
+    """Exercise the natural disgust lifecycle through the guarded V2 core."""
+
+    await _run_lifecycle_case("disgust", live_db, request)
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_surprise_lifecycle_live_llm(live_db, request) -> None:
+    """Exercise the natural surprise lifecycle through the guarded V2 core."""
+
+    await _run_lifecycle_case("surprise", live_db, request)
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_love_attachment_lifecycle_live_llm(live_db, request) -> None:
+    """Exercise the natural attachment lifecycle through the guarded core."""
+
+    await _run_lifecycle_case("love_attachment", live_db, request)
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_compassion_empathy_lifecycle_live_llm(live_db, request) -> None:
+    """Exercise the natural compassion lifecycle through the guarded core."""
+
+    await _run_lifecycle_case("compassion_empathy", live_db, request)
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_gratitude_lifecycle_live_llm(live_db, request) -> None:
+    """Exercise the natural gratitude lifecycle through the guarded core."""
+
+    await _run_lifecycle_case("gratitude", live_db, request)
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_jealousy_lifecycle_live_llm(live_db, request) -> None:
+    """Exercise the natural jealousy lifecycle through the guarded core."""
+
+    await _run_lifecycle_case("jealousy", live_db, request)
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_envy_lifecycle_live_llm(live_db, request) -> None:
+    """Exercise the natural envy lifecycle through the guarded V2 core."""
+
+    await _run_lifecycle_case("envy", live_db, request)
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_pride_lifecycle_live_llm(live_db, request) -> None:
+    """Exercise the natural pride lifecycle through the guarded V2 core."""
+
+    await _run_lifecycle_case("pride", live_db, request)
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_shame_lifecycle_live_llm(live_db, request) -> None:
+    """Exercise the natural shame lifecycle through the guarded V2 core."""
+
+    await _run_lifecycle_case("shame", live_db, request)
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_guilt_lifecycle_live_llm(live_db, request) -> None:
+    """Exercise the natural guilt lifecycle through the guarded V2 core."""
+
+    await _run_lifecycle_case("guilt", live_db, request)
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_embarrassment_lifecycle_live_llm(live_db, request) -> None:
+    """Exercise the natural embarrassment lifecycle through the core."""
+
+    await _run_lifecycle_case("embarrassment", live_db, request)
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_curiosity_lifecycle_live_llm(live_db, request) -> None:
+    """Exercise the natural curiosity lifecycle through the guarded core."""
+
+    await _run_lifecycle_case("curiosity", live_db, request)
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_awe_lifecycle_live_llm(live_db, request) -> None:
+    """Exercise the natural awe lifecycle through the guarded V2 core."""
+
+    await _run_lifecycle_case("awe", live_db, request)
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_nostalgia_lifecycle_live_llm(live_db, request) -> None:
+    """Exercise the natural nostalgia lifecycle through the guarded core."""
+
+    await _run_lifecycle_case("nostalgia", live_db, request)
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_loneliness_lifecycle_live_llm(live_db, request) -> None:
+    """Exercise the natural loneliness lifecycle through the guarded core."""
+
+    await _run_lifecycle_case("loneliness", live_db, request)
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_relief_lifecycle_live_llm(live_db, request) -> None:
+    """Exercise the natural relief lifecycle through the guarded V2 core."""
+
+    await _run_lifecycle_case("relief", live_db, request)
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_ennui_existential_angst_lifecycle_live_llm(live_db, request) -> None:
+    """Exercise the natural existential-ennui lifecycle through the core."""
+
+    await _run_lifecycle_case("ennui_existential_angst", live_db, request)
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_jealousy_scoped_appraisal_live_llm(live_db, request) -> None:
+    """Capture a jealousy appraisal with only its guarded user scope."""
+
+    await _run_live_case(
+        "jealousy-scoped-appraisal",
+        live_db,
+        request,
+        message=_CASE_MESSAGES["jealousy"],
+    )
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_guilt_scoped_appraisal_live_llm(live_db, request) -> None:
+    """Capture a guilt appraisal with only its guarded user scope."""
+
+    await _run_live_case(
+        "guilt-scoped-appraisal",
+        live_db,
+        request,
+        message=_CASE_MESSAGES["guilt"],
+    )
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_relief_scoped_appraisal_live_llm(live_db, request) -> None:
+    """Capture a relief appraisal with only its guarded user scope."""
+
+    await _run_live_case(
+        "relief-scoped-appraisal",
+        live_db,
+        request,
+        message=_CASE_MESSAGES["relief"],
+    )
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_ambiguous_user_meaning_uses_semantic_lane_live_llm(
+    live_db,
+    request,
+) -> None:
+    """Capture an ambiguous message that requires semantic clarification."""
+
+    await _run_live_case(
+        "ambiguous-user-meaning",
+        live_db,
+        request,
+        message=(
+            "The same ambiguous event could mean support or criticism; ask"
+            " what the speaker intends before judging it."
+        ),
+    )
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_jealousy_full_pipeline_live_llm_db(live_db, request) -> None:
+    """Capture a complete jealousy pipeline with guarded persistence."""
+
+    await _run_live_case(
+        "jealousy-full-pipeline",
+        live_db,
+        request,
+        message=_CASE_MESSAGES["jealousy"],
+    )
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_guilt_full_pipeline_live_llm_db(live_db, request) -> None:
+    """Capture a complete guilt pipeline with guarded persistence."""
+
+    await _run_live_case(
+        "guilt-full-pipeline",
+        live_db,
+        request,
+        message=_CASE_MESSAGES["guilt"],
+    )
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_relief_full_pipeline_live_llm_db(live_db, request) -> None:
+    """Capture a complete relief pipeline with guarded persistence."""
+
+    await _run_live_case(
+        "relief-full-pipeline",
+        live_db,
+        request,
+        message=_CASE_MESSAGES["relief"],
+    )
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_group_user_scope_full_pipeline_live_llm_db(live_db, request) -> None:
+    """Capture group-origin cognition while retaining the user scope."""
+
+    await _run_live_case(
+        "group-user-scope",
+        live_db,
+        request,
+        message="A group discussion created a clear request for my view.",
+        trigger_source="group_message",
+        channel_scope="group",
+    )
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_media_observation_full_pipeline_live_llm_db(
+    live_db,
+    request,
+) -> None:
+    """Capture a typed media observation in a guarded user scope."""
+
+    await _run_live_case(
+        "media-observation",
+        live_db,
+        request,
+        message="The attached image shows a damaged bridge after the storm.",
+    )
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_resolver_recurrence_full_pipeline_live_llm_db(
+    live_db,
+    request,
+) -> None:
+    """Capture recurrence while retaining the originating user owner."""
+
+    await _run_live_case(
+        "resolver-recurrence",
+        live_db,
+        request,
+        message="Continue the unresolved question using the current evidence.",
+        trigger_source="resolver_recurrence",
+    )
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_self_cognition_character_scope_live_llm_db(live_db) -> None:
+    """Capture self-cognition against the restored character singleton."""
+
+    await _run_character_case(
+        "self-cognition-character-scope",
+        live_db,
+        message="Review the current purpose and choose one grounded next step.",
+    )
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_accepted_task_result_full_pipeline_live_llm_db(
+    live_db,
+    request,
+) -> None:
+    """Capture accepted-task result re-entry through the user scope."""
+
+    await _run_live_case(
+        "accepted-task-result",
+        live_db,
+        request,
+        message="The accepted task completed and its bounded result is ready.",
+        trigger_source="accepted_task_result_ready",
+    )
+
+
+@pytest.mark.live_llm
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_same_ambiguous_events_report_cross_model_variance_live_llm(
+    live_db,
+    request,
+) -> None:
+    """Capture the same ambiguous event through both configured model routes."""
+
+    await _run_cross_model_case(live_db, request)

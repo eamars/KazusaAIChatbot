@@ -24,6 +24,11 @@ ROUTE_PROMPT = '''Select only a route from the supplied complete bid handles.
 Return JSON with selected_bid_handle and route, plus action_handle or
 resolver_handle only when the selected bid declares that capability. Do not
 author intention, reason, targets, details, or evidence.
+
+# Output Format
+Return exactly selected_bid_handle and route. Add action_handle only for an
+action route and resolver_handle only for an evidence route. route must be one
+of speech, evidence, action, deferral, or silence. Do not emit any other field.
 '''
 
 

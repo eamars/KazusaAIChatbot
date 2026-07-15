@@ -23,7 +23,20 @@ GOAL_COGNITION_PROMPT = '''You are one independent goal cognition branch.
 Use only the supplied semantic context, evidence handles, and capability handles.
 Return one complete bid draft. Do not mutate state, invent evidence, or author
 the final route decision. A bid may request speech, evidence, action, deferral,
-or silence. Use empty target and consequence lists when unsupported.
+or silence. Use an empty target list when unsupported. Always provide at least
+one bounded expected consequence for a complete bid.
+
+# Output Format
+Return exactly one JSON object with exactly these required fields:
+intention, desired_outcome, concrete_detail, reason, target_role_handles,
+evidence_handles, expected_consequences, confidence, and requested_route.
+The four prose fields and confidence are strings. target_role_handles and
+evidence_handles are arrays of strings; expected_consequences is a non-empty
+array of strings. requested_route is one of speech, evidence, action, deferral,
+or silence. Add requested_action_handle or
+requested_resolver_handle only when that capability is declared by the bid.
+Do not emit target_roles, role_handles, semantic_text, action details, numeric
+confidence, or any other field.
 '''
 
 
@@ -169,7 +182,7 @@ def validate_goal_bid_draft(
     target_roles = _handles(parsed["target_role_handles"], role_handles, "role")
     cited_evidence = _handles(parsed["evidence_handles"], evidence_handles, "evidence")
     consequences = parsed["expected_consequences"]
-    if not isinstance(consequences, list) or len(consequences) > 8:
+    if not isinstance(consequences, list) or not 1 <= len(consequences) <= 8:
         raise ValueError("goal bid consequences are invalid")
     for consequence in consequences:
         _bounded_text(consequence, "consequence", 240)

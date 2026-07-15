@@ -1,6 +1,7 @@
 """Checkpoint E integration tests for V2 facade and surface handoff."""
 
 import json
+from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
@@ -8,6 +9,14 @@ import pytest
 from kazusa_ai_chatbot.cognition_core_v2 import (
     run_cognition,
     run_text_surface_planning,
+)
+from kazusa_ai_chatbot.db.character import (
+    get_character_cognition_state,
+    replace_character_cognition_state,
+)
+from kazusa_ai_chatbot.db.users import (
+    get_user_cognition_state,
+    replace_user_cognition_state,
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionCoreServicesV2,
@@ -19,6 +28,7 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
 )
 
 from llm_test_helpers import make_llm_call_config
+from tests.live_llm_mongo import live_db, seed_shared_documents, unique_owner_id
 
 
 NOW = "2026-07-14T00:00:00Z"
@@ -121,22 +131,32 @@ def _surface_services(llm: _ScriptedLLM) -> TextSurfaceServicesV2:
     )
 
 
-def _input() -> dict[str, object]:
+def _input(
+    *,
+    episode_id: str = "e-integration",
+    mutable_state: dict[str, object] | None = None,
+    state_scope: str = "user",
+    trigger_source: str = "user_message",
+) -> dict[str, object]:
     """Build one evidence-grounded user episode."""
 
     character = build_character_production_state(updated_at=NOW)
+    state = mutable_state
+    if state is None:
+        state = build_acquaintance_user_state(
+            global_user_id="integration-user",
+            updated_at=NOW,
+        )
     return {
         "schema_version": "cognition_core_input.v2",
         "episode": {
-            "episode_id": "e-integration",
+            "episode_id": episode_id,
+            "trigger_source": trigger_source,
             "semantic_scene": "private evidence-grounded exchange",
             "semantic_temporal_context": "immediate",
         },
-        "state_scope": "user",
-        "mutable_state": build_acquaintance_user_state(
-            global_user_id="integration-user",
-            updated_at=NOW,
-        ),
+        "state_scope": state_scope,
+        "mutable_state": state,
         "character_constraints": {
             "drives": character["drives"],
             "standards": character["standards"],
@@ -146,7 +166,7 @@ def _input() -> dict[str, object]:
             "evidence_handle": "ev1",
             "evidence_ref": {
                 "source_kind": "episode",
-                "source_id": "episode:e-integration",
+                "source_id": f"episode:{episode_id}",
                 "occurred_at": NOW,
                 "semantic_summary": "the user supplied a direct bounded episode",
             },
@@ -163,6 +183,63 @@ def _input() -> dict[str, object]:
             "semantic_temporal_context": "immediate",
         },
     }
+
+
+async def _prepare_db_user(
+    live_db: object,
+    request: pytest.FixtureRequest,
+) -> tuple[str, dict[str, object]]:
+    """Create one owner-isolated user row from the checked-in seed."""
+
+    await seed_shared_documents(live_db)
+    owner_id = unique_owner_id(request.node.nodeid)
+    seed = await live_db.user_profiles.find_one(
+        {"global_user_id": "seed-s2-acquaintance"},
+    )
+    if seed is None:
+        raise AssertionError("the shared acquaintance seed is missing")
+    state = deepcopy(seed["cognition_state"])
+    state["owner_user_id"] = owner_id
+    state["relationship"]["other_user_id"] = owner_id
+    state["relationship"]["relationship_id"] = (
+        f"relationship:user:{owner_id}"
+    )
+    await live_db.user_profiles.insert_one({
+        "global_user_id": owner_id,
+        "cognition_state": state,
+    })
+    return owner_id, await get_user_cognition_state(owner_id)
+
+
+async def _run_db_user_smoke(
+    live_db: object,
+    request: pytest.FixtureRequest,
+    *,
+    trigger_source: str,
+) -> None:
+    """Exercise one user-scoped facade run and durable replacement reload."""
+
+    owner_id, state = await _prepare_db_user(live_db, request)
+    try:
+        output = await run_cognition(
+            _input(
+                episode_id=f"db-smoke-{trigger_source}",
+                mutable_state=state,
+                trigger_source=trigger_source,
+            ),
+            _core_services(_ScriptedLLM()),
+        )
+        replacement = output["state_update"]["replacement_state"]
+        await replace_user_cognition_state(owner_id, replacement)
+        reloaded = await get_user_cognition_state(owner_id)
+        assert output["schema_version"] == "cognition_core_output.v2"
+        assert output["state_update"]["state_scope"] == "user"
+        assert reloaded["owner_user_id"] == owner_id
+        assert reloaded == replacement
+    finally:
+        await live_db.user_profiles.delete_one(
+            {"global_user_id": owner_id},
+        )
 
 
 @pytest.mark.asyncio
@@ -222,3 +299,75 @@ async def test_v2_surface_receives_semantic_handoff_only() -> None:
     assert output["schema_version"] == "text_surface_output.v2"
     assert output["content_plan"] == "bounded content_plan guidance"
     assert len(llm.calls) == 4
+
+
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_test_database_private_chat_smoke(
+    live_db: object,
+    request: pytest.FixtureRequest,
+) -> None:
+    """Verify the private-chat user state path against the test database."""
+
+    await _run_db_user_smoke(
+        live_db,
+        request,
+        trigger_source="persona_user_message",
+    )
+
+
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_test_database_resolver_recurrence_smoke(
+    live_db: object,
+    request: pytest.FixtureRequest,
+) -> None:
+    """Verify recurrence preserves the originating user state owner."""
+
+    await _run_db_user_smoke(
+        live_db,
+        request,
+        trigger_source="resolver_recurrence",
+    )
+
+
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_test_database_self_cognition_smoke(live_db: object) -> None:
+    """Verify character-scoped cognition persists and restores its singleton."""
+
+    await seed_shared_documents(live_db)
+    snapshot = await get_character_cognition_state()
+    try:
+        output = await run_cognition(
+            _input(
+                episode_id="db-smoke-self-cognition",
+                mutable_state=deepcopy(snapshot),
+                state_scope="character",
+                trigger_source="self_cognition",
+            ),
+            _core_services(_ScriptedLLM()),
+        )
+        replacement = output["state_update"]["replacement_state"]
+        await replace_character_cognition_state(replacement)
+        reloaded = await get_character_cognition_state()
+        assert output["schema_version"] == "cognition_core_output.v2"
+        assert output["state_update"]["state_scope"] == "character"
+        assert reloaded == replacement
+    finally:
+        await replace_character_cognition_state(snapshot)
+
+
+@pytest.mark.live_db
+@pytest.mark.asyncio
+async def test_test_database_accepted_task_result_smoke(
+    live_db: object,
+    request: pytest.FixtureRequest,
+) -> None:
+    """Verify accepted-task results use the user-scoped cognition path."""
+
+    await _run_db_user_smoke(
+        live_db,
+        request,
+        trigger_source="accepted_task_result_ready",
+    )

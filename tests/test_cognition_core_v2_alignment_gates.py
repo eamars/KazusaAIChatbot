@@ -69,6 +69,15 @@ def test_episode_evidence_selects_each_family_once_with_unique_path_owners() -> 
     assert len({path for question in questions for path in question["permitted_delta_paths"]}) == sum(
         len(question["permitted_delta_paths"]) for question in questions
     )
+    all_paths = [
+        path
+        for question in questions
+        for path in question["permitted_delta_paths"]
+    ]
+    assert all(
+        not path.endswith((".salience", ".importance", ".progress"))
+        for path in all_paths
+    )
 
 
 def test_scheduler_evidence_selects_only_goal_threat_outcome() -> None:

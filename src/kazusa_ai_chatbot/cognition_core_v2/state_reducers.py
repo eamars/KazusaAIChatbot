@@ -73,6 +73,14 @@ def apply_semantic_appraisals(
                 delta["target_path"],
                 local_handle_to_ref,
             )
+            try:
+                _target_for_prompt_path(
+                    updated,
+                    delta["target_path"].split("."),
+                    local_handle_to_ref,
+                )
+            except CognitionStateError:
+                continue
             native_handles = [
                 evidence_by_handle[handle]
                 for handle in delta["evidence_handles"]
@@ -89,7 +97,12 @@ def apply_semantic_appraisals(
                 unsupported.append(proposal)
             else:
                 translated.append(proposal)
-    _retain_prompt_evidence(updated, results, evidence_by_handle, handle_to_ref)
+    _retain_prompt_evidence(
+        updated,
+        results,
+        evidence_by_handle,
+        local_handle_to_ref,
+    )
     updated = apply_semantic_deltas(updated, translated)
     _recompute_new_causal_salience(
         updated,
@@ -265,7 +278,7 @@ def _apply_proposition_transition(
             transitioned = transition_event(
                 entity,
                 transition="resolved",
-                evidence=marker,
+                evidence={"outcome_kind": "repair"},
             )
         elif entity_kind == "knowledge_gap":
             transitioned = transition_knowledge_gap(
@@ -454,7 +467,10 @@ def _retain_prompt_evidence(
         for delta in result["deltas"]:
             handles.update(delta["evidence_handles"])
             path = delta["target_path"].split(".")
-            target = _target_for_prompt_path(state, path, handle_to_ref)
+            try:
+                target = _target_for_prompt_path(state, path, handle_to_ref)
+            except CognitionStateError:
+                continue
             if "evidence_refs" in target:
                 _append_evidence_rows(
                     target,

@@ -204,4 +204,4 @@ def _changed_paths(
             paths.append(path)
 
     visit(previous, current, "")
-    return sorted(set(path.lstrip(".")) for path in paths if path)
+    return sorted({path.lstrip(".") for path in paths if path})

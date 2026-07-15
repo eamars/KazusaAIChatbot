@@ -38,6 +38,22 @@ Return exactly one JSON object with question_id, selected_evidence_handles,
 selected_role_handles, propositions, deltas, and explanation. Every
 proposition and delta must cite supplied evidence handles. Unknown or
 unsupported meaning must be omitted rather than guessed.
+
+Each proposition object must contain exactly proposition_kind,
+subject_handle, evidence_handles, role_assignments, and semantic_value. It may
+also contain object_handle. Each role assignment must contain exactly role and
+entity_handle. Each delta object must contain exactly target_path, delta,
+evidence_handles, and reason. Use the supplied role handles and delta paths
+literally. Do not emit kind, handle, semantic_text, role_handles, path, or any
+other proposition or delta field.
+semantic_value is one concise descriptive clause: target 120 characters and
+never exceed 200 characters. Do not repeat the standards, constraints, or
+evidence explanation inside it. It is never a number; only the delta field
+carries a numeric value. Keep each delta reason at most 300 characters and
+the explanation at most 1000 characters.
+The role field must be one of actor, experiencer, target, object,
+affected_goal, or affected_relationship. Entity handles such as r1, ce1, ct1,
+and ck1 belong in entity_handle, never in the role field.
 '''
 
 

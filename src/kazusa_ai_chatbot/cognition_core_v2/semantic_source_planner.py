@@ -275,14 +275,11 @@ def _permitted_delta_paths(
             f"goals.{handle_map[entity['entity_id']]}.{axis}"
             for entity in state["goals"]
             for axis in (
-                "importance",
-                "progress",
                 "obstruction",
                 "expected_success",
                 "controllability",
                 "recoverability",
                 "urgency",
-                "salience",
             )
         )
         paths.extend(
@@ -295,7 +292,6 @@ def _permitted_delta_paths(
                 "controllability",
                 "coping_potential",
                 "residual_pressure",
-                "salience",
             )
         )
         paths.extend(
@@ -323,7 +319,6 @@ def _permitted_delta_paths(
                 "learnability",
                 "novelty",
                 "model_accommodation",
-                "salience",
             )
         )
     elif question_kind == "existential_drive":
@@ -331,15 +326,15 @@ def _permitted_delta_paths(
             f"drives.{handle_map[drive_id]}.pressure"
             for drive_id in state.get("drives", {})
         )
-        paths.extend(
-            f"meaning_state.m1.{axis}"
-            for axis in (
-                "purpose_coherence",
-                "agency",
-                "identity_continuity",
-                "salience",
+        if isinstance(state.get("meaning_state"), Mapping):
+            paths.extend(
+                f"meaning_state.m1.{axis}"
+                for axis in (
+                    "purpose_coherence",
+                    "agency",
+                    "identity_continuity",
+                )
             )
-        )
     else:
         raise ValueError(f"unknown semantic question kind: {question_kind}")
     paths.extend(_candidate_delta_paths(question_kind, handle_map))
@@ -378,7 +373,6 @@ def _candidate_delta_paths(
             "learnability",
             "novelty",
             "model_accommodation",
-            "salience",
         )
     elif question_kind == "existential_drive":
         event_axes = ()

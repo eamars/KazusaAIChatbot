@@ -678,7 +678,7 @@ venv\Scripts\python -m pytest tests\test_cognition_core_v2_integration.py::test_
 - Evidence: `live_llm/gate_g.md`, `performance/gate_g.md`,
   `calibration/gate_g_implementation.md`, `calibration/gate_g_architect.md`.
 - Handoff: Checkpoint H only after architect sign-off.
-- Sign-off: `<architect/date>`.
+- Sign-off: `Codex parent architect / 2026-07-15`; exact G live/model/DB/performance packet and both calibration records are aligned. H and I remain open.
 
 ### Checkpoint H — legacy deletion and full release-candidate regression
 

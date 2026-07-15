@@ -462,10 +462,10 @@ also requires the independent review record.
   - Verify/evidence/handoff: execution-manifest Checkpoint F.
   - Calibration: `S2-O1`, `S2-O2`, `S2-O5`, `S2-O7`.
   - Sign-off: `Codex/2026-07-14` (parent-owned single-agent execution); exact F packet 200 passed and extended deterministic packet 228 passed; evidence is under test_artifacts/cognition_core_v2/stage_2/integration/ and calibration/; then reread all three plan documents.
-- [ ] Checkpoint G — isolated live/model/DB/performance evidence signed.
+- [x] Checkpoint G — isolated live/model/DB/performance evidence signed.
   - Verify/evidence/handoff: execution-manifest Checkpoint G and fixed live manifest.
   - Calibration: `S2-O3` through `S2-O9`.
-  - Sign-off: `<architect/date>`; then reread all three plan documents.
+  - Sign-off: `Codex takeover production owner / Codex parent architect / 2026-07-15`; exact scoped/full, lifecycle, cross-model, relationship, DB smoke, isolation, and paired V1/V2 benchmark commands pass; both calibration records are `Status: aligned`; evidence is under `test_artifacts/cognition_core_v2/stage_2/live_llm/`, `performance/`, and `calibration/`; then reread all three plan documents.
 - [ ] Checkpoint H — legacy deletion and full candidate regression signed.
   - Verify/evidence/handoff: execution-manifest Checkpoint H.
   - Calibration: `S2-O1`, `S2-O2`, `S2-O8`, `S2-O9`, `S2-O10`.
