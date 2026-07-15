@@ -192,6 +192,49 @@ def _build_current_image_observation(
     return return_value
 
 
+def select_media_for_turn(
+    multimedia_input: list[dict],
+) -> tuple[list[dict], bool]:
+    """Select the opening and newest unique images for one settled turn.
+
+    Args:
+        multimedia_input: All attachment rows retained for the turn.
+
+    Returns:
+        Selected image rows and whether additional image rows were omitted.
+    """
+
+    image_rows = [
+        row
+        for row in multimedia_input
+        if isinstance(row, dict)
+        and str(row.get("content_type", "")).startswith("image/")
+    ]
+    unique_rows: list[dict] = []
+    seen_keys: set[str] = set()
+    for row in image_rows:
+        base64_data = row.get("base64_data", "")
+        source_key = base64_data or row.get("url", "") or row.get(
+            "description",
+            "",
+        )
+        if not isinstance(source_key, str):
+            source_key = ""
+        content_key = hashlib.sha256(source_key.encode("utf-8")).hexdigest()
+        if content_key in seen_keys:
+            continue
+        seen_keys.add(content_key)
+        unique_rows.append(row)
+
+    if len(unique_rows) <= 4:
+        return_value = (unique_rows, False)
+        return return_value
+
+    selected_rows = [unique_rows[0], *unique_rows[-3:]]
+    return_value = (selected_rows, True)
+    return return_value
+
+
 async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
     """Refresh prompt-safe media descriptions for the current chat turn.
 
@@ -209,9 +252,22 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
     # Read the multi-media content
     user_multimedia_input = state.get("user_multimedia_input", [])
     output_multimedia_input = []
+    selected_media, additional_media_present = select_media_for_turn(
+        user_multimedia_input,
+    )
+    selected_media_ids = {id(piece) for piece in selected_media}
 
     for piece in user_multimedia_input:
         if piece["content_type"].startswith("image/"):
+            if id(piece) not in selected_media_ids:
+                output_piece = {
+                    "content_type": piece["content_type"],
+                    "base64_data": piece["base64_data"],
+                    "description": piece.get("description", ""),
+                }
+                output_multimedia_input.append(output_piece)
+                continue
+
             if not piece["base64_data"]:
                 output_piece = {
                     "content_type": piece["content_type"],
@@ -302,7 +358,10 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
                     result = {}
                 else:
                     try:
-                        result = parse_llm_json_output(response.content)
+                        result = parse_llm_json_output(
+                            response.content,
+                            deterministic_only=True,
+                        )
                     except Exception as exc:
                         logger.warning(
                             f"Image descriptor fallback after parse exception: {exc} "
@@ -390,6 +449,7 @@ async def multimedia_descriptor_agent(state: IMProcessState) -> IMProcessState:
 
     return_value = {
         "user_multimedia_input": output_multimedia_input,
+        "additional_media_present": additional_media_present,
         "prompt_message_context": prompt_message_context,
         "cognitive_episode": cognitive_episode,
     }

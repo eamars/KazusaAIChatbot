@@ -138,6 +138,14 @@ use `max_completion_tokens`.
 The caller chooses which config profile to pass. `LLInterface` only maps that
 config into backend-compatible request fields.
 
+The relevance stages impose stricter caller-owned budgets while sharing the
+existing `RELEVANCE_AGENT_LLM` route: frontline uses a 256-token completion
+cap and thinking disabled, while settled relevance uses a 512-token cap and
+thinking disabled. Their prompts are measured at 8,000 and 16,000 rendered
+characters respectively. These limits belong to the stage modules; the
+interface transports the resulting `LLMCallConfig` without changing the
+semantic contract.
+
 ## Public Invocation Contract
 
 `LLInterface` exposes:

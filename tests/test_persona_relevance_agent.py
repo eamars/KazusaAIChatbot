@@ -1,4 +1,4 @@
-"""Tests for relevance_agent.py — relevance gate logic."""
+"""Tests for the persona-aware settled relevance contract."""
 
 from __future__ import annotations
 
@@ -7,610 +7,193 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
-from kazusa_ai_chatbot.db import DatabaseOperationError
-from kazusa_ai_chatbot.nodes import persona_relevance_agent as relevance_module
-from kazusa_ai_chatbot.nodes.persona_relevance_agent import (
+import kazusa_ai_chatbot.relevance.persona_relevance_agent as relevance_module
+from kazusa_ai_chatbot.relevance.persona_relevance_agent import (
+    SETTLED_RELEVANCE_MAX_COMPLETION_TOKENS,
+    SETTLED_RELEVANCE_MAX_INPUT_CHARS,
     build_group_attention_context,
+    build_settled_relevance_messages,
     relevance_agent,
+    validate_settled_relevance_decision,
 )
 
 
-def _base_state():
-    """Build the minimal graph state shared by relevance-agent tests.
+def _base_state() -> dict:
+    """Build a minimal settled relevance state."""
 
-    Returns:
-        State containing the required fields consumed by relevance and
-        multimedia descriptor handlers.
-    """
-    time_context = {
-        "current_local_datetime": "2024-01-01 00:00",
-        "current_local_weekday": "Monday",
-    }
-    state = {
-        "storage_timestamp_utc": "2024-01-01T00:00:00Z",
-        "local_time_context": time_context,
-        "platform": "discord",
-        "platform_message_id": "msg_123",
-        "platform_user_id": "user_123",
-        "global_user_id": "uuid-123",
-        "user_name": "TestUser",
-        "user_input": "Hello bot!",
-        "user_multimedia_input": [],
-        "user_profile": {"affinity": 500, "last_relationship_insight": ""},
-        "platform_bot_id": "bot_456",
-        "message_envelope": {
-            "body_text": "Hello bot!",
-            "raw_wire_text": "Hello bot!",
-            "addressed_to_global_user_ids": [],
-            "mentions": [],
-            "attachments": [],
-            "broadcast": True,
-        },
-        "prompt_message_context": {
-            "body_text": "Hello bot!",
-            "addressed_to_global_user_ids": [],
-            "broadcast": True,
-            "mentions": [],
-            "attachments": [],
-        },
-        "character_name": "TestCharacter",
+    return {
+        "user_input": "Hello character.",
+        "user_profile": {"affinity": 500},
         "character_profile": {
             "name": "Character",
             "global_user_id": "character-global-id",
-            "mood": "neutral",
-            "global_vibe": "calm",
-            "reflection_summary": "nothing notable",
         },
-        "platform_channel_id": "chan_1",
+        "platform_bot_id": "bot-id",
+        "global_user_id": "user-id",
+        "platform_channel_id": "channel-id",
         "channel_type": "group",
-        "channel_name": "general",
         "chat_history_wide": [],
         "chat_history_recent": [],
-        "reply_context": {},
-        "debug_modes": {},
-    }
-    state["cognitive_episode"] = build_text_chat_cognitive_episode(
-        episode_id="episode-msg_123",
-        percept_id="percept-msg_123-dialog",
-        storage_timestamp_utc=state["storage_timestamp_utc"],
-        local_time_context=time_context,
-        user_input=state["user_input"],
-        platform=state["platform"],
-        platform_channel_id=state["platform_channel_id"],
-        channel_type=state["channel_type"],
-        platform_message_id=state["platform_message_id"],
-        platform_user_id=state["platform_user_id"],
-        global_user_id=state["global_user_id"],
-        user_name=state["user_name"],
-        debug_modes=state["debug_modes"],
-        target_addressed_user_ids=[],
-        target_broadcast=True,
-    )
-    return state
-
-
-def _history_row(
-    *,
-    role: str = "user",
-    platform_user_id: str = "user_123",
-    timestamp_utc: str = "2026-04-27T10:00:00+00:00",
-    reply_context: dict | None = None,
-    addressed_to_global_user_ids: list[str] | None = None,
-    content: str = "",
-    broadcast: bool = False,
-) -> dict:
-    """Build a trimmed conversation-history row for relevance tests.
-
-    Args:
-        role: Conversation role.
-        platform_user_id: Platform user id that produced the row.
-        timestamp_utc: Storage UTC timestamp for active-window selection.
-        reply_context: Optional structured reply metadata.
-        addressed_to_global_user_ids: Typed addressee UUIDs for the row.
-        content: Optional content fixture.
-        broadcast: Whether the row is addressed to the whole channel.
-
-    Returns:
-        Trimmed history row matching ``trim_history_dict`` shape.
-    """
-    return {
-        "role": role,
-        "platform_user_id": platform_user_id,
-        "timestamp": timestamp_utc,
-        "reply_context": reply_context or {},
-        "addressed_to_global_user_ids": addressed_to_global_user_ids or [],
-        "content": content,
-        "broadcast": broadcast,
+        "assembled_fragments": [{
+            "body_text": "Hello character.",
+            "semantic_target_labels": ["character"],
+            "reply_target_label": "none",
+            "media_labels": [],
+        }],
+        "fresh_history": [],
+        "media_descriptions": [],
+        "scene_context": "A quiet group conversation.",
+        "relationship_context": "The user is familiar.",
+        "observation_status": "observation_complete",
     }
 
 
 def _llm_response(content: str) -> MagicMock:
     """Return a small mock object shaped like a LangChain response."""
+
     response = MagicMock()
     response.content = content
     return response
 
 
-@pytest.fixture(autouse=True)
-def _stub_user_engagement_context(monkeypatch):
-    """Keep relevance tests independent from Mongo style-image reads."""
-    helper = AsyncMock(return_value={
-        "engagement_guidelines": [],
-        "confidence": "",
-    })
-    monkeypatch.setattr(
-        relevance_module,
-        "build_user_engagement_relevance_context",
-        helper,
-        raising=False,
-    )
-    return helper
-
-
-
 @pytest.mark.asyncio
-async def test_relevance_agent_returns_should_respond():
-    """LLM says should_respond=true → agent forwards that decision."""
-    llm_response = _llm_response('{"should_respond": true, "reason_to_respond": "user greeted", "use_reply_feature": false, "channel_topic": "greetings", "indirect_speech_context": ""}')
+async def test_relevance_agent_returns_proceed_action() -> None:
+    """A valid proceed object is forwarded as the settled action."""
 
-    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
+    response = _llm_response(json.dumps({
+        "response_action": "proceed",
+        "reason_to_respond": "the current message addresses the character",
+        "use_reply_feature": True,
+        "channel_topic": "greeting",
+        "indirect_speech_context": "",
+    }))
+
+    with patch.object(relevance_module, "_relevance_agent_llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=response)
         result = await relevance_agent(_base_state())
 
+    assert result["response_action"] == "proceed"
     assert result["should_respond"] is True
-    assert result["channel_topic"] == "greetings"
-    assert result["indirect_speech_context"] == ""
-
-
-@pytest.mark.asyncio
-async def test_relevance_agent_should_not_respond():
-    """LLM says should_respond=false → agent forwards that decision."""
-    llm_response = _llm_response('{"should_respond": false, "reason_to_respond": "third party conversation", "use_reply_feature": false, "channel_topic": "sports", "indirect_speech_context": ""}')
-
-    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
-        result = await relevance_agent(_base_state())
-
-    assert result["should_respond"] is False
-    assert result["reason_to_respond"] == "third party conversation"
-
-
-@pytest.mark.asyncio
-async def test_relevance_agent_malformed_json_defaults_to_not_respond():
-    """If LLM returns garbage JSON, parse_llm_json_output returns {} and should_respond defaults to False."""
-    llm_response = _llm_response("this is not json at all")
-
-    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
-        result = await relevance_agent(_base_state())
-
-    assert result["should_respond"] is False
-    assert result["channel_topic"] == ""
-    assert result["indirect_speech_context"] == ""
-
-
-@pytest.mark.asyncio
-async def test_relevance_agent_use_reply_feature():
-    """LLM says use_reply_feature=true → agent forwards it."""
-    llm_response = _llm_response('{"should_respond": true, "reason_to_respond": "reply needed", "use_reply_feature": true, "channel_topic": "topic", "indirect_speech_context": ""}')
-
-    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
-        result = await relevance_agent(_base_state())
-
     assert result["use_reply_feature"] is True
 
 
 @pytest.mark.asyncio
-async def test_relevance_agent_short_circuits_structured_third_party_reply_in_group() -> None:
-    """Structured reply metadata to another participant should skip the LLM in noisy channels."""
-    state = _base_state()
-    state["user_input"] = '[Reply to message] <@someone-else> 我同事上下班是不用加油的'
-    state["reply_context"] = {
-        "reply_to_message_id": "other-msg",
-        "reply_to_platform_user_id": "someone-else",
+async def test_relevance_agent_returns_ignore_action() -> None:
+    """A valid ignore object keeps cognition silent."""
+
+    response = _llm_response(json.dumps({
+        "response_action": "ignore",
+        "reason_to_respond": "third-party traffic",
+        "use_reply_feature": False,
+        "channel_topic": "other topic",
+        "indirect_speech_context": "",
+    }))
+
+    with patch.object(relevance_module, "_relevance_agent_llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=response)
+        result = await relevance_agent(_base_state())
+
+    assert result["response_action"] == "ignore"
+    assert result["should_respond"] is False
+
+
+@pytest.mark.asyncio
+async def test_relevance_agent_malformed_json_fails_closed() -> None:
+    """Malformed settled output invokes no repair model and ignores."""
+
+    response = _llm_response("not json")
+    with patch.object(relevance_module, "_relevance_agent_llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=response)
+        result = await relevance_agent(_base_state())
+
+    assert result["response_action"] == "ignore"
+    assert result["should_respond"] is False
+
+
+def test_settled_decision_requires_complete_phase_action() -> None:
+    """Settled relevance uses closed actions and no wait at the deadline."""
+
+    decision = validate_settled_relevance_decision({
+        "response_action": "proceed",
+        "reason_to_respond": "the assembled request is directed to the character",
+        "use_reply_feature": True,
+        "channel_topic": "image question",
+        "indirect_speech_context": "",
+    }, observation_status="observation_complete")
+
+    assert decision["response_action"] == "proceed"
+    with pytest.raises(ValueError):
+        validate_settled_relevance_decision({
+            "response_action": "wait",
+            "reason_to_respond": "more context",
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+        }, observation_status="observation_complete")
+
+
+def test_settled_render_keeps_latest_fragment_and_respects_cap() -> None:
+    """The settled prompt is capped while preserving the latest correction."""
+
+    state = {
+        "assembled_fragments": [
+            {"sequence": 1, "body_text": "The first request " + "x" * 3000},
+            {"sequence": 2, "body_text": "Correction: use the latest request."},
+        ],
+        "media_descriptions": [
+            {"media_kind": "image", "description": "a small diagram"},
+        ],
+        "fresh_history": [
+            {"speaker": "other_user", "body_text": "I already answered that."},
+        ],
+        "scene_context": "A group discussion about a diagram.",
+        "relationship_context": "The user often asks follow-up questions.",
+        "raw_turn_id": "turn-id-raw-1",
+        "raw_deadline": "2026-07-16T00:00:10Z",
     }
 
-    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock()
-        result = await relevance_agent(state)
+    messages = build_settled_relevance_messages(
+        state,
+        observation_status="more_time_available",
+    )
+    rendered = "".join(message.content for message in messages)
 
-    assert result["should_respond"] is False
-    assert "another participant" in result["reason_to_respond"]
-    mock_llm.ainvoke.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_relevance_agent_allows_structured_third_party_reply_when_bot_explicitly_addressed() -> None:
-    """Explicit bot address should override the third-party reply short-circuit."""
-    state = _base_state()
-    state["user_input"] = "你怎么看他刚才那句？"
-    state["message_envelope"]["addressed_to_global_user_ids"] = ["character-global-id"]
-    state["reply_context"] = {
-        "reply_to_message_id": "other-msg",
-        "reply_to_platform_user_id": "someone-else",
-    }
-    llm_response = _llm_response('{"should_respond": true, "reason_to_respond": "bot explicitly addressed", "use_reply_feature": true, "channel_topic": "discussion", "indirect_speech_context": ""}')
-
-    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
-        result = await relevance_agent(state)
-
-    assert result["should_respond"] is True
-    mock_llm.ainvoke.assert_called_once()
+    assert len(rendered) <= SETTLED_RELEVANCE_MAX_INPUT_CHARS
+    assert "turn-id-raw-1" not in rendered
+    assert "2026-07-16T00:00:10Z" not in rendered
+    assert "Correction: use the latest request." in rendered
 
 
-@pytest.mark.asyncio
-async def test_relevance_agent_text_only_reply_marker_does_not_block_without_metadata() -> None:
-    """Text-only reply markers should not drive deterministic relevance gating."""
-    state = _base_state()
-    state["user_input"] = '[Reply to message] <@someone-else> 我同事上下班是不用加油的'
-    llm_response = _llm_response('{"should_respond": false, "reason_to_respond": "model decision", "use_reply_feature": true, "channel_topic": "", "indirect_speech_context": ""}')
+def test_settled_route_has_exact_completion_and_thinking_budget() -> None:
+    """The settled route uses the approved completion cap."""
 
-    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
-        result = await relevance_agent(state)
-
-    assert result["should_respond"] is False
-    mock_llm.ainvoke.assert_called_once()
+    config = relevance_module._relevance_agent_llm_config
+    assert config.max_completion_tokens == SETTLED_RELEVANCE_MAX_COMPLETION_TOKENS
+    assert config.max_completion_tokens == 512
+    assert config.thinking.enabled is False
 
 
-@pytest.mark.asyncio
-async def test_relevance_agent_does_not_expose_reflection_summary_in_prompt() -> None:
-    """Global reflection summaries should not be injected into relevance reasoning."""
-    llm_response = _llm_response('{"should_respond": true, "reason_to_respond": "user greeted", "use_reply_feature": false, "channel_topic": "greetings", "indirect_speech_context": ""}')
+def test_group_attention_is_descriptive_only() -> None:
+    """Group attention remains a prompt descriptor, not a semantic short-circuit."""
 
-    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
-        await relevance_agent(_base_state())
-
-    rendered_prompt = mock_llm.ainvoke.await_args.args[0][0].content
-    assert "自我反思" not in rendered_prompt
-    assert "nothing notable" not in rendered_prompt
-
-
-@pytest.mark.asyncio
-async def test_noisy_relevance_prompt_preserves_metadata_first_contract() -> None:
-    """Group prompt should not reintroduce text-only address inference."""
-    llm_response = _llm_response('{"should_respond": true, "reason_to_respond": "metadata", "use_reply_feature": true, "channel_topic": "", "indirect_speech_context": ""}')
-
-    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
-        await relevance_agent(_base_state())
-
-    rendered_prompt = mock_llm.ainvoke.await_args.args[0][0].content
-    assert '高噪音群聊环境' not in rendered_prompt
-    assert '消息明确且**仅**包含你的 ID' not in rendered_prompt
-    assert '必须始终设置为 `true`' not in rendered_prompt
-    assert '不能当作平台结构化指向证据' in rendered_prompt
-    assert '稳定昵称' not in rendered_prompt
-    assert '群聊中不要猜昵称或别称' in rendered_prompt
-    assert '昵称召唤只允许在私聊路径中考虑' not in rendered_prompt
-    assert '不要仅凭第二人称代词判断实际听众' in rendered_prompt
-    assert '"use_reply_feature": boolean' in rendered_prompt
-
-
-def test_group_attention_low_noise_when_recent_direct_address_exists() -> None:
-    """A recent structural bot address should lower group attention pressure."""
     history = [
-        _history_row(platform_user_id="user_1", timestamp_utc="2026-04-27T10:00:00+00:00"),
-        _history_row(
-            platform_user_id="user_1",
-            timestamp_utc="2026-04-27T10:00:10+00:00",
-            addressed_to_global_user_ids=["character-global-id"],
-        ),
+        {
+            "role": "user",
+            "platform_user_id": "user-a",
+            "timestamp": "2026-04-27T10:00:00+00:00",
+            "addressed_to_global_user_ids": [],
+        },
+        {
+            "role": "user",
+            "platform_user_id": "user-b",
+            "timestamp": "2026-04-27T10:00:10+00:00",
+            "addressed_to_global_user_ids": [],
+        },
     ]
 
     result = build_group_attention_context(
         chat_history_wide=history,
-        platform_bot_id="bot_456",
-        character_global_user_id="character-global-id",
+        platform_bot_id="bot-id",
     )
-
-    assert result == {"group_attention": "low_noise"}
-
-
-def test_group_attention_chaotic_for_two_speaker_reply_thread_collision() -> None:
-    """Two fast non-bot speakers plus a reply-to-other thread is chaotic."""
-    history = [
-        _history_row(
-            platform_user_id="user_1",
-            timestamp_utc="2026-04-27T10:18:26+00:00",
-        ),
-        _history_row(
-            platform_user_id="user_2",
-            timestamp_utc="2026-04-27T10:19:08+00:00",
-            reply_context={
-                "reply_to_platform_user_id": "user_1",
-            },
-        ),
-        _history_row(
-            role="assistant",
-            platform_user_id="bot_456",
-            timestamp_utc="2026-04-27T10:19:08+00:00",
-        ),
-    ]
-
-    result = build_group_attention_context(chat_history_wide=history, platform_bot_id="bot_456")
-
-    assert result == {"group_attention": "chaotic_noise"}
-
-
-def test_group_attention_chaotic_for_many_unaddressed_speakers() -> None:
-    """Three speakers and four unaddressed messages should be chaotic."""
-    history = [
-        _history_row(platform_user_id="user_1", timestamp_utc="2026-04-27T10:00:00+00:00"),
-        _history_row(platform_user_id="user_2", timestamp_utc="2026-04-27T10:00:10+00:00"),
-        _history_row(platform_user_id="user_3", timestamp_utc="2026-04-27T10:00:20+00:00"),
-        _history_row(platform_user_id="user_1", timestamp_utc="2026-04-27T10:00:30+00:00"),
-    ]
-
-    result = build_group_attention_context(chat_history_wide=history, platform_bot_id="bot_456")
-
-    assert result == {"group_attention": "chaotic_noise"}
-
-
-def test_group_attention_excludes_bot_messages_from_noise() -> None:
-    """Bot messages should not inflate active speaker or message pressure."""
-    history = [
-        _history_row(platform_user_id="user_1", timestamp_utc="2026-04-27T10:00:00+00:00"),
-        _history_row(role="assistant", platform_user_id="bot_456", timestamp_utc="2026-04-27T10:00:10+00:00"),
-        _history_row(role="assistant", platform_user_id="bot_456", timestamp_utc="2026-04-27T10:00:20+00:00"),
-    ]
-
-    result = build_group_attention_context(chat_history_wide=history, platform_bot_id="bot_456")
 
     assert result == {"group_attention": "medium_noise"}
-
-
-@pytest.mark.asyncio
-async def test_relevance_group_payload_includes_direct_address_and_group_attention() -> None:
-    """Group relevance payload should include only compact structural attention fields."""
-    state = _base_state()
-    state["message_envelope"]["addressed_to_global_user_ids"] = ["character-global-id"]
-    llm_response = _llm_response('{"should_respond": true, "reason_to_respond": "metadata", "use_reply_feature": true, "channel_topic": "", "indirect_speech_context": ""}')
-
-    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
-        await relevance_agent(state)
-
-    human_payload = mock_llm.ainvoke.await_args.args[0][1].content
-    parsed_payload = json.loads(human_payload)
-    assert parsed_payload["user_message"]["directly_addressed"] is True
-    assert parsed_payload["group_attention"] == "low_noise"
-    assert "group_attention_context" not in parsed_payload
-    assert "distinct_speakers" not in human_payload
-    assert "message_count" not in human_payload
-
-
-@pytest.mark.asyncio
-async def test_relevance_group_payload_includes_user_engagement_context(
-    _stub_user_engagement_context,
-) -> None:
-    """Group LLM payload should expose bounded user engagement guidance."""
-    state = _base_state()
-    engagement_context = {
-        "engagement_guidelines": [
-            "主动承接用户分享意图，通过追问参与。",
-        ],
-        "confidence": "medium",
-    }
-    _stub_user_engagement_context.return_value = engagement_context
-    llm_response = _llm_response('{"should_respond": true, "reason_to_respond": "eligible engagement", "use_reply_feature": true, "channel_topic": "", "indirect_speech_context": ""}')
-
-    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
-        await relevance_agent(state)
-
-    human_payload = mock_llm.ainvoke.await_args.args[0][1].content
-    parsed_payload = json.loads(human_payload)
-    assert parsed_payload["user_engagement_context"] == engagement_context
-    _stub_user_engagement_context.assert_awaited_once_with("uuid-123")
-
-
-@pytest.mark.asyncio
-async def test_relevance_group_payload_uses_empty_engagement_context_when_db_unavailable(
-    _stub_user_engagement_context,
-) -> None:
-    """Optional engagement style lookup failure should not block relevance."""
-    state = _base_state()
-    _stub_user_engagement_context.side_effect = DatabaseOperationError(
-        "style image unavailable"
-    )
-    llm_response = _llm_response('{"should_respond": true, "reason_to_respond": "fallback", "use_reply_feature": true, "channel_topic": "", "indirect_speech_context": ""}')
-
-    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
-        await relevance_agent(state)
-
-    human_payload = mock_llm.ainvoke.await_args.args[0][1].content
-    parsed_payload = json.loads(human_payload)
-    assert parsed_payload["user_engagement_context"] == {
-        "engagement_guidelines": [],
-        "confidence": "",
-    }
-    _stub_user_engagement_context.assert_awaited_once_with("uuid-123")
-
-
-@pytest.mark.asyncio
-async def test_relevance_medium_group_without_bot_continuity_skips_llm(
-    _stub_user_engagement_context,
-) -> None:
-    """Medium group noise without structure or bot continuity should stop early."""
-
-    state = _base_state()
-    state["user_input"] = '鹅总你咋不说话了啊？'
-    state["chat_history_wide"] = [
-        _history_row(
-            platform_user_id="2795731500",
-            timestamp_utc="2026-05-04T14:39:37+00:00",
-            content='还要背回国',
-        ),
-    ]
-
-    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock()
-        result = await relevance_agent(state)
-
-    assert result["should_respond"] is False
-    assert "latest bot-turn continuity" in result["reason_to_respond"]
-    mock_llm.ainvoke.assert_not_called()
-    _stub_user_engagement_context.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_relevance_medium_group_latest_bot_continuity_invokes_llm() -> None:
-    """A latest bot turn keeps medium-noise continuation judgment with the LLM."""
-
-    state = _base_state()
-    state["chat_history_wide"] = [
-        _history_row(
-            platform_user_id="user_2",
-            timestamp_utc="2026-05-04T14:39:30+00:00",
-        ),
-        _history_row(
-            role="assistant",
-            platform_user_id="bot_456",
-            timestamp_utc="2026-05-04T14:39:37+00:00",
-            addressed_to_global_user_ids=["uuid-123"],
-        ),
-    ]
-    llm_response = _llm_response('{"should_respond": true, "reason_to_respond": "continuation", "use_reply_feature": true, "channel_topic": "", "indirect_speech_context": ""}')
-
-    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
-        result = await relevance_agent(state)
-
-    assert result["should_respond"] is True
-    mock_llm.ainvoke.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_relevance_private_payload_keeps_group_only_fields_out() -> None:
-    """Private relevance payload should include direct metadata but no group-only fields."""
-    state = _base_state()
-    state["channel_type"] = "private"
-    llm_response = _llm_response('{"should_respond": true, "reason_to_respond": "private", "use_reply_feature": false, "channel_topic": "", "indirect_speech_context": ""}')
-
-    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
-        await relevance_agent(state)
-
-    system_prompt = mock_llm.ainvoke.await_args.args[0][0].content
-    human_payload = mock_llm.ainvoke.await_args.args[0][1].content
-    parsed_payload = json.loads(human_payload)
-    assert "user_message.user_name" in system_prompt
-    assert "platform_user_id" in system_prompt
-    assert "`content` 是当前消息正文" in system_prompt
-    assert "channel_name" in system_prompt
-    assert parsed_payload["user_message"]["directly_addressed"] is False
-    assert parsed_payload["current_run_context"]["character_name"] == "Character"
-    assert "group_attention" not in parsed_payload
-    assert "user_engagement_context" not in parsed_payload
-
-
-@pytest.mark.asyncio
-async def test_relevance_chaotic_group_without_bot_address_skips_llm() -> None:
-    """Chaotic group rooms without reply or mention metadata should skip the LLM."""
-    state = _base_state()
-    state["chat_history_wide"] = [
-        _history_row(platform_user_id="user_1", timestamp_utc="2026-04-27T10:00:00+00:00"),
-        _history_row(platform_user_id="user_2", timestamp_utc="2026-04-27T10:00:10+00:00"),
-        _history_row(platform_user_id="user_3", timestamp_utc="2026-04-27T10:00:20+00:00"),
-        _history_row(platform_user_id="user_1", timestamp_utc="2026-04-27T10:00:30+00:00"),
-    ]
-
-    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock()
-        result = await relevance_agent(state)
-
-    assert result["should_respond"] is False
-    assert "chaotic group noise" in result["reason_to_respond"]
-    mock_llm.ainvoke.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_relevance_chaotic_group_with_direct_address_invokes_llm() -> None:
-    """Typed direct address should override the chaotic metadata-only skip."""
-    state = _base_state()
-    state["message_envelope"]["addressed_to_global_user_ids"] = ["character-global-id"]
-    state["chat_history_wide"] = [
-        _history_row(platform_user_id="user_1", timestamp_utc="2026-04-27T10:00:00+00:00"),
-        _history_row(platform_user_id="user_2", timestamp_utc="2026-04-27T10:00:10+00:00"),
-        _history_row(platform_user_id="user_3", timestamp_utc="2026-04-27T10:00:20+00:00"),
-        _history_row(platform_user_id="user_1", timestamp_utc="2026-04-27T10:00:30+00:00"),
-    ]
-    llm_response = _llm_response('{"should_respond": true, "reason_to_respond": "mentioned", "use_reply_feature": true, "channel_topic": "", "indirect_speech_context": ""}')
-
-    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
-        result = await relevance_agent(state)
-
-    assert result["should_respond"] is True
-    mock_llm.ainvoke.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_relevance_chaotic_group_with_typed_bot_reply_invokes_llm() -> None:
-    """Typed reply-to-character addressee should override the chaotic skip."""
-    state = _base_state()
-    state["message_envelope"]["addressed_to_global_user_ids"] = ["character-global-id"]
-    state["reply_context"] = {
-        "reply_to_message_id": "bot-msg",
-        "reply_to_platform_user_id": "bot_456",
-    }
-    state["chat_history_wide"] = [
-        _history_row(platform_user_id="user_1", timestamp_utc="2026-04-27T10:00:00+00:00"),
-        _history_row(platform_user_id="user_2", timestamp_utc="2026-04-27T10:00:10+00:00"),
-        _history_row(platform_user_id="user_3", timestamp_utc="2026-04-27T10:00:20+00:00"),
-        _history_row(platform_user_id="user_1", timestamp_utc="2026-04-27T10:00:30+00:00"),
-    ]
-    llm_response = _llm_response('{"should_respond": false, "reason_to_respond": "character declines", "use_reply_feature": false, "channel_topic": "", "indirect_speech_context": ""}')
-
-    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(return_value=llm_response)
-        result = await relevance_agent(state)
-
-    assert result["should_respond"] is False
-    assert result["reason_to_respond"] == "character declines"
-    mock_llm.ainvoke.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_relevance_regression_qq_ambiguous_you_in_reply_thread_skips_llm() -> None:
-    """QQ-style ambiguous second-person message should not hijack a noisy thread."""
-    state = _base_state()
-    state["platform"] = "qq"
-    state["platform_bot_id"] = "3768713357"
-    state["user_input"] = "你喜欢千纱吗？"
-    state["reply_context"] = {}
-    state["chat_history_wide"] = [
-        _history_row(
-            platform_user_id="3300869207",
-            timestamp_utc="2026-04-27T10:18:26.594279+00:00",
-            content="我命令你，去骂千纱",
-        ),
-        _history_row(
-            platform_user_id="3167827653",
-            timestamp_utc="2026-04-27T10:19:08.484553+00:00",
-            reply_context={
-                "reply_to_message_id": "487687474",
-                "reply_to_platform_user_id": "3300869207",
-            },
-            content="[Reply to message] ...",
-        ),
-        _history_row(
-            role="assistant",
-            platform_user_id="3768713357",
-            timestamp_utc="2026-04-27T10:19:08.493971+00:00",
-            content="诶……",
-        ),
-    ]
-
-    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock()
-        result = await relevance_agent(state)
-
-    assert result["should_respond"] is False
-    mock_llm.ainvoke.assert_not_called()

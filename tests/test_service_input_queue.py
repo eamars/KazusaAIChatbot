@@ -276,6 +276,53 @@ def _patch_common_dependencies(monkeypatch, graph) -> None:
         "_run_post_turn_memory_lifecycle_background",
         AsyncMock(side_effect=lambda state: state),
     )
+    async def _frontline(_state):
+        """Admit deterministic service fixtures through the new contract."""
+
+        open_turns = _state.get("open_turns") or []
+        if open_turns:
+            return {
+                "intake_action": "append",
+                "append_target": "open_1",
+                "prelude_targets": [],
+                "reason": "fixture continuation",
+            }
+        return {
+            "intake_action": "start",
+            "append_target": "none",
+            "prelude_targets": [],
+            "reason": "fixture candidate",
+        }
+
+    async def _settled(_state):
+        """Allow deterministic service fixtures to reach their fake graph."""
+
+        return {
+            "response_action": "proceed",
+            "reason_to_respond": "fixture response",
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+        }
+
+    async def _media(state):
+        """Keep deterministic media fixtures out of the vision endpoint."""
+
+        rows = []
+        for row in state.get("user_multimedia_input") or []:
+            rows.append({
+                "content_type": row.get("content_type", ""),
+                "base64_data": row.get("base64_data", ""),
+                "description": row.get("description", ""),
+            })
+        return {
+            "user_multimedia_input": rows,
+            "additional_media_present": False,
+        }
+
+    monkeypatch.setattr(service_module, "frontline_relevance_agent", _frontline)
+    monkeypatch.setattr(service_module, "relevance_agent", _settled)
+    monkeypatch.setattr(service_module, "multimedia_descriptor_agent", _media)
     monkeypatch.setattr(service_module, "_graph", graph)
 
 
@@ -492,8 +539,8 @@ async def test_prune_over_two_drops_plain_messages() -> None:
         bot_reply,
     ])
 
-    assert [item.sequence for item in survivors] == [2, 3]
-    assert [item.sequence for item in dropped] == [1]
+    assert [item.sequence for item in survivors] == [1, 2, 3]
+    assert dropped == []
 
 
 @pytest.mark.asyncio
@@ -512,8 +559,8 @@ async def test_prune_over_five_keeps_only_bot_replies_after_first_stage() -> Non
     queue = queue_module.ChatInputQueue()
     survivors, dropped = queue.prune(items)
 
-    assert [item.sequence for item in survivors] == [3, 4, 5, 6]
-    assert [item.sequence for item in dropped] == [1, 2]
+    assert [item.sequence for item in survivors] == [1, 2, 3, 4, 5, 6]
+    assert dropped == []
 
 
 @pytest.mark.asyncio
@@ -532,8 +579,8 @@ async def test_prune_still_over_five_keeps_latest_survivor() -> None:
     queue = queue_module.ChatInputQueue()
     survivors, dropped = queue.prune(items)
 
-    assert [item.sequence for item in survivors] == [6]
-    assert [item.sequence for item in dropped] == [1, 2, 3, 4, 5]
+    assert [item.sequence for item in survivors] == [1, 2, 3, 4, 5, 6]
+    assert dropped == []
 
 
 @pytest.mark.asyncio
@@ -551,8 +598,8 @@ async def test_reply_id_without_adapter_bot_reply_marker_is_not_protected() -> N
         bot_reply,
     ])
 
-    assert [item.sequence for item in survivors] == [2, 3]
-    assert [item.sequence for item in dropped] == [1]
+    assert [item.sequence for item in survivors] == [1, 2, 3]
+    assert dropped == []
 
 
 @pytest.mark.asyncio
@@ -575,8 +622,8 @@ async def test_private_messages_are_not_pruned_as_group_noise() -> None:
         tagged_group,
     ])
 
-    assert [item.sequence for item in survivors] == [2, 3]
-    assert [item.sequence for item in dropped] == [1]
+    assert [item.sequence for item in survivors] == [1, 2, 3]
+    assert dropped == []
 
 
 @pytest.mark.asyncio
@@ -600,9 +647,9 @@ async def test_listen_only_messages_are_dropped_under_threshold() -> None:
 async def test_listen_only_messages_do_not_trigger_active_pruning() -> None:
     """Listen-only messages should not count toward active queue thresholds."""
 
-    plain_group = _item(1)
+    plain_group = _item(1, channel_type="private")
     listen_only = _item(2, listen_only=True)
-    tagged_group = _item(3, direct_address=True)
+    tagged_group = _item(3, channel_type="private", direct_address=True)
 
     queue = queue_module.ChatInputQueue()
     survivors, dropped = queue.prune([
@@ -726,13 +773,13 @@ async def test_duplicate_private_platform_message_ids_do_not_coalesce() -> None:
 
 
 @pytest.mark.asyncio
-async def test_addressed_group_followups_coalesce() -> None:
-    """Addressed-start same-author group follow-ups should collapse."""
+async def test_group_items_remain_individual_for_frontline() -> None:
+    """Group messages reach frontline without adjacency coalescing."""
 
     first = _item(
         1,
         platform_user_id="user-1",
-        content="Kazusa,",
+        content="Character,",
         direct_address=True,
     )
     second = _item(
@@ -740,107 +787,12 @@ async def test_addressed_group_followups_coalesce() -> None:
         platform_user_id="user-1",
         content="one more detail",
     )
-    third = _item(
-        3,
-        platform_user_id="user-1",
-        content="and another",
-        bot_reply=True,
-    )
 
     queue = queue_module.ChatInputQueue()
-    survivors, collapsed = queue.coalesce_addressed_group([
-        first,
-        second,
-        third,
-    ])
-
-    assert [item.sequence for item in survivors] == [1]
-    assert [(item.sequence, survivor.sequence) for item, survivor in collapsed] == [
-        (2, 1),
-        (3, 1),
-    ]
-    assert first.combined_content == "Kazusa,\none more detail\nand another"
-
-
-@pytest.mark.asyncio
-async def test_duplicate_group_platform_message_ids_do_not_coalesce() -> None:
-    """Duplicate group deliveries should not be treated as follow-ups."""
-
-    first = _item(
-        1,
-        platform_message_id="same-message",
-        platform_user_id="user-1",
-        content="Kazusa,",
-        direct_address=True,
-    )
-    duplicate = _item(
-        2,
-        platform_message_id="same-message",
-        platform_user_id="user-1",
-        content="Kazusa,",
-        direct_address=True,
-    )
-
-    queue = queue_module.ChatInputQueue()
-    survivors, collapsed = queue.coalesce_addressed_group([first, duplicate])
+    survivors, dropped = queue.prune([first, second])
 
     assert [item.sequence for item in survivors] == [1, 2]
-    assert collapsed == []
-    assert first.collapsed_items == []
-    assert first.combined_content is None
-
-
-@pytest.mark.asyncio
-async def test_plain_group_runs_do_not_coalesce() -> None:
-    """Plain-start group runs should not collapse, even if a later item addresses."""
-
-    first = _item(1, platform_user_id="user-1")
-    second = _item(2, platform_user_id="user-1", direct_address=True)
-
-    queue = queue_module.ChatInputQueue()
-    survivors, collapsed = queue.coalesce_addressed_group([
-        first,
-        second,
-    ])
-
-    assert [item.sequence for item in survivors] == [1, 2]
-    assert collapsed == []
-
-
-@pytest.mark.asyncio
-async def test_group_followups_require_same_author_adjacency_and_time_gap() -> None:
-    """Group coalescing should respect author adjacency and the time gap."""
-
-    first = _item(
-        1,
-        platform_user_id="user-1",
-        direct_address=True,
-    )
-    other_author = _item(2, platform_user_id="user-2")
-    same_author_after_other = _item(3, platform_user_id="user-1")
-    late_followup = _item(
-        4,
-        platform_user_id="user-1",
-        direct_address=True,
-        storage_timestamp_utc="2026-04-29T00:10:00+00:00",
-    )
-    too_late = _item(
-        5,
-        platform_user_id="user-1",
-        storage_timestamp_utc="2026-04-29T00:13:00+00:00",
-    )
-
-    queue = queue_module.ChatInputQueue()
-    survivors, collapsed = queue.coalesce_addressed_group([
-        first,
-        other_author,
-        same_author_after_other,
-        late_followup,
-        too_late,
-    ])
-
-    assert [item.sequence for item in survivors] == [1, 2, 3, 4, 5]
-    assert collapsed == []
+    assert dropped == []
 
 
 @pytest.mark.asyncio
@@ -1031,10 +983,13 @@ async def test_worker_saves_dropped_messages_before_next_graph(monkeypatch) -> N
     monkeypatch.setattr(service_module, "save_conversation", _save_conversation)
     _patch_common_dependencies(monkeypatch, _Graph())
 
-    dropped = _item(1)
-    tagged = _item(2, direct_address=True)
-    bot_reply = _item(3, bot_reply=True)
-    service_module._chat_input_queue.extend_for_test([dropped, tagged, bot_reply])
+    dropped = _item(1, listen_only=True)
+    tagged = _item(
+        2,
+        channel_type="private",
+        direct_address=True,
+    )
+    service_module._chat_input_queue.extend_for_test([dropped, tagged])
 
     service_module._ensure_chat_input_worker_started()
     await service_module._chat_input_queue.notify_for_test()
@@ -1045,8 +1000,6 @@ async def test_worker_saves_dropped_messages_before_next_graph(monkeypatch) -> N
     assert dropped_response.messages == []
     assert call_order[:2] == ["save", "save"]
     assert call_order[2] == "graph"
-    assert not bot_reply.future.done()
-
     graph_can_finish.set()
     tagged_response = await asyncio.wait_for(tagged.future, timeout=1.0)
     assert tagged_response.messages == []
@@ -1081,10 +1034,13 @@ async def test_dropped_message_never_invokes_graph(monkeypatch) -> None:
     monkeypatch.setattr(service_module, "save_conversation", save_conversation)
     _patch_common_dependencies(monkeypatch, _Graph())
 
-    dropped = _item(1)
-    tagged = _item(2, direct_address=True)
-    bot_reply = _item(3, bot_reply=True)
-    service_module._chat_input_queue.extend_for_test([dropped, tagged, bot_reply])
+    dropped = _item(1, listen_only=True)
+    tagged = _item(
+        2,
+        channel_type="private",
+        direct_address=True,
+    )
+    service_module._chat_input_queue.extend_for_test([dropped, tagged])
 
     service_module._ensure_chat_input_worker_started()
     await service_module._chat_input_queue.notify_for_test()
@@ -1198,9 +1154,9 @@ async def test_worker_drops_listen_only_without_pruning_active_plain(monkeypatch
     monkeypatch.setattr(service_module, "save_conversation", _save_conversation)
     _patch_common_dependencies(monkeypatch, _Graph())
 
-    plain_group = _item(1)
+    plain_group = _item(1, channel_type="private")
     listen_only = _item(2, listen_only=True)
-    tagged_group = _item(3, direct_address=True)
+    tagged_group = _item(3, channel_type="private", direct_address=True)
     service_module._chat_input_queue.extend_for_test([
         plain_group,
         listen_only,
@@ -1214,7 +1170,8 @@ async def test_worker_drops_listen_only_without_pruning_active_plain(monkeypatch
     await asyncio.wait_for(graph_started.wait(), timeout=1.0)
 
     assert listen_response.messages == []
-    assert call_order[:3] == ["save:2", "save:1", "graph:1"]
+    assert call_order[:2] == ["save:2", "save:1"]
+    assert "graph:1" in call_order[2:]
     assert not tagged_group.future.done()
 
     graph_can_finish.set()
@@ -1374,6 +1331,7 @@ async def test_worker_derives_graph_input_from_message_envelope(monkeypatch) -> 
 
     item = _item(
         1,
+        channel_type="private",
         platform_user_id="user-1",
         content="<@bot-1> clean body",
         message_envelope={
@@ -1450,6 +1408,7 @@ async def test_worker_skips_graph_for_empty_no_content_turn(monkeypatch) -> None
 
     item = _item(
         1,
+        channel_type="private",
         platform_user_id="user-1",
         content="",
     )
@@ -1504,6 +1463,7 @@ async def test_worker_keeps_image_only_turn_on_graph_path(monkeypatch) -> None:
 
     item = _item(
         1,
+        channel_type="private",
         platform_user_id="user-1",
         content="",
         content_type="image",
@@ -1585,7 +1545,7 @@ async def test_worker_keeps_collapsed_non_empty_content_on_graph_path(
 
     assert collapsed_response.messages == []
     assert survivor_response.messages == []
-    assert captured_state["user_input"] == "\nfollow-up"
+    assert captured_state["user_input"] == "follow-up"
     assert captured_state["active_turn_platform_message_ids"] == ["1", "2"]
 
     await _reset_queue_state()
@@ -1641,6 +1601,7 @@ async def test_worker_resolves_cross_user_envelope_targets(monkeypatch) -> None:
 
     item = _item(
         1,
+        channel_type="private",
         platform_user_id="user-a",
         content="@user-b see this",
         message_envelope={
@@ -1675,11 +1636,13 @@ async def test_worker_resolves_cross_user_envelope_targets(monkeypatch) -> None:
     assert state_envelope["mentions"][0]["global_user_id"] == "global-user-b"
     assert state_envelope["reply"]["global_user_id"] == "global-user-c"
     assert state_envelope["addressed_to_global_user_ids"] == [
+        CHARACTER_GLOBAL_USER_ID,
         "global-user-b",
         "global-user-c",
     ]
     assert state_envelope["broadcast"] is False
     assert saved_docs[0]["addressed_to_global_user_ids"] == [
+        CHARACTER_GLOBAL_USER_ID,
         "global-user-b",
         "global-user-c",
     ]
@@ -1719,6 +1682,7 @@ async def test_worker_preserves_collapsed_image_input(monkeypatch) -> None:
 
     first = _item(
         1,
+        channel_type="private",
         platform_user_id="user-1",
         content="Kazusa, look",
         content_type="mixed",
@@ -1733,6 +1697,7 @@ async def test_worker_preserves_collapsed_image_input(monkeypatch) -> None:
     )
     second = _item(
         2,
+        channel_type="private",
         platform_user_id="user-1",
         content="",
         content_type="image",

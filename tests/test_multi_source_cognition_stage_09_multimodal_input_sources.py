@@ -100,8 +100,8 @@ _PROMPT_FINGERPRINTS = (
     (
         "_CONTENT_PLAN_AGENT_PROMPT",
         l3_module._CONTENT_PLAN_AGENT_PROMPT,
-        14137,
-        "f7173579abbb216fba6486ce6f771591ff6425ebf17c693df89e12728ec661c7",
+        14466,
+        "a000f8bb9afd733a28094a1cfec99cfff1bca354140c77fe695e686ba719bbcf",
     ),
     (
         "_PREFERENCE_ADAPTER_PROMPT",

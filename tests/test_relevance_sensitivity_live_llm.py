@@ -10,8 +10,8 @@ import httpx
 import pytest
 
 from kazusa_ai_chatbot.config import RELEVANCE_AGENT_LLM_BASE_URL
-from kazusa_ai_chatbot.nodes import persona_relevance_agent as relevance_module
-from kazusa_ai_chatbot.nodes.persona_relevance_agent import (
+import kazusa_ai_chatbot.relevance.persona_relevance_agent as relevance_module
+from kazusa_ai_chatbot.relevance.persona_relevance_agent import (
     build_group_attention_context,
     relevance_agent,
 )

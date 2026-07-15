@@ -11,10 +11,7 @@ from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.time_boundary import (
     LocalTimeContextDoc,
     build_turn_clock,
-    parse_storage_utc_datetime,
 )
-
-GROUP_COALESCE_MAX_GAP_SECONDS = 120.0
 
 
 @dataclass
@@ -46,6 +43,9 @@ class QueuedChatItem:
     collapsed_items: list[QueuedChatItem] = field(default_factory=list)
     conversation_row_id: str = ""
     pipeline_run_handle: Any | None = None
+    global_user_id: str = ""
+    user_profile: dict[str, Any] = field(default_factory=dict)
+    resolved_message_envelope: Any | None = None
 
 
 @dataclass
@@ -144,10 +144,7 @@ class ChatInputQueue:
             private_survivors, private_collapsed = self._coalesce_private(
                 waiting_items,
             )
-            group_survivors, group_collapsed = self._coalesce_addressed_group(
-                private_survivors,
-            )
-            survivors, dropped = self._prune(group_survivors)
+            survivors, dropped = self._prune(private_survivors)
 
             self._queue.clear()
             self._queue.extend(survivors)
@@ -159,7 +156,7 @@ class ChatInputQueue:
         return_value = DequeuedChatTurn(
             next_item=next_item,
             dropped_items=dropped,
-            collapsed_items=private_collapsed + group_collapsed,
+            collapsed_items=private_collapsed,
         )
         return return_value
 
@@ -312,19 +309,6 @@ class ChatInputQueue:
         return_value = item.request.channel_type == "private"
         return return_value
 
-    def is_group_message(self, item: QueuedChatItem) -> bool:
-        """Return whether the item is a group-channel message.
-
-        Args:
-            item: Queued chat item.
-
-        Returns:
-            True when the request channel type is group.
-        """
-
-        return_value = item.request.channel_type == "group"
-        return return_value
-
     def coalesce_private(
         self,
         waiting_items: list[QueuedChatItem],
@@ -347,30 +331,6 @@ class ChatInputQueue:
         """
 
         return_value = self._coalesce_private(waiting_items)
-        return return_value
-
-    def coalesce_addressed_group(
-        self,
-        waiting_items: list[QueuedChatItem],
-    ) -> tuple[list[QueuedChatItem], list[tuple[QueuedChatItem, QueuedChatItem]]]:
-        """Collapse only adjacent addressed group follow-ups from one user.
-
-        A group run may collapse only while queued items remain consecutive,
-        share platform, group channel, and platform user id, and each adjacent
-        storage UTC gap is within the configured collapse window. The first
-        item in the run must structurally mention the bot or reply to the
-        character. A repeated non-empty platform message id breaks the run so
-        duplicate deliveries are not treated as user follow-ups.
-
-        Args:
-            waiting_items: Ordered list of queued items after private coalescing.
-
-        Returns:
-            Pair of coalesced waiting items and collapsed original/survivor
-            pairs.
-        """
-
-        return_value = self._coalesce_addressed_group(waiting_items)
         return return_value
 
     def prune(
@@ -490,111 +450,6 @@ class ChatInputQueue:
         return_value = (survivors, collapsed)
         return return_value
 
-    def _seconds_between(
-        self,
-        first: QueuedChatItem,
-        second: QueuedChatItem,
-    ) -> float | None:
-        """Return the storage UTC timestamp gap between two queued items."""
-
-        try:
-            first_timestamp_utc = parse_storage_utc_datetime(
-                first.storage_timestamp_utc,
-            )
-            second_timestamp_utc = parse_storage_utc_datetime(
-                second.storage_timestamp_utc,
-            )
-        except ValueError:
-            return None
-        return_value = max(
-            0.0,
-            (second_timestamp_utc - first_timestamp_utc).total_seconds(),
-        )
-        return return_value
-
-    def _same_group_author(
-        self,
-        first: QueuedChatItem,
-        second: QueuedChatItem,
-    ) -> bool:
-        """Return whether two group items are adjacent same-author candidates."""
-
-        return_value = (
-            self.is_group_message(first)
-            and self.is_group_message(second)
-            and not first.request.debug_modes.listen_only
-            and not second.request.debug_modes.listen_only
-            and first.request.platform == second.request.platform
-            and first.request.platform_channel_id == second.request.platform_channel_id
-            and first.request.platform_user_id == second.request.platform_user_id
-        )
-        return return_value
-
-    def _group_gap_is_coalescible(
-        self,
-        first: QueuedChatItem,
-        second: QueuedChatItem,
-    ) -> bool:
-        """Return whether the group follow-up gap is within the collapse window."""
-
-        gap_seconds = self._seconds_between(first, second)
-        return_value = (
-            gap_seconds is not None
-            and gap_seconds <= GROUP_COALESCE_MAX_GAP_SECONDS
-        )
-        return return_value
-
-    def _coalesce_addressed_group(
-        self,
-        waiting_items: list[QueuedChatItem],
-    ) -> tuple[list[QueuedChatItem], list[tuple[QueuedChatItem, QueuedChatItem]]]:
-        """Apply the addressed same-author adjacent group collapse rule."""
-
-        survivors: list[QueuedChatItem] = []
-        collapsed: list[tuple[QueuedChatItem, QueuedChatItem]] = []
-        index = 0
-
-        while index < len(waiting_items):
-            run = [waiting_items[index]]
-            run_message_ids: set[str] = set()
-            run_message_id = run[0].request.platform_message_id
-            if run_message_id:
-                run_message_ids.add(run_message_id)
-            next_index = index + 1
-            while next_index < len(waiting_items):
-                previous = run[-1]
-                candidate = waiting_items[next_index]
-                candidate_message_id = candidate.request.platform_message_id
-                if not self._same_group_author(previous, candidate):
-                    break
-                if not self._group_gap_is_coalescible(previous, candidate):
-                    break
-                if (
-                    candidate_message_id
-                    and candidate_message_id in run_message_ids
-                ):
-                    break
-                run.append(candidate)
-                if candidate_message_id:
-                    run_message_ids.add(candidate_message_id)
-                next_index += 1
-
-            survivor = run[0]
-            survivors.append(survivor)
-            if len(run) > 1 and (
-                self.is_tagged(survivor) or self.is_bot_reply(survivor)
-            ):
-                for item in run[1:]:
-                    self._append_collapsed_item(survivor, item)
-                    collapsed.append((item, survivor))
-            else:
-                survivors.extend(run[1:])
-
-            index = next_index
-
-        return_value = (survivors, collapsed)
-        return return_value
-
     def _prune(
         self,
         waiting_items: list[QueuedChatItem],
@@ -608,50 +463,6 @@ class ChatInputQueue:
                 dropped.append(item)
             else:
                 survivors.append(item)
-
-        if len(survivors) > 2:
-            kept = []
-            for item in survivors:
-                if (
-                    self.is_private_message(item)
-                    or self.is_tagged(item)
-                    or self.is_bot_reply(item)
-                ):
-                    kept.append(item)
-                else:
-                    dropped.append(item)
-            survivors = kept
-
-        if len(survivors) > 5:
-            kept = []
-            for item in survivors:
-                if self.is_private_message(item) or self.is_bot_reply(item):
-                    kept.append(item)
-                else:
-                    dropped.append(item)
-            survivors = kept
-
-        if len(survivors) > 5:
-            private_items = [
-                item for item in survivors if self.is_private_message(item)
-            ]
-            if private_items:
-                non_private_items = [
-                    item for item in survivors if not self.is_private_message(item)
-                ]
-                keep_count = max(0, 5 - len(private_items))
-                kept_non_private = (
-                    non_private_items[-keep_count:] if keep_count else []
-                )
-                kept_non_private_ids = {id(item) for item in kept_non_private}
-                for item in non_private_items:
-                    if id(item) not in kept_non_private_ids:
-                        dropped.append(item)
-                kept_ids = {id(item) for item in private_items + kept_non_private}
-                survivors = [item for item in survivors if id(item) in kept_ids]
-            else:
-                dropped.extend(survivors[:-1])
-                survivors = survivors[-1:]
 
         dropped_ids = {id(item) for item in dropped}
         ordered_dropped = [

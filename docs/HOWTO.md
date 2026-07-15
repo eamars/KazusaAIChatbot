@@ -202,6 +202,27 @@ source evidence. When enabled, the LLM interface currently maps
 provider-specific thinking controls for Gemma 4, Qwen3-family model names, and
 Qwen-compatible Qwopus 3.x model names.
 
+`RELEVANCE_AGENT_LLM` serves both compact frontline intake and settled
+relevance. Frontline uses a 256-token completion cap, thinking disabled, and
+an 8,000-character rendered-input cap; settled relevance uses a 512-token
+completion cap, thinking disabled, and a 16,000-character cap. Both stages
+parse JSON deterministically and never call the JSON-repair LLM.
+
+## Relevance Turn Settlement
+
+Active chat intake persists each typed message before semantic routing. The
+frontline route receives bounded message evidence, typed target/reply labels,
+open-turn descriptors, and silent same-author preludes. It returns
+`discard`, `start`, or `append`.
+
+Group turns use a six-second quiet window and a ten-second hard deadline.
+Settled turns are ordered globally by eligibility and arrival sequence. The
+settled route returns `ignore`, `proceed`, or one bounded `wait` extension;
+only a matching turn version can claim the cognition lane. Private messages
+retain immediate timing and adjacency-only coalescing. Image description runs
+after frontline admission and selects the opening image plus the newest
+remaining unique images, up to four per assembled turn.
+
 `CHARACTER_GLOBAL_USER_ID` defaults to
 `00000000-0000-4000-8000-000000000001`. Set it explicitly in production so the
 active character keeps a stable first-class identity across service runs.

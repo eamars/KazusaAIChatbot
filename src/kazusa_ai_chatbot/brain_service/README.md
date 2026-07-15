@@ -161,6 +161,25 @@ future foreground applications must call the same interface instead of
 importing `/chat` queue state or adding their own gates. Different channel
 scopes remain independent.
 
+### Live Chat Intake And Settlement
+
+The normal active-chat path persists each typed inbound fragment, runs the
+compact frontline stage from `kazusa_ai_chatbot.relevance` through the
+existing `RELEVANCE_AGENT_LLM` route, and keeps only `discard`, `start`, or
+`append` as the frontline vocabulary. Group turns use a six-second quiet
+window and ten-second hard deadline. The service owns the pending-turn heap,
+fragment chronology, one bounded settled `wait`, stale-version invalidation,
+and the atomic cognition claim. The same `kazusa_ai_chatbot.relevance`
+package, using the same `RELEVANCE_AGENT_LLM` route, owns the settled
+character-level
+`ignore/proceed/wait` judgment; deterministic code applies the validated action
+and never rewrites a valid semantic choice.
+
+Private adjacency-only coalescing retains the existing immediate-ready timing.
+Group burst pruning and group pre-relevance coalescing are not part of the
+active queue contract. A claimable `proceed` is the only path into the existing
+cognition and dialog graph.
+
 Visible `/chat` delivery follows selected `SurfaceOutputV1` text surfaces.
 Private action results, private finalization, calendar-triggered action
 results, and no-visible-output decisions may still make an episode
@@ -335,7 +354,8 @@ Brain service responsibilities:
 
 - The brain service validates `ChatRequest` through Pydantic with
   `extra="forbid"`.
-- The brain service can collapse queued chat messages before graph execution.
+- The brain service can coalesce adjacent private follow-ups before frontline
+  execution; group messages are retained as separate persisted fragments.
 - The brain service owns foreground runtime-coordination admission for inbound
   chat turns and releases the foreground handle when the queued turn is
   processed, dropped, collapsed, rejected, or drained during shutdown.
@@ -488,11 +508,11 @@ Hydration rules:
 
 ## Persistence Timing
 
-The normal `/chat` path records the incoming user row before graph execution.
-If that row is not committed, the request fails closed and no visible reply is
-released. Pruned, listen-only, and collapsed queued inputs follow the same
-rule; a survivor turn is not allowed to run on collapsed text whose source row
-was not committed.
+The normal `/chat` path records the incoming user row before frontline
+execution. If that row is not committed, the request fails closed and no
+visible reply is released. Discarded, listen-only, and private-coalesced
+inputs retain their persisted source rows. A settled turn is not allowed to
+run on any fragment whose source row was not committed.
 
 For visible assistant output, the brain writes one assistant row per logical
 `ChatResponse.messages` item before returning `ChatResponse` to the adapter.
