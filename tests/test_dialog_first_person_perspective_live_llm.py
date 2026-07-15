@@ -228,7 +228,7 @@ def _dialog_agent_state_from_payload(payload: dict) -> dict:
         'platform_bot_id': 'touch-test-bot',
         'global_user_id': 'touch-test-global-user',
         'user_name': payload['user_name'],
-        'user_profile': {'affinity': 500},
+        'user_profile': {'relationship_state': 500},
         'character_profile': _character_profile(),
     }
 

@@ -93,7 +93,7 @@ class IMProcessState(TypedDict):
     prompt_message_context: PromptMessageContext
     cognitive_episode: NotRequired[CognitiveEpisode]
     user_multimedia_input: list[MultiMediaDoc]
-    user_profile: dict  # used to extract affinity score.
+    user_profile: dict  # carries the prompt-safe user projection.
 
     platform_bot_id: str  # Bot's ID on the current platform (provided by the adapter)
     character_name: str

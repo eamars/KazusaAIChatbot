@@ -77,7 +77,7 @@ def _request_kwargs() -> dict:
             "global_user_id": "character-1",
             "name": "Kazusa",
         },
-        "user_profile": {"affinity": 500},
+        "user_profile": {"relationship_state": 500},
         "prompt_message_context": {
             "body_text": "Need current evidence.",
             "mentions": [],
@@ -122,7 +122,7 @@ def test_valid_text_chat_episode_builds_exact_rag_request_shape() -> None:
             "active_turn_conversation_row_ids": ["row-1", "row-2"],
             "global_user_id": "user-1",
             "user_name": "User",
-            "user_profile": {"affinity": 500},
+            "user_profile": {"relationship_state": 500},
             "current_timestamp_utc": "2026-04-26T12:00:00+00:00",
             "local_time_context": {
                 "current_local_datetime": "2026-04-27 00:00",

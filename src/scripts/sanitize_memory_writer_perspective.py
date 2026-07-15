@@ -22,11 +22,8 @@ from kazusa_ai_chatbot.config import (
 from kazusa_ai_chatbot.db import (
     close_db,
     get_character_profile,
-    get_character_state,
-    update_last_relationship_insight,
     update_user_memory_unit_semantics,
     upsert_character_self_image,
-    upsert_character_state,
 )
 from kazusa_ai_chatbot.db.script_operations import (
     find_persistent_memory_without_embedding,
@@ -36,7 +33,6 @@ from kazusa_ai_chatbot.db.script_operations import (
 )
 from kazusa_ai_chatbot.memory_evolution import supersede_memory_unit
 from kazusa_ai_chatbot.memory_evolution.identity import deterministic_memory_unit_id
-from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 from kazusa_ai_chatbot.llm_interface import (
     LLInterface,
@@ -65,7 +61,7 @@ MIGRATION_REWRITE_SYSTEM_PROMPT = '''\
 # 读取顺序
 1. 先读 collection、document_id 和字段名，再读字段内容。字段名是判断语义来源的重要证据。
 2. fact 通常记录事件、用户事实、用户偏好、承诺或对话事实；不要把用户说的“我”改成 {character_name}。
-3. subjective_appraisal、relationship_signal、reflection_summary、self_image 和自我引导类 content 通常记录 {character_name} 对互动的感受、判断或未来应对；除非原文明确说这是用户的感受，否则不要把这类字段里的感受误写成用户的感受。
+3. subjective_appraisal、relationship_signal、character_reflection、self_image 和自我引导类 content 通常记录 {character_name} 对互动的感受、判断或未来应对；除非原文明确说这是用户的感受，否则不要把这类字段里的感受误写成用户的感受。
 4. memory_name 是标题，保持短而事实性；只在标题本来必须区分主体时才写名称。
 5. 只改写为满足视角、语言和名称契约所必需的文本；不要做风格润色或补充剧情。
 
@@ -242,7 +238,7 @@ async def scan_user_profiles(*, limit: int) -> list[dict[str, Any]]:
     )
     records = []
     for document in documents:
-        before = _field_view(document, ('last_relationship_insight',))
+        before = _field_view(document, ('semantic_relationship_projection',))
         if not before:
             continue
         records.append(_scan_record(
@@ -262,7 +258,7 @@ async def scan_character_state(*, limit: int) -> list[dict[str, Any]]:
     state = await get_character_state()
     if not state:
         return []
-    before = _field_view(state, ('reflection_summary', 'self_image'))
+    before = _field_view(state, ('character_reflection', 'self_image'))
     if not before:
         return []
     return [
@@ -429,10 +425,9 @@ async def apply_record(record: dict[str, Any]) -> None:
         )
         return
     if collection == SCOPE_USER_PROFILES:
-        insight = str(after.get('last_relationship_insight') or '').strip()
-        if insight:
-            await update_last_relationship_insight(document_id, insight)
-        return
+        raise ValueError(
+            "user-profile relationship prose is outside the V2 migration scope"
+        )
     if collection == SCOPE_CHARACTER_STATE:
         await _apply_character_state(after)
         return
@@ -443,19 +438,14 @@ async def apply_record(record: dict[str, Any]) -> None:
 
 
 async def _apply_character_state(after: dict[str, Any]) -> None:
-    """Apply singleton character-state fields through existing helpers."""
+    """Apply only the native character self-image lane."""
 
-    await get_character_state()
-    storage_timestamp_utc = storage_utc_now_iso()
-    if 'reflection_summary' in after:
-        await upsert_character_state(
-            '',
-            '',
-            str(after.get('reflection_summary') or ''),
-            storage_timestamp_utc,
+    self_image = after.get('self_image')
+    if not isinstance(self_image, dict):
+        raise ValueError(
+            "character cognition-state prose is outside the V2 migration scope"
         )
-    if isinstance(after.get('self_image'), dict):
-        await upsert_character_self_image(after['self_image'])
+    await upsert_character_self_image(self_image)
 
 
 async def _apply_persistent_memory(

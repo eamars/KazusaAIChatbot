@@ -13,8 +13,6 @@ import logging
 import re
 import uuid
 
-from pymongo.errors import PyMongoError
-
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
@@ -435,64 +433,6 @@ def _preferred_platform_account(
     return return_value
 
 
-async def list_users_by_affinity(
-    *,
-    rank_order: str = "top",
-    platform: str | None = None,
-    limit: int = 5,
-) -> list[dict]:
-    """List profiled users ordered by relationship affinity.
-
-    Args:
-        rank_order: ``"top"`` for highest-affinity users, ``"bottom"`` for
-            lowest-affinity users.
-        platform: Optional preferred platform for choosing display names.
-        limit: Maximum number of users to return.
-
-    Returns:
-        User dicts containing identity fields, raw affinity for internal agent
-        ranking. Callers that expose results to an LLM must remove the raw
-        affinity value.
-    """
-    if limit <= 0:
-        return_value = []
-        return return_value
-
-    sort_direction = 1 if rank_order == "bottom" else -1
-    db = await get_db()
-    cursor = (
-        db.user_profiles.find(
-            {
-                "global_user_id": {"$ne": CHARACTER_GLOBAL_USER_ID},
-                "affinity": {"$exists": True},
-                "platform_accounts.0": {"$exists": True},
-            },
-            {
-                "_id": 0,
-                "global_user_id": 1,
-                "platform_accounts": 1,
-                "affinity": 1,
-            },
-        )
-        .sort("affinity", sort_direction)
-        .limit(limit)
-    )
-
-    results: list[dict] = []
-    async for doc in cursor:
-        account = _preferred_platform_account(doc["platform_accounts"], platform)
-        results.append(
-            {
-                "global_user_id": doc["global_user_id"],
-                "display_name": str(account.get("display_name", "")),
-                "platform": str(account.get("platform", "")),
-                "platform_user_id": str(account.get("platform_user_id", "")),
-                "affinity": doc["affinity"],
-            }
-        )
-    return results
-
-
 def _relationship_rank_score(relationship: dict) -> int:
     """Compute an internal ranking score from native V2 relationship axes."""
 
@@ -681,7 +621,7 @@ async def create_user_profile(user_profile: UserProfileDoc) -> None:
 
     Args:
         user_profile: Profile document to insert. Defaults for core identity,
-            affinity, and memory fields are filled before persistence.
+            native cognition state and memory fields are filled before persistence.
 
     Returns:
         None.
@@ -742,60 +682,3 @@ async def replace_user_cognition_state(
         raise DatabaseOperationError(
             f"user profile {global_user_id!r} does not exist"
         )
-
-
-# ── Affinity & relationship insight ────────────────────────────────
-
-
-async def get_affinity(global_user_id: str) -> int:
-    """Return the affinity score for a user (0–1000, default ``AFFINITY_DEFAULT``)."""
-    db = await get_db()
-    doc = await db.user_profiles.find_one({"global_user_id": global_user_id})
-    if doc is None:
-        return AFFINITY_DEFAULT
-    affinity = doc["affinity"]
-    return affinity
-
-
-async def update_affinity(global_user_id: str, delta: int) -> int:
-    """Apply a delta to the user's affinity score, clamped to ``[AFFINITY_MIN, AFFINITY_MAX]``.
-
-    Creates the ``user_profiles`` doc if it doesn't exist yet.
-
-    Returns:
-        The new (clamped) affinity value.
-    """
-    try:
-        current = await get_affinity(global_user_id)
-    except PyMongoError as exc:
-        raise DatabaseOperationError(
-            f"failed to read affinity before update: {exc}"
-        ) from exc
-    new_value = max(AFFINITY_MIN, min(AFFINITY_MAX, current + delta))
-    try:
-        db = await get_db()
-        await db.user_profiles.update_one(
-            {"global_user_id": global_user_id},
-            {"$set": {"affinity": new_value}},
-            upsert=True,
-        )
-    except PyMongoError as exc:
-        raise DatabaseOperationError(
-            f"failed to update affinity: {exc}"
-        ) from exc
-    return new_value
-
-
-async def update_last_relationship_insight(global_user_id: str, insight: str) -> None:
-    """Update the last relationship insight for a user."""
-    try:
-        db = await get_db()
-        await db.user_profiles.update_one(
-            {"global_user_id": global_user_id},
-            {"$set": {"last_relationship_insight": insight}},
-            upsert=True,
-        )
-    except PyMongoError as exc:
-        raise DatabaseOperationError(
-            f"failed to update relationship insight: {exc}"
-        ) from exc

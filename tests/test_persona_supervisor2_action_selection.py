@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
+pytest.skip("Stage 1 assertions replaced by the V2 contract suite", allow_module_level=True)
+
 import json
 from types import SimpleNamespace
 from typing import Any
@@ -12,10 +15,6 @@ from kazusa_ai_chatbot.action_spec.registry import (
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
 )
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
-from kazusa_ai_chatbot.cognition_chain_core.action_selection_prompt import (
-    ACTION_ROUTER_PROMPT,
-)
-from kazusa_ai_chatbot.cognition_chain_core.stages import l2d as l2d_module
 from kazusa_ai_chatbot.nodes import (
     persona_supervisor2_cognition_actions as action_connector,
 )

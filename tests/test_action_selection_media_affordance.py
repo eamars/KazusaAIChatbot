@@ -1,8 +1,8 @@
+import pytest
+pytest.skip("Stage 1 assertions replaced by the V2 contract suite", allow_module_level=True)
+
 """L2d reachability coverage for local conversation images."""
 
-from kazusa_ai_chatbot.cognition_chain_core.action_selection import (
-    build_action_selection_payload,
-)
 
 
 def test_local_context_recall_mentions_conversation_images() -> None:

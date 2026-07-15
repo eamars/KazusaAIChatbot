@@ -206,8 +206,8 @@ async def test_user_memory_write_uses_native_lane_and_cache_invalidation(
     assert all(
         field not in result["metadata"]
         for field in (
-            "affinity_before",
-            "affinity_delta_processed",
+            "relationship_state_before",
+            "relationship_delta_processed",
             "relationship_insight",
             "character_state",
         )
@@ -272,10 +272,10 @@ async def test_native_writer_does_not_rehydrate_legacy_affect(monkeypatch) -> No
     state.update(
         {
             "mood": "legacy mood",
-            "global_vibe": "legacy vibe",
-            "reflection_summary": "legacy summary",
-            "affinity_delta": 9,
-            "last_relationship_insight": "legacy insight",
+            "vibe_check": "legacy vibe",
+            "character_reflection": "legacy summary",
+            "relationship_delta": 9,
+            "semantic_relationship_projection": "legacy insight",
         }
     )
 
@@ -284,6 +284,6 @@ async def test_native_writer_does_not_rehydrate_legacy_affect(monkeypatch) -> No
     mocks["memory"].assert_awaited_once()
     assert "legacy mood" not in str(result)
     assert "legacy insight" not in str(result)
-    assert "affinity" not in str(result).lower()
+    assert "relationship_state" not in str(result).lower()
     assert result["metadata"]["write_success"]["user_memory_units"] is True
     assert result["metadata"]["write_success"]["group_channel_style_image"] is False

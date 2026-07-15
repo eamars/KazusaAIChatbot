@@ -219,8 +219,8 @@ def _live_persona_state_for_input(
     )
     character_profile = load_personality(PERSONALITY_PATH)
     character_profile.setdefault("mood", "neutral")
-    character_profile.setdefault("global_vibe", "calm")
-    character_profile.setdefault("reflection_summary", "")
+    character_profile.setdefault("vibe_check", "calm")
+    character_profile.setdefault("character_reflection", "")
     character_profile.setdefault("global_user_id", CHARACTER_GLOBAL_USER_ID)
     state["character_profile"] = character_profile
     state["character_name"] = character_profile.get("name", "Kazusa")

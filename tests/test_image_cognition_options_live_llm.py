@@ -29,30 +29,10 @@ from kazusa_ai_chatbot.llm_interface import (
     LLMCallConfig,
     LLMThinkingConfig,
 )
-from kazusa_ai_chatbot.cognition_chain_core.stages.l1 import (
-    _COGNITION_SUBCONSCIOUS_PROMPT,
-    call_cognition_subconscious,
-    get_mbti_natural_response,
-)
-from kazusa_ai_chatbot.cognition_chain_core.stages.l2 import (
-    _COGNITION_CONSCIOUSNESS_PROMPT,
-    _cognition_rag_result as _l2_cognition_rag_result,
-    _current_user_rag_bundle,
-    call_cognition_consciousness,
-)
-from kazusa_ai_chatbot.cognition_chain_core.stages.l3 import (
-    _CONTENT_PLAN_AGENT_PROMPT,
-    _cognition_rag_result as _l3_cognition_rag_result,
-    call_content_plan_agent,
-)
-from kazusa_ai_chatbot.cognition_chain_core.prompt_selection import (
-    build_cognition_prompt_source_payload,
-    select_cognition_prompt_variant,
-)
 from kazusa_ai_chatbot.nodes.referent_resolution import normalize_referents
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 from kazusa_ai_chatbot.utils import (
-    build_affinity_block,
+    build_relationship_state_block,
     load_personality,
     parse_llm_json_output,
 )
@@ -704,8 +684,8 @@ def _character_profile() -> dict[str, Any]:
 
     profile = load_personality(_PERSONALITY_PATH)
     profile["mood"] = "Neutral"
-    profile["global_vibe"] = "Calm"
-    profile["reflection_summary"] = "No strong emotional residue from the previous turn."
+    profile["vibe_check"] = "Calm"
+    profile["character_reflection"] = "No strong emotional residue from the previous turn."
     return profile
 
 
@@ -813,9 +793,9 @@ def _base_layer_state(
         "user_name": "Image Quality User",
         "platform_user_id": "platform-user-image-quality",
         "user_profile": {
-            "affinity": 680,
+            "relationship_state": 680,
             "facts": [],
-            "last_relationship_insight": "The user is asking a neutral visual question.",
+            "semantic_relationship_projection": "The user is asking a neutral visual question.",
         },
         "platform_bot_id": "platform-bot-image-quality",
         "chat_history_wide": [],
@@ -953,9 +933,9 @@ async def _run_direct_image_layer_copy(
         character_name=character_profile["name"],
         character_mbti=mbti,
         character_mood=character_profile["mood"],
-        character_global_vibe=character_profile["global_vibe"],
-        character_reflection_summary=character_profile["reflection_summary"],
-        user_last_relationship_insight=state["user_profile"]["last_relationship_insight"],
+        character_vibe_check=character_profile["vibe_check"],
+        character_character_reflection=character_profile["character_reflection"],
+        user_semantic_relationship_projection=state["user_profile"]["semantic_relationship_projection"],
         mbti_natural_response=get_mbti_natural_response(mbti),
     )
     l1_payload = {
@@ -980,16 +960,16 @@ async def _run_direct_image_layer_copy(
         episode=state["cognitive_episode"],
         stage="l2a_conscious_framing",
     )
-    affinity_block = build_affinity_block(state["user_profile"]["affinity"])
+    relationship_state_block = build_relationship_state_block(state["user_profile"]["relationship_state"])
     user_memory_context = _current_user_rag_bundle(state)["user_memory_context"]
     l2_payload = {
         "character_mood": character_profile["mood"],
-        "global_vibe": character_profile["global_vibe"],
+        "vibe_check": character_profile["vibe_check"],
         "user_memory_context": user_memory_context,
-        "last_relationship_insight": state["user_profile"]["last_relationship_insight"],
-        "affinity_context": {
-            "level": affinity_block["level"],
-            "instruction": affinity_block["instruction"],
+        "semantic_relationship_projection": state["user_profile"]["semantic_relationship_projection"],
+        "relationship_state_context": {
+            "level": relationship_state_block["level"],
+            "instruction": relationship_state_block["instruction"],
         },
         "decontextualized_input": state["decontexualized_input"],
         "active_commitments": user_memory_context["active_commitments"],

@@ -178,7 +178,7 @@ def _base_case(case_id: str) -> dict[str, Any]:
         'user_name': _CURRENT_USER_NAME,
         'platform_user_id': _CURRENT_USER_PLATFORM_ID,
         'global_user_id': _CURRENT_USER_GLOBAL_ID,
-        'affinity': 520,
+        'relationship_state': 520,
         'relationship_insight': '熟悉但仍保持边界的群聊协作对象',
         'accepted_user_preferences': [],
         'forbidden_phrases': [],
@@ -219,8 +219,8 @@ def _state_from_case(case: dict[str, Any]) -> dict[str, Any]:
         'global_user_id': case['global_user_id'],
         'user_name': case['user_name'],
         'user_profile': {
-            'affinity': case['affinity'],
-            'last_relationship_insight': case['relationship_insight'],
+            'relationship_state': case['relationship_state'],
+            'semantic_relationship_projection': case['relationship_insight'],
         },
         'dialog_usage_mode': 'live_visible_reply',
     }

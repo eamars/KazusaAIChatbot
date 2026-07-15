@@ -161,7 +161,7 @@ def _public_candidate(doc: dict[str, Any], rank: int) -> dict[str, Any]:
 
     Args:
         doc: Raw relationship row returned by the DB helper.
-        rank: One-based rank after affinity sorting.
+        rank: One-based rank after relationship sorting.
 
     Returns:
         Candidate payload with no raw relationship scalar.
@@ -207,7 +207,7 @@ class RelationshipAgent(BaseRAGHelperAgent):
 
         Returns:
             Dict with resolved flag, prompt-safe relationship candidates, and
-            cache metadata. Raw affinity values are never included.
+            cache metadata. Raw relationship scores are never included.
         """
         del max_attempts
 

@@ -99,7 +99,7 @@ def _resolver_state() -> dict:
         "platform_bot_id": "bot-123",
         "global_user_id": "global-user-123",
         "user_name": "Test User",
-        "user_profile": {"affinity": 500},
+        "user_profile": {"relationship_state": 500},
         "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
         "local_time_context": turn_clock["local_time_context"],
         "prompt_message_context": {

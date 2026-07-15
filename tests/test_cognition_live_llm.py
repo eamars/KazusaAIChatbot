@@ -13,47 +13,6 @@ import pytest
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
-from kazusa_ai_chatbot.cognition_chain_core.contracts import LLMStageBinding
-from kazusa_ai_chatbot.cognition_chain_core.stages.l1 import (
-    call_cognition_subconscious,
-    reset_subconscious_llm,
-    set_subconscious_llm,
-)
-from kazusa_ai_chatbot.cognition_chain_core.stages.l2 import (
-    call_boundary_core_agent,
-    call_cognition_consciousness,
-    call_judgment_core_agent,
-    reset_boundary_core_llm,
-    reset_conscious_llm,
-    reset_judgement_core_llm,
-    set_boundary_core_llm,
-    set_conscious_llm,
-    set_judgement_core_llm,
-)
-from kazusa_ai_chatbot.cognition_chain_core.stages.l3 import (
-    call_surface_directive_collector,
-    call_content_plan_agent,
-    call_preference_adapter,
-    call_style_agent,
-    call_visual_agent,
-    reset_content_plan_agent_llm,
-    reset_preference_adapter_llm,
-    reset_style_agent_llm,
-    reset_visual_agent_llm,
-    set_content_plan_agent_llm,
-    set_preference_adapter_llm,
-    set_style_agent_llm,
-    set_visual_agent_llm,
-)
-from kazusa_ai_chatbot.cognition_chain_core.stages.l2c2 import (
-    call_social_context_appraisal,
-    reset_contextual_agent_llm,
-    set_contextual_agent_llm,
-)
-from kazusa_ai_chatbot.cognition_chain_core.utils import (
-    reset_json_parser,
-    set_json_parser,
-)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_cognition_chain_services,
 )
@@ -171,8 +130,8 @@ def _user_memory_context(objective_facts: str, recent_shift: str | None) -> dict
 def _build_character_profile() -> dict:
     profile = load_personality(_PERSONALITY_PATH)
     profile.setdefault("mood", "Neutral")
-    profile.setdefault("global_vibe", "Calm")
-    profile.setdefault("reflection_summary", "刚才只是普通的一轮对话，没有留下特别强烈的情绪余波。")
+    profile.setdefault("vibe_check", "Calm")
+    profile.setdefault("character_reflection", "刚才只是普通的一轮对话，没有留下特别强烈的情绪余波。")
     return profile
 
 
@@ -222,9 +181,9 @@ def _build_base_state() -> dict:
         "user_name": "LiveCognitionUser",
         "platform_user_id": "live-user",
         "user_profile": {
-            "affinity": 680,
+            "relationship_state": 680,
             "facts": [],
-            "last_relationship_insight": "对方目前让人放松，可以正常交流。",
+            "semantic_relationship_projection": "对方目前让人放松，可以正常交流。",
         },
         "platform_bot_id": "live-bot",
         "chat_history_wide": list(chat_history_recent),
@@ -433,9 +392,9 @@ def _build_webinar_invitation_advice_state() -> dict:
             "user_name": current_display_name,
             "platform_user_id": current_platform_user_id,
             "user_profile": {
-                "affinity": 720,
+                "relationship_state": 720,
                 "facts": [],
-                "last_relationship_insight": "对方经常在群里直接向千纱提问和开玩笑。",
+                "semantic_relationship_projection": "对方经常在群里直接向千纱提问和开玩笑。",
             },
             "platform": "qq",
             "platform_channel_id": "905393941",

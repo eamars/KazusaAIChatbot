@@ -147,7 +147,7 @@ def _base_state(
         "platform_bot_id": "bot-1",
         "global_user_id": "global-alex",
         "user_name": user_name,
-        "user_profile": {"affinity": 700},
+        "user_profile": {"relationship_state": 700},
     }
 
 

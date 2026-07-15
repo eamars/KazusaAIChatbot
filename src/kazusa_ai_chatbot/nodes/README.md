@@ -311,7 +311,7 @@ File: `cognition_chain_core/stages/l1.py`
 
 L1 is the fast affective layer. It receives the current stimulus plus the
 character's immediate mood, global vibe, relationship insight for the user,
-and MBTI-derived instinct hint. L1 no longer receives `reflection_summary` as
+and MBTI-derived instinct hint. L1 no longer receives `character_reflection` as
 live carry-over; internal monologue residue is projected only into L2a.
 
 It outputs:
@@ -369,7 +369,7 @@ File: `cognition_chain_core/stages/l2.py`
 
 L2a is the rational interpretation layer. It reads L1, decontextualized input,
 RAG evidence, user memory context, current commitments, promoted reflection
-context, conversation progress, projected internal monologue residue, affinity,
+context, conversation progress, projected internal monologue residue, relationship_state,
 mood, and global vibe.
 
 When the current turn is structurally anchored to a prior Kazusa-authored
@@ -467,7 +467,7 @@ File: `cognition_chain_core/stages/l2.py`
 
 L2b runs in parallel after L1 and before final judgment. It reads the
 decontextualized input, reason to respond, channel topic, indirect speech
-context, L1 affect, affinity, and the character's `boundary_profile`.
+context, L1 affect, relationship_state, and the character's `boundary_profile`.
 
 It outputs:
 
@@ -492,7 +492,7 @@ Design role:
 - decide whether the input touches autonomy, identity, control, authority, or
   relationship distortion,
 - translate personality-level boundary parameters into response constraints,
-- account for affinity without letting intimacy erase identity boundaries,
+- account for relationship_state without letting intimacy erase identity boundaries,
 - produce a maximum safe response envelope for the judgment core.
 
 Boundary Core is deliberately separate from Consciousness. L2a may be moved by
@@ -509,7 +509,7 @@ Example input:
   "indirect_speech_context": "",
   "interaction_subtext": "routine information request",
   "emotional_appraisal": "Calm; this is a normal request.",
-  "affinity_context": {
+  "relationship_state_context": {
     "level": "friendly neutral",
     "instruction": "respond normally while keeping boundaries intact"
   }

@@ -5,6 +5,9 @@ from __future__ import annotations
 import pytest
 
 from kazusa_ai_chatbot.cognition_episode import CognitiveEpisode
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    build_acquaintance_user_state,
+)
 from kazusa_ai_chatbot.consolidation import core as consolidator_module
 from kazusa_ai_chatbot.consolidation.origin import (
     build_self_cognition_consolidation_origin,
@@ -68,7 +71,13 @@ def _self_cognition_global_state() -> dict:
         "local_time_context": turn_clock["local_time_context"],
         "global_user_id": "global-user-1",
         "user_name": "Test User",
-        "user_profile": {"global_user_id": "global-user-1", "affinity": 500},
+        "user_profile": {
+            "global_user_id": "global-user-1",
+            "cognition_state": build_acquaintance_user_state(
+                global_user_id="global-user-1",
+                updated_at="2026-07-03T00:00:00Z",
+            ),
+        },
         "platform": "qq",
         "platform_channel_id": "channel-1",
         "channel_type": "private",
@@ -125,11 +134,11 @@ async def test_call_consolidation_subgraph_selects_self_cognition_origin(
         pipeline_state = {
             **node_state,
             "mood": "hurt",
-            "global_vibe": "uneasy",
-            "reflection_summary": "summary",
+            "vibe_check": "uneasy",
+            "character_reflection": "summary",
             "subjective_appraisals": ["The silence felt disappointing."],
-            "affinity_delta": -1,
-            "last_relationship_insight": "unreliable",
+            "relationship_delta": -1,
+            "semantic_relationship_projection": "unreliable",
             "new_facts": [],
             "future_promises": [],
             "metadata": {"write_success": {}},
@@ -148,5 +157,8 @@ async def test_call_consolidation_subgraph_selects_self_cognition_origin(
     result = await consolidator_module.call_consolidation_subgraph(state)
 
     assert seen_pipeline_state["consolidation_origin"] == expected_origin
-    assert result["mood"] == "hurt"
-    assert result["affinity_delta"] == -1
+    assert set(result) == {
+        "new_facts",
+        "future_promises",
+        "consolidation_metadata",
+    }

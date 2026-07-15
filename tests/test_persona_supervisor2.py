@@ -49,15 +49,15 @@ def _base_discord_state():
             "broadcast": True,
         },
         "user_multimedia_input": [],
-        "user_profile": {"affinity": 500},
+        "user_profile": {"relationship_state": 500},
         "platform_bot_id": "bot_456",
         "character_name": "TestCharacter",
         "character_profile": {
             "name": "Character",
             "global_user_id": "character-uuid",
             "mood": "neutral",
-            "global_vibe": "calm",
-            "reflection_summary": "nothing notable",
+            "vibe_check": "calm",
+            "character_reflection": "nothing notable",
         },
         "platform_channel_id": "chan_1",
         "channel_type": "group",
@@ -723,8 +723,8 @@ async def test_persona_supervisor2_builds_scope_users_for_first_pass_only():
         "name": "杏山千纱",
         "global_user_id": "00000000-0000-4000-8000-000000000001",
         "mood": "neutral",
-        "global_vibe": "calm",
-        "reflection_summary": "nothing notable",
+        "vibe_check": "calm",
+        "character_reflection": "nothing notable",
     }
     state["message_envelope"]["body_text"] = state["user_input"]
     state["message_envelope"]["raw_wire_text"] = state["user_input"]

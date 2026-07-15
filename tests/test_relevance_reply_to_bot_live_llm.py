@@ -33,8 +33,8 @@ _DB_CHARACTER_PROFILE = {
     "name": "杏山千纱 (Kyōyama Kazusa)",
     "global_user_id": _CHARACTER_GLOBAL_USER_ID,
     "mood": "Annoyed",
-    "global_vibe": "Slightly Tense",
-    "reflection_summary": "",
+    "vibe_check": "Slightly Tense",
+    "character_reflection": "",
 }
 
 _INCIDENT_USER_PROFILE = {
@@ -44,8 +44,8 @@ _INCIDENT_USER_PROFILE = {
         "platform_user_id": "673225019",
         "display_name": "蚝爹油",
     }],
-    "affinity": 700,
-    "last_relationship_insight": "关系不错，经常互动调侃。",
+    "relationship_state": 700,
+    "semantic_relationship_projection": "关系不错，经常互动调侃。",
 }
 
 

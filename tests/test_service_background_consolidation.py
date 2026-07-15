@@ -117,7 +117,7 @@ def _consolidation_state() -> dict:
         "platform_message_id": "msg-1",
         "global_user_id": "global-user-1",
         "user_name": "Test User",
-        "user_profile": {"global_user_id": "global-user-1", "affinity": 500},
+        "user_profile": {"global_user_id": "global-user-1", "relationship_state": 500},
         "character_profile": {"name": "Character"},
         "action_directives": {"linguistic_directives": {"content_plan": {}}},
         "internal_monologue": "test",
@@ -298,8 +298,8 @@ def _patch_chat_dependencies(
         "_runtime_character_state",
         {
             "mood": "old mood",
-            "global_vibe": "old vibe",
-            "reflection_summary": "old reflection",
+            "vibe_check": "old vibe",
+            "character_reflection": "old reflection",
         },
     )
     monkeypatch.setattr(
@@ -307,8 +307,8 @@ def _patch_chat_dependencies(
         "get_character_runtime_state",
         AsyncMock(return_value={
             "mood": "fresh mood",
-            "global_vibe": "fresh vibe",
-            "reflection_summary": "fresh reflection",
+            "vibe_check": "fresh vibe",
+            "character_reflection": "fresh reflection",
         }),
     )
     monkeypatch.setattr(
@@ -325,7 +325,7 @@ def _patch_chat_dependencies(
         service_module,
         "get_user_profile",
         AsyncMock(
-            return_value={"global_user_id": "global-user-1", "affinity": 500},
+            return_value={"global_user_id": "global-user-1", "relationship_state": 500},
         ),
     )
     monkeypatch.setattr(
@@ -1501,8 +1501,8 @@ async def test_background_consolidation_refreshes_cached_character_state(monkeyp
         "_runtime_character_state",
         {
             "mood": "old mood",
-            "global_vibe": "old vibe",
-            "reflection_summary": "old reflection",
+            "vibe_check": "old vibe",
+            "character_reflection": "old reflection",
         },
     )
     monkeypatch.setattr(
@@ -1510,8 +1510,8 @@ async def test_background_consolidation_refreshes_cached_character_state(monkeyp
         "call_consolidation_subgraph",
         AsyncMock(return_value={
             "mood": "Curious",
-            "global_vibe": "Focused",
-            "reflection_summary": "The previous turn left her attentive.",
+            "vibe_check": "Focused",
+            "character_reflection": "The previous turn left her attentive.",
             "consolidation_metadata": {
                 "write_success": {
                     "character_state": True,
@@ -1527,8 +1527,8 @@ async def test_background_consolidation_refreshes_cached_character_state(monkeyp
 
     assert service_module._runtime_character_state == {
         "mood": "old mood",
-        "global_vibe": "old vibe",
-        "reflection_summary": "old reflection",
+        "vibe_check": "old vibe",
+        "character_reflection": "old reflection",
     }
 
 
@@ -1638,7 +1638,7 @@ async def test_build_graph_preserves_consolidation_state_from_supervisor(monkeyp
         "user_name": "蚝爹油",
         "user_input": "一分钟后发消息",
         "user_multimedia_input": [],
-        "user_profile": {"global_user_id": "global-user-1", "affinity": 500},
+        "user_profile": {"global_user_id": "global-user-1", "relationship_state": 500},
         "platform_bot_id": "bot-id",
         "character_name": "Character",
         "character_profile": {"name": "杏山千纱"},
@@ -1715,7 +1715,7 @@ async def test_build_graph_preserves_persona_no_response(monkeypatch):
         "user_name": "Test User",
         "user_input": "ignored message",
         "user_multimedia_input": [],
-        "user_profile": {"global_user_id": "global-user-1", "affinity": 500},
+        "user_profile": {"global_user_id": "global-user-1", "relationship_state": 500},
         "platform_bot_id": "bot-id",
         "character_name": "Character",
         "character_profile": {"name": "Character"},
@@ -1761,7 +1761,7 @@ async def test_build_graph_skips_episode_state_loader_when_relevance_declines(mo
         "user_name": "Test User",
         "user_input": "third party chat",
         "user_multimedia_input": [],
-        "user_profile": {"global_user_id": "global-user-1", "affinity": 500},
+        "user_profile": {"global_user_id": "global-user-1", "relationship_state": 500},
         "platform_bot_id": "bot-id",
         "character_name": "Character",
         "character_profile": {"name": "Character"},
@@ -1793,8 +1793,8 @@ async def test_chat_listen_only_drops_before_graph(monkeypatch):
         "_runtime_character_state",
         {
             "mood": "old mood",
-            "global_vibe": "old vibe",
-            "reflection_summary": "old reflection",
+            "vibe_check": "old vibe",
+            "character_reflection": "old reflection",
         },
     )
     monkeypatch.setattr(
@@ -1802,8 +1802,8 @@ async def test_chat_listen_only_drops_before_graph(monkeypatch):
         "get_character_runtime_state",
         AsyncMock(return_value={
             "mood": "fresh mood",
-            "global_vibe": "fresh vibe",
-            "reflection_summary": "fresh reflection",
+            "vibe_check": "fresh vibe",
+            "character_reflection": "fresh reflection",
         }),
     )
     monkeypatch.setattr(
@@ -1820,7 +1820,7 @@ async def test_chat_listen_only_drops_before_graph(monkeypatch):
         service_module,
         "get_user_profile",
         AsyncMock(
-            return_value={"global_user_id": "global-user-1", "affinity": 500},
+            return_value={"global_user_id": "global-user-1", "relationship_state": 500},
         ),
     )
     monkeypatch.setattr(

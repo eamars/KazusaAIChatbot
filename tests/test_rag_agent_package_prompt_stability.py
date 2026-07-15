@@ -457,9 +457,9 @@ async def _prompt_payload_snapshot(
         monkeypatch,
         module=relationship_agent,
         llm_attr="_extractor_llm",
-        response_payload={"rank_by": "affinity", "direction": "top", "limit": 5},
+        response_payload={"rank_by": "relationship_state", "direction": "top", "limit": 5},
         call_factory=lambda: relationship_agent._extract_relationship_args(
-            "Relationship: top affinity users",
+            "Relationship: top relationship_state users",
             context,
         ),
     )

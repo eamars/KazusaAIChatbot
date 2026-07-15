@@ -96,7 +96,7 @@ async def test_collect_group_chat_review_cases_builds_same_group_cases(
     )
     assert newest_case["delivery_target"]["fallback_reason"] == ""
     assert "current_mood" not in newest_case
-    assert "global_vibe" not in newest_case
+    assert "vibe_check" not in newest_case
     addressed_case = next(
         case
         for case in cases
@@ -425,7 +425,7 @@ async def test_collect_group_review_cases_attaches_participant_context(
                 "role_in_window": ["direct_cue"],
                 "relationship_label": "Neutral",
                 "relationship_band": "neutral",
-                "last_relationship_insight": "",
+                "semantic_relationship_projection": "",
                 "engagement_guidelines": [],
                 "nearby_conversation_evidence": [],
                 "visible_samples": ["Can you look at this in the group?"],
@@ -950,7 +950,7 @@ async def test_collect_group_review_cases_attaches_thread_reference_context(
                 "role_in_window": ["direct_cue"],
                 "relationship_label": "Neutral",
                 "relationship_band": "neutral",
-                "last_relationship_insight": "",
+                "semantic_relationship_projection": "",
                 "engagement_guidelines": [],
                 "nearby_conversation_evidence": [],
                 "visible_samples": ["@杏山千纱 🐷"],

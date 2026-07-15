@@ -83,7 +83,7 @@ def _multimedia_state() -> dict:
         "user_name": "TestUser",
         "user_input": "Hello bot!",
         "user_multimedia_input": [],
-        "user_profile": {"affinity": 500, "last_relationship_insight": ""},
+        "user_profile": {"relationship_state": 500, "semantic_relationship_projection": ""},
         "platform_bot_id": "bot_456",
         "message_envelope": {
             "body_text": "Hello bot!",
@@ -104,7 +104,7 @@ def _multimedia_state() -> dict:
             "name": "Character",
             "global_user_id": "character-global-id",
             "mood": "neutral",
-            "global_vibe": "calm",
+            "vibe_check": "calm",
         },
         "platform_channel_id": "chan_1",
         "channel_type": "group",

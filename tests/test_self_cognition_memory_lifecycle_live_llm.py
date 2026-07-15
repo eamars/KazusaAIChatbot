@@ -220,9 +220,9 @@ async def _user_profile() -> dict:
     """Return a bounded profile for the synthetic test user."""
 
     profile = {
-        "affinity": 900,
+        "relationship_state": 900,
         "display_name": "live lifecycle test user",
-        "last_relationship_insight": "",
+        "semantic_relationship_projection": "",
     }
     return profile
 

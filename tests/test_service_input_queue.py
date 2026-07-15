@@ -228,8 +228,8 @@ def _patch_common_dependencies(monkeypatch, graph) -> None:
         "_runtime_character_state",
         {
             "mood": "old mood",
-            "global_vibe": "old vibe",
-            "reflection_summary": "old reflection",
+            "vibe_check": "old vibe",
+            "character_reflection": "old reflection",
         },
     )
     monkeypatch.setattr(
@@ -237,8 +237,8 @@ def _patch_common_dependencies(monkeypatch, graph) -> None:
         "get_character_runtime_state",
         AsyncMock(return_value={
             "mood": "fresh mood",
-            "global_vibe": "fresh vibe",
-            "reflection_summary": "fresh reflection",
+            "vibe_check": "fresh vibe",
+            "character_reflection": "fresh reflection",
         }),
     )
     monkeypatch.setattr(
@@ -254,7 +254,7 @@ def _patch_common_dependencies(monkeypatch, graph) -> None:
     monkeypatch.setattr(
         service_module,
         "get_user_profile",
-        AsyncMock(return_value={"affinity": 500}),
+        AsyncMock(return_value={"relationship_state": 500}),
     )
     monkeypatch.setattr(
         service_module,
@@ -979,7 +979,7 @@ async def test_dropped_queue_item_releases_foreground_handle(monkeypatch) -> Non
     monkeypatch.setattr(
         service_module,
         "_resolve_queued_user",
-        AsyncMock(return_value=("global-user-1", {"affinity": 500})),
+        AsyncMock(return_value=("global-user-1", {"relationship_state": 500})),
     )
     monkeypatch.setattr(
         service_module,
@@ -1404,9 +1404,9 @@ async def test_worker_derives_graph_input_from_message_envelope(monkeypatch) -> 
         == "static brief"
     )
     assert captured_state["character_profile"]["mood"] == "fresh mood"
-    assert captured_state["character_profile"]["global_vibe"] == "fresh vibe"
+    assert captured_state["character_profile"]["vibe_check"] == "fresh vibe"
     assert (
-        captured_state["character_profile"]["reflection_summary"]
+        captured_state["character_profile"]["character_reflection"]
         == "fresh reflection"
     )
     assert captured_state["character_profile"]["global_user_id"] == (

@@ -13,11 +13,6 @@ from kazusa_ai_chatbot.action_spec.registry import (
     build_initial_action_capabilities,
     project_prompt_affordances,
 )
-from kazusa_ai_chatbot.cognition_chain_core.stages import l2d as l2d_module
-from kazusa_ai_chatbot.cognition_chain_core.stages.l2d import (
-    build_action_selection_payload_text,
-    select_semantic_actions,
-)
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
 from kazusa_ai_chatbot.nodes import (
     persona_supervisor2_cognition_actions as action_connector,
@@ -124,7 +119,7 @@ def _quiet_group_graphics_state() -> dict:
         'character_profile': {
             'name': '杏山千纱',
             'mood': '平静',
-            'global_vibe': '轻松的群聊旁观状态',
+            'vibe_check': '轻松的群聊旁观状态',
         },
         'storage_timestamp_utc': '2026-06-12T07:55:54.573000+00:00',
         'local_time_context': {
@@ -150,8 +145,8 @@ def _quiet_group_graphics_state() -> dict:
         'user_name': 'Karma',
         'user_profile': {
             'display_name': 'Karma',
-            'affinity': 520,
-            'last_relationship_insight': '普通群友，当前没有直接点名压力。',
+            'relationship_state': 520,
+            'semantic_relationship_projection': '普通群友，当前没有直接点名压力。',
         },
         'platform_bot_id': 'pytest-bot',
         'chat_history_recent': [

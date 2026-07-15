@@ -11,6 +11,9 @@ from kazusa_ai_chatbot.cognition_episode import (
     OutputMode,
     build_text_chat_cognitive_episode,
 )
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    build_acquaintance_user_state,
+)
 from kazusa_ai_chatbot.consolidation import core as consolidator_module
 from kazusa_ai_chatbot.consolidation.origin import (
     ConsolidationOriginError,
@@ -160,7 +163,13 @@ def _global_state() -> dict:
         "local_time_context": turn_clock["local_time_context"],
         "global_user_id": "global-user-1",
         "user_name": "Test User",
-        "user_profile": {"global_user_id": "global-user-1", "affinity": 500},
+        "user_profile": {
+            "global_user_id": "global-user-1",
+            "cognition_state": build_acquaintance_user_state(
+                global_user_id="global-user-1",
+                updated_at="2026-07-03T00:00:00Z",
+            ),
+        },
         "platform": "qq",
         "platform_channel_id": "channel-1",
         "channel_type": "group",
@@ -467,11 +476,11 @@ async def test_call_consolidation_subgraph_threads_origin_to_all_nodes(
         pipeline_state = {
             **node_state,
             "mood": "calm",
-            "global_vibe": "steady",
-            "reflection_summary": "summary",
+            "vibe_check": "steady",
+            "character_reflection": "summary",
             "subjective_appraisals": [],
-            "affinity_delta": 0,
-            "last_relationship_insight": "",
+            "relationship_delta": 0,
+            "semantic_relationship_projection": "",
             "new_facts": [{"fact": "User likes tea"}],
             "future_promises": [],
             "metadata": {"write_success": {}},
@@ -516,11 +525,11 @@ async def test_call_consolidation_subgraph_accepts_reflection_signal_origin(
         pipeline_state = {
             **node_state,
             "mood": "",
-            "global_vibe": "",
-            "reflection_summary": "",
+            "vibe_check": "",
+            "character_reflection": "",
             "subjective_appraisals": [],
-            "affinity_delta": 0,
-            "last_relationship_insight": "",
+            "relationship_delta": 0,
+            "semantic_relationship_projection": "",
             "new_facts": [],
             "future_promises": [],
             "metadata": {"write_success": {}},
@@ -581,11 +590,11 @@ async def test_call_consolidation_subgraph_does_not_return_origin_metadata(
         pipeline_state = {
             **node_state,
             "mood": "calm",
-            "global_vibe": "steady",
-            "reflection_summary": "summary",
+            "vibe_check": "steady",
+            "character_reflection": "summary",
             "subjective_appraisals": [],
-            "affinity_delta": 0,
-            "last_relationship_insight": "",
+            "relationship_delta": 0,
+            "semantic_relationship_projection": "",
             "new_facts": [],
             "future_promises": [],
             "metadata": {"write_success": {"character_state": True}},
@@ -604,12 +613,6 @@ async def test_call_consolidation_subgraph_does_not_return_origin_metadata(
     result = await consolidator_module.call_consolidation_subgraph(_global_state())
 
     assert set(result) == {
-        "mood",
-        "global_vibe",
-        "reflection_summary",
-        "subjective_appraisals",
-        "affinity_delta",
-        "last_relationship_insight",
         "new_facts",
         "future_promises",
         "consolidation_metadata",

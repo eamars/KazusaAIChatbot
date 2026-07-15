@@ -233,7 +233,7 @@ async def test_missing_global_user_id_degrades_to_visible_only(
     assert primary["display_name"] == "Display Only"
     assert primary["relationship_label"] == "unknown"
     assert primary["relationship_band"] == "unknown"
-    assert "last_relationship_insight" not in primary
+    assert "semantic_relationship_projection" not in primary
     assert primary["engagement_guidelines"] == []
     assert primary["nearby_conversation_evidence"] == []
     assert primary["visible_samples"] == ["A visible-only comment."]

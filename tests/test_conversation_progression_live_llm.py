@@ -25,20 +25,6 @@ from kazusa_ai_chatbot.llm_interface import (
     LLMThinkingConfig,
 )
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
-from kazusa_ai_chatbot.cognition_chain_core.stages.l1 import call_cognition_subconscious
-from kazusa_ai_chatbot.cognition_chain_core.stages.l2 import (
-    call_boundary_core_agent,
-    call_cognition_consciousness,
-    call_judgment_core_agent,
-)
-from kazusa_ai_chatbot.cognition_chain_core.stages.l3 import (
-    call_surface_directive_collector,
-    call_content_plan_agent,
-    call_preference_adapter,
-    call_style_agent,
-    call_visual_agent,
-)
-from kazusa_ai_chatbot.cognition_chain_core.stages.l2c2 import call_social_context_appraisal
 from kazusa_ai_chatbot.time_boundary import (
     build_turn_clock_from_storage_utc,
     storage_utc_now_iso,
@@ -114,8 +100,8 @@ def _build_character_profile() -> dict:
 
     profile = load_personality(_PERSONALITY_PATH)
     profile.setdefault("mood", "Neutral")
-    profile.setdefault("global_vibe", "Calm")
-    profile.setdefault("reflection_summary", '最近对话平稳，没有需要长期保存的新印象。')
+    profile.setdefault("vibe_check", "Calm")
+    profile.setdefault("character_reflection", '最近对话平稳，没有需要长期保存的新印象。')
     return profile
 
 
@@ -189,10 +175,10 @@ def _base_state(
         "user_name": user_name,
         "platform_user_id": platform_user_id,
         "user_profile": {
-            "affinity": 700,
+            "relationship_state": 700,
             "active_commitments": [],
             "facts": [],
-            "last_relationship_insight": '对方信任千纱，最近会把正在卡住或难受的状态说出来。',
+            "semantic_relationship_projection": '对方信任千纱，最近会把正在卡住或难受的状态说出来。',
         },
         "platform_bot_id": platform_bot_id,
         "chat_history_wide": list(chat_history_recent),

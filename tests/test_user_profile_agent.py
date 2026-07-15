@@ -67,7 +67,7 @@ async def test_user_profile_agent_reads_character_profile_for_character_gid(monk
             "age": 15,
             "birthday": "August 5",
             "backstory": "Public backstory.",
-            "global_vibe": "private runtime vibe",
+            "vibe_check": "private runtime vibe",
             "boundary_profile": {"self_integrity": 0.6},
             "self_image": {
                 "milestones": [{"event": "Joined the chat"}],
@@ -113,7 +113,7 @@ async def test_user_profile_agent_reads_character_profile_for_character_gid(monk
     assert result["resolved"] is True
     assert result["result"]["name"] == "Kazusa"
     assert result["result"]["self_image"]["historical_summary"] == "Stable self-image summary."
-    assert "global_vibe" not in result["result"]
+    assert "vibe_check" not in result["result"]
     assert "boundary_profile" not in result["result"]
     assert result["cache"]["reason"] == "miss_stored"
     get_character_profile.assert_awaited_once()

@@ -159,7 +159,7 @@ def test_selected_compact_module_readmes_keep_icd_sections() -> None:
             "Testing Contract",
             "Forbidden Paths",
         ),
-        "src/kazusa_ai_chatbot/cognition_chain_core/README.md": (
+        "src/kazusa_ai_chatbot/cognition_core_v2/README.md": (
             "Document Control",
             "Purpose",
             "Boundary",

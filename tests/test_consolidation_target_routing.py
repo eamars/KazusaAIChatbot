@@ -8,6 +8,9 @@ from typing import Any
 import pytest
 
 from kazusa_ai_chatbot.consolidation import target as target_module
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    build_acquaintance_user_state,
+)
 from kazusa_ai_chatbot.consolidation.target import (
     ConsolidationTargetValidationError,
     build_consolidation_target_plan,
@@ -24,7 +27,10 @@ def _base_state() -> dict[str, Any]:
         "user_name": "Test User",
         "user_profile": {
             "global_user_id": "global-user-1",
-            "affinity": 500,
+            "cognition_state": build_acquaintance_user_state(
+                global_user_id="global-user-1",
+                updated_at="2026-07-03T00:00:00Z",
+            ),
             "display_name": "Test User",
         },
         "platform": "qq",
@@ -92,7 +98,7 @@ def test_target_plan_builds_user_target_for_valid_chat() -> None:
     assert len(targets_by_kind["user"]) == 1
     user_target = targets_by_kind["user"][0]
     assert user_target["target_id"]["global_user_id"] == "global-user-1"
-    assert "affinity" in user_target["write_lanes"]
+    assert "user_style_image" in user_target["write_lanes"]
     assert "user_memory_units" in user_target["write_lanes"]
     assert "group_channel" not in targets_by_kind
 
@@ -195,7 +201,7 @@ def test_real_user_target_requires_validated_profile_shape() -> None:
     state = _base_state()
     state["user_profile"] = {"display_name": "Test User"}
 
-    with pytest.raises(ConsolidationTargetValidationError, match="affinity"):
+    with pytest.raises(ConsolidationTargetValidationError, match="cognition_state"):
         build_consolidation_target_plan(state)
 
 
@@ -205,7 +211,10 @@ def test_real_user_target_requires_matching_profile_identity() -> None:
     state = _base_state()
     state["user_profile"] = {
         "global_user_id": "other-user",
-        "affinity": 500,
+        "cognition_state": build_acquaintance_user_state(
+            global_user_id="other-user",
+            updated_at="2026-07-03T00:00:00Z",
+        ),
     }
 
     with pytest.raises(ConsolidationTargetValidationError, match="mismatched"):
@@ -223,11 +232,11 @@ def test_validate_write_intent_rejects_forbidden_group_user_lane() -> None:
     plan = build_consolidation_target_plan(state)
     group_target = _targets_by_kind(plan)["group_channel"][0]
 
-    with pytest.raises(ConsolidationTargetValidationError, match="affinity"):
+    with pytest.raises(ConsolidationTargetValidationError, match="user_style_image"):
         validate_write_intent(
             {
                 "target_alias": group_target["target_alias"],
-                "write_lane": "affinity",
+                "write_lane": "user_style_image",
                 "payload": {"delta": 1},
             },
             plan,
@@ -241,8 +250,8 @@ def test_validate_write_intent_accepts_real_user_lane() -> None:
     user_target = _targets_by_kind(plan)["user"][0]
     intent = {
         "target_alias": user_target["target_alias"],
-        "write_lane": "affinity",
-        "payload": {"delta": 1},
+        "write_lane": "user_memory_units",
+        "payload": {"source_refs": []},
     }
 
     validated_intent = validate_write_intent(intent, plan)

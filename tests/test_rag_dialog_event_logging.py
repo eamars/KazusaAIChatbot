@@ -86,7 +86,7 @@ def _stage_1_state(*, referents: list[dict[str, object]]) -> dict[str, object]:
         "platform_bot_id": "bot-1",
         "global_user_id": "user-1",
         "user_name": "User",
-        "user_profile": {"affinity": 500},
+        "user_profile": {"relationship_state": 500},
         "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
         "local_time_context": turn_clock["local_time_context"],
         "prompt_message_context": {

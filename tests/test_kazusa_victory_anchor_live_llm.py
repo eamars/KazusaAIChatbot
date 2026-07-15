@@ -13,12 +13,6 @@ from kazusa_ai_chatbot.config import (
     COGNITION_LLM_BASE_URL,
     COGNITION_LLM_MODEL,
 )
-from kazusa_ai_chatbot.cognition_chain_core.contracts import LLMStageBinding
-from kazusa_ai_chatbot.cognition_chain_core.stages.l3 import (
-    call_content_plan_agent,
-    reset_content_plan_agent_llm,
-    set_content_plan_agent_llm,
-)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_cognition_chain_services,
 )
@@ -95,8 +89,8 @@ def _character_profile() -> dict:
         'name': '杏山千纱',
         'global_user_id': '00000000-0000-4000-8000-000000000001',
         'mood': 'Neutral',
-        'global_vibe': 'Playful',
-        'reflection_summary': '群聊里正在玩企鹅叫声和点心的轻松梗。',
+        'vibe_check': 'Playful',
+        'character_reflection': '群聊里正在玩企鹅叫声和点心的轻松梗。',
         'personality_brief': {
             'logic': '先判断事实主体和互动关系，再用克制傲娇的方式回应。',
             'tempo': '短句为主，允许轻微停顿和嘴硬。',

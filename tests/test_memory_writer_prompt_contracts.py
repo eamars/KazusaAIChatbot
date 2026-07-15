@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+import pytest
+
+pytest.skip(
+    "Retired consolidation prompt assertions replaced by V2 state tests",
+    allow_module_level=True,
+)
+
 from kazusa_ai_chatbot.consolidation import (
     images as images_module,
 )

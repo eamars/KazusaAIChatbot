@@ -663,30 +663,6 @@ MCP_CALL_TIMEOUT: float = float(os.getenv("MCP_CALL_TIMEOUT", "30"))
 # Seconds to wait for server initialisation and tool-list discovery at startup.
 MCP_CONNECT_TIMEOUT: float = float(os.getenv("MCP_CONNECT_TIMEOUT", "10"))
 
-# Affinity system
-# Affinity scaling breakpoints (later should be read from character profile)
-AFFINITY_INCREMENT_BREAKPOINTS = [
-    (0, 1.5),      # At 0: 1.5x scaling (easy to gain)
-    (300, 1.5),   # At 300: 1.5x scaling (still easy)
-    (300, 1.0),   # At 300: 1.0x scaling (normal starts)
-    (700, 1.0),   # At 700: 1.0x scaling (normal ends)
-    (700, 0.6),   # At 700: 0.6x scaling (harder to gain)
-    (1000, 0.6)   # At 1000: 0.6x scaling (hardest to gain)
-]
-
-AFFINITY_DECREMENT_BREAKPOINTS = [
-    (0, 1.3),      # At 0: 1.3x scaling (easy to lose when very low)
-    (300, 1.3),   # At 300: 1.3x scaling (still easy to lose)
-    (300, 1.0),   # At 300: 1.0x scaling (normal starts)
-    (700, 1.0),   # At 700: 1.0x scaling (normal ends)
-    (700, 0.6),   # At 700: 0.6x scaling (harder to lose)
-    (1000, 0.6)   # At 1000: 0.6x scaling (hardest to lose)
-]
-AFFINITY_DEFAULT = 500
-AFFINITY_MIN = 0
-AFFINITY_MAX = 1000
-AFFINITY_RAW_DEAD_ZONE = int(os.getenv("AFFINITY_RAW_DEAD_ZONE", "1"))
-
 # Loop counts
 MAX_MEMORY_RETRIEVER_AGENT_RETRY = int(
     os.getenv("MAX_MEMORY_RETRIEVER_AGENT_RETRY", "2"),

@@ -144,7 +144,7 @@ The runtime facade exports helpers for:
 - conversation history: save, recent-history retrieval, semantic/keyword
   search, aggregation by user, and attachment-description repair;
 - reflection conversation reads and reflection-run persistence;
-- user identity, platform-account linking, affinity, display-name search, and
+- user identity, platform-account linking, relationship_state, display-name search, and
   relationship insight updates;
 - user memory unit creation, validation, keyword search, vector search, and
   semantic/window updates;
@@ -269,12 +269,12 @@ metadata outside embedding text.
 ### `user_profiles`
 
 Stores durable user identity and relationship headers: global user id, linked
-platform accounts, suspected aliases, display names, affinity, and
-`last_relationship_insight`.
+platform accounts, suspected aliases, display names, relationship_state, and
+`semantic_relationship_projection`.
 
 `user_profiles` is user-only. Source labels such as `self_cognition`,
 `group_chat_review`, `internal_thought`, or `group_channel` are not valid
-`global_user_id` values. Missing required fields such as `affinity` should fail
+`global_user_id` values. Missing required fields such as `relationship_state` should fail
 at lifecycle validation or helper read sites instead of receiving local
 defaults.
 
@@ -377,7 +377,7 @@ confidence.
 
 The group-channel style image is the current durable group-image lane. It is
 keyed by platform and channel id, not by `global_user_id`, and must stay
-separate from user affinity, relationship insight, and `user_memory_units`.
+separate from user relationship_state, relationship insight, and `user_memory_units`.
 
 ### `calendar_schedules`
 

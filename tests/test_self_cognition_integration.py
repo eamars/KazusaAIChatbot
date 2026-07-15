@@ -484,7 +484,7 @@ def _consolidation_result() -> dict[str, Any]:
                 "character_state": True,
                 "relationship_insight": True,
                 "user_memory_units": False,
-                "affinity": True,
+                "relationship_state": True,
                 "character_image": False,
                 "cache_invalidation": True,
             },
@@ -707,7 +707,7 @@ async def test_collect_scheduled_future_cognition_cases_preserves_source_scope()
         return None
 
     async def user_profile(global_user_id: str) -> dict[str, Any]:
-        return {"global_user_id": global_user_id, "affinity": 500}
+        return {"global_user_id": global_user_id, "relationship_state": 500}
 
     cases = await sources.collect_scheduled_future_cognition_cases(
         now=now,
@@ -909,7 +909,7 @@ async def test_collect_commitment_due_cognition_cases_projects_calendar_runs() -
 
     async def get_profile(global_user_id: str) -> dict[str, Any]:
         assert global_user_id == "673225019"
-        return {"affinity": 600, "display_name": "User"}
+        return {"relationship_state": 600, "display_name": "User"}
 
     async def no_private_channel(**kwargs: Any) -> None:
         del kwargs
@@ -2763,7 +2763,7 @@ async def test_active_commitment_source_builds_due_case_from_memory_unit() -> No
 
     async def get_profile(global_user_id: str):
         assert global_user_id == "673225019"
-        return {"affinity": 600, "display_name": "User"}
+        return {"relationship_state": 600, "display_name": "User"}
 
     async def no_private_channel(**kwargs: Any) -> None:
         del kwargs

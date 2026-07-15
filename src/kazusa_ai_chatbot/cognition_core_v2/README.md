@@ -34,3 +34,50 @@ commits that update before action, surface, resolver, or dialog work.
 The text-surface API receives only semantic intention, bounded affect and
 relationship projections, complete-bid projections, and permitted action
 results. It owns expression planning; dialog owns final wording.
+
+## Document Control
+
+Stage 2 native cognition contract. Source of truth: the V2 contracts,
+state models, reducers, and focused test suites in this package.
+
+## Purpose
+
+Provide one bounded cognition implementation for persistent user and
+character state, semantic appraisal, goal evolution, emotion lifecycle
+derivation, and surface planning.
+
+## Boundary
+
+Callers provide typed episode evidence and validated state. This package owns
+semantic cognition and replacement-state production; persistence, action
+execution, dialog wording, and adapter delivery remain downstream owners.
+
+## Public Entrypoints
+
+- `run_cognition(...)`
+- `run_text_surface_planning(...)`
+- `validate_cognition_input(...)`
+- `validate_cognition_core_output(...)`
+
+## Runtime Flow
+
+Input validation, bounded semantic appraisal, dependency-ready goal branches,
+complete-bid collapse, route validation, replacement-state reduction, and
+typed output validation run in one inspectable call.
+
+## Failure Behavior
+
+Malformed input, invalid state, unsupported routes, unresolved required
+dependencies, and invalid model output raise the package validation or
+execution error. Callers commit only validated replacement state.
+
+## Testing Contract
+
+Run the focused V2 contract, state, emotion-lifecycle, failure, and reflection
+settling suites with the project virtual environment. Live LLM cases run one
+case at a time with their trace artifact inspected.
+
+## Forbidden Paths
+
+This package does not access adapters, raw database clients, final dialog
+wording, platform wire syntax, or untyped relationship scalars.

@@ -205,7 +205,7 @@ def test_brain_model_route_api_applies_and_resets_selected_route(
     snapshot = snapshot_response.json()
     assert snapshot["service_id"] == "brain"
     assert snapshot["service_state"]["actual_state"] == "running"
-    assert len(snapshot["routes"]) == 13
+    assert len(snapshot["routes"]) == 14
     assert "test-key" not in snapshot_response.text
 
     missing_csrf = client.put(

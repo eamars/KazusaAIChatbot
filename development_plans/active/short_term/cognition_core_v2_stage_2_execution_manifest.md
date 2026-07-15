@@ -716,8 +716,9 @@ git diff --check
 - Calibration: `S2-O1`, `S2-O2`, `S2-O8`, `S2-O9`, `S2-O10`.
 - Evidence: `integration/gate_h.md`, `calibration/gate_h_implementation.md`,
   `calibration/gate_h_architect.md`.
-- Handoff: keep the production-code subagent idle and start Checkpoint I.
-- Sign-off: `<architect/date>`.
+- Handoff: keep the Codex takeover production owner available for Checkpoint I
+  remediation; Checkpoint I remains open.
+- Sign-off: `Codex takeover production owner / Codex parent architect / 2026-07-15`.
 
 ### Checkpoint I — independent review, report, and closure
 

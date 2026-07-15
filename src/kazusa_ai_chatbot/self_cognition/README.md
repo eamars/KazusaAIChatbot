@@ -44,7 +44,7 @@ Self-cognition-created episodes set
 shared L3 visual-directive LLM is skipped for self-cognition. These episodes do
 not set `no_remember`. Production worker consolidation goes through the shared
 target-aware consolidator policy. Real user-scoped cases may update existing
-relationship, affinity, memory-unit, and cache lanes. Group-scoped or
+relationship, relationship_state, memory-unit, and cache lanes. Group-scoped or
 targetless cases do not fabricate a user id and cannot reach user-profile
 lanes. Self-cognition does not create a separate self-cognition memory or
 progress store.

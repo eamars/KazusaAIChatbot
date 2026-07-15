@@ -20,8 +20,8 @@ def _state() -> dict[str, Any]:
 
     state: dict[str, Any] = {
         "mood": "steady",
-        "global_vibe": "quiet",
-        "reflection_summary": "Kazusa noticed a stable self-image shift.",
+        "vibe_check": "quiet",
+        "character_reflection": "Kazusa noticed a stable self-image shift.",
         "character_profile": {"name": "Kazusa"},
     }
     return state

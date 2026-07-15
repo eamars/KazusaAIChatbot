@@ -43,7 +43,7 @@ def _minimal_persona_state() -> dict[str, Any]:
             "name": "Kazusa",
             "global_user_id": "character-1",
         },
-        "user_profile": {"affinity": 500},
+        "user_profile": {"relationship_state": 500},
         "prompt_message_context": {
             "body_text": "Need a memory-backed stance.",
             "mentions": [],

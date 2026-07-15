@@ -24,12 +24,6 @@ from kazusa_ai_chatbot.action_spec.registry import (
     project_prompt_affordances,
 )
 from kazusa_ai_chatbot.background_work.worker import run_background_work_worker_tick
-from kazusa_ai_chatbot.cognition_chain_core.contracts import LLMStageBinding
-from kazusa_ai_chatbot.cognition_chain_core.stages import l2d
-from kazusa_ai_chatbot.cognition_chain_core.stages.l2d import (
-    build_action_selection_payload_text,
-    select_semantic_actions,
-)
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
 from kazusa_ai_chatbot.db import (
     close_db,
@@ -712,7 +706,7 @@ def _future_speak_l2d_state(run_id: str) -> dict[str, Any]:
         "character_profile": {
             "name": "杏山千纱",
             "mood": "calm",
-            "global_vibe": "focused and helpful",
+            "vibe_check": "focused and helpful",
         },
         "storage_timestamp_utc": "2026-07-02T00:00:00+00:00",
         "local_time_context": {
@@ -738,8 +732,8 @@ def _future_speak_l2d_state(run_id: str) -> dict[str, Any]:
         "user_name": "Live Future Speak User",
         "user_profile": {
             "display_name": "Live Future Speak User",
-            "affinity": 100,
-            "last_relationship_insight": "Test user for future-speak proof.",
+            "relationship_state": 100,
+            "semantic_relationship_projection": "Test user for future-speak proof.",
         },
         "platform_bot_id": "debug-bot-future-speak-live",
         "chat_history_recent": [],

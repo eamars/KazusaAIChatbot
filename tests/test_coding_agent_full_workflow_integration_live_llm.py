@@ -19,15 +19,6 @@ from kazusa_ai_chatbot.action_spec.registry import (
     build_initial_action_capabilities,
     project_prompt_affordances,
 )
-from kazusa_ai_chatbot.cognition_chain_core.contracts import LLMStageBinding
-from kazusa_ai_chatbot.cognition_chain_core.stages import l2d
-from kazusa_ai_chatbot.cognition_chain_core.stages import l3
-from kazusa_ai_chatbot.cognition_chain_core.stages.l2d import (
-    select_semantic_actions,
-)
-from kazusa_ai_chatbot.cognition_chain_core.stages.l3 import (
-    call_content_plan_agent,
-)
 from kazusa_ai_chatbot.config import (
     CODING_AGENT_PM_LLM_BASE_URL,
     COGNITION_LLM_BASE_URL,

@@ -10,11 +10,12 @@ import pytest
 from kazusa_ai_chatbot.consolidation.target import (
     build_consolidation_target_plan,
 )
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    build_acquaintance_user_state,
+)
 
 
 EXPECTED_LANES = {
-    "character_state",
-    "relationship_profile",
     "user_memory_units",
     "active_commitment",
     "character_self_guidance",
@@ -47,7 +48,10 @@ def _base_state() -> dict[str, Any]:
         "user_name": "Test User",
         "user_profile": {
             "global_user_id": "global-user-1",
-            "affinity": 500,
+            "cognition_state": build_acquaintance_user_state(
+                global_user_id="global-user-1",
+                updated_at="2026-07-03T00:00:00Z",
+            ),
         },
         "platform": "qq",
         "platform_channel_id": "private-1",
@@ -225,7 +229,6 @@ def test_lane_roster_includes_character_self_guidance_for_chat() -> None:
     roster_lanes = {entry["lane"] for entry in roster}
 
     assert "character_self_guidance" in roster_lanes
-    assert "character_state" in roster_lanes
     assert "user_memory_units" in roster_lanes
     assert "active_commitment" in roster_lanes
 

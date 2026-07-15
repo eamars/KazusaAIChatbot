@@ -9,6 +9,12 @@ from kazusa_ai_chatbot.action_spec.results import (
 from kazusa_ai_chatbot.cognition_episode import CognitiveEpisode
 from kazusa_ai_chatbot.cognition_core_v2.contracts import TextSurfaceOutputV2
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    ResolverCapabilityRequestV1,
+    ResolverCycleStateV1,
+    ResolverCycleTraceV1,
+    ResolverGoalProgressV1,
+    ResolverPendingResolutionV1,
+    ResolverPendingResumeV1,
     ResolverWorkingStateV2,
 )
 from kazusa_ai_chatbot.conversation_progress import ConversationProgressPromptDoc

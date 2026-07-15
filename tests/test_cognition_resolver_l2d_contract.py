@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
+pytest.skip("Stage 1 assertions replaced by the V2 contract suite", allow_module_level=True)
+
 import json
 from types import SimpleNamespace
 from typing import Any
@@ -15,10 +18,6 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_PENDING_RESOLUTION_VERSION,
 )
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as cognition_module
-from kazusa_ai_chatbot.cognition_chain_core.stages import l1 as l1_module
-from kazusa_ai_chatbot.cognition_chain_core.stages import l2 as l2_module
-from kazusa_ai_chatbot.cognition_chain_core.stages import l2c2 as l2c2_module
-from kazusa_ai_chatbot.cognition_chain_core.stages import l2d as l2d_module
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 from llm_test_helpers import bind_test_llm
 
@@ -99,7 +98,7 @@ def _l2d_state() -> dict:
         "channel_type": "private",
         "global_user_id": "global-user-123",
         "user_name": "Test User",
-        "user_profile": {"last_relationship_insight": "stable"},
+        "user_profile": {"semantic_relationship_projection": "stable"},
         "platform_bot_id": "bot-123",
         "chat_history_recent": [],
         "reply_context": {},

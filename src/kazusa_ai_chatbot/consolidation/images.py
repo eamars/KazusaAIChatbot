@@ -59,16 +59,16 @@ _CHARACTER_IMAGE_SESSION_SUMMARY_PROMPT = """\
 - 只返回有效 JSON。
 
 # 生成步骤
-1. 先读取 `reflection_summary`，理解 `{character_name}` 本轮留下的第三人称心理背景。
-2. 结合 `mood` 和 `global_vibe`，提炼为第三人称的自我印象变化。
+1. 先读取 `character_reflection`，理解 `{character_name}` 本轮留下的第三人称心理背景。
+2. 结合 `mood` 和 `vibe_check`，提炼为第三人称的自我印象变化。
 3. 只保留会影响 `{character_name}` 后续自我认知的内容；不要记录用户事实或一次性对话流程。
 4. 控制在 80 字以内。
 
 # 输入格式
 {{
     "mood": "本轮情绪沉淀",
-    "global_vibe": "本轮心理底色",
-    "reflection_summary": "本轮复盘总结（{character_name} 第三人称）"
+    "vibe_check": "本轮心理底色",
+    "character_reflection": "本轮复盘总结（{character_name} 第三人称）"
 }}
 
 # 输出格式
@@ -165,20 +165,21 @@ async def _update_character_image(
     """Build an updated character self-image document from explicit state.
 
     Args:
-        state: Current consolidator state (mood, global_vibe, reflection_summary,
-            and character profile name for prompt rendering).
+        state: Current consolidator state (mood, vibe_check,
+            character_reflection, and character profile name for prompt
+            rendering).
         storage_timestamp_utc: Storage UTC timestamp for this session.
         existing_image: Current durable character self-image from the database.
 
     Returns:
         Updated image document dict, or ``None`` if no reflection was produced.
     """
-    reflection_summary = state["reflection_summary"]
-    if not reflection_summary:
+    character_reflection = state.get("character_reflection")
+    if not isinstance(character_reflection, str) or not character_reflection:
         return None
 
-    mood = state["mood"]
-    global_vibe = state["global_vibe"]
+    mood = state.get("mood", "")
+    vibe_check = state.get("vibe_check", "")
     character_profile = state["character_profile"]
     character_name = character_profile["name"]
 
@@ -192,8 +193,8 @@ async def _update_character_image(
     ))
     session_payload = project_character_image_prompt_payload({
         "mood": mood,
-        "global_vibe": global_vibe,
-        "reflection_summary": reflection_summary,
+        "vibe_check": vibe_check,
+        "character_reflection": character_reflection,
     }, character_name=character_name)
     user_prompt = HumanMessage(content=json.dumps(
         session_payload,

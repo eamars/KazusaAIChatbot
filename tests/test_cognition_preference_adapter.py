@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import pytest
+pytest.skip("Stage 1 assertions replaced by the V2 contract suite", allow_module_level=True)
+
 import json
 from types import SimpleNamespace
 
 import pytest
 
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
-from kazusa_ai_chatbot.cognition_chain_core.stages.l3 import call_preference_adapter
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 from llm_test_helpers import bind_test_llm
 

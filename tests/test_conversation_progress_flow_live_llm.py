@@ -25,7 +25,6 @@ from kazusa_ai_chatbot.llm_interface import (
     LLMThinkingConfig,
 )
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
-from kazusa_ai_chatbot.cognition_chain_core.stages.l3 import call_content_plan_agent
 from kazusa_ai_chatbot.time_boundary import (
     build_turn_clock_from_storage_utc,
     storage_utc_now_iso,
@@ -161,8 +160,8 @@ def _build_character_profile() -> dict:
 
     profile = load_personality(_PERSONALITY_PATH)
     profile.setdefault("mood", "Neutral")
-    profile.setdefault("global_vibe", "Focused")
-    profile.setdefault("reflection_summary", '用户正在长时间修改答辩 PPT，需要具体推进而不是重复安抚。')
+    profile.setdefault("vibe_check", "Focused")
+    profile.setdefault("character_reflection", '用户正在长时间修改答辩 PPT，需要具体推进而不是重复安抚。')
     return profile
 
 
@@ -346,10 +345,10 @@ def _base_state() -> dict:
         "user_name": "答辩人",
         "platform_user_id": "flow-user",
         "user_profile": {
-            "affinity": 700,
+            "relationship_state": 700,
             "active_commitments": [],
             "facts": [],
-            "last_relationship_insight": '用户信任千纱，但现在需要能推进 PPT 的具体判断。',
+            "semantic_relationship_projection": '用户信任千纱，但现在需要能推进 PPT 的具体判断。',
         },
         "platform_bot_id": "flow-bot",
         "chat_history_wide": history,
@@ -495,7 +494,7 @@ def _release_case_state(case: dict[str, Any]) -> dict:
     """
 
     profile = _build_character_profile()
-    profile["reflection_summary"] = case["reflection_summary"]
+    profile["character_reflection"] = case["character_reflection"]
     storage_timestamp_utc = storage_utc_now_iso()
     turn_clock = build_turn_clock_from_storage_utc(storage_timestamp_utc)
     return {
@@ -512,10 +511,10 @@ def _release_case_state(case: dict[str, Any]) -> dict:
         "user_name": case.get("user_name", "User"),
         "platform_user_id": "flow-user",
         "user_profile": {
-            "affinity": 700,
+            "relationship_state": 700,
             "active_commitments": [],
             "facts": [],
-            "last_relationship_insight": case["relationship_insight"],
+            "semantic_relationship_projection": case["relationship_insight"],
         },
         "platform_bot_id": "flow-bot",
         "chat_history_wide": case["history"],
@@ -687,7 +686,7 @@ def _emotional_cool_down_case() -> dict[str, Any]:
             "next_affordances": ['安心したことを受け止める。', '今日はここで閉じてよいと短く支える。'],
             "progression_guidance": "Close gently; do not restart troubleshooting.",
         },
-        "reflection_summary": 'ユーザーは不安から少し落ち着き、今日は会話を閉じたがっている。',
+        "character_reflection": 'ユーザーは不安から少し落ち着き、今日は会話を閉じたがっている。',
         "relationship_insight": 'Kazusa is trusted as a quiet support presence.',
         "channel_topic": 'emotional cooldown after stress',
         "internal_monologue": 'The user is cooling down. Do not solve new problems; support closure.',
@@ -740,7 +739,7 @@ def _practical_debugging_case() -> dict[str, Any]:
             ],
             "progression_guidance": "Move to token/session/header diagnostics; do not repeat cache advice.",
         },
-        "reflection_summary": "The user is debugging a 401 and needs the next diagnostic move.",
+        "character_reflection": "The user is debugging a 401 and needs the next diagnostic move.",
         "relationship_insight": "User expects concise technical continuity.",
         "channel_topic": "login debugging",
         "internal_monologue": "Continue the debug trail from known attempts.",
@@ -788,7 +787,7 @@ def _playful_social_case() -> dict[str, Any]:
             "next_affordances": ['用轻微嘴硬回应。', '保留一点被看穿的感觉。'],
             "progression_guidance": "Stay playful and socially warm; do not turn this into advice.",
         },
-        "reflection_summary": '用户正在和千纱玩笑式互动，不是在求助。',
+        "character_reflection": '用户正在和千纱玩笑式互动，不是在求助。',
         "relationship_insight": '用户喜欢千纱嘴硬但接得住玩笑。',
         "channel_topic": 'playful banter with Kazusa',
         "internal_monologue": 'This is teasing, not a task. Keep it warm and slightly guarded.',
@@ -837,7 +836,7 @@ def _rapid_topic_pivot_case() -> dict[str, Any]:
             "next_affordances": [],
             "progression_guidance": "",
         },
-        "reflection_summary": "The user has sharply switched from baking to urgent travel triage.",
+        "character_reflection": "The user has sharply switched from baking to urgent travel triage.",
         "relationship_insight": "User wants fast practical help in Spanish.",
         "channel_topic": "rapid topic pivot",
         "internal_monologue": "The current input is a sharp pivot. Ignore the cake thread.",
@@ -885,7 +884,7 @@ def _teasing_meta_bot_case() -> dict[str, Any]:
             "next_affordances": ['顺着开一个轻微玩笑。', '把关系感放在回答里。'],
             "progression_guidance": "Treat this as playful meta talk, not a capability question.",
         },
-        "reflection_summary": '用户在用 bot 话题调侃千纱。',
+        "character_reflection": '用户在用 bot 话题调侃千纱。',
         "relationship_insight": '用户希望千纱接住玩笑而不是进入说明模式。',
         "channel_topic": 'meta-bot teasing',
         "internal_monologue": 'This is playful meta discussion. Do not give a system explanation.',
@@ -935,7 +934,7 @@ def _group_reply_chain_case() -> dict[str, Any]:
             "next_affordances": ['承认这是回小周那句。', '在不确定时给出核对建议而不是编造营业信息。'],
             "progression_guidance": "Narrowly handle the reply-chain target; do not absorb unrelated group messages.",
         },
-        "reflection_summary": '群聊话题碎片化，用户明确指定了回复对象。',
+        "character_reflection": '群聊话题碎片化，用户明确指定了回复对象。',
         "relationship_insight": 'Kazusa should track reply-chain scope instead of把群聊全部合成一个任务。',
         "channel_topic": 'fragmented group reply chain',
         "internal_monologue": 'Handle only the ramen-shop reply target. Do not answer unrelated group topics.',

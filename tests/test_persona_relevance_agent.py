@@ -37,7 +37,7 @@ def _base_state():
         "user_name": "TestUser",
         "user_input": "Hello bot!",
         "user_multimedia_input": [],
-        "user_profile": {"affinity": 500, "last_relationship_insight": ""},
+        "user_profile": {"relationship_state": 500, "semantic_relationship_projection": ""},
         "platform_bot_id": "bot_456",
         "message_envelope": {
             "body_text": "Hello bot!",
@@ -59,8 +59,8 @@ def _base_state():
             "name": "Character",
             "global_user_id": "character-global-id",
             "mood": "neutral",
-            "global_vibe": "calm",
-            "reflection_summary": "nothing notable",
+            "vibe_check": "calm",
+            "character_reflection": "nothing notable",
         },
         "platform_channel_id": "chan_1",
         "channel_type": "group",
@@ -257,7 +257,7 @@ async def test_relevance_agent_text_only_reply_marker_does_not_block_without_met
 
 
 @pytest.mark.asyncio
-async def test_relevance_agent_does_not_expose_reflection_summary_in_prompt() -> None:
+async def test_relevance_agent_does_not_expose_character_reflection_in_prompt() -> None:
     """Global reflection summaries should not be injected into relevance reasoning."""
     llm_response = _llm_response('{"should_respond": true, "reason_to_respond": "user greeted", "use_reply_feature": false, "channel_topic": "greetings", "indirect_speech_context": ""}')
 

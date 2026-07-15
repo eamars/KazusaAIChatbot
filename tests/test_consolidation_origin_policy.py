@@ -13,12 +13,8 @@ from kazusa_ai_chatbot.consolidation.origin_policy import (
 
 
 _POLICY_KEYS: tuple[WritePolicyKey, ...] = (
-    "character_state",
-    "relationship_insight",
     "user_memory_units",
-    "affinity",
     "group_channel_style_image",
-    "character_image",
     "character_self_guidance",
     "cache_invalidation",
 )

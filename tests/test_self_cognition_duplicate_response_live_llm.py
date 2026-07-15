@@ -22,23 +22,8 @@ import pytest
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
 from kazusa_ai_chatbot.db import close_db, get_character_profile
 from kazusa_ai_chatbot.db._client import get_db
-from kazusa_ai_chatbot.cognition_chain_core.stages.l1 import (
-    call_cognition_subconscious,
-)
-from kazusa_ai_chatbot.cognition_chain_core.stages.l2 import (
-    call_boundary_core_agent,
-    call_cognition_consciousness,
-    call_judgment_core_agent,
-)
-from kazusa_ai_chatbot.cognition_chain_core.stages.l2c2 import (
-    call_social_context_appraisal,
-)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     call_group_engagement_action_context_loader,
-)
-from kazusa_ai_chatbot.cognition_chain_core.stages.l2d import (
-    build_action_selection_payload_text,
-    select_semantic_actions,
 )
 from kazusa_ai_chatbot.reflection_cycle.activity_windows import (
     build_group_activity_windows,

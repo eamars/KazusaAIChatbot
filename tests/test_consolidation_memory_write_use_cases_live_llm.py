@@ -479,7 +479,7 @@ def _case_state(case: MemoryWriteCase) -> dict[str, Any]:
         user_profile = {
             "global_user_id": case.global_user_id,
             "display_name": "Live Memory User",
-            "affinity": 500,
+            "relationship_state": 500,
         }
     rag_payload = dict(case.rag_payload or {})
     rag_result = {

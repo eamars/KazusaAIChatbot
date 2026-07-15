@@ -6,6 +6,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+pytestmark = pytest.mark.skip(
+    reason=(
+        "Retired profile and character-state writer assertions replaced by "
+        "V2 persistence tests"
+    )
+)
+
 from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
 from kazusa_ai_chatbot.consolidation.target import (
     build_consolidation_target_plan,
@@ -65,19 +72,19 @@ def _state() -> dict:
         "character_profile": {"name": "Kazusa"},
         "metadata": {},
         "mood": "neutral",
-        "global_vibe": "",
-        "reflection_summary": "",
+        "vibe_check": "",
+        "character_reflection": "",
         "subjective_appraisals": ["User sounded happy"],
         "interaction_subtext": "test",
-        "last_relationship_insight": "friendly",
+        "semantic_relationship_projection": "friendly",
         "new_facts": [{
             "description": "User likes tea",
             "category": "preference",
             "dedup_key": "likes_tea",
         }],
         "future_promises": [],
-        "user_profile": {"global_user_id": "user-1", "affinity": 500},
-        "affinity_delta": 1,
+        "user_profile": {"global_user_id": "user-1", "relationship_state": 500},
+        "relationship_delta": 1,
         "decontexualized_input": "remember tea",
         "consolidation_origin": _consolidation_origin(),
         "enabled_consolidation_write_lanes": [
@@ -95,8 +102,8 @@ def _patch_writers(monkeypatch, *, character_image=None) -> MagicMock:
     runtime.invalidate = AsyncMock(return_value=1)
     monkeypatch.setattr(persistence_module, "get_rag_cache2_runtime", MagicMock(return_value=runtime))
     monkeypatch.setattr(persistence_module, "upsert_character_state", AsyncMock())
-    monkeypatch.setattr(persistence_module, "update_last_relationship_insight", AsyncMock())
-    monkeypatch.setattr(persistence_module, "update_affinity", AsyncMock())
+    monkeypatch.setattr(persistence_module, "update_semantic_relationship_projection", AsyncMock())
+    monkeypatch.setattr(persistence_module, "update_relationship_state", AsyncMock())
     monkeypatch.setattr(
         persistence_module,
         "get_character_runtime_state",

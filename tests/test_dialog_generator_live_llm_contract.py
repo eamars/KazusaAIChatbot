@@ -27,7 +27,7 @@ from kazusa_ai_chatbot.nodes.dialog_agent import (
     get_softener_density_description,
 )
 from kazusa_ai_chatbot.utils import (
-    build_affinity_block,
+    build_relationship_state_block,
     parse_llm_json_output,
 )
 from tests.llm_trace import write_llm_trace
@@ -61,8 +61,8 @@ def _character_profile() -> dict:
     profile = {
         'name': 'Kazusa',
         'mood': 'Neutral',
-        'global_vibe': 'Calm',
-        'reflection_summary': '刚才只是普通聊天，情绪轻快。',
+        'vibe_check': 'Calm',
+        'character_reflection': '刚才只是普通聊天，情绪轻快。',
         'personality_brief': {
             'logic': '先判断事实和边界，再给出克制回应。',
             'tempo': '短句为主，必要时分行。',
@@ -132,7 +132,7 @@ def _render_system_prompt(character_profile: dict) -> SystemMessage:
 def _dialog_payload(character_profile: dict, case: dict) -> tuple[HumanMessage, list]:
     """Build the same human payload shape used by dialog_generator."""
 
-    affinity_block = build_affinity_block(case.get('affinity', 500))
+    relationship_state_block = build_relationship_state_block(case.get('relationship_state', 500))
     msg = {
         'linguistic_directives': {
             'rhetorical_strategy': case['rhetorical_strategy'],
@@ -142,7 +142,7 @@ def _dialog_payload(character_profile: dict, case: dict) -> tuple[HumanMessage, 
             'forbidden_phrases': [],
         },
         'contextual_directives': {
-            'social_distance': affinity_block['level'],
+            'social_distance': relationship_state_block['level'],
             'emotional_intensity': case['emotional_intensity'],
             'vibe_check': case['vibe_check'],
             'relational_dynamic': case['relational_dynamic'],
@@ -270,7 +270,7 @@ async def test_live_dialog_generator_node_accepts_deepseek_output() -> None:
         'platform_user_id': 'live-dialog-user',
         'platform_bot_id': 'live-dialog-bot',
         'user_name': '测试用户',
-        'user_profile': {'affinity': 500},
+        'user_profile': {'relationship_state': 500},
         'character_profile': character_profile,
         'dialog_usage_mode': 'live_visible_reply',
     }

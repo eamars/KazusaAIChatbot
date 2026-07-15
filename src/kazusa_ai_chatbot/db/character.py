@@ -19,11 +19,6 @@ RUNTIME_CHARACTER_STATE_FIELDS = (
     "cognition_state",
     "updated_at",
 )
-LEGACY_CHARACTER_AFFECT_FIELDS = frozenset({
-    "mood",
-    "global_vibe",
-    "reflection_summary",
-})
 
 
 def split_character_profile_runtime_state(profile: dict) -> tuple[dict, dict]:
@@ -44,7 +39,6 @@ def split_character_profile_runtime_state(profile: dict) -> tuple[dict, dict]:
         for key, value in profile.items()
         if (
             key not in runtime_field_names
-            and key not in LEGACY_CHARACTER_AFFECT_FIELDS
             and key != "_id"
         )
     }
@@ -185,55 +179,3 @@ async def upsert_character_self_image(image_doc: dict) -> None:
         raise DatabaseOperationError(
             f"failed to upsert character self image: {exc}"
         ) from exc
-
-
-async def upsert_character_state(
-    mood: str,
-    global_vibe: str,
-    reflection_summary: str,
-    updated_at_utc: str,
-) -> None:
-    """Update the runtime character state.
-
-    Empty-string arguments are treated as "leave unchanged" — the existing
-    value for that field is preserved. ``updated_at_utc`` always overwrites
-    ``updated_at``.
-    """
-    del mood, global_vibe, reflection_summary, updated_at_utc
-    raise DatabaseOperationError(
-        "legacy prose character-state writes are not part of cognition_core_v2"
-    )
-
-
-async def compare_and_upsert_character_state(
-    *,
-    expected_updated_at: str,
-    mood: str,
-    global_vibe: str,
-    reflection_summary: str,
-    updated_at_utc: str,
-) -> bool:
-    """Update runtime character state only if the freshness token still matches.
-
-    Args:
-        expected_updated_at: ``updated_at`` value read before the LLM proposal.
-        mood: LLM-authored replacement mood text.
-        global_vibe: LLM-authored replacement global vibe text.
-        reflection_summary: LLM-authored replacement reflection summary text.
-        updated_at_utc: New UTC freshness timestamp to persist.
-
-    Returns:
-        ``True`` when the singleton row matched the expected freshness token,
-        otherwise ``False`` so callers can record a non-retryable stale skip.
-    """
-
-    del (
-        expected_updated_at,
-        mood,
-        global_vibe,
-        reflection_summary,
-        updated_at_utc,
-    )
-    raise DatabaseOperationError(
-        "legacy prose character-state writes are not part of cognition_core_v2"
-    )

@@ -124,7 +124,7 @@ def test_target_plan_exposes_only_native_v2_write_lanes() -> None:
     assert not all_lanes & {
         "character_state",
         "relationship_insight",
-        "affinity",
+        "relationship_state",
     }
 
 

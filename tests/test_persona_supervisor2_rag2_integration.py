@@ -266,7 +266,7 @@ def _rag_evidence_snapshot_state() -> dict:
         "platform_bot_id": "bot-1",
         "global_user_id": "user-1",
         "user_name": "User",
-        "user_profile": {"affinity": 500},
+        "user_profile": {"relationship_state": 500},
         "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
         "local_time_context": turn_clock["local_time_context"],
         "message_envelope": {
@@ -1067,7 +1067,7 @@ async def test_rag_evidence_helper_calls_rag3_and_projects_payload(monkeypatch) 
         "platform_bot_id": "bot-1",
         "global_user_id": "user-1",
         "user_name": "User",
-        "user_profile": {"affinity": 500},
+        "user_profile": {"relationship_state": 500},
         "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
         "local_time_context": turn_clock["local_time_context"],
         "message_envelope": {
@@ -1266,7 +1266,7 @@ async def test_rag_evidence_skips_for_unresolved_referents(monkeypatch) -> None:
         "platform_bot_id": "bot-1",
         "global_user_id": "user-1",
         "user_name": "User",
-        "user_profile": {"affinity": 500},
+        "user_profile": {"relationship_state": 500},
         "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
         "local_time_context": turn_clock["local_time_context"],
         "message_envelope": {
@@ -1330,7 +1330,7 @@ async def test_rag_evidence_runs_for_mixed_referents(monkeypatch) -> None:
         "platform_bot_id": "bot-1",
         "global_user_id": "user-1",
         "user_name": "User",
-        "user_profile": {"affinity": 500},
+        "user_profile": {"relationship_state": 500},
         "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
         "local_time_context": turn_clock["local_time_context"],
         "message_envelope": {
@@ -1383,7 +1383,7 @@ async def test_rag_evidence_skips_when_referents_are_all_unresolved(monkeypatch)
         "platform_bot_id": "bot-1",
         "global_user_id": "user-1",
         "user_name": "User",
-        "user_profile": {"affinity": 500},
+        "user_profile": {"relationship_state": 500},
         "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
         "local_time_context": turn_clock["local_time_context"],
         "message_envelope": {

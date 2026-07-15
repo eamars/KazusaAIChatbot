@@ -13,8 +13,8 @@ def test_group_channel_module_does_not_call_user_profile_helpers() -> None:
     source_text = inspect.getsource(group_channel)
 
     forbidden_helpers = (
-        "update_affinity",
-        "update_last_relationship_insight",
+        "update_relationship_state",
+        "update_semantic_relationship_projection",
         "update_user_memory_units_from_state",
     )
     for helper_name in forbidden_helpers:

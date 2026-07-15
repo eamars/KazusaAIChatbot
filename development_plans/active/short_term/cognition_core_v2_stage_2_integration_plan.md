@@ -466,10 +466,10 @@ also requires the independent review record.
   - Verify/evidence/handoff: execution-manifest Checkpoint G and fixed live manifest.
   - Calibration: `S2-O3` through `S2-O9`.
   - Sign-off: `Codex takeover production owner / Codex parent architect / 2026-07-15`; exact scoped/full, lifecycle, cross-model, relationship, DB smoke, isolation, and paired V1/V2 benchmark commands pass; both calibration records are `Status: aligned`; evidence is under `test_artifacts/cognition_core_v2/stage_2/live_llm/`, `performance/`, and `calibration/`; then reread all three plan documents.
-- [ ] Checkpoint H — legacy deletion and full candidate regression signed.
+- [x] Checkpoint H — legacy deletion and full candidate regression signed.
   - Verify/evidence/handoff: execution-manifest Checkpoint H.
   - Calibration: `S2-O1`, `S2-O2`, `S2-O8`, `S2-O9`, `S2-O10`.
-  - Sign-off: `<architect/date>`; keep the production subagent idle for review remediation and reread all three documents.
+  - Sign-off: `Codex takeover production owner / Codex parent architect / 2026-07-15`; exact static scans, compile, collection, full regression, diagnostic regression, and diff checks pass; both calibration records are `Status: aligned`; the takeover owner remains available for Checkpoint I remediation and all three documents were reread.
 - [ ] Checkpoint I — independent review, remediation, final calibration, and report signed.
   - Verify/evidence/handoff: execution-manifest Checkpoint I.
   - Calibration: all `S2-O1` through `S2-O10`.

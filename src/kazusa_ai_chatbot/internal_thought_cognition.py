@@ -331,12 +331,6 @@ async def run_internal_thought_cognition_dry_run(
         "character_intent": "",
         "logical_stance": "",
         "final_dialog": [],
-        "mood": "",
-        "global_vibe": "",
-        "reflection_summary": "",
-        "subjective_appraisals": [],
-        "affinity_delta": 0,
-        "last_relationship_insight": "",
         "new_facts": [],
         "future_promises": [],
     }

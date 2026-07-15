@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from kazusa_ai_chatbot.cognition_chain_core.contracts import LLMStageBinding
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig
 
 
@@ -26,11 +25,8 @@ def make_llm_call_config(stage_name: str = "test_stage") -> LLMCallConfig:
     return config
 
 
-def bind_test_llm(llm: Any, stage_name: str = "test_stage") -> LLMStageBinding:
-    """Wrap a fake LLM in the cognition-chain stage binding contract."""
+def bind_test_llm(llm: Any, stage_name: str = "test_stage") -> Any:
+    """Return a fake LLM for callers that own an explicit V2 service binding."""
 
-    binding = LLMStageBinding(
-        llm=llm,
-        config=make_llm_call_config(stage_name),
-    )
-    return binding
+    del stage_name
+    return llm

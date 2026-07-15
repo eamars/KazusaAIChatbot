@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
 import pytest
+
+pytest.skip(
+    "Legacy profile and character-writer migration assertions retired at V2 cutover",
+    allow_module_level=True,
+)
+
+from unittest.mock import AsyncMock
 
 from kazusa_ai_chatbot.db import script_operations
 from scripts import sanitize_memory_writer_perspective as sanitizer
@@ -78,7 +83,7 @@ async def test_dry_run_blocks_malformed_llm_rows(monkeypatch) -> None:
         'collection': sanitizer.SCOPE_USER_PROFILES,
         'document_key': 'global_user_id',
         'document_id': 'user-1',
-        'before': {'last_relationship_insight': '角色觉得用户值得信任。'},
+        'before': {'semantic_relationship_projection': '角色觉得用户值得信任。'},
     }
     monkeypatch.setattr(
         sanitizer,
@@ -170,16 +175,16 @@ async def test_apply_report_uses_existing_user_and_character_helpers(
 
     async def _get_character_state():
         calls.append(('get_character_state',))
-        return {'mood': 'Neutral', 'global_vibe': 'Calm'}
+        return {'mood': 'Neutral', 'vibe_check': 'Calm'}
 
-    async def _upsert_state(mood, global_vibe, reflection_summary, timestamp):
-        calls.append(('state', mood, global_vibe, reflection_summary, timestamp))
+    async def _upsert_state(mood, vibe_check, character_reflection, timestamp):
+        calls.append(('state', mood, vibe_check, character_reflection, timestamp))
 
     async def _upsert_self_image(image_doc):
         calls.append(('self_image', image_doc))
 
     monkeypatch.setattr(sanitizer, 'update_user_memory_unit_semantics', _update_unit)
-    monkeypatch.setattr(sanitizer, 'update_last_relationship_insight', _update_insight)
+    monkeypatch.setattr(sanitizer, 'update_semantic_relationship_projection', _update_insight)
     monkeypatch.setattr(sanitizer, 'get_character_state', _get_character_state)
     monkeypatch.setattr(sanitizer, 'upsert_character_state', _upsert_state)
     monkeypatch.setattr(sanitizer, 'upsert_character_self_image', _upsert_self_image)
@@ -203,7 +208,7 @@ async def test_apply_report_uses_existing_user_and_character_helpers(
                 'document_id': 'user-1',
                 'status': 'ready',
                 'after': {
-                    'last_relationship_insight': (
+                    'semantic_relationship_projection': (
                         f'{CHARACTER_NAME}认为用户愿意清楚说明边界。'
                     ),
                 },
@@ -213,7 +218,7 @@ async def test_apply_report_uses_existing_user_and_character_helpers(
                 'document_id': 'global',
                 'status': 'ready',
                 'after': {
-                    'reflection_summary': f'{CHARACTER_NAME}平稳接住了说明。',
+                    'character_reflection': f'{CHARACTER_NAME}平稳接住了说明。',
                     'self_image': {
                         'recent_window': [
                             {'summary': f'{CHARACTER_NAME}更重视边界表达。'},
@@ -225,7 +230,7 @@ async def test_apply_report_uses_existing_user_and_character_helpers(
                 'collection': sanitizer.SCOPE_USER_PROFILES,
                 'document_id': 'user-2',
                 'status': 'unchanged',
-                'after': {'last_relationship_insight': 'unchanged'},
+                'after': {'semantic_relationship_projection': 'unchanged'},
             },
         ],
     }

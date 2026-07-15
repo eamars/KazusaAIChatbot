@@ -15,11 +15,6 @@ from kazusa_ai_chatbot.config import (
     DIALOG_GENERATOR_LLM_BASE_URL,
 )
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_generator
-from kazusa_ai_chatbot.cognition_chain_core.stages.l3 import (
-    call_content_plan_agent,
-    call_visual_agent,
-)
-from kazusa_ai_chatbot.cognition_chain_core.stages.l2c2 import call_social_context_appraisal
 from kazusa_ai_chatbot.consolidation.reflection import relationship_recorder
 from kazusa_ai_chatbot.utils import load_personality
 from tests.llm_trace import write_llm_trace
@@ -79,8 +74,8 @@ def _character_profile() -> dict[str, Any]:
 
     profile = deepcopy(load_personality(_ASUNA_PROFILE))
     profile.setdefault('mood', 'Neutral')
-    profile.setdefault('global_vibe', 'Calm')
-    profile.setdefault('reflection_summary', '刚才只是普通聊天，情绪轻快。')
+    profile.setdefault('vibe_check', 'Calm')
+    profile.setdefault('character_reflection', '刚才只是普通聊天，情绪轻快。')
     return profile
 
 
@@ -144,9 +139,9 @@ def _cognition_state(user_text: str) -> dict[str, Any]:
         'global_user_id': 'live-hardening-user',
         'user_name': '测试用户',
         'user_profile': {
-            'affinity': 500,
+            'relationship_state': 500,
             'facts': [],
-            'last_relationship_insight': '普通协作关系，没有当前边界冲突。',
+            'semantic_relationship_projection': '普通协作关系，没有当前边界冲突。',
         },
         'platform_bot_id': 'live-hardening-bot',
         'chat_history_recent': [
@@ -261,7 +256,7 @@ async def test_live_relationship_recorder_skips_mundane_clarification(ensure_liv
     del ensure_live_llms
     state = {
         'character_profile': _character_profile(),
-        'user_profile': {'affinity': 500},
+        'user_profile': {'relationship_state': 500},
         'user_name': '测试用户',
         'internal_monologue': '只是普通整理说明，不需要理解成关系后撤。',
         'emotional_appraisal': '平稳。',
@@ -282,16 +277,16 @@ async def test_live_relationship_recorder_skips_mundane_clarification(ensure_liv
     result = await relationship_recorder(state)
     combined = f'{result}'
     _assert_no_forbidden(combined, ('拉开距离', '防御', '暧昧', '心乱'), 'relationship_mundane')
-    assert result['affinity_delta'] == 0
+    assert result['relationship_delta'] == 0
     assert result['subjective_appraisals'] == []
-    assert result['last_relationship_insight'] in ('', None)
+    assert result['semantic_relationship_projection'] in ('', None)
     trace_path = write_llm_trace(
         'consolidation_evidence_hardening_live',
         'relationship_mundane_clarification',
         {
             'input': state,
             'output': result,
-            'judgment': 'affinity_delta=0 and no durable negative/positive swing',
+            'judgment': 'relationship_delta=0 and no durable negative/positive swing',
         },
     )
     assert trace_path.exists()
@@ -326,7 +321,7 @@ async def test_live_direct_node_integration_smoke(ensure_live_llms) -> None:
         'platform_user_id': 'live-hardening-user',
         'platform_bot_id': 'live-hardening-bot',
         'user_name': '测试用户',
-        'user_profile': {'affinity': 500},
+        'user_profile': {'relationship_state': 500},
         'character_profile': state['character_profile'],
         'messages': [],
         'should_stop': False,
