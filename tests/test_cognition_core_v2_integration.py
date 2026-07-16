@@ -88,9 +88,19 @@ class _ScriptedLLM:
                 "selected_bid_handle": "b1",
                 "route": "speech",
             }
+        elif "exactly style_guidance" in system:
+            result = {"style_guidance": "bounded style guidance"}
+        elif "exactly content_plan" in system:
+            result = {"content_plan": "bounded content-plan guidance"}
+        elif "exactly visible_boundaries" in system:
+            result = {
+                "visible_boundaries": ["bounded visible boundary"],
+                "addressee_plan": ["bounded addressee plan"],
+            }
+        elif "exactly pacing_guidance" in system:
+            result = {"pacing_guidance": "bounded pacing guidance"}
         else:
-            stage = payload["stage"]
-            result = {"result": f"bounded {stage} guidance"}
+            raise AssertionError("unexpected V2 model stage")
         self.calls.append(system)
         self.human_calls.append(human)
         return SimpleNamespace(content=json.dumps(result))
@@ -248,6 +258,71 @@ async def test_v2_facade_commits_before_surface_and_preserves_complete_bid() -> 
 
 
 @pytest.mark.asyncio
+async def test_v2_facade_projects_persistent_goal_to_entity_ref() -> None:
+    """Persistent goal state crosses the branch boundary as an entity ref."""
+
+    state = build_acquaintance_user_state(
+        global_user_id="integration-user",
+        updated_at=NOW,
+    )
+    state["goals"] = [{
+        "entity_id": "goal:ordinary_response:user:episode:prior",
+        "description": "continue the grounded conversation",
+        "salience": 70,
+        "role_refs": [],
+        "evidence_refs": [{
+            "source_kind": "episode",
+            "source_id": "episode:prior",
+            "occurred_at": NOW,
+            "semantic_summary": "a prior turn established the response goal",
+        }],
+        "created_at": NOW,
+        "updated_at": NOW,
+        "status": "pursuing",
+        "goal_kind": "ordinary_response",
+        "importance": 70,
+        "progress": 20,
+        "obstruction": 0,
+        "expected_success": 70,
+        "controllability": 70,
+        "recoverability": 60,
+        "urgency": 50,
+    }]
+
+    output = await run_cognition(
+        _input(mutable_state=state),
+        _core_services(_ScriptedLLM()),
+    )
+
+    assert output["admitted_bid"]["goal_ref"] == {
+        "scope": "user",
+        "kind": "goal",
+        "entity_id": "goal:ordinary_response:user:episode:prior",
+    }
+
+
+@pytest.mark.asyncio
+async def test_private_output_mode_excludes_visible_bids_before_collapse() -> None:
+    """Turn an otherwise valid speech bid into deterministic private silence."""
+
+    llm = _ScriptedLLM()
+    payload = _input(trigger_source="internal_thought")
+    payload["episode"]["output_mode"] = "think_only"
+
+    output = await run_cognition(payload, _core_services(llm))
+
+    assert output["intention"] == {
+        "route": "silence",
+        "intention": "remain silent",
+        "target_roles": [],
+        "reason": "no valid admitted bid",
+    }
+    assert "admitted_bid" not in output
+    assert not any("Collapse complete goal bids" in call for call in llm.calls)
+    assert not any("Select only a route" in call for call in llm.calls)
+
+
+@pytest.mark.asyncio
 async def test_v2_surface_receives_semantic_handoff_only() -> None:
     """The four surface stages emit a bounded plan from non-private fields."""
 
@@ -287,7 +362,9 @@ async def test_v2_surface_receives_semantic_handoff_only() -> None:
     output = await run_text_surface_planning(input_payload, _surface_services(llm))
 
     assert output["schema_version"] == "text_surface_output.v2"
-    assert output["content_plan"] == "bounded content_plan guidance"
+    assert output["content_plan"] == "bounded content-plan guidance"
+    assert output["visible_boundaries"] == ["bounded visible boundary"]
+    assert output["addressee_plan"] == ["bounded addressee plan"]
     assert len(llm.calls) == 4
     rendered_prompts = "\n".join(llm.human_calls)
     for raw_value in (

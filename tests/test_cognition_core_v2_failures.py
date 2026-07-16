@@ -6,12 +6,16 @@ from copy import deepcopy
 
 import pytest
 
+from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
+    validate_semantic_appraisal_result,
+)
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     CognitionStateError,
     build_acquaintance_user_state,
     build_character_production_state,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
+    _validate_goal_supersession,
     apply_elapsed_decay,
     apply_sleep_recovery,
     apply_state_update,
@@ -102,6 +106,105 @@ def _fact(
     if observed_progress is not None:
         fact["observed_progress"] = observed_progress
     return fact
+
+
+def test_unsupported_appraisal_can_select_no_evidence() -> None:
+    """Accept an explicit no-claim result without forcing false evidence use."""
+
+    question = {
+        "question_id": "q:event_agency",
+        "question_kind": "event_agency",
+        "semantic_question": "Assess responsibility and intentionality.",
+        "evidence_handles": ["e1"],
+        "permitted_role_handles": ["ce1", "current_user", "self"],
+        "permitted_delta_paths": ["active_events.ce1.intentionality"],
+        "dependencies": [],
+    }
+    result = validate_semantic_appraisal_result(
+        {
+            "question_id": "q:event_agency",
+            "selected_evidence_handles": [],
+            "selected_role_handles": [],
+            "propositions": [],
+            "deltas": [],
+            "explanation": "The supplied evidence does not support a claim.",
+        },
+        question,
+        {"e1"},
+    )
+
+    assert result["selected_evidence_handles"] == []
+    assert result["propositions"] == []
+    assert result["deltas"] == []
+
+
+def test_candidate_proposition_rejects_mismatched_evidence() -> None:
+    """Keep a candidate proposition bound to its originating evidence row."""
+
+    question = {
+        "question_id": "q:event_agency",
+        "question_kind": "event_agency",
+        "semantic_question": "Assess responsibility and intentionality.",
+        "evidence_handles": ["e1", "e2"],
+        "permitted_role_handles": ["ce1", "ce2", "current_user", "self"],
+        "permitted_delta_paths": ["active_events.ce1.intentionality"],
+        "dependencies": [],
+    }
+    parsed = {
+        "question_id": "q:event_agency",
+        "selected_evidence_handles": ["e2"],
+        "selected_role_handles": ["ce1"],
+        "propositions": [{
+            "proposition_kind": "intentionality",
+            "subject_handle": "ce1",
+            "evidence_handles": ["e2"],
+            "role_assignments": [],
+            "semantic_value": "The action appears deliberate.",
+        }],
+        "deltas": [],
+        "explanation": "The second row does not own the first candidate.",
+    }
+
+    with pytest.raises(ValueError, match="originating evidence"):
+        validate_semantic_appraisal_result(
+            parsed,
+            question,
+            {"e1", "e2"},
+        )
+
+
+def test_candidate_delta_rejects_mismatched_evidence() -> None:
+    """Keep a candidate delta bound to its originating evidence row."""
+
+    question = {
+        "question_id": "q:event_agency",
+        "question_kind": "event_agency",
+        "semantic_question": "Assess responsibility and intentionality.",
+        "evidence_handles": ["e1", "e2"],
+        "permitted_role_handles": ["ce1", "ce2", "current_user", "self"],
+        "permitted_delta_paths": ["active_events.ce1.intentionality"],
+        "dependencies": [],
+    }
+    parsed = {
+        "question_id": "q:event_agency",
+        "selected_evidence_handles": ["e2"],
+        "selected_role_handles": [],
+        "propositions": [],
+        "deltas": [{
+            "target_path": "active_events.ce1.intentionality",
+            "delta": 20,
+            "evidence_handles": ["e2"],
+            "reason": "The second row does not own the first candidate.",
+        }],
+        "explanation": "The candidate path and evidence must stay paired.",
+    }
+
+    with pytest.raises(ValueError, match="originating evidence"):
+        validate_semantic_appraisal_result(
+            parsed,
+            question,
+            {"e1", "e2"},
+        )
 
 
 def test_invalid_direct_fact_leaves_state_unchanged() -> None:
@@ -423,6 +526,76 @@ def test_goal_threat_event_and_gap_fsms_require_frozen_guards() -> None:
         evidence={"outcome_kind": "answer"},
     )
     assert resolved_gap["status"] == "resolved"
+
+
+def test_semantic_uncertainty_decrease_drives_the_frozen_gap_fsm() -> None:
+    """Reduce at twenty points and resolve at the twenty-point threshold."""
+
+    gap = {
+        "entity_id": "gap:semantic",
+        "status": "open",
+        "uncertainty": 60,
+        "evidence_refs": [_evidence()],
+        "updated_at": "2026-07-14T00:00:00Z",
+    }
+    state = {
+        "updated_at": "2026-07-14T00:00:00Z",
+        "knowledge_gaps": [gap],
+    }
+    reduced = apply_semantic_deltas(
+        state,
+        [{
+            "target_path": "knowledge_gaps.gap:semantic.uncertainty",
+            "delta": -20,
+            "evidence_handles": ["action-c"],
+            "reason": "accepted evidence materially narrows the gap",
+        }],
+    )
+    assert reduced["knowledge_gaps"][0]["status"] == "reduced"
+    assert reduced["knowledge_gaps"][0]["uncertainty"] == 40
+
+    resolved = apply_semantic_deltas(
+        reduced,
+        [{
+            "target_path": "knowledge_gaps.gap:semantic.uncertainty",
+            "delta": -20,
+            "evidence_handles": ["action-c"],
+            "reason": "accepted evidence reaches the resolution threshold",
+        }],
+    )
+    assert resolved["knowledge_gaps"][0]["status"] == "resolved"
+    assert resolved["knowledge_gaps"][0]["uncertainty"] == 0
+
+
+def test_goal_supersession_requires_a_distinct_pursuing_goal() -> None:
+    """Reject self, missing, and non-pursuing replacement goal handles."""
+
+    old_goal = _goal()
+    replacement = {**_goal(), "entity_id": "goal:replacement"}
+    state = {"goals": [old_goal, replacement]}
+    proposition = {
+        "proposition_kind": "goal_supersession",
+        "object_handle": "g2",
+    }
+    handle_to_ref = {
+        "g1": {"kind": "goal", "entity_id": old_goal["entity_id"]},
+        "g2": {"kind": "goal", "entity_id": replacement["entity_id"]},
+    }
+
+    assert _validate_goal_supersession(
+        state,
+        old_goal,
+        proposition,
+        handle_to_ref,
+    )
+    replacement["status"] = "blocked"
+    with pytest.raises(CognitionStateError, match="pursuing goal"):
+        _validate_goal_supersession(
+            state,
+            old_goal,
+            proposition,
+            handle_to_ref,
+        )
 
 
 def test_event_repair_axis_alone_does_not_auto_resolve() -> None:

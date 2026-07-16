@@ -86,7 +86,8 @@ async def execute_dependency_graph(
                 execution.failed_branch_ids.add(branch_id)
                 execution.ended_at[branch_id] = time.perf_counter()
                 execution.warnings.append(
-                    f"{branch_id} skipped because a dependency failed or was unavailable"
+                    f"{branch_id} skipped because a dependency failed "
+                    "or was unavailable"
                 )
             continue
         done, _ = await asyncio.wait(
@@ -112,7 +113,7 @@ async def execute_dependency_graph(
             try:
                 execution.results[branch_id] = task.result()
             except Exception as exc:
-                logger.exception("V2 branch %s failed: %s", branch_id, exc)
+                logger.exception(f"V2 branch {branch_id} failed: {exc}")
                 failed.add(branch_id)
                 execution.failed_branch_ids.add(branch_id)
                 execution.warnings.append(f"{branch_id} failed: {exc}")

@@ -624,7 +624,11 @@ def validate_cognition_core_output(
             "expression_policy",
             "diagnostics",
         } | ({"admitted_bid"} if "admitted_bid" in payload else set())
-        | ({"relationship_projection"} if "relationship_projection" in payload else set()),
+        | (
+            {"relationship_projection"}
+            if "relationship_projection" in payload
+            else set()
+        ),
         "cognition core output",
     )
     if payload["schema_version"] != "cognition_core_output.v2":
@@ -875,6 +879,14 @@ def _validate_action_bid(value: Any) -> None:
         "silence",
     }:
         raise CognitionContractError("action bid route is invalid")
+    route_fields = {
+        "action": {"requested_action_kind"},
+        "evidence": {"requested_resolver_capability"},
+    }.get(value["requested_route"], set())
+    if set(value) != required | route_fields:
+        raise CognitionContractError(
+            "action bid capability fields do not match its route"
+        )
     for field_name in optional:
         if field_name in value:
             _require_text(value[field_name], f"action bid.{field_name}")
@@ -1380,7 +1392,11 @@ def _validate_surface_bid(value: Any) -> None:
         "permitted_detail",
     ):
         _require_text(value[field_name], f"surface bid.{field_name}", maximum=1000)
-    _validate_text_list(value["target_summaries"], "surface bid.target_summaries", allow_empty=True)
+    _validate_text_list(
+        value["target_summaries"],
+        "surface bid.target_summaries",
+        allow_empty=True,
+    )
     _validate_text_list(
         value["expected_consequences"],
         "surface bid.expected_consequences",

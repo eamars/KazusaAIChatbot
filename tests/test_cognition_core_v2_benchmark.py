@@ -47,7 +47,10 @@ class _CapturingLLM:
         """Delegate an invocation and preserve evidence needed for comparison."""
 
         started_at = time.perf_counter()
-        message_contents = [str(getattr(message, "content", "")) for message in messages]
+        message_contents = [
+            str(getattr(message, "content", ""))
+            for message in messages
+        ]
         try:
             response = await self._delegate.ainvoke(messages, config=config)
         except Exception as exc:
@@ -373,11 +376,7 @@ def _v2_capture_measurements(
             state = payload.get("state_after_derivation")
     if not isinstance(state, Mapping):
         return branch_count, maximum_concurrent_branches, 0, 0
-    entity_count = sum(
-        len(value)
-        for value in state.values()
-        if isinstance(value, Mapping)
-    )
+    entity_count = _state_entity_count(state)
     serialized_state = json.dumps(state, ensure_ascii=False, sort_keys=True)
     return (
         branch_count,
@@ -385,6 +384,69 @@ def _v2_capture_measurements(
         entity_count,
         len(serialized_state.encode("utf-8")),
     )
+
+
+def _state_entity_count(state: Mapping[str, object]) -> int:
+    """Count native causal, affect, relationship, and character entities."""
+
+    count = 0
+    for field_name in (
+        "goals",
+        "threats",
+        "active_events",
+        "knowledge_gaps",
+        "affect_activations",
+        "standards",
+    ):
+        rows = state.get(field_name)
+        if isinstance(rows, list):
+            count += len(rows)
+    drives = state.get("drives")
+    if isinstance(drives, Mapping):
+        count += len(drives)
+    for field_name in ("relationship", "meaning_state"):
+        if isinstance(state.get(field_name), Mapping):
+            count += 1
+    return count
+
+
+def test_capture_measurements_read_orchestration_and_native_state() -> None:
+    """Measure branch concurrency and native entities from sidecar events."""
+
+    capture = {
+        "events": [
+            {
+                "event_id": "dependency_graph",
+                "payload": {"branch_definitions": [{}, {}]},
+            },
+            {
+                "event_id": "branch_execution",
+                "payload": {"maximum_concurrency": 2},
+            },
+            {
+                "event_id": "emotion_derivation",
+                "payload": {
+                    "state_after_derivation": {
+                        "relationship": {"relationship_id": "r1"},
+                        "goals": [{"entity_id": "g1"}],
+                        "threats": [{"entity_id": "t1"}],
+                        "active_events": [],
+                        "knowledge_gaps": [],
+                        "affect_activations": [{"emotion_id": "joy"}],
+                    },
+                },
+            },
+        ],
+    }
+
+    branch_count, concurrency, entity_count, state_size = (
+        _v2_capture_measurements(capture)
+    )
+
+    assert branch_count == 2
+    assert concurrency == 2
+    assert entity_count == 4
+    assert state_size > 0
 
 
 def _summary(samples: list[dict[str, object]]) -> dict[str, dict[str, float]]:
@@ -448,7 +510,11 @@ def test_summary_includes_tail_percentiles_and_failure_count() -> None:
         {"implementation": "v2", "wall_clock_ms": 70, "failure": None},
         {"implementation": "v2", "wall_clock_ms": 80, "failure": None},
         {"implementation": "v2", "wall_clock_ms": 90, "failure": None},
-        {"implementation": "v2", "wall_clock_ms": 100, "failure": {"class": "TimeoutError"}},
+        {
+            "implementation": "v2",
+            "wall_clock_ms": 100,
+            "failure": {"class": "TimeoutError"},
+        },
     ]
 
     summary = _summary(samples)

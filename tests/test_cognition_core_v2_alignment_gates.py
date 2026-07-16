@@ -13,6 +13,12 @@ from kazusa_ai_chatbot.cognition_core_v2.semantic_source_planner import (
     QUESTION_KINDS,
     plan_semantic_questions,
 )
+from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
+    _project_question_state,
+)
+from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+    project_state_for_prompt,
+)
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
@@ -64,7 +70,12 @@ def test_episode_evidence_selects_each_family_once_with_unique_path_owners() -> 
     assert [question["question_kind"] for question in questions] == list(
         QUESTION_KINDS
     )
-    assert len({path for question in questions for path in question["permitted_delta_paths"]}) == sum(
+    unique_paths = {
+        path
+        for question in questions
+        for path in question["permitted_delta_paths"]
+    }
+    assert len(unique_paths) == sum(
         len(question["permitted_delta_paths"]) for question in questions
     )
     all_paths = [
@@ -93,6 +104,66 @@ def test_scheduler_evidence_selects_only_goal_threat_outcome() -> None:
 
     assert [question["question_kind"] for question in questions] == [
         "goal_threat_outcome",
+    ]
+
+
+def test_each_question_receives_only_family_local_handles_and_state() -> None:
+    """Keep every appraisal partition local to its evidence and entity family."""
+
+    state = build_acquaintance_user_state(
+        global_user_id="user-family-local",
+        updated_at=NOW,
+    )
+    evidence = _evidence()
+    constraints = _constraints()
+    questions = plan_semantic_questions(evidence, state, constraints)
+    by_kind = {question["question_kind"]: question for question in questions}
+
+    assert "ct1" not in by_kind["event_agency"]["permitted_role_handles"]
+    assert "ce1" not in by_kind["relationship_social"][
+        "permitted_role_handles"
+    ]
+    assert "ck1" not in by_kind["moral_identity"]["permitted_role_handles"]
+    assert "ct1" not in by_kind["epistemic_comparison_memory"][
+        "permitted_role_handles"
+    ]
+
+    projection = project_state_for_prompt(
+        state,
+        character_constraints=constraints,
+        evidence=evidence,
+    )
+    event_state = _project_question_state(
+        projection,
+        by_kind["event_agency"],
+    )
+
+    assert [row["handle"] for row in event_state["causal_candidates"]] == [
+        "ce1"
+    ]
+    assert "relationship" not in event_state
+    assert "character_constraints" not in event_state
+
+
+def test_candidate_handle_retains_its_exact_evidence_number() -> None:
+    """Make candidate ownership inspectable when evidence order is sparse."""
+
+    state = build_acquaintance_user_state(
+        global_user_id="user-candidate-binding",
+        updated_at=NOW,
+    )
+    evidence = _evidence()
+    evidence[0]["evidence_handle"] = "e7"
+    questions = plan_semantic_questions(evidence, state, _constraints())
+    event_question = next(
+        question
+        for question in questions
+        if question["question_kind"] == "event_agency"
+    )
+
+    assert "ce7" in event_question["permitted_role_handles"]
+    assert "active_events.ce7.intentionality" in event_question[
+        "permitted_delta_paths"
     ]
 
 

@@ -174,6 +174,64 @@ latency comparison from guarded synthetic seed data while V1 remains available.
 | `tests/test_service_event_logging.py` | Test protected V2 state/branch redaction. |
 | `tests/fixtures/rag_agent_package_prompt_baseline.json` | Replace affinity prompt fields with semantic V2 relationship fields. |
 
+### Checkpoint I change-surface reconciliation
+
+The Checkpoint H alignment review found committed Stage 2 changes outside the
+original literal path tables. These paths are required to complete the frozen
+caller, telemetry, consolidation, lifecycle, and regression contracts; they
+are therefore part of the exact Stage 2 surface for independent review and
+remediation. This reconciliation adds no compatibility path, public contract,
+LLM call, persistence lane, or production cutover operation.
+
+| Path | Bounded Stage 2 responsibility |
+|---|---|
+| `llm_test_helpers.py` | Keep shared live-test helper behavior compatible with the V2 test taxonomy and retained trace contract. |
+| `src/kazusa_ai_chatbot/action_spec/handlers/background_work.py` | Preserve the validated V2 coding-task action payload during deterministic accepted-task materialization. |
+| `src/kazusa_ai_chatbot/consolidation/source_policy.py` | Remove retired affect/relationship writer-source policy while preserving retained memory sources. |
+| `src/kazusa_ai_chatbot/event_logging/__init__.py` | Export the bounded V2 telemetry recording/status surface. |
+| `src/kazusa_ai_chatbot/event_logging/recording.py` | Record bounded V2 component, resolver, route, and state-commit events without raw state or prompt payloads. |
+| `src/kazusa_ai_chatbot/event_logging/status.py` | Include bounded V2 event families in aggregate status without exposing protected data. |
+| `src/kazusa_ai_chatbot/nodes/persona_supervisor2.py` | Wire the canonical V2 persona flow, terminal handling, and one-scope commit ordering at the existing graph owner. |
+| `src/kazusa_ai_chatbot/nodes/persona_supervisor2_memory_lifecycle.py` | Preserve memory-lifecycle specialist behavior after the V2 action/surface handoff. |
+| `src/kazusa_ai_chatbot/reflection_cycle/models.py` | Align deterministic sleep-recovery run metadata with the frozen run artifact. |
+| `src/kazusa_ai_chatbot/self_cognition/tracking.py` | Track V2 self-cognition route outcomes without retired V1/affinity fields. |
+| `src/scripts/sanitize_memory_writer_perspective.py` | Keep the maintenance sanitizer importable after removal of retired relationship-insight fields; it remains outside runtime cognition authority. |
+| `tests/cognition_core_v2_test_helpers.py` | Own reusable deterministic V2 test fixtures without hiding behavioral assertions. |
+
+The following retained regression owners were also changed to replace legacy
+V1/affinity assumptions or to preserve their existing subsystem behavior after
+the V2 big-bang switch. The parent owns all Checkpoint I test remediation in
+these paths:
+
+```text
+tests/control_console_e2e/test_visual_product_acceptance_e2e.py
+tests/test_accepted_task_prompt_contract.py
+tests/test_action_selection_media_affordance.py
+tests/test_background_work_delivery.py
+tests/test_calendar_scheduler_active_commitments.py
+tests/test_coding_agent_background_run_contracts.py
+tests/test_coding_agent_full_workflow_integration_live_llm.py
+tests/test_coding_agent_image_reading_acceptance.py
+tests/test_coding_agent_phase_c_run_context_contracts.py
+tests/test_cognition_preference_adapter.py
+tests/test_cognition_resolver_persona_graph.py
+tests/test_cognition_stage_connection_live_llm.py
+tests/test_control_console_config_routes.py
+tests/test_db_public_boundary.py
+tests/test_documentation_harmonization.py
+tests/test_event_logging_status.py
+tests/test_l2d_action_selection_live_llm.py
+tests/test_l2d_unknown_context_resolver_live_llm.py
+tests/test_l3_dialog_content_plan_contract.py
+tests/test_llm_time_payload_projection.py
+tests/test_memory_writer_prompt_contracts.py
+tests/test_multi_source_cognition_stage_03_prompt_selection.py
+tests/test_persona_supervisor2_action_selection.py
+tests/test_rag_projection.py
+tests/test_self_cognition_duplicate_response_live_llm.py
+tests/test_self_cognition_response_sensitivity_live_llm.py
+```
+
 ### Rewrite-in-place legacy-reference test inventory
 
 The parent owns rewriting every path below. Each path currently contains an
@@ -354,6 +412,29 @@ tests/control_console_e2e/test_page_navigation_e2e.py
 tests/test_script_db_boundary.py
 tests/test_user_state_snapshot.py
 tests/test_character_state_snapshot.py
+```
+
+Stage 3 also owns the already-registered auxiliary documentation adoption
+surface below. These files may retain explanatory V1 layer names, affinity,
+prose-affect, or pre-V2 operator instructions during Stage 2, but they remain
+outside runtime authority and must not be used as a Stage 2 implementation
+contract:
+
+```text
+README.md
+docs/HOWTO.md
+src/kazusa_ai_chatbot/action_spec/README.md
+src/kazusa_ai_chatbot/accepted_task/README.md
+src/kazusa_ai_chatbot/background_work/README.md
+src/kazusa_ai_chatbot/brain_service/README.md
+src/kazusa_ai_chatbot/coding_agent/README.md
+src/kazusa_ai_chatbot/coding_agent/coding_run/README.md
+src/kazusa_ai_chatbot/complex_task_resolver/README.md
+src/kazusa_ai_chatbot/event_logging/README.md
+src/kazusa_ai_chatbot/internal_monologue_residue/README.md
+src/kazusa_ai_chatbot/llm_interface/README.md
+src/kazusa_ai_chatbot/past_dialog_cognition/README.md
+src/kazusa_ai_chatbot/rag/README.md
 ```
 
 No other `src` or `tests` match is permitted at Stage 2 completion.
@@ -740,11 +821,74 @@ git diff --check
 - Calibration: compare actual system with all `S2-O1` through `S2-O10`.
 - Evidence: `reviews/gate_i.md`, `calibration/gate_i_implementation.md`,
   `calibration/gate_i_architect.md`, and final `reviews/value_cost_quality.md`.
+- Candidate identity and durable evidence summary:
+  - base HEAD `3a1247320cb016d4a9d5d24a1300fd46cfdbe8af`;
+  - source/test diff git hash `4ed2538b6a0b46a4820cb6a01901226d87bfb9ec`;
+  - normal and `--noconftest` collection both report `3112/3750`
+    selected with `638` marker-deselected;
+  - exact full regression reports `3110 passed, 2 skipped, 638
+    deselected`; the six-path Stage 3 diagnostic regression reports `3071
+    passed, 2 skipped, 638 deselected`;
+  - the final affected deterministic remediation packets report Checkpoint B
+    `33 passed, 3 deselected`, Checkpoint D `40 passed`, Checkpoint E `53
+    passed, 4 deselected`, and the bounded surface/dialog packet `31 passed`;
+    the earlier unaffected Checkpoint C and F packets remain green;
+  - guarded Mongo isolation reports `3 passed, 3 deselected`; the four private,
+    resolver, self-cognition, and accepted-task DB smokes each report `1
+    passed`;
+  - refreshed scoped, full-pipeline, surface, lifecycle, relationship, and
+    cross-model commands in Section 4 pass one at a time. The comparison model
+    records one expected fail-closed appraisal for an unsupported
+    `goal_supersession` lacking a distinct object handle; the primary model has
+    six successful appraisals;
+  - the corrected ten-sample V2 performance summaries are: ordinary minimal
+    mean/p95 `38249.8/42527.5 ms`, single-emotion goal
+    `47682.7/50608.0 ms`, mixed-goal conflict `46542.1/52155.7 ms`, and
+    maximum bounded parallelism `50709.1/52733.0 ms`. All `40` samples have
+    zero run, parse, and validation failures; each records four protected
+    orchestration/state events. Maximum-parallelism mean LLM overlap ratio is
+    `0.7796`;
+  - exact V1 and incident scans return exit `1`; the residual vocabulary scan
+    returns only paths in the Stage 3 allowlist; compile and `git diff --check`
+    pass.
+  - final affected trace linkage and qualitative review:
+    - surface trace
+      `test_artifacts/llm_traces/cognition_core_v2_stage_2__v2_text_surface_stage_contracts__20260715T174036596112Z.json`,
+      SHA-256
+      `B4A6EAD68DEC2472C64C6B2BAB495DEAE2267F9C75365E5A3C635686FB64A23A`;
+      all four adjacent stage-local prompt/LLM/handler blocks returned exact
+      bounded fields, kept visible boundaries separate from addressee handling,
+      and authored no final dialogue;
+    - ambiguous-appraisal trace
+      `test_artifacts/cognition_core_v2/raw/ambiguous-user-meaning_1784136529692538800.json`,
+      SHA-256
+      `083DBED750A728698AB93614CF7545D5CB5CC8D9C588B518F10F10DABC09CE50`;
+      all six appraisals succeeded, recorded zero failures, and every candidate
+      proposition/delta cited its originating `e1` evidence;
+    - full jealousy trace
+      `test_artifacts/cognition_core_v2/raw/jealousy-full-pipeline_1784136643438635300.json`,
+      SHA-256
+      `123E7CC41F7183BDEA04BB0E93E623E6DB6E632F28C5A9364E80B175422C8BDC`;
+      all six appraisals succeeded with zero failures and zero candidate/evidence
+      binding mismatches;
+    - performance artifact SHA-256 values are
+      `F1CE6F96170BEF9B7E691F0F58D2F90DB28022686F8C19F39509C2232ACDA879`
+      ordinary,
+      `4569EF3C28CF74EAB33291BA59BD37D9C3FB368B43B495FC89CB4646AD515510`
+      single-emotion,
+      `48A6EC96A7D986F9E14146914E07C2CD646BA26AF5E4A26D09F400742B379E80`
+      mixed-goal, and
+      `FAFE384B30E4E045E1F11771CF855F313395545F807167CE941AAFE220A12B03`
+      maximum parallelism. These forty samples precede the final bounded
+      surface-layout, evidence-binding, and seed-hash remediation; those fixes
+      add no LLM call or concurrency cap, and the affected current-candidate
+      live cases above were refreshed individually.
 - Handoff: present exact measurements and limitations to the user. The user's
   Stage 3/cutover decision does not change whether completed Stage 2 work meets
   its technical acceptance criteria.
-- Sign-off: `<reviewer/date>` and `<parent/date>`; then close the production
-  implementation subagent.
+- Sign-off: `/root/checkpoint_i_independent_review / Codex parent architect /
+  2026-07-16`; independent verdict `APPROVED`, no remaining closure blockers;
+  the user-authorized production-owner takeover role is closed.
 
 ## 6. Production-State Evidence Boundary
 

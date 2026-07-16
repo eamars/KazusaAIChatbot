@@ -26,7 +26,7 @@ from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
     project_state_for_prompt,
 )
 from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
-    SURFACE_STAGE_PROMPTS,
+    CONTENT_PLAN_SYSTEM_PROMPT,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_cognition_input_from_global_state,
@@ -129,11 +129,11 @@ def _payload() -> dict[str, Any]:
 def test_content_plan_owns_visible_conversation_progression() -> None:
     """Topic and progression wording remain in the semantic surface stage."""
 
-    prompt = SURFACE_STAGE_PROMPTS["content_plan"].casefold()
+    prompt = CONTENT_PLAN_SYSTEM_PROMPT.casefold()
 
     assert "visible content" in prompt
     assert "selected semantic intention" in prompt
-    assert "without writing dialogue" in prompt
+    assert "do not write final dialogue" in prompt
 
 
 def test_connector_projects_allowlisted_bounded_conversation_progress() -> None:

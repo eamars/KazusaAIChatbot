@@ -42,7 +42,7 @@ from kazusa_ai_chatbot.nodes import (
     persona_supervisor2_cognition_actions as action_connector,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
-    build_cognition_chain_services,
+    build_cognition_core_services,
 )
 from kazusa_ai_chatbot.self_cognition import worker as self_cognition_worker
 from kazusa_ai_chatbot.utils import parse_llm_json_output
@@ -75,7 +75,7 @@ async def test_live_l2d_future_speak_runs_real_background_worker() -> None:
     run_id = uuid4().hex
     frozen_state = _future_speak_l2d_state(run_id)
     prompt_payload = build_action_selection_payload_text(frozen_state)
-    services = build_cognition_chain_services()
+    services = build_cognition_core_services()
     capturing_llm = _CapturingLLM(services.llm)
     token = l2d.set_action_selection_llm(
         LLMStageBinding(capturing_llm, services.action_selection_config)

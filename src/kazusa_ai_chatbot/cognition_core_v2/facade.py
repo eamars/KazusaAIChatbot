@@ -28,6 +28,9 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
 from kazusa_ai_chatbot.cognition_core_v2.dependency_graph import (
     build_dependency_graph,
 )
+from kazusa_ai_chatbot.cognition_core_v2.diagnostics import (
+    capture_validation_event,
+)
 from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import run_goal_cognition
 from kazusa_ai_chatbot.cognition_core_v2.output_projection import (
     build_state_update,
@@ -238,6 +241,17 @@ async def run_cognition(
     if final_execution is not None:
         bids.extend(final_execution.results.values())
     bids = [bid for bid in bids if isinstance(bid, Mapping)]
+    generated_bids = list(bids)
+    output_mode = payload["episode"]["output_mode"]
+    eligible_bids: list[ActionBidV2] = []
+    for bid in bids:
+        if _output_mode_allows_route(payload["episode"], bid["requested_route"]):
+            eligible_bids.append(bid)
+        else:
+            warnings.append(
+                f"{bid['branch_id']} bid excluded by {output_mode} output_mode"
+            )
+    bids = eligible_bids
     try:
         collapse = await collapse_bids(bids, services) if bids else _empty_collapse()
     except Exception as exc:
@@ -267,6 +281,8 @@ async def run_cognition(
         intention["route"],
         affect,
         output_mode=payload["episode"]["output_mode"],
+        selected_branch_id=intention.get("selected_branch_id"),
+        activations=final_state["affect_activations"],
     )
     output: dict[str, Any] = {
         "schema_version": "cognition_core_output.v2",
@@ -295,7 +311,9 @@ async def run_cognition(
             "stage_status": stage_status,
             "selected_question_count": len(questions),
             "dispatched_question_count": len(appraisal_tasks),
-            "selected_branch_count": len(preliminary_branches) + len(new_branch_definitions),
+            "selected_branch_count": (
+                len(preliminary_branches) + len(new_branch_definitions)
+            ),
             "dispatched_branch_count": (
                 len(preliminary_execution.started_at)
                 + (len(final_execution.started_at) if final_execution else 0)
@@ -324,6 +342,60 @@ async def run_cognition(
         output["admitted_bid"] = admitted_bid
     if relationship is not None:
         output["relationship_projection"] = relationship
+    all_branch_definitions = [
+        *preliminary_branches,
+        *new_branch_definitions,
+    ]
+    capture_validation_event(
+        "dependency_graph",
+        {
+            "branch_definitions": [
+                {
+                    "branch_id": definition.branch_id,
+                    "dependencies": list(definition.dependencies),
+                    "action_tendencies": list(definition.action_tendencies),
+                    "required": definition.required,
+                    "goal_kind": definition.goal_kind,
+                }
+                for definition in all_branch_definitions
+            ],
+        },
+    )
+    capture_validation_event(
+        "branch_execution",
+        {
+            "maximum_concurrency": max(
+                preliminary_execution.maximum_concurrency,
+                final_execution.maximum_concurrency if final_execution else 0,
+            ),
+            "generated_bids": generated_bids,
+            "eligible_bids": bids,
+            "failed_branch_ids": sorted({
+                *preliminary_execution.failed_branch_ids,
+                *(
+                    final_execution.failed_branch_ids
+                    if final_execution is not None
+                    else set()
+                ),
+            }),
+        },
+    )
+    capture_validation_event(
+        "emotion_derivation",
+        {
+            "state_before_derivation": preliminary_state,
+            "state_after_derivation": final_state,
+            "affect_projection": affect,
+        },
+    )
+    capture_validation_event(
+        "workspace_selection",
+        {
+            "appraisal_results": appraisal_results,
+            "comparison_results": comparison_results,
+            "final_intention": intention,
+        },
+    )
     return validate_cognition_core_output(output)
 
 
@@ -361,11 +433,18 @@ def _branch_handler(
         if definition.branch_id == "ordinary_response" and not payload["evidence"]:
             return None  # type: ignore[return-value]
         goal = _goal_for_branch(state, definition.goal_kind)
-        goal_ref = goal or {
-            "scope": state["state_scope"],
-            "kind": "goal",
-            "entity_id": f"goal:{definition.goal_kind}:episode",
-        }
+        if goal is None:
+            goal_ref = {
+                "scope": state["state_scope"],
+                "kind": "goal",
+                "entity_id": f"goal:{definition.goal_kind}:episode",
+            }
+        else:
+            goal_ref = {
+                "scope": state["state_scope"],
+                "kind": "goal",
+                "entity_id": goal["entity_id"],
+            }
         context = dict(semantic_context)
         context["goal_projection"] = _goal_projection(goal, definition.goal_kind)
         return await run_goal_cognition(
@@ -640,7 +719,9 @@ def _validate_output_mode(episode: Mapping[str, Any], route: str) -> None:
 
     output_mode = episode["output_mode"]
     if output_mode == "silence" and route != "silence":
-        raise CognitionExecutionError("visible route conflicts with silence output_mode")
+        raise CognitionExecutionError(
+            "visible route conflicts with silence output_mode"
+        )
     if output_mode in {"think_only", "preview"} and route == "speech":
         raise CognitionExecutionError(
             "speech route conflicts with private output_mode"
@@ -652,6 +733,19 @@ def _validate_output_mode(episode: Mapping[str, Any], route: str) -> None:
         raise CognitionExecutionError(
             "non-action route conflicts with scheduled_action_request output_mode"
         )
+
+
+def _output_mode_allows_route(
+    episode: Mapping[str, Any],
+    route: str,
+) -> bool:
+    """Return whether one requested route is eligible for workspace collapse."""
+
+    try:
+        _validate_output_mode(episode, route)
+    except CognitionExecutionError:
+        return False
+    return True
 
 
 def _elapsed_ms(started_at: float) -> int:

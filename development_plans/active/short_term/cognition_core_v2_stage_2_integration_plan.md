@@ -301,6 +301,10 @@ The exact file/symbol ownership is in the execution manifest and is mandatory.
 - Exact deterministic, integration, live, benchmark, and regression owners in
   the manifest.
 - `pytest.ini` to stop collecting the fixture project as repository tests.
+- The exact Checkpoint I change-surface reconciliation paths in the execution
+  manifest, limited to the already-required V2 caller, telemetry,
+  consolidation, lifecycle, maintenance-import, and retained-regression
+  responsibilities stated there.
 
 ### Create
 
@@ -314,6 +318,8 @@ The exact file/symbol ownership is in the execution manifest and is mandatory.
   guard, memory collections/evolution, existing scheduler timing/repository,
   LLM interface/provider code, and every production cutover operation.
 - Exact Stage 3 auxiliary residual paths, unchanged until Stage 3.
+- Exact Stage 3 auxiliary documentation-adoption paths recorded in the
+  execution manifest; their stale terminology has no Stage 2 runtime authority.
 
 Changes outside the manifest require a plan update before editing.
 
@@ -470,10 +476,14 @@ also requires the independent review record.
   - Verify/evidence/handoff: execution-manifest Checkpoint H.
   - Calibration: `S2-O1`, `S2-O2`, `S2-O8`, `S2-O9`, `S2-O10`.
   - Sign-off: `Codex takeover production owner / Codex parent architect / 2026-07-15`; exact static scans, compile, collection, full regression, diagnostic regression, and diff checks pass; both calibration records are `Status: aligned`; the takeover owner remains available for Checkpoint I remediation and all three documents were reread.
-- [ ] Checkpoint I — independent review, remediation, final calibration, and report signed.
+- [x] Checkpoint I — independent review, remediation, final calibration, and report signed.
   - Verify/evidence/handoff: execution-manifest Checkpoint I.
   - Calibration: all `S2-O1` through `S2-O10`.
-  - Sign-off: `<reviewer/date>` and `<parent/date>`; close the production subagent.
+  - Sign-off: `/root/checkpoint_i_independent_review / Codex parent architect /
+    2026-07-16`; final candidate source/test diff git hash
+    `4ed2538b6a0b46a4820cb6a01901226d87bfb9ec`; independent verdict
+    `APPROVED` with no remaining closure blockers; the takeover production-owner
+    role is closed.
 - [ ] User decision about Stage 3 and future cutover planning recorded.
 - [ ] Documentation, registry, Execution Evidence, and completed-plan archive updated.
 
@@ -633,3 +643,13 @@ During approved execution, record:
 - independent review findings/fixes/reruns;
 - value/cost/quality report, limitations, user decision, Stage 3 residual
   handoff, documentation, registry, and archive completion.
+- Checkpoint I final review approved the base
+  `3a1247320cb016d4a9d5d24a1300fd46cfdbe8af` plus source/test diff git hash
+  `4ed2538b6a0b46a4820cb6a01901226d87bfb9ec`. Normal and `--noconftest`
+  collection both report `3112/3750` with `638` deselected; full and diagnostic
+  regressions report `3110` and `3071` passes with two documented skips. The
+  four required Gate I artifacts exist under
+  `test_artifacts/cognition_core_v2/stage_2/`; the tracked execution manifest
+  preserves the exact trace paths, SHA-256 values, qualitative judgments,
+  measurements, and limitations. Stage 3/cutover direction and completed-plan
+  archival remain open for the user decision.

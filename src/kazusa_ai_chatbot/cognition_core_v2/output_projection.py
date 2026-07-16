@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from typing import Any
 
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
@@ -14,6 +15,27 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
 from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
     project_numeric_band,
 )
+from kazusa_ai_chatbot.cognition_core_v2.emotion_definitions import (
+    EMOTION_DEFINITIONS,
+)
+
+
+_EMOTION_ORDER = {
+    emotion_id: index
+    for index, emotion_id in enumerate(EMOTION_DEFINITIONS)
+}
+_DIRECT_BRANCHES = {
+    "autonomy_boundary",
+    "safety_coping",
+    "obstruction_strategy",
+    "moral_repair",
+}
+_INDIRECT_BRANCHES = {
+    "relationship_connection",
+    "social_care",
+    "loss_recovery",
+    "meaning_reconstruction",
+}
 
 
 def project_affect(
@@ -76,17 +98,19 @@ def build_state_update(
 ) -> StateUpdateV2:
     """Build the sole persistence envelope from a complete replacement state."""
 
-    changed_paths = _changed_paths(previous_state, replacement_state)
+    normalized_previous = _canonicalize_replacement_state(previous_state)
+    normalized_replacement = _canonicalize_replacement_state(replacement_state)
+    changed_paths = _changed_paths(normalized_previous, normalized_replacement)
     owner_key = (
-        replacement_state["owner_user_id"]
-        if replacement_state["state_scope"] == "user"
+        normalized_replacement["owner_user_id"]
+        if normalized_replacement["state_scope"] == "user"
         else "global"
     )
     normalized_comparisons = [dict(row) for row in comparison_results]
     return {
-        "state_scope": replacement_state["state_scope"],
+        "state_scope": normalized_replacement["state_scope"],
         "owner_key": owner_key,
-        "replacement_state": dict(replacement_state),
+        "replacement_state": normalized_replacement,
         "comparison_results": normalized_comparisons,
         "changed_paths": changed_paths,
     }
@@ -97,6 +121,8 @@ def default_expression_policy(
     affect: Sequence[Mapping[str, Any]],
     *,
     output_mode: str = "visible_reply",
+    selected_branch_id: str | None = None,
+    activations: Sequence[Mapping[str, Any]] = (),
 ) -> ExpressionPolicyV2:
     """Derive deterministic visible-expression limits from route and affect."""
 
@@ -109,14 +135,79 @@ def default_expression_policy(
     intensity = "restrained"
     if any(row.get("intensity") in {"high", "very high"} for row in affect):
         intensity = "strong"
-    elif affect:
+    elif any(row.get("intensity") == "moderate" for row in affect):
         intensity = "moderate"
+    if selected_branch_id in _DIRECT_BRANCHES:
+        directness = "direct"
+    elif selected_branch_id in _INDIRECT_BRANCHES:
+        directness = "indirect"
+    else:
+        directness = "balanced"
     return {
         "visibility": visibility,
-        "emotional_tone": affect[0]["emotion"] if affect else "neutral",
+        "emotional_tone": _emotional_tone(activations),
         "intensity": intensity,
-        "directness": "balanced",
+        "directness": directness,
     }
+
+
+def _emotional_tone(activations: Sequence[Mapping[str, Any]]) -> str:
+    """Describe the two strongest activations in frozen tie-break order."""
+
+    ordered = sorted(
+        activations,
+        key=lambda row: (
+            -int(row.get("score", 0)),
+            _EMOTION_ORDER.get(
+                str(row.get("emotion_id", "")),
+                len(_EMOTION_ORDER),
+            ),
+        ),
+    )[:2]
+    if not ordered:
+        return "composed"
+    parts = [
+        (
+            f"{row['emotion_id']} ({_phase_label(row)}, "
+            f"{row.get('trend', 'stable')})"
+        )
+        for row in ordered
+    ]
+    return " with ".join(parts)
+
+
+def _canonicalize_replacement_state(
+    state: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Serialize entity and activation rows in contract-defined order."""
+
+    normalized = deepcopy(dict(state))
+    for field_name in (
+        "goals",
+        "threats",
+        "active_events",
+        "knowledge_gaps",
+    ):
+        rows = normalized.get(field_name)
+        if isinstance(rows, list):
+            rows.sort(
+                key=lambda row: (
+                    str(row.get("created_at", "")),
+                    str(row.get("entity_id", "")),
+                )
+            )
+    activations = normalized.get("affect_activations")
+    if isinstance(activations, list):
+        activations.sort(
+            key=lambda row: (
+                _EMOTION_ORDER.get(
+                    str(row.get("emotion_id", "")),
+                    len(_EMOTION_ORDER),
+                ),
+                str(row.get("emotion_id", "")),
+            )
+        )
+    return normalized
 
 
 def _phase_label(activation: Mapping[str, Any]) -> str:
@@ -148,13 +239,22 @@ def _cause_summary(
             }.get(kind)
             if field_name is not None:
                 for entity in state.get(field_name, []):
-                    if isinstance(entity, Mapping) and entity.get("entity_id") == entity_id:
+                    if (
+                        isinstance(entity, Mapping)
+                        and entity.get("entity_id") == entity_id
+                    ):
                         description = entity.get("description")
                         if isinstance(description, str) and description.strip():
                             return description[:500]
-            if kind == "relationship" and isinstance(state.get("relationship"), Mapping):
+            if kind == "relationship" and isinstance(
+                state.get("relationship"),
+                Mapping,
+            ):
                 return "the current relationship carries the activating social pressure"
-            if kind == "meaning" and isinstance(state.get("meaning_state"), Mapping):
+            if kind == "meaning" and isinstance(
+                state.get("meaning_state"),
+                Mapping,
+            ):
                 return "purpose and agency remain persistently low"
     return "the retained primary cause remains grounded in the current episode"
 
@@ -176,7 +276,11 @@ def _changed_paths(
             return
         if isinstance(before, Mapping) and isinstance(after, Mapping):
             for key in sorted(set(before) | set(after)):
-                visit(before.get(key), after.get(key), f"{path}.{key}" if path else str(key))
+                visit(
+                    before.get(key),
+                    after.get(key),
+                    f"{path}.{key}" if path else str(key),
+                )
             return
         if isinstance(before, list) and isinstance(after, list):
             before_by_id = {

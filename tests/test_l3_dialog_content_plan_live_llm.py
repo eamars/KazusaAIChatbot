@@ -18,8 +18,8 @@ from kazusa_ai_chatbot.config import (
 )
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
-    build_cognition_chain_services,
+from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
+    _build_surface_services,
 )
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 from tests.llm_trace import write_llm_trace
@@ -239,7 +239,7 @@ def _l3_state(case: dict) -> dict:
 async def _run_l3_case(case: dict) -> dict:
     """Run one live L3 content-plan case and write a trace."""
 
-    services = build_cognition_chain_services()
+    services = _build_surface_services()
     calls: list[dict] = []
     token = l3_module.set_content_plan_agent_llm(
         LLMStageBinding(

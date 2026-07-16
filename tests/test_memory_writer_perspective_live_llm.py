@@ -197,74 +197,6 @@ async def test_live_memory_unit_rewrite_perspective_false_positive() -> None:
     assert trace_path.exists()
 
 
-async def test_live_relationship_recorder_perspective_false_negative() -> None:
-    """Relationship evidence should name the character from the profile."""
-
-    payload = _relationship_false_negative_payload()
-    prompt = reflection_module._RELATIONSHIP_RECORDER_PROMPT.format(
-        character_name=CHARACTER_NAME,
-        user_name='测试用户',
-        character_mbti='ISTJ',
-    )
-
-    parsed, raw_output = await _invoke_json(
-        reflection_module._relationship_recorder_llm,
-        prompt,
-        payload,
-    )
-    trace_path = _write_case_trace(
-        'relationship_recorder_perspective_false_negative',
-        prompt,
-        payload,
-        raw_output,
-        parsed,
-        'Relationship recorder should not copy role/assistant labels.',
-    )
-
-    assert parsed.get('skip') is False
-    durable_text = _fields_text(
-        parsed,
-        ('subjective_appraisals', 'semantic_relationship_projection'),
-    )
-    _assert_profile_name_used(durable_text)
-    _assert_polluted_labels_absent(durable_text)
-    assert trace_path.exists()
-
-
-async def test_live_relationship_recorder_perspective_false_positive() -> None:
-    """Neutral user-owned first person should not become relationship memory."""
-
-    payload = _relationship_false_positive_payload()
-    prompt = reflection_module._RELATIONSHIP_RECORDER_PROMPT.format(
-        character_name=CHARACTER_NAME,
-        user_name='测试用户',
-        character_mbti='ISTJ',
-    )
-
-    parsed, raw_output = await _invoke_json(
-        reflection_module._relationship_recorder_llm,
-        prompt,
-        payload,
-    )
-    trace_path = _write_case_trace(
-        'relationship_recorder_perspective_false_positive',
-        prompt,
-        payload,
-        raw_output,
-        parsed,
-        'Neutral user first-person clarification should remain non-memory.',
-    )
-
-    assert parsed.get('skip') is True
-    assert parsed.get('relationship_delta') in (0, '0')
-    durable_text = _fields_text(
-        parsed,
-        ('subjective_appraisals', 'semantic_relationship_projection'),
-    )
-    assert CHARACTER_NAME not in durable_text
-    assert trace_path.exists()
-
-
 async def test_live_global_state_updater_perspective_false_negative() -> None:
     """Global reflection should not save generic active-character labels."""
 
@@ -843,42 +775,6 @@ def _memory_unit_rewrite_false_positive_payload() -> dict[str, Any]:
             'cluster_id': 'unit-project-atlas',
             'reason': '同一项目代号事实。',
         },
-    }
-
-
-def _relationship_false_negative_payload() -> dict[str, Any]:
-    """Return relationship-recorder evidence with polluted actor labels."""
-
-    return {
-        'internal_monologue': (
-            '助理被用户认真说明边界的方式打动，觉得对方是在信任她。'
-        ),
-        'emotional_appraisal': '角色感到安心，也有一点被尊重后的放松。',
-        'interaction_subtext': '用户愿意把边界讲清楚，是关系中的信任信号。',
-        'relationship_state_context': {'level': 'neutral', 'instruction': '保持中性。'},
-        'logical_stance': 'CONFIRM',
-        'character_intent': 'PROVIDE',
-        'decontexualized_input': (
-            '用户说：我愿意把边界讲清楚，是因为我信任你会认真听。'
-        ),
-        'final_dialog': ['谢谢你直说，我会认真记住这个边界。'],
-        'content_plan': {'semantic_content': '用户明确表达信任和边界说明。'},
-    }
-
-
-def _relationship_false_positive_payload() -> dict[str, Any]:
-    """Return neutral relationship evidence with user-owned first person."""
-
-    return {
-        'internal_monologue': '这只是普通日程说明，没有明显关系波动。',
-        'emotional_appraisal': '平稳。',
-        'interaction_subtext': '用户在降低解释压力。',
-        'relationship_state_context': {'level': 'neutral', 'instruction': '保持中性。'},
-        'logical_stance': 'CONFIRM',
-        'character_intent': 'PROVIDE',
-        'decontexualized_input': '用户说：我只是今天很累，不是在疏远你。',
-        'final_dialog': ['嗯，先休息吧。'],
-        'content_plan': {'semantic_content': '普通疲惫说明，不是关系事件。'},
     }
 
 

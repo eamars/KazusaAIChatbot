@@ -10,8 +10,10 @@ from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
     SEMANTIC_APPRAISAL_PROMPT,
 )
 from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
-    SURFACE_STAGE_PROMPTS,
-    SURFACE_STAGE_SYSTEM_PROMPT,
+    CONTENT_PLAN_SYSTEM_PROMPT,
+    PREFERENCE_SYSTEM_PROMPT,
+    STYLE_SYSTEM_PROMPT,
+    VISUAL_SYSTEM_PROMPT,
 )
 from kazusa_ai_chatbot.cognition_core_v2.workspace import COLLAPSE_PROMPT
 
@@ -59,15 +61,15 @@ def test_collapse_and_route_prompts_select_handles_only() -> None:
 def test_surface_prompts_leave_final_dialogue_to_dialog() -> None:
     """Keep all four surface stages semantic and non-rendering."""
 
-    assert set(SURFACE_STAGE_PROMPTS) == {
-        "style",
-        "content_plan",
-        "preference",
-        "visual",
-    }
+    surface_prompts = (
+        STYLE_SYSTEM_PROMPT,
+        CONTENT_PLAN_SYSTEM_PROMPT,
+        PREFERENCE_SYSTEM_PROMPT,
+        VISUAL_SYSTEM_PROMPT,
+    )
     assert all(
-        "without writing dialogue" in prompt.lower()
-        for prompt in SURFACE_STAGE_PROMPTS.values()
+        "do not write final dialogue" in prompt.lower()
+        for prompt in surface_prompts
     )
 
 
@@ -77,7 +79,10 @@ def test_generated_semantic_prompts_preserve_language_policy() -> None:
     for prompt in (
         SEMANTIC_APPRAISAL_PROMPT,
         GOAL_COGNITION_PROMPT,
-        SURFACE_STAGE_SYSTEM_PROMPT,
+        STYLE_SYSTEM_PROMPT,
+        CONTENT_PLAN_SYSTEM_PROMPT,
+        PREFERENCE_SYSTEM_PROMPT,
+        VISUAL_SYSTEM_PROMPT,
     ):
         normalized = " ".join(prompt.split())
         assert "Simplified Chinese" in normalized
@@ -92,7 +97,10 @@ def test_semantic_prompts_preserve_typed_source_ownership() -> None:
     for prompt in (
         SEMANTIC_APPRAISAL_PROMPT,
         GOAL_COGNITION_PROMPT,
-        SURFACE_STAGE_SYSTEM_PROMPT,
+        STYLE_SYSTEM_PROMPT,
+        CONTENT_PLAN_SYSTEM_PROMPT,
+        PREFERENCE_SYSTEM_PROMPT,
+        VISUAL_SYSTEM_PROMPT,
     ):
         lowered = " ".join(prompt.casefold().split())
         assert "character-owned" in lowered
@@ -108,8 +116,10 @@ def test_v2_prompts_do_not_restore_operational_or_scalar_gates() -> None:
         GOAL_COGNITION_PROMPT,
         COLLAPSE_PROMPT,
         ROUTE_PROMPT,
-        SURFACE_STAGE_SYSTEM_PROMPT,
-        *SURFACE_STAGE_PROMPTS.values(),
+        STYLE_SYSTEM_PROMPT,
+        CONTENT_PLAN_SYSTEM_PROMPT,
+        PREFERENCE_SYSTEM_PROMPT,
+        VISUAL_SYSTEM_PROMPT,
     )).casefold()
     for forbidden in (
         "relationship score threshold",

@@ -1129,7 +1129,10 @@ async def test_live_graph_relationship_state_negative_delta_for_hostile_input(
         - before_relationship["boundary_safety"]
     )
 
-    assert result.get("final_dialog")
+    core_output = result.get("cognition_core_output")
+    assert isinstance(core_output, dict)
+    route = core_output["intention"]["route"]
+    assert result.get("final_dialog") or route == "silence"
     _assert_v2_relationship_commit(result, after_state)
     assert observed_delta < 0
 

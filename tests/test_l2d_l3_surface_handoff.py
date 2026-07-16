@@ -22,8 +22,22 @@ class _LLM:
 
     async def ainvoke(self, messages: list[object], *, config: object) -> SimpleNamespace:
         del config
-        payload = json.loads(str(getattr(messages[-1], "content", "{}")))
-        return SimpleNamespace(content=json.dumps({"result": payload["stage"]}))
+        system = str(getattr(messages[0], "content", ""))
+        json.loads(str(getattr(messages[-1], "content", "{}")))
+        if "exactly style_guidance" in system:
+            result = {"style_guidance": "style"}
+        elif "exactly content_plan" in system:
+            result = {"content_plan": "content plan"}
+        elif "exactly visible_boundaries" in system:
+            result = {
+                "visible_boundaries": ["visible boundary"],
+                "addressee_plan": ["current participant"],
+            }
+        elif "exactly pacing_guidance" in system:
+            result = {"pacing_guidance": "pacing"}
+        else:
+            raise AssertionError("unexpected surface stage")
+        return SimpleNamespace(content=json.dumps(result))
 
 
 def _state() -> dict[str, object]:

@@ -12,6 +12,7 @@ from kazusa_ai_chatbot.cognition_core_v2 import (
     build_acquaintance_user_state,
     build_character_production_state,
     run_cognition,
+    run_text_surface_planning,
 )
 from kazusa_ai_chatbot.cognition_core_v2.diagnostics import (
     reset_validation_capture,
@@ -32,6 +33,10 @@ from kazusa_ai_chatbot.db.users import (
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_cognition_core_services,
 )
+from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
+    _build_surface_services,
+)
+from tests.llm_trace import write_llm_trace
 from tests.live_llm_mongo import (
     live_db,
     seed_shared_documents,
@@ -67,6 +72,28 @@ _RESOLUTION_MESSAGE = (
     "The previously active cause is now resolved and no longer applies."
 )
 _NEUTRAL_MESSAGE = "Please describe the weather in one sentence."
+
+
+class _CapturingSurfaceLLM:
+    """Capture every stage-local surface request and raw model response."""
+
+    def __init__(self, delegate: Any) -> None:
+        self.delegate = delegate
+        self.calls: list[dict[str, str]] = []
+
+    async def ainvoke(
+        self,
+        messages: list[object],
+        *,
+        config: object,
+    ) -> Any:
+        response = await self.delegate.ainvoke(messages, config=config)
+        self.calls.append({
+            "system_prompt": str(getattr(messages[0], "content", "")),
+            "human_payload": str(getattr(messages[-1], "content", "")),
+            "raw_output": str(response.content),
+        })
+        return response
 
 
 def _cases() -> list[dict[str, object]]:
@@ -346,6 +373,62 @@ async def _run_cross_model_case(
         await live_db.user_profiles.delete_one(
             {"global_user_id": owner_id},
         )
+
+
+@pytest.mark.live_llm
+@pytest.mark.asyncio
+async def test_v2_text_surface_stage_contracts_live_llm() -> None:
+    """Exercise four stage-local L3 schemas and preserve their raw outputs."""
+
+    services = _build_surface_services()
+    capturing_llm = _CapturingSurfaceLLM(services.llm)
+    services = replace(services, llm=capturing_llm)
+    payload = {
+        "schema_version": "text_surface_input.v2",
+        "episode": canonical_episode(
+            episode_id="live-v2-surface-contracts",
+            content="I finished the difficult task and want a brief reply.",
+        ),
+        "intention": {
+            "route": "speech",
+            "intention": "acknowledge the completed effort",
+            "target_roles": [],
+            "reason": "the completed effort is directly observed",
+        },
+        "supporting_bids": [],
+        "expression_policy": {
+            "visibility": "visible",
+            "emotional_tone": "joy (currently active, stable)",
+            "intensity": "moderate",
+            "directness": "balanced",
+        },
+        "semantic_affect": [{
+            "emotion": "joy",
+            "phase": "currently active",
+            "intensity": "moderate",
+            "trend": "stable",
+            "cause_summary": "the difficult task was completed",
+        }],
+        "permitted_action_results": [],
+        "interaction_style_context": "brief and natural",
+    }
+
+    output = await run_text_surface_planning(payload, services)
+    artifact_path = write_llm_trace(
+        "cognition_core_v2_stage_2",
+        "v2_text_surface_stage_contracts",
+        {
+            "input": payload,
+            "calls": capturing_llm.calls,
+            "output": output,
+            "judgment": "four stage-local schemas returned exact bounded fields",
+        },
+    )
+
+    assert len(capturing_llm.calls) == 4
+    assert output["visible_boundaries"]
+    assert output["addressee_plan"]
+    assert artifact_path.exists()
 
 
 @pytest.mark.live_llm

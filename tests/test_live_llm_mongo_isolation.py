@@ -10,6 +10,8 @@ import pytest
 import kazusa_ai_chatbot.db._client as client_module
 from tests.live_llm_mongo import (
     TEST_DB_NAME,
+    _document_hash,
+    _seed_content_hash,
     assert_no_xdist,
     assert_test_db_name,
     live_db,
@@ -90,6 +92,30 @@ def test_checkpoint_b_helpers_enforce_the_exact_database_and_no_xdist(
     monkeypatch.setenv("PYTEST_XDIST_WORKER", "gw0")
     with pytest.raises(AssertionError):
         assert_no_xdist()
+
+
+def test_seed_hash_rejects_an_unexpected_document_sibling() -> None:
+    """Treat every non-generated stored field as fixture-owned content."""
+
+    expected = {"global_user_id": "seed-s2"}
+    stored = {
+        "_id": "database-generated-id",
+        "global_user_id": "seed-s2",
+        "profile_name": "preserved profile sibling",
+        "unexpected": "drift",
+    }
+
+    assert _seed_content_hash(
+        stored,
+        expected,
+        ["profile_name"],
+    ) != _document_hash(expected)
+    stored.pop("unexpected")
+    assert _seed_content_hash(
+        stored,
+        expected,
+        ["profile_name"],
+    ) == _document_hash(expected)
 
 
 @pytest.mark.asyncio

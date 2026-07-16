@@ -18,7 +18,7 @@ from kazusa_ai_chatbot.nodes import (
     persona_supervisor2_cognition_actions as action_connector,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
-    build_cognition_chain_services,
+    build_cognition_core_services,
 )
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 from tests.llm_trace import write_llm_trace
@@ -48,7 +48,7 @@ async def test_l2d_live_quiet_group_monologue_does_not_select_speak(
     frozen_state = _quiet_group_graphics_state()
     prompt_payload = build_action_selection_payload_text(frozen_state)
 
-    action_selection_llm = build_cognition_chain_services().action_selection_llm
+    action_selection_llm = build_cognition_core_services().llm
     capturing_llm = _CapturingLLM(action_selection_llm)
     monkeypatch.setattr(l2d_module, '_action_selection_llm', bind_test_llm(capturing_llm, "action_selection_llm"))
 

@@ -15,7 +15,6 @@ from kazusa_ai_chatbot.config import (
     DIALOG_GENERATOR_LLM_BASE_URL,
 )
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_generator
-from kazusa_ai_chatbot.consolidation.reflection import relationship_recorder
 from kazusa_ai_chatbot.utils import load_personality
 from tests.llm_trace import write_llm_trace
 
@@ -245,48 +244,6 @@ async def test_live_l3_profile_conformance_practical_sorting(ensure_live_llms) -
             'contextual_output': contextual,
             'visual_output': visual,
             'judgment': 'practical sorting question stayed neutral/task-oriented',
-        },
-    )
-    assert trace_path.exists()
-
-
-async def test_live_relationship_recorder_skips_mundane_clarification(ensure_live_llms) -> None:
-    """Relationship recorder should not persist mundane pressure reduction."""
-
-    del ensure_live_llms
-    state = {
-        'character_profile': _character_profile(),
-        'user_profile': {'relationship_state': 500},
-        'user_name': '测试用户',
-        'internal_monologue': '只是普通整理说明，不需要理解成关系后撤。',
-        'emotional_appraisal': '平稳。',
-        'interaction_subtext': '事务协作。',
-        'logical_stance': 'CONFIRM',
-        'character_intent': 'PROVIDE',
-        'decontexualized_input': '不是在拉开距离，只是顺手整理标签。',
-        'final_dialog': ['那就按你说的，把日期写清楚就好。'],
-        'action_directives': {
-            'linguistic_directives': {
-                'content_plan': {
-                    'semantic_content': '建议标签上写日期，普通事务回应。',
-                },
-            },
-        },
-    }
-
-    result = await relationship_recorder(state)
-    combined = f'{result}'
-    _assert_no_forbidden(combined, ('拉开距离', '防御', '暧昧', '心乱'), 'relationship_mundane')
-    assert result['relationship_delta'] == 0
-    assert result['subjective_appraisals'] == []
-    assert result['semantic_relationship_projection'] in ('', None)
-    trace_path = write_llm_trace(
-        'consolidation_evidence_hardening_live',
-        'relationship_mundane_clarification',
-        {
-            'input': state,
-            'output': result,
-            'judgment': 'relationship_delta=0 and no durable negative/positive swing',
         },
     )
     assert trace_path.exists()

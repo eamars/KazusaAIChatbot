@@ -176,8 +176,32 @@ def apply_semantic_deltas(
     for path, delta, handles, reason in sorted(normalized):
         if target_counts[path] != 1:
             continue
+        pieces = path.split(".")
+        previous_uncertainty = None
+        if len(pieces) == 3 and pieces[0] == "knowledge_gaps":
+            gap = _find_entity(updated_state, "knowledge_gap", pieces[1])
+            if pieces[2] == "uncertainty":
+                previous_uncertainty = gap["uncertainty"]
         target = _apply_delta_path(updated_state, path, delta)
         _retain_delta_evidence(target, handles)
+        if previous_uncertainty is not None and delta < 0:
+            decrease = previous_uncertainty - target["uncertainty"]
+            if target["uncertainty"] <= 20:
+                target.update(
+                    transition_knowledge_gap(
+                        target,
+                        transition="resolved",
+                        accepted_uncertainty_decrease=decrease,
+                    )
+                )
+            elif decrease >= 20:
+                target.update(
+                    transition_knowledge_gap(
+                        target,
+                        transition="reduced",
+                        accepted_uncertainty_decrease=decrease,
+                    )
+                )
         target["updated_at"] = updated_state["updated_at"]
     return updated_state
 
@@ -323,13 +347,13 @@ def transition_knowledge_gap(
             raise CognitionStateError(
                 "knowledge reduction requires a 20-point decrease"
             )
-        if updated_gap["uncertainty"] <= 0:
-            raise CognitionStateError("resolved gap requires answer evidence")
+        if updated_gap["uncertainty"] <= 20:
+            raise CognitionStateError("resolved gap cannot remain reduced")
     elif transition == "resolved":
-        if updated_gap["uncertainty"] != 0:
+        answer_complete = _has_typed_outcome(evidence, {"answer", "completion"})
+        if updated_gap["uncertainty"] > 20 and not answer_complete:
             raise CognitionStateError("knowledge resolution guard failed")
-        if not _has_typed_outcome(evidence, {"answer", "completion"}):
-            raise CognitionStateError("knowledge answer evidence is required")
+        updated_gap["uncertainty"] = 0
     else:
         raise CognitionStateError("unknown knowledge-gap transition")
     updated_gap["status"] = transition

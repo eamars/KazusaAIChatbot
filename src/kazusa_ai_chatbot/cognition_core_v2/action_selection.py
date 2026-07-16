@@ -182,14 +182,16 @@ def _validate_route_decision(
         "silence",
     }:
         raise ValueError("route decision route is invalid")
+    route_fields = {
+        "action": {"action_handle"},
+        "evidence": {"resolver_handle"},
+    }.get(parsed["route"], set())
+    if set(parsed) != required | route_fields:
+        raise ValueError("route capability fields do not match selected route")
     if "action_handle" in parsed and parsed["action_handle"] not in actions:
         raise ValueError("route action handle is unavailable")
     if "resolver_handle" in parsed and parsed["resolver_handle"] not in resolvers:
         raise ValueError("route resolver handle is unavailable")
-    if parsed["route"] == "action" and "action_handle" not in parsed:
-        raise ValueError("action route requires an action handle")
-    if parsed["route"] == "evidence" and "resolver_handle" not in parsed:
-        raise ValueError("evidence route requires a resolver handle")
     return dict(parsed)
 
 

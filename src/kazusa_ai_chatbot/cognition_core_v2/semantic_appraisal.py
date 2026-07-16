@@ -28,7 +28,8 @@ from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
-SEMANTIC_APPRAISAL_PROMPT = '''You assess one scoped semantic question from bounded evidence.
+SEMANTIC_APPRAISAL_PROMPT = '''You assess one scoped semantic question from
+bounded evidence.
 Use only the permitted prompt-local handles and semantic descriptions. Do not select
 actions, write dialogue, emit emotion ids, change lifecycle status, or invent
 facts. Return semantic propositions and allowlisted numeric deltas only when
@@ -98,7 +99,7 @@ async def appraise_semantic_question(
             },
         },
         "evidence": list(evidence_by_handle.values()),
-        "state": projection.payload,
+        "state": _project_question_state(projection, question),
     }
     payload_text = _fit_appraisal_payload(payload)
     started_at = time.perf_counter()
@@ -174,7 +175,9 @@ def validate_semantic_appraisal_result(
         parsed["selected_evidence_handles"],
         evidence_handles,
         "selected evidence",
+        minimum=0,
     )
+    selected_evidence_set = set(selected_evidence)
     selected_roles = _validate_handles(
         parsed["selected_role_handles"],
         set(question["permitted_role_handles"]),
@@ -184,13 +187,13 @@ def validate_semantic_appraisal_result(
     if not isinstance(parsed["propositions"], list) or len(parsed["propositions"]) > 8:
         raise ValueError("semantic propositions are invalid")
     propositions = [
-        _validate_proposition(row, question, evidence_handles)
+        _validate_proposition(row, question, selected_evidence_set)
         for row in parsed["propositions"]
     ]
     if not isinstance(parsed["deltas"], list) or len(parsed["deltas"]) > 8:
         raise ValueError("semantic deltas are invalid")
     deltas = [
-        _validate_delta(row, question, evidence_handles)
+        _validate_delta(row, question, selected_evidence_set)
         for row in parsed["deltas"]
     ]
     paths = [delta["target_path"] for delta in deltas]
@@ -239,7 +242,21 @@ def _validate_proposition(
         question["permitted_role_handles"]
     ):
         raise ValueError("semantic proposition object handle is not permitted")
-    cited = _validate_handles(value["evidence_handles"], evidence_handles, "proposition evidence")
+    if proposition_kind == "goal_supersession":
+        if "object_handle" not in value:
+            raise ValueError("goal supersession requires an object handle")
+        if (
+            not subject.startswith("g")
+            or not value["object_handle"].startswith("g")
+        ):
+            raise ValueError("goal supersession requires two goal handles")
+        if subject == value["object_handle"]:
+            raise ValueError("goal supersession requires a distinct goal")
+    cited = _validate_handles(
+        value["evidence_handles"],
+        evidence_handles,
+        "proposition evidence",
+    )
     assignments = value["role_assignments"]
     if not isinstance(assignments, list) or len(assignments) > 8:
         raise ValueError("semantic proposition roles are invalid")
@@ -259,9 +276,19 @@ def _validate_proposition(
             "affected_relationship",
         }:
             raise ValueError("semantic role value is invalid")
-        if assignment["entity_handle"] not in set(question["permitted_role_handles"]):
+        if assignment["entity_handle"] not in set(
+            question["permitted_role_handles"]
+        ):
             raise ValueError("semantic role handle is not permitted")
         normalized_assignments.append(dict(assignment))
+    referenced_handles = [subject]
+    if "object_handle" in value:
+        referenced_handles.append(value["object_handle"])
+    referenced_handles.extend(
+        assignment["entity_handle"]
+        for assignment in normalized_assignments
+    )
+    _validate_candidate_evidence_binding(referenced_handles, cited)
     result = {
         "proposition_kind": proposition_kind,
         "subject_handle": subject,
@@ -292,9 +319,19 @@ def _validate_delta(
     if path not in set(question["permitted_delta_paths"]):
         raise ValueError("semantic delta path is not owned by question")
     delta = value["delta"]
-    if isinstance(delta, bool) or not isinstance(delta, int) or not -40 <= delta <= 40:
+    if (
+        isinstance(delta, bool)
+        or not isinstance(delta, int)
+        or not -40 <= delta <= 40
+    ):
         raise ValueError("semantic delta must be an integer in range")
-    cited = _validate_handles(value["evidence_handles"], evidence_handles, "delta evidence")
+    cited = _validate_handles(
+        value["evidence_handles"],
+        evidence_handles,
+        "delta evidence",
+    )
+    path_handle = path.split(".")[1]
+    _validate_candidate_evidence_binding([path_handle], cited)
     return {
         "target_path": path,
         "delta": delta,
@@ -321,6 +358,32 @@ def _validate_handles(
     return list(value)
 
 
+def _validate_candidate_evidence_binding(
+    candidate_handles: Sequence[str],
+    cited_evidence_handles: Sequence[str],
+) -> None:
+    """Require every prompt-local candidate to cite its source evidence."""
+
+    cited = set(cited_evidence_handles)
+    for handle in candidate_handles:
+        evidence_handle = _candidate_evidence_handle(handle)
+        if evidence_handle is not None and evidence_handle not in cited:
+            raise ValueError(
+                "causal candidate must cite its originating evidence"
+            )
+
+
+def _candidate_evidence_handle(candidate_handle: str) -> str | None:
+    """Map one candidate handle back to its exact evidence handle."""
+
+    for prefix in ("ce", "ct", "ck"):
+        if candidate_handle.startswith(prefix):
+            suffix = candidate_handle[len(prefix):]
+            if suffix.isdigit():
+                return f"e{suffix}"
+    return None
+
+
 def _require_text(value: Any, maximum: int = 200) -> str:
     """Require bounded non-empty semantic text."""
 
@@ -344,7 +407,9 @@ def _fit_appraisal_payload(payload: dict[str, Any]) -> str:
     )
     state = payload["state"]
     if not isinstance(state, Mapping):
-        raise CognitionContextLimitError("semantic appraisal state projection is invalid")
+        raise CognitionContextLimitError(
+            "semantic appraisal state projection is invalid"
+        )
     projected_state = dict(state)
     while True:
         candidate = dict(payload)
@@ -367,3 +432,102 @@ def _fit_appraisal_payload(payload: dict[str, Any]) -> str:
             raise CognitionContextLimitError(
                 "required semantic appraisal context exceeds the contract cap"
             )
+
+
+def _project_question_state(
+    projection: PromptProjectionV2,
+    question: SemanticQuestionV2,
+) -> dict[str, Any]:
+    """Expose only the state partition authorized for one appraisal family."""
+
+    allowed = set(question["permitted_role_handles"])
+    source = projection.payload
+    result: dict[str, Any] = {}
+    for field_name in ("goals", "threats", "events", "knowledge_gaps"):
+        rows = source.get(field_name, [])
+        selected = [
+            dict(row)
+            for row in rows
+            if isinstance(row, Mapping) and row.get("handle") in allowed
+        ]
+        if selected:
+            result[field_name] = selected
+    candidates = [
+        dict(row)
+        for row in source.get("causal_candidates", [])
+        if isinstance(row, Mapping)
+        and row.get("handle") in allowed
+        and row.get("evidence_handle") in set(question["evidence_handles"])
+    ]
+    if candidates:
+        result["causal_candidates"] = candidates
+    evidence = [
+        dict(row)
+        for row in source.get("evidence", [])
+        if isinstance(row, Mapping)
+        and row.get("handle") in set(question["evidence_handles"])
+    ]
+    if evidence:
+        result["evidence"] = evidence
+    roles = source.get("roles", {})
+    if isinstance(roles, Mapping):
+        selected_roles = {
+            handle: summary
+            for handle, summary in roles.items()
+            if handle in allowed
+        }
+        if selected_roles:
+            result["roles"] = selected_roles
+    if "r1" in allowed and isinstance(source.get("relationship"), Mapping):
+        result["relationship"] = dict(source["relationship"])
+    constraints = _project_question_constraints(
+        projection,
+        source.get("character_constraints"),
+        allowed,
+    )
+    if constraints:
+        result["character_constraints"] = constraints
+    return result
+
+
+def _project_question_constraints(
+    projection: PromptProjectionV2,
+    constraints: Any,
+    allowed: set[str],
+) -> dict[str, Any]:
+    """Filter fixed character constraints through permitted local handles."""
+
+    if not isinstance(constraints, Mapping):
+        return {}
+    selected: dict[str, Any] = {}
+    drive_ids = {
+        ref["entity_id"]
+        for handle, ref in projection.handle_to_ref.items()
+        if handle in allowed and ref["kind"] == "drive"
+    }
+    drives = constraints.get("drives")
+    if isinstance(drives, Mapping):
+        selected_drives = {
+            drive_id: dict(value)
+            for drive_id, value in drives.items()
+            if drive_id in drive_ids and isinstance(value, Mapping)
+        }
+        if selected_drives:
+            selected["drives"] = selected_drives
+    standards = constraints.get("standards")
+    standard_indexes = sorted(
+        int(handle[1:]) - 1
+        for handle in allowed
+        if handle.startswith("s") and handle[1:].isdigit()
+    )
+    if isinstance(standards, list) and standard_indexes:
+        selected["standards"] = [
+            dict(standards[index])
+            for index in standard_indexes
+            if 0 <= index < len(standards)
+            and isinstance(standards[index], Mapping)
+        ]
+    meaning = constraints.get("meaning_state")
+    if "m1" in allowed and isinstance(meaning, Mapping):
+        selected["meaning_state"] = dict(meaning)
+    return selected

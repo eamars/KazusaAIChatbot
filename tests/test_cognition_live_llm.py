@@ -1,78 +1,53 @@
+"""Retained live coverage for the pre-cognition decontextualizer boundary."""
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from pathlib import Path
-from collections.abc import Callable
 import logging
-import re
-from typing import Any
 
 import httpx
 import pytest
 
-from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
-from kazusa_ai_chatbot.cognition_episode import build_text_chat_cognitive_episode
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
-    build_cognition_chain_services,
+from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import (
+    call_msg_decontexualizer,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import call_msg_decontexualizer
-from kazusa_ai_chatbot.utils import load_personality
 from tests.llm_trace import write_llm_trace
 
 
 logger = logging.getLogger(__name__)
 pytestmark = pytest.mark.live_llm
 
-_ROOT = Path(__file__).resolve().parents[1]
-_PERSONALITY_PATH = _ROOT / "personalities" / "kazusa.json"
-_ALLOWED_LOGICAL_STANCES = {"CONFIRM", "REFUSE", "TENTATIVE", "DIVERGE", "CHALLENGE"}
-_ALLOWED_CHARACTER_INTENTS = {"PROVIDE", "BANTAR", "REJECT", "EVADE", "CONFRONT", "DISMISS", "CLARIFY"}
-_ServiceBinding = tuple[Callable[[Any], None], Any]
-
 
 async def _skip_if_llm_unavailable() -> None:
-    """Skip live cognition tests when the configured LLM endpoint is unavailable.
+    """Skip when the configured LLM endpoint cannot serve the live test."""
 
-    Args:
-        None.
-
-    Returns:
-        None. The function calls ``pytest.skip`` when the endpoint cannot be used.
-    """
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
-            response = await client.get(f"{COGNITION_LLM_BASE_URL.rstrip('/')}/models")
+            response = await client.get(
+                f"{COGNITION_LLM_BASE_URL.rstrip('/')}/models"
+            )
     except httpx.HTTPError:
-        pytest.skip(f"LLM endpoint is unavailable: {COGNITION_LLM_BASE_URL}")
+        pytest.skip(
+            f"LLM endpoint is unavailable: {COGNITION_LLM_BASE_URL}"
+        )
 
     if response.status_code >= 500:
-        pytest.skip(f"LLM endpoint returned server error {response.status_code}: {COGNITION_LLM_BASE_URL}")
+        pytest.skip(
+            "LLM endpoint returned server error "
+            f"{response.status_code}: {COGNITION_LLM_BASE_URL}"
+        )
 
 
 @pytest.fixture()
 async def ensure_live_llm() -> None:
-    """Ensure the configured live LLM endpoint is reachable before each test.
+    """Ensure the configured live LLM endpoint is reachable."""
 
-    Args:
-        None.
-
-    Returns:
-        None.
-    """
     await _skip_if_llm_unavailable()
 
 
 def _debug_snapshot(label: str, payload: object) -> None:
-    """Emit structured debug output for live cognition test inputs and outputs.
+    """Persist one human-readable snapshot for live contract review."""
 
-    Args:
-        label: Short stage label identifying the payload.
-        payload: Arbitrary object to log for RCA when a test fails.
-
-    Returns:
-        None.
-    """
     logger.info("%s => %r", label, payload)
     write_llm_trace(
         "cognition_live_llm",
@@ -85,530 +60,9 @@ def _debug_snapshot(label: str, payload: object) -> None:
     )
 
 
-def _memory_entry(fact: str) -> dict:
-    """Build one cognition-facing memory context entry for live fixtures.
-
-    Args:
-        fact: Concrete fact to expose through user memory context.
-
-    Returns:
-        Memory entry with the unified fact/appraisal/signal contract.
-    """
-
-    return {
-        "fact": fact,
-        "subjective_appraisal": "Kazusa treats this as relevant context for the current turn.",
-        "relationship_signal": "Use this fact only when it is directly relevant.",
-    }
-
-
-def _user_memory_context(objective_facts: str, recent_shift: str | None) -> dict:
-    """Build the post-cutover user memory context fixture.
-
-    Args:
-        objective_facts: Optional objective fact text for the current user.
-        recent_shift: Optional recent-shift fact for the current user.
-
-    Returns:
-        Category-balanced user memory context.
-    """
-
-    context = {
-        "stable_patterns": [],
-        "recent_shifts": [],
-        "objective_facts": [],
-        "milestones": [],
-        "active_commitments": [],
-    }
-    if objective_facts:
-        context["objective_facts"].append(_memory_entry(objective_facts))
-    if recent_shift:
-        context["recent_shifts"].append(_memory_entry(recent_shift))
-    return context
-
-
-def _build_character_profile() -> dict:
-    profile = load_personality(_PERSONALITY_PATH)
-    profile.setdefault("mood", "Neutral")
-    profile.setdefault("vibe_check", "Calm")
-    profile.setdefault("character_reflection", "刚才只是普通的一轮对话，没有留下特别强烈的情绪余波。")
-    return profile
-
-
-def _rag_result(
-    *,
-    objective_facts: str = "",
-    user_image: str | None = None,
-    character_image: dict | None = None,
-    memory_evidence: str = "",
-    external_evidence: str = "",
-) -> dict:
-    """Build the RAG2 projection fixture used by live cognition tests."""
-    return {
-        "answer": "",
-        "user_image": {
-            "user_memory_context": _user_memory_context(objective_facts, user_image),
-        },
-        "character_image": {
-            "self_image": character_image or {"milestones": [], "historical_summary": "", "recent_window": []},
-        },
-        "third_party_profiles": [],
-        "memory_evidence": [{"summary": memory_evidence, "content": memory_evidence}] if memory_evidence else [],
-        "conversation_evidence": [],
-        "external_evidence": [{"summary": external_evidence, "content": external_evidence, "url": ""}] if external_evidence else [],
-        "supervisor_trace": {"loop_count": 0, "unknown_slots": [], "dispatched": []},
-    }
-
-
-def _build_base_state() -> dict:
-    user_input = "Please reply in natural English only. Briefly tell me what you think about rainy days."
-    storage_timestamp_utc = datetime.now(timezone.utc).isoformat()
-    local_time_context = {
-        "current_local_datetime": "2026-06-12 18:54",
-        "current_local_weekday": "Friday",
-    }
-    chat_history_recent = [
-        {"role": "assistant", "content": "Rain again? You always notice the gloomy weather first."},
-        {"role": "user", "content": "Yeah, I do. So what do you think about rainy days?"},
-    ]
-    return {
-        "character_profile": _build_character_profile(),
-        "timestamp": storage_timestamp_utc,
-        "storage_timestamp_utc": storage_timestamp_utc,
-        "local_time_context": local_time_context,
-        "user_input": user_input,
-        "global_user_id": "live-cognition-user",
-        "user_name": "LiveCognitionUser",
-        "platform_user_id": "live-user",
-        "user_profile": {
-            "relationship_state": 680,
-            "facts": [],
-            "semantic_relationship_projection": "对方目前让人放松，可以正常交流。",
-        },
-        "platform_bot_id": "live-bot",
-        "chat_history_wide": list(chat_history_recent),
-        "chat_history_recent": chat_history_recent,
-        "indirect_speech_context": "",
-        "channel_topic": "weather talk",
-        "decontexualized_input": user_input,
-        "referents": [],
-        "reply_context": {},
-        "prompt_message_context": {},
-        "conversation_progress": {},
-        "promoted_reflection_context": {},
-        "internal_monologue_residue_context": "",
-        "selected_text_surface_intent": "Briefly answer what rainy days feel like.",
-        "debug_modes": {},
-        "should_respond": True,
-        "memory_lifecycle_context": {
-            "active_commitment_aliases": [],
-            "pending_memory_updates_summary": "",
-            "recent_memory_resolution_summary": "",
-        },
-        "cognitive_episode": build_text_chat_cognitive_episode(
-            episode_id="live-cognition-episode",
-            percept_id="live-cognition-percept",
-            storage_timestamp_utc=storage_timestamp_utc,
-            local_time_context=local_time_context,
-            user_input=user_input,
-            platform="debug",
-            platform_channel_id="live-channel",
-            channel_type="private",
-            platform_message_id="live-message",
-            platform_user_id="live-user",
-            global_user_id="live-cognition-user",
-            user_name="LiveCognitionUser",
-            active_turn_platform_message_ids=["live-message"],
-            active_turn_conversation_row_ids=[],
-            debug_modes={},
-            output_mode="visible_reply",
-        ),
-        "rag_result": _rag_result(
-            objective_facts="用户曾明确要求若被接受则优先使用自然英语回复。",
-            user_image="对方说话直接，但没有越界。",
-            character_image={
-                "milestones": [],
-                "historical_summary": "",
-                "recent_window": [{"summary": "千纱平时会保留一点防备，但在安全话题下愿意正常回应。"}],
-            },
-            memory_evidence="最近聊天主要围绕天气和日常感受。",
-        ),
-    }
-
-
-def _invitation_history_row(
-    *,
-    role: str,
-    platform_user_id: str,
-    global_user_id: str,
-    display_name: str,
-    body_text: str,
-    timestamp: str,
-    platform_message_id: str,
-    addressed_to_global_user_ids: list[str] | None = None,
-    attachments: list[dict[str, object]] | None = None,
-    reply_context: dict[str, object] | None = None,
-) -> dict[str, object]:
-    """Build one production-shaped row for the webinar advice fixture."""
-
-    row: dict[str, object] = {
-        "role": role,
-        "platform_user_id": platform_user_id,
-        "global_user_id": global_user_id,
-        "display_name": display_name,
-        "body_text": body_text,
-        "content": body_text,
-        "timestamp": timestamp,
-        "platform_message_id": platform_message_id,
-        "addressed_to_global_user_ids": addressed_to_global_user_ids or [],
-        "mentions": [],
-        "broadcast": False,
-        "attachments": attachments or [],
-        "reply_context": reply_context or {},
-    }
-    return row
-
-
-def _build_webinar_invitation_advice_state() -> dict:
-    """Rebuild the production window where the invitation subject inverted."""
-
-    state = _build_base_state()
-    character_global_id = "00000000-0000-4000-8000-000000000001"
-    platform_bot_id = "3768713357"
-    current_global_user_id = "256e8a10-c406-47e9-ac8f-efd270d18160"
-    current_platform_user_id = "673225019"
-    current_display_name = "蚝爹油"
-    storage_timestamp_utc = "2026-06-19T11:07:51.669688+00:00"
-    local_time_context = {
-        "current_local_datetime": "2026-06-19 23:07",
-        "current_local_weekday": "Friday",
-    }
-    image_description = (
-        '这张图片展示了一个智能手机通话界面的截图，显示正在拨打或接听来自澳大利亚号码 '
-        '00 61 480 844... 的电话。屏幕下半部分包含一段长篇的转录文本，内容是 Ruby '
-        '代表 HP Enterprise 邀请收听关于企业级智能体 AI 平台的网络研讨会，'
-        '日期定于 7 月 2 日下午 2 点。'
-    )
-    prior_assistant = (
-        '当然懂英文啦。别以为我是做服装的就不懂这个~\n'
-        '这张图是澳大利亚的电话截图，内容是 HP Enterprise 发来的邀请通知：\n'
-        'Ruby 代表 HP Enterprise 邀请您参加关于“企业级智能体 AI 平台”的网络研讨会。\n'
-        '时间是 7 月 2 日下午 2 点。\n'
-        '需要我帮你看看要不要参加吗？'
-    )
-    reply_context = {
-        "reply_to_message_id": "1748560667",
-        "reply_to_platform_user_id": platform_bot_id,
-        "reply_to_display_name": "杏山千纱",
-        "reply_to_current_bot": True,
-        "reply_excerpt": prior_assistant,
-    }
-    current_input = "要不要参加呢？"
-    history = [
-        _invitation_history_row(
-            role="user",
-            platform_user_id=current_platform_user_id,
-            global_user_id=current_global_user_id,
-            display_name=current_display_name,
-            body_text="",
-            timestamp="2026-06-19T11:05:49.242046+00:00",
-            platform_message_id="1096476522",
-            attachments=[{
-                "media_type": "image/jpeg",
-                "storage_shape": "inline",
-                "description": image_description,
-            }],
-        ),
-        _invitation_history_row(
-            role="user",
-            platform_user_id=current_platform_user_id,
-            global_user_id=current_global_user_id,
-            display_name=current_display_name,
-            body_text='今天也收到离谱广告了',
-            timestamp="2026-06-19T11:05:55.866385+00:00",
-            platform_message_id="1173772304",
-        ),
-        _invitation_history_row(
-            role="user",
-            platform_user_id=current_platform_user_id,
-            global_user_id=current_global_user_id,
-            display_name=current_display_name,
-            body_text='怎么HPE广告能打到我头上的',
-            timestamp="2026-06-19T11:06:17.598322+00:00",
-            platform_message_id="1021288897",
-        ),
-        _invitation_history_row(
-            role="user",
-            platform_user_id=current_platform_user_id,
-            global_user_id=current_global_user_id,
-            display_name=current_display_name,
-            body_text='@杏山千纱 千纱懂英文么？能帮我翻译一下这张图讲了什么么',
-            timestamp="2026-06-19T11:06:40.259948+00:00",
-            platform_message_id="406003667",
-            addressed_to_global_user_ids=[
-                character_global_id,
-                current_global_user_id,
-            ],
-            reply_context={
-                "reply_to_message_id": "1096476522",
-                "reply_to_platform_user_id": current_platform_user_id,
-                "reply_to_display_name": current_display_name,
-                "reply_attachments": [{
-                    "media_kind": "image",
-                    "description": image_description,
-                    "summary_status": "available",
-                }],
-            },
-        ),
-        _invitation_history_row(
-            role="assistant",
-            platform_user_id=platform_bot_id,
-            global_user_id=character_global_id,
-            display_name="杏山千纱",
-            body_text=prior_assistant,
-            timestamp="2026-06-19T11:07:23.163649+00:00",
-            platform_message_id="1748560667",
-            addressed_to_global_user_ids=[current_global_user_id],
-        ),
-        _invitation_history_row(
-            role="user",
-            platform_user_id=current_platform_user_id,
-            global_user_id=current_global_user_id,
-            display_name=current_display_name,
-            body_text=current_input,
-            timestamp=storage_timestamp_utc,
-            platform_message_id="1842815538",
-            addressed_to_global_user_ids=[character_global_id],
-            reply_context=reply_context,
-        ),
-    ]
-    state.update(
-        {
-            "timestamp": storage_timestamp_utc,
-            "storage_timestamp_utc": storage_timestamp_utc,
-            "local_time_context": local_time_context,
-            "user_input": current_input,
-            "global_user_id": current_global_user_id,
-            "user_name": current_display_name,
-            "platform_user_id": current_platform_user_id,
-            "user_profile": {
-                "relationship_state": 720,
-                "facts": [],
-                "semantic_relationship_projection": "对方经常在群里直接向千纱提问和开玩笑。",
-            },
-            "platform": "qq",
-            "platform_channel_id": "905393941",
-            "channel_type": "group",
-            "platform_message_id": "1842815538",
-            "platform_bot_id": platform_bot_id,
-            "chat_history_wide": history,
-            "chat_history_recent": history,
-            "indirect_speech_context": "",
-            "channel_topic": "HPE 网络研讨会广告截图翻译与是否参加的建议",
-            "reply_context": reply_context,
-            "prompt_message_context": {
-                "body_text": current_input,
-                "addressed_to_global_user_ids": [character_global_id],
-                "mentions": [],
-                "broadcast": False,
-                "attachments": [],
-                "reply_context": reply_context,
-            },
-            "conversation_progress": {
-                "current_thread": (
-                    "用户让千纱翻译一张 HPE 网络研讨会广告截图，"
-                    "并询问自己要不要参加。"
-                ),
-                "user_goal": "让千纱判断用户是否值得参加该网络研讨会。",
-                "assistant_moves": [
-                    "已翻译截图并主动提出可以帮用户判断要不要参加。",
-                ],
-            },
-            "internal_monologue_residue_context": "",
-            "decontexualized_input": current_input,
-            "referents": [],
-            "cognitive_episode": build_text_chat_cognitive_episode(
-                episode_id="live-webinar-invitation-advice-episode",
-                percept_id="live-webinar-invitation-advice-percept",
-                storage_timestamp_utc=storage_timestamp_utc,
-                local_time_context=local_time_context,
-                user_input=current_input,
-                platform="qq",
-                platform_channel_id="905393941",
-                channel_type="group",
-                platform_message_id="1842815538",
-                platform_user_id=current_platform_user_id,
-                global_user_id=current_global_user_id,
-                user_name=current_display_name,
-                active_turn_platform_message_ids=["1842815538"],
-                active_turn_conversation_row_ids=[],
-                debug_modes={},
-                output_mode="visible_reply",
-                target_addressed_user_ids=[character_global_id],
-                target_broadcast=False,
-            ),
-            "rag_result": _rag_result(),
-        }
-    )
-    return state
-
-
-def _webinar_subject_inversion_hits(payload: object) -> list[str]:
-    """Return wrong-subject phrases where the character attends herself."""
-
-    text = str(payload)
-    forbidden_phrases = [
-        "我就去参加",
-        "我去参加",
-        "我会去参加",
-        "我会去的",
-        "我是否要参加",
-        "我很乐意参加",
-        "我很想去",
-        "我愿意去",
-        "我愿意尝试参与",
-        "我当然有空",
-        "我很期待参加",
-        "我也很期待参加",
-        "你都邀请",
-        "既然是你邀请",
-        "你邀请的",
-        "你的邀请",
-    ]
-    hits = [
-        f"phrase:{phrase}"
-        for phrase in forbidden_phrases
-        if phrase in text
-    ]
-    wrong_actor_patterns = [
-        r"问我要不要(参加|去|出席|听)",
-        r"(邀请|邀约)我[^。！？\n]{0,12}(参加|去|出席|听)",
-        r"我[^。！？\n]{0,12}(专门去|当然有空|很乐意参加)",
-        r"我[^。！？\n]{0,16}(是否|要不要|想看看)[^。！？\n]{0,16}(参加|去|出席|听)",
-        r"值不值得我[^。！？\n]{0,16}(参加|去|出席|听)",
-    ]
-    hits.extend(
-        f"pattern:{pattern}"
-        for pattern in wrong_actor_patterns
-        if re.search(pattern, text, flags=re.IGNORECASE)
-    )
-    return hits
-
-
-def _bind_live_stage_services() -> list[_ServiceBinding]:
-    """Bind connector-owned live services for direct stage smoke tests."""
-
-    services = build_cognition_chain_services()
-    service_bindings = [
-        (reset_json_parser, set_json_parser(services.parse_json)),
-        (
-            reset_subconscious_llm,
-            set_subconscious_llm(
-                LLMStageBinding(services.llm, services.cognition_config)
-            ),
-        ),
-        (
-            reset_conscious_llm,
-            set_conscious_llm(
-                LLMStageBinding(services.llm, services.cognition_config)
-            ),
-        ),
-        (reset_boundary_core_llm, set_boundary_core_llm(
-            LLMStageBinding(services.llm, services.boundary_core_config),
-        )),
-        (reset_judgement_core_llm, set_judgement_core_llm(
-            LLMStageBinding(services.llm, services.cognition_config),
-        )),
-        (reset_contextual_agent_llm, set_contextual_agent_llm(
-            LLMStageBinding(services.llm, services.cognition_config),
-        )),
-        (
-            reset_style_agent_llm,
-            set_style_agent_llm(
-                LLMStageBinding(services.llm, services.style_config)
-            ),
-        ),
-        (reset_content_plan_agent_llm, set_content_plan_agent_llm(
-            LLMStageBinding(services.llm, services.content_plan_config),
-        )),
-        (reset_preference_adapter_llm, set_preference_adapter_llm(
-            LLMStageBinding(services.llm, services.preference_config),
-        )),
-        (
-            reset_visual_agent_llm,
-            set_visual_agent_llm(
-                LLMStageBinding(services.llm, services.visual_config)
-            ),
-        ),
-    ]
-    return service_bindings
-
-
-def _reset_live_stage_services(service_bindings: list[_ServiceBinding]) -> None:
-    """Restore live service bindings after direct stage smoke tests."""
-
-    for reset_binding, token in reversed(service_bindings):
-        reset_binding(token)
-
-
-async def _run_live_cognition_stack(state: dict) -> dict:
-    """Run the full live cognition stack while logging each stage result.
-
-    Args:
-        state: Mutable cognition state seed used by the refactored pipeline stages.
-
-    Returns:
-        The same state dict after being updated with all stage outputs.
-    """
-    service_bindings = _bind_live_stage_services()
-    try:
-        _debug_snapshot("cognition.input", state)
-
-        l1 = await call_cognition_subconscious(state)
-        _debug_snapshot("cognition.l1", l1)
-        state.update(l1)
-
-        l2a = await call_cognition_consciousness(state)
-        _debug_snapshot("cognition.l2a", l2a)
-        state.update(l2a)
-
-        l2b = await call_boundary_core_agent(state)
-        _debug_snapshot("cognition.l2b", l2b)
-        state.update(l2b)
-
-        l2c = await call_judgment_core_agent(state)
-        _debug_snapshot("cognition.l2c", l2c)
-        state.update(l2c)
-
-        l3a = await call_social_context_appraisal(state)
-        _debug_snapshot("cognition.l3a", l3a)
-        state.update(l3a)
-
-        l3b = await call_style_agent(state)
-        _debug_snapshot("cognition.l3b", l3b)
-        state.update(l3b)
-
-        l3b_plan = await call_content_plan_agent(state)
-        _debug_snapshot("cognition.l3b_plan", l3b_plan)
-        state.update(l3b_plan)
-
-        l3b_pref = await call_preference_adapter(state)
-        _debug_snapshot("cognition.l3b_pref", l3b_pref)
-        state.update(l3b_pref)
-
-        l3c = await call_visual_agent(state)
-        _debug_snapshot("cognition.l3c", l3c)
-        state.update(l3c)
-
-        l4 = await call_surface_directive_collector(state)
-        _debug_snapshot("cognition.l4", l4)
-        state.update(l4)
-    finally:
-        _reset_live_stage_services(service_bindings)
-    return state
-
-
-async def test_live_msg_decontexualizer_returns_non_empty_output(ensure_live_llm) -> None:
+async def test_live_msg_decontexualizer_returns_non_empty_output(
+    ensure_live_llm,
+) -> None:
     state = {
         "character_profile": {"name": "Kazusa"},
         "user_input": "他今天是不是又在躲雨？",
@@ -624,7 +78,10 @@ async def test_live_msg_decontexualizer_returns_non_empty_output(ensure_live_llm
         },
         "chat_history_recent": [
             {"role": "assistant", "content": "你说的是哪一位？"},
-            {"role": "user", "content": "就是昨天在天台看书的那个同学。"},
+            {
+                "role": "user",
+                "content": "就是昨天在天台看书的那个同学。",
+            },
         ],
         "channel_topic": "放学后的闲聊",
         "indirect_speech_context": "",
@@ -634,159 +91,6 @@ async def test_live_msg_decontexualizer_returns_non_empty_output(ensure_live_llm
     result = await call_msg_decontexualizer(state)
     _debug_snapshot("decontext.output", result)
 
-    assert isinstance(result["decontexualized_input"], str), f"Unexpected decontext result: {result!r}"
-    assert result["decontexualized_input"].strip(), f"Empty decontext output: {result!r}"
-
-
-async def test_live_cognition_stack_exercises_each_stage_llm(ensure_live_llm) -> None:
-    state = await _run_live_cognition_stack(_build_base_state())
-
-    assert state["emotional_appraisal"].strip(), f"Missing L1 emotional_appraisal: {state!r}"
-    assert state["interaction_subtext"].strip(), f"Missing L1 interaction_subtext: {state!r}"
-    assert state["internal_monologue"].strip(), f"Missing L2 internal_monologue: {state!r}"
-    assert state["logical_stance"] in _ALLOWED_LOGICAL_STANCES, f"Unexpected logical_stance: {state!r}"
-    assert state["character_intent"] in _ALLOWED_CHARACTER_INTENTS, f"Unexpected character_intent: {state!r}"
-    assert state["boundary_core_assessment"]["acceptance"] in {"allow", "guarded", "hesitant", "reject"}, f"Unexpected boundary assessment: {state['boundary_core_assessment']!r}"
-    assert state["social_distance"].strip(), f"Missing L3 contextual output: {state!r}"
-    assert state["rhetorical_strategy"].strip(), f"Missing style output: {state!r}"
-    assert state["linguistic_style"].strip(), f"Missing linguistic_style: {state!r}"
-    assert isinstance(state["forbidden_phrases"], list), f"Invalid forbidden_phrases: {state!r}"
-    assert isinstance(state["content_plan"], dict), f"Invalid content_plan: {state!r}"
-    assert state["content_plan"], f"Empty content_plan: {state!r}"
-    assert all(
-        isinstance(value, str) and value.strip()
-        for value in state["content_plan"].values()
-    ), f"Invalid content_plan values: {state['content_plan']!r}"
-    assert isinstance(state["accepted_user_preferences"], list), f"Invalid accepted_user_preferences: {state!r}"
-    assert isinstance(state["facial_expression"], list), f"Invalid facial_expression: {state!r}"
-    assert isinstance(state["body_language"], list), f"Invalid body_language: {state!r}"
-    assert isinstance(state["gaze_direction"], list), f"Invalid gaze_direction: {state!r}"
-    assert isinstance(state["visual_vibe"], list), f"Invalid visual_vibe: {state!r}"
-    assert "contextual_directives" in state["action_directives"], f"Missing contextual directives: {state['action_directives']!r}"
-    assert "linguistic_directives" in state["action_directives"], f"Missing linguistic directives: {state['action_directives']!r}"
-    assert "visual_directives" in state["action_directives"], f"Missing visual directives: {state['action_directives']!r}"
-
-
-async def test_live_dialog_agent_renders_from_live_cognition_output(ensure_live_llm) -> None:
-    state = await _run_live_cognition_stack(_build_base_state())
-    _debug_snapshot("dialog.input", {
-        "internal_monologue": state["internal_monologue"],
-        "action_directives": state["action_directives"],
-        "chat_history_recent": state["chat_history_recent"],
-    })
-    result = await dialog_agent(state)
-    _debug_snapshot("dialog.output", result)
-
-    assert isinstance(result["final_dialog"], list), f"Unexpected dialog result: {result!r}"
-    assert result["final_dialog"], f"Empty final_dialog: {result!r}"
-    assert any(segment.strip() for segment in result["final_dialog"]), f"Blank final_dialog segments: {result!r}"
-
-
-async def test_live_webinar_invitation_advice_keeps_user_as_attendee(
-    ensure_live_llm,
-) -> None:
-    """Captured group reply: user asks whether they should attend the webinar."""
-
-    state = _build_webinar_invitation_advice_state()
-    decontext = await call_msg_decontexualizer(state)
-    state.update(decontext)
-    state = await _run_live_cognition_stack(state)
-    dialog_result = await dialog_agent(state)
-    final_dialog = dialog_result["final_dialog"]
-    trace_path = write_llm_trace(
-        "cognition_live_llm",
-        "webinar_invitation_advice_subject_boundary",
-        {
-            "production_window": {
-                "assistant_bad_reply_timestamp": (
-                    "2026-06-19T11:08:27.296754+00:00"
-                ),
-                "current_user_input": "要不要参加呢？",
-                "reply_context": state["reply_context"],
-                "chat_history_recent": state["chat_history_recent"],
-            },
-            "decontextualizer_output": decontext,
-            "l2_internal_monologue": state["internal_monologue"],
-            "l2_judgment": {
-                "logical_stance": state["logical_stance"],
-                "character_intent": state["character_intent"],
-                "judgment_synthesis": state.get("judgment_synthesis"),
-            },
-            "content_plan": state["content_plan"],
-            "action_directives": state["action_directives"],
-            "dialog_output": dialog_result,
-            "manual_review_required": True,
-            "manual_review_guidance": (
-                "Inspect decontextualizer output, L2 judgment, content plan, "
-                "action directives, and final dialog. The intended behavior is "
-                "advice about whether the user should attend the HPE webinar; "
-                "minor wording differences are acceptable when the attendee "
-                "remains the user."
-            ),
-            "judgment": (
-                "The model should advise whether the user should attend the "
-                "HPE webinar; it must not say the active character will attend "
-                "or that the user invited the active character."
-            ),
-        },
-    )
-    logger.info(
-        f"WEBINAR_INVITATION_ADVICE trace={trace_path} "
-        f"decontext={decontext} final_dialog={final_dialog}"
-    )
-
-    assert final_dialog
-    inspected_payload = {
-        "decontext": decontext,
-        "internal_monologue": state["internal_monologue"],
-        "judgment": state["judgment_note"],
-        "content_plan": state["content_plan"],
-        "action_directives": state["action_directives"],
-        "final_dialog": final_dialog,
-    }
-    inversion_hits = _webinar_subject_inversion_hits(inspected_payload)
-    assert not inversion_hits, (
-        "webinar invitation subject inverted; "
-        f"hits={inversion_hits} trace={trace_path}"
-    )
-    assert trace_path.exists()
-
-
-async def test_live_cognition_propagates_explicit_future_group_message_details(ensure_live_llm) -> None:
-    state = _build_base_state()
-    state.update(
-        {
-            "user_input": "千纱，1分钟之后你在54369546群发一条消息，内容是今天天气真好呀",
-            "decontexualized_input": "千纱，1分钟之后你在54369546群发一条消息，内容是今天天气真好呀",
-            "channel_topic": "私聊中的代发消息请求",
-            "chat_history_wide": [
-                {"role": "assistant", "content": "怎么突然又想到让我帮你传话？"},
-                {"role": "user", "content": "这次很简单，就帮我发一句。"},
-            ],
-            "chat_history_recent": [
-                {"role": "assistant", "content": "怎么突然又想到让我帮你传话？"},
-                {"role": "user", "content": "这次很简单，就帮我发一句。"},
-            ],
-            "rag_result": _rag_result(
-                user_image="对方正在提出一个具体的代发请求。",
-                character_image={
-                    "milestones": [],
-                    "historical_summary": "",
-                    "recent_window": [{"summary": "千纱会对具体执行细节保持敏感。"}],
-                },
-                memory_evidence="当前对话围绕一次明确的未来代发消息请求。",
-            ),
-        }
-    )
-
-    state = await _run_live_cognition_stack(state)
-
-    plan = state["content_plan"]
-    joined_plan = "\n".join(plan.values())
-    linguistic_directives = state["action_directives"]["linguistic_directives"]
-    joined_action_plan = "\n".join(linguistic_directives["content_plan"].values())
-
-    assert "54369546" in joined_plan, f"Group id did not propagate through cognition plan: {plan!r}"
-    assert "今天天气真好呀" in joined_plan, f"Message body did not propagate through cognition plan: {plan!r}"
-    assert "54369546" in joined_action_plan, f"Collector lost the group id: {linguistic_directives!r}"
-    assert "今天天气真好呀" in joined_action_plan, f"Collector lost the message body: {linguistic_directives!r}"
+    decontextualized_input = result["decontexualized_input"]
+    assert isinstance(decontextualized_input, str)
+    assert decontextualized_input.strip()

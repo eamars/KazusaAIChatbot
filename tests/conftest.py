@@ -8,13 +8,6 @@ import pytest
 from dotenv import load_dotenv
 
 
-collect_ignore_glob = ["*live_llm*.py"]
-collect_ignore = [
-    "test_coding_agent_phase_c_run_context_contracts.py",
-    "test_self_cognition_response_sensitivity_helpers.py",
-]
-
-
 load_dotenv(override=False)
 os.environ["MONGODB_DB_NAME"] = "_test_kazusa_live_llm"
 os.environ["KAZUSA_TEST_DB_GUARD"] = "1"

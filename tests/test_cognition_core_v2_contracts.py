@@ -15,6 +15,10 @@ from kazusa_ai_chatbot.cognition_core_v2.facade import (
     _episode_updated_at,
     _validate_output_mode,
 )
+from kazusa_ai_chatbot.cognition_core_v2.output_projection import (
+    build_state_update,
+    default_expression_policy,
+)
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionContractError,
     CognitionDiagnosticsV2,
@@ -174,6 +178,77 @@ def test_frozen_public_contract_fields_are_exact() -> None:
     }
 
 
+def test_expression_policy_uses_frozen_affect_and_branch_rules() -> None:
+    """Derive intensity, directness, and two-emotion tone deterministically."""
+
+    activations = [
+        {
+            "emotion_id": "fear",
+            "score": 60,
+            "phase": "active",
+            "cause_status": "active",
+            "trend": "rising",
+        },
+        {
+            "emotion_id": "joy",
+            "score": 60,
+            "phase": "active",
+            "cause_status": "active",
+            "trend": "stable",
+        },
+    ]
+    policy = default_expression_policy(
+        "speech",
+        [{"intensity": "high"}],
+        selected_branch_id="autonomy_boundary",
+        activations=activations,
+    )
+
+    assert policy["intensity"] == "strong"
+    assert policy["directness"] == "direct"
+    assert policy["emotional_tone"].startswith("joy (")
+    assert "fear (" in policy["emotional_tone"]
+    assert default_expression_policy(
+        "speech",
+        [{"intensity": "low"}],
+        selected_branch_id="social_care",
+    )["intensity"] == "restrained"
+    assert default_expression_policy(
+        "speech",
+        [{"intensity": "moderate"}],
+    )["intensity"] == "moderate"
+
+
+def test_state_update_serializes_entities_and_activations_canonically() -> None:
+    """Make replacement documents independent of parallel completion order."""
+
+    previous = build_acquaintance_user_state(
+        global_user_id="canonical-order-user",
+        updated_at=NOW,
+    )
+    replacement = deepcopy(previous)
+    replacement["goals"] = [
+        {"entity_id": "goal:b", "created_at": "2026-07-14T00:00:01Z"},
+        {"entity_id": "goal:c", "created_at": NOW},
+        {"entity_id": "goal:a", "created_at": NOW},
+    ]
+    replacement["affect_activations"] = [
+        {"emotion_id": "fear"},
+        {"emotion_id": "joy"},
+    ]
+
+    update = build_state_update(previous, replacement)
+
+    assert [
+        row["entity_id"]
+        for row in update["replacement_state"]["goals"]
+    ] == ["goal:a", "goal:c", "goal:b"]
+    assert [
+        row["emotion_id"]
+        for row in update["replacement_state"]["affect_activations"]
+    ] == ["joy", "fear"]
+
+
 def test_evidence_visibility_matches_its_source_question_ids() -> None:
     """Require exact source-owned semantic question visibility."""
 
@@ -316,7 +391,7 @@ def test_text_surface_output_validates_every_list_entry() -> None:
 
 @pytest.mark.asyncio
 async def test_surface_stage_rejects_legacy_response_fallbacks() -> None:
-    """Each surface model must emit exactly a single result string field."""
+    """Each surface model must emit its exact stage-local result fields."""
 
     input_payload = {
         "schema_version": "text_surface_input.v2",
@@ -349,7 +424,7 @@ async def test_surface_stage_rejects_legacy_response_fallbacks() -> None:
         visual_config=make_llm_call_config("v2_visual"),
     )
 
-    with pytest.raises(ValueError, match="exactly result"):
+    with pytest.raises(ValueError, match="fields are not exact"):
         await run_text_surface_planning(input_payload, services)
 
 

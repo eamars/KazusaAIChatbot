@@ -126,7 +126,10 @@ async def run_goal_cognition(
         action_handles=set(action_handles),
         resolver_handles=set(resolver_handles),
     )
-    target_roles = [dict(role_bindings[handle]) for handle in draft["target_role_handles"]]
+    target_roles = [
+        dict(role_bindings[handle])
+        for handle in draft["target_role_handles"]
+    ]
     bid: ActionBidV2 = {
         "branch_id": definition.branch_id,
         "goal_ref": dict(goal_ref),
@@ -188,6 +191,12 @@ def validate_goal_bid_draft(
         "silence",
     }:
         raise ValueError("goal bid route is invalid")
+    route_fields = {
+        "action": {"requested_action_handle"},
+        "evidence": {"requested_resolver_handle"},
+    }.get(parsed["requested_route"], set())
+    if set(parsed) != required | route_fields:
+        raise ValueError("goal bid capability fields do not match its route")
     target_roles = _handles(parsed["target_role_handles"], role_handles, "role")
     cited_evidence = _handles(parsed["evidence_handles"], evidence_handles, "evidence")
     consequences = parsed["expected_consequences"]
@@ -195,9 +204,15 @@ def validate_goal_bid_draft(
         raise ValueError("goal bid consequences are invalid")
     for consequence in consequences:
         _bounded_text(consequence, "consequence", 240)
-    if "requested_action_handle" in parsed and parsed["requested_action_handle"] not in action_handles:
+    if (
+        "requested_action_handle" in parsed
+        and parsed["requested_action_handle"] not in action_handles
+    ):
         raise ValueError("goal bid action handle is unavailable")
-    if "requested_resolver_handle" in parsed and parsed["requested_resolver_handle"] not in resolver_handles:
+    if (
+        "requested_resolver_handle" in parsed
+        and parsed["requested_resolver_handle"] not in resolver_handles
+    ):
         raise ValueError("goal bid resolver handle is unavailable")
     result = dict(parsed)
     result["target_role_handles"] = target_roles

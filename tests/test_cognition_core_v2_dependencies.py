@@ -7,7 +7,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2.action_selection import select_route
+from kazusa_ai_chatbot.cognition_core_v2.action_selection import (
+    _validate_route_decision,
+    select_route,
+)
 from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
     DEFAULT_BRANCH_DEFINITIONS,
     MAX_GOAL_BRANCHES,
@@ -23,6 +26,9 @@ from kazusa_ai_chatbot.cognition_core_v2.dependency_graph import (
 )
 from kazusa_ai_chatbot.cognition_core_v2.parallel_executor import (
     execute_dependency_graph,
+)
+from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
+    validate_goal_bid_draft,
 )
 from kazusa_ai_chatbot.cognition_core_v2.workspace import collapse_bids
 
@@ -193,6 +199,74 @@ async def test_collapse_copies_complete_bids_from_handle_partition() -> None:
 
     assert result["primary_bid"]["branch_id"] == "first"
     assert result["supporting_bids"][0]["reason"] == _bid("second")["reason"]
+
+
+@pytest.mark.asyncio
+async def test_collapse_assigns_handles_in_frozen_registry_order() -> None:
+    """Input completion order cannot change branch-to-handle assignment."""
+
+    captured: dict[str, object] = {}
+
+    class _LLM:
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del config
+            captured.update(json.loads(str(messages[-1].content)))
+            return SimpleNamespace(content=json.dumps({
+                "primary_bid_handle": "b1",
+                "supporting_bid_handles": ["b2"],
+                "suppressed_bid_handles": [],
+            }))
+
+    result = await collapse_bids(
+        [_bid("social_care"), _bid("autonomy_boundary")],
+        SimpleNamespace(llm=_LLM(), collapse_config=object()),
+    )
+
+    assert captured["bids"]["b1"]["intention"] == (
+        "intention from autonomy_boundary"
+    )
+    assert result["primary_branch_id"] == "autonomy_boundary"
+
+
+def test_bid_and_route_capability_fields_match_their_route_exactly() -> None:
+    """Reject missing, cross-route, and dual capability declarations."""
+
+    draft = {
+        "intention": "perform the permitted action",
+        "desired_outcome": "complete the bounded work",
+        "concrete_detail": "use the declared action only",
+        "reason": "the evidence supports execution",
+        "target_role_handles": [],
+        "evidence_handles": ["e1"],
+        "expected_consequences": ["the bounded work completes"],
+        "confidence": "high",
+        "requested_route": "action",
+    }
+    with pytest.raises(ValueError, match="capability fields"):
+        validate_goal_bid_draft(
+            draft,
+            evidence_handles={"e1"},
+            role_handles=set(),
+            action_handles={"a1"},
+            resolver_handles={"r1"},
+        )
+    with pytest.raises(ValueError, match="capability fields"):
+        _validate_route_decision(
+            {
+                "selected_bid_handle": "b1",
+                "route": "evidence",
+                "action_handle": "a1",
+                "resolver_handle": "r1",
+            },
+            {"b1": _bid("ordinary_response", route="evidence")},
+            {"a1": {"action_kind": "test"}},
+            {"r1": {"capability": "test"}},
+        )
 
 
 @pytest.mark.asyncio

@@ -120,6 +120,11 @@ DEFAULT_BRANCH_DEFINITIONS: dict[str, BranchDefinition] = {
     ),
 }
 MAX_GOAL_BRANCHES = 14
+BRANCH_REGISTRY_ORDER = tuple(DEFAULT_BRANCH_DEFINITIONS)
+_BRANCH_ORDER_INDEX = {
+    branch_id: index
+    for index, branch_id in enumerate(BRANCH_REGISTRY_ORDER)
+}
 
 
 def select_preliminary_branches(
@@ -136,7 +141,9 @@ def select_preliminary_branches(
         if definition.branch_id != "ordinary_response"
         and definition.goal_kind in goal_kinds
     )
-    return sorted(selected, key=lambda definition: definition.branch_id)[:MAX_GOAL_BRANCHES]
+    return sorted(selected, key=lambda definition: branch_order_key(
+        definition.branch_id
+    ))[:MAX_GOAL_BRANCHES]
 
 
 def select_final_branches(
@@ -158,7 +165,16 @@ def select_final_branches(
         resolved = _resolve_dependencies(definition, available_questions)
         if resolved is not None:
             selected.setdefault(definition.branch_id, resolved)
-    return sorted(selected.values(), key=lambda definition: definition.branch_id)[:MAX_GOAL_BRANCHES]
+    return sorted(
+        selected.values(),
+        key=lambda definition: branch_order_key(definition.branch_id),
+    )[:MAX_GOAL_BRANCHES]
+
+
+def branch_order_key(branch_id: str) -> tuple[int, str]:
+    """Return the frozen registry position with a stable extension fallback."""
+
+    return (_BRANCH_ORDER_INDEX.get(branch_id, len(_BRANCH_ORDER_INDEX)), branch_id)
 
 
 def _active_goal_kinds(

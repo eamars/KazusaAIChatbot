@@ -22,8 +22,8 @@ import pytest
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
 from kazusa_ai_chatbot.db import close_db, get_character_profile
 from kazusa_ai_chatbot.db._client import get_db
-from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
-    call_group_engagement_action_context_loader,
+from kazusa_ai_chatbot.db.interaction_style_images import (
+    build_group_engagement_action_context,
 )
 from kazusa_ai_chatbot.reflection_cycle.activity_windows import (
     build_group_activity_windows,
@@ -288,9 +288,14 @@ async def _run_cognition_stages(
         **l2c1_output,
         **l2c2_output,
     }
-    group_engagement_output = await call_group_engagement_action_context_loader(
-        before_group_engagement,
+    group_engagement_context = await build_group_engagement_action_context(
+        channel_type=str(state["channel_type"]),
+        platform=str(state["platform"]),
+        platform_channel_id=str(state["platform_channel_id"]),
     )
+    group_engagement_output = {
+        "group_engagement_action_context": group_engagement_context,
+    }
     l2d_state = {
         **before_group_engagement,
         **group_engagement_output,

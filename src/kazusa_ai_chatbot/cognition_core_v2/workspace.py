@@ -13,6 +13,9 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CollapsedIntentionV2,
     CognitionCoreServicesV2,
 )
+from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
+    branch_order_key,
+)
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
@@ -30,7 +33,7 @@ async def collapse_bids(
 ) -> CollapsedIntentionV2:
     """Collapse complete bids while preserving whole-bid ownership in code."""
 
-    ordered = sorted(bids, key=lambda bid: bid["branch_id"])
+    ordered = sorted(bids, key=lambda bid: branch_order_key(bid["branch_id"]))
     if not ordered:
         raise ValueError("workspace collapse requires at least one bid")
     if len(ordered) == 1:
@@ -109,7 +112,9 @@ def _validate_partition(parsed: object, handles: set[str]) -> dict[str, Any]:
     partitions = []
     for field_name in ("supporting_bid_handles", "suppressed_bid_handles"):
         values = parsed[field_name]
-        if not isinstance(values, list) or any(value not in handles for value in values):
+        if not isinstance(values, list) or any(
+            value not in handles for value in values
+        ):
             raise ValueError("workspace partition handle is unavailable")
         if len(values) != len(set(values)):
             raise ValueError("workspace partition contains duplicate handles")

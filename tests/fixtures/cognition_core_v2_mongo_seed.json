@@ -1,9 +1,17 @@
 {
+  "schema_version": "cognition_core_v2_mongo_seed.v1",
   "emotion_seed_phases": ["begin", "sustain", "fade", "negative"],
   "seed_documents": [
     {
       "collection": "character_state",
       "selector": {"_id": "global"},
+      "permitted_stored_sibling_fields": [
+        "boundary_profile",
+        "global_user_id",
+        "linguistic_texture_profile",
+        "name",
+        "personality_brief"
+      ],
       "document": {
         "_id": "global",
         "cognition_state": {

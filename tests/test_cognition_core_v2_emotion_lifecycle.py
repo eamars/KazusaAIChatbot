@@ -18,6 +18,9 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_character_production_state,
     validate_cognition_state,
 )
+from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
+    create_deterministic_goals,
+)
 
 
 NOW = "2026-07-14T00:00:00Z"
@@ -306,6 +309,70 @@ def _character_constraints() -> dict[str, object]:
         },
         "meaning_state": {"identity_continuity": 80},
     }
+
+
+def test_goal_creation_uses_each_frozen_guard_and_importance_formula() -> None:
+    """Keep autonomy, social-care, and loss importance root-specific."""
+
+    character = build_character_production_state(updated_at=NOW)
+    character["drives"]["autonomy"]["importance"] = 90
+    character["drives"]["care"]["importance"] = 80
+    constraints = {
+        "drives": character["drives"],
+        "standards": character["standards"],
+        "meaning_state": character["meaning_state"],
+    }
+    state = build_acquaintance_user_state(
+        global_user_id="goal-formula-user",
+        updated_at=NOW,
+    )
+    state["relationship"]["boundary_safety"] = -30
+    state["relationship"]["evidence_refs"] = [
+        _evidence("episode", "relationship-boundary")
+    ]
+    autonomy_event = _event(
+        "event:autonomy",
+        identity_threat=40,
+    )
+    autonomy_event["salience"] = 99
+    loss_event = _event(
+        "event:loss",
+        outcome_impact=-40,
+    )
+    loss_event["salience"] = 99
+    care_threat = _threat("threat:care")
+    care_threat["role_refs"] = [
+        _role("experiencer", "user", "other-user")
+    ]
+    state["active_events"] = [autonomy_event, loss_event]
+    state["threats"] = [care_threat]
+
+    updated = create_deterministic_goals(
+        state,
+        character_constraints=constraints,
+    )
+    goals = {
+        (goal["goal_kind"], goal["entity_id"].rsplit(":", 1)[-1]): goal
+        for goal in updated["goals"]
+    }
+
+    autonomy_goals = [
+        goal
+        for goal in updated["goals"]
+        if goal["goal_kind"] == "autonomy_boundary"
+    ]
+    assert {goal["importance"] for goal in autonomy_goals} == {90}
+    assert next(
+        goal for goal in updated["goals"]
+        if goal["goal_kind"] == "loss_recovery"
+        and goal["entity_id"].endswith("event:loss")
+    )["importance"] == 40
+    assert next(
+        goal for goal in updated["goals"]
+        if goal["goal_kind"] == "social_care"
+        and goal["entity_id"].endswith("threat:care")
+    )["importance"] == 80
+    assert goals
 
 
 EMOTION_CASES = tuple(EMOTION_DEFINITIONS)

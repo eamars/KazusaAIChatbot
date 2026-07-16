@@ -14,7 +14,10 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     validate_text_surface_output,
 )
 from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
-    run_surface_stage,
+    run_content_plan_stage,
+    run_preference_stage,
+    run_style_stage,
+    run_visual_stage,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
     validate_prompt_projection,
@@ -31,9 +34,9 @@ async def run_text_surface_planning(
     stage_payload = _project_surface_payload(payload)
     validate_prompt_projection(stage_payload)
     stage_calls = [
-        run_surface_stage("style", stage_payload, services),
-        run_surface_stage("content_plan", stage_payload, services),
-        run_surface_stage("preference", stage_payload, services),
+        run_style_stage(stage_payload, services),
+        run_content_plan_stage(stage_payload, services),
+        run_preference_stage(stage_payload, services),
     ]
     if _visual_guidance_disabled(payload["episode"]):
         style, content, preference = await asyncio.gather(*stage_calls)
@@ -41,13 +44,14 @@ async def run_text_surface_planning(
     else:
         style, content, preference, visual = await asyncio.gather(
             *stage_calls,
-            run_surface_stage("visual", stage_payload, services),
+            run_visual_stage(stage_payload, services),
         )
+    visible_boundaries, addressee_plan = preference
     output: TextSurfaceOutputV2 = {
         "schema_version": "text_surface_output.v2",
         "content_plan": content,
-        "visible_boundaries": [preference],
-        "addressee_plan": [preference],
+        "visible_boundaries": visible_boundaries,
+        "addressee_plan": addressee_plan,
         "style_guidance": style,
         "pacing_guidance": visual,
         "selected_surface_intent": payload["intention"]["intention"],

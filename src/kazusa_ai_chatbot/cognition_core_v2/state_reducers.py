@@ -142,11 +142,18 @@ def _materialize_proposition_root(
     )
     if not evidence_handles:
         raise CognitionStateError("causal proposition requires evidence")
+    subject_id = subject_ref["entity_id"]
+    candidate_subject = subject_id.startswith("candidate:")
+    if candidate_subject:
+        candidate_evidence_handle = subject_id.rsplit(":", maxsplit=1)[-1]
+        if candidate_evidence_handle not in evidence_handles:
+            raise CognitionStateError(
+                "causal candidate evidence does not match its source"
+            )
+        evidence_handles = [candidate_evidence_handle]
     evidence_ref = evidence_by_handle.get(evidence_handles[0])
     if evidence_ref is None:
         raise CognitionStateError("causal proposition evidence is unknown")
-    subject_id = subject_ref["entity_id"]
-    candidate_subject = subject_id.startswith("candidate:")
     root_id = (
         _causal_candidate_id(state, subject_kind, evidence_ref)
         if candidate_subject
@@ -197,11 +204,18 @@ def _materialize_proposition_root(
         new_causal_ids.add(existing["entity_id"])
         outcome = "create"
     else:
+        superseding_goal_validated = _validate_goal_supersession(
+            state,
+            existing,
+            proposition,
+            handle_to_ref,
+        )
         outcome = _apply_proposition_transition(
             existing,
             subject_kind,
             proposition["proposition_kind"],
             evidence_ref,
+            superseding_goal_validated=superseding_goal_validated,
         )
         if outcome == "reinforce":
             existing["description"] = proposition["semantic_value"]
@@ -242,6 +256,8 @@ def _apply_proposition_transition(
     entity_kind: str,
     proposition_kind: str,
     evidence_ref: Mapping[str, Any],
+    *,
+    superseding_goal_validated: bool = False,
 ) -> str:
     """Apply only the FSM transition owned by a validated proposition."""
 
@@ -252,7 +268,7 @@ def _apply_proposition_transition(
             entity,
             transition="abandoned",
             explicit_release=proposition_kind == "goal_release",
-            superseding_goal_validated=proposition_kind == "goal_supersession",
+            superseding_goal_validated=superseding_goal_validated,
         )
         entity.update(transitioned)
         return "resolve"
@@ -266,6 +282,13 @@ def _apply_proposition_transition(
             )
         elif entity_kind == "event":
             transitioned = transition_event(
+                entity,
+                transition="resolved",
+                evidence=marker,
+            )
+        elif entity_kind == "knowledge_gap":
+            entity["uncertainty"] = 0
+            transitioned = transition_knowledge_gap(
                 entity,
                 transition="resolved",
                 evidence=marker,
@@ -301,6 +324,35 @@ def _apply_proposition_transition(
         entity.update(transitioned)
         return "resolve"
     return "reinforce"
+
+
+def _validate_goal_supersession(
+    state: Mapping[str, Any],
+    subject: Mapping[str, Any],
+    proposition: Mapping[str, Any],
+    handle_to_ref: Mapping[str, Mapping[str, str]],
+) -> bool:
+    """Validate a distinct pursuing replacement before abandoning an old goal."""
+
+    if proposition["proposition_kind"] != "goal_supersession":
+        return False
+    object_handle = proposition.get("object_handle")
+    object_ref = handle_to_ref.get(object_handle)
+    if object_ref is None or object_ref["kind"] != "goal":
+        raise CognitionStateError("goal supersession target is invalid")
+    if object_ref["entity_id"] == subject["entity_id"]:
+        raise CognitionStateError("goal supersession target must be distinct")
+    replacement = next(
+        (
+            goal
+            for goal in state["goals"]
+            if goal["entity_id"] == object_ref["entity_id"]
+        ),
+        None,
+    )
+    if replacement is None or replacement["status"] != "pursuing":
+        raise CognitionStateError("goal supersession requires a pursuing goal")
+    return True
 
 
 def _role_refs_from_proposition(
@@ -473,9 +525,8 @@ def _retain_prompt_evidence(
     """Attach complete provenance to every mutable entity cited by appraisal."""
 
     for result in results:
-        handles = set(result["selected_evidence_handles"])
         for delta in result["deltas"]:
-            handles.update(delta["evidence_handles"])
+            handles = set(delta["evidence_handles"])
             path = delta["target_path"].split(".")
             try:
                 target = _target_for_prompt_path(state, path, handle_to_ref)
@@ -826,7 +877,6 @@ def create_guarded_goal(
         "relationship_connection",
         "bond_protection",
         "trust_verification",
-        "social_care",
         "reciprocity",
     } and not any(
         role.get("role") == "affected_relationship"
@@ -980,7 +1030,7 @@ def create_deterministic_goals(
             add_goal(
                 "autonomy_boundary",
                 relationship_root,
-                max(relationship["salience"], 100 + relationship["boundary_safety"]),
+                _drive_value(constraints, "autonomy", "importance"),
                 "protect the current relationship boundary",
                 relationship.get("evidence_refs", []),
                 [{
@@ -1039,6 +1089,22 @@ def create_deterministic_goals(
                 threat.get("evidence_refs", []),
                 threat_roles,
             )
+        if (
+            _has_other_experiencer(threat, updated)
+            and threat["residual_pressure"] >= 40
+            and _drive_value(constraints, "care", "importance") >= 40
+        ):
+            add_goal(
+                "social_care",
+                threat_root,
+                max(
+                    _drive_value(constraints, "care", "importance"),
+                    threat["residual_pressure"],
+                ),
+                "care for the other experiencer under pressure",
+                threat.get("evidence_refs", []),
+                threat_roles,
+            )
 
     for goal in list(updated.get("goals", [])):
         if (
@@ -1080,7 +1146,11 @@ def create_deterministic_goals(
             add_goal(
                 "autonomy_boundary",
                 event_root,
-                max(event["identity_threat"], event["unfairness"]),
+                max(
+                    _drive_value(constraints, "autonomy", "importance"),
+                    event["identity_threat"],
+                    event["unfairness"],
+                ),
                 "protect autonomy and repair the violated boundary",
                 event.get("evidence_refs", []),
                 event_roles,
@@ -1131,7 +1201,7 @@ def create_deterministic_goals(
             add_goal(
                 "loss_recovery",
                 event_root,
-                max(-event["outcome_impact"], event["salience"]),
+                -event["outcome_impact"],
                 "recover from the current negative outcome",
                 event.get("evidence_refs", []),
                 event_roles,

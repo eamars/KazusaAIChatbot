@@ -19,7 +19,7 @@ from kazusa_ai_chatbot.nodes import (
     persona_supervisor2_cognition_actions as action_connector,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
-    build_cognition_chain_services,
+    build_cognition_core_services,
 )
 from kazusa_ai_chatbot.self_cognition import runner as self_cognition_runner
 from kazusa_ai_chatbot.self_cognition.sources import (
@@ -73,7 +73,7 @@ async def test_l2d_live_case_against_frozen_upstream(
     frozen_state = case["frozen_l2d_state"]
     prompt_payload = build_action_selection_payload_text(frozen_state)
 
-    services = build_cognition_chain_services()
+    services = build_cognition_core_services()
     capturing_llm = _CapturingLLM(services.llm)
     monkeypatch.setattr(
         l2d,

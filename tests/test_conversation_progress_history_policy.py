@@ -29,8 +29,20 @@ class _PromptCaptureLLM:
         config: object,
     ) -> SimpleNamespace:
         del config
+        system = str(getattr(messages[0], "content", ""))
         self.prompts.append(str(getattr(messages[-1], "content", "")))
-        return SimpleNamespace(content=json.dumps({"result": "bounded"}))
+        if "exactly style_guidance" in system:
+            result = {"style_guidance": "bounded"}
+        elif "exactly content_plan" in system:
+            result = {"content_plan": "bounded"}
+        elif "exactly visible_boundaries" in system:
+            result = {
+                "visible_boundaries": ["bounded"],
+                "addressee_plan": ["bounded"],
+            }
+        else:
+            result = {"pacing_guidance": "bounded"}
+        return SimpleNamespace(content=json.dumps(result))
 
 
 def _surface_payload() -> dict[str, object]:

@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
-    SURFACE_STAGE_PROMPTS,
+    STYLE_SYSTEM_PROMPT,
 )
 from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as surface_module
 from tests.cognition_core_v2_test_helpers import (
@@ -50,10 +50,10 @@ def _state(*, channel_type: str = "private") -> dict[str, Any]:
 def test_style_context_is_owned_by_the_surface_stage() -> None:
     """Visible style stays downstream of cognition route selection."""
 
-    style_prompt = SURFACE_STAGE_PROMPTS["style"].casefold()
+    style_prompt = STYLE_SYSTEM_PROMPT.casefold()
 
     assert "style guidance" in style_prompt
-    assert "without writing dialogue" in style_prompt
+    assert "do not write final dialogue" in style_prompt
     assert "cognition state" not in style_prompt
 
 

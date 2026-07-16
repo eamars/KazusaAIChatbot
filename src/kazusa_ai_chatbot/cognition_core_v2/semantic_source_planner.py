@@ -103,6 +103,12 @@ def plan_semantic_questions(
             question_kind,
             handle_map,
             mutable_state,
+            [row["evidence_handle"] for row in question_evidence],
+        )
+        permitted_handles = _permitted_role_handles(
+            question_kind,
+            handle_map,
+            [row["evidence_handle"] for row in question_evidence],
         )
         question = {
             "question_id": question_id,
@@ -111,7 +117,7 @@ def plan_semantic_questions(
             "evidence_handles": [
                 row["evidence_handle"] for row in question_evidence
             ],
-            "permitted_role_handles": sorted(handle_map.values()),
+            "permitted_role_handles": permitted_handles,
             "permitted_delta_paths": permitted_paths,
             "dependencies": [],
         }
@@ -187,11 +193,22 @@ def _build_prompt_handles(
     )
     if isinstance(meaning_state, Mapping):
         mapping["meaning:character"] = "m1"
-    for index, row in enumerate(evidence, start=1):
+    mapping["character:self"] = "self"
+    owner_user_id = state.get("owner_user_id")
+    if isinstance(owner_user_id, str) and owner_user_id:
+        mapping[f"user:{owner_user_id}"] = "current_user"
+    for row in evidence:
         evidence_handle = row["evidence_handle"]
-        mapping[f"candidate:event:{evidence_handle}"] = f"ce{index}"
-        mapping[f"candidate:threat:{evidence_handle}"] = f"ct{index}"
-        mapping[f"candidate:knowledge_gap:{evidence_handle}"] = f"ck{index}"
+        evidence_number = evidence_handle[1:]
+        mapping[f"candidate:event:{evidence_handle}"] = (
+            f"ce{evidence_number}"
+        )
+        mapping[f"candidate:threat:{evidence_handle}"] = (
+            f"ct{evidence_number}"
+        )
+        mapping[f"candidate:knowledge_gap:{evidence_handle}"] = (
+            f"ck{evidence_number}"
+        )
     return mapping
 
 
@@ -199,6 +216,7 @@ def _permitted_delta_paths(
     question_kind: str,
     handle_map: Mapping[str, str],
     state: Mapping[str, Any],
+    evidence_handles: Sequence[str],
 ) -> list[str]:
     """Return exactly the allowlisted target paths owned by one family."""
 
@@ -308,13 +326,20 @@ def _permitted_delta_paths(
             )
     else:
         raise ValueError(f"unknown semantic question kind: {question_kind}")
-    paths.extend(_candidate_delta_paths(question_kind, handle_map))
+    paths.extend(
+        _candidate_delta_paths(
+            question_kind,
+            handle_map,
+            evidence_handles,
+        )
+    )
     return sorted(set(paths))
 
 
 def _candidate_delta_paths(
     question_kind: str,
     handle_map: Mapping[str, str],
+    evidence_handles: Sequence[str],
 ) -> list[str]:
     """Return allowlisted paths for episode-local causal candidates."""
 
@@ -335,7 +360,12 @@ def _candidate_delta_paths(
         )
     elif question_kind == "goal_threat_outcome":
         event_axes = ("outcome_impact", "expectation_mismatch")
-        threat_axes = ("likelihood", "expected_harm", "uncertainty", "residual_pressure")
+        threat_axes = (
+            "likelihood",
+            "expected_harm",
+            "uncertainty",
+            "residual_pressure",
+        )
     elif question_kind == "epistemic_comparison_memory":
         event_axes = ("comparison_gap", "vastness", "memory_warmth", "temporal_loss")
         gap_axes = (
@@ -351,7 +381,12 @@ def _candidate_delta_paths(
         raise ValueError(f"unknown semantic question kind: {question_kind}")
 
     paths: list[str] = []
-    for handle in handle_map.values():
+    for entity_id, handle in handle_map.items():
+        if entity_id.startswith("candidate:") and not _candidate_is_permitted(
+            entity_id,
+            evidence_handles,
+        ):
+            continue
         if handle.startswith("ce"):
             paths.extend(f"active_events.{handle}.{axis}" for axis in event_axes)
         elif handle.startswith("ct"):
@@ -359,6 +394,56 @@ def _candidate_delta_paths(
         elif handle.startswith("ck"):
             paths.extend(f"knowledge_gaps.{handle}.{axis}" for axis in gap_axes)
     return paths
+
+
+def _permitted_role_handles(
+    question_kind: str,
+    handle_map: Mapping[str, str],
+    evidence_handles: Sequence[str],
+) -> list[str]:
+    """Return only entity and role handles owned by one question family."""
+
+    prefixes = {
+        "event_agency": ("e", "ce"),
+        "relationship_social": ("r", "ct"),
+        "moral_identity": ("e", "ce", "s"),
+        "goal_threat_outcome": ("g", "t", "e", "k", "ce", "ct", "ck"),
+        "epistemic_comparison_memory": ("e", "k", "ce", "ck"),
+        "existential_drive": ("d", "m"),
+    }
+    try:
+        permitted_prefixes = prefixes[question_kind]
+    except KeyError as exc:
+        raise ValueError(
+            f"unknown semantic question kind: {question_kind}"
+        ) from exc
+    handles: list[str] = []
+    for entity_id, handle in handle_map.items():
+        if handle in {"self", "current_user"}:
+            handles.append(handle)
+            continue
+        if not handle.startswith(permitted_prefixes):
+            continue
+        if entity_id.startswith("candidate:") and not _candidate_is_permitted(
+            entity_id,
+            evidence_handles,
+        ):
+            continue
+        handles.append(handle)
+    return sorted(set(handles))
+
+
+def _candidate_is_permitted(
+    entity_id: str,
+    evidence_handles: Sequence[str],
+) -> bool:
+    """Match a candidate to one exact authorized evidence handle."""
+
+    return entity_id in {
+        f"candidate:{kind}:{evidence_handle}"
+        for kind in ("event", "threat", "knowledge_gap")
+        for evidence_handle in evidence_handles
+    }
 
 
 def _assert_unique_delta_owners(

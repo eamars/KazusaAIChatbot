@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -19,6 +20,7 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
 )
 
 TEST_DB_NAME = "_test_kazusa_live_llm"
+SEED_SCHEMA_VERSION = "cognition_core_v2_mongo_seed.v1"
 SEED_PATH = (
     Path(__file__).parent
     / "fixtures"
@@ -54,6 +56,8 @@ def _load_seed_documents() -> list[dict[str, Any]]:
 
     with SEED_PATH.open(encoding="utf-8") as fixture_file:
         fixture = json.load(fixture_file)
+    if fixture.get("schema_version") != SEED_SCHEMA_VERSION:
+        raise AssertionError("Stage 2 seed schema version is invalid")
     documents = list(fixture["seed_documents"])
     if not isinstance(documents, list):
         raise AssertionError("seed_documents must be a list")
@@ -99,9 +103,15 @@ async def seed_shared_documents(database: Any) -> None:
             upsert=True,
         )
         stored = await collection.find_one(selector)
-        if not _contains_seed_fields(stored, document):
+        permitted_siblings = seed.get("permitted_stored_sibling_fields", [])
+        if _seed_content_hash(
+            stored,
+            document,
+            permitted_siblings,
+        ) != _document_hash(document):
             raise AssertionError(
-                f"Seed content mismatch for {seed['collection']}:{selector}"
+                "Seed content hash mismatch for "
+                f"{seed['collection']}:{selector}"
             )
         cognition_state = document.get("cognition_state")
         if cognition_state is not None:
@@ -113,20 +123,40 @@ async def seed_shared_documents(database: Any) -> None:
                 )
 
 
-def _contains_seed_fields(
+def _document_hash(document: Any) -> str:
+    """Hash one exact JSON-compatible seed document canonically."""
+
+    try:
+        encoded = json.dumps(
+            document,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise AssertionError("Stage 2 seed document is not canonical JSON") from exc
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _seed_content_hash(
     stored: Any,
     expected: Any,
-) -> bool:
-    """Validate fixed seed fields while preserving unrelated legacy fields."""
+    permitted_sibling_fields: list[str] | None = None,
+) -> str:
+    """Hash the complete stored seed after explicit sibling exclusions."""
 
-    if isinstance(expected, dict):
-        if not isinstance(stored, dict):
-            return False
-        return all(
-            key in stored and _contains_seed_fields(stored[key], value)
-            for key, value in expected.items()
-        )
-    return stored == expected
+    if not isinstance(stored, dict) or not isinstance(expected, dict):
+        return _document_hash(stored)
+    normalized = dict(stored)
+    if "_id" not in expected:
+        normalized.pop("_id", None)
+    for field_name in permitted_sibling_fields or []:
+        if field_name in expected:
+            raise AssertionError(
+                "A fixture-owned seed field cannot be an excluded sibling"
+            )
+        normalized.pop(field_name, None)
+    return _document_hash(normalized)
 
 
 @pytest.fixture

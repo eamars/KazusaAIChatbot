@@ -32,7 +32,6 @@ from kazusa_ai_chatbot.llm_interface import (
 from kazusa_ai_chatbot.nodes.referent_resolution import normalize_referents
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 from kazusa_ai_chatbot.utils import (
-    build_relationship_state_block,
     load_personality,
     parse_llm_json_output,
 )
@@ -793,7 +792,6 @@ def _base_layer_state(
         "user_name": "Image Quality User",
         "platform_user_id": "platform-user-image-quality",
         "user_profile": {
-            "relationship_state": 680,
             "facts": [],
             "semantic_relationship_projection": "The user is asking a neutral visual question.",
         },
@@ -960,17 +958,12 @@ async def _run_direct_image_layer_copy(
         episode=state["cognitive_episode"],
         stage="l2a_conscious_framing",
     )
-    relationship_state_block = build_relationship_state_block(state["user_profile"]["relationship_state"])
     user_memory_context = _current_user_rag_bundle(state)["user_memory_context"]
     l2_payload = {
         "character_mood": character_profile["mood"],
         "vibe_check": character_profile["vibe_check"],
         "user_memory_context": user_memory_context,
         "semantic_relationship_projection": state["user_profile"]["semantic_relationship_projection"],
-        "relationship_state_context": {
-            "level": relationship_state_block["level"],
-            "instruction": relationship_state_block["instruction"],
-        },
         "decontextualized_input": state["decontexualized_input"],
         "active_commitments": user_memory_context["active_commitments"],
         "rag_result": _l2_cognition_rag_result(state["rag_result"]),
