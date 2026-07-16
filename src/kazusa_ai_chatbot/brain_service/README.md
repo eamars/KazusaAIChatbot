@@ -177,6 +177,28 @@ character-level
 `ignore/proceed/wait` judgment; deterministic code applies the validated action
 and never rewrites a valid semantic choice.
 
+The model-facing intake projection carries typed private/group scope, runtime
+character identity, semantic target/reply labels, and only eligible
+same-author/same-channel candidates. A present reply with unresolved author is
+`unknown_participant`. Explicit-third-party and unresolved-reply discards do
+not become later preludes. Latest bot dialog is continuity evidence only within
+the 180-second active scene and is never an append slot. Frontline renders a
+scope-specific prompt and exposes only candidate-supported actions; returned
+slot labels must exist in the exact capped projection shown to the model.
+Settled fresh history
+maps production identities to character, current-author, and other-participant
+relations before it reaches the model. Conversation row order also marks each
+external history row as before, after, or unknown relative to the active turn;
+when the bounded history window has evicted the active row, persisted server
+timestamps retain that relation, while missing or equal timestamps remain
+unknown. Rows between active fragments are `during_active_turn` and may resolve
+requests expressed in earlier fragments; after-turn rows may resolve the whole
+assembled request. The settled projection
+labels the assembled author as the current human and repeats only the bounded
+final fragment to make recipient correction salient without another model
+call. The first assessment may choose one bounded `wait`; the hard-deadline
+prompt offers only `ignore` or `proceed`.
+
 Private adjacency-only coalescing retains the existing immediate-ready timing
 and shows the full coalesced logical input to frontline before attaching its
 individual fragments to the exact survivor turn. An appended request completes

@@ -760,7 +760,7 @@ def _frontline_reply_label(
     if reply.get("global_user_id") or reply.get("platform_user_id"):
         return_value = "other_participant"
         return return_value
-    return_value = "none"
+    return_value = "unknown_participant"
     return return_value
 
 
@@ -833,6 +833,10 @@ async def _build_frontline_state(
 
     return_value = await _turn_settlement_coordinator.build_frontline_state(
         fragment,
+    )
+    return_value["active_character_name"] = _static_character_profile.get(
+        "name",
+        "Character",
     )
     queue_item = fragment.queue_item
     if isinstance(queue_item, QueuedChatItem):
@@ -1261,13 +1265,52 @@ def _settled_state_from_lease(
         for fragment in lease.fragments
         if fragment.conversation_row_id
     }
-    external_history = [
-        row
-        for row in history
-        if row.get("platform_message_id") not in active_platform_message_ids
-        and str(row.get("_id", "")) not in active_conversation_row_ids
-    ]
-    fresh_history = trim_history_dict(external_history)[-10:]
+    earliest_active_timestamp = (
+        lease.fragments[0].storage_timestamp_utc
+        if lease.fragments
+        else ""
+    )
+    latest_active_timestamp = (
+        lease.fragments[-1].storage_timestamp_utc
+        if lease.fragments
+        else ""
+    )
+    earliest_active_index = -1
+    latest_active_index = -1
+    external_history: list[tuple[int, dict]] = []
+    for history_index, row in enumerate(history):
+        is_active_row = (
+            row.get("platform_message_id") in active_platform_message_ids
+            or str(row.get("_id", "")) in active_conversation_row_ids
+        )
+        if is_active_row:
+            if earliest_active_index < 0:
+                earliest_active_index = history_index
+            latest_active_index = history_index
+            continue
+        external_history.append((history_index, row))
+    recent_external_history = external_history[-10:]
+    fresh_history = trim_history_dict([
+        row for _history_index, row in recent_external_history
+    ])
+    for projected_row, (history_index, _source_row) in zip(
+        fresh_history,
+        recent_external_history,
+        strict=True,
+    ):
+        if latest_active_index < 0:
+            temporal_relation = _history_relation_from_timestamp(
+                row_timestamp=projected_row.get("timestamp"),
+                earliest_active_timestamp=earliest_active_timestamp,
+                latest_active_timestamp=latest_active_timestamp,
+            )
+        elif history_index > latest_active_index:
+            temporal_relation = "after_active_turn"
+        elif history_index > earliest_active_index:
+            temporal_relation = "during_active_turn"
+        else:
+            temporal_relation = "before_active_turn"
+        projected_row["turn_temporal_relation"] = temporal_relation
     leader = lease.fragments[0] if lease.fragments else None
     response_owner = next(
         (
@@ -1313,6 +1356,15 @@ def _settled_state_from_lease(
         )
         group_attention = attention_context["group_attention"]
     return_value = {
+        "conversation_scope": (
+            response_owner.scope[2]
+            if response_owner is not None
+            else ""
+        ),
+        "active_character_name": _static_character_profile.get(
+            "name",
+            "Character",
+        ),
         "assembled_fragments": fragment_rows,
         "media_descriptions": media_descriptions,
         "additional_media_present": additional_media_present,
@@ -1327,12 +1379,67 @@ def _settled_state_from_lease(
         "group_attention": group_attention,
         "bot_continuity": lease.latest_bot_continuity,
         "user_profile": user_profile,
+        "current_author_global_user_id": (
+            response_owner.author_global_user_id
+            if response_owner is not None
+            else ""
+        ),
+        "current_author_platform_user_id": (
+            response_owner.author_platform_user_id
+            if response_owner is not None
+            else ""
+        ),
+        "character_global_user_id": CHARACTER_GLOBAL_USER_ID,
+        "platform_bot_id": (
+            request.platform_bot_id
+            if request is not None
+            else ""
+        ),
         "llm_trace_id": (
             response_owner_item.llm_trace_id
             if response_owner_item is not None
             else ""
         ),
     }
+    return return_value
+
+
+def _history_relation_from_timestamp(
+    *,
+    row_timestamp: object,
+    earliest_active_timestamp: str,
+    latest_active_timestamp: str,
+) -> str:
+    """Relate a history row when the bounded window omits the active row."""
+
+    if (
+        not isinstance(row_timestamp, str)
+        or not earliest_active_timestamp
+        or not latest_active_timestamp
+    ):
+        return_value = "unknown"
+        return return_value
+
+    try:
+        row_time = parse_storage_utc_datetime(row_timestamp)
+        earliest_active_time = parse_storage_utc_datetime(
+            earliest_active_timestamp,
+        )
+        active_time = parse_storage_utc_datetime(latest_active_timestamp)
+    except ValueError:
+        return_value = "unknown"
+        return return_value
+
+    if row_time > active_time:
+        return_value = "after_active_turn"
+        return return_value
+    if row_time < earliest_active_time:
+        return_value = "before_active_turn"
+        return return_value
+    if earliest_active_time < row_time < active_time:
+        return_value = "during_active_turn"
+        return return_value
+    return_value = "unknown"
     return return_value
 
 

@@ -208,6 +208,18 @@ async def _resolved_envelope(req: service_module.ChatRequest) -> dict:
     return envelope
 
 
+def test_frontline_reply_label_distinguishes_unresolved_reply() -> None:
+    """A present reply without an author is distinct from no reply."""
+
+    character_id = "character-global-id"
+
+    assert service_module._frontline_reply_label({}, character_id) == "none"
+    assert service_module._frontline_reply_label(
+        {"reply": {"platform_message_id": "message-1"}},
+        character_id,
+    ) == "unknown_participant"
+
+
 def _patch_common_dependencies(monkeypatch, graph) -> None:
     """Patch external service dependencies for queue-worker tests.
 
@@ -932,9 +944,16 @@ async def test_assembled_response_is_delivered_only_to_response_owner() -> None:
 
 
 @pytest.mark.asyncio
-async def test_settled_fresh_history_excludes_active_turn_fragments() -> None:
+async def test_settled_fresh_history_excludes_active_turn_fragments(
+    monkeypatch,
+) -> None:
     """Only external rows can act as fresh-history scene evidence."""
 
+    monkeypatch.setattr(
+        service_module,
+        "_static_character_profile",
+        {"name": "Kazusa"},
+    )
     item = _item(1)
     fragment = PersistedChatFragment(
         arrival_sequence=1,
@@ -949,13 +968,27 @@ async def test_settled_fresh_history_excludes_active_turn_fragments() -> None:
         semantic_target_labels=("character",),
         queue_item=item,
     )
+    second_item = _item(2)
+    second_fragment = PersistedChatFragment(
+        arrival_sequence=2,
+        scope=("qq", "chan-1", "group"),
+        author_platform_user_id="user-1",
+        author_global_user_id="global-user-1",
+        platform_message_id="message-active-2",
+        conversation_row_id="row-active-2",
+        storage_timestamp_utc=second_item.storage_timestamp_utc,
+        enqueue_monotonic=second_item.enqueue_monotonic,
+        body_text="active follow-up",
+        semantic_target_labels=("none",),
+        queue_item=second_item,
+    )
     lease = AssessmentLease(
         turn_id="turn-history",
         version=1,
         observation_status="observation_complete",
         leader_sequence=1,
         response_owner_sequence=1,
-        fragments=(fragment,),
+        fragments=(fragment, second_fragment),
     )
     common = {
         "role": "user",
@@ -983,14 +1016,130 @@ async def test_settled_fresh_history_excludes_active_turn_fragments() -> None:
                 "platform_message_id": "message-other",
                 "body_text": "another participant answered",
             },
+            {
+                **common,
+                "_id": "row-active-2",
+                "platform_message_id": "message-active-2",
+                "body_text": "active follow-up",
+            },
+            {
+                **common,
+                "_id": "row-after",
+                "platform_message_id": "message-after",
+                "body_text": "later context",
+            },
         ],
     )
 
     assert [row["platform_message_id"] for row in state["fresh_history"]] == [
         "message-other",
+        "message-after",
     ]
+    assert state["fresh_history"][0]["turn_temporal_relation"] == (
+        "during_active_turn"
+    )
+    assert state["fresh_history"][1]["turn_temporal_relation"] == (
+        "after_active_turn"
+    )
     assert state["relationship_context"] == "direct participant"
-    assert state["group_attention"] == "low_noise"
+    assert state["group_attention"] == "medium_noise"
+    assert state["conversation_scope"] == "group"
+    assert state["active_character_name"] == "Kazusa"
+    assert state["current_author_global_user_id"] == "global-user-1"
+    assert state["current_author_platform_user_id"] == "user-1"
+    assert state["character_global_user_id"] == CHARACTER_GLOBAL_USER_ID
+    assert state["platform_bot_id"] == "bot-1"
+
+
+@pytest.mark.asyncio
+async def test_settled_history_uses_timestamps_when_active_row_is_outside_window(
+) -> None:
+    """Intervening rows stay ordered when a busy group evicts the anchor."""
+
+    item = _item(
+        1,
+        storage_timestamp_utc="2026-07-16T00:00:05+00:00",
+    )
+    first_fragment = PersistedChatFragment(
+        arrival_sequence=1,
+        scope=("qq", "chan-1", "group"),
+        author_platform_user_id="user-1",
+        author_global_user_id="global-user-1",
+        platform_message_id="message-active",
+        conversation_row_id="row-active",
+        storage_timestamp_utc=item.storage_timestamp_utc,
+        enqueue_monotonic=item.enqueue_monotonic,
+        body_text="active request",
+        semantic_target_labels=("character",),
+        queue_item=item,
+    )
+    second_item = _item(
+        2,
+        storage_timestamp_utc="2026-07-16T00:00:07+00:00",
+    )
+    second_fragment = PersistedChatFragment(
+        arrival_sequence=2,
+        scope=("qq", "chan-1", "group"),
+        author_platform_user_id="user-1",
+        author_global_user_id="global-user-1",
+        platform_message_id="message-active-2",
+        conversation_row_id="row-active-2",
+        storage_timestamp_utc=second_item.storage_timestamp_utc,
+        enqueue_monotonic=second_item.enqueue_monotonic,
+        body_text="active follow-up",
+        semantic_target_labels=("none",),
+        queue_item=second_item,
+    )
+    lease = AssessmentLease(
+        turn_id="turn-history-clipped",
+        version=1,
+        observation_status="observation_complete",
+        leader_sequence=1,
+        response_owner_sequence=1,
+        fragments=(first_fragment, second_fragment),
+    )
+    common = {
+        "role": "user",
+        "platform_user_id": "user-2",
+        "global_user_id": "global-user-2",
+        "display_name": "Other user",
+        "addressed_to_global_user_ids": [],
+        "mentions": [],
+        "broadcast": False,
+        "attachments": [],
+    }
+
+    state = service_module._settled_state_from_lease(
+        lease,
+        history=[
+            {
+                **common,
+                "platform_message_id": "message-before",
+                "body_text": "earlier context",
+                "timestamp": "2026-07-16T00:00:04+00:00",
+            },
+            {
+                **common,
+                "platform_message_id": "message-during",
+                "body_text": "intervening answer",
+                "timestamp": "2026-07-16T00:00:06+00:00",
+            },
+            {
+                **common,
+                "platform_message_id": "message-after",
+                "body_text": "later context",
+                "timestamp": "2026-07-16T00:00:08+00:00",
+            },
+        ],
+    )
+
+    assert [
+        row["turn_temporal_relation"] for row in state["fresh_history"]
+    ] == [
+        "before_active_turn",
+        "during_active_turn",
+        "after_active_turn",
+    ]
 
 
 @pytest.mark.asyncio
@@ -1753,6 +1902,8 @@ async def test_private_frontline_sees_complete_coalesced_logical_input(
         "I need\nhelp with this setting"
     )
     assert current_message["semantic_target_labels"] == ["character"]
+    assert captured_frontline_state["conversation_scope"] == "private"
+    assert captured_frontline_state["active_character_name"] == "Kazusa"
 
     await _reset_queue_state()
 

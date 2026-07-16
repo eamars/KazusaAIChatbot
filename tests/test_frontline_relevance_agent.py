@@ -26,6 +26,8 @@ def _frontline_state() -> dict:
     """Build a semantic-only frontline projection with identity sentinels."""
 
     return {
+        "conversation_scope": "group",
+        "active_character_name": "Kazusa",
         "current_message": {
             "body_text": "Could you check this image?",
             "semantic_target_labels": ["character"],
@@ -118,7 +120,58 @@ def test_frontline_render_is_bounded_and_omits_raw_identity_and_time() -> None:
     assert "2026-07-16T00:00:00Z" not in rendered
     assert '"open_1"' in rendered
     assert '"prelude_1"' in rendered
-    json.loads(messages[1].content)
+    payload = json.loads(messages[1].content)
+    assert payload["conversation_scope"] == "group"
+    assert payload["active_character_name"] == "Kazusa"
+
+
+def test_frontline_prompt_defines_group_participation_and_slot_boundaries() -> None:
+    """The local model receives the semantic rules behind the release gates."""
+
+    messages = build_frontline_messages(_frontline_state())
+    system_prompt = messages[0].content
+
+    assert "explicit whole-group invitation" in system_prompt
+    assert "answerability" in system_prompt
+    assert "latest_bot_continuity is context, never an open slot" in (
+        system_prompt
+    )
+    assert "clearly continues exactly one" in system_prompt
+    assert 'elliptical reference such as "that one"' in system_prompt
+    assert "slot number, list order" in system_prompt.lower()
+    assert "only a direct character summon or explicitly" in system_prompt
+    assert "append is mandatory and start is invalid" in system_prompt
+    assert "target none and reply none, start is valid only" in system_prompt
+    assert "never treat this payload\nas private input" in system_prompt
+    assert "If open_turns is empty, append is invalid" in system_prompt
+
+
+def test_frontline_private_prompt_has_no_group_suppression_workload() -> None:
+    """Private intake uses its smaller scope-specific routing contract."""
+
+    state = _frontline_state()
+    state["conversation_scope"] = "private"
+    messages = build_frontline_messages(state)
+    system_prompt = messages[0].content
+
+    assert "conversation_scope is private" in system_prompt
+    assert "always has a character participation basis" in system_prompt
+    assert "Group Participation" not in system_prompt
+
+
+def test_frontline_prompt_hides_actions_for_absent_candidate_slots() -> None:
+    """The local model sees only actions supported by supplied candidates."""
+
+    state = _frontline_state()
+    state["open_turns"] = []
+    state["recent_preludes"] = []
+    messages = build_frontline_messages(state)
+    system_prompt = messages[0].content
+
+    assert '"intake_action":"discard|start"' in system_prompt
+    assert '"intake_action":"discard|start|append"' not in system_prompt
+    assert "The append action is unavailable" in system_prompt
+    assert "Return prelude_targets as [] exactly" in system_prompt
 
 
 def test_frontline_worst_case_projection_remains_valid_json() -> None:
@@ -181,3 +234,59 @@ async def test_frontline_agent_uses_structural_parser_and_returns_decision(
     assert invoke.await_args.kwargs["config"] is (
         frontline_module._frontline_relevance_agent_llm_config
     )
+
+
+@pytest.mark.asyncio
+async def test_frontline_agent_fails_closed_on_unsupplied_model_slot(
+    monkeypatch,
+) -> None:
+    """A vocabulary-valid but absent slot cannot pass model validation."""
+
+    response = MagicMock()
+    response.content = json.dumps({
+        "intake_action": "start",
+        "append_target": "none",
+        "prelude_targets": ["prelude_1"],
+        "reason": "invented slot",
+    })
+    llm = frontline_module._frontline_relevance_agent_llm
+    monkeypatch.setattr(llm, "ainvoke", AsyncMock(return_value=response))
+    state = _frontline_state()
+    state["recent_preludes"] = []
+
+    result = await frontline_relevance_agent(state)
+
+    assert result == {
+        "intake_action": "discard",
+        "append_target": "none",
+        "prelude_targets": [],
+        "reason": "invalid frontline output",
+    }
+
+
+@pytest.mark.asyncio
+async def test_frontline_agent_fails_closed_on_unsupplied_append_slot(
+    monkeypatch,
+) -> None:
+    """An absent open slot cannot pass as a vocabulary-valid append."""
+
+    response = MagicMock()
+    response.content = json.dumps({
+        "intake_action": "append",
+        "append_target": "open_1",
+        "prelude_targets": [],
+        "reason": "invented slot",
+    })
+    llm = frontline_module._frontline_relevance_agent_llm
+    monkeypatch.setattr(llm, "ainvoke", AsyncMock(return_value=response))
+    state = _frontline_state()
+    state["open_turns"] = []
+
+    result = await frontline_relevance_agent(state)
+
+    assert result == {
+        "intake_action": "discard",
+        "append_target": "none",
+        "prelude_targets": [],
+        "reason": "invalid frontline output",
+    }

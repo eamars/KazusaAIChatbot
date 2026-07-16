@@ -54,6 +54,7 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [action_selection_context_contract_bugfix_plan.md](active/bugfix/action_selection_context_contract_bugfix_plan.md) | Large cognition-chain action-selection context contract bugfix plan | completed |
+| [relevance_input_scope_robustness_bugfix_plan.md](archive/completed/bugfix/relevance_input_scope_robustness_bugfix_plan.md) | Medium relevance input-scope and production-projection robustness bugfix plan | completed |
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
 
 ## Reference Documents
@@ -258,6 +259,17 @@ private-message behavior, shared-route workload bounds, and test realism.
 |---|---|
 | Moved from active short-term to completed archive | `relevance_turn_settlement_dag_plan.md` |
 
+### 2026-07-16 relevance input-scope robustness completion
+
+The follow-up bugfix completed after production-shaped live LLM gates, local
+model prompt-load remediation, private/group scope separation, slot-reference
+validation, interleaved-history projection, deterministic regressions, and a
+parent-only independent review.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active bugfix to completed archive | `relevance_input_scope_robustness_bugfix_plan.md` |
+
 ## Archive
 
 Completed and superseded records live under `archive/`. Use them for historical
@@ -309,6 +321,7 @@ plans.
 | [rag_memory_evidence_remember_me_inner_path_bugfix_plan.md](archive/completed/bugfix/rag_memory_evidence_remember_me_inner_path_bugfix_plan.md) |
 | [rag_conversation_evidence_current_episode_boundary_bugfix_plan.md](archive/completed/bugfix/rag_conversation_evidence_current_episode_boundary_bugfix_plan.md) |
 | [rag_retrieval_top_k_embedding_tuning_plan.md](archive/completed/bugfix/rag_retrieval_top_k_embedding_tuning_plan.md) |
+| [relevance_input_scope_robustness_bugfix_plan.md](archive/completed/bugfix/relevance_input_scope_robustness_bugfix_plan.md) |
 | [reflection_group_scene_digest_self_cognition_bugfix_plan.md](archive/completed/bugfix/reflection_group_scene_digest_self_cognition_bugfix_plan.md) |
 | [reflection_global_promotion_replay_bugfix_plan.md](archive/completed/bugfix/reflection_global_promotion_replay_bugfix_plan.md) |
 | [resolver_image_only_empty_input_bugfix_plan.md](archive/completed/bugfix/resolver_image_only_empty_input_bugfix_plan.md) |

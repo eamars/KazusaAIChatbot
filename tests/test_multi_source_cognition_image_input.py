@@ -133,6 +133,7 @@ def _minimal_relevance_state() -> dict[str, object]:
             "attachments": [],
         },
         "character_name": "Character",
+        "active_character_name": "Character",
         "character_profile": {
             "name": "Character",
             "global_user_id": "character-1",
@@ -141,6 +142,7 @@ def _minimal_relevance_state() -> dict[str, object]:
         },
         "platform_channel_id": "debug-private-1",
         "channel_type": "private",
+        "conversation_scope": "private",
         "channel_name": "Direct",
         "chat_history_wide": [],
         "chat_history_recent": [],

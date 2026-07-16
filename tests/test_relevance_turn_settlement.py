@@ -444,6 +444,37 @@ async def test_discarded_prelude_is_promoted_by_supplied_slot() -> None:
 
 
 @pytest.mark.asyncio
+async def test_explicit_third_party_discard_is_not_a_prelude_candidate() -> None:
+    """Typed traffic for another participant cannot join a later bot turn."""
+
+    clock = _FakeClock()
+    coordinator = _coordinator(clock)
+    await coordinator.apply_frontline_decision(
+        _fragment(
+            1,
+            body="A question only for another participant.",
+            targets=("other_participant",),
+            reply_target="other_participant",
+        ),
+        {
+            "intake_action": "discard",
+            "append_target": "none",
+            "prelude_targets": [],
+            "reason": "third-party traffic",
+        },
+    )
+    clock.advance(3.0)
+
+    state = await coordinator.build_frontline_state(_fragment(
+        2,
+        body="Character?",
+        enqueue_monotonic=3.0,
+    ))
+
+    assert state["recent_preludes"] == []
+
+
+@pytest.mark.asyncio
 async def test_ingress_watermark_delays_claim_until_frontline_applies() -> None:
     """A pre-deadline queued follow-up blocks stale cognition entry."""
 
@@ -588,3 +619,31 @@ async def test_latest_bot_continuity_is_scoped_to_author_and_channel() -> None:
     lease = await coordinator.wait_for_assessment_ready()
 
     assert lease.latest_bot_continuity == "previous answer"
+
+
+@pytest.mark.asyncio
+async def test_latest_bot_continuity_expires_outside_active_scene() -> None:
+    """Old bot dialog cannot authorize a later unrelated group fragment."""
+
+    clock = _FakeClock()
+    coordinator = _coordinator(clock)
+    await coordinator.record_bot_continuity(
+        scope=("discord", "channel-1", "group"),
+        author_platform_user_id="author-a",
+        dialog_text="send the requested screenshot",
+    )
+
+    clock.advance(179.0)
+    recent = await coordinator.build_frontline_state(_fragment(
+        2,
+        enqueue_monotonic=179.0,
+    ))
+    clock.advance(2.0)
+    stale = await coordinator.build_frontline_state(_fragment(
+        3,
+        enqueue_monotonic=181.0,
+    ))
+
+    assert recent["latest_bot_continuity"] == "send the requested screenshot"
+    assert stale["latest_bot_continuity"] == ""
+    assert stale["conversation_scope"] == "group"

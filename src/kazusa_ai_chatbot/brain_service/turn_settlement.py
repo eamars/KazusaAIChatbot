@@ -21,6 +21,7 @@ from kazusa_ai_chatbot.relevance import (
 Scope = tuple[str, str, str]
 _MAX_PRELUDE_SCOPES = 64
 _MAX_CONTINUITY_SCOPES = 512
+_BOT_CONTINUITY_ACTIVE_SECONDS = 180.0
 FrontlineEvaluator = Callable[[Mapping[str, Any]], Awaitable[FrontlineDecision]]
 SettledEvaluator = Callable[
     ["AssessmentLease", Mapping[str, Any]],
@@ -152,7 +153,10 @@ class TurnSettlementCoordinator:
             tuple[Scope, str],
             list[PersistedChatFragment],
         ] = {}
-        self._latest_bot_continuity: dict[tuple[Scope, str], str] = {}
+        self._latest_bot_continuity: dict[
+            tuple[Scope, str],
+            tuple[str, float],
+        ] = {}
         self._pending_ingress: dict[int, tuple[Scope, str, float]] = {}
         self._ingress_blocked_turns: set[str] = set()
         self._ready_heap: list[tuple[float, int, str, int]] = []
@@ -195,6 +199,7 @@ class TurnSettlementCoordinator:
             open_turns = self._open_turns_locked(fragment)
             preludes = self._recent_preludes_locked(fragment)
             return_value = {
+                "conversation_scope": fragment.scope[2],
                 "current_message": {
                     "body_text": fragment.body_text,
                     "semantic_target_labels": list(
@@ -211,9 +216,10 @@ class TurnSettlementCoordinator:
                     self._prelude_descriptor(prelude)
                     for prelude in preludes
                 ],
-                "latest_bot_continuity": self._latest_bot_continuity.get(
-                    self._prelude_key(fragment),
-                    "",
+                "latest_bot_continuity": (
+                    self._recent_bot_continuity_locked(
+                        self._prelude_key(fragment),
+                    )
                 ),
             }
         return return_value
@@ -242,7 +248,10 @@ class TurnSettlementCoordinator:
                 ) >= _MAX_CONTINUITY_SCOPES:
                     oldest_key = next(iter(self._latest_bot_continuity))
                     self._latest_bot_continuity.pop(oldest_key, None)
-                self._latest_bot_continuity[key] = clean_text
+                self._latest_bot_continuity[key] = (
+                    clean_text,
+                    self._clock(),
+                )
             else:
                 self._latest_bot_continuity.pop(key, None)
 
@@ -711,12 +720,11 @@ class TurnSettlementCoordinator:
                 leader_sequence=pending_turn.leader_sequence,
                 response_owner_sequence=pending_turn.response_owner_sequence,
                 fragments=tuple(pending_turn.fragments),
-                latest_bot_continuity=self._latest_bot_continuity.get(
+                latest_bot_continuity=self._recent_bot_continuity_locked(
                     (
                         pending_turn.scope,
                         pending_turn.author_platform_user_id,
                     ),
-                    "",
                 ),
             )
             return return_value
@@ -759,6 +767,15 @@ class TurnSettlementCoordinator:
         """Retain one bounded group-silent fragment for possible promotion."""
 
         if fragment.scope[2] != "group":
+            return
+        target_labels = set(fragment.semantic_target_labels)
+        if "character" not in target_labels and (
+            "other_participant" in target_labels
+            or fragment.reply_target_label in {
+                "other_participant",
+                "unknown_participant",
+            }
+        ):
             return
         if not fragment.body_text.strip() and not fragment.media_labels:
             return
@@ -814,7 +831,29 @@ class TurnSettlementCoordinator:
             "target_summary": ", ".join(
                 fragment.semantic_target_labels
             ),
+            "reply_summary": fragment.reply_target_label,
         }
+        return return_value
+
+    def _recent_bot_continuity_locked(
+        self,
+        key: tuple[Scope, str],
+    ) -> str:
+        """Return active same-scene bot dialog and expire stale evidence."""
+
+        continuity = self._latest_bot_continuity.get(key)
+        if continuity is None:
+            return_value = ""
+            return return_value
+
+        dialog_text, recorded_at = continuity
+        age_seconds = self._clock() - recorded_at
+        if 0.0 <= age_seconds <= _BOT_CONTINUITY_ACTIVE_SECONDS:
+            return_value = dialog_text
+            return return_value
+
+        self._latest_bot_continuity.pop(key, None)
+        return_value = ""
         return return_value
 
     @staticmethod

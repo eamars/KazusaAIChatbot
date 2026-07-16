@@ -31,7 +31,8 @@ def _base_state() -> dict:
         "platform_bot_id": "bot-id",
         "global_user_id": "user-id",
         "platform_channel_id": "channel-id",
-        "channel_type": "group",
+        "conversation_scope": "group",
+        "active_character_name": "Character",
         "chat_history_wide": [],
         "chat_history_recent": [],
         "assembled_fragments": [{
@@ -148,6 +149,8 @@ def test_settled_render_keeps_latest_fragment_and_respects_cap() -> None:
         ],
         "scene_context": "A group discussion about a diagram.",
         "relationship_context": "The user often asks follow-up questions.",
+        "conversation_scope": "group",
+        "active_character_name": "Character",
         "raw_turn_id": "turn-id-raw-1",
         "raw_deadline": "2026-07-16T00:00:10Z",
     }
@@ -163,12 +166,139 @@ def test_settled_render_keeps_latest_fragment_and_respects_cap() -> None:
     assert "2026-07-16T00:00:10Z" not in rendered
     assert "Correction: use the latest request." in rendered
     assert "ignore rather than" in messages[0].content
-    assert "it is not\nevidence that the turn is incomplete" in (
-        messages[0].content
-    )
-    assert "textual\ncompleteness creates relevance" in messages[0].content
+    assert "more_time_available" not in rendered
+    assert "observation_complete" not in rendered
+    assert "additional_media_present" not in rendered
+    assert "media_evidence_status" in rendered
     payload = json.loads(messages[1].content)
     assert payload["assembled_turn"]["earlier_context_present"] is True
+    assert payload["assembled_turn"]["author_relation"] == "current_human"
+    assert payload["assembled_turn"]["effective_latest_fragment"][
+        "body_text"
+    ] == "Correction: use the latest request."
+    assert payload["conversation_scope"] == "group"
+    assert payload["active_character_name"] == "Character"
+
+
+def test_settled_prompt_renders_only_currently_available_actions() -> None:
+    """The final assessment cannot ask the local model for an invalid wait."""
+
+    waiting_messages = build_settled_relevance_messages(
+        _base_state(),
+        observation_status="more_time_available",
+    )
+    final_messages = build_settled_relevance_messages(
+        _base_state(),
+        observation_status="observation_complete",
+    )
+
+    assert '"response_action":"ignore|proceed|wait"' in (
+        waiting_messages[0].content
+    )
+    assert "assembled_turn.author_relation is current_human" in (
+        waiting_messages[0].content
+    )
+    assert "A statement that group members could react to is insufficient" in (
+        waiting_messages[0].content
+    )
+    assert "never swap their roles" in (
+        waiting_messages[0].content
+    )
+    assert '"response_action":"ignore|proceed"' in final_messages[0].content
+    assert "wait" not in final_messages[0].content.lower()
+    assert waiting_messages[1].content == final_messages[1].content
+
+
+def test_settled_history_projects_production_participant_relations() -> None:
+    """Production rows retain author, addressee, and reply relationships."""
+
+    state = _base_state()
+    state.update({
+        "current_author_global_user_id": "current-global",
+        "current_author_platform_user_id": "current-platform",
+        "character_global_user_id": "character-global-id",
+        "platform_bot_id": "bot-id",
+        "fresh_history": [
+            {
+                "role": "user",
+                "platform_user_id": "current-platform",
+                "global_user_id": "current-global",
+                "body_text": "My earlier question.",
+                "addressed_to_global_user_ids": ["character-global-id"],
+                "broadcast": False,
+                "reply_context": {},
+                "turn_temporal_relation": "before_active_turn",
+            },
+            {
+                "role": "assistant",
+                "platform_user_id": "bot-id",
+                "global_user_id": "character-global-id",
+                "body_text": "The character answered.",
+                "addressed_to_global_user_ids": ["current-global"],
+                "broadcast": False,
+                "reply_context": {
+                    "reply_to_platform_user_id": "current-platform",
+                },
+                "turn_temporal_relation": "after_active_turn",
+            },
+            {
+                "role": "user",
+                "platform_user_id": "other-platform",
+                "global_user_id": "other-global",
+                "body_text": "Another participant answered too.",
+                "addressed_to_global_user_ids": ["current-global"],
+                "broadcast": False,
+                "reply_context": {
+                    "reply_to_platform_user_id": "bot-id",
+                },
+                "turn_temporal_relation": "after_active_turn",
+            },
+            {
+                "role": "user",
+                "platform_user_id": "other-platform",
+                "global_user_id": "other-global",
+                "body_text": "An answer arrived between active fragments.",
+                "addressed_to_global_user_ids": ["current-global"],
+                "broadcast": False,
+                "reply_context": {},
+                "turn_temporal_relation": "during_active_turn",
+            },
+        ],
+    })
+
+    messages = build_settled_relevance_messages(state)
+    history = json.loads(messages[1].content)["fresh_history"]
+
+    assert history == [
+        {
+            "speaker_relation": "current_author",
+            "body_text": "My earlier question.",
+            "target_summary": "character",
+            "reply_summary": "none",
+            "turn_relation": "before_active_turn",
+        },
+        {
+            "speaker_relation": "character",
+            "body_text": "The character answered.",
+            "target_summary": "current_author",
+            "reply_summary": "current_author",
+            "turn_relation": "after_active_turn",
+        },
+        {
+            "speaker_relation": "other_participant",
+            "body_text": "Another participant answered too.",
+            "target_summary": "current_author",
+            "reply_summary": "character",
+            "turn_relation": "after_active_turn",
+        },
+        {
+            "speaker_relation": "other_participant",
+            "body_text": "An answer arrived between active fragments.",
+            "target_summary": "current_author",
+            "reply_summary": "none",
+            "turn_relation": "during_active_turn",
+        },
+    ]
 
 
 def test_settled_worst_case_projection_remains_valid_json() -> None:

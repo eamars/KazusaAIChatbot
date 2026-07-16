@@ -164,6 +164,8 @@ def _frontline_state(
     """Build the semantic projection used by the compact frontline route."""
 
     return {
+        "conversation_scope": "group",
+        "active_character_name": "Character",
         "current_message": {
             "body_text": body_text,
             "semantic_target_labels": targets or [],
@@ -187,6 +189,8 @@ def _settled_state(
     """Build a bounded settled relevance projection."""
 
     return {
+        "conversation_scope": "group",
+        "active_character_name": "Character",
         "assembled_fragments": fragments,
         "media_descriptions": media or [],
         "fresh_history": history or [],
@@ -324,10 +328,9 @@ async def test_live_mention_only_settles_safely_and_accepts_followup(
         targets=("character",),
         reply_target="none",
     )
-    first = await _run_frontline(
-        "L02_bare_mention",
-        await coordinator.build_frontline_state(bare_mention),
-    )
+    bare_state = await coordinator.build_frontline_state(bare_mention)
+    bare_state["active_character_name"] = "Character"
+    first = await _run_frontline("L02_bare_mention", bare_state)
     assert first["intake_action"] in {"start", "discard"}
     await coordinator.apply_frontline_decision(bare_mention, first)
     followup = _fragment(
@@ -338,6 +341,7 @@ async def test_live_mention_only_settles_safely_and_accepts_followup(
         reply_target="none",
     )
     followup_state = await coordinator.build_frontline_state(followup)
+    followup_state["active_character_name"] = "Character"
     if first["intake_action"] == "start":
         assert len(followup_state["open_turns"]) == 1
     else:
@@ -403,6 +407,7 @@ async def test_live_interleaved_authors_keep_independent_turns(
     state = await coordinator.build_frontline_state(
         _fragment(3, body="A2 clarifies the first request", enqueue_monotonic=2.0),
     )
+    state["active_character_name"] = "Character"
     assert len(state["open_turns"]) == 1
 
     result = await _run_frontline(
@@ -508,6 +513,7 @@ async def test_live_content_before_tag_promotes_recent_prelude(
         enqueue_monotonic=4.0,
     )
     state = await coordinator.build_frontline_state(current)
+    state["active_character_name"] = "Character"
     result = await _run_frontline(
         "L08_recent_prelude",
         state,
@@ -645,6 +651,7 @@ async def test_live_followup_after_running_becomes_new_candidate(
             enqueue_monotonic=7.0,
         ),
     )
+    state["active_character_name"] = "Character"
     assert state["open_turns"] == []
     assert "already answered" in state["latest_bot_continuity"]
 
@@ -736,6 +743,7 @@ async def test_live_cross_scope_candidates_never_attach(
     state = await coordinator.build_frontline_state(
         _fragment(2, body="A request in the current channel."),
     )
+    state["active_character_name"] = "Character"
     assert state["open_turns"] == []
 
     result = await _run_frontline(
@@ -762,6 +770,7 @@ async def test_live_fourth_same_author_topic_avoids_false_append(
     state = await coordinator.build_frontline_state(
         _fragment(4, body="A fourth unrelated topic.", enqueue_monotonic=1.0),
     )
+    state["active_character_name"] = "Character"
     assert len(state["open_turns"]) == 3
 
     result = await _run_frontline(
