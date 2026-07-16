@@ -15,8 +15,8 @@ import httpx
 import pytest
 
 from kazusa_ai_chatbot.config import RELEVANCE_AGENT_LLM_BASE_URL
-from kazusa_ai_chatbot.nodes import persona_relevance_agent as relevance_module
-from kazusa_ai_chatbot.nodes.persona_relevance_agent import (
+import kazusa_ai_chatbot.relevance.persona_relevance_agent as relevance_module
+from kazusa_ai_chatbot.relevance.persona_relevance_agent import (
     build_group_attention_context,
     relevance_agent,
 )
@@ -140,9 +140,11 @@ def _addressed_group_state(
         "user_profile": profile,
         "platform_bot_id": _PLATFORM_BOT_ID,
         "character_name": _DB_CHARACTER_PROFILE["name"],
+        "active_character_name": _DB_CHARACTER_PROFILE["name"],
         "character_profile": _DB_CHARACTER_PROFILE,
         "platform_channel_id": _CHANNEL_ID,
         "channel_type": "group",
+        "conversation_scope": "group",
         "channel_name": f"QQ group {_CHANNEL_ID}",
         "chat_history_wide": history,
         "chat_history_recent": history[-5:],

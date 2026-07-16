@@ -93,6 +93,8 @@ class IMProcessState(TypedDict):
     prompt_message_context: PromptMessageContext
     cognitive_episode: NotRequired[CognitiveEpisode]
     user_multimedia_input: list[MultiMediaDoc]
+    additional_media_present: NotRequired[bool]
+    media_prepared: NotRequired[bool]
     user_profile: dict  # used to extract affinity score.
 
     platform_bot_id: str  # Bot's ID on the current platform (provided by the adapter)
@@ -105,6 +107,20 @@ class IMProcessState(TypedDict):
     chat_history_wide: list[dict]   # Full history slice (CONVERSATION_HISTORY_LIMIT, used by Relevance Agent)
     chat_history_recent: list[dict] # Recent slice (CHAT_HISTORY_RECENT_LIMIT, used by downstream stages)
     reply_context: ReplyContext
+
+    # Relevance turn-settlement state
+    response_action: NotRequired[Literal["ignore", "proceed", "wait"]]
+    observation_status: NotRequired[
+        Literal["more_time_available", "observation_complete"]
+    ]
+    turn_id: NotRequired[str]
+    turn_version: NotRequired[int]
+    cognition_claimed: NotRequired[bool]
+    assembled_fragments: NotRequired[list[dict[str, Any]]]
+    fresh_history: NotRequired[list[dict[str, Any]]]
+    media_descriptions: NotRequired[list[dict[str, Any]]]
+    scene_context: NotRequired[str]
+    relationship_context: NotRequired[str]
 
     # Output from Relevance Agent
     # Origin contract: service.py seeds this true. LangGraph combines updates

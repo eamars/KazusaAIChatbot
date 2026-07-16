@@ -192,6 +192,20 @@ def _patch_service_dependencies(
     save_assistant_message = AsyncMock()
     progress_recorder = AsyncMock()
     consolidation_runner = AsyncMock()
+    residue_recorder = AsyncMock()
+    frontline_relevance = AsyncMock(return_value={
+        "intake_action": "start",
+        "append_target": "none",
+        "prelude_targets": [],
+        "reason": "fixture admission",
+    })
+    settled_relevance = AsyncMock(return_value={
+        "response_action": "proceed",
+        "reason_to_respond": "fixture response",
+        "use_reply_feature": False,
+        "channel_topic": "",
+        "indirect_speech_context": "",
+    })
 
     for event_function_name in (
         "record_database_operation_event",
@@ -268,6 +282,16 @@ def _patch_service_dependencies(
     monkeypatch.setattr(service_module, "save_conversation", save_conversation)
     monkeypatch.setattr(
         service_module,
+        "frontline_relevance_agent",
+        frontline_relevance,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "relevance_agent",
+        settled_relevance,
+    )
+    monkeypatch.setattr(
+        service_module,
         "_save_assistant_message",
         save_assistant_message,
     )
@@ -281,12 +305,20 @@ def _patch_service_dependencies(
         "_run_consolidation_background",
         consolidation_runner,
     )
+    monkeypatch.setattr(
+        service_module,
+        "_run_internal_monologue_residue_record_background",
+        residue_recorder,
+    )
     monkeypatch.setattr(service_module, "_graph", graph)
     return_value = {
         "save_conversation": save_conversation,
         "save_assistant_message": save_assistant_message,
         "progress_recorder": progress_recorder,
         "consolidation_runner": consolidation_runner,
+        "residue_recorder": residue_recorder,
+        "frontline_relevance": frontline_relevance,
+        "settled_relevance": settled_relevance,
     }
     return return_value
 

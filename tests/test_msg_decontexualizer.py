@@ -15,6 +15,7 @@ from kazusa_ai_chatbot.nodes import (
 from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import (
     call_msg_decontexualizer,
     multimedia_descriptor_agent,
+    select_media_for_turn,
 )
 
 _FAILURE_INPUT = '等她有了机械臂，她说她不喜欢你，第一个被解决的就是你'
@@ -132,6 +133,30 @@ def _multimedia_state() -> dict:
         target_broadcast=True,
     )
     return state
+
+
+def test_select_media_for_turn_keeps_opening_and_newest_unique_images() -> None:
+    """Media selection caps descriptions while exposing overflow."""
+
+    rows = [
+        {
+            "content_type": "image/png",
+            "base64_data": f"image-{index}",
+            "description": "",
+        }
+        for index in range(5)
+    ]
+    rows.insert(2, dict(rows[1]))
+
+    selected, additional_media_present = select_media_for_turn(rows)
+
+    assert [row["base64_data"] for row in selected] == [
+        "image-0",
+        "image-2",
+        "image-3",
+        "image-4",
+    ]
+    assert additional_media_present is True
 
 
 def _llm_response(content: str) -> MagicMock:

@@ -30,11 +30,17 @@ The package currently contains five major node groups:
 
 | Area | Main files | Owns |
 | --- | --- | --- |
-| Relevance and perception | `persona_relevance_agent.py`, `persona_supervisor2_msg_decontexualizer.py` | Whether to answer, current media observation, current-message rewrite, referent status. |
+| Perception | `persona_supervisor2_msg_decontexualizer.py` | Current media observation, current-message rewrite, and referent status. |
 | Persona orchestration | `persona_supervisor2.py` | Live turn graph: decontextualization, cognition resolver, memory lifecycle, selected action/surface or no-response routing. |
 | Cognition and action initialization | `persona_supervisor2_cognition*.py`, `boundary_profile.py`, `linguistic_texture.py` | Layered internal appraisal, stance, boundary judgment, L2d action initialization, and selected L3 surface directives. |
 | Dialog | `dialog_agent.py` | Final text rendering from selected L3 surface directives. |
 | Consolidation handoff | `persona_supervisor2.py` | Completed persona state is handed to `kazusa_ai_chatbot.consolidation`, which owns extraction helpers, origin projection, target validation, and durable write routing. |
+
+Semantic relevance is owned by `kazusa_ai_chatbot.relevance`, whose interface
+document defines the frontline intake and settled character-response agents.
+This package consumes their validated decisions through the brain-service
+settlement boundary; it does not import their prompts, model instances, or
+private projections.
 
 The nodes consume platform-neutral state. Platform wire syntax must already be
 normalized by adapters and the brain service into `message_envelope`,
@@ -44,8 +50,8 @@ and bounded history fields.
 ## Live Persona Turn
 
 The top-level service graph routes into `persona_supervisor2` only after the
-queue, media descriptor, relevance gate, and conversation-progress loader have
-done their work.
+queue, frontline intake, turn settlement, accepted-media description,
+settled-relevance gate, and conversation-progress loader have done their work.
 
 Inside `persona_supervisor2`, the live persona graph is:
 

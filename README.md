@@ -58,7 +58,7 @@ At a high level, Kazusa provides:
 | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | Platform-neutral character brain | Discord, QQ, debug UI, and future adapters feed the same FastAPI brain service.                                                    |
 | Typed message boundary           | Platform syntax is normalized into `MessageEnvelope` fields before cognition or RAG sees it.                                       |
-| Bounded live response path       | Queueing, relevance, the cognition resolver, selected evidence capabilities, action routing, and L3 surfaces are explicit stages with caps and inspectable payloads. |
+| Bounded live response path       | Typed intake, frontline relevance, turn settlement, settled relevance, the cognition resolver, selected evidence capabilities, action routing, and L3 surfaces are explicit stages with caps and inspectable payloads. |
 | Multi-horizon memory             | Recent chat, short-term conversation flow, retrieved evidence, durable memory, and scheduled commitments remain separate.          |
 | Internal monologue residue       | A short private residue lane carries bounded first-person reasons from completed episodes into the next L2a cognition pass.       |
 | RAG3 local context recall        | Demand-driven graph resolver dispatches local evidence subagents and projects prompt-safe local/private evidence, including session image observations, when cognition asks through `local_context_recall`. |
@@ -75,7 +75,7 @@ At a high level, Kazusa provides:
 | Use case                             | Why Kazusa fits                                                                                                                  |
 | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
 | Persistent character companion       | The runtime keeps relationship memory, short-term flow, character state, and reflection separate but connected.                  |
-| Group-chat character bot             | Queue pruning, typed addressees, native reply hydration, and adapter-specific delivery let the brain survive noisy channels.     |
+| Group-chat character bot             | Frontline relevance and turn settlement handle noisy channels.                                                                 |
 | Local model character lab            | Route-specific OpenAI-compatible model settings let weaker local models handle narrower, staged prompts.                         |
 | Memory and RAG experiments           | RAG3, Cache2, retired RAG2 helper coverage, scoped user memory, shared memory evolution, and conversation search are modular enough to inspect independently. |
 | Cross-platform adapter experiments   | New adapters only need to normalize platform events into the service contract and render returned messages.                      |
@@ -157,15 +157,28 @@ execute bounded delayed work. Exact subagent naming and documentation
 vocabulary are covered by the
 [Subagent Interface Guide](docs/SUBAGENT_INTERFACES.md).
 
+The active chat intake path has two bounded relevance decisions. The frontline
+route is a compact per-message `discard/start/append` judge. Accepted group
+messages settle in a six-second quiet window with a ten-second hard deadline;
+the settled route then chooses `ignore/proceed/wait`. Private-message timing
+and adjacency-only private coalescing remain intact. The settlement coordinator
+owns open-slot projection, bounded silent-prelude promotion, enqueue-time
+deadlines, and the pre-deadline ingress barrier. One response owner receives
+the assembled reply; appended request futures complete silently. A valid
+`proceed` is atomically claimed before persona preparation and cognition run.
+Coalesced private fragments are shown to frontline as one logical input. The
+four-image description budget is shared across reassessments, and omitted
+media is explicit so settled relevance can fail closed before cognition.
+
 ```mermaid
 flowchart TD
     A["Adapters<br/>Discord, NapCat QQ, debug UI, future adapters"]
     B["FastAPI brain service<br/>/chat, health, ops snapshots, delivery receipts, runtime adapter registry"]
-    C["Process-local chat queue<br/>drop/collapse policy, inbound persistence"]
-    D["Intake and typed episode assembly<br/>MessageEnvelope, reply hydration, history, media, source scope"]
+    C["Process-local chat queue<br/>private adjacency coalescing, inbound persistence"]
+    D["Typed fragment intake and turn settlement<br/>MessageEnvelope, frontline relevance, deadlines, version claim"]
     E{"Service graph"}
-    F["Media descriptor<br/>image/audio observations"]
-    G["Relevance gate"]
+    F["Media descriptor<br/>accepted media, max four unique images"]
+    G["Settled relevance gate<br/>ignore/proceed/wait"]
     H["Prompt-safe context lanes<br/>conversation_progress<br/>internal_monologue_residue<br/>past_dialog_cognition<br/>promoted reflection and growth context"]
     N["No persona turn<br/>empty ChatResponse"]
     J["Adapter delivery boundary<br/>ChatResponse messages, mentions, delivery receipts"]

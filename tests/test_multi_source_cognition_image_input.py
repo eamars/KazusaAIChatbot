@@ -18,7 +18,7 @@ from kazusa_ai_chatbot.cognition_chain_core.prompt_selection import (
 from kazusa_ai_chatbot.consolidation.origin import (
     build_user_message_consolidation_origin,
 )
-from kazusa_ai_chatbot.nodes.persona_relevance_agent import relevance_agent
+from kazusa_ai_chatbot.relevance import relevance_agent
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 
 
@@ -133,6 +133,7 @@ def _minimal_relevance_state() -> dict[str, object]:
             "attachments": [],
         },
         "character_name": "Character",
+        "active_character_name": "Character",
         "character_profile": {
             "name": "Character",
             "global_user_id": "character-1",
@@ -141,6 +142,7 @@ def _minimal_relevance_state() -> dict[str, object]:
         },
         "platform_channel_id": "debug-private-1",
         "channel_type": "private",
+        "conversation_scope": "private",
         "channel_name": "Direct",
         "chat_history_wide": [],
         "chat_history_recent": [],
@@ -266,12 +268,12 @@ def _llm_response(content: str) -> MagicMock:
 async def test_relevance_keeps_image_descriptor_out_of_user_input() -> None:
     """Relevance should not make descriptor text look user-authored."""
     response = _llm_response(
-        '{"should_respond": true, "reason_to_respond": "direct", '
+        '{"response_action": "proceed", "reason_to_respond": "direct", '
         '"use_reply_feature": false, "channel_topic": "", '
         '"indirect_speech_context": ""}'
     )
 
-    with patch("kazusa_ai_chatbot.nodes.persona_relevance_agent._relevance_agent_llm") as llm:
+    with patch("kazusa_ai_chatbot.relevance.persona_relevance_agent._relevance_agent_llm") as llm:
         llm.ainvoke = AsyncMock(return_value=response)
         result = await relevance_agent(_minimal_relevance_state())
 
@@ -279,11 +281,14 @@ async def test_relevance_keeps_image_descriptor_out_of_user_input() -> None:
     human_payload = json.loads(human_message.content)
 
     assert result["user_input"] == "Does this support my plan?"
-    assert human_payload["user_message"]["content"] == (
+    assert human_payload["assembled_turn"]["fragments"][0]["body_text"] == (
         "Does this support my plan?"
     )
     assert "Image attachment:" not in human_message.content
-    assert "image shows a desk setup" not in human_message.content
+    assert human_payload["assembled_turn"]["media"]["descriptions"] == [{
+        "media_kind": "image/png",
+        "description": "image shows a desk setup",
+    }]
 
 
 def test_source_payload_projects_structured_image_observations() -> None:
