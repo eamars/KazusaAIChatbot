@@ -61,8 +61,10 @@ def _payload() -> dict[str, object]:
             "channel_scope": "private",
             "character_role": "companion",
             "semantic_scene": "quiet private greeting",
+            "conversation_continuity": "No unresolved public commitment.",
             "semantic_temporal_context": "immediate",
         },
+        "private_continuity_context": "I remain calmly attentive.",
     }
 
 

@@ -86,16 +86,19 @@ _RECORDER_PROMPT = '''\
 - `internal_monologue` 是本轮已经生成的第一人称内心解释，是最高优先级证据。
 - `incoming_residue_context` 是我此前留下的短期余波窗口，只用于判断延续、缓和或变旧；不要机械复述窗口内容。
 - `ambient_evidence_summary` 只说明群聊、私聊、聊天完成后或自我回顾后的场景边界；不要把它写成报告。
+- `visible_outcome_summary` 是本轮实际可见回复的有界摘要；它用于核对我的私念最后怎样落到了对话中。
+- `surface_content_plan` 和 `visible_boundaries` 是本轮表达计划与可见边界；它们用于区分已经表达、刻意保留和仍未消化的内容。
 - `current_speaker_display_name` 与 `exact_name_candidates` 只是可用称呼提示；缺少准确称呼时可以自然省略。
 - `source_reliability_notes` 是来源可靠性限制；如果它提示群聊里有有歧义的二人称侧线，按来源优先级把该内容保留为被观察说话人的侧线/未定对象，我自己的私念只记录由这个限制引发的情绪、迟疑或放下。
 
 # 生成步骤
 1. 先读取 `internal_monologue`，找出其中仍可能影响后续理解的主观原因。
-2. 对照 `incoming_residue_context`，判断这是新原因、旧原因延续，还是旧余波已经被当前理解放轻。
-3. 读取 `source_reliability_notes`；来源可靠性限制优先于主观余波，被标记为有歧义二人称侧线的内容只可作为侧线/未定对象影响我的心情。
-4. 只保留一条最有用的私念；不要总结整段内心，也不要列出所有事实。
-5. 若当前只是普通、已接住、已放下或没有持续影响的内容，输出空字符串。
-6. 输出前检查：它必须像我私下留给自己的短句，而不是报告、行动计划、长期记忆或可见台词。
+2. 对照 `visible_outcome_summary`、`surface_content_plan` 和 `visible_boundaries`，判断哪些原因已经表达、哪些因边界留在心里、哪些已经不再需要延续。
+3. 对照 `incoming_residue_context`，判断这是新原因、旧原因延续，还是旧余波已经被当前理解放轻。
+4. 读取 `source_reliability_notes`；来源可靠性限制优先于主观余波，被标记为有歧义二人称侧线的内容只可作为侧线/未定对象影响我的心情。
+5. 只保留一条最有用的私念；不要总结整段内心，也不要列出所有事实。
+6. 若当前只是普通、已接住、已放下或没有持续影响的内容，输出空字符串。
+7. 输出前检查：它必须像我私下留给自己的短句，而不是报告、行动计划、长期记忆或可见台词。
 
 # 私念视角契约
 - 写成自然第一人称，可以写我为什么仍在意、放松、防备、期待、迟疑或释然。
@@ -374,6 +377,9 @@ async def _call_recorder(
         "ambient_evidence_summary": recorder_input["ambient_evidence_summary"],
         "incoming_residue_context": recorder_input["incoming_residue_context"],
         "source_reliability_notes": recorder_input["source_reliability_notes"],
+        "visible_outcome_summary": recorder_input["visible_outcome_summary"],
+        "surface_content_plan": recorder_input["surface_content_plan"],
+        "visible_boundaries": recorder_input["visible_boundaries"],
     }
     if repair_reason:
         payload["validation_failure"] = repair_reason
@@ -452,8 +458,52 @@ def _build_recorder_input(
         "source_reliability_notes": _source_reliability_notes(
             completed_state,
         ),
+        "visible_outcome_summary": _visible_outcome_summary(completed_state),
+        "surface_content_plan": _surface_content_plan(completed_state),
+        "visible_boundaries": _visible_boundaries(completed_state),
     }
     return recorder_input
+
+
+def _visible_outcome_summary(completed_state: Mapping[str, object]) -> str:
+    """Project bounded dialog that was actually selected for visibility."""
+
+    final_dialog = completed_state.get("final_dialog")
+    if not isinstance(final_dialog, list):
+        return ""
+    fragments = [
+        item.strip()
+        for item in final_dialog
+        if isinstance(item, str) and item.strip()
+    ]
+    summary = " ".join(fragments)[:1000]
+    return summary
+
+
+def _surface_content_plan(completed_state: Mapping[str, object]) -> str:
+    """Project the bounded semantic surface plan for residue reconciliation."""
+
+    surface = completed_state.get("text_surface_output_v2")
+    if not isinstance(surface, Mapping):
+        return ""
+    content_plan = _string_field(surface, "content_plan")[:1000]
+    return content_plan
+
+
+def _visible_boundaries(completed_state: Mapping[str, object]) -> list[str]:
+    """Project bounded visible boundaries from the completed surface."""
+
+    surface = completed_state.get("text_surface_output_v2")
+    if not isinstance(surface, Mapping):
+        return []
+    boundaries = surface.get("visible_boundaries")
+    if not isinstance(boundaries, list):
+        return []
+    return [
+        boundary.strip()[:500]
+        for boundary in boundaries[:8]
+        if isinstance(boundary, str) and boundary.strip()
+    ]
 
 
 def _build_residue_row(

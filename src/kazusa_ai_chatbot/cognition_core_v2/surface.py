@@ -1,4 +1,4 @@
-"""Public V2 text-surface planning facade."""
+"""Public V2 text and terminal visual surface planning facades."""
 
 from __future__ import annotations
 
@@ -10,8 +10,11 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     TextSurfaceInputV2,
     TextSurfaceOutputV2,
     TextSurfaceServicesV2,
+    VisualSurfaceOutputV2,
+    VisualSurfaceServicesV2,
     validate_text_surface_input,
     validate_text_surface_output,
+    validate_visual_surface_output,
 )
 from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
     run_content_plan_stage,
@@ -28,47 +31,56 @@ async def run_text_surface_planning(
     input_payload: TextSurfaceInputV2,
     services: TextSurfaceServicesV2,
 ) -> TextSurfaceOutputV2:
-    """Run four bounded surface stages after cognition state is committed."""
+    """Run three bounded text-surface stages after cognition is committed."""
 
     payload = validate_text_surface_input(input_payload)
     stage_payload = _project_surface_payload(payload)
     validate_prompt_projection(stage_payload)
-    stage_calls = [
-        run_style_stage(stage_payload, services),
+    style_payload = dict(stage_payload)
+    style_payload["character_voice_context"] = payload[
+        "character_voice_context"
+    ]
+    validate_prompt_projection(style_payload)
+    style, content_result, preference = await asyncio.gather(
+        run_style_stage(style_payload, services),
         run_content_plan_stage(stage_payload, services),
         run_preference_stage(stage_payload, services),
-    ]
-    if _visual_guidance_disabled(payload["episode"]):
-        style, content, preference = await asyncio.gather(*stage_calls)
-        visual = "Visual and pacing guidance is disabled for this episode."
-    else:
-        style, content, preference, visual = await asyncio.gather(
-            *stage_calls,
-            run_visual_stage(stage_payload, services),
-        )
+    )
+    content_plan, content_requirements = content_result
     visible_boundaries, addressee_plan = preference
     output: TextSurfaceOutputV2 = {
         "schema_version": "text_surface_output.v2",
-        "content_plan": content,
+        "content_plan": content_plan,
+        "content_requirements": content_requirements,
         "visible_boundaries": visible_boundaries,
         "addressee_plan": addressee_plan,
         "style_guidance": style,
-        "pacing_guidance": visual,
         "selected_surface_intent": payload["intention"]["intention"],
     }
-    return validate_text_surface_output(output)
+    validated_output = validate_text_surface_output(output)
+    return validated_output
 
 
-def _visual_guidance_disabled(episode: Mapping[str, Any]) -> bool:
-    """Return the deterministic episode flag for skipping visual planning."""
+async def run_visual_surface_planning(
+    input_payload: TextSurfaceInputV2,
+    services: VisualSurfaceServicesV2,
+) -> VisualSurfaceOutputV2:
+    """Run the independent terminal visual-directive stage."""
 
-    origin_metadata = episode.get("origin_metadata")
-    if not isinstance(origin_metadata, Mapping):
-        return False
-    debug_modes = origin_metadata.get("debug_modes")
-    return isinstance(debug_modes, Mapping) and (
-        debug_modes.get("no_visual_directives") is True
-    )
+    payload = validate_text_surface_input(input_payload)
+    stage_payload = _project_surface_payload(payload)
+    stage_payload["character_voice_context"] = payload[
+        "character_voice_context"
+    ]
+    validate_prompt_projection(stage_payload)
+    visual_directives = await run_visual_stage(stage_payload, services)
+    output: VisualSurfaceOutputV2 = {
+        "schema_version": "visual_surface_output.v2",
+        "visual_directives": visual_directives,
+        "selected_surface_intent": payload["intention"]["intention"],
+    }
+    validated_output = validate_visual_surface_output(output)
+    return validated_output
 
 
 def _project_surface_payload(

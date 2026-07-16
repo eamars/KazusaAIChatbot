@@ -110,6 +110,23 @@ class ConversationEpisodeEntryDoc(TypedDict, total=False):
     first_seen_at: str
 
 
+class ConversationInteractionObligationDoc(TypedDict, total=False):
+    """One actor-preserving interaction obligation with lifecycle metadata."""
+
+    actor: str
+    action: str
+    beneficiary: str
+    precondition: str
+    expected_outcome: str
+    status: Literal["active", "resolved", "superseded"]
+    source_kind: Literal[
+        "user_input",
+        "assistant_response",
+        "mutual_exchange",
+    ]
+    first_seen_at: str
+
+
 class ConversationEpisodeStateDoc(TypedDict, total=False):
     """Short-lived operational progress state for one user/channel episode."""
 
@@ -130,6 +147,7 @@ class ConversationEpisodeStateDoc(TypedDict, total=False):
     assistant_moves: list[str]
     overused_moves: list[str]
     open_loops: list[ConversationEpisodeEntryDoc]
+    interaction_obligations: list[ConversationInteractionObligationDoc]
     resolved_threads: list[ConversationEpisodeEntryDoc]
     avoid_reopening: list[ConversationEpisodeEntryDoc]
     emotional_trajectory: str

@@ -172,8 +172,10 @@ def _chain_input(case: dict[str, str]) -> dict[str, object]:
             "channel_scope": "private",
             "character_role": "companion",
             "semantic_scene": semantic_text,
+            "conversation_continuity": "Continue only the current benchmark case.",
             "semantic_temporal_context": "immediate",
         },
+        "private_continuity_context": "I should stay grounded in this case.",
     }
 
 

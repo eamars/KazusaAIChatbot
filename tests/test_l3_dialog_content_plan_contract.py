@@ -33,6 +33,34 @@ def _state() -> dict[str, Any]:
         ),
         "user_input": "hello",
         "action_results": [],
+        "character_profile": _character_profile(),
+    }
+
+
+def _character_profile() -> dict[str, Any]:
+    """Build the required wording-only character voice source."""
+
+    return {
+        "name": "Kazusa",
+        "personality_brief": {
+            "logic": "analytical",
+            "tempo": "moderate",
+            "defense": "reserved",
+            "quirks": "occasional hesitation",
+            "taboos": "stay in character",
+        },
+        "linguistic_texture_profile": {
+            "hesitation_density": 0.4,
+            "fragmentation": 0.4,
+            "emotional_leakage": 0.4,
+            "rhythmic_bounce": 0.4,
+            "direct_assertion": 0.4,
+            "softener_density": 0.4,
+            "counter_questioning": 0.4,
+            "formalism_avoidance": 0.4,
+            "abstraction_reframing": 0.4,
+            "self_deprecation": 0.4,
+        },
     }
 
 
@@ -55,10 +83,10 @@ def test_surface_output_validation_requires_exact_v2_fields() -> None:
     output = {
         "schema_version": "text_surface_output.v2",
         "content_plan": "Say hello.",
+        "content_requirements": ["Address the current user."],
         "visible_boundaries": [],
         "addressee_plan": ["current user"],
         "style_guidance": "brief",
-        "pacing_guidance": "one sentence",
         "selected_surface_intent": "acknowledge",
     }
 
@@ -72,10 +100,15 @@ async def test_surface_handler_returns_native_output(monkeypatch) -> None:
     expected = {
         "schema_version": "text_surface_output.v2",
         "content_plan": "Say hello.",
+        "content_requirements": ["Address the current user."],
         "visible_boundaries": [],
         "addressee_plan": ["current user"],
         "style_guidance": "brief",
-        "pacing_guidance": "one sentence",
+        "selected_surface_intent": "acknowledge",
+    }
+    expected_visual = {
+        "schema_version": "visual_surface_output.v2",
+        "visual_directives": "private image composition",
         "selected_surface_intent": "acknowledge",
     }
 
@@ -87,6 +120,16 @@ async def test_surface_handler_returns_native_output(monkeypatch) -> None:
         surface_module,
         "run_text_surface_planning",
         _fake_planner,
+    )
+
+    async def _fake_visual_planner(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        del args, kwargs
+        return expected_visual
+
+    monkeypatch.setattr(
+        surface_module,
+        "run_visual_surface_planning",
+        _fake_visual_planner,
     )
 
     async def _style_context(**kwargs: Any) -> dict[str, Any]:
@@ -110,5 +153,8 @@ async def test_surface_handler_returns_native_output(monkeypatch) -> None:
 
     result = await surface_module.call_l3_text_surface_handler(_state())
 
-    assert result == {"text_surface_output_v2": expected}
+    assert result == {
+        "text_surface_output_v2": expected,
+        "visual_surface_output_v2": expected_visual,
+    }
     assert "action_directives" not in result

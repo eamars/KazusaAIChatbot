@@ -13,9 +13,11 @@ from kazusa_ai_chatbot.conversation_progress.policy import (
     MAX_GUIDANCE_CHARS,
     MAX_LABEL_CHARS,
     MAX_MOVE_CHARS,
+    MAX_OBLIGATION_CHARS,
     MAX_THREAD_CHARS,
     NEXT_AFFORDANCES_LIMIT,
     OPEN_LOOPS_LIMIT,
+    INTERACTION_OBLIGATIONS_LIMIT,
     OVERUSED_MOVES_LIMIT,
     RESOLVED_THREADS_LIMIT,
     USER_STATE_UPDATES_LIMIT,
@@ -23,7 +25,11 @@ from kazusa_ai_chatbot.conversation_progress.policy import (
     empty_progress_prompt_doc,
     enforce_progress_prompt_budget,
 )
-from kazusa_ai_chatbot.db.schemas import ConversationEpisodeEntryDoc, ConversationEpisodeStateDoc
+from kazusa_ai_chatbot.db.schemas import (
+    ConversationEpisodeEntryDoc,
+    ConversationEpisodeStateDoc,
+    ConversationInteractionObligationDoc,
+)
 from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 
 logger = logging.getLogger(__name__)
@@ -115,6 +121,61 @@ def _project_entries(
     return result
 
 
+def _project_obligations(
+    *,
+    obligations: list[ConversationInteractionObligationDoc],
+    current_timestamp_utc: str,
+) -> list[dict[str, str]]:
+    """Project stored obligation roles with bounded semantic text and age."""
+
+    result: list[dict[str, str]] = []
+    for obligation in obligations:
+        first_seen_at = obligation.get("first_seen_at")
+        actor = obligation.get("actor")
+        action = obligation.get("action")
+        if (
+            not isinstance(first_seen_at, str)
+            or not first_seen_at.strip()
+            or not isinstance(actor, str)
+            or not actor.strip()
+            or not isinstance(action, str)
+            or not action.strip()
+        ):
+            continue
+        try:
+            relative_age = age_hint(
+                first_seen_at=first_seen_at,
+                current_timestamp_utc=current_timestamp_utc,
+            )
+        except ValueError as exc:
+            logger.debug(
+                f"Dropping obligation with invalid first_seen_at: {exc}"
+            )
+            continue
+        result.append({
+            "actor": cap_text(actor, MAX_OBLIGATION_CHARS),
+            "action": cap_text(action, MAX_OBLIGATION_CHARS),
+            "beneficiary": cap_text(
+                obligation.get("beneficiary", ""),
+                MAX_OBLIGATION_CHARS,
+            ),
+            "precondition": cap_text(
+                obligation.get("precondition", ""),
+                MAX_OBLIGATION_CHARS,
+            ),
+            "expected_outcome": cap_text(
+                obligation.get("expected_outcome", ""),
+                MAX_OBLIGATION_CHARS,
+            ),
+            "status": obligation["status"],
+            "source_kind": obligation["source_kind"],
+            "age_hint": relative_age,
+        })
+        if len(result) >= INTERACTION_OBLIGATIONS_LIMIT:
+            break
+    return result
+
+
 def _project_string_list(*, values: list, limit: int, max_chars: int) -> list[str]:
     """Project only clean string list items.
 
@@ -173,6 +234,10 @@ def project_prompt_doc(
             "assistant_moves": [],
             "overused_moves": [],
             "open_loops": [],
+            "interaction_obligations": _project_obligations(
+                obligations=document.get("interaction_obligations", []),
+                current_timestamp_utc=current_timestamp_utc,
+            ),
             "resolved_threads": [],
             "avoid_reopening": [],
             "emotional_trajectory": "",
@@ -211,6 +276,10 @@ def project_prompt_doc(
             entries=document.get("open_loops", []),
             current_timestamp_utc=current_timestamp_utc,
             limit=OPEN_LOOPS_LIMIT,
+        ),
+        "interaction_obligations": _project_obligations(
+            obligations=document.get("interaction_obligations", []),
+            current_timestamp_utc=current_timestamp_utc,
         ),
         "resolved_threads": _project_entries(
             entries=document.get("resolved_threads", []),

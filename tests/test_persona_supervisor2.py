@@ -51,7 +51,8 @@ def _cognition_output(route: str) -> dict[str, object]:
             "status": "not_requested",
             "semantic_summary": "no resolver request",
         },
-        "residue": "bounded private residue",
+        "selected_bid_reason": "the current episode establishes the route",
+        "private_monologue": "I want to respond to this clearly.",
         "expression_policy": {
             "visibility": "visible" if route == "speech" else "none",
             "emotional_tone": "composed",

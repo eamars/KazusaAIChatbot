@@ -18,7 +18,11 @@ from kazusa_ai_chatbot.config import (
 )
 from kazusa_ai_chatbot.conversation_progress.models import ConversationProgressRecordInput
 from kazusa_ai_chatbot.conversation_progress.policy import (
+    INTERACTION_OBLIGATIONS_LIMIT,
+    MAX_OBLIGATION_CHARS,
     VALID_CONTINUITY,
+    VALID_OBLIGATION_SOURCES,
+    VALID_OBLIGATION_STATUSES,
     VALID_STATUS,
 )
 from kazusa_ai_chatbot.db.schemas import ConversationEpisodeStateDoc
@@ -75,12 +79,21 @@ _RECORDER_PROMPT = '''\
 - `assistant_moves` 写本轮已经做过的话语动作标签。
 - `overused_moves` 写下一轮应避免重复的动作。
 - `open_loops` 只写本轮明确提出或本轮重新确认的未闭合事项；没有就写 `[]`。
+- `interaction_obligations` 只写有明确责任方向的互动义务，并保留谁行动、行动内容、受益者、条件、预期结果、状态和来源。普通话题悬念继续写入 `open_loops`，不要混入义务。
+- `interaction_obligations.actor` 和 `action` 必须明确且非空；不要把回复里由角色提出的奖励、选择或建议改写成用户欠角色的义务。
+- `interaction_obligations.status` 只能写 `active`、`resolved` 或 `superseded`；`source_kind` 只能写 `user_input`、`assistant_response` 或 `mutual_exchange`。
+- 义务仍然欠着、触发条件仍有效且本轮没有完成或替换证据时，状态写 `active`。
+- 本轮有明确证据表明行动已经完成、受益者已经收到结果，或双方明确取消且没有替代义务时，状态写 `resolved`；本轮保留这一项用于阻止下一轮重新打开，之后无新作用时可删除。
+- 本轮明确用新的行动、条件、受益者或预期结果替换旧义务时，这不是普通 `resolved`：必须把旧项写成 `superseded`，同时把替代项另写为 `active`。两项都保留在本轮 `interaction_obligations`，不能只把旧项放进 `resolved_threads`；不能仅因换题或措辞变化就推断替换。
+- `resolved` 和 `superseded` 都必须由本轮输入、实际回复或附近对话中的明确证据支持；没有证据时维持原状态或删除无用旧项，不猜测完成。
+- 明确替换示例：旧项是“杏山千纱在 2026-05-15 发送文字笔记”，本轮双方明确改成“杏山千纱在 2026-05-16 发送语音总结”，则 `interaction_obligations` 必须同时输出两项：旧文字笔记项完整保留原 actor、action、beneficiary、precondition、expected_outcome、source_kind 并把 status 改为 `superseded`；新语音总结项 status 写 `active`。只输出新项或只把旧项写进 `resolved_threads` 都不符合契约。
 - `resolved_threads` 写本轮已经处理完、收束或答复过的事项。
 - `avoid_reopening` 写除非用户主动重开，否则下一轮不要拖回来的旧事项或已闭合事项。
 - `emotional_trajectory` 写本轮局部情绪或张力的一行变化。
 - `next_affordances` 写下一轮自然可接的动作，不要写成完整台词。
 - `progression_guidance` 写一条短推进建议。
-- 所有输出列表都只能放普通字符串，不能放对象、嵌套数组，也不能出现 `text`、`label`、`reason`、`first_seen_at` 这类子字段。
+- 除 `interaction_obligations` 外，所有输出列表都只能放普通字符串，不能放对象、嵌套数组，也不能出现 `text`、`label`、`reason`、`first_seen_at` 这类子字段。
+- `interaction_obligations` 最多六项；每项只能包含规定字段，不能输出 `first_seen_at` 或 `age_hint`。
 
 # 时间规则
 - `current_turn_timestamp` 是这次记录时的本地时间。
@@ -101,10 +114,11 @@ _RECORDER_PROMPT = '''\
 1. 先判断本轮真正推进、收束、转向或中断了什么。
 2. 选择 `continuity` 和 `status`；把 `conversation_mode`、`episode_phase` 和 `topic_momentum` 写成 80 字以内的简短中文描述。
 3. 对旧状态逐项检查：无时间依赖且仍有用的可以继承；含相对时间、相对顺序或旧压力的默认删除。
-4. 只保留仍然有用的目标、阻塞点、用户状态、未闭合事项、已处理事项和不要重提提醒。
-5. 检查所有列表字段：只能输出字符串；没有内容就输出 `[]`。
-6. 缺失的单值字段写空字符串。
-7. 只返回合法 JSON；不要解释，不要代码块围栏，不要注释，不要额外字段。
+4. 对每项旧 `interaction_obligations` 检查本轮证据：继续欠着写 `active`，明确完成或取消写 `resolved`，明确被新义务替换则旧项写 `superseded` 且新增替代项为 `active`。
+5. 只保留仍然有用的目标、阻塞点、用户状态、未闭合事项、已处理事项和不要重提提醒。
+6. 检查列表字段：`interaction_obligations` 输出规定对象，其余列表只能输出字符串；没有内容就输出 `[]`。
+7. 缺失的单值字段写空字符串。
+8. 只返回合法 JSON；不要解释，不要代码块围栏，不要注释，不要额外字段。
 
 # 输入格式
 `prior_episode_state` 可能为 `null`；非 `null` 时，列表字段已经是字符串数组，不是带 `text` 或 `first_seen_at` 的对象数组。
@@ -124,6 +138,15 @@ _RECORDER_PROMPT = '''\
         "assistant_moves": ["旧动作标签"],
         "overused_moves": ["旧重复动作标签"],
         "open_loops": ["旧未闭合事项文本"],
+        "interaction_obligations": [{{
+            "actor": "承担行动的一方",
+            "action": "明确行动",
+            "beneficiary": "受益者或空字符串",
+            "precondition": "触发条件或空字符串",
+            "expected_outcome": "预期结果或空字符串",
+            "status": "active",
+            "source_kind": "user_input"
+        }}],
         "resolved_threads": ["旧已处理事项文本"],
         "avoid_reopening": ["旧不要主动重提事项文本"],
         "emotional_trajectory": "上一轮情绪走向",
@@ -164,6 +187,15 @@ _RECORDER_PROMPT = '''\
     "assistant_moves": ["标签1", "..."],
     "overused_moves": ["标签1", "..."],
     "open_loops": ["事项1", "..."],
+    "interaction_obligations": [{{
+        "actor": "承担行动的一方",
+        "action": "明确行动",
+        "beneficiary": "受益者或空字符串",
+        "precondition": "触发条件或空字符串",
+        "expected_outcome": "预期结果或空字符串",
+        "status": "active",
+        "source_kind": "assistant_response"
+    }}],
     "resolved_threads": ["事项1", "..."],
     "avoid_reopening": ["事项1", "..."],
     "emotional_trajectory": "一行情绪走向",
@@ -319,6 +351,16 @@ _RECORDER_PRIOR_SCALAR_FIELDS = (
     "expires_at",
 )
 
+_OBLIGATION_FIELDS = (
+    "actor",
+    "action",
+    "beneficiary",
+    "precondition",
+    "expected_outcome",
+    "status",
+    "source_kind",
+)
+
 
 def _require_string(value: Any, field_name: str, *, default: str = "") -> str:
     if value is None:
@@ -348,6 +390,36 @@ def _string_list(value: Any, field_name: str) -> list[str]:
     return result
 
 
+def _obligation_list(value: Any) -> list[dict[str, str]]:
+    """Validate exact recorder-owned obligation rows and deterministic bounds."""
+
+    if not isinstance(value, list):
+        raise ValueError("interaction_obligations must be a list")
+    if len(value) > INTERACTION_OBLIGATIONS_LIMIT:
+        raise ValueError("interaction_obligations exceeds its item limit")
+    result: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict) or set(item) != set(_OBLIGATION_FIELDS):
+            raise ValueError("interaction obligation fields must be exact")
+        obligation = {
+            field: _require_string(item[field], field)
+            for field in _OBLIGATION_FIELDS
+        }
+        if not obligation["actor"] or not obligation["action"]:
+            raise ValueError("interaction obligation actor and action are required")
+        if any(
+            len(obligation[field]) > MAX_OBLIGATION_CHARS
+            for field in _OBLIGATION_FIELDS[:5]
+        ):
+            raise ValueError("interaction obligation text exceeds its limit")
+        if obligation["status"] not in VALID_OBLIGATION_STATUSES:
+            raise ValueError("interaction obligation status is invalid")
+        if obligation["source_kind"] not in VALID_OBLIGATION_SOURCES:
+            raise ValueError("interaction obligation source_kind is invalid")
+        result.append(obligation)
+    return result
+
+
 def _prior_entry_texts(prior_episode_state: ConversationEpisodeStateDoc, field_name: str) -> list[str]:
     values = prior_episode_state.get(field_name, [])
     if not isinstance(values, list):
@@ -370,6 +442,21 @@ def _prior_string_list(prior_episode_state: ConversationEpisodeStateDoc, field_n
         return return_value
     return_value = [item.strip() for item in values if isinstance(item, str) and item.strip()]
     return return_value
+
+
+def _prior_obligations(
+    prior_episode_state: ConversationEpisodeStateDoc,
+) -> list[dict[str, str]]:
+    """Project stored obligations into the recorder contract without metadata."""
+
+    result: list[dict[str, str]] = []
+    for obligation in prior_episode_state.get("interaction_obligations", []):
+        if not isinstance(obligation, dict):
+            continue
+        if not all(field in obligation for field in _OBLIGATION_FIELDS):
+            continue
+        result.append({field: obligation[field] for field in _OBLIGATION_FIELDS})
+    return result
 
 
 def build_recorder_prior_state(
@@ -395,6 +482,7 @@ def build_recorder_prior_state(
         result[field_name] = _prior_entry_texts(prior_episode_state, field_name)
     for field_name in _STRING_LIST_FIELDS:
         result[field_name] = _prior_string_list(prior_episode_state, field_name)
+    result["interaction_obligations"] = _prior_obligations(prior_episode_state)
     return result
 
 
@@ -444,6 +532,9 @@ def validate_recorder_output(payload: dict) -> dict:
         "assistant_moves": _string_list(payload.get("assistant_moves", []), "assistant_moves"),
         "overused_moves": _string_list(payload.get("overused_moves", []), "overused_moves"),
         "open_loops": _string_list(payload.get("open_loops", []), "open_loops"),
+        "interaction_obligations": _obligation_list(
+            payload.get("interaction_obligations", []),
+        ),
         "resolved_threads": _string_list(payload.get("resolved_threads", []), "resolved_threads"),
         "avoid_reopening": _string_list(payload.get("avoid_reopening", []), "avoid_reopening"),
         "emotional_trajectory": _require_string(

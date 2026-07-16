@@ -110,7 +110,8 @@ def canonical_cognition_output(
             "status": "not_requested",
             "semantic_summary": "no resolver was selected",
         },
-        "residue": "bounded private residue",
+        "selected_bid_reason": "the current episode is grounded",
+        "private_monologue": "I want to acknowledge this clearly.",
         "expression_policy": {
             "visibility": "visible" if route == "speech" else "none",
             "emotional_tone": "composed",
@@ -144,6 +145,7 @@ def canonical_cognition_output(
             "desired_outcome": "maintain continuity",
             "concrete_detail": "use only the current grounded episode",
             "reason": "the current episode establishes the selected route",
+            "private_monologue": "I want to acknowledge this clearly.",
             "target_roles": [],
             "evidence_handles": ["e1"],
             "expected_consequences": ["preserve continuity"],

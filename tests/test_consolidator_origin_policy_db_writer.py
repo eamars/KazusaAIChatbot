@@ -80,10 +80,10 @@ def _state(
         "text_surface_output_v2": {
             "schema_version": "text_surface_output.v2",
             "content_plan": "acknowledge",
+            "content_requirements": ["Acknowledge the current user."],
             "visible_boundaries": [],
             "addressee_plan": ["current user"],
             "style_guidance": "brief",
-            "pacing_guidance": "direct",
             "selected_surface_intent": "acknowledge",
         },
         "new_facts": [
@@ -102,17 +102,7 @@ def _state(
             ),
         },
         "decontexualized_input": "remember tea",
-        "rag_result": {
-            "user_image": {
-                "user_memory_context": {
-                    "stable_patterns": [],
-                    "recent_shifts": [],
-                    "objective_facts": [],
-                    "milestones": [],
-                    "active_commitments": [],
-                }
-            }
-        },
+        "rag_result": {"user_memory_unit_candidates": []},
         "consolidation_origin": origin,
     }
     if enabled_lanes is not None:

@@ -193,8 +193,10 @@ def test_v2_input_rejects_scope_mismatch_before_any_model_call() -> None:
             "channel_scope": "internal",
             "character_role": "character",
             "semantic_scene": "test",
+            "conversation_continuity": "No unresolved public commitment.",
             "semantic_temporal_context": "now",
         },
+        "private_continuity_context": "I remain attentive.",
     }
 
     with pytest.raises(CognitionContractError, match="scope"):

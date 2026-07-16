@@ -210,10 +210,12 @@ def _build_benchmark_payload(case: dict[str, str]) -> dict[str, object]:
         "direct_facts": [],
         "available_actions": [],
         "available_resolver_capabilities": [],
+        "private_continuity_context": "",
         "scene_context": {
             "channel_scope": "internal",
             "character_role": "character",
             "semantic_scene": semantic_text,
+            "conversation_continuity": "",
             "semantic_temporal_context": "immediate",
         },
     }

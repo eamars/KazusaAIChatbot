@@ -27,14 +27,17 @@ class _LLM:
         if "exactly style_guidance" in system:
             result = {"style_guidance": "style"}
         elif "exactly content_plan" in system:
-            result = {"content_plan": "content plan"}
+            result = {
+                "content_plan": "content plan",
+                "content_requirements": ["preserve the current addressee"],
+            }
         elif "exactly visible_boundaries" in system:
             result = {
                 "visible_boundaries": ["visible boundary"],
                 "addressee_plan": ["current participant"],
             }
-        elif "exactly pacing_guidance" in system:
-            result = {"pacing_guidance": "pacing"}
+        elif "exactly visual_directives" in system:
+            result = {"visual_directives": "private image composition"}
         else:
             raise AssertionError("unexpected surface stage")
         return SimpleNamespace(content=json.dumps(result))
@@ -53,6 +56,34 @@ def _state() -> dict[str, object]:
         ),
         "cognition_core_output": cognition_output,
         "action_results": [],
+        "character_profile": _character_profile(),
+    }
+
+
+def _character_profile() -> dict[str, object]:
+    """Build the required wording-only character voice source."""
+
+    return {
+        "name": "Kazusa",
+        "personality_brief": {
+            "logic": "analytical",
+            "tempo": "moderate",
+            "defense": "reserved",
+            "quirks": "occasional hesitation",
+            "taboos": "stay in character",
+        },
+        "linguistic_texture_profile": {
+            "hesitation_density": 0.4,
+            "fragmentation": 0.4,
+            "emotional_leakage": 0.4,
+            "rhythmic_bounce": 0.4,
+            "direct_assertion": 0.4,
+            "softener_density": 0.4,
+            "counter_questioning": 0.4,
+            "formalism_avoidance": 0.4,
+            "abstraction_reframing": 0.4,
+            "self_deprecation": 0.4,
+        },
     }
 
 
@@ -64,6 +95,16 @@ def _services() -> object:
         style_config=object(),
         content_plan_config=object(),
         preference_config=object(),
+    )
+
+
+def _visual_services() -> object:
+    from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+        VisualSurfaceServicesV2,
+    )
+
+    return VisualSurfaceServicesV2(
+        llm=_LLM(),
         visual_config=object(),
     )
 
@@ -156,7 +197,12 @@ async def test_l3_surface_returns_semantic_plan_for_dialog() -> None:
     """Dialog receives an expression plan while retaining final wording ownership."""
 
     monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(l3_surface, "_build_surface_services", _services)
+    monkeypatch.setattr(l3_surface, "_build_text_surface_services", _services)
+    monkeypatch.setattr(
+        l3_surface,
+        "_build_visual_surface_services",
+        _visual_services,
+    )
     async def _style_context(**kwargs: object) -> dict[str, object]:
         del kwargs
         return {
@@ -184,6 +230,11 @@ async def test_l3_surface_returns_semantic_plan_for_dialog() -> None:
         "text_surface_output.v2"
     )
     assert update["text_surface_output_v2"]["content_plan"]
+    assert update["visual_surface_output_v2"] == {
+        "schema_version": "visual_surface_output.v2",
+        "visual_directives": "private image composition",
+        "selected_surface_intent": "acknowledge the grounded episode",
+    }
     assert "action_directives" not in update
 
 

@@ -211,6 +211,7 @@ class SceneContextV2(TypedDict):
     character_role: str
     current_user_role: NotRequired[str]
     semantic_scene: str
+    conversation_continuity: str
     semantic_temporal_context: str
 
 
@@ -281,6 +282,7 @@ class ActionBidV2(TypedDict):
     desired_outcome: str
     concrete_detail: str
     reason: str
+    private_monologue: str
     target_roles: list[RoleRefV2]
     evidence_handles: list[str]
     expected_consequences: list[str]
@@ -299,6 +301,7 @@ class GoalBidDraftV2(TypedDict):
     desired_outcome: str
     concrete_detail: str
     reason: str
+    private_monologue: str
     target_role_handles: list[str]
     evidence_handles: list[str]
     expected_consequences: list[str]
@@ -455,6 +458,7 @@ class CognitionCoreInputV2(TypedDict):
     available_actions: list[ActionAffordanceV2]
     available_resolver_capabilities: list[ResolverAffordanceV2]
     scene_context: SceneContextV2
+    private_continuity_context: str
 
 
 class CognitionCoreOutputV2(TypedDict):
@@ -470,7 +474,8 @@ class CognitionCoreOutputV2(TypedDict):
     action_requests: list[SemanticActionRequestV2]
     resolver_requests: list[ResolverCapabilityRequestV2]
     resolver_progress: ResolverProgressV2
-    residue: str
+    selected_bid_reason: str
+    private_monologue: str
     expression_policy: ExpressionPolicyV2
     diagnostics: CognitionDiagnosticsV2
 
@@ -508,6 +513,7 @@ class TextSurfaceInputV2(TypedDict):
     semantic_relationship: NotRequired[SemanticRelationshipProjectionV2]
     permitted_action_results: list[SemanticActionResultV2]
     interaction_style_context: str
+    character_voice_context: str
 
 
 class TextSurfaceOutputV2(TypedDict):
@@ -515,10 +521,18 @@ class TextSurfaceOutputV2(TypedDict):
 
     schema_version: Literal["text_surface_output.v2"]
     content_plan: str
+    content_requirements: list[str]
     visible_boundaries: list[str]
     addressee_plan: list[str]
     style_guidance: str
-    pacing_guidance: str
+    selected_surface_intent: str
+
+
+class VisualSurfaceOutputV2(TypedDict):
+    """Public V2 terminal visual-surface output contract."""
+
+    schema_version: Literal["visual_surface_output.v2"]
+    visual_directives: str
     selected_surface_intent: str
 
 
@@ -535,12 +549,19 @@ class CognitionCoreServicesV2:
 
 @dataclass(frozen=True)
 class TextSurfaceServicesV2:
-    """Injected four-stage V2 L3 bindings."""
+    """Injected three-stage V2 text-surface bindings."""
 
     llm: LLMInvoker
     style_config: LLMCallConfig
     content_plan_config: LLMCallConfig
     preference_config: LLMCallConfig
+
+
+@dataclass(frozen=True)
+class VisualSurfaceServicesV2:
+    """Injected terminal V2 visual-surface binding."""
+
+    llm: LLMInvoker
     visual_config: LLMCallConfig
 
 
@@ -562,6 +583,7 @@ def validate_cognition_core_input(
             "available_actions",
             "available_resolver_capabilities",
             "scene_context",
+            "private_continuity_context",
         } | ({"relationship_context"} if "relationship_context" in payload else set()),
         "cognition core input",
     )
@@ -601,6 +623,11 @@ def validate_cognition_core_input(
     if not isinstance(payload["scene_context"], Mapping):
         raise CognitionContractError("scene_context must be a mapping")
     _validate_scene_context(payload["scene_context"])
+    _require_bounded_text(
+        payload["private_continuity_context"],
+        "private continuity context",
+        maximum=1000,
+    )
     return dict(payload)  # type: ignore[return-value]
 
 
@@ -620,7 +647,8 @@ def validate_cognition_core_output(
             "action_requests",
             "resolver_requests",
             "resolver_progress",
-            "residue",
+            "selected_bid_reason",
+            "private_monologue",
             "expression_policy",
             "diagnostics",
         } | ({"admitted_bid"} if "admitted_bid" in payload else set())
@@ -662,7 +690,12 @@ def validate_cognition_core_output(
     if "relationship_projection" in payload:
         _validate_relationship_projection(payload["relationship_projection"])
     _validate_diagnostics(payload["diagnostics"])
-    _require_text(payload["residue"], "residue", maximum=1000)
+    _require_text(
+        payload["selected_bid_reason"],
+        "selected bid reason",
+        maximum=1000,
+    )
+    _require_text(payload["private_monologue"], "private monologue", maximum=1000)
     return dict(payload)  # type: ignore[return-value]
 
 
@@ -682,6 +715,7 @@ def validate_text_surface_input(
             "semantic_affect",
             "permitted_action_results",
             "interaction_style_context",
+            "character_voice_context",
         } | ({"primary_bid"} if "primary_bid" in payload else set())
         | ({"semantic_relationship"} if "semantic_relationship" in payload else set()),
         "text surface input",
@@ -690,6 +724,11 @@ def validate_text_surface_input(
         raise CognitionContractError("unsupported text surface input schema")
     _validate_intention(payload["intention"])
     _require_text(payload["interaction_style_context"], "interaction style")
+    _require_text(
+        payload["character_voice_context"],
+        "character voice context",
+        maximum=1500,
+    )
     _validate_canonical_episode(payload["episode"])
     if "primary_bid" in payload:
         _validate_surface_bid(payload["primary_bid"])
@@ -721,10 +760,10 @@ def validate_text_surface_output(
     required = {
         "schema_version",
         "content_plan",
+        "content_requirements",
         "visible_boundaries",
         "addressee_plan",
         "style_guidance",
-        "pacing_guidance",
         "selected_surface_intent",
     }
     _require_exact_keys(payload, required, "text surface output")
@@ -733,10 +772,16 @@ def validate_text_surface_output(
     for field_name in (
         "content_plan",
         "style_guidance",
-        "pacing_guidance",
         "selected_surface_intent",
     ):
         _require_text(payload[field_name], field_name, maximum=1000)
+    requirements = payload["content_requirements"]
+    if not isinstance(requirements, list) or not 1 <= len(requirements) <= 8:
+        raise CognitionContractError("content_requirements must contain 1-8 items")
+    if len(requirements) != len(set(requirements)):
+        raise CognitionContractError("content_requirements contains duplicates")
+    for index, item in enumerate(requirements):
+        _require_text(item, f"content_requirements[{index}]", maximum=500)
     for field_name in ("visible_boundaries", "addressee_plan"):
         if not isinstance(payload[field_name], list):
             raise CognitionContractError(f"{field_name} must be a list")
@@ -746,6 +791,27 @@ def validate_text_surface_output(
                 f"{field_name}[{index}]",
                 maximum=1000,
             )
+    return dict(payload)  # type: ignore[return-value]
+
+
+def validate_visual_surface_output(
+    payload: Mapping[str, Any],
+) -> VisualSurfaceOutputV2:
+    """Validate the bounded terminal V2 visual output."""
+
+    _require_exact_keys(
+        payload,
+        {
+            "schema_version",
+            "visual_directives",
+            "selected_surface_intent",
+        },
+        "visual surface output",
+    )
+    if payload["schema_version"] != "visual_surface_output.v2":
+        raise CognitionContractError("unsupported visual surface output schema")
+    for field_name in ("visual_directives", "selected_surface_intent"):
+        _require_text(payload[field_name], field_name, maximum=1000)
     return dict(payload)  # type: ignore[return-value]
 
 
@@ -846,6 +912,7 @@ def _validate_action_bid(value: Any) -> None:
         "desired_outcome",
         "concrete_detail",
         "reason",
+        "private_monologue",
         "target_roles",
         "evidence_handles",
         "expected_consequences",
@@ -861,6 +928,7 @@ def _validate_action_bid(value: Any) -> None:
         "desired_outcome",
         "concrete_detail",
         "reason",
+        "private_monologue",
         "confidence",
     ):
         _require_text(value[field_name], f"action bid.{field_name}")
@@ -1311,6 +1379,7 @@ def _validate_scene_context(value: Any) -> None:
         "channel_scope",
         "character_role",
         "semantic_scene",
+        "conversation_continuity",
         "semantic_temporal_context",
     }
     if isinstance(value, Mapping) and "current_user_role" in value:
@@ -1319,8 +1388,13 @@ def _validate_scene_context(value: Any) -> None:
         raise CognitionContractError("scene context fields are not exact")
     if value["channel_scope"] not in {"private", "group", "internal"}:
         raise CognitionContractError("scene context channel_scope is invalid")
-    for field_name in required - {"channel_scope"}:
+    for field_name in required - {"channel_scope", "conversation_continuity"}:
         _require_text(value[field_name], f"scene context.{field_name}")
+    _require_bounded_text(
+        value["conversation_continuity"],
+        "scene context.conversation_continuity",
+        maximum=1000,
+    )
 
 
 def _validate_canonical_episode(value: Any) -> CognitiveEpisode:
@@ -1452,4 +1526,11 @@ def _require_text(value: Any, label: str, maximum: int = 500) -> None:
     """Require bounded non-empty semantic text."""
 
     if not isinstance(value, str) or not value.strip() or len(value) > maximum:
+        raise CognitionContractError(f"{label} is invalid")
+
+
+def _require_bounded_text(value: Any, label: str, maximum: int) -> None:
+    """Require a bounded string while allowing an empty semantic window."""
+
+    if not isinstance(value, str) or len(value) > maximum:
         raise CognitionContractError(f"{label} is invalid")

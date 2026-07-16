@@ -30,6 +30,23 @@ class ConversationProgressEntry(TypedDict):
     age_hint: str
 
 
+class ConversationProgressObligation(TypedDict):
+    """Prompt-facing interaction obligation with explicit semantic roles."""
+
+    actor: str
+    action: str
+    beneficiary: str
+    precondition: str
+    expected_outcome: str
+    status: Literal["active", "resolved", "superseded"]
+    source_kind: Literal[
+        "user_input",
+        "assistant_response",
+        "mutual_exchange",
+    ]
+    age_hint: str
+
+
 class ConversationProgressPromptDoc(TypedDict):
     """Compact prompt-facing progress projection."""
 
@@ -47,6 +64,7 @@ class ConversationProgressPromptDoc(TypedDict):
     assistant_moves: list[str]
     overused_moves: list[str]
     open_loops: list[ConversationProgressEntry]
+    interaction_obligations: list[ConversationProgressObligation]
     resolved_threads: list[ConversationProgressEntry]
     avoid_reopening: list[ConversationProgressEntry]
     emotional_trajectory: str

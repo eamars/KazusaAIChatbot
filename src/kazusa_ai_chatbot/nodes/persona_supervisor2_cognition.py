@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from datetime import timezone
 from typing import Any
 
+from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.action_spec.registry import (
     ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
     build_initial_action_capabilities,
@@ -186,11 +187,17 @@ def build_cognition_input_from_global_state(
         "direct_facts": _typed_direct_facts(state.get("direct_facts")),
         "available_actions": _available_action_affordances(state),
         "available_resolver_capabilities": _available_resolver_affordances(state),
+        "private_continuity_context": _text(
+            state.get("internal_monologue_residue_context")
+        )[:1000],
         "scene_context": {
             "channel_scope": channel_scope,
             "character_role": "character",
             "current_user_role": "participant",
-            "semantic_scene": _semantic_scene_context(state, semantic_text),
+            "semantic_scene": semantic_text[:500],
+            "conversation_continuity": _conversation_progress_text(
+                state.get("conversation_progress")
+            )[:1000],
             "semantic_temporal_context": "immediate",
         },
     }
@@ -224,7 +231,16 @@ async def call_cognition_subgraph(
         mutable_state=mutable_state,
         character_state=character_state,
     )
-    output = await run_cognition(cognition_input, build_cognition_core_services())
+    trace_token = llm_tracing.bind_trace_id(
+        str(state.get("llm_trace_id") or ""),
+    )
+    try:
+        output = await run_cognition(
+            cognition_input,
+            build_cognition_core_services(),
+        )
+    finally:
+        llm_tracing.reset_trace_id(trace_token)
     if commit:
         await _commit_cognition_state(output)
     update = _project_output_to_global_state(output, state)
@@ -299,8 +315,8 @@ def _project_output_to_global_state(
         "resolver_capability_requests": output["resolver_requests"],
         "cognition_resolver_progress": output["resolver_progress"],
         "action_specs": _materialize_v2_action_requests(output, state),
-        "internal_monologue": output["residue"],
-        "interaction_subtext": output["residue"],
+        "internal_monologue": output["private_monologue"],
+        "interaction_subtext": output["selected_bid_reason"],
         "emotional_appraisal": dominant["emotion"] if dominant else "composed",
         "character_intent": output["intention"]["intention"],
         "logical_stance": output["intention"]["reason"],
@@ -648,24 +664,6 @@ def _semantic_episode_text(state: Mapping[str, Any]) -> str:
     return "no grounded semantic episode"
 
 
-def _semantic_scene_context(
-    state: Mapping[str, Any],
-    current_event: str,
-) -> str:
-    """Combine current evidence with bounded conversation continuity."""
-
-    progress = _conversation_progress_text(state.get("conversation_progress"))
-    if not progress:
-        return current_event[:500]
-    current_summary = current_event[:180].strip()
-    progress_budget = 500 - len(current_summary) - 34
-    progress_summary = progress[:max(1, progress_budget)].strip()
-    return (
-        f"Current event: {current_summary} | "
-        f"Conversation continuity: {progress_summary}"
-    )[:500]
-
-
 def _conversation_progress_text(value: object) -> str:
     """Render only prompt-safe semantic fields from conversation progress."""
 
@@ -706,6 +704,33 @@ def _conversation_progress_text(value: object) -> str:
         ]
         if texts:
             fragments.append(f"{label}: {', '.join(texts)}")
+    obligations = value.get("interaction_obligations")
+    if isinstance(obligations, list):
+        obligation_texts = []
+        for obligation in obligations:
+            if not isinstance(obligation, Mapping):
+                continue
+            actor = _text(obligation.get("actor"))
+            action = _text(obligation.get("action"))
+            if not actor or not action:
+                continue
+            details = [f"actor={actor}", f"action={action}"]
+            for field_name in (
+                "beneficiary",
+                "precondition",
+                "expected_outcome",
+                "status",
+                "source_kind",
+                "age_hint",
+            ):
+                detail = _text(obligation.get(field_name))
+                if detail:
+                    details.append(f"{field_name}={detail}")
+            obligation_texts.append(", ".join(details))
+        if obligation_texts:
+            fragments.append(
+                f"interaction obligations: {' | '.join(obligation_texts)}"
+            )
     return "; ".join(fragments)
 
 

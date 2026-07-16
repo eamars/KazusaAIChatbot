@@ -44,6 +44,34 @@ def _state(*, channel_type: str = "private") -> dict[str, Any]:
         "cognitive_episode": episode,
         "cognition_core_output": canonical_cognition_output(),
         "action_results": [],
+        "character_profile": _character_profile(),
+    }
+
+
+def _character_profile() -> dict[str, Any]:
+    """Build the required wording-only character voice source."""
+
+    return {
+        "name": "Kazusa",
+        "personality_brief": {
+            "logic": "analytical",
+            "tempo": "moderate",
+            "defense": "reserved",
+            "quirks": "occasional hesitation",
+            "taboos": "stay in character",
+        },
+        "linguistic_texture_profile": {
+            "hesitation_density": 0.4,
+            "fragmentation": 0.4,
+            "emotional_leakage": 0.4,
+            "rhythmic_bounce": 0.4,
+            "direct_assertion": 0.4,
+            "softener_density": 0.4,
+            "counter_questioning": 0.4,
+            "formalism_avoidance": 0.4,
+            "abstraction_reframing": 0.4,
+            "self_deprecation": 0.4,
+        },
     }
 
 
@@ -133,10 +161,10 @@ async def test_surface_handler_passes_loaded_style_to_v2_planner(
         return {
             "schema_version": "text_surface_output.v2",
             "content_plan": "Acknowledge the exchange.",
+            "content_requirements": ["Address the current participant."],
             "visible_boundaries": [],
             "addressee_plan": ["current participant"],
             "style_guidance": "brief",
-            "pacing_guidance": "one sentence",
             "selected_surface_intent": "acknowledge the current participant",
         }
 
@@ -153,6 +181,11 @@ async def test_surface_handler_passes_loaded_style_to_v2_planner(
         "Current participant style speech: Prefer short direct sentences."
     )
     assert "internal-user-id" not in captured["interaction_style_context"]
+    voice = captured["character_voice_context"]
+    assert "fragmentation=" not in voice
+    assert "hesitation_density=" not in voice
+    assert "0.4" not in voice
+    assert len(voice) > 300
 
 
 def test_empty_style_context_has_explicit_semantic_fallback() -> None:

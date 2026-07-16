@@ -34,14 +34,17 @@ class _PromptCaptureLLM:
         if "exactly style_guidance" in system:
             result = {"style_guidance": "bounded"}
         elif "exactly content_plan" in system:
-            result = {"content_plan": "bounded"}
+            result = {
+                "content_plan": "bounded",
+                "content_requirements": ["preserve the current addressee"],
+            }
         elif "exactly visible_boundaries" in system:
             result = {
                 "visible_boundaries": ["bounded"],
                 "addressee_plan": ["bounded"],
             }
         else:
-            result = {"pacing_guidance": "bounded"}
+            raise AssertionError("unexpected text-surface stage")
         return SimpleNamespace(content=json.dumps(result))
 
 
@@ -79,6 +82,7 @@ def _surface_payload() -> dict[str, object]:
         "semantic_affect": [],
         "permitted_action_results": [],
         "interaction_style_context": "brief and natural",
+        "character_voice_context": "reserved, analytical, and warm",
     }
 
 
@@ -99,7 +103,6 @@ async def test_surface_episode_allows_only_semantic_history_summaries() -> None:
         style_config=make_llm_call_config("history_style"),
         content_plan_config=make_llm_call_config("history_content"),
         preference_config=make_llm_call_config("history_preference"),
-        visual_config=make_llm_call_config("history_visual"),
     )
     await run_text_surface_planning(_surface_payload(), services)
 

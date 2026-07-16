@@ -17,6 +17,7 @@ from kazusa_ai_chatbot.nodes.dialog_agent import (
     dialog_agent,
     dialog_generator,
 )
+from tests.cognition_core_v2_test_helpers import canonical_episode
 
 
 @pytest.fixture(autouse=True)
@@ -38,6 +39,15 @@ def _stub_dialog_event_logging(monkeypatch):
             recorder_name,
             AsyncMock(),
         )
+    compliance_llm = MagicMock()
+    compliance_llm.ainvoke = AsyncMock(
+        return_value=AIMessage(content='{"aligned": true, "issues": []}')
+    )
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_compliance_llm",
+        compliance_llm,
+    )
 
 
 def _text_surface_output() -> dict[str, object]:
@@ -46,10 +56,10 @@ def _text_surface_output() -> dict[str, object]:
     return {
         "schema_version": "text_surface_output.v2",
         "content_plan": "Greet the user warmly.",
+        "content_requirements": ["Address the current user."],
         "visible_boundaries": [],
         "addressee_plan": ["current user"],
         "style_guidance": "warm and concise",
-        "pacing_guidance": "one short message",
         "selected_surface_intent": "acknowledge",
     }
 
@@ -87,6 +97,10 @@ def _base_global_state() -> dict[str, object]:
     return {
         "internal_monologue": "thinking about greeting",
         "text_surface_output_v2": _text_surface_output(),
+        "cognitive_episode": canonical_episode(
+            episode_id="dialog-agent-test",
+            content="Greet the current user.",
+        ),
         "chat_history_wide": [],
         "chat_history_recent": [],
         "debug_modes": {},
@@ -164,10 +178,10 @@ async def test_dialog_generator_forwards_native_surface_without_legacy_fields(
     assert set(human_payload["text_surface_output_v2"]) == {
         "schema_version",
         "content_plan",
+        "content_requirements",
         "visible_boundaries",
         "addressee_plan",
         "style_guidance",
-        "pacing_guidance",
         "selected_surface_intent",
     }
     assert human_payload["text_surface_output_v2"]["schema_version"] == (

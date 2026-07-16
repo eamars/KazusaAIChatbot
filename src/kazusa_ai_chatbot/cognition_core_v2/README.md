@@ -14,6 +14,14 @@ event identity, retention, and activation-cache recomputation. Emotion rows are
 derived projections: every activation retains typed roots, phase, trend, score,
 cause status, and timestamps.
 
+Evidence retention is deterministic and bounded: relationship state keeps the
+newest eight unique rows, while causal entities keep their first/root row and
+newest seven unique rows. A terminal meaning may repeat idempotently only in
+the appraisal batch that produced that terminal transition; later batches
+still observe strict terminal immutability. `relationship_connection` is owned
+by the typed desired-versus-perceived closeness gap and is satisfied when that
+gap closes.
+
 The twenty-one emotion formulas are exercised from typed natural causes in
 `tests/test_cognition_core_v2_emotion_lifecycle.py`. Cross-scope character
 constraints and optional relationship context are passed as dedicated
@@ -25,15 +33,56 @@ for the character singleton. The test database harness requires the exact
 `_test_kazusa_live_llm` name, validates seeded V2 state, and gives every
 mutable test row a unique owner.
 
-The public Stage 2 surface is the pair `run_cognition(...)` and
-`run_text_surface_planning(...)`. Cognition runs deterministic preparation,
-scoped semantic appraisal, dependency-ready goal branches, complete-bid
-collapse, route validation, and one replacement-state update. The caller
-commits that update before action, surface, resolver, or dialog work.
+The public Stage 2 surface consists of `run_cognition(...)`,
+`run_text_surface_planning(...)`, and `run_visual_surface_planning(...)`.
+Cognition runs deterministic preparation, scoped semantic appraisal,
+dependency-ready goal branches, complete-bid collapse, route validation, and
+one replacement-state update. The caller commits that update before action,
+surface, resolver, or dialog work.
 
-The text-surface API receives only semantic intention, bounded affect and
-relationship projections, complete-bid projections, and permitted action
-results. It owns expression planning; dialog owns final wording.
+Current-event scene text, public conversation continuity, and private residue
+continuity are separate inputs. Private continuity reaches goal-cognition
+branches only. Branch bids distinguish analytic `reason` from first-person
+`private_monologue`; public output exposes that distinction as
+`selected_bid_reason` and `private_monologue`.
+
+Goal-bid output uses an exact route-to-capability-field matrix. A malformed bid
+receives at most one LLM-owned schema repair while deterministic validation
+remains strict. A still-failed required branch raises an execution error rather
+than becoming an empty workspace and character silence. Initial and repaired
+goal outputs are eligible for the protected turn trace.
+
+The shared surface input receives semantic intention, bounded affect and
+relationship projections, complete-bid projections, permitted action results,
+interaction style, and bounded character voice. The three-call text planner
+exposes raw character voice only to speech-style planning; content and
+preference planning cannot observe it. Speech-style output is limited to
+lexical register and wording, sentence length and shape, rhythm, hesitation,
+and punctuation; it never proposes details, topics, examples, images, actions,
+claims, inferences, or content beats. The exact text output contains no raw
+voice or visual directives. The independent one-call visual planner may
+observe raw voice and produces image-generation directives as terminal private
+evidence; it has no downstream image or dialog model. Raw episode traces
+retain those directives for audit, while every model-facing consolidation
+projection excludes their fragments.
+
+Content planning and dialog preserve supplied descriptors, attributes,
+qualifiers, quantities, polarity, and comparative degree. Non-conflicting
+elaboration may add context without transforming or compounding an attribute
+into a different claim. They preserve explicit entity and target specificity;
+elaboration cannot generalize, euphemize, narrow, broaden, or replace a
+supplied referent. Acceptance, refusal, permission, and consent remain bounded
+to the exact source-requested act and scope; indefinite or unrestricted
+permission cannot substitute for a specific permission. When source meaning
+covers only the current occurrence, the planned and rendered output remains
+silent about future claims, promises, conditions, expectations, threats,
+habits, rules, and contrastive or teasing additions. Explicit future content
+is preserved when the source supplies or requires it. Dialog owns literal
+spoken or typed wording. Its existing semantic verifier receives only the
+exact text-surface output, candidate dialog, and current model-visible percept
+rows within the shared 24,000-character surface-prompt bound. A negative
+verdict may trigger one grounded repair. The protected turn trace records the
+initial dialog, verifier verdict, and repair output as distinct stages.
 
 ## Document Control
 
@@ -56,6 +105,7 @@ execution, dialog wording, and adapter delivery remain downstream owners.
 
 - `run_cognition(...)`
 - `run_text_surface_planning(...)`
+- `run_visual_surface_planning(...)`
 - `validate_cognition_input(...)`
 - `validate_cognition_core_output(...)`
 

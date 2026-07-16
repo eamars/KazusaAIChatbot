@@ -14,7 +14,7 @@ from kazusa_ai_chatbot.config import (
     COGNITION_LLM_MODEL,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
-    _build_surface_services,
+    _build_text_surface_services,
 )
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 from tests.llm_trace import write_llm_trace
@@ -290,7 +290,7 @@ async def test_live_content_plan_preserves_kazusa_as_victory_subject(
 
     del ensure_live_llm
     calls: list[dict] = []
-    services = _build_surface_services()
+    services = _build_text_surface_services()
     capturing_llm = _CapturingLiveLLM(services.llm, calls)
     token = set_content_plan_agent_llm(
         LLMStageBinding(capturing_llm, services.content_plan_config)

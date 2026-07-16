@@ -8,6 +8,18 @@ import pytest
 
 from kazusa_ai_chatbot.llm_interface.contracts import BackendDescriptor, LLMResponse
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
+from tests.cognition_core_v2_test_helpers import canonical_episode
+
+
+@pytest.fixture(autouse=True)
+def _aligned_dialog_compliance(monkeypatch) -> None:
+    """Keep mention tests focused on delivery-neutral authored text."""
+
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_compliance_llm",
+        _CapturingLLM({"aligned": True, "issues": []}),
+    )
 
 
 class _CapturingLLM:
@@ -43,13 +55,17 @@ def _dialog_state() -> dict:
 
     return {
         "internal_monologue": "answer directly",
+        "cognitive_episode": canonical_episode(
+            episode_id="dialog-mention-target",
+            content="Address the current user.",
+        ),
         "text_surface_output_v2": {
             "schema_version": "text_surface_output.v2",
             "content_plan": "answer",
+            "content_requirements": ["address the current user"],
             "visible_boundaries": [],
             "addressee_plan": ["current user"],
             "style_guidance": "brief",
-            "pacing_guidance": "one message",
             "selected_surface_intent": "answer",
         },
         "chat_history_wide": [],

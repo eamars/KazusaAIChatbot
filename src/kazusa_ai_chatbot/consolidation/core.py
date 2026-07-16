@@ -92,18 +92,15 @@ def _build_existing_dedup_keys(global_state: GlobalPersonaState) -> set[str]:
         Stable lower-cased dedup keys for known memory rows.
     """
 
-    rag_result = global_state.get("rag_result")
+    rag_result = global_state["rag_result"]
     if not isinstance(rag_result, dict):
-        return set()
-    user_image = rag_result["user_image"]
-    user_memory_context = user_image["user_memory_context"]
+        raise TypeError("consolidation rag_result must be a mapping")
     dedup_keys: set[str] = set()
-
-    for entries in user_memory_context.values():
-        if not isinstance(entries, list):
-            continue
-        for entry in entries:
-            _record_existing_dedup_key(entry, dedup_keys)
+    candidates = rag_result["user_memory_unit_candidates"]
+    if not isinstance(candidates, list):
+        raise TypeError("user_memory_unit_candidates must be a list")
+    for candidate in candidates:
+        _record_existing_dedup_key(candidate, dedup_keys)
 
     return dedup_keys
 

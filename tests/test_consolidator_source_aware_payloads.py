@@ -81,13 +81,6 @@ def _state() -> dict[str, Any]:
         State fields consumed by source-aware prompt handlers.
     """
     turn_clock = build_turn_clock("2026-05-10 21:00:00")
-    user_memory_context = {
-        "stable_patterns": [],
-        "recent_shifts": [],
-        "objective_facts": [],
-        "active_commitments": [],
-        "milestones": [],
-    }
     state: dict[str, Any] = {
         "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
         "local_time_context": turn_clock["local_time_context"],
@@ -113,10 +106,10 @@ def _state() -> dict[str, Any]:
         "text_surface_output_v2": {
             "schema_version": "text_surface_output.v2",
             "content_plan": "Revisit the missed promise.",
+            "content_requirements": ["Clarify the unresolved promise."],
             "visible_boundaries": [],
             "addressee_plan": ["current user"],
             "style_guidance": "brief and grounded",
-            "pacing_guidance": "direct",
             "selected_surface_intent": "clarify the unresolved promise",
         },
         "internal_monologue": "The missed promise still feels unresolved.",
@@ -131,7 +124,6 @@ def _state() -> dict[str, Any]:
         },
         "rag_result": {
             "answer": "",
-            "user_image": {"user_memory_context": user_memory_context},
             "user_memory_unit_candidates": [],
             "memory_evidence": [],
             "recall_evidence": [],

@@ -27,6 +27,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     EVIDENCE_SOURCE_QUESTION_IDS,
     EventComparisonResultV2,
     TextSurfaceServicesV2,
+    VisualSurfaceServicesV2,
     validate_cognition_core_input,
     validate_cognition_core_output,
     validate_text_surface_input,
@@ -113,8 +114,10 @@ def _input() -> dict[str, object]:
             "channel_scope": "private",
             "character_role": "companion",
             "semantic_scene": "quiet private greeting",
+            "conversation_continuity": "No unresolved public commitment.",
             "semantic_temporal_context": "immediate",
         },
+        "private_continuity_context": "I remain calmly attentive.",
     }
 
 
@@ -146,6 +149,9 @@ def test_frozen_public_contract_fields_are_exact() -> None:
         "style_config",
         "content_plan_config",
         "preference_config",
+    ]
+    assert [field.name for field in fields(VisualSurfaceServicesV2)] == [
+        "llm",
         "visual_config",
     ]
     assert set(CollapsedIntentionV2.__annotations__) == {
@@ -348,6 +354,7 @@ def test_text_surface_rejects_private_state_and_branch_fields() -> None:
         "semantic_affect": [],
         "permitted_action_results": [],
         "interaction_style_context": "brief and natural",
+        "character_voice_context": "reserved, analytical, and warm",
     }
     validate_text_surface_input(payload)
 
@@ -376,10 +383,10 @@ def test_text_surface_output_validates_every_list_entry() -> None:
     payload = {
         "schema_version": "text_surface_output.v2",
         "content_plan": "acknowledge the current percept",
+        "content_requirements": ["Preserve the current addressee."],
         "visible_boundaries": ["keep the response concise"],
         "addressee_plan": ["address the current participant"],
         "style_guidance": "natural",
-        "pacing_guidance": "brief",
         "selected_surface_intent": "acknowledge",
     }
     validate_text_surface_output(payload)
@@ -415,13 +422,13 @@ async def test_surface_stage_rejects_legacy_response_fallbacks() -> None:
         "semantic_affect": [],
         "permitted_action_results": [],
         "interaction_style_context": "brief and natural",
+        "character_voice_context": "reserved, analytical, and warm",
     }
     services = TextSurfaceServicesV2(
         llm=_FallbackSurfaceLLM(),
         style_config=make_llm_call_config("v2_style"),
         content_plan_config=make_llm_call_config("v2_content"),
         preference_config=make_llm_call_config("v2_preference"),
-        visual_config=make_llm_call_config("v2_visual"),
     )
 
     with pytest.raises(ValueError, match="fields are not exact"):

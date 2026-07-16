@@ -88,6 +88,9 @@ class RecorderInput(TypedDict):
     ambient_evidence_summary: str
     incoming_residue_context: str
     source_reliability_notes: list[str]
+    visible_outcome_summary: str
+    surface_content_plan: str
+    visible_boundaries: list[str]
 
 
 class RecorderValidationResult(TypedDict):

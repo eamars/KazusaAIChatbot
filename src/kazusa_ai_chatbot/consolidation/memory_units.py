@@ -68,11 +68,14 @@ logger = logging.getLogger(__name__)
 
 def _json_payload(state: ConsolidatorState) -> dict:
     rag_result = state["rag_result"]
-    user_image = rag_result["user_image"]
-    rag_user_memory_context = user_image["user_memory_context"]
-    projected_memory_context = project_tool_result_for_llm(rag_user_memory_context)
-    if not isinstance(projected_memory_context, dict):
-        projected_memory_context = {}
+    if not isinstance(rag_result, dict):
+        raise TypeError("consolidation rag_result must be a mapping")
+    rag_candidates = rag_result["user_memory_unit_candidates"]
+    if not isinstance(rag_candidates, list):
+        raise TypeError("user_memory_unit_candidates must be a list")
+    projected_memory_candidates = project_tool_result_for_llm(rag_candidates)
+    if not isinstance(projected_memory_candidates, list):
+        raise TypeError("projected memory candidates must be a list")
 
     local_datetime = state["local_time_context"]["current_local_datetime"]
     return_value = {
@@ -93,7 +96,7 @@ def _json_payload(state: ConsolidatorState) -> dict:
             state["chat_history_recent"],
             character_name=state.get("character_name", ""),
         ),
-        "rag_user_memory_context": projected_memory_context,
+        "rag_user_memory_unit_candidates": projected_memory_candidates,
         "new_facts_evidence": project_tool_result_for_llm(
             state["new_facts"]
         ),
@@ -118,10 +121,11 @@ def _rag_surfaced_memory_units(state: ConsolidatorState) -> list[dict]:
     """
 
     rag_result = state["rag_result"]
+    if not isinstance(rag_result, dict):
+        raise TypeError("consolidation rag_result must be a mapping")
     surfaced_units = rag_result["user_memory_unit_candidates"]
     if not isinstance(surfaced_units, list):
-        return_value = []
-        return return_value
+        raise TypeError("user_memory_unit_candidates must be a list")
     valid_units = [unit for unit in surfaced_units if isinstance(unit, dict)]
     return valid_units
 
@@ -564,7 +568,7 @@ _EXTRACTOR_PROMPT = '''\
 6. `final_dialog` 在 `user_message` 中是可见回复，在 `internal_thought` 中是私有 finalization。
 7. `new_facts_evidence` 和 `future_promises_evidence` 是上游证据提示，不是必须照抄的输出。
 8. `internal_monologue`、`emotional_appraisal`、`interaction_subtext`、`subjective_appraisal_evidence` 只用于理解 `{character_name}` 如何看待已确认事实，不可单独当作用户事实。
-9. 对照 `rag_user_memory_context`。只有本轮带来新事实、更清楚的细节或新的未来互动含义时，才生成 memory_unit。
+9. 对照 `rag_user_memory_unit_candidates`。只有本轮带来新事实、更清楚的细节或新的未来互动含义时，才生成 memory_unit。
 
 # 候选记忆准入
 - 只保存具体事件、决定、偏好、承诺、可复用行为模式或重要转折。
@@ -641,13 +645,9 @@ human payload 是以下 JSON：
     "logical_stance": "CONFIRM | REFUSE | TENTATIVE | DIVERGE | CHALLENGE",
     "character_intent": "本轮意图标签",
     "chat_history_recent": ["[YYYY-MM-DD HH:MM] 用户显示名或 {character_name}: 消息文本"],
-    "rag_user_memory_context": {{
-        "stable_patterns": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "可选本地 YYYY-MM-DD HH:MM"}}],
-        "recent_shifts": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "可选本地 YYYY-MM-DD HH:MM"}}],
-        "objective_facts": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "可选本地 YYYY-MM-DD HH:MM"}}],
-        "milestones": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "可选本地 YYYY-MM-DD HH:MM"}}],
-        "active_commitments": [{{"fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "可选本地 YYYY-MM-DD HH:MM"}}]
-    }},
+    "rag_user_memory_unit_candidates": [
+        {{"unit_id": "...", "unit_type": "...", "dedup_key": "...", "fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "可选本地 YYYY-MM-DD HH:MM"}}
+    ],
     "new_facts_evidence": [{{"fact": "lane specialist output"}}],
     "future_promises_evidence": [{{"action": "future promise or scheduled action", "due_time": "可选本地 YYYY-MM-DD HH:MM"}}],
     "subjective_appraisal_evidence": ["relationship/appraisal evidence text"]

@@ -10,20 +10,28 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     TextSurfaceServicesV2,
+    VisualSurfaceServicesV2,
 )
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
-STYLE_SYSTEM_PROMPT = '''Choose bounded style guidance from the supplied
+STYLE_SYSTEM_PROMPT = '''Choose bounded speech-safe style guidance from the
 expression policy, semantic affect, semantic relationship, and interaction
-style context. Treat the visible episode, selected intention, primary bid,
-supporting bids, and permitted action results as grounding constraints.
-Do not write final dialogue. Write newly generated free text in Simplified
-Chinese while preserving quoted user text, proper nouns, code, URLs, and
-schema or enum tokens when needed. Treat character-owned reflection or
-internal observation as evidence, never as live user speech. Do not copy
-source-packet headings, timestamps, transport summaries, schema keys, or
-operational metadata.
+style context. Use character_voice_context only for character wording and
+cadence. Its physical or visual traits must never become narrated action,
+stage direction, camera direction, scene direction, or performance cues in
+text. Return guidance only for lexical register and wording, sentence length
+and shape, rhythm, hesitation, and punctuation.
+style_guidance must never suggest any detail, topic, example, image, action,
+claim, inference, or content beat to add, even optionally. It must not select
+or alter semantic content.
+Treat the visible episode, selected intention, primary bid, supporting bids,
+and permitted action results as grounding constraints.
+Do not write final dialogue. Write newly generated free text in Simplified Chinese while
+preserving quoted user text, proper nouns, code, URLs, and schema or enum
+tokens when needed. Treat character-owned reflection or internal observation
+as evidence, never as live user speech. Do not copy source-packet headings,
+timestamps, transport summaries, schema keys, or operational metadata.
 
 # Output Format
 Return exactly one JSON object with exactly style_guidance. Its value must be
@@ -51,28 +59,50 @@ async def run_style_stage(
     return _bounded_text(parsed["style_guidance"], "style guidance", 1000)
 
 
-CONTENT_PLAN_SYSTEM_PROMPT = '''
-Plan visible content from the selected semantic intention, primary bid,
-supporting bids, permitted details, visible episode,
-semantic affect, semantic relationship, and permitted action results. Treat
-the expression policy and interaction style context as constraints.
-Do not write final dialogue. Write newly generated free text in Simplified
-Chinese while preserving quoted user text, proper nouns, code, URLs, and
-schema or enum tokens when needed. Treat character-owned reflection or
-internal observation as evidence, never as live user speech. Do not copy
-source-packet headings, timestamps, transport summaries, schema keys, or
-operational metadata.
+CONTENT_PLAN_SYSTEM_PROMPT = '''Plan speech-safe visible content from the
+selected semantic intention, primary bid, supporting bids, permitted details,
+visible episode, semantic affect, semantic relationship, and permitted action
+results. Treat the expression policy and interaction style context as
+constraints. Preserve the current user's requested response operation,
+including whether the response should answer, infer, explain, ask, accept,
+refuse, or negotiate. Preserve every actor, action, target or beneficiary,
+semantic claim, condition, required content beat, present or future time scope,
+topic, and visible limit. Preserve source descriptors, attributes, qualifiers,
+quantities, polarity, and comparative degree. Non-conflicting elaboration is
+allowed, but it must not transform, replace, or compound a supplied attribute
+into a different claim. Preserve explicit entity and target specificity.
+Never generalize, euphemize, narrow, broaden, or replace a supplied referent.
+Acceptance, refusal, permission, and consent must remain bounded to the exact
+source-requested act and scope. Indefinite or unrestricted permission must not
+substitute for a specific permission.
+When source meaning is limited to the current occurrence, output
+must remain silent about future claims, promises, conditions, expectations,
+threats, habits, or rules, including contrastive or teasing additions.
+Preserve explicit future content when the source actually supplies or requires
+it. Do not substitute a different operation, reverse a semantic role, invent
+a condition or future rule, or introduce an unrelated topic. Record these
+invariants as explicit content requirements for the final renderer.
+Physical-action topics may be discussed, accepted, refused, or negotiated in
+words, while the visible text remains literal speech rather than narrated
+execution. Do not write final dialogue. Write newly generated free text in
+Simplified Chinese while preserving quoted user text, proper nouns,
+code, URLs, and schema or enum tokens when needed. Treat character-owned
+reflection or internal observation as evidence, never as live user speech. Do
+not copy source-packet headings, timestamps, transport summaries, schema keys,
+or operational metadata.
 
 # Output Format
-Return exactly one JSON object with exactly content_plan. Its value must be
-one non-empty string of at most 1000 characters.'''
+Return exactly one JSON object with exactly content_plan and
+content_requirements. content_plan must be one non-empty string of at most
+1000 characters. content_requirements must be a duplicate-free list of one to
+eight non-empty semantic requirement strings of at most 500 characters each.'''
 
 
 async def run_content_plan_stage(
     payload: Mapping[str, Any],
     services: TextSurfaceServicesV2,
-) -> str:
-    """Run the stage-local content prompt and validate its exact field."""
+) -> tuple[str, list[str]]:
+    """Run the content prompt and return its plan and semantic requirements."""
 
     prompt_text = _surface_prompt_text(payload)
     content_plan_llm = services.llm
@@ -84,9 +114,17 @@ async def run_content_plan_stage(
         config=services.content_plan_config,
     )
     parsed = parse_llm_json_output(response.content)
-    if not isinstance(parsed, Mapping) or set(parsed) != {"content_plan"}:
+    if not isinstance(parsed, Mapping) or set(parsed) != {
+        "content_plan",
+        "content_requirements",
+    }:
         raise ValueError("content-plan stage fields are not exact")
-    return _bounded_text(parsed["content_plan"], "content plan", 1000)
+    content_plan = _bounded_text(parsed["content_plan"], "content plan", 1000)
+    content_requirements = _bounded_text_list(
+        parsed["content_requirements"],
+        "content requirements",
+    )
+    return content_plan, content_requirements
 
 
 PREFERENCE_SYSTEM_PROMPT = '''Choose preference-sensitive boundaries and an
@@ -138,25 +176,29 @@ async def run_preference_stage(
     )
 
 
-VISUAL_SYSTEM_PROMPT = '''Choose pacing and visual-directive guidance from the
-selected intention, visible episode, projected bids, expression policy,
-semantic affect, semantic relationship, permitted action results, and
-interaction style context. Treat every field as a bounded semantic constraint.
-Do not write final dialogue. Write newly generated free text in Simplified
-Chinese while preserving quoted user text, proper nouns, code, URLs, and
-schema or enum tokens when needed. Treat character-owned reflection or
-internal observation as evidence, never as live user speech. Do not copy
+VISUAL_SYSTEM_PROMPT = '''Create image-generation visual_directives for a
+terminal image surface from the selected intention, visible episode, projected
+bids, expression policy, semantic affect, semantic relationship, permitted
+action results, interaction style context, and character_voice_context. The
+directives may include physically visible character traits, pose, expression,
+composition, environment, and scene atmosphere that serve the selected
+surface intent. They are private image-oriented instructions, not text to send
+to the user, dialog guidance, or an instruction to invoke another model or
+handler. Do not write final dialogue. Write newly generated free text in
+Simplified Chinese while preserving quoted user text, proper nouns, code,
+URLs, and schema or enum tokens when needed. Treat character-owned reflection
+or internal observation as evidence, never as live user speech. Do not copy
 source-packet headings, timestamps, transport summaries, schema keys, or
 operational metadata.
 
 # Output Format
-Return exactly one JSON object with exactly pacing_guidance. Its value must be
-one non-empty string of at most 1000 characters.'''
+Return exactly one JSON object with exactly visual_directives. Its value must
+be one non-empty string of at most 1000 characters.'''
 
 
 async def run_visual_stage(
     payload: Mapping[str, Any],
-    services: TextSurfaceServicesV2,
+    services: VisualSurfaceServicesV2,
 ) -> str:
     """Run the stage-local visual prompt and validate its exact field."""
 
@@ -170,9 +212,14 @@ async def run_visual_stage(
         config=services.visual_config,
     )
     parsed = parse_llm_json_output(response.content)
-    if not isinstance(parsed, Mapping) or set(parsed) != {"pacing_guidance"}:
+    if not isinstance(parsed, Mapping) or set(parsed) != {"visual_directives"}:
         raise ValueError("visual stage fields are not exact")
-    return _bounded_text(parsed["pacing_guidance"], "pacing guidance", 1000)
+    visual_directives = _bounded_text(
+        parsed["visual_directives"],
+        "visual directives",
+        1000,
+    )
+    return visual_directives
 
 
 def _surface_prompt_text(payload: Mapping[str, Any]) -> str:

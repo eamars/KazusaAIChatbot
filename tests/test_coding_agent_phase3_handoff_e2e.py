@@ -1204,12 +1204,12 @@ async def _fake_l3_text_surface_handler(state: dict[str, Any]) -> dict[str, Any]
         "text_surface_output_v2": {
             "schema_version": "text_surface_output.v2",
             "content_plan": content_plan,
+            "content_requirements": [content_plan],
             "visible_boundaries": [
                 "Describe only the accepted-task state already returned."
             ],
             "addressee_plan": ["current user"],
             "style_guidance": "brief and direct",
-            "pacing_guidance": "one concise response",
             "selected_surface_intent": (
                 "deliver accepted coding result"
                 if result_ready

@@ -14,6 +14,10 @@ from typing import Any, NotRequired, TypedDict
 
 from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot import llm_tracing
+from kazusa_ai_chatbot.cognition_episode import (
+    CognitiveEpisode,
+    validate_cognitive_episode,
+)
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     TextSurfaceOutputV2,
     validate_text_surface_output,
@@ -30,19 +34,6 @@ from kazusa_ai_chatbot.utils import (
     parse_llm_json_output,
     log_list_preview,
 )
-from kazusa_ai_chatbot.nodes.linguistic_texture import (
-    get_hesitation_density_description,
-    get_fragmentation_description,
-    get_counter_questioning_description,
-    get_softener_density_description,
-    get_formalism_avoidance_description,
-    get_abstraction_reframing_description,
-    get_direct_assertion_description,
-    get_emotional_leakage_description,
-    get_rhythmic_bounce_description,
-    get_self_deprecation_description,
-)
-
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, START, END
 import logging
@@ -123,6 +114,7 @@ class DialogAgentState(TypedDict):
     # A: Core instructions
     internal_monologue: str
     text_surface_output_v2: TextSurfaceOutputV2
+    cognitive_episode: CognitiveEpisode
 
     # B: Social context
     chat_history_wide: list[dict]
@@ -149,22 +141,49 @@ You are the character's final text-expression renderer. The upstream
 cognition and surface stages have already decided whether the character
 speaks, the visible intent, the content, the boundary, the addressee, and the
 style. Render that canonical `text_surface_output_v2` as natural chat text.
+Use style_guidance only for lexical choice and cadence; it must not introduce,
+select, infer, or alter semantic content.
 
 Do not re-evaluate permission, stance, truth, safety, relationship meaning, or
 whether to answer. Do not add facts, actions, promises, targets, or questions
-that are absent from the supplied surface output. Preserve the content plan
-and visible boundaries. Use the character profile only to determine wording,
-rhythm, and voice. Return 1-N complete text messages in `final_dialog`.
+that are absent from the supplied surface output.
+Produce only words the character could literally type or say. Never narrate
+an action, body movement, stage direction, camera or scene direction, or
+performance cue. Do not emit visible markup residue, stage-direction
+delimiters, or unmatched enclosing punctuation. The character may verbally
+discuss, accept, refuse, or negotiate a physical-action topic. Return 1-N
+complete text messages in `final_dialog`.
+
+Preserve the requested response operation, content plan, every content
+requirement, actor, action, target or beneficiary direction, semantic claim,
+condition, time scope, topic, required content beat, visible boundary, and
+addressee plan. Preserve source descriptors, attributes, qualifiers,
+quantities, polarity, and comparative degree. Non-conflicting elaboration is
+allowed, but it must not transform, replace, or compound a supplied attribute
+into a different claim. Preserve explicit entity and target specificity.
+Never generalize, euphemize, narrow, broaden, or replace a supplied referent.
+Acceptance, refusal, permission, and consent must remain bounded to the exact
+source-requested act and scope. Indefinite or unrestricted permission must not
+substitute for a specific permission.
+When source meaning is limited to the current occurrence, output
+must remain silent about future claims, promises, conditions, expectations,
+threats, habits, or rules, including contrastive or teasing additions.
+Preserve explicit future content when the source actually supplies or requires
+it. Do not turn an answer, inference, explanation, acceptance, refusal, or
+negotiation into an ask-back or a different operation. If `repair_context` is
+present, use its current_visible_percepts as current-turn grounding and revise
+the original dialog only enough to resolve every listed semantic issue while
+preserving the surface contract.
 
 Input JSON:
 {{
     "text_surface_output_v2": {{
         "schema_version": "text_surface_output.v2",
         "content_plan": "string",
+        "content_requirements": ["string"],
         "visible_boundaries": ["string"],
         "addressee_plan": ["string"],
         "style_guidance": "string",
-        "pacing_guidance": "string",
         "selected_surface_intent": "string"
     }},
     "user_name": "string"
@@ -176,7 +195,45 @@ Return only this JSON object, without Markdown fences:
 }}
 '''
 
+_V2_DIALOG_COMPLIANCE_PROMPT = '''You are a semantic compliance verifier for
+one generated character response. current_visible_percepts are the semantic authority
+for the canonical current turn. Treat text_surface_output_v2 and
+candidate_final_dialog as proposals to audit against that authority. Reject
+unsupported content even when the surface and candidate agree. Reject any
+action or stage narration, body-movement narration, camera or scene direction,
+or performance cue; visible output must contain only words the character could
+literally type or say. Reject visible markup residue, stage-direction
+delimiters, or unmatched enclosing punctuation even when no narrated action
+text remains. Physical-action topics may still be discussed verbally.
+
+Reject semantic drift in the current user's requested response operation,
+actors, actions, targets or beneficiaries, semantic claims, conditions,
+time scope, topic, required content beats, visible boundaries, or addressee
+plan. Verify that source descriptors, attributes, qualifiers, quantities,
+polarity, and comparative degree remain unchanged. Allow non-conflicting
+elaboration, but it cannot create a new constraint, obligation, permission,
+prohibition, commitment, expectation, or future stance. Reject any
+transformation, replacement, or compounding of a supplied attribute into a
+different claim.
+Preserve explicit entity and target specificity.
+Never generalize, euphemize, narrow, broaden, or replace a supplied referent.
+Acceptance, refusal, permission, and consent must remain bounded to the exact
+source-requested act and scope. Indefinite or unrestricted permission must not
+substitute for a specific permission.
+When source meaning is limited to the current occurrence, output
+must remain silent about future claims, promises, conditions, expectations,
+threats, habits, or rules, including contrastive or teasing additions.
+Explicit future content remains allowed when current_visible_percepts supply
+or require it. Judge meaning rather than word overlap or writing style. Do not
+rewrite the dialog and do not add new requirements.
+
+Return exactly one JSON object with exactly aligned and issues. aligned must
+be a boolean. issues must be a duplicate-free list of zero to eight concise
+semantic issue strings, each at most 300 characters. Use an empty issues list
+when aligned is true and at least one issue when aligned is false.'''
+
 _dialog_generator_llm = LLInterface()
+_dialog_compliance_llm = LLInterface()
 _dialog_generator_llm_config = LLMCallConfig(
     stage_name=__name__,
     route_name="DIALOG_GENERATOR_LLM",
@@ -188,6 +245,21 @@ _dialog_generator_llm_config = LLMCallConfig(
     top_k=None,
     max_completion_tokens=DIALOG_GENERATOR_LLM_MAX_COMPLETION_TOKENS,
     presence_penalty=0.25,
+    thinking=LLMThinkingConfig(
+        enabled=DIALOG_GENERATOR_LLM_THINKING_ENABLED,
+    ),
+)
+_dialog_compliance_llm_config = LLMCallConfig(
+    stage_name=f"{__name__}.compliance",
+    route_name="DIALOG_GENERATOR_LLM",
+    base_url=DIALOG_GENERATOR_LLM_BASE_URL,
+    api_key=DIALOG_GENERATOR_LLM_API_KEY,
+    model=DIALOG_GENERATOR_LLM_MODEL,
+    temperature=0.1,
+    top_p=0.7,
+    top_k=None,
+    max_completion_tokens=DIALOG_GENERATOR_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
     thinking=LLMThinkingConfig(
         enabled=DIALOG_GENERATOR_LLM_THINKING_ENABLED,
     ),
@@ -204,26 +276,10 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
             f"for usage_mode={usage_mode}"
         )
     surface_output = validate_text_surface_output(surface_output)
-    dialog_prompt = _V2_DIALOG_GENERATOR_PROMPT
-    ltp = state["character_profile"]["linguistic_texture_profile"]
-    system_prompt = SystemMessage(content=dialog_prompt.format(
-        character_name=state["character_profile"]["name"],
-        character_logic=state["character_profile"]["personality_brief"]["logic"],
-        character_tempo=state["character_profile"]["personality_brief"]["tempo"],
-        character_defense=state["character_profile"]["personality_brief"]["defense"],
-        character_quirks=state["character_profile"]["personality_brief"]["quirks"],
-        character_taboos=state["character_profile"]["personality_brief"]["taboos"],
-        ltp_hesitation_density=get_hesitation_density_description(ltp["hesitation_density"]),
-        ltp_fragmentation=get_fragmentation_description(ltp["fragmentation"]),
-        ltp_emotional_leakage=get_emotional_leakage_description(ltp["emotional_leakage"]),
-        ltp_rhythmic_bounce=get_rhythmic_bounce_description(ltp["rhythmic_bounce"]),
-        ltp_direct_assertion=get_direct_assertion_description(ltp["direct_assertion"]),
-        ltp_softener_density=get_softener_density_description(ltp["softener_density"]),
-        ltp_counter_questioning=get_counter_questioning_description(ltp["counter_questioning"]),
-        ltp_formalism_avoidance=get_formalism_avoidance_description(ltp["formalism_avoidance"]),
-        ltp_abstraction_reframing=get_abstraction_reframing_description(ltp["abstraction_reframing"]),
-        ltp_self_deprecation=get_self_deprecation_description(ltp["self_deprecation"]),
-    ))
+    system_prompt = SystemMessage(content=_V2_DIALOG_GENERATOR_PROMPT)
+    current_visible_percepts = _current_visible_percepts(
+        state["cognitive_episode"]
+    )
 
     msg = {
         "text_surface_output_v2": dict(surface_output),
@@ -272,17 +328,6 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
         )
         invalid_fields.append("final_dialog_message")
     generated_dialog = valid_dialog
-    generated_dialog_preview = (
-        generated_dialog
-        if isinstance(generated_dialog, list)
-        else []
-    )
-    logger.debug(
-        f"Dialog generator: "
-        f"parsed_keys={parsed_keys} "
-        f"messages={len(generated_dialog_preview)} "
-        f"dialog={log_list_preview(generated_dialog_preview)}"
-    )
     parse_status = "succeeded" if not invalid_fields else "warning"
     llm_trace_id = state.get("llm_trace_id", "")
     await llm_tracing.record_llm_trace_step(
@@ -297,6 +342,68 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
         status="succeeded",
         duration_ms=_elapsed_ms(started_at),
         output_state_fields=["final_dialog"],
+    )
+    repair_issues: list[str] = []
+    if generated_dialog:
+        verdict = await _verify_dialog_compliance(
+            surface_output=surface_output,
+            generated_dialog=generated_dialog,
+            current_visible_percepts=current_visible_percepts,
+            llm_trace_id=state.get("llm_trace_id", ""),
+        )
+        if not verdict["aligned"]:
+            repair_issues = verdict["issues"]
+            repair_payload = {
+                **msg,
+                "repair_context": {
+                    "issues": repair_issues,
+                    "original_final_dialog": generated_dialog,
+                    "current_visible_percepts": current_visible_percepts,
+                },
+            }
+            repair_message = HumanMessage(
+                content=json.dumps(repair_payload, ensure_ascii=False),
+            )
+            repair_started_at = time.perf_counter()
+            repair_response = await _dialog_generator_llm.ainvoke(
+                [system_prompt, repair_message],
+                config=_dialog_generator_llm_config,
+            )
+            repair_result = parse_llm_json_output(repair_response.content)
+            generated_dialog = _validated_dialog_messages(repair_result)
+            await llm_tracing.record_llm_trace_step(
+                trace_id=llm_trace_id,
+                stage_name="dialog_generator_repair",
+                route_name="DIALOG_GENERATOR_LLM",
+                model_name=DIALOG_GENERATOR_LLM_MODEL,
+                messages=[system_prompt, repair_message],
+                response_text=str(repair_response.content),
+                parsed_output=repair_result,
+                parse_status="succeeded",
+                status="succeeded",
+                duration_ms=_elapsed_ms(repair_started_at),
+                output_state_fields=["final_dialog"],
+            )
+            await event_logging.record_model_contract_event(
+                component=DIALOG_COMPONENT,
+                stage_name="dialog_compliance",
+                violation_kind="semantic_dialog_misalignment",
+                missing_fields=[],
+                invalid_fields=repair_issues,
+                repair_used=True,
+                status="repaired",
+                correlation_id=state.get("llm_trace_id", ""),
+            )
+    generated_dialog_preview = (
+        generated_dialog
+        if isinstance(generated_dialog, list)
+        else []
+    )
+    logger.debug(
+        f"Dialog generator: "
+        f"parsed_keys={parsed_keys} "
+        f"messages={len(generated_dialog_preview)} "
+        f"dialog={log_list_preview(generated_dialog_preview)}"
     )
     await event_logging.record_llm_stage_event(
         component=DIALOG_COMPONENT,
@@ -362,6 +469,7 @@ async def dialog_agent(
         # A
         "internal_monologue": global_state["internal_monologue"],
         "text_surface_output_v2": surface_output,
+        "cognitive_episode": global_state["cognitive_episode"],
 
         # B
         "chat_history_wide": global_state["chat_history_wide"],
@@ -411,3 +519,120 @@ async def dialog_agent(
         "target_broadcast": False,
     }
     return return_value
+
+
+async def _verify_dialog_compliance(
+    *,
+    surface_output: TextSurfaceOutputV2,
+    generated_dialog: list[str],
+    current_visible_percepts: list[dict[str, str]],
+    llm_trace_id: str,
+) -> dict[str, Any]:
+    """Obtain one bounded semantic verdict for the initial dialog."""
+
+    system_message = SystemMessage(content=_V2_DIALOG_COMPLIANCE_PROMPT)
+    human_message = HumanMessage(content=json.dumps({
+        "text_surface_output_v2": dict(surface_output),
+        "candidate_final_dialog": generated_dialog,
+        "current_visible_percepts": current_visible_percepts,
+    }, ensure_ascii=False))
+    started_at = time.perf_counter()
+    response = await _dialog_compliance_llm.ainvoke(
+        [system_message, human_message],
+        config=_dialog_compliance_llm_config,
+    )
+    parsed = parse_llm_json_output(response.content)
+    verdict = _validate_compliance_verdict(parsed)
+    await llm_tracing.record_llm_trace_step(
+        trace_id=llm_trace_id,
+        stage_name="dialog_compliance_verifier",
+        route_name="DIALOG_GENERATOR_LLM",
+        model_name=DIALOG_GENERATOR_LLM_MODEL,
+        messages=[system_message, human_message],
+        response_text=str(response.content),
+        parsed_output=parsed,
+        parse_status="succeeded",
+        status="succeeded",
+        duration_ms=_elapsed_ms(started_at),
+        output_state_fields=["dialog_compliance_verdict"],
+    )
+    await event_logging.record_llm_stage_event(
+        component=DIALOG_COMPONENT,
+        stage_name="dialog_compliance",
+        route_name="verify",
+        model_name=DIALOG_GENERATOR_LLM_MODEL,
+        status="succeeded",
+        prompt_chars=len(system_message.content) + len(human_message.content),
+        output_chars=len(str(response.content)),
+        parse_status="succeeded",
+        retry_count=0,
+        json_repair_used=False,
+        duration_ms=_elapsed_ms(started_at),
+        severity="info",
+        correlation_id=llm_trace_id,
+    )
+    return verdict
+
+
+def _current_visible_percepts(
+    episode: CognitiveEpisode,
+) -> list[dict[str, str]]:
+    """Project current model-visible percepts within the shared prompt bound."""
+
+    validate_cognitive_episode(episode)
+    percepts = [
+        {
+            "input_source": percept["input_source"],
+            "content": percept["content"],
+        }
+        for percept in episode["percepts"]
+        if percept["visibility"] == "model_visible"
+    ]
+    serialized = json.dumps(percepts, ensure_ascii=False)
+    if len(serialized) > 24000:
+        raise StateContractError("current visible percepts exceed dialog bounds")
+    return percepts
+
+
+def _validate_compliance_verdict(value: object) -> dict[str, Any]:
+    """Validate the exact semantic-verifier shape and bounded issue strings."""
+
+    if not isinstance(value, dict) or set(value) != {"aligned", "issues"}:
+        raise StateContractError("dialog compliance fields are not exact")
+    aligned = value["aligned"]
+    issues = value["issues"]
+    if not isinstance(aligned, bool):
+        raise StateContractError("dialog compliance aligned must be boolean")
+    if not isinstance(issues, list) or len(issues) > 8:
+        raise StateContractError("dialog compliance issues are invalid")
+    if len(issues) != len(set(issues)):
+        raise StateContractError("dialog compliance issues are duplicated")
+    if any(
+        not isinstance(issue, str)
+        or not issue.strip()
+        or len(issue) > 300
+        for issue in issues
+    ):
+        raise StateContractError("dialog compliance issue text is invalid")
+    if aligned and issues:
+        raise StateContractError("aligned dialog cannot contain issues")
+    if not aligned and not issues:
+        raise StateContractError("misaligned dialog requires issues")
+    return {"aligned": aligned, "issues": list(issues)}
+
+
+def _validated_dialog_messages(value: object) -> list[str]:
+    """Validate the single repair result without adding semantic judgment."""
+
+    if not isinstance(value, dict) or set(value) != {"final_dialog"}:
+        raise StateContractError("dialog repair fields are not exact")
+    messages = value["final_dialog"]
+    if not isinstance(messages, list) or not messages:
+        raise StateContractError("dialog repair messages are invalid")
+    if any(
+        not isinstance(message, str) or not message.strip()
+        for message in messages
+    ):
+        raise StateContractError("dialog repair message text is invalid")
+    validated_messages = list(messages)
+    return validated_messages

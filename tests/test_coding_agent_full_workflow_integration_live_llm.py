@@ -30,7 +30,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_cognition_core_services,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
-    _build_surface_services,
+    _build_text_surface_services,
 )
 from tests.llm_trace import write_llm_trace
 from tests.test_coding_agent_phase3_handoff_e2e import (
@@ -720,7 +720,7 @@ async def test_live_gate_14_result_ready_blocker_question_survives_delivery(
         }},
     })
     state = _result_ready_content_plan_state(episode)
-    services = _build_surface_services()
+    services = _build_text_surface_services()
     capturing_llm = _CapturingLLM(services.llm)
     token = l3.set_content_plan_agent_llm(
         LLMStageBinding(capturing_llm, services.content_plan_config)

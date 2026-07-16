@@ -343,10 +343,10 @@ def _action_cognition_output(text: str) -> dict[str, Any]:
         "text_surface_output_v2": {
             "schema_version": "text_surface_output.v2",
             "content_plan": text,
+            "content_requirements": ["Preserve the scheduled follow-up purpose."],
             "visible_boundaries": [],
             "addressee_plan": ["current user"],
             "style_guidance": "brief and direct",
-            "pacing_guidance": "one ordinary message",
             "selected_surface_intent": "answer the scheduled follow-up",
         },
         "action_specs": [_speak_action_spec()],
@@ -525,10 +525,10 @@ def _surface_output(content_plan: str = "Continue the GPU model topic.") -> dict
     return {
         "schema_version": "text_surface_output.v2",
         "content_plan": content_plan,
+        "content_requirements": ["Preserve the scheduled follow-up purpose."],
         "visible_boundaries": [],
         "addressee_plan": ["current user"],
         "style_guidance": "brief",
-        "pacing_guidance": "direct",
         "selected_surface_intent": "answer the scheduled follow-up",
     }
 
@@ -880,10 +880,10 @@ def test_classify_route_does_not_use_content_plan_without_speak_action() -> None
             "text_surface_output_v2": {
                 "schema_version": "text_surface_output.v2",
                 "content_plan": "Check whether the user has started work.",
+                "content_requirements": ["Ask whether the user has started work."],
                 "visible_boundaries": [],
                 "addressee_plan": [],
                 "style_guidance": "brief",
-                "pacing_guidance": "direct",
                 "selected_surface_intent": "observe",
             },
             "action_specs": [],

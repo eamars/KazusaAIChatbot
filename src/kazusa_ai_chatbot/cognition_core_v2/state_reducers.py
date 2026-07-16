@@ -29,6 +29,7 @@ from kazusa_ai_chatbot.cognition_core_v2.transition_guards import (
     apply_direct_fact,
     apply_semantic_deltas,
     compare_event,
+    retain_bounded_evidence,
     transition_event,
     transition_goal,
     transition_knowledge_gap,
@@ -57,6 +58,7 @@ def apply_semantic_appraisals(
     translated: list[dict[str, Any]] = []
     unsupported: list[dict[str, Any]] = []
     new_causal_ids: set[str] = set()
+    batch_terminalizations: set[tuple[str, str, str]] = set()
     for result in results:
         for proposition in result["propositions"]:
             _materialize_proposition_root(
@@ -67,6 +69,7 @@ def apply_semantic_appraisals(
                 result["selected_evidence_handles"],
                 comparison_results,
                 new_causal_ids,
+                batch_terminalizations,
             )
         for delta in result["deltas"]:
             native_path = _native_delta_path(
@@ -122,6 +125,7 @@ def _materialize_proposition_root(
     selected_evidence_handles: Sequence[str],
     comparison_results: list[dict[str, Any]] | None,
     new_causal_ids: set[str],
+    batch_terminalizations: set[tuple[str, str, str]],
 ) -> None:
     """Turn a validated prompt-local proposition into a causal state root."""
 
@@ -210,13 +214,27 @@ def _materialize_proposition_root(
             proposition,
             handle_to_ref,
         )
-        outcome = _apply_proposition_transition(
-            existing,
+        terminal_status = _proposition_terminal_status(
             subject_kind,
             proposition["proposition_kind"],
-            evidence_ref,
-            superseding_goal_validated=superseding_goal_validated,
         )
+        terminalization = (
+            subject_kind,
+            existing["entity_id"],
+            terminal_status,
+        )
+        if terminal_status and terminalization in batch_terminalizations:
+            outcome = "resolve"
+        else:
+            outcome = _apply_proposition_transition(
+                existing,
+                subject_kind,
+                proposition["proposition_kind"],
+                evidence_ref,
+                superseding_goal_validated=superseding_goal_validated,
+            )
+            if outcome == "resolve" and terminal_status:
+                batch_terminalizations.add(terminalization)
         if outcome == "reinforce":
             existing["description"] = proposition["semantic_value"]
             existing["role_refs"] = _role_refs_from_proposition(
@@ -249,6 +267,33 @@ def _materialize_proposition_root(
                 "entity_id": existing["entity_id"],
             }
         comparison_results.append(comparison_result)
+
+
+def _proposition_terminal_status(
+    entity_kind: str,
+    proposition_kind: str,
+) -> str:
+    """Return the terminal status owned by one semantic proposition."""
+
+    if proposition_kind in {"goal_release", "goal_supersession"}:
+        return "abandoned" if entity_kind == "goal" else ""
+    if proposition_kind == "completion_meaning":
+        statuses = {
+            "goal": "satisfied",
+            "event": "resolved",
+            "knowledge_gap": "resolved",
+        }
+        terminal_status = statuses.get(entity_kind, "")
+        return terminal_status
+    if proposition_kind == "resolution_meaning":
+        statuses = {
+            "threat": "resolved",
+            "event": "resolved",
+            "knowledge_gap": "resolved",
+        }
+        terminal_status = statuses.get(entity_kind, "")
+        return terminal_status
+    return ""
 
 
 def _apply_proposition_transition(
@@ -409,7 +454,11 @@ def _new_causal_candidate(
         "description": description,
         "salience": 0,
         "role_refs": [],
-        "evidence_refs": [deepcopy(dict(ref)) for ref in evidence_refs],
+        "evidence_refs": retain_bounded_evidence(
+            [],
+            evidence_refs,
+            preserve_primary=True,
+        ),
         "created_at": timestamp,
         "updated_at": timestamp,
     }
@@ -573,13 +622,11 @@ def _append_evidence_rows(
     """Append complete evidence records without duplicating source identity."""
 
     evidence_refs = target.setdefault("evidence_refs", [])
-    source_ids = {
-        row.get("source_id") for row in evidence_refs if isinstance(row, Mapping)
-    }
-    for row in rows:
-        if row["source_id"] not in source_ids:
-            evidence_refs.append(dict(row))
-            source_ids.add(row["source_id"])
+    target["evidence_refs"] = retain_bounded_evidence(
+        evidence_refs,
+        rows,
+        preserve_primary="relationship_id" not in target,
+    )
 
 
 def _apply_unretained_character_delta(
@@ -921,7 +968,11 @@ def create_guarded_goal(
         "description": description,
         "salience": defaults["importance"],
         "role_refs": deepcopy(list(role_refs)),
-        "evidence_refs": deepcopy(list(evidence_refs)),
+        "evidence_refs": retain_bounded_evidence(
+            [],
+            evidence_refs,
+            preserve_primary=True,
+        ),
         "created_at": updated_at or state["updated_at"],
         "updated_at": updated_at or state["updated_at"],
         "status": "pursuing",
@@ -1013,7 +1064,31 @@ def create_deterministic_goals(
             relationship["care"],
             closeness_gap,
         )
-        if relationship["salience"] >= 40 and connection_value >= 40:
+        connection_goal_id = (
+            "goal:relationship_connection:"
+            f"{updated['state_scope']}:{relationship['relationship_id']}"
+        )
+        connection_goal = next(
+            (
+                goal for goal in updated["goals"]
+                if goal.get("entity_id") == connection_goal_id
+            ),
+            None,
+        )
+        if (
+            closeness_gap == 0
+            and connection_goal is not None
+            and connection_goal["status"] in {"pursuing", "blocked"}
+        ):
+            connection_goal["progress"] = 100
+            transitioned_goal = transition_goal(
+                connection_goal,
+                transition="satisfied",
+                evidence={"outcome_kind": "completion"},
+            )
+            connection_goal.update(transitioned_goal)
+            connection_goal["updated_at"] = now
+        if relationship["salience"] >= 40 and closeness_gap >= 40:
             add_goal(
                 "relationship_connection",
                 relationship_root,
@@ -1383,11 +1458,11 @@ def _append_unique_evidence(
 ) -> None:
     """Append a complete evidence record once."""
 
-    refs = entity["evidence_refs"]
-    if evidence not in refs:
-        if len(refs) >= 8:
-            raise CognitionStateError("evidence reference cap reached")
-        refs.append(deepcopy(dict(evidence)))
+    entity["evidence_refs"] = retain_bounded_evidence(
+        entity["evidence_refs"],
+        [evidence],
+        preserve_primary=True,
+    )
 
 
 def _apply_guarded_lifecycle_transitions(

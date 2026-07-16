@@ -14,6 +14,9 @@ from kazusa_ai_chatbot.cognition_core_v2 import (
     run_cognition,
     run_text_surface_planning,
 )
+from kazusa_ai_chatbot.cognition_core_v2.surface import (
+    run_visual_surface_planning,
+)
 from kazusa_ai_chatbot.cognition_core_v2.diagnostics import (
     reset_validation_capture,
     validation_capture_snapshot,
@@ -34,7 +37,8 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_cognition_core_services,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
-    _build_surface_services,
+    _build_text_surface_services,
+    _build_visual_surface_services,
 )
 from tests.llm_trace import write_llm_trace
 from tests.live_llm_mongo import (
@@ -164,8 +168,10 @@ def _chain_input(
             "channel_scope": channel_scope,
             "character_role": "companion",
             "semantic_scene": semantic_text,
+            "conversation_continuity": "Continue only the current live case.",
             "semantic_temporal_context": "immediate",
         },
+        "private_continuity_context": "I should remain grounded in this case.",
     }
 
 
@@ -378,11 +384,14 @@ async def _run_cross_model_case(
 @pytest.mark.live_llm
 @pytest.mark.asyncio
 async def test_v2_text_surface_stage_contracts_live_llm() -> None:
-    """Exercise four stage-local L3 schemas and preserve their raw outputs."""
+    """Exercise sibling text/visual L3 schemas and preserve raw outputs."""
 
-    services = _build_surface_services()
-    capturing_llm = _CapturingSurfaceLLM(services.llm)
-    services = replace(services, llm=capturing_llm)
+    text_services = _build_text_surface_services()
+    text_llm = _CapturingSurfaceLLM(text_services.llm)
+    text_services = replace(text_services, llm=text_llm)
+    visual_services = _build_visual_surface_services()
+    visual_llm = _CapturingSurfaceLLM(visual_services.llm)
+    visual_services = replace(visual_services, llm=visual_llm)
     payload = {
         "schema_version": "text_surface_input.v2",
         "episode": canonical_episode(
@@ -411,23 +420,34 @@ async def test_v2_text_surface_stage_contracts_live_llm() -> None:
         }],
         "permitted_action_results": [],
         "interaction_style_context": "brief and natural",
+        "character_voice_context": "reserved, analytical, vivid, and warm",
     }
 
-    output = await run_text_surface_planning(payload, services)
+    output = await run_text_surface_planning(payload, text_services)
+    visual_output = await run_visual_surface_planning(
+        payload,
+        visual_services,
+    )
     artifact_path = write_llm_trace(
         "cognition_core_v2_stage_2",
         "v2_text_surface_stage_contracts",
         {
             "input": payload,
-            "calls": capturing_llm.calls,
+            "text_calls": text_llm.calls,
+            "visual_calls": visual_llm.calls,
             "output": output,
-            "judgment": "four stage-local schemas returned exact bounded fields",
+            "visual_output": visual_output,
+            "judgment": "three text schemas and one terminal visual schema passed",
         },
     )
 
-    assert len(capturing_llm.calls) == 4
+    assert len(text_llm.calls) == 3
+    assert len(visual_llm.calls) == 1
     assert output["visible_boundaries"]
     assert output["addressee_plan"]
+    assert output["content_requirements"]
+    assert "character_voice_context" not in output
+    assert visual_output["visual_directives"]
     assert artifact_path.exists()
 
 
@@ -451,7 +471,7 @@ async def test_live_v2_lifecycle_case_writes_complete_raw_capture(
     reset_validation_capture(case_id)
     services = build_cognition_core_services()
 
-    payload["episode"]["semantic_scene"] = message
+    payload["episode"]["percepts"][0]["content"] = message
     payload["evidence"][0]["semantic_text"] = message
     payload["evidence"][0]["evidence_ref"]["semantic_summary"] = message
     output = await run_cognition(payload, services)
@@ -459,6 +479,8 @@ async def test_live_v2_lifecycle_case_writes_complete_raw_capture(
     artifact_path = write_validation_capture()
 
     assert output["schema_version"] == "cognition_core_output.v2"
+    assert output["private_monologue"]
+    assert output["private_monologue"] != output["selected_bid_reason"]
     assert capture is not None
     assert capture["case_id"] == case_id
     assert artifact_path.exists()

@@ -149,13 +149,14 @@ def _dialog_global_state() -> dict[str, object]:
 
     state = {
         "internal_monologue": "private internal thought",
+        "cognitive_episode": _minimal_episode(),
         "text_surface_output_v2": {
             "schema_version": "text_surface_output.v2",
             "content_plan": "Acknowledge the request.",
+            "content_requirements": ["Address the current user."],
             "visible_boundaries": [],
             "addressee_plan": ["current user"],
             "style_guidance": "concise",
-            "pacing_guidance": "one message",
             "selected_surface_intent": "acknowledge",
         },
         "chat_history_wide": [],
@@ -515,6 +516,11 @@ async def test_dialog_generator_records_llm_metadata_without_generated_text(
     )
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", llm)
     monkeypatch.setattr(
+        dialog_module,
+        "_dialog_compliance_llm",
+        _StaticLLM('{"aligned": true, "issues": []}'),
+    )
+    monkeypatch.setattr(
         dialog_module.event_logging,
         "record_llm_stage_event",
         record_llm_stage_event,
@@ -529,9 +535,13 @@ async def test_dialog_generator_records_llm_metadata_without_generated_text(
     result = await dialog_module.dialog_generator(state)
 
     assert result["final_dialog"] == ["secret generated dialog"]
-    record_llm_stage_event.assert_awaited_once()
+    assert record_llm_stage_event.await_count == 2
     record_model_contract_event.assert_not_awaited()
-    kwargs = record_llm_stage_event.await_args.kwargs
+    kwargs = next(
+        call.kwargs
+        for call in record_llm_stage_event.await_args_list
+        if call.kwargs["stage_name"] == "dialog_generator"
+    )
     assert kwargs["stage_name"] == "dialog_generator"
     assert "secret generated dialog" not in _serialized(kwargs)
 
@@ -549,6 +559,11 @@ async def test_dialog_agent_records_quality_without_dialog_text(monkeypatch) -> 
         _StaticLLM(
             '{"final_dialog": ["secret full graph reply"]}'
         ),
+    )
+    monkeypatch.setattr(
+        dialog_module,
+        "_dialog_compliance_llm",
+        _StaticLLM('{"aligned": true, "issues": []}'),
     )
     monkeypatch.setattr(
         dialog_module.event_logging,

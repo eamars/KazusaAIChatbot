@@ -16,6 +16,7 @@ from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     ActionBidV2,
+    BranchDefinition,
     CognitionCoreInputV2,
     CognitionCoreOutputV2,
     CognitionCoreServicesV2,
@@ -39,6 +40,7 @@ from kazusa_ai_chatbot.cognition_core_v2.output_projection import (
     project_relationship,
 )
 from kazusa_ai_chatbot.cognition_core_v2.parallel_executor import (
+    ParallelExecutionResult,
     execute_dependency_graph,
 )
 from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
@@ -129,6 +131,7 @@ async def run_cognition(
         preliminary_state,
         payload["evidence"],
         scene_context=payload["scene_context"],
+        private_continuity_context=payload["private_continuity_context"],
     )
 
     appraisal_tasks = [
@@ -161,6 +164,10 @@ async def run_cognition(
     )
     appraisal_results, appraisal_warnings = appraisal_collection
     warnings.extend(appraisal_warnings)
+    _raise_for_failed_required_branches(
+        preliminary_execution,
+        preliminary_branches,
+    )
     warnings.extend(preliminary_execution.warnings)
     stage_status["branch_cognition"] = "completed"
 
@@ -227,6 +234,9 @@ async def run_cognition(
                 payload["evidence"],
                 appraisal_results,
                 scene_context=payload["scene_context"],
+                private_continuity_context=payload[
+                    "private_continuity_context"
+                ],
             ),
             final_state,
             payload,
@@ -235,6 +245,10 @@ async def run_cognition(
         completed_external_dependencies=successful_questions,
     ) if new_branch_definitions else None
     if final_execution is not None:
+        _raise_for_failed_required_branches(
+            final_execution,
+            new_branch_definitions,
+        )
         warnings.extend(final_execution.warnings)
 
     bids: list[ActionBidV2] = list(preliminary_execution.results.values())
@@ -300,10 +314,15 @@ async def run_cognition(
         "action_requests": action_requests,
         "resolver_requests": resolver_requests,
         "resolver_progress": _resolver_progress(resolver_requests),
-        "residue": (
+        "selected_bid_reason": (
             admitted_bid["reason"]
             if admitted_bid is not None
             else "no grounded bid"
+        ),
+        "private_monologue": (
+            admitted_bid["private_monologue"]
+            if admitted_bid is not None
+            else "I have no grounded reason to act."
         ),
         "expression_policy": expression_policy,
         "diagnostics": {
@@ -399,6 +418,27 @@ async def run_cognition(
     return validate_cognition_core_output(output)
 
 
+def _raise_for_failed_required_branches(
+    execution: ParallelExecutionResult,
+    definitions: Sequence[BranchDefinition],
+) -> None:
+    """Prevent required branch failures from becoming semantic silence."""
+
+    required_failures = sorted(
+        definition.branch_id
+        for definition in definitions
+        if (
+            definition.required
+            and definition.branch_id in execution.failed_branch_ids
+        )
+    )
+    if required_failures:
+        failed_names = ", ".join(required_failures)
+        raise CognitionExecutionError(
+            f"required cognition branch failed: {failed_names}"
+        )
+
+
 def _resolver_progress(
     requests: Sequence[Mapping[str, Any]],
 ) -> dict[str, str]:
@@ -467,6 +507,7 @@ def _branch_context(
     appraisal_results: Sequence[Mapping[str, Any]] = (),
     *,
     scene_context: Mapping[str, Any],
+    private_continuity_context: str,
 ) -> dict[str, Any]:
     """Build semantic branch context and retain handle bindings privately."""
 
@@ -507,6 +548,7 @@ def _branch_context(
         for result in appraisal_results
     ]
     context["scene_context"] = dict(scene_context)
+    context["private_continuity_context"] = private_continuity_context
     del evidence
     return context
 

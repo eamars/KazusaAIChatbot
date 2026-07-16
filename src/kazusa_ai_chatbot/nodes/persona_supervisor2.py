@@ -19,6 +19,7 @@ from kazusa_ai_chatbot.action_spec.results import (
     build_episode_trace,
     build_private_surface_output,
     build_text_surface_output,
+    build_visual_surface_output,
 )
 from kazusa_ai_chatbot.config import (
     CHAT_HISTORY_RECENT_LIMIT,
@@ -27,6 +28,7 @@ from kazusa_ai_chatbot.config import (
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionExecutionError,
     validate_cognition_core_output,
+    validate_visual_surface_output,
 )
 from kazusa_ai_chatbot.cognition_resolver.capabilities import (
     run_rag_evidence_for_persona_state as _run_rag_evidence_for_persona_state,
@@ -448,6 +450,14 @@ async def call_action_subgraph(state: GlobalPersonaState) -> dict:
             action_attempt_id=speak_attempt_id,
         )
     ]
+    if "visual_surface_output_v2" in surface_update:
+        visual_output = validate_visual_surface_output(
+            surface_update["visual_surface_output_v2"]
+        )
+        surface_outputs.append(build_visual_surface_output(
+            fragments=[visual_output["visual_directives"]],
+            created_at=state["storage_timestamp_utc"],
+        ))
     return_value = {
         "final_dialog": final_dialog,
         "target_addressed_user_ids": result["target_addressed_user_ids"],

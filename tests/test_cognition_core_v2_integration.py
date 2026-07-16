@@ -10,6 +10,9 @@ from kazusa_ai_chatbot.cognition_core_v2 import (
     run_cognition,
     run_text_surface_planning,
 )
+from kazusa_ai_chatbot.cognition_core_v2.surface import (
+    run_visual_surface_planning,
+)
 from kazusa_ai_chatbot.db.character import (
     get_character_cognition_state,
     replace_character_cognition_state,
@@ -22,6 +25,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionCoreServicesV2,
     EVIDENCE_SOURCE_QUESTION_IDS,
     TextSurfaceServicesV2,
+    VisualSurfaceServicesV2,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
@@ -70,6 +74,7 @@ class _ScriptedLLM:
                 "desired_outcome": "maintain a coherent exchange",
                 "concrete_detail": "use the current episode only",
                 "reason": "the episode supplies bounded evidence",
+                "private_monologue": "I want to answer this carefully.",
                 "target_role_handles": [],
                 "evidence_handles": ["e1"],
                 "expected_consequences": ["preserve continuity"],
@@ -91,14 +96,17 @@ class _ScriptedLLM:
         elif "exactly style_guidance" in system:
             result = {"style_guidance": "bounded style guidance"}
         elif "exactly content_plan" in system:
-            result = {"content_plan": "bounded content-plan guidance"}
+            result = {
+                "content_plan": "bounded content-plan guidance",
+                "content_requirements": ["preserve actor direction"],
+            }
         elif "exactly visible_boundaries" in system:
             result = {
                 "visible_boundaries": ["bounded visible boundary"],
                 "addressee_plan": ["bounded addressee plan"],
             }
-        elif "exactly pacing_guidance" in system:
-            result = {"pacing_guidance": "bounded pacing guidance"}
+        elif "exactly visual_directives" in system:
+            result = {"visual_directives": "bounded visual directives"}
         else:
             raise AssertionError("unexpected V2 model stage")
         self.calls.append(system)
@@ -119,13 +127,21 @@ def _core_services(llm: _ScriptedLLM) -> CognitionCoreServicesV2:
 
 
 def _surface_services(llm: _ScriptedLLM) -> TextSurfaceServicesV2:
-    """Build all four surface stage bindings."""
+    """Build all three text-surface stage bindings."""
 
     return TextSurfaceServicesV2(
         llm=llm,
         style_config=make_llm_call_config("v2_style"),
         content_plan_config=make_llm_call_config("v2_content"),
         preference_config=make_llm_call_config("v2_preference"),
+    )
+
+
+def _visual_services(llm: _ScriptedLLM) -> VisualSurfaceServicesV2:
+    """Build the terminal visual-surface binding."""
+
+    return VisualSurfaceServicesV2(
+        llm=llm,
         visual_config=make_llm_call_config("v2_visual"),
     )
 
@@ -181,8 +197,10 @@ def _input(
             "channel_scope": "private",
             "character_role": "companion",
             "semantic_scene": "private evidence-grounded exchange",
+            "conversation_continuity": "Continue the current exchange.",
             "semantic_temporal_context": "immediate",
         },
+        "private_continuity_context": "I remain attentive to this exchange.",
     }
 
 
@@ -357,6 +375,7 @@ async def test_v2_surface_receives_semantic_handoff_only() -> None:
         "semantic_affect": [],
         "permitted_action_results": [],
         "interaction_style_context": "calm and concise",
+        "character_voice_context": "reserved, analytical, and warm",
     }
 
     output = await run_text_surface_planning(input_payload, _surface_services(llm))
@@ -365,7 +384,7 @@ async def test_v2_surface_receives_semantic_handoff_only() -> None:
     assert output["content_plan"] == "bounded content-plan guidance"
     assert output["visible_boundaries"] == ["bounded visible boundary"]
     assert output["addressee_plan"] == ["bounded addressee plan"]
-    assert len(llm.calls) == 4
+    assert len(llm.calls) == 3
     rendered_prompts = "\n".join(llm.human_calls)
     for raw_value in (
         "v2-surface-integration",
@@ -379,10 +398,17 @@ async def test_v2_surface_receives_semantic_handoff_only() -> None:
     assert '"origin_metadata"' not in rendered_prompts
     assert '"storage_timestamp_utc"' not in rendered_prompts
 
+    visual_output = await run_visual_surface_planning(
+        input_payload,
+        _visual_services(llm),
+    )
+    assert visual_output["visual_directives"] == "bounded visual directives"
+    assert len(llm.calls) == 4
+
 
 @pytest.mark.asyncio
-async def test_v2_surface_skips_visual_stage_when_episode_disables_it() -> None:
-    """The retained debug mode prevents the optional visual model call."""
+async def test_v2_text_surface_never_invokes_terminal_visual_stage() -> None:
+    """Text planning stays independent from the terminal visual branch."""
 
     llm = _ScriptedLLM()
     episode = canonical_episode(
@@ -411,6 +437,7 @@ async def test_v2_surface_skips_visual_stage_when_episode_disables_it() -> None:
         "semantic_affect": [],
         "permitted_action_results": [],
         "interaction_style_context": "calm and concise",
+        "character_voice_context": "reserved, analytical, and warm",
     }
 
     output = await run_text_surface_planning(
@@ -419,9 +446,7 @@ async def test_v2_surface_skips_visual_stage_when_episode_disables_it() -> None:
     )
 
     assert len(llm.calls) == 3
-    assert output["pacing_guidance"] == (
-        "Visual and pacing guidance is disabled for this episode."
-    )
+    assert "pacing_guidance" not in output
 
 
 @pytest.mark.live_db

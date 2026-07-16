@@ -365,3 +365,152 @@ async def test_live_recorder_returns_string_items_for_progress_lists(
     _assert_string_list_fields(result, trace_payload)
     assert _contains_cjk(result["conversation_mode"]), trace_payload
     assert result["assistant_moves"], trace_payload
+
+
+async def test_live_obligation_transitions_from_active_to_resolved(
+    ensure_live_llm,
+    monkeypatch,
+) -> None:
+    """Explicit fulfillment should close the actor-preserving obligation."""
+
+    del ensure_live_llm
+    record_input = _base_record_input()
+    record_input["prior_episode_state"] = {
+        "status": "active",
+        "episode_label": '评审笔记交付',
+        "continuity": "same_episode",
+        "conversation_mode": '协作收尾',
+        "episode_phase": '等待交付',
+        "topic_momentum": '接近完成',
+        "current_thread": '千纱向用户交付评审笔记',
+        "user_goal": '收到评审笔记',
+        "current_blocker": '',
+        "user_state_updates": [],
+        "assistant_moves": [],
+        "overused_moves": [],
+        "open_loops": [],
+        "interaction_obligations": [{
+            "actor": _CHARACTER_NAME,
+            "action": '发送整理好的评审笔记',
+            "beneficiary": '用户',
+            "precondition": '用户完成草稿',
+            "expected_outcome": '用户收到评审笔记',
+            "status": "active",
+            "source_kind": "assistant_response",
+        }],
+        "resolved_threads": [],
+        "avoid_reopening": [],
+        "emotional_trajectory": '平稳协作',
+        "next_affordances": ['确认交付结果'],
+        "progression_guidance": '交付完成后收束',
+    }
+    record_input["decontexualized_input"] = (
+        '用户明确说已经收到千纱发送的评审笔记。'
+    )
+    record_input["chat_history_recent"] = [
+        {
+            "role": "assistant",
+            "display_name": _CHARACTER_NAME,
+            "body_text": '整理好的评审笔记已经发给你了。',
+        },
+        {
+            "role": "user",
+            "display_name": '测试用户',
+            "body_text": '收到了，内容也没问题。',
+        },
+    ]
+    record_input["content_plan"] = ['确认用户已收到并收束交付事项']
+    record_input["final_dialog"] = ['那这件事就收尾了，别又弄丢。']
+
+    result, trace_payload = await _run_case(
+        monkeypatch,
+        "obligation_active_to_resolved",
+        record_input,
+    )
+
+    obligations = result["interaction_obligations"]
+    assert any(
+        row["actor"] == _CHARACTER_NAME
+        and row["status"] == "resolved"
+        and '评审笔记' in row["action"]
+        for row in obligations
+    ), trace_payload
+
+
+async def test_live_obligation_transitions_from_active_to_superseded(
+    ensure_live_llm,
+    monkeypatch,
+) -> None:
+    """An explicit replacement should supersede old work and keep the new one."""
+
+    del ensure_live_llm
+    record_input = _base_record_input()
+    record_input["prior_episode_state"] = {
+        "status": "active",
+        "episode_label": '评审交付改期',
+        "continuity": "same_episode",
+        "conversation_mode": '协商交付方式',
+        "episode_phase": '等待原交付',
+        "topic_momentum": '方案变化',
+        "current_thread": '原定周五发送评审笔记',
+        "user_goal": '获得可用的评审反馈',
+        "current_blocker": '',
+        "user_state_updates": [],
+        "assistant_moves": [],
+        "overused_moves": [],
+        "open_loops": [],
+        "interaction_obligations": [{
+            "actor": _CHARACTER_NAME,
+            "action": '2026-05-15 发送文字评审笔记',
+            "beneficiary": '用户',
+            "precondition": '用户完成草稿',
+            "expected_outcome": '用户获得文字评审反馈',
+            "status": "active",
+            "source_kind": "assistant_response",
+        }],
+        "resolved_threads": [],
+        "avoid_reopening": [],
+        "emotional_trajectory": '平稳协商',
+        "next_affordances": ['确认新的交付方式'],
+        "progression_guidance": '以本轮明确替代方案为准',
+    }
+    record_input["decontexualized_input"] = (
+        '用户明确取消周五文字笔记，改请千纱在2026-05-16发送语音总结。'
+    )
+    record_input["chat_history_recent"] = [
+        {
+            "role": "user",
+            "display_name": '测试用户',
+            "body_text": '周五的文字笔记取消，改成周六给我一份语音总结吧。',
+        },
+        {
+            "role": "assistant",
+            "display_name": _CHARACTER_NAME,
+            "body_text": '行，旧安排取消，2026-05-16 我发语音总结给你。',
+        },
+    ]
+    record_input["content_plan"] = [
+        '明确取消旧文字笔记义务',
+        '确认2026-05-16发送语音总结的新义务',
+    ]
+    record_input["final_dialog"] = [
+        '旧的文字笔记取消，2026-05-16 我发语音总结给你。'
+    ]
+
+    result, trace_payload = await _run_case(
+        monkeypatch,
+        "obligation_active_to_superseded",
+        record_input,
+    )
+
+    obligations = result["interaction_obligations"]
+    assert any(
+        row["status"] == "superseded" and '文字评审' in row["action"]
+        for row in obligations
+    ), trace_payload
+    assert any(
+        row["status"] == "active"
+        and row["actor"] == _CHARACTER_NAME
+        and '语音总结' in row["action"]
+        for row in obligations
+    ), trace_payload

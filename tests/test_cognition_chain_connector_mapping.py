@@ -47,7 +47,8 @@ def _core_output() -> dict[str, object]:
             "status": "not_requested",
             "semantic_summary": "no resolver request",
         },
-        "residue": "bounded residue",
+        "selected_bid_reason": "the current episode is grounded",
+        "private_monologue": "I want to answer this clearly.",
         "expression_policy": {
             "visibility": "visible",
             "emotional_tone": "composed",

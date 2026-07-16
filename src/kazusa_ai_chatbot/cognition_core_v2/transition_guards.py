@@ -49,6 +49,35 @@ _EVIDENCE_BY_PRODUCER = {
 }
 
 
+def retain_bounded_evidence(
+    existing: Sequence[Mapping[str, Any]],
+    incoming: Sequence[Mapping[str, Any]],
+    *,
+    preserve_primary: bool,
+) -> list[dict[str, Any]]:
+    """Retain unique evidence under the canonical eight-row policy."""
+
+    unique_rows: list[dict[str, Any]] = []
+    evidence_identities: set[tuple[str, str]] = set()
+    for row in (*existing, *incoming):
+        identity = (row["source_kind"], row["source_id"])
+        if identity in evidence_identities:
+            continue
+        unique_rows.append(deepcopy(dict(row)))
+        evidence_identities.add(identity)
+    if len(unique_rows) <= 8:
+        return unique_rows
+    if not preserve_primary:
+        return unique_rows[-8:]
+    primary = unique_rows[0]
+    primary_identity = (primary["source_kind"], primary["source_id"])
+    newest = [
+        row for row in unique_rows[1:]
+        if (row["source_kind"], row["source_id"]) != primary_identity
+    ][-7:]
+    return [primary, *newest]
+
+
 def apply_direct_fact(
     state: Mapping[str, Any],
     fact: Mapping[str, Any],
@@ -484,15 +513,16 @@ def _validate_target_ref(
 
 
 def _append_evidence(entity: dict[str, Any], evidence_ref: Mapping[str, Any]) -> None:
-    """Append a complete evidence record without lossy tokenization."""
+    """Append evidence while preserving the causal root and newest rows."""
 
     refs = entity["evidence_refs"]
-    if not isinstance(refs, list) or len(refs) >= 8:
-        if isinstance(refs, list) and evidence_ref in refs:
-            return
-        raise CognitionStateError("evidence reference cap reached")
-    if evidence_ref not in refs:
-        refs.append(deepcopy(dict(evidence_ref)))
+    if not isinstance(refs, list):
+        raise CognitionStateError("evidence references are invalid")
+    entity["evidence_refs"] = retain_bounded_evidence(
+        refs,
+        [evidence_ref],
+        preserve_primary=True,
+    )
 
 
 def _find_entity(

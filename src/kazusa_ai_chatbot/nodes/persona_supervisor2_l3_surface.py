@@ -2,28 +2,59 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from typing import Any
 
 from kazusa_ai_chatbot.action_spec.results import (
     project_trace_action_result_v2,
 )
-from kazusa_ai_chatbot.cognition_core_v2 import run_text_surface_planning
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     TextSurfaceInputV2,
     TextSurfaceServicesV2,
+    VisualSurfaceServicesV2,
     validate_cognition_core_output,
     validate_text_surface_input,
+)
+from kazusa_ai_chatbot.cognition_core_v2.surface import (
+    run_text_surface_planning,
+    run_visual_surface_planning,
 )
 from kazusa_ai_chatbot.db.interaction_style_images import (
     build_interaction_style_context,
 )
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig
+from kazusa_ai_chatbot.nodes.linguistic_texture import (
+    get_abstraction_reframing_description,
+    get_counter_questioning_description,
+    get_direct_assertion_description,
+    get_emotional_leakage_description,
+    get_formalism_avoidance_description,
+    get_fragmentation_description,
+    get_hesitation_density_description,
+    get_rhythmic_bounce_description,
+    get_self_deprecation_description,
+    get_softener_density_description,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     _cognition_llm_config,
     _llm_interface,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
+
+
+_LINGUISTIC_TEXTURE_DESCRIPTORS = {
+    "fragmentation": get_fragmentation_description,
+    "hesitation_density": get_hesitation_density_description,
+    "counter_questioning": get_counter_questioning_description,
+    "softener_density": get_softener_density_description,
+    "formalism_avoidance": get_formalism_avoidance_description,
+    "abstraction_reframing": get_abstraction_reframing_description,
+    "direct_assertion": get_direct_assertion_description,
+    "emotional_leakage": get_emotional_leakage_description,
+    "rhythmic_bounce": get_rhythmic_bounce_description,
+    "self_deprecation": get_self_deprecation_description,
+}
 
 
 def build_text_surface_input_from_global_state(
@@ -51,6 +82,7 @@ def build_text_surface_input_from_global_state(
         ],
         "permitted_action_results": _action_results(state),
         "interaction_style_context": interaction_style_context,
+        "character_voice_context": _character_voice_context(state),
     }
     admitted = validated_output.get("admitted_bid")
     if isinstance(admitted, Mapping):
@@ -62,18 +94,33 @@ def build_text_surface_input_from_global_state(
 
 
 async def call_l3_text_surface_handler(state: GlobalPersonaState) -> dict[str, Any]:
-    """Run V2 surface planning and hand the canonical output to dialog."""
+    """Run sibling V2 text and enabled terminal visual surface planning."""
 
     interaction_style_context = await _load_interaction_style_context(state)
     input_payload = build_text_surface_input_from_global_state(
         state,
         interaction_style_context=interaction_style_context,
     )
-    output = await run_text_surface_planning(
+    text_call = run_text_surface_planning(
         input_payload,
-        _build_surface_services(),
+        _build_text_surface_services(),
     )
-    return {"text_surface_output_v2": output}
+    if _visual_directives_disabled(input_payload):
+        text_output = await text_call
+        return_value = {"text_surface_output_v2": text_output}
+        return return_value
+    text_output, visual_output = await asyncio.gather(
+        text_call,
+        run_visual_surface_planning(
+            input_payload,
+            _build_visual_surface_services(),
+        ),
+    )
+    return_value = {
+        "text_surface_output_v2": text_output,
+        "visual_surface_output_v2": visual_output,
+    }
+    return return_value
 
 
 async def _load_interaction_style_context(
@@ -133,6 +180,41 @@ def _render_interaction_style_context(context: Mapping[str, Any]) -> str:
     return " | ".join(fragments)
 
 
+def _character_voice_context(state: Mapping[str, Any]) -> str:
+    """Project the active profile into one bounded wording-only context."""
+
+    profile = state.get("character_profile")
+    if not isinstance(profile, Mapping):
+        raise ValueError("character profile is required for surface planning")
+    personality = profile["personality_brief"]
+    linguistic_texture = profile["linguistic_texture_profile"]
+    if not isinstance(personality, Mapping):
+        raise ValueError("character personality brief must be a mapping")
+    if not isinstance(linguistic_texture, Mapping):
+        raise ValueError("character linguistic texture must be a mapping")
+    fragments = [f"name: {_voice_value(profile['name'], 80)}"]
+    for field_name in ("logic", "tempo", "defense", "quirks", "taboos"):
+        fragments.append(
+            f"{field_name}: {_voice_value(personality[field_name], 180)}"
+        )
+    for field_name, descriptor in _LINGUISTIC_TEXTURE_DESCRIPTORS.items():
+        score = linguistic_texture[field_name]
+        if not isinstance(score, (int, float)) or isinstance(score, bool):
+            raise ValueError("character linguistic texture score must be numeric")
+        fragments.append(f"{field_name}: {descriptor(float(score))}")
+    context = " | ".join(fragments)[:1500]
+    return context
+
+
+def _voice_value(value: object, maximum: int) -> str:
+    """Render one required profile value into a bounded semantic fragment."""
+
+    text = str(value).strip()
+    if not text:
+        raise ValueError("character voice value must be non-empty")
+    return text[:maximum]
+
+
 def _joined_length(fragments: list[str], candidate: str) -> int:
     """Return the rendered size after appending one candidate fragment."""
 
@@ -140,16 +222,32 @@ def _joined_length(fragments: list[str], candidate: str) -> int:
     return len(" | ".join(fragments)) + separator_size + len(candidate)
 
 
-def _build_surface_services() -> TextSurfaceServicesV2:
-    """Bind the four V2 surface stages to the project LLM interface."""
+def _build_text_surface_services() -> TextSurfaceServicesV2:
+    """Bind the three V2 text-surface stages to the project LLM interface."""
 
     return TextSurfaceServicesV2(
         llm=_llm_interface,
         style_config=_surface_config("v2_surface_style"),
         content_plan_config=_surface_config("v2_surface_content"),
         preference_config=_surface_config("v2_surface_preference"),
+    )
+
+
+def _build_visual_surface_services() -> VisualSurfaceServicesV2:
+    """Bind the terminal V2 visual stage to the project LLM interface."""
+
+    return VisualSurfaceServicesV2(
+        llm=_llm_interface,
         visual_config=_surface_config("v2_surface_visual"),
     )
+
+
+def _visual_directives_disabled(payload: TextSurfaceInputV2) -> bool:
+    """Return whether the canonical episode disables visual directives."""
+
+    debug_modes = payload["episode"]["origin_metadata"]["debug_modes"]
+    disabled = debug_modes.get("no_visual_directives") is True
+    return disabled
 
 
 def _surface_config(stage_name: str) -> LLMCallConfig:

@@ -133,7 +133,7 @@ class SurfaceOutputV1(TypedDict):
 
 
 class EpisodeTraceV1(TypedDict):
-    """Consolidation-facing record of cognition, actions, and surfaces."""
+    """Audit record of cognition, actions, and all produced surfaces."""
 
     schema_version: Literal["episode_trace.v1"]
     episode_id: str
@@ -241,6 +241,26 @@ def build_text_surface_output(
     return output
 
 
+def build_visual_surface_output(
+    *,
+    fragments: list[str],
+    created_at: str,
+) -> SurfaceOutputV1:
+    """Build audit-only terminal image directives for the raw episode trace."""
+
+    output: SurfaceOutputV1 = {
+        "schema_version": SURFACE_OUTPUT_VERSION,
+        "surface_kind": "image",
+        "visibility": "private",
+        "action_attempt_id": None,
+        "fragments": list(fragments),
+        "artifact_refs": [],
+        "delivery_intent": "do_not_deliver",
+        "created_at": created_at,
+    }
+    return output
+
+
 def build_private_surface_output(
     *,
     summary: str,
@@ -270,7 +290,7 @@ def build_episode_trace(
     surface_outputs: list[SurfaceOutputV1],
     cognition_refs: list[EvidenceRefV1] | None = None,
 ) -> EpisodeTraceV1:
-    """Build the episode trace consumed by post-turn consolidation."""
+    """Build the complete auditable trace before consolidation projection."""
 
     trace: EpisodeTraceV1 = {
         "schema_version": EPISODE_TRACE_VERSION,
@@ -288,7 +308,7 @@ def build_episode_trace(
 def project_episode_trace_for_consolidation(
     trace: EpisodeTraceV1 | dict[str, object] | None,
 ) -> dict[str, object]:
-    """Return prompt-safe action and surface evidence for consolidation."""
+    """Project model-facing evidence without terminal visual directives."""
 
     if not isinstance(trace, dict):
         projection = _empty_projection()
@@ -298,6 +318,20 @@ def project_episode_trace_for_consolidation(
     action_results = raw_results if isinstance(raw_results, list) else []
     raw_outputs = trace.get("surface_outputs")
     surface_outputs = raw_outputs if isinstance(raw_outputs, list) else []
+    projected_surface_outputs = []
+    for row in surface_outputs:
+        if not isinstance(row, dict):
+            continue
+        surface_kind = row.get("surface_kind")
+        visibility = row.get("visibility")
+        delivery_intent = row.get("delivery_intent")
+        if (
+            surface_kind == "image"
+            and visibility == "private"
+            and delivery_intent == "do_not_deliver"
+        ):
+            continue
+        projected_surface_outputs.append(_project_surface_output(row))
 
     projection = {
         "schema_version": "episode_trace_projection.v1",
@@ -308,11 +342,7 @@ def project_episode_trace_for_consolidation(
             for row in action_results
             if isinstance(row, dict)
         ],
-        "surface_outputs": [
-            _project_surface_output(row)
-            for row in surface_outputs
-            if isinstance(row, dict)
-        ],
+        "surface_outputs": projected_surface_outputs,
     }
     return projection
 

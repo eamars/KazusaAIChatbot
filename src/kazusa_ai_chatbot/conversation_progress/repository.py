@@ -14,9 +14,11 @@ from kazusa_ai_chatbot.conversation_progress.policy import (
     MAX_GUIDANCE_CHARS,
     MAX_LABEL_CHARS,
     MAX_MOVE_CHARS,
+    MAX_OBLIGATION_CHARS,
     MAX_THREAD_CHARS,
     NEXT_AFFORDANCES_LIMIT,
     OPEN_LOOPS_LIMIT,
+    INTERACTION_OBLIGATIONS_LIMIT,
     OVERUSED_MOVES_LIMIT,
     RESOLVED_THREADS_LIMIT,
     USER_STATE_UPDATES_LIMIT,
@@ -27,7 +29,11 @@ from kazusa_ai_chatbot.db.conversation_progress import (
     load_episode_state as _db_load_episode_state,
     upsert_episode_state_guarded as _db_upsert_episode_state_guarded,
 )
-from kazusa_ai_chatbot.db.schemas import ConversationEpisodeEntryDoc, ConversationEpisodeStateDoc
+from kazusa_ai_chatbot.db.schemas import (
+    ConversationEpisodeEntryDoc,
+    ConversationEpisodeStateDoc,
+    ConversationInteractionObligationDoc,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +111,48 @@ def preserve_first_seen_entries(
         if len(entries) >= limit:
             break
     return entries
+
+
+def preserve_first_seen_obligations(
+    *,
+    prior_obligations: list[ConversationInteractionObligationDoc],
+    new_obligations: list[dict],
+    current_timestamp_utc: str,
+) -> list[ConversationInteractionObligationDoc]:
+    """Attach first-seen metadata without changing obligation semantics."""
+
+    identity_fields = (
+        "actor",
+        "action",
+        "beneficiary",
+        "precondition",
+        "expected_outcome",
+        "source_kind",
+    )
+    prior_first_seen = {
+        tuple(obligation[field] for field in identity_fields): obligation[
+            "first_seen_at"
+        ]
+        for obligation in prior_obligations
+        if all(field in obligation for field in (*identity_fields, "first_seen_at"))
+    }
+    result: list[ConversationInteractionObligationDoc] = []
+    for obligation in new_obligations[:INTERACTION_OBLIGATIONS_LIMIT]:
+        capped = {
+            field: cap_text(obligation[field], MAX_OBLIGATION_CHARS)
+            for field in identity_fields[:-1]
+        }
+        capped["source_kind"] = obligation["source_kind"]
+        identity = tuple(capped[field] for field in identity_fields)
+        result.append({
+            **capped,
+            "status": obligation["status"],
+            "first_seen_at": prior_first_seen.get(
+                identity,
+                current_timestamp_utc,
+            ),
+        })
+    return result
 
 
 def _string_or_generated_id(value: object) -> str:
@@ -189,6 +237,11 @@ def build_episode_state_doc(
             new_texts=recorder_output["open_loops"],
             current_timestamp_utc=storage_timestamp_utc,
             limit=OPEN_LOOPS_LIMIT,
+        ),
+        "interaction_obligations": preserve_first_seen_obligations(
+            prior_obligations=prior_state.get("interaction_obligations", []),
+            new_obligations=recorder_output["interaction_obligations"],
+            current_timestamp_utc=storage_timestamp_utc,
         ),
         "resolved_threads": preserve_first_seen_entries(
             prior_entries=prior_state.get("resolved_threads", []),

@@ -16,16 +16,6 @@ from kazusa_ai_chatbot.config import (
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes.dialog_agent import (
     _V2_DIALOG_GENERATOR_PROMPT,
-    get_abstraction_reframing_description,
-    get_counter_questioning_description,
-    get_direct_assertion_description,
-    get_emotional_leakage_description,
-    get_formalism_avoidance_description,
-    get_fragmentation_description,
-    get_hesitation_density_description,
-    get_rhythmic_bounce_description,
-    get_self_deprecation_description,
-    get_softener_density_description,
 )
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 from tests.llm_trace import write_llm_trace
@@ -92,44 +82,8 @@ def _character_profile() -> dict:
 def _render_system_prompt(character_profile: dict) -> SystemMessage:
     """Render the exact dialog-generator system prompt under test."""
 
-    ltp = character_profile['linguistic_texture_profile']
-    prompt = _V2_DIALOG_GENERATOR_PROMPT.format(
-        character_name=character_profile['name'],
-        character_logic=character_profile['personality_brief']['logic'],
-        character_tempo=character_profile['personality_brief']['tempo'],
-        character_defense=character_profile['personality_brief']['defense'],
-        character_quirks=character_profile['personality_brief']['quirks'],
-        character_taboos=character_profile['personality_brief']['taboos'],
-        ltp_hesitation_density=get_hesitation_density_description(
-            ltp['hesitation_density']
-        ),
-        ltp_fragmentation=get_fragmentation_description(ltp['fragmentation']),
-        ltp_emotional_leakage=get_emotional_leakage_description(
-            ltp['emotional_leakage']
-        ),
-        ltp_rhythmic_bounce=get_rhythmic_bounce_description(
-            ltp['rhythmic_bounce']
-        ),
-        ltp_direct_assertion=get_direct_assertion_description(
-            ltp['direct_assertion']
-        ),
-        ltp_softener_density=get_softener_density_description(
-            ltp['softener_density']
-        ),
-        ltp_counter_questioning=get_counter_questioning_description(
-            ltp['counter_questioning']
-        ),
-        ltp_formalism_avoidance=get_formalism_avoidance_description(
-            ltp['formalism_avoidance']
-        ),
-        ltp_abstraction_reframing=get_abstraction_reframing_description(
-            ltp['abstraction_reframing']
-        ),
-        ltp_self_deprecation=get_self_deprecation_description(
-            ltp['self_deprecation']
-        ),
-    )
-    return SystemMessage(content=prompt)
+    del character_profile
+    return SystemMessage(content=_V2_DIALOG_GENERATOR_PROMPT)
 
 
 def _surface_payload(
@@ -137,7 +91,7 @@ def _surface_payload(
     content_plan: str,
     visible_boundaries: list[str],
     style_guidance: str,
-    pacing_guidance: str,
+    message_shape_guidance: str,
     selected_surface_intent: str,
     user_name: str,
 ) -> dict:
@@ -147,10 +101,10 @@ def _surface_payload(
         'text_surface_output_v2': {
             'schema_version': 'text_surface_output.v2',
             'content_plan': content_plan,
+            'content_requirements': [selected_surface_intent],
             'visible_boundaries': visible_boundaries,
             'addressee_plan': [user_name],
-            'style_guidance': style_guidance,
-            'pacing_guidance': pacing_guidance,
+            'style_guidance': f'{style_guidance} {message_shape_guidance}',
             'selected_surface_intent': selected_surface_intent,
         },
         'user_name': user_name,
@@ -171,7 +125,7 @@ def _touch_refusal_payload() -> dict:
         ),
         visible_boundaries=['拒绝未经允许的身体接触。'],
         style_guidance='傲娇、克制短句，保留一点被逗乐但不接受的嘴硬。',
-        pacing_guidance='1 条普通文字消息内保持紧凑短句。',
+        message_shape_guidance='1 条普通文字消息内保持紧凑短句。',
         selected_surface_intent='拒绝突如其来的亲昵动作并保留角色语气。',
         user_name='触碰测试用户',
     )
@@ -330,7 +284,7 @@ async def test_live_dialog_generator_keeps_uncertainty_reply_on_topic() -> None:
         ),
         visible_boundaries=['不要装懂或扩展无关私人活动。'],
         style_guidance='群聊短句，轻微困惑但自然。',
-        pacing_guidance='1 条普通文字消息，2-3个短句。',
+        message_shape_guidance='1 条普通文字消息，2-3个短句。',
         selected_surface_intent='回应用户问什么时候玩喷雾式散热。',
         user_name='散热测试用户',
     )
@@ -369,7 +323,7 @@ async def test_live_dialog_generator_does_not_invent_relationship_reading() -> N
         ),
         visible_boundaries=['不要展开关系评价。'],
         style_guidance='坦率认错，直接、简短，轻微不好意思。',
-        pacing_guidance='1 条普通文字消息，2-3个短句。',
+        message_shape_guidance='1 条普通文字消息，2-3个短句。',
         selected_surface_intent='承认武宜段已开通并回到铁路信息。',
         user_name='铁路测试用户',
     )

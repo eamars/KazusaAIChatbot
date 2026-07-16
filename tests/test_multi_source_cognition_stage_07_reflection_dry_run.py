@@ -103,8 +103,10 @@ def _payload() -> dict[str, object]:
             "channel_scope": "internal",
             "character_role": "character",
             "semantic_scene": "a promoted reflection is available",
+            "conversation_continuity": "No active public conversation.",
             "semantic_temporal_context": "recent",
         },
+        "private_continuity_context": "I should retain only promoted guidance.",
     }
 
 

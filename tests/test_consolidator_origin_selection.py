@@ -93,6 +93,7 @@ def _self_cognition_global_state() -> dict:
         "logical_stance": "TENTATIVE",
         "character_profile": {"name": "Kazusa"},
         "rag_result": {
+            "user_memory_unit_candidates": [],
             "user_image": {
                 "user_memory_context": {
                     "stable_patterns": [],

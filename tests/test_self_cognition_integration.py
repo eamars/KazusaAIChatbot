@@ -459,10 +459,10 @@ def _text_surface_output(content_plan: str = "Checking in now.") -> dict[str, An
     return {
         "schema_version": "text_surface_output.v2",
         "content_plan": content_plan,
+        "content_requirements": ["Preserve the scheduled follow-up purpose."],
         "visible_boundaries": [],
         "addressee_plan": ["current user"],
         "style_guidance": "brief",
-        "pacing_guidance": "direct",
         "selected_surface_intent": "answer the scheduled follow-up",
     }
 

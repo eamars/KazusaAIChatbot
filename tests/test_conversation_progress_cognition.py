@@ -57,6 +57,7 @@ class _GoalCaptureLLM:
             "desired_outcome": "answer the current blocker directly",
             "concrete_detail": "avoid repeating reassurance",
             "reason": "the conversation continuity names an open blocker",
+            "private_monologue": "I should address the missing point directly.",
             "target_role_handles": [],
             "evidence_handles": ["e1"],
             "expected_consequences": ["the conversation advances"],
@@ -139,7 +140,8 @@ def test_content_plan_owns_visible_conversation_progression() -> None:
 def test_connector_projects_allowlisted_bounded_conversation_progress() -> None:
     """Continuity reaches SceneContextV2 without operational identifiers."""
 
-    scene = _payload()["scene_context"]["semantic_scene"]
+    scene_context = _payload()["scene_context"]
+    scene = scene_context["conversation_continuity"]
 
     assert "missing third contribution point" in scene
     assert "avoid repeating: reassurance" in scene
@@ -164,6 +166,7 @@ async def test_goal_branch_receives_conversation_progress_before_surface() -> No
         payload["mutable_state"],
         payload["evidence"],
         scene_context=payload["scene_context"],
+        private_continuity_context=payload["private_continuity_context"],
     )
     llm = _GoalCaptureLLM()
     config = make_llm_call_config("conversation_progress_goal")
@@ -189,9 +192,9 @@ async def test_goal_branch_receives_conversation_progress_before_surface() -> No
         services,
     )
 
-    semantic_scene = llm.payload["semantic_context"]["scene_context"][
-        "semantic_scene"
+    conversation_continuity = llm.payload["semantic_context"]["scene_context"][
+        "conversation_continuity"
     ]
-    assert "the third point overlaps the second" in semantic_scene
+    assert "the third point overlaps the second" in conversation_continuity
     assert llm.payload["evidence"][0]["source_kind"] == "episode"
     assert bid["concrete_detail"] == "avoid repeating reassurance"

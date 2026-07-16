@@ -47,6 +47,14 @@ The consolidation package does not decide what the character should say. It
 only processes already produced cognition, dialog, action results, and
 prompt-safe episode traces after the live response decision has been made.
 
+User-memory deduplication, extractor prompt context, and surfaced merge
+candidates consume the canonical RAG `user_memory_unit_candidates` list. The
+consolidation path does not read a legacy `rag_result.user_image` envelope or
+maintain a parallel memory-context vocabulary.
+Once `rag_result` reaches consolidation, `user_memory_unit_candidates` is a
+required list, including when empty. Missing or malformed candidates fail at
+this boundary rather than silently projecting an empty memory context.
+
 The package must preserve these system boundaries:
 
 - LLM extraction may propose semantic facts or state updates.

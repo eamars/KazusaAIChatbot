@@ -72,10 +72,10 @@ def _global_state() -> dict:
         "text_surface_output_v2": {
             "schema_version": "text_surface_output.v2",
             "content_plan": "acknowledge",
+            "content_requirements": ["Acknowledge the current user."],
             "visible_boundaries": [],
             "addressee_plan": ["current user"],
             "style_guidance": "brief and grounded",
-            "pacing_guidance": "direct",
             "selected_surface_intent": "acknowledge",
         },
         "internal_monologue": "test",
@@ -85,19 +85,7 @@ def _global_state() -> dict:
         "character_intent": "PROVIDE",
         "logical_stance": "CONFIRM",
         "character_profile": {"name": "Kazusa"},
-        "rag_result": {
-            "user_image": {
-                "user_memory_context": {
-                    "stable_patterns": [],
-                    "recent_shifts": [],
-                    "objective_facts": [
-                        {"fact": "User likes tea"},
-                    ],
-                    "active_commitments": [],
-                    "milestones": [],
-                }
-            }
-        },
+        "rag_result": {"user_memory_unit_candidates": []},
         "decontexualized_input": "hello",
         "cognitive_episode": _cognitive_episode(),
     }
@@ -107,6 +95,16 @@ def test_build_existing_dedup_keys_ignores_memory_unit_context() -> None:
     """Transient RAG context must not become a dedup authority."""
 
     assert consolidator_module._build_existing_dedup_keys(_global_state()) == set()
+
+
+def test_build_existing_dedup_keys_requires_canonical_candidates() -> None:
+    """Missing canonical RAG candidates fail at the consolidation boundary."""
+
+    global_state = _global_state()
+    global_state["rag_result"] = {}
+
+    with pytest.raises(KeyError, match="user_memory_unit_candidates"):
+        consolidator_module._build_existing_dedup_keys(global_state)
 
 
 def test_build_consolidator_state_forwards_native_v2_outputs() -> None:

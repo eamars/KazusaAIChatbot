@@ -4,6 +4,7 @@ import asyncio
 import inspect
 import json
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -24,12 +25,19 @@ from kazusa_ai_chatbot.cognition_core_v2.dependency_graph import (
     build_dependency_graph,
     build_dependency_levels,
 )
+from kazusa_ai_chatbot.cognition_core_v2.facade import (
+    _raise_for_failed_required_branches,
+)
 from kazusa_ai_chatbot.cognition_core_v2.parallel_executor import (
+    ParallelExecutionResult,
     execute_dependency_graph,
 )
 from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
+    GOAL_COGNITION_PROMPT,
+    run_goal_cognition,
     validate_goal_bid_draft,
 )
+from kazusa_ai_chatbot.cognition_core_v2 import goal_cognition as goal_module
 from kazusa_ai_chatbot.cognition_core_v2.workspace import collapse_bids
 
 
@@ -241,6 +249,7 @@ def test_bid_and_route_capability_fields_match_their_route_exactly() -> None:
         "desired_outcome": "complete the bounded work",
         "concrete_detail": "use the declared action only",
         "reason": "the evidence supports execution",
+        "private_monologue": "I should use only the declared action.",
         "target_role_handles": [],
         "evidence_handles": ["e1"],
         "expected_consequences": ["the bounded work completes"],
@@ -266,6 +275,178 @@ def test_bid_and_route_capability_fields_match_their_route_exactly() -> None:
             {"b1": _bid("ordinary_response", route="evidence")},
             {"a1": {"action_kind": "test"}},
             {"r1": {"capability": "test"}},
+        )
+
+
+@pytest.mark.asyncio
+async def test_goal_bid_gets_one_bounded_schema_repair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A repairable route-field mismatch receives one LLM-owned correction."""
+
+    valid = {
+        "intention": "respond to the direct greeting",
+        "desired_outcome": "continue the addressed conversation",
+        "concrete_detail": "acknowledge the participant's greeting",
+        "reason": "the participant directly addressed the character",
+        "private_monologue": "I want to answer their greeting warmly.",
+        "target_role_handles": [],
+        "evidence_handles": ["e1"],
+        "expected_consequences": ["the conversation continues"],
+        "confidence": "high",
+        "requested_route": "speech",
+    }
+    responses = [
+        {**valid, "requested_resolver_handle": "r1"},
+        valid,
+    ]
+
+    class _LLM:
+        def __init__(self) -> None:
+            self.messages: list[list[object]] = []
+
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del config
+            self.messages.append(messages)
+            return SimpleNamespace(
+                content=json.dumps(responses[len(self.messages) - 1]),
+            )
+
+    trace_recorder = AsyncMock()
+    monkeypatch.setattr(
+        goal_module.llm_tracing,
+        "record_llm_trace_step",
+        trace_recorder,
+    )
+    monkeypatch.setattr(
+        goal_module.llm_tracing,
+        "current_trace_id",
+        lambda: "trace-1",
+    )
+    llm = _LLM()
+    bid = await run_goal_cognition(
+        DEFAULT_BRANCH_DEFINITIONS["ordinary_response"],
+        {"scope": "user", "kind": "goal", "entity_id": "g1"},
+        {"_role_bindings": {}, "role_summaries": {}},
+        [{
+            "evidence_handle": "e1",
+            "evidence_ref": {
+                "source_kind": "episode",
+                "source_id": "episode-1",
+                "occurred_at": "2026-07-15T00:00:00Z",
+                "semantic_summary": "the participant greeted the character",
+            },
+            "semantic_text": "the participant greeted the character",
+            "visible_to": ["q:event_agency"],
+        }],
+        [],
+        [{
+            "capability": "retrieve_context",
+            "semantic_capability": "retrieve bounded context",
+            "availability": "available",
+        }],
+        SimpleNamespace(
+            llm=llm,
+            goal_cognition_config=SimpleNamespace(
+                route_name="COGNITION_LLM",
+                model="test-model",
+            ),
+        ),
+    )
+
+    assert bid["requested_route"] == "speech"
+    assert len(llm.messages) == 2
+    assert "repair" in str(llm.messages[1][0].content).casefold()
+    assert "speech, deferral, silence" in GOAL_COGNITION_PROMPT
+    assert [
+        call.kwargs["stage_name"]
+        for call in trace_recorder.await_args_list
+    ] == [
+        "goal_cognition.ordinary_response.initial",
+        "goal_cognition.ordinary_response.repair",
+    ]
+    assert trace_recorder.await_args_list[0].kwargs["parse_status"] == (
+        "contract_error"
+    )
+
+
+@pytest.mark.asyncio
+async def test_goal_bid_schema_repair_stops_after_one_retry() -> None:
+    """A second malformed bid is surfaced after exactly one repair attempt."""
+
+    invalid = {
+        "intention": "respond",
+        "desired_outcome": "continue",
+        "concrete_detail": "acknowledge the greeting",
+        "reason": "the participant directly addressed the character",
+        "private_monologue": "I want to answer.",
+        "target_role_handles": [],
+        "evidence_handles": ["e1"],
+        "expected_consequences": ["the conversation continues"],
+        "confidence": "high",
+        "requested_route": "speech",
+        "requested_resolver_handle": "r1",
+    }
+
+    class _LLM:
+        def __init__(self) -> None:
+            self.call_count = 0
+
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del messages, config
+            self.call_count += 1
+            return SimpleNamespace(content=json.dumps(invalid))
+
+    llm = _LLM()
+    with pytest.raises(ValueError, match="capability fields"):
+        await run_goal_cognition(
+            DEFAULT_BRANCH_DEFINITIONS["ordinary_response"],
+            {"scope": "user", "kind": "goal", "entity_id": "g1"},
+            {"_role_bindings": {}, "role_summaries": {}},
+            [{
+                "evidence_handle": "e1",
+                "evidence_ref": {
+                    "source_kind": "episode",
+                    "source_id": "episode-1",
+                    "occurred_at": "2026-07-15T00:00:00Z",
+                    "semantic_summary": "direct greeting",
+                },
+                "semantic_text": "direct greeting",
+                "visible_to": ["q:event_agency"],
+            }],
+            [],
+            [{
+                "capability": "retrieve_context",
+                "semantic_capability": "retrieve bounded context",
+                "availability": "available",
+            }],
+            SimpleNamespace(llm=llm, goal_cognition_config=object()),
+        )
+
+    assert llm.call_count == 2
+
+
+def test_required_branch_failure_cannot_collapse_to_silence() -> None:
+    """A required cognition failure remains an execution failure."""
+
+    execution = ParallelExecutionResult(
+        failed_branch_ids={"ordinary_response"},
+    )
+
+    with pytest.raises(CognitionExecutionError, match="required cognition"):
+        _raise_for_failed_required_branches(
+            execution,
+            [DEFAULT_BRANCH_DEFINITIONS["ordinary_response"]],
         )
 
 

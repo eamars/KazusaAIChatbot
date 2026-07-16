@@ -37,7 +37,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_cognition_input_from_global_state,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
-    _build_surface_services,
+    _build_text_surface_services,
     build_text_surface_input_from_global_state,
 )
 from kazusa_ai_chatbot.time_boundary import (
@@ -599,7 +599,7 @@ async def _run_live_cognition_and_dialog(
     assert cognition_output["intention"]["route"] == "speech"
     state["cognition_input"] = cognition_input
     state["cognition_core_output"] = cognition_output
-    state["internal_monologue"] = cognition_output["residue"]
+    state["internal_monologue"] = cognition_output["private_monologue"]
     state["should_respond"] = True
     state["debug_modes"] = {}
 
@@ -612,7 +612,7 @@ async def _run_live_cognition_and_dialog(
     )
     surface_output = await run_text_surface_planning(
         surface_input,
-        _build_surface_services(),
+        _build_text_surface_services(),
     )
     state["text_surface_input_v2"] = surface_input
     state["text_surface_output_v2"] = surface_output

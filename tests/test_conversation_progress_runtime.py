@@ -58,6 +58,7 @@ async def test_runtime_record_writes_and_updates_cache(monkeypatch) -> None:
         "assistant_moves": ["reassurance"],
         "overused_moves": [],
         "open_loops": ["third point missing"],
+        "interaction_obligations": [],
         "progression_guidance": "address the missing third point",
     })
     monkeypatch.setattr(runtime.repository, "upsert_episode_state_guarded", AsyncMock(return_value=True))
@@ -109,6 +110,7 @@ async def test_runtime_record_does_not_cache_stale_write(monkeypatch) -> None:
         "assistant_moves": [],
         "overused_moves": [],
         "open_loops": [],
+        "interaction_obligations": [],
         "progression_guidance": "",
     })
     monkeypatch.setattr(runtime.repository, "upsert_episode_state_guarded", AsyncMock(return_value=False))

@@ -100,6 +100,9 @@ Conceptually, it contains:
 - unresolved user-state updates with relative age hints,
 - prior assistant move labels and overused move labels,
 - open loops,
+- interaction obligations with explicit actor, action, beneficiary,
+  precondition, expected outcome, lifecycle status, source kind, and relative
+  age,
 - resolved or stale threads,
 - emotional trajectory,
 - suggested next affordances,
@@ -107,7 +110,17 @@ Conceptually, it contains:
 
 The payload must remain bounded. It should be small enough to fit comfortably in the response-path context budget and clear enough for a local/weaker LLM to use directly.
 
-On a sharp transition, stale obligations are suppressed. The next cognition step should see a new-episode style payload rather than being nudged to reopen an old thread.
+On a sharp transition, stale topical loops are suppressed. Explicit structured
+obligations remain a distinct channel when the recorder judges that their
+lifecycle is still relevant; they are never inferred from the existence of an
+assistant suggestion or content plan alone.
+
+An obligation remains `active` while its typed action is still owed. Explicit
+fulfillment, receipt, or cancellation without replacement produces `resolved`
+for the transition turn. An explicit replacement preserves the old typed row as
+`superseded` and emits the replacement as a separate `active` row; this keeps
+actor and beneficiary direction inspectable while preventing the old item from
+driving later dialog.
 
 ## Storage Model
 
@@ -152,6 +165,16 @@ A storage implementation should preserve this conceptual shape:
     # Bounded episode entries
     "user_state_updates": [{"text": str, "first_seen_at": str}],
     "open_loops": [{"text": str, "first_seen_at": str}],
+    "interaction_obligations": [{
+        "actor": str,
+        "action": str,
+        "beneficiary": str,
+        "precondition": str,
+        "expected_outcome": str,
+        "status": "active | resolved | superseded",
+        "source_kind": "user_input | assistant_response | mutual_exchange",
+        "first_seen_at": str,
+    }],
     "resolved_threads": [{"text": str, "first_seen_at": str}],
     "avoid_reopening": [{"text": str, "first_seen_at": str}],
 
@@ -172,6 +195,8 @@ The important contract is behavioral rather than database-specific:
 
 - scope fields identify exactly one user's episode within one conversation surface,
 - entry lists preserve `first_seen_at` so prompt projection can produce relative age hints,
+- obligation rows preserve semantic roles and source ownership while
+  persistence adds `first_seen_at` and prompt projection adds `age_hint`,
 - `turn_count` is monotonic so guarded writes preserve newer progress,
 - expiry metadata ensures this remains short-term working memory,
 - new optional fields should be tolerated so older state can still project safely.
@@ -227,12 +252,14 @@ LLM judgment owns conversation semantics:
 - unresolved versus resolved threads,
 - overused response moves,
 - natural next affordances.
+- actor/source ownership and lifecycle of explicit interaction obligations.
 
 Deterministic code owns structure:
 
 - validating payload shape,
 - limiting string and list sizes,
 - generating relative age hints from timestamps,
+- validating obligation enums, field bounds, and the six-row cap,
 - enforcing prompt budget,
 - expiring stale state,
 - preventing stale writes from replacing newer state,

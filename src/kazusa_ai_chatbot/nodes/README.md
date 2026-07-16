@@ -35,8 +35,8 @@ planner owns expression planning. `dialog_agent.py` owns final visible wording.
 | Perception | `persona_supervisor2_msg_decontexualizer.py` | Current media observation, current-message rewrite, and referent status after the brain-service relevance settlement boundary. |
 | Persona graph | `persona_supervisor2.py` | Resolver recurrence, final commit ordering, action/surface routing, no-response handling, and episode trace assembly. |
 | V2 connector | `persona_supervisor2_cognition.py`, `persona_supervisor2_cognition_actions.py` | Exact `CognitionCoreInputV2` construction, state loading, V2 service binding, output projection, final state replacement, and semantic action-request materialization. |
-| Text-surface connector | `persona_supervisor2_l3_surface.py` | Prompt-safe interaction-style loading, exact `TextSurfaceInputV2` construction, and `run_text_surface_planning(...)`. |
-| Dialog | `dialog_agent.py` | Final text from `TextSurfaceOutputV2`, visible episode grounding, and permitted action results. |
+| Text and terminal visual connector | `persona_supervisor2_l3_surface.py` | Prompt-safe interaction-style loading, exact `TextSurfaceInputV2` construction, three-call text planning, and independent one-call visual planning. |
+| Dialog | `dialog_agent.py` | Literal spoken or typed text from `TextSurfaceOutputV2`, plus bounded current-visible-percept verification and one repair maximum. |
 | Specialist action handling | `persona_supervisor2_memory_lifecycle.py`, action-spec packages | Deterministic validation and execution of admitted semantic action requests. |
 | Consolidation handoff | `persona_supervisor2.py` | Completed persona state is handed to `kazusa_ai_chatbot.consolidation`, which owns extraction helpers, origin projection, target validation, and durable write routing. |
 
@@ -75,9 +75,10 @@ stage_0_msg_decontexualizer
   -> route from cognition_core_output.intention.route
        speech
          -> build TextSurfaceInputV2
-         -> run four bounded V2 surface stages
-         -> dialog_agent
-         -> text surface and action-result trace
+         -> run three bounded text stages
+         -> run one terminal visual stage as a sibling when enabled
+         -> dialog_agent receives only the text output
+         -> text surface, private image evidence, and action-result trace
        non-speech
          -> private terminal handling
          -> action-result trace without visible dialog
@@ -143,7 +144,7 @@ surface can describe only the actual semantic outcome. A background request
 without a visible acknowledgement route receives a deterministic failure
 result instead of silently promising work.
 
-## V2 Text Surface And Dialog
+## V2 Text, Terminal Visual, And Dialog
 
 `persona_supervisor2_l3_surface.py` runs only after the final cognition state
 commit and only for a speech intention. It builds exact `TextSurfaceInputV2`
@@ -155,7 +156,7 @@ from:
 - expression policy;
 - semantic affect and optional relationship projections;
 - permitted semantic action results; and
-- bounded interaction-style guidance.
+- bounded interaction-style guidance and character voice.
 
 The connector loads the existing sanitized user interaction-style overlay and,
 for group turns, the group-channel overlay. It renders only allowlisted speech,
@@ -163,12 +164,46 @@ social, pacing, and engagement guidance in application order into the bounded
 string required by `TextSurfaceInputV2`. Storage identifiers, revisions,
 reflection lineage, and raw channel/user identifiers are excluded.
 
-`run_text_surface_planning(...)` projects visible episode content and runs four
-bounded stages for style, content, preference, and visual/pacing guidance. The
-stages plan expression and return semantic strings; they do not write final
-dialogue. `dialog_agent.py` receives `TextSurfaceOutputV2`, visible episode
-grounding, allowed action results, and the character profile, then authors the
-final text fragments.
+`run_text_surface_planning(...)` projects visible episode content and runs
+three bounded stages for speech-safe style, content, and preference. Raw
+character voice reaches only the style call; content and preference cannot
+observe it. `TextSurfaceOutputV2` contains neither raw voice nor visual or
+pacing directives.
+
+When visual directives are enabled, `run_visual_surface_planning(...)` runs as
+an independent sibling call. It may observe bounded character voice and emits
+exact image-generation directives. No downstream image or dialog model
+consumes them. The persona graph retains them as a private `image` surface with
+`do_not_deliver` in the raw episode trace. Their fragments are audit-only and
+are excluded from every model-facing consolidation projection, source view,
+and router input.
+
+`dialog_agent.py` authors only words the character could literally type or
+say. Visible output contains no markup residue, stage-direction delimiters, or
+unmatched enclosing punctuation; the verifier rejects those forms even when no
+narrated action text remains. Dialog preserves the requested response
+operation, actors, claims, conditions, topic, time scope, and supplied
+descriptors, attributes, qualifiers, quantities, polarity, and comparative
+degree. Non-conflicting elaboration may add context without transforming,
+replacing, or compounding a supplied attribute into a different claim. It
+preserves explicit entity and target specificity; elaboration cannot
+generalize, euphemize, narrow, broaden, or replace a supplied referent.
+Acceptance, refusal, permission, and consent remain bounded to the exact
+source-requested act and scope; indefinite or unrestricted permission cannot
+substitute for a specific permission. When source meaning covers only the
+current occurrence, output remains silent about future claims, promises,
+conditions, expectations, threats, habits, rules, and contrastive or teasing
+additions. Explicit future content is preserved when the source supplies or
+requires it.
+Non-conflicting elaboration cannot create a new constraint, obligation,
+permission, prohibition, commitment, expectation, or future stance. The
+existing verifier receives the exact text surface, candidate dialog, and only
+`input_source` and `content` rows from current model-visible percepts within the
+shared 24,000-character surface-prompt bound. Those current percepts are the
+semantic authority; the text surface and candidate are proposals audited
+against them, and unsupported content is rejected even when both proposals
+agree. A negative verdict supplies the same grounding to the single allowed
+repair.
 
 Dialog does not receive raw V2 mutable state, private branch payloads,
 suppressed bids, persistent handles, relationship scalars, or obsolete
@@ -204,7 +239,9 @@ turn without becoming user-owned mutable state.
 The persona graph assembles action results and surface outputs into the existing
 episode-trace envelope for downstream diagnostics and consolidation. The trace
 records what was validated, attempted, completed, rejected, or surfaced. It is
-not a second cognition authority.
+not a second cognition authority. Terminal private image directives remain in
+this raw audit record, while the consolidation projection structurally omits
+them before any model-facing source view or router input is built.
 
 Consolidation runs after the live wording path. It consumes prompt-safe episode
 and trace evidence, plans eligible persistence targets, and applies writes
@@ -236,4 +273,5 @@ actions, deliver messages, schedule work, or reopen cognition.
 - `dialog_agent.dialog_agent(...)`
 
 The public cognition APIs themselves live in `kazusa_ai_chatbot.cognition_core_v2`:
-`run_cognition(...)` and `run_text_surface_planning(...)`.
+`run_cognition(...)`, `run_text_surface_planning(...)`, and
+`run_visual_surface_planning(...)`.
