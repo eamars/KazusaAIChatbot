@@ -54,6 +54,7 @@ long_term/todo.md
 | Document | Type | Status |
 |---|---|---|
 | [action_selection_context_contract_bugfix_plan.md](active/bugfix/action_selection_context_contract_bugfix_plan.md) | Large cognition-chain action-selection context contract bugfix plan | completed |
+| [relevance_native_reply_anchor_guard_bugfix_plan.md](archive/completed/bugfix/relevance_native_reply_anchor_guard_bugfix_plan.md) | Medium settled-relevance native reply semantics and delivery-target guard bugfix plan | completed |
 | [relevance_input_scope_robustness_bugfix_plan.md](archive/completed/bugfix/relevance_input_scope_robustness_bugfix_plan.md) | Medium relevance input-scope and production-projection robustness bugfix plan | completed |
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
 
@@ -270,6 +271,16 @@ parent-only independent review.
 |---|---|
 | Moved from active bugfix to completed archive | `relevance_input_scope_robustness_bugfix_plan.md` |
 
+### 2026-07-16 relevance native-reply anchor hardening completion
+
+The follow-up bugfix defined the existing settled native-reply Boolean, added a
+deterministic response-owner/latest-fragment delivery guard, preserved private
+and whole-group behavior, and verified the control-console observation surface.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active bugfix to completed archive | `relevance_native_reply_anchor_guard_bugfix_plan.md` |
+
 ## Archive
 
 Completed and superseded records live under `archive/`. Use them for historical
@@ -324,6 +335,7 @@ plans.
 | [relevance_input_scope_robustness_bugfix_plan.md](archive/completed/bugfix/relevance_input_scope_robustness_bugfix_plan.md) |
 | [reflection_group_scene_digest_self_cognition_bugfix_plan.md](archive/completed/bugfix/reflection_group_scene_digest_self_cognition_bugfix_plan.md) |
 | [reflection_global_promotion_replay_bugfix_plan.md](archive/completed/bugfix/reflection_global_promotion_replay_bugfix_plan.md) |
+| [relevance_native_reply_anchor_guard_bugfix_plan.md](archive/completed/bugfix/relevance_native_reply_anchor_guard_bugfix_plan.md) |
 | [resolver_image_only_empty_input_bugfix_plan.md](archive/completed/bugfix/resolver_image_only_empty_input_bugfix_plan.md) |
 | [self_cognition_background_context_budget_bugfix_plan.md](archive/completed/bugfix/self_cognition_background_context_budget_bugfix_plan.md) |
 | [self_cognition_group_digest_context_evidence_bugfix_plan.md](archive/completed/bugfix/self_cognition_group_digest_context_evidence_bugfix_plan.md) |

@@ -185,17 +185,20 @@ def _settled_state(
     media: list[dict] | None = None,
     scene: str = "A group conversation.",
     relationship: str = "The user is a familiar participant.",
+    conversation_scope: str = "group",
+    group_attention: str = "",
 ) -> dict:
     """Build a bounded settled relevance projection."""
 
     return {
-        "conversation_scope": "group",
+        "conversation_scope": conversation_scope,
         "active_character_name": "Character",
         "assembled_fragments": fragments,
         "media_descriptions": media or [],
         "fresh_history": history or [],
         "scene_context": scene,
         "relationship_context": relationship,
+        "group_attention": group_attention,
     }
 
 
@@ -965,3 +968,80 @@ async def test_live_attachment_burst_bounds_vision_and_preserves_overflow_signal
     assert len(state["media_descriptions"]) == 4
     assert state["additional_media_present"] is True
     assert result["response_action"] == "ignore"
+
+
+@pytest.mark.asyncio
+async def test_live_specific_group_question_requests_native_reply_anchor(
+    ensure_relevance_live_llms,
+) -> None:
+    """L21: a specific direct question in a noisy group requests anchoring."""
+
+    del ensure_relevance_live_llms
+    result = await _run_settled(
+        "L21_specific_group_reply_anchor",
+        _settled_state(
+            [{
+                "body_text": (
+                    "Character, can you check whether the deployment window "
+                    "is still 9 PM?"
+                ),
+                "semantic_target_labels": ["character"],
+                "reply_target_label": "none",
+            }],
+            scene="A busy operations group with several active discussions.",
+            group_attention="high_noise",
+        ),
+    )
+
+    assert result["response_action"] == "proceed"
+    assert result["use_reply_feature"] is True
+
+
+@pytest.mark.asyncio
+async def test_live_private_question_avoids_native_reply_anchor(
+    ensure_relevance_live_llms,
+) -> None:
+    """L22: ordinary private conversation proceeds without native anchoring."""
+
+    del ensure_relevance_live_llms
+    result = await _run_settled(
+        "L22_private_without_reply_anchor",
+        _settled_state(
+            [{
+                "body_text": "Can you help me check tonight's schedule?",
+                "semantic_target_labels": [],
+                "reply_target_label": "none",
+            }],
+            scene="A private conversation with the character.",
+            conversation_scope="private",
+        ),
+    )
+
+    assert result["response_action"] == "proceed"
+    assert result["use_reply_feature"] is False
+
+
+@pytest.mark.asyncio
+async def test_live_whole_group_invitation_avoids_native_reply_anchor(
+    ensure_relevance_live_llms,
+) -> None:
+    """L23: a whole-group invitation proceeds without a personal anchor."""
+
+    del ensure_relevance_live_llms
+    result = await _run_settled(
+        "L23_group_invitation_without_reply_anchor",
+        _settled_state(
+            [{
+                "body_text": (
+                    "Everyone, which release option should we choose tonight?"
+                ),
+                "semantic_target_labels": ["broadcast"],
+                "reply_target_label": "none",
+            }],
+            scene="A release-planning group conversation.",
+            group_attention="medium_noise",
+        ),
+    )
+
+    assert result["response_action"] == "proceed"
+    assert result["use_reply_feature"] is False

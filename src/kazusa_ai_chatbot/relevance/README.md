@@ -81,6 +81,12 @@ Fresh-history rows expose only `character|current_author|other_participant`
 speaker relations plus semantic target, reply, and turn-temporal summaries.
 The first settled assessment renders `ignore|proceed|wait`; the hard-deadline
 assessment renders only `ignore|proceed`.
+The settled agent also treats `use_reply_feature` as a semantic request for a
+native visual anchor. It requests an anchor only for a proceeding group turn
+where anchoring the effective latest fragment materially clarifies a specific
+character-directed message or speaker. Private turns, whole-group invitations,
+and non-proceed actions do not request one. Delivery feasibility and the
+executable quote target remain outside this package.
 
 ## Ownership Boundaries
 

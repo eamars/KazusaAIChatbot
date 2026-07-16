@@ -209,6 +209,19 @@ def test_settled_prompt_renders_only_currently_available_actions() -> None:
     assert waiting_messages[1].content == final_messages[1].content
 
 
+def test_settled_prompt_defines_native_reply_anchor_semantics() -> None:
+    """The settled prompt owns social usefulness, not delivery feasibility."""
+
+    messages = build_settled_relevance_messages(_base_state())
+    system_prompt = messages[0].content
+
+    assert "anchor the answer to effective_latest_fragment" in system_prompt
+    assert "specific character-directed message" in system_prompt
+    assert "for private input or a" in system_prompt
+    assert "whole-group invitation" in system_prompt
+    assert "response_action is not proceed" in system_prompt
+
+
 def test_settled_history_projects_production_participant_relations() -> None:
     """Production rows retain author, addressee, and reply relationships."""
 

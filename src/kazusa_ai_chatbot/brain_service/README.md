@@ -203,9 +203,12 @@ Private adjacency-only coalescing retains the existing immediate-ready timing
 and shows the full coalesced logical input to frontline before attaching its
 individual fragments to the exact survivor turn. An appended request completes
 with an empty response after attachment; only the response owner receives the
-assembled turn's visible response. Fresh settled history excludes active-turn
-rows. The opening/newest four-image budget is shared across reassessments, with
-overflow exposed to the settled fail-closed judgment.
+assembled turn's visible response. A settled native-reply request reaches the
+adapter only when that response owner is also the effective latest fragment;
+otherwise the visible response is delivered without a misleading quote.
+Fresh settled history excludes active-turn rows. The opening/newest four-image
+budget is shared across reassessments, with overflow exposed to the settled
+fail-closed judgment.
 Group burst pruning and group pre-relevance coalescing are not part of the
 active queue contract. A claimable `proceed` is the only path into the existing
 cognition and dialog graph.

@@ -944,6 +944,147 @@ async def test_assembled_response_is_delivered_only_to_response_owner() -> None:
 
 
 @pytest.mark.asyncio
+async def test_native_reply_is_suppressed_for_obsolete_response_owner(
+    monkeypatch,
+) -> None:
+    """An assembled answer cannot quote an older opening fragment."""
+
+    await _reset_queue_state()
+
+    class _Graph:
+        """Request one visible native-anchored response."""
+
+        async def ainvoke(self, state):
+            assert state["use_reply_feature"] is True
+            return {
+                "should_respond": True,
+                "use_reply_feature": state["use_reply_feature"],
+                "final_dialog": ["assembled answer"],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        AsyncMock(),
+    )
+    _patch_common_dependencies(monkeypatch, _Graph())
+    opening_item = _item(1, direct_address=True)
+    opening_item.conversation_row_id = "row-1"
+    followup_item = _item(
+        2,
+        platform_user_id="user-1",
+        content="Here is the actual question.",
+    )
+    followup_item.conversation_row_id = "row-2"
+    fragments = [
+        PersistedChatFragment(
+            arrival_sequence=queued_item.sequence,
+            scope=("qq", "chan-1", "group"),
+            author_platform_user_id="user-1",
+            author_global_user_id="global-user-1",
+            platform_message_id=str(queued_item.sequence),
+            conversation_row_id=queued_item.conversation_row_id,
+            storage_timestamp_utc=queued_item.storage_timestamp_utc,
+            enqueue_monotonic=queued_item.enqueue_monotonic,
+            body_text=queued_item.request.message_envelope.body_text,
+            queue_item=queued_item,
+        )
+        for queued_item in (opening_item, followup_item)
+    ]
+
+    await service_module._process_queued_chat_item(
+        opening_item,
+        settlement_fragments=fragments,
+        settled_decision={
+            "response_action": "proceed",
+            "reason_to_respond": "specific group question",
+            "use_reply_feature": True,
+            "channel_topic": "question",
+            "indirect_speech_context": "",
+        },
+        skip_user_persist=True,
+        settlement_turn_id="turn-1",
+        settlement_version=2,
+        settlement_claimed=True,
+        prepared_media=[],
+        media_prepared=True,
+    )
+
+    response = await opening_item.future
+    assert response.messages == ["assembled answer"]
+    assert response.use_reply_feature is False
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
+async def test_native_reply_reaches_single_fragment_response(
+    monkeypatch,
+) -> None:
+    """A compatible single-fragment owner preserves the semantic request."""
+
+    await _reset_queue_state()
+
+    class _Graph:
+        """Request one visible native-anchored response."""
+
+        async def ainvoke(self, state):
+            assert state["use_reply_feature"] is True
+            return {
+                "should_respond": True,
+                "use_reply_feature": state["use_reply_feature"],
+                "final_dialog": ["direct answer"],
+                "future_promises": [],
+                "consolidation_state": None,
+            }
+
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        AsyncMock(),
+    )
+    _patch_common_dependencies(monkeypatch, _Graph())
+    item = _item(1, direct_address=True)
+    item.conversation_row_id = "row-1"
+    fragment = PersistedChatFragment(
+        arrival_sequence=item.sequence,
+        scope=("qq", "chan-1", "group"),
+        author_platform_user_id="user-1",
+        author_global_user_id="global-user-1",
+        platform_message_id="1",
+        conversation_row_id=item.conversation_row_id,
+        storage_timestamp_utc=item.storage_timestamp_utc,
+        enqueue_monotonic=item.enqueue_monotonic,
+        body_text=item.request.message_envelope.body_text,
+        queue_item=item,
+    )
+
+    await service_module._process_queued_chat_item(
+        item,
+        settlement_fragments=[fragment],
+        settled_decision={
+            "response_action": "proceed",
+            "reason_to_respond": "specific group question",
+            "use_reply_feature": True,
+            "channel_topic": "question",
+            "indirect_speech_context": "",
+        },
+        skip_user_persist=True,
+        settlement_turn_id="turn-1",
+        settlement_version=1,
+        settlement_claimed=True,
+        prepared_media=[],
+        media_prepared=True,
+    )
+
+    response = await item.future
+    assert response.messages == ["direct answer"]
+    assert response.use_reply_feature is True
+    await _reset_queue_state()
+
+
+@pytest.mark.asyncio
 async def test_settled_fresh_history_excludes_active_turn_fragments(
     monkeypatch,
 ) -> None:

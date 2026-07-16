@@ -104,6 +104,17 @@ Decide only whether the active character has a grounded reason to speak now.
   available media. If speaking depends on omitted media, ignore rather than
   infer from the subset.
 
+# Native Reply Anchor
+- use_reply_feature is separate from the decision to speak. It requests a
+  visual anchor for the first answer.
+- Set it true only when response_action is proceed, conversation_scope is
+  group, and it would materially clarify a specific character-directed message
+  or speaker to anchor the answer to effective_latest_fragment amid surrounding
+  group traffic.
+- Set it false when response_action is not proceed, for private input or a
+  whole-group invitation, and whenever a group answer is already unambiguous
+  without a visual anchor.
+
 # Generation Procedure
 1. Read effective_latest_fragment and apply its recipient or withdrawal.
 2. Read the remaining assembled fragments as earlier context.

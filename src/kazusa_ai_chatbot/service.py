@@ -3543,8 +3543,14 @@ async def _process_queued_chat_item(
 
         stages_reached.append("graph")
         final_dialog = result["final_dialog"]
-        use_reply_feature = bool(final_dialog) and bool(
-            result["use_reply_feature"]
+        reply_owner_is_effective_latest = (
+            not settlement_fragments
+            or settlement_fragments[-1].arrival_sequence == item.sequence
+        )
+        use_reply_feature = (
+            bool(final_dialog)
+            and bool(result["use_reply_feature"])
+            and reply_owner_is_effective_latest
         )
         consolidation_state = result["consolidation_state"]
         scheduled_followup_count = len(result["future_promises"])
