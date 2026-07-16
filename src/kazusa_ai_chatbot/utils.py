@@ -492,6 +492,7 @@ def parse_llm_json_output(
     raw_output: str,
     *,
     expected_output_format: str | None = None,
+    deterministic_only: bool = False,
 ) -> dict:
     """Parse LLM JSON output, handling markdown fences and malformed JSON.
     
@@ -499,6 +500,8 @@ def parse_llm_json_output(
         raw_output: Raw string output from LLM
         expected_output_format: Optional target output contract shown to the
             original LLM, used only by the LLM repair fallback.
+        deterministic_only: Whether malformed output must fail closed without
+            calling the JSON-repair LLM.
         
     Returns:
         Parsed JSON object as dict, or empty dict if parsing fails
@@ -518,7 +521,14 @@ def parse_llm_json_output(
         # Use repair_json which handles both valid and broken JSON
         decoded_json_dict = repair_json(raw, return_objects=True)            
     except Exception as exc:
-        logger.exception(f"repair_json failed; falling back to LLM JSON repair: {exc}")
+        if deterministic_only:
+            logger.warning(f"Deterministic JSON parsing failed: {exc}")
+            return_value = {}
+            return return_value
+
+        logger.exception(
+            f"repair_json failed; falling back to LLM JSON repair: {exc}"
+        )
         try:
             decoded_json_dict = parse_json_with_llm(
                 raw_output,
@@ -531,6 +541,10 @@ def parse_llm_json_output(
     else:
         # repair_json failed to do the work. Now try the LLM approach
         if not isinstance(decoded_json_dict, dict):
+            if deterministic_only:
+                return_value = {}
+                return return_value
+
             try:
                 decoded_json_dict = parse_json_with_llm(
                     raw_output,

@@ -32,20 +32,32 @@ planner owns expression planning. `dialog_agent.py` owns final visible wording.
 
 | Area | Main files | Ownership |
 | --- | --- | --- |
-| Relevance and perception | `persona_relevance_agent.py`, `persona_supervisor2_msg_decontexualizer.py` | Whether a live event enters persona cognition, current media observations, current-message rewrite, and referent status. |
+| Perception | `persona_supervisor2_msg_decontexualizer.py` | Current media observation, current-message rewrite, and referent status after the brain-service relevance settlement boundary. |
 | Persona graph | `persona_supervisor2.py` | Resolver recurrence, final commit ordering, action/surface routing, no-response handling, and episode trace assembly. |
 | V2 connector | `persona_supervisor2_cognition.py`, `persona_supervisor2_cognition_actions.py` | Exact `CognitionCoreInputV2` construction, state loading, V2 service binding, output projection, final state replacement, and semantic action-request materialization. |
 | Text-surface connector | `persona_supervisor2_l3_surface.py` | Prompt-safe interaction-style loading, exact `TextSurfaceInputV2` construction, and `run_text_surface_planning(...)`. |
 | Dialog | `dialog_agent.py` | Final text from `TextSurfaceOutputV2`, visible episode grounding, and permitted action results. |
 | Specialist action handling | `persona_supervisor2_memory_lifecycle.py`, action-spec packages | Deterministic validation and execution of admitted semantic action requests. |
+| Consolidation handoff | `persona_supervisor2.py` | Completed persona state is handed to `kazusa_ai_chatbot.consolidation`, which owns extraction helpers, origin projection, target validation, and durable write routing. |
 
-Nodes consume normalized `message_envelope`, `prompt_message_context`,
-`reply_context`, `CognitiveEpisode`, typed user identities, and bounded history.
-Platform wire syntax and adapter-specific command parsing stay upstream.
+Semantic relevance is owned by `kazusa_ai_chatbot.relevance`, whose interface
+document defines the frontline intake and settled character-response agents.
+This package consumes their validated decisions through the brain-service
+settlement boundary; it does not import their prompts, model instances, or
+private projections.
+
+The nodes consume platform-neutral state. Platform wire syntax must already be
+normalized by adapters and the brain service into `message_envelope`,
+`prompt_message_context`, `reply_context`, `CognitiveEpisode`, global user ids,
+and bounded history fields.
 
 ## Canonical Live Flow
 
-The persona graph is:
+The top-level service graph routes into `persona_supervisor2` only after the
+queue, frontline intake, turn settlement, accepted-media description,
+settled-relevance gate, and conversation-progress loader have done their work.
+
+Inside `persona_supervisor2`, the live persona graph is:
 
 ```text
 stage_0_msg_decontexualizer

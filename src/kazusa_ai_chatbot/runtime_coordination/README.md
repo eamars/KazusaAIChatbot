@@ -16,6 +16,13 @@ can produce visible output from channel context. It does not own cognition,
 RAG, dialog wording, dispatcher delivery, adapter capability, calendar
 materialization, or durable cross-process leases.
 
+The brain service's relevance turn-settlement coordinator is a separate
+service-owned lifecycle. It orders frontline and settled relevance work,
+maintains enqueue-time group deadlines and the pre-deadline ingress barrier,
+and performs the versioned cognition claim before persona preparation. It uses
+runtime coordination for scoped foreground admission but does not move
+semantic judgment into this generic package.
+
 For one canonical channel scope, foreground work has precedence over
 background work that may send visible output. A foreground caller may request
 cooperative cancellation of same-scope background runs. A background caller

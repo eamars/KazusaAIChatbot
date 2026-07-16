@@ -144,6 +144,11 @@ from kazusa_ai_chatbot.brain_service import (
     post_turn as brain_post_turn,
     runtime_adapters as brain_runtime_registry,
 )
+from kazusa_ai_chatbot.brain_service.turn_settlement import (
+    AssessmentLease,
+    PersistedChatFragment,
+    TurnSettlementCoordinator,
+)
 from kazusa_ai_chatbot.brain_service.delivery_mentions import (
     build_inline_delivery_mentions,
 )
@@ -170,9 +175,14 @@ from kazusa_ai_chatbot.brain_service.contracts import (
     RuntimeAdapterRegistrationRequest,
     RuntimeAdapterRegistrationResponse,
 )
-from kazusa_ai_chatbot.nodes.persona_relevance_agent import relevance_agent
+from kazusa_ai_chatbot.relevance import (
+    build_group_attention_context,
+    frontline_relevance_agent,
+    relevance_agent,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontexualizer import (
     multimedia_descriptor_agent,
+    select_media_for_turn,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2
 from kazusa_ai_chatbot.nodes.persona_supervisor2_memory_lifecycle import (
@@ -344,10 +354,11 @@ def _register_runtime_adapter_payload(
 def _build_graph():
     """Build the LangGraph pipeline for the brain service."""
     return_value = brain_graph.build_graph(
-        relevance_agent_node=relevance_agent,
+        relevance_agent_node=_graph_relevance_node,
         multimedia_descriptor_agent_node=multimedia_descriptor_agent,
         load_conversation_episode_state_node=load_conversation_episode_state,
         persona_supervisor_node=persona_supervisor2,
+        claim_for_cognition_node=_claim_for_cognition_node,
     )
     return return_value
 
@@ -620,6 +631,1050 @@ _self_cognition_worker_handle: SelfCognitionWorkerHandle | None = None
 _background_work_worker_handle: BackgroundWorkRuntimeHandle | None = None
 _primary_interaction_active_count = 0
 _latest_cognition_graph: dict[str, Any] | None = None
+
+
+async def _evaluate_frontline_for_service(state: Mapping[str, Any]):
+    """Run the service-owned frontline semantic stage."""
+
+    return await frontline_relevance_agent(state)
+
+
+async def _evaluate_settled_for_service(
+    lease: AssessmentLease,
+    state: Mapping[str, Any],
+):
+    """Run the service-owned settled relevance semantic stage."""
+
+    del lease
+    return await relevance_agent(state)
+
+
+
+
+def _new_turn_settlement_coordinator() -> TurnSettlementCoordinator:
+    """Create the coordinator bound to the service's active event loop."""
+
+    return_value = TurnSettlementCoordinator(
+        frontline_evaluator=_evaluate_frontline_for_service,
+        settled_evaluator=_evaluate_settled_for_service,
+    )
+    return return_value
+
+
+_turn_settlement_coordinator = _new_turn_settlement_coordinator()
+_turn_settlement_worker_task: asyncio.Task[Any] | None = None
+
+
+async def _claim_for_cognition_node(state: IMProcessState) -> dict[str, Any]:
+    """Map the deterministic versioned claim into graph state."""
+
+    if state.get("cognition_claimed") is True:
+        return_value = {
+            "cognition_claimed": True,
+            "should_respond": True,
+        }
+        return return_value
+
+    turn_id = state.get("turn_id", "")
+    turn_version = state.get("turn_version")
+    claimed = False
+    if isinstance(turn_version, int) and turn_id:
+        claimed = await _turn_settlement_coordinator.claim_for_cognition(
+            turn_id,
+            turn_version,
+        )
+    return_value = {
+        "cognition_claimed": claimed,
+        "should_respond": claimed,
+    }
+    return return_value
+
+
+async def _graph_relevance_node(state: IMProcessState) -> dict[str, Any]:
+    """Use the settled decision already made before graph entry."""
+
+    if state.get("response_action") in {"ignore", "proceed", "wait"}:
+        return_value = {
+            "response_action": state["response_action"],
+            "should_respond": state["response_action"] == "proceed",
+            "reason_to_respond": state.get("reason_to_respond", ""),
+            "use_reply_feature": state.get("use_reply_feature", False),
+            "channel_topic": state.get("channel_topic", ""),
+            "indirect_speech_context": state.get(
+                "indirect_speech_context",
+                "",
+            ),
+        }
+        return return_value
+    return_value = {
+        "response_action": "ignore",
+        "should_respond": False,
+        "reason_to_respond": "settled relevance decision missing",
+        "use_reply_feature": False,
+        "channel_topic": "",
+        "indirect_speech_context": "",
+    }
+    return return_value
+
+
+def _frontline_target_labels(
+    envelope: Mapping[str, Any],
+    character_global_user_id: str,
+) -> list[str]:
+    """Project typed addressee evidence into semantic target labels."""
+
+    addressed_to = envelope.get("addressed_to_global_user_ids") or []
+    if not isinstance(addressed_to, list):
+        addressed_to = list(addressed_to) if isinstance(addressed_to, tuple) else []
+    has_character = character_global_user_id in addressed_to
+    has_other = any(
+        isinstance(value, str) and value != character_global_user_id
+        for value in addressed_to
+    )
+    labels: list[str] = []
+    if has_character:
+        labels.append("character")
+    if has_other:
+        labels.append("other_participant")
+    if not labels and envelope.get("broadcast"):
+        labels.append("broadcast")
+    if not labels:
+        labels.append("none")
+    return_value = labels
+    return return_value
+
+
+def _frontline_reply_label(
+    envelope: Mapping[str, Any],
+    character_global_user_id: str,
+) -> str:
+    """Project typed reply evidence without exposing reply identifiers."""
+
+    reply = envelope.get("reply")
+    if not isinstance(reply, Mapping):
+        return_value = "none"
+        return return_value
+    if reply.get("global_user_id") == character_global_user_id:
+        return_value = "character"
+        return return_value
+    if reply.get("global_user_id") or reply.get("platform_user_id"):
+        return_value = "other_participant"
+        return return_value
+    return_value = "unknown_participant"
+    return return_value
+
+
+def _build_frontline_fragment(
+    item: QueuedChatItem,
+    *,
+    message_envelope: Mapping[str, Any],
+    global_user_id: str,
+    character_global_user_id: str,
+) -> PersistedChatFragment:
+    """Build the persisted fragment and semantic labels for frontline work."""
+
+    attachments = message_envelope.get("attachments") or []
+    media_labels = tuple(
+        str(attachment.get("media_type"))
+        for attachment in attachments
+        if isinstance(attachment, Mapping) and attachment.get("media_type")
+    )
+    semantic_targets = tuple(
+        _frontline_target_labels(message_envelope, character_global_user_id)
+    )
+    reply_target_label = _frontline_reply_label(
+        message_envelope,
+        character_global_user_id,
+    )
+    media_descriptions = tuple(
+        {
+            "media_kind": str(attachment.get("media_type", "")),
+            "description": str(attachment.get("description", "")),
+        }
+        for attachment in attachments
+        if isinstance(attachment, Mapping)
+        and attachment.get("description")
+    )
+    return_value = PersistedChatFragment(
+        arrival_sequence=item.sequence,
+        scope=(
+            item.request.platform,
+            item.request.platform_channel_id,
+            item.request.channel_type,
+        ),
+        author_platform_user_id=item.request.platform_user_id,
+        author_global_user_id=global_user_id,
+        platform_message_id=item.request.platform_message_id,
+        conversation_row_id=item.conversation_row_id,
+        storage_timestamp_utc=item.storage_timestamp_utc,
+        enqueue_monotonic=item.enqueue_monotonic,
+        body_text=message_envelope.get("body_text", ""),
+        semantic_target_labels=semantic_targets,
+        reply_target_label=reply_target_label,
+        media_labels=media_labels,
+        media_descriptions=media_descriptions,
+        attachments=tuple(
+            dict(attachment)
+            for attachment in attachments
+            if isinstance(attachment, Mapping)
+        ),
+        request=item.request,
+        future=item.future,
+        pipeline_run_handle=item.pipeline_run_handle,
+        queue_item=item,
+    )
+    return return_value
+
+
+async def _build_frontline_state(
+    fragment: PersistedChatFragment,
+) -> dict[str, Any]:
+    """Build the bounded frontline semantic projection from service state."""
+
+    return_value = await _turn_settlement_coordinator.build_frontline_state(
+        fragment,
+    )
+    return_value["active_character_name"] = _static_character_profile.get(
+        "name",
+        "Character",
+    )
+    queue_item = fragment.queue_item
+    if isinstance(queue_item, QueuedChatItem):
+        return_value["llm_trace_id"] = queue_item.llm_trace_id
+    return return_value
+
+
+def _collapsed_private_frontline_message(
+    fragments: tuple[PersistedChatFragment, ...],
+) -> dict[str, Any]:
+    """Project one coalesced private logical input for frontline judgment."""
+
+    body_text = "\n".join(
+        fragment.body_text for fragment in fragments if fragment.body_text
+    )
+    semantic_target_labels = list(dict.fromkeys(
+        label
+        for fragment in fragments
+        for label in fragment.semantic_target_labels
+    ))
+    media_labels = list(dict.fromkeys(
+        label
+        for fragment in fragments
+        for label in fragment.media_labels
+    ))
+    reply_labels = {
+        fragment.reply_target_label
+        for fragment in fragments
+        if fragment.reply_target_label != "none"
+    }
+    if "character" in reply_labels:
+        reply_target_label = "character"
+    elif "other_participant" in reply_labels:
+        reply_target_label = "other_participant"
+    else:
+        reply_target_label = "none"
+    return_value = {
+        "body_text": body_text,
+        "semantic_target_labels": semantic_target_labels,
+        "reply_target_label": reply_target_label,
+        "media_labels": media_labels,
+    }
+    return return_value
+
+
+async def _prepare_frontline_fragment(
+    item: QueuedChatItem,
+) -> PersistedChatFragment:
+    """Resolve identities and persist one message before frontline judgment."""
+
+    req = item.request
+    character_name = _static_character_profile.get("name", "Character")
+    character_global_user_id = await _ensure_character_global_identity(
+        platform=req.platform,
+        platform_bot_id=req.platform_bot_id,
+        character_name=character_name,
+    )
+    global_user_id, user_profile = await _resolve_queued_user(item)
+    message_envelope = await _resolve_message_envelope_identities(req)
+    item.global_user_id = global_user_id
+    item.user_profile = dict(user_profile)
+    item.resolved_message_envelope = message_envelope
+    if not item.llm_trace_id:
+        item.llm_trace_id = llm_tracing.build_trace_id()
+    await llm_tracing.ensure_llm_trace_run(
+        trace_id=item.llm_trace_id,
+        platform=req.platform,
+        platform_channel_id=req.platform_channel_id,
+        channel_type=req.channel_type,
+        platform_message_id=req.platform_message_id,
+        global_user_id=global_user_id,
+        started_at=item.storage_timestamp_utc,
+    )
+    if not item.conversation_row_id:
+        conversation_row_id = await _save_user_message_from_item(
+            item,
+            global_user_id=global_user_id,
+            reply_context=await _hydrate_reply_context(req),
+            message_envelope=message_envelope,
+        )
+        if not conversation_row_id:
+            raise RuntimeError(
+                "frontline message persistence did not commit a row"
+            )
+        item.conversation_row_id = conversation_row_id
+    fragment = _build_frontline_fragment(
+        item,
+        message_envelope=message_envelope,
+        global_user_id=global_user_id,
+        character_global_user_id=character_global_user_id,
+    )
+    return_value = fragment
+    return return_value
+
+
+async def _prepare_frontline_fragments(
+    item: QueuedChatItem,
+) -> tuple[PersistedChatFragment, ...]:
+    """Prepare the leader and any private fragments as one intake unit."""
+
+    leader = await _prepare_frontline_fragment(item)
+    fragments = [leader]
+    character_global_user_id = await _ensure_character_global_identity(
+        platform=item.request.platform,
+        platform_bot_id=item.request.platform_bot_id,
+        character_name=_static_character_profile.get("name", "Character"),
+    )
+    for collapsed_item in sorted(
+        item.collapsed_items,
+        key=lambda queued_item: queued_item.sequence,
+    ):
+        message_envelope = collapsed_item.resolved_message_envelope
+        if not isinstance(message_envelope, Mapping):
+            message_envelope = await _resolve_message_envelope_identities(
+                collapsed_item.request,
+            )
+            collapsed_item.resolved_message_envelope = message_envelope
+        if not collapsed_item.global_user_id:
+            global_user_id, user_profile = await _resolve_queued_user(
+                collapsed_item,
+            )
+            collapsed_item.global_user_id = global_user_id
+            collapsed_item.user_profile = dict(user_profile)
+        if not collapsed_item.conversation_row_id:
+            conversation_row_id = await _save_user_message_from_item(
+                collapsed_item,
+                global_user_id=collapsed_item.global_user_id,
+                reply_context=await _hydrate_reply_context(
+                    collapsed_item.request,
+                ),
+                message_envelope=message_envelope,
+            )
+            if not conversation_row_id:
+                raise RuntimeError(
+                    "private fragment persistence did not commit a row"
+                )
+            collapsed_item.conversation_row_id = conversation_row_id
+        fragments.append(
+            _build_frontline_fragment(
+                collapsed_item,
+                message_envelope=message_envelope,
+                global_user_id=collapsed_item.global_user_id,
+                character_global_user_id=character_global_user_id,
+            )
+        )
+    return_value = tuple(fragments)
+    return return_value
+
+
+def _fragment_media_rows(
+    fragment: PersistedChatFragment,
+    *,
+    fragment_index: int,
+) -> list[dict[str, Any]]:
+    """Project prompt-usable media rows with their owning fragment index."""
+
+    rows: list[dict[str, Any]] = []
+    for attachment in fragment.attachments:
+        media_type = attachment.get("media_type", "")
+        base64_data = attachment.get("base64_data", "")
+        description = attachment.get("description", "")
+        if not isinstance(media_type, str):
+            continue
+        if not isinstance(base64_data, str):
+            base64_data = ""
+        if not isinstance(description, str):
+            description = ""
+        has_image_payload = (
+            media_type.startswith("image/")
+            and bool(base64_data or description)
+        )
+        has_audio_description = (
+            media_type.startswith("audio/")
+            and bool(description)
+        )
+        if not has_image_payload and not has_audio_description:
+            continue
+        source_key = base64_data or description
+        media_key = hashlib.sha256(source_key.encode("utf-8")).hexdigest()
+        rows.append({
+            "content_type": media_type,
+            "base64_data": base64_data,
+            "description": description,
+            "_fragment_index": fragment_index,
+            "_media_key": media_key,
+        })
+    return_value = rows
+    return return_value
+
+
+def _bounded_media_selection(
+    rows: list[dict[str, Any]],
+    *,
+    limit: int,
+    preserve_opening: bool,
+) -> list[dict[str, Any]]:
+    """Select the opening and newest image rows within a remaining budget."""
+
+    if limit <= 0 or not rows:
+        return []
+    selected, _overflow = select_media_for_turn(rows)
+    if len(selected) <= limit:
+        return selected
+    if not preserve_opening:
+        return selected[-limit:]
+    if limit == 1:
+        return [selected[0]]
+    return_value = [selected[0], *selected[-(limit - 1):]]
+    return return_value
+
+
+def _cached_media_row(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Strip settlement bookkeeping from one reusable descriptor row."""
+
+    return_value = {
+        "content_type": str(row.get("content_type", "")),
+        "base64_data": str(row.get("base64_data", "")),
+        "description": str(row.get("description", "")),
+    }
+    if isinstance(row.get("image_observation"), Mapping):
+        return_value["image_observation"] = dict(row["image_observation"])
+    return return_value
+
+
+async def _prepare_settled_media(
+    lease: AssessmentLease,
+) -> tuple[list[MultiMediaDoc], bool]:
+    """Describe admitted media before settled relevance and bound image work."""
+
+    all_rows = [
+        row
+        for index, fragment in enumerate(lease.fragments)
+        for row in _fragment_media_rows(fragment, fragment_index=index)
+    ]
+    for row in all_rows:
+        if not row.get("description"):
+            continue
+        fragment = lease.fragments[row["_fragment_index"]]
+        media_key = row["_media_key"]
+        fragment.media_description_cache.setdefault(
+            media_key,
+            _cached_media_row(row),
+        )
+        if str(row.get("content_type", "")).startswith("image/"):
+            fragment.media_description_attempted_keys.add(media_key)
+
+    attempted_image_keys = {
+        media_key
+        for fragment in lease.fragments
+        for media_key in fragment.media_description_attempted_keys
+    }
+    image_rows = [
+        row
+        for row in all_rows
+        if str(row.get("content_type", "")).startswith("image/")
+    ]
+    candidate_rows = [
+        row
+        for row in image_rows
+        if row["_media_key"] not in attempted_image_keys
+    ]
+    remaining_budget = max(0, 4 - len(attempted_image_keys))
+    selected_images = _bounded_media_selection(
+        candidate_rows,
+        limit=remaining_budget,
+        preserve_opening=(
+            bool(image_rows)
+            and image_rows[0]["_media_key"] not in attempted_image_keys
+        ),
+    )
+    selected_image_ids = {id(row) for row in selected_images}
+    for row in selected_images:
+        fragment = lease.fragments[row["_fragment_index"]]
+        fragment.media_description_attempted_keys.add(row["_media_key"])
+
+    all_image_keys = {row["_media_key"] for row in image_rows}
+    attempted_image_keys.update(
+        row["_media_key"] for row in selected_images
+    )
+    additional_media_present = bool(
+        all_image_keys - attempted_image_keys
+    )
+    rows_by_fragment: dict[int, list[dict[str, Any]]] = {}
+    for row in all_rows:
+        is_image = str(row.get("content_type", "")).startswith("image/")
+        if is_image and id(row) not in selected_image_ids:
+            continue
+        if not is_image:
+            fragment = lease.fragments[row["_fragment_index"]]
+            fragment.media_description_cache.setdefault(
+                row["_media_key"],
+                _cached_media_row(row),
+            )
+            continue
+        fragment_index = row["_fragment_index"]
+        rows_by_fragment.setdefault(fragment_index, []).append(row)
+
+    for fragment_index, fragment in enumerate(lease.fragments):
+        fragment_rows = rows_by_fragment.get(fragment_index, [])
+        if not fragment_rows:
+            continue
+        queue_item = fragment.queue_item
+        if not isinstance(queue_item, QueuedChatItem):
+            continue
+        message_envelope = queue_item.resolved_message_envelope
+        if not isinstance(message_envelope, Mapping):
+            message_envelope = await _resolve_message_envelope_identities(
+                queue_item.request,
+            )
+        episode = build_text_chat_cognitive_episode(
+            episode_id=(
+                f"settlement_media:{fragment.platform_message_id}"
+            ),
+            percept_id=(
+                f"settlement_media:{fragment.platform_message_id}:text"
+            ),
+            storage_timestamp_utc=fragment.storage_timestamp_utc,
+            local_time_context=queue_item.local_time_context,
+            user_input=fragment.body_text,
+            platform=fragment.scope[0],
+            platform_channel_id=fragment.scope[1],
+            channel_type=fragment.scope[2],
+            platform_message_id=fragment.platform_message_id,
+            platform_user_id=fragment.author_platform_user_id,
+            global_user_id=fragment.author_global_user_id,
+            user_name=queue_item.request.display_name,
+            target_addressed_user_ids=(
+                [CHARACTER_GLOBAL_USER_ID]
+                if "character" in fragment.semantic_target_labels
+                else []
+            ),
+            target_broadcast="broadcast" in fragment.semantic_target_labels,
+        )
+        media_state = {
+            "user_name": queue_item.request.display_name,
+            "platform_user_id": fragment.author_platform_user_id,
+            "platform": fragment.scope[0],
+            "platform_channel_id": fragment.scope[1],
+            "platform_message_id": fragment.platform_message_id,
+            "user_multimedia_input": fragment_rows,
+            "message_envelope": message_envelope,
+            "reply_context": await _hydrate_reply_context(
+                queue_item.request,
+            ),
+            "cognitive_episode": episode,
+        }
+        try:
+            described_state = await multimedia_descriptor_agent(media_state)
+        except Exception as exc:
+            logger.warning(
+                f"Settled media description failed; retaining supplied "
+                f"descriptions: {exc}"
+            )
+            described_state = {
+                "user_multimedia_input": fragment_rows,
+                "additional_media_present": False,
+            }
+        described_rows = described_state.get("user_multimedia_input")
+        if not isinstance(described_rows, list):
+            described_rows = fragment_rows
+        for index, source_row in enumerate(fragment_rows):
+            described_row = (
+                described_rows[index]
+                if index < len(described_rows)
+                and isinstance(described_rows[index], Mapping)
+                else source_row
+            )
+            fragment.media_description_cache[source_row["_media_key"]] = (
+                _cached_media_row(described_row)
+            )
+
+    prepared_rows: list[MultiMediaDoc] = []
+    seen_cache_keys: set[str] = set()
+    for fragment in lease.fragments:
+        fragment.media_descriptions = tuple(
+            {
+                "media_kind": str(row.get("content_type", "")),
+                "description": str(row.get("description", "")),
+            }
+            for row in fragment.media_description_cache.values()
+            if row.get("description")
+        )
+        for media_key, cached_row in fragment.media_description_cache.items():
+            if media_key in seen_cache_keys:
+                continue
+            seen_cache_keys.add(media_key)
+            prepared_rows.append(_cached_media_row(cached_row))
+
+    if lease.fragments and additional_media_present:
+        lease.fragments[0].additional_media_present = True
+    return_value = (prepared_rows, additional_media_present)
+    return return_value
+
+
+def _settled_state_from_lease(
+    lease: AssessmentLease,
+    *,
+    history: list[dict],
+) -> dict[str, Any]:
+    """Project a leased turn into settled semantic input."""
+
+    fragment_rows = [
+        {
+            "body_text": fragment.body_text,
+            "semantic_target_labels": list(fragment.semantic_target_labels),
+            "reply_target_label": fragment.reply_target_label,
+            "media_labels": list(fragment.media_labels),
+        }
+        for fragment in lease.fragments
+    ]
+    media_descriptions = [
+        dict(description)
+        for fragment in lease.fragments
+        for description in fragment.media_descriptions
+    ]
+    additional_media_present = any(
+        fragment.additional_media_present for fragment in lease.fragments
+    )
+    active_platform_message_ids = {
+        fragment.platform_message_id
+        for fragment in lease.fragments
+        if fragment.platform_message_id
+    }
+    active_conversation_row_ids = {
+        fragment.conversation_row_id
+        for fragment in lease.fragments
+        if fragment.conversation_row_id
+    }
+    earliest_active_timestamp = (
+        lease.fragments[0].storage_timestamp_utc
+        if lease.fragments
+        else ""
+    )
+    latest_active_timestamp = (
+        lease.fragments[-1].storage_timestamp_utc
+        if lease.fragments
+        else ""
+    )
+    earliest_active_index = -1
+    latest_active_index = -1
+    external_history: list[tuple[int, dict]] = []
+    for history_index, row in enumerate(history):
+        is_active_row = (
+            row.get("platform_message_id") in active_platform_message_ids
+            or str(row.get("_id", "")) in active_conversation_row_ids
+        )
+        if is_active_row:
+            if earliest_active_index < 0:
+                earliest_active_index = history_index
+            latest_active_index = history_index
+            continue
+        external_history.append((history_index, row))
+    recent_external_history = external_history[-10:]
+    fresh_history = trim_history_dict([
+        row for _history_index, row in recent_external_history
+    ])
+    for projected_row, (history_index, _source_row) in zip(
+        fresh_history,
+        recent_external_history,
+        strict=True,
+    ):
+        if latest_active_index < 0:
+            temporal_relation = _history_relation_from_timestamp(
+                row_timestamp=projected_row.get("timestamp"),
+                earliest_active_timestamp=earliest_active_timestamp,
+                latest_active_timestamp=latest_active_timestamp,
+            )
+        elif history_index > latest_active_index:
+            temporal_relation = "after_active_turn"
+        elif history_index > earliest_active_index:
+            temporal_relation = "during_active_turn"
+        else:
+            temporal_relation = "before_active_turn"
+        projected_row["turn_temporal_relation"] = temporal_relation
+    leader = lease.fragments[0] if lease.fragments else None
+    response_owner = next(
+        (
+            fragment
+            for fragment in lease.fragments
+            if fragment.arrival_sequence == lease.response_owner_sequence
+        ),
+        leader,
+    )
+    response_owner_item = (
+        response_owner.queue_item
+        if response_owner is not None
+        and isinstance(response_owner.queue_item, QueuedChatItem)
+        else None
+    )
+    request = (
+        response_owner_item.request
+        if response_owner_item is not None
+        else None
+    )
+    user_profile = (
+        response_owner_item.user_profile
+        if response_owner_item is not None
+        else {}
+    )
+    direct_participant = any(
+        "character" in fragment.semantic_target_labels
+        for fragment in lease.fragments
+    )
+    relationship_context = str(
+        user_profile.get("last_relationship_insight", "")
+    ).strip()
+    if not relationship_context:
+        relationship_context = (
+            "direct participant" if direct_participant
+            else "group participant"
+        )
+    group_attention = ""
+    if request is not None and request.channel_type == "group":
+        attention_context = build_group_attention_context(
+            chat_history_wide=fresh_history,
+            platform_bot_id=request.platform_bot_id,
+        )
+        group_attention = attention_context["group_attention"]
+    return_value = {
+        "conversation_scope": (
+            response_owner.scope[2]
+            if response_owner is not None
+            else ""
+        ),
+        "active_character_name": _static_character_profile.get(
+            "name",
+            "Character",
+        ),
+        "assembled_fragments": fragment_rows,
+        "media_descriptions": media_descriptions,
+        "additional_media_present": additional_media_present,
+        "fresh_history": fresh_history,
+        "scene_context": (
+            request.channel_name
+            if request is not None and request.channel_name
+            else ""
+        ),
+        "relationship_context": relationship_context,
+        "character_mood": str(_runtime_character_state.get("mood", "")),
+        "group_attention": group_attention,
+        "bot_continuity": lease.latest_bot_continuity,
+        "user_profile": user_profile,
+        "current_author_global_user_id": (
+            response_owner.author_global_user_id
+            if response_owner is not None
+            else ""
+        ),
+        "current_author_platform_user_id": (
+            response_owner.author_platform_user_id
+            if response_owner is not None
+            else ""
+        ),
+        "character_global_user_id": CHARACTER_GLOBAL_USER_ID,
+        "platform_bot_id": (
+            request.platform_bot_id
+            if request is not None
+            else ""
+        ),
+        "llm_trace_id": (
+            response_owner_item.llm_trace_id
+            if response_owner_item is not None
+            else ""
+        ),
+    }
+    return return_value
+
+
+def _history_relation_from_timestamp(
+    *,
+    row_timestamp: object,
+    earliest_active_timestamp: str,
+    latest_active_timestamp: str,
+) -> str:
+    """Relate a history row when the bounded window omits the active row."""
+
+    if (
+        not isinstance(row_timestamp, str)
+        or not earliest_active_timestamp
+        or not latest_active_timestamp
+    ):
+        return_value = "unknown"
+        return return_value
+
+    try:
+        row_time = parse_storage_utc_datetime(row_timestamp)
+        earliest_active_time = parse_storage_utc_datetime(
+            earliest_active_timestamp,
+        )
+        active_time = parse_storage_utc_datetime(latest_active_timestamp)
+    except ValueError:
+        return_value = "unknown"
+        return return_value
+
+    if row_time > active_time:
+        return_value = "after_active_turn"
+        return return_value
+    if row_time < earliest_active_time:
+        return_value = "before_active_turn"
+        return return_value
+    if earliest_active_time < row_time < active_time:
+        return_value = "during_active_turn"
+        return return_value
+    return_value = "unknown"
+    return return_value
+
+
+async def _complete_settled_fragments(
+    lease: AssessmentLease,
+    response: ChatResponse,
+    *,
+    release_response_owner: bool = True,
+) -> None:
+    """Deliver one response to its owner and silence every other fragment."""
+
+    for fragment in lease.fragments:
+        queue_item = fragment.queue_item
+        if not isinstance(queue_item, QueuedChatItem):
+            continue
+        is_response_owner = (
+            fragment.arrival_sequence == lease.response_owner_sequence
+        )
+        fragment_response = response if is_response_owner else ChatResponse()
+        _chat_input_queue.complete(queue_item, fragment_response)
+        if release_response_owner or not is_response_owner:
+            await _release_queued_pipeline_handle(queue_item)
+
+
+def _response_owner_item(lease: AssessmentLease) -> QueuedChatItem | None:
+    """Return the queue item that owns the assembled turn response."""
+
+    for fragment in lease.fragments:
+        if fragment.arrival_sequence != lease.response_owner_sequence:
+            continue
+        if isinstance(fragment.queue_item, QueuedChatItem):
+            return_value = fragment.queue_item
+            return return_value
+    return None
+
+
+async def _frontline_intake_item(item: QueuedChatItem) -> None:
+    """Run persistence and frontline admission for one queued item."""
+
+    if item.request.debug_modes.listen_only:
+        await _process_queued_chat_item(item)
+        return
+
+    try:
+        fragments = await _prepare_frontline_fragments(item)
+        leader_fragment = fragments[0]
+        frontline_state = await _build_frontline_state(leader_fragment)
+        if len(fragments) > 1:
+            frontline_state["current_message"] = (
+                _collapsed_private_frontline_message(fragments)
+            )
+        decision = await _turn_settlement_coordinator.evaluate_frontline(
+            frontline_state,
+        )
+        outcome = await _turn_settlement_coordinator.apply_frontline_decision(
+            leader_fragment,
+            decision,
+        )
+        if outcome.action == "discard":
+            discard_decision = {
+                "intake_action": "discard",
+                "append_target": "none",
+                "prelude_targets": [],
+                "reason": "collapsed private input follows discarded leader",
+            }
+            for fragment in fragments[1:]:
+                await _turn_settlement_coordinator.apply_frontline_decision(
+                    fragment,
+                    discard_decision,
+                )
+            for fragment in fragments:
+                queue_item = fragment.queue_item
+                if isinstance(queue_item, QueuedChatItem):
+                    _chat_input_queue.complete(queue_item, ChatResponse())
+                    await _release_queued_pipeline_handle(queue_item)
+                    if queue_item.llm_trace_id:
+                        await llm_tracing.finalize_llm_trace_run(
+                            trace_id=queue_item.llm_trace_id,
+                            status="succeeded",
+                            final_dialog_count=0,
+                            delivery_tracking_id="",
+                        )
+            return
+
+        if outcome.action == "append":
+            _chat_input_queue.complete(item, ChatResponse())
+            await _release_queued_pipeline_handle(item)
+            await llm_tracing.finalize_llm_trace_run(
+                trace_id=item.llm_trace_id,
+                status="succeeded",
+                final_dialog_count=0,
+                delivery_tracking_id="",
+            )
+        for fragment in fragments[1:]:
+            await _turn_settlement_coordinator.append_collapsed_private_fragment(
+                fragment,
+                turn_id=outcome.turn_id,
+            )
+            queue_item = fragment.queue_item
+            if isinstance(queue_item, QueuedChatItem):
+                _chat_input_queue.complete(queue_item, ChatResponse())
+                await _release_queued_pipeline_handle(queue_item)
+    except Exception as exc:
+        logger.exception(f"Frontline intake failed: {exc}")
+        for queued_item in [item, *item.collapsed_items]:
+            await _turn_settlement_coordinator.complete_ingress(
+                queued_item.sequence,
+            )
+            _chat_input_queue.fail(queued_item, exc)
+            await _release_queued_pipeline_handle(queued_item)
+            if queued_item.llm_trace_id:
+                await llm_tracing.finalize_llm_trace_run(
+                    trace_id=queued_item.llm_trace_id,
+                    status="failed",
+                    final_dialog_count=0,
+                    delivery_tracking_id="",
+                )
+
+
+async def _process_settlement_lease(
+    lease: AssessmentLease,
+    response_owner: QueuedChatItem,
+) -> None:
+    """Assess and finish one ready turn while the worker owns its activity."""
+
+    try:
+        prepared_media, additional_media_present = await _prepare_settled_media(
+            lease,
+        )
+        history = await get_conversation_history(
+            platform=response_owner.request.platform,
+            platform_channel_id=response_owner.request.platform_channel_id,
+            limit=CONVERSATION_HISTORY_LIMIT,
+        )
+        settled_state = _settled_state_from_lease(
+            lease,
+            history=history,
+        )
+        decision = await _turn_settlement_coordinator.evaluate_settled(
+            lease,
+            settled_state,
+        )
+        outcome = await _turn_settlement_coordinator.apply_settled_decision(
+            lease,
+            decision,
+        )
+    except Exception as exc:
+        logger.exception(f"Settled relevance failed: {exc}")
+        failure_decision = {
+            "response_action": "ignore",
+            "reason_to_respond": "settled relevance failed closed",
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+        }
+        failure_outcome = (
+            await _turn_settlement_coordinator.apply_settled_decision(
+                lease,
+                failure_decision,
+            )
+        )
+        if failure_outcome.stale:
+            return
+        await _complete_settled_fragments(lease, ChatResponse())
+        if response_owner.llm_trace_id:
+            await llm_tracing.finalize_llm_trace_run(
+                trace_id=response_owner.llm_trace_id,
+                status="failed",
+                final_dialog_count=0,
+                delivery_tracking_id="",
+            )
+        return
+
+    if outcome.stale or outcome.response_action == "wait":
+        return
+    if outcome.response_action == "ignore":
+        await _complete_settled_fragments(lease, ChatResponse())
+        if response_owner.llm_trace_id:
+            await llm_tracing.finalize_llm_trace_run(
+                trace_id=response_owner.llm_trace_id,
+                status="succeeded",
+                final_dialog_count=0,
+                delivery_tracking_id="",
+            )
+        return
+
+    claimed = await _turn_settlement_coordinator.claim_for_cognition(
+        lease.turn_id,
+        lease.version,
+    )
+    if not claimed:
+        return
+
+    try:
+        await _process_queued_chat_item(
+            response_owner,
+            settlement_fragments=list(lease.fragments),
+            settled_decision=decision,
+            skip_user_persist=True,
+            settlement_turn_id=lease.turn_id,
+            settlement_version=lease.version,
+            settlement_claimed=True,
+            prepared_media=prepared_media,
+            media_prepared=True,
+            additional_media_present=additional_media_present,
+        )
+        await _complete_settled_fragments(
+            lease,
+            ChatResponse(),
+            release_response_owner=False,
+        )
+    finally:
+        await _turn_settlement_coordinator.complete_cognition(
+            lease.turn_id,
+            lease.version,
+        )
+
+
+async def _turn_settlement_worker() -> None:
+    """Assess ready turns globally and hand only claimed proceeds to cognition."""
+
+    global _primary_interaction_active_count
+
+    while True:
+        lease = await _turn_settlement_coordinator.wait_for_assessment_ready()
+        if not lease.fragments:
+            continue
+        response_owner = _response_owner_item(lease)
+        if response_owner is None:
+            continue
+        _primary_interaction_active_count += 1
+        try:
+            await _process_settlement_lease(lease, response_owner)
+        finally:
+            _primary_interaction_active_count -= 1
 
 
 def _clear_latest_cognition_graph() -> None:
@@ -1380,13 +2435,20 @@ async def _drop_queued_chat_item(item: QueuedChatItem) -> bool:
     save_started_at = 0.0
     persistence_error: BaseException | None = None
     try:
-        global_user_id, _ = await _resolve_queued_user(item)
+        global_user_id, user_profile = await _resolve_queued_user(item)
+        message_envelope = await _resolve_message_envelope_identities(
+            item.request,
+        )
+        item.global_user_id = global_user_id
+        item.user_profile = dict(user_profile)
+        item.resolved_message_envelope = message_envelope
         reply_context = await _hydrate_reply_context(item.request)
         save_started_at = time.perf_counter()
         conversation_row_id = await _save_user_message_from_item(
             item,
             global_user_id=global_user_id,
             reply_context=reply_context,
+            message_envelope=message_envelope,
         )
         if not conversation_row_id:
             await event_logging.record_database_operation_event(
@@ -1493,7 +2555,7 @@ async def _persist_collapsed_queued_chat_item(
     item: QueuedChatItem,
     survivor: QueuedChatItem,
 ) -> bool:
-    """Persist and complete one queued item collapsed into a surviving turn.
+    """Persist one queued item retained in a surviving logical turn.
 
     Args:
         item: Queued chat item collapsed into another item.
@@ -1508,13 +2570,20 @@ async def _persist_collapsed_queued_chat_item(
     save_started_at = 0.0
     persistence_error: BaseException | None = None
     try:
-        global_user_id, _ = await _resolve_queued_user(item)
+        global_user_id, user_profile = await _resolve_queued_user(item)
+        message_envelope = await _resolve_message_envelope_identities(
+            item.request,
+        )
+        item.global_user_id = global_user_id
+        item.user_profile = dict(user_profile)
+        item.resolved_message_envelope = message_envelope
         reply_context = await _hydrate_reply_context(item.request)
         save_started_at = time.perf_counter()
         conversation_row_id = await _save_user_message_from_item(
             item,
             global_user_id=global_user_id,
             reply_context=reply_context,
+            message_envelope=message_envelope,
         )
         if conversation_row_id:
             item.conversation_row_id = conversation_row_id
@@ -1587,7 +2656,6 @@ async def _persist_collapsed_queued_chat_item(
         return_value = False
         return return_value
 
-    _chat_input_queue.complete(item, ChatResponse())
     collapsed_envelope: MessageEnvelope = item.request.message_envelope.model_dump(
         exclude_none=True,
         exclude_defaults=True,
@@ -1619,7 +2687,6 @@ async def _persist_collapsed_queued_chat_item(
         listen_only=item.request.debug_modes.listen_only,
         scope=scope,
     )
-    await _release_queued_pipeline_handle(item)
     return_value = True
     return return_value
 
@@ -1982,7 +3049,19 @@ def _memory_graph_summary(value: Any) -> str:
     return f"RAG data reported: {', '.join(keys)}."
 
 
-async def _process_queued_chat_item(item: QueuedChatItem) -> None:
+async def _process_queued_chat_item(
+    item: QueuedChatItem,
+    *,
+    settlement_fragments: list[PersistedChatFragment] | None = None,
+    settled_decision: Mapping[str, Any] | None = None,
+    skip_user_persist: bool = False,
+    settlement_turn_id: str = "",
+    settlement_version: int = 0,
+    settlement_claimed: bool = False,
+    prepared_media: list[MultiMediaDoc] | None = None,
+    media_prepared: bool = False,
+    additional_media_present: bool = False,
+) -> None:
     """Run one queued item through the existing chat graph and post-writes.
 
     Args:
@@ -1995,12 +3074,26 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
     req = item.request
     character_name = _static_character_profile.get("name", "Character")
     correlation_id = _chat_correlation_id(req)
-    llm_trace_id = llm_tracing.build_trace_id()
+    llm_trace_id = item.llm_trace_id or llm_tracing.build_trace_id()
+    item.llm_trace_id = llm_trace_id
     scope = _service_event_scope(req)
     turn_started_at = time.perf_counter()
     stages_reached: list[str] = []
     scheduled_followup_count = 0
     debug_mode_names: list[str] = []
+    settlement_items = [item]
+    if settlement_fragments:
+        settlement_items = [
+            fragment.queue_item
+            for fragment in settlement_fragments
+            if isinstance(fragment.queue_item, QueuedChatItem)
+        ]
+        if settlement_items:
+            item.collapsed_items = [
+                queued_item
+                for queued_item in settlement_items
+                if queued_item is not item
+            ]
 
     try:
         character_global_user_id = await _ensure_character_global_identity(
@@ -2008,8 +3101,14 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             platform_bot_id=req.platform_bot_id,
             character_name=character_name,
         )
-        global_user_id, user_profile = await _resolve_queued_user(item)
-        message_envelope = await _resolve_message_envelope_identities(req)
+        if item.global_user_id:
+            global_user_id = item.global_user_id
+            user_profile = dict(item.user_profile)
+        else:
+            global_user_id, user_profile = await _resolve_queued_user(item)
+        message_envelope = item.resolved_message_envelope
+        if not isinstance(message_envelope, Mapping):
+            message_envelope = await _resolve_message_envelope_identities(req)
         stages_reached.append("identity")
         await llm_tracing.ensure_llm_trace_run(
             trace_id=llm_trace_id,
@@ -2028,38 +3127,41 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             global_user_id,
         )
         begin_session_turn(media_scope)
-        for queued_item in [item, *item.collapsed_items]:
-            queued_envelope: MessageEnvelope = (
-                queued_item.request.message_envelope.model_dump(
-                    exclude_none=True,
-                    exclude_defaults=True,
+        if prepared_media is not None:
+            multimedia_input = [dict(row) for row in prepared_media]
+        else:
+            for queued_item in [item, *item.collapsed_items]:
+                queued_envelope: MessageEnvelope = (
+                    queued_item.request.message_envelope.model_dump(
+                        exclude_none=True,
+                        exclude_defaults=True,
+                    )
                 )
-            )
-            for attachment in queued_envelope["attachments"]:
-                media_type = attachment.get("media_type", "")
-                base64_data = attachment.get("base64_data", "")
-                description = attachment.get("description", "")
-                if not isinstance(media_type, str):
-                    continue
-                if not isinstance(base64_data, str):
-                    base64_data = ""
-                if not isinstance(description, str):
-                    description = ""
-                has_image_payload = (
-                    media_type.startswith("image/")
-                    and bool(base64_data or description)
-                )
-                has_audio_description = (
-                    media_type.startswith("audio/")
-                    and bool(description)
-                )
-                if not has_image_payload and not has_audio_description:
-                    continue
-                multimedia_input.append({
-                    "content_type": media_type,
-                    "base64_data": base64_data,
-                    "description": description,
-                })
+                for attachment in queued_envelope["attachments"]:
+                    media_type = attachment.get("media_type", "")
+                    base64_data = attachment.get("base64_data", "")
+                    description = attachment.get("description", "")
+                    if not isinstance(media_type, str):
+                        continue
+                    if not isinstance(base64_data, str):
+                        base64_data = ""
+                    if not isinstance(description, str):
+                        description = ""
+                    has_image_payload = (
+                        media_type.startswith("image/")
+                        and bool(base64_data or description)
+                    )
+                    has_audio_description = (
+                        media_type.startswith("audio/")
+                        and bool(description)
+                    )
+                    if not has_image_payload and not has_audio_description:
+                        continue
+                    multimedia_input.append({
+                        "content_type": media_type,
+                        "base64_data": base64_data,
+                        "description": description,
+                    })
         put_session_media(
             media_scope,
             [
@@ -2084,26 +3186,30 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         chat_history_recent = chat_history_wide[-CHAT_HISTORY_RECENT_LIMIT:]
         reply_context = await _hydrate_reply_context(req)
         stages_reached.append("history_loaded")
-        user_save_started_at = time.perf_counter()
-        try:
-            conversation_row_id = await _save_user_message_from_item(
-                item,
-                global_user_id=global_user_id,
-                reply_context=reply_context,
-                message_envelope=message_envelope,
-            )
-        except Exception as exc:
-            await event_logging.record_database_operation_event(
-                component=SERVICE_COMPONENT,
-                collection=CONVERSATION_HISTORY_COLLECTION,
-                operation_kind="insert_user_message",
-                status="failed",
-                idempotency_result=f"exception:{exc.__class__.__name__}",
-                latency_ms=_elapsed_ms(user_save_started_at),
-                correlation_id=correlation_id,
-                severity="warning",
-            )
-            raise
+        user_save_started_at = 0.0
+        if skip_user_persist and item.conversation_row_id:
+            conversation_row_id = item.conversation_row_id
+        else:
+            user_save_started_at = time.perf_counter()
+            try:
+                conversation_row_id = await _save_user_message_from_item(
+                    item,
+                    global_user_id=global_user_id,
+                    reply_context=reply_context,
+                    message_envelope=message_envelope,
+                )
+            except Exception as exc:
+                await event_logging.record_database_operation_event(
+                    component=SERVICE_COMPONENT,
+                    collection=CONVERSATION_HISTORY_COLLECTION,
+                    operation_kind="insert_user_message",
+                    status="failed",
+                    idempotency_result=f"exception:{exc.__class__.__name__}",
+                    latency_ms=_elapsed_ms(user_save_started_at),
+                    correlation_id=correlation_id,
+                    severity="warning",
+                )
+                raise
 
         if conversation_row_id:
             item.conversation_row_id = conversation_row_id
@@ -2161,7 +3267,14 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
         if active_flags:
             logger.info(f'Debug modes active: {active_flags}')
 
-        user_input = item.combined_content or message_envelope["body_text"]
+        if settlement_fragments:
+            user_input = "\n".join(
+                fragment.body_text
+                for fragment in settlement_fragments
+                if fragment.body_text.strip()
+            )
+        else:
+            user_input = item.combined_content or message_envelope["body_text"]
         media_description_rows = [
             *build_text_chat_media_description_rows(multimedia_input),
             *build_reply_media_description_rows(reply_context),
@@ -2292,6 +3405,10 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             "prompt_message_context": prompt_message_context,
             "cognitive_episode": episode,
             "user_multimedia_input": multimedia_input,
+            "additional_media_present": bool(
+                additional_media_present
+            ),
+            "media_prepared": media_prepared,
             "user_profile": user_profile,
             "platform_bot_id": req.platform_bot_id,
             "character_name": character_name,
@@ -2302,11 +3419,36 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
             "chat_history_wide": chat_history_wide,
             "chat_history_recent": chat_history_recent,
             "reply_context": reply_context,
+            "response_action": (
+                settled_decision.get("response_action")
+                if isinstance(settled_decision, Mapping)
+                else None
+            ),
+            "observation_status": "observation_complete",
+            "turn_id": settlement_turn_id,
+            "turn_version": settlement_version,
+            "cognition_claimed": settlement_claimed,
             "should_respond": initial_should_respond,
-            "reason_to_respond": "",
-            "use_reply_feature": False,
-            "channel_topic": "",
-            "indirect_speech_context": "",
+            "reason_to_respond": (
+                str(settled_decision.get("reason_to_respond", ""))
+                if isinstance(settled_decision, Mapping)
+                else ""
+            ),
+            "use_reply_feature": (
+                bool(settled_decision.get("use_reply_feature", False))
+                if isinstance(settled_decision, Mapping)
+                else False
+            ),
+            "channel_topic": (
+                str(settled_decision.get("channel_topic", ""))
+                if isinstance(settled_decision, Mapping)
+                else ""
+            ),
+            "indirect_speech_context": (
+                str(settled_decision.get("indirect_speech_context", ""))
+                if isinstance(settled_decision, Mapping)
+                else ""
+            ),
             "debug_modes": debug_modes,
             "final_dialog": [],
             "target_addressed_user_ids": [global_user_id],
@@ -2390,8 +3532,14 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
 
         stages_reached.append("graph")
         final_dialog = result["final_dialog"]
-        use_reply_feature = bool(final_dialog) and bool(
-            result["use_reply_feature"]
+        reply_owner_is_effective_latest = (
+            not settlement_fragments
+            or settlement_fragments[-1].arrival_sequence == item.sequence
+        )
+        use_reply_feature = (
+            bool(final_dialog)
+            and bool(result["use_reply_feature"])
+            and reply_owner_is_effective_latest
         )
         consolidation_state = result["consolidation_state"]
         scheduled_followup_count = len(result["future_promises"])
@@ -2511,6 +3659,12 @@ async def _process_queued_chat_item(item: QueuedChatItem) -> None:
                 return
 
             stages_reached.append("assistant_persisted")
+        if settlement_turn_id and response_dialog:
+            await _turn_settlement_coordinator.record_bot_continuity(
+                scope=(req.platform, req.platform_channel_id, req.channel_type),
+                author_platform_user_id=req.platform_user_id,
+                dialog_text="\n".join(response_dialog),
+            )
         _chat_input_queue.complete(item, response)
         stages_reached.append("response_completed")
         visible_response_sent = bool(response_dialog)
@@ -2628,6 +3782,18 @@ async def _chat_input_worker() -> None:
                 )
 
             if not incoming_history_committed:
+                for queued_item in [
+                    *dequeued_turn.dropped_items,
+                    *(item for item, _survivor in dequeued_turn.collapsed_items),
+                    *(
+                        [dequeued_turn.next_item]
+                        if dequeued_turn.next_item is not None
+                        else []
+                    ),
+                ]:
+                    await _turn_settlement_coordinator.complete_ingress(
+                        queued_item.sequence,
+                    )
                 if dequeued_turn.next_item is not None:
                     _chat_input_queue.fail(
                         dequeued_turn.next_item,
@@ -2642,7 +3808,7 @@ async def _chat_input_worker() -> None:
                 continue
 
             if dequeued_turn.next_item is not None:
-                await _process_queued_chat_item(dequeued_turn.next_item)
+                await _frontline_intake_item(dequeued_turn.next_item)
         finally:
             _primary_interaction_active_count -= 1
 
@@ -2654,9 +3820,16 @@ def _ensure_chat_input_worker_started() -> None:
         None.
     """
 
-    global _chat_queue_worker_task
+    global _chat_queue_worker_task, _turn_settlement_worker_task
     if _chat_queue_worker_task is None or _chat_queue_worker_task.done():
         _chat_queue_worker_task = asyncio.create_task(_chat_input_worker())
+    if (
+        _turn_settlement_worker_task is None
+        or _turn_settlement_worker_task.done()
+    ):
+        _turn_settlement_worker_task = asyncio.create_task(
+            _turn_settlement_worker()
+        )
 
 
 async def _stop_chat_input_worker() -> None:
@@ -2667,6 +3840,25 @@ async def _stop_chat_input_worker() -> None:
     """
 
     global _chat_input_queue, _chat_queue_worker_task
+    global _turn_settlement_worker_task
+    global _turn_settlement_coordinator
+
+    current_loop = asyncio.get_running_loop()
+    queue_task = _chat_queue_worker_task
+    settlement_task = _turn_settlement_worker_task
+    stale_loop = any(
+        task is not None
+        and not task.done()
+        and task.get_loop() is not current_loop
+        for task in (queue_task, settlement_task)
+    )
+    if stale_loop:
+        _chat_queue_worker_task = None
+        _turn_settlement_worker_task = None
+        _chat_input_queue = ChatInputQueue()
+        _turn_settlement_coordinator = _new_turn_settlement_coordinator()
+        return
+
     task = _chat_queue_worker_task
     _chat_queue_worker_task = None
     if task is not None:
@@ -2674,11 +3866,19 @@ async def _stop_chat_input_worker() -> None:
         with suppress(asyncio.CancelledError):
             await task
 
+    settlement_task = _turn_settlement_worker_task
+    _turn_settlement_worker_task = None
+    if settlement_task is not None:
+        settlement_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await settlement_task
+
     pending_items = await _chat_input_queue.drain()
     for item in pending_items:
         _chat_input_queue.complete(item, ChatResponse())
         await _release_queued_pipeline_handle(item)
     _chat_input_queue = ChatInputQueue()
+    _turn_settlement_coordinator = _new_turn_settlement_coordinator()
 
 
 async def _enqueue_chat_request(req: ChatRequest) -> ChatResponse:
@@ -2711,9 +3911,17 @@ async def _enqueue_chat_request(req: ChatRequest) -> ChatResponse:
     _ensure_chat_input_worker_started()
     item_enqueued = False
 
-    def _mark_item_enqueued() -> None:
+    def _mark_item_enqueued(queued_item: QueuedChatItem) -> None:
         nonlocal item_enqueued
         item_enqueued = True
+        if req.debug_modes.listen_only:
+            return
+        _turn_settlement_coordinator.register_ingress(
+            sequence=queued_item.sequence,
+            scope=(req.platform, req.platform_channel_id, req.channel_type),
+            author_platform_user_id=req.platform_user_id,
+            enqueue_monotonic=queued_item.enqueue_monotonic,
+        )
 
     try:
         response = await _chat_input_queue.enqueue(

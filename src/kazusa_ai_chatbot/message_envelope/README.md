@@ -310,8 +310,8 @@ The brain service:
 
 1. Requires `message_envelope` on every `/chat` request.
 2. Rejects incompatible request shapes through model validation.
-3. Derives graph `user_input` from `message_envelope.body_text`, plus collapsed
-   body text when the queue explicitly coalesces compatible messages.
+3. Derives graph `user_input` from `message_envelope.body_text`, preserving
+   fragment chronology when adjacent private follow-ups are coalesced.
 4. Derives internal reply context from `message_envelope.reply`.
 5. Persists typed conversation rows with `body_text`, `raw_wire_text`,
    `mentions`, `reply`, `attachments`, `addressed_to_global_user_ids`, and
@@ -322,6 +322,15 @@ The brain service:
    outbound addressee fields.
 
 The brain service returns validation errors for incompatible envelope shapes.
+
+Before frontline relevance, the service resolves typed mention and reply
+identities and persists the source row. Frontline receives semantic target
+labels and a semantic reply-target label derived from these typed fields; it
+does not parse raw wire text or platform syntax. Each accepted fragment keeps
+its own envelope evidence through settlement so later continuation decisions
+cannot flatten distinct addressees into one authored message. The deterministic
+coordinator filters open candidates by exact platform/channel/type scope and
+author before those candidates reach the model.
 
 ## Message Envelope Package Responsibilities
 

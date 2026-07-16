@@ -314,7 +314,7 @@ def _patch_chat_dependencies(
     monkeypatch.setattr(
         service_module,
         "_ensure_character_global_identity",
-        AsyncMock(return_value="character-global-id"),
+        AsyncMock(return_value=service_module.CHARACTER_GLOBAL_USER_ID),
     )
     monkeypatch.setattr(
         service_module,
@@ -338,6 +338,41 @@ def _patch_chat_dependencies(
         "_hydrate_reply_context",
         AsyncMock(return_value={}),
     )
+
+    async def _frontline(_state):
+        return {
+            "intake_action": "start",
+            "append_target": "none",
+            "prelude_targets": [],
+            "reason": "deterministic service fixture",
+        }
+
+    async def _settled(_state):
+        return {
+            "response_action": "proceed",
+            "reason_to_respond": "deterministic service fixture",
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+        }
+
+    async def _media(state):
+        return {
+            "user_multimedia_input": state.get("user_multimedia_input", []),
+            "additional_media_present": False,
+        }
+
+    monkeypatch.setattr(
+        service_module,
+        "frontline_relevance_agent",
+        _frontline,
+    )
+    monkeypatch.setattr(service_module, "relevance_agent", _settled)
+    monkeypatch.setattr(
+        service_module,
+        "multimedia_descriptor_agent",
+        _media,
+    )
     monkeypatch.setattr(
         service_module.event_logging,
         "record_database_operation_event",
@@ -353,7 +388,11 @@ def _patch_chat_dependencies(
         "record_runtime_error_event",
         AsyncMock(),
     )
-    monkeypatch.setattr(service_module, "save_conversation", AsyncMock())
+    monkeypatch.setattr(
+        service_module,
+        "save_conversation",
+        AsyncMock(return_value="conversation-row-1"),
+    )
     if patch_post_turn_lifecycle:
         monkeypatch.setattr(
             service_module,
@@ -1582,15 +1621,6 @@ async def test_progress_background_requires_character_boundary_profile(monkeypat
 async def test_build_graph_preserves_consolidation_state_from_supervisor(monkeypatch):
     """The top-level service graph should retain supervisor consolidation_state."""
 
-    async def _relevance_agent(_state):
-        return {
-            "should_respond": True,
-            "reason_to_respond": "test",
-            "use_reply_feature": False,
-            "channel_topic": "test",
-            "indirect_speech_context": "",
-        }
-
     async def _persona_supervisor(_state):
         return {
             "cognition_core_output": {},
@@ -1608,7 +1638,6 @@ async def test_build_graph_preserves_consolidation_state_from_supervisor(monkeyp
             },
         }
 
-    monkeypatch.setattr(service_module, "relevance_agent", _relevance_agent)
     monkeypatch.setattr(service_module, "persona_supervisor2", _persona_supervisor)
     monkeypatch.setattr(
         service_module,
@@ -1651,6 +1680,8 @@ async def test_build_graph_preserves_consolidation_state_from_supervisor(monkeyp
         "chat_history_wide": [],
         "chat_history_recent": [],
         "reply_context": {},
+        "response_action": "proceed",
+        "cognition_claimed": True,
         "debug_modes": {},
     })
 
@@ -1661,15 +1692,6 @@ async def test_build_graph_preserves_consolidation_state_from_supervisor(monkeyp
 @pytest.mark.asyncio
 async def test_build_graph_preserves_persona_no_response(monkeypatch):
     """Persona can de-assert should_respond after cognition chooses silence."""
-
-    async def _relevance_agent(_state):
-        return {
-            "should_respond": True,
-            "reason_to_respond": "test",
-            "use_reply_feature": False,
-            "channel_topic": "test",
-            "indirect_speech_context": "",
-        }
 
     async def _persona_supervisor(_state):
         return {
@@ -1688,7 +1710,6 @@ async def test_build_graph_preserves_persona_no_response(monkeypatch):
             },
         }
 
-    monkeypatch.setattr(service_module, "relevance_agent", _relevance_agent)
     monkeypatch.setattr(service_module, "persona_supervisor2", _persona_supervisor)
     monkeypatch.setattr(
         service_module,
@@ -1731,6 +1752,8 @@ async def test_build_graph_preserves_persona_no_response(monkeypatch):
         "chat_history_wide": [],
         "chat_history_recent": [],
         "reply_context": {},
+        "response_action": "proceed",
+        "cognition_claimed": True,
         "debug_modes": {},
     })
 
@@ -1759,6 +1782,7 @@ async def test_build_graph_skips_episode_state_loader_when_relevance_declines(mo
 
     async def _relevance_agent(_state):
         return {
+            "response_action": "ignore",
             "should_respond": False,
             "reason_to_respond": "not addressed",
             "use_reply_feature": False,

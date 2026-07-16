@@ -365,6 +365,30 @@ def test_parse_llm_json_output_does_not_use_expected_format_on_success(monkeypat
     assert result == {"answer": True}
 
 
+def test_parse_llm_json_output_deterministic_only_never_calls_repair_llm(
+    monkeypatch,
+):
+    """The bounded relevance path must parse without a repair-model call."""
+
+    def _unexpected_repair(_broken_string: str, *, expected_output_format=None):
+        del expected_output_format
+        raise AssertionError("deterministic parsing must not call an LLM")
+
+    monkeypatch.setattr(utils_module, "parse_json_with_llm", _unexpected_repair)
+
+    valid_result = parse_llm_json_output(
+        '```json\n{"response_action":"proceed"}\n```',
+        deterministic_only=True,
+    )
+    invalid_result = parse_llm_json_output(
+        "not-json",
+        deterministic_only=True,
+    )
+
+    assert valid_result == {"response_action": "proceed"}
+    assert invalid_result == {}
+
+
 def test_parse_json_with_llm_renders_expected_format_in_system_prompt(monkeypatch):
     """Expected output format belongs in the repair prompt, not user JSON."""
 
