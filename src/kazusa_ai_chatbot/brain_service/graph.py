@@ -71,6 +71,7 @@ def build_graph(
         _route_after_relevance,
         {"claim": "claim_for_cognition", "end": END},
     )
+
     def _route_after_claim(state):
         if not state.get("cognition_claimed"):
             return "end"

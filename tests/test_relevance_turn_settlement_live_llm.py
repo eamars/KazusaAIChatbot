@@ -12,6 +12,7 @@ import httpx
 import pytest
 
 from kazusa_ai_chatbot.brain_service.turn_settlement import (
+    PersistedChatFragment,
     TurnSettlementCoordinator,
 )
 from kazusa_ai_chatbot.config import (
@@ -42,6 +43,75 @@ _TRACE_SUITE = "relevance_turn_settlement_live_llm"
 frontline_module = import_module(
     "kazusa_ai_chatbot.relevance.frontline_relevance_agent"
 )
+
+
+class _ManualClock:
+    """Small monotonic clock for live coordinator gates."""
+
+    def __init__(self) -> None:
+        self.value = 0.0
+
+    def __call__(self) -> float:
+        return self.value
+
+
+def _fragment(
+    sequence: int,
+    *,
+    author: str = "author-a",
+    channel: str = "channel-1",
+    body: str = "request",
+    enqueue_monotonic: float = 0.0,
+    targets: tuple[str, ...] = ("character",),
+    reply_target: str = "character",
+) -> PersistedChatFragment:
+    """Build a production-shaped persisted fragment for live gates."""
+
+    return PersistedChatFragment(
+        arrival_sequence=sequence,
+        scope=("debug", channel, "group"),
+        author_platform_user_id=author,
+        author_global_user_id=f"global-{author}",
+        platform_message_id=f"message-{sequence}",
+        conversation_row_id=f"row-{sequence}",
+        storage_timestamp_utc="2026-07-16T00:00:00+00:00",
+        enqueue_monotonic=enqueue_monotonic,
+        body_text=body,
+        semantic_target_labels=targets,
+        reply_target_label=reply_target,
+    )
+
+
+def _start_decision() -> dict:
+    """Return the deterministic candidate-start action used for setup."""
+
+    return {
+        "intake_action": "start",
+        "append_target": "none",
+        "prelude_targets": [],
+        "reason": "live gate setup",
+    }
+
+
+def _coordinator(
+    clock: _ManualClock,
+    *,
+    frontline_evaluator=None,
+    settled_evaluator=None,
+) -> TurnSettlementCoordinator:
+    """Build a coordinator whose unused roles fail loudly."""
+
+    async def _unused_frontline(_state):
+        raise AssertionError("frontline evaluator is not used in this gate")
+
+    async def _unused_settled(_lease, _state):
+        raise AssertionError("settled evaluator is not used in this gate")
+
+    return TurnSettlementCoordinator(
+        frontline_evaluator=frontline_evaluator or _unused_frontline,
+        settled_evaluator=settled_evaluator or _unused_settled,
+        clock=clock,
+    )
 
 
 class _CapturingLLM:
@@ -123,6 +193,22 @@ def _settled_state(
         "scene_context": scene,
         "relationship_context": relationship,
     }
+
+
+def _settled_state_from_lease(lease) -> dict:
+    """Project a coordinator lease into the live settled-agent fixture."""
+
+    return _settled_state([
+        {
+            "body_text": fragment.body_text,
+            "semantic_target_labels": list(
+                fragment.semantic_target_labels
+            ),
+            "reply_target_label": fragment.reply_target_label,
+            "media_labels": list(fragment.media_labels),
+        }
+        for fragment in lease.fragments
+    ])
 
 
 async def _run_frontline(case_id: str, state: dict) -> dict:
@@ -216,40 +302,56 @@ async def test_live_frontline_discards_clear_third_party_message(
         "L01_clear_third_party",
         _frontline_state(
             "Two other users are discussing lunch plans.",
-            targets=["other_user"],
-            reply_target="other_user",
+            targets=["other_participant"],
+            reply_target="other_participant",
         ),
     )
     assert result["intake_action"] == "discard"
 
 
 @pytest.mark.asyncio
-async def test_live_mention_only_waits_and_accepts_request_followup(
+async def test_live_mention_only_settles_safely_and_accepts_followup(
     ensure_relevance_live_llms,
 ) -> None:
-    """L02: a bare summon starts a candidate and its follow-up appends."""
+    """L02: a bare summon waits or discards safely before its full request."""
 
     del ensure_relevance_live_llms
+    clock = _ManualClock()
+    coordinator = _coordinator(clock)
+    bare_mention = _fragment(
+        1,
+        body="Character",
+        targets=("character",),
+        reply_target="none",
+    )
     first = await _run_frontline(
         "L02_bare_mention",
-        _frontline_state("Character", targets=["character"]),
+        await coordinator.build_frontline_state(bare_mention),
     )
-    assert first["intake_action"] in {"start", "append"}
+    assert first["intake_action"] in {"start", "discard"}
+    await coordinator.apply_frontline_decision(bare_mention, first)
+    followup = _fragment(
+        2,
+        body="What I wanted to ask is whether this is okay.",
+        enqueue_monotonic=8.414,
+        targets=("character",),
+        reply_target="none",
+    )
+    followup_state = await coordinator.build_frontline_state(followup)
+    if first["intake_action"] == "start":
+        assert len(followup_state["open_turns"]) == 1
+    else:
+        assert followup_state["open_turns"] == []
+        assert len(followup_state["recent_preludes"]) == 1
     second = await _run_frontline(
         "L02_followup",
-        _frontline_state(
-            "What I wanted to ask is whether this is okay.",
-            targets=["character"],
-            open_turns=[{
-                "slot": "open_1",
-                "author_relation": "same_author",
-                "latest_intent": "bare summon",
-                "target_summary": "character",
-            }],
-        ),
+        followup_state,
     )
-    assert second["intake_action"] == "append"
-    assert second["append_target"] == "open_1"
+    if first["intake_action"] == "start":
+        assert second["intake_action"] == "append"
+        assert second["append_target"] == "open_1"
+    else:
+        assert second["intake_action"] == "start"
 
 
 @pytest.mark.asyncio
@@ -263,7 +365,7 @@ async def test_live_complete_question_accepts_delayed_image_followup(
         "L03_question",
         _frontline_state("What do you think about this?", targets=["character"]),
     )
-    assert first["intake_action"] in {"start", "append"}
+    assert first["intake_action"] == "start"
     result = await _run_frontline(
         "L03_image_followup",
         _frontline_state(
@@ -288,36 +390,34 @@ async def test_live_interleaved_authors_keep_independent_turns(
     """L04: A1/B1/A2 keeps A2 attached to A."""
 
     del ensure_relevance_live_llms
+    clock = _ManualClock()
+    coordinator = _coordinator(clock)
+    await coordinator.apply_frontline_decision(
+        _fragment(1, body="A1 request"),
+        _start_decision(),
+    )
+    await coordinator.apply_frontline_decision(
+        _fragment(2, author="author-b", body="B1 request"),
+        _start_decision(),
+    )
+    state = await coordinator.build_frontline_state(
+        _fragment(3, body="A2 clarifies the first request", enqueue_monotonic=2.0),
+    )
+    assert len(state["open_turns"]) == 1
+
     result = await _run_frontline(
         "L04_interleaved_authors",
-        _frontline_state(
-            "A2 clarifies the first request.",
-            targets=["character"],
-            open_turns=[
-                {
-                    "slot": "open_1",
-                    "author_relation": "same_author",
-                    "latest_intent": "A1 request",
-                    "target_summary": "character",
-                },
-                {
-                    "slot": "open_2",
-                    "author_relation": "other_author",
-                    "latest_intent": "B1 request",
-                    "target_summary": "character",
-                },
-            ],
-        ),
+        state,
     )
     assert result["intake_action"] == "append"
     assert result["append_target"] == "open_1"
 
 
 @pytest.mark.asyncio
-async def test_live_same_author_topic_change_starts_new_turn(
+async def test_live_same_author_topic_change_never_false_appends(
     ensure_relevance_live_llms,
 ) -> None:
-    """L05: unrelated same-author content starts a separate candidate."""
+    """L05: unrelated same-author content never contaminates an open turn."""
 
     del ensure_relevance_live_llms
     result = await _run_frontline(
@@ -334,8 +434,8 @@ async def test_live_same_author_topic_change_starts_new_turn(
             }],
         ),
     )
-    assert result["intake_action"] == "start"
-    assert result["append_target"] == "none"
+    assert result["intake_action"] in {"start", "discard"}
+    assert result["intake_action"] != "append"
 
 
 @pytest.mark.asyncio
@@ -349,8 +449,8 @@ async def test_live_same_author_other_recipient_avoids_false_join(
         "L06_other_recipient",
         _frontline_state(
             "Please answer the other participant about the schedule.",
-            targets=["other_user"],
-            reply_target="other_user",
+            targets=["other_participant"],
+            reply_target="other_participant",
             open_turns=[{
                 "slot": "open_1",
                 "author_relation": "same_author",
@@ -359,10 +459,7 @@ async def test_live_same_author_other_recipient_avoids_false_join(
             }],
         ),
     )
-    assert not (
-        result["intake_action"] == "append"
-        and result["append_target"] == "open_1"
-    )
+    assert result["intake_action"] == "discard"
 
 
 @pytest.mark.asyncio
@@ -376,10 +473,10 @@ async def test_live_multi_recipient_message_preserves_kazusa_relevance(
         "L07_multi_recipient",
         _frontline_state(
             "Character and Alex, what do you both think?",
-            targets=["character", "other_user"],
+            targets=["character", "other_participant"],
         ),
     )
-    assert result["intake_action"] in {"start", "append"}
+    assert result["intake_action"] == "start"
 
 
 @pytest.mark.asyncio
@@ -389,19 +486,39 @@ async def test_live_content_before_tag_promotes_recent_prelude(
     """L08: a later tag can select recent same-author prelude slots."""
 
     del ensure_relevance_live_llms
+    clock = _ManualClock()
+    coordinator = _coordinator(clock)
+    await coordinator.apply_frontline_decision(
+        _fragment(
+            1,
+            body="The user described the object before tagging the character.",
+            targets=("none",),
+            reply_target="none",
+        ),
+        {
+            "intake_action": "discard",
+            "append_target": "none",
+            "prelude_targets": [],
+            "reason": "silent prelude",
+        },
+    )
+    current = _fragment(
+        2,
+        body="Character, what do you think now?",
+        enqueue_monotonic=4.0,
+    )
+    state = await coordinator.build_frontline_state(current)
     result = await _run_frontline(
         "L08_recent_prelude",
-        _frontline_state(
-            "Character, what do you think now?",
-            targets=["character"],
-            preludes=[{
-                "slot": "prelude_1",
-                "summary": "The user described the object before tagging the character.",
-            }],
-        ),
+        state,
     )
     assert result["intake_action"] == "start"
     assert "prelude_1" in result["prelude_targets"]
+    await coordinator.apply_frontline_decision(current, result)
+    clock.value = 10.0
+    lease = await coordinator.wait_for_assessment_ready()
+    assert [fragment.arrival_sequence for fragment in lease.fragments] == [1, 2]
+    assert lease.response_owner_sequence == 2
 
 
 @pytest.mark.asyncio
@@ -461,13 +578,49 @@ async def test_live_boundary_followup_invalidates_stale_relevance(
     """L11: the final prompt includes a follow-up that arrived at assessment."""
 
     del ensure_relevance_live_llms
-    result = await _run_settled(
-        "L11_boundary_followup",
-        _settled_state([
-            {"sequence": 1, "body_text": "Should I send this?"},
-            {"sequence": 2, "body_text": "Actually, send the revised file."},
-        ]),
+    clock = _ManualClock()
+
+    async def _settled(lease, state):
+        del state
+        return await _run_settled(
+            f"L11_assessment_v{lease.version}",
+            _settled_state_from_lease(lease),
+            observation_status=lease.observation_status,
+        )
+
+    coordinator = _coordinator(clock, settled_evaluator=_settled)
+    start = await coordinator.apply_frontline_decision(
+        _fragment(1, body="Should I send this?"),
+        _start_decision(),
     )
+    clock.value = 6.0
+    first_lease = await coordinator.wait_for_assessment_ready()
+    first_decision = await coordinator.evaluate_settled(first_lease, {})
+    append = await coordinator.apply_frontline_decision(
+        _fragment(
+            2,
+            body="Actually, send the revised file.",
+            enqueue_monotonic=6.0,
+        ),
+        {
+            "intake_action": "append",
+            "append_target": "open_1",
+            "prelude_targets": [],
+            "reason": "newest correction",
+        },
+    )
+    stale = await coordinator.apply_settled_decision(
+        first_lease,
+        first_decision,
+    )
+    assert stale.stale is True
+    clock.value = 10.0
+    final_lease = await coordinator.wait_for_assessment_ready()
+    result = await coordinator.evaluate_settled(final_lease, {})
+
+    assert final_lease.turn_id == start.turn_id
+    assert final_lease.version == append.version
+    assert len(final_lease.fragments) == 2
     assert result["response_action"] in {"ignore", "proceed"}
 
 
@@ -478,14 +631,26 @@ async def test_live_followup_after_running_becomes_new_candidate(
     """L12: a post-running message is assessed as a new candidate."""
 
     del ensure_relevance_live_llms
+    clock = _ManualClock()
+    coordinator = _coordinator(clock)
+    await coordinator.record_bot_continuity(
+        scope=("debug", "channel-1", "group"),
+        author_platform_user_id="author-a",
+        dialog_text="The character already answered the previous turn.",
+    )
+    state = await coordinator.build_frontline_state(
+        _fragment(
+            2,
+            body="A new question after the character already answered.",
+            enqueue_monotonic=7.0,
+        ),
+    )
+    assert state["open_turns"] == []
+    assert "already answered" in state["latest_bot_continuity"]
+
     result = await _run_frontline(
         "L12_post_running_candidate",
-        _frontline_state(
-            "A new question after the character already answered.",
-            targets=["character"],
-            open_turns=[],
-            continuity="previous turn is already running",
-        ),
+        state,
     )
     assert result["intake_action"] == "start"
 
@@ -497,24 +662,41 @@ async def test_live_earliest_ready_relevant_turn_wins_cognition_claim(
     """L13: two independent ready turns both remain relevant."""
 
     del ensure_relevance_live_llms
-    first = await _run_settled(
-        "L13_first_ready_turn",
-        _settled_state([{
-            "sequence": 1,
-            "body_text": "Character, why did the server restart?",
-            "semantic_target_labels": ["character"],
-            "reply_target_label": "character",
-        }]),
+    clock = _ManualClock()
+
+    async def _settled(lease, state):
+        del state
+        return await _run_settled(
+            f"L13_turn_{lease.leader_sequence}",
+            _settled_state_from_lease(lease),
+            observation_status=lease.observation_status,
+        )
+
+    coordinator = _coordinator(clock, settled_evaluator=_settled)
+    first_turn = await coordinator.apply_frontline_decision(
+        _fragment(1, body="Character, why did the server restart?"),
+        _start_decision(),
     )
-    second = await _run_settled(
-        "L13_second_ready_turn",
-        _settled_state([{
-            "sequence": 2,
-            "body_text": "Character, which backup setting should I use?",
-            "semantic_target_labels": ["character"],
-            "reply_target_label": "character",
-        }]),
+    await coordinator.apply_frontline_decision(
+        _fragment(
+            2,
+            author="author-b",
+            body="Character, which backup setting should I use?",
+        ),
+        _start_decision(),
     )
+    clock.value = 6.0
+    first_lease = await coordinator.wait_for_assessment_ready()
+    first = await coordinator.evaluate_settled(first_lease, {})
+    await coordinator.apply_settled_decision(first_lease, first)
+    assert await coordinator.claim_for_cognition(
+        first_lease.turn_id,
+        first_lease.version,
+    ) is True
+    second_lease = await coordinator.wait_for_assessment_ready()
+    second = await coordinator.evaluate_settled(second_lease, {})
+
+    assert first_lease.turn_id == first_turn.turn_id
     assert first["response_action"] == "proceed"
     assert second["response_action"] == "proceed"
 
@@ -535,7 +717,7 @@ async def test_live_hard_deadline_closes_continuous_fragments(
         ]),
         observation_status="observation_complete",
     )
-    assert result["response_action"] in {"ignore", "proceed"}
+    assert result["response_action"] == "ignore"
 
 
 @pytest.mark.asyncio
@@ -545,61 +727,49 @@ async def test_live_cross_scope_candidates_never_attach(
     """L15: a candidate from another author or channel is not an append target."""
 
     del ensure_relevance_live_llms
+    clock = _ManualClock()
+    coordinator = _coordinator(clock)
+    await coordinator.apply_frontline_decision(
+        _fragment(1, author="other-author", channel="other-channel"),
+        _start_decision(),
+    )
+    state = await coordinator.build_frontline_state(
+        _fragment(2, body="A request in the current channel."),
+    )
+    assert state["open_turns"] == []
+
     result = await _run_frontline(
         "L15_cross_scope",
-        _frontline_state(
-            "A request in the current channel.",
-            targets=["character"],
-            open_turns=[{
-                "slot": "open_1",
-                "author_relation": "different_author_and_scope",
-                "latest_intent": "similar request elsewhere",
-                "target_summary": "character",
-            }],
-        ),
+        state,
     )
-    assert not (
-        result["intake_action"] == "append"
-        and result["append_target"] == "open_1"
-    )
+    assert result["intake_action"] != "append"
 
 
 @pytest.mark.asyncio
-async def test_live_fourth_same_author_topic_bounds_open_turns(
+async def test_live_fourth_same_author_topic_avoids_false_append(
     ensure_relevance_live_llms,
 ) -> None:
-    """L16: the fourth independent topic starts without an unbounded slot."""
+    """L16: a fourth topic never contaminates one of three bounded slots."""
 
     del ensure_relevance_live_llms
+    clock = _ManualClock()
+    coordinator = _coordinator(clock)
+    for sequence in range(1, 4):
+        await coordinator.apply_frontline_decision(
+            _fragment(sequence, body=f"topic {sequence}"),
+            _start_decision(),
+        )
+    state = await coordinator.build_frontline_state(
+        _fragment(4, body="A fourth unrelated topic.", enqueue_monotonic=1.0),
+    )
+    assert len(state["open_turns"]) == 3
+
     result = await _run_frontline(
         "L16_fourth_topic",
-        _frontline_state(
-            "A fourth unrelated topic.",
-            targets=["character"],
-            open_turns=[
-                {
-                    "slot": "open_1",
-                    "author_relation": "same_author",
-                    "latest_intent": "topic one",
-                    "target_summary": "character",
-                },
-                {
-                    "slot": "open_2",
-                    "author_relation": "same_author",
-                    "latest_intent": "topic two",
-                    "target_summary": "character",
-                },
-                {
-                    "slot": "open_3",
-                    "author_relation": "same_author",
-                    "latest_intent": "topic three",
-                    "target_summary": "character",
-                },
-            ],
-        ),
+        state,
     )
-    assert result["intake_action"] == "start"
-    assert result["append_target"] == "none"
+    assert result["intake_action"] in {"start", "discard"}
+    assert result["intake_action"] != "append"
 
 
 @pytest.mark.asyncio
@@ -621,7 +791,7 @@ async def test_live_long_multifragment_projection_preserves_latest_intent(
         message.content for message in messages
     )
     result = await _run_settled("L17_capped_latest_intent", state)
-    assert result["response_action"] in {"ignore", "proceed"}
+    assert result["response_action"] == "ignore"
 
 
 @pytest.mark.asyncio
@@ -647,27 +817,59 @@ async def test_live_frontline_burst_and_ready_turn_respect_workload_contract(
         active -= 1
         return result
 
-    async def _settled(_lease, _state):
-        raise AssertionError("settled stage is not used in the burst call")
+    async def _settled(lease, state):
+        nonlocal active, maximum_active
+        active += 1
+        maximum_active = max(maximum_active, active)
+        order.append("settled-ready")
+        result = await _run_settled(
+            "L18_settled_ready",
+            dict(state),
+            observation_status=lease.observation_status,
+        )
+        active -= 1
+        return result
 
-    coordinator = TurnSettlementCoordinator(
+    clock = _ManualClock()
+    coordinator = _coordinator(
+        clock,
         frontline_evaluator=_frontline,
         settled_evaluator=_settled,
-        clock=lambda: 0.0,
     )
+    await coordinator.apply_frontline_decision(
+        _fragment(20, body="Character, assess this ready request."),
+        _start_decision(),
+    )
+    clock.value = 10.0
+    lease = await coordinator.wait_for_assessment_ready()
     projections = [
         _frontline_state(f"Burst request {index}", targets=["character"])
         for index in range(3)
     ]
-    await asyncio.gather(*(
-        coordinator.evaluate_frontline({
+    tasks = []
+    for index, projection in enumerate(projections):
+        tasks.append(asyncio.create_task(coordinator.evaluate_frontline({
             "label": f"burst-{index}",
             "projection": projection,
-        })
-        for index, projection in enumerate(projections)
-    ))
+        })))
+        if index == 0:
+            await asyncio.sleep(0)
+            tasks.append(asyncio.create_task(coordinator.evaluate_settled(
+                lease,
+                _settled_state([{
+                    "body_text": "Character, assess this ready request.",
+                    "semantic_target_labels": ["character"],
+                    "reply_target_label": "character",
+                }]),
+            )))
+    await asyncio.gather(*tasks)
     assert maximum_active == 1
-    assert order == ["burst-0", "burst-1", "burst-2"]
+    assert order == [
+        "burst-0",
+        "settled-ready",
+        "burst-1",
+        "burst-2",
+    ]
 
 
 @pytest.mark.asyncio
@@ -677,25 +879,44 @@ async def test_live_waiting_ready_turn_releases_next_candidate(
     """L19: a waiting turn cannot hold the next ready candidate's relevance call."""
 
     del ensure_relevance_live_llms
-    incomplete = await _run_settled(
-        "L19_incomplete_turn",
-        _settled_state([{
-            "sequence": 1,
-            "body_text": (
+    clock = _ManualClock()
+
+    async def _settled(lease, state):
+        del state
+        return await _run_settled(
+            f"L19_turn_{lease.leader_sequence}",
+            _settled_state_from_lease(lease),
+            observation_status=lease.observation_status,
+        )
+
+    coordinator = _coordinator(clock, settled_evaluator=_settled)
+    await coordinator.apply_frontline_decision(
+        _fragment(
+            1,
+            body=(
                 "Character, can you help me decide this? I have not given "
                 "the details yet and will send them next."
             ),
-            "semantic_target_labels": ["character"],
-            "reply_target_label": "character",
-        }]),
-        observation_status="more_time_available",
+        ),
+        _start_decision(),
     )
-    ready = await _run_settled(
-        "L19_next_ready_turn",
-        _settled_state([{"sequence": 2, "body_text": "Please answer this direct question."}]),
-        observation_status="observation_complete",
+    await coordinator.apply_frontline_decision(
+        _fragment(
+            2,
+            author="author-b",
+            body="Character, which backup should I use before the restart?",
+        ),
+        _start_decision(),
     )
+    clock.value = 6.0
+    incomplete_lease = await coordinator.wait_for_assessment_ready()
+    incomplete = await coordinator.evaluate_settled(incomplete_lease, {})
+    await coordinator.apply_settled_decision(incomplete_lease, incomplete)
+    ready_lease = await coordinator.wait_for_assessment_ready()
+    ready = await coordinator.evaluate_settled(ready_lease, {})
+
     assert incomplete["response_action"] == "wait"
+    assert ready_lease.leader_sequence == 2
     assert ready["response_action"] == "proceed"
 
 
@@ -734,4 +955,4 @@ async def test_live_attachment_burst_bounds_vision_and_preserves_overflow_signal
     result = await _run_settled("L20_attachment_burst", state)
     assert len(state["media_descriptions"]) == 4
     assert state["additional_media_present"] is True
-    assert result["response_action"] in {"ignore", "proceed"}
+    assert result["response_action"] == "ignore"

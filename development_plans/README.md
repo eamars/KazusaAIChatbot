@@ -42,7 +42,6 @@ long_term/todo.md
 | [coding_agent_assessment_gap_phase_c_plan.md](archive/completed/short_term/coding_agent_assessment_gap_phase_c_plan.md) | High-risk coding-agent assessment gap plan for typed blockers, affordances, approval evidence, locks, and benchmark seam | completed |
 | [coding_agent_assessment_gap_phase_d_plan.md](active/short_term/coding_agent_assessment_gap_phase_d_plan.md) | High-risk coding-agent migration plan for a generic JSON action loop, persistent repository index, exploration-cap removal, and delete/rename | in progress |
 | [coding_agent_full_workflow_hardening_plan_2.md](active/short_term/coding_agent_full_workflow_hardening_plan_2.md) | Large coding-agent full workflow hardening plan | completed |
-| [relevance_turn_settlement_dag_plan.md](active/short_term/relevance_turn_settlement_dag_plan.md) | High-risk relevance DAG and first-ready turn-settlement cutover for fragmented group input | approved |
 
 ## Supporting Experiment Records
 
@@ -248,6 +247,17 @@ lifecycle closeout.
 |---|---|
 | Moved from active short-term to completed archive | `coding_agent_assessment_gap_phase_c_plan.md` |
 
+### 2026-07-16 relevance turn-settlement completion
+
+The relevance DAG and first-ready settlement cutover completed after
+parent-only review remediation, deterministic regressions, and twenty
+individually inspected real-LLM gates. The closeout also verified conservative
+private-message behavior, shared-route workload bounds, and test realism.
+
+| Outcome | Plans |
+|---|---|
+| Moved from active short-term to completed archive | `relevance_turn_settlement_dag_plan.md` |
+
 ## Archive
 
 Completed and superseded records live under `archive/`. Use them for historical
@@ -424,6 +434,7 @@ plans.
 | [rag_phase3_development_plan.md](archive/completed/short_term/rag_phase3_development_plan.md) |
 | [rag_reply_mention_and_vague_input_plan.md](archive/completed/short_term/rag_reply_mention_and_vague_input_plan.md) |
 | [recall_agent_plan.md](archive/completed/short_term/recall_agent_plan.md) |
+| [relevance_turn_settlement_dag_plan.md](archive/completed/short_term/relevance_turn_settlement_dag_plan.md) |
 | [reflection_attached_group_self_cognition_plan.md](archive/completed/short_term/reflection_attached_group_self_cognition_plan.md) |
 | [reflection_flag_simplification_plan.md](archive/completed/short_term/reflection_flag_simplification_plan.md) |
 | [reflection_memory_integration_stage1c_plan.md](archive/completed/short_term/reflection_memory_integration_stage1c_plan.md) |

@@ -25,7 +25,11 @@ The frontline agent answers the compact intake question with `discard`,
 `start`, or `append`. The settled agent answers the character-level question
 with `ignore`, `proceed`, or `wait`. Both agents use the existing
 `RELEVANCE_AGENT_LLM` route and keep their stage-local prompt and completion
-budgets next to their handlers.
+budgets next to their handlers. Settled input keeps active fragments separate
+from external fresh history and includes bounded mood, relationship,
+group-attention, bot-continuity, and media-overflow descriptors. A decision
+that depends on undescribed retained media fails closed instead of inferring
+from a partial image subset.
 
 ## Public Contract
 
@@ -40,7 +44,8 @@ Runtime callers import the public functions and validation types from
   `should_respond` compatibility field.
 - `validate_frontline_decision(...)` and
   `validate_settled_relevance_decision(...)` enforce closed semantic actions,
-  bounded free-form fields, and the complete-phase no-`wait` rule.
+  bounded free-form fields, start-only prelude promotion, and the complete-phase
+  no-`wait` rule.
 
 The public facade exposes contract helpers and decision types. Prompt
 constants, LLM instances, route configs, projections, trace details, and other
@@ -56,10 +61,11 @@ platform identifiers, operational timestamps, futures, handles, or queue
 telemetry.
 
 `brain_service.turn_settlement` owns the deterministic pending-turn lifecycle,
-FIFO relevance work, deadline handling, stale-version checks, and the atomic
-cognition claim. `kazusa_ai_chatbot.service` owns persistence and request/future
-resolution. The `nodes` package owns persona orchestration, cognition, dialog,
-and perception nodes; it does not own the relevance agents.
+FIFO relevance work, prompt-safe candidate/prelude slots, enqueue-time deadline
+handling, the pre-deadline ingress barrier, stale-version checks, and the atomic
+cognition claim. `kazusa_ai_chatbot.service` owns persistence and single-owner
+request/future resolution. The `nodes` package owns persona orchestration,
+cognition, dialog, and perception nodes; it does not own the relevance agents.
 
 ## Module Rules
 

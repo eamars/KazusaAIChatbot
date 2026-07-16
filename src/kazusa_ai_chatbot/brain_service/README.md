@@ -168,14 +168,22 @@ compact frontline stage from `kazusa_ai_chatbot.relevance` through the
 existing `RELEVANCE_AGENT_LLM` route, and keeps only `discard`, `start`, or
 `append` as the frontline vocabulary. Group turns use a six-second quiet
 window and ten-second hard deadline. The service owns the pending-turn heap,
-fragment chronology, one bounded settled `wait`, stale-version invalidation,
-and the atomic cognition claim. The same `kazusa_ai_chatbot.relevance`
+fragment chronology, same-author candidate and silent-prelude slots, one
+bounded settled `wait`, stale-version invalidation, a pre-deadline ingress
+barrier, and the atomic cognition claim. The same
+`kazusa_ai_chatbot.relevance`
 package, using the same `RELEVANCE_AGENT_LLM` route, owns the settled
 character-level
 `ignore/proceed/wait` judgment; deterministic code applies the validated action
 and never rewrites a valid semantic choice.
 
-Private adjacency-only coalescing retains the existing immediate-ready timing.
+Private adjacency-only coalescing retains the existing immediate-ready timing
+and shows the full coalesced logical input to frontline before attaching its
+individual fragments to the exact survivor turn. An appended request completes
+with an empty response after attachment; only the response owner receives the
+assembled turn's visible response. Fresh settled history excludes active-turn
+rows. The opening/newest four-image budget is shared across reassessments, with
+overflow exposed to the settled fail-closed judgment.
 Group burst pruning and group pre-relevance coalescing are not part of the
 active queue contract. A claimable `proceed` is the only path into the existing
 cognition and dialog graph.
@@ -356,6 +364,14 @@ Brain service responsibilities:
   `extra="forbid"`.
 - The brain service can coalesce adjacent private follow-ups before frontline
   execution; group messages are retained as separate persisted fragments.
+- The intake worker awaits only the serialized frontline call. Settlement
+  timers and cognition execute in the separate settlement worker, so one
+  waiting group turn does not block other intake.
+- Frontline and settled calls share one FIFO relevance slot. Active settled
+  relevance and cognition retain primary-interaction priority, while quiet
+  timers hold no model or worker capacity.
+- The settlement coordinator derives model-facing open and prelude slots from
+  the same state used to apply the returned slot labels.
 - The brain service owns foreground runtime-coordination admission for inbound
   chat turns and releases the foreground handle when the queued turn is
   processed, dropped, collapsed, rejected, or drained during shutdown.

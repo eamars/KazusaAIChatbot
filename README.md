@@ -75,7 +75,7 @@ At a high level, Kazusa provides:
 | Use case                             | Why Kazusa fits                                                                                                                  |
 | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
 | Persistent character companion       | The runtime keeps relationship memory, short-term flow, character state, and reflection separate but connected.                  |
-| Group-chat character bot             | Queue pruning, typed addressees, native reply hydration, and adapter-specific delivery let the brain survive noisy channels.     |
+| Group-chat character bot             | Frontline relevance and turn settlement handle noisy channels.                                                                 |
 | Local model character lab            | Route-specific OpenAI-compatible model settings let weaker local models handle narrower, staged prompts.                         |
 | Memory and RAG experiments           | RAG3, Cache2, retired RAG2 helper coverage, scoped user memory, shared memory evolution, and conversation search are modular enough to inspect independently. |
 | Cross-platform adapter experiments   | New adapters only need to normalize platform events into the service contract and render returned messages.                      |
@@ -161,9 +161,14 @@ The active chat intake path has two bounded relevance decisions. The frontline
 route is a compact per-message `discard/start/append` judge. Accepted group
 messages settle in a six-second quiet window with a ten-second hard deadline;
 the settled route then chooses `ignore/proceed/wait`. Private-message timing
-and adjacency-only private coalescing remain intact. A valid `proceed` must
-pass the deterministic versioned cognition claim before persona cognition and
-dialog run.
+and adjacency-only private coalescing remain intact. The settlement coordinator
+owns open-slot projection, bounded silent-prelude promotion, enqueue-time
+deadlines, and the pre-deadline ingress barrier. One response owner receives
+the assembled reply; appended request futures complete silently. A valid
+`proceed` is atomically claimed before persona preparation and cognition run.
+Coalesced private fragments are shown to frontline as one logical input. The
+four-image description budget is shared across reassessments, and omitted
+media is explicit so settled relevance can fail closed before cognition.
 
 ```mermaid
 flowchart TD

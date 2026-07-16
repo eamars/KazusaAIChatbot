@@ -48,32 +48,41 @@ FrontlineState = Mapping[str, Any]
 
 
 _FRONTLINE_SYSTEM_PROMPT = '''You are the compact frontline intake judge for a character brain.
-Answer only the routing question for the current message:
-- discard only when the message is clearly unrelated third-party traffic;
-- start when it deserves a bounded candidate turn;
-- append only when it clearly continues exactly one supplied open slot.
-Typed target and reply labels are authoritative. A short ambiguous message,
-direct address, or bot reply near an open candidate is admitted conservatively.
-An empty-body attachment appends when its media clearly matches a supplied
-same-author open intent; it starts only when no such candidate is supplied.
-In the supplied labels, the semantic label "character" names Kazusa and the
-semantic label "other_user" names someone else in the scene.
-When all current target and reply labels identify other participants and none
-names the character, choose discard.
-Same-author timing alone never proves append.
-Use only the supplied semantic projections. Do not invent slots or use IDs,
-timestamps, counters, deadlines, mood, affinity, or broad conversation history.
+Answer only the routing question for the current message.
 
-Return one JSON object with exactly these fields:
-intake_action is one of discard, start, append; append_target is one of none,
-open_1, open_2, open_3; prelude_targets is a list of zero, one, or two labels.
-{"intake_action":"discard","append_target":"none","prelude_targets":[],"reason":"short reason"}
-Each prelude item, when present, must be exactly "prelude_1" or
-"prelude_2". Use an empty prelude_targets list when none are selected.
-Select a prelude label only when that slot appears in recent_preludes; never
-invent a prelude slot.
-For discard or start, append_target is none. For append, choose one open slot.
-Use at most two prelude slots. Keep reason short and semantic.'''
+# Decision Contract
+- First obey the typed target and reply labels. When every supplied target and
+  reply label is other_participant and none is character, the message is not
+  character-relevant: discard it regardless of topic interest or open turns;
+- discard only clearly unrelated third-party traffic;
+- start a bounded candidate when the message is character-relevant but does
+  not continue a supplied open turn;
+- append only when the message clearly continues exactly one supplied open
+  turn.
+Append includes a clarification, correction, replacement, delayed attachment,
+or completion whose meaning continues a supplied open intent.
+Typed target and reply labels are authoritative. The label character means the
+active character; other_participant means somebody else. Direct character
+address, a reply to the character, and ambiguous short or attachment-only
+continuations are admitted conservatively. A new character-relevant topic is
+start, even when unrelated to every open turn. Same-author timing alone never
+proves append.
+
+# Generation Procedure
+1. Check typed target and reply evidence for character relevance.
+2. Compare the current intent with only the supplied open turns.
+3. If starting a turn, select supplied recent preludes only when they complete
+   the current intent.
+4. Verify that the action and slot fields obey the output contract.
+
+# Output Format
+Return exactly one JSON object and no surrounding text:
+{"intake_action":"discard|start|append",
+"append_target":"none|open_1|open_2|open_3","prelude_targets":[],
+"reason":"at most 80 characters"}
+For discard or start, append_target is none. For append, choose one supplied
+open slot. prelude_targets may contain up to two supplied prelude_1 or prelude_2
+labels only for start; otherwise use an empty list. Never invent a slot.'''
 
 _frontline_relevance_agent_llm = LLInterface()
 _frontline_relevance_agent_llm_config = LLMCallConfig(
@@ -94,6 +103,9 @@ _frontline_relevance_agent_llm_config = LLMCallConfig(
 def _clip_text(value: object, limit: int) -> str:
     """Clip one model-facing text field while retaining both ends."""
 
+    if limit <= 0:
+        return_value = ""
+        return return_value
     if not isinstance(value, str):
         return_value = ""
         return return_value
@@ -228,6 +240,8 @@ def build_frontline_messages(
         _FRONTLINE_SYSTEM_PROMPT
     )
     if len(human_content) > available_human_chars:
+        payload["latest_bot_continuity"] = ""
+        payload["recent_preludes"] = []
         payload["current_message"]["body_text"] = _clip_text(
             payload["current_message"].get("body_text"),
             max(0, available_human_chars // 2),
@@ -238,7 +252,18 @@ def build_frontline_messages(
             separators=(",", ":"),
         )
     if len(human_content) > available_human_chars:
-        human_content = human_content[:available_human_chars]
+        payload["open_turns"] = payload["open_turns"][:1]
+        payload["current_message"]["body_text"] = _clip_text(
+            payload["current_message"].get("body_text"),
+            400,
+        )
+        human_content = json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+    if len(human_content) > available_human_chars:
+        raise ValueError("frontline semantic projection exceeds its hard cap")
 
     messages = (
         SystemMessage(content=_FRONTLINE_SYSTEM_PROMPT),
@@ -278,6 +303,8 @@ def validate_frontline_decision(raw: Mapping[str, Any]) -> FrontlineDecision:
         raise ValueError("frontline non-append action must use none target")
     if action == "append" and append_target == "none":
         raise ValueError("frontline append action needs an open target")
+    if action != "start" and clean_preludes:
+        raise ValueError("frontline preludes are valid only for start")
 
     return_value: FrontlineDecision = {
         "intake_action": action,
@@ -322,7 +349,7 @@ async def frontline_relevance_agent(state: FrontlineState) -> FrontlineDecision:
         parse_status = "invalid"
 
     await llm_tracing.record_llm_trace_step(
-        trace_id="",
+        trace_id=str(state.get("llm_trace_id", "")),
         stage_name="frontline_relevance_agent",
         route_name="frontline_relevance",
         model_name=RELEVANCE_AGENT_LLM_MODEL,

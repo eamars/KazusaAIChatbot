@@ -206,7 +206,9 @@ Qwen-compatible Qwopus 3.x model names.
 relevance. Frontline uses a 256-token completion cap, thinking disabled, and
 an 8,000-character rendered-input cap; settled relevance uses a 512-token
 completion cap, thinking disabled, and a 16,000-character cap. Both stages
-parse JSON deterministically and never call the JSON-repair LLM.
+parse JSON deterministically and never call the JSON-repair LLM. They share one
+FIFO relevance executor with one in-flight call; settlement timers hold no
+model slot.
 
 ## Relevance Turn Settlement
 
@@ -219,9 +221,12 @@ Group turns use a six-second quiet window and a ten-second hard deadline.
 Settled turns are ordered globally by eligibility and arrival sequence. The
 settled route returns `ignore`, `proceed`, or one bounded `wait` extension;
 only a matching turn version can claim the cognition lane. Private messages
-retain immediate timing and adjacency-only coalescing. Image description runs
-after frontline admission and selects the opening image plus the newest
-remaining unique images, up to four per assembled turn.
+retain immediate timing and adjacency-only coalescing; their frontline input
+contains the full coalesced logical message. Image description runs after
+frontline admission and selects the opening image plus the newest remaining
+unique images, up to four across every assessment of one turn. Settled
+relevance receives an overflow marker and ignores media-dependent turns when
+the required retained media is undescribed.
 
 `CHARACTER_GLOBAL_USER_ID` defaults to
 `00000000-0000-4000-8000-000000000001`. Set it explicitly in production so the
@@ -712,19 +717,22 @@ you need process-local `task_alive` state.
 Primary brain entrypoint.
 
 The endpoint enqueues each request into the brain's process-local input queue
-and waits for the queued item's response. The queue worker processes one
-surviving item at a time. When bursts grow past the queue thresholds, plain
-unaddressed messages are pruned before relevance/RAG; pruned messages are still
-saved to `conversation_history` and return an empty `ChatResponse`.
+and waits for that request's response future. The intake worker persists active
+messages and runs their compact frontline decisions in arrival order. It then
+returns to intake while admitted group turns wait in the independent settlement
+scheduler. Explicit `listen_only` input follows its debug bypass; active group
+messages have no queue-threshold semantic pruning before frontline.
 
-Adapters own platform-specific reply detection. The brain protects a queued
-reply only when `reply_context.reply_to_current_bot` is `true`; a raw
-`reply_to_message_id` alone is not enough.
+Adapters own platform-specific reply detection. The brain projects typed target
+and reply evidence into frontline semantic labels; raw reply identifiers do not
+act as queue-level protection or routing signals.
 
-After a surviving turn produces its user-facing reply, the worker awaits bot
-message persistence, conversation-progress recording, consolidation, and the
-resulting Cache2 invalidation before consuming the next queued chat item. This
-keeps the next RAG pass from reading stale durable facts.
+Group turns become eligible after six quiet seconds and close at ten seconds
+from the opening enqueue time. Inputs enqueued before the hard boundary are
+applied by frontline before the cognition claim can succeed. Waiting turns hold
+neither the intake worker nor the cognition lane. Private survivors remain
+immediately eligible, and adjacent queued private follow-ups keep one response
+owner while appended requests return an empty response.
 
 For the exact `ChatRequest` and `ChatResponse` fields, adapter rules,
 `delivery_tracking_id` semantics, and delivery receipt flow, read the
@@ -732,7 +740,7 @@ For the exact `ChatRequest` and `ChatResponse` fields, adapter rules,
 typed inbound envelope fields, read the
 [Message Envelope ICD](../src/kazusa_ai_chatbot/message_envelope/README.md).
 
-Useful drop-audit log line:
+Useful listen-only audit log line:
 
 ```text
 Queued chat item dropped: sequence=... platform=... channel=... message=... user=... display_name=... tagged=... bot_reply=... content="..."
@@ -741,7 +749,7 @@ Queued chat item dropped: sequence=... platform=... channel=... message=... user
 Current attachment behavior:
 
 - inbound image attachments with inline base64 are supported
-- image descriptions are generated before relevance
+- image descriptions run after frontline admission and before settled relevance
 - outbound attachments are reserved for future service support
 
 ### Other Service Endpoints

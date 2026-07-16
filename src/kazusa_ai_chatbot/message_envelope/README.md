@@ -328,7 +328,9 @@ identities and persists the source row. Frontline receives semantic target
 labels and a semantic reply-target label derived from these typed fields; it
 does not parse raw wire text or platform syntax. Each accepted fragment keeps
 its own envelope evidence through settlement so later continuation decisions
-cannot flatten distinct addressees into one authored message.
+cannot flatten distinct addressees into one authored message. The deterministic
+coordinator filters open candidates by exact platform/channel/type scope and
+author before those candidates reach the model.
 
 ## Message Envelope Package Responsibilities
 

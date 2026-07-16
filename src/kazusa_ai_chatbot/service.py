@@ -176,6 +176,7 @@ from kazusa_ai_chatbot.brain_service.contracts import (
     RuntimeAdapterRegistrationResponse,
 )
 from kazusa_ai_chatbot.relevance import (
+    build_group_attention_context,
     frontline_relevance_agent,
     relevance_agent,
 )
@@ -661,14 +662,18 @@ def _new_turn_settlement_coordinator() -> TurnSettlementCoordinator:
 
 
 _turn_settlement_coordinator = _new_turn_settlement_coordinator()
-_frontline_slot_descriptors: dict[tuple[str, str, str, str], list[dict[str, str]]] = {}
-_frontline_projection_lock = asyncio.Lock()
-_frontline_tasks: set[asyncio.Task[Any]] = set()
 _turn_settlement_worker_task: asyncio.Task[Any] | None = None
 
 
 async def _claim_for_cognition_node(state: IMProcessState) -> dict[str, Any]:
     """Map the deterministic versioned claim into graph state."""
+
+    if state.get("cognition_claimed") is True:
+        return_value = {
+            "cognition_claimed": True,
+            "should_respond": True,
+        }
+        return return_value
 
     turn_id = state.get("turn_id", "")
     turn_version = state.get("turn_version")
@@ -701,21 +706,14 @@ async def _graph_relevance_node(state: IMProcessState) -> dict[str, Any]:
             ),
         }
         return return_value
-    return_value = await relevance_agent(state)
-    return return_value
-
-
-def _frontline_scope_key(
-    fragment: PersistedChatFragment,
-) -> tuple[str, str, str, str]:
-    """Return the service projection key for one author and channel scope."""
-
-    return_value = (
-        fragment.scope[0],
-        fragment.scope[1],
-        fragment.scope[2],
-        fragment.author_platform_user_id,
-    )
+    return_value = {
+        "response_action": "ignore",
+        "should_respond": False,
+        "reason_to_respond": "settled relevance decision missing",
+        "use_reply_feature": False,
+        "channel_topic": "",
+        "indirect_speech_context": "",
+    }
     return return_value
 
 
@@ -809,7 +807,7 @@ def _build_frontline_fragment(
         platform_message_id=item.request.platform_message_id,
         conversation_row_id=item.conversation_row_id,
         storage_timestamp_utc=item.storage_timestamp_utc,
-        enqueue_monotonic=time.monotonic(),
+        enqueue_monotonic=item.enqueue_monotonic,
         body_text=message_envelope.get("body_text", ""),
         semantic_target_labels=semantic_targets,
         reply_target_label=reply_target_label,
@@ -833,70 +831,51 @@ async def _build_frontline_state(
 ) -> dict[str, Any]:
     """Build the bounded frontline semantic projection from service state."""
 
-    key = _frontline_scope_key(fragment)
-    async with _frontline_projection_lock:
-        open_turns = [dict(item) for item in _frontline_slot_descriptors.get(key, [])]
-    return_value = {
-        "current_message": {
-            "body_text": fragment.body_text,
-            "semantic_target_labels": list(fragment.semantic_target_labels),
-            "reply_target_label": fragment.reply_target_label,
-            "media_labels": list(fragment.media_labels),
-        },
-        "open_turns": open_turns[:3],
-        "recent_preludes": [],
-        "latest_bot_continuity": "",
-    }
+    return_value = await _turn_settlement_coordinator.build_frontline_state(
+        fragment,
+    )
+    queue_item = fragment.queue_item
+    if isinstance(queue_item, QueuedChatItem):
+        return_value["llm_trace_id"] = queue_item.llm_trace_id
     return return_value
 
 
-async def _record_frontline_outcome(
-    fragment: PersistedChatFragment,
-    outcome: Any,
-) -> None:
-    """Maintain semantic slot descriptors after a deterministic outcome."""
+def _collapsed_private_frontline_message(
+    fragments: tuple[PersistedChatFragment, ...],
+) -> dict[str, Any]:
+    """Project one coalesced private logical input for frontline judgment."""
 
-    key = _frontline_scope_key(fragment)
-    async with _frontline_projection_lock:
-        descriptors = _frontline_slot_descriptors.setdefault(key, [])
-        if outcome.frozen_turn_id:
-            descriptors[:] = [
-                item
-                for item in descriptors
-                if item.get("turn_id") != outcome.frozen_turn_id
-            ]
-        if outcome.action == "append":
-            for descriptor in descriptors:
-                if descriptor.get("turn_id") == outcome.turn_id:
-                    descriptor["latest_intent"] = fragment.body_text
-                    descriptor["media_summary"] = ", ".join(
-                        fragment.media_labels
-                    )
-                    break
-        elif outcome.action == "start":
-            descriptors.append({
-                "turn_id": outcome.turn_id,
-                "author_relation": "same_author",
-                "latest_intent": fragment.body_text,
-                "opening_excerpt": fragment.body_text,
-                "target_summary": ", ".join(fragment.semantic_target_labels),
-                "reply_summary": fragment.reply_target_label,
-                "media_summary": ", ".join(fragment.semantic_target_labels),
-            })
-            del descriptors[3:]
-
-
-async def _remove_frontline_turn(fragment: PersistedChatFragment, turn_id: str) -> None:
-    """Remove a completed turn from the service's candidate projection."""
-
-    key = _frontline_scope_key(fragment)
-    async with _frontline_projection_lock:
-        descriptors = _frontline_slot_descriptors.get(key, [])
-        descriptors[:] = [
-            item for item in descriptors if item.get("turn_id") != turn_id
-        ]
-        if not descriptors:
-            _frontline_slot_descriptors.pop(key, None)
+    body_text = "\n".join(
+        fragment.body_text for fragment in fragments if fragment.body_text
+    )
+    semantic_target_labels = list(dict.fromkeys(
+        label
+        for fragment in fragments
+        for label in fragment.semantic_target_labels
+    ))
+    media_labels = list(dict.fromkeys(
+        label
+        for fragment in fragments
+        for label in fragment.media_labels
+    ))
+    reply_labels = {
+        fragment.reply_target_label
+        for fragment in fragments
+        if fragment.reply_target_label != "none"
+    }
+    if "character" in reply_labels:
+        reply_target_label = "character"
+    elif "other_participant" in reply_labels:
+        reply_target_label = "other_participant"
+    else:
+        reply_target_label = "none"
+    return_value = {
+        "body_text": body_text,
+        "semantic_target_labels": semantic_target_labels,
+        "reply_target_label": reply_target_label,
+        "media_labels": media_labels,
+    }
+    return return_value
 
 
 async def _prepare_frontline_fragment(
@@ -916,6 +895,17 @@ async def _prepare_frontline_fragment(
     item.global_user_id = global_user_id
     item.user_profile = dict(user_profile)
     item.resolved_message_envelope = message_envelope
+    if not item.llm_trace_id:
+        item.llm_trace_id = llm_tracing.build_trace_id()
+    await llm_tracing.ensure_llm_trace_run(
+        trace_id=item.llm_trace_id,
+        platform=req.platform,
+        platform_channel_id=req.platform_channel_id,
+        channel_type=req.channel_type,
+        platform_message_id=req.platform_message_id,
+        global_user_id=global_user_id,
+        started_at=item.storage_timestamp_utc,
+    )
     if not item.conversation_row_id:
         conversation_row_id = await _save_user_message_from_item(
             item,
@@ -1020,13 +1010,50 @@ def _fragment_media_rows(
         )
         if not has_image_payload and not has_audio_description:
             continue
+        source_key = base64_data or description
+        media_key = hashlib.sha256(source_key.encode("utf-8")).hexdigest()
         rows.append({
             "content_type": media_type,
             "base64_data": base64_data,
             "description": description,
             "_fragment_index": fragment_index,
+            "_media_key": media_key,
         })
     return_value = rows
+    return return_value
+
+
+def _bounded_media_selection(
+    rows: list[dict[str, Any]],
+    *,
+    limit: int,
+    preserve_opening: bool,
+) -> list[dict[str, Any]]:
+    """Select the opening and newest image rows within a remaining budget."""
+
+    if limit <= 0 or not rows:
+        return []
+    selected, _overflow = select_media_for_turn(rows)
+    if len(selected) <= limit:
+        return selected
+    if not preserve_opening:
+        return selected[-limit:]
+    if limit == 1:
+        return [selected[0]]
+    return_value = [selected[0], *selected[-(limit - 1):]]
+    return return_value
+
+
+def _cached_media_row(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Strip settlement bookkeeping from one reusable descriptor row."""
+
+    return_value = {
+        "content_type": str(row.get("content_type", "")),
+        "base64_data": str(row.get("base64_data", "")),
+        "description": str(row.get("description", "")),
+    }
+    if isinstance(row.get("image_observation"), Mapping):
+        return_value["image_observation"] = dict(row["image_observation"])
     return return_value
 
 
@@ -1040,21 +1067,72 @@ async def _prepare_settled_media(
         for index, fragment in enumerate(lease.fragments)
         for row in _fragment_media_rows(fragment, fragment_index=index)
     ]
-    selected_images, additional_media_present = select_media_for_turn(all_rows)
+    for row in all_rows:
+        if not row.get("description"):
+            continue
+        fragment = lease.fragments[row["_fragment_index"]]
+        media_key = row["_media_key"]
+        fragment.media_description_cache.setdefault(
+            media_key,
+            _cached_media_row(row),
+        )
+        if str(row.get("content_type", "")).startswith("image/"):
+            fragment.media_description_attempted_keys.add(media_key)
+
+    attempted_image_keys = {
+        media_key
+        for fragment in lease.fragments
+        for media_key in fragment.media_description_attempted_keys
+    }
+    image_rows = [
+        row
+        for row in all_rows
+        if str(row.get("content_type", "")).startswith("image/")
+    ]
+    candidate_rows = [
+        row
+        for row in image_rows
+        if row["_media_key"] not in attempted_image_keys
+    ]
+    remaining_budget = max(0, 4 - len(attempted_image_keys))
+    selected_images = _bounded_media_selection(
+        candidate_rows,
+        limit=remaining_budget,
+        preserve_opening=(
+            bool(image_rows)
+            and image_rows[0]["_media_key"] not in attempted_image_keys
+        ),
+    )
     selected_image_ids = {id(row) for row in selected_images}
+    for row in selected_images:
+        fragment = lease.fragments[row["_fragment_index"]]
+        fragment.media_description_attempted_keys.add(row["_media_key"])
+
+    all_image_keys = {row["_media_key"] for row in image_rows}
+    attempted_image_keys.update(
+        row["_media_key"] for row in selected_images
+    )
+    additional_media_present = bool(
+        all_image_keys - attempted_image_keys
+    )
     rows_by_fragment: dict[int, list[dict[str, Any]]] = {}
     for row in all_rows:
         is_image = str(row.get("content_type", "")).startswith("image/")
         if is_image and id(row) not in selected_image_ids:
             continue
+        if not is_image:
+            fragment = lease.fragments[row["_fragment_index"]]
+            fragment.media_description_cache.setdefault(
+                row["_media_key"],
+                _cached_media_row(row),
+            )
+            continue
         fragment_index = row["_fragment_index"]
         rows_by_fragment.setdefault(fragment_index, []).append(row)
 
-    prepared_rows: list[MultiMediaDoc] = []
     for fragment_index, fragment in enumerate(lease.fragments):
         fragment_rows = rows_by_fragment.get(fragment_index, [])
         if not fragment_rows:
-            fragment.media_descriptions = ()
             continue
         queue_item = fragment.queue_item
         if not isinstance(queue_item, QueuedChatItem):
@@ -1115,28 +1193,33 @@ async def _prepare_settled_media(
         described_rows = described_state.get("user_multimedia_input")
         if not isinstance(described_rows, list):
             described_rows = fragment_rows
+        for index, source_row in enumerate(fragment_rows):
+            described_row = (
+                described_rows[index]
+                if index < len(described_rows)
+                and isinstance(described_rows[index], Mapping)
+                else source_row
+            )
+            fragment.media_description_cache[source_row["_media_key"]] = (
+                _cached_media_row(described_row)
+            )
+
+    prepared_rows: list[MultiMediaDoc] = []
+    seen_cache_keys: set[str] = set()
+    for fragment in lease.fragments:
         fragment.media_descriptions = tuple(
             {
                 "media_kind": str(row.get("content_type", "")),
                 "description": str(row.get("description", "")),
             }
-            for row in described_rows
-            if isinstance(row, Mapping) and row.get("description")
+            for row in fragment.media_description_cache.values()
+            if row.get("description")
         )
-        prepared_rows.extend(
-            {
-                "content_type": str(row.get("content_type", "")),
-                "base64_data": str(row.get("base64_data", "")),
-                "description": str(row.get("description", "")),
-                **(
-                    {"image_observation": row["image_observation"]}
-                    if isinstance(row.get("image_observation"), Mapping)
-                    else {}
-                ),
-            }
-            for row in described_rows
-            if isinstance(row, Mapping)
-        )
+        for media_key, cached_row in fragment.media_description_cache.items():
+            if media_key in seen_cache_keys:
+                continue
+            seen_cache_keys.add(media_key)
+            prepared_rows.append(_cached_media_row(cached_row))
 
     if lease.fragments and additional_media_present:
         lease.fragments[0].additional_media_present = True
@@ -1168,29 +1251,86 @@ def _settled_state_from_lease(
     additional_media_present = any(
         fragment.additional_media_present for fragment in lease.fragments
     )
+    active_platform_message_ids = {
+        fragment.platform_message_id
+        for fragment in lease.fragments
+        if fragment.platform_message_id
+    }
+    active_conversation_row_ids = {
+        fragment.conversation_row_id
+        for fragment in lease.fragments
+        if fragment.conversation_row_id
+    }
+    external_history = [
+        row
+        for row in history
+        if row.get("platform_message_id") not in active_platform_message_ids
+        and str(row.get("_id", "")) not in active_conversation_row_ids
+    ]
+    fresh_history = trim_history_dict(external_history)[-10:]
     leader = lease.fragments[0] if lease.fragments else None
-    leader_item = leader.queue_item if leader is not None else None
-    request = leader_item.request if leader_item is not None else None
+    response_owner = next(
+        (
+            fragment
+            for fragment in lease.fragments
+            if fragment.arrival_sequence == lease.response_owner_sequence
+        ),
+        leader,
+    )
+    response_owner_item = (
+        response_owner.queue_item
+        if response_owner is not None
+        and isinstance(response_owner.queue_item, QueuedChatItem)
+        else None
+    )
+    request = (
+        response_owner_item.request
+        if response_owner_item is not None
+        else None
+    )
+    user_profile = (
+        response_owner_item.user_profile
+        if response_owner_item is not None
+        else {}
+    )
+    direct_participant = any(
+        "character" in fragment.semantic_target_labels
+        for fragment in lease.fragments
+    )
+    relationship_context = str(
+        user_profile.get("last_relationship_insight", "")
+    ).strip()
+    if not relationship_context:
+        relationship_context = (
+            "direct participant" if direct_participant
+            else "group participant"
+        )
+    group_attention = ""
+    if request is not None and request.channel_type == "group":
+        attention_context = build_group_attention_context(
+            chat_history_wide=fresh_history,
+            platform_bot_id=request.platform_bot_id,
+        )
+        group_attention = attention_context["group_attention"]
     return_value = {
         "assembled_fragments": fragment_rows,
         "media_descriptions": media_descriptions,
         "additional_media_present": additional_media_present,
-        "fresh_history": trim_history_dict(history)[-10:],
+        "fresh_history": fresh_history,
         "scene_context": (
             request.channel_name
             if request is not None and request.channel_name
             else ""
         ),
-        "relationship_context": (
-            "direct participant"
-            if leader is not None
-            and "character" in leader.semantic_target_labels
-            else "group participant"
-        ),
-        "user_profile": (
-            leader_item.user_profile
-            if leader_item is not None
-            else {}
+        "relationship_context": relationship_context,
+        "character_mood": str(_runtime_character_state.get("mood", "")),
+        "group_attention": group_attention,
+        "bot_continuity": lease.latest_bot_continuity,
+        "user_profile": user_profile,
+        "llm_trace_id": (
+            response_owner_item.llm_trace_id
+            if response_owner_item is not None
+            else ""
         ),
     }
     return return_value
@@ -1200,18 +1340,33 @@ async def _complete_settled_fragments(
     lease: AssessmentLease,
     response: ChatResponse,
     *,
-    release_leader: bool = True,
+    release_response_owner: bool = True,
 ) -> None:
-    """Complete every accepted fragment future with one assembled response."""
+    """Deliver one response to its owner and silence every other fragment."""
 
-    leader = lease.fragments[0].queue_item if lease.fragments else None
-    for index, fragment in enumerate(lease.fragments):
+    for fragment in lease.fragments:
         queue_item = fragment.queue_item
         if not isinstance(queue_item, QueuedChatItem):
             continue
-        _chat_input_queue.complete(queue_item, response)
-        if release_leader or index != 0 or queue_item is not leader:
+        is_response_owner = (
+            fragment.arrival_sequence == lease.response_owner_sequence
+        )
+        fragment_response = response if is_response_owner else ChatResponse()
+        _chat_input_queue.complete(queue_item, fragment_response)
+        if release_response_owner or not is_response_owner:
             await _release_queued_pipeline_handle(queue_item)
+
+
+def _response_owner_item(lease: AssessmentLease) -> QueuedChatItem | None:
+    """Return the queue item that owns the assembled turn response."""
+
+    for fragment in lease.fragments:
+        if fragment.arrival_sequence != lease.response_owner_sequence:
+            continue
+        if isinstance(fragment.queue_item, QueuedChatItem):
+            return_value = fragment.queue_item
+            return return_value
+    return None
 
 
 async def _frontline_intake_item(item: QueuedChatItem) -> None:
@@ -1225,112 +1380,194 @@ async def _frontline_intake_item(item: QueuedChatItem) -> None:
         fragments = await _prepare_frontline_fragments(item)
         leader_fragment = fragments[0]
         frontline_state = await _build_frontline_state(leader_fragment)
+        if len(fragments) > 1:
+            frontline_state["current_message"] = (
+                _collapsed_private_frontline_message(fragments)
+            )
         decision = await _turn_settlement_coordinator.evaluate_frontline(
             frontline_state,
         )
-        if decision["intake_action"] == "discard":
+        outcome = await _turn_settlement_coordinator.apply_frontline_decision(
+            leader_fragment,
+            decision,
+        )
+        if outcome.action == "discard":
+            discard_decision = {
+                "intake_action": "discard",
+                "append_target": "none",
+                "prelude_targets": [],
+                "reason": "collapsed private input follows discarded leader",
+            }
+            for fragment in fragments[1:]:
+                await _turn_settlement_coordinator.apply_frontline_decision(
+                    fragment,
+                    discard_decision,
+                )
             for fragment in fragments:
                 queue_item = fragment.queue_item
                 if isinstance(queue_item, QueuedChatItem):
                     _chat_input_queue.complete(queue_item, ChatResponse())
                     await _release_queued_pipeline_handle(queue_item)
+                    if queue_item.llm_trace_id:
+                        await llm_tracing.finalize_llm_trace_run(
+                            trace_id=queue_item.llm_trace_id,
+                            status="succeeded",
+                            final_dialog_count=0,
+                            delivery_tracking_id="",
+                        )
             return
-        outcome = await _turn_settlement_coordinator.apply_frontline_decision(
-            leader_fragment,
-            decision,
-        )
-        await _record_frontline_outcome(leader_fragment, outcome)
-        append_target = decision["append_target"]
-        if decision["intake_action"] == "start":
-            append_target = "open_1"
-        append_decision = {
-            "intake_action": "append",
-            "append_target": append_target,
-            "prelude_targets": [],
-            "reason": "private fragment continuation",
-        }
-        for fragment in fragments[1:]:
-            fragment_outcome = (
-                await _turn_settlement_coordinator.apply_frontline_decision(
-                    fragment,
-                    append_decision,
-                )
+
+        if outcome.action == "append":
+            _chat_input_queue.complete(item, ChatResponse())
+            await _release_queued_pipeline_handle(item)
+            await llm_tracing.finalize_llm_trace_run(
+                trace_id=item.llm_trace_id,
+                status="succeeded",
+                final_dialog_count=0,
+                delivery_tracking_id="",
             )
-            await _record_frontline_outcome(fragment, fragment_outcome)
+        for fragment in fragments[1:]:
+            await _turn_settlement_coordinator.append_collapsed_private_fragment(
+                fragment,
+                turn_id=outcome.turn_id,
+            )
+            queue_item = fragment.queue_item
+            if isinstance(queue_item, QueuedChatItem):
+                _chat_input_queue.complete(queue_item, ChatResponse())
+                await _release_queued_pipeline_handle(queue_item)
     except Exception as exc:
         logger.exception(f"Frontline intake failed: {exc}")
         for queued_item in [item, *item.collapsed_items]:
+            await _turn_settlement_coordinator.complete_ingress(
+                queued_item.sequence,
+            )
             _chat_input_queue.fail(queued_item, exc)
             await _release_queued_pipeline_handle(queued_item)
+            if queued_item.llm_trace_id:
+                await llm_tracing.finalize_llm_trace_run(
+                    trace_id=queued_item.llm_trace_id,
+                    status="failed",
+                    final_dialog_count=0,
+                    delivery_tracking_id="",
+                )
 
 
-async def _turn_settlement_worker() -> None:
-    """Assess ready turns globally and hand only claimed proceeds to cognition."""
+async def _process_settlement_lease(
+    lease: AssessmentLease,
+    response_owner: QueuedChatItem,
+) -> None:
+    """Assess and finish one ready turn while the worker owns its activity."""
 
-    while True:
-        lease = await _turn_settlement_coordinator.wait_for_assessment_ready()
-        if not lease.fragments:
-            continue
-        leader = lease.fragments[0].queue_item
-        if not isinstance(leader, QueuedChatItem):
-            continue
-        try:
-            prepared_media, additional_media_present = (
-                await _prepare_settled_media(lease)
-            )
-            history = await get_conversation_history(
-                platform=leader.request.platform,
-                platform_channel_id=leader.request.platform_channel_id,
-                limit=CONVERSATION_HISTORY_LIMIT,
-            )
-            settled_state = _settled_state_from_lease(
+    try:
+        prepared_media, additional_media_present = await _prepare_settled_media(
+            lease,
+        )
+        history = await get_conversation_history(
+            platform=response_owner.request.platform,
+            platform_channel_id=response_owner.request.platform_channel_id,
+            limit=CONVERSATION_HISTORY_LIMIT,
+        )
+        settled_state = _settled_state_from_lease(
+            lease,
+            history=history,
+        )
+        decision = await _turn_settlement_coordinator.evaluate_settled(
+            lease,
+            settled_state,
+        )
+        outcome = await _turn_settlement_coordinator.apply_settled_decision(
+            lease,
+            decision,
+        )
+    except Exception as exc:
+        logger.exception(f"Settled relevance failed: {exc}")
+        failure_decision = {
+            "response_action": "ignore",
+            "reason_to_respond": "settled relevance failed closed",
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+        }
+        failure_outcome = (
+            await _turn_settlement_coordinator.apply_settled_decision(
                 lease,
-                history=history,
+                failure_decision,
             )
-            decision = await _turn_settlement_coordinator.evaluate_settled(
-                lease,
-                settled_state,
+        )
+        if failure_outcome.stale:
+            return
+        await _complete_settled_fragments(lease, ChatResponse())
+        if response_owner.llm_trace_id:
+            await llm_tracing.finalize_llm_trace_run(
+                trace_id=response_owner.llm_trace_id,
+                status="failed",
+                final_dialog_count=0,
+                delivery_tracking_id="",
             )
-            outcome = await _turn_settlement_coordinator.apply_settled_decision(
-                lease,
-                decision,
-            )
-        except Exception as exc:
-            logger.exception(f"Settled relevance failed: {exc}")
-            await _complete_settled_fragments(lease, ChatResponse())
-            await _remove_frontline_turn(lease.fragments[0], lease.turn_id)
-            continue
+        return
 
-        if outcome.stale or outcome.response_action == "wait":
-            continue
-        if outcome.response_action == "ignore":
-            await _complete_settled_fragments(lease, ChatResponse())
-            await _remove_frontline_turn(lease.fragments[0], lease.turn_id)
-            continue
+    if outcome.stale or outcome.response_action == "wait":
+        return
+    if outcome.response_action == "ignore":
+        await _complete_settled_fragments(lease, ChatResponse())
+        if response_owner.llm_trace_id:
+            await llm_tracing.finalize_llm_trace_run(
+                trace_id=response_owner.llm_trace_id,
+                status="succeeded",
+                final_dialog_count=0,
+                delivery_tracking_id="",
+            )
+        return
 
+    claimed = await _turn_settlement_coordinator.claim_for_cognition(
+        lease.turn_id,
+        lease.version,
+    )
+    if not claimed:
+        return
+
+    try:
         await _process_queued_chat_item(
-            leader,
+            response_owner,
             settlement_fragments=list(lease.fragments),
             settled_decision=decision,
             skip_user_persist=True,
             settlement_turn_id=lease.turn_id,
             settlement_version=lease.version,
+            settlement_claimed=True,
             prepared_media=prepared_media,
             media_prepared=True,
             additional_media_present=additional_media_present,
         )
-        response = ChatResponse()
-        if leader.future.done() and not leader.future.cancelled():
-            try:
-                response = leader.future.result()
-            except BaseException:
-                response = ChatResponse()
         await _complete_settled_fragments(
             lease,
-            response,
-            release_leader=False,
+            ChatResponse(),
+            release_response_owner=False,
         )
-        await _remove_frontline_turn(lease.fragments[0], lease.turn_id)
+    finally:
+        await _turn_settlement_coordinator.complete_cognition(
+            lease.turn_id,
+            lease.version,
+        )
+
+
+async def _turn_settlement_worker() -> None:
+    """Assess ready turns globally and hand only claimed proceeds to cognition."""
+
+    global _primary_interaction_active_count
+
+    while True:
+        lease = await _turn_settlement_coordinator.wait_for_assessment_ready()
+        if not lease.fragments:
+            continue
+        response_owner = _response_owner_item(lease)
+        if response_owner is None:
+            continue
+        _primary_interaction_active_count += 1
+        try:
+            await _process_settlement_lease(lease, response_owner)
+        finally:
+            _primary_interaction_active_count -= 1
 
 
 def _clear_latest_cognition_graph() -> None:
@@ -2724,6 +2961,7 @@ async def _process_queued_chat_item(
     skip_user_persist: bool = False,
     settlement_turn_id: str = "",
     settlement_version: int = 0,
+    settlement_claimed: bool = False,
     prepared_media: list[MultiMediaDoc] | None = None,
     media_prepared: bool = False,
     additional_media_present: bool = False,
@@ -2740,7 +2978,8 @@ async def _process_queued_chat_item(
     req = item.request
     character_name = _static_character_profile.get("name", "Character")
     correlation_id = _chat_correlation_id(req)
-    llm_trace_id = llm_tracing.build_trace_id()
+    llm_trace_id = item.llm_trace_id or llm_tracing.build_trace_id()
+    item.llm_trace_id = llm_trace_id
     scope = _service_event_scope(req)
     turn_started_at = time.perf_counter()
     stages_reached: list[str] = []
@@ -3092,11 +3331,28 @@ async def _process_queued_chat_item(
             "observation_status": "observation_complete",
             "turn_id": settlement_turn_id,
             "turn_version": settlement_version,
+            "cognition_claimed": settlement_claimed,
             "should_respond": initial_should_respond,
-            "reason_to_respond": "",
-            "use_reply_feature": False,
-            "channel_topic": "",
-            "indirect_speech_context": "",
+            "reason_to_respond": (
+                str(settled_decision.get("reason_to_respond", ""))
+                if isinstance(settled_decision, Mapping)
+                else ""
+            ),
+            "use_reply_feature": (
+                bool(settled_decision.get("use_reply_feature", False))
+                if isinstance(settled_decision, Mapping)
+                else False
+            ),
+            "channel_topic": (
+                str(settled_decision.get("channel_topic", ""))
+                if isinstance(settled_decision, Mapping)
+                else ""
+            ),
+            "indirect_speech_context": (
+                str(settled_decision.get("indirect_speech_context", ""))
+                if isinstance(settled_decision, Mapping)
+                else ""
+            ),
             "debug_modes": debug_modes,
             "final_dialog": [],
             "target_addressed_user_ids": [global_user_id],
@@ -3301,6 +3557,12 @@ async def _process_queued_chat_item(
                 return
 
             stages_reached.append("assistant_persisted")
+        if settlement_turn_id and response_dialog:
+            await _turn_settlement_coordinator.record_bot_continuity(
+                scope=(req.platform, req.platform_channel_id, req.channel_type),
+                author_platform_user_id=req.platform_user_id,
+                dialog_text="\n".join(response_dialog),
+            )
         _chat_input_queue.complete(item, response)
         stages_reached.append("response_completed")
         visible_response_sent = bool(response_dialog)
@@ -3418,6 +3680,18 @@ async def _chat_input_worker() -> None:
                 )
 
             if not incoming_history_committed:
+                for queued_item in [
+                    *dequeued_turn.dropped_items,
+                    *(item for item, _survivor in dequeued_turn.collapsed_items),
+                    *(
+                        [dequeued_turn.next_item]
+                        if dequeued_turn.next_item is not None
+                        else []
+                    ),
+                ]:
+                    await _turn_settlement_coordinator.complete_ingress(
+                        queued_item.sequence,
+                    )
                 if dequeued_turn.next_item is not None:
                     _chat_input_queue.fail(
                         dequeued_turn.next_item,
@@ -3432,11 +3706,7 @@ async def _chat_input_worker() -> None:
                 continue
 
             if dequeued_turn.next_item is not None:
-                task = asyncio.create_task(
-                    _frontline_intake_item(dequeued_turn.next_item)
-                )
-                _frontline_tasks.add(task)
-                task.add_done_callback(_frontline_tasks.discard)
+                await _frontline_intake_item(dequeued_turn.next_item)
         finally:
             _primary_interaction_active_count -= 1
 
@@ -3469,7 +3739,7 @@ async def _stop_chat_input_worker() -> None:
 
     global _chat_input_queue, _chat_queue_worker_task
     global _turn_settlement_worker_task
-    global _turn_settlement_coordinator, _frontline_projection_lock
+    global _turn_settlement_coordinator
 
     current_loop = asyncio.get_running_loop()
     queue_task = _chat_queue_worker_task
@@ -3483,11 +3753,8 @@ async def _stop_chat_input_worker() -> None:
     if stale_loop:
         _chat_queue_worker_task = None
         _turn_settlement_worker_task = None
-        _frontline_tasks.clear()
         _chat_input_queue = ChatInputQueue()
         _turn_settlement_coordinator = _new_turn_settlement_coordinator()
-        _frontline_projection_lock = asyncio.Lock()
-        _frontline_slot_descriptors.clear()
         return
 
     task = _chat_queue_worker_task
@@ -3504,21 +3771,12 @@ async def _stop_chat_input_worker() -> None:
         with suppress(asyncio.CancelledError):
             await settlement_task
 
-    pending_frontline_tasks = list(_frontline_tasks)
-    for frontline_task in pending_frontline_tasks:
-        frontline_task.cancel()
-    if pending_frontline_tasks:
-        await asyncio.gather(*pending_frontline_tasks, return_exceptions=True)
-    _frontline_tasks.clear()
-
     pending_items = await _chat_input_queue.drain()
     for item in pending_items:
         _chat_input_queue.complete(item, ChatResponse())
         await _release_queued_pipeline_handle(item)
     _chat_input_queue = ChatInputQueue()
     _turn_settlement_coordinator = _new_turn_settlement_coordinator()
-    _frontline_projection_lock = asyncio.Lock()
-    _frontline_slot_descriptors.clear()
 
 
 async def _enqueue_chat_request(req: ChatRequest) -> ChatResponse:
@@ -3551,9 +3809,17 @@ async def _enqueue_chat_request(req: ChatRequest) -> ChatResponse:
     _ensure_chat_input_worker_started()
     item_enqueued = False
 
-    def _mark_item_enqueued() -> None:
+    def _mark_item_enqueued(queued_item: QueuedChatItem) -> None:
         nonlocal item_enqueued
         item_enqueued = True
+        if req.debug_modes.listen_only:
+            return
+        _turn_settlement_coordinator.register_ingress(
+            sequence=queued_item.sequence,
+            scope=(req.platform, req.platform_channel_id, req.channel_type),
+            author_platform_user_id=req.platform_user_id,
+            enqueue_monotonic=queued_item.enqueue_monotonic,
+        )
 
     try:
         response = await _chat_input_queue.enqueue(

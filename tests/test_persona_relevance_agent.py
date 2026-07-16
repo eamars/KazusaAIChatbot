@@ -162,6 +162,50 @@ def test_settled_render_keeps_latest_fragment_and_respects_cap() -> None:
     assert "turn-id-raw-1" not in rendered
     assert "2026-07-16T00:00:10Z" not in rendered
     assert "Correction: use the latest request." in rendered
+    assert "ignore rather than" in messages[0].content
+    assert "it is not\nevidence that the turn is incomplete" in (
+        messages[0].content
+    )
+    assert "textual\ncompleteness creates relevance" in messages[0].content
+    payload = json.loads(messages[1].content)
+    assert payload["assembled_turn"]["earlier_context_present"] is True
+
+
+def test_settled_worst_case_projection_remains_valid_json() -> None:
+    """Fallback projection preserves a valid bounded semantic payload."""
+
+    state = _base_state()
+    state["assembled_fragments"] = [
+        {
+            "body_text": f"fragment-{index} " + "x" * 5000,
+            "semantic_target_labels": ["character"],
+            "reply_target_label": "character",
+            "media_labels": ["image"],
+        }
+        for index in range(30)
+    ]
+    state["fresh_history"] = [
+        {"speaker": "user", "body_text": "h" * 3000}
+        for _index in range(10)
+    ]
+    state["media_descriptions"] = [
+        {"media_kind": "image", "description": "m" * 3000}
+        for _index in range(4)
+    ]
+
+    messages = build_settled_relevance_messages(state)
+    payload = json.loads(messages[1].content)
+
+    assert sum(len(message.content) for message in messages) <= (
+        SETTLED_RELEVANCE_MAX_INPUT_CHARS
+    )
+    assert payload["assembled_turn"]["fragments"][0]["body_text"].startswith(
+        "fragment-0"
+    )
+    assert payload["assembled_turn"]["fragments"][-1]["body_text"].startswith(
+        "fragment-29"
+    )
+    assert payload["assembled_turn"]["earlier_context_present"] is True
 
 
 def test_settled_route_has_exact_completion_and_thinking_budget() -> None:

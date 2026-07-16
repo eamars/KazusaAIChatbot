@@ -64,14 +64,14 @@ def test_frontline_decision_has_closed_enums_and_bounded_cards() -> None:
     decision = validate_frontline_decision({
         "intake_action": "append",
         "append_target": "open_2",
-        "prelude_targets": ["prelude_1"],
+        "prelude_targets": [],
         "reason": "same author and same image topic",
     })
 
     assert decision == {
         "intake_action": "append",
         "append_target": "open_2",
-        "prelude_targets": ["prelude_1"],
+        "prelude_targets": [],
         "reason": "same author and same image topic",
     }
 
@@ -81,6 +81,14 @@ def test_frontline_decision_has_closed_enums_and_bounded_cards() -> None:
             "append_target": "turn-id-from-model",
             "prelude_targets": [],
             "reason": "invalid slot",
+        })
+
+    with pytest.raises(ValueError):
+        validate_frontline_decision({
+            "intake_action": "append",
+            "append_target": "open_1",
+            "prelude_targets": ["prelude_1"],
+            "reason": "preludes belong to a new promoted turn",
         })
 
 
@@ -110,6 +118,32 @@ def test_frontline_render_is_bounded_and_omits_raw_identity_and_time() -> None:
     assert "2026-07-16T00:00:00Z" not in rendered
     assert '"open_1"' in rendered
     assert '"prelude_1"' in rendered
+    json.loads(messages[1].content)
+
+
+def test_frontline_worst_case_projection_remains_valid_json() -> None:
+    """Hard-cap fitting never sends a sliced JSON document to the model."""
+
+    state = _frontline_state()
+    state["current_message"]["body_text"] = "x" * 20000
+    state["open_turns"] = [
+        {
+            "author_relation": "same_author",
+            "latest_intent": "y" * 2000,
+            "opening_excerpt": "z" * 2000,
+            "target_summary": "character",
+            "reply_summary": "character",
+            "media_summary": "image" * 100,
+        }
+        for _index in range(3)
+    ]
+
+    messages = build_frontline_messages(state)
+
+    assert sum(len(message.content) for message in messages) <= (
+        FRONTLINE_RELEVANCE_MAX_INPUT_CHARS
+    )
+    json.loads(messages[1].content)
 
 
 def test_frontline_route_has_exact_completion_and_thinking_budget() -> None:

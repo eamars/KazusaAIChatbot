@@ -18,7 +18,8 @@ materialization, or durable cross-process leases.
 
 The brain service's relevance turn-settlement coordinator is a separate
 service-owned lifecycle. It orders frontline and settled relevance work,
-maintains group deadlines, and performs the versioned cognition claim. It uses
+maintains enqueue-time group deadlines and the pre-deadline ingress barrier,
+and performs the versioned cognition claim before persona preparation. It uses
 runtime coordination for scoped foreground admission but does not move
 semantic judgment into this generic package.
 

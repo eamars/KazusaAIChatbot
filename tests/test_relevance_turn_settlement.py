@@ -32,6 +32,8 @@ def _fragment(
     channel: str = "channel-1",
     body: str = "request",
     enqueue_monotonic: float = 0.0,
+    targets: tuple[str, ...] = ("character",),
+    reply_target: str = "character",
 ) -> PersistedChatFragment:
     """Build a persisted fragment with stable test metadata."""
 
@@ -45,8 +47,8 @@ def _fragment(
         storage_timestamp_utc=f"2026-07-16T00:00:{sequence:02d}+00:00",
         enqueue_monotonic=enqueue_monotonic,
         body_text=body,
-        semantic_target_labels=("character",),
-        reply_target_label="character",
+        semantic_target_labels=targets,
+        reply_target_label=reply_target,
         media_descriptions=(),
     )
 
@@ -128,7 +130,7 @@ async def test_append_increments_version_and_clamps_to_hard_deadline() -> None:
 
     clock.advance(5.0)
     append = await coordinator.apply_frontline_decision(
-        _fragment(2, body="clarification"),
+        _fragment(2, body="clarification", enqueue_monotonic=5.0),
         {
             "intake_action": "append",
             "append_target": "open_1",
@@ -245,6 +247,7 @@ async def test_stale_assessment_cannot_claim_after_append() -> None:
     )
     clock.advance(6.0)
     lease = await coordinator.wait_for_assessment_ready()
+    decision = await coordinator.evaluate_settled(lease, {})
     append = await coordinator.apply_frontline_decision(
         _fragment(2, body="newer intent"),
         {
@@ -256,7 +259,15 @@ async def test_stale_assessment_cannot_claim_after_append() -> None:
     )
 
     assert append.version == 2
-    assert await coordinator.claim_for_cognition(start.turn_id, lease.version) is False
+    stale_outcome = await coordinator.apply_settled_decision(
+        lease,
+        decision,
+    )
+    assert stale_outcome.stale is True
+    assert await coordinator.claim_for_cognition(
+        start.turn_id,
+        lease.version,
+    ) is False
     clock.advance(4.0)
     final_lease = await coordinator.wait_for_assessment_ready()
     final_decision = await coordinator.evaluate_settled(final_lease, {})
@@ -355,3 +366,225 @@ async def test_relevance_work_is_fifo_and_one_in_flight() -> None:
 
     assert order == ["first", "second"]
     assert maximum_active == 1
+
+
+@pytest.mark.asyncio
+async def test_interleaved_authors_receive_only_their_own_open_turns() -> None:
+    """A1, B1, A2 exposes A to A2 without exposing B as an append slot."""
+
+    clock = _FakeClock()
+    coordinator = _coordinator(clock)
+    start = {
+        "intake_action": "start",
+        "append_target": "none",
+        "prelude_targets": [],
+        "reason": "new candidate",
+    }
+    await coordinator.apply_frontline_decision(_fragment(1), start)
+    await coordinator.apply_frontline_decision(
+        _fragment(2, author="author-b", body="B1"),
+        start,
+    )
+
+    state = await coordinator.build_frontline_state(
+        _fragment(3, body="A2", enqueue_monotonic=2.0),
+    )
+
+    assert len(state["open_turns"]) == 1
+    assert state["open_turns"][0]["opening_excerpt"] == "request"
+
+
+@pytest.mark.asyncio
+async def test_discarded_prelude_is_promoted_by_supplied_slot() -> None:
+    """A content-first message can join a later direct tag in chronology."""
+
+    clock = _FakeClock()
+    coordinator = _coordinator(clock)
+    prelude = _fragment(
+        1,
+        body="The object is making this sound.",
+        enqueue_monotonic=0.0,
+        targets=("none",),
+        reply_target="none",
+    )
+    await coordinator.apply_frontline_decision(
+        prelude,
+        {
+            "intake_action": "discard",
+            "append_target": "none",
+            "prelude_targets": [],
+            "reason": "not addressed yet",
+        },
+    )
+    current = _fragment(
+        2,
+        body="Character, what do you think?",
+        enqueue_monotonic=4.0,
+    )
+    state = await coordinator.build_frontline_state(current)
+
+    assert state["recent_preludes"][0]["summary"].startswith("The object")
+
+    outcome = await coordinator.apply_frontline_decision(
+        current,
+        {
+            "intake_action": "start",
+            "append_target": "none",
+            "prelude_targets": ["prelude_1"],
+            "reason": "the tag promotes the prior description",
+        },
+    )
+    clock.advance(10.0)
+    lease = await coordinator.wait_for_assessment_ready()
+
+    assert outcome.turn_id == lease.turn_id
+    assert [fragment.arrival_sequence for fragment in lease.fragments] == [1, 2]
+    assert lease.leader_sequence == 1
+    assert lease.response_owner_sequence == 2
+
+
+@pytest.mark.asyncio
+async def test_ingress_watermark_delays_claim_until_frontline_applies() -> None:
+    """A pre-deadline queued follow-up blocks stale cognition entry."""
+
+    clock = _FakeClock()
+    coordinator = _coordinator(clock)
+    start = await coordinator.apply_frontline_decision(
+        _fragment(1),
+        {
+            "intake_action": "start",
+            "append_target": "none",
+            "prelude_targets": [],
+            "reason": "new candidate",
+        },
+    )
+    clock.advance(6.0)
+    lease = await coordinator.wait_for_assessment_ready()
+    decision = await coordinator.evaluate_settled(lease, {})
+    await coordinator.apply_settled_decision(lease, decision)
+    coordinator.register_ingress(
+        sequence=2,
+        scope=("discord", "channel-1", "group"),
+        author_platform_user_id="author-a",
+        enqueue_monotonic=9.5,
+    )
+
+    assert await coordinator.claim_for_cognition(
+        start.turn_id,
+        lease.version,
+    ) is False
+
+    append = await coordinator.apply_frontline_decision(
+        _fragment(2, body="boundary follow-up", enqueue_monotonic=9.5),
+        {
+            "intake_action": "append",
+            "append_target": "open_1",
+            "prelude_targets": [],
+            "reason": "same candidate",
+        },
+    )
+    clock.advance(4.0)
+    final_lease = await coordinator.wait_for_assessment_ready()
+
+    assert append.version == 2
+    assert final_lease.version == 2
+    assert final_lease.observation_status == "observation_complete"
+
+
+@pytest.mark.asyncio
+async def test_private_turn_is_immediately_ready_and_collapsed_append_is_exact(
+) -> None:
+    """Private coalescing keeps immediate timing and exact survivor identity."""
+
+    clock = _FakeClock()
+    coordinator = _coordinator(clock)
+    private = _fragment(1)
+    private.scope = ("discord", "dm-1", "private")
+    start = await coordinator.apply_frontline_decision(
+        private,
+        {
+            "intake_action": "start",
+            "append_target": "none",
+            "prelude_targets": [],
+            "reason": "private candidate",
+        },
+    )
+    follower = _fragment(2, body="private follow-up")
+    follower.scope = private.scope
+    append = await coordinator.append_collapsed_private_fragment(
+        follower,
+        turn_id=start.turn_id,
+    )
+    lease = await coordinator.wait_for_assessment_ready()
+
+    assert append.turn_id == start.turn_id
+    assert lease.observation_status == "observation_complete"
+    assert [fragment.arrival_sequence for fragment in lease.fragments] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_completed_cognition_releases_pending_turn_state() -> None:
+    """A claimed turn is removed after the single cognition lane finishes."""
+
+    clock = _FakeClock()
+    coordinator = _coordinator(clock)
+    start = await coordinator.apply_frontline_decision(
+        _fragment(1),
+        {
+            "intake_action": "start",
+            "append_target": "none",
+            "prelude_targets": [],
+            "reason": "candidate",
+        },
+    )
+    clock.advance(6.0)
+    lease = await coordinator.wait_for_assessment_ready()
+    decision = await coordinator.evaluate_settled(lease, {})
+    await coordinator.apply_settled_decision(lease, decision)
+    assert await coordinator.claim_for_cognition(
+        start.turn_id,
+        lease.version,
+    ) is True
+
+    await coordinator.complete_cognition(start.turn_id, lease.version)
+
+    assert start.turn_id not in coordinator._pending_turns
+
+
+@pytest.mark.asyncio
+async def test_latest_bot_continuity_is_scoped_to_author_and_channel() -> None:
+    """A completed dialog is visible only to its matching frontline scope."""
+
+    clock = _FakeClock()
+    coordinator = _coordinator(clock)
+    await coordinator.record_bot_continuity(
+        scope=("discord", "channel-1", "group"),
+        author_platform_user_id="author-a",
+        dialog_text="previous answer",
+    )
+
+    matching = await coordinator.build_frontline_state(_fragment(2))
+    other_author = await coordinator.build_frontline_state(
+        _fragment(3, author="author-b"),
+    )
+    other_channel = await coordinator.build_frontline_state(
+        _fragment(4, channel="channel-2"),
+    )
+
+    assert matching["latest_bot_continuity"] == "previous answer"
+    assert other_author["latest_bot_continuity"] == ""
+    assert other_channel["latest_bot_continuity"] == ""
+
+    await coordinator.apply_frontline_decision(
+        _fragment(5),
+        {
+            "intake_action": "start",
+            "append_target": "none",
+            "prelude_targets": [],
+            "reason": "new candidate",
+        },
+    )
+    clock.advance(6.0)
+    lease = await coordinator.wait_for_assessment_ready()
+
+    assert lease.latest_bot_continuity == "previous answer"

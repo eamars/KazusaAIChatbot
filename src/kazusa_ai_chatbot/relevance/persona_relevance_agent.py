@@ -18,7 +18,6 @@ from kazusa_ai_chatbot.config import (
     RELEVANCE_AGENT_LLM_BASE_URL,
     RELEVANCE_AGENT_LLM_MAX_COMPLETION_TOKENS,
     RELEVANCE_AGENT_LLM_MODEL,
-    RELEVANCE_AGENT_LLM_THINKING_ENABLED,
     SETTLED_RELEVANCE_MAX_COMPLETION_TOKENS,
     SETTLED_RELEVANCE_MAX_INPUT_CHARS,
 )
@@ -36,10 +35,6 @@ from kazusa_ai_chatbot.utils import build_affinity_block, parse_llm_json_output
 
 
 logger = logging.getLogger(__name__)
-
-SETTLED_RELEVANCE_MAX_COMPLETION_TOKENS = (
-    SETTLED_RELEVANCE_MAX_COMPLETION_TOKENS
-)
 
 _GROUP_ATTENTION_LOW = "low_noise"
 _GROUP_ATTENTION_MEDIUM = "medium_noise"
@@ -65,24 +60,36 @@ class SettledRelevanceDecision(TypedDict):
 SettledRelevanceState = Mapping[str, Any]
 
 
-_SETTLED_SYSTEM_PROMPT = '''You are the persona-aware settled relevance judge for an assembled user turn.
-Decide whether the active character has a grounded reason to speak in the
-current scene. Treat typed target and reply labels as authoritative evidence;
-preserve the latest correction and distinguish the assembled turn from fresh
-history. Ignore a turn when it is third-party traffic, redundant because a
-fresh answer already resolved it, or lacks a reason for this character to
-speak. Proceed when the turn is stable and relevant. Use wait only when more
-observation is available and the turn still appears incomplete. At the hard
-observation boundary choose only ignore or proceed.
+_SETTLED_SYSTEM_PROMPT = '''You are the persona-aware settled relevance judge
+for one assembled user turn.
+Decide only whether the active character has a grounded reason to speak now.
 
-Use only the supplied bounded projection. Raw platform IDs, turn IDs,
-timestamps, deadlines, counters, queue state, futures, handles, base64 media,
-and operational telemetry are absent by design.
+# Decision Contract
+Treat each fragment's typed target and reply labels as authoritative. Preserve
+the newest correction, keep the assembled turn separate from fresh history,
+and account for an intervening answer that made a reply redundant. Ignore
+third-party, redundant, or ungrounded turns. Proceed when the current assembled
+intent is stable and relevant. more_time_available permits wait; it is not
+evidence that the turn is incomplete. Wait only when the assembled fragments
+independently show missing meaning or an unfinished intent. During
+observation_complete, choose only ignore or proceed. additional_media_present
+means retained media is not
+described; when speaking would depend on that omitted media, ignore rather than
+infer from the described subset. Neither observation_complete nor textual
+completeness creates relevance. Proceed only when the actual content, typed
+targets, fresh history, or scene context establishes a grounded reason to
+speak; otherwise ignore.
 
-Return exactly one JSON object:
+# Generation Procedure
+1. Read the assembled fragments chronologically and identify the latest intent.
+2. Check typed addressee/reply evidence and fresh-history redundancy.
+3. Decide ignore, proceed, or an available wait.
+4. Fill every output field and verify the phase constraint.
+
+# Output Format
+Return exactly one JSON object and no surrounding text:
 {"response_action":"ignore|proceed|wait","reason_to_respond":"at most 180 characters","use_reply_feature":false,"channel_topic":"at most 60 characters","indirect_speech_context":"at most 100 characters"}'''
 
-_llm_interface = LLInterface()
 _relevance_agent_llm = LLInterface()
 _relevance_agent_llm_config = LLMCallConfig(
     stage_name=__name__,
@@ -98,15 +105,16 @@ _relevance_agent_llm_config = LLMCallConfig(
         SETTLED_RELEVANCE_MAX_COMPLETION_TOKENS,
     ),
     presence_penalty=None,
-    thinking=LLMThinkingConfig(
-        enabled=RELEVANCE_AGENT_LLM_THINKING_ENABLED,
-    ),
+    thinking=LLMThinkingConfig(enabled=False),
 )
 
 
 def _clip_text(value: object, limit: int) -> str:
     """Clip model-facing text while retaining its head and tail."""
 
+    if limit <= 0:
+        return_value = ""
+        return return_value
     if not isinstance(value, str):
         return_value = ""
         return return_value
@@ -231,28 +239,6 @@ def build_group_attention_context(
     return return_value
 
 
-def _has_latest_bot_turn_continuity(
-    *,
-    chat_history_wide: list[dict],
-    platform_bot_id: str,
-    current_global_user_id: str,
-) -> bool:
-    """Return whether the latest row is a bot turn aimed at this user."""
-
-    if not chat_history_wide:
-        return_value = False
-        return return_value
-    latest = chat_history_wide[-1]
-    return_value = (
-        latest.get("role") == "assistant"
-        and latest.get("platform_user_id") == platform_bot_id
-        and current_global_user_id in (
-            latest.get("addressed_to_global_user_ids") or []
-        )
-    )
-    return return_value
-
-
 def _string_list(value: object, *, limit: int) -> list[str]:
     """Return a bounded list of text descriptors."""
 
@@ -290,7 +276,9 @@ def _project_fragment(item: Mapping[str, Any], *, body_limit: int) -> dict[str, 
     return return_value
 
 
-def _project_fragments(state: SettledRelevanceState) -> list[dict[str, Any]]:
+def _project_fragments(
+    state: SettledRelevanceState,
+) -> tuple[list[dict[str, Any]], bool]:
     """Project opening and newest assembled fragments under their cap."""
 
     fragments = state.get("assembled_fragments")
@@ -300,23 +288,57 @@ def _project_fragments(state: SettledRelevanceState) -> list[dict[str, Any]]:
         user_input = state.get("user_input", "")
         fragments = [{"body_text": user_input}]
 
-    selected = list(fragments[:2]) + list(fragments[2:])
+    selected = [item for item in fragments if isinstance(item, Mapping)]
     projected: list[dict[str, Any]] = []
+    projected_indices: list[int] = []
     remaining = _FRAGMENT_TOTAL_CHARS
-    for item in selected:
-        if not isinstance(item, Mapping) or remaining <= 0:
+    for index, item in enumerate(selected):
+        if remaining <= 0:
             continue
+        is_edge_fragment = index == 0 or index == len(selected) - 1
         fragment = _project_fragment(
             item,
-            body_limit=min(1200, max(200, remaining)),
+            body_limit=min(
+                1200 if is_edge_fragment else 400,
+                max(80, remaining // 2),
+            ),
         )
         rendered_length = len(json.dumps(fragment, ensure_ascii=False))
         if rendered_length > remaining:
-            fragment = _project_fragment(item, body_limit=max(80, remaining // 2))
+            fragment = _project_fragment(item, body_limit=80)
             rendered_length = len(json.dumps(fragment, ensure_ascii=False))
+        if rendered_length > remaining:
+            continue
         projected.append(fragment)
+        projected_indices.append(index)
         remaining -= rendered_length
-    return_value = projected
+    latest = selected[-1] if selected else None
+    if latest is not None and projected_indices:
+        if projected_indices[-1] != len(selected) - 1:
+            latest_fragment = _project_fragment(latest, body_limit=400)
+            while len(projected) > 1 and (
+                len(json.dumps(latest_fragment, ensure_ascii=False)) > remaining
+            ):
+                removed = projected.pop(-1)
+                projected_indices.pop(-1)
+                remaining += len(json.dumps(removed, ensure_ascii=False))
+            if len(json.dumps(latest_fragment, ensure_ascii=False)) <= remaining:
+                projected.append(latest_fragment)
+                projected_indices.append(len(selected) - 1)
+    older_body_was_clipped = any(
+        index < len(selected) - 1
+        and str(selected[index].get("body_text", ""))
+        != projected_item["body_text"]
+        for index, projected_item in zip(
+            projected_indices,
+            projected,
+            strict=True,
+        )
+    )
+    earlier_context_present = (
+        len(projected) < len(selected) or older_body_was_clipped
+    )
+    return_value = (projected, earlier_context_present)
     return return_value
 
 
@@ -434,10 +456,12 @@ def _project_settled_state(
 ) -> dict[str, Any]:
     """Build the complete bounded semantic settled payload."""
 
+    fragments, earlier_context_present = _project_fragments(state)
     return_value = {
         "observation_status": observation_status,
         "assembled_turn": {
-            "fragments": _project_fragments(state),
+            "fragments": fragments,
+            "earlier_context_present": earlier_context_present,
             "media": _project_media(state),
         },
         "fresh_history": _project_history(state),
@@ -469,14 +493,34 @@ def build_settled_relevance_messages(
         )
     if len(human_content) > available_human_chars:
         fragments = payload["assembled_turn"]["fragments"]
-        payload["assembled_turn"]["fragments"] = fragments[-2:]
+        if len(fragments) > 1:
+            payload["assembled_turn"]["fragments"] = [
+                fragments[0],
+                fragments[-1],
+            ]
+            payload["assembled_turn"]["earlier_context_present"] = True
         human_content = json.dumps(
             payload,
             ensure_ascii=False,
             separators=(",", ":"),
         )
     if len(human_content) > available_human_chars:
-        human_content = human_content[:available_human_chars]
+        payload["scene_and_relationship"] = {
+            "scene_context": "",
+            "relationship_context": "",
+            "mood": "",
+            "group_attention": "",
+            "bot_continuity": "",
+            "affinity_level": "",
+            "engagement_guidelines": [],
+        }
+        human_content = json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+    if len(human_content) > available_human_chars:
+        raise ValueError("settled semantic projection exceeds its hard cap")
 
     messages = (
         SystemMessage(content=_SETTLED_SYSTEM_PROMPT),

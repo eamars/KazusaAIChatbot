@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 from dataclasses import dataclass, field
+import time
 from typing import Any, Callable
 
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
@@ -31,6 +32,10 @@ class QueuedChatItem:
             queued user message has already been persisted.
         pipeline_run_handle: Optional foreground coordination handle released
             by the service worker after this queued item is resolved.
+        enqueue_monotonic: Process-local monotonic arrival time used by turn
+            settlement deadlines.
+        llm_trace_id: Protected trace run shared by this input's relevance and
+            downstream cognition stages.
     """
 
     sequence: int
@@ -39,6 +44,7 @@ class QueuedChatItem:
     local_timestamp: str
     local_time_context: LocalTimeContextDoc
     future: asyncio.Future[Any]
+    enqueue_monotonic: float = field(default_factory=time.monotonic)
     combined_content: str | None = None
     collapsed_items: list[QueuedChatItem] = field(default_factory=list)
     conversation_row_id: str = ""
@@ -46,6 +52,7 @@ class QueuedChatItem:
     global_user_id: str = ""
     user_profile: dict[str, Any] = field(default_factory=dict)
     resolved_message_envelope: Any | None = None
+    llm_trace_id: str = ""
 
 
 @dataclass
@@ -54,7 +61,7 @@ class DequeuedChatTurn:
 
     Args:
         next_item: Oldest surviving item to process, if any.
-        dropped_items: Items pruned by group-noise policy.
+        dropped_items: Explicit listen-only items removed from active intake.
         collapsed_items: Pairs of collapsed original item and survivor item.
     """
 
@@ -64,7 +71,7 @@ class DequeuedChatTurn:
 
 
 class ChatInputQueue:
-    """Bookkeep queued chat messages, pruning, and collapse decisions."""
+    """Bookkeep queued chat messages and private collapse decisions."""
 
     def __init__(self) -> None:
         """Initialize an empty process-local queue."""
@@ -89,7 +96,7 @@ class ChatInputQueue:
         request: Any,
         *,
         pipeline_run_handle: Any | None = None,
-        on_enqueued: Callable[[], None] | None = None,
+        on_enqueued: Callable[[QueuedChatItem], None] | None = None,
     ) -> Any:
         """Add a request to the queue and wait for its response future.
 
@@ -97,8 +104,9 @@ class ChatInputQueue:
             request: Incoming chat request object.
             pipeline_run_handle: Optional active foreground coordination
                 handle attached to the queued item.
-            on_enqueued: Optional callback invoked after the item enters the
-                queue and before this coroutine waits for the response future.
+            on_enqueued: Optional callback invoked with the queued item after
+                it enters the queue and before this coroutine waits for the
+                response future.
 
         Returns:
             Response set by the service after processing, dropping, or collapse.
@@ -121,7 +129,7 @@ class ChatInputQueue:
             )
             self._queue.append(item)
             if on_enqueued is not None:
-                on_enqueued()
+                on_enqueued(item)
             condition.notify()
 
         response = await future
@@ -144,7 +152,7 @@ class ChatInputQueue:
             private_survivors, private_collapsed = self._coalesce_private(
                 waiting_items,
             )
-            survivors, dropped = self._prune(private_survivors)
+            survivors, dropped = self._filter_debug_bypass(private_survivors)
 
             self._queue.clear()
             self._queue.extend(survivors)
@@ -333,11 +341,11 @@ class ChatInputQueue:
         return_value = self._coalesce_private(waiting_items)
         return return_value
 
-    def prune(
+    def filter_debug_bypass(
         self,
         waiting_items: list[QueuedChatItem],
     ) -> tuple[list[QueuedChatItem], list[QueuedChatItem]]:
-        """Apply the global input-queue pruning policy to waiting items.
+        """Separate explicit listen-only items from active chat intake.
 
         Args:
             waiting_items: Ordered list of queued items that are not processing.
@@ -346,7 +354,7 @@ class ChatInputQueue:
             Pair of surviving items and dropped items, both in arrival order.
         """
 
-        return_value = self._prune(waiting_items)
+        return_value = self._filter_debug_bypass(waiting_items)
         return return_value
 
     def _private_message_scope(self, item: QueuedChatItem) -> tuple[str, str, str]:
@@ -450,11 +458,11 @@ class ChatInputQueue:
         return_value = (survivors, collapsed)
         return return_value
 
-    def _prune(
+    def _filter_debug_bypass(
         self,
         waiting_items: list[QueuedChatItem],
     ) -> tuple[list[QueuedChatItem], list[QueuedChatItem]]:
-        """Apply the global input-queue pruning policy to waiting items."""
+        """Remove only explicit listen-only items from active intake."""
 
         survivors: list[QueuedChatItem] = []
         dropped: list[QueuedChatItem] = []

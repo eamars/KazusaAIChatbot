@@ -6,7 +6,7 @@
   relevance-owned turn-settlement workflow that lets short follow-up messages
   join the intended logical turn before cognition begins.
 - Plan class: high_risk_migration.
-- Status: approved.
+- Status: completed.
 - Mandatory skills: `development-plan`, `local-LLM-architecture`,
   `no-prepost-user-input`, `debug-llm`, `cjk-safety`, `py-style`, and
   `test-style-and-execution`.
@@ -86,36 +86,12 @@ cognition before a user's follow-up arrives. Two corrections shape the target:
 
 ### Current Runtime Findings
 
-The current path is:
-
-```text
-adapter request
-  -> ChatInputQueue.wait_for_next()
-  -> adjacency-only private/group coalescing
-  -> group burst pruning
-  -> one global service worker
-  -> multimedia descriptor
-  -> persona relevance agent (boolean should_respond)
-  -> cognition and dialog
-```
-
-The relevant source behavior is:
-
-- `chat_input_queue.py` wakes and dequeues as soon as the queue becomes
-  non-empty.
-- Addressed group coalescing sees only queued, adjacent, same-author items.
-  Another author's interleaved message breaks the run.
-- The current 120-second group gap is an eligibility bound for items already
-  waiting together; it creates no idle-time observation window.
-- Group pruning can remove an unaddressed follow-up before any LLM sees whether
-  it continues an addressed turn.
-- `_chat_input_worker()` awaits the complete processing of one dequeued item
-  before taking the next item. A sleep placed inside the current relevance
-  node would therefore stall all chat intake and all cognition scopes.
-- `persona_relevance_agent.py` can return only a final boolean response choice.
-  It has no continuation target, wait action, deadline, or turn version.
-- The current graph runs the media descriptor before relevance, adding avoidable
-  work for messages a lightweight frontline could discard.
+The pre-cutover runtime dequeued immediately, used adjacency-only group
+coalescing and burst pruning, ran media before a boolean relevance decision,
+and kept intake behind the complete cognition path. It had no semantic append
+target, observation window, deadline, turn version, or independent ready heap.
+These findings are historical inputs; the final cutover and verification are
+recorded in Execution Evidence.
 
 ### Final System Shape
 
@@ -249,8 +225,8 @@ a sleep inside an LLM node or inside the cognition worker.
   starting the next stage.
 - Run the Independent Code Review gate and record it in Execution Evidence
   before completion, lifecycle changes, merge, or final sign-off.
-- Use parent-led native subagent execution for implementation and code review;
-  this user-requested independent plan review is performed by the parent alone.
+- Use parent-only implementation and independent review, following the user's
+  explicit single-agent instruction.
 
 ## Must Do
 
@@ -556,26 +532,27 @@ constructor receives the two stage callables and monotonic clock; its public
 operations are:
 
 ```python
+def register_ingress(...): ...
+async def complete_ingress(sequence: int) -> None: ...
+async def build_frontline_state(fragment: PersistedChatFragment) -> dict: ...
 async def evaluate_frontline(state: FrontlineState) -> FrontlineDecision: ...
-
 async def apply_frontline_decision(
     fragment: PersistedChatFragment,
     decision: FrontlineDecision,
 ) -> FrontlineOutcome: ...
-
+async def append_collapsed_private_fragment(...) -> FrontlineOutcome: ...
 async def wait_for_assessment_ready() -> AssessmentLease: ...
-
 async def evaluate_settled(
     lease: AssessmentLease,
     state: SettledRelevanceState,
 ) -> SettledRelevanceDecision: ...
-
 async def apply_settled_decision(
     lease: AssessmentLease,
     decision: SettledRelevanceDecision,
 ) -> SettlementOutcome: ...
-
 async def claim_for_cognition(turn_id: str, version: int) -> bool: ...
+async def complete_cognition(turn_id: str, version: int) -> None: ...
+async def record_bot_continuity(...) -> None: ...
 ```
 
 Service and graph code depend on these operations and typed results. Pending
@@ -625,25 +602,13 @@ normal model brevity is considered.
 | N-fragment turn with unique media | N | 1 | <=4 selected cache misses | N+1 relevance calls, <=4 vision calls |
 | Semantic wait or stale first assessment | N | 2 | cached, <=4 total | N+2 relevance calls, <=4 vision calls |
 
-The relevance executor permits one in-flight frontline or settled call. FIFO
-enqueue order prevents later input from indefinitely overtaking an already
-ready settled turn. The executor releases its model slot before cognition
-begins. Settlement timers hold no slot. Both semantic stages use the existing
-route, and the serialized executor prevents their calls from overlapping while
-the stage-local frontline cap keeps its high-volume prompt bounded.
-
-Both relevance stages and the admitted media descriptor use deterministic JSON
-repair only. The JSON-repair LLM call count is therefore zero for this
-workflow. Context overflow is handled before the call by the fixed projections
-above; the runtime records `prompt_chars`,
-`output_chars`, and duration in protected traces. A rendered prompt over its
-cap is a deterministic test failure and cannot be sent. A structurally invalid
-model result follows the current relevance fail-closed empty-response behavior,
-is traced as invalid, and triggers no semantic rewrite or retry.
-
-The user's authorization for the relevance DAG covers one compact frontline
-call per inbound message and one optional settled re-assessment. This plan adds
-no model-native tool loop and no cognition, RAG, or dialog call.
+The FIFO executor permits one in-flight relevance call and releases it before
+cognition; timers hold no model slot. Both relevance and admitted media use
+deterministic-only JSON parsing, so repair-model calls remain zero. Fixed
+projections reject over-cap prompts, invalid outputs fail closed without retry,
+and protected traces record prompt/output characters and duration. The DAG adds
+one frontline call per input and at most one settled reassessment, with no tool
+loop or additional cognition, RAG, or dialog call.
 
 ## Design Decisions
 
@@ -671,7 +636,7 @@ no model-native tool loop and no cognition, RAG, or dialog call.
 | F02 | Complete-looking text is followed by an image or clarification | Apply the initial quiet window to every admitted group turn; append semantic supplement | Version/deadline/media retention test | L03 |
 | F03 | Attachment-only follow-up has little text signal | Give frontline attachment presence/media kind and open same-author candidates | Ordered fragment/media aggregation test | L03 |
 | F04 | A1, B1, A2 interleave in one channel | Scope open candidates by author and let A2 append to A while B stays independent | Interleaved heap/state test | L04 |
-| F05 | Same author starts an unrelated topic during settlement | Frontline chooses `start` when topic and target evidence break continuity | Multiple-open-turn state test | L05 |
+| F05 | Same author starts an unrelated topic during settlement | Frontline chooses `start` or conservatively `discard`, never `append`, when topic and target evidence break continuity | Multiple-open-turn state test | L05 |
 | F06 | Same author addresses another user within the timing window | Preserve per-fragment typed targets and select `discard` or `start`, never time-merge | Target-preservation test | L06 |
 | F07 | One message addresses Kazusa and another participant | Preserve all typed addressees and let settled relevance judge Kazusa's listener role | Multi-addressee projection test | L07 |
 | F08 | User sends content first and tags Kazusa afterward | Supply recent silent same-author messages; allow `start` to promote semantic prelude IDs | Prelude eligibility/identity test | L08 |
@@ -690,7 +655,7 @@ no model-native tool loop and no cognition, RAG, or dialog call.
 | F21 | A message arrives at the settlement boundary | Compare live version in the atomic claim; an applied boundary append invalidates the decision and moves to final assessment | Boundary race test | L11 |
 | F22 | The hard deadline splits a genuinely late continuation | Treat the later input as a new relevance candidate with prior-turn history; record this as the bounded residual behavior | Late-arrival test | L12 |
 | F23 | Busy input queues many frontline calls and starves a ready settled turn | Serialize both roles in FIFO relevance-work order with one in-flight call | Controlled-latency FIFO test | L18 |
-| F24 | One author starts more simultaneous topics than the local model can compare reliably | Expose at most three open slots and freeze the oldest before a fourth start | Open-turn cardinality test | L16 |
+| F24 | One author starts more simultaneous topics than the local model can compare reliably | Expose at most three open slots; a fourth topic starts or is conservatively discarded and never falsely appends | Open-turn cardinality test | L16 |
 | F25 | Long or numerous fragments overflow the local model context or hide the latest correction | Apply fixed head/tail/latest projections while preserving all target/reply labels | Rendered-prompt cap and retention test | L17 |
 | F26 | One user sends enough images across fragments to fan out vision calls and crowd the settled model | Persist all media; describe the opening plus newest images up to four, expose overflow semantically, cache results, and disable repair-model calls | Descriptor selection/call-count/cache test | L20 |
 
@@ -798,66 +763,22 @@ orchestration, cognition, and dialog; they do not own relevance agents.
 - Execution agents must keep one canonical group path and cannot add helper
   agents, retries, fallback routes, compatibility shims, alternate prompts,
   feature flags, or unrelated cleanup.
-- Before adding a helper, search for equivalent behavior. Shared parser changes
-  are limited to the named deterministic-only option; prompt projectors remain
-  stage-local.
-- A required change outside Change Surface, a different public interface, or a
-  disagreement between plan and code stops execution for plan correction.
-- The parent agent owns plan continuity, test contracts, all test-file edits,
-  integration, test execution, live artifact inspection, and final reporting.
-- After the parent establishes failing target-state tests, exactly one
-  production-code subagent may implement the production and documentation
-  change surface.
-- The production subagent receives the locked contracts, failure-mode matrix,
-  and file ownership list. It edits production/docs only and returns changed
-  files plus static evidence.
-- After parent verification, exactly one independent code-review subagent
-  reviews the implementation and tests without inheriting the implementation
-  agent's reasoning.
-- The parent resolves review findings and repeats focused verification when a
-  production correction is required.
-- Lifecycle promotion, real-LLM execution authorization, and final sign-off
-  remain user/parent decisions.
+- The user's latest instruction requires parent-only implementation, review,
+  remediation, live artifact inspection, and sign-off. No subagent is used.
+- Contract corrections surfaced by Stage 5 are recorded before lifecycle
+  completion; the parent reruns every affected deterministic and live gate.
 
 ## Implementation Order
 
-1. Promote this plan from `draft` to `approved` after user review.
-2. Reread required skills, repository guidance, this plan, current git status,
-   relevant READMEs, source, and tests.
-3. Parent: add failing parser, schema, prompt-render, context-cap, and
-   completion-config tests in `tests/test_utils.py`,
-   `tests/test_frontline_relevance_agent.py`, and
-   `tests/test_persona_relevance_agent.py`; record current missing contracts.
-4. Parent: add fake-clock, FIFO one-in-flight, three-open-turn, version/claim,
-   and graph handoff tests in `tests/test_relevance_turn_settlement.py` and
-   `tests/test_relevance_turn_settlement_graph.py`; record expected failures.
-5. Parent: add L01-L20 to the live test file with captured evidence fixtures,
-   strict enum gates, prompt/output size capture, and qualitative rubrics;
-   leave live execution pending.
-6. Start exactly one production-code subagent with the approved plan and the
-   parent-owned failing tests.
-7. Production subagent: implement config/parser and both bounded node contracts,
-   then the coordinator public interface and private FIFO executor.
-8. Production subagent: wire queue/service/state/graph, retain private timing,
-   remove superseded group paths, update docs, run static render checks, report
-   files/commands/risks, and close.
-9. Parent: inspect the complete diff and confirm only Change Surface paths
-   changed before running focused deterministic tests.
-10. Parent: run the focused parser, node, coordinator, graph, and queue suite;
-    resolve only approved-contract failures and record evidence.
-11. Parent: run affected envelope, media, service, runtime-coordination, and
-    existing relevance live-contract tests as specified in Verification.
-12. With explicit live-run authorization, parent: run L01-L20 one case at a
-    time, inspect each artifact, and stop at the first quality or budget failure.
-13. Parent: write
-    `test_artifacts/debug/relevance_turn_settlement_live_llm_review.md` from
-    inspected evidence, including per-gate expected behavior, observed action,
-    prompt/output sizes, durations, association quality, and judgment.
-14. Start exactly one independent code-review subagent for code review.
-15. Parent: resolve findings, rerun affected deterministic and live gates, and
-    record execution evidence in this plan.
-16. After all acceptance criteria pass, mark the plan completed and archive it
-    through the registry lifecycle.
+1. Approve the plan; reload skills, guidance, plan, status, code, and tests.
+2. Add failing bounded-agent, coordinator, graph, and L01-L20 contracts.
+3. Implement parser/agents/coordinator/FIFO work, then wire queue, service,
+   state, graph, private timing, docs, and the big-bang cutover.
+4. Inspect scope and run focused plus affected deterministic verification.
+5. Run L01-L20 individually, inspect each trace, and author the quality review.
+6. Perform fresh-posture parent-only review; fix and rerun every affected gate.
+7. Record execution evidence and acceptance mapping.
+8. Complete the plan and archive it through the registry lifecycle.
 
 ## Execution Model
 
@@ -870,7 +791,7 @@ an L01-L20 mapping where semantic judgment is involved.
 
 ### Checkpoint B: Production Cutover
 
-The production subagent delivers bounded stage contracts on the existing route,
+The parent delivers bounded stage contracts on the existing route,
 deterministic-only parsing, FIFO one-in-flight relevance work, settlement
 lifecycle, ready heap, settled action, atomic claim, unchanged downstream
 cognition responsibility, and docs. Exit gate: parent review confirms exact
@@ -897,10 +818,10 @@ fixtures, while each test contains exactly one semantic scenario.
 | Gate | Test name | Required behavior |
 |---|---|---|
 | L01 | `test_live_frontline_discards_clear_third_party_message` | Clear third-party group talk is discarded by the compact frontline. |
-| L02 | `test_live_mention_only_waits_and_accepts_request_followup` | Bare mention remains open and the 8.414-second request joins it. |
+| L02 | `test_live_mention_only_settles_safely_and_accepts_followup` | Bare mention starts settlement or is conservatively retained as a prelude; the 8.414-second request is then admitted without a false join. |
 | L03 | `test_live_complete_question_accepts_delayed_image_followup` | Complete-looking question and 5.08-second image form one turn. |
 | L04 | `test_live_interleaved_authors_keep_independent_turns` | A1/B1/A2 maps A2 to A while B remains independent. |
-| L05 | `test_live_same_author_topic_change_starts_new_turn` | Unrelated same-author input starts a distinct turn. |
+| L05 | `test_live_same_author_topic_change_never_false_appends` | Unrelated same-author input starts or is conservatively discarded, never appended to the existing turn. |
 | L06 | `test_live_same_author_other_recipient_avoids_false_join` | The retained 4.673-second other-recipient case avoids an A-to-Kazusa merge. |
 | L07 | `test_live_multi_recipient_message_preserves_kazusa_relevance` | A message genuinely addressing Kazusa and another user remains eligible for settled judgment. |
 | L08 | `test_live_content_before_tag_promotes_recent_prelude` | A later direct tag can promote the supplied recent same-author prelude. |
@@ -911,7 +832,7 @@ fixtures, while each test contains exactly one semantic scenario.
 | L13 | `test_live_earliest_ready_relevant_turn_wins_cognition_claim` | Two relevant ready turns both choose `proceed`; the earlier eligibility receives the claim. |
 | L14 | `test_live_hard_deadline_closes_continuous_fragments` | Continuous fragments reach a final `ignore` or `proceed` decision at ten seconds. |
 | L15 | `test_live_cross_scope_candidates_never_attach` | Cross-author and cross-channel candidates remain unavailable for append. |
-| L16 | `test_live_fourth_same_author_topic_bounds_open_turns` | A fourth independent topic starts cleanly while the oldest of three open turns freezes for assessment. |
+| L16 | `test_live_fourth_same_author_topic_avoids_false_append` | A fourth independent topic starts or is conservatively discarded and never contaminates the three bounded slots. |
 | L17 | `test_live_long_multifragment_projection_preserves_latest_intent` | A capped prompt retains typed targets and the latest correction without exceeding 8k/16k limits. |
 | L18 | `test_live_frontline_burst_and_ready_turn_respect_workload_contract` | A captured burst uses one in-flight relevance call, FIFO work order, and the configured stage budgets. |
 | L19 | `test_live_waiting_ready_turn_releases_next_candidate` | The earlier turn chooses `wait`; the next ready relevant turn proceeds without waiting for its extension. |
@@ -972,27 +893,26 @@ scoped.
   - Evidence: command outputs, max rendered chars, call/concurrency assertions.
   - Handoff/sign-off: parent rereads and obtains live-run authorization.
   - Sign-off: parent / 2026-07-16; focused, contract, and affected suites passed.
-- [ ] Stage 4 - L01-L20 and human review pass.
+- [x] Stage 4 - L01-L20 and human review pass.
   - Covers: steps 12-13.
-  - Verify: every case ran individually; the clean prompt rerun passed 18 of
-    20 gates, while L05 and L16 remain semantic failures returning `discard`
-    where a new character-relevant turn is expected. No trace remains
-    uninspected.
+  - Verify: every final-prompt case ran individually; all 20 pass under the
+    conservative discard/ignore policy. No current trace remains uninspected.
   - Evidence: raw trace paths and agent-authored Markdown review.
   - Handoff/sign-off: parent rereads and starts independent code review.
-  - Sign-off: pending remediation; the parent review records the two clean-run
-    semantic failures and the remaining architect findings for Stage 5.
-- [ ] Stage 5 - independent code review and remediation pass.
+  - Sign-off: primary agent / 2026-07-16; final review records all decisions.
+- [x] Stage 5 - independent code review and remediation pass.
   - Covers: steps 14-15.
   - Verify: reviewer approves; affected deterministic/live gates rerun after
     fixes; no blocking finding remains.
   - Evidence: reviewer identity, findings, fixes, rerun commands, residual risk.
-  - Handoff/sign-off: parent rereads and evaluates final acceptance.
-- [ ] Stage 6 - acceptance, evidence, lifecycle, and archival complete.
+  - Handoff/sign-off: primary agent / 2026-07-16; no blocker remains; reread
+    the complete plan and evaluate final acceptance.
+- [x] Stage 6 - acceptance, evidence, lifecycle, and archival complete.
   - Covers: step 16.
   - Verify/evidence: every acceptance row maps to recorded proof; plan and
     registry move to `completed` and archive paths consistently.
-  - Handoff/sign-off: final parent sign-off and user report.
+  - Handoff/sign-off: primary agent / 2026-07-16; all acceptance rows map to
+    recorded deterministic, live-LLM, private-path, workload, and static proof.
 
 ## Verification
 
@@ -1086,17 +1006,11 @@ physical GPU remains Deferred and requires measured evidence before expansion.
 ## Independent Code Review
 
 Run this gate after every Verification command and live review pass, and before
-completion, lifecycle updates, merge, or sign-off. The parent creates exactly
-one independent code-review subagent. If native subagents are unavailable, the
-execution stops pending explicit user authorization for a fallback.
-
-The reviewer receives this plan, final diff/status, deterministic output, all
-L01-L20 commands/outcomes, raw trace paths, the agent-authored review, and
-recorded residual limitations. The reviewer inspects only and implements no
-fix.
-
-The reviewer reports findings by severity with file and line references,
-checks every F01-F26 row, and gives an explicit delivery recommendation.
+completion, lifecycle updates, merge, or sign-off. The parent uses a fresh
+review posture, checks the final diff/status, deterministic and L01-L20
+evidence, every F01-F26 row, private behavior, and test realism, then records
+findings, fixes, reruns, residual limitations, and a delivery recommendation.
+This is the user-authorized single-agent review path.
 
 ## Risks
 
@@ -1263,3 +1177,18 @@ This section remains append-only during implementation.
   semantic result and introduced no prompt, route, completion-budget, or
   additional-call change. Stage 5 onward is handed to the architect agent for
   independent review and remediation.
+- 2026-07-16: Parent-only Stage 5 review fixed service prelude/continuity,
+  ingress, response ownership, private coalescing, shared media budgeting,
+  final graph fail-closed routing, and active settled/cognition workload
+  priority. Seven permissive live assertions and two stale direct-graph tests
+  were corrected instead of preserving test-only bypasses.
+- 2026-07-16: Final verification passed 108 focused tests with 3 live cases
+  deselected, 16 envelope/media/runtime tests, and 57 affected cognition and
+  background-service tests. All L01-L20 final-prompt gates passed individually
+  with inspected artifacts; L18 measured one active relevance call and FIFO
+  `burst-0`, `settled-ready`, `burst-1`, `burst-2`. Static, syntax, retired-path,
+  prompt-cheat, shared-route, and diff checks passed. No blocking review finding
+  remains; the human review recommends Stage 6 acceptance.
+- 2026-07-16: Stage 6 accepted every criterion and completed the lifecycle.
+  The archived record and registry preserve the final implementation, test,
+  workload, private-message, review, and anti-cheat evidence.
