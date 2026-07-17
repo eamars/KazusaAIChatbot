@@ -78,6 +78,7 @@ def _global_state() -> dict:
             "addressee_plan": ["current user"],
             "style_guidance": "brief and grounded",
             "selected_surface_intent": "acknowledge",
+            "permitted_action_results": [],
         },
         "internal_monologue": "test",
         "final_dialog": ["ok"],

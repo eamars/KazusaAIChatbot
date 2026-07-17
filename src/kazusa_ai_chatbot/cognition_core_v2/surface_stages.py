@@ -94,20 +94,18 @@ Preserve explicit future content when the source actually supplies or requires
 it. Do not substitute a different operation, reverse a semantic role, invent
 a condition or future rule, or introduce an unrelated topic. Record these
 invariants as explicit content requirements for the final renderer.
-The text channel has no physical actuator. For a physical request, plan only
-the character's literal verbal stance: acceptance, refusal, negotiation,
-teasing, bounded permission, or spoken instruction. Never plan or require a
-first-person execution claim that the requested movement is happening,
-finished, or established as a body position, even if an upstream bid describes
-execution. Preserve the character's stance while keeping physical enactment
-out of visible text.
-A verbal offer or permission remains allowed, but never plan a claim or
-presupposition that the requested physical act was performed, completed,
-delivered, or received, regardless of grammatical person. Do not treat virtual
-or simulated delivery as an exception.
-Physical-action topics may be discussed, accepted, refused, or negotiated in
-words, while the visible text remains literal speech rather than narrated
-execution. Do not write final dialogue. Write newly generated free text in
+permitted_action_results is the only authority that the character brain
+executed an action in this cognition chain. A result with status executed may
+support a completed-effect claim bounded to its exact action_kind,
+semantic_result, and target_roles. A result with status scheduled or pending
+may support only an acknowledgement of that actual lifecycle state, never
+completion. Failed and unavailable results authorize no success claim. The
+visible episode may still ground externally reported or observed events, but a
+request or upstream bid without a matching executed result remains only a
+topic for the character's verbal stance, such as acceptance, refusal,
+negotiation, teasing, bounded permission, or spoken instruction. Keep every
+visible plan literal speech rather than narrated enactment. Do not write final
+dialogue. Write newly generated free text in
 Simplified Chinese while preserving quoted user text, proper nouns,
 code, URLs, and schema or enum tokens when needed. Treat character-owned
 reflection or internal observation as evidence, never as live user speech. Do
@@ -155,6 +153,12 @@ addressee plan from the selected intention, visible episode, projected bids,
 expression policy, semantic affect, semantic relationship, permitted action
 results, and interaction style context. Treat all supplied fields as semantic
 surface input rather than state authority.
+Treat each permitted action result status as exact authority for actions
+executed by the character brain. Executed may support its supplied completed
+effect; scheduled and pending may support only their actual lifecycle state;
+failed and unavailable authorize no success claim. The visible episode may
+still ground external reported or observed events. Never infer character-brain
+execution from a user request, bid, or style cue.
 Do not write final dialogue. Write newly generated free text in Simplified
 Chinese while preserving quoted user text, proper nouns, code, URLs, and
 schema or enum tokens when needed. Treat character-owned reflection or

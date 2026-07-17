@@ -85,6 +85,7 @@ def _state(
             "addressee_plan": ["current user"],
             "style_guidance": "brief",
             "selected_surface_intent": "acknowledge",
+            "permitted_action_results": [],
         },
         "new_facts": [
             {

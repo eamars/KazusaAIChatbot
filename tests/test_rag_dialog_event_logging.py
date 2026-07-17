@@ -158,6 +158,7 @@ def _dialog_global_state() -> dict[str, object]:
             "addressee_plan": ["current user"],
             "style_guidance": "concise",
             "selected_surface_intent": "acknowledge",
+            "permitted_action_results": [],
         },
         "chat_history_wide": [],
         "chat_history_recent": [],

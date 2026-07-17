@@ -1203,6 +1203,7 @@ async def _fake_l3_text_surface_handler(state: dict[str, Any]) -> dict[str, Any]
                 if result_ready
                 else "acknowledge scheduled coding work"
             ),
+            "permitted_action_results": [],
         }
     }
     return result

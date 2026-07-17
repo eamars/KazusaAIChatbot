@@ -61,6 +61,7 @@ long_term/todo.md
 | [cognition_core_v2_frozen_replay_drift_bugfix_plan.md](archive/completed/bugfix/cognition_core_v2_frozen_replay_drift_bugfix_plan.md) | Large bigbang cognition V2 state, continuity, monologue, voice, dialog-compliance, and consolidation drift bugfix proven against the frozen 20-turn replay | completed |
 | [dialog_visible_speech_and_semantic_fidelity_bugfix_plan.md](active/bugfix/dialog_visible_speech_and_semantic_fidelity_bugfix_plan.md) | Medium bigbang dialog literal-speech, character-voice isolation, current-turn semantic fidelity, and verifier-grounding bugfix | in progress |
 | [cognition_core_v2_compositional_action_planning_bugfix_plan.md](active/bugfix/cognition_core_v2_compositional_action_planning_bugfix_plan.md) | Large bigbang Cognition V2 semantic action-planning, production-capacity, resolver-lifecycle, operational-failure, and visual-default bugfix | in progress |
+| [cognition_chain_responsibility_allocation_bugfix_plan.md](active/bugfix/cognition_chain_responsibility_allocation_bugfix_plan.md) | Large bigbang constrained-relevance and exact action-lifecycle ownership bugfix | in progress |
 | [rag2_public_output_contract_leak_bugfix_plan.md](active/bugfix/rag2_public_output_contract_leak_bugfix_plan.md) | Large RAG2 prompt/evidence contract bugfix plan | draft |
 
 ## Reference Documents

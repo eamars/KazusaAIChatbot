@@ -11,6 +11,10 @@ from typing import Any
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot import llm_tracing
+from kazusa_ai_chatbot.cognition_core_v2.action_authorization import (
+    authorize_action_requests,
+    derive_action_route,
+)
 from kazusa_ai_chatbot.action_spec.registry import (
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
@@ -41,31 +45,21 @@ ACTION_PLANNING_ATTEMPT_LIMIT = 2
 MODEL_TEXT_CAP = 500
 
 
-ACTION_PLANNING_PROMPT = '''You are the semantic action-planning boundary for
-one active character. Select the visible route and any concrete capability
-requests that advance the admitted motives. The primary bid owns the visible
-intention. Supporting bids may contribute compatible private actions or
-evidence needs. Do not rewrite bid content, generate final dialogue, execute a
-capability, or invent an unavailable capability.
+ACTION_PLANNING_PROMPT = '''You are the semantic capability-proposal boundary
+for one active character. Propose concrete executable action requests or
+resolver requests that advance the admitted motives. The primary bid owns the
+visible intention. Supporting bids may contribute compatible private actions
+or evidence needs. Do not select or restate a route, rewrite bid content,
+generate final dialogue, execute a capability, authorize execution, or invent
+an unavailable capability. Protocol code derives route after semantic action
+authorization.
 
-Produce one semantic action plan.
-
-Immediate visible speech is represented only by route=speech. It is not an
-action request. A speech route may coexist with up to three non-speech action
-requests. Use route=action only when the character deliberately intends to
-perform private actions without an immediate visible reply. When the primary
-bid calls for an acknowledgement, answer, or other immediate visible response
-and no resolver is needed, use route=speech and keep every compatible private
-action request. When evidence or a persisted clarification or approval step is
-needed, use route=evidence with resolver requests only; resolver recurrence
-owns the later visible answer or question. An action route requires one to three
-action requests. An evidence route requires one to three resolver requests.
-Resolver requests and action
-requests are mutually exclusive. Deferral and silence contain neither.
-Do not use speech alone when a bid's desired outcome requires missing evidence
-or missing user-controlled input and a supplied resolver affordance directly
-satisfies that need. Select the matching resolver and route=evidence so the
-result or pending question remains continuous across cognition cycles.
+Produce one semantic proposal object. Action requests and resolver requests
+are mutually exclusive. Either array may contain up to three requests.
+Immediate visible speech is not a capability request and never appears in this
+output. When evidence or a persisted clarification or approval step is needed,
+select resolver requests only; resolver recurrence owns the later visible
+answer or question.
 Select a private action only when its cited admitted bid requires that
 capability's durable or out-of-turn effect as part of the desired outcome.
 The bid cannot broaden capability eligibility. Current evidence must itself
@@ -83,9 +77,10 @@ scene. Never select an action to execute a physical request or to generate,
 store, or later present a physical-action description. For a physical chat
 request, use speech for the character's verbal stance unless a distinct
 supplied capability genuinely provides another explicit non-physical effect.
-Respect episode.output_mode: silence permits only route=silence; think_only and
-preview exclude route=speech; scheduled_action_request permits only action or
-silence. A normal visible_reply permits every grounded route.
+Respect episode.output_mode. Silence permits no requests. A normal
+visible_reply may combine its protocol-owned visible response with up to three
+grounded private action requests. A scheduled_action_request permits executable
+actions only.
 
 Each request must cite one supplied bid handle and one supplied capability
 handle. For an action request, follow the affordance's decision_mode:
@@ -109,26 +104,21 @@ resolver_pending_resolution is null unless the resolver context contains an
 active pending item and the current evidence supports a decision. When present,
 return exactly decision and reason; deterministic code binds the active item.
 resolver_goal_progress is null when no goal progress is needed. When present,
-return the complete resolver goal-progress object described by the supplied
-context, preserving the original goal and all still-open deliverables.
+return a partial semantic update containing only fields that changed. Protocol
+code binds schema_version and original_goal and deterministic code preserves omitted
+known checklist fields from current_resolver_goal_progress.
 
 # Output Format
 Return exactly one JSON object with exactly these fields:
-- route: speech | evidence | action | deferral | silence
 - action_requests: array of zero to three objects, each with exactly
   bid_handle, action_handle, decision, semantic_goal, and reason
 - resolver_requests: array of zero to three objects, each with exactly
   bid_handle, resolver_handle, semantic_goal, and reason
 - resolver_pending_resolution: null or an object with exactly decision and
   reason
-- resolver_goal_progress: null or a complete resolver goal-progress object
-Apply this route matrix exactly:
-- speech: zero to three action_requests and zero resolver_requests;
-- action: one to three action_requests and zero resolver_requests;
-- evidence: zero action_requests and one to three resolver_requests;
-- deferral or silence: both arrays empty.
-If resolver_requests is non-empty, route must be evidence even when the
-resolver will later produce a visible clarification or approval question.
+- resolver_goal_progress: null or a partial semantic update object
+When resolver_requests is non-empty, action_requests must be empty. When
+action_requests is non-empty, resolver_requests must be empty.
 Do not emit any other field.
 '''
 
@@ -143,6 +133,7 @@ async def plan_actions(
     available_resolvers: Sequence[ResolverAffordanceV2],
     resolver_context: str,
     services: CognitionCoreServicesV2,
+    current_goal_progress: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Select one route and bounded semantic requests from admitted motives.
 
@@ -154,7 +145,7 @@ async def plan_actions(
         available_actions: Registry-derived executable action affordances.
         available_resolvers: Registry-derived resolver affordances.
         resolver_context: Bounded prompt-safe resolver recurrence projection.
-        services: Injected LLM binding and action-planning route configuration.
+        services: Injected LLM binding and action-planning configuration.
 
     Returns:
         Selected intention, semantic requests, and resolver lifecycle decisions.
@@ -238,6 +229,7 @@ async def plan_actions(
             for handle, affordance in resolver_handles.items()
         },
         "resolver_context": resolver_context,
+        "current_resolver_goal_progress": current_goal_progress,
     }
     prompt_text = json.dumps(prompt_payload, ensure_ascii=False, sort_keys=True)
     if len(prompt_text) > ACTION_PLANNING_PROMPT_CAP:
@@ -253,9 +245,17 @@ async def plan_actions(
         bid_handles=bid_handles,
         action_handles=action_handles,
         resolver_handles=resolver_handles,
+        current_goal_progress=current_goal_progress,
+    )
+    authorized_action_rows = await authorize_action_requests(
+        action_requests=decision["action_requests"],
+        bid_handles=bid_handles,
+        evidence=evidence,
+        action_handles=action_handles,
+        services=services,
     )
     action_requests = _materialize_action_requests(
-        decision["action_requests"],
+        authorized_action_rows,
         bid_handles,
         action_handles,
     )
@@ -264,9 +264,15 @@ async def plan_actions(
         bid_handles,
         resolver_handles,
     )
+    route = derive_action_route(
+        episode=episode,
+        primary_bid=primary_bid,
+        action_requests=action_requests,
+        resolver_requests=resolver_requests,
+    )
     intention: SelectedIntentionV2 = {
         "selected_branch_id": primary_bid["branch_id"],
-        "route": decision["route"],
+        "route": route,
         "intention": primary_bid["intention"],
         "target_roles": list(primary_bid["target_roles"]),
         "reason": primary_bid["reason"],
@@ -290,6 +296,7 @@ async def _invoke_action_planner(
     bid_handles: Mapping[str, ActionBidV2],
     action_handles: Mapping[str, ActionAffordanceV2],
     resolver_handles: Mapping[str, ResolverAffordanceV2],
+    current_goal_progress: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     """Invoke the semantic planner with one bounded contract replacement."""
 
@@ -314,6 +321,7 @@ async def _invoke_action_planner(
                 bid_handles=bid_handles,
                 action_handles=action_handles,
                 resolver_handles=resolver_handles,
+                current_goal_progress=current_goal_progress,
             )
         except (ResolverValidationError, ValueError) as exc:
             await _record_action_planning_trace(
@@ -365,7 +373,7 @@ def _action_planning_repair_message(
         "repair_instruction": (
             "Return a complete replacement object for the original action "
             "plan. Preserve only grounded semantic choices, satisfy every "
-            "exact field and route rule, and emit JSON only."
+            "exact field and request rule, and emit JSON only."
         ),
         "contract_error": contract_error[:MODEL_TEXT_CAP],
         "invalid_response": bounded_response,
@@ -395,13 +403,13 @@ def _validate_action_plan_decision(
     bid_handles: Mapping[str, ActionBidV2],
     action_handles: Mapping[str, ActionAffordanceV2],
     resolver_handles: Mapping[str, ResolverAffordanceV2],
+    current_goal_progress: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Validate fixed model shape, cardinality, and prompt-local ownership."""
 
     if not isinstance(parsed, Mapping):
         raise ValueError("action plan must be an object")
     required = {
-        "route",
         "action_requests",
         "resolver_requests",
         "resolver_pending_resolution",
@@ -409,9 +417,6 @@ def _validate_action_plan_decision(
     }
     if set(parsed) != required:
         raise ValueError("action plan fields are not exact")
-    route = parsed["route"]
-    if route not in {"speech", "evidence", "action", "deferral", "silence"}:
-        raise ValueError("action plan route is invalid")
     action_requests = parsed["action_requests"]
     resolver_requests = parsed["resolver_requests"]
     if not isinstance(action_requests, list):
@@ -424,18 +429,6 @@ def _validate_action_plan_decision(
         raise ValueError("action plan permits at most three resolver requests")
     if action_requests and resolver_requests:
         raise ValueError("action and resolver requests are mutually exclusive")
-    if route == "action" and not action_requests:
-        raise ValueError("action route requires action requests")
-    if route == "evidence" and not resolver_requests:
-        raise ValueError("evidence route requires resolver requests")
-    if route in {"action", "speech"} and resolver_requests:
-        raise ValueError(f"{route} route cannot contain resolver requests")
-    if route == "evidence" and action_requests:
-        raise ValueError("evidence route cannot contain action requests")
-    if route in {"deferral", "silence"} and (
-        action_requests or resolver_requests
-    ):
-        raise ValueError(f"{route} route cannot contain capability requests")
 
     normalized_actions = [
         _validate_action_request_row(row, bid_handles, action_handles)
@@ -449,10 +442,10 @@ def _validate_action_plan_decision(
         parsed["resolver_pending_resolution"]
     )
     goal_progress = _validate_goal_progress_choice(
-        parsed["resolver_goal_progress"]
+        parsed["resolver_goal_progress"],
+        current_goal_progress=current_goal_progress,
     )
     return_value = {
-        "route": route,
         "action_requests": normalized_actions,
         "resolver_requests": normalized_resolvers,
         "resolver_pending_resolution": pending_resolution,
@@ -582,19 +575,44 @@ def _validate_pending_resolution_choice(value: object) -> dict | None:
     return return_value
 
 
-def _validate_goal_progress_choice(value: object) -> dict | None:
-    """Normalize and validate optional model-owned resolver goal progress."""
+def _validate_goal_progress_choice(
+    value: object,
+    *,
+    current_goal_progress: Mapping[str, Any] | None,
+) -> dict | None:
+    """Merge one semantic delta into protocol-owned resolver progress."""
 
     if value is None:
         return_value = None
         return return_value
     if not isinstance(value, Mapping):
         raise ValueError("resolver goal progress must be an object or null")
-    raw_progress = dict(value)
-    raw_progress.setdefault(
-        "schema_version",
-        RESOLVER_GOAL_PROGRESS_VERSION,
-    )
+    if current_goal_progress is None:
+        raw_progress = dict(value)
+        raw_progress.setdefault(
+            "schema_version",
+            RESOLVER_GOAL_PROGRESS_VERSION,
+        )
+        validated = validate_resolver_goal_progress(raw_progress)
+        return_value = dict(validated)
+        return return_value
+
+    current = dict(validate_resolver_goal_progress(current_goal_progress))
+    allowed_fields = set(current)
+    if not set(value).issubset(allowed_fields):
+        raise ValueError("resolver goal progress update fields are invalid")
+    supplied_version = value.get("schema_version")
+    if supplied_version not in {None, RESOLVER_GOAL_PROGRESS_VERSION}:
+        raise ValueError("resolver goal progress schema_version is invalid")
+    supplied_goal = value.get("original_goal")
+    if supplied_goal not in {None, current["original_goal"]}:
+        raise ValueError("resolver goal progress cannot replace original_goal")
+    raw_progress = dict(current)
+    raw_progress.update({
+        key: item
+        for key, item in value.items()
+        if key not in {"schema_version", "original_goal"}
+    })
     validated = validate_resolver_goal_progress(raw_progress)
     return_value = dict(validated)
     return return_value

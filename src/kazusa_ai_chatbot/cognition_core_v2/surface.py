@@ -57,6 +57,15 @@ async def run_text_surface_planning(
         "addressee_plan": addressee_plan,
         "style_guidance": style,
         "selected_surface_intent": payload["intention"]["intention"],
+        "permitted_action_results": [
+            {
+                **row,
+                "target_roles": [
+                    dict(role) for role in row["target_roles"]
+                ],
+            }
+            for row in payload["permitted_action_results"]
+        ],
     }
     validated_output = validate_text_surface_output(output)
     return validated_output
@@ -101,7 +110,9 @@ def _project_surface_payload(
         "supporting_bids": payload["supporting_bids"],
         "expression_policy": payload["expression_policy"],
         "semantic_affect": payload["semantic_affect"],
-        "permitted_action_results": payload["permitted_action_results"],
+        "permitted_action_results": _project_action_results_for_prompt(
+            payload["permitted_action_results"]
+        ),
         "interaction_style_context": payload["interaction_style_context"],
     }
     if "primary_bid" in payload:
@@ -109,6 +120,37 @@ def _project_surface_payload(
     if "semantic_relationship" in payload:
         result["semantic_relationship"] = payload["semantic_relationship"]
     return result
+
+
+def _project_action_results_for_prompt(
+    action_results: object,
+) -> list[dict[str, Any]]:
+    """Project exact lifecycle truth without persistent target identifiers."""
+
+    if not isinstance(action_results, list):
+        raise ValueError("surface action results must be a list")
+    projected: list[dict[str, Any]] = []
+    for row in action_results:
+        if not isinstance(row, Mapping):
+            raise ValueError("surface action result must be an object")
+        roles = row.get("target_roles")
+        if not isinstance(roles, list):
+            raise ValueError("surface action result roles must be a list")
+        projected_roles = []
+        for role in roles:
+            if not isinstance(role, Mapping):
+                raise ValueError("surface action result role must be an object")
+            projected_roles.append({
+                "role": role["role"],
+                "entity_kind": role["entity_kind"],
+            })
+        projected.append({
+            "action_kind": row["action_kind"],
+            "status": row["status"],
+            "semantic_result": row["semantic_result"],
+            "target_roles": projected_roles,
+        })
+    return projected
 
 
 def _project_episode(episode: Mapping[str, Any]) -> dict[str, Any]:

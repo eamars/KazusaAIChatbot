@@ -61,6 +61,7 @@ def _text_surface_output() -> dict[str, object]:
         "addressee_plan": ["current user"],
         "style_guidance": "warm and concise",
         "selected_surface_intent": "acknowledge",
+        "permitted_action_results": [],
     }
 
 
@@ -183,6 +184,7 @@ async def test_dialog_generator_forwards_native_surface_without_legacy_fields(
         "addressee_plan",
         "style_guidance",
         "selected_surface_intent",
+        "permitted_action_results",
     }
     assert human_payload["text_surface_output_v2"]["schema_version"] == (
         "text_surface_output.v2"

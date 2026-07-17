@@ -20,8 +20,8 @@ def test_action_prompt_exposes_fixed_compositional_shape() -> None:
         "decision",
     ):
         assert field in prompt
-    for route in ("speech", "evidence", "action", "deferral", "silence"):
-        assert route in prompt
+    assert "protocol code derives route" in prompt
+    assert '"route"' not in prompt
 
 
 def test_action_prompt_excludes_retired_action_router_authority() -> None:
@@ -38,7 +38,7 @@ def test_action_prompt_excludes_retired_action_router_authority() -> None:
         assert retired_term not in prompt
     assert "up to three" in prompt
     assert "speech" in prompt
-    assert "non-speech" in prompt
+    assert "semantic capability-proposal boundary" in prompt
 
 
 def test_action_prompt_requires_grounded_out_of_turn_effect() -> None:
@@ -51,3 +51,12 @@ def test_action_prompt_requires_grounded_out_of_turn_effect() -> None:
     assert "reply preparation" in prompt
     assert "no supplied action capability actuates" in prompt
     assert "physical-action description" in prompt
+
+
+def test_action_prompt_assigns_goal_ledger_shape_to_protocol_code() -> None:
+    """The model emits semantic progress deltas, not duplicate state ledgers."""
+
+    prompt = ACTION_PLANNING_PROMPT.casefold()
+
+    assert "partial semantic update" in prompt
+    assert "deterministic code preserves omitted" in prompt

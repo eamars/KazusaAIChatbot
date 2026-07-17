@@ -87,13 +87,8 @@ class _ScriptedLLM:
                 "supporting_bid_handles": handles[1:],
                 "suppressed_bid_handles": [],
             }
-        elif "semantic action plan" in system.casefold():
+        elif "semantic capability-proposal" in system.casefold():
             result = {
-                "route": (
-                    "silence"
-                    if payload["episode"]["output_mode"] == "think_only"
-                    else "speech"
-                ),
                 "action_requests": [],
                 "resolver_requests": [],
                 "resolver_pending_resolution": None,
@@ -344,7 +339,10 @@ async def test_private_output_mode_produces_private_silence() -> None:
         "reason": "the episode supplies bounded evidence",
     }
     assert output["admitted_bid"]["branch_id"] == "ordinary_response"
-    assert any("semantic action plan" in call.casefold() for call in llm.calls)
+    assert any(
+        "semantic capability-proposal" in call.casefold()
+        for call in llm.calls
+    )
 
 
 @pytest.mark.asyncio

@@ -449,6 +449,7 @@ class CognitionCoreInputV2(TypedDict):
     available_actions: list[ActionAffordanceV2]
     available_resolver_capabilities: list[ResolverAffordanceV2]
     resolver_context: str
+    resolver_goal_progress: NotRequired[dict[str, Any]]
     pending_resolver_resume: NotRequired[dict[str, Any]]
     scene_context: SceneContextV2
     private_continuity_context: str
@@ -490,7 +491,13 @@ class SemanticActionResultV2(TypedDict):
     """Typed action result allowed into the surface planner."""
 
     action_kind: str
-    status: Literal["completed", "failed", "unavailable"]
+    status: Literal[
+        "executed",
+        "scheduled",
+        "pending",
+        "failed",
+        "unavailable",
+    ]
     semantic_result: str
     target_roles: list[RoleRefV2]
 
@@ -521,6 +528,7 @@ class TextSurfaceOutputV2(TypedDict):
     addressee_plan: list[str]
     style_guidance: str
     selected_surface_intent: str
+    permitted_action_results: list[SemanticActionResultV2]
 
 
 class VisualSurfaceOutputV2(TypedDict):
@@ -583,6 +591,11 @@ def validate_cognition_core_input(
         }
         | ({"relationship_context"} if "relationship_context" in payload else set())
         | (
+            {"resolver_goal_progress"}
+            if "resolver_goal_progress" in payload
+            else set()
+        )
+        | (
             {"pending_resolver_resume"}
             if "pending_resolver_resume" in payload
             else set()
@@ -629,6 +642,10 @@ def validate_cognition_core_input(
     )
     if "pending_resolver_resume" in payload:
         _validate_pending_resolver_resume(payload["pending_resolver_resume"])
+    if "resolver_goal_progress" in payload:
+        _validate_resolver_goal_progress_input(
+            payload["resolver_goal_progress"]
+        )
     if not isinstance(payload["scene_context"], Mapping):
         raise CognitionContractError("scene_context must be a mapping")
     _validate_scene_context(payload["scene_context"])
@@ -780,6 +797,7 @@ def validate_text_surface_output(
         "addressee_plan",
         "style_guidance",
         "selected_surface_intent",
+        "permitted_action_results",
     }
     _require_exact_keys(payload, required, "text surface output")
     if payload["schema_version"] != "text_surface_output.v2":
@@ -806,6 +824,13 @@ def validate_text_surface_output(
                 f"{field_name}[{index}]",
                 maximum=1000,
             )
+    action_results = payload["permitted_action_results"]
+    if not isinstance(action_results, list):
+        raise CognitionContractError(
+            "permitted_action_results must be a list"
+        )
+    for row in action_results:
+        _validate_action_result(row)
     return dict(payload)  # type: ignore[return-value]
 
 
@@ -1533,7 +1558,13 @@ def _validate_action_result(value: Any) -> None:
     if not isinstance(value, Mapping) or set(value) != required:
         raise CognitionContractError("surface action result fields are not exact")
     _require_text(value["action_kind"], "surface action result.action_kind")
-    if value["status"] not in {"completed", "failed", "unavailable"}:
+    if value["status"] not in {
+        "executed",
+        "scheduled",
+        "pending",
+        "failed",
+        "unavailable",
+    }:
         raise CognitionContractError("surface action result.status is invalid")
     _require_text(value["semantic_result"], "surface action result.semantic_result")
     _validate_roles(value["target_roles"], "surface action result.target_roles")
@@ -1590,6 +1621,22 @@ def _validate_pending_resolver_resume(value: object) -> None:
     except ResolverValidationError as exc:
         raise CognitionContractError(
             f"pending_resolver_resume is invalid: {exc}"
+        ) from exc
+
+
+def _validate_resolver_goal_progress_input(value: object) -> None:
+    """Validate protocol-owned goal state without an import cycle."""
+
+    from kazusa_ai_chatbot.cognition_resolver.contracts import (
+        ResolverValidationError,
+        validate_resolver_goal_progress,
+    )
+
+    try:
+        validate_resolver_goal_progress(value)
+    except ResolverValidationError as exc:
+        raise CognitionContractError(
+            f"resolver_goal_progress is invalid: {exc}"
         ) from exc
 
 

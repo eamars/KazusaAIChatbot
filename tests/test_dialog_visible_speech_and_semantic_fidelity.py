@@ -116,6 +116,7 @@ def _surface_output() -> dict[str, object]:
         "addressee_plan": ["Address the current user."],
         "style_guidance": "Warm, concise spoken wording.",
         "selected_surface_intent": "answer by inference",
+        "permitted_action_results": [],
     }
 
 
@@ -183,6 +184,7 @@ async def test_text_and_visual_planners_are_terminal_siblings() -> None:
         "addressee_plan",
         "style_guidance",
         "selected_surface_intent",
+        "permitted_action_results",
     }
     assert len(llm.calls) == 3
     for system, payload in llm.calls:
@@ -235,8 +237,10 @@ def test_runtime_prompts_define_general_speech_and_fidelity_contracts() -> None:
     assert "unrestricted permission" in content_prompt
     assert "must remain silent about future" in content_prompt
     assert "rhetorical question cannot substitute" in content_prompt
-    assert "no physical actuator" in content_prompt
-    assert "first-person execution" in content_prompt
+    assert "only authority that the character brain" in content_prompt
+    assert "visible episode may still ground externally reported" in content_prompt
+    assert "status executed" in content_prompt
+    assert "status scheduled or pending" in content_prompt
     assert "style alone cannot authorize" in content_prompt
     assert "literal future rule" in content_prompt
     assert "exclusivity condition" in content_prompt
@@ -251,9 +255,9 @@ def test_runtime_prompts_define_general_speech_and_fidelity_contracts() -> None:
     assert "unrestricted permission" in dialog_prompt
     assert "must remain silent about future" in dialog_prompt
     assert "rhetorical question cannot substitute" in dialog_prompt
-    assert "no physical actuator" in dialog_prompt
-    assert "first-person execution" in dialog_prompt
-    assert "performed, completed, delivered, or received" in dialog_prompt
+    assert "only authority that the character brain" in dialog_prompt
+    assert "current percepts\nmay still ground externally reported" in dialog_prompt
+    assert "status scheduled or pending" in dialog_prompt
     assert "style alone cannot authorize" in dialog_prompt
     assert "literal future rule" in dialog_prompt
     assert "exclusivity condition" in dialog_prompt
@@ -261,7 +265,9 @@ def test_runtime_prompts_define_general_speech_and_fidelity_contracts() -> None:
     assert "pacing_guidance" not in dialog_prompt
     assert "visual_directives" not in dialog_prompt
     assert "current_visible_percepts" in verifier_prompt
-    assert "current_visible_percepts are the semantic authority" in verifier_prompt
+    assert "exact authority for execution outcomes" in verifier_prompt
+    assert "closed execution ledger" in verifier_prompt
+    assert "reported or observed as events" in verifier_prompt
     assert "action or stage narration" in verifier_prompt
     assert "descriptors, attributes, qualifiers" in verifier_prompt
     assert "generalize, euphemize, narrow, broaden" in verifier_prompt
@@ -271,9 +277,9 @@ def test_runtime_prompts_define_general_speech_and_fidelity_contracts() -> None:
     assert "surface and candidate agreement is not evidence" in verifier_prompt
     assert "merely restates" in verifier_prompt
     assert "redirects, or asks back" in verifier_prompt
-    assert "first-person execution" in verifier_prompt
-    assert "requested physical movement" in verifier_prompt
-    assert "performed, completed, delivered, or received" in verifier_prompt
+    assert "user's\nrequest cannot prove the character performed it" in (
+        verifier_prompt
+    )
     assert "unmatched enclosing punctuation" in verifier_prompt
     assert "time scope" in verifier_prompt
 

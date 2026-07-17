@@ -88,6 +88,7 @@ def test_surface_output_validation_requires_exact_v2_fields() -> None:
         "addressee_plan": ["current user"],
         "style_guidance": "brief",
         "selected_surface_intent": "acknowledge",
+        "permitted_action_results": [],
     }
 
     assert validate_text_surface_output(output)["content_plan"] == "Say hello."
@@ -105,6 +106,7 @@ async def test_surface_handler_returns_native_output(monkeypatch) -> None:
         "addressee_plan": ["current user"],
         "style_guidance": "brief",
         "selected_surface_intent": "acknowledge",
+        "permitted_action_results": [],
     }
     expected_visual = {
         "schema_version": "visual_surface_output.v2",

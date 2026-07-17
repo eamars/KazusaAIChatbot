@@ -139,10 +139,66 @@ def test_l3_builder_projects_trace_status_into_exact_v2_action_result() -> None:
 
     assert payload["permitted_action_results"] == [{
         "action_kind": "background_work_request",
-        "status": "completed",
+        "status": "pending",
         "semantic_result": "The accepted task was scheduled.",
         "target_roles": [],
     }]
+
+
+@pytest.mark.asyncio
+async def test_text_surface_output_carries_exact_action_result_authority() -> None:
+    """Dialog receives deterministic action lifecycle truth, not L3 inference."""
+
+    state = _state()
+    state["action_results"] = [{
+        "action_kind": "background_work_request",
+        "status": "scheduled",
+        "result_summary": "The accepted task is scheduled.",
+    }]
+    input_payload = l3_surface.build_text_surface_input_from_global_state(
+        state,
+        interaction_style_context="brief and natural",
+    )
+
+    from kazusa_ai_chatbot.cognition_core_v2.surface import (
+        run_text_surface_planning,
+    )
+
+    output = await run_text_surface_planning(input_payload, _services())
+
+    assert output["permitted_action_results"] == [{
+        "action_kind": "background_work_request",
+        "status": "scheduled",
+        "semantic_result": "The accepted task is scheduled.",
+        "target_roles": [],
+    }]
+
+
+def test_surface_prompt_projects_action_roles_without_identity_leak() -> None:
+    """L3 sees target semantics while the exact output ledger retains ids."""
+
+    from kazusa_ai_chatbot.cognition_core_v2.surface import (
+        _project_action_results_for_prompt,
+    )
+
+    projected = _project_action_results_for_prompt([{
+        "action_kind": "future_speak",
+        "status": "scheduled",
+        "semantic_result": "The reminder is scheduled.",
+        "target_roles": [{
+            "role": "target",
+            "entity_kind": "user",
+            "entity_id": "private-user-id",
+        }],
+    }])
+
+    assert projected == [{
+        "action_kind": "future_speak",
+        "status": "scheduled",
+        "semantic_result": "The reminder is scheduled.",
+        "target_roles": [{"role": "target", "entity_kind": "user"}],
+    }]
+    assert "private-user-id" not in json.dumps(projected)
 
 
 def test_l3_builder_rejects_partial_cognition_output() -> None:

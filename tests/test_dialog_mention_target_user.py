@@ -67,6 +67,7 @@ def _dialog_state() -> dict:
             "addressee_plan": ["current user"],
             "style_guidance": "brief",
             "selected_surface_intent": "answer",
+            "permitted_action_results": [],
         },
         "chat_history_wide": [],
         "chat_history_recent": [],

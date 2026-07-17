@@ -229,6 +229,38 @@ def test_action_result_uses_evaluator_identity_without_raw_params() -> None:
     assert "handler_id" not in result
 
 
+@pytest.mark.parametrize(
+    ("trace_status", "surface_status"),
+    [
+        ("executed", "executed"),
+        ("scheduled", "scheduled"),
+        ("pending", "pending"),
+        ("failed", "failed"),
+        ("rejected", "unavailable"),
+        ("validated", "unavailable"),
+        ("cancelled", "unavailable"),
+    ],
+)
+def test_v2_surface_projection_preserves_action_lifecycle_authority(
+    trace_status: str,
+    surface_status: str,
+) -> None:
+    """Only executed action results authorize an executed surface claim."""
+
+    from kazusa_ai_chatbot.action_spec.results import (
+        project_trace_action_result_v2,
+    )
+
+    result = project_trace_action_result_v2({
+        "action_kind": "background_work_request",
+        "status": trace_status,
+        "result_summary": "Lifecycle result.",
+        "target_roles": [],
+    })
+
+    assert result["status"] == surface_status
+
+
 def test_background_work_job_ref_projects_prompt_safe_job_ref() -> None:
     """Queued background work should expose only prompt-safe job evidence."""
 

@@ -555,7 +555,10 @@ async def test_live_latest_recipient_switch_ignores_settled_turn(
     )
 
     assert result['response_action'] == 'ignore'
-    assert result['reason_to_respond'] != 'invalid settled relevance output'
+    assert result['reason_to_respond'] not in {
+        'invalid settled relevance output',
+        'invalid authoritative settled output',
+    }
 
 
 async def test_live_production_history_answer_makes_turn_redundant(
@@ -604,7 +607,51 @@ async def test_live_production_history_answer_makes_turn_redundant(
     )
 
     assert result['response_action'] == 'ignore'
-    assert result['reason_to_respond'] != 'invalid settled relevance output'
+    assert result['reason_to_respond'] not in {
+        'invalid settled relevance output',
+        'invalid authoritative settled output',
+    }
+
+
+async def test_live_retained_media_gap_uses_available_terminal_disposition(
+    ensure_relevance_live_llms,
+) -> None:
+    """A direct request that depends on omitted media fails closed semantically."""
+
+    del ensure_relevance_live_llms
+    state = {
+        'assembled_fragments': [{
+            'body_text': 'Please identify which image contains the missing receipt.',
+            'semantic_target_labels': ['character'],
+            'reply_target_label': 'character',
+            'media_labels': ['image/png'],
+        }],
+        'media_descriptions': [
+            {'media_kind': 'image', 'description': 'A partial receipt image.'},
+        ],
+        'additional_media_present': True,
+        'fresh_history': [],
+        'scene_context': 'A direct request in a group conversation.',
+        'relationship_context': 'group participant',
+        'character_mood': 'attentive',
+        'group_attention': 'low_noise',
+        'bot_continuity': '',
+        'user_profile': {'affinity': 500},
+        'conversation_scope': 'group',
+        'active_character_name': '杏山千纱',
+    }
+
+    result = await _run_settled(
+        'RCA_retained_media_gap',
+        state,
+        observation_status='observation_complete',
+    )
+
+    assert result['response_action'] == 'ignore'
+    assert result['reason_to_respond'] not in {
+        'invalid settled relevance output',
+        'invalid authoritative settled output',
+    }
 
 
 async def test_live_private_emotional_message_proceeds_settled(

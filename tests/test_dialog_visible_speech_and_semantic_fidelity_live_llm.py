@@ -95,7 +95,7 @@ def _voice_context(profile: dict[str, Any]) -> str:
     })
 
 
-def _surface_input(case: dict[str, str], profile: dict[str, Any]) -> dict[str, Any]:
+def _surface_input(case: dict[str, Any], profile: dict[str, Any]) -> dict[str, Any]:
     """Build one exact surface input for an individually reviewed live case."""
 
     return {
@@ -118,7 +118,9 @@ def _surface_input(case: dict[str, str], profile: dict[str, Any]) -> dict[str, A
             "directness": "balanced",
         },
         "semantic_affect": [],
-        "permitted_action_results": [],
+        "permitted_action_results": list(
+            case.get("permitted_action_results", [])
+        ),
         "interaction_style_context": (
             "关系亲近；用自然、有温度的简体中文短句表达，保持当前语义。"
         ),
@@ -155,7 +157,7 @@ def _dialog_state(
 
 
 async def _run_live_case(
-    case: dict[str, str],
+    case: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
 ) -> dict[str, Any]:
     """Run real sibling L3 branches and dialog, then write raw evidence."""
@@ -255,6 +257,7 @@ async def _run_live_verifier_case(
             "addressee_plan": ["Address the current user."],
             "style_guidance": "Natural concise spoken wording.",
             "selected_surface_intent": "Answer the current request verbally.",
+            "permitted_action_results": [],
         }
     if current_visible_percepts is None:
         current_visible_percepts = [{
@@ -332,6 +335,37 @@ async def test_live_requested_response_operation_is_preserved(
     }, monkeypatch)
 
 
+async def test_live_scheduled_action_is_acknowledged_without_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scheduled work remains scheduled through L3 and final wording."""
+
+    evidence = await _run_live_case({
+        "case_id": "scheduled_action_acknowledgement",
+        "user_input": "明早八点提醒我带伞。",
+        "intention": "确认提醒已经安排，并清楚保留尚未执行的时间状态",
+        "reason": "调度结果只证明提醒已安排，尚未到执行时间",
+        "emotional_tone": "可靠、自然、略带关心",
+        "permitted_action_results": [{
+            "action_kind": "future_speak",
+            "status": "scheduled",
+            "semantic_result": (
+                "A reminder to bring an umbrella is scheduled for tomorrow "
+                "at 08:00 and has not executed yet."
+            ),
+            "target_roles": [{
+                "role": "target",
+                "entity_kind": "user",
+                "entity_id": "live-visible-speech-user",
+            }],
+        }],
+    }, monkeypatch)
+
+    assert evidence["text_surface_output"]["permitted_action_results"] == (
+        evidence["surface_input"]["permitted_action_results"]
+    )
+
+
 async def test_live_current_meaning_avoids_future_rule_and_unrelated_topic(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -391,6 +425,7 @@ async def test_live_verifier_rejects_self_consistent_future_drift(
             "addressee_plan": ["Address the current user."],
             "style_guidance": "Natural concise spoken wording.",
             "selected_surface_intent": "Accept the current request.",
+            "permitted_action_results": [],
         },
         current_visible_percepts=[{
             "input_source": "dialog_text",
@@ -435,6 +470,7 @@ async def test_live_verifier_rejects_first_person_action_completion(
             "addressee_plan": ["直接回应发出命令的当前用户。"],
             "style_guidance": "使用局促、顺从、碎片化的自然短句。",
             "selected_surface_intent": "顺从地执行当前身体动作指令。",
+            "permitted_action_results": [],
         },
         current_visible_percepts=[{
             "input_source": "dialog_text",
@@ -475,6 +511,7 @@ async def test_live_verifier_rejects_second_person_delivery_completion(
             "addressee_plan": ["直接回应撒娇的当前用户。"],
             "style_guidance": "嘴硬但关心的自然口语。",
             "selected_surface_intent": "答应亲昵请求并催促起床。",
+            "permitted_action_results": [],
         },
         current_visible_percepts=[{
             "input_source": "dialog_text",
@@ -543,6 +580,7 @@ async def test_live_verifier_rejects_style_derived_future_exclusivity(
             "selected_surface_intent": (
                 "回应对方对肉包子的喜爱，并维持傲娇的人设。"
             ),
+            "permitted_action_results": [],
         },
         current_visible_percepts=[{
             "input_source": "dialog_text",
@@ -599,6 +637,7 @@ async def test_live_verifier_rejects_inference_subject_swap_and_ask_back(
                 "转为柔软。使用自然承接，允许极少量停顿或语气词。"
             ),
             "selected_surface_intent": "回应赞美并猜测对方偏好。",
+            "permitted_action_results": [],
         },
         current_visible_percepts=[{
             "input_source": "dialog_text",
@@ -638,6 +677,7 @@ async def test_live_verifier_rejects_imperative_actor_target_swap(
             "addressee_plan": ["将当前用户作为动作执行者。"],
             "style_guidance": "直接而亲密的口语。",
             "selected_surface_intent": "对用户下达身体姿态指令。",
+            "permitted_action_results": [],
         },
         current_visible_percepts=[{
             "input_source": "dialog_text",
@@ -678,6 +718,7 @@ async def test_live_verifier_preserves_source_required_future_content(
             "addressee_plan": ["Address the current user."],
             "style_guidance": "Natural concise spoken wording.",
             "selected_surface_intent": "Accept the future reminder request.",
+            "permitted_action_results": [],
         },
         current_visible_percepts=[{
             "input_source": "dialog_text",
@@ -732,6 +773,7 @@ async def test_live_verifier_rejects_unrestricted_permission_drift(
             "addressee_plan": ["Address the current user."],
             "style_guidance": "Natural concise spoken wording.",
             "selected_surface_intent": "Grant the specific current request.",
+            "permitted_action_results": [],
         },
         current_visible_percepts=[{
             "input_source": "dialog_text",

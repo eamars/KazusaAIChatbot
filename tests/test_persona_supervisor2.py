@@ -17,6 +17,9 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
 )
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as persona_module
+from kazusa_ai_chatbot.cognition_resolver.loop import (
+    _terminal_blocker_speak_action_spec,
+)
 from tests.cognition_core_v2_test_helpers import canonical_episode
 
 
@@ -224,6 +227,37 @@ async def test_live_persona_loads_open_coding_run_contexts(
         "limit": 3,
     }
     assert result["action_selection_context"] == {"coding_runs": contexts}
+
+
+def test_resolver_owned_speak_spec_overrides_stale_evidence_route() -> None:
+    """A terminal resolver surface remains visible after recurrence."""
+
+    request = {
+        "schema_version": "resolver_capability_request.v1",
+        "capability_kind": "local_context_recall",
+        "objective": "retrieve grounded breakfast evidence",
+        "reason": "the direct question requested one grounded answer",
+        "priority": "now",
+    }
+    blocker = {
+        "schema_version": "resolver_observation.v1",
+        "observation_id": "resolver_obs_duplicate_request",
+        "capability_kind": "local_context_recall",
+        "request_objective": "retrieve grounded breakfast evidence",
+        "request_reason": "the direct question requested one grounded answer",
+        "status": "failed",
+        "prompt_safe_summary": "No additional grounded evidence was found.",
+        "evidence_refs": [],
+        "created_at_utc": NOW,
+    }
+    state = {
+        "cognition_core_output": _cognition_output("evidence"),
+        "action_specs": [
+            _terminal_blocker_speak_action_spec(request, blocker)
+        ],
+    }
+
+    assert persona_module._cognition_selects_text_surface(state) is True
 
 
 @pytest.mark.asyncio

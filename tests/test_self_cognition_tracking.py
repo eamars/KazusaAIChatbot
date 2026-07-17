@@ -300,6 +300,7 @@ def _action_cognition_output(text: str) -> dict[str, Any]:
             "addressee_plan": ["current user"],
             "style_guidance": "brief and direct",
             "selected_surface_intent": "answer the scheduled follow-up",
+            "permitted_action_results": [],
         },
         "action_specs": [_speak_action_spec()],
     }
@@ -482,6 +483,7 @@ def _surface_output(content_plan: str = "Continue the GPU model topic.") -> dict
         "addressee_plan": ["current user"],
         "style_guidance": "brief",
         "selected_surface_intent": "answer the scheduled follow-up",
+        "permitted_action_results": [],
     }
 
 
@@ -837,6 +839,7 @@ def test_classify_route_does_not_use_content_plan_without_speak_action() -> None
                 "addressee_plan": [],
                 "style_guidance": "brief",
                 "selected_surface_intent": "observe",
+                "permitted_action_results": [],
             },
             "action_specs": [],
         },

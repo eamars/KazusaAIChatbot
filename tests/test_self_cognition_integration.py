@@ -464,6 +464,7 @@ def _text_surface_output(content_plan: str = "Checking in now.") -> dict[str, An
         "addressee_plan": ["current user"],
         "style_guidance": "brief",
         "selected_surface_intent": "answer the scheduled follow-up",
+        "permitted_action_results": [],
     }
 
 

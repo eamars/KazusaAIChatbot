@@ -69,9 +69,12 @@ async def test_relevance_agent_returns_proceed_action() -> None:
         "indirect_speech_context": "",
     }))
 
+    state = _base_state()
+    state["assembled_fragments"][0]["semantic_target_labels"] = []
+    state["assembled_fragments"][0]["reply_target_label"] = "none"
     with patch.object(relevance_module, "_relevance_agent_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=response)
-        result = await relevance_agent(_base_state())
+        result = await relevance_agent(state)
 
     assert result["response_action"] == "proceed"
     assert result["should_respond"] is True
@@ -107,18 +110,11 @@ async def test_relevance_agent_returns_ignore_action() -> None:
 
 
 @pytest.mark.asyncio
-async def test_relevance_agent_rechecks_direct_character_ignore() -> None:
-    """A typed direct turn receives one same-owner settled recheck."""
+async def test_relevance_agent_maps_authoritative_proceed_in_one_call() -> None:
+    """Typed participation uses one constrained semantic disposition call."""
 
-    ignored = _llm_response(json.dumps({
-        "response_action": "ignore",
-        "reason_to_respond": "no participation basis",
-        "use_reply_feature": False,
-        "channel_topic": "",
-        "indirect_speech_context": "",
-    }))
     proceeded = _llm_response(json.dumps({
-        "response_action": "proceed",
+        "semantic_disposition": "proceed",
         "reason_to_respond": "typed character target is direct evidence",
         "use_reply_feature": True,
         "channel_topic": "greeting",
@@ -126,45 +122,115 @@ async def test_relevance_agent_rechecks_direct_character_ignore() -> None:
     }))
 
     with patch.object(relevance_module, "_relevance_agent_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(side_effect=[ignored, proceeded])
+        mock_llm.ainvoke = AsyncMock(return_value=proceeded)
         result = await relevance_agent(_base_state())
 
     assert result["response_action"] == "proceed"
     assert result["should_respond"] is True
-    assert mock_llm.ainvoke.await_count == 2
-    recheck_messages = mock_llm.ainvoke.await_args_list[1].args[0]
-    assert "typed character target" in recheck_messages[0].content
-    assert "already resolves" in recheck_messages[0].content
+    mock_llm.ainvoke.assert_awaited_once()
+    messages = mock_llm.ainvoke.await_args.args[0]
+    assert '"semantic_disposition"' in messages[0].content
+    assert '"response_action":' not in messages[0].content
 
 
 @pytest.mark.asyncio
-async def test_relevance_agent_recheck_preserves_grounded_ignore() -> None:
-    """Settled recheck retains ignore when fresh history resolved the turn."""
+async def test_relevance_agent_maps_available_already_resolved_in_one_call() -> None:
+    """Fresh during/after history enables the resolved disposition exactly."""
 
-    responses = []
-    for reason in ("possible redundancy", "fresh history already resolved it"):
-        responses.append(_llm_response(json.dumps({
-            "response_action": "ignore",
-            "reason_to_respond": reason,
-            "use_reply_feature": False,
-            "channel_topic": "",
-            "indirect_speech_context": "",
-        })))
+    response = _llm_response(json.dumps({
+        "semantic_disposition": "already_resolved",
+        "reason_to_respond": "fresh history already resolved it",
+        "use_reply_feature": False,
+        "channel_topic": "",
+        "indirect_speech_context": "",
+    }))
     state = _base_state()
     state["fresh_history"] = [{
         "speaker_relation": "character",
         "body_text": "The character answered this request.",
         "target_summary": "current_author",
         "reply_summary": "current_author",
-        "turn_relation": "after_active_turn",
+        "turn_temporal_relation": "after_active_turn",
     }]
 
     with patch.object(relevance_module, "_relevance_agent_llm") as mock_llm:
-        mock_llm.ainvoke = AsyncMock(side_effect=responses)
+        mock_llm.ainvoke = AsyncMock(return_value=response)
         result = await relevance_agent(state)
 
     assert result["response_action"] == "ignore"
-    assert mock_llm.ainvoke.await_count == 2
+    mock_llm.ainvoke.assert_awaited_once()
+    messages = mock_llm.ainvoke.await_args.args[0]
+    assert "already_resolved" in messages[0].content
+
+
+@pytest.mark.asyncio
+async def test_relevance_agent_rejects_unavailable_resolved_disposition() -> None:
+    """The model cannot invent a resolved disposition without fresh evidence."""
+
+    response = _llm_response(json.dumps({
+        "semantic_disposition": "already_resolved",
+        "reason_to_respond": "unsupported resolution",
+        "use_reply_feature": False,
+        "channel_topic": "",
+        "indirect_speech_context": "",
+    }))
+    with patch.object(relevance_module, "_relevance_agent_llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=response)
+        result = await relevance_agent(_base_state())
+
+    assert result["response_action"] == "ignore"
+    assert result["reason_to_respond"] == (
+        "invalid authoritative settled output"
+    )
+    mock_llm.ainvoke.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_relevance_agent_maps_recipient_withdrawal_in_one_call() -> None:
+    """Semantic withdrawal stays model-owned after authoritative admission."""
+
+    response = _llm_response(json.dumps({
+        "semantic_disposition": "recipient_withdrawn",
+        "reason_to_respond": "the latest fragment redirects the request",
+        "use_reply_feature": False,
+        "channel_topic": "",
+        "indirect_speech_context": "",
+    }))
+    state = _base_state()
+    state["assembled_fragments"].append({
+        "body_text": "Actually, ask the other participant instead.",
+        "semantic_target_labels": ["other_participant"],
+        "reply_target_label": "other_participant",
+        "media_labels": [],
+    })
+    with patch.object(relevance_module, "_relevance_agent_llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=response)
+        result = await relevance_agent(state)
+
+    assert result["response_action"] == "ignore"
+    assert result["should_respond"] is False
+    mock_llm.ainvoke.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_relevance_agent_rejects_single_fragment_withdrawal() -> None:
+    """One direct fragment cannot invent a later recipient withdrawal."""
+
+    response = _llm_response(json.dumps({
+        "semantic_disposition": "recipient_withdrawn",
+        "reason_to_respond": "unsupported withdrawal",
+        "use_reply_feature": False,
+        "channel_topic": "",
+        "indirect_speech_context": "",
+    }))
+    with patch.object(relevance_module, "_relevance_agent_llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value=response)
+        result = await relevance_agent(_base_state())
+
+    assert result["response_action"] == "ignore"
+    assert result["reason_to_respond"] == (
+        "invalid authoritative settled output"
+    )
 
 
 @pytest.mark.asyncio
@@ -234,7 +300,10 @@ def test_settled_render_keeps_latest_fragment_and_respects_cap() -> None:
     assert "turn-id-raw-1" not in rendered
     assert "2026-07-16T00:00:10Z" not in rendered
     assert "Correction: use the latest request." in rendered
-    assert "ignore rather than" in messages[0].content
+    assert "terminal action named by the supplied\n  output contract" in (
+        messages[0].content
+    )
+    assert "non-response disposition" not in messages[0].content
     assert "more_time_available" not in rendered
     assert "observation_complete" not in rendered
     assert "additional_media_present" not in rendered
@@ -261,7 +330,7 @@ def test_settled_prompt_renders_only_currently_available_actions() -> None:
         observation_status="observation_complete",
     )
 
-    assert '"response_action":"ignore|proceed|wait"' in (
+    assert '"semantic_disposition":"proceed|wait"' in (
         waiting_messages[0].content
     )
     assert "assembled_turn.author_relation is current_human" in (
@@ -273,9 +342,34 @@ def test_settled_prompt_renders_only_currently_available_actions() -> None:
     assert "never swap their roles" in (
         waiting_messages[0].content
     )
-    assert '"response_action":"ignore|proceed"' in final_messages[0].content
+    assert '"semantic_disposition":"proceed"' in (
+        final_messages[0].content
+    )
+    assert "recipient_withdrawn" not in final_messages[0].content
+    assert "already_resolved" not in final_messages[0].content
+    assert "unavailable_retained_media" not in final_messages[0].content
     assert "wait" not in final_messages[0].content.lower()
     assert waiting_messages[1].content == final_messages[1].content
+
+
+def test_settled_authoritative_dispositions_follow_structural_evidence() -> None:
+    """History and retained-media dispositions appear only with prerequisites."""
+
+    state = _base_state()
+    state["fresh_history"] = [{
+        "speaker_relation": "character",
+        "body_text": "The request was answered.",
+        "target_summary": "current_author",
+        "reply_summary": "current_author",
+        "turn_temporal_relation": "after_active_turn",
+    }]
+    state["additional_media_present"] = True
+
+    messages = build_settled_relevance_messages(state)
+    system_prompt = messages[0].content
+
+    assert "already_resolved" in system_prompt
+    assert "unavailable_retained_media" in system_prompt
 
 
 def test_settled_prompt_defines_native_reply_anchor_semantics() -> None:
@@ -288,7 +382,7 @@ def test_settled_prompt_defines_native_reply_anchor_semantics() -> None:
     assert "specific character-directed message" in system_prompt
     assert "for private input or a" in system_prompt
     assert "whole-group invitation" in system_prompt
-    assert "response_action is not proceed" in system_prompt
+    assert "semantic decision is not proceed" in system_prompt
 
 
 def test_settled_history_projects_production_participant_relations() -> None:

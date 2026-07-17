@@ -164,16 +164,12 @@ service -> operational error delivery and conversation persistence boundary
     regardless of grammatical person. Verbal acceptance, permission, teasing,
     and affectionate offers remain allowed; claims that the requested act was
     performed, completed, delivered, or received do not.
-21. When either relevance stage rejects a group turn carrying authoritative
-    typed character-target or character-reply evidence, run one bounded recheck
-    by that same stage owner using a narrower disposition schema rather than
-    repeating the failed full routing task. Frontline classifies retained vs
-    withdrawn address and selects an optional supplied continuation slot.
-    Settled relevance selects speak, wait-for-completion, redirect/withdrawal,
-    already-resolved, or unavailable-retained-media disposition. Deterministic
-    code only validates and maps that semantic result into the existing route.
-    Neither recheck may replace semantic judgment with user-text keyword
-    routing.
+21. Superseded by
+    `cognition_chain_responsibility_allocation_bugfix_plan.md`: authoritative
+    typed participation constrains each relevance stage's first-call action
+    space, and the conditional same-owner rechecks are removed. Semantic
+    linkage, withdrawal, resolution, and retained-media judgment remain with
+    the existing relevance owners.
 22. Restore the required subjective-appraisal projection at the V2 cognition
     to consolidation boundary. Populate it from the admitted cognition reason,
     include it in the canonical consolidator state, and prove the user-memory
@@ -242,11 +238,15 @@ The baseline permits three action requests total, where visible acknowledgement
 may consume one `speak` slot. V2 permits one visible speech route plus three
 non-speech action requests. Action-only and resolver-only limits remain three.
 This preserves baseline capability and improves visible/private composition
-without adding an LLM call.
+with a focused authorization call only on turns that propose executable
+actions.
 
 ### Reuse established deterministic owners
 
-The action planner emits semantic requests only. Existing action-spec and
+The action planner emits semantic request proposals only. The structural
+responsibility-allocation plan adds a focused semantic authorization boundary
+for proposed executable actions and derives route shape deterministically.
+Existing action-spec and
 resolver code continue to own validation, permissions, materialization,
 pending rows, execution, persistence, and delivery. The live V2 response path
 uses the established full resolver recurrence rather than its reduced
@@ -827,7 +827,9 @@ The parent owns all remediation and reruns.
 ## Acceptance Criteria
 
 1. Goal bids contain no route or capability choice.
-2. One planner call emits the fixed action-plan object.
+2. One planner call emits the fixed route-free action-plan proposal object;
+   proposed executable actions receive a focused authorization call before
+   materialization.
 3. Speech plus up to three non-speech actions validates and materializes.
 4. Action-only and resolver-only paths retain three-request capacity.
 5. All runtime-eligible registry action capabilities except `speak` and
@@ -864,10 +866,10 @@ The parent owns all remediation and reruns.
 21. Physical chat requests produce only a verbal stance in the current system;
     no cognition bid, action request, surface plan, dialog, or verifier verdict
     treats the text or visual branches as a physical actuator.
-22. A typed character-target or character-reply rejection receives at most one
-    same-stage semantic recheck; explicit redirects and grounded redundancy
-    remain rejectable, while ordinary direct messages enter start/append and
-    proceed without deterministic text classification.
+22. Superseded by the structural responsibility-allocation plan: typed
+    participation cannot be discarded at frontline, authoritative settled
+    turns use one constrained semantic disposition call, and explicit
+    redirects or grounded redundancy remain semantically rejectable.
 23. Consolidation receives the required subjective-appraisal evidence from V2
     cognition, and production-shaped user-memory consolidation completes
     without a missing-field error.

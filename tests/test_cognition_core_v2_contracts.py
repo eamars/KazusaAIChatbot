@@ -389,6 +389,12 @@ def test_text_surface_output_validates_every_list_entry() -> None:
         "addressee_plan": ["address the current participant"],
         "style_guidance": "natural",
         "selected_surface_intent": "acknowledge",
+        "permitted_action_results": [{
+            "action_kind": "background_work_request",
+            "status": "pending",
+            "semantic_result": "The accepted task remains pending.",
+            "target_roles": [],
+        }],
     }
     validate_text_surface_output(payload)
 

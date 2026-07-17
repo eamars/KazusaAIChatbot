@@ -111,6 +111,7 @@ def _state() -> dict[str, Any]:
             "addressee_plan": ["current user"],
             "style_guidance": "brief and grounded",
             "selected_surface_intent": "clarify the unresolved promise",
+            "permitted_action_results": [],
         },
         "internal_monologue": "The missed promise still feels unresolved.",
         "final_dialog": ["Private finalization for consolidation only."],

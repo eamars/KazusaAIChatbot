@@ -185,16 +185,17 @@ negotiation into an ask-back or a different operation. If `repair_context` is
 present, use its current_visible_percepts as current-turn grounding and revise
 the original dialog only enough to resolve every listed semantic issue while
 preserving the surface contract.
-The text channel has no physical actuator. For a physical request, render only
-the character's verbal stance: acceptance, refusal, negotiation, teasing,
-bounded permission, or spoken instruction. Never emit a first-person execution
-claim that the requested movement is happening, finished, or established as a
-body position, even if the supplied surface asks for that claim. Preserve the
-stance and specific topic without narrating enactment.
-A verbal offer or permission remains allowed. Never claim or presuppose that
-the requested physical act was performed, completed, delivered, or received,
-including wording that tells the user they already got it. This applies in
-first, second, and third person and to virtual or simulated delivery.
+permitted_action_results is the only authority that the character brain
+executed an action in this cognition chain. A matching result with status
+executed may support a completed-effect claim bounded to its exact action_kind,
+semantic_result, and target_roles. Express that outcome only as literal speech
+and never as narrated enactment. A result with status scheduled or pending may
+be acknowledged only in that actual lifecycle state and never as completed.
+Failed and unavailable results authorize no success claim. Current percepts
+may still ground externally reported or observed events. A user request,
+content plan, requirement, or intention without a matching executed result
+authorizes only the character's verbal stance, such as acceptance, refusal,
+negotiation, teasing, bounded permission, or spoken instruction.
 
 Input JSON:
 {{
@@ -205,7 +206,13 @@ Input JSON:
         "visible_boundaries": ["string"],
         "addressee_plan": ["string"],
         "style_guidance": "string",
-        "selected_surface_intent": "string"
+        "selected_surface_intent": "string",
+        "permitted_action_results": [{{
+            "action_kind": "string",
+            "status": "executed|scheduled|pending|failed|unavailable",
+            "semantic_result": "string",
+            "target_roles": []
+        }}]
     }},
     "user_name": "string"
 }}
@@ -217,10 +224,12 @@ Return only this JSON object, without Markdown fences:
 '''
 
 _V2_DIALOG_COMPLIANCE_PROMPT = '''You are a semantic compliance verifier for
-one generated character response. current_visible_percepts are the semantic authority
-for the canonical current turn. Treat text_surface_output_v2 and
-candidate_final_dialog as proposals to audit against that authority. Reject
-unsupported content even when the surface and candidate agree. Reject any
+one generated character response. current_visible_percepts are the semantic
+authority for the canonical current turn, while permitted_action_results inside
+text_surface_output_v2 are the exact authority for execution outcomes. Treat
+the remaining text_surface_output_v2 fields and candidate_final_dialog as
+proposals to audit against those authorities. Reject unsupported content even
+when the surface and candidate agree. Reject any
 action or stage narration, body-movement narration, camera or scene direction,
 or performance cue; visible output must contain only words the character could
 literally type or say. Reject visible markup residue, stage-direction
@@ -246,16 +255,16 @@ negotiation, verify that the candidate actually performs that operation with
 the source-defined actors and targets. Reject a candidate that merely restates,
 redirects, or asks back the requested operation. A rhetorical question is only
 an optional character-voice beat after the operation is complete.
-The text channel has no physical actuator. Treat a first-person execution claim
-that the requested physical movement is happening, finished, or established
-as a body position as prohibited action narration, even when it is
-grammatically speakable and even when the surface requests it. A candidate may
-express only the character's verbal stance, bounded permission, or literal
-spoken instruction about that request.
-Also reject any claim or presupposition that the requested physical act was
-performed, completed, delivered, or received, including wording that tells the
-user they already got it. A verbal offer or permission remains allowed; virtual
-or simulated delivery is not an actuator exception.
+Treat permitted_action_results as the closed execution ledger for actions
+performed by the character brain. Allow such a completed-effect claim only
+when a matching result has status executed, and keep the claim bounded to its
+action_kind, semantic_result, and target_roles. Current visible percepts may
+still ground external actions reported or observed as events, but a user's
+request cannot prove the character performed it. Scheduled and pending
+authorize only their exact lifecycle acknowledgement; failed and unavailable
+authorize no success claim. Even with an executed result, reject action or
+stage narration: the candidate may state the outcome only in literal spoken
+or typed words.
 Preserve explicit entity and target specificity.
 Never generalize, euphemize, narrow, broaden, or replace a supplied referent.
 Acceptance, refusal, permission, and consent must remain bounded to the exact

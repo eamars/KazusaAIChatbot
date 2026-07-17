@@ -65,16 +65,36 @@ def _resolver(kind: str) -> dict[str, str]:
     }
 
 
+def _goal_progress() -> dict[str, object]:
+    """Build the canonical resolver checklist owned by recurrence state."""
+
+    return {
+        "schema_version": "resolver_goal_progress.v1",
+        "original_goal": "answer the user's breakfast question",
+        "current_focus": "identify grounded breakfast evidence",
+        "deliverables": [{
+            "description": "give one grounded breakfast answer",
+            "status": "pending",
+            "note": "",
+        }],
+        "missing_user_inputs": [],
+        "evidence_dependencies": ["character memory"],
+        "attempted_paths": [],
+        "source_backed_facts": [],
+        "assumptions_or_inferences": [],
+        "blockers": [],
+        "final_response_requirements": ["answer the current user"],
+    }
+
+
 def _planner_response(
     *,
-    route: str,
     actions: list[dict[str, str]] | None = None,
     resolvers: list[dict[str, str]] | None = None,
 ) -> dict[str, object]:
     """Build the exact fixed-shape model response."""
 
     return {
-        "route": route,
         "action_requests": actions or [],
         "resolver_requests": resolvers or [],
         "resolver_pending_resolution": None,
@@ -88,7 +108,6 @@ async def test_speech_composes_with_three_private_actions() -> None:
 
     captured: dict[str, object] = {}
     response = _planner_response(
-        route="speech",
         actions=[
             {
                 "bid_handle": "b1",
@@ -101,6 +120,13 @@ async def test_speech_composes_with_three_private_actions() -> None:
         ],
     )
 
+    authorization = {
+        "decisions": {
+            f"c{index}": True for index in range(1, 4)
+        },
+    }
+    calls = 0
+
     class _LLM:
         async def ainvoke(
             self,
@@ -109,13 +135,20 @@ async def test_speech_composes_with_three_private_actions() -> None:
             config: object,
         ) -> SimpleNamespace:
             del config
+            nonlocal calls
             captured.update(json.loads(str(messages[-1].content)))
-            return SimpleNamespace(content=json.dumps(response))
+            calls += 1
+            selected = response if calls == 1 else authorization
+            return SimpleNamespace(content=json.dumps(selected))
 
     result = await plan_actions(
         primary_bid=_bid("ordinary_response"),
         supporting_bids=[],
-        episode={"episode_id": "episode-1", "trigger_source": "user_message"},
+        episode={
+            "episode_id": "episode-1",
+            "trigger_source": "user_message",
+            "output_mode": "visible_reply",
+        },
         evidence=[{
             "evidence_handle": "e1",
             "evidence_ref": {
@@ -163,10 +196,9 @@ async def test_invalid_action_plan_receives_one_bounded_replacement() -> None:
 
     responses = [
         {
-            "route": "speech",
             "action_requests": [],
         },
-        _planner_response(route="speech"),
+        _planner_response(),
     ]
     captured_messages: list[list[object]] = []
 
@@ -185,7 +217,11 @@ async def test_invalid_action_plan_receives_one_bounded_replacement() -> None:
     result = await plan_actions(
         primary_bid=_bid("ordinary_response"),
         supporting_bids=[],
-        episode={"episode_id": "episode-1", "trigger_source": "user_message"},
+        episode={
+            "episode_id": "episode-1",
+            "trigger_source": "user_message",
+            "output_mode": "visible_reply",
+        },
         evidence=[],
         available_actions=[],
         available_resolvers=[],
@@ -230,6 +266,7 @@ async def test_action_plan_stops_after_one_failed_replacement() -> None:
             episode={
                 "episode_id": "episode-1",
                 "trigger_source": "user_message",
+                "output_mode": "visible_reply",
             },
             evidence=[],
             available_actions=[],
@@ -250,7 +287,6 @@ async def test_contextual_action_binds_ref_without_prompt_exposure() -> None:
 
     captured_prompt = ""
     response = _planner_response(
-        route="speech",
         actions=[{
             "bid_handle": "b1",
             "action_handle": "a1",
@@ -267,6 +303,8 @@ async def test_contextual_action_binds_ref_without_prompt_exposure() -> None:
         "context_ref": "coding_run:private-run-ref",
     })
 
+    calls = 0
+
     class _LLM:
         async def ainvoke(
             self,
@@ -275,14 +313,24 @@ async def test_contextual_action_binds_ref_without_prompt_exposure() -> None:
             config: object,
         ) -> SimpleNamespace:
             nonlocal captured_prompt
+            nonlocal calls
             del config
             captured_prompt = str(messages[-1].content)
-            return SimpleNamespace(content=json.dumps(response))
+            calls += 1
+            if calls == 1:
+                return SimpleNamespace(content=json.dumps(response))
+            return SimpleNamespace(content=json.dumps({
+                "decisions": {"c1": True},
+            }))
 
     result = await plan_actions(
         primary_bid=_bid("ordinary_response"),
         supporting_bids=[],
-        episode={"episode_id": "episode-1", "trigger_source": "user_message"},
+        episode={
+            "episode_id": "episode-1",
+            "trigger_source": "user_message",
+            "output_mode": "visible_reply",
+        },
         evidence=[],
         available_actions=[contextual_action],
         available_resolvers=[],
@@ -304,7 +352,6 @@ async def test_contextual_action_binds_ref_without_prompt_exposure() -> None:
     [
         (
             _planner_response(
-                route="action",
                 actions=[{
                     "bid_handle": "b1",
                     "action_handle": "a1",
@@ -317,7 +364,6 @@ async def test_contextual_action_binds_ref_without_prompt_exposure() -> None:
         ),
         (
             _planner_response(
-                route="speech",
                 actions=[{
                     "bid_handle": "b1",
                     "action_handle": "a1",
@@ -336,7 +382,6 @@ async def test_contextual_action_binds_ref_without_prompt_exposure() -> None:
         ),
         (
             _planner_response(
-                route="speech",
                 actions=[{
                     "bid_handle": "b2",
                     "action_handle": "a1",
@@ -364,17 +409,48 @@ def test_action_plan_rejects_capacity_mixing_and_unknown_bids(
         )
 
 
-def test_action_plan_requires_requests_for_private_routes() -> None:
-    """Action and evidence routes cannot collapse into empty technical work."""
+def test_action_plan_rejects_model_authored_route() -> None:
+    """Protocol route is absent from the semantic proposal schema."""
 
-    for route in ("action", "evidence"):
-        with pytest.raises(ValueError, match="requires"):
-            _validate_action_plan_decision(
-                _planner_response(route=route),
-                bid_handles={"b1": _bid("ordinary_response")},
-                action_handles={"a1": _action("background_work_request")},
-                resolver_handles={"r1": _resolver("local_context_recall")},
+    response = _planner_response()
+    response["route"] = "speech"
+    with pytest.raises(ValueError, match="fields are not exact"):
+        _validate_action_plan_decision(
+            response,
+            bid_handles={"b1": _bid("ordinary_response")},
+            action_handles={"a1": _action("background_work_request")},
+            resolver_handles={"r1": _resolver("local_context_recall")},
         )
+
+
+def test_action_plan_merges_semantic_goal_progress_delta() -> None:
+    """Protocol code preserves the canonical resolver checklist shape."""
+
+    response = _planner_response(resolvers=[{
+        "bid_handle": "b1",
+        "resolver_handle": "r1",
+        "semantic_goal": "retrieve grounded breakfast evidence",
+        "reason": "the answer depends on character memory",
+    }])
+    response["resolver_goal_progress"] = {
+        "original_goal": "answer the user's breakfast question",
+        "current_focus": "retrieve the relevant character memory",
+    }
+
+    decision = _validate_action_plan_decision(
+        response,
+        bid_handles={"b1": _bid("ordinary_response")},
+        action_handles={},
+        resolver_handles={"r1": _resolver("local_context_recall")},
+        current_goal_progress=_goal_progress(),
+    )
+
+    progress = decision["resolver_goal_progress"]
+    assert progress["current_focus"] == (
+        "retrieve the relevant character memory"
+    )
+    assert progress["deliverables"] == _goal_progress()["deliverables"]
+    assert progress["evidence_dependencies"] == ["character memory"]
 
 
 def test_action_plan_enforces_registry_decision_format() -> None:
@@ -388,7 +464,6 @@ def test_action_plan_enforces_registry_decision_format() -> None:
     with pytest.raises(ValueError, match="full-match"):
         _validate_action_plan_decision(
             _planner_response(
-                route="speech",
                 actions=[{
                     "bid_handle": "b1",
                     "action_handle": "a1",
@@ -417,7 +492,6 @@ def test_closed_action_error_names_handle_and_allowed_decision() -> None:
     ):
         _validate_action_plan_decision(
             _planner_response(
-                route="speech",
                 actions=[{
                     "bid_handle": "b1",
                     "action_handle": "a1",

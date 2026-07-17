@@ -279,6 +279,7 @@ async def run_cognition(
             available_resolvers=payload["available_resolver_capabilities"],
             resolver_context=payload["resolver_context"],
             services=services,
+            current_goal_progress=payload.get("resolver_goal_progress"),
         )
     except CognitionExecutionError:
         raise

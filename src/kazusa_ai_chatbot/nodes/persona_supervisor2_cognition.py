@@ -235,6 +235,11 @@ def build_cognition_input_from_global_state(
     pending_resume = state.get("pending_resolver_resume")
     if isinstance(pending_resume, Mapping):
         payload["pending_resolver_resume"] = dict(pending_resume)
+    resolver_state = state.get("resolver_state")
+    if isinstance(resolver_state, Mapping):
+        goal_progress = resolver_state.get("goal_progress")
+        if isinstance(goal_progress, Mapping):
+            payload["resolver_goal_progress"] = dict(goal_progress)
     return validate_cognition_core_input(payload)
 
 

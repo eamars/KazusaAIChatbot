@@ -276,6 +276,14 @@ def _selected_action_specs(state: GlobalPersonaState) -> list[dict]:
 def _cognition_selects_text_surface(state: GlobalPersonaState) -> bool:
     """Return whether the validated V2 intention selects text speech."""
 
+    evaluator = ActionSpecEvaluator()
+    for action_spec in _selected_action_specs(state):
+        if action_spec.get("kind") != SPEAK_CAPABILITY:
+            continue
+        if evaluator.evaluate(action_spec)["ok"]:
+            return_value = True
+            return return_value
+
     cognition_output = state.get("cognition_core_output")
     if not isinstance(cognition_output, Mapping):
         raise CognitionExecutionError(

@@ -166,6 +166,7 @@ async def test_surface_handler_passes_loaded_style_to_v2_planner(
             "addressee_plan": ["current participant"],
             "style_guidance": "brief",
             "selected_surface_intent": "acknowledge the current participant",
+            "permitted_action_results": [],
         }
 
     monkeypatch.setattr(

@@ -65,7 +65,13 @@ class SemanticActionResultV2(TypedDict):
     """Typed execution outcome allowed back into later cognition."""
 
     action_kind: str
-    status: Literal["completed", "failed", "unavailable"]
+    status: Literal[
+        "executed",
+        "scheduled",
+        "pending",
+        "failed",
+        "unavailable",
+    ]
     semantic_result: str
     target_roles: list[RoleRefV2]
 
@@ -79,7 +85,13 @@ def project_semantic_action_result_v2(
 ) -> SemanticActionResultV2:
     """Project an action outcome without returning handlers or raw parameters."""
 
-    if status not in {"completed", "failed", "unavailable"}:
+    if status not in {
+        "executed",
+        "scheduled",
+        "pending",
+        "failed",
+        "unavailable",
+    }:
         raise ValueError("V2 action result status is invalid")
     if not isinstance(semantic_result, str) or not semantic_result.strip():
         raise ValueError("V2 action result summary is invalid")
@@ -97,10 +109,8 @@ def project_trace_action_result_v2(
     """Project one executed trace row into the exact V2 surface outcome."""
 
     trace_status = _string_field(row, "status")
-    if trace_status in {"executed", "scheduled", "pending"}:
-        status = "completed"
-    elif trace_status == "failed":
-        status = "failed"
+    if trace_status in {"executed", "scheduled", "pending", "failed"}:
+        status = trace_status
     else:
         status = "unavailable"
     semantic_result = _string_field(row, "result_summary").strip()

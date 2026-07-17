@@ -11,6 +11,9 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
 )
+from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    new_empty_goal_progress,
+)
 from tests.cognition_core_v2_test_helpers import canonical_episode
 
 
@@ -126,6 +129,27 @@ def test_persona_connector_maps_one_native_user_scope() -> None:
         "current_user_role"
     ]
     assert "implicit subject" in payload["scene_context"]["character_role"]
+
+
+def test_connector_projects_protocol_owned_resolver_goal_progress() -> None:
+    """The planner receives canonical goal state beside its text projection."""
+
+    from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
+        build_cognition_input_from_global_state,
+    )
+
+    state = _global_state()
+    goal_progress = new_empty_goal_progress(original_goal="answer the user")
+    state["resolver_state"] = {"goal_progress": goal_progress}
+    payload = build_cognition_input_from_global_state(
+        state,
+        mutable_state=build_acquaintance_user_state(
+            global_user_id="user-1",
+            updated_at=NOW,
+        ),
+    )
+
+    assert payload["resolver_goal_progress"] == goal_progress
 
 
 def test_connector_projects_full_registry_capacity() -> None:

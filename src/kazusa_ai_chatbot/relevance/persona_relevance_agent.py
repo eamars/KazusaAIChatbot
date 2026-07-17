@@ -57,6 +57,22 @@ class SettledRelevanceDecision(TypedDict):
     indirect_speech_context: str
 
 
+class AuthoritativeSettledDecision(TypedDict):
+    """Semantic disposition returned for authoritative participation."""
+
+    semantic_disposition: Literal[
+        "proceed",
+        "wait",
+        "recipient_withdrawn",
+        "already_resolved",
+        "unavailable_retained_media",
+    ]
+    reason_to_respond: str
+    use_reply_feature: bool
+    channel_topic: str
+    indirect_speech_context: str
+
+
 SettledRelevanceState = Mapping[str, Any]
 
 
@@ -76,11 +92,13 @@ Decide only whether the active character has a grounded reason to speak now.
 - Read assembled_turn.effective_latest_fragment first. It repeats the final
   chronological fragment and controls the effective intent and recipient.
 - Before choosing proceed, identify a concrete character participation basis.
-  If none exists, ignore. A complete or conversational statement does not
-  create that basis.
+  If none exists, choose the applicable terminal action named by the supplied
+  output contract. A complete or conversational statement does not create
+  that basis.
 - The newest correction controls the effective intent and recipient. If it
   withdraws the character and redirects the request only to another
-  participant, ignore even when an older fragment named the character.
+  participant, choose the applicable terminal action named by the supplied
+  output contract even when an older fragment named the character.
 - Private input is communication with the active character.
 - In a group, proceed only with a character participation basis: typed
   character or broadcast evidence, clear canonical-name address, a whole-group
@@ -90,7 +108,8 @@ Decide only whether the active character has a grounded reason to speak now.
   everyone. A statement that group members could react to is insufficient.
 - When group target and reply labels are none and bot continuity is empty,
   proceed only for clear canonical-name address or an explicit whole-group
-  request. Otherwise ignore.
+  request. Otherwise choose the applicable terminal action named by the
+  supplied output contract.
 - Group target none and reply none do not become relevant merely because the
   content is answerable, useful, emotional, or interesting. An unresolved
   reply alone is also insufficient.
@@ -101,27 +120,30 @@ Decide only whether the active character has a grounded reason to speak now.
   A before_active_turn or unknown row cannot prove that the current request
   was already answered.
 - media_evidence_status partial_media_view means the descriptions omit some
-  available media. If speaking depends on omitted media, ignore rather than
-  infer from the subset.
+  available media. If speaking depends on omitted media, choose the applicable
+  terminal action named by the supplied output contract rather than infer from
+  the subset.
 
 # Native Reply Anchor
 - use_reply_feature is separate from the decision to speak. It requests a
   visual anchor for the first answer.
-- Set it true only when response_action is proceed, conversation_scope is
+- Set it true only when the semantic decision is proceed, conversation_scope is
   group, and it would materially clarify a specific character-directed message
   or speaker to anchor the answer to effective_latest_fragment amid surrounding
   group traffic.
-- Set it false when response_action is not proceed, for private input or a
+- Set it false when the semantic decision is not proceed, for private input or a
   whole-group invitation, and whenever a group answer is already unambiguous
   without a visual anchor.
 
 # Generation Procedure
 1. Read effective_latest_fragment and apply its recipient or withdrawal.
 2. Read the remaining assembled fragments as earlier context.
-3. Name the concrete character participation basis. If none exists, ignore.
+3. Name the concrete character participation basis. If none exists, choose a
+   terminal action named by the supplied output contract.
 4. Before proceed, check whether after_active_turn or applicable
    during_active_turn fresh history already resolves the current request. If
-   it does, ignore a redundant reply.
+   it does, choose the applicable terminal action named by the supplied output
+   contract for the redundant reply.
 5. Choose only an action listed in the output contract below.
 6. Fill every output field and keep the action consistent with the evidence.
    A proceed reason must name one allowed participation basis.
@@ -141,28 +163,46 @@ _SETTLED_FINAL_ACTION_CONTRACT = '''
 Return exactly one JSON object and no surrounding text:
 {"response_action":"ignore|proceed","reason_to_respond":"at most 180 characters","use_reply_feature":false,"channel_topic":"at most 60 characters","indirect_speech_context":"at most 100 characters"}'''
 
-_SETTLED_DIRECT_ADDRESS_RECHECK = '''
+_SETTLED_AUTHORITATIVE_ACTION_CONTRACT = '''
+# Authoritative Participation
+Typed protocol evidence has already established the active character as a
+participant. Decide the current semantic disposition within the exact action
+space below:
+{disposition_guidance}
 
-# Direct-Address Ignore Recheck
-A valid prior pass returned ignore even though a typed character target or
-native character reply establishes the active character's participation basis.
-Re-evaluate the same settled turn. Retain ignore only when the effective latest
-fragment redirects or withdraws the character, qualifying fresh history
-already resolves the current request, or speaking depends on retained media
-that is unavailable here. Group noise, ambiguity, affection, answer quality,
-or the fact that the character spoke earlier does not cancel authoritative
-direct-address evidence. Choose proceed, or wait when the original action
-contract allows it, if none of those grounded ignore reasons applies.
-'''
+# Output Format
+Return exactly one JSON object and no surrounding text:
+{{"semantic_disposition":"{semantic_dispositions}",
+"reason_to_respond":"at most 180 characters","use_reply_feature":false,
+"channel_topic":"at most 60 characters",
+"indirect_speech_context":"at most 100 characters"}}
+Choose only a semantic_disposition listed in this exact output contract.'''
+
+_AUTHORITATIVE_DISPOSITION_GUIDANCE = {
+    "proceed": (
+        "- proceed: the character still has a grounded reason to speak now."
+    ),
+    "wait": (
+        "- wait: the assembled intent is unfinished and another observation "
+        "can resolve it."
+    ),
+    "recipient_withdrawn": (
+        "- recipient_withdrawn: the effective latest meaning explicitly "
+        "withdraws or redirects the character as recipient."
+    ),
+    "already_resolved": (
+        "- already_resolved: qualifying fresh during-turn or after-turn "
+        "history already resolves the current request."
+    ),
+    "unavailable_retained_media": (
+        "- unavailable_retained_media: speaking depends on retained media "
+        "omitted from the supplied descriptions."
+    ),
+}
 
 _SETTLED_ACTION_CONTRACTS = {
     "more_time_available": _SETTLED_WAIT_ACTION_CONTRACT,
     "observation_complete": _SETTLED_FINAL_ACTION_CONTRACT,
-}
-
-_SETTLED_SYSTEM_PROMPTS = {
-    status: _SETTLED_SYSTEM_PROMPT_COMMON + contract
-    for status, contract in _SETTLED_ACTION_CONTRACTS.items()
 }
 
 _relevance_agent_llm = LLInterface()
@@ -650,22 +690,91 @@ def _project_settled_state(
     return return_value
 
 
+def _has_authoritative_participation(
+    model_payload: Mapping[str, Any],
+) -> bool:
+    """Return whether typed protocol facts require constrained settlement."""
+
+    if model_payload["conversation_scope"] == "private":
+        return_value = True
+        return return_value
+    fragments = model_payload["assembled_turn"]["fragments"]
+    return_value = any(
+        "character" in fragment["semantic_target_labels"]
+        or "broadcast" in fragment["semantic_target_labels"]
+        or fragment["reply_target_label"] == "character"
+        for fragment in fragments
+    )
+    return return_value
+
+
+def _available_authoritative_dispositions(
+    model_payload: Mapping[str, Any],
+    observation_status: str,
+) -> list[str]:
+    """Derive the exact semantic action space from bounded typed evidence."""
+
+    dispositions = ["proceed"]
+    if observation_status == "more_time_available":
+        dispositions.append("wait")
+    fragments = model_payload["assembled_turn"]["fragments"]
+    if len(fragments) > 1:
+        dispositions.append("recipient_withdrawn")
+    if any(
+        row["turn_relation"] in {
+            "during_active_turn",
+            "after_active_turn",
+        }
+        for row in model_payload["fresh_history"]
+    ):
+        dispositions.append("already_resolved")
+    media = model_payload["assembled_turn"]["media"]
+    if media["media_evidence_status"] == "partial_media_view":
+        dispositions.append("unavailable_retained_media")
+    return dispositions
+
+
+def _settled_system_prompt(
+    model_payload: Mapping[str, Any],
+    observation_status: str,
+    *,
+    authoritative: bool,
+) -> str:
+    """Render the settled contract for the evidence-derived action space."""
+
+    if authoritative:
+        dispositions = _available_authoritative_dispositions(
+            model_payload,
+            observation_status,
+        )
+        action_contract = _SETTLED_AUTHORITATIVE_ACTION_CONTRACT.format(
+            disposition_guidance="\n".join(
+                _AUTHORITATIVE_DISPOSITION_GUIDANCE[disposition]
+                for disposition in dispositions
+            ),
+            semantic_dispositions="|".join(dispositions),
+        )
+    else:
+        action_contract = _SETTLED_ACTION_CONTRACTS[observation_status]
+    system_prompt = _SETTLED_SYSTEM_PROMPT_COMMON + action_contract
+    return system_prompt
+
+
 def _build_settled_relevance_messages(
     state: SettledRelevanceState,
     observation_status: str,
-    *,
-    policy_suffix: str,
 ) -> tuple[SystemMessage, HumanMessage]:
-    """Render bounded settled messages with one static policy suffix."""
+    """Render bounded settled messages with evidence-derived actions."""
 
     if observation_status not in {"more_time_available", "observation_complete"}:
         raise ValueError("observation_status is invalid")
-    system_prompt = (
-        _SETTLED_SYSTEM_PROMPT_COMMON
-        + policy_suffix
-        + _SETTLED_ACTION_CONTRACTS[observation_status]
-    )
     payload = _project_settled_state(state)
+    authoritative = _has_authoritative_participation(payload)
+    system_prompt = _settled_system_prompt(
+        payload,
+        observation_status,
+        authoritative=authoritative,
+    )
     human_content = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     available_human_chars = SETTLED_RELEVANCE_MAX_INPUT_CHARS - len(
         system_prompt
@@ -673,6 +782,14 @@ def _build_settled_relevance_messages(
     if len(human_content) > available_human_chars:
         payload["fresh_history"] = []
         payload["scene_and_relationship"]["engagement_guidelines"] = []
+        system_prompt = _settled_system_prompt(
+            payload,
+            observation_status,
+            authoritative=authoritative,
+        )
+        available_human_chars = SETTLED_RELEVANCE_MAX_INPUT_CHARS - len(
+            system_prompt
+        )
         human_content = json.dumps(
             payload,
             ensure_ascii=False,
@@ -725,7 +842,6 @@ def build_settled_relevance_messages(
     return_value = _build_settled_relevance_messages(
         state,
         observation_status,
-        policy_suffix="",
     )
     return return_value
 
@@ -774,6 +890,76 @@ def validate_settled_relevance_decision(
     return return_value
 
 
+def _validate_authoritative_settled_decision(
+    raw: Mapping[str, Any],
+    *,
+    available_dispositions: list[str],
+) -> AuthoritativeSettledDecision:
+    """Validate one authoritative semantic disposition and visible metadata."""
+
+    if not isinstance(raw, Mapping):
+        raise ValueError("authoritative settled output must be an object")
+    required = {
+        "semantic_disposition",
+        "reason_to_respond",
+        "use_reply_feature",
+        "channel_topic",
+        "indirect_speech_context",
+    }
+    if set(raw) != required:
+        raise ValueError("authoritative settled output fields are not exact")
+    semantic_disposition = raw["semantic_disposition"]
+    if semantic_disposition not in available_dispositions:
+        raise ValueError("authoritative semantic_disposition is unavailable")
+    reason = raw["reason_to_respond"]
+    use_reply_feature = raw["use_reply_feature"]
+    channel_topic = raw["channel_topic"]
+    indirect_context = raw["indirect_speech_context"]
+    if not isinstance(reason, str):
+        raise ValueError("authoritative reason_to_respond must be a string")
+    if not isinstance(use_reply_feature, bool):
+        raise ValueError("authoritative use_reply_feature must be bool")
+    if not isinstance(channel_topic, str):
+        raise ValueError("authoritative channel_topic must be a string")
+    if not isinstance(indirect_context, str):
+        raise ValueError(
+            "authoritative indirect_speech_context must be a string"
+        )
+    if semantic_disposition != "proceed" and use_reply_feature:
+        raise ValueError(
+            "authoritative non-proceed disposition cannot request a reply"
+        )
+    return_value: AuthoritativeSettledDecision = {
+        "semantic_disposition": semantic_disposition,
+        "reason_to_respond": _clip_text(reason, 180),
+        "use_reply_feature": use_reply_feature,
+        "channel_topic": _clip_text(channel_topic, 60),
+        "indirect_speech_context": _clip_text(indirect_context, 100),
+    }
+    return return_value
+
+
+def _decision_from_authoritative_disposition(
+    authoritative: AuthoritativeSettledDecision,
+) -> SettledRelevanceDecision:
+    """Map semantic settlement into the existing coordinator vocabulary."""
+
+    semantic_disposition = authoritative["semantic_disposition"]
+    response_action: Literal["ignore", "proceed", "wait"] = "ignore"
+    if semantic_disposition == "proceed":
+        response_action = "proceed"
+    elif semantic_disposition == "wait":
+        response_action = "wait"
+    return_value: SettledRelevanceDecision = {
+        "response_action": response_action,
+        "reason_to_respond": authoritative["reason_to_respond"],
+        "use_reply_feature": authoritative["use_reply_feature"],
+        "channel_topic": authoritative["channel_topic"],
+        "indirect_speech_context": authoritative["indirect_speech_context"],
+    }
+    return return_value
+
+
 def _ignore_decision(reason: str) -> SettledRelevanceDecision:
     """Return the structural fail-closed settled decision."""
 
@@ -811,25 +997,31 @@ def _parse_settled_response(
     return decision, parse_status
 
 
-def _needs_direct_address_ignore_recheck(
-    decision: SettledRelevanceDecision,
-    model_payload: Mapping[str, Any],
-) -> bool:
-    """Return whether a valid ignore contradicts typed participation evidence."""
+def _parse_authoritative_settled_response(
+    response_text: str,
+    *,
+    available_dispositions: list[str],
+) -> tuple[SettledRelevanceDecision, str]:
+    """Parse one authoritative disposition or map invalid output to silence."""
 
-    if model_payload["conversation_scope"] != "group":
-        return_value = False
-        return return_value
-    if decision["response_action"] != "ignore":
-        return_value = False
-        return return_value
-    fragments = model_payload["assembled_turn"]["fragments"]
-    return_value = any(
-        "character" in fragment["semantic_target_labels"]
-        or fragment["reply_target_label"] == "character"
-        for fragment in fragments
+    parsed_output = parse_llm_json_output(
+        response_text,
+        deterministic_only=True,
     )
-    return return_value
+    parse_status = "succeeded"
+    try:
+        authoritative = _validate_authoritative_settled_decision(
+            parsed_output,
+            available_dispositions=available_dispositions,
+        )
+        decision = _decision_from_authoritative_disposition(authoritative)
+    except ValueError as exc:
+        logger.warning(f"Invalid authoritative settled output: {exc}")
+        decision = _ignore_decision(
+            "invalid authoritative settled output"
+        )
+        parse_status = "invalid"
+    return decision, parse_status
 
 
 def _settled_return_value(
@@ -858,15 +1050,29 @@ async def relevance_agent(state: IMProcessState) -> dict[str, Any]:
         "observation_complete",
     )
     messages = build_settled_relevance_messages(state, observation_status)
+    model_payload = json.loads(str(messages[1].content))
+    authoritative = _has_authoritative_participation(
+        _project_settled_state(state)
+    )
     started_at = time.perf_counter()
     response = await _relevance_agent_llm.ainvoke(
         list(messages),
         config=_relevance_agent_llm_config,
     )
-    decision, parse_status = _parse_settled_response(
-        str(response.content),
-        observation_status=observation_status,
-    )
+    if authoritative:
+        available_dispositions = _available_authoritative_dispositions(
+            model_payload,
+            observation_status,
+        )
+        decision, parse_status = _parse_authoritative_settled_response(
+            str(response.content),
+            available_dispositions=available_dispositions,
+        )
+    else:
+        decision, parse_status = _parse_settled_response(
+            str(response.content),
+            observation_status=observation_status,
+        )
     return_value = _settled_return_value(decision, state)
 
     await llm_tracing.record_llm_trace_step(
@@ -890,47 +1096,4 @@ async def relevance_agent(state: IMProcessState) -> dict[str, Any]:
         ],
     )
 
-    model_payload = json.loads(str(messages[1].content))
-    if (
-        parse_status == "succeeded"
-        and _needs_direct_address_ignore_recheck(decision, model_payload)
-    ):
-        recheck_messages = _build_settled_relevance_messages(
-            state,
-            observation_status,
-            policy_suffix=_SETTLED_DIRECT_ADDRESS_RECHECK,
-        )
-        recheck_started_at = time.perf_counter()
-        recheck_response = await _relevance_agent_llm.ainvoke(
-            list(recheck_messages),
-            config=_relevance_agent_llm_config,
-        )
-        decision, recheck_parse_status = _parse_settled_response(
-            str(recheck_response.content),
-            observation_status=observation_status,
-        )
-        return_value = _settled_return_value(decision, state)
-        await llm_tracing.record_llm_trace_step(
-            trace_id=str(state.get("llm_trace_id", "")),
-            stage_name="persona_relevance_agent.direct_address_recheck",
-            route_name="relevance",
-            model_name=RELEVANCE_AGENT_LLM_MODEL,
-            messages=list(recheck_messages),
-            response_text=str(recheck_response.content),
-            parsed_output=return_value,
-            parse_status=recheck_parse_status,
-            status="succeeded",
-            duration_ms=max(
-                0,
-                int((time.perf_counter() - recheck_started_at) * 1000),
-            ),
-            output_state_fields=[
-                "response_action",
-                "should_respond",
-                "reason_to_respond",
-                "use_reply_feature",
-                "channel_topic",
-                "indirect_speech_context",
-            ],
-        )
     return return_value

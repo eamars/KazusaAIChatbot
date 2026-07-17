@@ -389,6 +389,7 @@ def _surface_output() -> dict[str, object]:
         "addressee_plan": ["current user"],
         "style_guidance": "reserved, vivid, and warm",
         "selected_surface_intent": "confirm the reward direction",
+        "permitted_action_results": [],
     }
 
 
